@@ -1,7 +1,7 @@
 {
-  "cycle": 1,
-  "cursor": 3,
-  "quantum_remaining": 1,
+  "cycle": 2,
+  "cursor": 0,
+  "quantum_remaining": 0,
   "loops_per_lane_quantum": 3,
   "max_active_lanes": 8,
   "max_total_lanes": 64,
