@@ -4,3 +4,6 @@
 {"type":"run_logged","run_id":"R0003","node_id":"N0003","lane_id":"L000","status":"keep","metric":98,"timestamp":"2026-05-04T18:53:40.760Z"}
 {"type":"run_logged","run_id":"R0004","node_id":"N0004","lane_id":"L000","status":"keep","metric":98,"timestamp":"2026-05-04T18:54:11.578Z"}
 {"type":"run_logged","run_id":"R0005","node_id":"N0005","lane_id":"L000","status":"keep","metric":130,"timestamp":"2026-05-04T19:00:40.401Z"}
+{"type":"lane_created","lane_id":"L001","parent_node_id":"N0005","timestamp":"2026-05-04T20:56:07.298Z"}
+{"type":"lane_created","lane_id":"L002","parent_node_id":"N0005","idea_id":"I0013","timestamp":"2026-05-04T20:56:26.456Z"}
+{"type":"run_logged","run_id":"R0006","node_id":"N0006","lane_id":"L002","status":"keep","metric":73.468924,"timestamp":"2026-05-04T20:57:46.138Z"}

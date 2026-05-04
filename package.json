@@ -6,7 +6,8 @@
   "description": "Tiny in-browser Leela-like chess engine research prototype.",
   "scripts": {
     "test": "node --test",
-    "eval:phase-b": "node eval/phase_b_metrics.mjs"
+    "eval:phase-b": "node eval/phase_b_metrics.mjs",
+    "eval:search": "node eval/search_suite.mjs"
   },
   "devDependencies": {
     "typescript": "^5.4.0"

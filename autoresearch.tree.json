@@ -32,6 +32,41 @@
       ],
       "runs_in_current_concept": 5,
       "created_at": "2026-05-04T18:45:53.444Z"
+    },
+    "L001": {
+      "lane_id": "L001",
+      "title": "True research lane: PUCT search policy experiments",
+      "hypothesis": "Compare structural root/search policy choices against fixed evaluator fixtures under benchmark tiny_leela_phase_b_fixed_metrics_v1.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0005",
+      "current_node_id": "N0005",
+      "local_baseline_node_id": "N0005",
+      "local_baseline_metric": 130,
+      "concept_tags": [
+        "search",
+        "algorithm"
+      ],
+      "runs_in_current_concept": 0,
+      "created_at": "2026-05-04T20:56:07.298Z"
+    },
+    "L002": {
+      "lane_id": "L002",
+      "title": "True research lane: PUCT search policy experiments",
+      "hypothesis": "Once the substrate is stable, compare structural PUCT choices such as FPU, policy temperature, root noise, and uncertainty-based playout allocation against fixed evaluator fixtures.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0005",
+      "current_node_id": "N0006",
+      "local_baseline_node_id": "N0005",
+      "local_baseline_metric": 130,
+      "concept_tags": [
+        "search",
+        "algorithm"
+      ],
+      "runs_in_current_concept": 1,
+      "created_at": "2026-05-04T20:56:26.456Z",
+      "idea_id": "I0013"
     }
   },
   "nodes": {
@@ -183,7 +218,9 @@
       "node_id": "N0005",
       "lane_id": "L000",
       "parent_node_id": "N0004",
-      "children": [],
+      "children": [
+        "N0006"
+      ],
       "phase": "stabilize",
       "status": "keep",
       "hypothesis": "Complete Phase A/B separation by documenting lab/product substrate vs frozen evaluation metrics and making Phase B metric readiness executable.",
@@ -209,6 +246,39 @@
       },
       "created_at": "2026-05-04T19:00:40.401Z",
       "run_id": "R0005"
+    },
+    "N0006": {
+      "node_id": "N0006",
+      "lane_id": "L002",
+      "parent_node_id": "N0005",
+      "children": [],
+      "phase": "explore",
+      "status": "keep",
+      "hypothesis": "For the first search lane experiment, compare a structural root visit policy that preserves evaluator prior mass against the previous argmax-only root choice on frozen Phase B fixtures.",
+      "commit": "c29d8d88ec78",
+      "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
+      "metric": 73.468924,
+      "metrics": {
+        "fixed_playout_suite_score": 73.468924,
+        "policy_top1_acc": 1,
+        "policy_top3_acc": 1,
+        "policy_cross_entropy": 1.101706,
+        "search_suite_positions": 3,
+        "phase_b_benchmark_ready": 1
+      },
+      "deltas": {
+        "delta_vs_parent": -56.531076,
+        "delta_vs_lane_baseline": -56.531076,
+        "delta_vs_root": 73.468924,
+        "delta_vs_global_best": -56.531076
+      },
+      "decision": {
+        "action": "keep",
+        "reason": "On the fixed 3-position fixture suite, argmax scored 33.849477 with CE 13.078683, while prior_proportional scored 73.468924 with CE 1.101706 and top1/top3 remained 1.0. This is an early toy-fixture result, not a chess-strength claim."
+      },
+      "created_at": "2026-05-04T20:57:46.137Z",
+      "run_id": "R0006",
+      "idea_id": "I0013"
     }
   },
   "runs": {
@@ -315,12 +385,37 @@
       "learned": "Phase A/B are now explicit: build substrate and evaluation infrastructure are pre-work, while Phase C research optimizes fixed metrics like policy_top1_acc, wdl_cross_entropy, fixed_playout_suite_score, latency, and model size. Readiness score improved to 130 and checks pass.",
       "next_action": "Commit Phase A/B freeze, then optionally start a new Phase C benchmark segment when a real lane has an executable candidate metric.",
       "timestamp": "2026-05-04T19:00:40.401Z"
+    },
+    "R0006": {
+      "type": "research_run",
+      "run_id": "R0006",
+      "node_id": "N0006",
+      "lane_id": "L002",
+      "phase": "explore",
+      "status": "keep",
+      "metric": 73.468924,
+      "metrics": {
+        "fixed_playout_suite_score": 73.468924,
+        "policy_top1_acc": 1,
+        "policy_top3_acc": 1,
+        "policy_cross_entropy": 1.101706,
+        "search_suite_positions": 3,
+        "phase_b_benchmark_ready": 1
+      },
+      "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
+      "commit": "c29d8d88ec78",
+      "base_commit": "c29d8d8",
+      "hypothesis": "For the first search lane experiment, compare a structural root visit policy that preserves evaluator prior mass against the previous argmax-only root choice on frozen Phase B fixtures.",
+      "implementation": "Added eval/search_suite.mjs with fixed metrics for root distributions, src/search/rootPolicy.ts with argmax/prior_proportional/sqrt_prior variants, an npm eval:search script, and a regression test proving prior_proportional improves distribution score over argmax while preserving top-1.",
+      "learned": "On the fixed 3-position fixture suite, argmax scored 33.849477 with CE 13.078683, while prior_proportional scored 73.468924 with CE 1.101706 and top1/top3 remained 1.0. This is an early toy-fixture result, not a chess-strength claim.",
+      "next_action": "Ablate sqrt_prior or add value-weighted one-ply root policy, but do not change the fixed benchmark fixtures in this lane.",
+      "timestamp": "2026-05-04T20:57:46.137Z"
     }
   },
   "ids": {
-    "next_lane": 1,
-    "next_node": 6,
-    "next_run": 6,
+    "next_lane": 3,
+    "next_node": 7,
+    "next_run": 7,
     "next_idea": 18
   },
   "global_best_node_id": "N0005"
