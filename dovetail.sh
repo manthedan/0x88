@@ -12,5 +12,6 @@ python3 training/train_student.py \
   --average-policy-only \
   --report-folds \
   --compare-conv-archs \
+  --primary-conv-arch 64x6 \
   --train data/teacher_labels.jsonl data/stockfish_teacher_labels.jsonl \
   --out artifacts/student_distill_benchmark.json

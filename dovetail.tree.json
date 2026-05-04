@@ -271,14 +271,14 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0033",
-      "current_node_id": "N0034",
+      "current_node_id": "N0038",
       "local_baseline_node_id": "N0033",
       "local_baseline_metric": 13.328393,
       "concept_tags": [
         "architecture",
         "nn"
       ],
-      "runs_in_current_concept": 1,
+      "runs_in_current_concept": 2,
       "created_at": "2026-05-04T22:52:12.429Z",
       "idea_id": "I0015"
     }
@@ -1476,7 +1476,9 @@
       "node_id": "N0034",
       "lane_id": "L011",
       "parent_node_id": "N0033",
-      "children": [],
+      "children": [
+        "N0038"
+      ],
       "phase": "explore",
       "status": "kept",
       "hypothesis": "Comparing frozen conv-tower feature students at 16x2/24x3/48x5/64x6 under the same move encoding and teacher-label split can reveal the best strength-per-byte architecture without weakening the fixed benchmark.",
@@ -1702,6 +1704,66 @@
       "created_at": "2026-05-04T23:10:19.950Z",
       "run_id": "R0036",
       "idea_id": "I0021"
+    },
+    "N0038": {
+      "node_id": "N0038",
+      "lane_id": "L011",
+      "parent_node_id": "N0034",
+      "children": [],
+      "phase": "explore",
+      "status": "kept",
+      "hypothesis": "The raw-best 64x6 frozen-conv feature student found in L011 diagnostics can improve the primary fixed distillation score if promoted from diagnostic-only to the primary artifact, despite lower strength-per-byte.",
+      "commit": "d0ac858",
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "metric": 13.436814,
+      "metrics": {
+        "distill_student_score": 13.436814,
+        "train_policy_ce": 2.158718,
+        "train_wdl_ce": 0.672846,
+        "dev_policy_ce": 5.645547,
+        "dev_wdl_ce": 0.796693,
+        "dev_policy_only_score": 15.047671,
+        "dev_wdl_only_score": 55.657797,
+        "dev_loss_balance_gap": 4.848853,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 194,
+        "wdl_feature_dim": 194,
+        "weight_average_count": 600,
+        "average_policy_only": 1,
+        "primary_conv_channels": 64,
+        "primary_conv_layers": 6,
+        "fold_score_mean": 13.040061,
+        "fold_score_std": 0.396754,
+        "conv_16x2_score": 12.85193,
+        "conv_16x2_score_per_kb": 0.504152,
+        "conv_24x3_score": 13.308346,
+        "conv_24x3_score_per_kb": 0.204572,
+        "conv_48x5_score": 13.322949,
+        "conv_48x5_score_per_kb": 0.035743,
+        "conv_64x6_score": 13.436814,
+        "conv_64x6_score_per_kb": 0.01712,
+        "best_conv_channels": 16,
+        "best_conv_layers": 2,
+        "best_conv_score": 12.85193,
+        "best_conv_bytes": 26104,
+        "best_conv_score_per_kb": 0.504152
+      },
+      "deltas": {
+        "delta_vs_parent": 0.10842099999999988,
+        "delta_vs_lane_baseline": 0.10842099999999988,
+        "delta_vs_root": 0.5146789999999992,
+        "delta_vs_global_best": 0.10842099999999988
+      },
+      "decision": {
+        "action": "kept",
+        "reason": "Promoting 64x6 conv features improved the primary distill_student_score from 13.328393 to 13.436814. Policy CE improved (5.757296 -> 5.645547), WDL CE worsened (0.745483 -> 0.796693), and fold robustness improved substantially (mean 12.764220 -> 13.040061, std 0.564173 -> 0.396754). Because the primary metric is dominated by policy CE, the raw-best conv architecture is a clear fixed-benchmark improvement even with larger artifact/features."
+      },
+      "created_at": "2026-05-04T23:19:17.826Z",
+      "run_id": "R0037",
+      "idea_id": "I0015"
     }
   },
   "runs": {
@@ -2735,13 +2797,65 @@
       "learned": "All primary and secondary diagnostics reproduced exactly: distill_student_score=13.328393, dev_loss_balance_gap=5.011813, fold_score_mean=12.764220, and conv_64x6_score=13.436814. L010 diagnostics are deterministic; further L010 work should be a structural policy-preserving improvement rather than more confirmations.",
       "next_action": "Commit dovetail confirmation logs. Scheduler should rotate or consider a raw-best conv64 primary artifact candidate in an architecture lane.",
       "timestamp": "2026-05-04T23:10:19.950Z"
+    },
+    "R0037": {
+      "type": "research_run",
+      "run_id": "R0037",
+      "node_id": "N0038",
+      "lane_id": "L011",
+      "phase": "explore",
+      "status": "kept",
+      "metric": 13.436814,
+      "metrics": {
+        "distill_student_score": 13.436814,
+        "train_policy_ce": 2.158718,
+        "train_wdl_ce": 0.672846,
+        "dev_policy_ce": 5.645547,
+        "dev_wdl_ce": 0.796693,
+        "dev_policy_only_score": 15.047671,
+        "dev_wdl_only_score": 55.657797,
+        "dev_loss_balance_gap": 4.848853,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 194,
+        "wdl_feature_dim": 194,
+        "weight_average_count": 600,
+        "average_policy_only": 1,
+        "primary_conv_channels": 64,
+        "primary_conv_layers": 6,
+        "fold_score_mean": 13.040061,
+        "fold_score_std": 0.396754,
+        "conv_16x2_score": 12.85193,
+        "conv_16x2_score_per_kb": 0.504152,
+        "conv_24x3_score": 13.308346,
+        "conv_24x3_score_per_kb": 0.204572,
+        "conv_48x5_score": 13.322949,
+        "conv_48x5_score_per_kb": 0.035743,
+        "conv_64x6_score": 13.436814,
+        "conv_64x6_score_per_kb": 0.01712,
+        "best_conv_channels": 16,
+        "best_conv_layers": 2,
+        "best_conv_score": 12.85193,
+        "best_conv_bytes": 26104,
+        "best_conv_score_per_kb": 0.504152
+      },
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "commit": "d0ac858",
+      "base_commit": "d0ac858",
+      "hypothesis": "The raw-best 64x6 frozen-conv feature student found in L011 diagnostics can improve the primary fixed distillation score if promoted from diagnostic-only to the primary artifact, despite lower strength-per-byte.",
+      "implementation": "Added --primary-conv-arch with choices for frozen-conv architecture features and switched dovetail.sh to --primary-conv-arch 64x6 while retaining policy-only averaging, fold reporting, and architecture diagnostics. The output artifact now records frozen_conv_fen_student metadata and conv shape when selected.",
+      "learned": "Promoting 64x6 conv features improved the primary distill_student_score from 13.328393 to 13.436814. Policy CE improved (5.757296 -> 5.645547), WDL CE worsened (0.745483 -> 0.796693), and fold robustness improved substantially (mean 12.764220 -> 13.040061, std 0.564173 -> 0.396754). Because the primary metric is dominated by policy CE, the raw-best conv architecture is a clear fixed-benchmark improvement even with larger artifact/features.",
+      "next_action": "Commit the kept 64x6 primary candidate and run a deterministic confirmation. Future architecture work can seek smaller conv features that retain the policy CE gain or improve best_conv_score_per_kb.",
+      "timestamp": "2026-05-04T23:19:17.826Z"
     }
   },
   "ids": {
     "next_lane": 12,
-    "next_node": 38,
-    "next_run": 37,
+    "next_node": 39,
+    "next_run": 38,
     "next_idea": 22
   },
-  "global_best_node_id": "N0033"
+  "global_best_node_id": "N0038"
 }

@@ -253,6 +253,7 @@ def main() -> int:
     parser.add_argument("--average-policy-only", action="store_true", help="when averaging, average only policy weights and keep final WDL weights")
     parser.add_argument("--report-folds", action="store_true", help="also train alternate holdout folds for robustness reporting without changing the primary metric")
     parser.add_argument("--compare-conv-archs", action="store_true", help="train frozen-conv feature students for 16x2/24x3/48x5/64x6 architecture diagnostics")
+    parser.add_argument("--primary-conv-arch", choices=["16x2", "24x3", "48x5", "64x6"], help="use the selected frozen-conv feature student as the primary artifact and metric")
     args = parser.parse_args()
 
     raw_rows = load_rows(args.train)
@@ -260,11 +261,21 @@ def main() -> int:
     if len(rows) < 2:
         raise SystemExit("Need at least two teacher rows")
     moves = sorted({move for row in rows for move in row["policy"]})
-    result = train_once(rows, moves, args.epochs, args.lr, args.holdout_mod, 0, args.average_weights, args.average_policy_only)
+    primary_kind = "linear_fen_student"
+    primary_feature_fn = fen_features
+    primary_value_feature_fn = wdl_features
+    primary_conv_channels = 0
+    primary_conv_layers = 0
+    if args.primary_conv_arch:
+        primary_conv_channels, primary_conv_layers = [int(v) for v in args.primary_conv_arch.split("x")]
+        primary_feature_fn = cached_feature_fn(lambda fen, c=primary_conv_channels, l=primary_conv_layers: conv_student_features(fen, c, l))
+        primary_value_feature_fn = primary_feature_fn
+        primary_kind = "frozen_conv_fen_student"
+    result = train_once(rows, moves, args.epochs, args.lr, args.holdout_mod, 0, args.average_weights, args.average_policy_only, primary_feature_fn, primary_value_feature_fn)
     fold_scores = [result["score"]]
     if args.report_folds:
         for offset in range(1, args.holdout_mod):
-            fold_scores.append(train_once(rows, moves, args.epochs, args.lr, args.holdout_mod, offset, args.average_weights, args.average_policy_only)["score"])
+            fold_scores.append(train_once(rows, moves, args.epochs, args.lr, args.holdout_mod, offset, args.average_weights, args.average_policy_only, primary_feature_fn, primary_value_feature_fn)["score"])
     fold_mean = sum(fold_scores) / len(fold_scores)
     fold_std = math.sqrt(sum((score - fold_mean) ** 2 for score in fold_scores) / len(fold_scores))
 
@@ -285,7 +296,7 @@ def main() -> int:
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"kind": "linear_fen_student", "moves": moves, "policy_weights": result["policy_weights"], "wdl_weights": result["wdl_weights"], "policy_feature_dim": result["feature_dim"], "wdl_feature_dim": result["wdl_feature_dim"], "weight_average_count": result["weight_average_count"]}, separators=(",", ":")))
+    out.write_text(json.dumps({"kind": primary_kind, "moves": moves, "policy_weights": result["policy_weights"], "wdl_weights": result["wdl_weights"], "policy_feature_dim": result["feature_dim"], "wdl_feature_dim": result["wdl_feature_dim"], "weight_average_count": result["weight_average_count"], "conv_channels": primary_conv_channels, "conv_layers": primary_conv_layers}, separators=(",", ":")))
     print(f"METRIC distill_student_score={result['score']:.6f}")
     print(f"METRIC train_policy_ce={result['train_policy_ce']:.6f}")
     print(f"METRIC train_wdl_ce={result['train_wdl_ce']:.6f}")
@@ -302,6 +313,8 @@ def main() -> int:
     print(f"METRIC wdl_feature_dim={result['wdl_feature_dim']}")
     print(f"METRIC weight_average_count={result['weight_average_count']}")
     print(f"METRIC average_policy_only={1 if args.average_policy_only else 0}")
+    print(f"METRIC primary_conv_channels={primary_conv_channels}")
+    print(f"METRIC primary_conv_layers={primary_conv_layers}")
     print(f"METRIC fold_score_mean={fold_mean:.6f}")
     print(f"METRIC fold_score_std={fold_std:.6f}")
     if conv_best is not None:
