@@ -9,7 +9,11 @@
     "eval:phase-b": "node eval/phase_b_metrics.mjs",
     "eval:search": "node eval/search_suite.mjs",
     "eval:runtime": "node --experimental-strip-types eval/runtime_suite.mjs",
-    "eval:architecture": "node --experimental-strip-types eval/architecture_suite.mjs"
+    "eval:architecture": "node --experimental-strip-types eval/architecture_suite.mjs",
+    "distill:check": "python3 scripts/check_lc0_teacher.py",
+    "distill:seed": "python3 scripts/export_seed_fens.py",
+    "distill:query": "python3 scripts/query_lc0_teacher.py",
+    "distill:validate": "python3 training/validate_teacher_labels.py"
   },
   "devDependencies": {
     "typescript": "^5.4.0"
