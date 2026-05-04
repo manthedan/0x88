@@ -252,7 +252,7 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0033",
-      "current_node_id": "N0033",
+      "current_node_id": "N0035",
       "local_baseline_node_id": "N0033",
       "local_baseline_metric": 13.328393,
       "concept_tags": [
@@ -260,7 +260,7 @@
         "distillation",
         "loss"
       ],
-      "runs_in_current_concept": 0,
+      "runs_in_current_concept": 1,
       "created_at": "2026-05-04T22:52:02.819Z",
       "idea_id": "I0021"
     },
@@ -1433,7 +1433,8 @@
       "lane_id": "L006",
       "parent_node_id": "N0029",
       "children": [
-        "N0034"
+        "N0034",
+        "N0035"
       ],
       "phase": "explore",
       "status": "kept",
@@ -1525,6 +1526,62 @@
       "created_at": "2026-05-04T22:57:06.908Z",
       "run_id": "R0033",
       "idea_id": "I0015"
+    },
+    "N0035": {
+      "node_id": "N0035",
+      "lane_id": "L010",
+      "parent_node_id": "N0033",
+      "children": [],
+      "phase": "explore",
+      "status": "discarded",
+      "hypothesis": "Separating policy and WDL training into independent deterministic streams may reveal objective conflict or improve the fixed distillation score by decoupling head initialization and row order.",
+      "commit": "dd3fc39",
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "metric": 13.328319,
+      "metrics": {
+        "distill_student_score": 13.328319,
+        "train_policy_ce": 1.689949,
+        "train_wdl_ce": 0.387152,
+        "dev_policy_ce": 5.757882,
+        "dev_wdl_ce": 0.74494,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "weight_average_count": 600,
+        "average_policy_only": 1,
+        "separate_head_training": 1,
+        "fold_score_mean": 12.76584,
+        "fold_score_std": 0.562479,
+        "conv_16x2_score": 12.85054,
+        "conv_16x2_score_per_kb": 0.504097,
+        "conv_24x3_score": 13.307756,
+        "conv_24x3_score_per_kb": 0.204563,
+        "conv_48x5_score": 13.320943,
+        "conv_48x5_score_per_kb": 0.035738,
+        "conv_64x6_score": 13.435362,
+        "conv_64x6_score_per_kb": 0.017118,
+        "best_conv_channels": 16,
+        "best_conv_layers": 2,
+        "best_conv_score": 12.85054,
+        "best_conv_bytes": 26104,
+        "best_conv_score_per_kb": 0.504097
+      },
+      "deltas": {
+        "delta_vs_parent": -0.00007399999999968543,
+        "delta_vs_lane_baseline": -0.00007399999999968543,
+        "delta_vs_root": 0.40618399999999966,
+        "delta_vs_global_best": -0.00007399999999968543
+      },
+      "decision": {
+        "action": "discarded",
+        "reason": "Separated head training slightly worsened the primary score from 13.328393 to 13.328319. It marginally improved dev_wdl_ce (0.745483 -> 0.744940) and fold mean/std (12.764220/0.564173 -> 12.765840/0.562479), but worsened dev_policy_ce (5.757296 -> 5.757882), so the fixed primary objective shows a small policy-vs-WDL tradeoff and does not justify replacing the current best."
+      },
+      "created_at": "2026-05-04T23:01:40.986Z",
+      "run_id": "R0034",
+      "idea_id": "I0021"
     }
   },
   "runs": {
@@ -2410,12 +2467,60 @@
       "learned": "Primary comparable distill_student_score stayed at the current best 13.328393. Among conv diagnostics, 64x6 reached the highest raw score at 13.436814, but its byte efficiency was lowest. 16x2 had the best strength-per-byte at 0.504152 score/KB, though raw score 12.851930 trails the baseline. This reveals a raw-strength vs size-efficiency tradeoff and suggests a separate candidate could switch the primary artifact to 64x6 if raw metric is prioritized.",
       "next_action": "Commit kept architecture diagnostics. Then scheduler should either confirm determinism or run a structural candidate that makes 64x6 the primary student artifact if raw distill_student_score remains the priority despite size cost.",
       "timestamp": "2026-05-04T22:57:06.908Z"
+    },
+    "R0034": {
+      "type": "research_run",
+      "run_id": "R0034",
+      "node_id": "N0035",
+      "lane_id": "L010",
+      "phase": "explore",
+      "status": "discarded",
+      "metric": 13.328319,
+      "metrics": {
+        "distill_student_score": 13.328319,
+        "train_policy_ce": 1.689949,
+        "train_wdl_ce": 0.387152,
+        "dev_policy_ce": 5.757882,
+        "dev_wdl_ce": 0.74494,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "weight_average_count": 600,
+        "average_policy_only": 1,
+        "separate_head_training": 1,
+        "fold_score_mean": 12.76584,
+        "fold_score_std": 0.562479,
+        "conv_16x2_score": 12.85054,
+        "conv_16x2_score_per_kb": 0.504097,
+        "conv_24x3_score": 13.307756,
+        "conv_24x3_score_per_kb": 0.204563,
+        "conv_48x5_score": 13.320943,
+        "conv_48x5_score_per_kb": 0.035738,
+        "conv_64x6_score": 13.435362,
+        "conv_64x6_score_per_kb": 0.017118,
+        "best_conv_channels": 16,
+        "best_conv_layers": 2,
+        "best_conv_score": 12.85054,
+        "best_conv_bytes": 26104,
+        "best_conv_score_per_kb": 0.504097
+      },
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "commit": "dd3fc39",
+      "base_commit": "dd3fc39",
+      "hypothesis": "Separating policy and WDL training into independent deterministic streams may reveal objective conflict or improve the fixed distillation score by decoupling head initialization and row order.",
+      "implementation": "Added --separate-head-training to initialize and shuffle policy and WDL heads with separate deterministic RNG streams, while keeping policy-only averaging and fixed benchmark labels/split. dovetail.sh enabled the separated-head mode for the run.",
+      "learned": "Separated head training slightly worsened the primary score from 13.328393 to 13.328319. It marginally improved dev_wdl_ce (0.745483 -> 0.744940) and fold mean/std (12.764220/0.564173 -> 12.765840/0.562479), but worsened dev_policy_ce (5.757296 -> 5.757882), so the fixed primary objective shows a small policy-vs-WDL tradeoff and does not justify replacing the current best.",
+      "next_action": "Discard and revert separated-head primary mode. Keep the insight that WDL can improve at policy cost; if revisited, use diagnostics only or search structural policy-preserving value improvements rather than changing shared training streams.",
+      "timestamp": "2026-05-04T23:01:40.986Z"
     }
   },
   "ids": {
     "next_lane": 12,
-    "next_node": 35,
-    "next_run": 34,
+    "next_node": 36,
+    "next_run": 35,
     "next_idea": 22
   },
   "global_best_node_id": "N0033"
