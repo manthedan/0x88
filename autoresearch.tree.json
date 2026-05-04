@@ -168,6 +168,26 @@
       "runs_in_current_concept": 1,
       "created_at": "2026-05-04T21:48:02.197Z",
       "idea_id": "I0018"
+    },
+    "L008": {
+      "lane_id": "L008",
+      "title": "True research lane: small MLP student",
+      "hypothesis": "A dependency-free small hidden-layer student should learn non-linear board patterns and improve distillation score over linear features on teacher_distill_seed_v2.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0005",
+      "current_node_id": "N0023",
+      "local_baseline_node_id": "N0005",
+      "local_baseline_metric": 130,
+      "concept_tags": [
+        "training",
+        "distillation",
+        "model",
+        "architecture"
+      ],
+      "runs_in_current_concept": 1,
+      "created_at": "2026-05-04T21:51:05.745Z",
+      "idea_id": "I0019"
     }
   },
   "nodes": {
@@ -326,7 +346,8 @@
         "N0016",
         "N0017",
         "N0020",
-        "N0022"
+        "N0022",
+        "N0023"
       ],
       "phase": "stabilize",
       "status": "keep",
@@ -925,6 +946,43 @@
       "created_at": "2026-05-04T21:50:46.213Z",
       "run_id": "R0022",
       "idea_id": "I0018"
+    },
+    "N0023": {
+      "node_id": "N0023",
+      "lane_id": "L008",
+      "parent_node_id": "N0005",
+      "children": [],
+      "phase": "explore",
+      "status": "discard",
+      "hypothesis": "A dependency-free small hidden-layer student should improve over aggregate linear features on v2 teacher labels by modeling non-linear patterns.",
+      "commit": "d3e7d58d0907",
+      "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
+      "metric": 9.60206,
+      "metrics": {
+        "distill_student_score": 9.60206,
+        "train_policy_ce": 1.199587,
+        "train_wdl_ce": 0.310639,
+        "dev_policy_ce": 7.595354,
+        "dev_wdl_ce": 1.819077,
+        "dev_policy_top1": 0.1,
+        "teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "hidden_units": 16
+      },
+      "deltas": {
+        "delta_vs_parent": -120.39794,
+        "delta_vs_lane_baseline": -120.39794,
+        "delta_vs_root": 9.60206,
+        "delta_vs_global_best": -120.39794
+      },
+      "decision": {
+        "action": "discard",
+        "reason": "MLP overfit/failed on the tiny v2 dataset: train losses improved versus linear but dev_policy_ce worsened to 7.595354 and dev_wdl_ce to 1.819077, dropping score from 12.046814 to 9.602060. Non-linear capacity is premature without more data or regularization."
+      },
+      "created_at": "2026-05-04T21:52:19.576Z",
+      "run_id": "R0023",
+      "idea_id": "I0019"
     }
   },
   "runs": {
@@ -1451,12 +1509,40 @@
       "learned": "Board-square linear features improved train losses and slightly improved dev_policy_ce (6.44 vs 6.57), but worsened dev_wdl_ce enough that primary distill_student_score fell from 12.046814 to 11.555163. With only 20 rows and 770 features, the linear board-square model appears to overfit; richer features need regularization or non-linear sharing, not a wider linear one-hot board.",
       "next_action": "Discard as primary regression. Try a small MLP/shared representation or source/loss ablations rather than high-dimensional linear square features.",
       "timestamp": "2026-05-04T21:50:46.213Z"
+    },
+    "R0023": {
+      "type": "research_run",
+      "run_id": "R0023",
+      "node_id": "N0023",
+      "lane_id": "L008",
+      "phase": "explore",
+      "status": "discard",
+      "metric": 9.60206,
+      "metrics": {
+        "distill_student_score": 9.60206,
+        "train_policy_ce": 1.199587,
+        "train_wdl_ce": 0.310639,
+        "dev_policy_ce": 7.595354,
+        "dev_wdl_ce": 1.819077,
+        "dev_policy_top1": 0.1,
+        "teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "hidden_units": 16
+      },
+      "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
+      "commit": "d3e7d58d0907",
+      "hypothesis": "A dependency-free small hidden-layer student should improve over aggregate linear features on v2 teacher labels by modeling non-linear patterns.",
+      "implementation": "Added optional tanh MLP student with 16 hidden units to training/train_student.py and evaluated it on the fixed 20-row lc0+Stockfish v2 labels.",
+      "learned": "MLP overfit/failed on the tiny v2 dataset: train losses improved versus linear but dev_policy_ce worsened to 7.595354 and dev_wdl_ce to 1.819077, dropping score from 12.046814 to 9.602060. Non-linear capacity is premature without more data or regularization.",
+      "next_action": "Discard MLP candidate. Prefer teacher-source/loss ablations on the current linear baseline, or expand the dataset before adding capacity.",
+      "timestamp": "2026-05-04T21:52:19.576Z"
     }
   },
   "ids": {
-    "next_lane": 8,
-    "next_node": 23,
-    "next_run": 23,
+    "next_lane": 9,
+    "next_node": 24,
+    "next_run": 24,
     "next_idea": 22
   },
   "global_best_node_id": "N0005"
