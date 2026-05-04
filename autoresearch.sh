@@ -30,7 +30,7 @@ score=0
 
 # Verified tests are the main backpressure: only count them when they pass.
 if [[ -f package.json ]] && command -v npm >/dev/null 2>&1; then
-  if npm test -- --run >/tmp/tiny-leela-test.log 2>&1 || npm test >/tmp/tiny-leela-test.log 2>&1; then
+  if npm test >/tmp/tiny-leela-test.log 2>&1; then
     score=$((score + 20))
   fi
 fi

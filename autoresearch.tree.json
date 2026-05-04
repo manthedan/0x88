@@ -24,13 +24,13 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0000",
-      "current_node_id": "N0002",
+      "current_node_id": "N0003",
       "local_baseline_node_id": "N0000",
       "local_baseline_metric": 0,
       "concept_tags": [
         "baseline"
       ],
-      "runs_in_current_concept": 2,
+      "runs_in_current_concept": 3,
       "created_at": "2026-05-04T18:45:53.444Z"
     }
   },
@@ -96,7 +96,9 @@
       "node_id": "N0002",
       "lane_id": "L000",
       "parent_node_id": "N0001",
-      "children": [],
+      "children": [
+        "N0003"
+      ],
       "phase": "explore",
       "status": "keep",
       "hypothesis": "Convert the over-fragmented pre-work into an explicit L000 foundation substrate and separate true research-lane ideas from shared engine infrastructure.",
@@ -118,6 +120,33 @@
       },
       "created_at": "2026-05-04T18:53:07.145Z",
       "run_id": "R0002"
+    },
+    "N0003": {
+      "node_id": "N0003",
+      "lane_id": "L000",
+      "parent_node_id": "N0002",
+      "children": [],
+      "phase": "stabilize",
+      "status": "keep",
+      "hypothesis": "Clean benchmark/check scripts so Node's built-in test runner does not receive an invalid Vitest-style --run argument.",
+      "commit": "6e36f6a198cf",
+      "benchmark_id": "tiny_leela_bootstrap_score_v1",
+      "metric": 98,
+      "metrics": {
+        "tiny_leela_score": 98
+      },
+      "deltas": {
+        "delta_vs_parent": 0,
+        "delta_vs_lane_baseline": 98,
+        "delta_vs_root": 98,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "keep",
+        "reason": "Metric remains 98, but validation output is cleaner and checks still pass. This is a stabilize-only cleanup, not a research lane."
+      },
+      "created_at": "2026-05-04T18:53:40.760Z",
+      "run_id": "R0003"
     }
   },
   "runs": {
@@ -160,12 +189,32 @@
       "learned": "The setup now has a minimum shared engine substrate and the idea queue distinguishes blocking pre-work from differentiated lanes. Bootstrap score improved from 32 to 98 with checks passing.",
       "next_action": "Continue L000 only for hard correctness gaps such as full legal check/perft fixtures; otherwise schedule true lanes for search/runtime/model/training/evaluation comparisons.",
       "timestamp": "2026-05-04T18:53:07.145Z"
+    },
+    "R0003": {
+      "type": "research_run",
+      "run_id": "R0003",
+      "node_id": "N0003",
+      "lane_id": "L000",
+      "phase": "stabilize",
+      "status": "keep",
+      "metric": 98,
+      "metrics": {
+        "tiny_leela_score": 98
+      },
+      "benchmark_id": "tiny_leela_bootstrap_score_v1",
+      "commit": "6e36f6a198cf",
+      "base_commit": "6e36f6a",
+      "hypothesis": "Clean benchmark/check scripts so Node's built-in test runner does not receive an invalid Vitest-style --run argument.",
+      "implementation": "Removed npm test -- --run fallback from autoresearch.sh and autoresearch.checks.sh; both now call npm test directly.",
+      "learned": "Metric remains 98, but validation output is cleaner and checks still pass. This is a stabilize-only cleanup, not a research lane.",
+      "next_action": "Commit cleanup and mark the goal complete after confirming clean git status.",
+      "timestamp": "2026-05-04T18:53:40.760Z"
     }
   },
   "ids": {
     "next_lane": 1,
-    "next_node": 3,
-    "next_run": 3,
+    "next_node": 4,
+    "next_run": 4,
     "next_idea": 18
   },
   "global_best_node_id": "N0002"
