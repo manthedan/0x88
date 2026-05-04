@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "program": {
+    "program_id": "rp_20260504184553",
+    "name": "Tiny Leela browser engine dovetail research",
+    "objective": "Build a tiny in-browser Leela-like chess engine with policy/WDL neural evaluation, PUCT search, ONNX Runtime Web deployment, and verified chess correctness.",
+    "created_at": "2026-05-04T18:45:53.444Z",
+    "primary_metric": {
+      "name": "tiny_leela_score",
+      "direction": "higher",
+      "unit": ""
+    },
+    "root_baseline": {
+      "commit": "3da10f6",
+      "metric": 0,
+      "benchmark_id": "tiny_leela_bootstrap_score_v1"
+    }
+  },
+  "lanes": {
+    "L000": {
+      "lane_id": "L000",
+      "title": "baseline trajectory",
+      "hypothesis": "Improve from the root baseline while scheduler spawns diverse lanes.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0000",
+      "current_node_id": "N0002",
+      "local_baseline_node_id": "N0000",
+      "local_baseline_metric": 0,
+      "concept_tags": [
+        "baseline"
+      ],
+      "runs_in_current_concept": 2,
+      "created_at": "2026-05-04T18:45:53.444Z"
+    }
+  },
+  "nodes": {
+    "N0000": {
+      "node_id": "N0000",
+      "lane_id": "L000",
+      "parent_node_id": null,
+      "children": [
+        "N0001"
+      ],
+      "phase": "probe",
+      "status": "root",
+      "hypothesis": "Root baseline",
+      "commit": "3da10f6",
+      "benchmark_id": "tiny_leela_bootstrap_score_v1",
+      "metric": 0,
+      "metrics": {
+        "tiny_leela_score": 0
+      },
+      "deltas": {
+        "delta_vs_parent": null,
+        "delta_vs_lane_baseline": 0,
+        "delta_vs_root": 0,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "root",
+        "reason": "Initial baseline"
+      },
+      "created_at": "2026-05-04T18:45:53.444Z"
+    },
+    "N0001": {
+      "node_id": "N0001",
+      "lane_id": "L000",
+      "parent_node_id": "N0000",
+      "children": [
+        "N0002"
+      ],
+      "phase": "explore",
+      "status": "keep",
+      "hypothesis": "Create minimal TypeScript/Node test scaffold so engine infrastructure can be built and verified in future lanes.",
+      "commit": "3da10f6310cd",
+      "benchmark_id": "tiny_leela_bootstrap_score_v1",
+      "metric": 32,
+      "metrics": {
+        "tiny_leela_score": 32
+      },
+      "deltas": {
+        "delta_vs_parent": 32,
+        "delta_vs_lane_baseline": 32,
+        "delta_vs_root": 32,
+        "delta_vs_global_best": 32
+      },
+      "decision": {
+        "action": "keep",
+        "reason": "Bootstrap score rose from 0 to 32 and checks pass. The scheduler is currently treating foundational infrastructure as normal ideas, which is useful for tracking but can feel over-fragmented before the engine skeleton exists."
+      },
+      "created_at": "2026-05-04T18:47:43.094Z",
+      "run_id": "R0001"
+    },
+    "N0002": {
+      "node_id": "N0002",
+      "lane_id": "L000",
+      "parent_node_id": "N0001",
+      "children": [],
+      "phase": "explore",
+      "status": "keep",
+      "hypothesis": "Convert the over-fragmented pre-work into an explicit L000 foundation substrate and separate true research-lane ideas from shared engine infrastructure.",
+      "commit": "3da10f6310cd",
+      "benchmark_id": "tiny_leela_bootstrap_score_v1",
+      "metric": 98,
+      "metrics": {
+        "tiny_leela_score": 98
+      },
+      "deltas": {
+        "delta_vs_parent": 66,
+        "delta_vs_lane_baseline": 98,
+        "delta_vs_root": 98,
+        "delta_vs_global_best": 66
+      },
+      "decision": {
+        "action": "keep",
+        "reason": "The setup now has a minimum shared engine substrate and the idea queue distinguishes blocking pre-work from differentiated lanes. Bootstrap score improved from 32 to 98 with checks passing."
+      },
+      "created_at": "2026-05-04T18:53:07.145Z",
+      "run_id": "R0002"
+    }
+  },
+  "runs": {
+    "R0001": {
+      "type": "research_run",
+      "run_id": "R0001",
+      "node_id": "N0001",
+      "lane_id": "L000",
+      "phase": "explore",
+      "status": "keep",
+      "metric": 32,
+      "metrics": {
+        "tiny_leela_score": 32
+      },
+      "benchmark_id": "tiny_leela_bootstrap_score_v1",
+      "commit": "3da10f6310cd",
+      "base_commit": "3da10f6",
+      "hypothesis": "Create minimal TypeScript/Node test scaffold so engine infrastructure can be built and verified in future lanes.",
+      "implementation": "Added package.json, tsconfig.json, src/index.ts, tests/smoke.test.mjs, and made checks only run tsc when TypeScript is installed locally.",
+      "learned": "Bootstrap score rose from 0 to 32 and checks pass. The scheduler is currently treating foundational infrastructure as normal ideas, which is useful for tracking but can feel over-fragmented before the engine skeleton exists.",
+      "next_action": "Treat core infra as L000 foundation/backlog or a milestone checklist, then spawn separate lanes only after board/movegen/codec/search interfaces exist.",
+      "timestamp": "2026-05-04T18:47:43.094Z"
+    },
+    "R0002": {
+      "type": "research_run",
+      "run_id": "R0002",
+      "node_id": "N0002",
+      "lane_id": "L000",
+      "phase": "explore",
+      "status": "keep",
+      "metric": 98,
+      "metrics": {
+        "tiny_leela_score": 98
+      },
+      "benchmark_id": "tiny_leela_bootstrap_score_v1",
+      "commit": "3da10f6310cd",
+      "base_commit": "3da10f6",
+      "hypothesis": "Convert the over-fragmented pre-work into an explicit L000 foundation substrate and separate true research-lane ideas from shared engine infrastructure.",
+      "implementation": "Added board/FEN parsing, UCI/action move codec, pseudo-legal move generation and makeMove, feature encoder, evaluator interface, minimal search entry point, move encoding/browser docs, substrate tests, and reclassified loaded infra ideas as foundation_milestone while appending true research lanes.",
+      "learned": "The setup now has a minimum shared engine substrate and the idea queue distinguishes blocking pre-work from differentiated lanes. Bootstrap score improved from 32 to 98 with checks passing.",
+      "next_action": "Continue L000 only for hard correctness gaps such as full legal check/perft fixtures; otherwise schedule true lanes for search/runtime/model/training/evaluation comparisons.",
+      "timestamp": "2026-05-04T18:53:07.145Z"
+    }
+  },
+  "ids": {
+    "next_lane": 1,
+    "next_node": 3,
+    "next_run": 3,
+    "next_idea": 18
+  },
+  "global_best_node_id": "N0002"
+}

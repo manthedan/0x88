@@ -28,13 +28,28 @@ When Elo/gauntlet infrastructure exists, create a new benchmark id and metric se
 ./autoresearch.checks.sh
 ```
 
-## Dovetail lanes to maintain
-- L0 baseline/product scaffold: package structure, deterministic tests, docs, CI-friendly benchmark.
-- Architecture/runtime: feature encoder, move indexing, tiny conv model spec, ONNX interface.
-- Search/engine: legal moves, PUCT, policy masking, time controls.
-- Browser deployment: Web Worker, ORT Web WASM/WebGPU fallback, cache/progressive loading.
-- Training/data: teacher-label format, distillation loss, synthetic fixtures, export/compression scripts.
-- Evaluation: node-free metrics, tactical tests, self-play/gauntlet harness, latency/size tracking.
+## Foundation vs research lanes
+
+Before dovetailing heavily, L000 owns the shared minimum engine substrate. These are not differentiated research ideas; they are blocking pre-work used by every lane:
+
+- TypeScript/test scaffold.
+- Board state and FEN parsing.
+- Deterministic move representation and action id mapping.
+- Baseline move generation and move application.
+- Feature encoder skeleton.
+- Backend-neutral evaluator interface.
+- Search entry point consuming only `BoardState` + `Evaluator`.
+- Move encoding and browser runtime docs.
+
+Loaded ideas that were actually foundation tasks are marked `foundation_milestone` in `autoresearch.ideas.jsonl`. True research-lane ideas are explicitly titled `True research lane: ...` and should compare structurally different approaches after the substrate is stable.
+
+## Dovetail lanes to maintain after substrate
+- L0 foundation/product scaffold: deterministic tests, docs, CI-friendly benchmark, shared interfaces.
+- Search lane: PUCT variants, FPU, batching, uncertainty-driven playout allocation.
+- Architecture lane: 16x2/24x3/48x5/64x6 conv students and later tiny transformers.
+- Browser runtime lane: Web Worker, ORT WASM/WebGPU fallback, cache/progressive loading.
+- Training/data lane: teacher-label format, distillation losses, export/compression scripts.
+- Evaluation lane: node-free metrics, tactical tests, self-play/gauntlet harness, latency/size tracking.
 
 ## Safety and reproducibility rules
 - Never improve the benchmark by weakening chess correctness or evaluation workload.

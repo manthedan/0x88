@@ -1,0 +1,13 @@
+{
+  "name": "tiny-leela",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tiny in-browser Leela-like chess engine research prototype.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
