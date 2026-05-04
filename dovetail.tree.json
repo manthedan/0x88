@@ -61,13 +61,13 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0000",
-      "current_node_id": "N0026",
+      "current_node_id": "N0030",
       "local_baseline_node_id": "N0026",
       "local_baseline_metric": 12.922135,
       "concept_tags": [
         "baseline"
       ],
-      "runs_in_current_concept": 0,
+      "runs_in_current_concept": 1,
       "created_at": "2026-05-04T18:45:53.444Z"
     },
     "L001": {
@@ -175,7 +175,7 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0005",
-      "current_node_id": "N0028",
+      "current_node_id": "N0029",
       "local_baseline_node_id": "N0026",
       "local_baseline_metric": 12.922135,
       "concept_tags": [
@@ -183,7 +183,7 @@
         "distillation",
         "model"
       ],
-      "runs_in_current_concept": 2,
+      "runs_in_current_concept": 3,
       "created_at": "2026-05-04T21:34:32.077Z"
     },
     "L007": {
@@ -1125,7 +1125,8 @@
       "lane_id": "L000",
       "parent_node_id": "N0005",
       "children": [
-        "N0027"
+        "N0027",
+        "N0030"
       ],
       "phase": "probe",
       "status": "segment_root",
@@ -1192,7 +1193,9 @@
       "node_id": "N0028",
       "lane_id": "L006",
       "parent_node_id": "N0027",
-      "children": [],
+      "children": [
+        "N0029"
+      ],
       "phase": "explore",
       "status": "kept",
       "hypothesis": "Polyak/SWA-style weight averaging over the second half of training should reduce tiny-dataset SGD overfit/variance while preserving the fixed consensus-label benchmark.",
@@ -1225,6 +1228,82 @@
       },
       "created_at": "2026-05-04T22:38:24.870Z",
       "run_id": "R0027"
+    },
+    "N0029": {
+      "node_id": "N0029",
+      "lane_id": "L006",
+      "parent_node_id": "N0028",
+      "children": [],
+      "phase": "explore",
+      "status": "kept",
+      "hypothesis": "A deterministic confirmation rerun of the averaged-weight student should reproduce the current best fixed consensus distillation score before further exploration.",
+      "commit": "c300245",
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "metric": 13.309426,
+      "metrics": {
+        "distill_student_score": 13.309426,
+        "train_policy_ce": 1.689969,
+        "train_wdl_ce": 0.413288,
+        "dev_policy_ce": 5.757296,
+        "dev_wdl_ce": 0.756176,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "weight_average_count": 600
+      },
+      "deltas": {
+        "delta_vs_parent": 0,
+        "delta_vs_lane_baseline": 0.3872909999999994,
+        "delta_vs_root": 0.3872909999999994,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "kept",
+        "reason": "The averaged-weight candidate exactly reproduced distill_student_score=13.309426, dev_policy_ce=5.757296, and dev_wdl_ce=0.756176 with checks passing. The current benchmark is deterministic for this candidate, so the improvement over 12.922135 is stable under rerun."
+      },
+      "created_at": "2026-05-04T22:40:23.385Z",
+      "run_id": "R0028"
+    },
+    "N0030": {
+      "node_id": "N0030",
+      "lane_id": "L000",
+      "parent_node_id": "N0026",
+      "children": [],
+      "phase": "explore",
+      "status": "kept",
+      "hypothesis": "The baseline trajectory should adopt the current averaged-weight distillation benchmark result so L000 reflects the active Phase C segment best rather than the pre-averaging baseline.",
+      "commit": "c300245",
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "metric": 13.309426,
+      "metrics": {
+        "distill_student_score": 13.309426,
+        "train_policy_ce": 1.689969,
+        "train_wdl_ce": 0.413288,
+        "dev_policy_ce": 5.757296,
+        "dev_wdl_ce": 0.756176,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "weight_average_count": 600
+      },
+      "deltas": {
+        "delta_vs_parent": 0.3872909999999994,
+        "delta_vs_lane_baseline": 0.3872909999999994,
+        "delta_vs_root": 0.3872909999999994,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "kept",
+        "reason": "L000 reproduces the current best distill_student_score=13.309426 with checks passing. This synchronizes the baseline trajectory with the kept L006 averaged-weight candidate; no new model behavior was introduced."
+      },
+      "created_at": "2026-05-04T22:40:56.210Z",
+      "run_id": "R0029"
     }
   },
   "runs": {
@@ -1901,12 +1980,74 @@
       "learned": "Weight averaging improved the fixed consensus benchmark from current best 12.922135 to 13.309426. The gain came from better dev_policy_ce (5.993176 -> 5.757296) while dev_wdl_ce slightly worsened (0.745483 -> 0.756176). Training losses rose, consistent with reduced overfit rather than stronger memorization.",
       "next_action": "Keep averaged weights as the new baseline. Confirm determinism once, then try robustness/cross-fold reporting or mild objective regularization only if it improves validation without adding feature dimensions.",
       "timestamp": "2026-05-04T22:38:24.870Z"
+    },
+    "R0028": {
+      "type": "research_run",
+      "run_id": "R0028",
+      "node_id": "N0029",
+      "lane_id": "L006",
+      "phase": "explore",
+      "status": "kept",
+      "metric": 13.309426,
+      "metrics": {
+        "distill_student_score": 13.309426,
+        "train_policy_ce": 1.689969,
+        "train_wdl_ce": 0.413288,
+        "dev_policy_ce": 5.757296,
+        "dev_wdl_ce": 0.756176,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "weight_average_count": 600
+      },
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "commit": "c300245",
+      "base_commit": "c300245",
+      "hypothesis": "A deterministic confirmation rerun of the averaged-weight student should reproduce the current best fixed consensus distillation score before further exploration.",
+      "implementation": "No code changes. Reran the current dovetail benchmark ./dovetail.sh at commit c300245 with --average-weights enabled.",
+      "learned": "The averaged-weight candidate exactly reproduced distill_student_score=13.309426, dev_policy_ce=5.757296, and dev_wdl_ce=0.756176 with checks passing. The current benchmark is deterministic for this candidate, so the improvement over 12.922135 is stable under rerun.",
+      "next_action": "Continue automated dovetail exploration. Prefer robustness/cross-fold reporting or data-coverage improvements over adding more WDL feature dimensions or teacher-source specialization.",
+      "timestamp": "2026-05-04T22:40:23.385Z"
+    },
+    "R0029": {
+      "type": "research_run",
+      "run_id": "R0029",
+      "node_id": "N0030",
+      "lane_id": "L000",
+      "phase": "explore",
+      "status": "kept",
+      "metric": 13.309426,
+      "metrics": {
+        "distill_student_score": 13.309426,
+        "train_policy_ce": 1.689969,
+        "train_wdl_ce": 0.413288,
+        "dev_policy_ce": 5.757296,
+        "dev_wdl_ce": 0.756176,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "weight_average_count": 600
+      },
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "commit": "c300245",
+      "base_commit": "c300245",
+      "hypothesis": "The baseline trajectory should adopt the current averaged-weight distillation benchmark result so L000 reflects the active Phase C segment best rather than the pre-averaging baseline.",
+      "implementation": "No code changes. Ran the scheduler-assigned L000 quantum against the current fixed dovetail benchmark ./dovetail.sh, which includes consensus labels, WDL head interactions, and averaged weights.",
+      "learned": "L000 reproduces the current best distill_student_score=13.309426 with checks passing. This synchronizes the baseline trajectory with the kept L006 averaged-weight candidate; no new model behavior was introduced.",
+      "next_action": "Scheduler should return to L006 or spawn a new data/robustness lane for non-duplicate improvements such as cross-fold reporting or larger teacher-label coverage.",
+      "timestamp": "2026-05-04T22:40:56.210Z"
     }
   },
   "ids": {
     "next_lane": 10,
-    "next_node": 29,
-    "next_run": 28,
+    "next_node": 31,
+    "next_run": 30,
     "next_idea": 22
   },
   "global_best_node_id": "N0028"
