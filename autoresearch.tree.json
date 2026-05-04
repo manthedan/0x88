@@ -148,6 +148,26 @@
       ],
       "runs_in_current_concept": 2,
       "created_at": "2026-05-04T21:34:32.077Z"
+    },
+    "L007": {
+      "lane_id": "L007",
+      "title": "True research lane: board-square student representation",
+      "hypothesis": "A student using explicit 64-square piece/color features should beat the current aggregate linear FEN baseline on fixed teacher_distill_seed_v2 policy/WDL metrics without changing labels.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0005",
+      "current_node_id": "N0022",
+      "local_baseline_node_id": "N0005",
+      "local_baseline_metric": 130,
+      "concept_tags": [
+        "training",
+        "distillation",
+        "model",
+        "features"
+      ],
+      "runs_in_current_concept": 1,
+      "created_at": "2026-05-04T21:48:02.197Z",
+      "idea_id": "I0018"
     }
   },
   "nodes": {
@@ -305,7 +325,8 @@
         "N0008",
         "N0016",
         "N0017",
-        "N0020"
+        "N0020",
+        "N0022"
       ],
       "phase": "stabilize",
       "status": "keep",
@@ -868,6 +889,42 @@
       },
       "created_at": "2026-05-04T21:43:22.260Z",
       "run_id": "R0021"
+    },
+    "N0022": {
+      "node_id": "N0022",
+      "lane_id": "L007",
+      "parent_node_id": "N0005",
+      "children": [],
+      "phase": "explore",
+      "status": "discard",
+      "hypothesis": "Explicit 64-square piece/color linear features should improve over aggregate FEN counts on fixed v2 teacher labels.",
+      "commit": "72ddb7bd879e",
+      "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
+      "metric": 11.555163,
+      "metrics": {
+        "distill_student_score": 11.555163,
+        "train_policy_ce": 1.184344,
+        "train_wdl_ce": 0.310036,
+        "dev_policy_ce": 6.440227,
+        "dev_wdl_ce": 1.213913,
+        "dev_policy_top1": 0,
+        "teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 770
+      },
+      "deltas": {
+        "delta_vs_parent": -118.444837,
+        "delta_vs_lane_baseline": -118.444837,
+        "delta_vs_root": 11.555163,
+        "delta_vs_global_best": -118.444837
+      },
+      "decision": {
+        "action": "discard",
+        "reason": "Board-square linear features improved train losses and slightly improved dev_policy_ce (6.44 vs 6.57), but worsened dev_wdl_ce enough that primary distill_student_score fell from 12.046814 to 11.555163. With only 20 rows and 770 features, the linear board-square model appears to overfit; richer features need regularization or non-linear sharing, not a wider linear one-hot board."
+      },
+      "created_at": "2026-05-04T21:50:46.213Z",
+      "run_id": "R0022",
+      "idea_id": "I0018"
     }
   },
   "runs": {
@@ -1367,12 +1424,39 @@
       "learned": "Dataset expanded from 6 to 20 teacher rows and move vocabulary from 20 to 44. Lc0 labels are no longer one-hot: avg_policy_moves=3.3; Stockfish avg_policy_moves=4.0. The linear student score fell from 16.90 on the tiny easy fixture to 12.05 on v2, with dev_policy_ce=6.57, showing the new dataset is harder and the linear FEN baseline is inadequate.",
       "next_action": "Compare stronger student representations on v2: board-square features or a small MLP/conv implementation. Also consider more lc0 nodes now that verbose visit extraction works.",
       "timestamp": "2026-05-04T21:43:22.260Z"
+    },
+    "R0022": {
+      "type": "research_run",
+      "run_id": "R0022",
+      "node_id": "N0022",
+      "lane_id": "L007",
+      "phase": "explore",
+      "status": "discard",
+      "metric": 11.555163,
+      "metrics": {
+        "distill_student_score": 11.555163,
+        "train_policy_ce": 1.184344,
+        "train_wdl_ce": 0.310036,
+        "dev_policy_ce": 6.440227,
+        "dev_wdl_ce": 1.213913,
+        "dev_policy_top1": 0,
+        "teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 770
+      },
+      "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
+      "commit": "72ddb7bd879e",
+      "hypothesis": "Explicit 64-square piece/color linear features should improve over aggregate FEN counts on fixed v2 teacher labels.",
+      "implementation": "Added optional board_square feature extractor to the pure-Python linear student and tested it against the same 20-row lc0+Stockfish v2 labels.",
+      "learned": "Board-square linear features improved train losses and slightly improved dev_policy_ce (6.44 vs 6.57), but worsened dev_wdl_ce enough that primary distill_student_score fell from 12.046814 to 11.555163. With only 20 rows and 770 features, the linear board-square model appears to overfit; richer features need regularization or non-linear sharing, not a wider linear one-hot board.",
+      "next_action": "Discard as primary regression. Try a small MLP/shared representation or source/loss ablations rather than high-dimensional linear square features.",
+      "timestamp": "2026-05-04T21:50:46.213Z"
     }
   },
   "ids": {
-    "next_lane": 7,
-    "next_node": 22,
-    "next_run": 22,
+    "next_lane": 8,
+    "next_node": 23,
+    "next_run": 23,
     "next_idea": 22
   },
   "global_best_node_id": "N0005"
