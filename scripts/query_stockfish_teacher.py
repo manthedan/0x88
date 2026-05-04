@@ -46,7 +46,7 @@ def read_until(proc: subprocess.Popen[str], token: str, limit: int = 20000) -> l
 
 
 def parse(lines: list[str]) -> tuple[dict[str, float], list[float], float]:
-    scores: dict[str, float] = {}
+    by_mpv: dict[int, tuple[str, float]] = {}
     bestmove = None
     for line in lines:
         if line.startswith("bestmove "):
@@ -56,11 +56,12 @@ def parse(lines: list[str]) -> tuple[dict[str, float], list[float], float]:
         m = INFO_RE.search(line)
         if not m:
             continue
-        _mpv, kind, raw, move = m.groups()
+        mpv, kind, raw, move = m.groups()
         score = float(raw)
         if kind == "mate":
             score = 100000.0 if score > 0 else -100000.0
-        scores.setdefault(move, score / 100.0)
+        by_mpv[int(mpv)] = (move, score / 100.0)
+    scores = {move: score for move, score in by_mpv.values()}
     if not scores and bestmove and bestmove != "(none)":
         scores[bestmove] = 0.0
     if not scores:

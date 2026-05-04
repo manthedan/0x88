@@ -29,6 +29,6 @@ Bootstrap command sequence:
 ```bash
 python3 scripts/export_seed_fens.py
 LC0_BIN=/path/to/lc0 LC0_WEIGHTS=/path/to/weights.pb.gz \
-  python3 scripts/query_lc0_teacher.py --nodes 64 --multipv 4
+  python3 scripts/query_lc0_teacher.py --positions data/distill_seed_positions.fen --nodes 64 --multipv 4
 python3 training/validate_teacher_labels.py data/teacher_labels.jsonl
 ```

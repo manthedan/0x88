@@ -1,0 +1,10 @@
+opening_start	rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+opening_after_e4	rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1
+opening_after_d4	rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1
+sicilian_knights	rnbqkb1r/pp1ppppp/5n2/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq c6 0 3
+queen_gambit_declined	rnbqkb1r/pp2pppp/2p2n2/3p4/2PP4/4PN2/PP3PPP/RNBQKB1R w KQkq - 0 5
+kingside_castled	r1bq1rk1/ppp2ppp/2np1n2/4p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 0 7
+isolated_queen_pawn	r2q1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP2BPPP/R2Q1RK1 w - - 0 9
+back_rank_tactic	6k1/5ppp/8/8/8/8/5PPP/4R1K1 w - - 0 1
+simple_endgame	8/5k2/8/8/8/8/4K3/4R3 w - - 0 1
+pawn_race	8/4k3/3p4/8/4P3/8/4K3/8 w - - 0 1

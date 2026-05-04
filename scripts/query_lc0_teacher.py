@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 INFO_RE = re.compile(r"multipv\s+(\d+).*?(?:score\s+(cp|mate)\s+(-?\d+)).*?\spv\s+(\S+)")
+VERBOSE_RE = re.compile(r"info string\s+(\S+)\s+\([^)]*\)\s+N:\s*(\d+).*?\(P:\s*([0-9.]+)%\).*?\(WL:\s*([-0-9.]+)\).*?\(D:\s*([0-9.]+)\)")
 
 
 def require(path_or_bin: str, label: str) -> str:
@@ -48,18 +49,40 @@ def read_until(proc: subprocess.Popen[str], token: str, timeout_lines: int = 100
 
 
 def parse_search(lines: list[str]) -> tuple[dict[str, float], list[float], float]:
-    scores: dict[str, float] = {}
+    # Prefer Lc0 verbose root stats: they expose visit counts, policy prior, WL and draw estimates.
+    verbose: dict[str, tuple[int, float, float, float]] = {}
+    for line in lines:
+        m = VERBOSE_RE.search(line)
+        if not m:
+            continue
+        move, visits, prior_pct, wl, draw = m.groups()
+        if move == "node":
+            continue
+        verbose[move] = (int(visits), float(prior_pct) / 100.0, float(wl), float(draw))
+    visited = {move: vals for move, vals in verbose.items() if vals[0] > 0}
+    if visited:
+        total_visits = sum(vals[0] for vals in visited.values())
+        policy = {move: vals[0] / total_visits for move, vals in visited.items()}
+        best_move, best_vals = max(visited.items(), key=lambda item: item[1][0])
+        _visits, _prior, q, draw = best_vals
+        win = max(0.0, (1.0 - draw + q) / 2.0)
+        loss = max(0.0, (1.0 - draw - q) / 2.0)
+        total = win + draw + loss
+        return policy, [win / total, draw / total, loss / total], q
+
+    # Fallback to the final MultiPV lines. Overwrite by multipv so early shallow lines do not freeze labels.
+    by_mpv: dict[int, tuple[str, float]] = {}
     for line in lines:
         m = INFO_RE.search(line)
         if not m:
             continue
-        _multipv, kind, raw, move = m.groups()
+        multipv, kind, raw, move = m.groups()
         score = float(raw)
         if kind == "mate":
             score = 100000.0 if score > 0 else -100000.0
-        scores.setdefault(move, score / 100.0)
+        by_mpv[int(multipv)] = (move, score / 100.0)
+    scores = {move: score for move, score in by_mpv.values()}
     if not scores:
-        # At least parse bestmove so downstream code can proceed with a one-hot policy.
         best = next((line.split()[1] for line in lines if line.startswith("bestmove ") and len(line.split()) > 1), None)
         if best and best != "(none)":
             scores[best] = 0.0
@@ -70,7 +93,6 @@ def parse_search(lines: list[str]) -> tuple[dict[str, float], list[float], float
     total = sum(exps.values())
     policy = {m: v / total for m, v in exps.items()}
     q = math.tanh(max_score / 4.0)
-    # Simple q->WDL projection for bootstrap labels. Replace with native lc0 WDL if exposed.
     win = max(0.0, q)
     loss = max(0.0, -q)
     draw = max(0.0, 1.0 - win - loss)
@@ -98,6 +120,7 @@ def main() -> int:
         read_until(proc, "uciok")
         send(proc, f"setoption name WeightsFile value {weights}")
         send(proc, f"setoption name MultiPV value {args.multipv}")
+        send(proc, "setoption name VerboseMoveStats value true")
         send(proc, "isready")
         read_until(proc, "readyok")
         count = 0

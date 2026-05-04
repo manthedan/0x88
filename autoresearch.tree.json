@@ -128,7 +128,7 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0005",
-      "current_node_id": "N0020",
+      "current_node_id": "N0021",
       "local_baseline_node_id": "N0005",
       "local_baseline_metric": 130,
       "concept_tags": [
@@ -136,7 +136,7 @@
         "distillation",
         "model"
       ],
-      "runs_in_current_concept": 1,
+      "runs_in_current_concept": 2,
       "created_at": "2026-05-04T21:34:32.077Z"
     }
   },
@@ -791,7 +791,9 @@
       "node_id": "N0020",
       "lane_id": "L006",
       "parent_node_id": "N0005",
-      "children": [],
+      "children": [
+        "N0021"
+      ],
       "phase": "explore",
       "status": "keep",
       "hypothesis": "A first dependency-free student trained on real lc0 and Stockfish labels can establish measurable distillation losses and create a baseline for future model/training research.",
@@ -820,6 +822,42 @@
       },
       "created_at": "2026-05-04T21:36:57.794Z",
       "run_id": "R0020"
+    },
+    "N0021": {
+      "node_id": "N0021",
+      "lane_id": "L006",
+      "parent_node_id": "N0020",
+      "children": [],
+      "phase": "explore",
+      "status": "keep",
+      "hypothesis": "Expanding teacher seed positions and extracting lc0 verbose root visit distributions will create a more meaningful distillation dataset than the initial 3-position/one-hot labels.",
+      "commit": "4e1539e00580",
+      "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
+      "metric": 12.046814,
+      "metrics": {
+        "distill_student_score": 12.046814,
+        "train_policy_ce": 1.506926,
+        "train_wdl_ce": 0.387755,
+        "dev_policy_ce": 6.566377,
+        "dev_wdl_ce": 0.734573,
+        "dev_policy_top1": 0,
+        "teacher_rows": 20,
+        "move_vocab": 44,
+        "lc0_avg_policy_moves": 3.3,
+        "stockfish_avg_policy_moves": 4
+      },
+      "deltas": {
+        "delta_vs_parent": -4.855736000000002,
+        "delta_vs_lane_baseline": -117.953186,
+        "delta_vs_root": 12.046814,
+        "delta_vs_global_best": -117.953186
+      },
+      "decision": {
+        "action": "keep",
+        "reason": "Dataset expanded from 6 to 20 teacher rows and move vocabulary from 20 to 44. Lc0 labels are no longer one-hot: avg_policy_moves=3.3; Stockfish avg_policy_moves=4.0. The linear student score fell from 16.90 on the tiny easy fixture to 12.05 on v2, with dev_policy_ce=6.57, showing the new dataset is harder and the linear FEN baseline is inadequate."
+      },
+      "created_at": "2026-05-04T21:43:22.260Z",
+      "run_id": "R0021"
     }
   },
   "runs": {
@@ -1291,12 +1329,40 @@
       "learned": "The full teacher-to-student loop now runs. Baseline is intentionally weak and tiny: 6 teacher rows, 20-move vocabulary, dev_policy_ce=3.121585, dev_wdl_ce=1.794682, dev_policy_top1=0.666667. Lc0 labels were one-hot under the current UCI parser at nodes=64, while Stockfish produced richer MultiPV distributions. This is still data-pipeline/model-quality evidence, not Elo.",
       "next_action": "Improve teacher label extraction quality (lc0 visit-policy/WDL if exposed, more seed positions), then compare student families or add a small neural/ONNX training backend.",
       "timestamp": "2026-05-04T21:36:57.794Z"
+    },
+    "R0021": {
+      "type": "research_run",
+      "run_id": "R0021",
+      "node_id": "N0021",
+      "lane_id": "L006",
+      "phase": "explore",
+      "status": "keep",
+      "metric": 12.046814,
+      "metrics": {
+        "distill_student_score": 12.046814,
+        "train_policy_ce": 1.506926,
+        "train_wdl_ce": 0.387755,
+        "dev_policy_ce": 6.566377,
+        "dev_wdl_ce": 0.734573,
+        "dev_policy_top1": 0,
+        "teacher_rows": 20,
+        "move_vocab": 44,
+        "lc0_avg_policy_moves": 3.3,
+        "stockfish_avg_policy_moves": 4
+      },
+      "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
+      "commit": "4e1539e00580",
+      "hypothesis": "Expanding teacher seed positions and extracting lc0 verbose root visit distributions will create a more meaningful distillation dataset than the initial 3-position/one-hot labels.",
+      "implementation": "Added data/distill_seed_positions.fen with 10 curated opening/middlegame/endgame positions. Updated lc0 query parsing to prefer VerboseMoveStats root visits/WL/D and to overwrite final MultiPV lines instead of freezing early shallow PVs. Updated Stockfish parser similarly. Regenerated lc0 nodes=16 and Stockfish depth=8 labels for 10 positions and trained the linear baseline.",
+      "learned": "Dataset expanded from 6 to 20 teacher rows and move vocabulary from 20 to 44. Lc0 labels are no longer one-hot: avg_policy_moves=3.3; Stockfish avg_policy_moves=4.0. The linear student score fell from 16.90 on the tiny easy fixture to 12.05 on v2, with dev_policy_ce=6.57, showing the new dataset is harder and the linear FEN baseline is inadequate.",
+      "next_action": "Compare stronger student representations on v2: board-square features or a small MLP/conv implementation. Also consider more lc0 nodes now that verbose visit extraction works.",
+      "timestamp": "2026-05-04T21:43:22.260Z"
     }
   },
   "ids": {
     "next_lane": 7,
-    "next_node": 21,
-    "next_run": 21,
+    "next_node": 22,
+    "next_run": 22,
     "next_idea": 18
   },
   "global_best_node_id": "N0005"

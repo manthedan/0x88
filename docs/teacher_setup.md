@@ -34,7 +34,7 @@ export LC0_BIN=/absolute/path/to/lc0
 export LC0_WEIGHTS=/absolute/path/to/weights.pb.gz
 npm run distill:check
 npm run distill:seed
-npm run distill:query -- --nodes 64 --multipv 4
+npm run distill:query -- --positions data/distill_seed_positions.fen --nodes 64 --multipv 4
 npm run distill:validate -- data/teacher_labels.jsonl
 ```
 
@@ -52,7 +52,7 @@ sudo apt install stockfish
 export STOCKFISH_BIN=/usr/games/stockfish  # or wherever installed
 npm run stockfish:check
 npm run distill:seed
-npm run stockfish:query -- --depth 10 --multipv 4
+npm run stockfish:query -- --positions data/distill_seed_positions.fen --depth 10 --multipv 4
 npm run distill:validate -- data/stockfish_teacher_labels.jsonl
 ```
 
