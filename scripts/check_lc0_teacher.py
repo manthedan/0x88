@@ -19,18 +19,18 @@ def main() -> int:
     lc0_ready = int(bool(lc0_path))
     weights_ready = int(bool(args.weights and Path(args.weights).exists()))
 
-    version_ok = 0
+    uci_ok = 0
     if lc0_path:
         try:
-            proc = subprocess.run([lc0_path, "--version"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
-            version_ok = int(proc.returncode == 0 and bool(proc.stdout.strip()))
+            proc = subprocess.run([lc0_path], input="uci\nquit\n", text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
+            uci_ok = int(proc.returncode == 0 and "uciok" in proc.stdout)
         except Exception:
-            version_ok = 0
+            uci_ok = 0
 
-    ready = int(lc0_ready and weights_ready and version_ok)
+    ready = int(lc0_ready and weights_ready and uci_ok)
     print(f"METRIC lc0_binary_ready={lc0_ready}")
     print(f"METRIC lc0_weights_ready={weights_ready}")
-    print(f"METRIC lc0_version_ready={version_ok}")
+    print(f"METRIC lc0_uci_ready={uci_ok}")
     print(f"METRIC distillation_ready={ready}")
     if not ready:
         print("Missing real lc0 teacher setup. Set LC0_BIN=/path/to/lc0 and LC0_WEIGHTS=/path/to/weights.pb.gz.")

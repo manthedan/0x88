@@ -110,7 +110,7 @@
       "status": "active",
       "phase": "stabilize",
       "parent_node_id": "N0005",
-      "current_node_id": "N0018",
+      "current_node_id": "N0019",
       "local_baseline_node_id": "N0005",
       "local_baseline_metric": 130,
       "concept_tags": [
@@ -118,7 +118,7 @@
         "data",
         "foundation"
       ],
-      "runs_in_current_concept": 2,
+      "runs_in_current_concept": 3,
       "created_at": "2026-05-04T21:10:09.336Z"
     }
   },
@@ -705,7 +705,9 @@
       "node_id": "N0018",
       "lane_id": "L005",
       "parent_node_id": "N0017",
-      "children": [],
+      "children": [
+        "N0019"
+      ],
       "phase": "stabilize",
       "status": "keep",
       "hypothesis": "Use current web references to make teacher setup actionable for lc0 and add Stockfish as an optional second teacher with separate labels.",
@@ -732,6 +734,39 @@
       },
       "created_at": "2026-05-04T21:18:07.109Z",
       "run_id": "R0018"
+    },
+    "N0019": {
+      "node_id": "N0019",
+      "lane_id": "L005",
+      "parent_node_id": "N0018",
+      "children": [],
+      "phase": "stabilize",
+      "status": "keep",
+      "hypothesis": "Install teacher engines locally without sudo so the distillation data pipeline can actually run.",
+      "commit": "3a42cee050f6",
+      "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
+      "metric": 1,
+      "metrics": {
+        "lc0_binary_ready": 1,
+        "lc0_weights_ready": 1,
+        "lc0_uci_ready": 1,
+        "distillation_ready": 1,
+        "stockfish_binary_ready": 1,
+        "stockfish_uci_ready": 1,
+        "stockfish_distillation_ready": 1
+      },
+      "deltas": {
+        "delta_vs_parent": 1,
+        "delta_vs_lane_baseline": -129,
+        "delta_vs_root": 1,
+        "delta_vs_global_best": -129
+      },
+      "decision": {
+        "action": "keep",
+        "reason": "Both teacher engines are now locally usable via env vars. lc0 is at .local_engines/lc0/build/release/lc0 with weights .local_engines/lc0_weights/weights_run2_912822.lc0. Stockfish is at .local_engines/stockfish_pkg/usr/games/stockfish. Smoke-generated 3 lc0 labels with nodes=1 and 3 Stockfish labels with depth=1; both validate."
+      },
+      "created_at": "2026-05-04T21:29:45.687Z",
+      "run_id": "R0019"
     }
   },
   "runs": {
@@ -1152,12 +1187,37 @@
       "learned": "Web search confirms lc0 source/binary and weights are separate: lc0 docs point to network pages for .pb.gz weights and to WeightsFile/--weights configuration. Stockfish has official downloads/UCI docs and Ubuntu package candidate, making it a practical fallback/second teacher. Neither binary is installed locally, so readiness metrics remain zero.",
       "next_action": "Install lc0 plus network weights and/or Stockfish, set LC0_BIN/LC0_WEIGHTS or STOCKFISH_BIN, then generate real labels.",
       "timestamp": "2026-05-04T21:18:07.109Z"
+    },
+    "R0019": {
+      "type": "research_run",
+      "run_id": "R0019",
+      "node_id": "N0019",
+      "lane_id": "L005",
+      "phase": "stabilize",
+      "status": "keep",
+      "metric": 1,
+      "metrics": {
+        "lc0_binary_ready": 1,
+        "lc0_weights_ready": 1,
+        "lc0_uci_ready": 1,
+        "distillation_ready": 1,
+        "stockfish_binary_ready": 1,
+        "stockfish_uci_ready": 1,
+        "stockfish_distillation_ready": 1
+      },
+      "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
+      "commit": "3a42cee050f6",
+      "hypothesis": "Install teacher engines locally without sudo so the distillation data pipeline can actually run.",
+      "implementation": "Installed Stockfish locally by downloading/extracting Ubuntu stockfish package into .local_engines. Built lc0 v0.32.1 locally from source with Meson/Ninja in a venv, downloaded latest training network weights from training.lczero.org, fixed lc0 readiness checker to use UCI instead of unsupported --version, and ignored local engine artifacts/real generated labels.",
+      "learned": "Both teacher engines are now locally usable via env vars. lc0 is at .local_engines/lc0/build/release/lc0 with weights .local_engines/lc0_weights/weights_run2_912822.lc0. Stockfish is at .local_engines/stockfish_pkg/usr/games/stockfish. Smoke-generated 3 lc0 labels with nodes=1 and 3 Stockfish labels with depth=1; both validate.",
+      "next_action": "Run higher-quality label generation with more lc0 nodes / Stockfish depth, then start a real student training script against generated JSONL labels.",
+      "timestamp": "2026-05-04T21:29:45.687Z"
     }
   },
   "ids": {
     "next_lane": 6,
-    "next_node": 19,
-    "next_run": 19,
+    "next_node": 20,
+    "next_run": 20,
     "next_idea": 18
   },
   "global_best_node_id": "N0005"
