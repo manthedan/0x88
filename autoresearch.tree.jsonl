@@ -32,3 +32,4 @@
 {"type":"run_logged","run_id":"R0023","node_id":"N0023","lane_id":"L008","status":"discard","metric":9.60206,"timestamp":"2026-05-04T21:52:19.576Z"}
 {"type":"lane_created","lane_id":"L009","parent_node_id":"N0005","idea_id":"I0020","timestamp":"2026-05-04T21:52:31.948Z"}
 {"type":"run_logged","run_id":"R0024","node_id":"N0024","lane_id":"L009","status":"keep","metric":12.046814,"timestamp":"2026-05-04T21:52:58.590Z"}
+{"type":"run_logged","run_id":"R0025","node_id":"N0025","lane_id":"L006","status":"discard","metric":12.890689,"timestamp":"2026-05-04T22:02:26.284Z"}

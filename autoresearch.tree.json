@@ -138,7 +138,7 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0005",
-      "current_node_id": "N0021",
+      "current_node_id": "N0025",
       "local_baseline_node_id": "N0005",
       "local_baseline_metric": 130,
       "concept_tags": [
@@ -146,7 +146,7 @@
         "distillation",
         "model"
       ],
-      "runs_in_current_concept": 2,
+      "runs_in_current_concept": 3,
       "created_at": "2026-05-04T21:34:32.077Z"
     },
     "L007": {
@@ -899,7 +899,9 @@
       "node_id": "N0021",
       "lane_id": "L006",
       "parent_node_id": "N0020",
-      "children": [],
+      "children": [
+        "N0025"
+      ],
       "phase": "explore",
       "status": "keep",
       "hypothesis": "Expanding teacher seed positions and extracting lc0 verbose root visit distributions will create a more meaningful distillation dataset than the initial 3-position/one-hot labels.",
@@ -1041,6 +1043,44 @@
       "created_at": "2026-05-04T21:52:58.589Z",
       "run_id": "R0024",
       "idea_id": "I0020"
+    },
+    "N0025": {
+      "node_id": "N0025",
+      "lane_id": "L006",
+      "parent_node_id": "N0021",
+      "children": [],
+      "phase": "explore",
+      "status": "discard",
+      "hypothesis": "Training-only draw regularization for the WDL head should reduce overfitting while preserving the fixed consensus-label evaluation target.",
+      "commit": "8cc07dd",
+      "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
+      "metric": 12.890689,
+      "metrics": {
+        "distill_student_score": 12.890689,
+        "train_policy_ce": 1.631707,
+        "train_wdl_ce": 0.411843,
+        "dev_policy_ce": 5.993176,
+        "dev_wdl_ce": 0.764361,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "wdl_draw_regularization": 0.1
+      },
+      "deltas": {
+        "delta_vs_parent": 0.8438750000000006,
+        "delta_vs_lane_baseline": -117.109311,
+        "delta_vs_root": 12.890689,
+        "delta_vs_global_best": -117.109311
+      },
+      "decision": {
+        "action": "discard",
+        "reason": "Draw regularization did not help the current head-separated model: score fell from 12.922135 to 12.890689. Policy CE was unchanged, but dev_wdl_ce regressed from 0.745483 to 0.764361, so the prior best WDL interactions should remain unchanged."
+      },
+      "created_at": "2026-05-04T22:02:26.284Z",
+      "run_id": "R0025"
     }
   },
   "runs": {
@@ -1624,12 +1664,43 @@
       "learned": "Combined labels remain best on the primary score: combined=12.046814, Stockfish-only=11.723282, lc0-only=10.643424. Stockfish-only had better dev_top1=0.2 and lower dev_wdl_ce=0.612093, while combined had better dev_policy_ce=6.566377. lc0-only is weakest with current low-node labels.",
       "next_action": "Keep combined teacher data as default. If optimizing top1/WDL separately, Stockfish-only is interesting; otherwise run policy/WDL loss-mix ablations next.",
       "timestamp": "2026-05-04T21:52:58.589Z"
+    },
+    "R0025": {
+      "type": "research_run",
+      "run_id": "R0025",
+      "node_id": "N0025",
+      "lane_id": "L006",
+      "phase": "explore",
+      "status": "discard",
+      "metric": 12.890689,
+      "metrics": {
+        "distill_student_score": 12.890689,
+        "train_policy_ce": 1.631707,
+        "train_wdl_ce": 0.411843,
+        "dev_policy_ce": 5.993176,
+        "dev_wdl_ce": 0.764361,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "wdl_draw_regularization": 0.1
+      },
+      "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
+      "commit": "8cc07dd",
+      "base_commit": "8cc07dd",
+      "hypothesis": "Training-only draw regularization for the WDL head should reduce overfitting while preserving the fixed consensus-label evaluation target.",
+      "implementation": "Added train_wdl_target() with a fixed draw_regularized mode that shifts 10% WDL training mass to draw, and ran the fixed distillation benchmark through the internal dovetail runner.",
+      "learned": "Draw regularization did not help the current head-separated model: score fell from 12.922135 to 12.890689. Policy CE was unchanged, but dev_wdl_ce regressed from 0.745483 to 0.764361, so the prior best WDL interactions should remain unchanged.",
+      "next_action": "Discard and revert. Avoid WDL regularization on this tiny fixed seed unless validated across a broader cross-fold or larger label set.",
+      "timestamp": "2026-05-04T22:02:26.284Z"
     }
   },
   "ids": {
     "next_lane": 10,
-    "next_node": 25,
-    "next_run": 25,
+    "next_node": 26,
+    "next_run": 26,
     "next_idea": 22
   },
   "global_best_node_id": "N0005"
