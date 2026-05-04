@@ -188,6 +188,25 @@
       "runs_in_current_concept": 1,
       "created_at": "2026-05-04T21:51:05.745Z",
       "idea_id": "I0019"
+    },
+    "L009": {
+      "lane_id": "L009",
+      "title": "True research lane: teacher-source ablations",
+      "hypothesis": "Training on lc0-only, Stockfish-only, and combined teacher labels will identify whether the two teachers help or conflict on the fixed v2 seed dataset.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0005",
+      "current_node_id": "N0024",
+      "local_baseline_node_id": "N0005",
+      "local_baseline_metric": 130,
+      "concept_tags": [
+        "training",
+        "distillation",
+        "data"
+      ],
+      "runs_in_current_concept": 1,
+      "created_at": "2026-05-04T21:52:31.948Z",
+      "idea_id": "I0020"
     }
   },
   "nodes": {
@@ -347,7 +366,8 @@
         "N0017",
         "N0020",
         "N0022",
-        "N0023"
+        "N0023",
+        "N0024"
       ],
       "phase": "stabilize",
       "status": "keep",
@@ -983,6 +1003,44 @@
       "created_at": "2026-05-04T21:52:19.576Z",
       "run_id": "R0023",
       "idea_id": "I0019"
+    },
+    "N0024": {
+      "node_id": "N0024",
+      "lane_id": "L009",
+      "parent_node_id": "N0005",
+      "children": [],
+      "phase": "explore",
+      "status": "keep",
+      "hypothesis": "Training on lc0-only, Stockfish-only, and combined teacher labels will reveal whether the two teachers help or conflict on fixed v2 labels.",
+      "commit": "e8edfc3e209d",
+      "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
+      "metric": 12.046814,
+      "metrics": {
+        "distill_student_score": 12.046814,
+        "train_policy_ce": 1.506926,
+        "train_wdl_ce": 0.387755,
+        "dev_policy_ce": 6.566377,
+        "dev_wdl_ce": 0.734573,
+        "dev_policy_top1": 0,
+        "teacher_rows": 20,
+        "move_vocab": 44,
+        "lc0_only_score": 10.643424,
+        "stockfish_only_score": 11.723282,
+        "combined_score": 12.046814
+      },
+      "deltas": {
+        "delta_vs_parent": -117.953186,
+        "delta_vs_lane_baseline": -117.953186,
+        "delta_vs_root": 12.046814,
+        "delta_vs_global_best": -117.953186
+      },
+      "decision": {
+        "action": "keep",
+        "reason": "Combined labels remain best on the primary score: combined=12.046814, Stockfish-only=11.723282, lc0-only=10.643424. Stockfish-only had better dev_top1=0.2 and lower dev_wdl_ce=0.612093, while combined had better dev_policy_ce=6.566377. lc0-only is weakest with current low-node labels."
+      },
+      "created_at": "2026-05-04T21:52:58.589Z",
+      "run_id": "R0024",
+      "idea_id": "I0020"
     }
   },
   "runs": {
@@ -1537,12 +1595,41 @@
       "learned": "MLP overfit/failed on the tiny v2 dataset: train losses improved versus linear but dev_policy_ce worsened to 7.595354 and dev_wdl_ce to 1.819077, dropping score from 12.046814 to 9.602060. Non-linear capacity is premature without more data or regularization.",
       "next_action": "Discard MLP candidate. Prefer teacher-source/loss ablations on the current linear baseline, or expand the dataset before adding capacity.",
       "timestamp": "2026-05-04T21:52:19.576Z"
+    },
+    "R0024": {
+      "type": "research_run",
+      "run_id": "R0024",
+      "node_id": "N0024",
+      "lane_id": "L009",
+      "phase": "explore",
+      "status": "keep",
+      "metric": 12.046814,
+      "metrics": {
+        "distill_student_score": 12.046814,
+        "train_policy_ce": 1.506926,
+        "train_wdl_ce": 0.387755,
+        "dev_policy_ce": 6.566377,
+        "dev_wdl_ce": 0.734573,
+        "dev_policy_top1": 0,
+        "teacher_rows": 20,
+        "move_vocab": 44,
+        "lc0_only_score": 10.643424,
+        "stockfish_only_score": 11.723282,
+        "combined_score": 12.046814
+      },
+      "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
+      "commit": "e8edfc3e209d",
+      "hypothesis": "Training on lc0-only, Stockfish-only, and combined teacher labels will reveal whether the two teachers help or conflict on fixed v2 labels.",
+      "implementation": "Ran source ablation using existing linear aggregate student: lc0-only, Stockfish-only, and combined lc0+Stockfish labels. No code changes were required.",
+      "learned": "Combined labels remain best on the primary score: combined=12.046814, Stockfish-only=11.723282, lc0-only=10.643424. Stockfish-only had better dev_top1=0.2 and lower dev_wdl_ce=0.612093, while combined had better dev_policy_ce=6.566377. lc0-only is weakest with current low-node labels.",
+      "next_action": "Keep combined teacher data as default. If optimizing top1/WDL separately, Stockfish-only is interesting; otherwise run policy/WDL loss-mix ablations next.",
+      "timestamp": "2026-05-04T21:52:58.589Z"
     }
   },
   "ids": {
-    "next_lane": 9,
-    "next_node": 24,
-    "next_run": 24,
+    "next_lane": 10,
+    "next_node": 25,
+    "next_run": 25,
     "next_idea": 22
   },
   "global_best_node_id": "N0005"
