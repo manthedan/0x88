@@ -57,14 +57,14 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0005",
-      "current_node_id": "N0011",
+      "current_node_id": "N0012",
       "local_baseline_node_id": "N0005",
       "local_baseline_metric": 130,
       "concept_tags": [
         "search",
         "algorithm"
       ],
-      "runs_in_current_concept": 2,
+      "runs_in_current_concept": 3,
       "created_at": "2026-05-04T20:56:26.456Z",
       "idea_id": "I0013"
     },
@@ -437,7 +437,9 @@
       "node_id": "N0011",
       "lane_id": "L002",
       "parent_node_id": "N0006",
-      "children": [],
+      "children": [
+        "N0012"
+      ],
       "phase": "explore",
       "status": "keep",
       "hypothesis": "Follow scheduler assignment in L002 by rerunning the only non-degenerate current-best root policy before forcing rotation away from exhausted policy-only search transforms.",
@@ -464,6 +466,39 @@
       },
       "created_at": "2026-05-04T21:03:35.145Z",
       "run_id": "R0011",
+      "idea_id": "I0013"
+    },
+    "N0012": {
+      "node_id": "N0012",
+      "lane_id": "L002",
+      "parent_node_id": "N0011",
+      "children": [],
+      "phase": "explore",
+      "status": "discard",
+      "hypothesis": "Under scheduler pressure to continue L002, re-evaluate sqrt_prior as a second lane-local check to confirm it is not competitive with exact prior preservation.",
+      "commit": "bca64389fbf9",
+      "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
+      "metric": 71.610243,
+      "metrics": {
+        "fixed_playout_suite_score": 71.610243,
+        "policy_top1_acc": 1,
+        "policy_top3_acc": 1,
+        "policy_cross_entropy": 1.167327,
+        "search_suite_positions": 3,
+        "phase_b_benchmark_ready": 1
+      },
+      "deltas": {
+        "delta_vs_parent": -1.8586810000000042,
+        "delta_vs_lane_baseline": -58.389757,
+        "delta_vs_root": 71.610243,
+        "delta_vs_global_best": -58.389757
+      },
+      "decision": {
+        "action": "discard",
+        "reason": "sqrt_prior again scores 71.610243 vs prior_proportional 73.468924. This duplicate result reinforces that L002 should be paused under current fixtures; more policy-only transform work is tunnel vision."
+      },
+      "created_at": "2026-05-04T21:04:10.178Z",
+      "run_id": "R0012",
       "idea_id": "I0013"
     }
   },
@@ -719,12 +754,37 @@
       "learned": "Deterministic result again equals fixed_playout_suite_score=73.468924 and CE=1.101706. This confirms the policy-only search lane has saturated: because the benchmark rewards matching teacher distribution, exact prior preservation is the optimum among current transforms.",
       "next_action": "Scheduler should rotate to a non-search lane or the program should add a new benchmark version with per-move values before additional search experiments.",
       "timestamp": "2026-05-04T21:03:35.145Z"
+    },
+    "R0012": {
+      "type": "research_run",
+      "run_id": "R0012",
+      "node_id": "N0012",
+      "lane_id": "L002",
+      "phase": "explore",
+      "status": "discard",
+      "metric": 71.610243,
+      "metrics": {
+        "fixed_playout_suite_score": 71.610243,
+        "policy_top1_acc": 1,
+        "policy_top3_acc": 1,
+        "policy_cross_entropy": 1.167327,
+        "search_suite_positions": 3,
+        "phase_b_benchmark_ready": 1
+      },
+      "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
+      "commit": "bca64389fbf9",
+      "base_commit": "bca6438",
+      "hypothesis": "Under scheduler pressure to continue L002, re-evaluate sqrt_prior as a second lane-local check to confirm it is not competitive with exact prior preservation.",
+      "implementation": "No code change; reran existing sqrt_prior variant.",
+      "learned": "sqrt_prior again scores 71.610243 vs prior_proportional 73.468924. This duplicate result reinforces that L002 should be paused under current fixtures; more policy-only transform work is tunnel vision.",
+      "next_action": "Force rotation by creating/scheduling architecture or training lane; do not spend further L002 budget until benchmark evolves.",
+      "timestamp": "2026-05-04T21:04:10.178Z"
     }
   },
   "ids": {
     "next_lane": 4,
-    "next_node": 12,
-    "next_run": 12,
+    "next_node": 13,
+    "next_run": 13,
     "next_idea": 18
   },
   "global_best_node_id": "N0005"
