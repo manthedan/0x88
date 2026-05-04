@@ -24,13 +24,13 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0000",
-      "current_node_id": "N0003",
+      "current_node_id": "N0004",
       "local_baseline_node_id": "N0000",
       "local_baseline_metric": 0,
       "concept_tags": [
         "baseline"
       ],
-      "runs_in_current_concept": 3,
+      "runs_in_current_concept": 4,
       "created_at": "2026-05-04T18:45:53.444Z"
     }
   },
@@ -125,7 +125,9 @@
       "node_id": "N0003",
       "lane_id": "L000",
       "parent_node_id": "N0002",
-      "children": [],
+      "children": [
+        "N0004"
+      ],
       "phase": "stabilize",
       "status": "keep",
       "hypothesis": "Clean benchmark/check scripts so Node's built-in test runner does not receive an invalid Vitest-style --run argument.",
@@ -147,6 +149,33 @@
       },
       "created_at": "2026-05-04T18:53:40.760Z",
       "run_id": "R0003"
+    },
+    "N0004": {
+      "node_id": "N0004",
+      "lane_id": "L000",
+      "parent_node_id": "N0003",
+      "children": [],
+      "phase": "stabilize",
+      "status": "keep",
+      "hypothesis": "Finish taxonomy cleanup by moving remaining spec/schema/gauntlet scaffold tasks out of the queued research-lane pool.",
+      "commit": "ff7840329cab",
+      "benchmark_id": "tiny_leela_bootstrap_score_v1",
+      "metric": 98,
+      "metrics": {
+        "tiny_leela_score": 98
+      },
+      "deltas": {
+        "delta_vs_parent": 0,
+        "delta_vs_lane_baseline": 98,
+        "delta_vs_root": 98,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "keep",
+        "reason": "The idea queue now has 9 foundation milestones separated from 8 true research lanes. Checks pass with score 98."
+      },
+      "created_at": "2026-05-04T18:54:11.577Z",
+      "run_id": "R0004"
     }
   },
   "runs": {
@@ -209,12 +238,32 @@
       "learned": "Metric remains 98, but validation output is cleaner and checks still pass. This is a stabilize-only cleanup, not a research lane.",
       "next_action": "Commit cleanup and mark the goal complete after confirming clean git status.",
       "timestamp": "2026-05-04T18:53:40.760Z"
+    },
+    "R0004": {
+      "type": "research_run",
+      "run_id": "R0004",
+      "node_id": "N0004",
+      "lane_id": "L000",
+      "phase": "stabilize",
+      "status": "keep",
+      "metric": 98,
+      "metrics": {
+        "tiny_leela_score": 98
+      },
+      "benchmark_id": "tiny_leela_bootstrap_score_v1",
+      "commit": "ff7840329cab",
+      "base_commit": "ff78403",
+      "hypothesis": "Finish taxonomy cleanup by moving remaining spec/schema/gauntlet scaffold tasks out of the queued research-lane pool.",
+      "implementation": "Reclassified I0009, I0011, and I0012 as foundation_milestone with low priority; queued high-priority ideas are now true differentiated lanes only.",
+      "learned": "The idea queue now has 9 foundation milestones separated from 8 true research lanes. Checks pass with score 98.",
+      "next_action": "Use schedule_next for actual lane work; if scheduler still picks L000, interpret it as foundation hardening only.",
+      "timestamp": "2026-05-04T18:54:11.577Z"
     }
   },
   "ids": {
     "next_lane": 1,
-    "next_node": 4,
-    "next_run": 4,
+    "next_node": 5,
+    "next_run": 5,
     "next_idea": 18
   },
   "global_best_node_id": "N0002"

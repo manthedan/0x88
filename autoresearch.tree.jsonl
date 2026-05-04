@@ -2,3 +2,4 @@
 {"type":"run_logged","run_id":"R0001","node_id":"N0001","lane_id":"L000","status":"keep","metric":32,"timestamp":"2026-05-04T18:47:43.100Z"}
 {"type":"run_logged","run_id":"R0002","node_id":"N0002","lane_id":"L000","status":"keep","metric":98,"timestamp":"2026-05-04T18:53:07.146Z"}
 {"type":"run_logged","run_id":"R0003","node_id":"N0003","lane_id":"L000","status":"keep","metric":98,"timestamp":"2026-05-04T18:53:40.760Z"}
+{"type":"run_logged","run_id":"R0004","node_id":"N0004","lane_id":"L000","status":"keep","metric":98,"timestamp":"2026-05-04T18:54:11.578Z"}
