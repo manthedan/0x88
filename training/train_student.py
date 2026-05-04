@@ -47,6 +47,33 @@ def load_rows(paths: list[str]) -> list[dict]:
     return rows
 
 
+def merge_fen_rows(rows: list[dict]) -> list[dict]:
+    """Average multiple teacher labels for the same position into one consensus target."""
+    merged: dict[str, dict] = {}
+    order: list[str] = []
+    for row in rows:
+        fen = row["fen"]
+        if fen not in merged:
+            order.append(fen)
+            merged[fen] = {"fen": fen, "policy": {}, "wdl": [0.0, 0.0, 0.0], "count": 0}
+        acc = merged[fen]
+        acc["count"] += 1
+        for move, prob in row["policy"].items():
+            acc["policy"][move] = acc["policy"].get(move, 0.0) + prob
+        for i, prob in enumerate(row["wdl"]):
+            acc["wdl"][i] += prob
+    out: list[dict] = []
+    for fen in order:
+        acc = merged[fen]
+        count = acc["count"]
+        policy = {move: prob / count for move, prob in acc["policy"].items()}
+        mass = sum(policy.values())
+        if mass > 0:
+            policy = {move: prob / mass for move, prob in policy.items()}
+        out.append({"fen": fen, "policy": policy, "wdl": [prob / count for prob in acc["wdl"]]})
+    return out
+
+
 def cross_entropy(target: list[float], pred: list[float]) -> float:
     return -sum(t * math.log(max(p, 1e-12)) for t, p in zip(target, pred))
 
@@ -83,9 +110,11 @@ def main() -> int:
     parser.add_argument("--lr", type=float, default=0.05)
     parser.add_argument("--holdout-mod", type=int, default=2, help="hold out rows whose index modulo this value is 0")
     parser.add_argument("--out", default="artifacts/student_linear.json")
+    parser.add_argument("--merge-fen", action="store_true", help="average labels that share the same FEN before splitting")
     args = parser.parse_args()
 
-    rows = load_rows(args.train)
+    raw_rows = load_rows(args.train)
+    rows = merge_fen_rows(raw_rows) if args.merge_fen else raw_rows
     if len(rows) < 2:
         raise SystemExit("Need at least two teacher rows")
     moves = sorted({move for row in rows for move in row["policy"]})
@@ -129,6 +158,7 @@ def main() -> int:
     print(f"METRIC dev_wdl_ce={dev_wdl_ce:.6f}")
     print(f"METRIC dev_policy_top1={dev_top1:.6f}")
     print(f"METRIC teacher_rows={len(rows)}")
+    print(f"METRIC raw_teacher_rows={len(raw_rows)}")
     print(f"METRIC move_vocab={len(moves)}")
     return 0
 
