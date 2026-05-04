@@ -75,14 +75,14 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0005",
-      "current_node_id": "N0014",
+      "current_node_id": "N0015",
       "local_baseline_node_id": "N0005",
       "local_baseline_metric": 130,
       "concept_tags": [
         "browser",
         "runtime"
       ],
-      "runs_in_current_concept": 3,
+      "runs_in_current_concept": 4,
       "created_at": "2026-05-04T21:00:13.087Z",
       "idea_id": "I0014"
     },
@@ -557,7 +557,9 @@
       "node_id": "N0014",
       "lane_id": "L003",
       "parent_node_id": "N0013",
-      "children": [],
+      "children": [
+        "N0015"
+      ],
       "phase": "explore",
       "status": "discard",
       "hypothesis": "Formally log WebGPU-only runtime strategy as the L003 baseline to make fallback benefits auditable.",
@@ -582,6 +584,37 @@
       },
       "created_at": "2026-05-04T21:05:07.813Z",
       "run_id": "R0014",
+      "idea_id": "I0014"
+    },
+    "N0015": {
+      "node_id": "N0015",
+      "lane_id": "L003",
+      "parent_node_id": "N0014",
+      "children": [],
+      "phase": "explore",
+      "status": "keep",
+      "hypothesis": "Confirm progressive_fallback remains the deterministic L003 best after logging webgpu_only and wasm_fallback baselines.",
+      "commit": "3cd3033c3fb0",
+      "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
+      "metric": 83.525,
+      "metrics": {
+        "browser_compatibility_score": 83.525,
+        "median_move_latency_ms": 147.5,
+        "runtime_profiles_evaluated": 4,
+        "compatible_profiles": 3
+      },
+      "deltas": {
+        "delta_vs_parent": 38.95,
+        "delta_vs_lane_baseline": -46.474999999999994,
+        "delta_vs_root": 83.525,
+        "delta_vs_global_best": -46.474999999999994
+      },
+      "decision": {
+        "action": "keep",
+        "reason": "Progressive_fallback exactly reproduced browser_compatibility_score=83.525, compatible_profiles=3/4, median=147.5. L003 is now saturated under estimated-profile metric until a real model artifact allows measured latency."
+      },
+      "created_at": "2026-05-04T21:05:38.519Z",
+      "run_id": "R0015",
       "idea_id": "I0014"
     }
   },
@@ -908,12 +941,35 @@
       "learned": "WebGPU-only scores 44.575 with 2/4 compatible profiles and 542.5ms median penalty due unsupported browsers. This confirms browser runtime research must optimize compatibility and fallback, not only fastest backend.",
       "next_action": "Pause L003 until measured model/evaluator latency exists; rotate to architecture/training lane.",
       "timestamp": "2026-05-04T21:05:07.813Z"
+    },
+    "R0015": {
+      "type": "research_run",
+      "run_id": "R0015",
+      "node_id": "N0015",
+      "lane_id": "L003",
+      "phase": "explore",
+      "status": "keep",
+      "metric": 83.525,
+      "metrics": {
+        "browser_compatibility_score": 83.525,
+        "median_move_latency_ms": 147.5,
+        "runtime_profiles_evaluated": 4,
+        "compatible_profiles": 3
+      },
+      "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
+      "commit": "3cd3033c3fb0",
+      "base_commit": "3cd3033",
+      "hypothesis": "Confirm progressive_fallback remains the deterministic L003 best after logging webgpu_only and wasm_fallback baselines.",
+      "implementation": "No code change; reran existing progressive_fallback strategy under fixed browser profiles.",
+      "learned": "Progressive_fallback exactly reproduced browser_compatibility_score=83.525, compatible_profiles=3/4, median=147.5. L003 is now saturated under estimated-profile metric until a real model artifact allows measured latency.",
+      "next_action": "Rotate to L004 architecture or training lane; avoid more runtime strategy repeats.",
+      "timestamp": "2026-05-04T21:05:38.519Z"
     }
   },
   "ids": {
     "next_lane": 5,
-    "next_node": 15,
-    "next_run": 15,
+    "next_node": 16,
+    "next_run": 16,
     "next_idea": 18
   },
   "global_best_node_id": "N0005"
