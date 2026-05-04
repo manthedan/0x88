@@ -117,7 +117,7 @@ def evaluate(rows: list[dict], moves: list[str], wp: list[list[float]], ww: list
     return p_ce / n, w_ce / n, top1 / n
 
 
-def train_once(rows: list[dict], moves: list[str], epochs: int, lr: float, holdout_mod: int, holdout_offset: int, average: bool) -> dict:
+def train_once(rows: list[dict], moves: list[str], epochs: int, lr: float, holdout_mod: int, holdout_offset: int, average: bool, average_policy_only: bool) -> dict:
     train_rows = [row for i, row in enumerate(rows) if i % holdout_mod != holdout_offset]
     dev_rows = [row for i, row in enumerate(rows) if i % holdout_mod == holdout_offset]
     feat_dim = len(fen_features(rows[0]["fen"]))
@@ -159,7 +159,7 @@ def train_once(rows: list[dict], moves: list[str], epochs: int, lr: float, holdo
                     avg_ww[i][j] += val
 
     final_wp = average_weights(wp, avg_wp, avg_count) if average else wp
-    final_ww = average_weights(ww, avg_ww, avg_count) if average else ww
+    final_ww = average_weights(ww, avg_ww, avg_count) if average and not average_policy_only else ww
     train_policy_ce, train_wdl_ce, _train_top1 = evaluate(train_rows, moves, final_wp, final_ww)
     dev_policy_ce, dev_wdl_ce, dev_top1 = evaluate(dev_rows, moves, final_wp, final_ww)
     quality = 100.0 / (1.0 + dev_policy_ce + dev_wdl_ce)
@@ -187,6 +187,7 @@ def main() -> int:
     parser.add_argument("--out", default="artifacts/student_linear.json")
     parser.add_argument("--merge-fen", action="store_true", help="average labels that share the same FEN before splitting")
     parser.add_argument("--average-weights", action="store_true", help="use Polyak/SWA-style averaged weights from the second half of training")
+    parser.add_argument("--average-policy-only", action="store_true", help="when averaging, average only policy weights and keep final WDL weights")
     parser.add_argument("--report-folds", action="store_true", help="also train alternate holdout folds for robustness reporting without changing the primary metric")
     args = parser.parse_args()
 
@@ -195,11 +196,11 @@ def main() -> int:
     if len(rows) < 2:
         raise SystemExit("Need at least two teacher rows")
     moves = sorted({move for row in rows for move in row["policy"]})
-    result = train_once(rows, moves, args.epochs, args.lr, args.holdout_mod, 0, args.average_weights)
+    result = train_once(rows, moves, args.epochs, args.lr, args.holdout_mod, 0, args.average_weights, args.average_policy_only)
     fold_scores = [result["score"]]
     if args.report_folds:
         for offset in range(1, args.holdout_mod):
-            fold_scores.append(train_once(rows, moves, args.epochs, args.lr, args.holdout_mod, offset, args.average_weights)["score"])
+            fold_scores.append(train_once(rows, moves, args.epochs, args.lr, args.holdout_mod, offset, args.average_weights, args.average_policy_only)["score"])
     fold_mean = sum(fold_scores) / len(fold_scores)
     fold_std = math.sqrt(sum((score - fold_mean) ** 2 for score in fold_scores) / len(fold_scores))
 
@@ -218,6 +219,7 @@ def main() -> int:
     print(f"METRIC feature_dim={result['feature_dim']}")
     print(f"METRIC wdl_feature_dim={result['wdl_feature_dim']}")
     print(f"METRIC weight_average_count={result['weight_average_count']}")
+    print(f"METRIC average_policy_only={1 if args.average_policy_only else 0}")
     print(f"METRIC fold_score_mean={fold_mean:.6f}")
     print(f"METRIC fold_score_std={fold_std:.6f}")
     return 0
