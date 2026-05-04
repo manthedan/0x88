@@ -40,14 +40,14 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0005",
-      "current_node_id": "N0009",
+      "current_node_id": "N0010",
       "local_baseline_node_id": "N0005",
       "local_baseline_metric": 130,
       "concept_tags": [
         "search",
         "algorithm"
       ],
-      "runs_in_current_concept": 2,
+      "runs_in_current_concept": 3,
       "created_at": "2026-05-04T20:56:07.298Z"
     },
     "L002": {
@@ -369,7 +369,9 @@
       "node_id": "N0009",
       "lane_id": "L001",
       "parent_node_id": "N0008",
-      "children": [],
+      "children": [
+        "N0010"
+      ],
       "phase": "explore",
       "status": "keep",
       "hypothesis": "Rerun prior_proportional in the search lane after sqrt_prior ablation to confirm the current local best under fixed fixtures before moving to a different structural idea.",
@@ -396,6 +398,38 @@
       },
       "created_at": "2026-05-04T21:01:58.177Z",
       "run_id": "R0009"
+    },
+    "N0010": {
+      "node_id": "N0010",
+      "lane_id": "L001",
+      "parent_node_id": "N0009",
+      "children": [],
+      "phase": "explore",
+      "status": "discard",
+      "hypothesis": "Formally log the argmax root policy as the search-lane baseline to make the prior_proportional improvement auditable in the research tree.",
+      "commit": "1677e8ace2ca",
+      "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
+      "metric": 33.849477,
+      "metrics": {
+        "fixed_playout_suite_score": 33.849477,
+        "policy_top1_acc": 1,
+        "policy_top3_acc": 1,
+        "policy_cross_entropy": 13.078683,
+        "search_suite_positions": 3,
+        "phase_b_benchmark_ready": 1
+      },
+      "deltas": {
+        "delta_vs_parent": -39.619447,
+        "delta_vs_lane_baseline": -96.15052299999999,
+        "delta_vs_root": 33.849477,
+        "delta_vs_global_best": -96.15052299999999
+      },
+      "decision": {
+        "action": "discard",
+        "reason": "Argmax preserves top1/top3 on the tiny suite but collapses the teacher distribution, scoring only 33.849477 with CE 13.078683 versus prior_proportional 73.468924/CE 1.101706. This confirms distribution-sensitive metrics are necessary; top-k alone cannot distinguish these policies."
+      },
+      "created_at": "2026-05-04T21:02:21.875Z",
+      "run_id": "R0010"
     }
   },
   "runs": {
@@ -600,12 +634,37 @@
       "learned": "Result exactly reproduced fixed_playout_suite_score=73.468924 and CE=1.101706. Current deterministic suite has no noise, so further simple prior transforms are unlikely to beat exact teacher-prior preservation.",
       "next_action": "Search lane should either add new per-move value fixtures to a new benchmark version or pause until model/evaluator outputs create non-teacher priors; scheduler should rotate to architecture/training/evaluation lanes.",
       "timestamp": "2026-05-04T21:01:58.177Z"
+    },
+    "R0010": {
+      "type": "research_run",
+      "run_id": "R0010",
+      "node_id": "N0010",
+      "lane_id": "L001",
+      "phase": "explore",
+      "status": "discard",
+      "metric": 33.849477,
+      "metrics": {
+        "fixed_playout_suite_score": 33.849477,
+        "policy_top1_acc": 1,
+        "policy_top3_acc": 1,
+        "policy_cross_entropy": 13.078683,
+        "search_suite_positions": 3,
+        "phase_b_benchmark_ready": 1
+      },
+      "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
+      "commit": "1677e8ace2ca",
+      "base_commit": "1677e8a",
+      "hypothesis": "Formally log the argmax root policy as the search-lane baseline to make the prior_proportional improvement auditable in the research tree.",
+      "implementation": "No code change; evaluated existing argmax variant in eval/search_suite.mjs.",
+      "learned": "Argmax preserves top1/top3 on the tiny suite but collapses the teacher distribution, scoring only 33.849477 with CE 13.078683 versus prior_proportional 73.468924/CE 1.101706. This confirms distribution-sensitive metrics are necessary; top-k alone cannot distinguish these policies.",
+      "next_action": "Search lane has exhausted current fixed-policy-only variants; rotate away or create a new benchmark version with per-move value/search targets before further search work.",
+      "timestamp": "2026-05-04T21:02:21.875Z"
     }
   },
   "ids": {
     "next_lane": 4,
-    "next_node": 10,
-    "next_run": 10,
+    "next_node": 11,
+    "next_run": 11,
     "next_idea": 18
   },
   "global_best_node_id": "N0005"

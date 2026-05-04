@@ -11,3 +11,4 @@
 {"type":"run_logged","run_id":"R0007","node_id":"N0007","lane_id":"L003","status":"keep","metric":83.525,"timestamp":"2026-05-04T21:01:04.866Z"}
 {"type":"run_logged","run_id":"R0008","node_id":"N0008","lane_id":"L001","status":"discard","metric":71.610243,"timestamp":"2026-05-04T21:01:26.114Z"}
 {"type":"run_logged","run_id":"R0009","node_id":"N0009","lane_id":"L001","status":"keep","metric":73.468924,"timestamp":"2026-05-04T21:01:58.177Z"}
+{"type":"run_logged","run_id":"R0010","node_id":"N0010","lane_id":"L001","status":"discard","metric":33.849477,"timestamp":"2026-05-04T21:02:21.875Z"}
