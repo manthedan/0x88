@@ -15,7 +15,8 @@
     "distill:query": "python3 scripts/query_lc0_teacher.py",
     "distill:validate": "python3 training/validate_teacher_labels.py",
     "stockfish:check": "python3 scripts/check_stockfish_teacher.py",
-    "stockfish:query": "python3 scripts/query_stockfish_teacher.py"
+    "stockfish:query": "python3 scripts/query_stockfish_teacher.py",
+    "distill:train": "python3 training/train_student.py"
   },
   "devDependencies": {
     "typescript": "^5.4.0"
