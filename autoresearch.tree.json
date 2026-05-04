@@ -67,6 +67,24 @@
       "runs_in_current_concept": 1,
       "created_at": "2026-05-04T20:56:26.456Z",
       "idea_id": "I0013"
+    },
+    "L003": {
+      "lane_id": "L003",
+      "title": "True research lane: browser inference backends",
+      "hypothesis": "Compare ORT Web WASM/SIMD, WebGPU/FP16, worker batching, and model caching for latency and compatibility without changing chess semantics.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0005",
+      "current_node_id": "N0007",
+      "local_baseline_node_id": "N0005",
+      "local_baseline_metric": 130,
+      "concept_tags": [
+        "browser",
+        "runtime"
+      ],
+      "runs_in_current_concept": 1,
+      "created_at": "2026-05-04T21:00:13.087Z",
+      "idea_id": "I0014"
     }
   },
   "nodes": {
@@ -219,7 +237,8 @@
       "lane_id": "L000",
       "parent_node_id": "N0004",
       "children": [
-        "N0006"
+        "N0006",
+        "N0007"
       ],
       "phase": "stabilize",
       "status": "keep",
@@ -279,6 +298,37 @@
       "created_at": "2026-05-04T20:57:46.137Z",
       "run_id": "R0006",
       "idea_id": "I0013"
+    },
+    "N0007": {
+      "node_id": "N0007",
+      "lane_id": "L003",
+      "parent_node_id": "N0005",
+      "children": [],
+      "phase": "explore",
+      "status": "keep",
+      "hypothesis": "Compare a progressive WebGPU/WASM fallback runtime strategy against a WebGPU-only baseline under fixed browser capability profiles without changing chess semantics.",
+      "commit": "1307475097b9",
+      "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
+      "metric": 83.525,
+      "metrics": {
+        "browser_compatibility_score": 83.525,
+        "median_move_latency_ms": 147.5,
+        "runtime_profiles_evaluated": 4,
+        "compatible_profiles": 3
+      },
+      "deltas": {
+        "delta_vs_parent": -46.474999999999994,
+        "delta_vs_lane_baseline": -46.474999999999994,
+        "delta_vs_root": 83.525,
+        "delta_vs_global_best": -46.474999999999994
+      },
+      "decision": {
+        "action": "keep",
+        "reason": "Progressive fallback scored 83.525 with 3/4 compatible profiles and 147.5ms median estimated latency; manual WebGPU-only baseline scored 44.575 with 2/4 compatible profiles and 542.5ms median. This is a fixed-profile runtime strategy result, not measured ORT latency yet."
+      },
+      "created_at": "2026-05-04T21:01:04.866Z",
+      "run_id": "R0007",
+      "idea_id": "I0014"
     }
   },
   "runs": {
@@ -410,12 +460,35 @@
       "learned": "On the fixed 3-position fixture suite, argmax scored 33.849477 with CE 13.078683, while prior_proportional scored 73.468924 with CE 1.101706 and top1/top3 remained 1.0. This is an early toy-fixture result, not a chess-strength claim.",
       "next_action": "Ablate sqrt_prior or add value-weighted one-ply root policy, but do not change the fixed benchmark fixtures in this lane.",
       "timestamp": "2026-05-04T20:57:46.137Z"
+    },
+    "R0007": {
+      "type": "research_run",
+      "run_id": "R0007",
+      "node_id": "N0007",
+      "lane_id": "L003",
+      "phase": "explore",
+      "status": "keep",
+      "metric": 83.525,
+      "metrics": {
+        "browser_compatibility_score": 83.525,
+        "median_move_latency_ms": 147.5,
+        "runtime_profiles_evaluated": 4,
+        "compatible_profiles": 3
+      },
+      "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
+      "commit": "1307475097b9",
+      "base_commit": "1307475",
+      "hypothesis": "Compare a progressive WebGPU/WASM fallback runtime strategy against a WebGPU-only baseline under fixed browser capability profiles without changing chess semantics.",
+      "implementation": "Added src/browser/backendPlan.ts with webgpu_only, wasm_fallback, and progressive_fallback strategies; added eval/runtime_suite.mjs and tests/runtime_suite.test.mjs to score compatibility, median estimated latency, caching, and progressive loading under fixed profiles.",
+      "learned": "Progressive fallback scored 83.525 with 3/4 compatible profiles and 147.5ms median estimated latency; manual WebGPU-only baseline scored 44.575 with 2/4 compatible profiles and 542.5ms median. This is a fixed-profile runtime strategy result, not measured ORT latency yet.",
+      "next_action": "Continue runtime lane by replacing estimated latencies with measured mock/evaluator latency or add explicit model-artifact prerequisite before ORT backend experiments.",
+      "timestamp": "2026-05-04T21:01:04.866Z"
     }
   },
   "ids": {
-    "next_lane": 3,
-    "next_node": 7,
-    "next_run": 7,
+    "next_lane": 4,
+    "next_node": 8,
+    "next_run": 8,
     "next_idea": 18
   },
   "global_best_node_id": "N0005"

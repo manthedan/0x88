@@ -7,7 +7,8 @@
   "scripts": {
     "test": "node --test",
     "eval:phase-b": "node eval/phase_b_metrics.mjs",
-    "eval:search": "node eval/search_suite.mjs"
+    "eval:search": "node eval/search_suite.mjs",
+    "eval:runtime": "node --experimental-strip-types eval/runtime_suite.mjs"
   },
   "devDependencies": {
     "typescript": "^5.4.0"
