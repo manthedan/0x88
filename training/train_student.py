@@ -85,6 +85,12 @@ def cross_entropy(target: list[float], pred: list[float]) -> float:
     return -sum(t * math.log(max(p, 1e-12)) for t, p in zip(target, pred))
 
 
+def average_weights(weights: list[list[float]], totals: list[list[float]], count: int) -> list[list[float]]:
+    if count <= 0:
+        return weights
+    return [[total / count for total in row] for row in totals]
+
+
 def evaluate(rows: list[dict], moves: list[str], wp: list[list[float]], ww: list[list[float]]) -> tuple[float, float, float]:
     if not rows:
         return 0.0, 0.0, 0.0
@@ -119,6 +125,7 @@ def main() -> int:
     parser.add_argument("--holdout-mod", type=int, default=2, help="hold out rows whose index modulo this value is 0")
     parser.add_argument("--out", default="artifacts/student_linear.json")
     parser.add_argument("--merge-fen", action="store_true", help="average labels that share the same FEN before splitting")
+    parser.add_argument("--average-weights", action="store_true", help="use Polyak/SWA-style averaged weights from the second half of training")
     args = parser.parse_args()
 
     raw_rows = load_rows(args.train)
@@ -134,7 +141,11 @@ def main() -> int:
     wp = [[rng.uniform(-0.01, 0.01) for _ in range(feat_dim)] for _ in moves]
     ww = [[rng.uniform(-0.01, 0.01) for _ in range(value_feat_dim)] for _ in range(3)]
 
-    for _epoch in range(args.epochs):
+    avg_wp = [[0.0 for _ in range(feat_dim)] for _ in moves]
+    avg_ww = [[0.0 for _ in range(value_feat_dim)] for _ in range(3)]
+    avg_count = 0
+
+    for epoch in range(args.epochs):
         rng.shuffle(train_rows)
         for row in train_rows:
             x = fen_features(row["fen"])
@@ -154,13 +165,23 @@ def main() -> int:
                 grad = wdl[i] - row["wdl"][i]
                 for j, val in enumerate(xv):
                     ww[i][j] -= args.lr * grad * val
+        if args.average_weights and epoch >= args.epochs // 2:
+            avg_count += 1
+            for i, row in enumerate(wp):
+                for j, val in enumerate(row):
+                    avg_wp[i][j] += val
+            for i, row in enumerate(ww):
+                for j, val in enumerate(row):
+                    avg_ww[i][j] += val
 
-    train_policy_ce, train_wdl_ce, train_top1 = evaluate(train_rows, moves, wp, ww)
-    dev_policy_ce, dev_wdl_ce, dev_top1 = evaluate(dev_rows, moves, wp, ww)
+    final_wp = average_weights(wp, avg_wp, avg_count) if args.average_weights else wp
+    final_ww = average_weights(ww, avg_ww, avg_count) if args.average_weights else ww
+    train_policy_ce, train_wdl_ce, train_top1 = evaluate(train_rows, moves, final_wp, final_ww)
+    dev_policy_ce, dev_wdl_ce, dev_top1 = evaluate(dev_rows, moves, final_wp, final_ww)
     quality = 100.0 / (1.0 + dev_policy_ce + dev_wdl_ce)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"kind": "linear_fen_student", "moves": moves, "policy_weights": wp, "wdl_weights": ww, "policy_feature_dim": feat_dim, "wdl_feature_dim": value_feat_dim}, separators=(",", ":")))
+    out.write_text(json.dumps({"kind": "linear_fen_student", "moves": moves, "policy_weights": final_wp, "wdl_weights": final_ww, "policy_feature_dim": feat_dim, "wdl_feature_dim": value_feat_dim, "weight_average_count": avg_count}, separators=(",", ":")))
     print(f"METRIC distill_student_score={quality:.6f}")
     print(f"METRIC train_policy_ce={train_policy_ce:.6f}")
     print(f"METRIC train_wdl_ce={train_wdl_ce:.6f}")
@@ -172,6 +193,7 @@ def main() -> int:
     print(f"METRIC move_vocab={len(moves)}")
     print(f"METRIC feature_dim={feat_dim}")
     print(f"METRIC wdl_feature_dim={value_feat_dim}")
+    print(f"METRIC weight_average_count={avg_count}")
     return 0
 
 

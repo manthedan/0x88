@@ -175,7 +175,7 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0005",
-      "current_node_id": "N0027",
+      "current_node_id": "N0028",
       "local_baseline_node_id": "N0026",
       "local_baseline_metric": 12.922135,
       "concept_tags": [
@@ -183,7 +183,7 @@
         "distillation",
         "model"
       ],
-      "runs_in_current_concept": 1,
+      "runs_in_current_concept": 2,
       "created_at": "2026-05-04T21:34:32.077Z"
     },
     "L007": {
@@ -1152,7 +1152,9 @@
       "node_id": "N0027",
       "lane_id": "L006",
       "parent_node_id": "N0026",
-      "children": [],
+      "children": [
+        "N0028"
+      ],
       "phase": "explore",
       "status": "discarded",
       "hypothesis": "Training the WDL head from Stockfish-only value targets while keeping consensus policy/evaluation should exploit Stockfish's lower WDL validation loss without sacrificing combined policy labels.",
@@ -1185,6 +1187,44 @@
       },
       "created_at": "2026-05-04T22:35:42.084Z",
       "run_id": "R0026"
+    },
+    "N0028": {
+      "node_id": "N0028",
+      "lane_id": "L006",
+      "parent_node_id": "N0027",
+      "children": [],
+      "phase": "explore",
+      "status": "kept",
+      "hypothesis": "Polyak/SWA-style weight averaging over the second half of training should reduce tiny-dataset SGD overfit/variance while preserving the fixed consensus-label benchmark.",
+      "commit": "0dadb9a",
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "metric": 13.309426,
+      "metrics": {
+        "distill_student_score": 13.309426,
+        "train_policy_ce": 1.689969,
+        "train_wdl_ce": 0.413288,
+        "dev_policy_ce": 5.757296,
+        "dev_wdl_ce": 0.756176,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "weight_average_count": 600
+      },
+      "deltas": {
+        "delta_vs_parent": 0.4678950000000004,
+        "delta_vs_lane_baseline": 0.3872909999999994,
+        "delta_vs_root": 0.3872909999999994,
+        "delta_vs_global_best": 0.3872909999999994
+      },
+      "decision": {
+        "action": "kept",
+        "reason": "Weight averaging improved the fixed consensus benchmark from current best 12.922135 to 13.309426. The gain came from better dev_policy_ce (5.993176 -> 5.757296) while dev_wdl_ce slightly worsened (0.745483 -> 0.756176). Training losses rose, consistent with reduced overfit rather than stronger memorization."
+      },
+      "created_at": "2026-05-04T22:38:24.870Z",
+      "run_id": "R0027"
     }
   },
   "runs": {
@@ -1830,13 +1870,44 @@
       "learned": "Stockfish-only WDL training hurt the consensus evaluation target: score fell from current best 12.922135 to 12.841531, with dev_wdl_ce worsening from 0.745483 to 0.794058 while policy CE stayed unchanged. The consensus WDL label is better aligned with the current benchmark than Stockfish-only WDL despite earlier raw-source ablation hints.",
       "next_action": "Discard and revert. Do not specialize WDL to Stockfish under the consensus benchmark; next try robustness/cross-fold reporting or increase teacher-label coverage in a new segment.",
       "timestamp": "2026-05-04T22:35:42.084Z"
+    },
+    "R0027": {
+      "type": "research_run",
+      "run_id": "R0027",
+      "node_id": "N0028",
+      "lane_id": "L006",
+      "phase": "explore",
+      "status": "kept",
+      "metric": 13.309426,
+      "metrics": {
+        "distill_student_score": 13.309426,
+        "train_policy_ce": 1.689969,
+        "train_wdl_ce": 0.413288,
+        "dev_policy_ce": 5.757296,
+        "dev_wdl_ce": 0.756176,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "weight_average_count": 600
+      },
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "commit": "0dadb9a",
+      "base_commit": "0dadb9a",
+      "hypothesis": "Polyak/SWA-style weight averaging over the second half of training should reduce tiny-dataset SGD overfit/variance while preserving the fixed consensus-label benchmark.",
+      "implementation": "Added --average-weights to the dependency-free student trainer. During the second half of training it accumulates policy and WDL weights each epoch, evaluates/serializes their average, and the fixed dovetail benchmark now enables this option.",
+      "learned": "Weight averaging improved the fixed consensus benchmark from current best 12.922135 to 13.309426. The gain came from better dev_policy_ce (5.993176 -> 5.757296) while dev_wdl_ce slightly worsened (0.745483 -> 0.756176). Training losses rose, consistent with reduced overfit rather than stronger memorization.",
+      "next_action": "Keep averaged weights as the new baseline. Confirm determinism once, then try robustness/cross-fold reporting or mild objective regularization only if it improves validation without adding feature dimensions.",
+      "timestamp": "2026-05-04T22:38:24.870Z"
     }
   },
   "ids": {
     "next_lane": 10,
-    "next_node": 28,
-    "next_run": 27,
+    "next_node": 29,
+    "next_run": 28,
     "next_idea": 22
   },
-  "global_best_node_id": "N0026"
+  "global_best_node_id": "N0028"
 }

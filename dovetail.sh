@@ -8,5 +8,6 @@ set -euo pipefail
 # duplicate FEN teacher labels, and a stable output artifact path.
 python3 training/train_student.py \
   --merge-fen \
+  --average-weights \
   --train data/teacher_labels.jsonl data/stockfish_teacher_labels.jsonl \
   --out artifacts/student_distill_benchmark.json
