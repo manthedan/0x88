@@ -6,7 +6,7 @@
     "objective": "Build a tiny in-browser Leela-like chess engine with policy/WDL neural evaluation, PUCT search, ONNX Runtime Web deployment, and verified chess correctness.",
     "created_at": "2026-05-04T18:45:53.444Z",
     "primary_metric": {
-      "name": "tiny_leela_score",
+      "name": "distill_student_score",
       "direction": "higher",
       "unit": ""
     },
@@ -14,6 +14,43 @@
       "commit": "3da10f6",
       "metric": 0,
       "benchmark_id": "tiny_leela_bootstrap_score_v1"
+    },
+    "current_segment_id": "S0001",
+    "benchmark_segments": {
+      "S0000": {
+        "segment_id": "S0000",
+        "name": "root benchmark segment",
+        "metric": {
+          "name": "tiny_leela_score",
+          "direction": "higher",
+          "unit": ""
+        },
+        "baseline": {
+          "commit": "3da10f6",
+          "metric": 0,
+          "benchmark_id": "tiny_leela_bootstrap_score_v1",
+          "node_id": "N0000"
+        },
+        "created_at": "2026-05-04T18:45:53.444Z",
+        "reason": "Migrated from pre-segment dovetail state."
+      },
+      "S0001": {
+        "segment_id": "S0001",
+        "name": "Phase C fixed teacher distillation consensus",
+        "metric": {
+          "name": "distill_student_score",
+          "direction": "higher",
+          "unit": ""
+        },
+        "baseline": {
+          "commit": "11bf83c17594",
+          "metric": 12.922135,
+          "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+          "node_id": "N0026"
+        },
+        "created_at": "2026-05-04T22:29:04.426Z",
+        "reason": "Migrate Tiny Leela from mixed bootstrap/Phase B/autoresearch logs to a dovetail-owned Phase C segment with fixed consensus-label student score."
+      }
     }
   },
   "lanes": {
@@ -24,13 +61,13 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0000",
-      "current_node_id": "N0005",
-      "local_baseline_node_id": "N0000",
-      "local_baseline_metric": 0,
+      "current_node_id": "N0026",
+      "local_baseline_node_id": "N0026",
+      "local_baseline_metric": 12.922135,
       "concept_tags": [
         "baseline"
       ],
-      "runs_in_current_concept": 5,
+      "runs_in_current_concept": 0,
       "created_at": "2026-05-04T18:45:53.444Z"
     },
     "L001": {
@@ -115,7 +152,7 @@
       "lane_id": "L005",
       "title": "Foundation/training-data: lc0 teacher distillation pipeline",
       "hypothesis": "Make real lc0 distillation runnable by adding teacher availability checks, FEN seed export, teacher-label schema, and query script that fails clearly until lc0 binary and weights are configured.",
-      "status": "complete",
+      "status": "exhausted",
       "phase": "stabilize",
       "parent_node_id": "N0005",
       "current_node_id": "N0019",
@@ -138,34 +175,34 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0005",
-      "current_node_id": "N0025",
-      "local_baseline_node_id": "N0005",
-      "local_baseline_metric": 130,
+      "current_node_id": "N0027",
+      "local_baseline_node_id": "N0026",
+      "local_baseline_metric": 12.922135,
       "concept_tags": [
         "training",
         "distillation",
         "model"
       ],
-      "runs_in_current_concept": 3,
+      "runs_in_current_concept": 1,
       "created_at": "2026-05-04T21:34:32.077Z"
     },
     "L007": {
       "lane_id": "L007",
       "title": "True research lane: board-square student representation",
       "hypothesis": "A student using explicit 64-square piece/color features should beat the current aggregate linear FEN baseline on fixed teacher_distill_seed_v2 policy/WDL metrics without changing labels.",
-      "status": "active",
+      "status": "archived",
       "phase": "explore",
       "parent_node_id": "N0005",
-      "current_node_id": "N0022",
-      "local_baseline_node_id": "N0005",
-      "local_baseline_metric": 130,
+      "current_node_id": "N0026",
+      "local_baseline_node_id": "N0026",
+      "local_baseline_metric": 12.922135,
       "concept_tags": [
         "training",
         "distillation",
         "model",
         "features"
       ],
-      "runs_in_current_concept": 1,
+      "runs_in_current_concept": 0,
       "created_at": "2026-05-04T21:48:02.197Z",
       "idea_id": "I0018"
     },
@@ -173,19 +210,19 @@
       "lane_id": "L008",
       "title": "True research lane: small MLP student",
       "hypothesis": "A dependency-free small hidden-layer student should learn non-linear board patterns and improve distillation score over linear features on teacher_distill_seed_v2.",
-      "status": "active",
+      "status": "archived",
       "phase": "explore",
       "parent_node_id": "N0005",
-      "current_node_id": "N0023",
-      "local_baseline_node_id": "N0005",
-      "local_baseline_metric": 130,
+      "current_node_id": "N0026",
+      "local_baseline_node_id": "N0026",
+      "local_baseline_metric": 12.922135,
       "concept_tags": [
         "training",
         "distillation",
         "model",
         "architecture"
       ],
-      "runs_in_current_concept": 1,
+      "runs_in_current_concept": 0,
       "created_at": "2026-05-04T21:51:05.745Z",
       "idea_id": "I0019"
     },
@@ -193,18 +230,18 @@
       "lane_id": "L009",
       "title": "True research lane: teacher-source ablations",
       "hypothesis": "Training on lc0-only, Stockfish-only, and combined teacher labels will identify whether the two teachers help or conflict on the fixed v2 seed dataset.",
-      "status": "active",
+      "status": "exhausted",
       "phase": "explore",
       "parent_node_id": "N0005",
-      "current_node_id": "N0024",
-      "local_baseline_node_id": "N0005",
-      "local_baseline_metric": 130,
+      "current_node_id": "N0026",
+      "local_baseline_node_id": "N0026",
+      "local_baseline_metric": 12.922135,
       "concept_tags": [
         "training",
         "distillation",
         "data"
       ],
-      "runs_in_current_concept": 1,
+      "runs_in_current_concept": 0,
       "created_at": "2026-05-04T21:52:31.948Z",
       "idea_id": "I0020"
     }
@@ -246,7 +283,7 @@
         "N0002"
       ],
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Create minimal TypeScript/Node test scaffold so engine infrastructure can be built and verified in future lanes.",
       "commit": "3da10f6310cd",
       "benchmark_id": "tiny_leela_bootstrap_score_v1",
@@ -275,7 +312,7 @@
         "N0003"
       ],
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Convert the over-fragmented pre-work into an explicit L000 foundation substrate and separate true research-lane ideas from shared engine infrastructure.",
       "commit": "3da10f6310cd",
       "benchmark_id": "tiny_leela_bootstrap_score_v1",
@@ -304,7 +341,7 @@
         "N0004"
       ],
       "phase": "stabilize",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Clean benchmark/check scripts so Node's built-in test runner does not receive an invalid Vitest-style --run argument.",
       "commit": "6e36f6a198cf",
       "benchmark_id": "tiny_leela_bootstrap_score_v1",
@@ -333,7 +370,7 @@
         "N0005"
       ],
       "phase": "stabilize",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Finish taxonomy cleanup by moving remaining spec/schema/gauntlet scaffold tasks out of the queued research-lane pool.",
       "commit": "ff7840329cab",
       "benchmark_id": "tiny_leela_bootstrap_score_v1",
@@ -367,10 +404,11 @@
         "N0020",
         "N0022",
         "N0023",
-        "N0024"
+        "N0024",
+        "N0026"
       ],
       "phase": "stabilize",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Complete Phase A/B separation by documenting lab/product substrate vs frozen evaluation metrics and making Phase B metric readiness executable.",
       "commit": "608dd53cdf5f",
       "benchmark_id": "tiny_leela_bootstrap_score_v1",
@@ -403,7 +441,7 @@
         "N0011"
       ],
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "For the first search lane experiment, compare a structural root visit policy that preserves evaluator prior mass against the previous argmax-only root choice on frozen Phase B fixtures.",
       "commit": "c29d8d88ec78",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -438,7 +476,7 @@
         "N0013"
       ],
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Compare a progressive WebGPU/WASM fallback runtime strategy against a WebGPU-only baseline under fixed browser capability profiles without changing chess semantics.",
       "commit": "1307475097b9",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -471,7 +509,7 @@
         "N0009"
       ],
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "hypothesis": "A sqrt-prior root distribution may smooth overconfident teacher priors while preserving top move, potentially improving suite score versus prior-proportional.",
       "commit": "6eb6b0ed4412",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -505,7 +543,7 @@
         "N0010"
       ],
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Rerun prior_proportional in the search lane after sqrt_prior ablation to confirm the current local best under fixed fixtures before moving to a different structural idea.",
       "commit": "0d6571a1e6e7",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -537,7 +575,7 @@
       "parent_node_id": "N0009",
       "children": [],
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "hypothesis": "Formally log the argmax root policy as the search-lane baseline to make the prior_proportional improvement auditable in the research tree.",
       "commit": "1677e8ace2ca",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -571,7 +609,7 @@
         "N0012"
       ],
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Follow scheduler assignment in L002 by rerunning the only non-degenerate current-best root policy before forcing rotation away from exhausted policy-only search transforms.",
       "commit": "f4b79cc718e1",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -604,7 +642,7 @@
       "parent_node_id": "N0011",
       "children": [],
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "hypothesis": "Under scheduler pressure to continue L002, re-evaluate sqrt_prior as a second lane-local check to confirm it is not competitive with exact prior preservation.",
       "commit": "bca64389fbf9",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -639,7 +677,7 @@
         "N0014"
       ],
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "hypothesis": "A simpler WebGPU-with-WASM-fallback runtime strategy might match progressive fallback compatibility while avoiding progressive/caching complexity.",
       "commit": "24a098d15dd7",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -672,7 +710,7 @@
         "N0015"
       ],
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "hypothesis": "Formally log WebGPU-only runtime strategy as the L003 baseline to make fallback benefits auditable.",
       "commit": "0f1de02560c7",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -703,7 +741,7 @@
       "parent_node_id": "N0014",
       "children": [],
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Confirm progressive_fallback remains the deterministic L003 best after logging webgpu_only and wasm_fallback baselines.",
       "commit": "3cd3033c3fb0",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -734,7 +772,7 @@
       "parent_node_id": "N0005",
       "children": [],
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Compare tiny conv student architecture specs with a frozen capacity-vs-size proxy; practical 64x6 INT8 may offer the best policy-quality proxy while staying sub-1MB.",
       "commit": "8944a646f97b",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -768,7 +806,7 @@
         "N0018"
       ],
       "phase": "stabilize",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Set up the real lc0 teacher distillation pipeline enough to detect whether actual distillation can run and to generate/validate teacher-label data once lc0 and weights are supplied.",
       "commit": "c8ce8efca0c5",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -800,7 +838,7 @@
         "N0019"
       ],
       "phase": "stabilize",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Use current web references to make teacher setup actionable for lc0 and add Stockfish as an optional second teacher with separate labels.",
       "commit": "a689a7c814cc",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -832,7 +870,7 @@
       "parent_node_id": "N0018",
       "children": [],
       "phase": "stabilize",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Install teacher engines locally without sudo so the distillation data pipeline can actually run.",
       "commit": "3a42cee050f6",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -867,7 +905,7 @@
         "N0021"
       ],
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "A first dependency-free student trained on real lc0 and Stockfish labels can establish measurable distillation losses and create a baseline for future model/training research.",
       "commit": "af6230b1d121",
       "benchmark_id": "tiny_leela_phase_b_fixed_metrics_v1",
@@ -903,7 +941,7 @@
         "N0025"
       ],
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Expanding teacher seed positions and extracting lc0 verbose root visit distributions will create a more meaningful distillation dataset than the initial 3-position/one-hot labels.",
       "commit": "4e1539e00580",
       "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
@@ -939,7 +977,7 @@
       "parent_node_id": "N0005",
       "children": [],
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "hypothesis": "Explicit 64-square piece/color linear features should improve over aggregate FEN counts on fixed v2 teacher labels.",
       "commit": "72ddb7bd879e",
       "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
@@ -975,7 +1013,7 @@
       "parent_node_id": "N0005",
       "children": [],
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "hypothesis": "A dependency-free small hidden-layer student should improve over aggregate linear features on v2 teacher labels by modeling non-linear patterns.",
       "commit": "d3e7d58d0907",
       "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
@@ -1012,7 +1050,7 @@
       "parent_node_id": "N0005",
       "children": [],
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "hypothesis": "Training on lc0-only, Stockfish-only, and combined teacher labels will reveal whether the two teachers help or conflict on fixed v2 labels.",
       "commit": "e8edfc3e209d",
       "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
@@ -1050,7 +1088,7 @@
       "parent_node_id": "N0021",
       "children": [],
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "hypothesis": "Training-only draw regularization for the WDL head should reduce overfitting while preserving the fixed consensus-label evaluation target.",
       "commit": "8cc07dd",
       "benchmark_id": "tiny_leela_teacher_distill_seed_v2",
@@ -1081,6 +1119,72 @@
       },
       "created_at": "2026-05-04T22:02:26.284Z",
       "run_id": "R0025"
+    },
+    "N0026": {
+      "node_id": "N0026",
+      "lane_id": "L000",
+      "parent_node_id": "N0005",
+      "children": [
+        "N0027"
+      ],
+      "phase": "probe",
+      "status": "segment_root",
+      "hypothesis": "Segment baseline: Phase C fixed teacher distillation consensus",
+      "commit": "11bf83c17594",
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "metric": 12.922135,
+      "metrics": {
+        "distill_student_score": 12.922135
+      },
+      "deltas": {
+        "delta_vs_parent": null,
+        "delta_vs_lane_baseline": 0,
+        "delta_vs_root": 0,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "segment_root",
+        "reason": "Migrate Tiny Leela from mixed bootstrap/Phase B/autoresearch logs to a dovetail-owned Phase C segment with fixed consensus-label student score."
+      },
+      "created_at": "2026-05-04T22:29:04.426Z"
+    },
+    "N0027": {
+      "node_id": "N0027",
+      "lane_id": "L006",
+      "parent_node_id": "N0026",
+      "children": [],
+      "phase": "explore",
+      "status": "discarded",
+      "hypothesis": "Training the WDL head from Stockfish-only value targets while keeping consensus policy/evaluation should exploit Stockfish's lower WDL validation loss without sacrificing combined policy labels.",
+      "commit": "11bf83c",
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "metric": 12.841531,
+      "metrics": {
+        "distill_student_score": 12.841531,
+        "train_policy_ce": 1.631707,
+        "train_wdl_ce": 0.435944,
+        "dev_policy_ce": 5.993176,
+        "dev_wdl_ce": 0.794058,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "wdl_train_source_stockfish": 1
+      },
+      "deltas": {
+        "delta_vs_parent": -0.08060400000000101,
+        "delta_vs_lane_baseline": -0.08060400000000101,
+        "delta_vs_root": -0.08060400000000101,
+        "delta_vs_global_best": -0.08060400000000101
+      },
+      "decision": {
+        "action": "discarded",
+        "reason": "Stockfish-only WDL training hurt the consensus evaluation target: score fell from current best 12.922135 to 12.841531, with dev_wdl_ce worsening from 0.745483 to 0.794058 while policy CE stayed unchanged. The consensus WDL label is better aligned with the current benchmark than Stockfish-only WDL despite earlier raw-source ablation hints."
+      },
+      "created_at": "2026-05-04T22:35:42.084Z",
+      "run_id": "R0026"
     }
   },
   "runs": {
@@ -1090,7 +1194,7 @@
       "node_id": "N0001",
       "lane_id": "L000",
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "metric": 32,
       "metrics": {
         "tiny_leela_score": 32
@@ -1110,7 +1214,7 @@
       "node_id": "N0002",
       "lane_id": "L000",
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "metric": 98,
       "metrics": {
         "tiny_leela_score": 98
@@ -1130,7 +1234,7 @@
       "node_id": "N0003",
       "lane_id": "L000",
       "phase": "stabilize",
-      "status": "keep",
+      "status": "kept",
       "metric": 98,
       "metrics": {
         "tiny_leela_score": 98
@@ -1139,7 +1243,7 @@
       "commit": "6e36f6a198cf",
       "base_commit": "6e36f6a",
       "hypothesis": "Clean benchmark/check scripts so Node's built-in test runner does not receive an invalid Vitest-style --run argument.",
-      "implementation": "Removed npm test -- --run fallback from autoresearch.sh and autoresearch.checks.sh; both now call npm test directly.",
+      "implementation": "Removed npm test -- --run fallback from dovetail.sh and dovetail.checks.sh; both now call npm test directly.",
       "learned": "Metric remains 98, but validation output is cleaner and checks still pass. This is a stabilize-only cleanup, not a research lane.",
       "next_action": "Commit cleanup and mark the goal complete after confirming clean git status.",
       "timestamp": "2026-05-04T18:53:40.760Z"
@@ -1150,7 +1254,7 @@
       "node_id": "N0004",
       "lane_id": "L000",
       "phase": "stabilize",
-      "status": "keep",
+      "status": "kept",
       "metric": 98,
       "metrics": {
         "tiny_leela_score": 98
@@ -1170,7 +1274,7 @@
       "node_id": "N0005",
       "lane_id": "L000",
       "phase": "stabilize",
-      "status": "keep",
+      "status": "kept",
       "metric": 130,
       "metrics": {
         "tiny_leela_score": 130,
@@ -1194,7 +1298,7 @@
       "node_id": "N0006",
       "lane_id": "L002",
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "metric": 73.468924,
       "metrics": {
         "fixed_playout_suite_score": 73.468924,
@@ -1219,7 +1323,7 @@
       "node_id": "N0007",
       "lane_id": "L003",
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "metric": 83.525,
       "metrics": {
         "browser_compatibility_score": 83.525,
@@ -1242,7 +1346,7 @@
       "node_id": "N0008",
       "lane_id": "L001",
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "metric": 71.610243,
       "metrics": {
         "fixed_playout_suite_score": 71.610243,
@@ -1267,7 +1371,7 @@
       "node_id": "N0009",
       "lane_id": "L001",
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "metric": 73.468924,
       "metrics": {
         "fixed_playout_suite_score": 73.468924,
@@ -1292,7 +1396,7 @@
       "node_id": "N0010",
       "lane_id": "L001",
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "metric": 33.849477,
       "metrics": {
         "fixed_playout_suite_score": 33.849477,
@@ -1317,7 +1421,7 @@
       "node_id": "N0011",
       "lane_id": "L002",
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "metric": 73.468924,
       "metrics": {
         "fixed_playout_suite_score": 73.468924,
@@ -1342,7 +1446,7 @@
       "node_id": "N0012",
       "lane_id": "L002",
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "metric": 71.610243,
       "metrics": {
         "fixed_playout_suite_score": 71.610243,
@@ -1367,7 +1471,7 @@
       "node_id": "N0013",
       "lane_id": "L003",
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "metric": 73.525,
       "metrics": {
         "browser_compatibility_score": 73.525,
@@ -1390,7 +1494,7 @@
       "node_id": "N0014",
       "lane_id": "L003",
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "metric": 44.575,
       "metrics": {
         "browser_compatibility_score": 44.575,
@@ -1413,7 +1517,7 @@
       "node_id": "N0015",
       "lane_id": "L003",
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "metric": 83.525,
       "metrics": {
         "browser_compatibility_score": 83.525,
@@ -1436,7 +1540,7 @@
       "node_id": "N0016",
       "lane_id": "L004",
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "metric": 78.354004,
       "metrics": {
         "architecture_score": 78.354004,
@@ -1461,7 +1565,7 @@
       "node_id": "N0017",
       "lane_id": "L005",
       "phase": "stabilize",
-      "status": "keep",
+      "status": "kept",
       "metric": 0,
       "metrics": {
         "lc0_binary_ready": 0,
@@ -1484,7 +1588,7 @@
       "node_id": "N0018",
       "lane_id": "L005",
       "phase": "stabilize",
-      "status": "keep",
+      "status": "kept",
       "metric": 0,
       "metrics": {
         "lc0_binary_ready": 0,
@@ -1508,7 +1612,7 @@
       "node_id": "N0019",
       "lane_id": "L005",
       "phase": "stabilize",
-      "status": "keep",
+      "status": "kept",
       "metric": 1,
       "metrics": {
         "lc0_binary_ready": 1,
@@ -1533,7 +1637,7 @@
       "node_id": "N0020",
       "lane_id": "L006",
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "metric": 16.90255,
       "metrics": {
         "distill_student_score": 16.90255,
@@ -1559,7 +1663,7 @@
       "node_id": "N0021",
       "lane_id": "L006",
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "metric": 12.046814,
       "metrics": {
         "distill_student_score": 12.046814,
@@ -1587,7 +1691,7 @@
       "node_id": "N0022",
       "lane_id": "L007",
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "metric": 11.555163,
       "metrics": {
         "distill_student_score": 11.555163,
@@ -1614,7 +1718,7 @@
       "node_id": "N0023",
       "lane_id": "L008",
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "metric": 9.60206,
       "metrics": {
         "distill_student_score": 9.60206,
@@ -1642,7 +1746,7 @@
       "node_id": "N0024",
       "lane_id": "L009",
       "phase": "explore",
-      "status": "keep",
+      "status": "kept",
       "metric": 12.046814,
       "metrics": {
         "distill_student_score": 12.046814,
@@ -1671,7 +1775,7 @@
       "node_id": "N0025",
       "lane_id": "L006",
       "phase": "explore",
-      "status": "discard",
+      "status": "discarded",
       "metric": 12.890689,
       "metrics": {
         "distill_student_score": 12.890689,
@@ -1695,13 +1799,44 @@
       "learned": "Draw regularization did not help the current head-separated model: score fell from 12.922135 to 12.890689. Policy CE was unchanged, but dev_wdl_ce regressed from 0.745483 to 0.764361, so the prior best WDL interactions should remain unchanged.",
       "next_action": "Discard and revert. Avoid WDL regularization on this tiny fixed seed unless validated across a broader cross-fold or larger label set.",
       "timestamp": "2026-05-04T22:02:26.284Z"
+    },
+    "R0026": {
+      "type": "research_run",
+      "run_id": "R0026",
+      "node_id": "N0027",
+      "lane_id": "L006",
+      "phase": "explore",
+      "status": "discarded",
+      "metric": 12.841531,
+      "metrics": {
+        "distill_student_score": 12.841531,
+        "train_policy_ce": 1.631707,
+        "train_wdl_ce": 0.435944,
+        "dev_policy_ce": 5.993176,
+        "dev_wdl_ce": 0.794058,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "wdl_train_source_stockfish": 1
+      },
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "commit": "11bf83c",
+      "base_commit": "11bf83c",
+      "hypothesis": "Training the WDL head from Stockfish-only value targets while keeping consensus policy/evaluation should exploit Stockfish's lower WDL validation loss without sacrificing combined policy labels.",
+      "implementation": "Added source-aware merged rows that retain per-teacher WDL labels and a --wdl-train-source option; ran the fixed dovetail distillation benchmark with --wdl-train-source stockfish.",
+      "learned": "Stockfish-only WDL training hurt the consensus evaluation target: score fell from current best 12.922135 to 12.841531, with dev_wdl_ce worsening from 0.745483 to 0.794058 while policy CE stayed unchanged. The consensus WDL label is better aligned with the current benchmark than Stockfish-only WDL despite earlier raw-source ablation hints.",
+      "next_action": "Discard and revert. Do not specialize WDL to Stockfish under the consensus benchmark; next try robustness/cross-fold reporting or increase teacher-label coverage in a new segment.",
+      "timestamp": "2026-05-04T22:35:42.084Z"
     }
   },
   "ids": {
     "next_lane": 10,
-    "next_node": 26,
-    "next_run": 26,
+    "next_node": 28,
+    "next_run": 27,
     "next_idea": 22
   },
-  "global_best_node_id": "N0005"
+  "global_best_node_id": "N0026"
 }

@@ -13,7 +13,7 @@ test('minimum engine substrate files exist with stable interfaces', () => {
 });
 
 test('research ideas distinguish foundation from lanes', () => {
-  const ideas = read('../autoresearch.ideas.jsonl');
+  const ideas = read('../dovetail.ideas.jsonl');
   assert.match(ideas, /Foundation milestone/);
   assert.match(ideas, /True research lane/);
 });

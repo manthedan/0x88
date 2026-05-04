@@ -12,7 +12,7 @@ Build a tiny in-browser Leela-like chess engine: policy/value neural evaluation 
 - Highest risk: silent feature/move-encoding mismatches between training, export, and inference.
 
 ## Current readiness metric
-`tiny_leela_score` (higher is better), emitted by `./autoresearch.sh`.
+`tiny_leela_score` (higher is better), emitted by `./dovetail.sh`.
 
 This is a Phase A/B lab-readiness score, not a chess research-performance metric. It rewards verified implementation and benchmark-definition milestones: TypeScript package, chess substrate, fixed move codec, feature encoder, PUCT/evaluator interfaces, docs, and frozen Phase B metric specs.
 
@@ -20,12 +20,12 @@ Phase C research must optimize fixed engine metrics from `eval/benchmark_spec.js
 
 ## Benchmark command
 ```bash
-./autoresearch.sh
+./dovetail.sh
 ```
 
 ## Correctness checks
 ```bash
-./autoresearch.checks.sh
+./dovetail.checks.sh
 ```
 
 ## Foundation vs research lanes
@@ -41,7 +41,7 @@ Before dovetailing heavily, L000 owns the shared minimum engine substrate. These
 - Search entry point consuming only `BoardState` + `Evaluator`.
 - Move encoding and browser runtime docs.
 
-Loaded ideas that were actually foundation tasks are marked `foundation_milestone` in `autoresearch.ideas.jsonl`. True research-lane ideas are explicitly titled `True research lane: ...` and should compare structurally different approaches after the substrate is stable.
+Loaded ideas that were actually foundation tasks are marked `foundation_milestone` in `dovetail.ideas.jsonl`. True research-lane ideas are explicitly titled `True research lane: ...` and should compare structurally different approaches after the substrate is stable.
 
 ## Dovetail lanes to maintain after substrate
 - L0 foundation/product scaffold: deterministic tests, docs, CI-friendly benchmark, shared interfaces.
