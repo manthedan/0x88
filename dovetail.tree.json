@@ -61,13 +61,13 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0000",
-      "current_node_id": "N0031",
+      "current_node_id": "N0032",
       "local_baseline_node_id": "N0026",
       "local_baseline_metric": 12.922135,
       "concept_tags": [
         "baseline"
       ],
-      "runs_in_current_concept": 2,
+      "runs_in_current_concept": 3,
       "created_at": "2026-05-04T18:45:53.444Z"
     },
     "L001": {
@@ -1311,7 +1311,9 @@
       "node_id": "N0031",
       "lane_id": "L000",
       "parent_node_id": "N0030",
-      "children": [],
+      "children": [
+        "N0032"
+      ],
       "phase": "explore",
       "status": "kept",
       "hypothesis": "Adding explicit alternate-holdout fold reporting should improve robustness visibility without changing the fixed primary benchmark score or training target.",
@@ -1346,6 +1348,46 @@
       },
       "created_at": "2026-05-04T22:42:14.474Z",
       "run_id": "R0030"
+    },
+    "N0032": {
+      "node_id": "N0032",
+      "lane_id": "L000",
+      "parent_node_id": "N0031",
+      "children": [],
+      "phase": "explore",
+      "status": "kept",
+      "hypothesis": "A deterministic rerun after adding fold robustness reporting should reproduce both the primary score and the new fold diagnostics before rotating back to model research.",
+      "commit": "327d0b4",
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "metric": 13.309426,
+      "metrics": {
+        "distill_student_score": 13.309426,
+        "train_policy_ce": 1.689969,
+        "train_wdl_ce": 0.413288,
+        "dev_policy_ce": 5.757296,
+        "dev_wdl_ce": 0.756176,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "weight_average_count": 600,
+        "fold_score_mean": 12.742533,
+        "fold_score_std": 0.566893
+      },
+      "deltas": {
+        "delta_vs_parent": 0,
+        "delta_vs_lane_baseline": 0.3872909999999994,
+        "delta_vs_root": 0.3872909999999994,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "kept",
+        "reason": "Primary and robustness diagnostics reproduced exactly: distill_student_score=13.309426, fold_score_mean=12.742533, fold_score_std=0.566893. Reporting is deterministic and safe to keep as a secondary diagnostic."
+      },
+      "created_at": "2026-05-04T22:42:44.149Z",
+      "run_id": "R0031"
     }
   },
   "runs": {
@@ -2117,12 +2159,45 @@
       "learned": "Primary distill_student_score stayed exactly 13.309426, preserving benchmark comparability. The two-fold mean is 12.742533 with std 0.566893, showing the tiny 10-position consensus split is sensitive to holdout choice; future improvements should be checked against fold robustness, not only the primary split.",
       "next_action": "Keep robustness reporting as diagnostics. Next structural work should try to improve fold_score_mean or add more teacher-label coverage in a new segment, while leaving the fixed primary metric intact.",
       "timestamp": "2026-05-04T22:42:14.474Z"
+    },
+    "R0031": {
+      "type": "research_run",
+      "run_id": "R0031",
+      "node_id": "N0032",
+      "lane_id": "L000",
+      "phase": "explore",
+      "status": "kept",
+      "metric": 13.309426,
+      "metrics": {
+        "distill_student_score": 13.309426,
+        "train_policy_ce": 1.689969,
+        "train_wdl_ce": 0.413288,
+        "dev_policy_ce": 5.757296,
+        "dev_wdl_ce": 0.756176,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 15,
+        "wdl_feature_dim": 28,
+        "weight_average_count": 600,
+        "fold_score_mean": 12.742533,
+        "fold_score_std": 0.566893
+      },
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "commit": "327d0b4",
+      "base_commit": "327d0b4",
+      "hypothesis": "A deterministic rerun after adding fold robustness reporting should reproduce both the primary score and the new fold diagnostics before rotating back to model research.",
+      "implementation": "No code changes. Reran ./dovetail.sh with --report-folds enabled at commit 327d0b4.",
+      "learned": "Primary and robustness diagnostics reproduced exactly: distill_student_score=13.309426, fold_score_mean=12.742533, fold_score_std=0.566893. Reporting is deterministic and safe to keep as a secondary diagnostic.",
+      "next_action": "End the L000 duplicate quantum and rotate to a true model/data lane. Next useful work should improve fold_score_mean or expand teacher-label coverage rather than repeating baseline confirmations.",
+      "timestamp": "2026-05-04T22:42:44.149Z"
     }
   },
   "ids": {
     "next_lane": 10,
-    "next_node": 32,
-    "next_run": 31,
+    "next_node": 33,
+    "next_run": 32,
     "next_idea": 22
   },
   "global_best_node_id": "N0028"
