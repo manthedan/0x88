@@ -38,6 +38,13 @@ def fen_features(fen: str) -> list[float]:
     return feats
 
 
+def wdl_features(fen: str) -> list[float]:
+    """Value head features: base aggregate features plus compact tempo interactions."""
+    base = fen_features(fen)
+    side_sign = base[1]
+    return base + [side_sign * v for v in base[2:]]
+
+
 def load_rows(paths: list[str]) -> list[dict]:
     rows: list[dict] = []
     for path in paths:
@@ -86,6 +93,7 @@ def evaluate(rows: list[dict], moves: list[str], wp: list[list[float]], ww: list
     top1 = 0.0
     for row in rows:
         x = fen_features(row["fen"])
+        xv = wdl_features(row["fen"])
         logits = [sum(w * v for w, v in zip(weights, x)) for weights in wp]
         probs = softmax(logits)
         target = [row["policy"].get(move, 0.0) for move in moves]
@@ -94,7 +102,7 @@ def evaluate(rows: list[dict], moves: list[str], wp: list[list[float]], ww: list
             continue
         target = [v / mass for v in target]
         p_ce += cross_entropy(target, probs)
-        wdl_logits = [sum(w * v for w, v in zip(weights, x)) for weights in ww]
+        wdl_logits = [sum(w * v for w, v in zip(weights, xv)) for weights in ww]
         wdl = softmax(wdl_logits)
         w_ce += cross_entropy(row["wdl"], wdl)
         if moves[max(range(len(moves)), key=lambda i: probs[i])] in row["policy"]:
@@ -121,14 +129,16 @@ def main() -> int:
     train_rows = [row for i, row in enumerate(rows) if i % args.holdout_mod != 0]
     dev_rows = [row for i, row in enumerate(rows) if i % args.holdout_mod == 0]
     feat_dim = len(fen_features(rows[0]["fen"]))
+    value_feat_dim = len(wdl_features(rows[0]["fen"]))
     rng = random.Random(7)
     wp = [[rng.uniform(-0.01, 0.01) for _ in range(feat_dim)] for _ in moves]
-    ww = [[rng.uniform(-0.01, 0.01) for _ in range(feat_dim)] for _ in range(3)]
+    ww = [[rng.uniform(-0.01, 0.01) for _ in range(value_feat_dim)] for _ in range(3)]
 
     for _epoch in range(args.epochs):
         rng.shuffle(train_rows)
         for row in train_rows:
             x = fen_features(row["fen"])
+            xv = wdl_features(row["fen"])
             policy_logits = [sum(w * v for w, v in zip(weights, x)) for weights in wp]
             probs = softmax(policy_logits)
             target = [row["policy"].get(move, 0.0) for move in moves]
@@ -138,11 +148,11 @@ def main() -> int:
                 grad = probs[i] - target[i]
                 for j, val in enumerate(x):
                     wp[i][j] -= args.lr * grad * val
-            wdl_logits = [sum(w * v for w, v in zip(weights, x)) for weights in ww]
+            wdl_logits = [sum(w * v for w, v in zip(weights, xv)) for weights in ww]
             wdl = softmax(wdl_logits)
             for i in range(3):
                 grad = wdl[i] - row["wdl"][i]
-                for j, val in enumerate(x):
+                for j, val in enumerate(xv):
                     ww[i][j] -= args.lr * grad * val
 
     train_policy_ce, train_wdl_ce, train_top1 = evaluate(train_rows, moves, wp, ww)
@@ -150,7 +160,7 @@ def main() -> int:
     quality = 100.0 / (1.0 + dev_policy_ce + dev_wdl_ce)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"kind": "linear_fen_student", "moves": moves, "policy_weights": wp, "wdl_weights": ww}, separators=(",", ":")))
+    out.write_text(json.dumps({"kind": "linear_fen_student", "moves": moves, "policy_weights": wp, "wdl_weights": ww, "policy_feature_dim": feat_dim, "wdl_feature_dim": value_feat_dim}, separators=(",", ":")))
     print(f"METRIC distill_student_score={quality:.6f}")
     print(f"METRIC train_policy_ce={train_policy_ce:.6f}")
     print(f"METRIC train_wdl_ce={train_wdl_ce:.6f}")
@@ -160,6 +170,8 @@ def main() -> int:
     print(f"METRIC teacher_rows={len(rows)}")
     print(f"METRIC raw_teacher_rows={len(raw_rows)}")
     print(f"METRIC move_vocab={len(moves)}")
+    print(f"METRIC feature_dim={feat_dim}")
+    print(f"METRIC wdl_feature_dim={value_feat_dim}")
     return 0
 
 
