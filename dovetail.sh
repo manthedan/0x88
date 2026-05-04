@@ -11,5 +11,6 @@ python3 training/train_student.py \
   --average-weights \
   --average-policy-only \
   --report-folds \
+  --compare-conv-archs \
   --train data/teacher_labels.jsonl data/stockfish_teacher_labels.jsonl \
   --out artifacts/student_distill_benchmark.json
