@@ -27,6 +27,13 @@ score=0
 [[ -f eval/gauntlet.ts || -f eval/gauntlet.js || -f eval/gauntlet.py ]] && score=$((score + 6))
 [[ -f docs/move_encoding.md ]] && score=$((score + 4))
 [[ -f docs/browser_runtime.md ]] && score=$((score + 4))
+[[ -f docs/research_phases.md ]] && score=$((score + 6))
+[[ -f eval/benchmark_spec.json ]] && score=$((score + 8))
+[[ -f eval/phase_b_metrics.mjs ]] && score=$((score + 6))
+
+if [[ -f eval/phase_b_metrics.mjs ]] && node eval/phase_b_metrics.mjs >/tmp/tiny-leela-phase-b.log 2>&1; then
+  score=$((score + 12))
+fi
 
 # Verified tests are the main backpressure: only count them when they pass.
 if [[ -f package.json ]] && command -v npm >/dev/null 2>&1; then

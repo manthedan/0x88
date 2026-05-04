@@ -24,13 +24,13 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0000",
-      "current_node_id": "N0004",
+      "current_node_id": "N0005",
       "local_baseline_node_id": "N0000",
       "local_baseline_metric": 0,
       "concept_tags": [
         "baseline"
       ],
-      "runs_in_current_concept": 4,
+      "runs_in_current_concept": 5,
       "created_at": "2026-05-04T18:45:53.444Z"
     }
   },
@@ -154,7 +154,9 @@
       "node_id": "N0004",
       "lane_id": "L000",
       "parent_node_id": "N0003",
-      "children": [],
+      "children": [
+        "N0005"
+      ],
       "phase": "stabilize",
       "status": "keep",
       "hypothesis": "Finish taxonomy cleanup by moving remaining spec/schema/gauntlet scaffold tasks out of the queued research-lane pool.",
@@ -176,6 +178,37 @@
       },
       "created_at": "2026-05-04T18:54:11.577Z",
       "run_id": "R0004"
+    },
+    "N0005": {
+      "node_id": "N0005",
+      "lane_id": "L000",
+      "parent_node_id": "N0004",
+      "children": [],
+      "phase": "stabilize",
+      "status": "keep",
+      "hypothesis": "Complete Phase A/B separation by documenting lab/product substrate vs frozen evaluation metrics and making Phase B metric readiness executable.",
+      "commit": "608dd53cdf5f",
+      "benchmark_id": "tiny_leela_bootstrap_score_v1",
+      "metric": 130,
+      "metrics": {
+        "tiny_leela_score": 130,
+        "phase_b_benchmark_ready": 1,
+        "fixed_positions": 3,
+        "research_metrics_defined": 9,
+        "runtime_profiles_defined": 3
+      },
+      "deltas": {
+        "delta_vs_parent": 32,
+        "delta_vs_lane_baseline": 130,
+        "delta_vs_root": 130,
+        "delta_vs_global_best": 32
+      },
+      "decision": {
+        "action": "keep",
+        "reason": "Phase A/B are now explicit: build substrate and evaluation infrastructure are pre-work, while Phase C research optimizes fixed metrics like policy_top1_acc, wdl_cross_entropy, fixed_playout_suite_score, latency, and model size. Readiness score improved to 130 and checks pass."
+      },
+      "created_at": "2026-05-04T19:00:40.401Z",
+      "run_id": "R0005"
     }
   },
   "runs": {
@@ -258,13 +291,37 @@
       "learned": "The idea queue now has 9 foundation milestones separated from 8 true research lanes. Checks pass with score 98.",
       "next_action": "Use schedule_next for actual lane work; if scheduler still picks L000, interpret it as foundation hardening only.",
       "timestamp": "2026-05-04T18:54:11.577Z"
+    },
+    "R0005": {
+      "type": "research_run",
+      "run_id": "R0005",
+      "node_id": "N0005",
+      "lane_id": "L000",
+      "phase": "stabilize",
+      "status": "keep",
+      "metric": 130,
+      "metrics": {
+        "tiny_leela_score": 130,
+        "phase_b_benchmark_ready": 1,
+        "fixed_positions": 3,
+        "research_metrics_defined": 9,
+        "runtime_profiles_defined": 3
+      },
+      "benchmark_id": "tiny_leela_bootstrap_score_v1",
+      "commit": "608dd53cdf5f",
+      "base_commit": "608dd53",
+      "hypothesis": "Complete Phase A/B separation by documenting lab/product substrate vs frozen evaluation metrics and making Phase B metric readiness executable.",
+      "implementation": "Added docs/research_phases.md, eval/benchmark_spec.json, eval/phase_b_metrics.mjs, tests/phase_b.test.mjs, npm eval:phase-b script, and checks that validate Phase B metrics. Updated autoresearch.md and readiness scoring to state tiny_leela_score is lab-readiness only.",
+      "learned": "Phase A/B are now explicit: build substrate and evaluation infrastructure are pre-work, while Phase C research optimizes fixed metrics like policy_top1_acc, wdl_cross_entropy, fixed_playout_suite_score, latency, and model size. Readiness score improved to 130 and checks pass.",
+      "next_action": "Commit Phase A/B freeze, then optionally start a new Phase C benchmark segment when a real lane has an executable candidate metric.",
+      "timestamp": "2026-05-04T19:00:40.401Z"
     }
   },
   "ids": {
     "next_lane": 1,
-    "next_node": 5,
-    "next_run": 5,
+    "next_node": 6,
+    "next_run": 6,
     "next_idea": 18
   },
-  "global_best_node_id": "N0002"
+  "global_best_node_id": "N0005"
 }

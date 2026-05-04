@@ -11,12 +11,12 @@ Build a tiny in-browser Leela-like chess engine: policy/value neural evaluation 
 - Browser deployment should prefer ONNX Runtime Web, with WASM/SIMD fallback and WebGPU/FP16 as an acceleration lane.
 - Highest risk: silent feature/move-encoding mismatches between training, export, and inference.
 
-## Primary metric
+## Current readiness metric
 `tiny_leela_score` (higher is better), emitted by `./autoresearch.sh`.
 
-The score is a deterministic project fitness proxy until real playing-strength gauntlets exist. It rewards verified implementation milestones: TypeScript package, chess rules/tests, fixed move codec, feature encoder, PUCT search, neural inference interface, browser worker/runtime, model export/compression docs/scripts, and evaluation harness.
+This is a Phase A/B lab-readiness score, not a chess research-performance metric. It rewards verified implementation and benchmark-definition milestones: TypeScript package, chess substrate, fixed move codec, feature encoder, PUCT/evaluator interfaces, docs, and frozen Phase B metric specs.
 
-When Elo/gauntlet infrastructure exists, create a new benchmark id and metric segment rather than comparing directly to this bootstrap score.
+Phase C research must optimize fixed engine metrics from `eval/benchmark_spec.json`, such as `policy_top1_acc`, `wdl_cross_entropy`, `fixed_playout_suite_score`, latency, and model size. If the benchmark dataset or workload changes, create a new benchmark id rather than comparing directly to this bootstrap segment.
 
 ## Benchmark command
 ```bash

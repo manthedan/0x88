@@ -3,3 +3,4 @@
 {"type":"run_logged","run_id":"R0002","node_id":"N0002","lane_id":"L000","status":"keep","metric":98,"timestamp":"2026-05-04T18:53:07.146Z"}
 {"type":"run_logged","run_id":"R0003","node_id":"N0003","lane_id":"L000","status":"keep","metric":98,"timestamp":"2026-05-04T18:53:40.760Z"}
 {"type":"run_logged","run_id":"R0004","node_id":"N0004","lane_id":"L000","status":"keep","metric":98,"timestamp":"2026-05-04T18:54:11.578Z"}
+{"type":"run_logged","run_id":"R0005","node_id":"N0005","lane_id":"L000","status":"keep","metric":130,"timestamp":"2026-05-04T19:00:40.401Z"}
