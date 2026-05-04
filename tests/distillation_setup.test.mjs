@@ -11,9 +11,13 @@ test('distillation setup exports seed positions and validates sample labels', ()
   assert.match(validateOut, /METRIC teacher_labels_valid=1/);
 });
 
-test('lc0 checker reports readiness metrics without requiring lc0 in CI', () => {
-  const output = execFileSync('python3', ['scripts/check_lc0_teacher.py'], { encoding: 'utf8' });
-  assert.match(output, /METRIC lc0_binary_ready=/);
-  assert.match(output, /METRIC distillation_ready=/);
+test('teacher checkers report readiness metrics without requiring engines in CI', () => {
+  const lc0 = execFileSync('python3', ['scripts/check_lc0_teacher.py'], { encoding: 'utf8' });
+  assert.match(lc0, /METRIC lc0_binary_ready=/);
+  assert.match(lc0, /METRIC distillation_ready=/);
+  const stockfish = execFileSync('python3', ['scripts/check_stockfish_teacher.py'], { encoding: 'utf8' });
+  assert.match(stockfish, /METRIC stockfish_binary_ready=/);
+  assert.match(stockfish, /METRIC stockfish_distillation_ready=/);
   assert.match(readFileSync('training/teacher_schema.md', 'utf8'), /LC0_BIN/);
+  assert.match(readFileSync('docs/teacher_setup.md', 'utf8'), /stockfish/i);
 });
