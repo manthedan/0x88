@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
 function arg(name, fallback = undefined) {
@@ -12,6 +12,17 @@ function arg(name, fallback = undefined) {
 
 function run(cmd, args) {
   return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+}
+
+function runAsync(cmd, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { process.stderr.write(chunk); });
+    child.on('error', reject);
+    child.on('close', (code) => code === 0 ? resolve(stdout) : reject(new Error(`${cmd} exited ${code}`)));
+  });
 }
 
 function metrics(output) {
@@ -32,6 +43,8 @@ const arenaVisits = arg('--arena-visits', '1');
 const adjudicate = arg('--adjudicate', 'terminal');
 const adjudicateThreshold = arg('--adjudicate-threshold', '0.02');
 const primaryConvArch = arg('--primary-conv-arch', '');
+const parallel = process.argv.includes('--parallel-candidates') || process.env.TINY_LEELA_PARALLEL_CANDIDATES === '1';
+const featureCache = arg('--feature-cache', primaryConvArch ? `artifacts/cache/conv_features_${primaryConvArch}.json` : '');
 const trainPaths = arg('--train', 'data/teacher_labels.jsonl,data/stockfish_teacher_labels.jsonl').split(',').filter(Boolean);
 
 const startedAt = Date.now();
@@ -46,18 +59,36 @@ if (!existsSync(selfplayPath) || process.argv.includes('--regenerate')) {
   for (const [key, value] of Object.entries(selfplayMetrics)) console.log(`METRIC mix_${key}=${value.toFixed(6)}`);
 }
 
-let best = null;
-for (const weight of weights) {
+if (featureCache && primaryConvArch) {
+  logProgress(`rust feature cache prewarm start cache=${featureCache}`);
+  run('cargo', ['build', '--release', '--quiet', '--manifest-path', 'rust/tiny_leela_core/Cargo.toml', '--bin', 'tiny-leela-rust-feature-cache']);
+  const cacheOutput = run('rust/tiny_leela_core/target/release/tiny-leela-rust-feature-cache', [`--arch=${primaryConvArch}`, `--out=${featureCache}`, `--inputs=${[...trainPaths, selfplayPath].join(',')}`]);
+  process.stderr.write(cacheOutput);
+  for (const [key, value] of Object.entries(metrics(cacheOutput))) console.log(`METRIC mix_${key}=${value.toFixed(6)}`);
+}
+
+async function evaluateWeight(weight) {
   const out = `${candidatePrefix}_w${String(weight).replace(/\./g, 'p')}.json`;
   logProgress(`weight=${weight} train start out=${out} elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}`);
   const trainArgs = ['training/train_student.py', '--train', ...trainPaths, '--merge-fen', '--epochs', epochs, '--lr', lr, '--out', out, '--selfplay-weight', String(weight)];
   if (weight > 0) trainArgs.push('--selfplay-train', selfplayPath);
   if (primaryConvArch) trainArgs.push('--average-weights', '--average-policy-only', '--primary-conv-arch', primaryConvArch);
-  const trainOutput = run('python3', trainArgs);
+  if (featureCache) trainArgs.push('--feature-cache', featureCache);
+  const trainOutput = parallel ? await runAsync('python3', trainArgs) : run('python3', trainArgs);
   const trainMetrics = metrics(trainOutput);
   logProgress(`weight=${weight} train done score=${(trainMetrics.distill_student_score ?? 0).toFixed(6)} arena start elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}`);
-  const arenaOutput = run('npm', ['run', 'eval:arena', '--silent', '--', `--backend=${backend}`, `--candidate=${out}`, '--baseline=artifacts/student_distill_benchmark.json', `--games=${arenaGames}`, `--visits=${arenaVisits}`, `--max-plies=${maxPlies}`, `--adjudicate=${adjudicate}`, `--adjudicate-threshold=${adjudicateThreshold}`]);
+  const arenaArgs = ['run', 'eval:arena', '--silent', '--', `--backend=${backend}`, `--candidate=${out}`, '--baseline=artifacts/student_distill_benchmark.json', `--games=${arenaGames}`, `--visits=${arenaVisits}`, `--max-plies=${maxPlies}`, `--adjudicate=${adjudicate}`, `--adjudicate-threshold=${adjudicateThreshold}`];
+  const arenaOutput = parallel ? await runAsync('npm', arenaArgs) : run('npm', arenaArgs);
   const arenaMetrics = metrics(arenaOutput);
+  logProgress(`weight=${weight} arena done score=${(arenaMetrics.arena_score_rate ?? 0).toFixed(6)} illegal=${arenaMetrics.arena_illegal_losses ?? 0} elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}`);
+  return { weight, out, trainMetrics, arenaMetrics };
+}
+
+const results = parallel ? await Promise.all(weights.map(evaluateWeight)) : [];
+if (!parallel) for (const weight of weights) results.push(await evaluateWeight(weight));
+let best = null;
+for (const candidate of results) {
+  const { weight, trainMetrics, arenaMetrics } = candidate;
   const prefix = `mix_${String(weight).replace(/\./g, 'p')}`;
   console.log(`METRIC ${prefix}_selfplay_weight=${weight.toFixed(6)}`);
   console.log(`METRIC ${prefix}_distill_student_score=${(trainMetrics.distill_student_score ?? 0).toFixed(6)}`);
@@ -65,8 +96,6 @@ for (const weight of weights) {
   console.log(`METRIC ${prefix}_arena_candidate_elo_estimate=${(arenaMetrics.arena_candidate_elo_estimate ?? 0).toFixed(6)}`);
   console.log(`METRIC ${prefix}_arena_illegal_losses=${arenaMetrics.arena_illegal_losses ?? 0}`);
   console.log(`METRIC ${prefix}_arena_adjudicated_rate=${(arenaMetrics.arena_adjudicated_rate ?? 0).toFixed(6)}`);
-  logProgress(`weight=${weight} arena done score=${(arenaMetrics.arena_score_rate ?? 0).toFixed(6)} illegal=${arenaMetrics.arena_illegal_losses ?? 0} elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}`);
-  const candidate = { weight, out, trainMetrics, arenaMetrics };
   if (!best || (arenaMetrics.arena_score_rate ?? -1) > (best.arenaMetrics.arena_score_rate ?? -1)) best = candidate;
 }
 

@@ -99,12 +99,31 @@ def conv_student_features(fen: str, channels: int, layers: int) -> list[float]:
     return feats
 
 
-def cached_feature_fn(fn):
+def cached_feature_fn(fn, disk_path: str | None = None):
     cache: dict[str, list[float]] = {}
+    path = Path(disk_path) if disk_path else None
+    if path and path.exists():
+        try:
+            cache.update(json.loads(path.read_text()))
+        except Exception:
+            cache.clear()
+    dirty = False
     def inner(fen: str) -> list[float]:
+        nonlocal dirty
         if fen not in cache:
             cache[fen] = fn(fen)
+            dirty = True
         return cache[fen]
+    def flush() -> None:
+        nonlocal dirty
+        if path and dirty:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(json.dumps(cache, separators=(",", ":")))
+            tmp.replace(path)
+            dirty = False
+    inner.flush = flush  # type: ignore[attr-defined]
+    inner.cache_size = lambda: len(cache)  # type: ignore[attr-defined]
     return inner
 
 
@@ -296,6 +315,7 @@ def main() -> int:
     parser.add_argument("--report-folds", action="store_true", help="also train alternate holdout folds for robustness reporting without changing the primary metric")
     parser.add_argument("--compare-conv-archs", action="store_true", help="train frozen-conv feature students for 16x2/24x3/48x5/64x6 architecture diagnostics")
     parser.add_argument("--primary-conv-arch", choices=["16x2", "24x3", "48x5", "64x6"], help="use the selected frozen-conv feature student as the primary artifact and metric")
+    parser.add_argument("--feature-cache", help="optional JSON cache for expensive frozen-conv features keyed by FEN")
     args = parser.parse_args()
 
     raw_rows = load_rows(args.train)
@@ -315,7 +335,8 @@ def main() -> int:
     primary_conv_layers = 0
     if args.primary_conv_arch:
         primary_conv_channels, primary_conv_layers = [int(v) for v in args.primary_conv_arch.split("x")]
-        primary_feature_fn = cached_feature_fn(lambda fen, c=primary_conv_channels, l=primary_conv_layers: conv_student_features(fen, c, l))
+        cache_path = args.feature_cache or f"artifacts/cache/conv_features_{args.primary_conv_arch}.json"
+        primary_feature_fn = cached_feature_fn(lambda fen, c=primary_conv_channels, l=primary_conv_layers: conv_student_features(fen, c, l), cache_path)
         primary_value_feature_fn = primary_feature_fn
         primary_kind = "frozen_conv_fen_student"
     result = train_once(rows, moves, args.epochs, args.lr, args.holdout_mod, 0, args.average_weights, args.average_policy_only, primary_feature_fn, primary_value_feature_fn)
@@ -343,6 +364,8 @@ def main() -> int:
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
+    if hasattr(primary_feature_fn, "flush"):
+        primary_feature_fn.flush()  # type: ignore[attr-defined]
     artifact = {"kind": primary_kind, "moves": moves, "policy_weights": result["policy_weights"], "wdl_weights": result["wdl_weights"], "policy_feature_dim": result["feature_dim"], "wdl_feature_dim": result["wdl_feature_dim"], "weight_average_count": result["weight_average_count"], "conv_channels": primary_conv_channels, "conv_layers": primary_conv_layers}
     artifact_text = json.dumps(artifact, separators=(",", ":"))
     out.write_text(artifact_text)
@@ -373,6 +396,7 @@ def main() -> int:
     print(f"METRIC model_json_bytes={len(artifact_text.encode('utf-8'))}")
     print(f"METRIC model_weight_count={model_weight_count}")
     print(f"METRIC estimated_eval_ops={estimated_eval_ops}")
+    print(f"METRIC feature_cache_entries={primary_feature_fn.cache_size() if hasattr(primary_feature_fn, 'cache_size') else 0}")
     print(f"METRIC browser_json_compatible=1")
     print(f"METRIC fold_score_mean={fold_mean:.6f}")
     print(f"METRIC fold_score_std={fold_std:.6f}")

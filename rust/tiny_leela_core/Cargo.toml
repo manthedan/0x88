@@ -31,6 +31,10 @@ path = "src/bin/selfplay.rs"
 name = "tiny-leela-rust-arena"
 path = "src/bin/arena.rs"
 
+[[bin]]
+name = "tiny-leela-rust-feature-cache"
+path = "src/bin/feature_cache.rs"
+
 [profile.release]
 opt-level = 3
 lto = true

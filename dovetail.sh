@@ -24,6 +24,8 @@ npm run selfplay:mix-sweep --silent -- \
   --adjudicate=value \
   --adjudicate-threshold=0.02 \
   --primary-conv-arch=64x6 \
+  --feature-cache=artifacts/cache/conv_features_64x6.json \
+  --parallel-candidates \
   --selfplay=artifacts/selfplay_mix_arena_v1.jsonl \
   --candidate-prefix=artifacts/selfplay_mix_arena_candidate \
   --regenerate

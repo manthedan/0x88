@@ -481,6 +481,25 @@
           "R0049"
         ]
       }
+    },
+    "L018": {
+      "lane_id": "L018",
+      "title": "Self-play teacher mix ratio sweep",
+      "hypothesis": "A small amount of PUCT self-play visit-policy data mixed with teacher distillation can improve arena score over the current 64x6 baseline while preserving legality and avoiding self-play collapse.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0052",
+      "current_node_id": "N0052",
+      "local_baseline_node_id": "N0052",
+      "local_baseline_metric": 0.75,
+      "concept_tags": [
+        "selfplay",
+        "training",
+        "arena"
+      ],
+      "runs_in_current_concept": 0,
+      "created_at": "2026-05-05T04:35:43.901Z",
+      "idea_id": "I0025"
     }
   },
   "nodes": {
@@ -4488,7 +4507,7 @@
     }
   },
   "ids": {
-    "next_lane": 18,
+    "next_lane": 19,
     "next_node": 53,
     "next_run": 50,
     "next_idea": 27

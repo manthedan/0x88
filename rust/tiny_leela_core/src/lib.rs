@@ -410,6 +410,10 @@ fn conv_student_features(fen: &str, channels: usize, layers: usize, params: Opti
     feats
 }
 
+pub fn frozen_conv_student_features(fen: &str, channels: usize, layers: usize) -> Vec<f32> {
+    conv_student_features(fen, channels, layers, None)
+}
+
 impl PositionEvaluator for StudentEvaluator {
     fn evaluate(&self, board: &Board) -> Evaluation {
         let fen = board_to_fen(board);
