@@ -552,7 +552,7 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0052",
-      "current_node_id": "N0052",
+      "current_node_id": "N0055",
       "local_baseline_node_id": "N0052",
       "local_baseline_metric": 0.75,
       "concept_tags": [
@@ -560,9 +560,44 @@
         "search",
         "arena"
       ],
-      "runs_in_current_concept": 0,
+      "runs_in_current_concept": 2,
       "created_at": "2026-05-05T04:40:31.616Z",
-      "idea_id": "I0026"
+      "idea_id": "I0026",
+      "context_checkpoint": {
+        "type": "lane_context_checkpoint",
+        "lane_id": "L019",
+        "updated_at": "2026-05-05T04:52:30.309Z",
+        "source_handoff_run_id": "R0052",
+        "source_handoff_node_id": "N0055",
+        "task": "Install/expose tinygrad GPU backend on the RTX 3090 and rerun the S0003 tinygrad A/B.",
+        "outcome": "Kept infrastructure. User-space CUDA packages were installed into .venv-tinygrad and dovetail.sh now exports CUDA_HOME/PATH/LD_LIBRARY_PATH for tinygrad. tinygrad now selects the NV backend and runs on the NVIDIA RTX 3090. Single-candidate cached trainer time improved from tinygrad DEV=PYTHON ~50.1s to tinygrad CUDA ~5.43s. Full S0003 tinygrad CUDA sweep completed in 21.97s with checks passing, but the cached pure-Python parallel baseline is still faster at 17.2s for this tiny dataset. Metric stayed 0.75, best weight stayed 0, and all arena games were value-adjudicated.",
+        "changed_files": [
+          "dovetail.sh"
+        ],
+        "relevant_reads": [
+          "dovetail.sh",
+          "scripts/selfplay_mix_sweep.mjs",
+          "training/train_student.py"
+        ],
+        "validation_commands": [
+          "CUDA tinygrad one-candidate train: ~5.43s",
+          "CUDA_HOME=$PWD/.venv-tinygrad/lib/python3.12/site-packages/nvidia/cu13 PATH=$CUDA_HOME/bin:$PATH LD_LIBRARY_PATH=$CUDA_HOME/lib:$LD_LIBRARY_PATH nvcc --version",
+          "nvidia-smi",
+          "pip install nvidia-cuda-nvcc nvidia-cuda-runtime nvidia-cuda-cupti inside .venv-tinygrad",
+          "run_research_experiment: env TINY_LEELA_TRAINER=tinygrad TINY_LEELA_PYTHON=.venv-tinygrad/bin/python bash dovetail.sh",
+          "tinygrad smoke test selected Device.DEFAULT=NV"
+        ],
+        "failures": [
+          "tinygrad CUDA is still slower than cached pure-Python parallel baseline on this very small dataset/full sweep: 21.97s vs 17.2s",
+          "Primary metric remains adjudicated and best self-play weight remains 0; not evidence of self-play improvement"
+        ],
+        "next_action_hint": "Keep Python trainer default for current smoke workload. Use tinygrad CUDA for larger model/data A/B where GPU overhead can amortize. Next research step should improve benchmark discrimination: larger/non-adjudicated arena or opening starts.",
+        "summary": "Lane L019 (explore) hypothesis: Changing self-play visits and policy temperature may produce less overfit or more diverse training targets, improving arena score at the same teacher/self-play mix.\nLatest task: Install/expose tinygrad GPU backend on the RTX 3090 and rerun the S0003 tinygrad A/B.\nOutcome: Kept infrastructure. User-space CUDA packages were installed into .venv-tinygrad and dovetail.sh now exports CUDA_HOME/PATH/LD_LIBRARY_PATH for tinygrad. tinygrad now selects the NV backend and runs on the NVIDIA RTX 3090. Single-candidate cached trainer time improved from tinygrad DEV=PYTHON ~50.1s to tinygrad CUDA ~5.43s. Full S0003 tinygrad CUDA sweep completed in 21.97s with checks passing, but the cached pure-Python parallel baseline is still faster at 17.2s for this tiny dataset. Metric stayed 0.75, best weight stayed 0, and all arena games were value-adjudicated.\nFailures to remember: tinygrad CUDA is still slower than cached pure-Python parallel baseline on this very small dataset/full sweep: 21.97s vs 17.2s; Primary metric remains adjudicated and best self-play weight remains 0; not evidence of self-play improvement\nNext action: Keep Python trainer default for current smoke workload. Use tinygrad CUDA for larger model/data A/B where GPU overhead can amortize. Next research step should improve benchmark discrimination: larger/non-adjudicated arena or opening starts.\nRecent lane runs: R0051, R0052",
+        "recent_run_ids": [
+          "R0051",
+          "R0052"
+        ]
+      }
     }
   },
   "nodes": {
@@ -2793,7 +2828,8 @@
       "lane_id": "L017",
       "parent_node_id": "N0051",
       "children": [
-        "N0053"
+        "N0053",
+        "N0054"
       ],
       "phase": "explore",
       "status": "crash",
@@ -2903,6 +2939,96 @@
       "created_at": "2026-05-05T04:39:05.741Z",
       "run_id": "R0050",
       "idea_id": "I0025"
+    },
+    "N0054": {
+      "node_id": "N0054",
+      "lane_id": "L019",
+      "parent_node_id": "N0052",
+      "children": [
+        "N0055"
+      ],
+      "phase": "explore",
+      "status": "discarded",
+      "hypothesis": "Changing self-play visits and policy temperature may produce less overfit or more diverse training targets, improving arena score at the same teacher/self-play mix.",
+      "commit": "6e446b1",
+      "benchmark_id": "tiny_leela_rust_selfplay_mix_arena_v1",
+      "metric": 0.75,
+      "metrics": {
+        "mix_best_arena_score_rate": 0.75,
+        "mix_best_selfplay_weight": 0,
+        "mix_best_distill_student_score": 17.575958,
+        "mix_backend_rust": 1,
+        "mix_weights_tested": 4,
+        "rust_feature_cache_entries": 24,
+        "rust_feature_cache_new_entries": 0,
+        "mix_0_arena_score_rate": 0.75,
+        "mix_0p05_arena_score_rate": 0.5,
+        "mix_0p1_arena_score_rate": 0.5,
+        "mix_0p25_arena_score_rate": 0.5,
+        "mix_0_arena_adjudicated_rate": 1,
+        "mix_0p05_arena_adjudicated_rate": 1,
+        "mix_0p1_arena_adjudicated_rate": 1,
+        "mix_0p25_arena_adjudicated_rate": 1,
+        "legal_move_selection_rate": 1,
+        "playable_shell_ready": 1,
+        "tinygrad_dev_python_run_seconds": 316.731
+      },
+      "deltas": {
+        "delta_vs_parent": 0,
+        "delta_vs_lane_baseline": 0,
+        "delta_vs_root": 0.25,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "discarded",
+        "reason": "Tinygrad integration is functionally wired but not useful without a compiled GPU/CPU backend. CUDA selection failed due to missing nvcc; CPU backend failed due to missing clang; forced DEV=PYTHON completed but took 316.7s versus 17.2s for the cached Python/parallel baseline. Primary metric stayed 0.75 with best weight 0 and all arena games value-adjudicated, so there is no self-play quality improvement and the backend is slower in current configuration."
+      },
+      "created_at": "2026-05-05T04:50:24.707Z",
+      "run_id": "R0051",
+      "idea_id": "I0026"
+    },
+    "N0055": {
+      "node_id": "N0055",
+      "lane_id": "L019",
+      "parent_node_id": "N0054",
+      "children": [],
+      "phase": "explore",
+      "status": "kept",
+      "hypothesis": "Changing self-play visits and policy temperature may produce less overfit or more diverse training targets, improving arena score at the same teacher/self-play mix.",
+      "commit": "df56b6e",
+      "benchmark_id": "tiny_leela_rust_selfplay_mix_arena_v1",
+      "metric": 0.75,
+      "metrics": {
+        "mix_best_arena_score_rate": 0.75,
+        "mix_best_selfplay_weight": 0,
+        "mix_best_distill_student_score": 17.575958,
+        "mix_backend_rust": 1,
+        "mix_weights_tested": 4,
+        "rust_feature_cache_entries": 24,
+        "rust_feature_cache_new_entries": 0,
+        "mix_0_arena_score_rate": 0.75,
+        "mix_0p05_arena_score_rate": 0.5,
+        "mix_0p1_arena_score_rate": 0.5,
+        "mix_0p25_arena_score_rate": 0.5,
+        "legal_move_selection_rate": 1,
+        "playable_shell_ready": 1,
+        "tinygrad_cuda_single_candidate_seconds": 5.43,
+        "tinygrad_cuda_full_sweep_seconds": 21.97,
+        "python_cached_full_sweep_baseline_seconds": 17.185
+      },
+      "deltas": {
+        "delta_vs_parent": 0,
+        "delta_vs_lane_baseline": 0,
+        "delta_vs_root": 0.25,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "kept",
+        "reason": "GPU backend is now usable without sudo/system CUDA install. A single 40-epoch cached candidate improved from tinygrad DEV=PYTHON ~50.1s to tinygrad CUDA ~5.4s. Full S0003 tinygrad CUDA sweep completed with checks in 22.0s, far faster than DEV=PYTHON 316.7s but still slightly slower than the cached pure-Python parallel baseline of 17.2s for this tiny dataset. Primary metric remained 0.75, best weight 0, all arena games value-adjudicated."
+      },
+      "created_at": "2026-05-05T04:52:17.701Z",
+      "run_id": "R0052",
+      "idea_id": "I0026"
     }
   },
   "runs": {
@@ -4673,13 +4799,85 @@
       "next_action": "Do not over-interpret weight=0/adjudicated 0.75 as self-play learning. Next, either remove/reduce value adjudication for a true-play arena or increase arena games/starts now that the sweep is fast; implement a real Rust trainer or tinygrad trainer only if scaling beyond cached frozen features becomes a bottleneck.",
       "timestamp": "2026-05-05T04:39:05.741Z",
       "wall_time_seconds": 17.185
+    },
+    "R0051": {
+      "type": "research_run",
+      "run_id": "R0051",
+      "node_id": "N0054",
+      "lane_id": "L019",
+      "phase": "explore",
+      "status": "discarded",
+      "metric": 0.75,
+      "metrics": {
+        "mix_best_arena_score_rate": 0.75,
+        "mix_best_selfplay_weight": 0,
+        "mix_best_distill_student_score": 17.575958,
+        "mix_backend_rust": 1,
+        "mix_weights_tested": 4,
+        "rust_feature_cache_entries": 24,
+        "rust_feature_cache_new_entries": 0,
+        "mix_0_arena_score_rate": 0.75,
+        "mix_0p05_arena_score_rate": 0.5,
+        "mix_0p1_arena_score_rate": 0.5,
+        "mix_0p25_arena_score_rate": 0.5,
+        "mix_0_arena_adjudicated_rate": 1,
+        "mix_0p05_arena_adjudicated_rate": 1,
+        "mix_0p1_arena_adjudicated_rate": 1,
+        "mix_0p25_arena_adjudicated_rate": 1,
+        "legal_move_selection_rate": 1,
+        "playable_shell_ready": 1,
+        "tinygrad_dev_python_run_seconds": 316.731
+      },
+      "benchmark_id": "tiny_leela_rust_selfplay_mix_arena_v1",
+      "commit": "6e446b1",
+      "hypothesis": "Changing self-play visits and policy temperature may produce less overfit or more diverse training targets, improving arena score at the same teacher/self-play mix.",
+      "implementation": "Installed tinygrad into a local .venv-tinygrad, added --trainer=tinygrad to training/train_student.py, threaded --trainer/--python through selfplay_mix_sweep and dovetail.sh, and ran the S0003 sweep using tinygrad DEV=PYTHON because CUDA required nvcc and CPU backend required clang.",
+      "learned": "Tinygrad integration is functionally wired but not useful without a compiled GPU/CPU backend. CUDA selection failed due to missing nvcc; CPU backend failed due to missing clang; forced DEV=PYTHON completed but took 316.7s versus 17.2s for the cached Python/parallel baseline. Primary metric stayed 0.75 with best weight 0 and all arena games value-adjudicated, so there is no self-play quality improvement and the backend is slower in current configuration.",
+      "next_action": "Install or expose a real tinygrad GPU backend/toolchain (nvcc/CUDA or another supported GPU runtime) and rerun only a trainer A/B before using it in the full dovetail sweep. If GPU backend cannot be installed without sudo/system packages, keep normal Python trainer as default.",
+      "timestamp": "2026-05-05T04:50:24.707Z",
+      "wall_time_seconds": 316.731
+    },
+    "R0052": {
+      "type": "research_run",
+      "run_id": "R0052",
+      "node_id": "N0055",
+      "lane_id": "L019",
+      "phase": "explore",
+      "status": "kept",
+      "metric": 0.75,
+      "metrics": {
+        "mix_best_arena_score_rate": 0.75,
+        "mix_best_selfplay_weight": 0,
+        "mix_best_distill_student_score": 17.575958,
+        "mix_backend_rust": 1,
+        "mix_weights_tested": 4,
+        "rust_feature_cache_entries": 24,
+        "rust_feature_cache_new_entries": 0,
+        "mix_0_arena_score_rate": 0.75,
+        "mix_0p05_arena_score_rate": 0.5,
+        "mix_0p1_arena_score_rate": 0.5,
+        "mix_0p25_arena_score_rate": 0.5,
+        "legal_move_selection_rate": 1,
+        "playable_shell_ready": 1,
+        "tinygrad_cuda_single_candidate_seconds": 5.43,
+        "tinygrad_cuda_full_sweep_seconds": 21.97,
+        "python_cached_full_sweep_baseline_seconds": 17.185
+      },
+      "benchmark_id": "tiny_leela_rust_selfplay_mix_arena_v1",
+      "commit": "df56b6e",
+      "hypothesis": "Changing self-play visits and policy temperature may produce less overfit or more diverse training targets, improving arena score at the same teacher/self-play mix.",
+      "implementation": "Installed user-space CUDA 13 pip packages into .venv-tinygrad (nvidia-cuda-nvcc/runtime/cupti), exported CUDA_HOME/PATH/LD_LIBRARY_PATH from dovetail.sh when TINY_LEELA_TRAINER=tinygrad, verified tinygrad selects the NV backend on the RTX 3090, then reran the full S0003 sweep using tinygrad CUDA.",
+      "learned": "GPU backend is now usable without sudo/system CUDA install. A single 40-epoch cached candidate improved from tinygrad DEV=PYTHON ~50.1s to tinygrad CUDA ~5.4s. Full S0003 tinygrad CUDA sweep completed with checks in 22.0s, far faster than DEV=PYTHON 316.7s but still slightly slower than the cached pure-Python parallel baseline of 17.2s for this tiny dataset. Primary metric remained 0.75, best weight 0, all arena games value-adjudicated.",
+      "next_action": "Keep normal Python trainer as default for the current tiny dataset. Use tinygrad CUDA only for larger batches/models where launch/compile overhead is amortized, or add a larger trainer-only A/B workload before switching defaults. Next quality-focused step remains a more discriminating non-adjudicated/larger arena.",
+      "timestamp": "2026-05-05T04:52:17.701Z",
+      "wall_time_seconds": 21.97
     }
   },
   "ids": {
     "next_lane": 20,
-    "next_node": 54,
-    "next_run": 51,
-    "next_idea": 27
+    "next_node": 56,
+    "next_run": 53,
+    "next_idea": 31
   },
   "global_best_node_id": "N0052"
 }

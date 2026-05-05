@@ -59,6 +59,10 @@ fn main() {
     let mut illegal_losses = 0usize;
     let mut plies_total = 0usize;
     let mut adjudicated_games = 0usize;
+    let mut true_play_wins = 0usize;
+    let mut true_play_draws = 0usize;
+    let mut true_play_losses = 0usize;
+    let mut adjudicated_score_sum = 0.0f64;
 
     for game in 0..games {
         let candidate_color = if game % 2 == 0 { Color::White } else { Color::Black };
@@ -88,15 +92,23 @@ fn main() {
                 eprintln!("[rust-arena visits={visits}] game {}/{} ply={}/{} move={} elapsed_s={:.1}", game + 1, games, plies, max_plies, uci, started.elapsed().as_secs_f64());
             }
         }
+        let true_white_score = white_score.unwrap_or(0.5);
+        let true_score = candidate_score(true_white_score, candidate_color);
+        if true_score == 1.0 { true_play_wins += 1; } else if true_score == 0.0 { true_play_losses += 1; } else { true_play_draws += 1; }
         let (white_score, adjudicated) = if let Some(score) = white_score { (score, false) } else { adjudicated_white_score(&board, if board.turn == candidate_color { &candidate } else { &baseline }, &adjudicate, adjudicate_threshold) };
-        if adjudicated { adjudicated_games += 1; }
         let score = candidate_score(white_score, candidate_color);
+        if adjudicated {
+            adjudicated_games += 1;
+            adjudicated_score_sum += score as f64;
+        }
         if score == 1.0 { wins += 1; } else if score == 0.0 { losses += 1; } else { draws += 1; }
         plies_total += plies;
         eprintln!("[rust-arena visits={visits}] game {}/{} done score={} wdl={}/{}/{} illegal={} elapsed_s={:.1}", game + 1, games, score, wins, draws, losses, illegal_losses, started.elapsed().as_secs_f64());
     }
 
     let score_rate = (wins as f64 + 0.5 * draws as f64) / games.max(1) as f64;
+    let true_play_score_rate = (true_play_wins as f64 + 0.5 * true_play_draws as f64) / games.max(1) as f64;
+    let adjudicated_score_rate = if adjudicated_games == 0 { 0.5 } else { adjudicated_score_sum / adjudicated_games.max(1) as f64 };
     let elo = if score_rate <= 0.0 { -999.0 } else if score_rate >= 1.0 { 999.0 } else { -400.0 * ((1.0 / score_rate) - 1.0).log10() };
     let promotion_ready = if score_rate > 0.55 && illegal_losses == 0 { 1 } else { 0 };
     println!("METRIC arena_backend_rust=1");
@@ -108,6 +120,11 @@ fn main() {
     println!("METRIC arena_losses={losses}");
     println!("METRIC arena_illegal_losses={illegal_losses}");
     println!("METRIC arena_adjudicated_rate={:.6}", adjudicated_games as f64 / games.max(1) as f64);
+    println!("METRIC arena_true_play_score_rate={true_play_score_rate:.6}");
+    println!("METRIC arena_adjudicated_score_rate={adjudicated_score_rate:.6}");
+    println!("METRIC arena_true_play_wins={true_play_wins}");
+    println!("METRIC arena_true_play_draws={true_play_draws}");
+    println!("METRIC arena_true_play_losses={true_play_losses}");
     println!("METRIC arena_avg_plies={:.6}", plies_total as f64 / games.max(1) as f64);
     println!("METRIC arena_promotion_ready={promotion_ready}");
 }

@@ -99,6 +99,8 @@ for (const candidate of results) {
   console.log(`METRIC ${prefix}_arena_candidate_elo_estimate=${(arenaMetrics.arena_candidate_elo_estimate ?? 0).toFixed(6)}`);
   console.log(`METRIC ${prefix}_arena_illegal_losses=${arenaMetrics.arena_illegal_losses ?? 0}`);
   console.log(`METRIC ${prefix}_arena_adjudicated_rate=${(arenaMetrics.arena_adjudicated_rate ?? 0).toFixed(6)}`);
+  console.log(`METRIC ${prefix}_arena_true_play_score_rate=${(arenaMetrics.arena_true_play_score_rate ?? arenaMetrics.arena_score_rate ?? 0).toFixed(6)}`);
+  console.log(`METRIC ${prefix}_arena_adjudicated_score_rate=${(arenaMetrics.arena_adjudicated_score_rate ?? 0.5).toFixed(6)}`);
   if (!best || (arenaMetrics.arena_score_rate ?? -1) > (best.arenaMetrics.arena_score_rate ?? -1)) best = candidate;
 }
 
