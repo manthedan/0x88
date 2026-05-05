@@ -9,4 +9,5 @@ export LD_LIBRARY_PATH="$CUDA_HOME/lib:${LD_LIBRARY_PATH:-}"
   --max-rows "${BOARD_CNN_ROWS:-20000}" \
   --epochs "${BOARD_CNN_EPOCHS:-3}" \
   --channels "${BOARD_CNN_CHANNELS:-16}" \
+  --lr "${BOARD_CNN_LR:-0.001}" \
   --out artifacts/student_board_cnn_autoresearch.json
