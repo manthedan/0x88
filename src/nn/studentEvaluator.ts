@@ -1,5 +1,5 @@
 import { boardToFen, type BoardState } from '../chess/board.ts';
-import { pseudoLegalMoves } from '../chess/movegen.ts';
+import { legalMoves } from '../chess/movegen.ts';
 import { moveToActionId, moveToUci } from '../chess/moveCodec.ts';
 import type { Evaluation, Evaluator } from './evaluator.ts';
 
@@ -179,7 +179,7 @@ export class StudentEvaluator implements Evaluator {
     const valueFeatures = this.features(board, true);
     const logits = this.artifact.policy_weights.map((weights) => dot(weights, policyFeatures));
     const probs = softmax(logits);
-    const legal = pseudoLegalMoves(board);
+    const legal = legalMoves(board);
     const legalMass = legal.reduce((sum, move) => sum + (probs[this.moveIndex.get(moveToUci(move)) ?? -1] ?? 0), 0);
     const policy = new Map<number, number>();
     if (legal.length && legalMass <= 0) {

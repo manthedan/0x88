@@ -2,7 +2,7 @@
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { parseFen, START_FEN, boardToFen, squareName } from '../src/chess/board.ts';
-import { pseudoLegalMoves, makeMove } from '../src/chess/movegen.ts';
+import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
 import { chooseMove } from '../src/search/puct.ts';
 import { StudentEvaluator } from '../src/nn/studentEvaluator.ts';
@@ -19,21 +19,22 @@ const modelPath = arg('--model', 'artifacts/student_distill_benchmark.json');
 const port = Number(arg('--port', process.env.PORT ?? '5173'));
 const host = arg('--host', process.env.HOST ?? '127.0.0.1');
 const evaluator = StudentEvaluator.fromJson(readFileSync(modelPath, 'utf8'));
+const searchVisits = Number(arg('--visits', process.env.TINY_LEELA_SEARCH_VISITS ?? '8'));
 let board = parseFen(arg('--fen', START_FEN));
 let lastEngine = null;
 let lastMessage = 'Ready. Click one of your pieces, then a highlighted target.';
 
-function legalMoves() {
-  return pseudoLegalMoves(board);
+function currentLegalMoves() {
+  return legalMoves(board);
 }
 
 function legalMoveByUci(uci) {
-  return legalMoves().find((move) => moveToUci(move) === uci) ?? null;
+  return currentLegalMoves().find((move) => moveToUci(move) === uci) ?? null;
 }
 
 function boardPayload() {
   const evaluation = evaluator.evaluate(board);
-  const legal = legalMoves();
+  const legal = currentLegalMoves();
   const moves = legal.map((move) => ({
     uci: moveToUci(move),
     from: squareName(move.from),
@@ -53,7 +54,7 @@ function boardPayload() {
 }
 
 async function enginePly() {
-  const result = await chooseMove(board, evaluator);
+  const result = await chooseMove(board, evaluator, { visits: searchVisits });
   if (!result.move) {
     lastEngine = null;
     lastMessage = 'No engine move available.';

@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { parseFen, START_FEN } from '../src/chess/board.ts';
-import { pseudoLegalMoves, makeMove } from '../src/chess/movegen.ts';
+import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
 import { chooseMove } from '../src/search/puct.ts';
 import { StudentEvaluator } from '../src/nn/studentEvaluator.ts';
@@ -24,18 +24,18 @@ const t0 = performance.now();
 
 for (const fen of fens) {
   const board = parseFen(fen);
-  const legal = pseudoLegalMoves(board);
+  const legal = legalMoves(board);
   if (!legal.length) continue;
   const evaluation = evaluator.evaluate(board);
   priorMass += legal.reduce((sum, move) => sum + (evaluation.policy.get(moveToActionId(move)) ?? 0), 0);
-  const result = await chooseMove(board, evaluator);
+  const result = await chooseMove(board, evaluator, { visits: 1 });
   if (result.move && legal.some((move) => moveToUci(move) === moveToUci(result.move))) legalSelections++;
   evaluatedPositions++;
 }
 
 let board = parseFen(START_FEN);
 for (let i = 0; i < 12; i++) {
-  const result = await chooseMove(board, evaluator);
+  const result = await chooseMove(board, evaluator, { visits: 1 });
   if (!result.move) break;
   board = makeMove(board, result.move);
   pliesCompleted++;

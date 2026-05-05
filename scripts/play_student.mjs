@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { parseFen, START_FEN, boardToFen } from '../src/chess/board.ts';
-import { pseudoLegalMoves, makeMove } from '../src/chess/movegen.ts';
+import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { moveFromUci, moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
 import { chooseMove } from '../src/search/puct.ts';
 import { StudentEvaluator } from '../src/nn/studentEvaluator.ts';
@@ -31,11 +31,13 @@ function render(board) {
 }
 
 function legalUci(board) {
-  return new Map(pseudoLegalMoves(board).map((move) => [moveToUci(move), move]));
+  return new Map(legalMoves(board).map((move) => [moveToUci(move), move]));
 }
 
+const searchVisits = Number(arg('--visits', process.env.TINY_LEELA_SEARCH_VISITS ?? '8'));
+
 async function engineMove(board, evaluator) {
-  const result = await chooseMove(board, evaluator);
+  const result = await chooseMove(board, evaluator, { visits: searchVisits });
   if (!result.move) return { board, result, uci: null };
   return { board: makeMove(board, result.move), result, uci: moveToUci(result.move) };
 }
