@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${TINY_LEELA_TRAINER:-python}" == "tinygrad" && -d ".venv-tinygrad/lib/python3.12/site-packages/nvidia/cu13" ]]; then
+  export CUDA_HOME="$PWD/.venv-tinygrad/lib/python3.12/site-packages/nvidia/cu13"
+  export PATH="$CUDA_HOME/bin:$PATH"
+  export LD_LIBRARY_PATH="$CUDA_HOME/lib:${LD_LIBRARY_PATH:-}"
+fi
 
 mkdir -p artifacts/logs
 DOVETAIL_LOG="artifacts/logs/dovetail-$(date -u +%Y%m%dT%H%M%SZ).log"
