@@ -287,13 +287,21 @@ pub fn move_to_action_id(m: Move) -> u32 {
 pub struct StudentArtifact {
     pub kind: String,
     pub moves: Vec<String>,
-    pub policy_weights: Vec<Vec<f32>>,
-    pub wdl_weights: Vec<Vec<f32>>,
-    pub policy_feature_dim: usize,
-    pub wdl_feature_dim: usize,
+    #[serde(default)] pub policy_weights: Vec<Vec<f32>>,
+    #[serde(default)] pub wdl_weights: Vec<Vec<f32>>,
+    #[serde(default)] pub policy_feature_dim: usize,
+    #[serde(default)] pub wdl_feature_dim: usize,
     pub weight_average_count: Option<u32>,
     pub conv_channels: Option<usize>,
     pub conv_layers: Option<usize>,
+    pub feature_dim: Option<usize>,
+    pub hidden: Option<usize>,
+    pub w1: Option<Vec<Vec<f32>>>,
+    pub b1: Option<Vec<f32>>,
+    pub policy_w: Option<Vec<Vec<f32>>>,
+    pub policy_b: Option<Vec<f32>>,
+    pub wdl_w: Option<Vec<Vec<f32>>>,
+    pub wdl_b: Option<Vec<f32>>,
 }
 
 pub struct Evaluation { pub policy: Vec<(u32, f32)>, pub wdl: [f32; 3] }
@@ -313,7 +321,7 @@ impl StudentEvaluator {
     pub fn from_json(json: &str) -> Result<Self, String> {
         let artifact: StudentArtifact = serde_json::from_str(json).map_err(|e| e.to_string())?;
         let move_index = artifact.moves.iter().enumerate().map(|(i, m)| (m.clone(), i)).collect();
-        let conv_params = if artifact.kind == "frozen_conv_fen_student" {
+        let conv_params = if artifact.kind == "frozen_conv_fen_student" || artifact.kind == "frozen_conv_feature_mlp_student" {
             Some(precompute_conv_params(artifact.conv_channels.unwrap_or(0), artifact.conv_layers.unwrap_or(0)))
         } else { None };
         Ok(Self { artifact, move_index, conv_params })
@@ -417,16 +425,30 @@ pub fn frozen_conv_student_features(fen: &str, channels: usize, layers: usize) -
 impl PositionEvaluator for StudentEvaluator {
     fn evaluate(&self, board: &Board) -> Evaluation {
         let fen = board_to_fen(board);
-        let policy_features = if self.artifact.kind == "frozen_conv_fen_student" { conv_student_features(&fen, self.artifact.conv_channels.unwrap_or(0), self.artifact.conv_layers.unwrap_or(0), self.conv_params.as_ref()) } else { fen_features(&fen).unwrap().to_vec() };
-        let value_features = if self.artifact.kind == "frozen_conv_fen_student" { policy_features.clone() } else { wdl_features_from_fen(&fen).unwrap() };
-        let logits: Vec<f32> = self.artifact.policy_weights.iter().map(|w| dot(w, &policy_features)).collect();
+        let policy_features = if self.artifact.kind == "frozen_conv_fen_student" || self.artifact.kind == "frozen_conv_feature_mlp_student" { conv_student_features(&fen, self.artifact.conv_channels.unwrap_or(64), self.artifact.conv_layers.unwrap_or(6), self.conv_params.as_ref()) } else { fen_features(&fen).unwrap().to_vec() };
+        let value_features = if self.artifact.kind == "frozen_conv_fen_student" || self.artifact.kind == "frozen_conv_feature_mlp_student" { policy_features.clone() } else { wdl_features_from_fen(&fen).unwrap() };
+        let (logits, wdl_logits): (Vec<f32>, Vec<f32>) = if self.artifact.kind == "frozen_conv_feature_mlp_student" {
+            let w1 = self.artifact.w1.as_ref().unwrap(); let b1 = self.artifact.b1.as_ref().unwrap();
+            let mut hidden = vec![0.0; b1.len()];
+            for h in 0..b1.len() {
+                let mut acc = b1[h];
+                for (f, &x) in policy_features.iter().enumerate() { acc += x * w1.get(f).and_then(|row| row.get(h)).copied().unwrap_or(0.0); }
+                hidden[h] = acc.max(0.0);
+            }
+            let pw = self.artifact.policy_w.as_ref().unwrap(); let pb = self.artifact.policy_b.as_ref().unwrap();
+            let ww = self.artifact.wdl_w.as_ref().unwrap(); let wb = self.artifact.wdl_b.as_ref().unwrap();
+            let pl = (0..pb.len()).map(|m| pb[m] + hidden.iter().enumerate().map(|(h, &x)| x * pw.get(h).and_then(|row| row.get(m)).copied().unwrap_or(0.0)).sum::<f32>()).collect();
+            let wl = (0..wb.len()).map(|k| wb[k] + hidden.iter().enumerate().map(|(h, &x)| x * ww.get(h).and_then(|row| row.get(k)).copied().unwrap_or(0.0)).sum::<f32>()).collect();
+            (pl, wl)
+        } else {
+            (self.artifact.policy_weights.iter().map(|w| dot(w, &policy_features)).collect(), self.artifact.wdl_weights.iter().map(|w| dot(w, &value_features)).collect())
+        };
         let probs = softmax(&logits);
         let legal = legal_moves(board);
         let mut raw = Vec::with_capacity(legal.len());
         let mut legal_mass = 0f32;
         for m in legal.iter() { let p = self.move_index.get(&move_to_uci(*m)).and_then(|&i| probs.get(i)).copied().unwrap_or(0.0).max(0.0); raw.push(p); legal_mass += p; }
         let policy = if legal.is_empty() { Vec::new() } else if legal_mass <= 0.0 { legal.iter().map(|&m| (move_to_action_id(m), 1.0 / legal.len() as f32)).collect() } else { legal.iter().zip(raw.iter()).map(|(&m, &p)| (move_to_action_id(m), p / legal_mass)).collect() };
-        let wdl_logits: Vec<f32> = self.artifact.wdl_weights.iter().map(|w| dot(w, &value_features)).collect();
         let w = softmax(&wdl_logits);
         Evaluation { policy, wdl: [w.first().copied().unwrap_or(0.0), w.get(1).copied().unwrap_or(0.0), w.get(2).copied().unwrap_or(0.0)] }
     }

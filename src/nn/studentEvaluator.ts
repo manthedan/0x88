@@ -7,15 +7,23 @@ const PIECES = 'PNBRQKpnbrqk';
 const PIECE_INDEX = new Map([...PIECES].map((piece, index) => [piece, index]));
 
 export interface StudentArtifact {
-  kind: 'linear_fen_student' | 'frozen_conv_fen_student';
+  kind: 'linear_fen_student' | 'frozen_conv_fen_student' | 'frozen_conv_feature_mlp_student';
   moves: string[];
-  policy_weights: number[][];
-  wdl_weights: number[][];
-  policy_feature_dim: number;
-  wdl_feature_dim: number;
+  policy_weights?: number[][];
+  wdl_weights?: number[][];
+  policy_feature_dim?: number;
+  wdl_feature_dim?: number;
   weight_average_count?: number;
   conv_channels?: number;
   conv_layers?: number;
+  feature_dim?: number;
+  hidden?: number;
+  w1?: number[][];
+  b1?: number[];
+  policy_w?: number[][];
+  policy_b?: number[];
+  wdl_w?: number[][];
+  wdl_b?: number[];
 }
 
 function softmax(xs: number[]): number[] {
@@ -165,8 +173,8 @@ export class StudentEvaluator implements Evaluator {
     const cached = this.cache.get(key);
     if (cached) return cached;
     let features: number[];
-    if (this.artifact.kind === 'frozen_conv_fen_student') {
-      features = convStudentFeatures(fen, this.artifact.conv_channels ?? 0, this.artifact.conv_layers ?? 0);
+    if (this.artifact.kind === 'frozen_conv_fen_student' || this.artifact.kind === 'frozen_conv_feature_mlp_student') {
+      features = convStudentFeatures(fen, this.artifact.conv_channels ?? 64, this.artifact.conv_layers ?? 6);
     } else {
       features = valueHead ? wdlFeatures(fen) : fenFeatures(fen);
     }
@@ -177,7 +185,16 @@ export class StudentEvaluator implements Evaluator {
   evaluate(board: BoardState): Evaluation {
     const policyFeatures = this.features(board, false);
     const valueFeatures = this.features(board, true);
-    const logits = this.artifact.policy_weights.map((weights) => dot(weights, policyFeatures));
+    let logits: number[];
+    let wdlLogits: number[];
+    if (this.artifact.kind === 'frozen_conv_feature_mlp_student') {
+      const hidden = (this.artifact.b1 ?? []).map((bias, h) => Math.max(0, bias + dot((this.artifact.w1 ?? []).map((row) => row[h] ?? 0), policyFeatures)));
+      logits = (this.artifact.policy_b ?? []).map((bias, move) => bias + dot((this.artifact.policy_w ?? []).map((row) => row[move] ?? 0), hidden));
+      wdlLogits = (this.artifact.wdl_b ?? []).map((bias, k) => bias + dot((this.artifact.wdl_w ?? []).map((row) => row[k] ?? 0), hidden));
+    } else {
+      logits = (this.artifact.policy_weights ?? []).map((weights) => dot(weights, policyFeatures));
+      wdlLogits = (this.artifact.wdl_weights ?? []).map((weights) => dot(weights, valueFeatures));
+    }
     const probs = softmax(logits);
     const legal = legalMoves(board);
     const legalMass = legal.reduce((sum, move) => sum + (probs[this.moveIndex.get(moveToUci(move)) ?? -1] ?? 0), 0);
@@ -190,7 +207,7 @@ export class StudentEvaluator implements Evaluator {
         policy.set(moveToActionId(move), index === undefined ? 0 : probs[index] / legalMass);
       }
     }
-    const wdl = softmax(this.artifact.wdl_weights.map((weights) => dot(weights, valueFeatures))) as [number, number, number];
+    const wdl = softmax(wdlLogits) as [number, number, number];
     return { policy, wdl };
   }
 }
