@@ -31,6 +31,7 @@
     "distill:validate": "python3 training/validate_teacher_labels.py",
     "stockfish:check": "python3 scripts/check_stockfish_teacher.py",
     "stockfish:query": "python3 scripts/query_stockfish_teacher.py",
+    "lichess:ingest": "node --experimental-strip-types scripts/lichess_pgn_to_training.mjs",
     "distill:train": "python3 training/train_student.py"
   },
   "devDependencies": {

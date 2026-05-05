@@ -70,6 +70,8 @@ const seed = Number(arg('--seed', '1'));
 const progressEvery = Math.max(1, Number(arg('--progress-every', process.env.TINY_LEELA_PROGRESS_EVERY ?? '1')));
 const adjudicate = arg('--adjudicate', 'terminal');
 const adjudicateThreshold = Number(arg('--adjudicate-threshold', '0.02'));
+const openingFensPath = arg('--opening-fens', '');
+const openingFens = openingFensPath ? readFileSync(openingFensPath, 'utf8').split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#')).map((line) => line.includes('\t') ? line.split('\t').at(-1) : line) : [];
 if (backend === 'rust' && !process.argv.includes('--js-rust-shell')) {
   const bin = ensureRustBin('tiny-leela-rust-selfplay');
   const forwarded = process.argv.slice(2).filter((value) => value !== '--backend=rust' && value !== '--backend' && value !== 'rust');
@@ -91,7 +93,7 @@ logProgress(`start games=${games} max_plies=${maxPlies} out=${outPath}`);
 
 for (let game = 0; game < games; game++) {
   logProgress(`game ${game + 1}/${games} start positions=${rows.length}`);
-  let board = parseFen(START_FEN);
+  let board = openingFens.length ? parseFen(openingFens[Math.min(openingFens.length - 1, Math.floor(rng() * openingFens.length))]) : parseFen(START_FEN);
   const pending = [];
   let whiteScore = null;
   for (let ply = 0; ply < maxPlies; ply++) {
@@ -133,6 +135,7 @@ mkdirSync(dirname(outPath), { recursive: true });
 writeFileSync(outPath, rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : ''));
 
 console.log(`METRIC selfplay_backend_${backend}=1`);
+console.log(`METRIC selfplay_opening_fens=${openingFens.length}`);
 console.log(`METRIC selfplay_games=${completedGames}`);
 console.log(`METRIC selfplay_positions=${rows.length}`);
 console.log(`METRIC selfplay_avg_plies=${(totalPlies / Math.max(1, completedGames)).toFixed(6)}`);

@@ -50,6 +50,18 @@ fn main() {
     let progress_every: usize = arg("--progress-every", "1").parse().unwrap_or(1).max(1);
     let adjudicate = arg("--adjudicate", "terminal");
     let adjudicate_threshold: f32 = arg("--adjudicate-threshold", "0.02").parse().unwrap_or(0.02);
+    let opening_fens_path = arg("--opening-fens", "");
+    let opening_fens: Vec<String> = if opening_fens_path.is_empty() {
+        Vec::new()
+    } else {
+        fs::read_to_string(&opening_fens_path)
+            .expect("read opening fens")
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| line.split_once('\t').map(|(_, fen)| fen).unwrap_or(line).to_string())
+            .collect()
+    };
     let mut rng: u32 = arg("--seed", "1").parse().unwrap_or(1);
 
     let json_text = fs::read_to_string(&model_path).expect("read model");
@@ -66,7 +78,12 @@ fn main() {
 
     for game in 0..games {
         eprintln!("[rust-selfplay visits={visits}] game {}/{} start positions={}", game + 1, games, rows.len());
-        let mut board = parse_fen(START_FEN).expect("start fen");
+        let mut board = if opening_fens.is_empty() {
+            parse_fen(START_FEN).expect("start fen")
+        } else {
+            let idx = ((rng_next(&mut rng) * opening_fens.len() as f32) as usize).min(opening_fens.len() - 1);
+            parse_fen(&opening_fens[idx]).expect("opening fen")
+        };
         let mut pending: Vec<(serde_json::Value, Color)> = Vec::new();
         let mut white_score: Option<f32> = None;
         for ply in 0..max_plies {
@@ -125,6 +142,7 @@ fn main() {
     let bytes = fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
 
     println!("METRIC selfplay_backend_rust=1");
+    println!("METRIC selfplay_opening_fens={}", opening_fens.len());
     println!("METRIC selfplay_games={completed_games}");
     println!("METRIC selfplay_positions={}", rows.len());
     println!("METRIC selfplay_avg_plies={:.6}", total_plies as f64 / completed_games.max(1) as f64);

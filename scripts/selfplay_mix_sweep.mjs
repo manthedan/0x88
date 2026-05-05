@@ -49,6 +49,7 @@ const pythonBin = arg('--python', process.env.TINY_LEELA_PYTHON || 'python3');
 const featureCache = arg('--feature-cache', primaryConvArch ? `artifacts/cache/conv_features_${primaryConvArch}.json` : '');
 const trainPaths = arg('--train', 'data/teacher_labels.jsonl,data/stockfish_teacher_labels.jsonl').split(',').filter(Boolean);
 const selectionMetric = arg('--selection-metric', 'arena_score_rate');
+const openingFens = arg('--opening-fens', '');
 
 const startedAt = Date.now();
 const logProgress = (message) => process.stderr.write(`[mix-sweep backend=${backend}] ${message}\n`);
@@ -56,7 +57,9 @@ logProgress(`start weights=${weights.join(',')} selfplay=${selfplayPath}`);
 
 if (!existsSync(selfplayPath) || process.argv.includes('--regenerate')) {
   logProgress(`generating self-play rows at ${selfplayPath}`);
-  const selfplayOutput = run('npm', ['run', 'selfplay:generate', '--silent', '--', `--backend=${backend}`, `--games=${games}`, `--visits=${selfplayVisits}`, `--max-plies=${maxPlies}`, `--out=${selfplayPath}`, `--adjudicate=${adjudicate}`, `--adjudicate-threshold=${adjudicateThreshold}`]);
+  const selfplayArgs = ['run', 'selfplay:generate', '--silent', '--', `--backend=${backend}`, `--games=${games}`, `--visits=${selfplayVisits}`, `--max-plies=${maxPlies}`, `--out=${selfplayPath}`, `--adjudicate=${adjudicate}`, `--adjudicate-threshold=${adjudicateThreshold}`];
+  if (openingFens) selfplayArgs.push(`--opening-fens=${openingFens}`);
+  const selfplayOutput = run('npm', selfplayArgs);
   process.stderr.write(selfplayOutput);
   const selfplayMetrics = metrics(selfplayOutput);
   for (const [key, value] of Object.entries(selfplayMetrics)) console.log(`METRIC mix_${key}=${value.toFixed(6)}`);

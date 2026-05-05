@@ -1,0 +1,25 @@
+[Event "Rated rapid game"]
+[Site "https://lichess.org/smoke1"]
+[White "Alice"]
+[Black "Bob"]
+[Result "1-0"]
+[UTCDate "2024.01.01"]
+[WhiteElo "2200"]
+[BlackElo "2210"]
+[Variant "Standard"]
+[TimeControl "600+0"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 9. h3 Nb8 10. d4 Nbd7 1-0
+
+[Event "Rated blitz game"]
+[Site "https://lichess.org/smoke2"]
+[White "Carol"]
+[Black "Dave"]
+[Result "0-1"]
+[UTCDate "2024.01.01"]
+[WhiteElo "2300"]
+[BlackElo "2290"]
+[Variant "Standard"]
+[TimeControl "300+0"]
+
+1. d4 Nf6 2. c4 g6 3. Nc3 Bg7 4. e4 d6 5. Nf3 O-O 6. Be2 e5 7. O-O Nc6 8. d5 Ne7 9. b4 Nh5 10. Re1 f5 0-1

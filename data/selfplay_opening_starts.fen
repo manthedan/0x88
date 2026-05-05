@@ -1,0 +1,10 @@
+# Common opening starts used to diversify weak self-play replay buffers.
+# id<TAB>fen
+italian_after_3bc4	r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3
+ruy_lopez_after_3bb5	r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3
+queens_gambit_declined	rnbqkbnr/ppp1pppp/8/3p4/2PP4/8/PP2PPPP/RNBQKBNR b KQkq c3 0 2
+sicilian_open	rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2
+french_advance	rnbqkbnr/ppp2ppp/4p3/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3
+caro_kann_advance	rnbqkbnr/pp1ppppp/8/2p1P3/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 2
+kings_indian_setup	rnbqk2r/ppppppbp/5np1/8/3P4/5N2/PPP1PPPP/RNBQKB1R w KQkq - 2 4
+english_opening	rnbqkbnr/pppppppp/8/8/2P5/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 1
