@@ -3,8 +3,9 @@ import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToActionId, type Move } from '../chess/moveCodec.ts';
 import type { Evaluator } from '../nn/evaluator.ts';
 
-export interface SearchResult { move: Move | null; visits: number; value: number; }
-export interface SearchOptions { visits?: number; cpuct?: number; }
+export interface SearchPolicyEntry { move: Move; visits: number; prior: number; q: number; probability: number; }
+export interface SearchResult { move: Move | null; visits: number; value: number; policy: SearchPolicyEntry[]; }
+export interface SearchOptions { visits?: number; cpuct?: number; temperature?: number; }
 
 interface Edge {
   move: Move;
@@ -74,13 +75,31 @@ async function simulate(node: Node, evaluator: Evaluator, cpuct: number): Promis
   return -childValue;
 }
 
-export async function chooseMove(board: BoardState, evaluator: Evaluator, options: SearchOptions = {}): Promise<SearchResult> {
+function visitPolicy(edges: Edge[], temperature: number): SearchPolicyEntry[] {
+  if (!edges.length) return [];
+  const tau = Math.max(0, temperature);
+  if (tau === 0) {
+    const best = edges.reduce((a, b) => b.visits > a.visits ? b : a);
+    return edges.map((edge) => ({ move: edge.move, visits: edge.visits, prior: edge.prior, q: edgeQForParent(edge), probability: edge === best ? 1 : 0 }));
+  }
+  const weights = edges.map((edge) => Math.pow(Math.max(edge.visits, 1e-9), 1 / tau));
+  const total = weights.reduce((a, b) => a + b, 0) || 1;
+  return edges.map((edge, i) => ({ move: edge.move, visits: edge.visits, prior: edge.prior, q: edgeQForParent(edge), probability: weights[i] / total }));
+}
+
+export async function searchRoot(board: BoardState, evaluator: Evaluator, options: SearchOptions = {}): Promise<SearchResult> {
   const visits = Math.max(1, Math.floor(options.visits ?? 8));
   const cpuct = options.cpuct ?? 1.5;
+  const temperature = options.temperature ?? 1;
   const root: Node = { board, expanded: false, terminalValue: null, edges: [] };
   const rootValue = await expand(root, evaluator);
-  if (!root.edges.length) return { move: null, visits: 0, value: rootValue };
+  if (!root.edges.length) return { move: null, visits: 0, value: rootValue, policy: [] };
   for (let i = 0; i < visits; i++) await simulate(root, evaluator, cpuct);
-  const best = root.edges.reduce((a, b) => b.visits > a.visits ? b : a);
-  return { move: best.move, visits: root.edges.reduce((sum, edge) => sum + edge.visits, 0), value: edgeQForParent(best) };
+  const policy = visitPolicy(root.edges, temperature);
+  const bestEntry = policy.reduce((a, b) => b.probability > a.probability ? b : a);
+  return { move: bestEntry.move, visits: root.edges.reduce((sum, edge) => sum + edge.visits, 0), value: bestEntry.q, policy };
+}
+
+export async function chooseMove(board: BoardState, evaluator: Evaluator, options: SearchOptions = {}): Promise<SearchResult> {
+  return searchRoot(board, evaluator, { ...options, temperature: options.temperature ?? 0 });
 }
