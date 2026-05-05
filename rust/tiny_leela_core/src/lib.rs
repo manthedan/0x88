@@ -313,6 +313,7 @@ pub struct StudentArtifact {
     pub policy_bias: Option<Vec<f32>>,
     pub wdl_weight: Option<Vec<Vec<f32>>>,
     pub wdl_bias: Option<Vec<f32>>,
+    pub policy_head: Option<String>,
 }
 
 pub struct Evaluation { pub policy: Vec<(u32, f32)>, pub wdl: [f32; 3] }
@@ -417,10 +418,12 @@ fn board_cnn_forward(fen: &str, a: &StudentArtifact) -> (Vec<f32>, Vec<f32>) {
     let h2 = conv_relu_res(&h1, a.c2_weight.as_ref().unwrap(), a.c2_bias.as_ref().unwrap(), true);
     let h3 = conv_relu_res(&h2, a.c3_weight.as_ref().unwrap(), a.c3_bias.as_ref().unwrap(), true);
     let mut pooled = vec![0f32; h3.len()];
-    for c in 0..h3.len() { for r in 0..8 { for f in 0..8 { pooled[c] += h3[c][r][f] / 64.0; } } }
+    let mut spatial = Vec::with_capacity(h3.len() * 64);
+    for c in 0..h3.len() { for r in 0..8 { for f in 0..8 { pooled[c] += h3[c][r][f] / 64.0; spatial.push(h3[c][r][f]); } } }
+    let policy_features = if a.policy_head.as_deref() == Some("spatial") { &spatial } else { &pooled };
     let pw = a.policy_weight.as_ref().unwrap(); let pb = a.policy_bias.as_ref().unwrap();
     let vw = a.wdl_weight.as_ref().unwrap(); let vb = a.wdl_bias.as_ref().unwrap();
-    let policy = (0..pb.len()).map(|m| pb[m] + pooled.iter().enumerate().map(|(c, &x)| x * pw[m][c]).sum::<f32>()).collect();
+    let policy = (0..pb.len()).map(|m| pb[m] + policy_features.iter().enumerate().map(|(c, &x)| x * pw[m][c]).sum::<f32>()).collect();
     let wdl = (0..vb.len()).map(|k| vb[k] + pooled.iter().enumerate().map(|(c, &x)| x * vw[k][c]).sum::<f32>()).collect();
     (policy, wdl)
 }

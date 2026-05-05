@@ -35,6 +35,7 @@ export interface StudentArtifact {
   policy_bias?: number[];
   wdl_weight?: number[][];
   wdl_bias?: number[];
+  policy_head?: 'pooled' | 'spatial';
 }
 
 function softmax(xs: number[]): number[] {
@@ -148,8 +149,10 @@ function boardCnnLogits(fen: string, artifact: StudentArtifact): { policy: numbe
   const h2 = convReluResidual(h1, artifact.c2_weight ?? [], artifact.c2_bias ?? [], true);
   const h3 = convReluResidual(h2, artifact.c3_weight ?? [], artifact.c3_bias ?? [], true);
   const pooled = h3.map((channel) => channel.flat().reduce((a, b) => a + b, 0) / 64);
+  const spatial = h3.flatMap((channel) => channel.flat());
+  const policyFeatures = artifact.policy_head === 'spatial' ? spatial : pooled;
   return {
-    policy: (artifact.policy_bias ?? []).map((bias, i) => bias + dot(artifact.policy_weight?.[i] ?? [], pooled)),
+    policy: (artifact.policy_bias ?? []).map((bias, i) => bias + dot(artifact.policy_weight?.[i] ?? [], policyFeatures)),
     wdl: (artifact.wdl_bias ?? []).map((bias, i) => bias + dot(artifact.wdl_weight?.[i] ?? [], pooled)),
   };
 }
