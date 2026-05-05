@@ -302,6 +302,17 @@ pub struct StudentArtifact {
     pub policy_b: Option<Vec<f32>>,
     pub wdl_w: Option<Vec<Vec<f32>>>,
     pub wdl_b: Option<Vec<f32>>,
+    pub channels: Option<usize>,
+    pub c1_weight: Option<Vec<Vec<Vec<Vec<f32>>>>>,
+    pub c1_bias: Option<Vec<f32>>,
+    pub c2_weight: Option<Vec<Vec<Vec<Vec<f32>>>>>,
+    pub c2_bias: Option<Vec<f32>>,
+    pub c3_weight: Option<Vec<Vec<Vec<Vec<f32>>>>>,
+    pub c3_bias: Option<Vec<f32>>,
+    pub policy_weight: Option<Vec<Vec<f32>>>,
+    pub policy_bias: Option<Vec<f32>>,
+    pub wdl_weight: Option<Vec<Vec<f32>>>,
+    pub wdl_bias: Option<Vec<f32>>,
 }
 
 pub struct Evaluation { pub policy: Vec<(u32, f32)>, pub wdl: [f32; 3] }
@@ -372,6 +383,48 @@ fn precompute_conv_params(channels: usize, layers: usize) -> ConvParams {
     ConvParams { layers: out }
 }
 
+fn board_planes(fen: &str) -> Vec<[[f32; 8]; 8]> {
+    let mut parts = fen.split_whitespace();
+    let placement = parts.next().unwrap_or("8/8/8/8/8/8/8/8");
+    let side = parts.next().unwrap_or("w");
+    let mut maps = vec![[[0f32; 8]; 8]; 14];
+    let (mut rank_i, mut file_i) = (0usize, 0usize);
+    for ch in placement.chars() {
+        if ch == '/' { rank_i += 1; file_i = 0; }
+        else if ch.is_ascii_digit() { file_i += ch.to_digit(10).unwrap() as usize; }
+        else if let Some(pi) = "PNBRQKpnbrqk".find(ch) { maps[pi][rank_i][file_i] = 1.0; file_i += 1; }
+    }
+    let side_value = if side == "w" { 1.0 } else { -1.0 };
+    for r in 0..8 { for f in 0..8 { maps[12][r][f] = side_value; maps[13][r][f] = 1.0; } }
+    maps
+}
+
+fn board_cnn_forward(fen: &str, a: &StudentArtifact) -> (Vec<f32>, Vec<f32>) {
+    fn conv_relu_res(input: &[[[f32; 8]; 8]], weight: &[Vec<Vec<Vec<f32>>>], bias: &[f32], residual: bool) -> Vec<[[f32; 8]; 8]> {
+        let out_c = bias.len(); let in_c = input.len(); let mut out = vec![[[0f32; 8]; 8]; out_c];
+        for oc in 0..out_c { for r in 0..8usize { for f in 0..8usize {
+            let mut acc = bias[oc];
+            for ic in 0..in_c { for kr in 0..3usize { for kf in 0..3usize {
+                let rr = r as isize + kr as isize - 1; let ff = f as isize + kf as isize - 1;
+                if (0..8).contains(&rr) && (0..8).contains(&ff) { acc += input[ic][rr as usize][ff as usize] * weight[oc][ic][kr][kf]; }
+            } } }
+            let v = acc.max(0.0); out[oc][r][f] = if residual && oc < input.len() { v + input[oc][r][f] } else { v };
+        } } }
+        out
+    }
+    let x0 = board_planes(fen);
+    let h1 = conv_relu_res(&x0, a.c1_weight.as_ref().unwrap(), a.c1_bias.as_ref().unwrap(), false);
+    let h2 = conv_relu_res(&h1, a.c2_weight.as_ref().unwrap(), a.c2_bias.as_ref().unwrap(), true);
+    let h3 = conv_relu_res(&h2, a.c3_weight.as_ref().unwrap(), a.c3_bias.as_ref().unwrap(), true);
+    let mut pooled = vec![0f32; h3.len()];
+    for c in 0..h3.len() { for r in 0..8 { for f in 0..8 { pooled[c] += h3[c][r][f] / 64.0; } } }
+    let pw = a.policy_weight.as_ref().unwrap(); let pb = a.policy_bias.as_ref().unwrap();
+    let vw = a.wdl_weight.as_ref().unwrap(); let vb = a.wdl_bias.as_ref().unwrap();
+    let policy = (0..pb.len()).map(|m| pb[m] + pooled.iter().enumerate().map(|(c, &x)| x * pw[m][c]).sum::<f32>()).collect();
+    let wdl = (0..vb.len()).map(|k| vb[k] + pooled.iter().enumerate().map(|(c, &x)| x * vw[k][c]).sum::<f32>()).collect();
+    (policy, wdl)
+}
+
 fn conv_student_features(fen: &str, channels: usize, layers: usize, params: Option<&ConvParams>) -> Vec<f32> {
     let mut parts = fen.split_whitespace();
     let placement = parts.next().unwrap_or("8/8/8/8/8/8/8/8");
@@ -427,7 +480,9 @@ impl PositionEvaluator for StudentEvaluator {
         let fen = board_to_fen(board);
         let policy_features = if self.artifact.kind == "frozen_conv_fen_student" || self.artifact.kind == "frozen_conv_feature_mlp_student" { conv_student_features(&fen, self.artifact.conv_channels.unwrap_or(64), self.artifact.conv_layers.unwrap_or(6), self.conv_params.as_ref()) } else { fen_features(&fen).unwrap().to_vec() };
         let value_features = if self.artifact.kind == "frozen_conv_fen_student" || self.artifact.kind == "frozen_conv_feature_mlp_student" { policy_features.clone() } else { wdl_features_from_fen(&fen).unwrap() };
-        let (logits, wdl_logits): (Vec<f32>, Vec<f32>) = if self.artifact.kind == "frozen_conv_feature_mlp_student" {
+        let (logits, wdl_logits): (Vec<f32>, Vec<f32>) = if self.artifact.kind == "tiny_board_cnn_student" {
+            board_cnn_forward(&fen, &self.artifact)
+        } else if self.artifact.kind == "frozen_conv_feature_mlp_student" {
             let w1 = self.artifact.w1.as_ref().unwrap(); let b1 = self.artifact.b1.as_ref().unwrap();
             let mut hidden = vec![0.0; b1.len()];
             for h in 0..b1.len() {

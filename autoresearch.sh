@@ -10,4 +10,6 @@ export LD_LIBRARY_PATH="$CUDA_HOME/lib:${LD_LIBRARY_PATH:-}"
   --epochs "${BOARD_CNN_EPOCHS:-3}" \
   --channels "${BOARD_CNN_CHANNELS:-16}" \
   --lr "${BOARD_CNN_LR:-0.001}" \
+  --checkpoint "${BOARD_CNN_CHECKPOINT:-artifacts/checkpoints/board_cnn_autoresearch.pkl}" \
+  --checkpoint-every "${BOARD_CNN_CHECKPOINT_EVERY:-1}" \
   --out artifacts/student_board_cnn_autoresearch.json

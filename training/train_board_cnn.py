@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, json, math, random
+import argparse, json, math, random, pickle
 from pathlib import Path
-p=argparse.ArgumentParser(); p.add_argument('--train', nargs='+', required=True); p.add_argument('--out', required=True); p.add_argument('--max-rows', type=int, default=50000); p.add_argument('--epochs', type=int, default=10); p.add_argument('--channels', type=int, default=32); p.add_argument('--lr', type=float, default=1e-3); p.add_argument('--holdout-mod', type=int, default=5); p.add_argument('--eval-rows', type=int, default=10000); args=p.parse_args()
+p=argparse.ArgumentParser(); p.add_argument('--train', nargs='+', required=True); p.add_argument('--out', required=True); p.add_argument('--max-rows', type=int, default=50000); p.add_argument('--epochs', type=int, default=10); p.add_argument('--channels', type=int, default=32); p.add_argument('--lr', type=float, default=1e-3); p.add_argument('--holdout-mod', type=int, default=5); p.add_argument('--eval-rows', type=int, default=10000); p.add_argument('--checkpoint', default=''); p.add_argument('--checkpoint-every', type=int, default=1); p.add_argument('--resume', default=''); args=p.parse_args()
 from tinygrad import Tensor
 from tinygrad.nn import Conv2d, Linear
 from tinygrad.nn.optim import Adam
@@ -35,13 +35,30 @@ class Net:
   def __call__(self,x):
     h=self.c1(x).relu(); h=(self.c2(h).relu()+h); h=(self.c3(h).relu()+h); h=h.mean(axis=(2,3)); return self.p(h), self.v(h)
   def params(self): return [self.c1.weight,self.c1.bias,self.c2.weight,self.c2.bias,self.c3.weight,self.c3.bias,self.p.weight,self.p.bias,self.v.weight,self.v.bias]
-net=Net(); opt=Adam(net.params(), lr=args.lr); rng=random.Random(7); Tensor.training=True
-for ep in range(args.epochs):
+net=Net(); opt=Adam(net.params(), lr=args.lr); rng=random.Random(7); start_epoch=0
+if args.resume:
+  with open(args.resume,'rb') as f: ck=pickle.load(f)
+  for name in ['c1','c2','c3']:
+    layer=getattr(net,name); layer.weight.assign(Tensor(ck[name+'_weight'])); layer.bias.assign(Tensor(ck[name+'_bias']))
+  net.p.weight.assign(Tensor(ck['policy_weight'])); net.p.bias.assign(Tensor(ck['policy_bias'])); net.v.weight.assign(Tensor(ck['wdl_weight'])); net.v.bias.assign(Tensor(ck['wdl_bias']))
+  start_epoch=int(ck.get('epoch',0)); print(f'METRIC resumed_epoch={start_epoch}')
+Tensor.training=True
+for ep in range(start_epoch, args.epochs):
   rng.shuffle(train); total=0.0; n=0
   for off in range(0,len(train),512):
     idx=train[off:off+512]; x=Tensor([planes(rows[i][0]) for i in idx]); y=Tensor([mid[rows[i][1]] for i in idx]); v=Tensor([rows[i][2] for i in idx]); w=Tensor([rows[i][3] for i in idx]).reshape(len(idx),1)
     opt.zero_grad(); lp,lv=net(x); lps=lp.log_softmax(); lvs=lv.log_softmax(); loss=lps.sparse_categorical_crossentropy(y,reduction='none').reshape(len(idx),1).mul(w).sum()-((lvs*v*w).sum()); loss.backward(); opt.step(); total+=float(loss.numpy()); n+=len(idx)
   print(f'METRIC epoch_{ep+1}_loss={total/max(1,n):.6f}', flush=True)
+  if args.checkpoint and args.checkpoint_every > 0 and (ep + 1) % args.checkpoint_every == 0:
+    ck={'epoch':ep+1,'moves':moves,'channels':args.channels,
+        'c1_weight':net.c1.weight.numpy().tolist(),'c1_bias':net.c1.bias.numpy().tolist(),
+        'c2_weight':net.c2.weight.numpy().tolist(),'c2_bias':net.c2.bias.numpy().tolist(),
+        'c3_weight':net.c3.weight.numpy().tolist(),'c3_bias':net.c3.bias.numpy().tolist(),
+        'policy_weight':net.p.weight.numpy().tolist(),'policy_bias':net.p.bias.numpy().tolist(),
+        'wdl_weight':net.v.weight.numpy().tolist(),'wdl_bias':net.v.bias.numpy().tolist()}
+    Path(args.checkpoint).parent.mkdir(parents=True,exist_ok=True)
+    with open(args.checkpoint,'wb') as f: pickle.dump(ck,f)
+    print(f'METRIC checkpoint_epoch={ep+1}', flush=True)
 Tensor.training=False
 n=min(args.eval_rows,len(dev)); top1=top4=top8=0; pce=wce=0.0
 for off in range(0,n,512):
