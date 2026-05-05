@@ -60,3 +60,5 @@
 {"type":"lane_created","lane_id":"L015","parent_node_id":"N0038","idea_id":"I0002","timestamp":"2026-05-05T00:20:17.486Z"}
 {"type":"run_logged","run_id":"R0044","node_id":"N0045","lane_id":"L015","status":"discarded","metric":7.411533,"benchmark_id":"tiny_leela_fixed_teacher_distill_consensus_v1","timestamp":"2026-05-05T00:28:22.206Z"}
 {"type":"run_logged","run_id":"R0045","node_id":"N0046","lane_id":"L006","status":"kept","metric":13.436814,"benchmark_id":"tiny_leela_fixed_teacher_distill_consensus_v1","timestamp":"2026-05-05T00:35:09.913Z"}
+{"type":"candidate_promoted","node_id":"N0038","reason":"Promote confirmed 64x6 frozen-conv primary student as the new research trunk: it improved fixed teacher distillation from 13.328393 to 13.436814, reproduced deterministically, improved fold robustness, and is now the best comparable Phase C candidate despite larger browser artifact size.","timestamp":"2026-05-05T00:50:47.422Z"}
+{"type":"lane_created","lane_id":"L016","parent_node_id":"N0038","timestamp":"2026-05-05T00:50:47.429Z"}

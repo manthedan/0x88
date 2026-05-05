@@ -351,6 +351,22 @@
       "runs_in_current_concept": 1,
       "created_at": "2026-05-05T00:20:17.485Z",
       "idea_id": "I0002"
+    },
+    "L016": {
+      "lane_id": "L016",
+      "title": "child of N0038",
+      "hypothesis": "Explore follow-ups from promoted candidate N0038: Promote confirmed 64x6 frozen-conv primary student as the new research trunk: it improved fixed teacher distillation from 13.328393 to 13.436814, reproduced deterministically, improved fold robustness, and is now the best comparable Phase C candidate despite larger browser artifact size.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0038",
+      "current_node_id": "N0038",
+      "local_baseline_node_id": "N0038",
+      "local_baseline_metric": 13.436814,
+      "concept_tags": [
+        "promoted"
+      ],
+      "runs_in_current_concept": 0,
+      "created_at": "2026-05-05T00:50:47.423Z"
     }
   },
   "nodes": {
@@ -1790,7 +1806,7 @@
         "N0045"
       ],
       "phase": "explore",
-      "status": "kept",
+      "status": "promoted",
       "hypothesis": "The raw-best 64x6 frozen-conv feature student found in L011 diagnostics can improve the primary fixed distillation score if promoted from diagnostic-only to the primary artifact, despite lower strength-per-byte.",
       "commit": "d0ac858",
       "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
@@ -1837,8 +1853,8 @@
         "delta_vs_global_best": 0.10842099999999988
       },
       "decision": {
-        "action": "kept",
-        "reason": "Promoting 64x6 conv features improved the primary distill_student_score from 13.328393 to 13.436814. Policy CE improved (5.757296 -> 5.645547), WDL CE worsened (0.745483 -> 0.796693), and fold robustness improved substantially (mean 12.764220 -> 13.040061, std 0.564173 -> 0.396754). Because the primary metric is dominated by policy CE, the raw-best conv architecture is a clear fixed-benchmark improvement even with larger artifact/features."
+        "action": "promote",
+        "reason": "Promote confirmed 64x6 frozen-conv primary student as the new research trunk: it improved fixed teacher distillation from 13.328393 to 13.436814, reproduced deterministically, improved fold robustness, and is now the best comparable Phase C candidate despite larger browser artifact size."
       },
       "created_at": "2026-05-04T23:19:17.826Z",
       "run_id": "R0037",
@@ -3885,10 +3901,10 @@
     }
   },
   "ids": {
-    "next_lane": 16,
+    "next_lane": 17,
     "next_node": 47,
     "next_run": 46,
-    "next_idea": 22
+    "next_idea": 25
   },
   "global_best_node_id": "N0038"
 }

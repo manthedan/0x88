@@ -9,5 +9,5 @@
   "spawn_new_lane_every_cycles": 1,
   "last_scheduled_lane_id": "L006",
   "strict_mode": true,
-  "strict_next_action": "Call schedule_next for the next scheduler-owned quantum unless the user stops you."
+  "strict_next_action": "Call schedule_next; let the scheduler decide whether to consume queued research ideas."
 }
