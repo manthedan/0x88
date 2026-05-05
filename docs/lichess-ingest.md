@@ -15,12 +15,28 @@ npm run lichess:ingest -- \
   --max-plies-per-game=80
 
 python3 training/validate_teacher_labels.py data/lichess_training_50k.jsonl
-python3 training/train_student.py \
+
+# Precompute frozen-conv features with the Rust CPU cache builder. This avoids
+# recomputing 64x6 features inside the Python training loop.
+cargo build --release --quiet --manifest-path rust/tiny_leela_core/Cargo.toml --bin tiny-leela-rust-feature-cache
+rust/tiny_leela_core/target/release/tiny-leela-rust-feature-cache \
+  --arch=64x6 \
+  --out=artifacts/cache/conv_features_64x6_lichess_50k.json \
+  --inputs=data/teacher_labels.jsonl,data/stockfish_teacher_labels.jsonl,data/lichess_training_50k.jsonl
+
+# For 10k+ rows, tinygrad/CUDA is currently much more practical than the pure
+# Python trainer for the linear heads. The CUDA_HOME/PATH setup is needed when
+# using the local pip CUDA toolchain.
+CUDA_HOME=$PWD/.venv-tinygrad/lib/python3.12/site-packages/nvidia/cu13 \
+PATH=$PWD/.venv-tinygrad/lib/python3.12/site-packages/nvidia/cu13/bin:$PATH \
+LD_LIBRARY_PATH=$PWD/.venv-tinygrad/lib/python3.12/site-packages/nvidia/cu13/lib:${LD_LIBRARY_PATH:-} \
+.venv-tinygrad/bin/python training/train_student.py \
+  --trainer tinygrad \
   --train data/teacher_labels.jsonl data/stockfish_teacher_labels.jsonl data/lichess_training_50k.jsonl \
   --merge-fen \
   --epochs 40 \
   --primary-conv-arch 64x6 \
-  --feature-cache artifacts/cache/conv_features_64x6.json \
+  --feature-cache artifacts/cache/conv_features_64x6_lichess_50k.json \
   --out artifacts/student_lichess_50k.json
 ```
 
@@ -37,3 +53,7 @@ Recommended scale-up:
 - stronger pretraining: 100k-500k rows
 
 Use these rows to teach broad human move priors. Use Stockfish/lc0 labels later for sharper tactical correction.
+
+## Local benchmark notes
+
+On the 2013-01 Lichess shard, ingestion produced 50k rows from 894 accepted games with zero parse failures. Rust CPU feature-cache precompute for 50k unique-ish 64x6 positions took about 422s. A 10k-row cache took about 86s, and tinygrad/CUDA trained 40 epochs over the cached 10k set in about 141s. The pure Python trainer did not finish even 5 epochs over the cached 10k set within 600s, so use tinygrad for Lichess-scale training.
