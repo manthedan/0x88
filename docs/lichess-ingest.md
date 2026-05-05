@@ -57,3 +57,24 @@ Use these rows to teach broad human move priors. Use Stockfish/lc0 labels later 
 ## Local benchmark notes
 
 On the 2013-01 Lichess shard, ingestion produced 50k rows from 894 accepted games with zero parse failures. Rust CPU feature-cache precompute for 50k unique-ish 64x6 positions took about 422s. A 10k-row cache took about 86s, and tinygrad/CUDA trained 40 epochs over the cached 10k set in about 141s. The pure Python trainer did not finish even 5 epochs over the cached 10k set within 600s, so use tinygrad for Lichess-scale training.
+
+An Unsloth-style tensorized dataset experiment is available:
+
+```bash
+python3 training/build_feature_dataset.py \
+  --train data/teacher_labels.jsonl data/stockfish_teacher_labels.jsonl data/lichess_training_10k.jsonl \
+  --merge-fen \
+  --feature-cache artifacts/cache/conv_features_64x6_lichess_10k.json \
+  --out artifacts/datasets/lichess_10k_64x6.pkl
+
+CUDA_HOME=$PWD/.venv-tinygrad/lib/python3.12/site-packages/nvidia/cu13 \
+PATH=$PWD/.venv-tinygrad/lib/python3.12/site-packages/nvidia/cu13/bin:$PATH \
+LD_LIBRARY_PATH=$PWD/.venv-tinygrad/lib/python3.12/site-packages/nvidia/cu13/lib:${LD_LIBRARY_PATH:-} \
+.venv-tinygrad/bin/python training/train_feature_dataset.py \
+  --dataset artifacts/datasets/lichess_10k_64x6.pkl \
+  --epochs 40 \
+  --batch-size 512 \
+  --out artifacts/student_lichess_10k_tensor.json
+```
+
+Local result: building the 10k tensor dataset worked, but the first minibatch trainer was slower (about 485s for 40 epochs) than the existing full-batch tinygrad trainer (about 141s). This means the useful lesson is not merely “pickle tensors”; we need persistent device tensors / compiled full-batch or larger fused batches, plus a binary matrix format, to get Unsloth-like speedups.
