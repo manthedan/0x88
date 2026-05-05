@@ -22,7 +22,8 @@ const backend = arg('--backend', process.env.TINY_LEELA_BACKEND ?? 'rust');
 const port = Number(arg('--port', process.env.PORT ?? '5173'));
 const host = arg('--host', process.env.HOST ?? '127.0.0.1');
 const evaluator = StudentEvaluator.fromJson(readFileSync(modelPath, 'utf8'));
-const searchVisits = Number(arg('--visits', process.env.TINY_LEELA_SEARCH_VISITS ?? '8'));
+const searchVisits = Number(arg('--visits', process.env.TINY_LEELA_SEARCH_VISITS ?? '64'));
+const policyVisits = Number(arg('--policy-visits', process.env.TINY_LEELA_POLICY_VISITS ?? String(Math.min(8, searchVisits))));
 const chessgroundCss = [
   readFileSync('node_modules/chessground/assets/chessground.base.css', 'utf8'),
   readFileSync('node_modules/chessground/assets/chessground.brown.css', 'utf8'),
@@ -30,7 +31,9 @@ const chessgroundCss = [
 ].join('\n');
 let board = parseFen(arg('--fen', START_FEN));
 let lastEngine = null;
+let lastMove = null;
 let lastMessage = 'Ready. Drag a piece on the Chessground board, or click a legal source/target.';
+let apiQueue = Promise.resolve();
 
 function currentLegalMoves() {
   return legalMoves(board);
@@ -41,7 +44,7 @@ function legalMoveByUci(uci) {
 }
 
 function boardPayload() {
-  const evaluation = backend === 'ts' ? evaluator.evaluate(board) : rustPolicyForBoard(board, { model: modelPath, visits: searchVisits, temperature: 1 });
+  const evaluation = backend === 'ts' ? evaluator.evaluate(board) : rustPolicyForBoard(board, { model: modelPath, visits: policyVisits, temperature: 1 });
   const rustPrior = new Map((evaluation.policy ?? []).map((entry) => [moveToUci(entry.move), entry.prior ?? entry.probability ?? 0]));
   const legal = currentLegalMoves();
   const moves = legal.map((move) => ({
@@ -57,7 +60,10 @@ function boardPayload() {
     backend,
     wdl: evaluation.wdl,
     value: evaluation.wdl[0] - evaluation.wdl[2],
+    visits: searchVisits,
+    policyVisits,
     lastEngine,
+    lastMove,
     message: lastMessage,
   };
 }
@@ -70,16 +76,23 @@ async function enginePly() {
     return;
   }
   lastEngine = moveToUci(result.move);
+  lastMove = lastEngine;
   board = makeMove(board, result.move);
   lastMessage = `${backend.toUpperCase()} engine played ${lastEngine}.`;
 }
 
 async function handleApi(req, res, url) {
+  apiQueue = apiQueue.then(() => handleApiSerial(req, res, url), () => handleApiSerial(req, res, url));
+  return apiQueue;
+}
+
+async function handleApiSerial(req, res, url) {
   try {
     if (url.pathname === '/api/state' && req.method === 'GET') return json(res, boardPayload());
     if (url.pathname === '/api/reset' && req.method === 'POST') {
       board = parseFen(START_FEN);
       lastEngine = null;
+      lastMove = null;
       lastMessage = 'Reset to start position.';
       return json(res, boardPayload());
     }
@@ -87,6 +100,7 @@ async function handleApi(req, res, url) {
       const body = await readJson(req);
       board = parseFen(String(body.fen ?? START_FEN));
       lastEngine = null;
+      lastMove = null;
       lastMessage = 'Loaded FEN.';
       return json(res, boardPayload());
     }
@@ -96,6 +110,7 @@ async function handleApi(req, res, url) {
       const move = legalMoveByUci(uci);
       if (!move) return json(res, { error: `Illegal move: ${uci}`, ...boardPayload() }, 400);
       board = makeMove(board, move);
+      lastMove = uci;
       lastMessage = `You played ${uci}.`;
       if (body.engine !== false) await enginePly();
       return json(res, boardPayload());
@@ -166,6 +181,9 @@ ${chessgroundCss}
   code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .fen { overflow-wrap: anywhere; color: var(--muted); }
   .message { color: var(--good); min-height: 1.4em; }
+  .status { color: var(--muted); font-size: 13px; margin-left: 8px; }
+  body.busy button, body.busy #ground { cursor: progress; }
+  body.busy button { opacity: 0.65; }
   .wdl { display: grid; gap: 8px; margin: 14px 0; }
   .bar { display: grid; grid-template-columns: 44px 1fr 54px; gap: 8px; align-items: center; color: var(--muted); }
   .track { height: 10px; background: #020617; border-radius: 999px; overflow: hidden; }
@@ -186,6 +204,7 @@ ${chessgroundCss}
         <button id="engine">Engine move</button>
         <button id="reset">Reset</button>
         <button id="flip">Flip board</button>
+        <span class="status" id="status"></span>
       </div>
       <div class="message" id="message"></div>
       <p><b>Backend</b> <span class="mono" id="backend"></span></p>
@@ -207,17 +226,41 @@ import { Chessground } from '/vendor/chessground/dist/chessground.js';
 let state = null;
 let orientation = 'white';
 let ground = null;
+let pending = 0;
+let requestSeq = 0;
 const fenEl = document.getElementById('fen');
 const msgEl = document.getElementById('message');
 const movesEl = document.getElementById('moves');
 const wdlEl = document.getElementById('wdl');
+const statusEl = document.getElementById('status');
+const buttons = [...document.querySelectorAll('button')];
+
+function setBusy(on) {
+  pending += on ? 1 : -1;
+  pending = Math.max(0, pending);
+  document.body.classList.toggle('busy', pending > 0);
+  buttons.forEach((button) => { button.disabled = pending > 0; });
+  statusEl.textContent = pending > 0 ? 'thinking…' : '';
+  if (ground && state) ground.set({ movable: { color: pending > 0 ? undefined : (state.turn === 'w' ? 'white' : 'black') } });
+}
 
 async function api(path, body) {
-  const res = await fetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-  const json = await res.json();
-  if (!res.ok) msgEl.textContent = json.error || 'Request failed';
-  state = json;
-  render();
+  const seq = ++requestSeq;
+  setBusy(true);
+  try {
+    const res = await fetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const json = await res.json();
+    if (!res.ok) msgEl.textContent = json.error || 'Request failed';
+    if (seq === requestSeq) {
+      state = json;
+      render();
+    }
+  } catch (err) {
+    msgEl.textContent = err.message || String(err);
+    if (ground && state) renderGround();
+  } finally {
+    setBusy(false);
+  }
 }
 function boardFen() { return state.fen.split(' ')[0]; }
 function dests() {
@@ -229,10 +272,11 @@ function dests() {
   return map;
 }
 function lastMove() {
-  const move = state.lastEngine;
+  const move = state.lastMove || state.lastEngine;
   return move && move.length >= 4 ? [move.slice(0, 2), move.slice(2, 4)] : undefined;
 }
 async function userMove(orig, dest) {
+  if (pending > 0) { renderGround(); return; }
   const candidates = state.legalMoves.filter((m) => m.from === orig && m.to === dest);
   const chosen = candidates.find((m) => m.uci.endsWith('q')) ?? candidates[0];
   if (!chosen) { render(); return; }
@@ -247,7 +291,7 @@ function renderGround() {
     animation: { enabled: true, duration: 180 },
     movable: {
       free: false,
-      color: state.turn === 'w' ? 'white' : 'black',
+      color: pending > 0 ? undefined : (state.turn === 'w' ? 'white' : 'black'),
       dests: dests(),
       showDests: true,
       events: { after: userMove },
@@ -269,7 +313,8 @@ function render() {
   fenEl.textContent = state.fen;
   document.getElementById('backend').textContent = state.backend || 'unknown';
   msgEl.textContent = state.message || '';
-  document.getElementById('fenInput').value = state.fen;
+  const fenInput = document.getElementById('fenInput');
+  if (document.activeElement !== fenInput) fenInput.value = state.fen;
   renderGround(); renderWdl(); renderMoves();
 }
 document.getElementById('engine').onclick = () => api('/api/engine', {});
