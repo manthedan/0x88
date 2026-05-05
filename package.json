@@ -11,6 +11,7 @@
     "eval:runtime": "node --experimental-strip-types eval/runtime_suite.mjs",
     "rust:test": "cargo test --manifest-path rust/tiny_leela_core/Cargo.toml",
     "bench:movegen": "node --experimental-strip-types scripts/bench_movegen.mjs",
+    "bench:search": "node --experimental-strip-types scripts/bench_search.mjs",
     "rust:bench": "cargo run --release --manifest-path rust/tiny_leela_core/Cargo.toml --bin tiny-leela-rust-bench --",
     "rust:eval": "cargo run --release --manifest-path rust/tiny_leela_core/Cargo.toml --bin tiny-leela-rust-eval --",
     "rust:wasm": "cargo build --release --target wasm32-unknown-unknown --manifest-path rust/tiny_leela_core/Cargo.toml",
