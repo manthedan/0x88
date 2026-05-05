@@ -10,6 +10,7 @@ mkdir -p artifacts/logs
 DOVETAIL_LOG="artifacts/logs/dovetail-$(date -u +%Y%m%dT%H%M%SZ).log"
 exec > >(tee -a "$DOVETAIL_LOG") 2>&1
 echo "[dovetail] log=$DOVETAIL_LOG"
+echo "METRIC dovetail_log_started=1"
 echo "[dovetail] phase=selfplay_mix_sweep start ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # Phase D self-play mix arena benchmark.
@@ -41,3 +42,12 @@ echo "[dovetail] phase=selfplay_mix_sweep done ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 echo "[dovetail] phase=playable_suite start ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 npm run eval:playable --silent
 echo "[dovetail] phase=playable_suite done ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+DOVETAIL_LOG_BYTES=$(wc -c < "$DOVETAIL_LOG" | tr -d ' ')
+echo "METRIC dovetail_log_bytes=$DOVETAIL_LOG_BYTES"
+echo "[dovetail] log_path=$DOVETAIL_LOG log_bytes=$DOVETAIL_LOG_BYTES"
+DOVETAIL_TAIL_TMP=$(mktemp)
+tail -n "${DOVETAIL_LOG_TAIL_LINES:-60}" "$DOVETAIL_LOG" > "$DOVETAIL_TAIL_TMP"
+echo "[dovetail] recent_log_tail_begin lines=${DOVETAIL_LOG_TAIL_LINES:-60}"
+cat "$DOVETAIL_TAIL_TMP"
+echo "[dovetail] recent_log_tail_end"
+rm -f "$DOVETAIL_TAIL_TMP"
