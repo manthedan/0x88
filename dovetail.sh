@@ -13,21 +13,21 @@ echo "[dovetail] log=$DOVETAIL_LOG"
 echo "METRIC dovetail_log_started=1"
 echo "[dovetail] phase=selfplay_mix_sweep start ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-# Phase D self-play mix arena benchmark.
-# Fixed small CPU workload for comparable early self-play research: generate a
-# deterministic PUCT self-play buffer from the current student, train candidates
-# with several teacher/self-play mix weights, then evaluate each candidate against
-# the current 64x6 teacher-distilled baseline in the arena.
+# Phase D scaled true-play arena benchmark.
+# Evaluate candidate mix weights by actual played result rather than value
+# adjudication. Unfinished games at max plies are draws, so this is a fixed-budget
+# strength proxy rather than a full Elo estimate.
 npm run selfplay:mix-sweep --silent -- \
   --backend=rust \
   --weights=0,0.05,0.1,0.25 \
   --games=2 \
   --selfplay-visits=32 \
-  --max-plies=8 \
+  --max-plies=40 \
   --epochs=40 \
-  --arena-games=2 \
+  --arena-games=32 \
   --arena-visits=32 \
-  --adjudicate=value \
+  --adjudicate=terminal \
+  --selection-metric=arena_true_play_score_rate \
   --adjudicate-threshold=0.02 \
   --primary-conv-arch=64x6 \
   --feature-cache=artifacts/cache/conv_features_64x6.json \

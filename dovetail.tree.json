@@ -6,7 +6,7 @@
     "objective": "Build a tiny in-browser Leela-like chess engine with policy/WDL neural evaluation, PUCT search, ONNX Runtime Web deployment, and verified chess correctness.",
     "created_at": "2026-05-04T18:45:53.444Z",
     "primary_metric": {
-      "name": "mix_best_arena_score_rate",
+      "name": "mix_best_arena_true_play_score_rate",
       "direction": "higher",
       "unit": "score_rate"
     },
@@ -15,7 +15,7 @@
       "metric": 0,
       "benchmark_id": "tiny_leela_bootstrap_score_v1"
     },
-    "current_segment_id": "S0003",
+    "current_segment_id": "S0004",
     "benchmark_segments": {
       "S0000": {
         "segment_id": "S0000",
@@ -84,6 +84,23 @@
         },
         "created_at": "2026-05-05T03:30:21.510Z",
         "reason": "Research/self-play and arena backend changed from TypeScript PUCT to native Rust PUCT with higher visit budgets; start a new comparable segment rather than mixing TS and Rust workload results."
+      },
+      "S0004": {
+        "segment_id": "S0004",
+        "name": "Phase D scaled true-play arena",
+        "metric": {
+          "name": "mix_best_arena_true_play_score_rate",
+          "direction": "higher",
+          "unit": "score_rate"
+        },
+        "baseline": {
+          "commit": "e249169",
+          "metric": 0.5,
+          "benchmark_id": "tiny_leela_scaled_trueplay_arena_v1",
+          "node_id": "N0058"
+        },
+        "created_at": "2026-05-05T05:09:04.413Z",
+        "reason": "Switch primary metric away from value-adjudicated mix_best_arena_score_rate to true-play/terminal arena score so strength claims are based on actual played results rather than value adjudication. Baseline is equal-strength teacher-only/control expected true-play score rate 0.5."
       }
     }
   },
@@ -424,7 +441,7 @@
       "lane_id": "L017",
       "title": "Self-play teacher mix ratio lane",
       "hypothesis": "A small weighted mix of PUCT self-play examples with teacher labels can improve head-to-head arena score versus the current teacher-only baseline without illegal moves.",
-      "status": "active",
+      "status": "paused",
       "phase": "explore",
       "parent_node_id": "N0047",
       "current_node_id": "N0052",
@@ -480,16 +497,18 @@
           "R0048",
           "R0049"
         ]
-      }
+      },
+      "pause_reason": "Paused by user to prioritize true-play strength measurement lanes after S0003 adjudication contamination.",
+      "paused_at": "2026-05-05T05:15:00.000Z"
     },
     "L018": {
       "lane_id": "L018",
       "title": "Self-play teacher mix ratio sweep",
       "hypothesis": "A small amount of PUCT self-play visit-policy data mixed with teacher distillation can improve arena score over the current 64x6 baseline while preserving legality and avoiding self-play collapse.",
-      "status": "active",
+      "status": "paused",
       "phase": "explore",
       "parent_node_id": "N0052",
-      "current_node_id": "N0053",
+      "current_node_id": "N0057",
       "local_baseline_node_id": "N0052",
       "local_baseline_metric": 0.75,
       "concept_tags": [
@@ -497,59 +516,54 @@
         "training",
         "arena"
       ],
-      "runs_in_current_concept": 1,
+      "runs_in_current_concept": 3,
       "created_at": "2026-05-05T04:35:43.901Z",
       "idea_id": "I0025",
       "context_checkpoint": {
         "type": "lane_context_checkpoint",
         "lane_id": "L018",
-        "updated_at": "2026-05-05T04:39:17.917Z",
-        "source_handoff_run_id": "R0050",
-        "source_handoff_node_id": "N0053",
-        "task": "Try feature cache, Rust-side cache prewarming, parallel candidate weights, and tinygrad availability for S0003 self-play mix training speed.",
-        "outcome": "Kept infrastructure improvement. The S0003 Rust self-play mix sweep completed in 17.2s with checks passing, versus prior timeouts around 1136s. Added disk-backed Python frozen-conv feature cache, a Rust feature-cache prewarmer using the Rust frozen-conv implementation, and parallel candidate weight training/arena evaluation. tinygrad is not installed in this environment, so no tinygrad path was enabled yet. Primary metric was 0.75 with zero illegal losses; however best weight remained 0 and all arena games were value-adjudicated, so this is mostly an infrastructure/speed validation rather than proof of self-play mix strength.",
+        "updated_at": "2026-05-05T05:08:02.321Z",
+        "source_handoff_run_id": "R0054",
+        "source_handoff_node_id": "N0057",
+        "task": "Run the scheduled L018 Rust self-play mix arena quantum after adding log-discoverability and creating top-priority scaling lanes.",
+        "outcome": "Kept as a reproducibility/logging confirmation, not as a strength claim. The S0003 benchmark completed in 17.385s with checks passing. Primary metric reproduced at 0.75 and best self-play weight remained 0. Split metrics again show adjudication contamination: weight=0 true_play_score_rate=0.5, adjudicated_score_rate=0.75, adjudicated_rate=1.0; all positive self-play weights had true_play_score_rate=0.5. Dovetail log discoverability is now visible in benchmark metrics: dovetail_log_started=1 and dovetail_log_bytes=9976, with log_path printed.",
         "changed_files": [
+          "dovetail.context.jsonl",
           "dovetail.ideas.jsonl",
+          "dovetail.runs.jsonl",
           "dovetail.scheduler.json",
-          "dovetail.sh",
           "dovetail.tree.json",
-          "dovetail.tree.jsonl",
-          "rust/tiny_leela_core/Cargo.toml",
-          "rust/tiny_leela_core/src/bin/feature_cache.rs",
-          "rust/tiny_leela_core/src/lib.rs",
-          "scripts/selfplay_mix_sweep.mjs",
-          "training/train_student.py"
+          "dovetail.tree.jsonl"
         ],
         "relevant_reads": [
           "dovetail.sh",
-          "rust/tiny_leela_core/src/lib.rs",
-          "scripts/selfplay_mix_sweep.mjs",
-          "training/train_student.py"
+          "rust/tiny_leela_core/src/bin/arena.rs",
+          "scripts/selfplay_mix_sweep.mjs"
         ],
         "validation_commands": [
-          "npm run rust:test",
-          "npm run selfplay:mix-sweep --silent -- --backend=rust --weights=0,0.05 --games=1 --selfplay-visits=2 --max-plies=2 --epochs=0 --arena-games=1 --arena-visits=2 --primary-conv-arch=64x6 --feature-cache=/tmp/tl_conv_cache.json --parallel-candidates --selfplay=/tmp/tl_sp_cache.jsonl --candidate-prefix=/tmp/tl_cand_cache --regenerate",
-          "python3 -c 'import tinygrad'  # tinygrad not installed",
-          "run_research_experiment: bash dovetail.sh with checks"
+          "run_research_experiment: bash dovetail.sh"
         ],
         "failures": [
-          "tinygrad is not installed, so the tinygrad trainer option was not tried yet",
-          "Primary 0.75 still came from weight=0, not a positive self-play mix weight",
-          "All arena games were value-adjudicated, so the score may reflect value-head/adjudication bias",
-          "Only small 2-game arena workload; needs larger non-adjudicated arena before promotion as chess-strength evidence"
+          "Current primary metric remains adjudication-contaminated for S0003 compatibility",
+          "No positive self-play mix true-play improvement; all positive weights stayed at true_play_score_rate=0.5",
+          "Best weight remains 0, so self-play mix has not beaten teacher-only under true-play evidence"
         ],
-        "next_action_hint": "Use the now-fast sweep to run a more discriminating S0003 variant: increase arena games/opening starts and reduce or separate value adjudication. If training becomes a bottleneck again at larger data sizes, add a true Rust trainer or install/implement tinygrad tensor trainer.",
-        "summary": "Lane L018 (explore) hypothesis: A small amount of PUCT self-play visit-policy data mixed with teacher distillation can improve arena score over the current 64x6 baseline while preserving legality and avoiding self-play collapse.\nLatest task: Try feature cache, Rust-side cache prewarming, parallel candidate weights, and tinygrad availability for S0003 self-play mix training speed.\nOutcome: Kept infrastructure improvement. The S0003 Rust self-play mix sweep completed in 17.2s with checks passing, versus prior timeouts around 1136s. Added disk-backed Python frozen-conv feature cache, a Rust feature-cache prewarmer using the Rust frozen-conv implementation, and parallel candidate weight training/arena evaluation. tinygrad is not installed in this environment, so no tinygrad path was enabled yet. Primary metric was 0.75 with zero illegal losses; however best weight remained 0 and all arena games were value-adjudicated, so this is mostly an infrastructure/speed validation rather than proof of self-play mix strength.\nFailures to remember: tinygrad is not installed, so the tinygrad trainer option was not tried yet; Primary 0.75 still came from weight=0, not a positive self-play mix weight; All arena games were value-adjudicated, so the score may reflect value-head/adjudication bias; Only small 2-game arena workload; needs larger non-adjudicated arena before promotion as chess-strength evidence\nNext action: Use the now-fast sweep to run a more discriminating S0003 variant: increase arena games/opening starts and reduce or separate value adjudication. If training becomes a bottleneck again at larger data sizes, add a true Rust trainer or install/implement tinygrad tensor trainer.\nRecent lane runs: R0050",
+        "next_action_hint": "Pivot to the newly active scale/discrimination lanes, preferably L020 scaled true-play arena games before strength claims, or initialize a new segment if making terminal/true-play arena the primary metric.",
+        "summary": "Lane L018 (explore) hypothesis: A small amount of PUCT self-play visit-policy data mixed with teacher distillation can improve arena score over the current 64x6 baseline while preserving legality and avoiding self-play collapse.\nLatest task: Run the scheduled L018 Rust self-play mix arena quantum after adding log-discoverability and creating top-priority scaling lanes.\nOutcome: Kept as a reproducibility/logging confirmation, not as a strength claim. The S0003 benchmark completed in 17.385s with checks passing. Primary metric reproduced at 0.75 and best self-play weight remained 0. Split metrics again show adjudication contamination: weight=0 true_play_score_rate=0.5, adjudicated_score_rate=0.75, adjudicated_rate=1.0; all positive self-play weights had true_play_score_rate=0.5. Dovetail log discoverability is now visible in benchmark metrics: dovetail_log_started=1 and dovetail_log_bytes=9976, with log_path printed.\nFailures to remember: Current primary metric remains adjudication-contaminated for S0003 compatibility; No positive self-play mix true-play improvement; all positive weights stayed at true_play_score_rate=0.5; Best weight remains 0, so self-play mix has not beaten teacher-only under true-play evidence\nNext action: Pivot to the newly active scale/discrimination lanes, preferably L020 scaled true-play arena games before strength claims, or initialize a new segment if making terminal/true-play arena the primary metric.\nRecent lane runs: R0050, R0053, R0054",
         "recent_run_ids": [
-          "R0050"
+          "R0050",
+          "R0053",
+          "R0054"
         ]
-      }
+      },
+      "pause_reason": "Paused by user to prioritize true-play strength measurement lanes after S0003 adjudication contamination.",
+      "paused_at": "2026-05-05T05:15:00.000Z"
     },
     "L019": {
       "lane_id": "L019",
       "title": "Self-play visit budget and temperature sweep",
       "hypothesis": "Changing self-play visits and policy temperature may produce less overfit or more diverse training targets, improving arena score at the same teacher/self-play mix.",
-      "status": "active",
+      "status": "paused",
       "phase": "explore",
       "parent_node_id": "N0052",
       "current_node_id": "N0055",
@@ -597,7 +611,81 @@
           "R0051",
           "R0052"
         ]
-      }
+      },
+      "pause_reason": "Paused by user to prioritize true-play strength measurement lanes after S0003 adjudication contamination.",
+      "paused_at": "2026-05-05T05:15:00.000Z"
+    },
+    "L020": {
+      "lane_id": "L020",
+      "title": "Scaled true-play arena games before strength claims",
+      "hypothesis": "Increasing arena games to 32-128 with terminal/true-play scoring will reduce variance and prevent value-adjudication artifacts from being mistaken for real strength gains.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0052",
+      "current_node_id": "N0052",
+      "local_baseline_node_id": "N0052",
+      "local_baseline_metric": 0.75,
+      "concept_tags": [
+        "arena",
+        "evaluation",
+        "scaling"
+      ],
+      "runs_in_current_concept": 0,
+      "created_at": "2026-05-05T05:05:41.742Z"
+    },
+    "L021": {
+      "lane_id": "L021",
+      "title": "Scaled diverse self-play replay buffer",
+      "hypothesis": "Generating 64-512 Rust self-play games with longer plies, opening starts, and early-ply stochasticity will produce a replay buffer diverse enough for self-play mix weights to improve true-play arena results.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0052",
+      "current_node_id": "N0052",
+      "local_baseline_node_id": "N0052",
+      "local_baseline_metric": 0.75,
+      "concept_tags": [
+        "selfplay",
+        "training",
+        "scaling"
+      ],
+      "runs_in_current_concept": 0,
+      "created_at": "2026-05-05T05:05:44.512Z"
+    },
+    "L022": {
+      "lane_id": "L022",
+      "title": "Self-play opening diversity and early-ply noise",
+      "hypothesis": "Adding fixed opening starts and early-ply policy temperature/noise to Rust self-play will produce more diverse visit-policy targets and reduce overfitting to short homogeneous openings.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0052",
+      "current_node_id": "N0052",
+      "local_baseline_node_id": "N0052",
+      "local_baseline_metric": 0.75,
+      "concept_tags": [
+        "selfplay",
+        "temperature",
+        "openings"
+      ],
+      "runs_in_current_concept": 0,
+      "created_at": "2026-05-05T05:05:47.161Z"
+    },
+    "L023": {
+      "lane_id": "L023",
+      "title": "Cached baseline/control artifact for mix sweeps",
+      "hypothesis": "Skipping repeated weight=0 retraining and treating teacher-only as a cached control will reduce sweep variance and wall-clock while making positive self-play weights the primary comparison target.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0052",
+      "current_node_id": "N0052",
+      "local_baseline_node_id": "N0052",
+      "local_baseline_metric": 0.75,
+      "concept_tags": [
+        "selfplay",
+        "training",
+        "benchmark"
+      ],
+      "runs_in_current_concept": 0,
+      "created_at": "2026-05-05T05:05:51.021Z"
     }
   },
   "nodes": {
@@ -1894,10 +1982,10 @@
         "best_conv_score_per_kb": 0.504097
       },
       "deltas": {
-        "delta_vs_parent": -0.00007399999999968543,
-        "delta_vs_lane_baseline": -0.00007399999999968543,
+        "delta_vs_parent": -7.399999999968543e-05,
+        "delta_vs_lane_baseline": -7.399999999968543e-05,
         "delta_vs_root": 0.40618399999999966,
-        "delta_vs_global_best": -0.00007399999999968543
+        "delta_vs_global_best": -7.399999999968543e-05
       },
       "decision": {
         "action": "discarded",
@@ -1954,7 +2042,7 @@
         "best_conv_score_per_kb": 0.504152
       },
       "deltas": {
-        "delta_vs_parent": 0.00007399999999968543,
+        "delta_vs_parent": 7.399999999968543e-05,
         "delta_vs_lane_baseline": 0,
         "delta_vs_root": 0.40625799999999934,
         "delta_vs_global_best": 0
@@ -2888,7 +2976,9 @@
       "node_id": "N0053",
       "lane_id": "L018",
       "parent_node_id": "N0052",
-      "children": [],
+      "children": [
+        "N0056"
+      ],
       "phase": "explore",
       "status": "kept",
       "hypothesis": "A small amount of PUCT self-play visit-policy data mixed with teacher distillation can improve arena score over the current 64x6 baseline while preserving legality and avoiding self-play collapse.",
@@ -3029,6 +3119,119 @@
       "created_at": "2026-05-05T04:52:17.701Z",
       "run_id": "R0052",
       "idea_id": "I0026"
+    },
+    "N0056": {
+      "node_id": "N0056",
+      "lane_id": "L018",
+      "parent_node_id": "N0053",
+      "children": [
+        "N0057"
+      ],
+      "phase": "explore",
+      "status": "kept",
+      "hypothesis": "A small amount of PUCT self-play visit-policy data mixed with teacher distillation can improve arena score over the current 64x6 baseline while preserving legality and avoiding self-play collapse.",
+      "commit": "ad11610",
+      "benchmark_id": "tiny_leela_rust_selfplay_mix_arena_v1",
+      "metric": 0.75,
+      "metrics": {
+        "mix_best_arena_score_rate": 0.75,
+        "mix_best_selfplay_weight": 0,
+        "mix_0_arena_score_rate": 0.75,
+        "mix_0_arena_true_play_score_rate": 0.5,
+        "mix_0_arena_adjudicated_score_rate": 0.75,
+        "mix_0_arena_adjudicated_rate": 1,
+        "mix_0p05_arena_score_rate": 0.5,
+        "mix_0p05_arena_true_play_score_rate": 0.5,
+        "mix_0p05_arena_adjudicated_score_rate": 0.5,
+        "mix_0p1_arena_score_rate": 0.5,
+        "mix_0p1_arena_true_play_score_rate": 0.5,
+        "mix_0p1_arena_adjudicated_score_rate": 0.5,
+        "mix_0p25_arena_score_rate": 0.5,
+        "mix_0p25_arena_true_play_score_rate": 0.5,
+        "mix_0p25_arena_adjudicated_score_rate": 0.5,
+        "legal_move_selection_rate": 1,
+        "playable_shell_ready": 1
+      },
+      "deltas": {
+        "delta_vs_parent": 0,
+        "delta_vs_lane_baseline": 0,
+        "delta_vs_root": 0.25,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "kept",
+        "reason": "The previous 0.75 best is fully explained by adjudication: weight=0 has true_play_score_rate=0.5 and adjudicated_score_rate=0.75 with adjudicated_rate=1.0. Positive self-play mix weights all have true_play_score_rate=0.5 and adjudicated_score_rate=0.5. This confirms benchmark discrimination was needed; current primary remains compatible but should not be interpreted as true-play strength."
+      },
+      "created_at": "2026-05-05T04:57:28.731Z",
+      "run_id": "R0053",
+      "idea_id": "I0025"
+    },
+    "N0057": {
+      "node_id": "N0057",
+      "lane_id": "L018",
+      "parent_node_id": "N0056",
+      "children": [
+        "N0058"
+      ],
+      "phase": "explore",
+      "status": "kept",
+      "hypothesis": "A small amount of PUCT self-play visit-policy data mixed with teacher distillation can improve arena score over the current 64x6 baseline while preserving legality and avoiding self-play collapse.",
+      "commit": "e249169",
+      "benchmark_id": "tiny_leela_rust_selfplay_mix_arena_v1",
+      "metric": 0.75,
+      "metrics": {
+        "mix_best_arena_score_rate": 0.75,
+        "mix_best_selfplay_weight": 0,
+        "mix_0_arena_true_play_score_rate": 0.5,
+        "mix_0_arena_adjudicated_score_rate": 0.75,
+        "mix_0_arena_adjudicated_rate": 1,
+        "mix_0p05_arena_true_play_score_rate": 0.5,
+        "mix_0p1_arena_true_play_score_rate": 0.5,
+        "mix_0p25_arena_true_play_score_rate": 0.5,
+        "dovetail_log_started": 1,
+        "dovetail_log_bytes": 9976,
+        "legal_move_selection_rate": 1,
+        "checks_pass": 1
+      },
+      "deltas": {
+        "delta_vs_parent": 0,
+        "delta_vs_lane_baseline": 0,
+        "delta_vs_root": 0.25,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "kept",
+        "reason": "The run reproduced mix_best_arena_score_rate=0.75 with best self-play weight still 0. Split metrics again show the apparent win is value-adjudication driven: weight=0 true-play score is 0.5, adjudicated score is 0.75, adjudicated rate is 1.0. Positive self-play weights remain true-play 0.5. New dovetail logging metrics are visible: dovetail_log_started=1 and dovetail_log_bytes=9976."
+      },
+      "created_at": "2026-05-05T05:07:54.329Z",
+      "run_id": "R0054",
+      "idea_id": "I0025"
+    },
+    "N0058": {
+      "node_id": "N0058",
+      "lane_id": "L018",
+      "parent_node_id": "N0057",
+      "children": [],
+      "phase": "probe",
+      "status": "segment_root",
+      "hypothesis": "Segment baseline: Phase D scaled true-play arena",
+      "commit": "e249169",
+      "benchmark_id": "tiny_leela_scaled_trueplay_arena_v1",
+      "metric": 0.5,
+      "metrics": {
+        "mix_best_arena_true_play_score_rate": 0.5
+      },
+      "deltas": {
+        "delta_vs_parent": null,
+        "delta_vs_lane_baseline": 0,
+        "delta_vs_root": 0,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "segment_root",
+        "reason": "Switch primary metric away from value-adjudicated mix_best_arena_score_rate to true-play/terminal arena score so strength claims are based on actual played results rather than value adjudication. Baseline is equal-strength teacher-only/control expected true-play score rate 0.5."
+      },
+      "created_at": "2026-05-05T05:09:04.413Z"
     }
   },
   "runs": {
@@ -4871,13 +5074,80 @@
       "next_action": "Keep normal Python trainer as default for the current tiny dataset. Use tinygrad CUDA only for larger batches/models where launch/compile overhead is amortized, or add a larger trainer-only A/B workload before switching defaults. Next quality-focused step remains a more discriminating non-adjudicated/larger arena.",
       "timestamp": "2026-05-05T04:52:17.701Z",
       "wall_time_seconds": 21.97
+    },
+    "R0053": {
+      "type": "research_run",
+      "run_id": "R0053",
+      "node_id": "N0056",
+      "lane_id": "L018",
+      "phase": "explore",
+      "status": "kept",
+      "metric": 0.75,
+      "metrics": {
+        "mix_best_arena_score_rate": 0.75,
+        "mix_best_selfplay_weight": 0,
+        "mix_0_arena_score_rate": 0.75,
+        "mix_0_arena_true_play_score_rate": 0.5,
+        "mix_0_arena_adjudicated_score_rate": 0.75,
+        "mix_0_arena_adjudicated_rate": 1,
+        "mix_0p05_arena_score_rate": 0.5,
+        "mix_0p05_arena_true_play_score_rate": 0.5,
+        "mix_0p05_arena_adjudicated_score_rate": 0.5,
+        "mix_0p1_arena_score_rate": 0.5,
+        "mix_0p1_arena_true_play_score_rate": 0.5,
+        "mix_0p1_arena_adjudicated_score_rate": 0.5,
+        "mix_0p25_arena_score_rate": 0.5,
+        "mix_0p25_arena_true_play_score_rate": 0.5,
+        "mix_0p25_arena_adjudicated_score_rate": 0.5,
+        "legal_move_selection_rate": 1,
+        "playable_shell_ready": 1
+      },
+      "benchmark_id": "tiny_leela_rust_selfplay_mix_arena_v1",
+      "commit": "ad11610",
+      "hypothesis": "A small amount of PUCT self-play visit-policy data mixed with teacher distillation can improve arena score over the current 64x6 baseline while preserving legality and avoiding self-play collapse.",
+      "implementation": "Added infrastructure metrics to Rust arena and mix sweep that split arena_score_rate into arena_true_play_score_rate and arena_adjudicated_score_rate while retaining existing primary metric compatibility. Also queued research ideas for larger mirrored opening-start arenas, cached baseline control, Rust WASM browser path, and opening diversity/noise.",
+      "learned": "The previous 0.75 best is fully explained by adjudication: weight=0 has true_play_score_rate=0.5 and adjudicated_score_rate=0.75 with adjudicated_rate=1.0. Positive self-play mix weights all have true_play_score_rate=0.5 and adjudicated_score_rate=0.5. This confirms benchmark discrimination was needed; current primary remains compatible but should not be interpreted as true-play strength.",
+      "next_action": "Run a new or updated segment using true-play/non-adjudicated arena or larger mirrored opening starts as the primary discriminating metric. Also improve dovetail log surfacing so run_research_experiment returns durable log path and useful tail/head snippets.",
+      "timestamp": "2026-05-05T04:57:28.731Z",
+      "wall_time_seconds": 17.491
+    },
+    "R0054": {
+      "type": "research_run",
+      "run_id": "R0054",
+      "node_id": "N0057",
+      "lane_id": "L018",
+      "phase": "explore",
+      "status": "kept",
+      "metric": 0.75,
+      "metrics": {
+        "mix_best_arena_score_rate": 0.75,
+        "mix_best_selfplay_weight": 0,
+        "mix_0_arena_true_play_score_rate": 0.5,
+        "mix_0_arena_adjudicated_score_rate": 0.75,
+        "mix_0_arena_adjudicated_rate": 1,
+        "mix_0p05_arena_true_play_score_rate": 0.5,
+        "mix_0p1_arena_true_play_score_rate": 0.5,
+        "mix_0p25_arena_true_play_score_rate": 0.5,
+        "dovetail_log_started": 1,
+        "dovetail_log_bytes": 9976,
+        "legal_move_selection_rate": 1,
+        "checks_pass": 1
+      },
+      "benchmark_id": "tiny_leela_rust_selfplay_mix_arena_v1",
+      "commit": "e249169",
+      "hypothesis": "A small amount of PUCT self-play visit-policy data mixed with teacher distillation can improve arena score over the current 64x6 baseline while preserving legality and avoiding self-play collapse.",
+      "implementation": "Ran the scheduled L018 S0003 Rust self-play mix arena benchmark after enabling explicit dovetail log discoverability and creating scale/discrimination lanes. No scalar tuning changes were made.",
+      "learned": "The run reproduced mix_best_arena_score_rate=0.75 with best self-play weight still 0. Split metrics again show the apparent win is value-adjudication driven: weight=0 true-play score is 0.5, adjudicated score is 0.75, adjudicated rate is 1.0. Positive self-play weights remain true-play 0.5. New dovetail logging metrics are visible: dovetail_log_started=1 and dovetail_log_bytes=9976.",
+      "next_action": "Scheduler should pivot to the new discrimination/scaling lanes, preferably L020 scaled true-play arena, because further L018 mix-ratio runs on S0003 remain adjudication-contaminated.",
+      "timestamp": "2026-05-05T05:07:54.329Z",
+      "wall_time_seconds": 17.385
     }
   },
   "ids": {
-    "next_lane": 20,
-    "next_node": 56,
-    "next_run": 53,
-    "next_idea": 31
+    "next_lane": 24,
+    "next_node": 59,
+    "next_run": 55,
+    "next_idea": 35
   },
-  "global_best_node_id": "N0052"
+  "global_best_node_id": "N0058"
 }

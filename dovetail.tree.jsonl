@@ -74,3 +74,10 @@
 {"type":"lane_created","lane_id":"L019","parent_node_id":"N0052","idea_id":"I0026","timestamp":"2026-05-05T04:40:31.617Z"}
 {"type":"run_logged","run_id":"R0051","node_id":"N0054","lane_id":"L019","status":"discarded","metric":0.75,"benchmark_id":"tiny_leela_rust_selfplay_mix_arena_v1","timestamp":"2026-05-05T04:50:24.709Z"}
 {"type":"run_logged","run_id":"R0052","node_id":"N0055","lane_id":"L019","status":"kept","metric":0.75,"benchmark_id":"tiny_leela_rust_selfplay_mix_arena_v1","timestamp":"2026-05-05T04:52:17.702Z"}
+{"type":"run_logged","run_id":"R0053","node_id":"N0056","lane_id":"L018","status":"kept","metric":0.75,"benchmark_id":"tiny_leela_rust_selfplay_mix_arena_v1","timestamp":"2026-05-05T04:57:28.732Z"}
+{"type":"lane_created","lane_id":"L020","parent_node_id":"N0052","timestamp":"2026-05-05T05:05:41.743Z"}
+{"type":"lane_created","lane_id":"L021","parent_node_id":"N0052","timestamp":"2026-05-05T05:05:44.513Z"}
+{"type":"lane_created","lane_id":"L022","parent_node_id":"N0052","timestamp":"2026-05-05T05:05:47.162Z"}
+{"type":"lane_created","lane_id":"L023","parent_node_id":"N0052","timestamp":"2026-05-05T05:05:51.022Z"}
+{"type":"run_logged","run_id":"R0054","node_id":"N0057","lane_id":"L018","status":"kept","metric":0.75,"benchmark_id":"tiny_leela_rust_selfplay_mix_arena_v1","timestamp":"2026-05-05T05:07:54.330Z"}
+{"type":"segment_initialized","segment_id":"S0004","node_id":"N0058","benchmark_id":"tiny_leela_scaled_trueplay_arena_v1","metric_name":"mix_best_arena_true_play_score_rate","reason":"Switch primary metric away from value-adjudicated mix_best_arena_score_rate to true-play/terminal arena score so strength claims are based on actual played results rather than value adjudication. Baseline is equal-strength teacher-only/control expected true-play score rate 0.5.","timestamp":"2026-05-05T05:09:04.414Z"}

@@ -48,6 +48,7 @@ const trainer = arg('--trainer', process.env.TINY_LEELA_TRAINER || 'python');
 const pythonBin = arg('--python', process.env.TINY_LEELA_PYTHON || 'python3');
 const featureCache = arg('--feature-cache', primaryConvArch ? `artifacts/cache/conv_features_${primaryConvArch}.json` : '');
 const trainPaths = arg('--train', 'data/teacher_labels.jsonl,data/stockfish_teacher_labels.jsonl').split(',').filter(Boolean);
+const selectionMetric = arg('--selection-metric', 'arena_score_rate');
 
 const startedAt = Date.now();
 const logProgress = (message) => process.stderr.write(`[mix-sweep backend=${backend}] ${message}\n`);
@@ -101,11 +102,16 @@ for (const candidate of results) {
   console.log(`METRIC ${prefix}_arena_adjudicated_rate=${(arenaMetrics.arena_adjudicated_rate ?? 0).toFixed(6)}`);
   console.log(`METRIC ${prefix}_arena_true_play_score_rate=${(arenaMetrics.arena_true_play_score_rate ?? arenaMetrics.arena_score_rate ?? 0).toFixed(6)}`);
   console.log(`METRIC ${prefix}_arena_adjudicated_score_rate=${(arenaMetrics.arena_adjudicated_score_rate ?? 0.5).toFixed(6)}`);
-  if (!best || (arenaMetrics.arena_score_rate ?? -1) > (best.arenaMetrics.arena_score_rate ?? -1)) best = candidate;
+  const candidateSelection = arenaMetrics[selectionMetric] ?? arenaMetrics.arena_score_rate ?? -1;
+  const bestSelection = best ? (best.arenaMetrics[selectionMetric] ?? best.arenaMetrics.arena_score_rate ?? -1) : -1;
+  if (!best || candidateSelection > bestSelection) best = candidate;
 }
 
 console.log(`METRIC mix_backend_${backend}=1`);
 console.log(`METRIC mix_weights_tested=${weights.length}`);
 console.log(`METRIC mix_best_selfplay_weight=${(best?.weight ?? 0).toFixed(6)}`);
 console.log(`METRIC mix_best_arena_score_rate=${(best?.arenaMetrics.arena_score_rate ?? 0).toFixed(6)}`);
+console.log(`METRIC mix_best_arena_true_play_score_rate=${(best?.arenaMetrics.arena_true_play_score_rate ?? best?.arenaMetrics.arena_score_rate ?? 0).toFixed(6)}`);
+console.log(`METRIC mix_best_arena_adjudicated_score_rate=${(best?.arenaMetrics.arena_adjudicated_score_rate ?? 0.5).toFixed(6)}`);
+console.log(`METRIC mix_selection_metric_${selectionMetric}=1`);
 console.log(`METRIC mix_best_distill_student_score=${(best?.trainMetrics.distill_student_score ?? 0).toFixed(6)}`);
