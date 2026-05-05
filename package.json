@@ -12,6 +12,7 @@
     "eval:architecture": "node --experimental-strip-types eval/architecture_suite.mjs",
     "eval:playable": "node --experimental-strip-types eval/playable_suite.mjs",
     "play:student": "node --experimental-strip-types scripts/play_student.mjs",
+    "web:student": "node --experimental-strip-types scripts/serve_student_web.mjs",
     "distill:check": "python3 scripts/check_lc0_teacher.py",
     "distill:seed": "python3 scripts/export_seed_fens.py",
     "distill:query": "python3 scripts/query_lc0_teacher.py",
