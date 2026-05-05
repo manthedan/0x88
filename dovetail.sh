@@ -40,6 +40,7 @@ npm run selfplay:mix-sweep --silent -- \
   --adjudicate=terminal \
   --selection-metric=arena_true_play_score_rate \
   --adjudicate-threshold=0.02 \
+  --opening-fens=data/selfplay_opening_starts.fen \
   --primary-conv-arch=64x6 \
   --train="$TRAIN_INPUTS" \
   --feature-cache=artifacts/cache/conv_features_64x6.json \

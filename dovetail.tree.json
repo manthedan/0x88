@@ -679,7 +679,7 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0052",
-      "current_node_id": "N0052",
+      "current_node_id": "N0061",
       "local_baseline_node_id": "N0052",
       "local_baseline_metric": 0.75,
       "concept_tags": [
@@ -687,8 +687,48 @@
         "training",
         "scaling"
       ],
-      "runs_in_current_concept": 0,
-      "created_at": "2026-05-05T05:05:44.512Z"
+      "runs_in_current_concept": 1,
+      "created_at": "2026-05-05T05:05:44.512Z",
+      "context_checkpoint": {
+        "type": "lane_context_checkpoint",
+        "lane_id": "L021",
+        "updated_at": "2026-05-05T05:44:04.207Z",
+        "source_handoff_run_id": "R0057",
+        "source_handoff_node_id": "N0061",
+        "task": "Apply teacher corrections to the recent timeout self-play buffer and include them in training inputs.",
+        "outcome": "Kept teacher-correction data plumbing, but no arena strength gain. Extracted 32 unique FENs from artifacts/selfplay_mix_arena_v1.jsonl, queried the local packaged Stockfish binary at depth 6/MultiPV 4, and committed data/teacher_corrections_selfplay_mix_arena.jsonl. dovetail.sh now detects this correction file, emits teacher_correction_rows, and includes it in --train inputs. The run completed in 393.117s with checks passing and teacher_correction_rows=32. Full-game arena still timed out completely: mix_best_arena_true_play_score_rate=0.5 and mix_best_arena_max_ply_draw_rate=1.0.",
+        "changed_files": [
+          "data/teacher_corrections_selfplay_mix_arena.jsonl",
+          "dovetail.context.jsonl",
+          "dovetail.runs.jsonl",
+          "dovetail.scheduler.json",
+          "dovetail.sh",
+          "dovetail.tree.json",
+          "dovetail.tree.jsonl"
+        ],
+        "relevant_reads": [
+          "artifacts/selfplay_mix_arena_v1.jsonl",
+          "dovetail.sh",
+          "scripts/query_stockfish_teacher.py",
+          "training/train_student.py"
+        ],
+        "validation_commands": [
+          "STOCKFISH_BIN=.local_engines/stockfish_pkg/usr/games/stockfish python3 scripts/query_stockfish_teacher.py --positions artifacts/selfplay_mix_arena_positions.fen --out artifacts/teacher_corrections_selfplay_mix_arena.jsonl --depth 6 --multipv 4",
+          "bash -n dovetail.sh",
+          "python3 training/validate_teacher_labels.py data/teacher_corrections_selfplay_mix_arena.jsonl",
+          "run_research_experiment: bash dovetail.sh"
+        ],
+        "failures": [
+          "Adding 32 teacher correction rows did not improve full-game true-play score; all weights remained 0.5",
+          "Arena max-ply draw rate stayed 1.0, so full-game arena remains non-discriminative",
+          "Correction rows were treated as extra teacher labels, not yet as a weighted correction objective or tactical readiness metric"
+        ],
+        "next_action_hint": "Prefer L024 next: add a teacher-correction/tactical gauntlet metric that evaluates corrected FEN move agreement/top-k/rank directly, then train with explicit correction weighting before returning to full-game arena.",
+        "summary": "Lane L021 (explore) hypothesis: Generating 64-512 Rust self-play games with longer plies, opening starts, and early-ply stochasticity will produce a replay buffer diverse enough for self-play mix weights to improve true-play arena results.\nLatest task: Apply teacher corrections to the recent timeout self-play buffer and include them in training inputs.\nOutcome: Kept teacher-correction data plumbing, but no arena strength gain. Extracted 32 unique FENs from artifacts/selfplay_mix_arena_v1.jsonl, queried the local packaged Stockfish binary at depth 6/MultiPV 4, and committed data/teacher_corrections_selfplay_mix_arena.jsonl. dovetail.sh now detects this correction file, emits teacher_correction_rows, and includes it in --train inputs. The run completed in 393.117s with checks passing and teacher_correction_rows=32. Full-game arena still timed out completely: mix_best_arena_true_play_score_rate=0.5 and mix_best_arena_max_ply_draw_rate=1.0.\nFailures to remember: Adding 32 teacher correction rows did not improve full-game true-play score; all weights remained 0.5; Arena max-ply draw rate stayed 1.0, so full-game arena remains non-discriminative; Correction rows were treated as extra teacher labels, not yet as a weighted correction objective or tactical readiness metric\nNext action: Prefer L024 next: add a teacher-correction/tactical gauntlet metric that evaluates corrected FEN move agreement/top-k/rank directly, then train with explicit correction weighting before returning to full-game arena.\nRecent lane runs: R0057",
+        "recent_run_ids": [
+          "R0057"
+        ]
+      }
     },
     "L022": {
       "lane_id": "L022",
@@ -2976,7 +3016,8 @@
       "children": [
         "N0053",
         "N0054",
-        "N0059"
+        "N0059",
+        "N0061"
       ],
       "phase": "explore",
       "status": "crash",
@@ -3379,6 +3420,45 @@
       },
       "created_at": "2026-05-05T05:34:55.513Z",
       "run_id": "R0056"
+    },
+    "N0061": {
+      "node_id": "N0061",
+      "lane_id": "L021",
+      "parent_node_id": "N0052",
+      "children": [],
+      "phase": "explore",
+      "status": "kept",
+      "hypothesis": "Generating 64-512 Rust self-play games with longer plies, opening starts, and early-ply stochasticity will produce a replay buffer diverse enough for self-play mix weights to improve true-play arena results.",
+      "commit": "22ed6b8",
+      "benchmark_id": "tiny_leela_scaled_trueplay_arena_v1",
+      "metric": 0.5,
+      "metrics": {
+        "teacher_correction_rows": 32,
+        "mix_best_arena_true_play_score_rate": 0.5,
+        "mix_best_arena_max_ply_draw_rate": 1,
+        "mix_best_selfplay_weight": 0,
+        "mix_0_distill_student_score": 14.985298,
+        "mix_0p05_distill_student_score": 14.802289,
+        "mix_0p1_distill_student_score": 14.805103,
+        "mix_0p25_distill_student_score": 14.794749,
+        "mix_0_arena_true_play_score_rate": 0.5,
+        "mix_0p05_arena_true_play_score_rate": 0.5,
+        "mix_0p1_arena_true_play_score_rate": 0.5,
+        "mix_0p25_arena_true_play_score_rate": 0.5,
+        "checks_pass": 1
+      },
+      "deltas": {
+        "delta_vs_parent": null,
+        "delta_vs_lane_baseline": -0.25,
+        "delta_vs_root": 0,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "kept",
+        "reason": "Teacher corrections can be applied to the self-play we just generated, and the pipeline remains valid/check-passing. However simply adding 32 Stockfish-corrected rows as extra teacher data did not change the current full-game true-play result: every arena game still hit max plies and all weights scored 0.5. The offline distillation score shifted downward because the eval/train distribution now includes correction rows, so future runs need a tactical/progress metric rather than relying on full-game arena."
+      },
+      "created_at": "2026-05-05T05:43:53.805Z",
+      "run_id": "R0057"
     }
   },
   "runs": {
@@ -5362,13 +5442,46 @@
       "next_action": "Pivot scheduler to teacher-assisted correction buffer or tactical/progress gauntlet. Do not spend more time scaling full-game true-play from start position while max_ply_draw_rate remains 1.0.",
       "timestamp": "2026-05-05T05:34:55.513Z",
       "wall_time_seconds": 390.437
+    },
+    "R0057": {
+      "type": "research_run",
+      "run_id": "R0057",
+      "node_id": "N0061",
+      "lane_id": "L021",
+      "phase": "explore",
+      "status": "kept",
+      "metric": 0.5,
+      "metrics": {
+        "teacher_correction_rows": 32,
+        "mix_best_arena_true_play_score_rate": 0.5,
+        "mix_best_arena_max_ply_draw_rate": 1,
+        "mix_best_selfplay_weight": 0,
+        "mix_0_distill_student_score": 14.985298,
+        "mix_0p05_distill_student_score": 14.802289,
+        "mix_0p1_distill_student_score": 14.805103,
+        "mix_0p25_distill_student_score": 14.794749,
+        "mix_0_arena_true_play_score_rate": 0.5,
+        "mix_0p05_arena_true_play_score_rate": 0.5,
+        "mix_0p1_arena_true_play_score_rate": 0.5,
+        "mix_0p25_arena_true_play_score_rate": 0.5,
+        "checks_pass": 1
+      },
+      "benchmark_id": "tiny_leela_scaled_trueplay_arena_v1",
+      "commit": "22ed6b8",
+      "base_commit": "bb21820",
+      "hypothesis": "Generating 64-512 Rust self-play games with longer plies, opening starts, and early-ply stochasticity will produce a replay buffer diverse enough for self-play mix weights to improve true-play arena results.",
+      "implementation": "Applied Stockfish teacher corrections to the timeout self-play buffer from the previous run by extracting 32 unique self-play FENs, querying the local packaged Stockfish at depth 6/MultiPV 4, committing data/teacher_corrections_selfplay_mix_arena.jsonl, and adding it to the training inputs in dovetail.sh alongside the existing teacher labels.",
+      "learned": "Teacher corrections can be applied to the self-play we just generated, and the pipeline remains valid/check-passing. However simply adding 32 Stockfish-corrected rows as extra teacher data did not change the current full-game true-play result: every arena game still hit max plies and all weights scored 0.5. The offline distillation score shifted downward because the eval/train distribution now includes correction rows, so future runs need a tactical/progress metric rather than relying on full-game arena.",
+      "next_action": "Run the dedicated L024 teacher-assisted correction lane or initialize a tactical/progress gauntlet segment to measure whether correction rows improve move quality on the corrected FENs before expecting arena improvement.",
+      "timestamp": "2026-05-05T05:43:53.805Z",
+      "wall_time_seconds": 393.117
     }
   },
   "ids": {
     "next_lane": 25,
-    "next_node": 61,
-    "next_run": 57,
-    "next_idea": 36
+    "next_node": 62,
+    "next_run": 58,
+    "next_idea": 37
   },
   "global_best_node_id": "N0058"
 }

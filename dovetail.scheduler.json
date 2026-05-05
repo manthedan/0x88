@@ -1,7 +1,7 @@
 {
   "cycle": 3,
   "cursor": 1,
-  "quantum_remaining": 2,
+  "quantum_remaining": 1,
   "loops_per_lane_quantum": 3,
   "max_active_lanes": 8,
   "max_total_lanes": 64,
@@ -9,6 +9,6 @@
   "spawn_new_lane_every_cycles": 1,
   "last_scheduled_lane_id": "L021",
   "strict_mode": true,
-  "strict_next_action": "Call log_research_run for this result, including failures/check failures.",
-  "lane_context_checkpoints": true
+  "lane_context_checkpoints": true,
+  "enabled": false
 }
