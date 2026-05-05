@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Phase C fixed teacher-distillation benchmark.
-# This replaces the saturated bootstrap-readiness score with a real model-quality
-# metric over the frozen v2 lc0+Stockfish seed labels. The workload is fixed:
-# dependency-free linear student, deterministic seed/split, consensus merge of
-# duplicate FEN teacher labels, and a stable output artifact path.
-python3 training/train_student.py \
-  --merge-fen \
-  --average-weights \
-  --average-policy-only \
-  --report-folds \
-  --compare-conv-archs \
-  --primary-conv-arch 64x6 \
-  --train data/teacher_labels.jsonl data/stockfish_teacher_labels.jsonl \
-  --out artifacts/student_distill_benchmark.json
+# Phase D self-play mix arena benchmark.
+# Fixed small CPU workload for comparable early self-play research: generate a
+# deterministic PUCT self-play buffer from the current student, train candidates
+# with several teacher/self-play mix weights, then evaluate each candidate against
+# the current 64x6 teacher-distilled baseline in the arena.
+npm run selfplay:mix-sweep --silent -- \
+  --weights=0,0.05,0.1,0.25 \
+  --games=2 \
+  --selfplay-visits=1 \
+  --max-plies=8 \
+  --epochs=40 \
+  --arena-games=2 \
+  --arena-visits=1 \
+  --primary-conv-arch=64x6 \
+  --selfplay=artifacts/selfplay_mix_arena_v1.jsonl \
+  --candidate-prefix=artifacts/selfplay_mix_arena_candidate \
+  --regenerate
+
+npm run eval:playable --silent
