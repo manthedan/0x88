@@ -52,6 +52,7 @@ const visits = Number(arg('--visits', '2'));
 const maxPlies = Number(arg('--max-plies', '40'));
 const adjudicate = arg('--adjudicate', 'terminal');
 const adjudicateThreshold = Number(arg('--adjudicate-threshold', '0.02'));
+const progressEvery = Math.max(1, Number(arg('--progress-every', process.env.TINY_LEELA_PROGRESS_EVERY ?? '4')));
 const candidate = StudentEvaluator.fromJson(readFileSync(candidatePath, 'utf8'));
 const baseline = StudentEvaluator.fromJson(readFileSync(baselinePath, 'utf8'));
 const openings = [
@@ -62,8 +63,12 @@ const openings = [
 ];
 
 let wins = 0, draws = 0, losses = 0, illegalLosses = 0, pliesTotal = 0, adjudicatedGames = 0;
+const startedAt = Date.now();
+const logProgress = (message) => process.stderr.write(`[arena backend=${backend} visits=${visits}] ${message}\n`);
+logProgress(`start games=${games} max_plies=${maxPlies} candidate=${candidatePath} baseline=${baselinePath}`);
 
 for (let game = 0; game < games; game++) {
+  logProgress(`game ${game + 1}/${games} start candidate_color=${game % 2 === 0 ? 'w' : 'b'}`);
   let board = parseFen(openings[game % openings.length]);
   const candidateColor = game % 2 === 0 ? 'w' : 'b';
   let whiteScore = terminalWhiteScore(board);
@@ -83,6 +88,7 @@ for (let game = 0; game < games; game++) {
     }
     board = makeMove(board, result.move);
     whiteScore = terminalWhiteScore(board);
+    if ((plies + 1) % progressEvery === 0) logProgress(`game ${game + 1}/${games} ply=${plies + 1}/${maxPlies} move=${uci} elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}`);
   }
   if (whiteScore === null) {
     const adjudicated = await adjudicatedWhiteScore(board);
@@ -94,6 +100,7 @@ for (let game = 0; game < games; game++) {
   else if (score === 0) losses++;
   else draws++;
   pliesTotal += plies;
+  logProgress(`game ${game + 1}/${games} done score=${score} wdl=${wins}/${draws}/${losses} illegal=${illegalLosses} elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}`);
 }
 
 const scoreRate = (wins + 0.5 * draws) / Math.max(1, games);

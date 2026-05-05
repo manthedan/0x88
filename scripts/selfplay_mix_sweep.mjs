@@ -34,8 +34,12 @@ const adjudicateThreshold = arg('--adjudicate-threshold', '0.02');
 const primaryConvArch = arg('--primary-conv-arch', '');
 const trainPaths = arg('--train', 'data/teacher_labels.jsonl,data/stockfish_teacher_labels.jsonl').split(',').filter(Boolean);
 
+const startedAt = Date.now();
+const logProgress = (message) => process.stderr.write(`[mix-sweep backend=${backend}] ${message}\n`);
+logProgress(`start weights=${weights.join(',')} selfplay=${selfplayPath}`);
+
 if (!existsSync(selfplayPath) || process.argv.includes('--regenerate')) {
-  process.stderr.write(`Generating self-play rows at ${selfplayPath}\n`);
+  logProgress(`generating self-play rows at ${selfplayPath}`);
   const selfplayOutput = run('npm', ['run', 'selfplay:generate', '--silent', '--', `--backend=${backend}`, `--games=${games}`, `--visits=${selfplayVisits}`, `--max-plies=${maxPlies}`, `--out=${selfplayPath}`, `--adjudicate=${adjudicate}`, `--adjudicate-threshold=${adjudicateThreshold}`]);
   process.stderr.write(selfplayOutput);
   const selfplayMetrics = metrics(selfplayOutput);
@@ -45,11 +49,13 @@ if (!existsSync(selfplayPath) || process.argv.includes('--regenerate')) {
 let best = null;
 for (const weight of weights) {
   const out = `${candidatePrefix}_w${String(weight).replace(/\./g, 'p')}.json`;
+  logProgress(`weight=${weight} train start out=${out} elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}`);
   const trainArgs = ['training/train_student.py', '--train', ...trainPaths, '--merge-fen', '--epochs', epochs, '--lr', lr, '--out', out, '--selfplay-weight', String(weight)];
   if (weight > 0) trainArgs.push('--selfplay-train', selfplayPath);
   if (primaryConvArch) trainArgs.push('--average-weights', '--average-policy-only', '--primary-conv-arch', primaryConvArch);
   const trainOutput = run('python3', trainArgs);
   const trainMetrics = metrics(trainOutput);
+  logProgress(`weight=${weight} train done score=${(trainMetrics.distill_student_score ?? 0).toFixed(6)} arena start elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}`);
   const arenaOutput = run('npm', ['run', 'eval:arena', '--silent', '--', `--backend=${backend}`, `--candidate=${out}`, '--baseline=artifacts/student_distill_benchmark.json', `--games=${arenaGames}`, `--visits=${arenaVisits}`, `--max-plies=${maxPlies}`, `--adjudicate=${adjudicate}`, `--adjudicate-threshold=${adjudicateThreshold}`]);
   const arenaMetrics = metrics(arenaOutput);
   const prefix = `mix_${String(weight).replace(/\./g, 'p')}`;
@@ -59,6 +65,7 @@ for (const weight of weights) {
   console.log(`METRIC ${prefix}_arena_candidate_elo_estimate=${(arenaMetrics.arena_candidate_elo_estimate ?? 0).toFixed(6)}`);
   console.log(`METRIC ${prefix}_arena_illegal_losses=${arenaMetrics.arena_illegal_losses ?? 0}`);
   console.log(`METRIC ${prefix}_arena_adjudicated_rate=${(arenaMetrics.arena_adjudicated_rate ?? 0).toFixed(6)}`);
+  logProgress(`weight=${weight} arena done score=${(arenaMetrics.arena_score_rate ?? 0).toFixed(6)} illegal=${arenaMetrics.arena_illegal_losses ?? 0} elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}`);
   const candidate = { weight, out, trainMetrics, arenaMetrics };
   if (!best || (arenaMetrics.arena_score_rate ?? -1) > (best.arenaMetrics.arena_score_rate ?? -1)) best = candidate;
 }

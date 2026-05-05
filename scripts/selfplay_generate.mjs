@@ -66,6 +66,7 @@ const visits = Number(arg('--visits', '4'));
 const maxPlies = Number(arg('--max-plies', '40'));
 const temperature = Number(arg('--temperature', '1'));
 const seed = Number(arg('--seed', '1'));
+const progressEvery = Math.max(1, Number(arg('--progress-every', process.env.TINY_LEELA_PROGRESS_EVERY ?? '1')));
 const adjudicate = arg('--adjudicate', 'terminal');
 const adjudicateThreshold = Number(arg('--adjudicate-threshold', '0.02'));
 const evaluator = StudentEvaluator.fromJson(readFileSync(modelPath, 'utf8'));
@@ -76,8 +77,12 @@ let decisiveGames = 0;
 let totalPlies = 0;
 let policyMass = 0;
 let adjudicatedGames = 0;
+const startedAt = Date.now();
+const logProgress = (message) => process.stderr.write(`[selfplay backend=${backend} visits=${visits}] ${message}\n`);
+logProgress(`start games=${games} max_plies=${maxPlies} out=${outPath}`);
 
 for (let game = 0; game < games; game++) {
+  logProgress(`game ${game + 1}/${games} start positions=${rows.length}`);
   let board = parseFen(START_FEN);
   const pending = [];
   let whiteScore = null;
@@ -103,6 +108,7 @@ for (let game = 0; game < games; game++) {
     if (!move) { whiteScore = 0.5; break; }
     board = makeMove(board, move);
     totalPlies++;
+    if ((ply + 1) % progressEvery === 0) logProgress(`game ${game + 1}/${games} ply=${ply + 1}/${maxPlies} move=${moveToUci(move)} rows_pending=${pending.length} elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}`);
   }
   if (whiteScore === null) {
     const adjudicated = await adjudicatedWhiteScore(board);
@@ -112,6 +118,7 @@ for (let game = 0; game < games; game++) {
   if (whiteScore !== 0.5) decisiveGames++;
   for (const row of pending) rows.push({ ...row, result: resultForTurn(whiteScore, row.turn), white_score: whiteScore });
   completedGames++;
+  logProgress(`game ${game + 1}/${games} done white_score=${whiteScore} rows_total=${rows.length} adjudicated=${adjudicatedGames} elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}`);
 }
 
 mkdirSync(dirname(outPath), { recursive: true });
