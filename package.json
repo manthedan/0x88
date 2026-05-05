@@ -34,5 +34,8 @@
   },
   "devDependencies": {
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "chessground": "^9.2.1"
   }
 }
