@@ -1,13 +1,13 @@
 {
   "cycle": 2,
-  "cursor": 1,
-  "quantum_remaining": 1,
+  "cursor": 2,
+  "quantum_remaining": 0,
   "loops_per_lane_quantum": 3,
   "max_active_lanes": 8,
   "max_total_lanes": 64,
   "max_same_concept_runs": 4,
   "spawn_new_lane_every_cycles": 1,
-  "last_scheduled_lane_id": "L015",
+  "last_scheduled_lane_id": "L006",
   "strict_mode": true,
   "strict_next_action": "Call schedule_next for the next scheduler-owned quantum unless the user stops you."
 }
