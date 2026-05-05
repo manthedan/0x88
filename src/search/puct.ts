@@ -1,5 +1,5 @@
 import type { BoardState } from '../chess/board.ts';
-import { legalMoves, makeMove } from '../chess/movegen.ts';
+import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToActionId, type Move } from '../chess/moveCodec.ts';
 import type { Evaluator } from '../nn/evaluator.ts';
 
@@ -33,10 +33,8 @@ async function expand(node: Node, evaluator: Evaluator): Promise<number> {
   const moves = legalMoves(node.board);
   if (!moves.length) {
     node.expanded = true;
-    // No legal moves: the current side is either checkmated or stalemated. The
-    // legal-move generator already rejects illegal king exposure; this value is
-    // intentionally conservative until terminal result plumbing is broadened.
-    node.terminalValue = 0;
+    // No legal moves: checkmate is loss for the side to move, stalemate is draw.
+    node.terminalValue = inCheck(node.board) ? -1 : 0;
     node.edges = [];
     return node.terminalValue;
   }
