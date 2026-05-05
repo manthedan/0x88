@@ -140,7 +140,8 @@ def merge_fen_rows(rows: list[dict]) -> list[dict]:
         mass = sum(policy.values())
         if mass > 0:
             policy = {move: prob / mass for move, prob in policy.items()}
-        out.append({"fen": fen, "policy": policy, "wdl": [prob / count for prob in acc["wdl"]]})
+        q = (acc["wdl"][0] - acc["wdl"][2]) / count
+        out.append({"fen": fen, "policy": policy, "wdl": [prob / count for prob in acc["wdl"]], "q": q})
     return out
 
 
@@ -152,6 +153,22 @@ def average_weights(weights: list[list[float]], totals: list[list[float]], count
     if count <= 0:
         return weights
     return [[total / count for total in row] for row in totals]
+
+
+def q_to_wdl(q: float) -> list[float]:
+    q = max(-1.0, min(1.0, q))
+    return [max(q, 0.0), 1.0 - abs(q), max(-q, 0.0)]
+
+
+def evaluate_q_wdl(rows: list[dict], ww: list[list[float]], value_feature_fn=wdl_features) -> float:
+    if not rows:
+        return 0.0
+    total = 0.0
+    for row in rows:
+        xv = value_feature_fn(row["fen"])
+        wdl_logits = [sum(w * v for w, v in zip(weights, xv)) for weights in ww]
+        total += cross_entropy(q_to_wdl(row.get("q", row["wdl"][0] - row["wdl"][2])), softmax(wdl_logits))
+    return total / len(rows)
 
 
 def evaluate(rows: list[dict], moves: list[str], wp: list[list[float]], ww: list[list[float]], policy_feature_fn=fen_features, value_feature_fn=wdl_features) -> tuple[float, float, float]:
@@ -225,6 +242,7 @@ def train_once(rows: list[dict], moves: list[str], epochs: int, lr: float, holdo
     final_ww = average_weights(ww, avg_ww, avg_count) if average and not average_policy_only else ww
     train_policy_ce, train_wdl_ce, _train_top1 = evaluate(train_rows, moves, final_wp, final_ww, policy_feature_fn, value_feature_fn)
     dev_policy_ce, dev_wdl_ce, dev_top1 = evaluate(dev_rows, moves, final_wp, final_ww, policy_feature_fn, value_feature_fn)
+    dev_q_wdl_ce = evaluate_q_wdl(dev_rows, final_ww, value_feature_fn)
     quality = 100.0 / (1.0 + dev_policy_ce + dev_wdl_ce)
     return {
         "score": quality,
@@ -232,6 +250,7 @@ def train_once(rows: list[dict], moves: list[str], epochs: int, lr: float, holdo
         "train_wdl_ce": train_wdl_ce,
         "dev_policy_ce": dev_policy_ce,
         "dev_wdl_ce": dev_wdl_ce,
+        "dev_q_wdl_ce": dev_q_wdl_ce,
         "dev_top1": dev_top1,
         "policy_weights": final_wp,
         "wdl_weights": final_ww,
@@ -302,6 +321,8 @@ def main() -> int:
     print(f"METRIC train_wdl_ce={result['train_wdl_ce']:.6f}")
     print(f"METRIC dev_policy_ce={result['dev_policy_ce']:.6f}")
     print(f"METRIC dev_wdl_ce={result['dev_wdl_ce']:.6f}")
+    print(f"METRIC dev_q_wdl_ce={result['dev_q_wdl_ce']:.6f}")
+    print(f"METRIC dev_wdl_q_ce_gap={result['dev_q_wdl_ce'] - result['dev_wdl_ce']:.6f}")
     print(f"METRIC dev_policy_only_score={100.0 / (1.0 + result['dev_policy_ce']):.6f}")
     print(f"METRIC dev_wdl_only_score={100.0 / (1.0 + result['dev_wdl_ce']):.6f}")
     print(f"METRIC dev_loss_balance_gap={result['dev_policy_ce'] - result['dev_wdl_ce']:.6f}")

@@ -281,6 +281,24 @@
       "runs_in_current_concept": 4,
       "created_at": "2026-05-04T22:52:12.429Z",
       "idea_id": "I0015"
+    },
+    "L012": {
+      "lane_id": "L012",
+      "title": "True research lane: distillation target choices",
+      "hypothesis": "Compare raw teacher policy, search-visit policy, WDL/Q mixes, and calibration losses while keeping model architecture and engine runtime fixed.",
+      "status": "active",
+      "phase": "explore",
+      "parent_node_id": "N0038",
+      "current_node_id": "N0042",
+      "local_baseline_node_id": "N0038",
+      "local_baseline_metric": 13.436814,
+      "concept_tags": [
+        "training",
+        "data"
+      ],
+      "runs_in_current_concept": 1,
+      "created_at": "2026-05-04T23:58:58.442Z",
+      "idea_id": "I0016"
     }
   },
   "nodes": {
@@ -1712,7 +1730,8 @@
       "lane_id": "L011",
       "parent_node_id": "N0034",
       "children": [
-        "N0039"
+        "N0039",
+        "N0042"
       ],
       "phase": "explore",
       "status": "kept",
@@ -1949,6 +1968,68 @@
       },
       "created_at": "2026-05-04T23:58:48.522Z",
       "run_id": "R0040"
+    },
+    "N0042": {
+      "node_id": "N0042",
+      "lane_id": "L012",
+      "parent_node_id": "N0038",
+      "children": [],
+      "phase": "explore",
+      "status": "kept",
+      "hypothesis": "Adding Q-derived WDL calibration diagnostics can reveal whether the current 64x6 value head aligns better with averaged WDL targets or with Q-implied targets while keeping architecture, primary labels, and runtime fixed.",
+      "commit": "fb849fe",
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "metric": 13.436814,
+      "metrics": {
+        "distill_student_score": 13.436814,
+        "train_policy_ce": 2.158718,
+        "train_wdl_ce": 0.672846,
+        "dev_policy_ce": 5.645547,
+        "dev_wdl_ce": 0.796693,
+        "dev_q_wdl_ce": 0.685984,
+        "dev_wdl_q_ce_gap": -0.110709,
+        "dev_policy_only_score": 15.047671,
+        "dev_wdl_only_score": 55.657797,
+        "dev_loss_balance_gap": 4.848853,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 194,
+        "wdl_feature_dim": 194,
+        "weight_average_count": 600,
+        "average_policy_only": 1,
+        "primary_conv_channels": 64,
+        "primary_conv_layers": 6,
+        "fold_score_mean": 13.040061,
+        "fold_score_std": 0.396754,
+        "conv_16x2_score": 12.85193,
+        "conv_16x2_score_per_kb": 0.504152,
+        "conv_24x3_score": 13.308346,
+        "conv_24x3_score_per_kb": 0.204572,
+        "conv_48x5_score": 13.322949,
+        "conv_48x5_score_per_kb": 0.035743,
+        "conv_64x6_score": 13.436814,
+        "conv_64x6_score_per_kb": 0.01712,
+        "best_conv_channels": 16,
+        "best_conv_layers": 2,
+        "best_conv_score": 12.85193,
+        "best_conv_bytes": 26104,
+        "best_conv_score_per_kb": 0.504152
+      },
+      "deltas": {
+        "delta_vs_parent": 0,
+        "delta_vs_lane_baseline": 0,
+        "delta_vs_root": 0.5146789999999992,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "kept",
+        "reason": "Primary score stayed at 13.436814. The Q-derived WDL calibration CE was 0.685984, which is 0.110709 lower than consensus dev_wdl_ce=0.796693. This indicates the current value head is closer to Q-implied WDL calibration than to full averaged teacher WDL, and the WDL weakness in the primary metric may come from draw-probability disagreement rather than pure win/loss Q."
+      },
+      "created_at": "2026-05-05T00:05:39.633Z",
+      "run_id": "R0041",
+      "idea_id": "I0016"
     }
   },
   "runs": {
@@ -3190,12 +3271,66 @@
       "learned": "L000 reproduced the current best exactly: distill_student_score=13.436814 with fold_score_mean=13.040061 and fold_score_std=0.396754. This confirms the baseline trajectory now points at the promoted 64x6 candidate and that the reverted discarded pooling run left the executable state clean.",
       "next_action": "Commit L000 alignment logs. Continue scheduler rotation; avoid further duplicate confirmations unless assigned, and prefer structural compression or WDL repair that preserves policy CE.",
       "timestamp": "2026-05-04T23:58:48.522Z"
+    },
+    "R0041": {
+      "type": "research_run",
+      "run_id": "R0041",
+      "node_id": "N0042",
+      "lane_id": "L012",
+      "phase": "explore",
+      "status": "kept",
+      "metric": 13.436814,
+      "metrics": {
+        "distill_student_score": 13.436814,
+        "train_policy_ce": 2.158718,
+        "train_wdl_ce": 0.672846,
+        "dev_policy_ce": 5.645547,
+        "dev_wdl_ce": 0.796693,
+        "dev_q_wdl_ce": 0.685984,
+        "dev_wdl_q_ce_gap": -0.110709,
+        "dev_policy_only_score": 15.047671,
+        "dev_wdl_only_score": 55.657797,
+        "dev_loss_balance_gap": 4.848853,
+        "dev_policy_top1": 0,
+        "teacher_rows": 10,
+        "raw_teacher_rows": 20,
+        "move_vocab": 44,
+        "feature_dim": 194,
+        "wdl_feature_dim": 194,
+        "weight_average_count": 600,
+        "average_policy_only": 1,
+        "primary_conv_channels": 64,
+        "primary_conv_layers": 6,
+        "fold_score_mean": 13.040061,
+        "fold_score_std": 0.396754,
+        "conv_16x2_score": 12.85193,
+        "conv_16x2_score_per_kb": 0.504152,
+        "conv_24x3_score": 13.308346,
+        "conv_24x3_score_per_kb": 0.204572,
+        "conv_48x5_score": 13.322949,
+        "conv_48x5_score_per_kb": 0.035743,
+        "conv_64x6_score": 13.436814,
+        "conv_64x6_score_per_kb": 0.01712,
+        "best_conv_channels": 16,
+        "best_conv_layers": 2,
+        "best_conv_score": 12.85193,
+        "best_conv_bytes": 26104,
+        "best_conv_score_per_kb": 0.504152
+      },
+      "benchmark_id": "tiny_leela_fixed_teacher_distill_consensus_v1",
+      "commit": "fb849fe",
+      "base_commit": "fb849fe",
+      "hypothesis": "Adding Q-derived WDL calibration diagnostics can reveal whether the current 64x6 value head aligns better with averaged WDL targets or with Q-implied targets while keeping architecture, primary labels, and runtime fixed.",
+      "implementation": "Preserved consensus WDL training/evaluation as the primary benchmark, but carried a derived q value through merged FEN rows and emitted dev_q_wdl_ce plus dev_wdl_q_ce_gap using a q_to_wdl calibration target. No training labels, primary metric, architecture, or artifact selection changed.",
+      "learned": "Primary score stayed at 13.436814. The Q-derived WDL calibration CE was 0.685984, which is 0.110709 lower than consensus dev_wdl_ce=0.796693. This indicates the current value head is closer to Q-implied WDL calibration than to full averaged teacher WDL, and the WDL weakness in the primary metric may come from draw-probability disagreement rather than pure win/loss Q.",
+      "next_action": "Commit diagnostics. If scheduler continues L012, test a structural WDL target-mix diagnostic or optional q-derived WDL training only if benchmark comparability is handled explicitly; otherwise preserve fixed primary WDL labels.",
+      "timestamp": "2026-05-05T00:05:39.633Z"
     }
   },
   "ids": {
-    "next_lane": 12,
-    "next_node": 42,
-    "next_run": 41,
+    "next_lane": 13,
+    "next_node": 43,
+    "next_run": 42,
     "next_idea": 22
   },
   "global_best_node_id": "N0038"
