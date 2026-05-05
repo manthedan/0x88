@@ -117,6 +117,26 @@ def load_rows(paths: list[str]) -> list[dict]:
     return rows
 
 
+def load_selfplay_rows(paths: list[str], weight: float) -> list[dict]:
+    rows: list[dict] = []
+    for row in load_rows(paths):
+        if not row.get("policy") or not row.get("result"):
+            continue
+        policy = {move: float(prob) for move, prob in row["policy"].items() if float(prob) > 0}
+        mass = sum(policy.values())
+        if mass <= 0:
+            continue
+        rows.append({
+            "fen": row["fen"],
+            "policy": {move: prob / mass for move, prob in policy.items()},
+            "wdl": [float(v) for v in row["result"]],
+            "q": float(row["result"][0]) - float(row["result"][2]),
+            "_source": "selfplay",
+            "_weight": weight,
+        })
+    return rows
+
+
 def merge_fen_rows(rows: list[dict]) -> list[dict]:
     """Average multiple teacher labels for the same position into one consensus target."""
     merged: dict[str, dict] = {}
@@ -219,14 +239,15 @@ def train_once(rows: list[dict], moves: list[str], epochs: int, lr: float, holdo
             target = [row["policy"].get(move, 0.0) for move in moves]
             mass = sum(target)
             target = [v / mass for v in target]
+            row_weight = float(row.get("_weight", 1.0))
             for i in range(len(moves)):
-                grad = probs[i] - target[i]
+                grad = row_weight * (probs[i] - target[i])
                 for j, val in enumerate(x):
                     wp[i][j] -= lr * grad * val
             wdl_logits = [sum(w * v for w, v in zip(weights, xv)) for weights in ww]
             wdl = softmax(wdl_logits)
             for i in range(3):
-                grad = wdl[i] - row["wdl"][i]
+                grad = row_weight * (wdl[i] - row["wdl"][i])
                 for j, val in enumerate(xv):
                     ww[i][j] -= lr * grad * val
         if average and epoch >= epochs // 2:
@@ -263,6 +284,8 @@ def train_once(rows: list[dict], moves: list[str], epochs: int, lr: float, holdo
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--train", nargs="+", default=["data/teacher_labels.jsonl", "data/stockfish_teacher_labels.jsonl"])
+    parser.add_argument("--selfplay-train", nargs="*", default=[], help="optional self-play JSONL rows with visit policy and result targets")
+    parser.add_argument("--selfplay-weight", type=float, default=0.0, help="per-row training weight for self-play rows")
     parser.add_argument("--epochs", type=int, default=1200)
     parser.add_argument("--lr", type=float, default=0.05)
     parser.add_argument("--holdout-mod", type=int, default=2, help="hold out rows whose index modulo this value is 0")
@@ -276,7 +299,12 @@ def main() -> int:
     args = parser.parse_args()
 
     raw_rows = load_rows(args.train)
-    rows = merge_fen_rows(raw_rows) if args.merge_fen else raw_rows
+    teacher_rows = merge_fen_rows(raw_rows) if args.merge_fen else raw_rows
+    for row in teacher_rows:
+        row.setdefault("_source", "teacher")
+        row.setdefault("_weight", 1.0)
+    selfplay_rows = load_selfplay_rows(args.selfplay_train, args.selfplay_weight) if args.selfplay_train and args.selfplay_weight > 0 else []
+    rows = teacher_rows + selfplay_rows
     if len(rows) < 2:
         raise SystemExit("Need at least two teacher rows")
     moves = sorted({move for row in rows for move in row["policy"]})
@@ -331,8 +359,10 @@ def main() -> int:
     print(f"METRIC dev_wdl_only_score={100.0 / (1.0 + result['dev_wdl_ce']):.6f}")
     print(f"METRIC dev_loss_balance_gap={result['dev_policy_ce'] - result['dev_wdl_ce']:.6f}")
     print(f"METRIC dev_policy_top1={result['dev_top1']:.6f}")
-    print(f"METRIC teacher_rows={len(rows)}")
+    print(f"METRIC teacher_rows={len(teacher_rows)}")
     print(f"METRIC raw_teacher_rows={len(raw_rows)}")
+    print(f"METRIC selfplay_train_rows={len(selfplay_rows)}")
+    print(f"METRIC selfplay_weight={args.selfplay_weight:.6f}")
     print(f"METRIC move_vocab={len(moves)}")
     print(f"METRIC feature_dim={result['feature_dim']}")
     print(f"METRIC wdl_feature_dim={result['wdl_feature_dim']}")

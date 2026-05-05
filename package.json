@@ -13,6 +13,7 @@
     "eval:playable": "node --experimental-strip-types eval/playable_suite.mjs",
     "eval:arena": "node --experimental-strip-types eval/arena_suite.mjs",
     "selfplay:generate": "node --experimental-strip-types scripts/selfplay_generate.mjs",
+    "selfplay:mix-sweep": "node --experimental-strip-types scripts/selfplay_mix_sweep.mjs",
     "play:student": "node --experimental-strip-types scripts/play_student.mjs",
     "web:student": "node --experimental-strip-types scripts/serve_student_web.mjs",
     "distill:check": "python3 scripts/check_lc0_teacher.py",
