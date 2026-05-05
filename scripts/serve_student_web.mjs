@@ -22,8 +22,8 @@ const backend = arg('--backend', process.env.TINY_LEELA_BACKEND ?? 'rust');
 const port = Number(arg('--port', process.env.PORT ?? '5173'));
 const host = arg('--host', process.env.HOST ?? '127.0.0.1');
 const evaluator = StudentEvaluator.fromJson(readFileSync(modelPath, 'utf8'));
-const searchVisits = Number(arg('--visits', process.env.TINY_LEELA_SEARCH_VISITS ?? '64'));
-const policyVisits = Number(arg('--policy-visits', process.env.TINY_LEELA_POLICY_VISITS ?? String(Math.min(8, searchVisits))));
+const searchVisits = Number(arg('--visits', process.env.TINY_LEELA_SEARCH_VISITS ?? '1024'));
+const policyVisits = Number(arg('--policy-visits', process.env.TINY_LEELA_POLICY_VISITS ?? String(Math.min(64, searchVisits))));
 const chessgroundCss = [
   readFileSync('node_modules/chessground/assets/chessground.base.css', 'utf8'),
   readFileSync('node_modules/chessground/assets/chessground.brown.css', 'utf8'),
