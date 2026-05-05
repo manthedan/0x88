@@ -1,3 +1,6 @@
+use serde::Deserialize;
+use std::collections::HashMap;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Color { White, Black }
 
@@ -278,6 +281,225 @@ pub fn move_to_uci(m: Move) -> String {
 pub fn move_to_action_id(m: Move) -> u32 {
     let promo = match m.promotion { Some(Role::Knight)=>1, Some(Role::Bishop)=>2, Some(Role::Rook)=>3, Some(Role::Queen)=>4, _=>0 };
     ((m.from as u32 * 64 + m.to as u32) * 5) + promo
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct StudentArtifact {
+    pub kind: String,
+    pub moves: Vec<String>,
+    pub policy_weights: Vec<Vec<f32>>,
+    pub wdl_weights: Vec<Vec<f32>>,
+    pub policy_feature_dim: usize,
+    pub wdl_feature_dim: usize,
+    pub weight_average_count: Option<u32>,
+    pub conv_channels: Option<usize>,
+    pub conv_layers: Option<usize>,
+}
+
+pub struct Evaluation { pub policy: Vec<(u32, f32)>, pub wdl: [f32; 3] }
+pub trait PositionEvaluator { fn evaluate(&self, board: &Board) -> Evaluation; }
+
+pub struct StudentEvaluator { artifact: StudentArtifact, move_index: HashMap<String, usize> }
+
+impl StudentEvaluator {
+    pub fn from_json(json: &str) -> Result<Self, String> {
+        let artifact: StudentArtifact = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        let move_index = artifact.moves.iter().enumerate().map(|(i, m)| (m.clone(), i)).collect();
+        Ok(Self { artifact, move_index })
+    }
+}
+
+fn softmax(xs: &[f32]) -> Vec<f32> {
+    let m = xs.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let exps: Vec<f32> = xs.iter().map(|x| (*x - m).exp()).collect();
+    let total: f32 = exps.iter().sum::<f32>().max(1e-30);
+    exps.into_iter().map(|x| x / total).collect()
+}
+
+fn dot(weights: &[f32], values: &[f32]) -> f32 { weights.iter().zip(values.iter()).map(|(a, b)| a * b).sum() }
+
+fn wdl_features_from_fen(fen: &str) -> Result<Vec<f32>, String> {
+    let base = fen_features(fen)?;
+    let side = base[1];
+    let mut out = base.to_vec();
+    out.extend(base[2..].iter().map(|v| side * *v));
+    Ok(out)
+}
+
+fn stable_weight(values: &[u64]) -> f32 {
+    let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+    for &v in values { seed ^= v.wrapping_add(0x9E37_79B9).wrapping_add(seed << 6).wrapping_add(seed >> 2); }
+    (((seed % 2001) as f32 / 1000.0) - 1.0) / ((values.len() + 1) as f32).sqrt()
+}
+
+fn conv_student_features(fen: &str, channels: usize, layers: usize) -> Vec<f32> {
+    let mut parts = fen.split_whitespace();
+    let placement = parts.next().unwrap_or("8/8/8/8/8/8/8/8");
+    let side = parts.next().unwrap_or("w");
+    let mut maps = vec![[[0f32; 8]; 8]; 13];
+    let (mut rank_i, mut file_i) = (0usize, 0usize);
+    for ch in placement.chars() {
+        if ch == '/' { rank_i += 1; file_i = 0; }
+        else if ch.is_ascii_digit() { file_i += ch.to_digit(10).unwrap() as usize; }
+        else if let Some(pi) = "PNBRQKpnbrqk".find(ch) { maps[pi][rank_i][file_i] = 1.0; file_i += 1; }
+    }
+    let side_value = if side == "w" { 1.0 } else { -1.0 };
+    for r in 0..8 { for f in 0..8 { maps[12][r][f] = side_value; } }
+    let mut prev = maps;
+    for layer in 0..layers {
+        let prev_channels = prev.len();
+        let mut out = vec![[[0f32; 8]; 8]; channels];
+        for c in 0..channels { for r in 0..8usize { for f in 0..8usize {
+            let mut acc = stable_weight(&[layer as u64, c as u64, 99]);
+            for (pc, prev_map) in prev.iter().enumerate() { for dri in 0..3usize {
+                let rr = r as isize + dri as isize - 1; if !(0..8).contains(&rr) { continue; }
+                for dfi in 0..3usize { let ff = f as isize + dfi as isize - 1; if (0..8).contains(&ff) {
+                    let k = stable_weight(&[layer as u64, c as u64, pc as u64, dri as u64, dfi as u64]);
+                    acc += prev_map[rr as usize][ff as usize] * k;
+                } }
+            } }
+            out[c][r][f] = (acc / ((prev_channels * 4) as f32).sqrt()).tanh();
+        } } }
+        prev = out;
+    }
+    let mut feats = Vec::with_capacity(2 + channels * 3);
+    feats.push(1.0); feats.push(side_value);
+    for channel in prev.iter() {
+        let (mut sum, mut mx, mut mn) = (0f32, f32::NEG_INFINITY, f32::INFINITY);
+        for row in channel { for &v in row { sum += v; mx = mx.max(v); mn = mn.min(v); } }
+        feats.push(sum / 64.0); feats.push(mx); feats.push(mn);
+    }
+    feats
+}
+
+impl PositionEvaluator for StudentEvaluator {
+    fn evaluate(&self, board: &Board) -> Evaluation {
+        let fen = board_to_fen(board);
+        let policy_features = if self.artifact.kind == "frozen_conv_fen_student" { conv_student_features(&fen, self.artifact.conv_channels.unwrap_or(0), self.artifact.conv_layers.unwrap_or(0)) } else { fen_features(&fen).unwrap().to_vec() };
+        let value_features = if self.artifact.kind == "frozen_conv_fen_student" { policy_features.clone() } else { wdl_features_from_fen(&fen).unwrap() };
+        let logits: Vec<f32> = self.artifact.policy_weights.iter().map(|w| dot(w, &policy_features)).collect();
+        let probs = softmax(&logits);
+        let legal = legal_moves(board);
+        let mut raw = Vec::with_capacity(legal.len());
+        let mut legal_mass = 0f32;
+        for m in legal.iter() { let p = self.move_index.get(&move_to_uci(*m)).and_then(|&i| probs.get(i)).copied().unwrap_or(0.0).max(0.0); raw.push(p); legal_mass += p; }
+        let policy = if legal.is_empty() { Vec::new() } else if legal_mass <= 0.0 { legal.iter().map(|&m| (move_to_action_id(m), 1.0 / legal.len() as f32)).collect() } else { legal.iter().zip(raw.iter()).map(|(&m, &p)| (move_to_action_id(m), p / legal_mass)).collect() };
+        let wdl_logits: Vec<f32> = self.artifact.wdl_weights.iter().map(|w| dot(w, &value_features)).collect();
+        let w = softmax(&wdl_logits);
+        Evaluation { policy, wdl: [w.first().copied().unwrap_or(0.0), w.get(1).copied().unwrap_or(0.0), w.get(2).copied().unwrap_or(0.0)] }
+    }
+}
+
+pub struct UniformEvaluator;
+impl PositionEvaluator for UniformEvaluator {
+    fn evaluate(&self, board: &Board) -> Evaluation {
+        let moves = legal_moves(board); let p = if moves.is_empty() { 0.0 } else { 1.0 / moves.len() as f32 };
+        Evaluation { policy: moves.into_iter().map(|m| (move_to_action_id(m), p)).collect(), wdl: [0.25, 0.5, 0.25] }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SearchOptions { pub visits: u32, pub cpuct: f32, pub temperature: f32 }
+impl Default for SearchOptions { fn default() -> Self { Self { visits: 8, cpuct: 1.5, temperature: 1.0 } } }
+#[derive(Clone, Debug)]
+pub struct SearchPolicyEntry { pub mv: Move, pub visits: u32, pub prior: f32, pub q: f32, pub probability: f32 }
+#[derive(Clone, Debug)]
+pub struct SearchResult { pub mv: Option<Move>, pub visits: u32, pub value: f32, pub policy: Vec<SearchPolicyEntry> }
+struct Edge { mv: Move, prior: f32, child: Option<Box<Node>>, visits: u32, value_sum: f32 }
+struct Node { board: Board, expanded: bool, terminal_value: Option<f32>, edges: Vec<Edge> }
+fn value_from_wdl(wdl: [f32; 3]) -> f32 { wdl[0] - wdl[2] }
+fn edge_q_for_parent(edge: &Edge) -> f32 { if edge.visits > 0 { -edge.value_sum / edge.visits as f32 } else { 0.0 } }
+fn expand_node(node: &mut Node, evaluator: &dyn PositionEvaluator) -> f32 {
+    let moves = legal_moves(&node.board);
+    if moves.is_empty() { node.expanded = true; node.terminal_value = Some(if in_check(&node.board, node.board.turn) { -1.0 } else { 0.0 }); node.edges.clear(); return node.terminal_value.unwrap(); }
+    let evaln = evaluator.evaluate(&node.board);
+    let policy_map: HashMap<u32, f32> = evaln.policy.into_iter().collect();
+    let raw: Vec<f32> = moves.iter().map(|&m| policy_map.get(&move_to_action_id(m)).copied().unwrap_or(0.0).max(0.0)).collect();
+    let total: f32 = raw.iter().sum(); let fallback = 1.0 / moves.len() as f32;
+    node.edges = moves.into_iter().enumerate().map(|(i, mv)| Edge { mv, prior: if total > 0.0 { raw[i] / total } else { fallback }, child: None, visits: 0, value_sum: 0.0 }).collect();
+    node.expanded = true; node.terminal_value = None; value_from_wdl(evaln.wdl)
+}
+fn simulate(node: &mut Node, evaluator: &dyn PositionEvaluator, cpuct: f32) -> f32 {
+    if !node.expanded { return expand_node(node, evaluator); }
+    if let Some(v) = node.terminal_value { return v; }
+    let parent_visits: u32 = node.edges.iter().map(|e| e.visits).sum(); let sqrt_parent = ((parent_visits + 1) as f32).sqrt();
+    let mut best_i = 0usize; let mut best_score = f32::NEG_INFINITY;
+    for (i, edge) in node.edges.iter().enumerate() { let score = edge_q_for_parent(edge) + cpuct * edge.prior * sqrt_parent / (1.0 + edge.visits as f32); if score > best_score { best_i = i; best_score = score; } }
+    let edge = &mut node.edges[best_i];
+    if edge.child.is_none() { edge.child = Some(Box::new(Node { board: make_move(&node.board, edge.mv), expanded: false, terminal_value: None, edges: Vec::new() })); }
+    let child_value = simulate(edge.child.as_mut().unwrap(), evaluator, cpuct);
+    edge.visits += 1; edge.value_sum += child_value; -child_value
+}
+fn visit_policy(edges: &[Edge], temperature: f32) -> Vec<SearchPolicyEntry> {
+    if edges.is_empty() { return Vec::new(); }
+    let tau = temperature.max(0.0);
+    if tau == 0.0 { let best_i = edges.iter().enumerate().max_by_key(|(_, e)| e.visits).map(|(i, _)| i).unwrap_or(0); return edges.iter().enumerate().map(|(i, e)| SearchPolicyEntry { mv: e.mv, visits: e.visits, prior: e.prior, q: edge_q_for_parent(e), probability: if i == best_i { 1.0 } else { 0.0 } }).collect(); }
+    let weights: Vec<f32> = edges.iter().map(|e| (e.visits as f32).max(1e-9).powf(1.0 / tau)).collect(); let total: f32 = weights.iter().sum::<f32>().max(1e-30);
+    edges.iter().zip(weights.iter()).map(|(e, &w)| SearchPolicyEntry { mv: e.mv, visits: e.visits, prior: e.prior, q: edge_q_for_parent(e), probability: w / total }).collect()
+}
+pub fn search_root(board: &Board, evaluator: &dyn PositionEvaluator, options: SearchOptions) -> SearchResult {
+    let visits = options.visits.max(1); let mut root = Node { board: board.clone(), expanded: false, terminal_value: None, edges: Vec::new() };
+    let root_value = expand_node(&mut root, evaluator); if root.edges.is_empty() { return SearchResult { mv: None, visits: 0, value: root_value, policy: Vec::new() }; }
+    for _ in 0..visits { simulate(&mut root, evaluator, options.cpuct); }
+    let policy = visit_policy(&root.edges, options.temperature); let best = policy.iter().max_by(|a, b| a.probability.total_cmp(&b.probability));
+    SearchResult { mv: best.map(|e| e.mv), visits: root.edges.iter().map(|e| e.visits).sum(), value: best.map(|e| e.q).unwrap_or(root_value), policy }
+}
+
+#[no_mangle]
+pub extern "C" fn tiny_leela_startpos_uniform_search_best_action(visits: u32) -> u32 {
+    let board = parse_fen(START_FEN).expect("valid start fen");
+    search_root(&board, &UniformEvaluator, SearchOptions { visits: visits.max(1), cpuct: 1.5, temperature: 0.0 }).mv.map(move_to_action_id).unwrap_or(u32::MAX)
+}
+
+#[no_mangle]
+pub extern "C" fn tiny_leela_alloc(len: usize) -> *mut u8 {
+    let mut buf = Vec::<u8>::with_capacity(len);
+    let ptr = buf.as_mut_ptr();
+    std::mem::forget(buf);
+    ptr
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tiny_leela_free(ptr: *mut u8, len: usize) {
+    if !ptr.is_null() { drop(Vec::from_raw_parts(ptr, 0, len)); }
+}
+
+unsafe fn wasm_str<'a>(ptr: *const u8, len: usize) -> Result<&'a str, ()> {
+    if ptr.is_null() { return Err(()); }
+    std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).map_err(|_| ())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tiny_leela_student_wdl(
+    artifact_ptr: *const u8,
+    artifact_len: usize,
+    fen_ptr: *const u8,
+    fen_len: usize,
+    out_wdl_ptr: *mut f32,
+) -> i32 {
+    let Ok(artifact_json) = wasm_str(artifact_ptr, artifact_len) else { return -1; };
+    let Ok(fen) = wasm_str(fen_ptr, fen_len) else { return -2; };
+    let Ok(evaluator) = StudentEvaluator::from_json(artifact_json) else { return -3; };
+    let Ok(board) = parse_fen(fen) else { return -4; };
+    if out_wdl_ptr.is_null() { return -5; }
+    let evaln = evaluator.evaluate(&board);
+    for i in 0..3 { *out_wdl_ptr.add(i) = evaln.wdl[i]; }
+    0
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tiny_leela_student_search_best_action(
+    artifact_ptr: *const u8,
+    artifact_len: usize,
+    fen_ptr: *const u8,
+    fen_len: usize,
+    visits: u32,
+) -> u32 {
+    let Ok(artifact_json) = wasm_str(artifact_ptr, artifact_len) else { return u32::MAX; };
+    let Ok(fen) = wasm_str(fen_ptr, fen_len) else { return u32::MAX; };
+    let Ok(evaluator) = StudentEvaluator::from_json(artifact_json) else { return u32::MAX; };
+    let Ok(board) = parse_fen(fen) else { return u32::MAX; };
+    search_root(&board, &evaluator, SearchOptions { visits: visits.max(1), cpuct: 1.5, temperature: 0.0 }).mv.map(move_to_action_id).unwrap_or(u32::MAX)
 }
 
 #[no_mangle]
