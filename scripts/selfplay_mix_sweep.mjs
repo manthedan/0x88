@@ -102,6 +102,8 @@ for (const candidate of results) {
   console.log(`METRIC ${prefix}_arena_adjudicated_rate=${(arenaMetrics.arena_adjudicated_rate ?? 0).toFixed(6)}`);
   console.log(`METRIC ${prefix}_arena_true_play_score_rate=${(arenaMetrics.arena_true_play_score_rate ?? arenaMetrics.arena_score_rate ?? 0).toFixed(6)}`);
   console.log(`METRIC ${prefix}_arena_adjudicated_score_rate=${(arenaMetrics.arena_adjudicated_score_rate ?? 0.5).toFixed(6)}`);
+  console.log(`METRIC ${prefix}_arena_max_ply_draw_rate=${(arenaMetrics.arena_max_ply_draw_rate ?? 0).toFixed(6)}`);
+  console.log(`METRIC ${prefix}_arena_avg_plies=${(arenaMetrics.arena_avg_plies ?? 0).toFixed(6)}`);
   const candidateSelection = arenaMetrics[selectionMetric] ?? arenaMetrics.arena_score_rate ?? -1;
   const bestSelection = best ? (best.arenaMetrics[selectionMetric] ?? best.arenaMetrics.arena_score_rate ?? -1) : -1;
   if (!best || candidateSelection > bestSelection) best = candidate;
@@ -113,5 +115,6 @@ console.log(`METRIC mix_best_selfplay_weight=${(best?.weight ?? 0).toFixed(6)}`)
 console.log(`METRIC mix_best_arena_score_rate=${(best?.arenaMetrics.arena_score_rate ?? 0).toFixed(6)}`);
 console.log(`METRIC mix_best_arena_true_play_score_rate=${(best?.arenaMetrics.arena_true_play_score_rate ?? best?.arenaMetrics.arena_score_rate ?? 0).toFixed(6)}`);
 console.log(`METRIC mix_best_arena_adjudicated_score_rate=${(best?.arenaMetrics.arena_adjudicated_score_rate ?? 0.5).toFixed(6)}`);
+console.log(`METRIC mix_best_arena_max_ply_draw_rate=${(best?.arenaMetrics.arena_max_ply_draw_rate ?? 0).toFixed(6)}`);
 console.log(`METRIC mix_selection_metric_${selectionMetric}=1`);
 console.log(`METRIC mix_best_distill_student_score=${(best?.trainMetrics.distill_student_score ?? 0).toFixed(6)}`);

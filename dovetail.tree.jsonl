@@ -81,3 +81,5 @@
 {"type":"lane_created","lane_id":"L023","parent_node_id":"N0052","timestamp":"2026-05-05T05:05:51.022Z"}
 {"type":"run_logged","run_id":"R0054","node_id":"N0057","lane_id":"L018","status":"kept","metric":0.75,"benchmark_id":"tiny_leela_rust_selfplay_mix_arena_v1","timestamp":"2026-05-05T05:07:54.330Z"}
 {"type":"segment_initialized","segment_id":"S0004","node_id":"N0058","benchmark_id":"tiny_leela_scaled_trueplay_arena_v1","metric_name":"mix_best_arena_true_play_score_rate","reason":"Switch primary metric away from value-adjudicated mix_best_arena_score_rate to true-play/terminal arena score so strength claims are based on actual played results rather than value adjudication. Baseline is equal-strength teacher-only/control expected true-play score rate 0.5.","timestamp":"2026-05-05T05:09:04.414Z"}
+{"type":"run_logged","run_id":"R0055","node_id":"N0059","lane_id":"L020","status":"kept","metric":0.5,"benchmark_id":"tiny_leela_scaled_trueplay_arena_v1","timestamp":"2026-05-05T05:18:13.539Z"}
+{"type":"lane_created","lane_id":"L024","parent_node_id":"N0058","timestamp":"2026-05-05T05:27:30.429Z"}

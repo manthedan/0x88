@@ -63,6 +63,7 @@ fn main() {
     let mut true_play_draws = 0usize;
     let mut true_play_losses = 0usize;
     let mut adjudicated_score_sum = 0.0f64;
+    let mut max_ply_draws = 0usize;
 
     for game in 0..games {
         let candidate_color = if game % 2 == 0 { Color::White } else { Color::Black };
@@ -92,6 +93,8 @@ fn main() {
                 eprintln!("[rust-arena visits={visits}] game {}/{} ply={}/{} move={} elapsed_s={:.1}", game + 1, games, plies, max_plies, uci, started.elapsed().as_secs_f64());
             }
         }
+        let hit_max_ply_draw = white_score.is_none() && plies >= max_plies;
+        if hit_max_ply_draw { max_ply_draws += 1; }
         let true_white_score = white_score.unwrap_or(0.5);
         let true_score = candidate_score(true_white_score, candidate_color);
         if true_score == 1.0 { true_play_wins += 1; } else if true_score == 0.0 { true_play_losses += 1; } else { true_play_draws += 1; }
@@ -125,6 +128,8 @@ fn main() {
     println!("METRIC arena_true_play_wins={true_play_wins}");
     println!("METRIC arena_true_play_draws={true_play_draws}");
     println!("METRIC arena_true_play_losses={true_play_losses}");
+    println!("METRIC arena_max_ply_draws={max_ply_draws}");
+    println!("METRIC arena_max_ply_draw_rate={:.6}", max_ply_draws as f64 / games.max(1) as f64);
     println!("METRIC arena_avg_plies={:.6}", plies_total as f64 / games.max(1) as f64);
     println!("METRIC arena_promotion_ready={promotion_ready}");
 }
