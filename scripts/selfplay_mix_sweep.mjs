@@ -44,6 +44,8 @@ const adjudicate = arg('--adjudicate', 'terminal');
 const adjudicateThreshold = arg('--adjudicate-threshold', '0.02');
 const primaryConvArch = arg('--primary-conv-arch', '');
 const parallel = process.argv.includes('--parallel-candidates') || process.env.TINY_LEELA_PARALLEL_CANDIDATES === '1';
+const trainer = arg('--trainer', process.env.TINY_LEELA_TRAINER || 'python');
+const pythonBin = arg('--python', process.env.TINY_LEELA_PYTHON || 'python3');
 const featureCache = arg('--feature-cache', primaryConvArch ? `artifacts/cache/conv_features_${primaryConvArch}.json` : '');
 const trainPaths = arg('--train', 'data/teacher_labels.jsonl,data/stockfish_teacher_labels.jsonl').split(',').filter(Boolean);
 
@@ -74,7 +76,8 @@ async function evaluateWeight(weight) {
   if (weight > 0) trainArgs.push('--selfplay-train', selfplayPath);
   if (primaryConvArch) trainArgs.push('--average-weights', '--average-policy-only', '--primary-conv-arch', primaryConvArch);
   if (featureCache) trainArgs.push('--feature-cache', featureCache);
-  const trainOutput = parallel ? await runAsync('python3', trainArgs) : run('python3', trainArgs);
+  if (trainer) trainArgs.push('--trainer', trainer);
+  const trainOutput = parallel ? await runAsync(pythonBin, trainArgs) : run(pythonBin, trainArgs);
   const trainMetrics = metrics(trainOutput);
   logProgress(`weight=${weight} train done score=${(trainMetrics.distill_student_score ?? 0).toFixed(6)} arena start elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}`);
   const arenaArgs = ['run', 'eval:arena', '--silent', '--', `--backend=${backend}`, `--candidate=${out}`, '--baseline=artifacts/student_distill_benchmark.json', `--games=${arenaGames}`, `--visits=${arenaVisits}`, `--max-plies=${maxPlies}`, `--adjudicate=${adjudicate}`, `--adjudicate-threshold=${adjudicateThreshold}`];

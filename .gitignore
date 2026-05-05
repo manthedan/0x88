@@ -4,3 +4,4 @@ data/stockfish_teacher_labels.jsonl
 artifacts/
 rust/**/target/
 node_modules/
+.venv-tinygrad/

@@ -26,6 +26,8 @@ npm run selfplay:mix-sweep --silent -- \
   --primary-conv-arch=64x6 \
   --feature-cache=artifacts/cache/conv_features_64x6.json \
   --parallel-candidates \
+  --trainer="${TINY_LEELA_TRAINER:-python}" \
+  --python="${TINY_LEELA_PYTHON:-python3}" \
   --selfplay=artifacts/selfplay_mix_arena_v1.jsonl \
   --candidate-prefix=artifacts/selfplay_mix_arena_candidate \
   --regenerate

@@ -236,6 +236,62 @@ def evaluate(rows: list[dict], moves: list[str], wp: list[list[float]], ww: list
     return p_ce / n, w_ce / n, top1 / n
 
 
+def train_once_tinygrad(rows: list[dict], moves: list[str], epochs: int, lr: float, holdout_mod: int, holdout_offset: int, average: bool, average_policy_only: bool, policy_feature_fn=fen_features, value_feature_fn=wdl_features) -> dict:
+    from tinygrad import Tensor
+    from tinygrad.nn.optim import SGD
+    train_rows = [row for i, row in enumerate(rows) if i % holdout_mod != holdout_offset]
+    dev_rows = [row for i, row in enumerate(rows) if i % holdout_mod == holdout_offset]
+    feat_dim = len(policy_feature_fn(rows[0]["fen"]))
+    value_feat_dim = len(value_feature_fn(rows[0]["fen"]))
+    rng = random.Random(7 + holdout_offset)
+    wp_init = [[rng.uniform(-0.01, 0.01) for _ in range(len(moves))] for _ in range(feat_dim)]
+    ww_init = [[rng.uniform(-0.01, 0.01) for _ in range(3)] for _ in range(value_feat_dim)]
+    x = Tensor([policy_feature_fn(row["fen"]) for row in train_rows])
+    xv = Tensor([value_feature_fn(row["fen"]) for row in train_rows])
+    target = []
+    wdl_target = []
+    row_weights = []
+    for row in train_rows:
+        tv = [row["policy"].get(move, 0.0) for move in moves]
+        mass = sum(tv)
+        target.append([v / mass for v in tv])
+        wdl_target.append([float(v) for v in row["wdl"]])
+        row_weights.append(float(row.get("_weight", 1.0)))
+    y = Tensor(target)
+    yv = Tensor(wdl_target)
+    rw = Tensor(row_weights).reshape(len(row_weights), 1)
+    wp = Tensor(wp_init, requires_grad=True)
+    ww = Tensor(ww_init, requires_grad=True)
+    opt = SGD([wp, ww], lr=lr / max(1, len(train_rows)))
+    avg_wp = Tensor.zeros(*wp.shape)
+    avg_ww = Tensor.zeros(*ww.shape)
+    avg_count = 0
+    Tensor.training = True
+    for epoch in range(epochs):
+        opt.zero_grad()
+        lp = x.matmul(wp).log_softmax()
+        lv = xv.matmul(ww).log_softmax()
+        loss = -((lp * y * rw).sum() + (lv * yv * rw).sum())
+        loss.backward()
+        opt.step()
+        if average and epoch >= epochs // 2:
+            avg_count += 1
+            avg_wp = avg_wp + wp.detach()
+            avg_ww = avg_ww + ww.detach()
+    Tensor.training = False
+    final_wp_t = (avg_wp / avg_count) if average and avg_count else wp
+    final_ww_t = (avg_ww / avg_count) if average and not average_policy_only and avg_count else ww
+    wp_cols = final_wp_t.numpy().tolist()
+    ww_cols = final_ww_t.numpy().tolist()
+    final_wp = [[wp_cols[j][i] for j in range(feat_dim)] for i in range(len(moves))]
+    final_ww = [[ww_cols[j][i] for j in range(value_feat_dim)] for i in range(3)]
+    train_policy_ce, train_wdl_ce, _train_top1 = evaluate(train_rows, moves, final_wp, final_ww, policy_feature_fn, value_feature_fn)
+    dev_policy_ce, dev_wdl_ce, dev_top1 = evaluate(dev_rows, moves, final_wp, final_ww, policy_feature_fn, value_feature_fn)
+    dev_q_wdl_ce = evaluate_q_wdl(dev_rows, final_ww, value_feature_fn)
+    quality = 100.0 / (1.0 + dev_policy_ce + dev_wdl_ce)
+    return {"score": quality, "train_policy_ce": train_policy_ce, "train_wdl_ce": train_wdl_ce, "dev_policy_ce": dev_policy_ce, "dev_wdl_ce": dev_wdl_ce, "dev_q_wdl_ce": dev_q_wdl_ce, "dev_top1": dev_top1, "policy_weights": final_wp, "wdl_weights": final_ww, "feature_dim": feat_dim, "wdl_feature_dim": value_feat_dim, "weight_average_count": avg_count}
+
+
 def train_once(rows: list[dict], moves: list[str], epochs: int, lr: float, holdout_mod: int, holdout_offset: int, average: bool, average_policy_only: bool, policy_feature_fn=fen_features, value_feature_fn=wdl_features) -> dict:
     train_rows = [row for i, row in enumerate(rows) if i % holdout_mod != holdout_offset]
     dev_rows = [row for i, row in enumerate(rows) if i % holdout_mod == holdout_offset]
@@ -316,6 +372,7 @@ def main() -> int:
     parser.add_argument("--compare-conv-archs", action="store_true", help="train frozen-conv feature students for 16x2/24x3/48x5/64x6 architecture diagnostics")
     parser.add_argument("--primary-conv-arch", choices=["16x2", "24x3", "48x5", "64x6"], help="use the selected frozen-conv feature student as the primary artifact and metric")
     parser.add_argument("--feature-cache", help="optional JSON cache for expensive frozen-conv features keyed by FEN")
+    parser.add_argument("--trainer", choices=["python", "tinygrad"], default="python", help="training backend for the linear heads")
     args = parser.parse_args()
 
     raw_rows = load_rows(args.train)
@@ -339,11 +396,12 @@ def main() -> int:
         primary_feature_fn = cached_feature_fn(lambda fen, c=primary_conv_channels, l=primary_conv_layers: conv_student_features(fen, c, l), cache_path)
         primary_value_feature_fn = primary_feature_fn
         primary_kind = "frozen_conv_fen_student"
-    result = train_once(rows, moves, args.epochs, args.lr, args.holdout_mod, 0, args.average_weights, args.average_policy_only, primary_feature_fn, primary_value_feature_fn)
+    trainer_fn = train_once_tinygrad if args.trainer == "tinygrad" else train_once
+    result = trainer_fn(rows, moves, args.epochs, args.lr, args.holdout_mod, 0, args.average_weights, args.average_policy_only, primary_feature_fn, primary_value_feature_fn)
     fold_scores = [result["score"]]
     if args.report_folds:
         for offset in range(1, args.holdout_mod):
-            fold_scores.append(train_once(rows, moves, args.epochs, args.lr, args.holdout_mod, offset, args.average_weights, args.average_policy_only, primary_feature_fn, primary_value_feature_fn)["score"])
+            fold_scores.append(trainer_fn(rows, moves, args.epochs, args.lr, args.holdout_mod, offset, args.average_weights, args.average_policy_only, primary_feature_fn, primary_value_feature_fn)["score"])
     fold_mean = sum(fold_scores) / len(fold_scores)
     fold_std = math.sqrt(sum((score - fold_mean) ** 2 for score in fold_scores) / len(fold_scores))
 
@@ -391,6 +449,7 @@ def main() -> int:
     print(f"METRIC wdl_feature_dim={result['wdl_feature_dim']}")
     print(f"METRIC weight_average_count={result['weight_average_count']}")
     print(f"METRIC average_policy_only={1 if args.average_policy_only else 0}")
+    print(f"METRIC trainer_tinygrad={1 if args.trainer == 'tinygrad' else 0}")
     print(f"METRIC primary_conv_channels={primary_conv_channels}")
     print(f"METRIC primary_conv_layers={primary_conv_layers}")
     print(f"METRIC model_json_bytes={len(artifact_text.encode('utf-8'))}")
