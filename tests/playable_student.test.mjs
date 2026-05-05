@@ -37,6 +37,9 @@ test('student web UI serves board and API state', async () => {
     });
     const html = await (await fetch(url)).text();
     assert.match(html, /Tiny Leela Student/);
+    assert.match(html, /turnColor: sideColor\(state\.turn\)/);
+    assert.match(html, /premovable: \{ enabled: false/);
+    assert.match(html, /dests: pending > 0 \? new Map\(\) : dests\(\)/);
     const state = await (await fetch(`${url}/api/state`)).json();
     assert.equal(state.fen.startsWith('rnbqkbnr/pppppppp'), true);
     assert.ok(state.legalMoves.length > 0);

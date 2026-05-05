@@ -241,7 +241,19 @@ function setBusy(on) {
   document.body.classList.toggle('busy', pending > 0);
   buttons.forEach((button) => { button.disabled = pending > 0; });
   statusEl.textContent = pending > 0 ? 'thinking…' : '';
-  if (ground && state) ground.set({ movable: { color: pending > 0 ? undefined : (state.turn === 'w' ? 'white' : 'black') } });
+  if (ground && state) ground.set({
+    turnColor: sideColor(state.turn),
+    movable: {
+      color: pending > 0 ? undefined : sideColor(state.turn),
+      dests: pending > 0 ? new Map() : dests(),
+      showDests: true,
+      events: { after: userMove },
+    },
+    premovable: { enabled: false, showDests: false },
+    predroppable: { enabled: false },
+    draggable: { enabled: pending === 0 },
+    selectable: { enabled: pending === 0 },
+  });
 }
 
 async function api(path, body) {
@@ -263,6 +275,7 @@ async function api(path, body) {
   }
 }
 function boardFen() { return state.fen.split(' ')[0]; }
+function sideColor(turn) { return turn === 'w' ? 'white' : 'black'; }
 function dests() {
   const map = new Map();
   for (const move of state.legalMoves) {
@@ -286,16 +299,21 @@ function renderGround() {
   const config = {
     fen: boardFen(),
     orientation,
+    turnColor: sideColor(state.turn),
     coordinates: true,
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 180 },
     movable: {
       free: false,
-      color: pending > 0 ? undefined : (state.turn === 'w' ? 'white' : 'black'),
-      dests: dests(),
+      color: pending > 0 ? undefined : sideColor(state.turn),
+      dests: pending > 0 ? new Map() : dests(),
       showDests: true,
       events: { after: userMove },
     },
+    premovable: { enabled: false, showDests: false },
+    predroppable: { enabled: false },
+    draggable: { enabled: pending === 0 },
+    selectable: { enabled: pending === 0 },
     lastMove: lastMove(),
   };
   if (!ground) ground = Chessground(document.getElementById('ground'), config);
