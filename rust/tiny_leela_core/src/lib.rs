@@ -299,13 +299,24 @@ pub struct StudentArtifact {
 pub struct Evaluation { pub policy: Vec<(u32, f32)>, pub wdl: [f32; 3] }
 pub trait PositionEvaluator { fn evaluate(&self, board: &Board) -> Evaluation; }
 
-pub struct StudentEvaluator { artifact: StudentArtifact, move_index: HashMap<String, usize> }
+struct ConvLayerParams {
+    prev_channels: usize,
+    biases: Vec<f32>,
+    kernels: Vec<f32>, // (((out_c * prev_channels + in_c) * 3 + dr) * 3 + df)
+}
+
+struct ConvParams { layers: Vec<ConvLayerParams> }
+
+pub struct StudentEvaluator { artifact: StudentArtifact, move_index: HashMap<String, usize>, conv_params: Option<ConvParams> }
 
 impl StudentEvaluator {
     pub fn from_json(json: &str) -> Result<Self, String> {
         let artifact: StudentArtifact = serde_json::from_str(json).map_err(|e| e.to_string())?;
         let move_index = artifact.moves.iter().enumerate().map(|(i, m)| (m.clone(), i)).collect();
-        Ok(Self { artifact, move_index })
+        let conv_params = if artifact.kind == "frozen_conv_fen_student" {
+            Some(precompute_conv_params(artifact.conv_channels.unwrap_or(0), artifact.conv_layers.unwrap_or(0)))
+        } else { None };
+        Ok(Self { artifact, move_index, conv_params })
     }
 }
 
@@ -332,7 +343,28 @@ fn stable_weight(values: &[u64]) -> f32 {
     (((seed % 2001) as f32 / 1000.0) - 1.0) / ((values.len() + 1) as f32).sqrt()
 }
 
-fn conv_student_features(fen: &str, channels: usize, layers: usize) -> Vec<f32> {
+fn kernel_index(out_c: usize, prev_channels: usize, in_c: usize, dr: usize, df: usize) -> usize {
+    (((out_c * prev_channels + in_c) * 3 + dr) * 3) + df
+}
+
+fn precompute_conv_params(channels: usize, layers: usize) -> ConvParams {
+    let mut out = Vec::with_capacity(layers);
+    for layer in 0..layers {
+        let prev_channels = if layer == 0 { 13 } else { channels };
+        let mut biases = vec![0.0; channels];
+        let mut kernels = vec![0.0; channels * prev_channels * 3 * 3];
+        for c in 0..channels {
+            biases[c] = stable_weight(&[layer as u64, c as u64, 99]);
+            for pc in 0..prev_channels { for dri in 0..3usize { for dfi in 0..3usize {
+                kernels[kernel_index(c, prev_channels, pc, dri, dfi)] = stable_weight(&[layer as u64, c as u64, pc as u64, dri as u64, dfi as u64]);
+            } } }
+        }
+        out.push(ConvLayerParams { prev_channels, biases, kernels });
+    }
+    ConvParams { layers: out }
+}
+
+fn conv_student_features(fen: &str, channels: usize, layers: usize, params: Option<&ConvParams>) -> Vec<f32> {
     let mut parts = fen.split_whitespace();
     let placement = parts.next().unwrap_or("8/8/8/8/8/8/8/8");
     let side = parts.next().unwrap_or("w");
@@ -345,16 +377,22 @@ fn conv_student_features(fen: &str, channels: usize, layers: usize) -> Vec<f32> 
     }
     let side_value = if side == "w" { 1.0 } else { -1.0 };
     for r in 0..8 { for f in 0..8 { maps[12][r][f] = side_value; } }
+    let owned_params;
+    let params = match params {
+        Some(params) => params,
+        None => { owned_params = precompute_conv_params(channels, layers); &owned_params }
+    };
     let mut prev = maps;
-    for layer in 0..layers {
+    for (layer, layer_params) in params.layers.iter().enumerate().take(layers) {
         let prev_channels = prev.len();
+        debug_assert_eq!(layer_params.prev_channels, prev_channels, "cached conv layer {layer} channel mismatch");
         let mut out = vec![[[0f32; 8]; 8]; channels];
         for c in 0..channels { for r in 0..8usize { for f in 0..8usize {
-            let mut acc = stable_weight(&[layer as u64, c as u64, 99]);
+            let mut acc = layer_params.biases[c];
             for (pc, prev_map) in prev.iter().enumerate() { for dri in 0..3usize {
                 let rr = r as isize + dri as isize - 1; if !(0..8).contains(&rr) { continue; }
                 for dfi in 0..3usize { let ff = f as isize + dfi as isize - 1; if (0..8).contains(&ff) {
-                    let k = stable_weight(&[layer as u64, c as u64, pc as u64, dri as u64, dfi as u64]);
+                    let k = layer_params.kernels[kernel_index(c, prev_channels, pc, dri, dfi)];
                     acc += prev_map[rr as usize][ff as usize] * k;
                 } }
             } }
@@ -375,7 +413,7 @@ fn conv_student_features(fen: &str, channels: usize, layers: usize) -> Vec<f32> 
 impl PositionEvaluator for StudentEvaluator {
     fn evaluate(&self, board: &Board) -> Evaluation {
         let fen = board_to_fen(board);
-        let policy_features = if self.artifact.kind == "frozen_conv_fen_student" { conv_student_features(&fen, self.artifact.conv_channels.unwrap_or(0), self.artifact.conv_layers.unwrap_or(0)) } else { fen_features(&fen).unwrap().to_vec() };
+        let policy_features = if self.artifact.kind == "frozen_conv_fen_student" { conv_student_features(&fen, self.artifact.conv_channels.unwrap_or(0), self.artifact.conv_layers.unwrap_or(0), self.conv_params.as_ref()) } else { fen_features(&fen).unwrap().to_vec() };
         let value_features = if self.artifact.kind == "frozen_conv_fen_student" { policy_features.clone() } else { wdl_features_from_fen(&fen).unwrap() };
         let logits: Vec<f32> = self.artifact.policy_weights.iter().map(|w| dot(w, &policy_features)).collect();
         let probs = softmax(&logits);
