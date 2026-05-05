@@ -77,4 +77,4 @@ LD_LIBRARY_PATH=$PWD/.venv-tinygrad/lib/python3.12/site-packages/nvidia/cu13/lib
   --out artifacts/student_lichess_10k_tensor.json
 ```
 
-Local result: building the 10k tensor dataset worked, but the first minibatch trainer was slower (about 485s for 40 epochs) than the existing full-batch tinygrad trainer (about 141s). This means the useful lesson is not merely “pickle tensors”; we need persistent device tensors / compiled full-batch or larger fused batches, plus a binary matrix format, to get Unsloth-like speedups.
+Local result: building the 10k tensor dataset worked, but the first minibatch trainer was slower (about 485s for 40 epochs) than the existing full-batch tinygrad trainer (about 141s). Adding `--preload-device` realizes the full train tensors on the GPU once and uses full-batch updates; this improved the 10k/40 epoch tensor run to about 115s with comparable metrics. This is the first useful Unsloth-style win. Next speedups should make policy targets sparse and replace pickle with a compact binary matrix format.
