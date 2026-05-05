@@ -9,6 +9,7 @@ p.add_argument('--train', nargs='+', required=True)
 p.add_argument('--feature-cache', required=True)
 p.add_argument('--out', required=True)
 p.add_argument('--merge-fen', action='store_true')
+p.add_argument('--sparse-only', action='store_true', help='store only one-hot move ids instead of dense policy matrix')
 args=p.parse_args()
 rows=load_rows(args.train)
 if args.merge_fen: rows=merge_fen_rows(rows)
@@ -23,13 +24,17 @@ for r in rows:
     X.append([float(v) for v in feat])
     tv=[0.0]*len(moves); mass=sum(float(v) for v in r['policy'].values()) or 1.0
     for m,v in r['policy'].items(): tv[move_idx[m]]=float(v)/mass
-    y.append(tv)
+    if not args.sparse_only: y.append(tv)
     if len(r['policy']) == 1:
         yi.append(move_idx[next(iter(r['policy']))]); sparse += 1
     else:
         yi.append(-1)
     yv.append([float(v) for v in r['wdl']]); w.append(float(r.get('_weight',1.0))); kept.append(r.get('fen',''))
-obj={'moves':moves,'X':X,'y_policy':y,'y_move_id':yi,'y_wdl':yv,'weights':w,'fens':kept,'feature_dim':len(X[0]) if X else 0}
+obj={'moves':moves,'y_move_id':yi,'y_wdl':yv,'weights':w,'feature_dim':len(X[0]) if X else 0,'sparse_only':args.sparse_only}
+obj['X']=X
+if not args.sparse_only:
+    obj['y_policy']=y
+    obj['fens']=kept
 out=Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
 with out.open('wb') as f: pickle.dump(obj,f,protocol=pickle.HIGHEST_PROTOCOL)
 print(f'METRIC feature_dataset_rows={len(X)}')

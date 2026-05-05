@@ -116,6 +116,8 @@ const out = arg('--out', 'data/lichess_training.jsonl');
 const maxGames = Number(arg('--max-games', '100'));
 const maxPositions = Number(arg('--max-positions', '10000'));
 const minElo = Number(arg('--min-elo', '1800'));
+const teacher = arg('--teacher', 'lichess_pgn');
+const noEloFilter = process.argv.includes('--no-elo-filter');
 const skipPlies = Number(arg('--skip-plies', '4'));
 const maxPliesPerGame = Number(arg('--max-plies-per-game', '80'));
 if (!input) throw new Error('Usage: node --experimental-strip-types scripts/lichess_pgn_to_training.mjs --pgn file.pgn[.zst] --out data/lichess_training.jsonl');
@@ -130,7 +132,7 @@ for (const game of splitGames(readInput(input))) {
   if (!['1-0', '0-1', '1/2-1/2'].includes(result)) continue;
   if (tags.Variant && tags.Variant !== 'Standard') continue;
   const whiteElo = Number(tags.WhiteElo ?? 0), blackElo = Number(tags.BlackElo ?? 0);
-  if (Math.min(whiteElo, blackElo) < minElo) continue;
+  if (!noEloFilter && Math.min(whiteElo, blackElo) < minElo) continue;
   let board = parseFen(tags.FEN ?? START_FEN);
   let acceptedInGame = 0;
   try {
@@ -140,7 +142,7 @@ for (const game of splitGames(readInput(input))) {
       const move = parseSanMove(board, san);
       if (acceptedInGame >= skipPlies && acceptedInGame < maxPliesPerGame && rows.length < maxPositions) {
         const wdl = resultWdl(result, turn);
-        rows.push({ id: `lichess_${String(gamesAccepted).padStart(6, '0')}_${String(acceptedInGame).padStart(3, '0')}`, fen: before, policy: { [moveToUci(move)]: 1.0 }, wdl, q: wdl[0] - wdl[2], teacher: 'lichess_pgn', result, white_elo: whiteElo, black_elo: blackElo });
+        rows.push({ id: `${teacher}_${String(gamesAccepted).padStart(6, '0')}_${String(acceptedInGame).padStart(3, '0')}`, fen: before, policy: { [moveToUci(move)]: 1.0 }, wdl, q: wdl[0] - wdl[2], teacher, result, white_elo: whiteElo, black_elo: blackElo });
       }
       board = makeMove(board, move);
       acceptedInGame++;

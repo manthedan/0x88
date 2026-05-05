@@ -3,6 +3,8 @@ data/teacher_labels.jsonl
 data/stockfish_teacher_labels.jsonl
 data/lichess_raw/
 data/lichess_training_*.jsonl
+data/tcec_raw/
+data/tcec_training_*.jsonl
 artifacts/
 rust/**/target/
 node_modules/
