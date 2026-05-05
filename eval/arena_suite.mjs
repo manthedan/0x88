@@ -1,11 +1,12 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { parseFen, START_FEN } from '../src/chess/board.ts';
 import { inCheck, legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
 import { chooseMove } from '../src/search/puct.ts';
 import { StudentEvaluator } from '../src/nn/studentEvaluator.ts';
-import { rustChooseMove } from '../scripts/rust_engine.mjs';
+import { ensureRustBin, rustChooseMove } from '../scripts/rust_engine.mjs';
 
 function arg(name, fallback = undefined) {
   const prefix = `${name}=`;
@@ -53,6 +54,18 @@ const maxPlies = Number(arg('--max-plies', '40'));
 const adjudicate = arg('--adjudicate', 'terminal');
 const adjudicateThreshold = Number(arg('--adjudicate-threshold', '0.02'));
 const progressEvery = Math.max(1, Number(arg('--progress-every', process.env.TINY_LEELA_PROGRESS_EVERY ?? '4')));
+if (backend === 'rust' && !process.argv.includes('--js-rust-shell')) {
+  const bin = ensureRustBin('tiny-leela-rust-arena');
+  const openings = [
+    START_FEN,
+    'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1',
+    'rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1',
+    'rnbqkbnr/pppppppp/8/8/8/5N2/PPPPPPPP/RNBQKB1R b KQkq - 1 1',
+  ].join('|');
+  const forwarded = process.argv.slice(2).filter((value) => value !== '--backend=rust' && value !== '--backend' && value !== 'rust');
+  execFileSync(bin, [...forwarded, `--openings=${openings}`], { stdio: 'inherit' });
+  process.exit(0);
+}
 const candidate = StudentEvaluator.fromJson(readFileSync(candidatePath, 'utf8'));
 const baseline = StudentEvaluator.fromJson(readFileSync(baselinePath, 'utf8'));
 const openings = [

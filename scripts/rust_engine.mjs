@@ -6,12 +6,18 @@ import { moveFromUci, moveToUci } from '../src/chess/moveCodec.ts';
 
 const manifest = 'rust/tiny_leela_core/Cargo.toml';
 const bin = 'rust/tiny_leela_core/target/release/tiny-leela-rust-eval';
-let built = false;
+const builtBins = new Set();
+
+export function ensureRustBin(name) {
+  const path = `rust/tiny_leela_core/target/release/${name}`;
+  if (builtBins.has(name) && existsSync(path)) return path;
+  execFileSync('cargo', ['build', '--release', '--quiet', '--manifest-path', manifest, '--bin', name], { stdio: 'inherit' });
+  builtBins.add(name);
+  return path;
+}
 
 export function ensureRustEngine() {
-  if (built && existsSync(bin)) return;
-  execFileSync('cargo', ['build', '--release', '--quiet', '--manifest-path', manifest, '--bin', 'tiny-leela-rust-eval'], { stdio: 'inherit' });
-  built = true;
+  return ensureRustBin('tiny-leela-rust-eval');
 }
 
 function parseOutput(out) {

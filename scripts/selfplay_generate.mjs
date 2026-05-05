@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseFen, START_FEN, boardToFen } from '../src/chess/board.ts';
@@ -6,7 +7,7 @@ import { inCheck, legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
 import { searchRoot } from '../src/search/puct.ts';
 import { StudentEvaluator } from '../src/nn/studentEvaluator.ts';
-import { rustPolicyForBoard } from './rust_engine.mjs';
+import { ensureRustBin, rustPolicyForBoard } from './rust_engine.mjs';
 
 function arg(name, fallback = undefined) {
   const prefix = `${name}=`;
@@ -69,6 +70,13 @@ const seed = Number(arg('--seed', '1'));
 const progressEvery = Math.max(1, Number(arg('--progress-every', process.env.TINY_LEELA_PROGRESS_EVERY ?? '1')));
 const adjudicate = arg('--adjudicate', 'terminal');
 const adjudicateThreshold = Number(arg('--adjudicate-threshold', '0.02'));
+if (backend === 'rust' && !process.argv.includes('--js-rust-shell')) {
+  const bin = ensureRustBin('tiny-leela-rust-selfplay');
+  const forwarded = process.argv.slice(2).filter((value) => value !== '--backend=rust' && value !== '--backend' && value !== 'rust');
+  execFileSync(bin, forwarded, { stdio: 'inherit' });
+  process.exit(0);
+}
+
 const evaluator = StudentEvaluator.fromJson(readFileSync(modelPath, 'utf8'));
 const rng = makeRng(seed);
 const rows = [];
