@@ -1,5 +1,5 @@
-import { boardToFen, type BoardState } from '../chess/board.ts';
-import { legalMoves } from '../chess/movegen.ts';
+import { boardToFen, parseFen, type BoardState } from '../chess/board.ts';
+import { inCheck, legalMoves } from '../chess/movegen.ts';
 import { moveToActionId, moveToUci } from '../chess/moveCodec.ts';
 import type { Evaluation, Evaluator } from './evaluator.ts';
 
@@ -132,7 +132,14 @@ function boardPlanes(fen: string, inputPlanes = 14): number[][][] {
       const er = 8 - Number(ep[1]);
       if (er >= 0 && er < 8 && ef >= 0 && ef < 8) maps[17][er][ef] = 1;
     }
-    for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) { maps[18][r][f] = 1; maps[19][r][f] = side === 'w' ? 1 : 0; }
+    let stmCheck = 0;
+    let oppCheck = 0;
+    if (inputPlanes >= 22) {
+      const board = parseFen(fen);
+      stmCheck = inCheck(board, board.turn) ? 1 : 0;
+      oppCheck = inCheck(board, board.turn === 'w' ? 'b' : 'w') ? 1 : 0;
+    }
+    for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) { maps[18][r][f] = 1; maps[19][r][f] = side === 'w' ? 1 : 0; if (inputPlanes >= 22) { maps[20][r][f] = stmCheck; maps[21][r][f] = oppCheck; } }
   } else {
     for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) maps[13][r][f] = 1;
   }

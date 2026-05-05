@@ -408,7 +408,14 @@ fn board_planes(fen: &str, input_planes: usize) -> Vec<[[f32; 8]; 8]> {
             let b = ep.as_bytes();
             if b.len() >= 2 { let ef = b[0].saturating_sub(b'a') as usize; let er = 8usize.saturating_sub((b[1].saturating_sub(b'0')) as usize); if er < 8 && ef < 8 { maps[17][er][ef] = 1.0; } }
         }
-        for r in 0..8 { for f in 0..8 { maps[18][r][f] = 1.0; maps[19][r][f] = if side == "w" { 1.0 } else { 0.0 }; } }
+        let (mut stm_check, mut opp_check) = (0.0, 0.0);
+        if input_planes >= 22 {
+            if let Ok(board) = parse_fen(fen) {
+                stm_check = if in_check(&board, board.turn) { 1.0 } else { 0.0 };
+                opp_check = if in_check(&board, board.turn.opposite()) { 1.0 } else { 0.0 };
+            }
+        }
+        for r in 0..8 { for f in 0..8 { maps[18][r][f] = 1.0; maps[19][r][f] = if side == "w" { 1.0 } else { 0.0 }; if input_planes >= 22 { maps[20][r][f] = stm_check; maps[21][r][f] = opp_check; } } }
     } else {
         for r in 0..8 { for f in 0..8 { maps[13][r][f] = 1.0; } }
     }
