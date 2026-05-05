@@ -427,7 +427,7 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0047",
-      "current_node_id": "N0051",
+      "current_node_id": "N0052",
       "local_baseline_node_id": "N0047",
       "local_baseline_metric": 0.5,
       "concept_tags": [
@@ -435,16 +435,16 @@
         "training",
         "arena"
       ],
-      "runs_in_current_concept": 3,
+      "runs_in_current_concept": 4,
       "created_at": "2026-05-05T02:10:47.515Z",
       "context_checkpoint": {
         "type": "lane_context_checkpoint",
         "lane_id": "L017",
-        "updated_at": "2026-05-05T03:54:00.753Z",
-        "source_handoff_run_id": "R0048",
-        "source_handoff_node_id": "N0051",
-        "task": "Run first Rust-default self-play mix arena experiment under S0003.",
-        "outcome": "Crashed/timed out after 1152s before checks completed. Metrics were emitted and showed backend=rust was used for self-play/mix/arena, with 2 games/16 positions and zero illegal losses, but primary mix_best_arena_score_rate stayed 0.5 for all weights. Runtime got worse than expected because the current JS Rust backend shells out to the Rust eval binary per search/evaluation and reloads the artifact repeatedly.",
+        "updated_at": "2026-05-05T04:19:22.359Z",
+        "source_handoff_run_id": "R0049",
+        "source_handoff_node_id": "N0052",
+        "task": "Run S0003 after moving self-play and arena loops into native Rust binaries.",
+        "outcome": "Crashed/timed out after 1136s before checks completed. Native Rust self-play/arena binaries were used and emitted full metrics. Primary metric reached mix_best_arena_score_rate=0.75 at weight 0 with zero illegal losses, but this is invalid for promotion because the run exceeded time budget/checks did not complete and all arena games were value-adjudicated. Self-play logs were not visible in the returned run tail because they occurred early and were pushed out by later Python training/arena/check output; durable log files are needed.",
         "changed_files": [
           "dovetail.context.jsonl",
           "dovetail.runs.jsonl",
@@ -454,25 +454,31 @@
         "relevant_reads": [
           "dovetail.sh",
           "eval/arena_suite.mjs",
-          "scripts/rust_engine.mjs",
+          "rust/tiny_leela_core/src/bin/arena.rs",
+          "rust/tiny_leela_core/src/bin/selfplay.rs",
           "scripts/selfplay_generate.mjs",
           "scripts/selfplay_mix_sweep.mjs"
         ],
         "validation_commands": [
+          "npm run eval:arena --silent -- --backend=rust --games=2 --visits=4 --max-plies=2",
+          "npm run rust:test",
+          "npm run selfplay:generate --silent -- --backend=rust --games=1 --visits=4 --max-plies=2 --out=/tmp/native_sp.jsonl",
+          "npm run selfplay:mix-sweep --silent -- --backend=rust --weights=0,0.05 --games=1 --selfplay-visits=4 --max-plies=2 --epochs=1 --arena-games=2 --arena-visits=4 --selfplay=/tmp/native_mix_sp.jsonl --candidate-prefix=/tmp/native_mix_candidate --regenerate",
           "run_research_experiment: bash dovetail.sh"
         ],
         "failures": [
           "Run exceeded time budget and checks did not complete",
-          "Primary metric did not improve: mix_best_arena_score_rate stayed 0.5",
-          "All games were value-adjudicated, so benchmark discrimination may reflect value-head bias",
-          "Rust integration is native but process-per-position, not an in-process Rust self-play loop, so native search speed is mostly lost"
+          "Self-play progress logs were not visible in the final returned tail because later output displaced them",
+          "All arena games were value-adjudicated, so 0.75 score may reflect value-head/adjudication bias",
+          "Remaining runtime likely dominated by repeated Python train_student.py runs for four weights at 40 epochs plus checks, not native self-play alone"
         ],
-        "next_action_hint": "Before any more self-play, add periodic progress logs and replace process-per-move Rust calls with an in-process/batched Rust self-play/arena binary or parallel worker model. Then rerun a shorter S0003 workload.",
-        "summary": "Lane L017 (explore) hypothesis: A small weighted mix of PUCT self-play examples with teacher labels can improve head-to-head arena score versus the current teacher-only baseline without illegal moves.\nLatest task: Run first Rust-default self-play mix arena experiment under S0003.\nOutcome: Crashed/timed out after 1152s before checks completed. Metrics were emitted and showed backend=rust was used for self-play/mix/arena, with 2 games/16 positions and zero illegal losses, but primary mix_best_arena_score_rate stayed 0.5 for all weights. Runtime got worse than expected because the current JS Rust backend shells out to the Rust eval binary per search/evaluation and reloads the artifact repeatedly.\nFailures to remember: Run exceeded time budget and checks did not complete; Primary metric did not improve: mix_best_arena_score_rate stayed 0.5; All games were value-adjudicated, so benchmark discrimination may reflect value-head bias; Rust integration is native but process-per-position, not an in-process Rust self-play loop, so native search speed is mostly lost\nNext action: Before any more self-play, add periodic progress logs and replace process-per-move Rust calls with an in-process/batched Rust self-play/arena binary or parallel worker model. Then rerun a shorter S0003 workload.\nRecent lane runs: R0046, R0047, R0048",
+        "next_action_hint": "Add durable phase/progress log files and tee commands in dovetail.sh so logs survive tail truncation. Then restructure speed bottleneck: reduce repeated Python retraining for smoke runs, cache/train baseline once, or move more training/eval into Rust/parallel jobs before rerunning S0003.",
+        "summary": "Lane L017 (explore) hypothesis: A small weighted mix of PUCT self-play examples with teacher labels can improve head-to-head arena score versus the current teacher-only baseline without illegal moves.\nLatest task: Run S0003 after moving self-play and arena loops into native Rust binaries.\nOutcome: Crashed/timed out after 1136s before checks completed. Native Rust self-play/arena binaries were used and emitted full metrics. Primary metric reached mix_best_arena_score_rate=0.75 at weight 0 with zero illegal losses, but this is invalid for promotion because the run exceeded time budget/checks did not complete and all arena games were value-adjudicated. Self-play logs were not visible in the returned run tail because they occurred early and were pushed out by later Python training/arena/check output; durable log files are needed.\nFailures to remember: Run exceeded time budget and checks did not complete; Self-play progress logs were not visible in the final returned tail because later output displaced them; All arena games were value-adjudicated, so 0.75 score may reflect value-head/adjudication bias; Remaining runtime likely dominated by repeated Python train_student.py runs for four weights at 40 epochs plus checks, not native self-play alone\nNext action: Add durable phase/progress log files and tee commands in dovetail.sh so logs survive tail truncation. Then restructure speed bottleneck: reduce repeated Python retraining for smoke runs, cache/train baseline once, or move more training/eval into Rust/parallel jobs before rerunning S0003.\nRecent lane runs: R0046, R0047, R0048, R0049",
         "recent_run_ids": [
           "R0046",
           "R0047",
-          "R0048"
+          "R0048",
+          "R0049"
         ]
       }
     }
@@ -2648,7 +2654,9 @@
       "node_id": "N0051",
       "lane_id": "L017",
       "parent_node_id": "N0049",
-      "children": [],
+      "children": [
+        "N0052"
+      ],
       "phase": "explore",
       "status": "crash",
       "hypothesis": "A small weighted mix of Rust PUCT self-play examples with teacher labels can improve head-to-head arena score versus the current teacher-only baseline without illegal moves.",
@@ -2697,6 +2705,64 @@
       },
       "created_at": "2026-05-05T03:53:53.186Z",
       "run_id": "R0048"
+    },
+    "N0052": {
+      "node_id": "N0052",
+      "lane_id": "L017",
+      "parent_node_id": "N0051",
+      "children": [],
+      "phase": "explore",
+      "status": "crash",
+      "hypothesis": "A small weighted mix of Rust PUCT self-play examples with teacher labels can improve head-to-head arena score versus the current teacher-only baseline without illegal moves.",
+      "commit": "d9d242a",
+      "benchmark_id": "tiny_leela_rust_selfplay_mix_arena_v1",
+      "metric": 0.75,
+      "metrics": {
+        "selfplay_backend_rust": 1,
+        "selfplay_games": 2,
+        "selfplay_positions": 16,
+        "selfplay_avg_plies": 8,
+        "selfplay_decisive_rate": 1,
+        "selfplay_adjudicated_rate": 1,
+        "selfplay_policy_mass": 1,
+        "selfplay_output_bytes": 8497,
+        "mix_selfplay_backend_rust": 1,
+        "mix_selfplay_games": 2,
+        "mix_selfplay_positions": 16,
+        "mix_selfplay_avg_plies": 8,
+        "mix_selfplay_decisive_rate": 1,
+        "mix_selfplay_adjudicated_rate": 1,
+        "mix_selfplay_policy_mass": 1,
+        "mix_0_arena_score_rate": 0.75,
+        "mix_0_arena_candidate_elo_estimate": 190.848502,
+        "mix_0_arena_illegal_losses": 0,
+        "mix_0p05_arena_score_rate": 0.5,
+        "mix_0p05_arena_illegal_losses": 0,
+        "mix_0p1_arena_score_rate": 0.5,
+        "mix_0p1_arena_illegal_losses": 0,
+        "mix_0p25_arena_score_rate": 0.5,
+        "mix_0p25_arena_illegal_losses": 0,
+        "mix_backend_rust": 1,
+        "mix_weights_tested": 4,
+        "mix_best_selfplay_weight": 0,
+        "mix_best_arena_score_rate": 0.75,
+        "mix_best_distill_student_score": 17.012288,
+        "legal_move_selection_rate": 1,
+        "legal_policy_mass": 1,
+        "playable_shell_ready": 1
+      },
+      "deltas": {
+        "delta_vs_parent": 0.25,
+        "delta_vs_lane_baseline": 0.25,
+        "delta_vs_root": 0.25,
+        "delta_vs_global_best": 0.25
+      },
+      "decision": {
+        "action": "crash",
+        "reason": "The benchmark still exceeded the wall-time budget before checks completed (1136s), despite native Rust self-play/arena. Metrics were emitted and showed mix_best_arena_score_rate=0.75 at weight 0 with zero illegal losses, but this is not valid for promotion because the run crashed/timed out and all arena games were value-adjudicated. The lack of visible self-play logs in the run tail is because run_research_experiment only surfaced the final tail; self-play/arena progress occurred early and was pushed out by later Python training/arena output. Remaining slowness is dominated by repeated Python retraining for 4 weights at 40 epochs plus checks, not by self-play move generation alone."
+      },
+      "created_at": "2026-05-05T04:19:10.185Z",
+      "run_id": "R0049"
     }
   },
   "runs": {
@@ -4368,13 +4434,64 @@
       "next_action": "Do not rerun this workload unchanged. Add periodic progress logs immediately. Then speed up Rust self-play by keeping Rust evaluator/search in-process or batching positions, and/or parallelize independent games/arena games; reduce checks/runtime before the next scheduler run.",
       "timestamp": "2026-05-05T03:53:53.186Z",
       "wall_time_seconds": 1152.192
+    },
+    "R0049": {
+      "type": "research_run",
+      "run_id": "R0049",
+      "node_id": "N0052",
+      "lane_id": "L017",
+      "phase": "explore",
+      "status": "crash",
+      "metric": 0.75,
+      "metrics": {
+        "selfplay_backend_rust": 1,
+        "selfplay_games": 2,
+        "selfplay_positions": 16,
+        "selfplay_avg_plies": 8,
+        "selfplay_decisive_rate": 1,
+        "selfplay_adjudicated_rate": 1,
+        "selfplay_policy_mass": 1,
+        "selfplay_output_bytes": 8497,
+        "mix_selfplay_backend_rust": 1,
+        "mix_selfplay_games": 2,
+        "mix_selfplay_positions": 16,
+        "mix_selfplay_avg_plies": 8,
+        "mix_selfplay_decisive_rate": 1,
+        "mix_selfplay_adjudicated_rate": 1,
+        "mix_selfplay_policy_mass": 1,
+        "mix_0_arena_score_rate": 0.75,
+        "mix_0_arena_candidate_elo_estimate": 190.848502,
+        "mix_0_arena_illegal_losses": 0,
+        "mix_0p05_arena_score_rate": 0.5,
+        "mix_0p05_arena_illegal_losses": 0,
+        "mix_0p1_arena_score_rate": 0.5,
+        "mix_0p1_arena_illegal_losses": 0,
+        "mix_0p25_arena_score_rate": 0.5,
+        "mix_0p25_arena_illegal_losses": 0,
+        "mix_backend_rust": 1,
+        "mix_weights_tested": 4,
+        "mix_best_selfplay_weight": 0,
+        "mix_best_arena_score_rate": 0.75,
+        "mix_best_distill_student_score": 17.012288,
+        "legal_move_selection_rate": 1,
+        "legal_policy_mass": 1,
+        "playable_shell_ready": 1
+      },
+      "benchmark_id": "tiny_leela_rust_selfplay_mix_arena_v1",
+      "commit": "d9d242a",
+      "hypothesis": "A small weighted mix of Rust PUCT self-play examples with teacher labels can improve head-to-head arena score versus the current teacher-only baseline without illegal moves.",
+      "implementation": "Moved the self-play and arena inner loops into native Rust binaries that load model artifacts once per process, emit progress logs, and are invoked by the existing JS wrappers for Rust backend self-play/mix/arena. Ran dovetail.sh under S0003.",
+      "learned": "The benchmark still exceeded the wall-time budget before checks completed (1136s), despite native Rust self-play/arena. Metrics were emitted and showed mix_best_arena_score_rate=0.75 at weight 0 with zero illegal losses, but this is not valid for promotion because the run crashed/timed out and all arena games were value-adjudicated. The lack of visible self-play logs in the run tail is because run_research_experiment only surfaced the final tail; self-play/arena progress occurred early and was pushed out by later Python training/arena output. Remaining slowness is dominated by repeated Python retraining for 4 weights at 40 epochs plus checks, not by self-play move generation alone.",
+      "next_action": "Make progress logs durable and visible by teeing self-play/mix/arena logs to artifacts/logs with explicit phase markers in dovetail.sh, and reduce or restructure the expensive repeated training phase before rerunning. Do not treat the 0.75 timed-out/adjudicated result as a kept improvement.",
+      "timestamp": "2026-05-05T04:19:10.185Z",
+      "wall_time_seconds": 1136.012
     }
   },
   "ids": {
     "next_lane": 18,
-    "next_node": 52,
-    "next_run": 49,
+    "next_node": 53,
+    "next_run": 50,
     "next_idea": 27
   },
-  "global_best_node_id": "N0050"
+  "global_best_node_id": "N0052"
 }
