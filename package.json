@@ -13,6 +13,7 @@
     "bench:movegen": "node --experimental-strip-types scripts/bench_movegen.mjs",
     "bench:search": "node --experimental-strip-types scripts/bench_search.mjs",
     "compare:rust-ts-search": "node --experimental-strip-types scripts/compare_rust_ts_search.mjs",
+    "arena:rust-ts": "node --experimental-strip-types scripts/arena_rust_ts.mjs",
     "rust:bench": "cargo run --release --manifest-path rust/tiny_leela_core/Cargo.toml --bin tiny-leela-rust-bench --",
     "rust:eval": "cargo run --release --manifest-path rust/tiny_leela_core/Cargo.toml --bin tiny-leela-rust-eval --",
     "rust:wasm": "cargo build --release --target wasm32-unknown-unknown --manifest-path rust/tiny_leela_core/Cargo.toml",

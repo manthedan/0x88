@@ -27,10 +27,27 @@ function runRust(fen, visits) {
   ], { encoding: 'utf8', maxBuffer: 1024 * 1024 * 16 });
   return {
     bestMove: out.match(/^best_move=(.*)$/m)?.[1]?.trim() ?? 'none',
+    rootPolicy: JSON.parse(out.match(/^root_policy_json=(.*)$/m)?.[1] ?? '[]'),
     wdl: (out.match(/^wdl=([0-9eE+.,-]+)$/m)?.[1] ?? '').split(',').map(Number),
     legalCount: Number(out.match(/^policy_legal_count=(\d+)$/m)?.[1] ?? NaN),
     visitsPerSecond: Number(out.match(/^METRIC rust_student_visits_per_second=([0-9.]+)$/m)?.[1] ?? NaN),
   };
+}
+
+function rootPolicyStats(tsPolicy, rustPolicy) {
+  const eps = 1e-12;
+  const tsMap = new Map(tsPolicy.map((entry) => [moveToUci(entry.move), entry.probability]));
+  const rustMap = new Map(rustPolicy.map((entry) => [entry.move, entry.probability]));
+  const keys = new Set([...tsMap.keys(), ...rustMap.keys()]);
+  let l1 = 0, klTsRust = 0, overlap = 0;
+  for (const key of keys) {
+    const p = tsMap.get(key) ?? 0;
+    const q = rustMap.get(key) ?? 0;
+    l1 += Math.abs(p - q);
+    overlap += Math.min(p, q);
+    if (p > 0) klTsRust += p * Math.log(p / Math.max(q, eps));
+  }
+  return { l1, klTsRust, overlap };
 }
 
 let cases = 0;
@@ -39,6 +56,11 @@ let legalCountMatches = 0;
 let bestMoveMatches = 0;
 let rustVpsSum = 0;
 let tsVpsSum = 0;
+let rootPolicyL1Sum = 0;
+let rootPolicyKlSum = 0;
+let rootPolicyOverlapSum = 0;
+let rootPolicyMaxL1 = 0;
+let rootPolicyMaxKl = 0;
 const mismatches = [];
 
 for (const fen of fens) {
@@ -53,12 +75,18 @@ for (const fen of fens) {
     const legalMatch = rust.legalCount === tsEval.policy.size;
     const bestMatch = rust.bestMove === tsBest;
     const wdlErr = Math.max(...tsEval.wdl.map((v, i) => Math.abs(v - rust.wdl[i])));
+    const policyStats = rootPolicyStats(tsSearch.policy, rust.rootPolicy);
     cases++;
     if (legalMatch) legalCountMatches++;
     if (bestMatch) bestMoveMatches++;
     wdlMaxAbsError = Math.max(wdlMaxAbsError, wdlErr);
     rustVpsSum += rust.visitsPerSecond;
     tsVpsSum += tsSearch.visits / tsSeconds;
+    rootPolicyL1Sum += policyStats.l1;
+    rootPolicyKlSum += policyStats.klTsRust;
+    rootPolicyOverlapSum += policyStats.overlap;
+    rootPolicyMaxL1 = Math.max(rootPolicyMaxL1, policyStats.l1);
+    rootPolicyMaxKl = Math.max(rootPolicyMaxKl, policyStats.klTsRust);
     if (!bestMatch) mismatches.push({ fen, visits, tsBest, rustBest: rust.bestMove, wdlErr });
   }
 }
@@ -69,6 +97,11 @@ console.log(`METRIC parity_cases=${cases}`);
 console.log(`METRIC parity_wdl_max_abs_error=${wdlMaxAbsError.toExponential(6)}`);
 console.log(`METRIC parity_legal_count_match_rate=${legalRate.toFixed(6)}`);
 console.log(`METRIC parity_best_move_match_rate=${bestRate.toFixed(6)}`);
+console.log(`METRIC parity_root_policy_avg_l1=${(rootPolicyL1Sum / cases).toFixed(6)}`);
+console.log(`METRIC parity_root_policy_max_l1=${rootPolicyMaxL1.toFixed(6)}`);
+console.log(`METRIC parity_root_policy_avg_kl_ts_rust=${(rootPolicyKlSum / cases).toFixed(6)}`);
+console.log(`METRIC parity_root_policy_max_kl_ts_rust=${rootPolicyMaxKl.toFixed(6)}`);
+console.log(`METRIC parity_root_policy_avg_overlap=${(rootPolicyOverlapSum / cases).toFixed(6)}`);
 console.log(`METRIC parity_ts_avg_visits_per_second=${(tsVpsSum / cases).toFixed(6)}`);
 console.log(`METRIC parity_rust_avg_visits_per_second=${(rustVpsSum / cases).toFixed(6)}`);
 if (mismatches.length) {

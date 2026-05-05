@@ -14,6 +14,11 @@ fn main() {
     let elapsed = t0.elapsed().as_secs_f64().max(1e-9);
     println!("fen={}", board_to_fen(&board));
     println!("best_move={}", result.mv.map(move_to_uci).unwrap_or_else(|| "none".to_string()));
+    let policy_json = result.policy.iter()
+        .map(|entry| format!("{{\"move\":\"{}\",\"probability\":{:.9},\"visits\":{},\"prior\":{:.9},\"q\":{:.9}}}", move_to_uci(entry.mv), entry.probability, entry.visits, entry.prior, entry.q))
+        .collect::<Vec<_>>()
+        .join(",");
+    println!("root_policy_json=[{}]", policy_json);
     println!("wdl={:.6},{:.6},{:.6}", evaln.wdl[0], evaln.wdl[1], evaln.wdl[2]);
     println!("policy_legal_count={}", evaln.policy.len());
     println!("METRIC rust_student_search_visits={}", result.visits);
