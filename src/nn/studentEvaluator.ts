@@ -7,7 +7,7 @@ const PIECES = 'PNBRQKpnbrqk';
 const PIECE_INDEX = new Map([...PIECES].map((piece, index) => [piece, index]));
 
 export interface StudentArtifact {
-  kind: 'linear_fen_student' | 'frozen_conv_fen_student' | 'frozen_conv_feature_mlp_student';
+  kind: 'linear_fen_student' | 'frozen_conv_fen_student' | 'frozen_conv_feature_mlp_student' | 'tiny_board_cnn_student';
   moves: string[];
   policy_weights?: number[][];
   wdl_weights?: number[][];
@@ -24,6 +24,17 @@ export interface StudentArtifact {
   policy_b?: number[];
   wdl_w?: number[][];
   wdl_b?: number[];
+  channels?: number;
+  c1_weight?: number[][][][];
+  c1_bias?: number[];
+  c2_weight?: number[][][][];
+  c2_bias?: number[];
+  c3_weight?: number[][][][];
+  c3_bias?: number[];
+  policy_weight?: number[][];
+  policy_bias?: number[];
+  wdl_weight?: number[][];
+  wdl_bias?: number[];
 }
 
 function softmax(xs: number[]): number[] {
@@ -98,6 +109,49 @@ function convParams(channels: number, layers: number) {
   const params = { biases, kernels };
   CONV_PARAM_CACHE.set(key, params);
   return params;
+}
+
+function boardPlanes(fen: string): number[][][] {
+  const [placement, side] = fen.split(/\s+/);
+  const maps = Array.from({ length: 14 }, () => Array.from({ length: 8 }, () => Array(8).fill(0)));
+  let rank = 0;
+  let file = 0;
+  for (const ch of placement) {
+    if (ch === '/') { rank++; file = 0; }
+    else if (/\d/.test(ch)) file += Number(ch);
+    else if (PIECE_INDEX.has(ch)) maps[PIECE_INDEX.get(ch)!][rank][file++] = 1;
+  }
+  const sideValue = side === 'w' ? 1 : -1;
+  for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) { maps[12][r][f] = sideValue; maps[13][r][f] = 1; }
+  return maps;
+}
+
+function convReluResidual(input: number[][][], weights: number[][][][], biases: number[], residual: boolean): number[][][] {
+  const out = Array.from({ length: biases.length }, () => Array.from({ length: 8 }, () => Array(8).fill(0)));
+  for (let oc = 0; oc < biases.length; oc++) {
+    for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) {
+      let acc = biases[oc];
+      for (let ic = 0; ic < input.length; ic++) for (let kr = 0; kr < 3; kr++) for (let kf = 0; kf < 3; kf++) {
+        const rr = r + kr - 1;
+        const ff = f + kf - 1;
+        if (rr >= 0 && rr < 8 && ff >= 0 && ff < 8) acc += input[ic][rr][ff] * (weights[oc]?.[ic]?.[kr]?.[kf] ?? 0);
+      }
+      const v = Math.max(0, acc);
+      out[oc][r][f] = residual && oc < input.length ? v + input[oc][r][f] : v;
+    }
+  }
+  return out;
+}
+
+function boardCnnLogits(fen: string, artifact: StudentArtifact): { policy: number[]; wdl: number[] } {
+  const h1 = convReluResidual(boardPlanes(fen), artifact.c1_weight ?? [], artifact.c1_bias ?? [], false);
+  const h2 = convReluResidual(h1, artifact.c2_weight ?? [], artifact.c2_bias ?? [], true);
+  const h3 = convReluResidual(h2, artifact.c3_weight ?? [], artifact.c3_bias ?? [], true);
+  const pooled = h3.map((channel) => channel.flat().reduce((a, b) => a + b, 0) / 64);
+  return {
+    policy: (artifact.policy_bias ?? []).map((bias, i) => bias + dot(artifact.policy_weight?.[i] ?? [], pooled)),
+    wdl: (artifact.wdl_bias ?? []).map((bias, i) => bias + dot(artifact.wdl_weight?.[i] ?? [], pooled)),
+  };
 }
 
 function convStudentFeatures(fen: string, channels: number, layers: number): number[] {
@@ -187,7 +241,11 @@ export class StudentEvaluator implements Evaluator {
     const valueFeatures = this.features(board, true);
     let logits: number[];
     let wdlLogits: number[];
-    if (this.artifact.kind === 'frozen_conv_feature_mlp_student') {
+    if (this.artifact.kind === 'tiny_board_cnn_student') {
+      const cnn = boardCnnLogits(boardToFen(board), this.artifact);
+      logits = cnn.policy;
+      wdlLogits = cnn.wdl;
+    } else if (this.artifact.kind === 'frozen_conv_feature_mlp_student') {
       const hidden = (this.artifact.b1 ?? []).map((bias, h) => Math.max(0, bias + dot((this.artifact.w1 ?? []).map((row) => row[h] ?? 0), policyFeatures)));
       logits = (this.artifact.policy_b ?? []).map((bias, move) => bias + dot((this.artifact.policy_w ?? []).map((row) => row[move] ?? 0), hidden));
       wdlLogits = (this.artifact.wdl_b ?? []).map((bias, k) => bias + dot((this.artifact.wdl_w ?? []).map((row) => row[k] ?? 0), hidden));

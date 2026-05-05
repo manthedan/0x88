@@ -1,15 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 python3 -m py_compile training/train_board_cnn.py
-export CUDA_HOME="$PWD/.venv-tinygrad/lib/python3.12/site-packages/nvidia/cu13"
-export PATH="$CUDA_HOME/bin:$PATH"
-export LD_LIBRARY_PATH="$CUDA_HOME/lib:${LD_LIBRARY_PATH:-}"
-.venv-tinygrad/bin/python training/train_board_cnn.py \
-  --train data/lichess_training_400k_2000elo_2016-01.jsonl data/tcec_training_100k.jsonl \
-  --max-rows "${BOARD_CNN_ROWS:-20000}" \
-  --epochs "${BOARD_CNN_EPOCHS:-3}" \
-  --channels "${BOARD_CNN_CHANNELS:-16}" \
-  --lr "${BOARD_CNN_LR:-0.001}" \
-  --checkpoint "${BOARD_CNN_CHECKPOINT:-artifacts/checkpoints/board_cnn_autoresearch.pkl}" \
-  --checkpoint-every "${BOARD_CNN_CHECKPOINT_EVERY:-1}" \
-  --out artifacts/student_board_cnn_autoresearch.json
+npx tsc --noEmit >/dev/null
+cargo check --quiet --manifest-path rust/tiny_leela_core/Cargo.toml --bin tiny-leela-rust-eval
+npm run eval:playable --silent
+rust/tiny_leela_core/target/debug/tiny-leela-rust-eval artifacts/student_distill_benchmark.json 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' 16 0 \
+  | grep -E '^(best_move|METRIC rust_student|policy_legal_count|wdl=)'
