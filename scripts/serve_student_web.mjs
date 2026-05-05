@@ -7,6 +7,7 @@ import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
 import { chooseMove } from '../src/search/puct.ts';
 import { StudentEvaluator } from '../src/nn/studentEvaluator.ts';
+import { rustChooseMove, rustPolicyForBoard } from './rust_engine.mjs';
 
 function arg(name, fallback = undefined) {
   const prefix = `${name}=`;
@@ -17,6 +18,7 @@ function arg(name, fallback = undefined) {
 }
 
 const modelPath = arg('--model', 'artifacts/student_distill_benchmark.json');
+const backend = arg('--backend', process.env.TINY_LEELA_BACKEND ?? 'rust');
 const port = Number(arg('--port', process.env.PORT ?? '5173'));
 const host = arg('--host', process.env.HOST ?? '127.0.0.1');
 const evaluator = StudentEvaluator.fromJson(readFileSync(modelPath, 'utf8'));
@@ -39,18 +41,20 @@ function legalMoveByUci(uci) {
 }
 
 function boardPayload() {
-  const evaluation = evaluator.evaluate(board);
+  const evaluation = backend === 'ts' ? evaluator.evaluate(board) : rustPolicyForBoard(board, { model: modelPath, visits: searchVisits, temperature: 1 });
+  const rustPrior = new Map((evaluation.policy ?? []).map((entry) => [moveToUci(entry.move), entry.prior ?? entry.probability ?? 0]));
   const legal = currentLegalMoves();
   const moves = legal.map((move) => ({
     uci: moveToUci(move),
     from: squareName(move.from),
     to: squareName(move.to),
-    prior: evaluation.policy.get(moveToActionId(move)) ?? 0,
+    prior: backend === 'ts' ? (evaluation.policy.get(moveToActionId(move)) ?? 0) : (rustPrior.get(moveToUci(move)) ?? 0),
   })).sort((a, b) => b.prior - a.prior);
   return {
     fen: boardToFen(board),
     turn: board.turn,
     legalMoves: moves,
+    backend,
     wdl: evaluation.wdl,
     value: evaluation.wdl[0] - evaluation.wdl[2],
     lastEngine,
@@ -59,7 +63,7 @@ function boardPayload() {
 }
 
 async function enginePly() {
-  const result = await chooseMove(board, evaluator, { visits: searchVisits });
+  const result = backend === 'ts' ? await chooseMove(board, evaluator, { visits: searchVisits }) : rustChooseMove(board, { model: modelPath, visits: searchVisits });
   if (!result.move) {
     lastEngine = null;
     lastMessage = 'No engine move available.';
@@ -67,7 +71,7 @@ async function enginePly() {
   }
   lastEngine = moveToUci(result.move);
   board = makeMove(board, result.move);
-  lastMessage = `Engine played ${lastEngine}.`;
+  lastMessage = `${backend.toUpperCase()} engine played ${lastEngine}.`;
 }
 
 async function handleApi(req, res, url) {
@@ -184,6 +188,7 @@ ${chessgroundCss}
         <button id="flip">Flip board</button>
       </div>
       <div class="message" id="message"></div>
+      <p><b>Backend</b> <span class="mono" id="backend"></span></p>
       <p><b>FEN</b></p>
       <p class="fen mono" id="fen"></p>
       <div class="row">
@@ -262,6 +267,7 @@ function renderMoves() {
 function render() {
   if (!state) return;
   fenEl.textContent = state.fen;
+  document.getElementById('backend').textContent = state.backend || 'unknown';
   msgEl.textContent = state.message || '';
   document.getElementById('fenInput').value = state.fen;
   renderGround(); renderWdl(); renderMoves();

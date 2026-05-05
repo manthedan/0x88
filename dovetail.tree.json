@@ -8,14 +8,14 @@
     "primary_metric": {
       "name": "mix_best_arena_score_rate",
       "direction": "higher",
-      "unit": ""
+      "unit": "score_rate"
     },
     "root_baseline": {
       "commit": "3da10f6",
       "metric": 0,
       "benchmark_id": "tiny_leela_bootstrap_score_v1"
     },
-    "current_segment_id": "S0002",
+    "current_segment_id": "S0003",
     "benchmark_segments": {
       "S0000": {
         "segment_id": "S0000",
@@ -67,6 +67,23 @@
         },
         "created_at": "2026-05-05T02:10:35.290Z",
         "reason": "Switch from fixed teacher distillation quality to playable self-play/arena promotion research. Baseline is candidate equal to current 64x6 teacher-distilled model scoring 0.5 against itself in arena."
+      },
+      "S0003": {
+        "segment_id": "S0003",
+        "name": "S0003 Phase D Rust self-play mix arena",
+        "metric": {
+          "name": "mix_best_arena_score_rate",
+          "direction": "higher",
+          "unit": "score_rate"
+        },
+        "baseline": {
+          "commit": "07f42ebd88c5fac7f35287054b97f68f9aa4ac10",
+          "metric": 0.5,
+          "benchmark_id": "tiny_leela_rust_selfplay_mix_arena_v1",
+          "node_id": "N0050"
+        },
+        "created_at": "2026-05-05T03:30:21.510Z",
+        "reason": "Research/self-play and arena backend changed from TypeScript PUCT to native Rust PUCT with higher visit budgets; start a new comparable segment rather than mixing TS and Rust workload results."
       }
     }
   },
@@ -410,7 +427,7 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0047",
-      "current_node_id": "N0048",
+      "current_node_id": "N0049",
       "local_baseline_node_id": "N0047",
       "local_baseline_metric": 0.5,
       "concept_tags": [
@@ -418,46 +435,49 @@
         "training",
         "arena"
       ],
-      "runs_in_current_concept": 1,
+      "runs_in_current_concept": 2,
       "created_at": "2026-05-05T02:10:47.515Z",
       "context_checkpoint": {
         "type": "lane_context_checkpoint",
         "lane_id": "L017",
-        "updated_at": "2026-05-05T02:27:09.542Z",
-        "source_handoff_run_id": "R0046",
-        "source_handoff_node_id": "N0048",
-        "task": "Prioritize self-play lanes and run first Phase D teacher/self-play mix sweep under dovetail.",
-        "outcome": "Discarded/non-improving. Paused non-self-play active lanes L000,L006,L010,L011,L012,L013,L014,L015,L016 so scheduler selected L017. The fixed mix sweep tested weights 0,0.05,0.1,0.25; all arena_score_rate values tied baseline at 0.5 with zero illegal losses. Self-play generated 2 games/16 positions, all draws/non-decisive, making the tiny arena too weak to distinguish mixes.",
+        "updated_at": "2026-05-05T03:26:06.099Z",
+        "source_handoff_run_id": "R0047",
+        "source_handoff_node_id": "N0049",
+        "task": "Try more self-play under L017 by improving Phase D benchmark discrimination with value adjudication rather than scalar-only mix tuning.",
+        "outcome": "Discarded/non-improving. Added optional value adjudication to selfplay generation and arena evaluation and enabled it in dovetail.sh. The run completed and checks passed, but primary mix_best_arena_score_rate remained 0.5. Self-play generated 2 games/16 positions and value adjudication made decisive_rate=1/adjudicated_rate=1; however all mix weights 0,0.05,0.1,0.25 tied arena_score_rate=0.5 with zero illegal losses. Runtime was still 878s, near the 900s budget.",
         "changed_files": [
           "dovetail.context.jsonl",
           "dovetail.runs.jsonl",
           "dovetail.scheduler.json",
           "dovetail.sh",
-          "dovetail.tree.json"
+          "dovetail.tree.json",
+          "eval/arena_suite.mjs",
+          "scripts/selfplay_generate.mjs",
+          "scripts/selfplay_mix_sweep.mjs"
         ],
         "relevant_reads": [
-          "/home/ddbb/pi-dovetail/skills/dovetail-run/SKILL.md",
-          "dovetail.context.jsonl",
-          "dovetail.runs.jsonl",
-          "dovetail.scheduler.json",
           "dovetail.sh",
-          "dovetail.tree.json",
-          "src/search/puct.ts",
-          "training/train_student.py"
+          "eval/arena_suite.mjs",
+          "scripts/selfplay_generate.mjs",
+          "scripts/selfplay_mix_sweep.mjs"
         ],
         "validation_commands": [
-          "./dovetail.checks.sh via run_research_experiment",
-          "run_research_experiment: ./dovetail.sh"
+          "npm run eval:arena --silent -- --games=2 --visits=1 --max-plies=2 --adjudicate=value",
+          "npm run selfplay:generate --silent -- --games=1 --visits=1 --max-plies=2 --adjudicate=value --out=/tmp/tiny_sp.jsonl",
+          "npm test -- --test-reporter=dot",
+          "run_research_experiment: bash dovetail.sh with checks"
         ],
         "failures": [
           "Primary metric did not improve: mix_best_arena_score_rate stayed 0.5",
-          "Benchmark took 878s, close to the 900s lane budget",
-          "Arena/self-play workload draw-saturated at this small budget"
+          "All arena games were value-adjudicated, so discrimination may now reflect current value-head bias rather than true play strength",
+          "Runtime remained 878s, close to the 900s lane budget",
+          "The current Lichess/Chessground frontend still uses the TypeScript server/evaluator/search path, not Rust/WASM"
         ],
-        "next_action_hint": "Keep only self-play lanes active. Next L017 run should improve benchmark discrimination: shorter/faster but more informative tactical/opening arena starts, more decisive adjudication, or reduced expensive 64x6 retraining before increasing mix budget.",
-        "summary": "Lane L017 (explore) hypothesis: A small weighted mix of PUCT self-play examples with teacher labels can improve head-to-head arena score versus the current teacher-only baseline without illegal moves.\nLatest task: Prioritize self-play lanes and run first Phase D teacher/self-play mix sweep under dovetail.\nOutcome: Discarded/non-improving. Paused non-self-play active lanes L000,L006,L010,L011,L012,L013,L014,L015,L016 so scheduler selected L017. The fixed mix sweep tested weights 0,0.05,0.1,0.25; all arena_score_rate values tied baseline at 0.5 with zero illegal losses. Self-play generated 2 games/16 positions, all draws/non-decisive, making the tiny arena too weak to distinguish mixes.\nFailures to remember: Primary metric did not improve: mix_best_arena_score_rate stayed 0.5; Benchmark took 878s, close to the 900s lane budget; Arena/self-play workload draw-saturated at this small budget\nNext action: Keep only self-play lanes active. Next L017 run should improve benchmark discrimination: shorter/faster but more informative tactical/opening arena starts, more decisive adjudication, or reduced expensive 64x6 retraining before increasing mix budget.\nRecent lane runs: R0046",
+        "next_action_hint": "Do not repeat another TS self-play mix sweep. Next useful path is infrastructure: wire Rust/WASM or native Rust search into self-play/arena/UI, then start a new comparable segment or explicitly update benchmark workload. If continuing L017 before that, use tactical/opening start suites and shorter retraining to avoid 900s runs.",
+        "summary": "Lane L017 (explore) hypothesis: A small weighted mix of PUCT self-play examples with teacher labels can improve head-to-head arena score versus the current teacher-only baseline without illegal moves.\nLatest task: Try more self-play under L017 by improving Phase D benchmark discrimination with value adjudication rather than scalar-only mix tuning.\nOutcome: Discarded/non-improving. Added optional value adjudication to selfplay generation and arena evaluation and enabled it in dovetail.sh. The run completed and checks passed, but primary mix_best_arena_score_rate remained 0.5. Self-play generated 2 games/16 positions and value adjudication made decisive_rate=1/adjudicated_rate=1; however all mix weights 0,0.05,0.1,0.25 tied arena_score_rate=0.5 with zero illegal losses. Runtime was still 878s, near the 900s budget.\nFailures to remember: Primary metric did not improve: mix_best_arena_score_rate stayed 0.5; All arena games were value-adjudicated, so discrimination may now reflect current value-head bias rather than true play strength; Runtime remained 878s, close to the 900s lane budget; The current Lichess/Chessground frontend still uses the TypeScript server/evaluator/search path, not Rust/WASM\nNext action: Do not repeat another TS self-play mix sweep. Next useful path is infrastructure: wire Rust/WASM or native Rust search into self-play/arena/UI, then start a new comparable segment or explicitly update benchmark workload. If continuing L017 before that, use tactical/opening start suites and shorter retraining to avoid 900s runs.\nRecent lane runs: R0046, R0047",
         "recent_run_ids": [
-          "R0046"
+          "R0046",
+          "R0047"
         ]
       }
     }
@@ -2495,7 +2515,9 @@
       "node_id": "N0048",
       "lane_id": "L017",
       "parent_node_id": "N0047",
-      "children": [],
+      "children": [
+        "N0049"
+      ],
       "phase": "explore",
       "status": "discarded",
       "hypothesis": "A small weighted mix of PUCT self-play examples with teacher labels can improve head-to-head arena score versus the current teacher-only baseline without illegal moves.",
@@ -2547,6 +2569,84 @@
       },
       "created_at": "2026-05-05T02:26:59.937Z",
       "run_id": "R0046"
+    },
+    "N0049": {
+      "node_id": "N0049",
+      "lane_id": "L017",
+      "parent_node_id": "N0048",
+      "children": [
+        "N0050"
+      ],
+      "phase": "explore",
+      "status": "discarded",
+      "hypothesis": "A small weighted mix of PUCT self-play examples with teacher labels can improve head-to-head arena score versus the current teacher-only baseline without illegal moves; improving benchmark discrimination with value adjudication may reveal non-draw differences.",
+      "commit": "07f42ebd88c5fac7f35287054b97f68f9aa4ac10",
+      "benchmark_id": "tiny_leela_selfplay_mix_arena_v1",
+      "metric": 0.5,
+      "metrics": {
+        "selfplay_games": 2,
+        "selfplay_positions": 16,
+        "selfplay_avg_plies": 8,
+        "selfplay_decisive_rate": 1,
+        "selfplay_adjudicated_rate": 1,
+        "selfplay_policy_mass": 1,
+        "mix_selfplay_games": 2,
+        "mix_selfplay_positions": 16,
+        "mix_selfplay_decisive_rate": 1,
+        "mix_selfplay_adjudicated_rate": 1,
+        "mix_0_arena_score_rate": 0.5,
+        "mix_0_distill_student_score": 17.012288,
+        "mix_0p05_arena_score_rate": 0.5,
+        "mix_0p05_distill_student_score": 18.083951,
+        "mix_0p1_arena_score_rate": 0.5,
+        "mix_0p1_distill_student_score": 18.093003,
+        "mix_0p25_arena_score_rate": 0.5,
+        "mix_0p25_distill_student_score": 18.111029,
+        "mix_best_selfplay_weight": 0,
+        "mix_best_arena_score_rate": 0.5,
+        "mix_best_distill_student_score": 17.012288,
+        "legal_move_selection_rate": 1,
+        "legal_policy_mass": 1,
+        "playable_shell_ready": 1
+      },
+      "deltas": {
+        "delta_vs_parent": 0,
+        "delta_vs_lane_baseline": 0,
+        "delta_vs_root": 0,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "discarded",
+        "reason": "Value adjudication made all tiny self-play and arena games decisive/adjudicated, but it did not improve the primary arena score: every tested self-play mix weight still tied baseline at 0.5 with zero illegal losses. Distillation scores rose numerically under the modified target/adjudication setup but did not translate to arena advantage. Runtime remained 878s, still too close to the 900s budget."
+      },
+      "created_at": "2026-05-05T03:25:55.638Z",
+      "run_id": "R0047"
+    },
+    "N0050": {
+      "node_id": "N0050",
+      "lane_id": "L017",
+      "parent_node_id": "N0049",
+      "children": [],
+      "phase": "probe",
+      "status": "segment_root",
+      "hypothesis": "Segment baseline: S0003 Phase D Rust self-play mix arena",
+      "commit": "07f42ebd88c5fac7f35287054b97f68f9aa4ac10",
+      "benchmark_id": "tiny_leela_rust_selfplay_mix_arena_v1",
+      "metric": 0.5,
+      "metrics": {
+        "mix_best_arena_score_rate": 0.5
+      },
+      "deltas": {
+        "delta_vs_parent": null,
+        "delta_vs_lane_baseline": 0,
+        "delta_vs_root": 0,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "segment_root",
+        "reason": "Research/self-play and arena backend changed from TypeScript PUCT to native Rust PUCT with higher visit budgets; start a new comparable segment rather than mixing TS and Rust workload results."
+      },
+      "created_at": "2026-05-05T03:30:21.510Z"
     }
   },
   "runs": {
@@ -4128,13 +4228,56 @@
       "next_action": "Keep the Phase D benchmark scaffold but treat this mix candidate as non-improving. Next self-play lane should make the arena more discriminative with more games/plies, fixed tactical/opening starts, or decisive adjudication before relying on mix weights.",
       "timestamp": "2026-05-05T02:26:59.937Z",
       "wall_time_seconds": 878.288
+    },
+    "R0047": {
+      "type": "research_run",
+      "run_id": "R0047",
+      "node_id": "N0049",
+      "lane_id": "L017",
+      "phase": "explore",
+      "status": "discarded",
+      "metric": 0.5,
+      "metrics": {
+        "selfplay_games": 2,
+        "selfplay_positions": 16,
+        "selfplay_avg_plies": 8,
+        "selfplay_decisive_rate": 1,
+        "selfplay_adjudicated_rate": 1,
+        "selfplay_policy_mass": 1,
+        "mix_selfplay_games": 2,
+        "mix_selfplay_positions": 16,
+        "mix_selfplay_decisive_rate": 1,
+        "mix_selfplay_adjudicated_rate": 1,
+        "mix_0_arena_score_rate": 0.5,
+        "mix_0_distill_student_score": 17.012288,
+        "mix_0p05_arena_score_rate": 0.5,
+        "mix_0p05_distill_student_score": 18.083951,
+        "mix_0p1_arena_score_rate": 0.5,
+        "mix_0p1_distill_student_score": 18.093003,
+        "mix_0p25_arena_score_rate": 0.5,
+        "mix_0p25_distill_student_score": 18.111029,
+        "mix_best_selfplay_weight": 0,
+        "mix_best_arena_score_rate": 0.5,
+        "mix_best_distill_student_score": 17.012288,
+        "legal_move_selection_rate": 1,
+        "legal_policy_mass": 1,
+        "playable_shell_ready": 1
+      },
+      "benchmark_id": "tiny_leela_selfplay_mix_arena_v1",
+      "commit": "07f42ebd88c5fac7f35287054b97f68f9aa4ac10",
+      "hypothesis": "A small weighted mix of PUCT self-play examples with teacher labels can improve head-to-head arena score versus the current teacher-only baseline without illegal moves; improving benchmark discrimination with value adjudication may reveal non-draw differences.",
+      "implementation": "Added optional value adjudication to self-play generation and arena evaluation, surfaced adjudication metrics through the mix sweep, and enabled value adjudication in dovetail.sh while keeping the same fixed weights/workload.",
+      "learned": "Value adjudication made all tiny self-play and arena games decisive/adjudicated, but it did not improve the primary arena score: every tested self-play mix weight still tied baseline at 0.5 with zero illegal losses. Distillation scores rose numerically under the modified target/adjudication setup but did not translate to arena advantage. Runtime remained 878s, still too close to the 900s budget.",
+      "next_action": "Discard this run for primary metric. Commit or preserve logs only after deciding whether to keep value-adjudication instrumentation as benchmark infrastructure; next L017 pivot should reduce runtime and improve discrimination structurally, likely by using Rust search/self-play or tactical opening suites rather than another TS 64x6 retraining sweep.",
+      "timestamp": "2026-05-05T03:25:55.638Z",
+      "wall_time_seconds": 878.158
     }
   },
   "ids": {
     "next_lane": 18,
-    "next_node": 49,
-    "next_run": 47,
+    "next_node": 51,
+    "next_run": 48,
     "next_idea": 27
   },
-  "global_best_node_id": "N0047"
+  "global_best_node_id": "N0050"
 }

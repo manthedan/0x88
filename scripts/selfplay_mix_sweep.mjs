@@ -18,6 +18,7 @@ function metrics(output) {
   return Object.fromEntries([...output.matchAll(/^METRIC ([^=]+)=(-?[0-9.]+)/gm)].map((m) => [m[1], Number(m[2])]));
 }
 
+const backend = arg('--backend', process.env.TINY_LEELA_BACKEND ?? 'rust');
 const weights = arg('--weights', '0,0.1,0.25').split(',').map(Number);
 const selfplayPath = arg('--selfplay', 'artifacts/selfplay_mix_sweep.jsonl');
 const candidatePrefix = arg('--candidate-prefix', 'artifacts/selfplay_mix_candidate');
@@ -28,12 +29,17 @@ const epochs = arg('--epochs', '20');
 const lr = arg('--lr', '0.05');
 const arenaGames = arg('--arena-games', '2');
 const arenaVisits = arg('--arena-visits', '1');
+const adjudicate = arg('--adjudicate', 'terminal');
+const adjudicateThreshold = arg('--adjudicate-threshold', '0.02');
 const primaryConvArch = arg('--primary-conv-arch', '');
 const trainPaths = arg('--train', 'data/teacher_labels.jsonl,data/stockfish_teacher_labels.jsonl').split(',').filter(Boolean);
 
 if (!existsSync(selfplayPath) || process.argv.includes('--regenerate')) {
   process.stderr.write(`Generating self-play rows at ${selfplayPath}\n`);
-  process.stderr.write(run('npm', ['run', 'selfplay:generate', '--silent', '--', `--games=${games}`, `--visits=${selfplayVisits}`, `--max-plies=${maxPlies}`, `--out=${selfplayPath}`]));
+  const selfplayOutput = run('npm', ['run', 'selfplay:generate', '--silent', '--', `--backend=${backend}`, `--games=${games}`, `--visits=${selfplayVisits}`, `--max-plies=${maxPlies}`, `--out=${selfplayPath}`, `--adjudicate=${adjudicate}`, `--adjudicate-threshold=${adjudicateThreshold}`]);
+  process.stderr.write(selfplayOutput);
+  const selfplayMetrics = metrics(selfplayOutput);
+  for (const [key, value] of Object.entries(selfplayMetrics)) console.log(`METRIC mix_${key}=${value.toFixed(6)}`);
 }
 
 let best = null;
@@ -44,7 +50,7 @@ for (const weight of weights) {
   if (primaryConvArch) trainArgs.push('--average-weights', '--average-policy-only', '--primary-conv-arch', primaryConvArch);
   const trainOutput = run('python3', trainArgs);
   const trainMetrics = metrics(trainOutput);
-  const arenaOutput = run('npm', ['run', 'eval:arena', '--silent', '--', `--candidate=${out}`, '--baseline=artifacts/student_distill_benchmark.json', `--games=${arenaGames}`, `--visits=${arenaVisits}`, `--max-plies=${maxPlies}`]);
+  const arenaOutput = run('npm', ['run', 'eval:arena', '--silent', '--', `--backend=${backend}`, `--candidate=${out}`, '--baseline=artifacts/student_distill_benchmark.json', `--games=${arenaGames}`, `--visits=${arenaVisits}`, `--max-plies=${maxPlies}`, `--adjudicate=${adjudicate}`, `--adjudicate-threshold=${adjudicateThreshold}`]);
   const arenaMetrics = metrics(arenaOutput);
   const prefix = `mix_${String(weight).replace(/\./g, 'p')}`;
   console.log(`METRIC ${prefix}_selfplay_weight=${weight.toFixed(6)}`);
@@ -52,10 +58,12 @@ for (const weight of weights) {
   console.log(`METRIC ${prefix}_arena_score_rate=${(arenaMetrics.arena_score_rate ?? 0).toFixed(6)}`);
   console.log(`METRIC ${prefix}_arena_candidate_elo_estimate=${(arenaMetrics.arena_candidate_elo_estimate ?? 0).toFixed(6)}`);
   console.log(`METRIC ${prefix}_arena_illegal_losses=${arenaMetrics.arena_illegal_losses ?? 0}`);
+  console.log(`METRIC ${prefix}_arena_adjudicated_rate=${(arenaMetrics.arena_adjudicated_rate ?? 0).toFixed(6)}`);
   const candidate = { weight, out, trainMetrics, arenaMetrics };
   if (!best || (arenaMetrics.arena_score_rate ?? -1) > (best.arenaMetrics.arena_score_rate ?? -1)) best = candidate;
 }
 
+console.log(`METRIC mix_backend_${backend}=1`);
 console.log(`METRIC mix_weights_tested=${weights.length}`);
 console.log(`METRIC mix_best_selfplay_weight=${(best?.weight ?? 0).toFixed(6)}`);
 console.log(`METRIC mix_best_arena_score_rate=${(best?.arenaMetrics.arena_score_rate ?? 0).toFixed(6)}`);

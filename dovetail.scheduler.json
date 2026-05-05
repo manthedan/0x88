@@ -1,7 +1,7 @@
 {
   "cycle": 2,
   "cursor": 0,
-  "quantum_remaining": 2,
+  "quantum_remaining": 1,
   "loops_per_lane_quantum": 3,
   "max_active_lanes": 8,
   "max_total_lanes": 64,
@@ -9,6 +9,6 @@
   "spawn_new_lane_every_cycles": 1,
   "last_scheduled_lane_id": "L017",
   "strict_mode": true,
-  "strict_next_action": "Call schedule_next for the next scheduler-owned quantum unless the user stops you.",
+  "strict_next_action": "Call schedule_next under the new benchmark segment before editing.",
   "lane_context_checkpoints": true
 }
