@@ -315,7 +315,11 @@ def main() -> int:
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"kind": primary_kind, "moves": moves, "policy_weights": result["policy_weights"], "wdl_weights": result["wdl_weights"], "policy_feature_dim": result["feature_dim"], "wdl_feature_dim": result["wdl_feature_dim"], "weight_average_count": result["weight_average_count"], "conv_channels": primary_conv_channels, "conv_layers": primary_conv_layers}, separators=(",", ":")))
+    artifact = {"kind": primary_kind, "moves": moves, "policy_weights": result["policy_weights"], "wdl_weights": result["wdl_weights"], "policy_feature_dim": result["feature_dim"], "wdl_feature_dim": result["wdl_feature_dim"], "weight_average_count": result["weight_average_count"], "conv_channels": primary_conv_channels, "conv_layers": primary_conv_layers}
+    artifact_text = json.dumps(artifact, separators=(",", ":"))
+    out.write_text(artifact_text)
+    model_weight_count = (len(moves) * result["feature_dim"]) + (3 * result["wdl_feature_dim"])
+    estimated_eval_ops = model_weight_count + (primary_conv_channels * primary_conv_layers * 64 if primary_conv_channels else 0)
     print(f"METRIC distill_student_score={result['score']:.6f}")
     print(f"METRIC train_policy_ce={result['train_policy_ce']:.6f}")
     print(f"METRIC train_wdl_ce={result['train_wdl_ce']:.6f}")
@@ -336,6 +340,10 @@ def main() -> int:
     print(f"METRIC average_policy_only={1 if args.average_policy_only else 0}")
     print(f"METRIC primary_conv_channels={primary_conv_channels}")
     print(f"METRIC primary_conv_layers={primary_conv_layers}")
+    print(f"METRIC model_json_bytes={len(artifact_text.encode('utf-8'))}")
+    print(f"METRIC model_weight_count={model_weight_count}")
+    print(f"METRIC estimated_eval_ops={estimated_eval_ops}")
+    print(f"METRIC browser_json_compatible=1")
     print(f"METRIC fold_score_mean={fold_mean:.6f}")
     print(f"METRIC fold_score_std={fold_std:.6f}")
     if conv_best is not None:
