@@ -314,6 +314,7 @@ pub struct StudentArtifact {
     pub wdl_weight: Option<Vec<Vec<f32>>>,
     pub wdl_bias: Option<Vec<f32>>,
     pub policy_head: Option<String>,
+    pub input_planes: Option<usize>,
 }
 
 pub struct Evaluation { pub policy: Vec<(u32, f32)>, pub wdl: [f32; 3] }
@@ -384,11 +385,13 @@ fn precompute_conv_params(channels: usize, layers: usize) -> ConvParams {
     ConvParams { layers: out }
 }
 
-fn board_planes(fen: &str) -> Vec<[[f32; 8]; 8]> {
+fn board_planes(fen: &str, input_planes: usize) -> Vec<[[f32; 8]; 8]> {
     let mut parts = fen.split_whitespace();
     let placement = parts.next().unwrap_or("8/8/8/8/8/8/8/8");
     let side = parts.next().unwrap_or("w");
-    let mut maps = vec![[[0f32; 8]; 8]; 14];
+    let castling = parts.next().unwrap_or("-");
+    let ep = parts.next().unwrap_or("-");
+    let mut maps = vec![[[0f32; 8]; 8]; input_planes];
     let (mut rank_i, mut file_i) = (0usize, 0usize);
     for ch in placement.chars() {
         if ch == '/' { rank_i += 1; file_i = 0; }
@@ -396,7 +399,19 @@ fn board_planes(fen: &str) -> Vec<[[f32; 8]; 8]> {
         else if let Some(pi) = "PNBRQKpnbrqk".find(ch) { maps[pi][rank_i][file_i] = 1.0; file_i += 1; }
     }
     let side_value = if side == "w" { 1.0 } else { -1.0 };
-    for r in 0..8 { for f in 0..8 { maps[12][r][f] = side_value; maps[13][r][f] = 1.0; } }
+    for r in 0..8 { for f in 0..8 { maps[12][r][f] = side_value; } }
+    if input_planes >= 20 {
+        for (i, flag) in ['K', 'Q', 'k', 'q'].iter().enumerate() {
+            if castling.contains(*flag) { for r in 0..8 { for f in 0..8 { maps[13 + i][r][f] = 1.0; } } }
+        }
+        if ep != "-" {
+            let b = ep.as_bytes();
+            if b.len() >= 2 { let ef = b[0].saturating_sub(b'a') as usize; let er = 8usize.saturating_sub((b[1].saturating_sub(b'0')) as usize); if er < 8 && ef < 8 { maps[17][er][ef] = 1.0; } }
+        }
+        for r in 0..8 { for f in 0..8 { maps[18][r][f] = 1.0; maps[19][r][f] = if side == "w" { 1.0 } else { 0.0 }; } }
+    } else {
+        for r in 0..8 { for f in 0..8 { maps[13][r][f] = 1.0; } }
+    }
     maps
 }
 
@@ -413,7 +428,8 @@ fn board_cnn_forward(fen: &str, a: &StudentArtifact) -> (Vec<f32>, Vec<f32>) {
         } } }
         out
     }
-    let x0 = board_planes(fen);
+    let input_planes = a.input_planes.unwrap_or_else(|| a.c1_weight.as_ref().and_then(|w| w.first().map(|oc| oc.len())).unwrap_or(14));
+    let x0 = board_planes(fen, input_planes);
     let h1 = conv_relu_res(&x0, a.c1_weight.as_ref().unwrap(), a.c1_bias.as_ref().unwrap(), false);
     let h2 = conv_relu_res(&h1, a.c2_weight.as_ref().unwrap(), a.c2_bias.as_ref().unwrap(), true);
     let h3 = conv_relu_res(&h2, a.c3_weight.as_ref().unwrap(), a.c3_bias.as_ref().unwrap(), true);

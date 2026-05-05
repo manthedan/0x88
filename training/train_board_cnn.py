@@ -2,20 +2,34 @@
 from __future__ import annotations
 import argparse, json, math, random, pickle
 from pathlib import Path
-p=argparse.ArgumentParser(); p.add_argument('--train', nargs='+', required=True); p.add_argument('--out', required=True); p.add_argument('--max-rows', type=int, default=50000); p.add_argument('--epochs', type=int, default=10); p.add_argument('--channels', type=int, default=32); p.add_argument('--lr', type=float, default=1e-3); p.add_argument('--holdout-mod', type=int, default=5); p.add_argument('--eval-rows', type=int, default=10000); p.add_argument('--policy-head', choices=['pooled','spatial'], default='pooled'); p.add_argument('--checkpoint', default=''); p.add_argument('--checkpoint-every', type=int, default=1); p.add_argument('--resume', default=''); args=p.parse_args()
+p=argparse.ArgumentParser(); p.add_argument('--train', nargs='+', required=True); p.add_argument('--out', required=True); p.add_argument('--max-rows', type=int, default=50000); p.add_argument('--epochs', type=int, default=10); p.add_argument('--channels', type=int, default=32); p.add_argument('--lr', type=float, default=1e-3); p.add_argument('--holdout-mod', type=int, default=5); p.add_argument('--eval-rows', type=int, default=10000); p.add_argument('--policy-head', choices=['pooled','spatial'], default='spatial'); p.add_argument('--state-planes', action='store_true'); p.add_argument('--checkpoint', default=''); p.add_argument('--checkpoint-every', type=int, default=1); p.add_argument('--resume', default=''); args=p.parse_args()
 from tinygrad import Tensor
 from tinygrad.nn import Conv2d, Linear
 from tinygrad.nn.optim import Adam
 PIECES='PNBRQKpnbrqk'
 def planes(fen):
-  board,side=fen.split()[:2]; x=[[[0.0]*8 for _ in range(8)] for _ in range(14)]; r=f=0
+  parts=fen.split(); board=parts[0]; side=parts[1] if len(parts)>1 else 'w'; castling=parts[2] if len(parts)>2 else '-'; ep=parts[3] if len(parts)>3 else '-'; n=20 if args.state_planes else 14; x=[[[0.0]*8 for _ in range(8)] for _ in range(n)]; r=f=0
   for ch in board:
     if ch=='/': r+=1; f=0
     elif ch.isdigit(): f+=int(ch)
     else: x[PIECES.index(ch)][r][f]=1.0; f+=1
   sv=1.0 if side=='w' else -1.0
   for rr in range(8):
-    for ff in range(8): x[12][rr][ff]=sv; x[13][rr][ff]=1.0
+    for ff in range(8): x[12][rr][ff]=sv
+  if args.state_planes:
+    flags=['K','Q','k','q']
+    for i,flag in enumerate(flags):
+      if flag in castling:
+        for rr in range(8):
+          for ff in range(8): x[13+i][rr][ff]=1.0
+    if ep!='-' and len(ep)>=2:
+      ef=ord(ep[0])-97; er=8-int(ep[1])
+      if 0<=er<8 and 0<=ef<8: x[17][er][ef]=1.0
+    for rr in range(8):
+      for ff in range(8): x[18][rr][ff]=1.0; x[19][rr][ff]=1.0 if side=='w' else 0.0
+  else:
+    for rr in range(8):
+      for ff in range(8): x[13][rr][ff]=1.0
   return x
 def read_rows(paths):
   rows=[]; moves=[]
@@ -31,7 +45,7 @@ rows,moves=read_rows(args.train); mid={m:i for i,m in enumerate(moves)}; rows=[r
 train=[i for i in range(len(rows)) if i%args.holdout_mod!=0]; dev=[i for i in range(len(rows)) if i%args.holdout_mod==0]
 class Net:
   def __init__(self):
-    C=args.channels; self.c1=Conv2d(14,C,3,padding=1); self.c2=Conv2d(C,C,3,padding=1); self.c3=Conv2d(C,C,3,padding=1); self.p=Linear(C*64 if args.policy_head=='spatial' else C,len(moves)); self.v=Linear(C,3)
+    C=args.channels; self.c1=Conv2d(20 if args.state_planes else 14,C,3,padding=1); self.c2=Conv2d(C,C,3,padding=1); self.c3=Conv2d(C,C,3,padding=1); self.p=Linear(C*64 if args.policy_head=='spatial' else C,len(moves)); self.v=Linear(C,3)
   def __call__(self,x):
     h=self.c1(x).relu(); h=(self.c2(h).relu()+h); h=(self.c3(h).relu()+h); pooled=h.mean(axis=(2,3)); pf=h.reshape(h.shape[0], args.channels*64) if args.policy_head=='spatial' else pooled; return self.p(pf), self.v(pooled)
   def params(self): return [self.c1.weight,self.c1.bias,self.c2.weight,self.c2.bias,self.c3.weight,self.c3.bias,self.p.weight,self.p.bias,self.v.weight,self.v.bias]
@@ -50,7 +64,7 @@ for ep in range(start_epoch, args.epochs):
     opt.zero_grad(); lp,lv=net(x); lps=lp.log_softmax(); lvs=lv.log_softmax(); loss=lps.sparse_categorical_crossentropy(y,reduction='none').reshape(len(idx),1).mul(w).sum()-((lvs*v*w).sum()); loss.backward(); opt.step(); total+=float(loss.numpy()); n+=len(idx)
   print(f'METRIC epoch_{ep+1}_loss={total/max(1,n):.6f}', flush=True)
   if args.checkpoint and args.checkpoint_every > 0 and (ep + 1) % args.checkpoint_every == 0:
-    ck={'epoch':ep+1,'moves':moves,'channels':args.channels,
+    ck={'epoch':ep+1,'moves':moves,'channels':args.channels,'policy_head':args.policy_head,'input_planes':20 if args.state_planes else 14,
         'c1_weight':net.c1.weight.numpy().tolist(),'c1_bias':net.c1.bias.numpy().tolist(),
         'c2_weight':net.c2.weight.numpy().tolist(),'c2_bias':net.c2.bias.numpy().tolist(),
         'c3_weight':net.c3.weight.numpy().tolist(),'c3_bias':net.c3.bias.numpy().tolist(),
@@ -66,11 +80,11 @@ for off in range(0,n,512):
   for row,wl,i in zip(logits,wlog,idx):
     t=mid[rows[i][1]]; ranked=sorted(range(len(row)), key=lambda k: row[k], reverse=True); top1+=t==ranked[0]; top4+=t in ranked[:4]; top8+=t in ranked[:8]
     m=max(row); pce+=-(row[t]-m-math.log(sum(math.exp(z-m) for z in row))); mw=max(wl); vt=rows[i][2]; wce+=-sum(vt[k]*(wl[k]-mw-math.log(sum(math.exp(z-mw) for z in wl))) for k in range(3))
-obj={'kind':'tiny_board_cnn_student','moves':moves,'channels':args.channels,'policy_head':args.policy_head,
+obj={'kind':'tiny_board_cnn_student','moves':moves,'channels':args.channels,'policy_head':args.policy_head,'input_planes':20 if args.state_planes else 14,
      'c1_weight':net.c1.weight.numpy().tolist(),'c1_bias':net.c1.bias.numpy().tolist(),
      'c2_weight':net.c2.weight.numpy().tolist(),'c2_bias':net.c2.bias.numpy().tolist(),
      'c3_weight':net.c3.weight.numpy().tolist(),'c3_bias':net.c3.bias.numpy().tolist(),
      'policy_weight':net.p.weight.numpy().tolist(),'policy_bias':net.p.bias.numpy().tolist(),
      'wdl_weight':net.v.weight.numpy().tolist(),'wdl_bias':net.v.bias.numpy().tolist()}
 out=Path(args.out); out.parent.mkdir(parents=True,exist_ok=True); out.write_text(json.dumps(obj))
-print(f'METRIC board_cnn_rows={len(rows)}'); print(f'METRIC board_cnn_moves={len(moves)}'); print(f'METRIC board_cnn_policy_head_spatial={1 if args.policy_head == "spatial" else 0}'); print(f'METRIC dev_policy_ce={pce/n:.6f}'); print(f'METRIC dev_wdl_ce={wce/n:.6f}'); print(f'METRIC dev_policy_top1={top1/n:.6f}'); print(f'METRIC dev_policy_top4={top4/n:.6f}'); print(f'METRIC dev_policy_top8={top8/n:.6f}')
+print(f'METRIC board_cnn_rows={len(rows)}'); print(f'METRIC board_cnn_moves={len(moves)}'); print(f'METRIC board_cnn_policy_head_spatial={1 if args.policy_head == "spatial" else 0}'); print(f'METRIC board_cnn_input_planes={20 if args.state_planes else 14}'); print(f'METRIC dev_policy_ce={pce/n:.6f}'); print(f'METRIC dev_wdl_ce={wce/n:.6f}'); print(f'METRIC dev_policy_top1={top1/n:.6f}'); print(f'METRIC dev_policy_top4={top4/n:.6f}'); print(f'METRIC dev_policy_top8={top8/n:.6f}')
