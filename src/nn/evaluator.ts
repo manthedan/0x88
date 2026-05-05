@@ -1,6 +1,6 @@
-import type { BoardState } from '../chess/board.js';
-import { pseudoLegalMoves } from '../chess/movegen.js';
-import { moveToActionId } from '../chess/moveCodec.js';
+import type { BoardState } from '../chess/board.ts';
+import { pseudoLegalMoves } from '../chess/movegen.ts';
+import { moveToActionId } from '../chess/moveCodec.ts';
 
 export interface Evaluation {
   policy: Map<number, number>;

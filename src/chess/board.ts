@@ -57,6 +57,30 @@ export function parseFen(fen = START_FEN): BoardState {
   };
 }
 
+export function boardToFen(board: BoardState): string {
+  const ranks: string[] = [];
+  for (let rank = 7; rank >= 0; rank--) {
+    let out = '';
+    let empty = 0;
+    for (let file = 0; file < 8; file++) {
+      const piece = board.squares[file + rank * 8];
+      if (!piece) {
+        empty++;
+        continue;
+      }
+      if (empty) {
+        out += String(empty);
+        empty = 0;
+      }
+      const role = piece[1];
+      out += piece[0] === 'w' ? role.toUpperCase() : role;
+    }
+    if (empty) out += String(empty);
+    ranks.push(out);
+  }
+  return `${ranks.join('/')} ${board.turn} ${board.castling || '-'} ${board.epSquare === null ? '-' : squareName(board.epSquare)} ${board.halfmove} ${board.fullmove}`;
+}
+
 export function cloneBoard(board: BoardState): BoardState {
   return { ...board, squares: [...board.squares] };
 }

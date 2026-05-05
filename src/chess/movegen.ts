@@ -1,5 +1,5 @@
-import { cloneBoard, opposite, type BoardState, type Color, type Piece } from './board.js';
-import type { Move } from './moveCodec.js';
+import { cloneBoard, opposite, type BoardState, type Color, type Piece } from './board.ts';
+import type { Move } from './moveCodec.ts';
 
 const KNIGHT = [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]];
 const KING = [[1, 1], [1, 0], [1, -1], [0, 1], [0, -1], [-1, 1], [-1, 0], [-1, -1]];

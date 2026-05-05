@@ -1,7 +1,7 @@
-import type { BoardState } from '../chess/board.js';
-import { makeMove, pseudoLegalMoves } from '../chess/movegen.js';
-import { moveToActionId, type Move } from '../chess/moveCodec.js';
-import type { Evaluator } from '../nn/evaluator.js';
+import type { BoardState } from '../chess/board.ts';
+import { makeMove, pseudoLegalMoves } from '../chess/movegen.ts';
+import { moveToActionId, type Move } from '../chess/moveCodec.ts';
+import type { Evaluator } from '../nn/evaluator.ts';
 
 export interface SearchResult { move: Move | null; visits: number; value: number; }
 
