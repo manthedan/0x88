@@ -131,8 +131,8 @@ const html = String.raw`<!doctype html>
   h1 { margin: 0 0 6px; font-size: clamp(28px, 5vw, 48px); }
   .sub { margin: 0 0 20px; color: var(--muted); }
   .layout { display: grid; grid-template-columns: minmax(300px, 560px) minmax(280px, 1fr); gap: 22px; align-items: start; }
-  .board { display: grid; grid-template-columns: repeat(8, 1fr); border: 2px solid #111; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 60px #0008; aspect-ratio: 1; }
-  .sq { position: relative; border: 0; font-size: clamp(28px, 7vw, 58px); cursor: pointer; display: grid; place-items: center; color: #111827; }
+  .board { width: min(560px, calc(100vw - 48px)); aspect-ratio: 1 / 1; display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); border: 2px solid #111; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 60px #0008; }
+  .sq { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 0; border: 0; line-height: 1; font-size: clamp(24px, 7vw, 56px); cursor: pointer; display: grid; place-items: center; color: #111827; }
   .light { background: #f0d9b5; } .dark { background: #b58863; }
   .sq.selected { outline: 4px solid var(--accent); outline-offset: -4px; }
   .sq.target::after { content: ''; width: 28%; height: 28%; border-radius: 50%; background: #38bdf8bb; position: absolute; }
