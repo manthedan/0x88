@@ -17,6 +17,7 @@ function arg(name, fallback = undefined) {
 
 const modelPath = arg('--model', 'artifacts/student_distill_benchmark.json');
 const port = Number(arg('--port', process.env.PORT ?? '5173'));
+const host = arg('--host', process.env.HOST ?? '127.0.0.1');
 const evaluator = StudentEvaluator.fromJson(readFileSync(modelPath, 'utf8'));
 let board = parseFen(arg('--fen', START_FEN));
 let lastEngine = null;
@@ -256,7 +257,8 @@ const server = createServer((req, res) => {
   res.end(html);
 });
 
-server.listen(port, '127.0.0.1', () => {
+server.listen(port, host, () => {
   const address = server.address();
-  console.log(`Tiny Leela web UI: http://127.0.0.1:${address.port}`);
+  const shownHost = host === '0.0.0.0' ? '127.0.0.1' : host;
+  console.log(`Tiny Leela web UI: http://${shownHost}:${address.port}`);
 });
