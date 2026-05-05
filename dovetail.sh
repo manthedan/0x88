@@ -12,6 +12,17 @@ exec > >(tee -a "$DOVETAIL_LOG") 2>&1
 echo "[dovetail] log=$DOVETAIL_LOG"
 echo "METRIC dovetail_log_started=1"
 echo "[dovetail] phase=selfplay_mix_sweep start ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+TEACHER_CORRECTIONS="data/teacher_corrections_selfplay_mix_arena.jsonl"
+if [[ -f "$TEACHER_CORRECTIONS" ]]; then
+  TEACHER_CORRECTION_ROWS=$(grep -cve '^$' "$TEACHER_CORRECTIONS" || true)
+else
+  TEACHER_CORRECTION_ROWS=0
+fi
+TRAIN_INPUTS="data/teacher_labels.jsonl,data/stockfish_teacher_labels.jsonl"
+if [[ "$TEACHER_CORRECTION_ROWS" != "0" ]]; then
+  TRAIN_INPUTS="$TRAIN_INPUTS,$TEACHER_CORRECTIONS"
+fi
+echo "METRIC teacher_correction_rows=$TEACHER_CORRECTION_ROWS"
 
 # Phase D scaled true-play arena benchmark.
 # Evaluate candidate mix weights by actual played result rather than value
@@ -30,6 +41,7 @@ npm run selfplay:mix-sweep --silent -- \
   --selection-metric=arena_true_play_score_rate \
   --adjudicate-threshold=0.02 \
   --primary-conv-arch=64x6 \
+  --train="$TRAIN_INPUTS" \
   --feature-cache=artifacts/cache/conv_features_64x6.json \
   --parallel-candidates \
   --trainer="${TINY_LEELA_TRAINER:-python}" \

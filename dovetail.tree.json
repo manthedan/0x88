@@ -622,7 +622,7 @@
       "status": "active",
       "phase": "explore",
       "parent_node_id": "N0052",
-      "current_node_id": "N0059",
+      "current_node_id": "N0060",
       "local_baseline_node_id": "N0052",
       "local_baseline_metric": 0.75,
       "concept_tags": [
@@ -630,24 +630,23 @@
         "evaluation",
         "scaling"
       ],
-      "runs_in_current_concept": 1,
+      "runs_in_current_concept": 2,
       "created_at": "2026-05-05T05:05:41.742Z",
       "context_checkpoint": {
         "type": "lane_context_checkpoint",
         "lane_id": "L020",
-        "updated_at": "2026-05-05T05:18:22.192Z",
-        "source_handoff_run_id": "R0055",
-        "source_handoff_node_id": "N0059",
-        "task": "Implement and run S0004 scaled true-play arena as the primary metric for L020.",
-        "outcome": "Kept measurement infrastructure, but no strength gain. S0004 now uses mix_best_arena_true_play_score_rate as primary, with mix-sweep selection by arena_true_play_score_rate. dovetail.sh ran terminal/no-value-adjudication arena with 32 games, max_plies=40, visits=32. The run completed in 391.649s with checks passing. All weights scored true_play_score_rate=0.5, best weight remained 0, and adjudicated_rate=0 for all candidates. This confirms the old 0.75 artifact is gone, but the current true-play workload is still not discriminative because games draw by max plies.",
+        "updated_at": "2026-05-05T05:35:04.393Z",
+        "source_handoff_run_id": "R0056",
+        "source_handoff_node_id": "N0060",
+        "task": "Add diagnostics to confirm whether S0004 true-play arena is timing out by max plies rather than measuring strength.",
+        "outcome": "Kept diagnostic infrastructure. Added arena_max_ply_draw_rate / arena_max_ply_draws in Rust arena and forwarded per-weight and best max-ply draw metrics through the mix sweep. The S0004 run completed in 390.437s with checks passing. It confirmed every game for every candidate hit the ply cap: mix_best_arena_max_ply_draw_rate=1.0, each per-weight max_ply_draw_rate=1.0, and avg_plies=40. True-play score remained 0.5 for all weights. Also queued and created L024 Teacher-assisted self-play correction buffer, but scheduler kept this quantum on L020.",
         "changed_files": [
           "dovetail.context.jsonl",
           "dovetail.ideas.jsonl",
-          "dovetail.runs.jsonl",
           "dovetail.scheduler.json",
-          "dovetail.sh",
           "dovetail.tree.json",
           "dovetail.tree.jsonl",
+          "rust/tiny_leela_core/src/bin/arena.rs",
           "scripts/selfplay_mix_sweep.mjs"
         ],
         "relevant_reads": [
@@ -656,19 +655,20 @@
           "scripts/selfplay_mix_sweep.mjs"
         ],
         "validation_commands": [
-          "bash -n dovetail.sh",
+          "cargo check --manifest-path rust/tiny_leela_core/Cargo.toml --bin tiny-leela-rust-arena",
           "node --check scripts/selfplay_mix_sweep.mjs",
           "run_research_experiment: bash dovetail.sh"
         ],
         "failures": [
-          "No candidate exceeded 0.5 true-play score over 32 games",
-          "Best weight remains 0, so scaled true-play did not validate self-play mix improvement",
-          "Terminal/no-adjudication games at max_plies=40 appear too drawish/non-discriminative"
+          "Every S0004 arena game hit max plies: max_ply_draw_rate=1.0",
+          "True-play full-game arena from the current setup measures legal survival/timeouts, not purposeful chess strength",
+          "No self-play mix weight improved beyond 0.5 true-play score"
         ],
-        "next_action_hint": "Stay with scale/discrimination lanes. Add mirrored opening starts and/or longer plies/decisive mini-game conditions before increasing self-play training. Avoid restoring value adjudication as the primary metric.",
-        "summary": "Lane L020 (explore) hypothesis: Increasing arena games to 32-128 with terminal/true-play scoring will reduce variance and prevent value-adjudication artifacts from being mistaken for real strength gains.\nLatest task: Implement and run S0004 scaled true-play arena as the primary metric for L020.\nOutcome: Kept measurement infrastructure, but no strength gain. S0004 now uses mix_best_arena_true_play_score_rate as primary, with mix-sweep selection by arena_true_play_score_rate. dovetail.sh ran terminal/no-value-adjudication arena with 32 games, max_plies=40, visits=32. The run completed in 391.649s with checks passing. All weights scored true_play_score_rate=0.5, best weight remained 0, and adjudicated_rate=0 for all candidates. This confirms the old 0.75 artifact is gone, but the current true-play workload is still not discriminative because games draw by max plies.\nFailures to remember: No candidate exceeded 0.5 true-play score over 32 games; Best weight remains 0, so scaled true-play did not validate self-play mix improvement; Terminal/no-adjudication games at max_plies=40 appear too drawish/non-discriminative\nNext action: Stay with scale/discrimination lanes. Add mirrored opening starts and/or longer plies/decisive mini-game conditions before increasing self-play training. Avoid restoring value adjudication as the primary metric.\nRecent lane runs: R0055",
+        "next_action_hint": "Pause or deprioritize full-game S0004 scaling until a tactical/progress/teacher-assisted readiness gate improves. Prefer L024 Teacher-assisted self-play correction buffer or a tactical gauntlet segment next.",
+        "summary": "Lane L020 (explore) hypothesis: Increasing arena games to 32-128 with terminal/true-play scoring will reduce variance and prevent value-adjudication artifacts from being mistaken for real strength gains.\nLatest task: Add diagnostics to confirm whether S0004 true-play arena is timing out by max plies rather than measuring strength.\nOutcome: Kept diagnostic infrastructure. Added arena_max_ply_draw_rate / arena_max_ply_draws in Rust arena and forwarded per-weight and best max-ply draw metrics through the mix sweep. The S0004 run completed in 390.437s with checks passing. It confirmed every game for every candidate hit the ply cap: mix_best_arena_max_ply_draw_rate=1.0, each per-weight max_ply_draw_rate=1.0, and avg_plies=40. True-play score remained 0.5 for all weights. Also queued and created L024 Teacher-assisted self-play correction buffer, but scheduler kept this quantum on L020.\nFailures to remember: Every S0004 arena game hit max plies: max_ply_draw_rate=1.0; True-play full-game arena from the current setup measures legal survival/timeouts, not purposeful chess strength; No self-play mix weight improved beyond 0.5 true-play score\nNext action: Pause or deprioritize full-game S0004 scaling until a tactical/progress/teacher-assisted readiness gate improves. Prefer L024 Teacher-assisted self-play correction buffer or a tactical gauntlet segment next.\nRecent lane runs: R0055, R0056",
         "recent_run_ids": [
-          "R0055"
+          "R0055",
+          "R0056"
         ]
       }
     },
@@ -3296,7 +3296,9 @@
       "node_id": "N0059",
       "lane_id": "L020",
       "parent_node_id": "N0052",
-      "children": [],
+      "children": [
+        "N0060"
+      ],
       "phase": "explore",
       "status": "kept",
       "hypothesis": "Increasing arena games to 32-128 with terminal/true-play scoring will reduce variance and prevent value-adjudication artifacts from being mistaken for real strength gains.",
@@ -3335,6 +3337,48 @@
       },
       "created_at": "2026-05-05T05:18:13.538Z",
       "run_id": "R0055"
+    },
+    "N0060": {
+      "node_id": "N0060",
+      "lane_id": "L020",
+      "parent_node_id": "N0059",
+      "children": [],
+      "phase": "explore",
+      "status": "kept",
+      "hypothesis": "Increasing arena games to 32-128 with terminal/true-play scoring will reduce variance and prevent value-adjudication artifacts from being mistaken for real strength gains.",
+      "commit": "bb21820",
+      "benchmark_id": "tiny_leela_scaled_trueplay_arena_v1",
+      "metric": 0.5,
+      "metrics": {
+        "mix_best_arena_true_play_score_rate": 0.5,
+        "mix_best_arena_max_ply_draw_rate": 1,
+        "mix_best_selfplay_weight": 0,
+        "mix_0_arena_max_ply_draw_rate": 1,
+        "mix_0p05_arena_max_ply_draw_rate": 1,
+        "mix_0p1_arena_max_ply_draw_rate": 1,
+        "mix_0p25_arena_max_ply_draw_rate": 1,
+        "mix_0_arena_avg_plies": 40,
+        "mix_0p05_arena_avg_plies": 40,
+        "mix_0p1_arena_avg_plies": 40,
+        "mix_0p25_arena_avg_plies": 40,
+        "mix_0_arena_true_play_score_rate": 0.5,
+        "mix_0p05_arena_true_play_score_rate": 0.5,
+        "mix_0p1_arena_true_play_score_rate": 0.5,
+        "mix_0p25_arena_true_play_score_rate": 0.5,
+        "checks_pass": 1
+      },
+      "deltas": {
+        "delta_vs_parent": 0,
+        "delta_vs_lane_baseline": -0.25,
+        "delta_vs_root": 0,
+        "delta_vs_global_best": 0
+      },
+      "decision": {
+        "action": "kept",
+        "reason": "The user's concern was exactly right: every candidate and every game hit the ply cap. mix_best_arena_max_ply_draw_rate=1.0 and avg_plies=40 for all weights, so S0004 is currently measuring legal survival to timeout, not strength or conversion. Pure true-play full games should be blocked as a promotion metric until progress/tactical/teacher-assisted readiness improves."
+      },
+      "created_at": "2026-05-05T05:34:55.513Z",
+      "run_id": "R0056"
     }
   },
   "runs": {
@@ -5282,12 +5326,48 @@
       "next_action": "Continue in L020/L022 by adding mirrored opening starts or increasing plies/visits/game diversity so terminal/true-play games produce non-identical outcomes without returning to value-adjudication bias.",
       "timestamp": "2026-05-05T05:18:13.538Z",
       "wall_time_seconds": 391.649
+    },
+    "R0056": {
+      "type": "research_run",
+      "run_id": "R0056",
+      "node_id": "N0060",
+      "lane_id": "L020",
+      "phase": "explore",
+      "status": "kept",
+      "metric": 0.5,
+      "metrics": {
+        "mix_best_arena_true_play_score_rate": 0.5,
+        "mix_best_arena_max_ply_draw_rate": 1,
+        "mix_best_selfplay_weight": 0,
+        "mix_0_arena_max_ply_draw_rate": 1,
+        "mix_0p05_arena_max_ply_draw_rate": 1,
+        "mix_0p1_arena_max_ply_draw_rate": 1,
+        "mix_0p25_arena_max_ply_draw_rate": 1,
+        "mix_0_arena_avg_plies": 40,
+        "mix_0p05_arena_avg_plies": 40,
+        "mix_0p1_arena_avg_plies": 40,
+        "mix_0p25_arena_avg_plies": 40,
+        "mix_0_arena_true_play_score_rate": 0.5,
+        "mix_0p05_arena_true_play_score_rate": 0.5,
+        "mix_0p1_arena_true_play_score_rate": 0.5,
+        "mix_0p25_arena_true_play_score_rate": 0.5,
+        "checks_pass": 1
+      },
+      "benchmark_id": "tiny_leela_scaled_trueplay_arena_v1",
+      "commit": "bb21820",
+      "base_commit": "4d2470a",
+      "hypothesis": "Increasing arena games to 32-128 with terminal/true-play scoring will reduce variance and prevent value-adjudication artifacts from being mistaken for real strength gains.",
+      "implementation": "Added arena_max_ply_draw_rate and per-weight mix forwarding so S0004 can distinguish clean true-play draws from non-discriminative max-ply timeouts. Also queued/created a teacher-assisted correction buffer lane for the user's next desired research direction, but the scheduler kept this quantum on L020.",
+      "learned": "The user's concern was exactly right: every candidate and every game hit the ply cap. mix_best_arena_max_ply_draw_rate=1.0 and avg_plies=40 for all weights, so S0004 is currently measuring legal survival to timeout, not strength or conversion. Pure true-play full games should be blocked as a promotion metric until progress/tactical/teacher-assisted readiness improves.",
+      "next_action": "Pivot scheduler to teacher-assisted correction buffer or tactical/progress gauntlet. Do not spend more time scaling full-game true-play from start position while max_ply_draw_rate remains 1.0.",
+      "timestamp": "2026-05-05T05:34:55.513Z",
+      "wall_time_seconds": 390.437
     }
   },
   "ids": {
     "next_lane": 25,
-    "next_node": 60,
-    "next_run": 56,
+    "next_node": 61,
+    "next_run": 57,
     "next_idea": 36
   },
   "global_best_node_id": "N0058"
