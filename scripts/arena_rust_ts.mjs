@@ -1,14 +1,15 @@
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { parseFen, boardToFen, opposite, START_FEN } from '../src/chess/board.ts';
+import { parseFen, boardToFen, START_FEN } from '../src/chess/board.ts';
 import { legalMoves, makeMove, inCheck } from '../src/chess/movegen.ts';
 import { moveFromUci, moveToUci } from '../src/chess/moveCodec.ts';
 import { StudentEvaluator } from '../src/nn/studentEvaluator.ts';
 import { searchRoot } from '../src/search/puct.ts';
 
 const artifactPath = process.argv[2] ?? 'artifacts/student_distill_benchmark.json';
-const visits = Number(process.argv[3] ?? 8);
-const maxPlies = Number(process.argv[4] ?? 30);
+const tsVisits = Number(process.argv[3] ?? 8);
+const rustVisits = Number(process.argv[4] ?? process.argv[3] ?? 8);
+const maxPlies = Number(process.argv[5] ?? 30);
 const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
 const tsEvaluator = new StudentEvaluator(artifact);
 
@@ -24,12 +25,12 @@ const starts = [
 
 function rustMove(board) {
   const fen = boardToFen(board);
-  const out = execFileSync(rustBin, [artifactPath, fen, String(visits)], { encoding: 'utf8', maxBuffer: 1024 * 1024 * 16 });
+  const out = execFileSync(rustBin, [artifactPath, fen, String(rustVisits)], { encoding: 'utf8', maxBuffer: 1024 * 1024 * 16 });
   return out.match(/^best_move=(.*)$/m)?.[1]?.trim() ?? 'none';
 }
 
 async function tsMove(board) {
-  const result = await searchRoot(board, tsEvaluator, { visits, temperature: 0 });
+  const result = await searchRoot(board, tsEvaluator, { visits: tsVisits, temperature: 0 });
   return result.move ? moveToUci(result.move) : 'none';
 }
 
@@ -83,6 +84,8 @@ for (const start of starts) {
 }
 
 for (const row of rows) console.log(JSON.stringify(row));
+console.log(`METRIC rust_ts_arena_ts_visits=${tsVisits}`);
+console.log(`METRIC rust_ts_arena_rust_visits=${rustVisits}`);
 console.log(`METRIC rust_ts_arena_games=${games}`);
 console.log(`METRIC rust_ts_arena_rust_score_rate=${(rustScore / games).toFixed(6)}`);
 console.log(`METRIC rust_ts_arena_rust_illegal_losses=${rustIllegalLosses}`);
