@@ -93,6 +93,21 @@ with --state-planes:    12 × (N + 1) + 10
 
 Missing history at game starts is zero-filled. Dataset rows may carry `history_fens`; if absent, the trainer still works and zero-fills history planes. Runtime TS/Rust inference must not deploy a history-trained artifact until it passes the same history stack to the evaluator.
 
+## ONNX Export Path
+
+Residual-tower artifacts are exported from the existing tinygrad JSON format through a small optional PyTorch bridge:
+
+```bash
+python3 -m venv .venv-onnx
+.venv-onnx/bin/pip install -r requirements-onnx.txt
+.venv-onnx/bin/python training/export_residual_to_onnx.py \
+  --artifact artifacts/student_residual_48x5.json \
+  --out artifacts/student_residual_48x5.onnx \
+  --verify
+```
+
+The exporter is intentionally dependency-optional. Main training can remain tinygrad for now; PyTorch is only used as a reliable ONNX serializer/runtime smoke path.
+
 ## Roadmap
 
 ## Phase 1: Stabilize Current Model Path

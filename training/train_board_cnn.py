@@ -2,6 +2,9 @@
 from __future__ import annotations
 import argparse, json, math, random, pickle
 from pathlib import Path
+import os, shutil
+if os.environ.get('DEV') is None and shutil.which('nvcc') is None:
+  os.environ['DEV']='CPU' if shutil.which('clang') is not None else 'PYTHON'
 p=argparse.ArgumentParser(); p.add_argument('--train', nargs='+', required=True); p.add_argument('--out', required=True); p.add_argument('--max-rows', type=int, default=50000); p.add_argument('--epochs', type=int, default=10); p.add_argument('--channels', type=int, default=32); p.add_argument('--lr', type=float, default=1e-3); p.add_argument('--holdout-mod', type=int, default=5); p.add_argument('--eval-rows', type=int, default=10000); p.add_argument('--architecture', choices=['legacy3','residual_tower'], default='legacy3'); p.add_argument('--blocks', type=int, default=2); p.add_argument('--policy-head', choices=['pooled','spatial'], default='spatial'); p.add_argument('--state-planes', action='store_true'); p.add_argument('--history-plies', type=int, default=0); p.add_argument('--fixed-policy-map', action='store_true'); p.add_argument('--checkpoint', default=''); p.add_argument('--checkpoint-every', type=int, default=1); p.add_argument('--resume', default=''); args=p.parse_args()
 if args.blocks < 0: raise SystemExit('--blocks must be >= 0')
 if args.history_plies < 0: raise SystemExit('--history-plies must be >= 0')
