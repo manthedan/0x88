@@ -13,7 +13,11 @@ p.add_argument('--max-rows-per-opening', type=int, default=6000)
 p.add_argument('--skip-plies', type=int, default=0)
 p.add_argument('--seed', type=int, default=7)
 p.add_argument('--dedupe-fen', action='store_true')
+p.add_argument('--dev-out', default='', help='Optional held-out output JSONL split by whole games')
+p.add_argument('--dev-ratio', type=float, default=0.05, help='Fraction of games for --dev-out')
+p.add_argument('--report', default='', help='Optional JSON diagnostics report path')
 args=p.parse_args()
+if args.dev_out and not (0.0 < args.dev_ratio < 1.0): raise SystemExit('--dev-ratio must be between 0 and 1')
 
 def game_id(row):
   rid=str(row.get('id',''))
@@ -39,39 +43,66 @@ def opening_key(rows):
   # Proxy for repeated book line: first sampled normalized FEN.
   return 'firstfen:'+fen_key(first['fen'])
 
-games=defaultdict(list)
+games=defaultdict(list); game_sources={}
 for path in args.input:
+  source=Path(path).stem
   with open(path) as f:
     for line in f:
       row=json.loads(line)
       if ply(row) < args.skip_plies: continue
       pol=row.get('policy',{})
       if len(pol)!=1: continue
-      games[game_id(row)].append(row)
+      gid=game_id(row); games[gid].append(row); game_sources.setdefault(gid, source)
+
+def select_rows(game_items, max_rows, seen_fens=None):
+  opening_counts=Counter(); rows_per_game=[]; rows_out=[]; skipped_dupe=0; skipped_opening=0; source_counts=Counter(); game_openings={}
+  if seen_fens is None: seen_fens=set()
+  for gid, rows in game_items:
+    rng.shuffle(rows)
+    ok=opening_key(rows); game_openings[gid]=ok
+    took=0
+    for row in rows:
+      if took >= args.max_rows_per_game: break
+      if opening_counts[ok] >= args.max_rows_per_opening:
+        skipped_opening += 1; continue
+      fk=fen_key(row['fen'])
+      if args.dedupe_fen and fk in seen_fens:
+        skipped_dupe += 1; continue
+      seen_fens.add(fk); rows_out.append(row); opening_counts[ok]+=1; source_counts[game_sources.get(gid,'unknown')]+=1; took+=1
+      if len(rows_out) >= max_rows: break
+    if took: rows_per_game.append(took)
+    if len(rows_out) >= max_rows: break
+  return {'rows': rows_out, 'opening_counts': opening_counts, 'rows_per_game': rows_per_game, 'skipped_dupe': skipped_dupe, 'skipped_opening': skipped_opening, 'source_counts': source_counts, 'game_openings': game_openings}
 
 rng=random.Random(args.seed)
 game_items=list(games.items())
 rng.shuffle(game_items)
-opening_counts=Counter(); rows_per_game=[]; rows_out=[]; seen_fens=set(); skipped_dupe=0; skipped_opening=0
-for gid, rows in game_items:
-  rng.shuffle(rows)
-  ok=opening_key(rows)
-  took=0
-  for row in rows:
-    if took >= args.max_rows_per_game: break
-    if opening_counts[ok] >= args.max_rows_per_opening:
-      skipped_opening += 1; continue
-    fk=fen_key(row['fen'])
-    if args.dedupe_fen and fk in seen_fens:
-      skipped_dupe += 1; continue
-    seen_fens.add(fk); rows_out.append(row); opening_counts[ok]+=1; took+=1
-    if len(rows_out) >= args.max_rows: break
-  if took: rows_per_game.append(took)
-  if len(rows_out) >= args.max_rows: break
+dev_items=[]; train_items=game_items
+if args.dev_out:
+  n_dev=max(1, int(round(len(game_items)*args.dev_ratio)))
+  dev_items=game_items[:n_dev]; train_items=game_items[n_dev:]
+train=select_rows(train_items, args.max_rows)
+rows_out=train['rows']; opening_counts=train['opening_counts']; rows_per_game=train['rows_per_game']; skipped_dupe=train['skipped_dupe']; skipped_opening=train['skipped_opening']
+dev=None
+if args.dev_out:
+  dev=select_rows(dev_items, max(1, int(args.max_rows*args.dev_ratio)), set())
 
 Path(args.out).parent.mkdir(parents=True, exist_ok=True)
 with open(args.out,'w') as f:
   for row in rows_out: f.write(json.dumps(row,separators=(',',':'))+'\n')
+if args.dev_out and dev is not None:
+  Path(args.dev_out).parent.mkdir(parents=True, exist_ok=True)
+  with open(args.dev_out,'w') as f:
+    for row in dev['rows']: f.write(json.dumps(row,separators=(',',':'))+'\n')
+
+def summary(name, data):
+  oc=data['opening_counts']; rpg=data['rows_per_game']
+  return {'name':name,'rows':len(data['rows']),'games':len(rpg),'openings':len(oc),'top_opening_rows':max(oc.values()) if oc else 0,'skipped_duplicate_fens':data['skipped_dupe'],'skipped_opening_cap':data['skipped_opening'],'avg_rows_per_game':sum(rpg)/max(1,len(rpg)),'source_counts':dict(data['source_counts'].most_common()),'top_openings':oc.most_common(20)}
+report={'seed':args.seed,'input_games':len(games),'train_game_candidates':len(train_items),'dev_game_candidates':len(dev_items),'train':summary('train',train)}
+if dev is not None: report['dev']=summary('dev',dev)
+if args.report:
+  Path(args.report).parent.mkdir(parents=True, exist_ok=True)
+  with open(args.report,'w') as f: json.dump(report,f,indent=2)
 print(f'METRIC balanced_rows={len(rows_out)}')
 print(f'METRIC balanced_games={len(rows_per_game)}')
 print(f'METRIC balanced_openings={len(opening_counts)}')
@@ -79,3 +110,7 @@ print(f'METRIC balanced_top_opening_rows={max(opening_counts.values()) if openin
 print(f'METRIC balanced_skipped_duplicate_fens={skipped_dupe}')
 print(f'METRIC balanced_skipped_opening_cap={skipped_opening}')
 print(f'METRIC balanced_avg_rows_per_game={sum(rows_per_game)/max(1,len(rows_per_game)):.6f}')
+if dev is not None:
+  print(f'METRIC balanced_dev_rows={len(dev["rows"])}')
+  print(f'METRIC balanced_dev_games={len(dev["rows_per_game"])}')
+  print(f'METRIC balanced_dev_openings={len(dev["opening_counts"])}')
