@@ -114,6 +114,6 @@ def main():
   Path(args.out).parent.mkdir(parents=True,exist_ok=True); torch.save({'model':net.state_dict(),'meta':meta},args.out)
   if args.meta_out or args.onnx_out: Path(args.meta_out or (args.onnx_out+'.meta.json')).write_text(json.dumps(meta,separators=(',',':')))
   if args.onnx_out:
-    dummy=torch.zeros(1,meta['input_planes'],8,8,device=device); Path(args.onnx_out).parent.mkdir(parents=True,exist_ok=True); torch.onnx.export(net,dummy,args.onnx_out,input_names=['planes'],output_names=['policy_logits','wdl_logits'],dynamic_axes={'planes':{0:'batch'},'policy_logits':{0:'batch'},'wdl_logits':{0:'batch'}},opset_version=18)
+    dummy=torch.zeros(1,meta['input_planes'],8,8,device=device); Path(args.onnx_out).parent.mkdir(parents=True,exist_ok=True); torch.onnx.export(net,dummy,args.onnx_out,input_names=['planes'],output_names=['policy_logits','wdl_logits'],dynamic_axes={'planes':{0:'batch'},'policy_logits':{0:'batch'},'wdl_logits':{0:'batch'}},opset_version=18,external_data=False)
   print(f'METRIC torch_rows={len(rows)}'); print(f'METRIC torch_skipped_unknown_moves={skipped}'); print(f'METRIC torch_input_planes={meta["input_planes"]}'); print(f'METRIC dev_policy_top1={top1/max(1,n):.6f}'); print(f'METRIC dev_policy_top4={top4/max(1,n):.6f}'); print(f'METRIC dev_policy_top8={top8/max(1,n):.6f}'); print(f'METRIC dev_policy_ce={pce/max(1,n):.6f}'); print(f'METRIC dev_wdl_ce={wce/max(1,n):.6f}')
 if __name__=='__main__': main()
