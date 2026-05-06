@@ -7,6 +7,7 @@ import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
 import { chooseMove } from '../src/search/puct.ts';
 import { StudentEvaluator } from '../src/nn/studentEvaluator.ts';
+import { OnnxEvaluator } from '../src/nn/onnxEvaluator.ts';
 import { rustChooseMove, rustPolicyForBoard } from './rust_engine.mjs';
 
 function arg(name, fallback = undefined) {
@@ -18,10 +19,14 @@ function arg(name, fallback = undefined) {
 }
 
 const modelPath = arg('--model', 'artifacts/student_distill_benchmark.json');
-const backend = arg('--backend', process.env.TINY_LEELA_BACKEND ?? 'rust');
+const onnxPath = arg('--onnx', process.env.TINY_LEELA_ONNX ?? '');
+const metaPath = arg('--meta', process.env.TINY_LEELA_ONNX_META ?? '');
+const backend = arg('--backend', process.env.TINY_LEELA_BACKEND ?? (onnxPath ? 'onnx' : 'rust'));
 const port = Number(arg('--port', process.env.PORT ?? '5173'));
 const host = arg('--host', process.env.HOST ?? '127.0.0.1');
-const evaluator = StudentEvaluator.fromJson(readFileSync(modelPath, 'utf8'));
+const evaluator = backend === 'onnx'
+  ? await OnnxEvaluator.create(onnxPath, JSON.parse(readFileSync(metaPath, 'utf8')))
+  : StudentEvaluator.fromJson(readFileSync(modelPath, 'utf8'));
 const searchVisits = Number(arg('--visits', process.env.TINY_LEELA_SEARCH_VISITS ?? '1024'));
 const policyVisits = Number(arg('--policy-visits', process.env.TINY_LEELA_POLICY_VISITS ?? String(Math.min(64, searchVisits))));
 const chessgroundCss = [
@@ -43,15 +48,15 @@ function legalMoveByUci(uci) {
   return currentLegalMoves().find((move) => moveToUci(move) === uci) ?? null;
 }
 
-function boardPayload() {
-  const evaluation = backend === 'ts' ? evaluator.evaluate(board) : rustPolicyForBoard(board, { model: modelPath, visits: policyVisits, temperature: 1 });
-  const rustPrior = new Map((evaluation.policy ?? []).map((entry) => [moveToUci(entry.move), entry.prior ?? entry.probability ?? 0]));
+async function boardPayload() {
+  const evaluation = backend === 'ts' || backend === 'onnx' ? await evaluator.evaluate(board) : rustPolicyForBoard(board, { model: modelPath, visits: policyVisits, temperature: 1 });
+  const rustPrior = backend === 'ts' || backend === 'onnx' ? new Map() : new Map((evaluation.policy ?? []).map((entry) => [moveToUci(entry.move), entry.prior ?? entry.probability ?? 0]));
   const legal = currentLegalMoves();
   const moves = legal.map((move) => ({
     uci: moveToUci(move),
     from: squareName(move.from),
     to: squareName(move.to),
-    prior: backend === 'ts' ? (evaluation.policy.get(moveToActionId(move)) ?? 0) : (rustPrior.get(moveToUci(move)) ?? 0),
+    prior: backend === 'ts' || backend === 'onnx' ? (evaluation.policy.get(moveToActionId(move)) ?? 0) : (rustPrior.get(moveToUci(move)) ?? 0),
   })).sort((a, b) => b.prior - a.prior);
   return {
     fen: boardToFen(board),
@@ -69,7 +74,7 @@ function boardPayload() {
 }
 
 async function enginePly() {
-  const result = backend === 'ts' ? await chooseMove(board, evaluator, { visits: searchVisits }) : rustChooseMove(board, { model: modelPath, visits: searchVisits });
+  const result = backend === 'ts' || backend === 'onnx' ? await chooseMove(board, evaluator, { visits: searchVisits }) : rustChooseMove(board, { model: modelPath, visits: searchVisits });
   if (!result.move) {
     lastEngine = null;
     lastMessage = 'No engine move available.';
@@ -88,13 +93,13 @@ async function handleApi(req, res, url) {
 
 async function handleApiSerial(req, res, url) {
   try {
-    if (url.pathname === '/api/state' && req.method === 'GET') return json(res, boardPayload());
+    if (url.pathname === '/api/state' && req.method === 'GET') return json(res, await boardPayload());
     if (url.pathname === '/api/reset' && req.method === 'POST') {
       board = parseFen(START_FEN);
       lastEngine = null;
       lastMove = null;
       lastMessage = 'Reset to start position.';
-      return json(res, boardPayload());
+      return json(res, await boardPayload());
     }
     if (url.pathname === '/api/fen' && req.method === 'POST') {
       const body = await readJson(req);
@@ -102,22 +107,22 @@ async function handleApiSerial(req, res, url) {
       lastEngine = null;
       lastMove = null;
       lastMessage = 'Loaded FEN.';
-      return json(res, boardPayload());
+      return json(res, await boardPayload());
     }
     if (url.pathname === '/api/move' && req.method === 'POST') {
       const body = await readJson(req);
       const uci = String(body.uci ?? '');
       const move = legalMoveByUci(uci);
-      if (!move) return json(res, { error: `Illegal move: ${uci}`, ...boardPayload() }, 400);
+      if (!move) return json(res, { error: `Illegal move: ${uci}`, ...(await boardPayload()) }, 400);
       board = makeMove(board, move);
       lastMove = uci;
       lastMessage = `You played ${uci}.`;
       if (body.engine !== false) await enginePly();
-      return json(res, boardPayload());
+      return json(res, await boardPayload());
     }
     if (url.pathname === '/api/engine' && req.method === 'POST') {
       await enginePly();
-      return json(res, boardPayload());
+      return json(res, await boardPayload());
     }
     json(res, { error: 'Not found' }, 404);
   } catch (err) {
