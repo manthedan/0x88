@@ -24,6 +24,7 @@ function legalDests() {
   return dests;
 }
 function legalMoveByUci(uci: string) { return legalMoves(board).find((m) => moveToUci(m) === uci) ?? null; }
+function boardFen() { return boardToFen(board).split(' ')[0]; }
 function renderWdl(wdl: [number, number, number]) {
   $('wdl').innerHTML = ['Win','Draw','Loss'].map((name,i)=>`<div class="bar"><span>${name}</span><div class="track"><div class="fill" style="width:${Math.round((wdl[i]??0)*100)}%"></div></div><span>${((wdl[i]??0)*100).toFixed(1)}%</span></div>`).join('');
 }
@@ -32,9 +33,9 @@ async function render(message = '') {
   $('status').textContent = evaluator ? `${visits} visits` : 'loading';
   if (message) $('message').textContent = message;
   if (!ground) {
-    ground = Chessground($('ground'), { orientation, fen: boardToFen(board), movable: { free: false, color: board.turn === 'w' ? 'white' : 'black', dests: legalDests(), events: { after: onUserMove } } });
+    ground = Chessground($('ground'), { orientation, fen: boardFen(), turnColor: board.turn === 'w' ? 'white' : 'black', coordinates: true, highlight: { lastMove: true, check: true }, animation: { enabled: true, duration: 180 }, movable: { free: false, color: board.turn === 'w' ? 'white' : 'black', dests: legalDests(), showDests: true, events: { after: onUserMove } } });
   } else {
-    ground.set({ orientation, fen: boardToFen(board), lastMove: lastMove ? [lastMove.slice(0,2) as Key, lastMove.slice(2,4) as Key] : undefined, movable: { free: false, color: board.turn === 'w' ? 'white' : 'black', dests: legalDests(), events: { after: onUserMove } } });
+    ground.set({ orientation, fen: boardFen(), turnColor: board.turn === 'w' ? 'white' : 'black', coordinates: true, highlight: { lastMove: true, check: true }, animation: { enabled: true, duration: 180 }, lastMove: lastMove ? [lastMove.slice(0,2) as Key, lastMove.slice(2,4) as Key] : undefined, movable: { free: false, color: board.turn === 'w' ? 'white' : 'black', dests: legalDests(), showDests: true, events: { after: onUserMove } } });
   }
   if (!evaluator) return;
   const ev = await evaluator.evaluate(board, { historyFens });
@@ -51,7 +52,8 @@ async function playMove(move: Move, who: string) {
   await render(`${who} played ${uci}.`);
 }
 async function onUserMove(from: string, to: string) {
-  const move = legalMoveByUci(from + to) ?? legalMoves(board).find((m) => squareName(m.from) === from && squareName(m.to) === to);
+  const candidates = legalMoves(board).filter((m) => squareName(m.from) === from && squareName(m.to) === to);
+  const move = legalMoveByUci(from + to) ?? candidates.find((m) => moveToUci(m).endsWith('q')) ?? candidates[0];
   if (!move) { await render(`Illegal move ${from}${to}.`); return; }
   await playMove(move, 'You');
   await engineMove();
