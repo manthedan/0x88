@@ -1,11 +1,11 @@
-import type { BoardState } from '../chess/board.ts';
+import { boardToFen, type BoardState } from '../chess/board.ts';
 import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToActionId, type Move } from '../chess/moveCodec.ts';
 import type { Evaluator } from '../nn/evaluator.ts';
 
 export interface SearchPolicyEntry { move: Move; visits: number; prior: number; q: number; probability: number; }
 export interface SearchResult { move: Move | null; visits: number; value: number; policy: SearchPolicyEntry[]; }
-export interface SearchOptions { visits?: number; cpuct?: number; temperature?: number; }
+export interface SearchOptions { visits?: number; cpuct?: number; temperature?: number; historyFens?: string[]; }
 
 interface Edge {
   move: Move;
@@ -17,6 +17,7 @@ interface Edge {
 
 interface Node {
   board: BoardState;
+  historyFens: string[];
   expanded: boolean;
   terminalValue: number | null;
   edges: Edge[];
@@ -39,7 +40,7 @@ async function expand(node: Node, evaluator: Evaluator): Promise<number> {
     node.edges = [];
     return node.terminalValue;
   }
-  const evaln = await evaluator.evaluate(node.board);
+  const evaln = await evaluator.evaluate(node.board, { historyFens: node.historyFens });
   const raw = moves.map((move) => Math.max(0, evaln.policy.get(moveToActionId(move)) ?? 0));
   const total = raw.reduce((a, b) => a + b, 0);
   const fallback = 1 / moves.length;
@@ -68,7 +69,7 @@ async function simulate(node: Node, evaluator: Evaluator, cpuct: number): Promis
     const score = q + u;
     if (score > bestScore) { best = edge; bestScore = score; }
   }
-  if (!best.child) best.child = { board: makeMove(node.board, best.move), expanded: false, terminalValue: null, edges: [] };
+  if (!best.child) best.child = { board: makeMove(node.board, best.move), historyFens: [boardToFen(node.board), ...node.historyFens], expanded: false, terminalValue: null, edges: [] };
   const childValue = await simulate(best.child, evaluator, cpuct);
   best.visits += 1;
   best.valueSum += childValue;
@@ -91,7 +92,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   const visits = Math.max(1, Math.floor(options.visits ?? 8));
   const cpuct = options.cpuct ?? 1.5;
   const temperature = options.temperature ?? 1;
-  const root: Node = { board, expanded: false, terminalValue: null, edges: [] };
+  const root: Node = { board, historyFens: options.historyFens ?? [], expanded: false, terminalValue: null, edges: [] };
   const rootValue = await expand(root, evaluator);
   if (!root.edges.length) return { move: null, visits: 0, value: rootValue, policy: [] };
   for (let i = 0; i < visits; i++) await simulate(root, evaluator, cpuct);

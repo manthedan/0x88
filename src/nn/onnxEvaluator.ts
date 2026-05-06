@@ -3,7 +3,7 @@ import { boardToFen, type BoardState } from '../chess/board.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { moveToActionId, type Move } from '../chess/moveCodec.ts';
 import { POLICY_MAP, moveToPolicyIndex } from '../chess/policyMap.ts';
-import type { Evaluation, Evaluator } from './evaluator.ts';
+import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 
 const PIECES = 'PNBRQKpnbrqk';
 
@@ -77,8 +77,8 @@ export class OnnxEvaluator implements Evaluator {
     return new OnnxEvaluator(session, meta, historyFens);
   }
 
-  async evaluate(board: BoardState): Promise<Evaluation> {
-    const input = onnxInputPlanes(board, this.meta, this.historyFens);
+  async evaluate(board: BoardState, context: EvaluationContext = {}): Promise<Evaluation> {
+    const input = onnxInputPlanes(board, this.meta, context.historyFens ?? this.historyFens);
     const tensor = new ort.Tensor('float32', input, [1, this.meta.input_planes, 8, 8]);
     const outputs = await this.session.run({ planes: tensor });
     const policyRaw = outputs.policy_logits?.data ?? Object.values(outputs)[0].data;

@@ -7,8 +7,13 @@ export interface Evaluation {
   wdl: [win: number, draw: number, loss: number];
 }
 
+export interface EvaluationContext {
+  /** Previous position FENs, newest first. */
+  historyFens?: string[];
+}
+
 export interface Evaluator {
-  evaluate(board: BoardState): Promise<Evaluation> | Evaluation;
+  evaluate(board: BoardState, context?: EvaluationContext): Promise<Evaluation> | Evaluation;
 }
 
 export class UniformEvaluator implements Evaluator {

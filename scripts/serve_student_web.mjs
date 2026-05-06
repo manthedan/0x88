@@ -35,6 +35,7 @@ const chessgroundCss = [
   readFileSync('node_modules/chessground/assets/chessground.cburnett.css', 'utf8'),
 ].join('\n');
 let board = parseFen(arg('--fen', START_FEN));
+let historyFens = [];
 let lastEngine = null;
 let lastMove = null;
 let lastMessage = 'Ready. Drag a piece on the Chessground board, or click a legal source/target.';
@@ -49,7 +50,7 @@ function legalMoveByUci(uci) {
 }
 
 async function boardPayload() {
-  const evaluation = backend === 'ts' || backend === 'onnx' ? await evaluator.evaluate(board) : rustPolicyForBoard(board, { model: modelPath, visits: policyVisits, temperature: 1 });
+  const evaluation = backend === 'ts' || backend === 'onnx' ? await evaluator.evaluate(board, { historyFens }) : rustPolicyForBoard(board, { model: modelPath, visits: policyVisits, temperature: 1 });
   const rustPrior = backend === 'ts' || backend === 'onnx' ? new Map() : new Map((evaluation.policy ?? []).map((entry) => [moveToUci(entry.move), entry.prior ?? entry.probability ?? 0]));
   const legal = currentLegalMoves();
   const moves = legal.map((move) => ({
@@ -74,7 +75,7 @@ async function boardPayload() {
 }
 
 async function enginePly() {
-  const result = backend === 'ts' || backend === 'onnx' ? await chooseMove(board, evaluator, { visits: searchVisits }) : rustChooseMove(board, { model: modelPath, visits: searchVisits });
+  const result = backend === 'ts' || backend === 'onnx' ? await chooseMove(board, evaluator, { visits: searchVisits, historyFens }) : rustChooseMove(board, { model: modelPath, visits: searchVisits });
   if (!result.move) {
     lastEngine = null;
     lastMessage = 'No engine move available.';
@@ -82,6 +83,7 @@ async function enginePly() {
   }
   lastEngine = moveToUci(result.move);
   lastMove = lastEngine;
+  historyFens = [boardToFen(board), ...historyFens];
   board = makeMove(board, result.move);
   lastMessage = `${backend.toUpperCase()} engine played ${lastEngine}.`;
 }
@@ -96,6 +98,7 @@ async function handleApiSerial(req, res, url) {
     if (url.pathname === '/api/state' && req.method === 'GET') return json(res, await boardPayload());
     if (url.pathname === '/api/reset' && req.method === 'POST') {
       board = parseFen(START_FEN);
+      historyFens = [];
       lastEngine = null;
       lastMove = null;
       lastMessage = 'Reset to start position.';
@@ -104,6 +107,7 @@ async function handleApiSerial(req, res, url) {
     if (url.pathname === '/api/fen' && req.method === 'POST') {
       const body = await readJson(req);
       board = parseFen(String(body.fen ?? START_FEN));
+      historyFens = [];
       lastEngine = null;
       lastMove = null;
       lastMessage = 'Loaded FEN.';
@@ -114,6 +118,7 @@ async function handleApiSerial(req, res, url) {
       const uci = String(body.uci ?? '');
       const move = legalMoveByUci(uci);
       if (!move) return json(res, { error: `Illegal move: ${uci}`, ...(await boardPayload()) }, 400);
+      historyFens = [boardToFen(board), ...historyFens];
       board = makeMove(board, move);
       lastMove = uci;
       lastMessage = `You played ${uci}.`;
