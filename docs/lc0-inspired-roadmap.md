@@ -35,8 +35,8 @@ Recent important improvements:
 
 Remaining limitations:
 
-- No history planes.
-- Data-derived move vocabulary is fragile.
+- History planes are now specified and available in the Python data/training path, but TS/Rust runtime inference still needs history-aware state plumbing before deployment.
+- Data-derived move vocabulary is deprecated by the fixed policy-map path, though legacy artifacts still support it.
 - Policy targets are mostly one-hot played moves, not search-improved distributions.
 - Network is still extremely shallow.
 - WDL/value quality is weak compared with policy quality.
@@ -68,6 +68,30 @@ Remaining limitations:
 | Hanse sampling | Production RL detail; skip for supervised stage. |
 | Tablebase rescoring | Valuable later for endgames. |
 | LC0 pb.gz export | Optional unless we want to run inside lc0. |
+
+## Input Plane Spec v2: Nano-LC0 History Planes
+
+History support is intentionally smaller than full LC0 at first but follows the same principle: give the net recent position context so it can infer repetition, castling/en-passant history effects, and move momentum.
+
+Current Python training layout with `--history-plies N`:
+
+```text
+12 current piece planes: P N B R Q K p n b r q k
+12 × N previous-position piece planes, newest first
+state planes:
+  legacy mode: side-to-move scalar plane, constant plane
+  --state-planes mode: side-to-move, castling K/Q/k/q, en-passant square,
+                       constant, white-to-move, stm-in-check, opponent-in-check
+```
+
+Plane count:
+
+```text
+without --state-planes: 12 × (N + 1) + 2
+with --state-planes:    12 × (N + 1) + 10
+```
+
+Missing history at game starts is zero-filled. Dataset rows may carry `history_fens`; if absent, the trainer still works and zero-fills history planes. Runtime TS/Rust inference must not deploy a history-trained artifact until it passes the same history stack to the evaluator.
 
 ## Roadmap
 

@@ -315,6 +315,7 @@ pub struct StudentArtifact {
     pub wdl_bias: Option<Vec<f32>>,
     pub policy_head: Option<String>,
     pub policy_map: Option<String>,
+    pub history_plies: Option<usize>,
     pub input_planes: Option<usize>,
 }
 
@@ -406,7 +407,7 @@ fn precompute_conv_params(channels: usize, layers: usize) -> ConvParams {
     ConvParams { layers: out }
 }
 
-fn board_planes(fen: &str, input_planes: usize) -> Vec<[[f32; 8]; 8]> {
+fn board_planes(fen: &str, input_planes: usize, history_plies: usize) -> Vec<[[f32; 8]; 8]> {
     let mut parts = fen.split_whitespace();
     let placement = parts.next().unwrap_or("8/8/8/8/8/8/8/8");
     let side = parts.next().unwrap_or("w");
@@ -419,26 +420,27 @@ fn board_planes(fen: &str, input_planes: usize) -> Vec<[[f32; 8]; 8]> {
         else if ch.is_ascii_digit() { file_i += ch.to_digit(10).unwrap() as usize; }
         else if let Some(pi) = "PNBRQKpnbrqk".find(ch) { maps[pi][rank_i][file_i] = 1.0; file_i += 1; }
     }
+    let state0 = 12 * (history_plies + 1);
     let side_value = if side == "w" { 1.0 } else { -1.0 };
-    for r in 0..8 { for f in 0..8 { maps[12][r][f] = side_value; } }
-    if input_planes >= 20 {
+    for r in 0..8 { for f in 0..8 { maps[state0][r][f] = side_value; } }
+    if input_planes.saturating_sub(state0) >= 10 {
         for (i, flag) in ['K', 'Q', 'k', 'q'].iter().enumerate() {
-            if castling.contains(*flag) { for r in 0..8 { for f in 0..8 { maps[13 + i][r][f] = 1.0; } } }
+            if castling.contains(*flag) { for r in 0..8 { for f in 0..8 { maps[state0 + 1 + i][r][f] = 1.0; } } }
         }
         if ep != "-" {
             let b = ep.as_bytes();
-            if b.len() >= 2 { let ef = b[0].saturating_sub(b'a') as usize; let er = 8usize.saturating_sub((b[1].saturating_sub(b'0')) as usize); if er < 8 && ef < 8 { maps[17][er][ef] = 1.0; } }
+            if b.len() >= 2 { let ef = b[0].saturating_sub(b'a') as usize; let er = 8usize.saturating_sub((b[1].saturating_sub(b'0')) as usize); if er < 8 && ef < 8 { maps[state0 + 5][er][ef] = 1.0; } }
         }
         let (mut stm_check, mut opp_check) = (0.0, 0.0);
-        if input_planes >= 22 {
+        if input_planes.saturating_sub(state0) >= 10 {
             if let Ok(board) = parse_fen(fen) {
                 stm_check = if in_check(&board, board.turn) { 1.0 } else { 0.0 };
                 opp_check = if in_check(&board, board.turn.opposite()) { 1.0 } else { 0.0 };
             }
         }
-        for r in 0..8 { for f in 0..8 { maps[18][r][f] = 1.0; maps[19][r][f] = if side == "w" { 1.0 } else { 0.0 }; if input_planes >= 22 { maps[20][r][f] = stm_check; maps[21][r][f] = opp_check; } } }
+        for r in 0..8 { for f in 0..8 { maps[state0 + 6][r][f] = 1.0; maps[state0 + 7][r][f] = if side == "w" { 1.0 } else { 0.0 }; maps[state0 + 8][r][f] = stm_check; maps[state0 + 9][r][f] = opp_check; } }
     } else {
-        for r in 0..8 { for f in 0..8 { maps[13][r][f] = 1.0; } }
+        for r in 0..8 { for f in 0..8 { maps[state0 + 1][r][f] = 1.0; } }
     }
     maps
 }
@@ -457,7 +459,7 @@ fn board_cnn_forward(fen: &str, a: &StudentArtifact) -> (Vec<f32>, Vec<f32>) {
         out
     }
     let input_planes = a.input_planes.unwrap_or_else(|| a.c1_weight.as_ref().and_then(|w| w.first().map(|oc| oc.len())).unwrap_or(14));
-    let x0 = board_planes(fen, input_planes);
+    let x0 = board_planes(fen, input_planes, a.history_plies.unwrap_or(0));
     let h1 = conv_relu_res(&x0, a.c1_weight.as_ref().unwrap(), a.c1_bias.as_ref().unwrap(), false);
     let h2 = conv_relu_res(&h1, a.c2_weight.as_ref().unwrap(), a.c2_bias.as_ref().unwrap(), true);
     let h3 = conv_relu_res(&h2, a.c3_weight.as_ref().unwrap(), a.c3_bias.as_ref().unwrap(), true);

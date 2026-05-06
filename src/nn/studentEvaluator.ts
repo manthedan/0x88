@@ -38,6 +38,7 @@ export interface StudentArtifact {
   wdl_bias?: number[];
   policy_head?: 'pooled' | 'spatial';
   policy_map?: string | null;
+  history_plies?: number;
   input_planes?: number;
 }
 
@@ -115,7 +116,7 @@ function convParams(channels: number, layers: number) {
   return params;
 }
 
-function boardPlanes(fen: string, inputPlanes = 14): number[][][] {
+function boardPlanes(fen: string, inputPlanes = 14, historyPlies = 0): number[][][] {
   const [placement, side = 'w', castling = '-', ep = '-'] = fen.split(/\s+/);
   const maps = Array.from({ length: inputPlanes }, () => Array.from({ length: 8 }, () => Array(8).fill(0)));
   let rank = 0;
@@ -125,25 +126,26 @@ function boardPlanes(fen: string, inputPlanes = 14): number[][][] {
     else if (/\d/.test(ch)) file += Number(ch);
     else if (PIECE_INDEX.has(ch)) maps[PIECE_INDEX.get(ch)!][rank][file++] = 1;
   }
+  const state0 = 12 * (historyPlies + 1);
   const sideValue = side === 'w' ? 1 : -1;
-  for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) maps[12][r][f] = sideValue;
-  if (inputPlanes >= 20) {
-    ['K', 'Q', 'k', 'q'].forEach((flag, i) => { if (castling.includes(flag)) for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) maps[13 + i][r][f] = 1; });
+  for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) maps[state0][r][f] = sideValue;
+  if (inputPlanes - state0 >= 10) {
+    ['K', 'Q', 'k', 'q'].forEach((flag, i) => { if (castling.includes(flag)) for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) maps[state0 + 1 + i][r][f] = 1; });
     if (ep !== '-' && ep.length >= 2) {
       const ef = ep.charCodeAt(0) - 97;
       const er = 8 - Number(ep[1]);
-      if (er >= 0 && er < 8 && ef >= 0 && ef < 8) maps[17][er][ef] = 1;
+      if (er >= 0 && er < 8 && ef >= 0 && ef < 8) maps[state0 + 5][er][ef] = 1;
     }
     let stmCheck = 0;
     let oppCheck = 0;
-    if (inputPlanes >= 22) {
+    if (inputPlanes - state0 >= 10) {
       const board = parseFen(fen);
       stmCheck = inCheck(board, board.turn) ? 1 : 0;
       oppCheck = inCheck(board, board.turn === 'w' ? 'b' : 'w') ? 1 : 0;
     }
-    for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) { maps[18][r][f] = 1; maps[19][r][f] = side === 'w' ? 1 : 0; if (inputPlanes >= 22) { maps[20][r][f] = stmCheck; maps[21][r][f] = oppCheck; } }
+    for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) { maps[state0 + 6][r][f] = 1; maps[state0 + 7][r][f] = side === 'w' ? 1 : 0; maps[state0 + 8][r][f] = stmCheck; maps[state0 + 9][r][f] = oppCheck; }
   } else {
-    for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) maps[13][r][f] = 1;
+    for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) maps[state0 + 1][r][f] = 1;
   }
   return maps;
 }
@@ -166,7 +168,7 @@ function convReluResidual(input: number[][][], weights: number[][][][], biases: 
 }
 
 function boardCnnLogits(fen: string, artifact: StudentArtifact): { policy: number[]; wdl: number[] } {
-  const h1 = convReluResidual(boardPlanes(fen, artifact.input_planes ?? artifact.c1_weight?.[0]?.length ?? 14), artifact.c1_weight ?? [], artifact.c1_bias ?? [], false);
+  const h1 = convReluResidual(boardPlanes(fen, artifact.input_planes ?? artifact.c1_weight?.[0]?.length ?? 14, artifact.history_plies ?? 0), artifact.c1_weight ?? [], artifact.c1_bias ?? [], false);
   const h2 = convReluResidual(h1, artifact.c2_weight ?? [], artifact.c2_bias ?? [], true);
   const h3 = convReluResidual(h2, artifact.c3_weight ?? [], artifact.c3_bias ?? [], true);
   const pooled = h3.map((channel) => channel.flat().reduce((a, b) => a + b, 0) / 64);
