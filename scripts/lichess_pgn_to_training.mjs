@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { createReadStream, mkdirSync, writeFileSync } from 'node:fs';
+import { createInterface } from 'node:readline';
 import { dirname } from 'node:path';
 import { parseFen, boardToFen, START_FEN } from '../src/chess/board.ts';
 import { legalMoves, makeMove, inCheck } from '../src/chess/movegen.ts';
@@ -14,18 +15,29 @@ function arg(name, fallback = undefined) {
   return i >= 0 ? process.argv[i + 1] : fallback;
 }
 
-function readInput(path) {
-  if (path.endsWith('.zst')) {
-    const proc = spawnSync('zstd', ['-dc', path], { encoding: 'utf8', maxBuffer: 1024 * 1024 * 1024 });
-    if (proc.status !== 0) throw new Error(`zstd -dc failed for ${path}: ${proc.stderr}`);
-    return proc.stdout;
+async function* streamGames(path) {
+  const input = path.endsWith('.zst') ? spawn('zstd', ['-dc', path], { stdio: ['ignore', 'pipe', 'pipe'] }) : null;
+  let stderr = '';
+  if (input?.stderr) input.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk; });
+  const stream = input ? input.stdout : createReadStream(path);
+  const rl = createInterface({ input: stream, crlfDelay: Infinity });
+  let lines = [];
+  for await (const line of rl) {
+    if (line.startsWith('[Event ') && lines.length) {
+      const game = lines.join('\n').trim();
+      if (game) yield game;
+      lines = [];
+    }
+    lines.push(line);
   }
-  return readFileSync(path, 'utf8');
-}
-
-function* splitGames(text) {
-  const chunks = text.replace(/\r\n/g, '\n').split(/\n(?=\[Event )/g);
-  for (const chunk of chunks) if (chunk.trim()) yield chunk.trim();
+  if (lines.length) {
+    const game = lines.join('\n').trim();
+    if (game) yield game;
+  }
+  if (input) {
+    const code = await new Promise((resolve) => input.on('close', resolve));
+    if (code !== 0) throw new Error(`zstd -dc failed for ${path}: ${stderr}`);
+  }
 }
 
 function parseTags(game) {
@@ -124,7 +136,7 @@ if (!input) throw new Error('Usage: node --experimental-strip-types scripts/lich
 
 const rows = [];
 let gamesSeen = 0, gamesAccepted = 0, parseFailures = 0;
-for (const game of splitGames(readInput(input))) {
+for await (const game of streamGames(input)) {
   gamesSeen++;
   if (gamesAccepted >= maxGames || rows.length >= maxPositions) break;
   const tags = parseTags(game);
