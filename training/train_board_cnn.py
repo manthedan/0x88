@@ -2,11 +2,31 @@
 from __future__ import annotations
 import argparse, json, math, random, pickle
 from pathlib import Path
-p=argparse.ArgumentParser(); p.add_argument('--train', nargs='+', required=True); p.add_argument('--out', required=True); p.add_argument('--max-rows', type=int, default=50000); p.add_argument('--epochs', type=int, default=10); p.add_argument('--channels', type=int, default=32); p.add_argument('--lr', type=float, default=1e-3); p.add_argument('--holdout-mod', type=int, default=5); p.add_argument('--eval-rows', type=int, default=10000); p.add_argument('--policy-head', choices=['pooled','spatial'], default='spatial'); p.add_argument('--state-planes', action='store_true'); p.add_argument('--checkpoint', default=''); p.add_argument('--checkpoint-every', type=int, default=1); p.add_argument('--resume', default=''); args=p.parse_args()
+p=argparse.ArgumentParser(); p.add_argument('--train', nargs='+', required=True); p.add_argument('--out', required=True); p.add_argument('--max-rows', type=int, default=50000); p.add_argument('--epochs', type=int, default=10); p.add_argument('--channels', type=int, default=32); p.add_argument('--lr', type=float, default=1e-3); p.add_argument('--holdout-mod', type=int, default=5); p.add_argument('--eval-rows', type=int, default=10000); p.add_argument('--policy-head', choices=['pooled','spatial'], default='spatial'); p.add_argument('--state-planes', action='store_true'); p.add_argument('--fixed-policy-map', action='store_true'); p.add_argument('--checkpoint', default=''); p.add_argument('--checkpoint-every', type=int, default=1); p.add_argument('--resume', default=''); args=p.parse_args()
 from tinygrad import Tensor
 from tinygrad.nn import Conv2d, Linear
 from tinygrad.nn.optim import Adam
 PIECES='PNBRQKpnbrqk'
+def fixed_policy_moves():
+  files='abcdefgh'; out=set(); dirs=[(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)]; knights=[(1,2),(2,1),(-1,2),(-2,1),(1,-2),(2,-1),(-1,-2),(-2,-1)]
+  on=lambda f,r: 0<=f<8 and 0<=r<8; sq=lambda f,r: files[f]+str(r+1)
+  for r in range(8):
+    for f in range(8):
+      fr=sq(f,r)
+      for df,dr in dirs:
+        for n in range(1,8):
+          tf,tr=f+df*n,r+dr*n
+          if not on(tf,tr): break
+          out.add(fr+sq(tf,tr))
+      for df,dr in knights:
+        if on(f+df,r+dr): out.add(fr+sq(f+df,r+dr))
+  for r in [1,6]:
+    tr=7 if r==6 else 0
+    for f in range(8):
+      for df in [-1,0,1]:
+        if on(f+df,tr):
+          for pr in 'qrbn': out.add(sq(f,r)+sq(f+df,tr)+pr)
+  return sorted(out)
 def in_check_grid(grid, side):
   kr=kf=-1; king='K' if side=='w' else 'k'; enemy=lambda ch: ch!='.' and (ch.islower() if side=='w' else ch.isupper())
   for r in range(8):
@@ -59,10 +79,11 @@ def planes(fen):
     for rr in range(8):
       for ff in range(8): x[13][rr][ff]=1.0
   return x
-resume_ck=None; fixed_moves=None
+resume_ck=None; fixed_moves=fixed_policy_moves() if args.fixed_policy_map else None; policy_map='uci_queen_knight_promo_v1' if args.fixed_policy_map else None
 if args.resume:
   with open(args.resume,'rb') as f: resume_ck=pickle.load(f)
-  fixed_moves=resume_ck.get('moves')
+  fixed_moves=resume_ck.get('moves') or fixed_moves
+  policy_map=resume_ck.get('policy_map') or policy_map
   if fixed_moves: print(f'METRIC fixed_resume_moves={len(fixed_moves)}')
 def read_rows(paths):
   rows=[]; seen_moves=[]; skipped_unknown=0
@@ -102,7 +123,7 @@ for ep in range(start_epoch, args.epochs):
     opt.zero_grad(); lp,lv=net(x); lps=lp.log_softmax(); lvs=lv.log_softmax(); loss=lps.sparse_categorical_crossentropy(y,reduction='none').reshape(len(idx),1).mul(w).sum()-((lvs*v*w).sum()); loss.backward(); opt.step(); total+=float(loss.numpy()); n+=len(idx)
   print(f'METRIC epoch_{ep+1}_loss={total/max(1,n):.6f}', flush=True)
   if args.checkpoint and args.checkpoint_every > 0 and (ep + 1) % args.checkpoint_every == 0:
-    ck={'epoch':ep+1,'moves':moves,'channels':args.channels,'policy_head':args.policy_head,'input_planes':22 if args.state_planes else 14,
+    ck={'epoch':ep+1,'moves':moves,'channels':args.channels,'policy_head':args.policy_head,'policy_map':policy_map,'input_planes':22 if args.state_planes else 14,
         'c1_weight':net.c1.weight.numpy().tolist(),'c1_bias':net.c1.bias.numpy().tolist(),
         'c2_weight':net.c2.weight.numpy().tolist(),'c2_bias':net.c2.bias.numpy().tolist(),
         'c3_weight':net.c3.weight.numpy().tolist(),'c3_bias':net.c3.bias.numpy().tolist(),
@@ -118,11 +139,11 @@ for off in range(0,n,512):
   for row,wl,i in zip(logits,wlog,idx):
     t=mid[rows[i][1]]; ranked=sorted(range(len(row)), key=lambda k: row[k], reverse=True); top1+=t==ranked[0]; top4+=t in ranked[:4]; top8+=t in ranked[:8]
     m=max(row); pce+=-(row[t]-m-math.log(sum(math.exp(z-m) for z in row))); mw=max(wl); vt=rows[i][2]; wce+=-sum(vt[k]*(wl[k]-mw-math.log(sum(math.exp(z-mw) for z in wl))) for k in range(3))
-obj={'kind':'tiny_board_cnn_student','moves':moves,'channels':args.channels,'policy_head':args.policy_head,'input_planes':22 if args.state_planes else 14,
+obj={'kind':'tiny_board_cnn_student','moves':moves,'channels':args.channels,'policy_head':args.policy_head,'policy_map':policy_map,'input_planes':22 if args.state_planes else 14,
      'c1_weight':net.c1.weight.numpy().tolist(),'c1_bias':net.c1.bias.numpy().tolist(),
      'c2_weight':net.c2.weight.numpy().tolist(),'c2_bias':net.c2.bias.numpy().tolist(),
      'c3_weight':net.c3.weight.numpy().tolist(),'c3_bias':net.c3.bias.numpy().tolist(),
      'policy_weight':net.p.weight.numpy().tolist(),'policy_bias':net.p.bias.numpy().tolist(),
      'wdl_weight':net.v.weight.numpy().tolist(),'wdl_bias':net.v.bias.numpy().tolist()}
 out=Path(args.out); out.parent.mkdir(parents=True,exist_ok=True); out.write_text(json.dumps(obj))
-print(f'METRIC board_cnn_rows={len(rows)}'); print(f'METRIC board_cnn_moves={len(moves)}'); print(f'METRIC board_cnn_policy_head_spatial={1 if args.policy_head == "spatial" else 0}'); print(f'METRIC board_cnn_input_planes={22 if args.state_planes else 14}'); print(f'METRIC dev_policy_ce={pce/n:.6f}'); print(f'METRIC dev_wdl_ce={wce/n:.6f}'); print(f'METRIC dev_policy_top1={top1/n:.6f}'); print(f'METRIC dev_policy_top4={top4/n:.6f}'); print(f'METRIC dev_policy_top8={top8/n:.6f}')
+print(f'METRIC board_cnn_rows={len(rows)}'); print(f'METRIC board_cnn_moves={len(moves)}'); print(f'METRIC board_cnn_fixed_policy_map={1 if policy_map else 0}'); print(f'METRIC board_cnn_policy_head_spatial={1 if args.policy_head == "spatial" else 0}'); print(f'METRIC board_cnn_input_planes={22 if args.state_planes else 14}'); print(f'METRIC dev_policy_ce={pce/n:.6f}'); print(f'METRIC dev_wdl_ce={wce/n:.6f}'); print(f'METRIC dev_policy_top1={top1/n:.6f}'); print(f'METRIC dev_policy_top4={top4/n:.6f}'); print(f'METRIC dev_policy_top8={top8/n:.6f}')

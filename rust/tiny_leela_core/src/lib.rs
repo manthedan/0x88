@@ -314,6 +314,7 @@ pub struct StudentArtifact {
     pub wdl_weight: Option<Vec<Vec<f32>>>,
     pub wdl_bias: Option<Vec<f32>>,
     pub policy_head: Option<String>,
+    pub policy_map: Option<String>,
     pub input_planes: Option<usize>,
 }
 
@@ -349,6 +350,26 @@ fn softmax(xs: &[f32]) -> Vec<f32> {
 }
 
 fn dot(weights: &[f32], values: &[f32]) -> f32 { weights.iter().zip(values.iter()).map(|(a, b)| a * b).sum() }
+
+fn fixed_policy_moves() -> Vec<String> {
+    let mut out = std::collections::BTreeSet::new();
+    let files = b"abcdefgh";
+    let sq = |f: i32, r: i32| format!("{}{}", files[f as usize] as char, r + 1);
+    let dirs = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)];
+    let knights = [(1,2),(2,1),(-1,2),(-2,1),(1,-2),(2,-1),(-1,-2),(-2,-1)];
+    for r in 0..8 { for f in 0..8 {
+        let from = sq(f, r);
+        for (df, dr) in dirs { for n in 1..8 { let tf = f + df * n; let tr = r + dr * n; if !(0..8).contains(&tf) || !(0..8).contains(&tr) { break; } out.insert(format!("{}{}", from, sq(tf, tr))); } }
+        for (df, dr) in knights { let tf = f + df; let tr = r + dr; if (0..8).contains(&tf) && (0..8).contains(&tr) { out.insert(format!("{}{}", from, sq(tf, tr))); } }
+    } }
+    for r in [1, 6] { let tr = if r == 6 { 7 } else { 0 }; for f in 0..8 { for df in [-1, 0, 1] { let tf = f + df; if (0..8).contains(&tf) { for p in ['q','r','b','n'] { out.insert(format!("{}{}{}", sq(f, r), sq(tf, tr), p)); } } } } }
+    out.into_iter().collect()
+}
+
+fn move_to_fixed_policy_index(m: Move) -> Option<usize> {
+    let uci = move_to_uci(m);
+    fixed_policy_moves().binary_search(&uci).ok()
+}
 
 fn wdl_features_from_fen(fen: &str) -> Result<Vec<f32>, String> {
     let base = fen_features(fen)?;
@@ -528,7 +549,10 @@ impl PositionEvaluator for StudentEvaluator {
         let legal = legal_moves(board);
         let mut raw = Vec::with_capacity(legal.len());
         let mut legal_mass = 0f32;
-        for m in legal.iter() { let p = self.move_index.get(&move_to_uci(*m)).and_then(|&i| probs.get(i)).copied().unwrap_or(0.0).max(0.0); raw.push(p); legal_mass += p; }
+        for m in legal.iter() {
+            let idx = if self.artifact.policy_map.as_deref() == Some("uci_queen_knight_promo_v1") { move_to_fixed_policy_index(*m) } else { self.move_index.get(&move_to_uci(*m)).copied() };
+            let p = idx.and_then(|i| probs.get(i)).copied().unwrap_or(0.0).max(0.0); raw.push(p); legal_mass += p;
+        }
         let policy = if legal.is_empty() { Vec::new() } else if legal_mass <= 0.0 { legal.iter().map(|&m| (move_to_action_id(m), 1.0 / legal.len() as f32)).collect() } else { legal.iter().zip(raw.iter()).map(|(&m, &p)| (move_to_action_id(m), p / legal_mass)).collect() };
         let w = softmax(&wdl_logits);
         Evaluation { policy, wdl: [w.first().copied().unwrap_or(0.0), w.get(1).copied().unwrap_or(0.0), w.get(2).copied().unwrap_or(0.0)] }

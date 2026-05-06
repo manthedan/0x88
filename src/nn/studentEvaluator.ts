@@ -1,6 +1,7 @@
 import { boardToFen, parseFen, type BoardState } from '../chess/board.ts';
 import { inCheck, legalMoves } from '../chess/movegen.ts';
-import { moveToActionId, moveToUci } from '../chess/moveCodec.ts';
+import { moveToActionId, moveToUci, type Move } from '../chess/moveCodec.ts';
+import { POLICY_INDEX, POLICY_MAP, moveToPolicyIndex } from '../chess/policyMap.ts';
 import type { Evaluation, Evaluator } from './evaluator.ts';
 
 const PIECES = 'PNBRQKpnbrqk';
@@ -36,6 +37,7 @@ export interface StudentArtifact {
   wdl_weight?: number[][];
   wdl_bias?: number[];
   policy_head?: 'pooled' | 'spatial';
+  policy_map?: string | null;
   input_planes?: number;
 }
 
@@ -236,7 +238,7 @@ export class StudentEvaluator implements Evaluator {
 
   constructor(artifact: StudentArtifact) {
     this.artifact = artifact;
-    this.moveIndex = new Map(artifact.moves.map((move, index) => [move, index]));
+    this.moveIndex = artifact.policy_map === POLICY_MAP ? POLICY_INDEX : new Map(artifact.moves.map((move, index) => [move, index]));
   }
 
   static fromJson(json: string): StudentEvaluator {
@@ -277,13 +279,14 @@ export class StudentEvaluator implements Evaluator {
     }
     const probs = softmax(logits);
     const legal = legalMoves(board);
-    const legalMass = legal.reduce((sum, move) => sum + (probs[this.moveIndex.get(moveToUci(move)) ?? -1] ?? 0), 0);
+    const policyIndex = (move: Move) => this.artifact.policy_map === POLICY_MAP ? moveToPolicyIndex(move) : this.moveIndex.get(moveToUci(move));
+    const legalMass = legal.reduce((sum, move) => sum + (probs[policyIndex(move) ?? -1] ?? 0), 0);
     const policy = new Map<number, number>();
     if (legal.length && legalMass <= 0) {
       for (const move of legal) policy.set(moveToActionId(move), 1 / legal.length);
     } else {
       for (const move of legal) {
-        const index = this.moveIndex.get(moveToUci(move));
+        const index = policyIndex(move);
         policy.set(moveToActionId(move), index === undefined ? 0 : probs[index] / legalMass);
       }
     }
