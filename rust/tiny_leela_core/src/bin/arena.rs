@@ -1,5 +1,6 @@
-use std::{env, fs, time::Instant};
-use tiny_leela_core::{in_check, legal_moves, make_move, move_to_uci, parse_fen, search_root, Color, PositionEvaluator, SearchOptions, StudentEvaluator, START_FEN};
+use std::{env, fs, process::{Command, Stdio}, time::Instant};
+use std::io::Write;
+use tiny_leela_core::{board_to_fen, in_check, legal_moves, make_move, move_to_uci, parse_fen, search_root, Color, PositionEvaluator, SearchOptions, StudentEvaluator, START_FEN};
 
 fn arg(name: &str, fallback: &str) -> String {
     let prefix = format!("{name}=");
@@ -23,8 +24,39 @@ fn candidate_score(white_score: f32, candidate_color: Color) -> f32 {
     else { 0.0 }
 }
 
-fn adjudicated_white_score(board: &tiny_leela_core::Board, evaluator: &StudentEvaluator, adjudicate: &str, threshold: f32) -> (f32, bool) {
+fn stockfish_white_score(board: &tiny_leela_core::Board, stockfish: &str, depth: u32, draw_cp: i32) -> Option<f32> {
+    let fen = board_to_fen(board);
+    let mut child = Command::new(stockfish).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    {
+        let stdin = child.stdin.as_mut()?;
+        writeln!(stdin, "uci").ok()?;
+        writeln!(stdin, "isready").ok()?;
+        writeln!(stdin, "position fen {fen}").ok()?;
+        writeln!(stdin, "go depth {depth}").ok()?;
+        writeln!(stdin, "quit").ok()?;
+    }
+    let output = child.wait_with_output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut side_cp: Option<i32> = None;
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        for i in 0..parts.len().saturating_sub(2) {
+            if parts[i] == "score" && parts[i + 1] == "cp" { side_cp = parts[i + 2].parse::<i32>().ok(); }
+            if parts[i] == "score" && parts[i + 1] == "mate" {
+                if let Ok(m) = parts[i + 2].parse::<i32>() { side_cp = Some(if m > 0 { 100000 } else { -100000 }); }
+            }
+        }
+    }
+    let side_cp = side_cp?;
+    let white_cp = if board.turn == Color::White { side_cp } else { -side_cp };
+    if white_cp.abs() <= draw_cp { Some(0.5) } else if white_cp > 0 { Some(1.0) } else { Some(0.0) }
+}
+
+fn adjudicated_white_score(board: &tiny_leela_core::Board, evaluator: &StudentEvaluator, adjudicate: &str, threshold: f32, stockfish: &str, stockfish_depth: u32, stockfish_draw_cp: i32) -> (f32, bool) {
     if let Some(score) = terminal_white_score(board) { return (score, false); }
+    if adjudicate == "stockfish" {
+        return (stockfish_white_score(board, stockfish, stockfish_depth, stockfish_draw_cp).unwrap_or(0.5), true);
+    }
     if adjudicate != "value" { return (0.5, false); }
     let evaln = evaluator.evaluate(board);
     let side_value = evaln.wdl[0] - evaln.wdl[2];
@@ -38,11 +70,15 @@ fn main() {
     let candidate_path = arg("--candidate", "artifacts/student_distill_benchmark.json");
     let baseline_path = arg("--baseline", "artifacts/student_distill_benchmark.json");
     let games: usize = arg("--games", "4").parse().unwrap_or(4);
+    let start_game: usize = arg("--start-game", "0").parse().unwrap_or(0);
     let visits: u32 = arg("--visits", "8").parse().unwrap_or(8);
     let max_plies: usize = arg("--max-plies", "40").parse().unwrap_or(40);
     let progress_every: usize = arg("--progress-every", "4").parse().unwrap_or(4).max(1);
     let adjudicate = arg("--adjudicate", "terminal");
     let adjudicate_threshold: f32 = arg("--adjudicate-threshold", "0.02").parse().unwrap_or(0.02);
+    let stockfish = arg("--stockfish", &env::var("STOCKFISH_BIN").unwrap_or_else(|_| "stockfish".to_string()));
+    let stockfish_depth: u32 = arg("--stockfish-depth", "8").parse().unwrap_or(8);
+    let stockfish_draw_cp: i32 = arg("--stockfish-draw-cp", "50").parse().unwrap_or(50);
     let openings_text = arg("--openings", START_FEN);
     let openings: Vec<String> = openings_text.split('|').map(|s| s.to_string()).collect();
 
@@ -51,7 +87,7 @@ fn main() {
     let candidate = StudentEvaluator::from_json(&candidate_json).expect("parse candidate");
     let baseline = StudentEvaluator::from_json(&baseline_json).expect("parse baseline");
     let started = Instant::now();
-    eprintln!("[rust-arena visits={visits}] start games={games} max_plies={max_plies} candidate={candidate_path} baseline={baseline_path}");
+    eprintln!("[rust-arena visits={visits}] start games={games} start_game={start_game} max_plies={max_plies} candidate={candidate_path} baseline={baseline_path}");
 
     let mut wins = 0usize;
     let mut draws = 0usize;
@@ -65,10 +101,11 @@ fn main() {
     let mut adjudicated_score_sum = 0.0f64;
     let mut max_ply_draws = 0usize;
 
-    for game in 0..games {
+    for local_game in 0..games {
+        let game = start_game + local_game;
         let candidate_color = if game % 2 == 0 { Color::White } else { Color::Black };
-        eprintln!("[rust-arena visits={visits}] game {}/{} start candidate_color={}", game + 1, games, if candidate_color == Color::White { "w" } else { "b" });
-        let mut board = parse_fen(&openings[game % openings.len()]).expect("parse opening");
+        eprintln!("[rust-arena visits={visits}] game {}/{} global={} start candidate_color={}", local_game + 1, games, game, if candidate_color == Color::White { "w" } else { "b" });
+        let mut board = parse_fen(&openings[(game / 2) % openings.len()]).expect("parse opening");
         let mut white_score = terminal_white_score(&board);
         let mut plies = 0usize;
         while white_score.is_none() && plies < max_plies {
@@ -90,7 +127,7 @@ fn main() {
             white_score = terminal_white_score(&board);
             plies += 1;
             if plies % progress_every == 0 {
-                eprintln!("[rust-arena visits={visits}] game {}/{} ply={}/{} move={} elapsed_s={:.1}", game + 1, games, plies, max_plies, uci, started.elapsed().as_secs_f64());
+                eprintln!("[rust-arena visits={visits}] game {}/{} ply={}/{} move={} elapsed_s={:.1}", local_game + 1, games, plies, max_plies, uci, started.elapsed().as_secs_f64());
             }
         }
         let hit_max_ply_draw = white_score.is_none() && plies >= max_plies;
@@ -98,7 +135,7 @@ fn main() {
         let true_white_score = white_score.unwrap_or(0.5);
         let true_score = candidate_score(true_white_score, candidate_color);
         if true_score == 1.0 { true_play_wins += 1; } else if true_score == 0.0 { true_play_losses += 1; } else { true_play_draws += 1; }
-        let (white_score, adjudicated) = if let Some(score) = white_score { (score, false) } else { adjudicated_white_score(&board, if board.turn == candidate_color { &candidate } else { &baseline }, &adjudicate, adjudicate_threshold) };
+        let (white_score, adjudicated) = if let Some(score) = white_score { (score, false) } else { adjudicated_white_score(&board, if board.turn == candidate_color { &candidate } else { &baseline }, &adjudicate, adjudicate_threshold, &stockfish, stockfish_depth, stockfish_draw_cp) };
         let score = candidate_score(white_score, candidate_color);
         if adjudicated {
             adjudicated_games += 1;
@@ -106,7 +143,7 @@ fn main() {
         }
         if score == 1.0 { wins += 1; } else if score == 0.0 { losses += 1; } else { draws += 1; }
         plies_total += plies;
-        eprintln!("[rust-arena visits={visits}] game {}/{} done score={} wdl={}/{}/{} illegal={} elapsed_s={:.1}", game + 1, games, score, wins, draws, losses, illegal_losses, started.elapsed().as_secs_f64());
+        eprintln!("[rust-arena visits={visits}] game {}/{} done score={} wdl={}/{}/{} illegal={} elapsed_s={:.1}", local_game + 1, games, score, wins, draws, losses, illegal_losses, started.elapsed().as_secs_f64());
     }
 
     let score_rate = (wins as f64 + 0.5 * draws as f64) / games.max(1) as f64;

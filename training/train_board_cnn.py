@@ -59,17 +59,27 @@ def planes(fen):
     for rr in range(8):
       for ff in range(8): x[13][rr][ff]=1.0
   return x
+resume_ck=None; fixed_moves=None
+if args.resume:
+  with open(args.resume,'rb') as f: resume_ck=pickle.load(f)
+  fixed_moves=resume_ck.get('moves')
+  if fixed_moves: print(f'METRIC fixed_resume_moves={len(fixed_moves)}')
 def read_rows(paths):
-  rows=[]; moves=[]
+  rows=[]; seen_moves=[]; skipped_unknown=0
+  fixed_mid={m:i for i,m in enumerate(fixed_moves or [])}
   for path in paths:
     with open(path) as f:
       for line in f:
-        if len(rows)>=args.max_rows: return rows, sorted(set(moves))
+        if len(rows)>=args.max_rows: return rows, (list(fixed_moves) if fixed_moves else sorted(set(seen_moves))), skipped_unknown
         r=json.loads(line); pol=r.get('policy',{})
         if len(pol)!=1: continue
-        mv=next(iter(pol)); rows.append((r['fen'], mv, r.get('wdl',[.25,.5,.25]), float(r.get('weight',1.0)))); moves.append(mv)
-  return rows, sorted(set(moves))
-rows,moves=read_rows(args.train); mid={m:i for i,m in enumerate(moves)}; rows=[r for r in rows if r[1] in mid]
+        mv=next(iter(pol))
+        if fixed_moves and mv not in fixed_mid:
+          skipped_unknown+=1; continue
+        rows.append((r['fen'], mv, r.get('wdl',[.25,.5,.25]), float(r.get('weight',1.0)))); seen_moves.append(mv)
+  return rows, (list(fixed_moves) if fixed_moves else sorted(set(seen_moves))), skipped_unknown
+rows,moves,skipped_unknown=read_rows(args.train); mid={m:i for i,m in enumerate(moves)}; rows=[r for r in rows if r[1] in mid]
+print(f'METRIC board_cnn_skipped_unknown_moves={skipped_unknown}')
 train=[i for i in range(len(rows)) if i%args.holdout_mod!=0]; dev=[i for i in range(len(rows)) if i%args.holdout_mod==0]
 class Net:
   def __init__(self):
@@ -78,8 +88,8 @@ class Net:
     h=self.c1(x).relu(); h=(self.c2(h).relu()+h); h=(self.c3(h).relu()+h); pooled=h.mean(axis=(2,3)); pf=h.reshape(h.shape[0], args.channels*64) if args.policy_head=='spatial' else pooled; return self.p(pf), self.v(pooled)
   def params(self): return [self.c1.weight,self.c1.bias,self.c2.weight,self.c2.bias,self.c3.weight,self.c3.bias,self.p.weight,self.p.bias,self.v.weight,self.v.bias]
 net=Net(); opt=Adam(net.params(), lr=args.lr); rng=random.Random(7); start_epoch=0
-if args.resume:
-  with open(args.resume,'rb') as f: ck=pickle.load(f)
+if resume_ck:
+  ck=resume_ck
   for name in ['c1','c2','c3']:
     layer=getattr(net,name); layer.weight.assign(Tensor(ck[name+'_weight'])); layer.bias.assign(Tensor(ck[name+'_bias']))
   net.p.weight.assign(Tensor(ck['policy_weight'])); net.p.bias.assign(Tensor(ck['policy_bias'])); net.v.weight.assign(Tensor(ck['wdl_weight'])); net.v.bias.assign(Tensor(ck['wdl_bias']))

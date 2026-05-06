@@ -5,6 +5,7 @@ data/lichess_raw/
 data/lichess_training_*.jsonl
 data/tcec_raw/
 data/tcec_training_*.jsonl
+data/balanced_*.jsonl
 artifacts/
 rust/**/target/
 node_modules/
