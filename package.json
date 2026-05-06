@@ -26,6 +26,8 @@
     "selfplay:mix-sweep": "node --experimental-strip-types scripts/selfplay_mix_sweep.mjs",
     "play:student": "node --experimental-strip-types scripts/play_student.mjs",
     "web:student": "node --experimental-strip-types scripts/serve_student_web.mjs",
+    "web:client": "vite --host 0.0.0.0",
+    "build:client": "vite build --outDir dist-client",
     "distill:check": "python3 scripts/check_lc0_teacher.py",
     "distill:seed": "python3 scripts/export_seed_fens.py",
     "distill:query": "python3 scripts/query_lc0_teacher.py",
@@ -37,7 +39,8 @@
     "train:residual:smoke": ".venv-onnx/bin/python training/train_residual_torch.py --train /tmp/hist_train.jsonl --out /tmp/residual_smoke.pt --onnx-out /tmp/residual_smoke.onnx --meta-out /tmp/residual_smoke.meta.json --channels 8 --blocks 1 --history-plies 2 --state-planes --epochs 1 --max-rows 128 --batch-size 32 --device cpu"
   },
   "devDependencies": {
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vite": "^8.0.10"
   },
   "dependencies": {
     "chessground": "^9.2.1",

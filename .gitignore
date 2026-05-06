@@ -6,8 +6,12 @@ data/lichess_training_*.jsonl
 data/tcec_raw/
 data/tcec_training_*.jsonl
 data/balanced_*.jsonl
+data/balanced_*.json
 artifacts/
 logs/
+dist-client/
+public/models/*.onnx
+public/models/*.json
 rust/**/target/
 node_modules/
 .venv-tinygrad/
