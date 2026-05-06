@@ -33,7 +33,8 @@
     "stockfish:check": "python3 scripts/check_stockfish_teacher.py",
     "stockfish:query": "python3 scripts/query_stockfish_teacher.py",
     "lichess:ingest": "node --experimental-strip-types scripts/lichess_pgn_to_training.mjs",
-    "distill:train": "python3 training/train_student.py"
+    "distill:train": "python3 training/train_student.py",
+    "train:residual:smoke": ".venv-onnx/bin/python training/train_residual_torch.py --train /tmp/hist_train.jsonl --out /tmp/residual_smoke.pt --onnx-out /tmp/residual_smoke.onnx --meta-out /tmp/residual_smoke.meta.json --channels 8 --blocks 1 --history-plies 2 --state-planes --epochs 1 --max-rows 128 --batch-size 32 --device cpu"
   },
   "devDependencies": {
     "typescript": "^5.4.0"

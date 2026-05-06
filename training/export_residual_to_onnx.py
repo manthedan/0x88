@@ -6,7 +6,7 @@ from pathlib import Path
 p=argparse.ArgumentParser()
 p.add_argument('--artifact', required=True, help='JSON artifact from train_board_cnn.py')
 p.add_argument('--out', required=True, help='Output .onnx path')
-p.add_argument('--opset', type=int, default=17)
+p.add_argument('--opset', type=int, default=18)
 p.add_argument('--verify', action='store_true', help='Run onnxruntime shape smoke if available')
 args=p.parse_args()
 

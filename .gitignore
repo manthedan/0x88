@@ -10,3 +10,4 @@ artifacts/
 rust/**/target/
 node_modules/
 .venv-tinygrad/
+.venv-onnx/

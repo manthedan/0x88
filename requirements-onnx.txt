@@ -1,8 +1,9 @@
-# Optional ONNX export/runtime tooling for nano-LC0 residual artifacts.
-# Install into a separate venv when needed, e.g.:
+# Primary PyTorch training + ONNX export/runtime tooling for nano-LC0 residual artifacts.
+# Install into the project training venv, e.g.:
 #   python3 -m venv .venv-onnx
 #   .venv-onnx/bin/pip install -r requirements-onnx.txt
-# CPU wheels are enough for export and smoke inference.
+# CPU is enough for smoke tests; use CUDA when available for real training.
 torch>=2.3
 onnx>=1.16
 onnxruntime>=1.18
+onnxscript>=0.1

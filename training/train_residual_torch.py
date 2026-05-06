@@ -103,7 +103,7 @@ def main():
     rng.shuffle(rows); net.train(); total=0; seen=0
     for off in range(0,len(rows),args.batch_size):
       b=rows[off:off+args.batch_size]; x=torch.tensor([planes(r[0],r[4],args.history_plies,args.state_planes) for r in b],device=device); y=torch.tensor([r[1] for r in b],device=device); v=torch.tensor([r[2] for r in b],device=device); w=torch.tensor([r[3] for r in b],device=device)
-      pl,wl=net(x); loss=(F.cross_entropy(pl,y,reduction='none')*w).mean() + (-(F.log_softmax(wl,1)*v).sum(1)*w).mean(); opt.zero_grad(); loss.backward(); opt.step(); total+=float(loss)*len(b); seen+=len(b)
+      pl,wl=net(x); loss=(F.cross_entropy(pl,y,reduction='none')*w).mean() + (-(F.log_softmax(wl,1)*v).sum(1)*w).mean(); opt.zero_grad(); loss.backward(); opt.step(); total+=float(loss.detach())*len(b); seen+=len(b)
     print(f'METRIC epoch_{ep+1}_loss={total/max(1,seen):.6f}', flush=True)
     if args.checkpoint: Path(args.checkpoint).parent.mkdir(parents=True,exist_ok=True); torch.save({'epoch':ep+1,'model':net.state_dict(),'opt':opt.state_dict(),'args':vars(args)},args.checkpoint)
   net.eval(); top1=top4=top8=pce=wce=0.0; n=0
@@ -114,6 +114,6 @@ def main():
   Path(args.out).parent.mkdir(parents=True,exist_ok=True); torch.save({'model':net.state_dict(),'meta':meta},args.out)
   if args.meta_out or args.onnx_out: Path(args.meta_out or (args.onnx_out+'.meta.json')).write_text(json.dumps(meta,separators=(',',':')))
   if args.onnx_out:
-    dummy=torch.zeros(1,meta['input_planes'],8,8,device=device); Path(args.onnx_out).parent.mkdir(parents=True,exist_ok=True); torch.onnx.export(net,dummy,args.onnx_out,input_names=['planes'],output_names=['policy_logits','wdl_logits'],dynamic_axes={'planes':{0:'batch'},'policy_logits':{0:'batch'},'wdl_logits':{0:'batch'}},opset_version=17)
+    dummy=torch.zeros(1,meta['input_planes'],8,8,device=device); Path(args.onnx_out).parent.mkdir(parents=True,exist_ok=True); torch.onnx.export(net,dummy,args.onnx_out,input_names=['planes'],output_names=['policy_logits','wdl_logits'],dynamic_axes={'planes':{0:'batch'},'policy_logits':{0:'batch'},'wdl_logits':{0:'batch'}},opset_version=18)
   print(f'METRIC torch_rows={len(rows)}'); print(f'METRIC torch_skipped_unknown_moves={skipped}'); print(f'METRIC torch_input_planes={meta["input_planes"]}'); print(f'METRIC dev_policy_top1={top1/max(1,n):.6f}'); print(f'METRIC dev_policy_top4={top4/max(1,n):.6f}'); print(f'METRIC dev_policy_top8={top8/max(1,n):.6f}'); print(f'METRIC dev_policy_ce={pce/max(1,n):.6f}'); print(f'METRIC dev_wdl_ce={wce/max(1,n):.6f}')
 if __name__=='__main__': main()

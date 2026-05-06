@@ -95,18 +95,16 @@ Missing history at game starts is zero-filled. Dataset rows may carry `history_f
 
 ## ONNX Export Path
 
-Residual-tower artifacts are exported from the existing tinygrad JSON format through a small optional PyTorch bridge:
+PyTorch is now the primary training path for nano-LC0 residual models. The legacy tinygrad trainer remains only for older JSON artifacts and reference experiments.
+
+Install the primary training environment:
 
 ```bash
 python3 -m venv .venv-onnx
 .venv-onnx/bin/pip install -r requirements-onnx.txt
-.venv-onnx/bin/python training/export_residual_to_onnx.py \
-  --artifact artifacts/student_residual_48x5.json \
-  --out artifacts/student_residual_48x5.onnx \
-  --verify
 ```
 
-The exporter is intentionally dependency-optional. A newer `training/train_residual_torch.py` path can also train the residual tower directly in PyTorch and export ONNX in one step:
+Train the residual tower directly in PyTorch and export ONNX in one step:
 
 ```bash
 .venv-onnx/bin/python training/train_residual_torch.py \
