@@ -38,7 +38,7 @@ Remaining limitations:
 - History planes are now specified and available in the Python data/training path, but TS/Rust runtime inference still needs history-aware state plumbing before deployment.
 - Data-derived move vocabulary is deprecated by the fixed policy-map path, though legacy artifacts still support it.
 - Policy targets are mostly one-hot played moves, not search-improved distributions.
-- Network is still extremely shallow.
+- Deeper residual tower training path exists in Python, but deployed TS/Rust runtime intentionally rejects those artifacts until ONNX/runtime support lands.
 - WDL/value quality is weak compared with policy quality.
 - No moves-left/progress auxiliary head.
 - Dataset split/sampling still needs more rigorous game-level and opening-level validation.
@@ -53,7 +53,7 @@ Remaining limitations:
 | Fixed policy map | Replace data-derived move vocab with fixed move indexing. |
 | Policy + WDL heads | Keep as core outputs. |
 | Search-improved policy targets | Add teacher/MCTS soft policy distributions. |
-| Residual tower | Move from 3 convs to 5-6 residual blocks. |
+| Residual tower | Python trainer supports a `residual_tower`; use 48×5 as first nano-LC0 target. |
 | Moves-left head | Add as auxiliary progress/conversion signal. |
 | Shuffled frame sampling | Keep via simple Python dataset builder/shuffle buffer. |
 | Checkpoint/export loop | Keep simple checkpointing and JSON/ONNX export. |

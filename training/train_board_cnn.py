@@ -2,7 +2,8 @@
 from __future__ import annotations
 import argparse, json, math, random, pickle
 from pathlib import Path
-p=argparse.ArgumentParser(); p.add_argument('--train', nargs='+', required=True); p.add_argument('--out', required=True); p.add_argument('--max-rows', type=int, default=50000); p.add_argument('--epochs', type=int, default=10); p.add_argument('--channels', type=int, default=32); p.add_argument('--lr', type=float, default=1e-3); p.add_argument('--holdout-mod', type=int, default=5); p.add_argument('--eval-rows', type=int, default=10000); p.add_argument('--policy-head', choices=['pooled','spatial'], default='spatial'); p.add_argument('--state-planes', action='store_true'); p.add_argument('--history-plies', type=int, default=0); p.add_argument('--fixed-policy-map', action='store_true'); p.add_argument('--checkpoint', default=''); p.add_argument('--checkpoint-every', type=int, default=1); p.add_argument('--resume', default=''); args=p.parse_args()
+p=argparse.ArgumentParser(); p.add_argument('--train', nargs='+', required=True); p.add_argument('--out', required=True); p.add_argument('--max-rows', type=int, default=50000); p.add_argument('--epochs', type=int, default=10); p.add_argument('--channels', type=int, default=32); p.add_argument('--lr', type=float, default=1e-3); p.add_argument('--holdout-mod', type=int, default=5); p.add_argument('--eval-rows', type=int, default=10000); p.add_argument('--architecture', choices=['legacy3','residual_tower'], default='legacy3'); p.add_argument('--blocks', type=int, default=2); p.add_argument('--policy-head', choices=['pooled','spatial'], default='spatial'); p.add_argument('--state-planes', action='store_true'); p.add_argument('--history-plies', type=int, default=0); p.add_argument('--fixed-policy-map', action='store_true'); p.add_argument('--checkpoint', default=''); p.add_argument('--checkpoint-every', type=int, default=1); p.add_argument('--resume', default=''); args=p.parse_args()
+if args.blocks < 0: raise SystemExit('--blocks must be >= 0')
 if args.history_plies < 0: raise SystemExit('--history-plies must be >= 0')
 from tinygrad import Tensor
 from tinygrad.nn import Conv2d, Linear
@@ -114,15 +115,46 @@ print(f'METRIC board_cnn_skipped_unknown_moves={skipped_unknown}')
 train=[i for i in range(len(rows)) if i%args.holdout_mod!=0]; dev=[i for i in range(len(rows)) if i%args.holdout_mod==0]
 class Net:
   def __init__(self):
-    C=args.channels; self.c1=Conv2d(input_plane_count(),C,3,padding=1); self.c2=Conv2d(C,C,3,padding=1); self.c3=Conv2d(C,C,3,padding=1); self.p=Linear(C*64 if args.policy_head=='spatial' else C,len(moves)); self.v=Linear(C,3)
+    C=args.channels; self.c1=Conv2d(input_plane_count(),C,3,padding=1); self.p=Linear(C*64 if args.policy_head=='spatial' else C,len(moves)); self.v=Linear(C,3)
+    if args.architecture=='legacy3':
+      self.c2=Conv2d(C,C,3,padding=1); self.c3=Conv2d(C,C,3,padding=1); self.blocks=[]
+    else:
+      self.blocks=[(Conv2d(C,C,3,padding=1), Conv2d(C,C,3,padding=1)) for _ in range(args.blocks)]
   def __call__(self,x):
-    h=self.c1(x).relu(); h=(self.c2(h).relu()+h); h=(self.c3(h).relu()+h); pooled=h.mean(axis=(2,3)); pf=h.reshape(h.shape[0], args.channels*64) if args.policy_head=='spatial' else pooled; return self.p(pf), self.v(pooled)
-  def params(self): return [self.c1.weight,self.c1.bias,self.c2.weight,self.c2.bias,self.c3.weight,self.c3.bias,self.p.weight,self.p.bias,self.v.weight,self.v.bias]
+    h=self.c1(x).relu()
+    if args.architecture=='legacy3': h=(self.c2(h).relu()+h); h=(self.c3(h).relu()+h)
+    else:
+      for c1,c2 in self.blocks: h=(c2(c1(h).relu())+h).relu()
+    pooled=h.mean(axis=(2,3)); pf=h.reshape(h.shape[0], args.channels*64) if args.policy_head=='spatial' else pooled; return self.p(pf), self.v(pooled)
+  def params(self):
+    ps=[self.c1.weight,self.c1.bias,self.p.weight,self.p.bias,self.v.weight,self.v.bias]
+    if args.architecture=='legacy3': ps += [self.c2.weight,self.c2.bias,self.c3.weight,self.c3.bias]
+    else:
+      for c1,c2 in self.blocks: ps += [c1.weight,c1.bias,c2.weight,c2.bias]
+    return ps
 net=Net(); opt=Adam(net.params(), lr=args.lr); rng=random.Random(7); start_epoch=0
+def save_payload(epoch):
+  obj={'epoch':epoch,'kind':'tiny_board_cnn_student' if args.architecture=='legacy3' else 'tiny_board_residual_student','architecture':args.architecture,'blocks':args.blocks if args.architecture!='legacy3' else 0,'moves':moves,'channels':args.channels,'policy_head':args.policy_head,'policy_map':policy_map,'history_plies':args.history_plies,'input_planes':input_plane_count(),
+       'c1_weight':net.c1.weight.numpy().tolist(),'c1_bias':net.c1.bias.numpy().tolist(),
+       'policy_weight':net.p.weight.numpy().tolist(),'policy_bias':net.p.bias.numpy().tolist(),
+       'wdl_weight':net.v.weight.numpy().tolist(),'wdl_bias':net.v.bias.numpy().tolist()}
+  if args.architecture=='legacy3':
+    obj.update({'c2_weight':net.c2.weight.numpy().tolist(),'c2_bias':net.c2.bias.numpy().tolist(),'c3_weight':net.c3.weight.numpy().tolist(),'c3_bias':net.c3.bias.numpy().tolist()})
+  else:
+    obj['residual_blocks']=[{'c1_weight':c1.weight.numpy().tolist(),'c1_bias':c1.bias.numpy().tolist(),'c2_weight':c2.weight.numpy().tolist(),'c2_bias':c2.bias.numpy().tolist()} for c1,c2 in net.blocks]
+  return obj
+
 if resume_ck:
   ck=resume_ck
-  for name in ['c1','c2','c3']:
-    layer=getattr(net,name); layer.weight.assign(Tensor(ck[name+'_weight'])); layer.bias.assign(Tensor(ck[name+'_bias']))
+  if ck.get('architecture','legacy3') != args.architecture: raise SystemExit('resume checkpoint architecture does not match --architecture')
+  net.c1.weight.assign(Tensor(ck['c1_weight'])); net.c1.bias.assign(Tensor(ck['c1_bias']))
+  if args.architecture=='legacy3':
+    for name in ['c2','c3']:
+      layer=getattr(net,name); layer.weight.assign(Tensor(ck[name+'_weight'])); layer.bias.assign(Tensor(ck[name+'_bias']))
+  else:
+    if len(ck.get('residual_blocks',[])) != len(net.blocks): raise SystemExit('resume checkpoint block count does not match --blocks')
+    for block_ck,(c1,c2) in zip(ck['residual_blocks'], net.blocks):
+      c1.weight.assign(Tensor(block_ck['c1_weight'])); c1.bias.assign(Tensor(block_ck['c1_bias'])); c2.weight.assign(Tensor(block_ck['c2_weight'])); c2.bias.assign(Tensor(block_ck['c2_bias']))
   net.p.weight.assign(Tensor(ck['policy_weight'])); net.p.bias.assign(Tensor(ck['policy_bias'])); net.v.weight.assign(Tensor(ck['wdl_weight'])); net.v.bias.assign(Tensor(ck['wdl_bias']))
   start_epoch=int(ck.get('epoch',0)); print(f'METRIC resumed_epoch={start_epoch}')
 Tensor.training=True
@@ -133,12 +165,7 @@ for ep in range(start_epoch, args.epochs):
     opt.zero_grad(); lp,lv=net(x); lps=lp.log_softmax(); lvs=lv.log_softmax(); loss=lps.sparse_categorical_crossentropy(y,reduction='none').reshape(len(idx),1).mul(w).sum()-((lvs*v*w).sum()); loss.backward(); opt.step(); total+=float(loss.numpy()); n+=len(idx)
   print(f'METRIC epoch_{ep+1}_loss={total/max(1,n):.6f}', flush=True)
   if args.checkpoint and args.checkpoint_every > 0 and (ep + 1) % args.checkpoint_every == 0:
-    ck={'epoch':ep+1,'moves':moves,'channels':args.channels,'policy_head':args.policy_head,'policy_map':policy_map,'history_plies':args.history_plies,'input_planes':input_plane_count(),
-        'c1_weight':net.c1.weight.numpy().tolist(),'c1_bias':net.c1.bias.numpy().tolist(),
-        'c2_weight':net.c2.weight.numpy().tolist(),'c2_bias':net.c2.bias.numpy().tolist(),
-        'c3_weight':net.c3.weight.numpy().tolist(),'c3_bias':net.c3.bias.numpy().tolist(),
-        'policy_weight':net.p.weight.numpy().tolist(),'policy_bias':net.p.bias.numpy().tolist(),
-        'wdl_weight':net.v.weight.numpy().tolist(),'wdl_bias':net.v.bias.numpy().tolist()}
+    ck=save_payload(ep+1)
     Path(args.checkpoint).parent.mkdir(parents=True,exist_ok=True)
     with open(args.checkpoint,'wb') as f: pickle.dump(ck,f)
     print(f'METRIC checkpoint_epoch={ep+1}', flush=True)
@@ -149,11 +176,6 @@ for off in range(0,n,512):
   for row,wl,i in zip(logits,wlog,idx):
     t=mid[rows[i][1]]; ranked=sorted(range(len(row)), key=lambda k: row[k], reverse=True); top1+=t==ranked[0]; top4+=t in ranked[:4]; top8+=t in ranked[:8]
     m=max(row); pce+=-(row[t]-m-math.log(sum(math.exp(z-m) for z in row))); mw=max(wl); vt=rows[i][2]; wce+=-sum(vt[k]*(wl[k]-mw-math.log(sum(math.exp(z-mw) for z in wl))) for k in range(3))
-obj={'kind':'tiny_board_cnn_student','moves':moves,'channels':args.channels,'policy_head':args.policy_head,'policy_map':policy_map,'history_plies':args.history_plies,'input_planes':input_plane_count(),
-     'c1_weight':net.c1.weight.numpy().tolist(),'c1_bias':net.c1.bias.numpy().tolist(),
-     'c2_weight':net.c2.weight.numpy().tolist(),'c2_bias':net.c2.bias.numpy().tolist(),
-     'c3_weight':net.c3.weight.numpy().tolist(),'c3_bias':net.c3.bias.numpy().tolist(),
-     'policy_weight':net.p.weight.numpy().tolist(),'policy_bias':net.p.bias.numpy().tolist(),
-     'wdl_weight':net.v.weight.numpy().tolist(),'wdl_bias':net.v.bias.numpy().tolist()}
+obj=save_payload(args.epochs)
 out=Path(args.out); out.parent.mkdir(parents=True,exist_ok=True); out.write_text(json.dumps(obj))
-print(f'METRIC board_cnn_rows={len(rows)}'); print(f'METRIC board_cnn_moves={len(moves)}'); print(f'METRIC board_cnn_fixed_policy_map={1 if policy_map else 0}'); print(f'METRIC board_cnn_history_plies={args.history_plies}'); print(f'METRIC board_cnn_policy_head_spatial={1 if args.policy_head == "spatial" else 0}'); print(f'METRIC board_cnn_input_planes={input_plane_count()}'); print(f'METRIC dev_policy_ce={pce/n:.6f}'); print(f'METRIC dev_wdl_ce={wce/n:.6f}'); print(f'METRIC dev_policy_top1={top1/n:.6f}'); print(f'METRIC dev_policy_top4={top4/n:.6f}'); print(f'METRIC dev_policy_top8={top8/n:.6f}')
+print(f'METRIC board_cnn_rows={len(rows)}'); print(f'METRIC board_cnn_moves={len(moves)}'); print(f'METRIC board_cnn_architecture_residual={1 if args.architecture == "residual_tower" else 0}'); print(f'METRIC board_cnn_blocks={args.blocks if args.architecture == "residual_tower" else 0}'); print(f'METRIC board_cnn_fixed_policy_map={1 if policy_map else 0}'); print(f'METRIC board_cnn_history_plies={args.history_plies}'); print(f'METRIC board_cnn_policy_head_spatial={1 if args.policy_head == "spatial" else 0}'); print(f'METRIC board_cnn_input_planes={input_plane_count()}'); print(f'METRIC dev_policy_ce={pce/n:.6f}'); print(f'METRIC dev_wdl_ce={wce/n:.6f}'); print(f'METRIC dev_policy_top1={top1/n:.6f}'); print(f'METRIC dev_policy_top4={top4/n:.6f}'); print(f'METRIC dev_policy_top8={top8/n:.6f}')

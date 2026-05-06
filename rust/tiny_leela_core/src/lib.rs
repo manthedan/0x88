@@ -317,6 +317,8 @@ pub struct StudentArtifact {
     pub policy_map: Option<String>,
     pub history_plies: Option<usize>,
     pub input_planes: Option<usize>,
+    pub architecture: Option<String>,
+    pub blocks: Option<usize>,
 }
 
 pub struct Evaluation { pub policy: Vec<(u32, f32)>, pub wdl: [f32; 3] }
@@ -529,7 +531,9 @@ impl PositionEvaluator for StudentEvaluator {
         let fen = board_to_fen(board);
         let policy_features = if self.artifact.kind == "frozen_conv_fen_student" || self.artifact.kind == "frozen_conv_feature_mlp_student" { conv_student_features(&fen, self.artifact.conv_channels.unwrap_or(64), self.artifact.conv_layers.unwrap_or(6), self.conv_params.as_ref()) } else { fen_features(&fen).unwrap().to_vec() };
         let value_features = if self.artifact.kind == "frozen_conv_fen_student" || self.artifact.kind == "frozen_conv_feature_mlp_student" { policy_features.clone() } else { wdl_features_from_fen(&fen).unwrap() };
-        let (logits, wdl_logits): (Vec<f32>, Vec<f32>) = if self.artifact.kind == "tiny_board_cnn_student" {
+        let (logits, wdl_logits): (Vec<f32>, Vec<f32>) = if self.artifact.kind == "tiny_board_residual_student" || self.artifact.architecture.as_deref() == Some("residual_tower") {
+            panic!("Residual tower artifacts require the upcoming ONNX/runtime path");
+        } else if self.artifact.kind == "tiny_board_cnn_student" {
             board_cnn_forward(&fen, &self.artifact)
         } else if self.artifact.kind == "frozen_conv_feature_mlp_student" {
             let w1 = self.artifact.w1.as_ref().unwrap(); let b1 = self.artifact.b1.as_ref().unwrap();

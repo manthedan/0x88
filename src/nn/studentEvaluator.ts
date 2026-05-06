@@ -8,7 +8,7 @@ const PIECES = 'PNBRQKpnbrqk';
 const PIECE_INDEX = new Map([...PIECES].map((piece, index) => [piece, index]));
 
 export interface StudentArtifact {
-  kind: 'linear_fen_student' | 'frozen_conv_fen_student' | 'frozen_conv_feature_mlp_student' | 'tiny_board_cnn_student';
+  kind: 'linear_fen_student' | 'frozen_conv_fen_student' | 'frozen_conv_feature_mlp_student' | 'tiny_board_cnn_student' | 'tiny_board_residual_student';
   moves: string[];
   policy_weights?: number[][];
   wdl_weights?: number[][];
@@ -40,6 +40,8 @@ export interface StudentArtifact {
   policy_map?: string | null;
   history_plies?: number;
   input_planes?: number;
+  architecture?: 'legacy3' | 'residual_tower';
+  blocks?: number;
 }
 
 function softmax(xs: number[]): number[] {
@@ -267,7 +269,9 @@ export class StudentEvaluator implements Evaluator {
     const valueFeatures = this.features(board, true);
     let logits: number[];
     let wdlLogits: number[];
-    if (this.artifact.kind === 'tiny_board_cnn_student') {
+    if (this.artifact.kind === 'tiny_board_residual_student' || this.artifact.architecture === 'residual_tower') {
+      throw new Error('Residual tower artifacts require the upcoming ONNX/runtime path');
+    } else if (this.artifact.kind === 'tiny_board_cnn_student') {
       const cnn = boardCnnLogits(boardToFen(board), this.artifact);
       logits = cnn.policy;
       wdlLogits = cnn.wdl;
