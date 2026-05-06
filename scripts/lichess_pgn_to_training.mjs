@@ -22,19 +22,26 @@ async function* streamGames(path) {
   const stream = input ? input.stdout : createReadStream(path);
   const rl = createInterface({ input: stream, crlfDelay: Infinity });
   let lines = [];
-  for await (const line of rl) {
-    if (line.startsWith('[Event ') && lines.length) {
+  let completed = false;
+  try {
+    for await (const line of rl) {
+      if (line.startsWith('[Event ') && lines.length) {
+        const game = lines.join('\n').trim();
+        if (game) yield game;
+        lines = [];
+      }
+      lines.push(line);
+    }
+    completed = true;
+    if (lines.length) {
       const game = lines.join('\n').trim();
       if (game) yield game;
-      lines = [];
     }
-    lines.push(line);
+  } finally {
+    rl.close();
+    if (input && !completed) input.kill('SIGTERM');
   }
-  if (lines.length) {
-    const game = lines.join('\n').trim();
-    if (game) yield game;
-  }
-  if (input) {
+  if (input && completed) {
     const code = await new Promise((resolve) => input.on('close', resolve));
     if (code !== 0) throw new Error(`zstd -dc failed for ${path}: ${stderr}`);
   }
