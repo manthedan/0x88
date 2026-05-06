@@ -106,7 +106,20 @@ python3 -m venv .venv-onnx
   --verify
 ```
 
-The exporter is intentionally dependency-optional. Main training can remain tinygrad for now; PyTorch is only used as a reliable ONNX serializer/runtime smoke path.
+The exporter is intentionally dependency-optional. A newer `training/train_residual_torch.py` path can also train the residual tower directly in PyTorch and export ONNX in one step:
+
+```bash
+.venv-onnx/bin/python training/train_residual_torch.py \
+  --train data/balanced_train.jsonl \
+  --dev data/balanced_dev.jsonl \
+  --out artifacts/residual_48x5.pt \
+  --onnx-out artifacts/residual_48x5.onnx \
+  --channels 48 --blocks 5 \
+  --history-plies 2 --state-planes \
+  --compile
+```
+
+Use `--compile` on PyTorch 2.x systems where `torch.compile` is stable for the selected device; omit it if compile overhead dominates small smoke runs.
 
 ## Roadmap
 
