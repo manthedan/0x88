@@ -13,7 +13,34 @@ candidate model vs previous best
 
 This answers the most important development question: did the change make the engine stronger?
 
-Absolute Elo can come later by calibrating against known engines or Stockfish levels.
+Absolute Elo can come later by calibrating against known engines, Stockfish `UCI_Elo` levels, Maia levels, and small lc0/play-lc0 nets. Even then it should be reported as **pool Elo under a named protocol**, not as a universal human/FIDE Elo.
+
+Engine strength is always conditional on a test card:
+
+```text
+engine A vs engine B
+hardware/backend
+time control or fixed node budget
+opening suite
+tablebase/hash/thread settings
+adjudication rules
+opponent pool
+statistical estimator
+```
+
+So reports should say things like:
+
+```text
+nano-leela-64x6-e12ema, ONNX/WebGPU-like backend, PUCT 64 visits,
+varied_openings_10m_dev_v1, reversed pairs, 5000 games,
+Stockfish UCI_Elo/Maia/nano pool Elo = 1840 ±45
+```
+
+not simply:
+
+```text
+1840 Elo
+```
 
 ## Basic Elo calculation
 
@@ -125,6 +152,64 @@ Avoid using the same biased TCEC opening head that caused training issues.
 
 The opening suite should be versioned and reused so results are comparable across models.
 
+## Three separate strength measurements
+
+Use three different measurements instead of searching for one true rating.
+
+### A. Development gating: checkpoint vs checkpoint
+
+Primary question:
+
+```text
+candidate vs current best: did this change help?
+```
+
+Use same backend, same precision, same search budget, same openings, reversed colors, and deterministic seeds. Suggested budgets:
+
+```text
+quick smoke:        200-500 games
+serious candidate:  2,000-10,000 games
+release candidate: 20,000+ games if cheap enough
+```
+
+### B. Rating-list style gauntlet
+
+Maintain a stable anchor pool:
+
+```text
+Stockfish UCI_Elo 1320
+Stockfish UCI_Elo 1600
+Stockfish UCI_Elo 1900
+Stockfish UCI_Elo 2200
+Maia 1100-1900, if available locally
+small lc0/play-lc0 nets
+previous tiny_leela releases
+weak classical engines
+```
+
+Estimate ratings with BayesElo, Ordo, or a simple Bradley-Terry model. This gives honest pool-relative ratings with error bars.
+
+### C. Product-facing browser levels
+
+User levels should be calibrated separately from development Elo:
+
+```text
+Level 1: policy sampling, high temperature
+Level 2: policy-only argmax
+Level 3: top-4 value rerank
+Level 4: 32-node PUCT
+Level 5: 64-node PUCT
+Level 6: 128-node PUCT
+```
+
+Publish caveats:
+
+```text
+Approximate engine-pool Elo, not FIDE Elo.
+Calibrated at fixed protocol X on desktop Chrome.
+Mobile strength may differ.
+```
+
 ## SPRT / early stopping
 
 Use sequential testing to avoid wasting games.
@@ -197,6 +282,138 @@ Store:
 
 This avoids rerunning completed games.
 
+## Pentanomial paired statistics
+
+For serious paired-opening tests, track each pair as a single outcome, not just two unrelated games. For an opening pair:
+
+```text
+Game A: candidate White vs baseline Black
+Game B: baseline White vs candidate Black
+```
+
+Record the candidate's total pair score as one of five outcomes:
+
+```text
+0.0, 0.5, 1.0, 1.5, 2.0
+```
+
+This pentanomial view reduces variance versus plain W/D/L when openings are deliberately imbalanced. Keep both:
+
+```text
+WDL:    total wins / draws / losses
+Ptnml:  paired outcome buckets
+Elo:    raw score-based Elo estimate
+nElo:   optional normalized Elo later
+LLR:    optional SPRT/GSPRT likelihood ratio later
+```
+
+We do not need full Fishtest immediately, but our result schema should preserve enough information to add pentanomial/SPRT analysis later.
+
+## Current implementation
+
+Initial anchor-arena implementation:
+
+```text
+eval/uci_anchor_arena.mjs
+```
+
+It supports:
+
+- one ONNX tiny_leela candidate,
+- Stockfish anchors through UCI `UCI_LimitStrength` / `UCI_Elo`,
+- custom UCI anchors through `--uci-anchors=name|/path/to/engine|nodes`, useful for Maia via lc0 if local Maia weights are installed,
+- reversed opening pairs,
+- WDL, score rate, simple Elo diff ± normal-approx CI,
+- pentanomial pair buckets,
+- per-game JSON output including final FEN and illegal move marker.
+
+Initial unbalanced opening suite:
+
+```text
+eval/opening_suite_uho_lite_v1.fen
+```
+
+Example Stockfish run:
+
+```bash
+node --experimental-strip-types eval/uci_anchor_arena.mjs \
+  --candidate=80x5:artifacts/arena_10m_guarded/80x5_hybrid_e12_ema.onnx:artifacts/arena_10m_guarded/80x5_hybrid_e12_ema.meta.json \
+  --openings-file=eval/opening_suite_uho_lite_v1.fen \
+  --pairs=10 \
+  --visits=32 \
+  --stockfish-levels=1320,1600 \
+  --stockfish-nodes=32 \
+  --max-plies=100 \
+  --out=artifacts/anchor_arena/80x5_vs_stockfish_uho_soft_v1.json
+```
+
+Maia v1 anchors are installed locally through lc0 wrappers:
+
+```text
+.local_engines/maia/maia-1100.pb.gz
+.local_engines/maia/maia-1500.pb.gz
+.local_engines/maia/maia-1900.pb.gz
+.local_engines/maia/lc0-maia-1100.sh
+.local_engines/maia/lc0-maia-1500.sh
+.local_engines/maia/lc0-maia-1900.sh
+```
+
+Example Maia run:
+
+```bash
+node --experimental-strip-types eval/uci_anchor_arena.mjs \
+  --candidate=80x5:artifacts/arena_10m_guarded/80x5_hybrid_e12_ema.onnx:artifacts/arena_10m_guarded/80x5_hybrid_e12_ema.meta.json \
+  --openings-file=eval/opening_suite_uho_lite_v1.fen \
+  --pairs=10 \
+  --visits=32 \
+  --include-stockfish=0 \
+  '--uci-anchors=maia1100|.local_engines/maia/lc0-maia-1100.sh|32,maia1500|.local_engines/maia/lc0-maia-1500.sh|32,maia1900|.local_engines/maia/lc0-maia-1900.sh|32' \
+  --out=artifacts/anchor_arena/80x5_vs_maia_uho_soft_v1.json
+```
+
+## Recommended tiny-engine protocol card
+
+A release-quality report should include a reproducible card:
+
+```text
+engine:
+  name: tiny_leela
+  version: candidate id / git commit
+  model: artifact path + sha256
+  backend: onnxruntime/webgpu/wasm/node/pytorch
+
+search:
+  mode: policy-only | value-rerank | puct
+  nodes_or_visits: 64
+  temperature: 0
+  opening_noise: false
+
+match:
+  openings: eval/opening_suite_v1.fen or UHO-lite suite
+  colors: reversed_pairs
+  games: 5000
+  adjudication: fixed and documented
+  tablebases: none unless fixed for every engine
+  time_control: fixed_nodes preferred for model testing
+
+anchors:
+  - current best tiny_leela
+  - Stockfish UCI_Elo levels
+  - Maia levels if available
+  - small lc0/play-lc0 nets if available
+
+report:
+  WDL
+  pentanomial counts
+  Elo ± error
+  draw rate
+  average move latency
+  evals/sec or nodes/sec
+  model size
+```
+
+For cross-hardware model comparisons, fixed nodes/visits are cleaner than wall-clock time. For product UX testing, also run wall-clock/browser-latency tests.
+
 ## Report format
 
 A useful Elo report should include:
@@ -229,8 +446,14 @@ For development, use a small ladder of opponents:
 2. simple material evaluator
 3. previous tiny_leela checkpoint
 4. current best tiny_leela checkpoint
-5. weak Stockfish level / low node limit
-6. stronger Stockfish level / higher node limit
+5. Stockfish `UCI_LimitStrength=true`, `UCI_Elo=1320`
+6. Stockfish `UCI_Elo=1600`
+7. Stockfish `UCI_Elo=1900`
+8. Stockfish `UCI_Elo=2200`
+9. Maia 1100-1900, if available locally
+10. small lc0/play-lc0 nets, if available locally
+
+Important Stockfish caveat: `UCI_Elo` is a deliberately weakened mode, not Stockfish's true strength and not a guaranteed FIDE-equivalent human rating. It is still a useful stable anchor if the exact time/node protocol is documented.
 
 The primary promotion gate should usually be:
 

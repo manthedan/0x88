@@ -80,7 +80,13 @@ function visitPolicy(edges: Edge[], temperature: number): SearchPolicyEntry[] {
   if (!edges.length) return [];
   const tau = Math.max(0, temperature);
   if (tau === 0) {
-    const best = edges.reduce((a, b) => b.visits > a.visits ? b : a);
+    const better = (a: Edge, b: Edge) => {
+      if (b.visits !== a.visits) return b.visits > a.visits;
+      const aq = edgeQForParent(a), bq = edgeQForParent(b);
+      if (bq !== aq) return bq > aq;
+      return b.prior > a.prior;
+    };
+    const best = edges.reduce((a, b) => better(a, b) ? b : a);
     return edges.map((edge) => ({ move: edge.move, visits: edge.visits, prior: edge.prior, q: edgeQForParent(edge), probability: edge === best ? 1 : 0 }));
   }
   const weights = edges.map((edge) => Math.pow(Math.max(edge.visits, 1e-9), 1 / tau));

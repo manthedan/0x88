@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { createReadStream, mkdirSync, writeFileSync } from 'node:fs';
+import { createReadStream, createWriteStream, mkdirSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { dirname } from 'node:path';
 import { parseFen, boardToFen, START_FEN } from '../src/chess/board.ts';
@@ -16,7 +16,9 @@ function arg(name, fallback = undefined) {
 }
 
 async function* streamGames(path) {
-  const input = path.endsWith('.zst') ? spawn('zstd', ['-dc', path], { stdio: ['ignore', 'pipe', 'pipe'] }) : null;
+  let input = null;
+  if (path.endsWith('.zst')) input = spawn('zstd', ['-dc', path], { stdio: ['ignore', 'pipe', 'pipe'] });
+  else if (path.endsWith('.zip')) input = spawn('unzip', ['-p', path], { stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
   if (input?.stderr) input.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk; });
   const stream = input ? input.stdout : createReadStream(path);
@@ -43,7 +45,7 @@ async function* streamGames(path) {
   }
   if (input && completed) {
     const code = await new Promise((resolve) => input.on('close', resolve));
-    if (code !== 0) throw new Error(`zstd -dc failed for ${path}: ${stderr}`);
+    if (code !== 0) throw new Error(`decompress failed for ${path}: ${stderr}`);
   }
 }
 
@@ -80,6 +82,19 @@ function sanTokens(text) {
     .filter((t) => !/^\d+\.{1,3}$/.test(t))
     .filter((t) => !/^\$\d+$/.test(t))
     .filter((t) => !/^(1-0|0-1|1\/2-1\/2|\*)$/.test(t));
+}
+
+function parseTimeControl(tc) {
+  if (!tc || tc === '-' || tc === '?') return null;
+  const m = String(tc).match(/^(\d+)\+(\d+)$/);
+  if (!m) return null;
+  return { initial: Number(m[1]), increment: Number(m[2]) };
+}
+function isBulletLike(tc) {
+  const parsed = parseTimeControl(tc);
+  if (!parsed) return false;
+  const estimatedSeconds = parsed.initial + 40 * parsed.increment;
+  return estimatedSeconds < 180;
 }
 
 function resultWdl(result, turn) {
@@ -139,17 +154,32 @@ const teacher = arg('--teacher', 'lichess_pgn');
 const noEloFilter = process.argv.includes('--no-elo-filter');
 const skipPlies = Number(arg('--skip-plies', '4'));
 const maxPliesPerGame = Number(arg('--max-plies-per-game', '80'));
-if (!input) throw new Error('Usage: node --experimental-strip-types scripts/lichess_pgn_to_training.mjs --pgn file.pgn[.zst] --out data/lichess_training.jsonl');
+const excludeBullet = !process.argv.includes('--include-bullet');
+const minInitialSeconds = Number(arg('--min-initial-seconds', '0'));
+const minEstimatedSeconds = Number(arg('--min-estimated-seconds', '0'));
+if (!input) throw new Error('Usage: node --experimental-strip-types scripts/lichess_pgn_to_training.mjs --pgn file.pgn[.zst|.zip] --out data/lichess_training.jsonl');
 
-const rows = [];
-let gamesSeen = 0, gamesAccepted = 0, parseFailures = 0;
+mkdirSync(dirname(out), { recursive: true });
+const writer = createWriteStream(out, { encoding: 'utf8' });
+let rowCount = 0, outputBytes = 0;
+async function writeRow(row) {
+  const line = JSON.stringify(row) + '\n';
+  outputBytes += Buffer.byteLength(line);
+  rowCount++;
+  if (!writer.write(line)) await new Promise((resolve) => writer.once('drain', resolve));
+}
+let gamesSeen = 0, gamesAccepted = 0, parseFailures = 0, skippedVariant = 0, skippedTimeControl = 0;
 for await (const game of streamGames(input)) {
   gamesSeen++;
-  if (gamesAccepted >= maxGames || rows.length >= maxPositions) break;
+  if (gamesAccepted >= maxGames || rowCount >= maxPositions) break;
   const tags = parseTags(game);
   const result = tags.Result ?? '*';
   if (!['1-0', '0-1', '1/2-1/2'].includes(result)) continue;
-  if (tags.Variant && tags.Variant !== 'Standard') continue;
+  if (tags.Variant && tags.Variant !== 'Standard') { skippedVariant++; continue; }
+  const tc = parseTimeControl(tags.TimeControl);
+  if (excludeBullet && isBulletLike(tags.TimeControl)) { skippedTimeControl++; continue; }
+  if (tc && minInitialSeconds > 0 && tc.initial < minInitialSeconds) { skippedTimeControl++; continue; }
+  if (tc && minEstimatedSeconds > 0 && tc.initial + 40 * tc.increment < minEstimatedSeconds) { skippedTimeControl++; continue; }
   const whiteElo = Number(tags.WhiteElo ?? 0), blackElo = Number(tags.BlackElo ?? 0);
   if (!noEloFilter && Math.min(whiteElo, blackElo) < minElo) continue;
   let board = parseFen(tags.FEN ?? START_FEN);
@@ -159,9 +189,9 @@ for await (const game of streamGames(input)) {
       const before = boardToFen(board);
       const turn = board.turn;
       const move = parseSanMove(board, san);
-      if (acceptedInGame >= skipPlies && acceptedInGame < maxPliesPerGame && rows.length < maxPositions) {
+      if (acceptedInGame >= skipPlies && acceptedInGame < maxPliesPerGame && rowCount < maxPositions) {
         const wdl = resultWdl(result, turn);
-        rows.push({ id: `${teacher}_${String(gamesAccepted).padStart(6, '0')}_${String(acceptedInGame).padStart(3, '0')}`, fen: before, policy: { [moveToUci(move)]: 1.0 }, wdl, q: wdl[0] - wdl[2], teacher, result, white_elo: whiteElo, black_elo: blackElo });
+        await writeRow({ id: `${teacher}_${String(gamesAccepted).padStart(6, '0')}_${String(acceptedInGame).padStart(3, '0')}`, fen: before, policy: { [moveToUci(move)]: 1.0 }, wdl, q: wdl[0] - wdl[2], teacher, result, white_elo: whiteElo, black_elo: blackElo, time_control: tags.TimeControl ?? '', variant: tags.Variant ?? 'Standard' });
       }
       board = makeMove(board, move);
       acceptedInGame++;
@@ -172,10 +202,11 @@ for await (const game of streamGames(input)) {
     parseFailures++;
   }
 }
-mkdirSync(dirname(out), { recursive: true });
-writeFileSync(out, rows.map((r) => JSON.stringify(r)).join('\n') + (rows.length ? '\n' : ''));
+await new Promise((resolve, reject) => writer.end((err) => err ? reject(err) : resolve()));
 console.log(`METRIC lichess_games_seen=${gamesSeen}`);
 console.log(`METRIC lichess_games_accepted=${gamesAccepted}`);
 console.log(`METRIC lichess_parse_failures=${parseFailures}`);
-console.log(`METRIC lichess_training_rows=${rows.length}`);
-console.log(`METRIC lichess_output_bytes=${Buffer.byteLength(rows.map((r) => JSON.stringify(r)).join('\n'))}`);
+console.log(`METRIC lichess_skipped_variant=${skippedVariant}`);
+console.log(`METRIC lichess_skipped_time_control=${skippedTimeControl}`);
+console.log(`METRIC lichess_training_rows=${rowCount}`);
+console.log(`METRIC lichess_output_bytes=${outputBytes}`);
