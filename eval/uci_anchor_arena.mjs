@@ -66,6 +66,8 @@ function ptnmlFromPairScores(pairScores) {
 
 const candidateSpec = parseCandidate(arg('--candidate', ''));
 const openingsFile = arg('--openings-file', 'eval/opening_suite_uho_lite_v1.fen');
+const openingStart = Number(arg('--opening-start', '0'));
+const openingCountRaw = arg('--opening-count', '');
 const pairs = Number(arg('--pairs', '20'));
 const visits = Number(arg('--visits', '64'));
 const cpuct = Number(arg('--cpuct', '1.5'));
@@ -82,7 +84,10 @@ async function loadEvaluator(onnx, metaPath) {
   const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
   return meta.kind === 'squareformer' ? SquareFormerEvaluator.create(onnx, meta) : OnnxEvaluator.create(onnx, meta);
 }
-const openings = loadOpenings(openingsFile);
+const allOpenings = loadOpenings(openingsFile);
+const openingCount = openingCountRaw === '' ? allOpenings.length - openingStart : Number(openingCountRaw);
+const openings = allOpenings.slice(openingStart, openingStart + openingCount);
+if (!openings.length) throw new Error(`No openings selected: start=${openingStart} count=${openingCount} total=${allOpenings.length}`);
 const candidate = { type:'tiny', ...candidateSpec, evaluator: await loadEvaluator(candidateSpec.onnx, candidateSpec.meta) };
 const anchors = [
   ...(includeStockfish ? stockfishAnchors(stockfishPath, sfLevels, sfNodes, threads, hash) : []),
@@ -139,7 +144,7 @@ for (const anchor of anchors) {
 }
 for (const a of anchors) a.engine.quit();
 mkdirSync(dirname(out), { recursive:true });
-const protocol = { kind:'uci_anchor_arena', candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta }, anchors:anchors.map(a=>({ name:a.name, type:a.type, command:a.command, nodes:a.nodes, options:a.options })), openingsFile, openings:openings.length, pairs, visits, cpuct, maxPlies, stockfishNodes:sfNodes, threads, hash, createdUtc:new Date().toISOString() };
+const protocol = { kind:'uci_anchor_arena', candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta }, anchors:anchors.map(a=>({ name:a.name, type:a.type, command:a.command, nodes:a.nodes, options:a.options })), openingsFile, openingsTotal:allOpenings.length, openingStart, openingCount:openings.length, openings:openings.length, pairs, visits, cpuct, maxPlies, stockfishNodes:sfNodes, threads, hash, createdUtc:new Date().toISOString() };
 writeFileSync(out, JSON.stringify({ candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta }, protocol, summaries, games }, null, 2));
 writeFileSync(`${out}.protocol.json`, JSON.stringify(protocol, null, 2));
 for (const s of summaries) {
