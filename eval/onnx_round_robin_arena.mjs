@@ -100,7 +100,9 @@ for (let i = 0; i < specs.length; i++) for (let j = i + 1; j < specs.length; j++
 }
 const standings = Object.entries(table).map(([name, r]) => ({ name, ...r, scoreRate: r.score / Math.max(1, r.games), eloVsPool: elo(r.score / Math.max(1, r.games)) })).sort((a,b)=>b.scoreRate-a.scoreRate);
 mkdirSync(dirname(out), { recursive: true });
-writeFileSync(out, JSON.stringify({ visits, maxPlies, gamesPerPair, openingsFile, openings: openings.length, standings, games }, null, 2));
+const protocol = { kind:'onnx_round_robin_arena', models:specs, visits, maxPlies, gamesPerPair, openingsFile, openings: openings.length, createdUtc:new Date().toISOString() };
+writeFileSync(out, JSON.stringify({ visits, maxPlies, gamesPerPair, openingsFile, openings: openings.length, protocol, standings, games }, null, 2));
+writeFileSync(`${out}.protocol.json`, JSON.stringify(protocol, null, 2));
 standings.forEach((r, idx) => {
   console.log(`METRIC arena_rank_${idx + 1}_${r.name}_score_rate=${r.scoreRate.toFixed(6)}`);
   console.log(`METRIC arena_${r.name}_games=${r.games}`);

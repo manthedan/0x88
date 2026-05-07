@@ -138,7 +138,9 @@ for (const anchor of anchors) {
 }
 for (const a of anchors) a.engine.quit();
 mkdirSync(dirname(out), { recursive:true });
-writeFileSync(out, JSON.stringify({ candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta }, protocol:{ openingsFile, openings:openings.length, pairs, visits, maxPlies, stockfishNodes:sfNodes, threads, hash }, summaries, games }, null, 2));
+const protocol = { kind:'uci_anchor_arena', candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta }, anchors:anchors.map(a=>({ name:a.name, type:a.type, command:a.command, nodes:a.nodes, options:a.options })), openingsFile, openings:openings.length, pairs, visits, maxPlies, stockfishNodes:sfNodes, threads, hash, createdUtc:new Date().toISOString() };
+writeFileSync(out, JSON.stringify({ candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta }, protocol, summaries, games }, null, 2));
+writeFileSync(`${out}.protocol.json`, JSON.stringify(protocol, null, 2));
 for (const s of summaries) {
   console.log(`METRIC anchor_${s.anchor}_score_rate=${s.scoreRate.toFixed(6)}`);
   console.log(`METRIC anchor_${s.anchor}_elo_diff=${s.eloDiff.toFixed(3)}`);
