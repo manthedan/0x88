@@ -75,7 +75,7 @@ EOF
 if [[ "$SKIP_BUILD" != 1 ]]; then run build_client npm run build:client; fi
 run puct_core node --experimental-strip-types eval/puct_core_tests.mjs
 run puct_node_test node --test tests/puct_core.test.mjs
-run puct_consistency node --experimental-strip-types eval/puct_consistency_check.mjs --model "$MODEL" --meta "$META" --positions-json "$POSITIONS" --limit 100 --visits "$VISITS_LIST"
+run puct_consistency node --experimental-strip-types eval/puct_consistency_check.mjs --model "$MODEL" --meta "$META" --positions-json "$POSITIONS" --limit 100 --visits "$VISITS_LIST" --out "$OUT_DIR/puct_consistency.json"
 run queen_fixed node --experimental-strip-types eval/queen_plumbing_diagnostic.mjs --model "$MODEL" --meta "$META" --positions-json "$POSITIONS" --out "$OUT_DIR/queen_fixed.json"
 run bucket_eval node --experimental-strip-types eval/onnx_bucket_eval_jsonl.mjs --input "$DEV" --model "$MODEL" --meta "$META" --out "$OUT_DIR/bucket_eval.json" --max-rows-per-bucket "$BUCKET_ROWS"
 

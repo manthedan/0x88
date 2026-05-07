@@ -45,9 +45,10 @@ for await (const line of openLines(input)) {
   for (const k of keys) if ((counts[k] ?? 0) < maxRowsPerBucket) { counts[k] = (counts[k] ?? 0) + 1; add(stats, k, ce, rank, rank===1?1:0, rank<=4?1:0, rank<=8?1:0); }
   used++;
 }
-const result = { input, model, meta, rows, used, bad, maxRowsPerBucket, buckets: {} };
+const protocol = { kind:'onnx_bucket_eval_jsonl', input, model, meta, maxRowsPerBucket, createdUtc:new Date().toISOString() };
+const result = { input, model, meta, rows, used, bad, maxRowsPerBucket, protocol, buckets: {} };
 for (const [k,s] of Object.entries(stats)) result.buckets[k] = { rows:s.rows, ce:s.ce/s.rows, mean_legal_rank:s.rank/s.rows, top1:s.top1/s.rows, top4:s.top4/s.rows, top8:s.top8/s.rows };
-mkdirSync(dirname(out), { recursive:true }); writeFileSync(out, JSON.stringify(result, null, 2));
+mkdirSync(dirname(out), { recursive:true }); writeFileSync(out, JSON.stringify(result, null, 2)); writeFileSync(`${out}.protocol.json`, JSON.stringify(protocol, null, 2));
 for (const [k,s] of Object.entries(result.buckets)) {
   const safe = k.replace(/[^a-zA-Z0-9]+/g, '_');
   console.log(`METRIC bucket_${safe}_rows=${s.rows}`);
