@@ -17,11 +17,12 @@ Options:
   --full-pairs N             default 0 (skip full anchor)
   --visits-list CSV          default 1,32,128,512
   --full-visits N            default 512
+  --cpuct X                  default 1.5
   --skip-build               skip npm run build:client
 EOF
 }
 
-NAME=""; MODEL=""; META=""; OUT_DIR=""; POSITIONS="artifacts/diagnostics/queen_risk_fixed_suite_drop300_or_capture.json"; DEV="data/datasets/supervised_100m_elite_tcec_v1/dev/dev_1000000.jsonl.zst"; OPENINGS="eval/opening_suite_uho_lite_v1.fen"; BUCKET_ROWS=5000; QUICK_PAIRS=3; FULL_PAIRS=0; VISITS_LIST="1,32,128,512"; FULL_VISITS=512; SKIP_BUILD=0
+NAME=""; MODEL=""; META=""; OUT_DIR=""; POSITIONS="artifacts/diagnostics/queen_risk_fixed_suite_drop300_or_capture.json"; DEV="data/datasets/supervised_100m_elite_tcec_v1/dev/dev_1000000.jsonl.zst"; OPENINGS="eval/opening_suite_uho_lite_v1.fen"; BUCKET_ROWS=5000; QUICK_PAIRS=3; FULL_PAIRS=0; VISITS_LIST="1,32,128,512"; FULL_VISITS=512; CPUCT=1.5; SKIP_BUILD=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --name) NAME="$2"; shift 2;;
@@ -36,6 +37,7 @@ while [[ $# -gt 0 ]]; do
     --full-pairs) FULL_PAIRS="$2"; shift 2;;
     --visits-list) VISITS_LIST="$2"; shift 2;;
     --full-visits) FULL_VISITS="$2"; shift 2;;
+    --cpuct) CPUCT="$2"; shift 2;;
     --skip-build) SKIP_BUILD=1; shift;;
     -h|--help) usage; exit 0;;
     *) echo "unknown arg: $1" >&2; usage; exit 2;;
@@ -64,6 +66,7 @@ cat > "$OUT_DIR/protocol_card.json" <<EOF
   "full_pairs": $FULL_PAIRS,
   "visits_list": "$VISITS_LIST",
   "full_visits": $FULL_VISITS,
+  "cpuct": $CPUCT,
   "created_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "git_commit": "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 }
@@ -83,6 +86,7 @@ for v in "${VISITS[@]}"; do
     --openings-file="$OPENINGS" \
     --pairs="$QUICK_PAIRS" \
     --visits="$v" \
+    --cpuct="$CPUCT" \
     --stockfish-levels=1320,1600 \
     --stockfish-nodes=32 \
     --max-plies=100 \
@@ -96,6 +100,7 @@ if [[ "$FULL_PAIRS" -gt 0 ]]; then
     --openings-file="$OPENINGS" \
     --pairs="$FULL_PAIRS" \
     --visits="$FULL_VISITS" \
+    --cpuct="$CPUCT" \
     --stockfish-levels=1320,1600 \
     --stockfish-nodes=32 \
     --max-plies=100 \

@@ -36,6 +36,7 @@ const specs = modelSpecs();
 if (specs.length < 2) throw new Error('Need --models=name:onnx:meta,...');
 const gamesPerPair = Number(arg('--games-per-pair', '4'));
 const visits = Number(arg('--visits', '32'));
+const cpuct = Number(arg('--cpuct', '1.5'));
 const maxPlies = Number(arg('--max-plies', '80'));
 const out = arg('--out', 'artifacts/arena_10m/onnx_round_robin.json');
 const openingsFile = arg('--openings-file', '');
@@ -69,7 +70,7 @@ for (let i = 0; i < specs.length; i++) for (let j = i + 1; j < specs.length; j++
       const sideName = board.turn === aColor ? a : b;
       const evaluator = models.get(sideName);
       const legalUci = new Set(legalMoves(board).map(moveToUci));
-      const result = await chooseMove(board, evaluator, { visits, historyFens: history.slice(-2).reverse() });
+      const result = await chooseMove(board, evaluator, { visits, cpuct, historyFens: history.slice(-2).reverse() });
       if (!result.move) { whiteScore = inCheck(board) ? (board.turn === 'w' ? 0 : 1) : 0.5; break; }
       const uci = moveToUci(result.move);
       if (!legalUci.has(uci)) {
@@ -100,8 +101,8 @@ for (let i = 0; i < specs.length; i++) for (let j = i + 1; j < specs.length; j++
 }
 const standings = Object.entries(table).map(([name, r]) => ({ name, ...r, scoreRate: r.score / Math.max(1, r.games), eloVsPool: elo(r.score / Math.max(1, r.games)) })).sort((a,b)=>b.scoreRate-a.scoreRate);
 mkdirSync(dirname(out), { recursive: true });
-const protocol = { kind:'onnx_round_robin_arena', models:specs, visits, maxPlies, gamesPerPair, openingsFile, openings: openings.length, createdUtc:new Date().toISOString() };
-writeFileSync(out, JSON.stringify({ visits, maxPlies, gamesPerPair, openingsFile, openings: openings.length, protocol, standings, games }, null, 2));
+const protocol = { kind:'onnx_round_robin_arena', models:specs, visits, cpuct, maxPlies, gamesPerPair, openingsFile, openings: openings.length, createdUtc:new Date().toISOString() };
+writeFileSync(out, JSON.stringify({ visits, cpuct, maxPlies, gamesPerPair, openingsFile, openings: openings.length, protocol, standings, games }, null, 2));
 writeFileSync(`${out}.protocol.json`, JSON.stringify(protocol, null, 2));
 standings.forEach((r, idx) => {
   console.log(`METRIC arena_rank_${idx + 1}_${r.name}_score_rate=${r.scoreRate.toFixed(6)}`);

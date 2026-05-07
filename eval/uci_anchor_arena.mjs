@@ -68,6 +68,7 @@ const candidateSpec = parseCandidate(arg('--candidate', ''));
 const openingsFile = arg('--openings-file', 'eval/opening_suite_uho_lite_v1.fen');
 const pairs = Number(arg('--pairs', '20'));
 const visits = Number(arg('--visits', '64'));
+const cpuct = Number(arg('--cpuct', '1.5'));
 const maxPlies = Number(arg('--max-plies', '120'));
 const stockfishPath = arg('--stockfish', '.local_engines/stockfish_pkg/usr/games/stockfish');
 const sfLevels = arg('--stockfish-levels', '1320,1600').split(',').filter(Boolean).map(Number);
@@ -92,7 +93,7 @@ for (const a of anchors) { a.engine = new UciEngine(a.name, a.command); await a.
 async function choose(side, board, history) {
   if (side.type === 'tiny') {
     const legalUci = new Set(legalMoves(board).map(moveToUci));
-    const r = await chooseMove(board, side.evaluator, { visits, historyFens: history.slice(-2).reverse() });
+    const r = await chooseMove(board, side.evaluator, { visits, cpuct, historyFens: history.slice(-2).reverse() });
     if (!r.move) return null;
     const u = moveToUci(r.move);
     return legalUci.has(u) ? u : `ILLEGAL:${u}`;
@@ -138,7 +139,7 @@ for (const anchor of anchors) {
 }
 for (const a of anchors) a.engine.quit();
 mkdirSync(dirname(out), { recursive:true });
-const protocol = { kind:'uci_anchor_arena', candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta }, anchors:anchors.map(a=>({ name:a.name, type:a.type, command:a.command, nodes:a.nodes, options:a.options })), openingsFile, openings:openings.length, pairs, visits, maxPlies, stockfishNodes:sfNodes, threads, hash, createdUtc:new Date().toISOString() };
+const protocol = { kind:'uci_anchor_arena', candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta }, anchors:anchors.map(a=>({ name:a.name, type:a.type, command:a.command, nodes:a.nodes, options:a.options })), openingsFile, openings:openings.length, pairs, visits, cpuct, maxPlies, stockfishNodes:sfNodes, threads, hash, createdUtc:new Date().toISOString() };
 writeFileSync(out, JSON.stringify({ candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta }, protocol, summaries, games }, null, 2));
 writeFileSync(`${out}.protocol.json`, JSON.stringify(protocol, null, 2));
 for (const s of summaries) {
