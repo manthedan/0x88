@@ -9,7 +9,7 @@ const PIECES = 'PNBRQKpnbrqk';
 
 export interface OnnxStudentMeta {
   kind: string;
-  architecture: 'residual_tower';
+  architecture: 'residual_tower' | 'cnn_channel_transformer' | 'cnn_move_token_transformer';
   policy_map: string;
   moves: string[];
   channels: number;
@@ -17,6 +17,18 @@ export interface OnnxStudentMeta {
   history_plies: number;
   input_planes: number;
   onnx?: string;
+  channelformer_cpatch?: number;
+  channelformer_dim?: number;
+  channelformer_heads?: number;
+  channelformer_layers?: number;
+  channelformer_ff_dim?: number;
+  trained_with_aux_av?: boolean;
+  av_head_exported?: boolean;
+  aux_heads_exported?: string[];
+  action_value_move_encoding?: 'chessbench_compact_20480';
+  max_legal_moves?: number;
+  onnx_fixed_legal_moves?: number;
+  num_move_features?: number;
 }
 
 function softmax(xs: ArrayLike<number>): number[] {
@@ -25,6 +37,89 @@ function softmax(xs: ArrayLike<number>): number[] {
   const out = Array.from(xs, (x) => Math.exp(Number(x) - m));
   const total = out.reduce((a, b) => a + b, 0) || 1;
   return out.map((x) => x / total);
+}
+
+function normalizePolicy(policyRaw: ArrayLike<number>, board: BoardState): Map<number, number> {
+  const probs = softmax(policyRaw);
+  const legal = legalMoves(board);
+  const policyIndex = (move: Move) => moveToPolicyIndex(move);
+  const legalMass = legal.reduce((sum, move) => sum + (probs[policyIndex(move) ?? -1] ?? 0), 0);
+  const policy = new Map<number, number>();
+  if (legal.length && legalMass <= 0) for (const move of legal) policy.set(moveToActionId(move), 1 / legal.length);
+  else for (const move of legal) { const index = policyIndex(move); policy.set(moveToActionId(move), index === undefined ? 0 : probs[index] / legalMass); }
+  return policy;
+}
+
+function moveToChessBenchAvClass(move: Move): number {
+  const ft = move.from * 64 + move.to;
+  if (!move.promotion) return ft;
+  const promo = { n: 0, b: 1, r: 2, q: 3 }[move.promotion];
+  return 4096 + ft * 4 + promo;
+}
+
+function legalCandidateInputs(boards: BoardState[]): { moves: Move[][]; classes: BigInt64Array; width: number } {
+  const moves = boards.map((board) => legalMoves(board));
+  const width = Math.max(1, ...moves.map((m) => m.length));
+  const classes = new BigInt64Array(boards.length * width);
+  for (let i = 0; i < moves.length; i++) {
+    for (let j = 0; j < moves[i].length; j++) classes[i * width + j] = BigInt(moveToChessBenchAvClass(moves[i][j]));
+  }
+  return { moves, classes, width };
+}
+
+const ROLE_INDEX: Record<string, number> = { p: 1, n: 2, b: 3, r: 4, q: 5, k: 6 };
+const PIECE_VALUE_BY_ROLE: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+const PROMO_INDEX: Record<string, number> = { n: 1, b: 2, r: 3, q: 4 };
+
+function kingSquare(board: BoardState, color: 'w' | 'b'): number {
+  const target = `${color}k`;
+  const i = board.squares.findIndex((p) => p === target);
+  return i >= 0 ? i : (color === 'w' ? 4 : 60);
+}
+
+function chebyshev(a: number, b: number): number {
+  return Math.max(Math.abs((a % 8) - (b % 8)), Math.abs(Math.floor(a / 8) - Math.floor(b / 8)));
+}
+
+function moveformerLegalInputs(boards: BoardState[], width: number, featureCount: number): { moves: Move[][]; actionIds: BigInt64Array; features: Float32Array; mask: Float32Array; width: number } {
+  const moves = boards.map((board) => legalMoves(board));
+  const actionIds = new BigInt64Array(boards.length * width);
+  const features = new Float32Array(boards.length * width * featureCount);
+  const mask = new Float32Array(boards.length * width);
+  for (let bi = 0; bi < boards.length; bi++) {
+    const board = boards[bi];
+    actionIds.fill(20480n, bi * width, (bi + 1) * width);
+    const ownKing = kingSquare(board, board.turn);
+    const enemyKing = kingSquare(board, board.turn === 'w' ? 'b' : 'w');
+    for (let j = 0; j < Math.min(width, moves[bi].length); j++) {
+      const move = moves[bi][j];
+      const actionId = moveToActionId(move);
+      actionIds[bi * width + j] = BigInt(actionId);
+      mask[bi * width + j] = 1;
+      const base = (bi * width + j) * featureCount;
+      const moving = board.squares[move.from];
+      const captured = board.squares[move.to];
+      const movingRole = moving?.[1] ?? '';
+      const capturedRole = captured?.[1] ?? '';
+      const promo = move.promotion ? (PROMO_INDEX[move.promotion] ?? 0) : 0;
+      const movingType = ROLE_INDEX[movingRole] ?? 0;
+      const capturedType = ROLE_INDEX[capturedRole] ?? 0;
+      const capturedValue = PIECE_VALUE_BY_ROLE[capturedRole] ?? 0;
+      const promoValue = move.promotion ? ((PIECE_VALUE_BY_ROLE[move.promotion] ?? 0) - 1) : 0;
+      if (featureCount > 0) features[base + 0] = movingType;
+      if (featureCount > 1) features[base + 1] = capturedType;
+      if (featureCount > 2) features[base + 2] = promo;
+      if (featureCount > 3) features[base + 3] = captured ? 1 : 0;
+      // Features 4/5/7..13/17 are expensive check/castle/attack/pin signals; keep zero here, matching the lightweight AV-cache training path.
+      if (featureCount > 6) features[base + 6] = promo ? 1 : 0;
+      if (featureCount > 14) features[base + 14] = PIECE_VALUE_BY_ROLE[movingRole] ?? 0;
+      if (featureCount > 15) features[base + 15] = capturedValue;
+      if (featureCount > 16) features[base + 16] = capturedValue + promoValue;
+      if (featureCount > 18) features[base + 18] = chebyshev(move.to, enemyKing);
+      if (featureCount > 19) features[base + 19] = chebyshev(move.to, ownKing);
+    }
+  }
+  return { moves, actionIds, features, mask, width };
 }
 
 function addPiecePlanes(data: Float32Array, fen: string, offset: number, inputPlanes: number) {
@@ -63,6 +158,16 @@ export function onnxInputPlanes(board: BoardState, meta: Pick<OnnxStudentMeta, '
   return data;
 }
 
+function sessionOptions(): ort.InferenceSession.SessionOptions {
+  const threads = Number(globalThis.process?.env?.ORT_INTRA_OP_NUM_THREADS ?? globalThis.process?.env?.ORT_NUM_THREADS ?? '0');
+  const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all' };
+  if (Number.isFinite(threads) && threads > 0) {
+    opts.intraOpNumThreads = Math.floor(threads);
+    opts.interOpNumThreads = 1;
+  }
+  return opts;
+}
+
 export class OnnxEvaluator implements Evaluator {
   private session: ort.InferenceSession;
   private meta: OnnxStudentMeta;
@@ -73,24 +178,103 @@ export class OnnxEvaluator implements Evaluator {
   }
 
   static async create(modelPath: string | Uint8Array | ArrayBuffer, meta: OnnxStudentMeta, historyFens: string[] = []): Promise<OnnxEvaluator> {
-    const session = await ort.InferenceSession.create(modelPath as never);
+    const session = await ort.InferenceSession.create(modelPath as never, sessionOptions());
     return new OnnxEvaluator(session, meta, historyFens);
   }
 
   async evaluate(board: BoardState, context: EvaluationContext = {}): Promise<Evaluation> {
-    const input = onnxInputPlanes(board, this.meta, context.historyFens ?? this.historyFens);
-    const tensor = new ort.Tensor('float32', input, [1, this.meta.input_planes, 8, 8]);
-    const outputs = await this.session.run({ planes: tensor });
-    const policyRaw = outputs.policy_logits?.data ?? Object.values(outputs)[0].data;
-    const wdlRaw = outputs.wdl_logits?.data ?? Object.values(outputs)[1].data;
-    const probs = softmax(policyRaw as Float32Array);
-    const legal = legalMoves(board);
-    const policyIndex = (move: Move) => moveToPolicyIndex(move);
-    const legalMass = legal.reduce((sum, move) => sum + (probs[policyIndex(move) ?? -1] ?? 0), 0);
-    const policy = new Map<number, number>();
-    if (legal.length && legalMass <= 0) for (const move of legal) policy.set(moveToActionId(move), 1 / legal.length);
-    else for (const move of legal) { const index = policyIndex(move); policy.set(moveToActionId(move), index === undefined ? 0 : probs[index] / legalMass); }
-    const wdl = softmax(wdlRaw as Float32Array);
-    return { policy, wdl: [wdl[0] ?? 0, wdl[1] ?? 0, wdl[2] ?? 0] };
+    return (await this.evaluateBatch([board], [context]))[0];
+  }
+
+  async evaluateBatch(boards: BoardState[], contexts: EvaluationContext[] = []): Promise<Evaluation[]> {
+    if (!boards.length) return [];
+    const one = this.meta.input_planes * 64;
+    const input = new Float32Array(boards.length * one);
+    for (let i = 0; i < boards.length; i++) input.set(onnxInputPlanes(boards[i], this.meta, contexts[i]?.historyFens ?? this.historyFens), i * one);
+    const feeds: Record<string, ort.Tensor> = { planes: new ort.Tensor('float32', input, [boards.length, this.meta.input_planes, 8, 8]) };
+
+    if (this.meta.architecture === 'cnn_move_token_transformer') {
+      const width = Math.max(1, Number(this.meta.onnx_fixed_legal_moves ?? this.meta.max_legal_moves ?? 128));
+      const featureCount = Math.max(1, Number(this.meta.num_move_features ?? 20));
+      const legal = moveformerLegalInputs(boards, width, featureCount);
+      feeds.legal_action_ids = new ort.Tensor('int64', legal.actionIds, [boards.length, width]);
+      feeds.legal_features = new ort.Tensor('float32', legal.features, [boards.length, width, featureCount]);
+      feeds.legal_mask = new ort.Tensor('float32', legal.mask, [boards.length, width]);
+      const outputs = await this.session.run(feeds);
+      const policyRaw = (outputs.policy_logits_legal?.data ?? Object.values(outputs)[0].data) as Float32Array;
+      const wdlRaw = (outputs.wdl_logits?.data ?? Object.values(outputs)[1].data) as Float32Array;
+      const avRaw = (outputs.action_values?.data ?? Object.values(outputs)[2]?.data) as Float32Array | undefined;
+      const rankRaw = outputs.rank_scores?.data as Float32Array | undefined;
+      const regretRaw = outputs.regrets?.data as Float32Array | undefined;
+      const riskRaw = outputs.risks?.data as Float32Array | undefined;
+      const uncertaintyRaw = outputs.uncertainties?.data as Float32Array | undefined;
+      const out: Evaluation[] = [];
+      for (let i = 0; i < boards.length; i++) {
+        const n = Math.min(width, legal.moves[i].length);
+        const probs = softmax(policyRaw.subarray(i * width, i * width + n));
+        const policy = new Map<number, number>();
+        const actionValues = new Map<number, number>();
+        const rankScores = new Map<number, number>();
+        const regrets = new Map<number, number>();
+        const risks = new Map<number, number>();
+        const uncertainties = new Map<number, number>();
+        for (let j = 0; j < n; j++) {
+          const actionId = moveToActionId(legal.moves[i][j]);
+          policy.set(actionId, probs[j] ?? 0);
+          if (avRaw) actionValues.set(actionId, Number(avRaw[i * width + j] ?? 0));
+          if (rankRaw) rankScores.set(actionId, Number(rankRaw[i * width + j] ?? 0));
+          if (regretRaw) regrets.set(actionId, Number(regretRaw[i * width + j] ?? 0));
+          if (riskRaw) risks.set(actionId, Number(riskRaw[i * width + j] ?? 0));
+          if (uncertaintyRaw) uncertainties.set(actionId, Number(uncertaintyRaw[i * width + j] ?? 0));
+        }
+        if (legal.moves[i].length > width) {
+          // Extremely rare with K=128 in practical suites. Give omitted moves zero prior/AV rather than failing mid-arena.
+          for (let j = width; j < legal.moves[i].length; j++) policy.set(moveToActionId(legal.moves[i][j]), 0);
+        }
+        const wdl = softmax(wdlRaw.subarray(i * 3, i * 3 + 3));
+        out.push({ policy, wdl: [wdl[0] ?? 0, wdl[1] ?? 0, wdl[2] ?? 0], ...(actionValues.size ? { actionValues } : {}), ...(rankScores.size ? { rankScores } : {}), ...(regrets.size ? { regrets } : {}), ...(risks.size ? { risks } : {}), ...(uncertainties.size ? { uncertainties } : {}) });
+      }
+      return out;
+    }
+
+    let candidateMoves: Move[][] | null = null;
+    let candidateWidth = 0;
+    if (this.meta.av_head_exported) {
+      const cand = legalCandidateInputs(boards);
+      candidateMoves = cand.moves;
+      candidateWidth = cand.width;
+      feeds.candidate_moves = new ort.Tensor('int64', cand.classes, [boards.length, candidateWidth]);
+    }
+    const outputs = await this.session.run(feeds);
+    const policyRaw = (outputs.policy_logits?.data ?? Object.values(outputs)[0].data) as Float32Array;
+    const wdlRaw = (outputs.wdl_logits?.data ?? Object.values(outputs)[1].data) as Float32Array;
+    const avRaw = (outputs.action_values?.data ?? outputs.action_value?.data ?? outputs.action_value_logits?.data) as Float32Array | undefined;
+    const rankRaw = outputs.rank_scores?.data as Float32Array | undefined;
+    const regretRaw = outputs.regrets?.data as Float32Array | undefined;
+    const riskRaw = outputs.risks?.data as Float32Array | undefined;
+    const uncertaintyRaw = outputs.uncertainties?.data as Float32Array | undefined;
+    const policySize = this.meta.moves?.length ?? Math.floor(policyRaw.length / boards.length);
+    const out: Evaluation[] = [];
+    for (let i = 0; i < boards.length; i++) {
+      const policy = normalizePolicy(policyRaw.subarray(i * policySize, (i + 1) * policySize), boards[i]);
+      const wdl = softmax(wdlRaw.subarray(i * 3, i * 3 + 3));
+      const actionValues = new Map<number, number>();
+      const rankScores = new Map<number, number>();
+      const regrets = new Map<number, number>();
+      const risks = new Map<number, number>();
+      const uncertainties = new Map<number, number>();
+      if (candidateMoves) {
+        for (let j = 0; j < candidateMoves[i].length; j++) {
+          const actionId = moveToActionId(candidateMoves[i][j]);
+          if (avRaw) actionValues.set(actionId, Number(avRaw[i * candidateWidth + j] ?? 0));
+          if (rankRaw) rankScores.set(actionId, Number(rankRaw[i * candidateWidth + j] ?? 0));
+          if (regretRaw) regrets.set(actionId, Number(regretRaw[i * candidateWidth + j] ?? 0));
+          if (riskRaw) risks.set(actionId, Number(riskRaw[i * candidateWidth + j] ?? 0));
+          if (uncertaintyRaw) uncertainties.set(actionId, Number(uncertaintyRaw[i * candidateWidth + j] ?? 0));
+        }
+      }
+      out.push({ policy, wdl: [wdl[0] ?? 0, wdl[1] ?? 0, wdl[2] ?? 0], ...(actionValues.size ? { actionValues } : {}), ...(rankScores.size ? { rankScores } : {}), ...(regrets.size ? { regrets } : {}), ...(risks.size ? { risks } : {}), ...(uncertainties.size ? { uncertainties } : {}) });
+    }
+    return out;
   }
 }

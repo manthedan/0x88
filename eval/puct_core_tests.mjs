@@ -3,12 +3,17 @@ import assert from 'node:assert/strict';
 import { parseFen } from '../src/chess/board.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { moveToActionId, moveFromUci, moveToUci } from '../src/chess/moveCodec.ts';
-import { searchRoot } from '../src/search/puct.ts';
+import { actionValuePuctPolicy, searchRoot } from '../src/search/puct.ts';
 
 function moveEq(a,b){return a.from===b.from&&a.to===b.to&&(a.promotion??'')===(b.promotion??'');}
 function legalByUci(board, uci){const want=moveFromUci(uci); return legalMoves(board).find(m=>moveEq(m,want));}
 function policyFor(board, entries){const m=new Map(); for(const [uci,p] of Object.entries(entries)){const mv=legalByUci(board,uci); if(mv) m.set(moveToActionId(mv),p);} return m;}
+function actionValuesFor(board, entries){const m=new Map(); for(const [uci,v] of Object.entries(entries)){const mv=legalByUci(board,uci); if(mv) m.set(moveToActionId(mv),v);} return m;}
 function evaluator(fn){return { async evaluate(board, opts={}){ return fn(board, opts); } };}
+function batchEvaluator(fn){
+  const calls={single:0,batch:0,batchBoards:0};
+  return { calls, async evaluate(board, opts={}){ calls.single++; return fn(board, opts); }, async evaluateBatch(boards, opts=[]){ calls.batch++; calls.batchBoards += boards.length; return boards.map((b,i)=>fn(b, opts[i] ?? {})); } };
+}
 const START='rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 async function testPolicyIdentity(){
@@ -51,8 +56,29 @@ async function testTieBreakByQThenPrior(){
   assert.equal(moveToUci(r.move),'g1f3','equal visits/Q should tie-break by larger/equal prior preserving deterministic first high-prior edge');
 }
 
-for (const t of [testPolicyIdentity,testAllZeroPolicyUniformFallback,testValuePerspectiveFlip,testTerminalNoLegalMoves,testTieBreakByQThenPrior]) {
+async function testBatchedEvaluatorPath(){
+  const ev=batchEvaluator((board)=>({ policy:policyFor(board,{g1f3:0.6,b1c3:0.4,e2e4:0.2,d2d4:0.1}), wdl:[0.5,0,0.5] }));
+  const r=await searchRoot(parseFen(START),ev,{visits:8,batchSize:4,temperature:0});
+  assert.equal(r.visits,8);
+  assert.ok(ev.calls.batch > 0, 'batched PUCT should call evaluateBatch');
+  assert.ok(r.move, 'batched PUCT should return a move');
+}
+
+async function testActionValuePolicyGuidesSelection(){
+  const ev=evaluator((board)=>({
+    policy:policyFor(board,{g1f3:0.51,e2e4:0.49}),
+    actionValues:actionValuesFor(board,{g1f3:-0.5,e2e4:0.8}),
+    wdl:[0.5,0,0.5],
+  }));
+  const classic=await searchRoot(parseFen(START),ev,{visits:1,temperature:0});
+  assert.equal(moveToUci(classic.move),'g1f3','classic PUCT should still follow policy prior');
+  const av=await searchRoot(parseFen(START),ev,{visits:1,temperature:0,searchPolicy:actionValuePuctPolicy,avWeight:1.0});
+  assert.equal(moveToUci(av.move),'e2e4','AV-PUCT should use edge actionValuePrior to guide low-visit selection');
+}
+
+const tests=[testPolicyIdentity,testAllZeroPolicyUniformFallback,testValuePerspectiveFlip,testTerminalNoLegalMoves,testTieBreakByQThenPrior,testBatchedEvaluatorPath,testActionValuePolicyGuidesSelection];
+for (const t of tests) {
   await t();
   console.log(`ok ${t.name}`);
 }
-console.log('METRIC puct_core_tests=5');
+console.log(`METRIC puct_core_tests=${tests.length}`);

@@ -63,6 +63,25 @@ Examples:
 
 Elo from small samples is noisy, so always report confidence or at least number of games and W/D/L.
 
+## Size/latency efficiency is part of evaluation
+
+Raw Elo is not enough for tiny_leela.  For browser and small-engine work, every serious comparison should also report params, ONNX bundle bytes, quantized bytes when available, and eval latency.  Use the standard efficiency doc and tool:
+
+```text
+docs/model_efficiency_metrics.md
+eval/model_efficiency_report.py
+```
+
+Preferred resource metrics are incremental, not raw `Elo / byte`:
+
+```text
+EloPerByteDoubling = ΔElo / log2(model_bytes / baseline_bytes)
+EloPerParamDoubling = ΔElo / log2(params / baseline_params)
+EloPerLatencyDoubling = ΔElo / log2(eval_ms / baseline_eval_ms)
+```
+
+Also identify the Pareto frontier: candidates that are not simultaneously weaker, larger, and slower than another candidate under the same protocol.
+
 ## Recommended evaluation funnel
 
 Do not send every model through a large arena. Use a staged process:

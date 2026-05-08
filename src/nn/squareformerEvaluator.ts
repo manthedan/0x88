@@ -119,26 +119,51 @@ function squareformerPolicyIndex(move: Move): number {
   return ft;
 }
 
+function sessionOptions(): ort.InferenceSession.SessionOptions {
+  const threads = Number(globalThis.process?.env?.ORT_INTRA_OP_NUM_THREADS ?? globalThis.process?.env?.ORT_NUM_THREADS ?? '0');
+  const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all' };
+  if (Number.isFinite(threads) && threads > 0) {
+    opts.intraOpNumThreads = Math.floor(threads);
+    opts.interOpNumThreads = 1;
+  }
+  return opts;
+}
+
 export class SquareFormerEvaluator implements Evaluator {
   private session: ort.InferenceSession;
   private meta: SquareFormerMeta;
   constructor(session: ort.InferenceSession, meta: SquareFormerMeta) { this.session = session; this.meta = meta; }
   static async create(modelPath: string | Uint8Array | ArrayBuffer, meta: SquareFormerMeta): Promise<SquareFormerEvaluator> {
-    return new SquareFormerEvaluator(await ort.InferenceSession.create(modelPath as never), meta);
+    return new SquareFormerEvaluator(await ort.InferenceSession.create(modelPath as never, sessionOptions()), meta);
   }
   async evaluate(board: BoardState, context: EvaluationContext = {}): Promise<Evaluation> {
+    return (await this.evaluateBatch([board], [context]))[0];
+  }
+
+  async evaluateBatch(boards: BoardState[], contexts: EvaluationContext[] = []): Promise<Evaluation[]> {
+    if (!boards.length) return [];
     const compact = this.meta.input_format === 'compact_uint8_embeddings';
-    const input = compact ? squareformerCompactInput(board, this.meta, context.historyFens ?? []) : squareformerFloatInput(board, this.meta, context.historyFens ?? []);
-    const shape: [number, number, number] = compact ? [1, 64, this.meta.token_features ?? this.meta.history_plies + 9] : [1, 64, this.meta.input_dim];
+    const stride = compact ? this.meta.token_features ?? this.meta.history_plies + 9 : this.meta.input_dim;
+    const one = 64 * stride;
+    const input = compact ? new BigInt64Array(boards.length * one) : new Float32Array(boards.length * one);
+    for (let i = 0; i < boards.length; i++) {
+      const row = compact ? squareformerCompactInput(boards[i], this.meta, contexts[i]?.historyFens ?? []) : squareformerFloatInput(boards[i], this.meta, contexts[i]?.historyFens ?? []);
+      (input as BigInt64Array | Float32Array).set(row as never, i * one);
+    }
+    const shape: [number, number, number] = [boards.length, 64, stride];
     const outputs = await this.session.run({ tokens: compact ? new ort.Tensor('int64', input as BigInt64Array, shape) : new ort.Tensor('float32', input as Float32Array, shape) });
     const policyRaw = (outputs.policy?.data ?? Object.values(outputs)[0].data) as Float32Array;
     const wdlRaw = (outputs.wdl?.data ?? Object.values(outputs)[1].data) as Float32Array;
-    const legal = legalMoves(board);
-    const logits = legal.map((move) => Number(policyRaw[squareformerPolicyIndex(move)] ?? -100));
-    const probs = softmax(logits);
-    const policy = new Map<number, number>();
-    legal.forEach((move, i) => policy.set(moveToActionId(move), probs[i] ?? 0));
-    const wdl = softmax(wdlRaw);
-    return { policy, wdl: [wdl[0] ?? 0, wdl[1] ?? 0, wdl[2] ?? 0] };
+    const policySize = this.meta.policy_size;
+    return boards.map((board, i) => {
+      const legal = legalMoves(board);
+      const policyRow = policyRaw.subarray(i * policySize, (i + 1) * policySize);
+      const logits = legal.map((move) => Number(policyRow[squareformerPolicyIndex(move)] ?? -100));
+      const probs = softmax(logits);
+      const policy = new Map<number, number>();
+      legal.forEach((move, j) => policy.set(moveToActionId(move), probs[j] ?? 0));
+      const wdl = softmax(wdlRaw.subarray(i * 3, i * 3 + 3));
+      return { policy, wdl: [wdl[0] ?? 0, wdl[1] ?? 0, wdl[2] ?? 0] as [number, number, number] };
+    });
   }
 }

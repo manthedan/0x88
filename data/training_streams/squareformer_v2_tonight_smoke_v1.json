@@ -1,0 +1,71 @@
+{
+  "config_id": "squareformer_v2_tonight_smoke_v1",
+  "created_at_unix": 1778210189.3969102,
+  "streams": [
+    {
+      "name": "policy_clean",
+      "ratio": 0.55,
+      "kind": "supervised_cache",
+      "dataset": "data/datasets/supervised_100m_elite_tcec_v1",
+      "cache_manifest": "data/datasets/supervised_100m_elite_tcec_v1/cache_squareformer_h2/cache_manifest.json",
+      "loss_mask": {
+        "policy": 1.0,
+        "wdl": 1.0,
+        "q_bucket": 0.0,
+        "av": 0.0,
+        "ranking": 0.0,
+        "regret": 0.0
+      },
+      "sample_weight": 1.0
+    },
+    {
+      "name": "value_broad_stockfish_100k",
+      "ratio": 0.2,
+      "kind": "position_eval_overlay",
+      "shards": [
+        "data/teacher/root_stockfish_d8_mpv4_100k_pilot_v1/labels/root_stockfish_d8_mpv4_100k.jsonl.zst"
+      ],
+      "loss_mask": {
+        "policy": 0.25,
+        "wdl": 1.0,
+        "q_bucket": 1.0,
+        "av": 0.0,
+        "ranking": 0.0,
+        "regret": 0.0
+      },
+      "sample_weight": 1.0,
+      "notes": "Root Stockfish pilot; policy is sparse MultiPV teacher, not behavior cloning."
+    },
+    {
+      "name": "action_value_stockfish_multipv_100k",
+      "ratio": 0.25,
+      "kind": "action_value_overlay",
+      "shards": [
+        "data/public_teacher_overlays/stockfish_root_multipv_av_100k_v1/shards/part_000000.jsonl.zst"
+      ],
+      "candidate_source": "group_by_position_key",
+      "max_candidates": 8,
+      "loss_mask": {
+        "policy": 0.0,
+        "wdl": 0.0,
+        "q_bucket": 0.0,
+        "av": 1.0,
+        "ranking": 0.5,
+        "regret": 0.25
+      },
+      "sample_weight": 1.0,
+      "notes": "Smoke AV labels from root MultiPV scores. Replace/augment with ChessBench ASAP."
+    }
+  ],
+  "dev": {
+    "policy_dev": "data/datasets/supervised_100m_elite_tcec_v1/dev/dev_1000000.jsonl.zst",
+    "av_dev_overlay": "data/public_teacher_overlays/stockfish_root_multipv_av_100k_v1/shards/part_000000.jsonl.zst"
+  },
+  "recommended_first_train": {
+    "max_rows": 1000000,
+    "epochs": 1,
+    "batch_size": 256,
+    "variant": "v2",
+    "goal": "prove V2 plumbing/AV metrics, not strength claim"
+  }
+}

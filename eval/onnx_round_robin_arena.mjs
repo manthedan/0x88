@@ -49,9 +49,36 @@ const defaultOpenings = [
   'rnbqkbnr/pppppppp/8/8/8/2N5/PPPPPPPP/R1BQKBNR b KQkq - 1 1',
 ];
 const openings = openingsFile ? readFileSync(openingsFile, 'utf8').split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.startsWith('#')).map(s => s.split(/\s+#/)[0].trim()) : defaultOpenings;
+function cacheKey(board, context = {}) {
+  const history = (context.historyFens ?? []).slice(0, 2).join('|');
+  return `${boardToFen(board)}#${history}`;
+}
+
+class CachedEvaluator {
+  constructor(inner, maxEntries = 50000) {
+    this.inner = inner;
+    this.maxEntries = maxEntries;
+    this.cache = new Map();
+    this.hits = 0;
+    this.misses = 0;
+  }
+  async evaluate(board, context = {}) {
+    const key = cacheKey(board, context);
+    const cached = this.cache.get(key);
+    if (cached) { this.hits++; return cached; }
+    this.misses++;
+    const value = await this.inner.evaluate(board, context);
+    this.cache.set(key, value);
+    if (this.cache.size > this.maxEntries) this.cache.delete(this.cache.keys().next().value);
+    return value;
+  }
+}
+
+const evalCacheEntries = Number(arg('--eval-cache-entries', process.env.EVAL_CACHE_ENTRIES ?? '50000'));
 async function loadEvaluator(onnx, metaPath) {
   const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
-  return meta.kind === 'squareformer' ? SquareFormerEvaluator.create(onnx, meta) : OnnxEvaluator.create(onnx, meta);
+  const inner = meta.kind === 'squareformer' ? await SquareFormerEvaluator.create(onnx, meta) : await OnnxEvaluator.create(onnx, meta);
+  return evalCacheEntries > 0 ? new CachedEvaluator(inner, evalCacheEntries) : inner;
 }
 const models = new Map();
 for (const s of specs) {
@@ -101,7 +128,8 @@ for (let i = 0; i < specs.length; i++) for (let j = i + 1; j < specs.length; j++
 }
 const standings = Object.entries(table).map(([name, r]) => ({ name, ...r, scoreRate: r.score / Math.max(1, r.games), eloVsPool: elo(r.score / Math.max(1, r.games)) })).sort((a,b)=>b.scoreRate-a.scoreRate);
 mkdirSync(dirname(out), { recursive: true });
-const protocol = { kind:'onnx_round_robin_arena', models:specs, visits, cpuct, maxPlies, gamesPerPair, openingsFile, openings: openings.length, createdUtc:new Date().toISOString() };
+const cacheStats = Object.fromEntries([...models.entries()].map(([name, evaluator]) => [name, { hits: evaluator.hits ?? 0, misses: evaluator.misses ?? 0, entries: evaluator.cache?.size ?? 0 }]));
+const protocol = { kind:'onnx_round_robin_arena', models:specs, visits, cpuct, maxPlies, gamesPerPair, openingsFile, openings: openings.length, evalCacheEntries, cacheStats, ortThreads: process.env.ORT_INTRA_OP_NUM_THREADS ?? process.env.ORT_NUM_THREADS ?? null, createdUtc:new Date().toISOString() };
 writeFileSync(out, JSON.stringify({ visits, cpuct, maxPlies, gamesPerPair, openingsFile, openings: openings.length, protocol, standings, games }, null, 2));
 writeFileSync(`${out}.protocol.json`, JSON.stringify(protocol, null, 2));
 standings.forEach((r, idx) => {

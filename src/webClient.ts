@@ -2,11 +2,26 @@ import { Chessground } from 'chessground';
 import type { Key } from 'chessground/types';
 import { parseFen, boardToFen, squareName, START_FEN, type BoardState } from './chess/board.ts';
 import { legalMoves, makeMove } from './chess/movegen.ts';
-import { moveToActionId, moveToUci, type Move } from './chess/moveCodec.ts';
-import { chooseMove } from './search/puct.ts';
+import { moveFromUci, moveToActionId, moveToUci, type Move } from './chess/moveCodec.ts';
+import { actionValuePuctPolicy, chooseMove } from './search/puct.ts';
 import { OnnxEvaluator, type OnnxStudentMeta } from './nn/onnxEvaluator.ts';
 import { SquareFormerEvaluator, type SquareFormerMeta } from './nn/squareformerEvaluator.ts';
 import type { Evaluator } from './nn/evaluator.ts';
+
+const MICRO_OPENING_BOOK = [
+  ['e2e4', 'e7e5'], // Open Game
+  ['e2e4', 'c7c5'], // Sicilian
+  ['e2e4', 'c7c6'], // Caro-Kann
+  ['e2e4', 'e7e6'], // French
+  ['d2d4', 'd7d5'], // Queen's Pawn
+  ['d2d4', 'g8f6'], // Indian setup
+  ['c2c4', 'e7e5'], // English reversed Sicilian
+  ['c2c4', 'c7c5'], // Symmetrical English
+  ['g1f3', 'd7d5'], // Reti
+  ['g2g3', 'd7d5'], // King's Fianchetto
+  ['b2b3', 'e7e5'], // Larsen
+  ['f2f4', 'd7d5'], // Bird
+];
 
 let board: BoardState = parseFen(START_FEN);
 let historyFens: string[] = [];
@@ -23,13 +38,17 @@ let stockfishScore = '';
 let stockfishPv = '';
 let stockfishSeq = 0;
 const params = new URLSearchParams(location.search);
-const visits = Number(params.get('visits') ?? '512');
+const visits = Number(params.get('visits') ?? '128');
+const puctBatchSize = Math.max(1, Number(params.get('batch') ?? '16'));
+const puctPolicy = params.get('puctPolicy') ?? 'classic';
+const avWeight = Number(params.get('avWeight') ?? '0.25');
 const requestedPlayMode = params.get('mode') ?? 'puct';
 const temperature = Number(params.get('temperature') ?? '1');
 const topK = Number(params.get('topk') ?? '0');
 const topP = Number(params.get('topp') ?? '1');
 const stockfishDepth = Number(params.get('sfdepth') ?? '10');
-const modelKey = params.get('model') ?? 'sfaux';
+const openingMode = params.get('opening') ?? 'book';
+const modelKey = params.get('model') ?? '32x4';
 let busy = false;
 let renderSeq = 0;
 const models: Record<string, { onnx: string; meta: string; label: string; forcedMode?: string }> = {
@@ -46,6 +65,12 @@ const models: Record<string, { onnx: string; meta: string; label: string; forced
   'square-v1-smoke-puct': { onnx: '/models/squareformer_v1_100k_e3_single.onnx', meta: '/models/squareformer_v1_100k_e3_single.meta.json', label: 'SquareFormer v1 100k PUCT', forcedMode: 'puct' },
   'chessformer-v1-100m-e3-policy': { onnx: '/models/chessformer_v1_100m_e3_single.onnx', meta: '/models/chessformer_v1_100m_e3_single.meta.json', label: 'ChessFormer v1 100M e3 policy-only', forcedMode: 'argmax' },
   'chessformer-v1-100m-e3-puct': { onnx: '/models/chessformer_v1_100m_e3_single.onnx', meta: '/models/chessformer_v1_100m_e3_single.meta.json', label: 'ChessFormer v1 100M e3 PUCT', forcedMode: 'puct' },
+  'cnn-64x6-100m-e3-puct': { onnx: '/models/cnn_64x6_100m_e3.onnx', meta: '/models/cnn_64x6_100m_e3.meta.json', label: 'CNN 64x6 100M e3 PUCT', forcedMode: 'puct' },
+  'cnn-64x6-100m-e3-policy': { onnx: '/models/cnn_64x6_100m_e3.onnx', meta: '/models/cnn_64x6_100m_e3.meta.json', label: 'CNN 64x6 100M e3 policy-only', forcedMode: 'argmax' },
+  'cnn-48x5-100m-e3-puct': { onnx: '/models/cnn_48x5_100m_e3.onnx', meta: '/models/cnn_48x5_100m_e3.meta.json', label: 'CNN 48x5 100M e3 PUCT', forcedMode: 'puct' },
+  'cnn-48x5-100m-e3-policy': { onnx: '/models/cnn_48x5_100m_e3.onnx', meta: '/models/cnn_48x5_100m_e3.meta.json', label: 'CNN 48x5 100M e3 policy-only', forcedMode: 'argmax' },
+  'cnn-32x4-100m-e3-puct': { onnx: '/models/cnn_32x4_100m_e3.onnx', meta: '/models/cnn_32x4_100m_e3.meta.json', label: 'CNN 32x4 100M e3 PUCT', forcedMode: 'puct' },
+  'cnn-32x4-100m-e3-policy': { onnx: '/models/cnn_32x4_100m_e3.onnx', meta: '/models/cnn_32x4_100m_e3.meta.json', label: 'CNN 32x4 100M e3 policy-only', forcedMode: 'argmax' },
 };
 const selectedModel = models[modelKey] ?? models['32x4'];
 const playMode = selectedModel.forcedMode ?? requestedPlayMode;
@@ -61,6 +86,20 @@ function legalDests() {
 }
 function legalMoveByUci(uci: string) { return legalMoves(board).find((m) => moveToUci(m) === uci) ?? null; }
 function boardFen() { return boardToFen(board).split(' ')[0]; }
+function startFromMicroBook() {
+  board = parseFen(START_FEN); historyFens = []; lastMove = null; playedMoves = [];
+  if (openingMode === 'start') return 'Start position.';
+  const line = MICRO_OPENING_BOOK[Math.floor(Math.random() * MICRO_OPENING_BOOK.length)];
+  for (const uci of line) {
+    const before = boardToFen(board);
+    const move = legalMoves(board).find((m) => moveToUci(m) === uci) ?? moveFromUci(uci);
+    historyFens = [before, ...historyFens];
+    board = makeMove(board, move);
+    lastMove = uci;
+    playedMoves.push(uci);
+  }
+  return `Random 2-ply book: ${line.join(' ')}.`;
+}
 function initModelSelect() {
   const select = document.getElementById('modelSelect') as HTMLSelectElement | null;
   if (!select) return;
@@ -71,8 +110,37 @@ function initModelSelect() {
     location.href = url.toString();
   };
 }
+function initRunConfigChips() {
+  const visitsChip = document.getElementById('visitsChip');
+  const batchChip = document.getElementById('batchChip');
+  if (visitsChip) visitsChip.textContent = playMode === 'puct' ? `visits ${visits}` : `policy ${playMode}`;
+  if (batchChip) batchChip.textContent = playMode === 'puct' ? `batch ${puctBatchSize}` : `top-k ${topK || 'all'}`;
+}
+type UiMode = 'play' | 'analysis';
+let uiMode: UiMode = 'play';
+function setUiMode(mode: UiMode) {
+  uiMode = mode;
+  document.body.classList.toggle('analysis-mode', mode === 'analysis');
+  document.getElementById('playModeBtn')?.classList.toggle('active', mode === 'play');
+  document.getElementById('analysisModeBtn')?.classList.toggle('active', mode === 'analysis');
+}
+function toggleUiMode() {
+  setUiMode(uiMode === 'play' ? 'analysis' : 'play');
+}
+function initUiMode() {
+  setUiMode(params.get('view') === 'analysis' ? 'analysis' : 'play');
+  document.querySelector('.mode-pill')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    toggleUiMode();
+  });
+}
 function renderWdl(wdl: [number, number, number]) {
-  $('wdl').innerHTML = ['Win','Draw','Loss'].map((name,i)=>`<div class="bar"><span>${name}</span><div class="track"><div class="fill" style="width:${Math.round((wdl[i]??0)*100)}%"></div></div><span>${((wdl[i]??0)*100).toFixed(1)}%</span></div>`).join('');
+  const parts = [
+    { name: 'win', value: wdl[0] ?? 0, cls: 'wdl-win' },
+    { name: 'draw', value: wdl[1] ?? 0, cls: 'wdl-draw' },
+    { name: 'loss', value: wdl[2] ?? 0, cls: 'wdl-loss' },
+  ];
+  $('wdl').innerHTML = `<div class="wdl-stack">${parts.map((p)=>`<div class="wdl-seg ${p.cls}" style="width:${Math.max(0, p.value * 100)}%">${(p.value * 100).toFixed(0)}%</div>`).join('')}</div><div class="wdl-labels"><span>win</span><span>draw</span><span>loss</span></div>`;
 }
 function renderMoves() {
   const cells: string[] = [];
@@ -101,13 +169,22 @@ function renderStockfish() {
   $('stockfish').innerHTML = `<div>${status}</div><div class="score">${stockfishScore || '—'}</div><div>Best: <span class="mono">${stockfishBest || '—'}</span></div><div class="pv">PV: <span class="mono">${stockfishPv || '—'}</span></div>`;
 }
 function controlsEnabled(enabled: boolean) {
-  for (const id of ['engine','reset','flip','loadFen']) (($(id) as HTMLButtonElement).disabled = !enabled);
-  ($('stockfishBtn') as HTMLButtonElement).disabled = !!stockfish && !stockfishReady;
+  for (const id of ['engine','engineAnalysis','reset','resetAnalysis','flip','flipAnalysis','loadFen']) {
+    const el = document.getElementById(id) as HTMLButtonElement | null;
+    if (el) el.disabled = !enabled;
+  }
+  for (const id of ['stockfishBtn','stockfishAnalysis']) {
+    const el = document.getElementById(id) as HTMLButtonElement | null;
+    if (el) el.disabled = !!stockfish && !stockfishReady;
+  }
 }
 async function render(message = '') {
   const seq = ++renderSeq;
   $('fen').textContent = boardToFen(board);
-  $('status').textContent = evaluator ? `${selectedModel.label} · ${playMode === 'puct' ? `${visits} visits` : `policy ${playMode}`}${busy ? ' · thinking…' : ''}` : 'loading';
+  const statusText = evaluator ? `${selectedModel.label} · ${playMode === 'puct' ? `${visits} visits · batch ${puctBatchSize}${puctPolicy === 'av' ? ` · AV ${avWeight}` : ''}` : `policy ${playMode}`}${busy ? ' · thinking…' : ''}` : 'loading';
+  $('status').textContent = statusText;
+  const analysisStatus = document.getElementById('analysisStatus');
+  if (analysisStatus) analysisStatus.textContent = statusText;
   controlsEnabled(!busy && !!evaluator);
   if (message) $('message').textContent = message;
   renderMoves();
@@ -123,7 +200,8 @@ async function render(message = '') {
   if (seq !== renderSeq) return;
   renderWdl(ev.wdl);
   const rows = legalMoves(board).map((m: Move) => ({ uci: moveToUci(m), prior: ev.policy.get(moveToActionId(m)) ?? 0 })).sort((a,b)=>b.prior-a.prior).slice(0,16);
-  $('moves').innerHTML = rows.map((r)=>`<li><b>${r.uci}</b> ${(r.prior*100).toFixed(2)}%</li>`).join('');
+  const maxPrior = Math.max(1e-9, ...rows.map((r) => r.prior));
+  $('moves').innerHTML = rows.map((r, i)=>`<li class="policy-row ${i === 0 ? 'best' : ''}"><span class="rank">${i + 1}</span><b>${r.uci}</b><span class="policy-meter"><span style="width:${Math.max(2, (r.prior / maxPrior) * 100)}%"></span></span><span class="pct">${(r.prior*100).toFixed(2)}%</span></li>`).join('');
   requestStockfishAnalysis();
 }
 function startStockfish() {
@@ -213,24 +291,36 @@ async function engineMove() {
   document.body.style.cursor = 'progress';
   await render('Engine thinking…');
   try {
-    const move = playMode === 'puct' ? (await chooseMove(board, evaluator, { visits, historyFens })).move : await choosePolicyMove();
+    const move = playMode === 'puct' ? (await chooseMove(board, evaluator, { visits, batchSize: puctBatchSize, historyFens, searchPolicy: puctPolicy === 'av' ? actionValuePuctPolicy : undefined, avWeight })).move : await choosePolicyMove();
     if (move) await playMove(move, 'Engine');
     else await render('No legal engine move.');
+  } catch (e) {
+    console.error(e);
+    await render(`Engine failed: ${(e as Error).message}`);
   } finally { busy = false; document.body.style.cursor = ''; await render(); }
 }
+const onReset = async () => { if (busy) return; await render(startFromMicroBook()); };
+const onFlip = async () => { if (busy) return; orientation = orientation === 'white' ? 'black' : 'white'; await render(); };
 $('engine').onclick = () => engineMove();
+$('engineAnalysis').onclick = () => engineMove();
 $('stockfishBtn').onclick = () => startStockfish();
-$('reset').onclick = async () => { if (busy) return; board = parseFen(START_FEN); historyFens = []; lastMove = null; playedMoves = []; await render('Reset.'); };
-$('flip').onclick = async () => { if (busy) return; orientation = orientation === 'white' ? 'black' : 'white'; await render(); };
+$('stockfishAnalysis').onclick = () => startStockfish();
+$('reset').onclick = onReset;
+$('resetAnalysis').onclick = onReset;
+$('flip').onclick = onFlip;
+$('flipAnalysis').onclick = onFlip;
 $('loadFen').onclick = async () => { if (busy) return; board = parseFen(($('fenInput') as HTMLInputElement).value || START_FEN); historyFens = []; lastMove = null; playedMoves = []; await render('Loaded FEN.'); };
 
 async function main() {
+  initUiMode();
   initModelSelect();
-  await render();
+  initRunConfigChips();
+  const initialMessage = startFromMicroBook();
+  await render(initialMessage);
   const meta = await fetch(selectedModel.meta).then((r) => r.json()) as OnnxStudentMeta | SquareFormerMeta;
   evaluator = meta.kind === 'squareformer'
     ? await SquareFormerEvaluator.create(selectedModel.onnx, meta as SquareFormerMeta)
     : await OnnxEvaluator.create(selectedModel.onnx, meta as OnnxStudentMeta);
-  await render(`Loaded ${selectedModel.label}. Mode: ${playMode === 'puct' ? `${visits} visits` : `policy ${playMode}`}.`);
+  await render(`Loaded ${selectedModel.label}. Mode: ${playMode === 'puct' ? `${visits} visits, batch ${puctBatchSize}${puctPolicy === 'av' ? `, AV ${avWeight}` : ''}` : `policy ${playMode}`}.`);
 }
 main().catch((e) => { console.error(e); $('message').textContent = `Failed: ${e.message}`; });

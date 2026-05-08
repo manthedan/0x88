@@ -13,6 +13,12 @@ data/balanced_*.json
 data/cache/
 data/datasets/
 data/stockfish_aug/
+data/teacher/
+data/public_teacher_raw
+/data/public_teacher_raw
+data/public_teacher_raw/
+data/public_teacher_raw.local_moved_*
+data/public_teacher_overlays/
 artifacts/
 logs/
 dist-client/
