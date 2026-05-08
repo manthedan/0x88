@@ -156,7 +156,9 @@ const judgeMeta = arg('--judge-meta', '');
 const adjudicateThreshold = Number(arg('--adjudicate-threshold', '0.05'));
 const shardCount = Math.max(1, Number(arg('--shard-count', '1')));
 const shardIndex = Math.max(0, Number(arg('--shard-index', '0')));
+const anchorPlayer = arg('--anchor-player', '');
 if (shardIndex >= shardCount) throw new Error(`Bad shard index ${shardIndex} for shard count ${shardCount}`);
+if (anchorPlayer && !players.some((p) => p.name === anchorPlayer)) throw new Error(`Unknown --anchor-player: ${anchorPlayer}`);
 const defaultOpenings = [
   START_FEN,
   'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1',
@@ -179,7 +181,9 @@ for (let i = 0; i < players.length; i++) for (let j = i + 1; j < players.length;
   const a = players[i], b = players[j];
   const pairKey = `${a.name}__${b.name}`;
   pairTable[pairKey] = { a: a.name, b: b.name, aScore: 0, games: 0, aWdl: [0, 0, 0] };
-  for (let g = 0; g < gamesPerPair; g++) jobs.push({ i, j, g, a, b, pairKey });
+  if (!anchorPlayer || a.name === anchorPlayer || b.name === anchorPlayer) {
+    for (let g = 0; g < gamesPerPair; g++) jobs.push({ i, j, g, a, b, pairKey });
+  }
 }
 const selectedJobs = jobs.filter((_, idx) => idx % shardCount === shardIndex);
 const startedAt = Date.now();
@@ -224,7 +228,7 @@ const standings = Object.entries(table).map(([name, r]) => ({ name, ...r, scoreR
 const pairs = Object.values(pairTable).map((r) => ({ ...r, aScoreRate: r.aScore / Math.max(1, r.games) }));
 const cacheStats = Object.fromEntries([...evaluators.entries()].map(([name, evaluator]) => [name, { hits: evaluator.hits ?? 0, misses: evaluator.misses ?? 0, entries: evaluator.cache?.size ?? 0 }]));
 const modelResources = Object.fromEntries(players.map((p) => [p.name, { onnx: p.onnx, meta: p.meta, bundleBytes: bundleBytes(p.onnx) }]));
-const protocol = { kind:'search_mode_arena', players, visits, cpuct, batchSize, maxPlies, gamesPerPair, openingsFile, openings: openings.length, evalCacheEntries, cacheStats, modelResources, judgeModel, judgeMeta, adjudicateThreshold, shardCount, shardIndex, shardGames: selectedJobs.length, totalGames: jobs.length, ortThreads: process.env.ORT_INTRA_OP_NUM_THREADS ?? process.env.ORT_NUM_THREADS ?? null, elapsedMs: Date.now() - startedAt, createdUtc:new Date().toISOString() };
+const protocol = { kind:'search_mode_arena', players, visits, cpuct, batchSize, maxPlies, gamesPerPair, openingsFile, openings: openings.length, evalCacheEntries, cacheStats, modelResources, judgeModel, judgeMeta, adjudicateThreshold, anchorPlayer, shardCount, shardIndex, shardGames: selectedJobs.length, totalGames: jobs.length, ortThreads: process.env.ORT_INTRA_OP_NUM_THREADS ?? process.env.ORT_NUM_THREADS ?? null, elapsedMs: Date.now() - startedAt, createdUtc:new Date().toISOString() };
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, JSON.stringify({ protocol, standings, pairs, games }, null, 2));
 writeFileSync(`${out}.protocol.json`, JSON.stringify(protocol, null, 2));
