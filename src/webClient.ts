@@ -30,6 +30,12 @@ let ground: ReturnType<typeof Chessground> | null = null;
 let orientation: 'white' | 'black' = 'white';
 let lastMove: string | null = null;
 let playedMoves: string[] = [];
+const params = new URLSearchParams(location.search);
+const initialClockMs = Math.max(10, Number(params.get('clock') ?? '300')) * 1000;
+let whiteClockMs = initialClockMs;
+let blackClockMs = initialClockMs;
+let lastClockTick = performance.now();
+let clockRunning = false;
 let stockfish: Worker | null = null;
 let stockfishReady = false;
 let stockfishThinking = false;
@@ -37,7 +43,6 @@ let stockfishBest = '';
 let stockfishScore = '';
 let stockfishPv = '';
 let stockfishSeq = 0;
-const params = new URLSearchParams(location.search);
 const visits = Number(params.get('visits') ?? '128');
 const puctBatchSize = Math.max(1, Number(params.get('batch') ?? '16'));
 const puctPolicy = params.get('puctPolicy') ?? 'classic';
@@ -87,7 +92,7 @@ function legalDests() {
 function legalMoveByUci(uci: string) { return legalMoves(board).find((m) => moveToUci(m) === uci) ?? null; }
 function boardFen() { return boardToFen(board).split(' ')[0]; }
 function startFromMicroBook() {
-  board = parseFen(START_FEN); historyFens = []; lastMove = null; playedMoves = [];
+  board = parseFen(START_FEN); historyFens = []; lastMove = null; playedMoves = []; resetClocks();
   if (openingMode === 'start') return 'Start position.';
   const line = MICRO_OPENING_BOOK[Math.floor(Math.random() * MICRO_OPENING_BOOK.length)];
   for (const uci of line) {
@@ -115,6 +120,40 @@ function initRunConfigChips() {
   const batchChip = document.getElementById('batchChip');
   if (visitsChip) visitsChip.textContent = playMode === 'puct' ? `visits ${visits}` : `policy ${playMode}`;
   if (batchChip) batchChip.textContent = playMode === 'puct' ? `batch ${puctBatchSize}` : `top-k ${topK || 'all'}`;
+  const modelInfo = document.getElementById('modelInfo');
+  if (modelInfo) modelInfo.innerHTML = `<code>${modelKey}</code> · ${selectedModel.label} · ${playMode === 'puct' ? `${visits} visits` : playMode}`;
+}
+function resetClocks() {
+  whiteClockMs = initialClockMs;
+  blackClockMs = initialClockMs;
+  lastClockTick = performance.now();
+}
+function formatClock(ms: number) {
+  const clamped = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(clamped / 60);
+  const seconds = clamped % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+function updateClockDisplay() {
+  const playerClock = document.getElementById('playerClock');
+  const engineClock = document.getElementById('engineClock');
+  if (!playerClock || !engineClock) return;
+  playerClock.textContent = formatClock(whiteClockMs);
+  engineClock.textContent = formatClock(blackClockMs);
+  playerClock.classList.toggle('active', board.turn === 'w');
+  engineClock.classList.toggle('active', board.turn === 'b');
+  playerClock.classList.toggle('low', whiteClockMs <= 30_000);
+  engineClock.classList.toggle('low', blackClockMs <= 30_000);
+}
+function tickClocks() {
+  const now = performance.now();
+  const elapsed = now - lastClockTick;
+  lastClockTick = now;
+  if (clockRunning && evaluator && uiMode !== 'analysis') {
+    if (board.turn === 'w') whiteClockMs = Math.max(0, whiteClockMs - elapsed);
+    else blackClockMs = Math.max(0, blackClockMs - elapsed);
+  }
+  updateClockDisplay();
 }
 type UiMode = 'play' | 'analysis';
 let uiMode: UiMode = 'play';
@@ -129,9 +168,33 @@ function toggleUiMode() {
 }
 function initUiMode() {
   setUiMode(params.get('view') === 'analysis' ? 'analysis' : 'play');
-  document.querySelector('.mode-pill')?.addEventListener('click', (event) => {
+  const pill = document.querySelector('.mode-pill');
+  pill?.addEventListener('click', (event) => {
     event.preventDefault();
     toggleUiMode();
+  });
+  pill?.addEventListener('keydown', (event) => {
+    if (!(event instanceof KeyboardEvent) || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    toggleUiMode();
+  });
+}
+function initNavAndShortcuts() {
+  document.getElementById('modelsNav')?.addEventListener('click', () => {
+    document.getElementById('modelSelect')?.focus();
+  });
+  document.getElementById('docsNav')?.addEventListener('click', () => {
+    const panel = document.getElementById('docsPanel') as HTMLElement | null;
+    if (panel) panel.hidden = !panel.hidden;
+  });
+  document.addEventListener('keydown', (event) => {
+    const target = document.activeElement;
+    if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLButtonElement) return;
+    if (event.key === 'a') { event.preventDefault(); toggleUiMode(); }
+    else if (event.key === 'f') { event.preventDefault(); onFlip(); }
+    else if (event.key === 'n') { event.preventDefault(); onReset(); }
+    else if (event.key === ' ') { event.preventDefault(); engineMove(); }
+    else if (event.key === 's') { event.preventDefault(); startStockfish(); }
   });
 }
 function renderWdl(wdl: [number, number, number]) {
@@ -180,6 +243,7 @@ function controlsEnabled(enabled: boolean) {
 }
 async function render(message = '') {
   const seq = ++renderSeq;
+  updateClockDisplay();
   $('fen').textContent = boardToFen(board);
   const statusText = evaluator ? `${selectedModel.label} · ${playMode === 'puct' ? `${visits} visits · batch ${puctBatchSize}${puctPolicy === 'av' ? ` · AV ${avWeight}` : ''}` : `policy ${playMode}`}${busy ? ' · thinking…' : ''}` : 'loading';
   $('status').textContent = statusText;
@@ -309,10 +373,11 @@ $('reset').onclick = onReset;
 $('resetAnalysis').onclick = onReset;
 $('flip').onclick = onFlip;
 $('flipAnalysis').onclick = onFlip;
-$('loadFen').onclick = async () => { if (busy) return; board = parseFen(($('fenInput') as HTMLInputElement).value || START_FEN); historyFens = []; lastMove = null; playedMoves = []; await render('Loaded FEN.'); };
+$('loadFen').onclick = async () => { if (busy) return; board = parseFen(($('fenInput') as HTMLInputElement).value || START_FEN); historyFens = []; lastMove = null; playedMoves = []; resetClocks(); await render('Loaded FEN.'); };
 
 async function main() {
   initUiMode();
+  initNavAndShortcuts();
   initModelSelect();
   initRunConfigChips();
   const initialMessage = startFromMicroBook();
@@ -321,6 +386,8 @@ async function main() {
   evaluator = meta.kind === 'squareformer'
     ? await SquareFormerEvaluator.create(selectedModel.onnx, meta as SquareFormerMeta)
     : await OnnxEvaluator.create(selectedModel.onnx, meta as OnnxStudentMeta);
+  clockRunning = true;
+  setInterval(tickClocks, 250);
   await render(`Loaded ${selectedModel.label}. Mode: ${playMode === 'puct' ? `${visits} visits, batch ${puctBatchSize}${puctPolicy === 'av' ? `, AV ${avWeight}` : ''}` : `policy ${playMode}`}.`);
 }
 main().catch((e) => { console.error(e); $('message').textContent = `Failed: ${e.message}`; });
