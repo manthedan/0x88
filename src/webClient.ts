@@ -145,7 +145,7 @@ function updateClockDisplay() {
   playerClock.classList.toggle('low', whiteClockMs <= 30_000);
   engineClock.classList.toggle('low', blackClockMs <= 30_000);
 }
-function tickClocks() {
+function settleClock() {
   const now = performance.now();
   const elapsed = now - lastClockTick;
   lastClockTick = now;
@@ -154,6 +154,9 @@ function tickClocks() {
     else blackClockMs = Math.max(0, blackClockMs - elapsed);
   }
   updateClockDisplay();
+}
+function tickClocks() {
+  settleClock();
 }
 type UiMode = 'play' | 'analysis';
 let uiMode: UiMode = 'play';
@@ -313,6 +316,7 @@ function requestStockfishAnalysis() {
   renderStockfish();
 }
 async function playMove(move: Move, who: string) {
+  settleClock();
   const before = boardToFen(board);
   const uci = moveToUci(move);
   historyFens = [before, ...historyFens];
