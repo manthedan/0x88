@@ -8,29 +8,29 @@ import { OnnxEvaluator, type OnnxStudentMeta } from './nn/onnxEvaluator.ts';
 import { SquareFormerEvaluator, type SquareFormerMeta } from './nn/squareformerEvaluator.ts';
 import type { Evaluator } from './nn/evaluator.ts';
 
-const MICRO_OPENING_BOOK = [
-  ['e2e4', 'e7e5'], // Open Game
-  ['e2e4', 'c7c5'], // Sicilian
-  ['e2e4', 'c7c6'], // Caro-Kann
-  ['e2e4', 'e7e6'], // French
-  ['d2d4', 'd7d5'], // Queen's Pawn
-  ['d2d4', 'g8f6'], // Indian setup
-  ['c2c4', 'e7e5'], // English reversed Sicilian
-  ['c2c4', 'c7c5'], // Symmetrical English
-  ['g1f3', 'd7d5'], // Reti
-  ['g2g3', 'd7d5'], // King's Fianchetto
-  ['b2b3', 'e7e5'], // Larsen
-  ['f2f4', 'd7d5'], // Bird
-];
+const COMMON_OPENING_BOOK: Record<string, string[]> = {
+  e2e4: ['e7e5', 'c7c5', 'c7c6', 'e7e6', 'd7d6', 'g8f6'],
+  d2d4: ['d7d5', 'g8f6', 'e7e6', 'f7f5'],
+  c2c4: ['e7e5', 'c7c5', 'g8f6', 'e7e6'],
+  g1f3: ['d7d5', 'g8f6', 'c7c5'],
+  g2g3: ['d7d5', 'e7e5', 'g8f6'],
+  b2b3: ['e7e5', 'd7d5'],
+  f2f4: ['d7d5', 'e7e5', 'g8f6'],
+  b1c3: ['d7d5', 'e7e5'],
+  e2e3: ['d7d5', 'e7e5'],
+  c2c3: ['d7d5', 'e7e5'],
+};
 
+const params = new URLSearchParams(location.search);
+type PlayerSide = 'white' | 'black';
+let playerSide: PlayerSide = params.get('side') === 'black' ? 'black' : 'white';
 let board: BoardState = parseFen(START_FEN);
 let historyFens: string[] = [];
 let evaluator: Evaluator | null = null;
 let ground: ReturnType<typeof Chessground> | null = null;
-let orientation: 'white' | 'black' = 'white';
+let orientation: 'white' | 'black' = playerSide;
 let lastMove: string | null = null;
 let playedMoves: string[] = [];
-const params = new URLSearchParams(location.search);
 const initialClockMs = Math.max(10, Number(params.get('clock') ?? '300')) * 1000;
 let whiteClockMs = initialClockMs;
 let blackClockMs = initialClockMs;
@@ -91,19 +91,42 @@ function legalDests() {
 }
 function legalMoveByUci(uci: string) { return legalMoves(board).find((m) => moveToUci(m) === uci) ?? null; }
 function boardFen() { return boardToFen(board).split(' ')[0]; }
-function startFromMicroBook() {
-  board = parseFen(START_FEN); historyFens = []; lastMove = null; playedMoves = []; resetClocks();
-  if (openingMode === 'start') return 'Start position.';
-  const line = MICRO_OPENING_BOOK[Math.floor(Math.random() * MICRO_OPENING_BOOK.length)];
-  for (const uci of line) {
-    const before = boardToFen(board);
-    const move = legalMoves(board).find((m) => moveToUci(m) === uci) ?? moveFromUci(uci);
-    historyFens = [before, ...historyFens];
-    board = makeMove(board, move);
-    lastMove = uci;
-    playedMoves.push(uci);
+function randomChoice<T>(values: T[]) { return values[Math.floor(Math.random() * values.length)]; }
+function resetPositionState() {
+  board = parseFen(START_FEN);
+  historyFens = [];
+  lastMove = null;
+  playedMoves = [];
+  resetClocks();
+}
+function applySetupMove(uci: string) {
+  const before = boardToFen(board);
+  const move = legalMoves(board).find((m) => moveToUci(m) === uci) ?? moveFromUci(uci);
+  historyFens = [before, ...historyFens];
+  board = makeMove(board, move);
+  lastMove = uci;
+  playedMoves.push(uci);
+}
+function chooseBookReply(): Move | null {
+  if (uiMode === 'analysis' || openingMode === 'start' || playerSide !== 'white' || playedMoves.length !== 1 || board.turn !== 'b') return null;
+  const replies = COMMON_OPENING_BOOK[playedMoves[0]] ?? [];
+  const legalReplies = replies.map((uci) => legalMoveByUci(uci)).filter((move): move is Move => !!move);
+  return legalReplies.length ? randomChoice(legalReplies) : null;
+}
+function startPlayGame() {
+  resetPositionState();
+  orientation = playerSide;
+  if (openingMode === 'start') return `Start position. You are playing ${playerSide}.`;
+  if (playerSide === 'black') {
+    const firstMove = randomChoice(Object.keys(COMMON_OPENING_BOOK));
+    applySetupMove(firstMove);
+    return `Book first move: ${firstMove}. You to move as Black.`;
   }
-  return `Random 2-ply book: ${line.join(' ')}.`;
+  return 'Start position. Make White’s first move; Nibbler will answer from book when possible.';
+}
+function startAnalysisBoard() {
+  resetPositionState();
+  return 'Analysis board: start position.';
 }
 function initModelSelect() {
   const select = document.getElementById('modelSelect') as HTMLSelectElement | null;
@@ -120,8 +143,24 @@ function initRunConfigChips() {
   const batchChip = document.getElementById('batchChip');
   if (visitsChip) visitsChip.textContent = playMode === 'puct' ? `visits ${visits}` : `policy ${playMode}`;
   if (batchChip) batchChip.textContent = playMode === 'puct' ? `batch ${puctBatchSize}` : `top-k ${topK || 'all'}`;
+  updatePlayerSideControls();
   const modelInfo = document.getElementById('modelInfo');
-  if (modelInfo) modelInfo.innerHTML = `<code>${modelKey}</code> · ${selectedModel.label} · ${playMode === 'puct' ? `${visits} visits` : playMode}`;
+  if (modelInfo) modelInfo.innerHTML = `<code>${modelKey}</code> · ${selectedModel.label} · ${playMode === 'puct' ? `${visits} visits` : playMode} · ${playerSide}`;
+}
+function updatePlayerSideControls() {
+  document.getElementById('playWhite')?.classList.toggle('active', playerSide === 'white');
+  document.getElementById('playBlack')?.classList.toggle('active', playerSide === 'black');
+}
+function setPlayerSide(side: PlayerSide) {
+  if (busy || playerSide === side) return;
+  playerSide = side;
+  initRunConfigChips();
+  render(startPlayGame());
+}
+function initPlayerSideControls() {
+  document.getElementById('playWhite')?.addEventListener('click', () => setPlayerSide('white'));
+  document.getElementById('playBlack')?.addEventListener('click', () => setPlayerSide('black'));
+  updatePlayerSideControls();
 }
 function resetClocks() {
   whiteClockMs = initialClockMs;
@@ -235,7 +274,7 @@ function renderStockfish() {
   $('stockfish').innerHTML = `<div>${status}</div><div class="score">${stockfishScore || '—'}</div><div>Best: <span class="mono">${stockfishBest || '—'}</span></div><div class="pv">PV: <span class="mono">${stockfishPv || '—'}</span></div>`;
 }
 function controlsEnabled(enabled: boolean) {
-  for (const id of ['engine','engineAnalysis','reset','resetAnalysis','flip','flipAnalysis','loadFen']) {
+  for (const id of ['engine','engineAnalysis','reset','resetAnalysis','flip','flipAnalysis','loadFen','playWhite','playBlack']) {
     const el = document.getElementById(id) as HTMLButtonElement | null;
     if (el) el.disabled = !enabled;
   }
@@ -359,22 +398,24 @@ async function engineMove() {
   document.body.style.cursor = 'progress';
   await render('Engine thinking…');
   try {
-    const move = playMode === 'puct' ? (await chooseMove(board, evaluator, { visits, batchSize: puctBatchSize, historyFens, searchPolicy: puctPolicy === 'av' ? actionValuePuctPolicy : undefined, avWeight })).move : await choosePolicyMove();
-    if (move) await playMove(move, 'Engine');
+    const bookMove = chooseBookReply();
+    const move = bookMove ?? (playMode === 'puct' ? (await chooseMove(board, evaluator, { visits, batchSize: puctBatchSize, historyFens, searchPolicy: puctPolicy === 'av' ? actionValuePuctPolicy : undefined, avWeight })).move : await choosePolicyMove());
+    if (move) await playMove(move, bookMove ? 'Book' : 'Engine');
     else await render('No legal engine move.');
   } catch (e) {
     console.error(e);
     await render(`Engine failed: ${(e as Error).message}`);
   } finally { busy = false; document.body.style.cursor = ''; await render(); }
 }
-const onReset = async () => { if (busy) return; await render(startFromMicroBook()); };
+const onReset = async () => { if (busy) return; await render(uiMode === 'analysis' ? startAnalysisBoard() : startPlayGame()); };
+const onResetAnalysis = async () => { if (busy) return; await render(startAnalysisBoard()); };
 const onFlip = async () => { if (busy) return; orientation = orientation === 'white' ? 'black' : 'white'; await render(); };
 $('engine').onclick = () => engineMove();
 $('engineAnalysis').onclick = () => engineMove();
 $('stockfishBtn').onclick = () => startStockfish();
 $('stockfishAnalysis').onclick = () => startStockfish();
 $('reset').onclick = onReset;
-$('resetAnalysis').onclick = onReset;
+$('resetAnalysis').onclick = onResetAnalysis;
 $('flip').onclick = onFlip;
 $('flipAnalysis').onclick = onFlip;
 $('loadFen').onclick = async () => { if (busy) return; board = parseFen(($('fenInput') as HTMLInputElement).value || START_FEN); historyFens = []; lastMove = null; playedMoves = []; resetClocks(); await render('Loaded FEN.'); };
@@ -382,9 +423,10 @@ $('loadFen').onclick = async () => { if (busy) return; board = parseFen(($('fenI
 async function main() {
   initUiMode();
   initNavAndShortcuts();
+  initPlayerSideControls();
   initModelSelect();
   initRunConfigChips();
-  const initialMessage = startFromMicroBook();
+  const initialMessage = uiMode === 'analysis' ? startAnalysisBoard() : startPlayGame();
   await render(initialMessage);
   const meta = await fetch(selectedModel.meta).then((r) => r.json()) as OnnxStudentMeta | SquareFormerMeta;
   evaluator = meta.kind === 'squareformer'
