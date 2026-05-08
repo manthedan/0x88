@@ -156,7 +156,7 @@ export class SquareFormerEvaluator implements Evaluator {
     const wdlRaw = (outputs.wdl?.data ?? Object.values(outputs)[1].data) as Float32Array;
     const policySize = this.meta.policy_size;
     return boards.map((board, i) => {
-      const legal = legalMoves(board);
+      const legal = contexts[i]?.legalMoves ?? legalMoves(board);
       const policyRow = policyRaw.subarray(i * policySize, (i + 1) * policySize);
       const logits = legal.map((move) => Number(policyRow[squareformerPolicyIndex(move)] ?? -100));
       const probs = softmax(logits);

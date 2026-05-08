@@ -1,6 +1,6 @@
 import type { BoardState } from '../chess/board.ts';
 import { legalMoves } from '../chess/movegen.ts';
-import { moveToActionId } from '../chess/moveCodec.ts';
+import { moveToActionId, type Move } from '../chess/moveCodec.ts';
 
 export interface Evaluation {
   policy: Map<number, number>;
@@ -17,6 +17,8 @@ export interface Evaluation {
 export interface EvaluationContext {
   /** Previous position FENs, newest first. */
   historyFens?: string[];
+  /** Optional precomputed legal moves for this board, used to avoid duplicate movegen in search hot paths. */
+  legalMoves?: Move[];
 }
 
 export interface Evaluator {

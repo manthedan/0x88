@@ -39,9 +39,9 @@ function softmax(xs: ArrayLike<number>): number[] {
   return out.map((x) => x / total);
 }
 
-function normalizePolicy(policyRaw: ArrayLike<number>, board: BoardState): Map<number, number> {
+function normalizePolicy(policyRaw: ArrayLike<number>, board: BoardState, legalOverride?: Move[]): Map<number, number> {
   const probs = softmax(policyRaw);
-  const legal = legalMoves(board);
+  const legal = legalOverride ?? legalMoves(board);
   const policyIndex = (move: Move) => moveToPolicyIndex(move);
   const legalMass = legal.reduce((sum, move) => sum + (probs[policyIndex(move) ?? -1] ?? 0), 0);
   const policy = new Map<number, number>();
@@ -57,8 +57,8 @@ function moveToChessBenchAvClass(move: Move): number {
   return 4096 + ft * 4 + promo;
 }
 
-function legalCandidateInputs(boards: BoardState[]): { moves: Move[][]; classes: BigInt64Array; width: number } {
-  const moves = boards.map((board) => legalMoves(board));
+function legalCandidateInputs(boards: BoardState[], contexts: EvaluationContext[] = []): { moves: Move[][]; classes: BigInt64Array; width: number } {
+  const moves = boards.map((board, i) => contexts[i]?.legalMoves ?? legalMoves(board));
   const width = Math.max(1, ...moves.map((m) => m.length));
   const classes = new BigInt64Array(boards.length * width);
   for (let i = 0; i < moves.length; i++) {
@@ -81,8 +81,8 @@ function chebyshev(a: number, b: number): number {
   return Math.max(Math.abs((a % 8) - (b % 8)), Math.abs(Math.floor(a / 8) - Math.floor(b / 8)));
 }
 
-function moveformerLegalInputs(boards: BoardState[], width: number, featureCount: number): { moves: Move[][]; actionIds: BigInt64Array; features: Float32Array; mask: Float32Array; width: number } {
-  const moves = boards.map((board) => legalMoves(board));
+function moveformerLegalInputs(boards: BoardState[], width: number, featureCount: number, contexts: EvaluationContext[] = []): { moves: Move[][]; actionIds: BigInt64Array; features: Float32Array; mask: Float32Array; width: number } {
+  const moves = boards.map((board, i) => contexts[i]?.legalMoves ?? legalMoves(board));
   const actionIds = new BigInt64Array(boards.length * width);
   const features = new Float32Array(boards.length * width * featureCount);
   const mask = new Float32Array(boards.length * width);
@@ -196,7 +196,7 @@ export class OnnxEvaluator implements Evaluator {
     if (this.meta.architecture === 'cnn_move_token_transformer') {
       const width = Math.max(1, Number(this.meta.onnx_fixed_legal_moves ?? this.meta.max_legal_moves ?? 128));
       const featureCount = Math.max(1, Number(this.meta.num_move_features ?? 20));
-      const legal = moveformerLegalInputs(boards, width, featureCount);
+      const legal = moveformerLegalInputs(boards, width, featureCount, contexts);
       feeds.legal_action_ids = new ort.Tensor('int64', legal.actionIds, [boards.length, width]);
       feeds.legal_features = new ort.Tensor('float32', legal.features, [boards.length, width, featureCount]);
       feeds.legal_mask = new ort.Tensor('float32', legal.mask, [boards.length, width]);
@@ -240,7 +240,7 @@ export class OnnxEvaluator implements Evaluator {
     let candidateMoves: Move[][] | null = null;
     let candidateWidth = 0;
     if (this.meta.av_head_exported) {
-      const cand = legalCandidateInputs(boards);
+      const cand = legalCandidateInputs(boards, contexts);
       candidateMoves = cand.moves;
       candidateWidth = cand.width;
       feeds.candidate_moves = new ort.Tensor('int64', cand.classes, [boards.length, candidateWidth]);
@@ -256,7 +256,7 @@ export class OnnxEvaluator implements Evaluator {
     const policySize = this.meta.moves?.length ?? Math.floor(policyRaw.length / boards.length);
     const out: Evaluation[] = [];
     for (let i = 0; i < boards.length; i++) {
-      const policy = normalizePolicy(policyRaw.subarray(i * policySize, (i + 1) * policySize), boards[i]);
+      const policy = normalizePolicy(policyRaw.subarray(i * policySize, (i + 1) * policySize), boards[i], contexts[i]?.legalMoves);
       const wdl = softmax(wdlRaw.subarray(i * 3, i * 3 + 3));
       const actionValues = new Map<number, number>();
       const rankScores = new Map<number, number>();

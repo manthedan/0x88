@@ -172,7 +172,7 @@ async function expand(node: Node, evaluator: Evaluator, stats?: SearchStats): Pr
     return node.terminalValue;
   }
   if (stats) stats.evalCalls += 1;
-  const evaln = await evaluator.evaluate(node.board, { historyFens: node.historyFens });
+  const evaln = await evaluator.evaluate(node.board, { historyFens: node.historyFens, legalMoves: moves });
   const value = finishExpansion(node, moves, evaln);
   if (stats) stats.expansions += 1;
   return value;
@@ -269,7 +269,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
 
     let evals: Evaluation[] = [];
     if (evalNodes.length) {
-      const contexts = evalNodes.map((node) => ({ historyFens: node.historyFens }));
+      const contexts = evalNodes.map((node, i) => ({ historyFens: node.historyFens, legalMoves: evalMoves[i] }));
       stats.evalCalls += evalNodes.length;
       stats.maxEvalBatch = Math.max(stats.maxEvalBatch, evalNodes.length);
       if (evaluator.evaluateBatch) {

@@ -93,6 +93,11 @@ async function loadEvaluator(onnx, metaPath, evalCacheEntries) {
   const inner = meta.kind === 'squareformer' ? await SquareFormerEvaluator.create(onnx, meta) : await OnnxEvaluator.create(onnx, meta);
   return evalCacheEntries > 0 ? new CachedEvaluator(inner, evalCacheEntries) : inner;
 }
+async function loadSharedEvaluator(onnx, metaPath, evalCacheEntries, shared) {
+  const key = `${onnx}\0${metaPath}\0${evalCacheEntries}`;
+  if (!shared.has(key)) shared.set(key, await loadEvaluator(onnx, metaPath, evalCacheEntries));
+  return shared.get(key);
+}
 async function choosePolicyMove(board, evaluator, historyFens) {
   const moves = legalMoves(board);
   if (!moves.length) return { move: null, visits: 0, value: terminalWhiteScore(board) ?? 0, policy: [] };
@@ -149,6 +154,9 @@ const evalCacheEntries = Number(arg('--eval-cache-entries', process.env.EVAL_CAC
 const judgeModel = arg('--judge-model', '');
 const judgeMeta = arg('--judge-meta', '');
 const adjudicateThreshold = Number(arg('--adjudicate-threshold', '0.05'));
+const shardCount = Math.max(1, Number(arg('--shard-count', '1')));
+const shardIndex = Math.max(0, Number(arg('--shard-index', '0')));
+if (shardIndex >= shardCount) throw new Error(`Bad shard index ${shardIndex} for shard count ${shardCount}`);
 const defaultOpenings = [
   START_FEN,
   'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1',
@@ -159,58 +167,64 @@ const defaultOpenings = [
 ];
 let openings = openingsFile ? readFileSync(openingsFile, 'utf8').split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.startsWith('#')).map(s => s.split(/\s+#/)[0].trim()) : defaultOpenings;
 if (maxOpenings > 0) openings = openings.slice(0, maxOpenings);
+const sharedEvaluators = new Map();
 const evaluators = new Map();
-for (const p of players) evaluators.set(p.name, await loadEvaluator(p.onnx, p.meta, evalCacheEntries));
-const judge = judgeModel && judgeMeta ? await loadEvaluator(judgeModel, judgeMeta, evalCacheEntries) : null;
+for (const p of players) evaluators.set(p.name, await loadSharedEvaluator(p.onnx, p.meta, evalCacheEntries, sharedEvaluators));
+const judge = judgeModel && judgeMeta ? await loadSharedEvaluator(judgeModel, judgeMeta, evalCacheEntries, sharedEvaluators) : null;
 const table = Object.fromEntries(players.map(p => [p.name, { wins: 0, draws: 0, losses: 0, score: 0, games: 0, illegal: 0 }]));
 const pairTable = {};
 const games = [];
-const startedAt = Date.now();
+const jobs = [];
 for (let i = 0; i < players.length; i++) for (let j = i + 1; j < players.length; j++) {
   const a = players[i], b = players[j];
   const pairKey = `${a.name}__${b.name}`;
   pairTable[pairKey] = { a: a.name, b: b.name, aScore: 0, games: 0, aWdl: [0, 0, 0] };
-  for (let g = 0; g < gamesPerPair; g++) {
-    const aColor = g % 2 === 0 ? 'w' : 'b';
-    let board = parseFen(openings[(i * 17 + j * 7 + g) % openings.length]);
-    const history = [];
-    let whiteScore = terminalWhiteScore(board), illegal = null, plies = 0;
-    for (; whiteScore === null && plies < maxPlies; plies++) {
-      const side = board.turn === aColor ? a : b;
-      const evaluator = evaluators.get(side.name);
-      const legalUci = new Set(legalMoves(board).map(moveToUci));
-      const result = await choosePlayerMove(side, board, evaluator, { visits, cpuct, batchSize }, history);
-      if (!result.move) { whiteScore = inCheck(board) ? (board.turn === 'w' ? 0 : 1) : 0.5; break; }
-      const uci = moveToUci(result.move);
-      if (!legalUci.has(uci)) {
-        illegal = side.name;
-        whiteScore = board.turn === 'w' ? 0 : 1;
-        table[side.name].illegal++;
-        break;
-      }
-      history.push(boardToFen(board));
-      board = makeMove(board, result.move);
-      whiteScore = terminalWhiteScore(board);
+  for (let g = 0; g < gamesPerPair; g++) jobs.push({ i, j, g, a, b, pairKey });
+}
+const selectedJobs = jobs.filter((_, idx) => idx % shardCount === shardIndex);
+const startedAt = Date.now();
+process.stderr.write(`[search-mode-arena] shard ${shardIndex + 1}/${shardCount} running ${selectedJobs.length}/${jobs.length} games\n`);
+for (const job of selectedJobs) {
+  const { i, j, g, a, b, pairKey } = job;
+  const aColor = g % 2 === 0 ? 'w' : 'b';
+  let board = parseFen(openings[(i * 17 + j * 7 + g) % openings.length]);
+  const history = [];
+  let whiteScore = terminalWhiteScore(board), illegal = null, plies = 0;
+  for (; whiteScore === null && plies < maxPlies; plies++) {
+    const side = board.turn === aColor ? a : b;
+    const evaluator = evaluators.get(side.name);
+    const legalUci = new Set(legalMoves(board).map(moveToUci));
+    const result = await choosePlayerMove(side, board, evaluator, { visits, cpuct, batchSize }, history);
+    if (!result.move) { whiteScore = inCheck(board) ? (board.turn === 'w' ? 0 : 1) : 0.5; break; }
+    const uci = moveToUci(result.move);
+    if (!legalUci.has(uci)) {
+      illegal = side.name;
+      whiteScore = board.turn === 'w' ? 0 : 1;
+      table[side.name].illegal++;
+      break;
     }
-    if (whiteScore === null) whiteScore = await adjudicateWhiteScore(board, history, judge, adjudicateThreshold);
-    const aScore = whiteScore === 0.5 ? 0.5 : ((whiteScore === 1) === (aColor === 'w') ? 1 : 0);
-    const bScore = 1 - aScore;
-    for (const [name, score] of [[a.name, aScore], [b.name, bScore]]) {
-      table[name].games++; table[name].score += score;
-      if (score === 1) table[name].wins++; else if (score === 0) table[name].losses++; else table[name].draws++;
-    }
-    pairTable[pairKey].aScore += aScore;
-    pairTable[pairKey].games++;
-    pairTable[pairKey].aWdl[aScore === 1 ? 0 : aScore === 0.5 ? 1 : 2]++;
-    games.push({ white: aColor === 'w' ? a.name : b.name, black: aColor === 'w' ? b.name : a.name, whiteScore, a: a.name, b: b.name, aScore, plies, illegal });
-    process.stderr.write(`[search-mode-arena] ${a.name} vs ${b.name} game ${g + 1}/${gamesPerPair} aScore=${aScore} plies=${plies} elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}\n`);
+    history.push(boardToFen(board));
+    board = makeMove(board, result.move);
+    whiteScore = terminalWhiteScore(board);
   }
+  if (whiteScore === null) whiteScore = await adjudicateWhiteScore(board, history, judge, adjudicateThreshold);
+  const aScore = whiteScore === 0.5 ? 0.5 : ((whiteScore === 1) === (aColor === 'w') ? 1 : 0);
+  const bScore = 1 - aScore;
+  for (const [name, score] of [[a.name, aScore], [b.name, bScore]]) {
+    table[name].games++; table[name].score += score;
+    if (score === 1) table[name].wins++; else if (score === 0) table[name].losses++; else table[name].draws++;
+  }
+  pairTable[pairKey].aScore += aScore;
+  pairTable[pairKey].games++;
+  pairTable[pairKey].aWdl[aScore === 1 ? 0 : aScore === 0.5 ? 1 : 2]++;
+  games.push({ white: aColor === 'w' ? a.name : b.name, black: aColor === 'w' ? b.name : a.name, whiteScore, a: a.name, b: b.name, aScore, plies, illegal });
+  process.stderr.write(`[search-mode-arena] ${a.name} vs ${b.name} game ${g + 1}/${gamesPerPair} aScore=${aScore} plies=${plies} elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}\n`);
 }
 const standings = Object.entries(table).map(([name, r]) => ({ name, ...r, scoreRate: r.score / Math.max(1, r.games), eloVsPool: elo(r.score / Math.max(1, r.games)) })).sort((a,b)=>b.scoreRate-a.scoreRate);
 const pairs = Object.values(pairTable).map((r) => ({ ...r, aScoreRate: r.aScore / Math.max(1, r.games) }));
 const cacheStats = Object.fromEntries([...evaluators.entries()].map(([name, evaluator]) => [name, { hits: evaluator.hits ?? 0, misses: evaluator.misses ?? 0, entries: evaluator.cache?.size ?? 0 }]));
 const modelResources = Object.fromEntries(players.map((p) => [p.name, { onnx: p.onnx, meta: p.meta, bundleBytes: bundleBytes(p.onnx) }]));
-const protocol = { kind:'search_mode_arena', players, visits, cpuct, batchSize, maxPlies, gamesPerPair, openingsFile, openings: openings.length, evalCacheEntries, cacheStats, modelResources, judgeModel, judgeMeta, adjudicateThreshold, ortThreads: process.env.ORT_INTRA_OP_NUM_THREADS ?? process.env.ORT_NUM_THREADS ?? null, elapsedMs: Date.now() - startedAt, createdUtc:new Date().toISOString() };
+const protocol = { kind:'search_mode_arena', players, visits, cpuct, batchSize, maxPlies, gamesPerPair, openingsFile, openings: openings.length, evalCacheEntries, cacheStats, modelResources, judgeModel, judgeMeta, adjudicateThreshold, shardCount, shardIndex, shardGames: selectedJobs.length, totalGames: jobs.length, ortThreads: process.env.ORT_INTRA_OP_NUM_THREADS ?? process.env.ORT_NUM_THREADS ?? null, elapsedMs: Date.now() - startedAt, createdUtc:new Date().toISOString() };
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, JSON.stringify({ protocol, standings, pairs, games }, null, 2));
 writeFileSync(`${out}.protocol.json`, JSON.stringify(protocol, null, 2));

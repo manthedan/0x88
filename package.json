@@ -40,7 +40,8 @@
     "analysis:efficiency": ".venv-onnx/bin/python eval/model_efficiency_report.py",
     "analysis:model-manifest": ".venv-onnx/bin/python eval/build_model_manifest.py",
     "deploy:onnxsim": ".venv-onnx/bin/python scripts/simplify_onnx_for_deploy.py",
-    "eval:onnx-parity": "node --experimental-strip-types eval/onnx_parity_check.mjs"
+    "eval:onnx-parity": "node --experimental-strip-types eval/onnx_parity_check.mjs",
+    "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
