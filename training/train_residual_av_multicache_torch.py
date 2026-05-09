@@ -86,6 +86,10 @@ def main():
     ap.add_argument('--policy-prefetch-rows', type=int, default=65536, help='Read contiguous policy blocks into RAM, then shuffle locally; reduces memmap random page faults. Set <= batch size for old random-row sampling.')
     ap.add_argument('--av-prefetch-rows', type=int, default=65536, help='Read contiguous AV cache blocks into RAM, then shuffle locally; reduces memmap random page faults. Set <= av batch size for old random-row sampling.')
     ap.add_argument('--lr', type=float, default=3e-5); ap.add_argument('--weight-decay', type=float, default=1e-4)
+    ap.add_argument('--optimizer', choices=['adamw','muon'], default='adamw', help='Optimizer. muon uses Muon for matrix-like weights and AdamW for embeddings/norms/biases.')
+    ap.add_argument('--muon-momentum', type=float, default=0.95)
+    ap.add_argument('--muon-ns-steps', type=int, default=5)
+    ap.add_argument('--adamw-lr-scale', type=float, default=1.0, help='AdamW LR multiplier for non-Muon params in --optimizer muon mode.')
     ap.add_argument('--av-weight', type=float, default=1.0); ap.add_argument('--rank-weight', type=float, default=0.5); ap.add_argument('--regret-weight', type=float, default=0.25)
     ap.add_argument('--eval-every-steps', type=int, default=10000); ap.add_argument('--checkpoint-every-steps', type=int, default=10000); ap.add_argument('--progress-every', type=int, default=500)
     ap.add_argument('--max-dev-rows', type=int, default=100000); ap.add_argument('--max-av-dev-positions', type=int, default=10000); ap.add_argument('--patience', type=int, default=4)
@@ -148,7 +152,17 @@ def main():
         miss=net.load_state_dict(st, strict=False)
         print(f'[cnn-av] resumed=1 missing={len(miss.missing_keys)} unexpected={len(miss.unexpected_keys)}', flush=True)
     else: print('[cnn-av] resumed=0', flush=True)
-    opt=torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    if args.optimizer == 'muon':
+        from muon_optimizer import Muon, MultiOptimizer, split_muon_adamw_params
+        muon_params, adamw_params = split_muon_adamw_params(net)
+        opt = MultiOptimizer(
+            Muon(muon_params, lr=args.lr, momentum=args.muon_momentum, weight_decay=args.weight_decay, ns_steps=args.muon_ns_steps),
+            torch.optim.AdamW(adamw_params, lr=args.lr * args.adamw_lr_scale, weight_decay=args.weight_decay),
+        )
+        print(f'[cnn-av] optimizer=muon muon_params={sum(p.numel() for p in muon_params)} adamw_params={sum(p.numel() for p in adamw_params)} muon_tensors={len(muon_params)} adamw_tensors={len(adamw_params)}', flush=True)
+    else:
+        opt=torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        print('[cnn-av] optimizer=adamw', flush=True)
     amp_enabled=bool(args.amp and str(device).startswith('cuda')); amp_dtype=torch.bfloat16 if args.amp_dtype=='bf16' else torch.float16; scaler=torch.amp.GradScaler('cuda', enabled=bool(amp_enabled and amp_dtype is torch.float16))
     def to_dev(a,dtype):
         if isinstance(a, np.ndarray) and not a.flags.writeable:
@@ -230,7 +244,7 @@ def main():
                         print('METRIC stopped_patience=1', flush=True); break
         m=eval_all(f'epoch{ep}'); save(Path(args.checkpoint_dir)/f'epoch_{ep}.pt' if args.checkpoint_dir else args.out,ep,step,m)
     export_aux=bool(args.export_aux_heads); export_av=bool(args.export_av_head or export_aux)
-    meta={'kind':'tiny_board_residual_onnx_student','architecture':'residual_tower','policy_map':'uci_queen_knight_promo_v1','moves':moves,'channels':args.channels,'blocks':args.blocks,'policy_head':args.policy_head,'se':bool(args.se),'history_plies':args.history_plies,'input_planes':C,'trained_with_aux_av':True,'av_head_exported':export_av,'aux_heads_exported':(['action_values','rank_scores','regrets'] if export_aux else (['action_values'] if export_av else [])),'separate_aux_heads':bool(args.separate_aux_heads),'action_value_move_encoding':'chessbench_compact_20480','onnx':args.onnx_out}
+    meta={'kind':'tiny_board_residual_onnx_student','architecture':'residual_tower','policy_map':'uci_queen_knight_promo_v1','moves':moves,'channels':args.channels,'blocks':args.blocks,'policy_head':args.policy_head,'se':bool(args.se),'history_plies':args.history_plies,'input_planes':C,'trained_with_aux_av':True,'av_head_exported':export_av,'aux_heads_exported':(['action_values','rank_scores','regrets'] if export_aux else (['action_values'] if export_av else [])),'separate_aux_heads':bool(args.separate_aux_heads),'action_value_move_encoding':'chessbench_compact_20480','onnx':args.onnx_out,'optimizer':args.optimizer,'muon_momentum':args.muon_momentum if args.optimizer=='muon' else None,'muon_ns_steps':args.muon_ns_steps if args.optimizer=='muon' else None}
     Path(args.out).parent.mkdir(parents=True,exist_ok=True); torch.save({'model':net.state_dict(),'meta':meta},args.out)
     if args.meta_out: Path(args.meta_out).write_text(json.dumps(meta,separators=(',',':')))
     if args.onnx_out:

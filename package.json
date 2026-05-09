@@ -23,6 +23,8 @@
     "eval:arena": "node --experimental-strip-types eval/arena_suite.mjs",
     "elo:arena": "node --experimental-strip-types scripts/elo_arena_parallel.mjs",
     "selfplay:generate": "node --experimental-strip-types scripts/selfplay_generate.mjs",
+    "selfplay:generate-atomic": "scripts/selfplay_chunk_generate_atomic.sh",
+    "selfplay:validate": ".venv-onnx/bin/python scripts/selfplay_chunk_validate.py",
     "selfplay:mix-sweep": "node --experimental-strip-types scripts/selfplay_mix_sweep.mjs",
     "play:student": "node --experimental-strip-types scripts/play_student.mjs",
     "web:student": "node --experimental-strip-types scripts/serve_student_web.mjs",
@@ -42,6 +44,8 @@
     "analysis:lint-eval-protocols": "python3 eval/lint_eval_protocols.py",
     "analysis:validate-cache-schema": "python3 scripts/validate_cache_schema.py",
     "deploy:onnxsim": ".venv-onnx/bin/python scripts/simplify_onnx_for_deploy.py",
+    "eval:chess-ocean": "node --experimental-strip-types eval/chess_ocean_tests.mjs",
+    "eval:pareto-sweep": ".venv-onnx/bin/python eval/pareto_sweep_report.py",
     "eval:onnx-parity": "node --experimental-strip-types eval/onnx_parity_check.mjs",
     "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs"
   },
