@@ -120,12 +120,35 @@ root temperature/noise in early plies
 fixed deterministic seeds
 ```
 
+MiniZero-informed actor loop:
+
+```text
+many games/searches in flight per worker
+CPU tree selection across games
+shared NN eval queue
+batched ONNX/Torch inference
+leaf expansion + backup
+move selection from explicit self-play config
+WAL append after every move
+```
+
+Keep self-play and evaluation configs separate:
+
+```text
+self-play: temperature/noise, optional Dirichlet/Gumbel exploration, resign-disable calibration
+evaluation/fight: no stochastic root noise, deterministic max visit/count choice, fixed openings/nodes
+```
+
 Store per move:
 
 ```json
 {
   "run_id": "sp_0001",
   "net_id": "model_id",
+  "net_sha256": "...",
+  "model_iteration": 17,
+  "config_hash": "...",
+  "search_config_id": "puct64_train_noise_v1",
   "fen": "...",
   "history_fens": ["..."],
   "legal_moves": ["e2e4", "d2d4"],
@@ -139,6 +162,10 @@ Store per move:
   "uncertainty": 0.42,
   "nodes": 64,
   "temperature": 1.0,
+  "root_exploration": {"kind": "dirichlet", "alpha": 0.3, "weight": 0.25},
+  "gumbel_root": {"enabled": false, "top_k": 0},
+  "resign_disabled": false,
+  "resign_threshold": -0.9,
   "opening_id": "uho_lite:0007",
   "seed": 12345
 }
@@ -454,12 +481,23 @@ GPU workers: lc0 labeling and neural self-play
 ```text
 schema valid
 net_id/model hash matches job
+config_hash/search_config_id matches job
 teacher/search metadata present
 legal moves parse
 policy/visit distributions normalize
 no impossible FEN/move pairs
 row counts match manifest
 no duplicate job ids unless explicitly deduped
+resign-disabled games are flagged and included in false-resign accounting
+```
+
+Add a MiniZero-style environment validation path before merge:
+
+```text
+random legal games serialize/replay exactly
+opening FEN + action log reconstructs final FEN/result
+every replayed move is legal at that ply
+action-id/UCI roundtrip holds for every legal move in sampled plies
 ```
 
 Output shards are immutable. Merged datasets are manifests over immutable shards, not rewritten monoliths.
@@ -549,6 +587,8 @@ Required metadata:
 ```text
 net id
 artifact hash
+model iteration
+config hash
 search config
 opening id
 seed
@@ -556,6 +596,8 @@ worker id
 backend
 nodes/time budget
 temperature/noise config
+Gumbel/Dirichlet exploration config
+resign threshold and resign-disabled flag
 partial/discard reason if any
 ```
 
@@ -575,9 +617,19 @@ high-disagreement positions
 Root exploration:
 
 ```text
-early opening: higher temperature/noise
+early opening: higher temperature/noise + optional Dirichlet root noise
 middlegame: moderate exploration
 endgame: low exploration/tablebase when possible
+```
+
+MiniZero-inspired experimental knobs:
+
+```text
+classic PUCT target generation: 32/64/128 visits
+Gumbel-root target generation: low-visit top-k + sequential halving experiment
+resign_threshold: start conservative, e.g. -0.9 side-to-move/root-player value
+resign_disable_fraction: e.g. 0.05-0.10 to estimate false resigns
+false_resign_rate: gate metric before enabling stronger resignation
 ```
 
 ## Promotion gates
@@ -618,6 +670,11 @@ Promote only if candidate improves primary strength or efficiency without major 
 - [ ] Add self-play WAL schema and writer.
 - [ ] Add resume/accounting for interrupted games.
 - [ ] Store root visit distributions, Q, WDL, PV, entropy, uncertainty.
+- [ ] Store model hash, config hash, search config ID, and model iteration in every chunk/shard.
+- [ ] Add separate self-play vs evaluation/fight config files and enforce no eval root noise.
+- [ ] Add MiniZero-style random legal game serialize/replay `env_test` for ChessOcean.
+- [ ] Add resign-disable calibration and false-resign metrics.
+- [ ] Prototype low-visit Gumbel-root target generation behind an experiment flag.
 - [ ] Add candidate extraction for action-value labels.
 - [ ] Add training loader for self-play visit-policy JSONL.
 - [ ] Add action-value head to SquareFormer.

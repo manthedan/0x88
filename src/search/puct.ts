@@ -6,6 +6,7 @@ import type { Evaluation, Evaluator } from '../nn/evaluator.ts';
 export interface SearchPolicyEntry { move: Move; visits: number; prior: number; q: number; probability: number; }
 export interface SearchResult { move: Move | null; visits: number; value: number; policy: SearchPolicyEntry[]; stats?: SearchStats; }
 export interface SearchOptions { visits?: number; cpuct?: number; temperature?: number; historyFens?: string[]; batchSize?: number; searchPolicy?: SearchPolicy; avWeight?: number; rankWeight?: number; regretWeight?: number; riskWeight?: number; uncertaintyWeight?: number; }
+export interface GumbelRootOptions { candidateCount?: number; seed?: number; gumbelScale?: number; qWeight?: number; priorWeight?: number; visitPenalty?: number; }
 
 export interface SearchStats {
   requestedVisits: number;
@@ -39,6 +40,7 @@ export interface Node {
   expanded: boolean;
   terminalValue: number | null;
   edges: Edge[];
+  isRoot?: boolean;
 }
 
 export interface SearchPolicyContext {
@@ -139,6 +141,78 @@ export class AuxPUCTPolicy extends ClassicPUCTPolicy {
   }
 }
 
+function splitmix32(seed: number): () => number {
+  let x = seed >>> 0;
+  return () => {
+    x = (x + 0x9e3779b9) >>> 0;
+    let z = x;
+    z = Math.imul(z ^ (z >>> 16), 0x21f0aaad);
+    z = Math.imul(z ^ (z >>> 15), 0x735a2d97);
+    z = (z ^ (z >>> 15)) >>> 0;
+    return (z + 0.5) / 0x100000000;
+  };
+}
+
+function gumbel01(rng: () => number): number {
+  const u = Math.min(1 - 1e-12, Math.max(1e-12, rng()));
+  return -Math.log(-Math.log(u));
+}
+
+interface GumbelRootState { candidates: Set<Edge>; noise: Map<Edge, number>; }
+
+export class GumbelRootPolicy extends ClassicPUCTPolicy {
+  private options: Required<GumbelRootOptions>;
+  private rng: () => number;
+  private states = new WeakMap<Node, GumbelRootState>();
+
+  constructor(options: GumbelRootOptions = {}) {
+    super();
+    this.options = {
+      candidateCount: Math.max(1, Math.floor(options.candidateCount ?? 16)),
+      seed: Math.floor(options.seed ?? 1),
+      gumbelScale: options.gumbelScale ?? 1,
+      qWeight: options.qWeight ?? 1,
+      priorWeight: options.priorWeight ?? 1,
+      visitPenalty: options.visitPenalty ?? 0.15,
+    };
+    this.rng = splitmix32(this.options.seed);
+  }
+
+  private rootState(node: Node): GumbelRootState {
+    let state = this.states.get(node);
+    if (state) return state;
+    const scored = node.edges.map((edge) => {
+      const noise = gumbel01(this.rng) * this.options.gumbelScale;
+      return { edge, noise, score: Math.log(Math.max(edge.prior, 1e-12)) + noise };
+    }).sort((a, b) => b.score - a.score);
+    const keep = new Set(scored.slice(0, Math.min(this.options.candidateCount, scored.length)).map((x) => x.edge));
+    const noise = new Map(scored.map((x) => [x.edge, x.noise]));
+    state = { candidates: keep, noise };
+    this.states.set(node, state);
+    return state;
+  }
+
+  scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext): number {
+    if (!node.isRoot) return super.scoreEdge(node, edge, context);
+    const state = this.rootState(node);
+    if (!state.candidates.has(edge)) return -Infinity;
+    const parentVisits = node.edges.reduce((sum, e) => sum + edgeSelectVisits(e), 0);
+    const q = edgeQForParent(edge);
+    const sv = edgeSelectVisits(edge);
+    const puct = context.cpuct * edge.prior * Math.sqrt(parentVisits + 1) / (1 + sv);
+    const g = state.noise.get(edge) ?? 0;
+    const logPrior = Math.log(Math.max(edge.prior, 1e-12));
+    // Root-only Gumbel demo policy: sample a policy-prior candidate set with
+    // log(P)+Gumbel, then spend low visits on candidates using a conservative
+    // sequential-halving-like score. Non-root selection remains classic PUCT.
+    return this.options.qWeight * q
+      + this.options.priorWeight * (logPrior + g) / (1 + sv)
+      + puct
+      - this.options.visitPenalty * sv;
+  }
+
+}
+
 export const classicPuctPolicy = new ClassicPUCTPolicy();
 export const actionValuePuctPolicy = new ActionValuePUCTPolicy();
 export const auxPuctPolicy = new AuxPUCTPolicy();
@@ -148,7 +222,7 @@ function makeStats(visits: number): SearchStats {
 }
 
 function makeChild(parent: Node, move: Move): Node {
-  return { board: makeMove(parent.board, move), historyFens: [boardToFen(parent.board), ...parent.historyFens], expanded: false, terminalValue: null, edges: [] };
+  return { board: makeMove(parent.board, move), historyFens: [boardToFen(parent.board), ...parent.historyFens], expanded: false, terminalValue: null, edges: [], isRoot: false };
 }
 
 function selectBestEdge(node: Node, searchPolicy: SearchPolicy, context: SearchPolicyContext): Edge {
@@ -293,7 +367,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   const context: SearchPolicyContext = { cpuct: options.cpuct ?? 1.5, temperature: options.temperature ?? 1, avWeight: options.avWeight ?? 0.25, rankWeight: options.rankWeight ?? 0, regretWeight: options.regretWeight ?? 0, riskWeight: options.riskWeight ?? 0, uncertaintyWeight: options.uncertaintyWeight ?? 0 };
   const searchPolicy = options.searchPolicy ?? classicPuctPolicy;
   const stats = makeStats(visits);
-  const root: Node = { board, historyFens: options.historyFens ?? [], expanded: false, terminalValue: null, edges: [] };
+  const root: Node = { board, historyFens: options.historyFens ?? [], expanded: false, terminalValue: null, edges: [], isRoot: true };
   const rootValue = await expand(root, evaluator, stats);
   if (!root.edges.length) return { move: null, visits: 0, value: rootValue, policy: [], stats };
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? 1));

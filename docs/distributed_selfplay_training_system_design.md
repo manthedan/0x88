@@ -121,10 +121,13 @@ The MiniZero README says the server controls training, asks self-play workers to
 ```text
 Coordinator as the owner of training state.
 Many self-play workers producing games in parallel.
-Batched inference inside workers.
+Many games/MCTS instances per self-play worker.
+Batched NN leaf inference inside workers.
 Trainer samples from replay buffer.
 Network versions stored in shared storage.
 Iteration-based bookkeeping.
+Explicit train/eval config separation.
+Evaluation/fight workers with stochastic exploration disabled.
 ```
 
 ### Do not copy blindly
@@ -142,12 +145,23 @@ Use MiniZero's topology, but implement a chess-specific worker and data schema:
 
 ```text
 SquareFormer model
-PUCT engine
+PUCT/Gumbel-root engine
 legal move map
 WDL/value/action-value labels
 hard-position mining
 teacher reanalysis
 browser deployment metrics
+```
+
+MiniZero-specific practices to copy early:
+
+```text
+env_test mode: random legal game -> serialize -> replay -> assert final state
+resign_disable_ratio: sometimes ignore resignation to detect false resigns
+root exploration config: Dirichlet, temperature schedule, optional Gumbel-root search
+virtual loss / in-flight leaf protection for parallel searches
+intermediate sequence/chunk output so long games do not grow unbounded memory
+analysis dashboards for self-play returns, lengths, throughput, and optimization loss
 ```
 
 ---
@@ -455,6 +469,12 @@ while True:
             "nodes": search.nodes,
             "rng_seed": game.rng_seed,
             "net_id": model.id,
+            "net_sha256": model.sha256,
+            "model_iteration": model.iteration,
+            "config_hash": config.hash,
+            "search_config_id": config.search_config_id,
+            "root_exploration": config.root_exploration,
+            "resign_disabled": game.resign_disabled,
         })
 
         game.play(move)
@@ -754,6 +774,8 @@ A chunk should represent one game or a small batch of games.
   "net_id": "sqf_128x6_0042",
   "net_sha256": "...",
   "search_config_id": "puct64_v3",
+  "config_hash": "...",
+  "model_iteration": 42,
   "created_at": "2026-05-09T00:00:00Z",
   "game": {
     "initial_fen": "startpos",
@@ -778,7 +800,11 @@ A chunk should represent one game or a small batch of games.
       "policy_entropy": 2.31,
       "uncertainty": 0.42,
       "nodes": 512,
-      "temperature": 1.0
+      "temperature": 1.0,
+      "root_exploration": {"kind": "dirichlet", "alpha": 0.3, "weight": 0.25},
+      "gumbel_root": {"enabled": false, "top_k": 0, "sequential_halving": false},
+      "resign_disabled": false,
+      "resign_threshold": -0.9
     }
   ]
 }
@@ -1353,7 +1379,12 @@ WDL
 PV
 rng seed
 net id
+net/model hash
+model iteration
+config hash
 search config
+root exploration config
+resign threshold / resign-disabled flag
 ```
 
 If a worker dies:
@@ -1629,7 +1660,24 @@ selfplay:
     enabled: true
     alpha: 0.3
     weight: 0.25
+  gumbel_root:
+    enabled: false
+    top_k: 16
+    sequential_halving: true
+  resign:
+    enabled: false
+    threshold: -0.9
+    disable_fraction: 0.10
+    max_false_resign_rate: 0.01
   write_wal_every_move: true
+
+evaluation:
+  root_noise:
+    enabled: false
+  gumbel_root:
+    enabled: false
+  action_selection: max_visit
+  deterministic: true
 
 chunks:
   schema: sqf-sp-v1
@@ -1691,6 +1739,8 @@ chunk checksum
 duplicate chunk detection
 partial WAL recovery
 teacher provenance correctness
+model/config/search ids present and consistent
+resign-disabled games accounted separately
 ```
 
 ## Model/input tests
@@ -1701,6 +1751,7 @@ legal move map roundtrip
 promotion/castling/en-passant tests
 side-to-move/value perspective tests
 policy top-k equals root prior
+MiniZero-style env_test: random legal game serialize/replay/final-state equality
 ```
 
 ## Search tests

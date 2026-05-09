@@ -26,6 +26,7 @@ This directory is intentionally treated as a **living research notebook plus sta
 | [`small_bt4_progression.md`](small_bt4_progression.md) | Active | TinyBT-static → TinyBT-AV → smolgen-lite → MiniBT progression. |
 | [`deepresearch_architecture_triage_2026-05.md`](deepresearch_architecture_triage_2026-05.md) | Active | Triage of external DeepResearch architecture analysis: accepted useful ideas only. |
 | [`unsloth_rl_economics_triage_2026-05.md`](unsloth_rl_economics_triage_2026-05.md) | Active | Triage of Unsloth RL/GRPO economics: candidate-regret ranking, chunked aux losses, actor/trainer memory lifecycle, PTQ→QAT. |
+| [`puffer_selfplay_infra_plan.md`](puffer_selfplay_infra_plan.md) | Active | PufferLib/MiniZero-inspired local self-play worker plan: batched actors, WAL/chunks, ChessOcean env tests, resign/Gumbel experiments. |
 | [`head_ablation_roadmap.md`](head_ablation_roadmap.md) | Active | CNN/MoveFormer/aux-head ablation matrix and calibration plan. |
 
 ## Current execution docs
@@ -42,10 +43,13 @@ This directory is intentionally treated as a **living research notebook plus sta
 | [`browser_runtime.md`](browser_runtime.md) | Reference | Browser runtime plan; short and older, still useful. |
 | [`search_aux_head_calibration.md`](search_aux_head_calibration.md) | Active | AV/aux-PUCT calibration notes. |
 
-### Data, teachers, and training substrate
+### Data, teachers, self-play, and training substrate
 
 | Doc | Status | Notes |
 | --- | --- | --- |
+| [`puffer_selfplay_infra_plan.md`](puffer_selfplay_infra_plan.md) | Active | Near-term local self-play infrastructure plan with MiniZero/Puffer systems lessons, ChessOcean validation, and chunk schema. |
+| [`self_play_scaling_roadmap.md`](self_play_scaling_roadmap.md) | Reference / Active | Longer self-play roadmap; now includes MiniZero-style batched actor loop, config separation, Gumbel-root and resign calibration TODOs. |
+| [`distributed_selfplay_training_system_design.md`](distributed_selfplay_training_system_design.md) | Reference / future architecture | Distributed design drawing from MiniZero/KataGo/lczero-training; use now for schemas, WAL, accepted-model discipline, and validation. |
 | [`public_teacher_data_sources_plan.md`](public_teacher_data_sources_plan.md) | Active | Public teacher overlays and SquareFormer-AV-PUCT data source plan. |
 | [`aws_distributed_cache_setup.md`](aws_distributed_cache_setup.md) | Active | AWS CPU Spot/S3/ECR/Batch scaffold for first distributed cache/reanalysis jobs. |
 | [`training_setup_observations.md`](training_setup_observations.md) | Current | Current 100M CNN training setup observations. |

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseFen } from '../src/chess/board.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { moveToActionId, moveFromUci, moveToUci } from '../src/chess/moveCodec.ts';
-import { actionValuePuctPolicy, searchRoot } from '../src/search/puct.ts';
+import { GumbelRootPolicy, actionValuePuctPolicy, searchRoot } from '../src/search/puct.ts';
 
 function moveEq(a,b){return a.from===b.from&&a.to===b.to&&(a.promotion??'')===(b.promotion??'');}
 function legalByUci(board, uci){const want=moveFromUci(uci); return legalMoves(board).find(m=>moveEq(m,want));}
@@ -76,7 +76,15 @@ async function testActionValuePolicyGuidesSelection(){
   assert.equal(moveToUci(av.move),'e2e4','AV-PUCT should use edge actionValuePrior to guide low-visit selection');
 }
 
-const tests=[testPolicyIdentity,testAllZeroPolicyUniformFallback,testValuePerspectiveFlip,testTerminalNoLegalMoves,testTieBreakByQThenPrior,testBatchedEvaluatorPath,testActionValuePolicyGuidesSelection];
+async function testGumbelRootPolicyIsBoundedToCandidateSet(){
+  const ev=evaluator((board)=>({ policy:policyFor(board,{g1f3:0.40,e2e4:0.30,d2d4:0.20,b1c3:0.10}), wdl:[0.5,0,0.5] }));
+  const g=await searchRoot(parseFen(START),ev,{visits:8,temperature:0,searchPolicy:new GumbelRootPolicy({candidateCount:2,seed:7})});
+  const visited=g.policy.filter(e=>e.visits>0).map(e=>moveToUci(e.move));
+  assert.ok(visited.length<=2, `Gumbel root should spend visits only inside candidate set, got ${visited.join(',')}`);
+  assert.ok(g.move, 'Gumbel root should return a legal move');
+}
+
+const tests=[testPolicyIdentity,testAllZeroPolicyUniformFallback,testValuePerspectiveFlip,testTerminalNoLegalMoves,testTieBreakByQThenPrior,testBatchedEvaluatorPath,testActionValuePolicyGuidesSelection,testGumbelRootPolicyIsBoundedToCandidateSet];
 for (const t of tests) {
   await t();
   console.log(`ok ${t.name}`);
