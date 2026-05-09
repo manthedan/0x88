@@ -31,6 +31,7 @@ let ground: ReturnType<typeof Chessground> | null = null;
 let orientation: 'white' | 'black' = playerSide;
 let lastMove: string | null = null;
 let playedMoves: string[] = [];
+let pendingPremove: { from: string; to: string } | null = null;
 const initialClockMs = Math.max(10, Number(params.get('clock') ?? '300')) * 1000;
 let whiteClockMs = initialClockMs;
 let blackClockMs = initialClockMs;
@@ -97,6 +98,8 @@ function resetPositionState() {
   historyFens = [];
   lastMove = null;
   playedMoves = [];
+  pendingPremove = null;
+  ground?.cancelPremove();
   resetClocks();
 }
 function applySetupMove(uci: string) {
@@ -151,6 +154,13 @@ function updatePlayerSideControls() {
   document.getElementById('playWhite')?.classList.toggle('active', playerSide === 'white');
   document.getElementById('playBlack')?.classList.toggle('active', playerSide === 'black');
 }
+function playerColorToMove() {
+  return playerSide === 'white' ? 'w' : 'b';
+}
+function movableColor() {
+  if (uiMode === 'play') return playerSide;
+  return busy ? undefined : (board.turn === 'w' ? 'white' : 'black');
+}
 function setPlayerSide(side: PlayerSide) {
   if (busy || playerSide === side) return;
   playerSide = side;
@@ -201,6 +211,10 @@ type UiMode = 'play' | 'analysis';
 let uiMode: UiMode = 'play';
 function setUiMode(mode: UiMode) {
   uiMode = mode;
+  if (mode === 'analysis') {
+    pendingPremove = null;
+    ground?.cancelPremove();
+  }
   document.body.classList.toggle('analysis-mode', mode === 'analysis');
   document.getElementById('playModeBtn')?.classList.toggle('active', mode === 'play');
   document.getElementById('analysisModeBtn')?.classList.toggle('active', mode === 'analysis');
@@ -296,10 +310,12 @@ async function render(message = '') {
   renderMoves();
   renderMaterial();
   renderStockfish();
+  const moveColor = movableColor();
+  const boardConfig = { orientation, fen: boardFen(), turnColor: board.turn === 'w' ? 'white' as const : 'black' as const, coordinates: true, highlight: { lastMove: true, check: true }, animation: { enabled: true, duration: 180 }, premovable: { enabled: uiMode === 'play', showDests: true, castle: true, events: { set: (from: Key, to: Key) => { pendingPremove = { from, to }; }, unset: () => { pendingPremove = null; } } }, predroppable: { enabled: false }, movable: { free: false, color: moveColor, dests: busy ? new Map() : legalDests(), showDests: !busy, events: { after: onUserMove } } };
   if (!ground) {
-    ground = Chessground($('ground'), { orientation, fen: boardFen(), turnColor: board.turn === 'w' ? 'white' : 'black', coordinates: true, highlight: { lastMove: true, check: true }, animation: { enabled: true, duration: 180 }, premovable: { enabled: false }, predroppable: { enabled: false }, movable: { free: false, color: busy ? undefined : (board.turn === 'w' ? 'white' : 'black'), dests: busy ? new Map() : legalDests(), showDests: !busy, events: { after: onUserMove } } });
+    ground = Chessground($('ground'), boardConfig);
   } else {
-    ground.set({ orientation, fen: boardFen(), turnColor: board.turn === 'w' ? 'white' : 'black', coordinates: true, highlight: { lastMove: true, check: true }, animation: { enabled: true, duration: 180 }, lastMove: lastMove ? [lastMove.slice(0,2) as Key, lastMove.slice(2,4) as Key] : undefined, premovable: { enabled: false }, predroppable: { enabled: false }, movable: { free: false, color: busy ? undefined : (board.turn === 'w' ? 'white' : 'black'), dests: busy ? new Map() : legalDests(), showDests: !busy, events: { after: onUserMove } } });
+    ground.set({ ...boardConfig, lastMove: lastMove ? [lastMove.slice(0,2) as Key, lastMove.slice(2,4) as Key] : undefined });
   }
   if (!evaluator) return;
   const ev = await evaluator.evaluate(board, { historyFens });
@@ -364,10 +380,24 @@ async function playMove(move: Move, who: string) {
   playedMoves.push(uci);
   await render(`${who} played ${uci}.`);
 }
+function resolveUserMove(from: string, to: string) {
+  const candidates = legalMoves(board).filter((m) => squareName(m.from) === from && squareName(m.to) === to);
+  return legalMoveByUci(from + to) ?? candidates.find((m) => moveToUci(m).endsWith('q')) ?? candidates[0] ?? null;
+}
+async function applyPendingPremove() {
+  if (!pendingPremove || busy || uiMode !== 'play' || board.turn !== playerColorToMove()) return false;
+  const { from, to } = pendingPremove;
+  pendingPremove = null;
+  ground?.cancelPremove();
+  const move = resolveUserMove(from, to);
+  if (!move) { await render(`Premove ${from}${to} is no longer legal.`); return false; }
+  await playMove(move, 'Premove');
+  await engineMove();
+  return true;
+}
 async function onUserMove(from: string, to: string) {
   if (busy) return;
-  const candidates = legalMoves(board).filter((m) => squareName(m.from) === from && squareName(m.to) === to);
-  const move = legalMoveByUci(from + to) ?? candidates.find((m) => moveToUci(m).endsWith('q')) ?? candidates[0];
+  const move = resolveUserMove(from, to);
   if (!move) { await render(`Illegal move ${from}${to}.`); return; }
   await playMove(move, 'You');
   await engineMove();
@@ -405,7 +435,12 @@ async function engineMove() {
   } catch (e) {
     console.error(e);
     await render(`Engine failed: ${(e as Error).message}`);
-  } finally { busy = false; document.body.style.cursor = ''; await render(); }
+  } finally {
+    busy = false;
+    document.body.style.cursor = '';
+    await render();
+    await applyPendingPremove();
+  }
 }
 const onReset = async () => { if (busy) return; await render(uiMode === 'analysis' ? startAnalysisBoard() : startPlayGame()); };
 const onResetAnalysis = async () => { if (busy) return; await render(startAnalysisBoard()); };
