@@ -23,7 +23,11 @@ const COMMON_OPENING_BOOK: Record<string, string[]> = {
 
 const params = new URLSearchParams(location.search);
 type PlayerSide = 'white' | 'black';
+type PlayStyle = 'normal' | 'handbrain';
+type PieceRole = 'p' | 'n' | 'b' | 'r' | 'q' | 'k';
+const PIECE_NAMES: Record<PieceRole, string> = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
 let playerSide: PlayerSide = params.get('side') === 'black' ? 'black' : 'white';
+let playStyle: PlayStyle = params.get('handbrain') === '1' || params.get('style') === 'handbrain' ? 'handbrain' : 'normal';
 let board: BoardState = parseFen(START_FEN);
 let historyFens: string[] = [];
 let evaluator: Evaluator | null = null;
@@ -32,9 +36,13 @@ let orientation: 'white' | 'black' = playerSide;
 let lastMove: string | null = null;
 let playedMoves: string[] = [];
 let pendingPremove: { from: string; to: string } | null = null;
-const initialClockMs = Math.max(10, Number(params.get('clock') ?? '300')) * 1000;
-let whiteClockMs = initialClockMs;
-let blackClockMs = initialClockMs;
+let brainPiece: PieceRole | null = null;
+let gameStarted = false;
+const clockParam = params.get('clock');
+let timedGame = clockParam !== 'off' && clockParam !== '0';
+let selectedClockMs = Math.max(10, Number(clockParam ?? '300')) * 1000;
+let whiteClockMs = selectedClockMs;
+let blackClockMs = selectedClockMs;
 let lastClockTick = performance.now();
 let clockRunning = false;
 let stockfish: Worker | null = null;
@@ -84,7 +92,7 @@ const playMode = selectedModel.forcedMode ?? requestedPlayMode;
 const $ = (id: string) => document.getElementById(id)!;
 function legalDests() {
   const dests = new Map<Key, Key[]>();
-  for (const m of legalMoves(board)) {
+  for (const m of legalMovesForUser()) {
     const from = squareName(m.from) as Key, to = squareName(m.to) as Key;
     dests.set(from, [...(dests.get(from) ?? []), to]);
   }
@@ -99,6 +107,7 @@ function resetPositionState() {
   lastMove = null;
   playedMoves = [];
   pendingPremove = null;
+  brainPiece = null;
   ground?.cancelPremove();
   resetClocks();
 }
@@ -117,17 +126,29 @@ function chooseBookReply(): Move | null {
   return legalReplies.length ? randomChoice(legalReplies) : null;
 }
 function startPlayGame() {
+  gameStarted = true;
+  clockRunning = true;
   resetPositionState();
   orientation = playerSide;
-  if (openingMode === 'start') return `Start position. You are playing ${playerSide}.`;
+  if (openingMode === 'start') return `Start position. You are playing ${playerSide}${playStyle === 'handbrain' ? ' in Hand & Brain' : ''}${timedGame ? ` with ${formatClock(selectedClockMs)} clocks` : ' with no clock'}.`;
   if (playerSide === 'black') {
     const firstMove = randomChoice(Object.keys(COMMON_OPENING_BOOK));
     applySetupMove(firstMove);
-    return `Book first move: ${firstMove}. You to move as Black.`;
+    return `Book first move: ${firstMove}. You to move as Black${playStyle === 'handbrain' ? ' · Hand & Brain' : ''}${timedGame ? ` · ${formatClock(selectedClockMs)} clocks` : ' · no clock'}.`;
   }
-  return 'Start position. Make White’s first move; Nibbler will answer from book when possible.';
+  return `Start position. Make White’s first move; Nibbler will answer from book when possible${playStyle === 'handbrain' ? ' · Hand & Brain' : ''}${timedGame ? ` · ${formatClock(selectedClockMs)} clocks` : ' · no clock'}.`;
+}
+function showPlayIntro(message = 'Choose side and clock, then start the game.') {
+  gameStarted = false;
+  clockRunning = false;
+  resetPositionState();
+  orientation = playerSide;
+  updateIntroControls();
+  return message;
 }
 function startAnalysisBoard() {
+  gameStarted = true;
+  clockRunning = false;
   resetPositionState();
   return 'Analysis board: start position.';
 }
@@ -145,39 +166,103 @@ function initRunConfigChips() {
   const visitsChip = document.getElementById('visitsChip');
   const batchChip = document.getElementById('batchChip');
   if (visitsChip) visitsChip.textContent = playMode === 'puct' ? `visits ${visits}` : `policy ${playMode}`;
-  if (batchChip) batchChip.textContent = playMode === 'puct' ? `batch ${puctBatchSize}` : `top-k ${topK || 'all'}`;
+  if (batchChip) batchChip.textContent = timedGame ? formatClock(selectedClockMs) : 'no clock';
   updatePlayerSideControls();
+  updateIntroControls();
   const modelInfo = document.getElementById('modelInfo');
-  if (modelInfo) modelInfo.innerHTML = `<code>${modelKey}</code> · ${selectedModel.label} · ${playMode === 'puct' ? `${visits} visits` : playMode} · ${playerSide}`;
+  if (modelInfo) modelInfo.innerHTML = `<code>${modelKey}</code> · ${selectedModel.label} · ${playMode === 'puct' ? `${visits} visits` : playMode} · ${playerSide} · ${playStyle === 'handbrain' ? 'hand & brain' : 'normal'} · ${timedGame ? formatClock(selectedClockMs) : 'untimed'}`;
+  updateBrainHint();
 }
 function updatePlayerSideControls() {
   document.getElementById('playWhite')?.classList.toggle('active', playerSide === 'white');
   document.getElementById('playBlack')?.classList.toggle('active', playerSide === 'black');
+  document.getElementById('introWhite')?.classList.toggle('active', playerSide === 'white');
+  document.getElementById('introBlack')?.classList.toggle('active', playerSide === 'black');
+}
+function updateIntroControls() {
+  const intro = document.getElementById('playIntro') as HTMLElement | null;
+  if (intro) intro.hidden = uiMode !== 'play' || gameStarted;
+  updatePlayerSideControls();
+  document.getElementById('modeNormal')?.classList.toggle('active', playStyle === 'normal');
+  document.getElementById('modeHandBrain')?.classList.toggle('active', playStyle === 'handbrain');
+  document.getElementById('timeOff')?.classList.toggle('active', !timedGame);
+  document.getElementById('time5')?.classList.toggle('active', timedGame && selectedClockMs === 300_000);
+  document.getElementById('time10')?.classList.toggle('active', timedGame && selectedClockMs === 600_000);
+}
+function isUserTurn() {
+  return uiMode === 'play' && gameStarted && board.turn === playerColorToMove();
+}
+function updateBrainHint() {
+  const hint = document.getElementById('brainHint');
+  if (!hint) return;
+  if (uiMode !== 'play' || !gameStarted || playStyle !== 'handbrain') {
+    hint.textContent = '';
+  } else if (isUserTurn() && brainPiece) {
+    hint.innerHTML = `Brain says: <b>${PIECE_NAMES[brainPiece]}</b>. You choose the move.`;
+  } else if (isUserTurn()) {
+    hint.textContent = 'Brain is choosing a piece…';
+  } else {
+    hint.textContent = 'Hand & Brain: wait for Nibbler, then move the named piece.';
+  }
 }
 function playerColorToMove() {
   return playerSide === 'white' ? 'w' : 'b';
 }
+function legalMovesForUser() {
+  const moves = legalMoves(board);
+  if (uiMode !== 'play' || playStyle !== 'handbrain' || !isUserTurn()) return moves;
+  if (!brainPiece) return [];
+  return moves.filter((move) => board.squares[move.from]?.[1] === brainPiece);
+}
 function movableColor() {
-  if (uiMode === 'play') return playerSide;
+  if (uiMode === 'play') return gameStarted && !busy ? playerSide : undefined;
   return busy ? undefined : (board.turn === 'w' ? 'white' : 'black');
 }
 function setPlayerSide(side: PlayerSide) {
   if (busy || playerSide === side) return;
   playerSide = side;
   initRunConfigChips();
+  if (gameStarted && uiMode === 'play') render(showPlayIntro('Choose settings for the next game.'));
+}
+function setClockOption(ms: number | null) {
+  if (busy) return;
+  timedGame = ms !== null;
+  if (ms !== null) selectedClockMs = ms;
+  resetClocks();
+  initRunConfigChips();
+}
+function setPlayStyle(style: PlayStyle) {
+  if (busy || playStyle === style) return;
+  playStyle = style;
+  brainPiece = null;
+  initRunConfigChips();
+  if (gameStarted && uiMode === 'play') render(showPlayIntro('Choose settings for the next game.'));
+}
+function beginConfiguredGame() {
+  if (busy) return;
+  updateIntroControls();
   render(startPlayGame());
 }
 function initPlayerSideControls() {
   document.getElementById('playWhite')?.addEventListener('click', () => setPlayerSide('white'));
   document.getElementById('playBlack')?.addEventListener('click', () => setPlayerSide('black'));
-  updatePlayerSideControls();
+  document.getElementById('introWhite')?.addEventListener('click', () => setPlayerSide('white'));
+  document.getElementById('introBlack')?.addEventListener('click', () => setPlayerSide('black'));
+  document.getElementById('modeNormal')?.addEventListener('click', () => setPlayStyle('normal'));
+  document.getElementById('modeHandBrain')?.addEventListener('click', () => setPlayStyle('handbrain'));
+  document.getElementById('timeOff')?.addEventListener('click', () => setClockOption(null));
+  document.getElementById('time5')?.addEventListener('click', () => setClockOption(300_000));
+  document.getElementById('time10')?.addEventListener('click', () => setClockOption(600_000));
+  document.getElementById('startGame')?.addEventListener('click', () => beginConfiguredGame());
+  updateIntroControls();
 }
 function resetClocks() {
-  whiteClockMs = initialClockMs;
-  blackClockMs = initialClockMs;
+  whiteClockMs = selectedClockMs;
+  blackClockMs = selectedClockMs;
   lastClockTick = performance.now();
 }
 function formatClock(ms: number) {
+  if (!timedGame) return '∞';
   const clamped = Math.max(0, Math.ceil(ms / 1000));
   const minutes = Math.floor(clamped / 60);
   const seconds = clamped % 60;
@@ -189,16 +274,16 @@ function updateClockDisplay() {
   if (!playerClock || !engineClock) return;
   playerClock.textContent = formatClock(whiteClockMs);
   engineClock.textContent = formatClock(blackClockMs);
-  playerClock.classList.toggle('active', board.turn === 'w');
-  engineClock.classList.toggle('active', board.turn === 'b');
-  playerClock.classList.toggle('low', whiteClockMs <= 30_000);
-  engineClock.classList.toggle('low', blackClockMs <= 30_000);
+  playerClock.classList.toggle('active', timedGame && gameStarted && board.turn === 'w');
+  engineClock.classList.toggle('active', timedGame && gameStarted && board.turn === 'b');
+  playerClock.classList.toggle('low', timedGame && whiteClockMs <= 30_000);
+  engineClock.classList.toggle('low', timedGame && blackClockMs <= 30_000);
 }
 function settleClock() {
   const now = performance.now();
   const elapsed = now - lastClockTick;
   lastClockTick = now;
-  if (clockRunning && evaluator && uiMode !== 'analysis') {
+  if (clockRunning && timedGame && gameStarted && evaluator && uiMode !== 'analysis') {
     if (board.turn === 'w') whiteClockMs = Math.max(0, whiteClockMs - elapsed);
     else blackClockMs = Math.max(0, blackClockMs - elapsed);
   }
@@ -213,8 +298,10 @@ function setUiMode(mode: UiMode) {
   uiMode = mode;
   if (mode === 'analysis') {
     pendingPremove = null;
+    brainPiece = null;
     ground?.cancelPremove();
   }
+  updateIntroControls();
   document.body.classList.toggle('analysis-mode', mode === 'analysis');
   document.getElementById('playModeBtn')?.classList.toggle('active', mode === 'play');
   document.getElementById('analysisModeBtn')?.classList.toggle('active', mode === 'analysis');
@@ -249,7 +336,7 @@ function initNavAndShortcuts() {
     if (event.key === 'a') { event.preventDefault(); toggleUiMode(); }
     else if (event.key === 'f') { event.preventDefault(); onFlip(); }
     else if (event.key === 'n') { event.preventDefault(); onReset(); }
-    else if (event.key === ' ') { event.preventDefault(); engineMove(); }
+    else if (event.key === ' ') { event.preventDefault(); if (uiMode === 'play' && !gameStarted) beginConfiguredGame(); else engineMove(); }
     else if (event.key === 's') { event.preventDefault(); startStockfish(); }
   });
 }
@@ -288,7 +375,7 @@ function renderStockfish() {
   $('stockfish').innerHTML = `<div>${status}</div><div class="score">${stockfishScore || '—'}</div><div>Best: <span class="mono">${stockfishBest || '—'}</span></div><div class="pv">PV: <span class="mono">${stockfishPv || '—'}</span></div>`;
 }
 function controlsEnabled(enabled: boolean) {
-  for (const id of ['engine','engineAnalysis','reset','resetAnalysis','flip','flipAnalysis','loadFen','playWhite','playBlack']) {
+  for (const id of ['engine','engineAnalysis','reset','resetAnalysis','flip','flipAnalysis','loadFen','playWhite','playBlack','introWhite','introBlack','modeNormal','modeHandBrain','timeOff','time5','time10','startGame']) {
     const el = document.getElementById(id) as HTMLButtonElement | null;
     if (el) el.disabled = !enabled;
   }
@@ -296,6 +383,26 @@ function controlsEnabled(enabled: boolean) {
     const el = document.getElementById(id) as HTMLButtonElement | null;
     if (el) el.disabled = !!stockfish && !stockfishReady;
   }
+}
+async function chooseBrainPieceForTurn() {
+  if (!evaluator || uiMode !== 'play' || !gameStarted || playStyle !== 'handbrain' || !isUserTurn()) {
+    brainPiece = null;
+    updateBrainHint();
+    return;
+  }
+  if (brainPiece) { updateBrainHint(); return; }
+  const moves = legalMoves(board);
+  if (!moves.length) { updateBrainHint(); return; }
+  const ev = await evaluator.evaluate(board, { historyFens });
+  const scores = new Map<PieceRole, number>();
+  for (const move of moves) {
+    const role = board.squares[move.from]?.[1] as PieceRole | undefined;
+    if (!role) continue;
+    scores.set(role, (scores.get(role) ?? 0) + Math.max(0, ev.policy.get(moveToActionId(move)) ?? 0));
+  }
+  const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1]);
+  brainPiece = ranked[0]?.[0] ?? (board.squares[moves[0].from]?.[1] as PieceRole | undefined) ?? null;
+  updateBrainHint();
 }
 async function render(message = '') {
   const seq = ++renderSeq;
@@ -310,8 +417,11 @@ async function render(message = '') {
   renderMoves();
   renderMaterial();
   renderStockfish();
+  await chooseBrainPieceForTurn();
+  if (seq !== renderSeq) return;
   const moveColor = movableColor();
-  const boardConfig = { orientation, fen: boardFen(), turnColor: board.turn === 'w' ? 'white' as const : 'black' as const, coordinates: true, highlight: { lastMove: true, check: true }, animation: { enabled: true, duration: 180 }, premovable: { enabled: uiMode === 'play', showDests: true, castle: true, events: { set: (from: Key, to: Key) => { pendingPremove = { from, to }; }, unset: () => { pendingPremove = null; } } }, predroppable: { enabled: false }, movable: { free: false, color: moveColor, dests: busy ? new Map() : legalDests(), showDests: !busy, events: { after: onUserMove } } };
+  updateIntroControls();
+  const boardConfig = { orientation, fen: boardFen(), turnColor: board.turn === 'w' ? 'white' as const : 'black' as const, coordinates: true, highlight: { lastMove: true, check: true }, animation: { enabled: true, duration: 180 }, premovable: { enabled: uiMode === 'play' && gameStarted && playStyle !== 'handbrain', showDests: true, castle: true, events: { set: (from: Key, to: Key) => { pendingPremove = { from, to }; }, unset: () => { pendingPremove = null; } } }, predroppable: { enabled: false }, movable: { free: false, color: moveColor, dests: busy || (uiMode === 'play' && !gameStarted) ? new Map() : legalDests(), showDests: !busy && (uiMode !== 'play' || gameStarted), events: { after: onUserMove } } };
   if (!ground) {
     ground = Chessground($('ground'), boardConfig);
   } else {
@@ -372,6 +482,7 @@ function requestStockfishAnalysis() {
 }
 async function playMove(move: Move, who: string) {
   settleClock();
+  brainPiece = null;
   const before = boardToFen(board);
   const uci = moveToUci(move);
   historyFens = [before, ...historyFens];
@@ -381,7 +492,7 @@ async function playMove(move: Move, who: string) {
   await render(`${who} played ${uci}.`);
 }
 function resolveUserMove(from: string, to: string) {
-  const candidates = legalMoves(board).filter((m) => squareName(m.from) === from && squareName(m.to) === to);
+  const candidates = legalMovesForUser().filter((m) => squareName(m.from) === from && squareName(m.to) === to);
   return legalMoveByUci(from + to) ?? candidates.find((m) => moveToUci(m).endsWith('q')) ?? candidates[0] ?? null;
 }
 async function applyPendingPremove() {
@@ -396,9 +507,9 @@ async function applyPendingPremove() {
   return true;
 }
 async function onUserMove(from: string, to: string) {
-  if (busy) return;
+  if (busy || (uiMode === 'play' && !gameStarted)) return;
   const move = resolveUserMove(from, to);
-  if (!move) { await render(`Illegal move ${from}${to}.`); return; }
+  if (!move) { await render(playStyle === 'handbrain' && brainPiece ? `Brain said ${PIECE_NAMES[brainPiece]}; ${from}${to} is not available.` : `Illegal move ${from}${to}.`); return; }
   await playMove(move, 'You');
   await engineMove();
 }
@@ -423,7 +534,7 @@ async function choosePolicyMove(): Promise<Move | null> {
   return rows[0].move;
 }
 async function engineMove() {
-  if (!evaluator || busy) return;
+  if (!evaluator || busy || (uiMode === 'play' && !gameStarted)) return;
   busy = true;
   document.body.style.cursor = 'progress';
   await render('Engine thinking…');
@@ -442,7 +553,7 @@ async function engineMove() {
     await applyPendingPremove();
   }
 }
-const onReset = async () => { if (busy) return; await render(uiMode === 'analysis' ? startAnalysisBoard() : startPlayGame()); };
+const onReset = async () => { if (busy) return; await render(uiMode === 'analysis' ? startAnalysisBoard() : showPlayIntro('Choose settings for a new game.')); };
 const onResetAnalysis = async () => { if (busy) return; await render(startAnalysisBoard()); };
 const onFlip = async () => { if (busy) return; orientation = orientation === 'white' ? 'black' : 'white'; await render(); };
 $('engine').onclick = () => engineMove();
@@ -461,14 +572,13 @@ async function main() {
   initPlayerSideControls();
   initModelSelect();
   initRunConfigChips();
-  const initialMessage = uiMode === 'analysis' ? startAnalysisBoard() : startPlayGame();
+  const initialMessage = uiMode === 'analysis' ? startAnalysisBoard() : showPlayIntro();
   await render(initialMessage);
   const meta = await fetch(selectedModel.meta).then((r) => r.json()) as OnnxStudentMeta | SquareFormerMeta;
   evaluator = meta.kind === 'squareformer'
     ? await SquareFormerEvaluator.create(selectedModel.onnx, meta as SquareFormerMeta)
     : await OnnxEvaluator.create(selectedModel.onnx, meta as OnnxStudentMeta);
-  clockRunning = true;
   setInterval(tickClocks, 250);
-  await render(`Loaded ${selectedModel.label}. Mode: ${playMode === 'puct' ? `${visits} visits, batch ${puctBatchSize}${puctPolicy === 'av' ? `, AV ${avWeight}` : ''}` : `policy ${playMode}`}.`);
+  await render(uiMode === 'analysis' ? `Loaded ${selectedModel.label}. Mode: ${playMode === 'puct' ? `${visits} visits, batch ${puctBatchSize}${puctPolicy === 'av' ? `, AV ${avWeight}` : ''}` : `policy ${playMode}`}.` : `Loaded ${selectedModel.label}. Choose side and clock to start.`);
 }
 main().catch((e) => { console.error(e); $('message').textContent = `Failed: ${e.message}`; });
