@@ -11,6 +11,7 @@
     "eval:search": "node eval/search_suite.mjs",
     "eval:runtime": "node --experimental-strip-types eval/runtime_suite.mjs",
     "rust:test": "cargo test --manifest-path rust/tiny_leela_core/Cargo.toml",
+    "test:rust-ts-perft": "TINY_LEELA_RUN_RUST_PERFT=1 node --experimental-strip-types --test tests/perft_parity.test.mjs",
     "bench:movegen": "node --experimental-strip-types scripts/bench_movegen.mjs",
     "bench:search": "node --experimental-strip-types scripts/bench_search.mjs",
     "compare:rust-ts-search": "node --experimental-strip-types scripts/compare_rust_ts_search.mjs",

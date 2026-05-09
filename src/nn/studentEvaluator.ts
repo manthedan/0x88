@@ -286,7 +286,11 @@ export class StudentEvaluator implements Evaluator {
     const probs = softmax(logits);
     const legal = legalMoves(board);
     const policyIndex = (move: Move) => this.artifact.policy_map === POLICY_MAP ? moveToPolicyIndex(move) : this.moveIndex.get(moveToUci(move));
-    const legalMass = legal.reduce((sum, move) => sum + (probs[policyIndex(move) ?? -1] ?? 0), 0);
+    let legalMass = 0;
+    for (const move of legal) {
+      const index = policyIndex(move);
+      if (index !== undefined) legalMass += probs[index] ?? 0;
+    }
     const policy = new Map<number, number>();
     if (legal.length && legalMass <= 0) {
       for (const move of legal) policy.set(moveToActionId(move), 1 / legal.length);

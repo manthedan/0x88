@@ -2,10 +2,10 @@ import * as ort from 'onnxruntime-web';
 import { boardToFen, type BoardState } from '../chess/board.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { moveToActionId, type Move } from '../chess/moveCodec.ts';
+import { moveToSquareformerPolicyIndex } from '../chess/moveEncodings.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 
 const PIECES = '.PNBRQKpnbrqk';
-const PROMO_INDEX: Record<string, number> = { n: 0, b: 1, r: 2, q: 3 };
 
 export interface SquareFormerMeta {
   kind: 'squareformer' | 'squareformer_v2';
@@ -122,23 +122,35 @@ function parseFenCached(fen: string): BoardState {
   return { squares, turn: turn as 'w' | 'b', castling, epSquare, halfmove: Number(half), fullmove: Number(full) };
 }
 
-function squareformerPolicyIndex(move: Move): number {
-  const ft = move.from * 64 + move.to;
-  if (move.promotion) return 4096 + ft * 4 + PROMO_INDEX[move.promotion];
-  return ft;
-}
-
 function legalCandidateInputs(boards: BoardState[], width: number, contexts: EvaluationContext[] = []): { moves: Move[][]; classes: BigInt64Array; width: number } {
   const moves = boards.map((board, i) => contexts[i]?.legalMoves ?? legalMoves(board));
   const classes = new BigInt64Array(boards.length * width);
   for (let i = 0; i < moves.length; i++) {
-    for (let j = 0; j < Math.min(width, moves[i].length); j++) classes[i * width + j] = BigInt(squareformerPolicyIndex(moves[i][j]));
+    for (let j = 0; j < Math.min(width, moves[i].length); j++) classes[i * width + j] = BigInt(moveToSquareformerPolicyIndex(moves[i][j]));
   }
   return { moves, classes, width };
 }
 
 function isCompactMeta(meta: SquareFormerMeta): boolean {
   return meta.input_mode === 'embedding' || meta.input_format === 'compact_uint8_embeddings' || meta.input_format === 'compact_uint8_tokens';
+}
+
+function outputNames(outputs: Record<string, ort.Tensor>): string {
+  return Object.keys(outputs).sort().join(', ') || '<none>';
+}
+
+function requiredFloatOutput(outputs: Record<string, ort.Tensor>, name: string): Float32Array {
+  const tensor = outputs[name];
+  if (!tensor) throw new Error(`SquareFormer ONNX output missing required tensor '${name}'. Available outputs: ${outputNames(outputs)}`);
+  if (!(tensor.data instanceof Float32Array)) throw new Error(`SquareFormer ONNX output '${name}' expected float32 data, got ${Object.prototype.toString.call(tensor.data)}`);
+  return tensor.data;
+}
+
+function optionalFloatOutput(outputs: Record<string, ort.Tensor>, name: string): Float32Array | undefined {
+  const tensor = outputs[name];
+  if (!tensor) return undefined;
+  if (!(tensor.data instanceof Float32Array)) throw new Error(`SquareFormer ONNX output '${name}' expected float32 data, got ${Object.prototype.toString.call(tensor.data)}`);
+  return tensor.data;
 }
 
 function sessionOptions(): ort.InferenceSession.SessionOptions {
@@ -178,14 +190,14 @@ export class SquareFormerEvaluator implements Evaluator {
     const legalInfo = this.meta.av_head_exported && avWidth > 0 ? legalCandidateInputs(boards, avWidth, contexts) : null;
     if (legalInfo) feeds.legal_action_ids = new ort.Tensor('int64', legalInfo.classes, [boards.length, avWidth]);
     const outputs = await this.session.run(feeds);
-    const policyRaw = (outputs.policy?.data ?? Object.values(outputs)[0].data) as Float32Array;
-    const wdlRaw = (outputs.wdl?.data ?? Object.values(outputs)[1].data) as Float32Array;
-    const avRaw = outputs.action_values?.data as Float32Array | undefined;
+    const policyRaw = requiredFloatOutput(outputs, 'policy');
+    const wdlRaw = requiredFloatOutput(outputs, 'wdl');
+    const avRaw = optionalFloatOutput(outputs, 'action_values');
     const policySize = this.meta.policy_size;
     return boards.map((board, i) => {
       const legal = contexts[i]?.legalMoves ?? legalMoves(board);
       const policyRow = policyRaw.subarray(i * policySize, (i + 1) * policySize);
-      const logits = legal.map((move) => Number(policyRow[squareformerPolicyIndex(move)] ?? -100));
+      const logits = legal.map((move) => Number(policyRow[moveToSquareformerPolicyIndex(move)] ?? -100));
       const probs = softmax(logits);
       const policy = new Map<number, number>();
       const actionValues = avRaw ? new Map<number, number>() : undefined;

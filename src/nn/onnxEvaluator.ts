@@ -2,7 +2,7 @@ import * as ort from 'onnxruntime-web';
 import { boardToFen, type BoardState } from '../chess/board.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { moveToActionId, type Move } from '../chess/moveCodec.ts';
-import { POLICY_MAP, moveToPolicyIndex } from '../chess/policyMap.ts';
+import { POLICY_MAP, moveToChessBenchAvClass, moveToResidualPolicyIndex } from '../chess/moveEncodings.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 
 const PIECES = 'PNBRQKpnbrqk';
@@ -43,19 +43,16 @@ function softmax(xs: ArrayLike<number>): number[] {
 function normalizePolicy(policyRaw: ArrayLike<number>, board: BoardState, legalOverride?: Move[]): Map<number, number> {
   const probs = softmax(policyRaw);
   const legal = legalOverride ?? legalMoves(board);
-  const policyIndex = (move: Move) => moveToPolicyIndex(move);
-  const legalMass = legal.reduce((sum, move) => sum + (probs[policyIndex(move) ?? -1] ?? 0), 0);
+  const policyIndex = (move: Move) => moveToResidualPolicyIndex(move);
+  let legalMass = 0;
+  for (const move of legal) {
+    const index = policyIndex(move);
+    if (index !== undefined) legalMass += probs[index] ?? 0;
+  }
   const policy = new Map<number, number>();
   if (legal.length && legalMass <= 0) for (const move of legal) policy.set(moveToActionId(move), 1 / legal.length);
   else for (const move of legal) { const index = policyIndex(move); policy.set(moveToActionId(move), index === undefined ? 0 : probs[index] / legalMass); }
   return policy;
-}
-
-function moveToChessBenchAvClass(move: Move): number {
-  const ft = move.from * 64 + move.to;
-  if (!move.promotion) return ft;
-  const promo = { n: 0, b: 1, r: 2, q: 3 }[move.promotion];
-  return 4096 + ft * 4 + promo;
 }
 
 function legalCandidateInputs(boards: BoardState[], contexts: EvaluationContext[] = []): { moves: Move[][]; classes: BigInt64Array; width: number } {
@@ -159,6 +156,27 @@ export function onnxInputPlanes(board: BoardState, meta: Pick<OnnxStudentMeta, '
   return data;
 }
 
+function outputNames(outputs: Record<string, ort.Tensor>): string {
+  return Object.keys(outputs).sort().join(', ') || '<none>';
+}
+
+function requiredFloatOutput(outputs: Record<string, ort.Tensor>, name: string): Float32Array {
+  const tensor = outputs[name];
+  if (!tensor) throw new Error(`ONNX output missing required tensor '${name}'. Available outputs: ${outputNames(outputs)}`);
+  if (!(tensor.data instanceof Float32Array)) throw new Error(`ONNX output '${name}' expected float32 data, got ${Object.prototype.toString.call(tensor.data)}`);
+  return tensor.data;
+}
+
+function optionalFloatOutput(outputs: Record<string, ort.Tensor>, ...names: string[]): Float32Array | undefined {
+  for (const name of names) {
+    const tensor = outputs[name];
+    if (!tensor) continue;
+    if (!(tensor.data instanceof Float32Array)) throw new Error(`ONNX output '${name}' expected float32 data, got ${Object.prototype.toString.call(tensor.data)}`);
+    return tensor.data;
+  }
+  return undefined;
+}
+
 function sessionOptions(): ort.InferenceSession.SessionOptions {
   const threads = Number(globalThis.process?.env?.ORT_INTRA_OP_NUM_THREADS ?? globalThis.process?.env?.ORT_NUM_THREADS ?? '0');
   const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all' };
@@ -206,9 +224,9 @@ export class OnnxEvaluator implements Evaluator {
       feeds.legal_features = new ort.Tensor('float32', legal.features, [boards.length, width, featureCount]);
       feeds.legal_mask = new ort.Tensor('float32', legal.mask, [boards.length, width]);
       const outputs = await this.session.run(feeds);
-      const policyRaw = (outputs.policy_logits_legal?.data ?? Object.values(outputs)[0].data) as Float32Array;
-      const wdlRaw = (outputs.wdl_logits?.data ?? Object.values(outputs)[1].data) as Float32Array;
-      const avRaw = (outputs.action_values?.data ?? Object.values(outputs)[2]?.data) as Float32Array | undefined;
+      const policyRaw = requiredFloatOutput(outputs, 'policy_logits_legal');
+      const wdlRaw = requiredFloatOutput(outputs, 'wdl_logits');
+      const avRaw = optionalFloatOutput(outputs, 'action_values');
       const rankRaw = outputs.rank_scores?.data as Float32Array | undefined;
       const regretRaw = outputs.regrets?.data as Float32Array | undefined;
       const riskRaw = outputs.risks?.data as Float32Array | undefined;
@@ -251,9 +269,9 @@ export class OnnxEvaluator implements Evaluator {
       feeds.candidate_moves = new ort.Tensor('int64', cand.classes, [boards.length, candidateWidth]);
     }
     const outputs = await this.session.run(feeds);
-    const policyRaw = (outputs.policy_logits?.data ?? Object.values(outputs)[0].data) as Float32Array;
-    const wdlRaw = (outputs.wdl_logits?.data ?? Object.values(outputs)[1].data) as Float32Array;
-    const avRaw = (outputs.action_values?.data ?? outputs.action_value?.data ?? outputs.action_value_logits?.data) as Float32Array | undefined;
+    const policyRaw = requiredFloatOutput(outputs, 'policy_logits');
+    const wdlRaw = requiredFloatOutput(outputs, 'wdl_logits');
+    const avRaw = optionalFloatOutput(outputs, 'action_values', 'action_value', 'action_value_logits');
     const rankRaw = outputs.rank_scores?.data as Float32Array | undefined;
     const regretRaw = outputs.regrets?.data as Float32Array | undefined;
     const riskRaw = outputs.risks?.data as Float32Array | undefined;

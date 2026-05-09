@@ -40,3 +40,4 @@ tmp_check_*.mjs
 data/training_streams/squareformer_lc0_lite_1m_h*_v1.json
 
 tiny-leela-netlify-sfaux-512.zip
+Nibbler.standalone.html
