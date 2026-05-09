@@ -334,20 +334,22 @@ function setUiMode(mode: UiMode) {
   document.getElementById('playModeBtn')?.classList.toggle('active', mode === 'play');
   document.getElementById('analysisModeBtn')?.classList.toggle('active', mode === 'analysis');
 }
-function toggleUiMode() {
-  setUiMode(uiMode === 'play' ? 'analysis' : 'play');
+async function toggleUiMode() {
+  const next = uiMode === 'play' ? 'analysis' : 'play';
+  setUiMode(next);
+  await render(next === 'analysis' ? 'Analysis board: drag legal moves or use the history controls.' : gameStarted ? 'Returned to game.' : 'Choose settings to start a game.');
 }
 function initUiMode() {
   setUiMode(params.get('view') === 'analysis' ? 'analysis' : 'play');
   const pill = document.querySelector('.mode-pill');
   pill?.addEventListener('click', (event) => {
     event.preventDefault();
-    toggleUiMode();
+    void toggleUiMode();
   });
   pill?.addEventListener('keydown', (event) => {
     if (!(event instanceof KeyboardEvent) || (event.key !== 'Enter' && event.key !== ' ')) return;
     event.preventDefault();
-    toggleUiMode();
+    void toggleUiMode();
   });
 }
 type SideTab = 'game' | 'eval' | 'policy' | 'setup';
@@ -390,7 +392,7 @@ function initNavAndShortcuts() {
   document.addEventListener('keydown', (event) => {
     const target = document.activeElement;
     if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLButtonElement) return;
-    if (event.key === 'a') { event.preventDefault(); toggleUiMode(); }
+    if (event.key === 'a') { event.preventDefault(); void toggleUiMode(); }
     else if (event.key === 'f') { event.preventDefault(); onFlip(); }
     else if (event.key === 'n') { event.preventDefault(); onReset(); }
     else if (event.key === ' ') { event.preventDefault(); if (uiMode === 'play' && !gameStarted) beginConfiguredGame(); else engineMove(); }
