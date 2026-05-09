@@ -14,7 +14,7 @@ RAW_DIR=${RAW_DIR:-data/lichess_elite_raw}
 ELITE_DIR=${ELITE_DIR:-data/lichess_elite_training}
 REPORT_DIR=${REPORT_DIR:-$DATASET/reports}
 STATUS_DIR=${STATUS_DIR:-$DATASET/status}
-CNN_CACHE=${CNN_CACHE:-$DATASET/cache_residual_h2}
+CNN_CACHE=${CNN_CACHE:-$DATASET/cache_h2_state}
 SQ_CACHE=${SQ_CACHE:-$DATASET/cache_squareformer_h2}
 ART_DIR=${ART_DIR:-artifacts/100m_canonical}
 
@@ -156,6 +156,7 @@ build_cnn_cache() {
     --out-dir "$CNN_CACHE" \
     --python "$PY_ONNX" \
     --history-plies 2 \
+    --state-planes \
     --workers "$CACHE_WORKERS"
 }
 

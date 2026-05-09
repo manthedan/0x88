@@ -1,5 +1,7 @@
 # Maia-inspired roadmap for tiny Leela
 
+> **Status: Superseded / reference.** The supervised-human-policy lesson remains important, but current Maia/lc0 work is tracked through [`lc0_maia_gap_closure_roadmap.md`](lc0_maia_gap_closure_roadmap.md), evaluation anchor docs, and current queue artifacts.
+
 This note summarizes ideas from `CSSLab/maia-chess`, `CSSLab/maia2`, and how they should change the project roadmap.
 
 ## Core lesson

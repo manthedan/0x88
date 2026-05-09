@@ -73,21 +73,18 @@ let stockfishPv = '';
 let stockfishSeq = 0;
 let stockfishSearchTurn: 'w' | 'b' = board.turn;
 let stockfishSearchFen = boardToFen(board);
-const visits = Number(params.get('visits') ?? '128');
+const modelKey = params.get('model') ?? '32x4';
 const puctBatchSize = Math.max(1, Number(params.get('batch') ?? '16'));
-const puctPolicy = params.get('puctPolicy') ?? 'classic';
-const avWeight = Number(params.get('avWeight') ?? '0.25');
-const requestedPlayMode = params.get('mode') ?? 'puct';
 const temperature = Number(params.get('temperature') ?? '1');
 const topK = Number(params.get('topk') ?? '0');
 const topP = Number(params.get('topp') ?? '1');
 const stockfishDepth = Number(params.get('sfdepth') ?? '10');
 const openingMode = params.get('opening') ?? 'book';
 const openingBookMaxPlies = Math.max(0, Number(params.get('bookPlies') ?? '8'));
-const modelKey = params.get('model') ?? '32x4';
 let busy = false;
 let renderSeq = 0;
-const models: Record<string, { onnx: string; meta: string; label: string; forcedMode?: string }> = {
+type PlayableModel = { onnx: string; meta: string; label: string; forcedMode?: string; defaultMode?: string; defaultVisits?: number; defaultPuctPolicy?: string; defaultAvWeight?: number };
+const models: Record<string, PlayableModel> = {
   '32x4': { onnx: '/models/residual_32x4_history2.onnx', meta: '/models/residual_32x4_history2.meta.json', label: '32x4 supervised' },
   '48x5': { onnx: '/models/residual_48x5_history2_2026mix_best.onnx', meta: '/models/residual_48x5_history2_2026mix_best.meta.json', label: '48x5 supervised best' },
   'sfaux': { onnx: '/models/residual_48x5_history2_2026mix_sfauxfull_d8_mpv4.onnx', meta: '/models/residual_48x5_history2_2026mix_sfauxfull_d8_mpv4.meta.json', label: '48x5 Stockfish aux full' },
@@ -107,8 +104,14 @@ const models: Record<string, { onnx: string; meta: string; label: string; forced
   'cnn-48x5-100m-e3-policy': { onnx: '/models/cnn_48x5_100m_e3.onnx', meta: '/models/cnn_48x5_100m_e3.meta.json', label: 'CNN 48x5 100M e3 policy-only', forcedMode: 'argmax' },
   'cnn-32x4-100m-e3-puct': { onnx: '/models/cnn_32x4_100m_e3.onnx', meta: '/models/cnn_32x4_100m_e3.meta.json', label: 'CNN 32x4 100M e3 PUCT', forcedMode: 'puct' },
   'cnn-32x4-100m-e3-policy': { onnx: '/models/cnn_32x4_100m_e3.onnx', meta: '/models/cnn_32x4_100m_e3.meta.json', label: 'CNN 32x4 100M e3 policy-only', forcedMode: 'argmax' },
+  'mf80-e3-10m-puct256': { onnx: '/models/mf80_e3_k128_onnxsim.onnx', meta: '/models/mf80_e3_k128_onnxsim.meta.json', label: 'MoveFormer 80x5 10M e3 tuned PUCT256', defaultMode: 'puct', defaultVisits: 256, defaultPuctPolicy: 'classic' },
+  'mf80-e3-10m-av128': { onnx: '/models/mf80_e3_k128_onnxsim.onnx', meta: '/models/mf80_e3_k128_onnxsim.meta.json', label: 'MoveFormer 80x5 10M e3 AV-tuned PUCT128', defaultMode: 'puct', defaultVisits: 128, defaultPuctPolicy: 'av', defaultAvWeight: 0.0025 },
 };
 const selectedModel = models[modelKey] ?? models['32x4'];
+const requestedPlayMode = params.get('mode') ?? selectedModel.defaultMode ?? 'puct';
+const visits = Number(params.get('visits') ?? selectedModel.defaultVisits ?? '128');
+const puctPolicy = params.get('puctPolicy') ?? selectedModel.defaultPuctPolicy ?? 'classic';
+const avWeight = Number(params.get('avWeight') ?? selectedModel.defaultAvWeight ?? '0.25');
 const playMode = selectedModel.forcedMode ?? requestedPlayMode;
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -712,7 +715,7 @@ async function main() {
   const initialMessage = uiMode === 'analysis' ? startAnalysisBoard() : showPlayIntro();
   await render(initialMessage);
   const meta = await fetch(selectedModel.meta).then((r) => r.json()) as OnnxStudentMeta | SquareFormerMeta;
-  evaluator = meta.kind === 'squareformer'
+  evaluator = (meta.kind === 'squareformer' || meta.kind === 'squareformer_v2')
     ? await SquareFormerEvaluator.create(selectedModel.onnx, meta as SquareFormerMeta)
     : await OnnxEvaluator.create(selectedModel.onnx, meta as OnnxStudentMeta);
   setInterval(tickClocks, 250);

@@ -1,8 +1,19 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, contextlib, hashlib, json, random, re, subprocess, sys
-from collections import Counter, defaultdict
+
+import argparse
+import contextlib
+import hashlib
+import json
+import random
+import re
+import shutil
+import subprocess
+import sys
+from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Iterable
 
 try:
     import pyzstd  # type: ignore
@@ -22,9 +33,11 @@ def opener(path: str, mode: str = 'rt'):
             try:
                 yield p.stdout
             finally:
-                if p.stdout: p.stdout.close()
+                if p.stdout:
+                    p.stdout.close()
                 rc = p.wait()
-                if rc: raise subprocess.CalledProcessError(rc, ['zstdcat', path])
+                if rc:
+                    raise subprocess.CalledProcessError(rc, ['zstdcat', path])
             return
         if 'w' in mode:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -33,9 +46,12 @@ def opener(path: str, mode: str = 'rt'):
             try:
                 yield p.stdin
             finally:
-                if p.stdin: p.stdin.close()
-                rc = p.wait(); raw.close()
-                if rc: raise subprocess.CalledProcessError(rc, ['zstd', '-o', path])
+                if p.stdin:
+                    p.stdin.close()
+                rc = p.wait()
+                raw.close()
+                if rc:
+                    raise subprocess.CalledProcessError(rc, ['zstd', '-c', path])
             return
         raise SystemExit(f'Unsupported .zst mode: {mode}')
     with open(path, mode, encoding='utf-8' if 't' in mode else None) as f:
@@ -50,8 +66,10 @@ def gid(row):
 
 def ply(row):
     if 'ply' in row:
-        try: return int(row['ply'])
-        except Exception: pass
+        try:
+            return int(row['ply'])
+        except Exception:
+            pass
     rid = str(row.get('id', ''))
     m = re.search(r'_([0-9]+)$', rid)
     return int(m.group(1)) if m else 0
@@ -64,40 +82,26 @@ def fen_key(fen):
 def source_name(path):
     n = Path(path).name
     for suf in ('.jsonl.zst', '.jsonl'):
-        if n.endswith(suf): return n[:-len(suf)]
+        if n.endswith(suf):
+            return n[:-len(suf)]
     return Path(path).stem
 
 
 def opening_key(rows):
     r0 = rows[0]
     for k in ('eco', 'ECO'):
-        if r0.get(k): return 'eco:' + str(r0[k])
+        if r0.get(k):
+            return 'eco:' + str(r0[k])
     for k in ('opening', 'Opening'):
-        if r0.get(k): return 'opening:' + str(r0[k])[:80]
+        if r0.get(k):
+            return 'opening:' + str(r0[k])[:80]
     first = min(rows, key=ply)
     return 'firstfen:' + fen_key(first['fen'])
 
 
-def load_games(inputs, skip_plies):
-    games = defaultdict(list); sources = {}
-    bad = unknown_policy = 0
-    for p in inputs:
-        src = source_name(p)
-        with opener(p, 'rt') as f:
-            for line in f:
-                if not line.strip(): continue
-                try: r = json.loads(line)
-                except Exception:
-                    bad += 1; continue
-                if ply(r) < skip_plies: continue
-                if len(r.get('policy', {})) != 1:
-                    unknown_policy += 1; continue
-                g = gid(r); games[g].append(r); sources.setdefault(g, src)
-    return games, sources, bad, unknown_policy
-
-
 def annotate_history(rows, history_plies):
-    out = {}; prev = []
+    out = {}
+    prev = []
     for r in sorted(rows, key=ply):
         nr = dict(r)
         if history_plies:
@@ -107,59 +111,238 @@ def annotate_history(rows, history_plies):
     return out
 
 
-def choose(items, sources, rng, max_rows, max_rows_per_game, max_rows_per_opening, max_rows_per_source, source_caps, dedupe, history_plies, seen=None):
-    seen = seen or set(); rows_out=[]; rpg=[]; oc=Counter(); sc=Counter(); skipped_dupe=skipped_opening=skipped_source=hist=0
-    for g, rows in items:
-        if not rows: continue
-        src = sources.get(g,'unknown')
-        ok = opening_key(rows); took = 0; ann = annotate_history(rows, history_plies)
-        rows = list(rows); rng.shuffle(rows)
-        for r in rows:
-            if len(rows_out) >= max_rows: break
-            if took >= max_rows_per_game: break
-            if oc[ok] >= max_rows_per_opening:
-                skipped_opening += 1; continue
-            source_cap = source_caps.get(src, max_rows_per_source)
-            if source_cap is not None and sc[src] >= source_cap:
-                skipped_source += 1; continue
-            fk = fen_key(r['fen'])
-            if dedupe and fk in seen:
-                skipped_dupe += 1; continue
-            nr = ann[id(r)]
-            if nr.get('history_fens'): hist += 1
-            rows_out.append(nr); seen.add(fk); oc[ok]+=1; sc[src]+=1; took+=1
-        if took: rpg.append(took)
-        if len(rows_out) >= max_rows: break
-    return {'rows': rows_out, 'rows_per_game': rpg, 'opening_counts': oc, 'source_counts': sc, 'skipped_dupe': skipped_dupe, 'skipped_opening': skipped_opening, 'skipped_source_cap': skipped_source, 'rows_with_history': hist}
-
-
 def git_commit():
     try:
-        return subprocess.check_output(['git','rev-parse','--short','HEAD'], text=True).strip()
+        return subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], text=True).strip()
     except Exception:
         return 'unknown'
 
+
 def file_sha256(path):
-    h=hashlib.sha256()
-    with open(path,'rb') as f:
-        for b in iter(lambda:f.read(1<<20), b''):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for b in iter(lambda: f.read(1 << 20), b''):
             h.update(b)
     return h.hexdigest()
 
-def write_jsonl(path, rows):
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with opener(str(path), 'wt') as f:
-        for r in rows:
-            f.write(json.dumps(r, separators=(',', ':')) + '\n')
+
+def stable_unit(seed: int, value: str) -> float:
+    h = hashlib.sha256(f'{seed}:{value}'.encode('utf-8')).digest()
+    return int.from_bytes(h[:8], 'big') / float(1 << 64)
 
 
-def summarize(d):
-    rpg=d['rows_per_game']; oc=d['opening_counts']
-    return {'rows': len(d['rows']), 'games': len(rpg), 'avg_rows_per_game': sum(rpg)/max(1,len(rpg)), 'openings': len(oc), 'top_opening_rows': max(oc.values()) if oc else 0, 'rows_with_history': d['rows_with_history'], 'skipped_duplicate_fens': d['skipped_dupe'], 'skipped_opening_cap': d['skipped_opening'], 'skipped_source_cap': d.get('skipped_source_cap',0), 'source_counts': dict(d['source_counts'].most_common()), 'top_openings': oc.most_common(20)}
+@dataclass
+class ReadStats:
+    bad_json_lines: int = 0
+    skipped_non_single_policy: int = 0
+    input_games: int = 0
+    input_rows: int = 0
+
+
+def iter_games(inputs: Iterable[str], skip_plies: int, stats: ReadStats):
+    """Yield one game at a time without materialising the full corpus.
+
+    The raw training JSONL files generated by this project are game-contiguous
+    (`..._<game>_<ply>` ids in ascending order).  Keeping only the current game
+    in memory is enough to reconstruct `history_fens` while avoiding the old
+    all-games/all-selected-rows memory spike that OOMed the h8 cloud job.
+    """
+    for p in inputs:
+        src = source_name(p)
+        cur_gid = None
+        rows = []
+        with opener(p, 'rt') as f:
+            for line in f:
+                if not line or not line.strip():
+                    continue
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    stats.bad_json_lines += 1
+                    continue
+                if ply(r) < skip_plies:
+                    continue
+                if len(r.get('policy', {})) != 1:
+                    stats.skipped_non_single_policy += 1
+                    continue
+                g = gid(r)
+                if cur_gid is None:
+                    cur_gid = g
+                if g != cur_gid:
+                    if rows:
+                        stats.input_games += 1
+                        stats.input_rows += len(rows)
+                        yield cur_gid, src, rows
+                    cur_gid = g
+                    rows = []
+                rows.append(r)
+        if rows:
+            stats.input_games += 1
+            stats.input_rows += len(rows)
+            yield cur_gid, src, rows
+
+
+@dataclass
+class SelectionStats:
+    rows: int = 0
+    games: int = 0
+    rows_sum_by_game: int = 0
+    top_opening_rows: int = 0
+    rows_with_history: int = 0
+    skipped_dupe: int = 0
+    skipped_opening: int = 0
+    skipped_source_cap: int = 0
+    opening_counts: Counter = field(default_factory=Counter)
+    source_counts: Counter = field(default_factory=Counter)
+
+    def note_row(self, source: str, opening: str, has_history: bool):
+        self.rows += 1
+        self.source_counts[source] += 1
+        self.opening_counts[opening] += 1
+        self.top_opening_rows = max(self.top_opening_rows, self.opening_counts[opening])
+        if has_history:
+            self.rows_with_history += 1
+
+    def note_game(self, took: int):
+        if took:
+            self.games += 1
+            self.rows_sum_by_game += took
+
+
+class TrainShardWriter:
+    def __init__(self, out: Path, ext: str, rows_per_shard: int):
+        self.out = out
+        self.ext = ext
+        self.rows_per_shard = rows_per_shard
+        self.paths = []
+        self.total = 0
+        self._shard_rows = 0
+        self._index = -1
+        self._ctx = None
+        self._fh = None
+
+    def _open_next(self):
+        self.close_current()
+        self._index += 1
+        rel = f'train/shard_{self._index:04d}{self.ext}'
+        self.paths.append(rel)
+        path = self.out / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._ctx = opener(str(path), 'wt')
+        self._fh = self._ctx.__enter__()
+        self._shard_rows = 0
+
+    def write(self, row: dict):
+        if self._fh is None or self._shard_rows >= self.rows_per_shard:
+            self._open_next()
+        self._fh.write(json.dumps(row, separators=(',', ':')) + '\n')
+        self._shard_rows += 1
+        self.total += 1
+        if self._shard_rows >= self.rows_per_shard:
+            self.close_current()
+
+    def close_current(self):
+        if self._ctx is not None:
+            self._ctx.__exit__(None, None, None)
+            self._ctx = None
+            self._fh = None
+
+    def close(self):
+        self.close_current()
+
+
+class DevWriter:
+    def __init__(self, out: Path, ext: str):
+        self.out = out
+        self.ext = ext
+        self.total = 0
+        self.tmp_rel = f'dev/dev_tmp{ext}'
+        self.final_rel = None
+        path = self.out / self.tmp_rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._ctx = opener(str(path), 'wt')
+        self._fh = self._ctx.__enter__()
+
+    def write(self, row: dict):
+        self._fh.write(json.dumps(row, separators=(',', ':')) + '\n')
+        self.total += 1
+
+    def close(self):
+        if self._ctx is not None:
+            self._ctx.__exit__(None, None, None)
+            self._ctx = None
+            self._fh = None
+        self.final_rel = f'dev/dev_{self.total}{self.ext}'
+        src = self.out / self.tmp_rel
+        dst = self.out / self.final_rel
+        if dst.exists():
+            dst.unlink()
+        src.rename(dst)
+        return self.final_rel
+
+
+def select_game(rows, src, rng, limit, max_rows_per_game, max_rows_per_opening, max_rows_per_source, source_caps, dedupe, history_plies, seen, stats: SelectionStats, writer):
+    if stats.rows >= limit:
+        return 0
+    ok = opening_key(rows)
+    ann = annotate_history(rows, history_plies)
+    order = list(rows)
+    rng.shuffle(order)
+    took = 0
+    for r in order:
+        if stats.rows >= limit:
+            break
+        if took >= max_rows_per_game:
+            break
+        if stats.opening_counts[ok] >= max_rows_per_opening:
+            stats.skipped_opening += 1
+            continue
+        source_cap = source_caps.get(src, max_rows_per_source)
+        if source_cap is not None and stats.source_counts[src] >= source_cap:
+            stats.skipped_source_cap += 1
+            continue
+        fk = fen_key(r['fen'])
+        if dedupe and fk in seen:
+            stats.skipped_dupe += 1
+            continue
+        nr = ann[id(r)]
+        writer.write(nr)
+        seen.add(fk)
+        stats.note_row(src, ok, bool(nr.get('history_fens')))
+        took += 1
+    stats.note_game(took)
+    return took
+
+
+def summarize_stream(d: SelectionStats):
+    return {
+        'rows': d.rows,
+        'games': d.games,
+        'avg_rows_per_game': d.rows_sum_by_game / max(1, d.games),
+        'openings': len(d.opening_counts),
+        'top_opening_rows': d.top_opening_rows,
+        'rows_with_history': d.rows_with_history,
+        'skipped_duplicate_fens': d.skipped_dupe,
+        'skipped_opening_cap': d.skipped_opening,
+        'skipped_source_cap': d.skipped_source_cap,
+        'source_counts': dict(d.source_counts.most_common()),
+        'top_openings': d.opening_counts.most_common(20),
+    }
+
+
+def clean_output(out: Path):
+    for rel in ('train', 'dev', 'reports'):
+        p = out / rel
+        if p.exists():
+            shutil.rmtree(p)
+    for rel in ('manifest.json',):
+        p = out / rel
+        if p.exists():
+            p.unlink()
 
 
 def main():
-    ap=argparse.ArgumentParser(description='Build a sharded supervised chess dataset with whole-game dev split and balance caps.')
+    ap = argparse.ArgumentParser(description='Build a sharded supervised chess dataset with low-memory streaming game selection.')
     ap.add_argument('--input', nargs='+', required=True)
     ap.add_argument('--out-dir', required=True)
     ap.add_argument('--name', default='supervised_shards')
@@ -175,33 +358,106 @@ def main():
     ap.add_argument('--seed', type=int, default=7)
     ap.add_argument('--dedupe-fen', action='store_true')
     ap.add_argument('--zst', action='store_true')
-    args=ap.parse_args()
-    rng=random.Random(args.seed); out=Path(args.out_dir)
-    source_caps={}
-    for spec in args.source_cap:
-        if '=' not in spec: raise SystemExit(f'--source-cap must be SOURCE=N, got {spec!r}')
-        k,v=spec.rsplit('=',1); source_caps[k]=int(v)
-    max_rows_per_source = args.max_rows_per_source or None
-    games,sources,bad,unknown=load_games(args.input,args.skip_plies)
-    items=list(games.items()); rng.shuffle(items)
-    dev_game_count=max(1, int(len(items)*min(0.2, max(0.01, args.dev_rows/max(1,args.max_rows+args.dev_rows)))))
-    dev_items=items[:dev_game_count]; train_items=items[dev_game_count:]
-    dev=choose(dev_items,sources,rng,args.dev_rows,args.max_rows_per_game,args.max_rows_per_opening,max_rows_per_source,source_caps,args.dedupe_fen,args.history_plies,set())
-    train=choose(train_items,sources,rng,args.max_rows,args.max_rows_per_game,args.max_rows_per_opening,max_rows_per_source,source_caps,args.dedupe_fen,args.history_plies,set())
-    ext='.jsonl.zst' if args.zst else '.jsonl'
-    shard_paths=[]
-    for i in range(0,len(train['rows']),args.rows_per_shard):
-        si=i//args.rows_per_shard; rel=f'train/shard_{si:04d}{ext}'; write_jsonl(out/rel, train['rows'][i:i+args.rows_per_shard]); shard_paths.append(rel)
-    dev_rel=f'dev/dev_{len(dev["rows"])}{ext}'; write_jsonl(out/dev_rel, dev['rows'])
-    caps={'max_rows_per_game':args.max_rows_per_game,'max_rows_per_opening':args.max_rows_per_opening,'max_rows_per_source':max_rows_per_source,'source_caps':source_caps}
-    repro={'inputs':args.input,'input_sizes':{p:(Path(p).stat().st_size if Path(p).exists() else None) for p in args.input},'seed':args.seed,'caps':caps,'git_commit':git_commit(),'script':'scripts/build_supervised_dataset_shards.py','script_sha256':file_sha256(__file__),'argv':sys.argv}
-    report={'name':args.name,'seed':args.seed,'inputs':args.input,'reproducibility':repro,'bad_json_lines':bad,'skipped_non_single_policy':unknown,'input_games':len(games),'skip_plies':args.skip_plies,'history_plies':args.history_plies,'caps':caps,'train':summarize(train),'dev':summarize(dev)}
-    manifest={'name':args.name,'format':'jsonl.zst' if args.zst else 'jsonl','train_shards':shard_paths,'dev':dev_rel,'rows_per_shard':args.rows_per_shard,'total_train_rows':len(train['rows']),'total_dev_rows':len(dev['rows']),'history_plies':args.history_plies,'skip_plies':args.skip_plies,'caps':caps,'reproducibility':repro,'report':'reports/dataset_report.json'}
-    (out/'reports').mkdir(parents=True,exist_ok=True); (out/'manifest.json').write_text(json.dumps(manifest,indent=2)); (out/'reports/dataset_report.json').write_text(json.dumps(report,indent=2))
-    print(f'METRIC dataset_train_rows={len(train["rows"])}')
-    print(f'METRIC dataset_dev_rows={len(dev["rows"])}')
-    print(f'METRIC dataset_train_shards={len(shard_paths)}')
-    print(f'METRIC dataset_train_games={len(train["rows_per_game"])}')
-    print(f'METRIC dataset_train_openings={len(train["opening_counts"])}')
+    ap.add_argument('--progress-games', type=int, default=25000)
+    args = ap.parse_args()
 
-if __name__ == '__main__': main()
+    rng = random.Random(args.seed)
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    clean_output(out)
+
+    source_caps = {}
+    for spec in args.source_cap:
+        if '=' not in spec:
+            raise SystemExit(f'--source-cap must be SOURCE=N, got {spec!r}')
+        k, v = spec.rsplit('=', 1)
+        source_caps[k] = int(v)
+    max_rows_per_source = args.max_rows_per_source or None
+    ext = '.jsonl.zst' if args.zst else '.jsonl'
+
+    dev_rate = min(0.2, max(0.01, args.dev_rows / max(1, args.max_rows + args.dev_rows)))
+    read_stats = ReadStats()
+    train_stats = SelectionStats()
+    dev_stats = SelectionStats()
+    train_writer = TrainShardWriter(out, ext, args.rows_per_shard)
+    dev_writer = DevWriter(out, ext)
+    train_seen = set() if args.dedupe_fen else set()
+    dev_seen = set() if args.dedupe_fen else set()
+
+    try:
+        for g, src, rows in iter_games(args.input, args.skip_plies, read_stats):
+            # Whole-game dev split without needing to pre-count or shuffle all games.
+            prefer_dev = stable_unit(args.seed, str(g)) < dev_rate
+            if prefer_dev and dev_stats.rows < args.dev_rows:
+                select_game(rows, src, rng, args.dev_rows, args.max_rows_per_game, args.max_rows_per_opening, max_rows_per_source, source_caps, args.dedupe_fen, args.history_plies, dev_seen, dev_stats, dev_writer)
+            elif train_stats.rows < args.max_rows:
+                select_game(rows, src, rng, args.max_rows, args.max_rows_per_game, args.max_rows_per_opening, max_rows_per_source, source_caps, args.dedupe_fen, args.history_plies, train_seen, train_stats, train_writer)
+            elif dev_stats.rows < args.dev_rows:
+                select_game(rows, src, rng, args.dev_rows, args.max_rows_per_game, args.max_rows_per_opening, max_rows_per_source, source_caps, args.dedupe_fen, args.history_plies, dev_seen, dev_stats, dev_writer)
+            if args.progress_games and read_stats.input_games % args.progress_games == 0:
+                print(f'progress input_games={read_stats.input_games} train_rows={train_stats.rows} dev_rows={dev_stats.rows} source={src}', flush=True)
+            if train_stats.rows >= args.max_rows and dev_stats.rows >= args.dev_rows:
+                break
+    finally:
+        train_writer.close()
+        dev_rel = dev_writer.close()
+
+    caps = {
+        'max_rows_per_game': args.max_rows_per_game,
+        'max_rows_per_opening': args.max_rows_per_opening,
+        'max_rows_per_source': max_rows_per_source,
+        'source_caps': source_caps,
+    }
+    repro = {
+        'inputs': args.input,
+        'input_sizes': {p: (Path(p).stat().st_size if Path(p).exists() else None) for p in args.input},
+        'seed': args.seed,
+        'selection': 'streaming_hash_dev_split_game_contiguous',
+        'dev_rate': dev_rate,
+        'caps': caps,
+        'git_commit': git_commit(),
+        'script': 'scripts/build_supervised_dataset_shards.py',
+        'script_sha256': file_sha256(__file__),
+        'argv': sys.argv,
+    }
+    report = {
+        'name': args.name,
+        'seed': args.seed,
+        'inputs': args.input,
+        'reproducibility': repro,
+        'bad_json_lines': read_stats.bad_json_lines,
+        'skipped_non_single_policy': read_stats.skipped_non_single_policy,
+        'input_games': read_stats.input_games,
+        'input_rows': read_stats.input_rows,
+        'skip_plies': args.skip_plies,
+        'history_plies': args.history_plies,
+        'caps': caps,
+        'train': summarize_stream(train_stats),
+        'dev': summarize_stream(dev_stats),
+    }
+    manifest = {
+        'name': args.name,
+        'format': 'jsonl.zst' if args.zst else 'jsonl',
+        'train_shards': train_writer.paths,
+        'dev': dev_rel,
+        'rows_per_shard': args.rows_per_shard,
+        'total_train_rows': train_stats.rows,
+        'total_dev_rows': dev_stats.rows,
+        'history_plies': args.history_plies,
+        'skip_plies': args.skip_plies,
+        'caps': caps,
+        'reproducibility': repro,
+        'report': 'reports/dataset_report.json',
+    }
+    (out / 'reports').mkdir(parents=True, exist_ok=True)
+    (out / 'manifest.json').write_text(json.dumps(manifest, indent=2))
+    (out / 'reports/dataset_report.json').write_text(json.dumps(report, indent=2))
+    print(f'METRIC dataset_train_rows={train_stats.rows}')
+    print(f'METRIC dataset_dev_rows={dev_stats.rows}')
+    print(f'METRIC dataset_train_shards={len(train_writer.paths)}')
+    print(f'METRIC dataset_train_games={train_stats.games}')
+    print(f'METRIC dataset_train_openings={len(train_stats.opening_counts)}')
+
+
+if __name__ == '__main__':
+    main()

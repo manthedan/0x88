@@ -39,6 +39,8 @@
     "train:residual:smoke": ".venv-onnx/bin/python training/train_residual_torch.py --train /tmp/hist_train.jsonl --out /tmp/residual_smoke.pt --onnx-out /tmp/residual_smoke.onnx --meta-out /tmp/residual_smoke.meta.json --channels 8 --blocks 1 --history-plies 2 --state-planes --epochs 1 --max-rows 128 --batch-size 32 --device cpu",
     "analysis:efficiency": ".venv-onnx/bin/python eval/model_efficiency_report.py",
     "analysis:model-manifest": ".venv-onnx/bin/python eval/build_model_manifest.py",
+    "analysis:lint-eval-protocols": "python3 eval/lint_eval_protocols.py",
+    "analysis:validate-cache-schema": "python3 scripts/validate_cache_schema.py",
     "deploy:onnxsim": ".venv-onnx/bin/python scripts/simplify_onnx_for_deploy.py",
     "eval:onnx-parity": "node --experimental-strip-types eval/onnx_parity_check.mjs",
     "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs"

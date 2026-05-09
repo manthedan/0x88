@@ -9,7 +9,7 @@ const PIECES = 'PNBRQKpnbrqk';
 
 export interface OnnxStudentMeta {
   kind: string;
-  architecture: 'residual_tower' | 'cnn_channel_transformer' | 'cnn_move_token_transformer';
+  architecture: 'residual_tower' | 'cnn_channel_transformer' | 'cnn_move_token_transformer' | 'cnn_square_move_transformer' | 'cnn_square_transformer';
   policy_map: string;
   moves: string[];
   channels: number;
@@ -29,6 +29,7 @@ export interface OnnxStudentMeta {
   max_legal_moves?: number;
   onnx_fixed_legal_moves?: number;
   num_move_features?: number;
+  allow_legal_overflow_zero_prior?: boolean;
 }
 
 function softmax(xs: ArrayLike<number>): number[] {
@@ -193,10 +194,14 @@ export class OnnxEvaluator implements Evaluator {
     for (let i = 0; i < boards.length; i++) input.set(onnxInputPlanes(boards[i], this.meta, contexts[i]?.historyFens ?? this.historyFens), i * one);
     const feeds: Record<string, ort.Tensor> = { planes: new ort.Tensor('float32', input, [boards.length, this.meta.input_planes, 8, 8]) };
 
-    if (this.meta.architecture === 'cnn_move_token_transformer') {
+    if (this.meta.architecture === 'cnn_move_token_transformer' || this.meta.architecture === 'cnn_square_move_transformer') {
       const width = Math.max(1, Number(this.meta.onnx_fixed_legal_moves ?? this.meta.max_legal_moves ?? 128));
       const featureCount = Math.max(1, Number(this.meta.num_move_features ?? 20));
       const legal = moveformerLegalInputs(boards, width, featureCount, contexts);
+      const overflow = legal.moves.findIndex((moves) => moves.length > width);
+      if (overflow >= 0 && this.meta.allow_legal_overflow_zero_prior !== true) {
+        throw new Error(`Move-token ONNX legal move overflow: model accepts ${width} legal moves but position has ${legal.moves[overflow].length}. Use a larger legal bucket/export (for example k128), dynamic legal export, or set meta.allow_legal_overflow_zero_prior=true to keep legacy zero-prior truncation. fen=${boardToFen(boards[overflow])}`);
+      }
       feeds.legal_action_ids = new ort.Tensor('int64', legal.actionIds, [boards.length, width]);
       feeds.legal_features = new ort.Tensor('float32', legal.features, [boards.length, width, featureCount]);
       feeds.legal_mask = new ort.Tensor('float32', legal.mask, [boards.length, width]);
@@ -228,7 +233,7 @@ export class OnnxEvaluator implements Evaluator {
           if (uncertaintyRaw) uncertainties.set(actionId, Number(uncertaintyRaw[i * width + j] ?? 0));
         }
         if (legal.moves[i].length > width) {
-          // Extremely rare with K=128 in practical suites. Give omitted moves zero prior/AV rather than failing mid-arena.
+          // Legacy compatibility path, enabled only by meta.allow_legal_overflow_zero_prior.
           for (let j = width; j < legal.moves[i].length; j++) policy.set(moveToActionId(legal.moves[i][j]), 0);
         }
         const wdl = softmax(wdlRaw.subarray(i * 3, i * 3 + 3));

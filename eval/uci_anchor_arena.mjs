@@ -5,7 +5,7 @@ import { dirname } from 'node:path';
 import { parseFen, boardToFen } from '../src/chess/board.ts';
 import { inCheck, legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
-import { chooseMove } from '../src/search/puct.ts';
+import { chooseMove, classicPuctPolicy, actionValuePuctPolicy, auxPuctPolicy } from '../src/search/puct.ts';
 import { OnnxEvaluator } from '../src/nn/onnxEvaluator.ts';
 import { SquareFormerEvaluator } from '../src/nn/squareformerEvaluator.ts';
 
@@ -31,9 +31,10 @@ function normalApproxCi(scoreRate, games) {
   return 1.96 * se * deriv;
 }
 function parseCandidate(s) {
-  const [name, onnx, meta] = s.split(':');
-  if (!name || !onnx || !meta) throw new Error('Use --candidate=name:path.onnx:path.meta.json');
-  return { name, onnx, meta };
+  const [name, onnx, meta, mode = 'puct', avWeight = '0.25', rankWeight = '0', regretWeight = '0', riskWeight = '0', uncertaintyWeight = '0'] = s.split(':');
+  if (!name || !onnx || !meta) throw new Error('Use --candidate=name:path.onnx:path.meta.json[:mode[:avWeight[:rankWeight[:regretWeight]]]]');
+  if (!['puct', 'av', 'aux'].includes(mode)) throw new Error(`Bad candidate mode: ${mode}`);
+  return { name, onnx, meta, mode, avWeight: Number(avWeight), rankWeight: Number(rankWeight), regretWeight: Number(regretWeight), riskWeight: Number(riskWeight), uncertaintyWeight: Number(uncertaintyWeight) };
 }
 function loadOpenings(path) {
   return readFileSync(path, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#')).map(l => l.split(/\s+#/)[0].trim());
@@ -44,18 +45,41 @@ class UciEngine {
   send(s) { this.p.stdin.write(s + '\n'); }
   waitFor(pred, timeoutMs=30000) { const hit = this.buf.find(pred); if (hit) return Promise.resolve(hit); return new Promise((resolve, reject) => { const t=setTimeout(()=>{this.waiters=this.waiters.filter(w=>w.resolve!==resolve); reject(new Error(`${this.name} timeout`));}, timeoutMs); this.waiters.push({ pred, resolve:(v)=>{clearTimeout(t); resolve(v);} }); }); }
   async init(options={}) { this.send('uci'); await this.waitFor(l => l === 'uciok'); for (const [k,v] of Object.entries(options)) this.send(`setoption name ${k} value ${v}`); this.send('isready'); await this.waitFor(l => l === 'readyok'); }
-  async bestmove(fen, nodes) { this.buf = []; this.send(`position fen ${fen}`); this.send(`go nodes ${nodes}`); const line = await this.waitFor(l => l.startsWith('bestmove '), 60000); return line.split(/\s+/)[1]; }
+  async bestmove(fen, search) {
+    this.buf = [];
+    this.send(`position fen ${fen}`);
+    const go = typeof search === 'object' && search ? (search.go || `nodes ${search.nodes || 1}`) : `nodes ${search}`;
+    this.send(`go ${go}`);
+    const line = await this.waitFor(l => l.startsWith('bestmove '), 60000);
+    return line.split(/\s+/)[1];
+  }
   quit() { try { this.send('quit'); } catch {} }
 }
 function stockfishAnchors(path, levels, nodes, threads, hash) {
-  return levels.map(level => ({ type:'uci', name:`stockfish_${level}`, command:path, nodes, options:{ Threads:threads, Hash:hash, UCI_LimitStrength:'true', UCI_Elo:String(level) }}));
+  return levels.map(level => ({ type:'uci', name:`stockfish_${level}`, command:path, search:{ go:`nodes ${nodes}`, nodes }, options:{ Threads:threads, Hash:hash, UCI_LimitStrength:'true', UCI_Elo:String(level) }}));
+}
+function stockfishLiteAnchors(path, levels, nodes, hash) {
+  return levels.map(level => ({ type:'uci', name:`stockfish_lite_${level}`, command:path, search:{ go:`nodes ${nodes}`, nodes }, options:{ Hash:hash, UCI_LimitStrength:'true', UCI_Elo:String(level) }}));
+}
+function stockfishShallowAnchors(path, depths, threads, hash) {
+  return depths.map(depth => ({ type:'uci', name:`stockfish_depth${depth}`, command:path, search:{ go:`depth ${depth}`, depth }, options:{ Threads:threads, Hash:hash, UCI_LimitStrength:'false' }}));
+}
+function stockfishLiteShallowAnchors(path, depths, hash) {
+  return depths.map(depth => ({ type:'uci', name:`stockfish_lite_depth${depth}`, command:path, search:{ go:`depth ${depth}`, depth }, options:{ Hash:hash, UCI_LimitStrength:'false' }}));
+}
+function parseSearch(raw, defaultNodes) {
+  if (!raw) return { go:`nodes ${defaultNodes}`, nodes:defaultNodes };
+  if (/^\d+$/.test(raw)) return { go:`nodes ${Number(raw)}`, nodes:Number(raw) };
+  const m = raw.match(/^(nodes|depth|movetime)=(\d+)$/);
+  if (!m) throw new Error(`Bad UCI search spec '${raw}', use N, nodes=N, depth=N, or movetime=N`);
+  return { go:`${m[1]} ${Number(m[2])}`, [m[1]]:Number(m[2]) };
 }
 function customUciAnchors(spec, defaultNodes) {
   if (!spec) return [];
   return spec.split(',').filter(Boolean).map(entry => {
-    const [name, command, nodesRaw] = entry.split('|');
-    if (!name || !command) throw new Error('--uci-anchors=name|/path/to/uci|nodes,...');
-    return { type:'uci', name, command, nodes:Number(nodesRaw || defaultNodes), options:{} };
+    const [name, command, searchRaw] = entry.split('|');
+    if (!name || !command) throw new Error('--uci-anchors=name|/path/to/uci|nodes=N|depth=N|movetime=N,...');
+    return { type:'uci', name, command, search:parseSearch(searchRaw, defaultNodes), options:{} };
   });
 }
 function ptnmlFromPairScores(pairScores) {
@@ -72,6 +96,7 @@ const pairs = Number(arg('--pairs', '20'));
 const visits = Number(arg('--visits', '64'));
 const cpuct = Number(arg('--cpuct', '1.5'));
 const maxPlies = Number(arg('--max-plies', '120'));
+const batchSize = Number(arg('--batch-size', '16'));
 const stockfishPath = arg('--stockfish', '.local_engines/stockfish_pkg/usr/games/stockfish');
 const sfLevels = arg('--stockfish-levels', '1320,1600').split(',').filter(Boolean).map(Number);
 const sfNodes = Number(arg('--stockfish-nodes', '64'));
@@ -79,10 +104,18 @@ const threads = Number(arg('--threads', '1'));
 const hash = Number(arg('--hash', '16'));
 const out = arg('--out', 'artifacts/anchor_arena/uci_anchor_arena.json');
 const includeStockfish = boolArg('--include-stockfish', true);
+const includeStockfishLite = boolArg('--include-stockfish-lite', false);
+const stockfishLitePath = arg('--stockfish-lite', '.local_engines/stockfish-lite-single.sh');
+const sfLiteLevels = arg('--stockfish-lite-levels', sfLevels.join(',')).split(',').filter(Boolean).map(Number);
+const sfLiteNodes = Number(arg('--stockfish-lite-nodes', String(sfNodes)));
+const includeStockfishShallow = boolArg('--include-stockfish-shallow', false);
+const sfShallowDepths = arg('--stockfish-shallow-depths', '1,2,3').split(',').filter(Boolean).map(Number);
+const includeStockfishLiteShallow = boolArg('--include-stockfish-lite-shallow', false);
+const sfLiteShallowDepths = arg('--stockfish-lite-shallow-depths', sfShallowDepths.join(',')).split(',').filter(Boolean).map(Number);
 
 async function loadEvaluator(onnx, metaPath) {
   const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
-  return meta.kind === 'squareformer' ? SquareFormerEvaluator.create(onnx, meta) : OnnxEvaluator.create(onnx, meta);
+  return (meta.kind === 'squareformer' || meta.kind === 'squareformer_v2') ? SquareFormerEvaluator.create(onnx, meta) : OnnxEvaluator.create(onnx, meta);
 }
 const allOpenings = loadOpenings(openingsFile);
 const openingCount = openingCountRaw === '' ? allOpenings.length - openingStart : Number(openingCountRaw);
@@ -91,6 +124,9 @@ if (!openings.length) throw new Error(`No openings selected: start=${openingStar
 const candidate = { type:'tiny', ...candidateSpec, evaluator: await loadEvaluator(candidateSpec.onnx, candidateSpec.meta) };
 const anchors = [
   ...(includeStockfish ? stockfishAnchors(stockfishPath, sfLevels, sfNodes, threads, hash) : []),
+  ...(includeStockfishLite ? stockfishLiteAnchors(stockfishLitePath, sfLiteLevels, sfLiteNodes, hash) : []),
+  ...(includeStockfishShallow ? stockfishShallowAnchors(stockfishPath, sfShallowDepths, threads, hash) : []),
+  ...(includeStockfishLiteShallow ? stockfishLiteShallowAnchors(stockfishLitePath, sfLiteShallowDepths, hash) : []),
   ...customUciAnchors(arg('--uci-anchors',''), sfNodes),
 ];
 if (!anchors.length) throw new Error('No anchors configured');
@@ -98,12 +134,24 @@ for (const a of anchors) { a.engine = new UciEngine(a.name, a.command); await a.
 async function choose(side, board, history) {
   if (side.type === 'tiny') {
     const legalUci = new Set(legalMoves(board).map(moveToUci));
-    const r = await chooseMove(board, side.evaluator, { visits, cpuct, historyFens: history.slice(-2).reverse() });
+    const searchPolicy = side.mode === 'aux' ? auxPuctPolicy : (side.mode === 'av' ? actionValuePuctPolicy : classicPuctPolicy);
+    const r = await chooseMove(board, side.evaluator, {
+      visits,
+      cpuct,
+      batchSize,
+      historyFens: history.slice(-2).reverse(),
+      searchPolicy,
+      avWeight: side.avWeight,
+      rankWeight: side.rankWeight,
+      regretWeight: side.regretWeight,
+      riskWeight: side.riskWeight,
+      uncertaintyWeight: side.uncertaintyWeight,
+    });
     if (!r.move) return null;
     const u = moveToUci(r.move);
     return legalUci.has(u) ? u : `ILLEGAL:${u}`;
   }
-  return side.engine.bestmove(boardToFen(board), side.nodes);
+  return side.engine.bestmove(boardToFen(board), side.search || { go:`nodes ${side.nodes || 1}`, nodes:side.nodes || 1 });
 }
 function applyUci(board, uci) {
   for (const m of legalMoves(board)) if (moveToUci(m) === uci) return makeMove(board, m);
@@ -144,7 +192,7 @@ for (const anchor of anchors) {
 }
 for (const a of anchors) a.engine.quit();
 mkdirSync(dirname(out), { recursive:true });
-const protocol = { kind:'uci_anchor_arena', candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta }, anchors:anchors.map(a=>({ name:a.name, type:a.type, command:a.command, nodes:a.nodes, options:a.options })), openingsFile, openingsTotal:allOpenings.length, openingStart, openingCount:openings.length, openings:openings.length, pairs, visits, cpuct, maxPlies, stockfishNodes:sfNodes, threads, hash, createdUtc:new Date().toISOString() };
+const protocol = { kind:'uci_anchor_arena', candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta, mode:candidate.mode, avWeight:candidate.avWeight, rankWeight:candidate.rankWeight, regretWeight:candidate.regretWeight, riskWeight:candidate.riskWeight, uncertaintyWeight:candidate.uncertaintyWeight }, anchors:anchors.map(a=>({ name:a.name, type:a.type, command:a.command, search:a.search, nodes:a.nodes, options:a.options })), openingsFile, openingsTotal:allOpenings.length, openingStart, openingCount:openings.length, openings:openings.length, pairs, visits, cpuct, batchSize, maxPlies, stockfishNodes:sfNodes, stockfishLiteNodes:sfLiteNodes, includeStockfishLite, includeStockfishShallow, stockfishShallowDepths:sfShallowDepths, includeStockfishLiteShallow, stockfishLiteShallowDepths:sfLiteShallowDepths, threads, hash, createdUtc:new Date().toISOString() };
 writeFileSync(out, JSON.stringify({ candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta }, protocol, summaries, games }, null, 2));
 writeFileSync(`${out}.protocol.json`, JSON.stringify(protocol, null, 2));
 for (const s of summaries) {

@@ -8,7 +8,7 @@ import { SquareFormerEvaluator } from '../src/nn/squareformerEvaluator.ts';
 import { searchRoot } from '../src/search/puct.ts';
 
 function arg(name, fallback='') { const p=`${name}=`; const x=process.argv.find(v=>v.startsWith(p)); if (x) return x.slice(p.length); const i=process.argv.indexOf(name); return i>=0 ? process.argv[i+1] : fallback; }
-async function load(model, metaPath) { const meta=JSON.parse(readFileSync(metaPath,'utf8')); return meta.kind==='squareformer' ? SquareFormerEvaluator.create(model, meta) : OnnxEvaluator.create(model, meta); }
+async function load(model, metaPath) { const meta=JSON.parse(readFileSync(metaPath,'utf8')); return (meta.kind==='squareformer'||meta.kind==='squareformer_v2') ? SquareFormerEvaluator.create(model, meta) : OnnxEvaluator.create(model, meta); }
 function valueFromWdl(wdl) { return wdl[0]-wdl[2]; }
 const model=arg('--model'); const meta=arg('--meta'); const fen=arg('--fen','rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'); const visitsList=arg('--visits','1,2,4,8,16,32').split(',').map(Number); const cpuct=Number(arg('--cpuct','1.5')); const batchSize=Number(arg('--batch-size','1')); const topN=Number(arg('--top','12'));
 if (!model || !meta) throw new Error('usage: node --experimental-strip-types eval/puct_probe.mjs --model m.onnx --meta m.meta.json [--fen FEN]');

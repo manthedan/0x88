@@ -8,7 +8,7 @@ import { SquareFormerEvaluator } from '../src/nn/squareformerEvaluator.ts';
 import { searchRoot, classicPuctPolicy, actionValuePuctPolicy, auxPuctPolicy } from '../src/search/puct.ts';
 
 function arg(name, fallback='') { const p=`${name}=`; const x=process.argv.find(v=>v.startsWith(p)); if (x) return x.slice(p.length); const i=process.argv.indexOf(name); return i>=0 ? process.argv[i+1] : fallback; }
-async function load(model, metaPath) { const meta=JSON.parse(readFileSync(metaPath,'utf8')); return meta.kind==='squareformer' ? SquareFormerEvaluator.create(model, meta) : OnnxEvaluator.create(model, meta); }
+async function load(model, metaPath) { const meta=JSON.parse(readFileSync(metaPath,'utf8')); return (meta.kind==='squareformer'||meta.kind==='squareformer_v2') ? SquareFormerEvaluator.create(model, meta) : OnnxEvaluator.create(model, meta); }
 function median(xs){const a=[...xs].sort((x,y)=>x-y); return a[Math.floor(a.length/2)] ?? 0;}
 function p90(xs){const a=[...xs].sort((x,y)=>x-y); return a[Math.min(a.length-1,Math.floor(a.length*0.9))] ?? 0;}
 function sampleBoards(rootFen, n){

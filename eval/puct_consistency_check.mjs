@@ -8,7 +8,7 @@ import { OnnxEvaluator } from '../src/nn/onnxEvaluator.ts';
 import { SquareFormerEvaluator } from '../src/nn/squareformerEvaluator.ts';
 import { searchRoot } from '../src/search/puct.ts';
 function arg(n,f=''){const p=`${n}=`;const x=process.argv.find(v=>v.startsWith(p));if(x)return x.slice(p.length);const i=process.argv.indexOf(n);return i>=0?process.argv[i+1]:f}
-async function load(m,mp){const meta=JSON.parse(readFileSync(mp,'utf8'));return meta.kind==='squareformer'?SquareFormerEvaluator.create(m,meta):OnnxEvaluator.create(m,meta)}
+async function load(m,mp){const meta=JSON.parse(readFileSync(mp,'utf8'));return (meta.kind==='squareformer'||meta.kind==='squareformer_v2')?SquareFormerEvaluator.create(m,meta):OnnxEvaluator.create(m,meta)}
 const model=arg('--model'), meta=arg('--meta'), pos=arg('--positions-json'), out=arg('--out',''), limit=Number(arg('--limit','100')), visits=arg('--visits','1,2,4,8,16,32').split(',').map(Number);
 if(!model||!meta||!pos) throw new Error('usage --model --meta --positions-json');
 const data=JSON.parse(readFileSync(pos,'utf8')); const fens=(data.positions??data).map(x=>x.fen??x.fen_before).filter(Boolean).slice(0,limit); const evr=await load(model,meta);

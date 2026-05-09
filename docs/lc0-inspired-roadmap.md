@@ -1,5 +1,7 @@
 # LC0-Inspired Tiny Leela Roadmap
 
+> **Status: Superseded / reference.** The lc0-inspired direction has been folded into [`lc0_maia_gap_closure_roadmap.md`](lc0_maia_gap_closure_roadmap.md), [`unified_squareformer_architecture_roadmap.md`](unified_squareformer_architecture_roadmap.md), and [`small_bt4_progression.md`](small_bt4_progression.md). Keep this as background.
+
 ## Summary
 
 The current tiny Leela has reached the point where architecture and training-target changes matter more than simply adding epochs. The spatial policy head was a major breakthrough, confirming that chess policy needs square-aware features. The next phase should borrow the core ideas from `lczero-training` while keeping the project small, readable, browser-friendly, and Rust/TypeScript deployable.

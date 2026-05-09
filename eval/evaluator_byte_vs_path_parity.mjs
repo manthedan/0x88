@@ -7,7 +7,7 @@ import { OnnxEvaluator } from '../src/nn/onnxEvaluator.ts';
 import { SquareFormerEvaluator } from '../src/nn/squareformerEvaluator.ts';
 
 function arg(name, fallback=''){ const p=`${name}=`; const x=process.argv.find(v=>v.startsWith(p)); if(x)return x.slice(p.length); const i=process.argv.indexOf(name); return i>=0?process.argv[i+1]:fallback; }
-async function create(model, meta, bytes=false){ const m=JSON.parse(readFileSync(meta,'utf8')); const src=bytes?readFileSync(model):model; return m.kind==='squareformer'?SquareFormerEvaluator.create(src,m):OnnxEvaluator.create(src,m); }
+async function create(model, meta, bytes=false){ const m=JSON.parse(readFileSync(meta,'utf8')); const src=bytes?readFileSync(model):model; return (m.kind==='squareformer'||m.kind==='squareformer_v2')?SquareFormerEvaluator.create(src,m):OnnxEvaluator.create(src,m); }
 const model=arg('--model','public/models/chessformer_v1_100m_e3_single.onnx');
 const meta=arg('--meta','public/models/chessformer_v1_100m_e3_single.meta.json');
 const tol=Number(arg('--tol','1e-7'));

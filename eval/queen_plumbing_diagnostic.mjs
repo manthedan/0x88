@@ -63,7 +63,7 @@ const BUILTIN = [
 
 async function loadEvaluator(model, metaPath) {
   const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
-  if (meta.kind === 'squareformer') return { meta, evaluator: await SquareFormerEvaluator.create(model, meta) };
+  if ((meta.kind === 'squareformer' || meta.kind === 'squareformer_v2')) return { meta, evaluator: await SquareFormerEvaluator.create(model, meta) };
   return { meta, evaluator: await OnnxEvaluator.create(model, meta) };
 }
 

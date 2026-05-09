@@ -8,14 +8,20 @@ const PIECES = '.PNBRQKpnbrqk';
 const PROMO_INDEX: Record<string, number> = { n: 0, b: 1, r: 2, q: 3 };
 
 export interface SquareFormerMeta {
-  kind: 'squareformer';
-  variant: string;
+  kind: 'squareformer' | 'squareformer_v2';
+  variant?: string;
   input_dim: number;
   token_features?: number;
-  input_format?: 'float_onehot_rules' | 'compact_uint8_embeddings' | string;
+  input_mode?: 'onehot' | 'embedding' | string;
+  input_format?: 'float_onehot_rules' | 'compact_uint8_embeddings' | 'compact_uint8_tokens' | string;
   policy_size: number;
   history_plies: number;
   relation_bias?: boolean;
+  av_head_exported?: boolean;
+  action_value_move_encoding?: 'chessbench_compact_20480' | string;
+  max_legal_moves?: number;
+  onnx_fixed_legal_moves?: number;
+  outputs?: string[];
 }
 
 function softmax(xs: ArrayLike<number>): number[] {
@@ -87,9 +93,14 @@ function squareformerCompactInput(board: BoardState, meta: SquareFormerMeta, his
   const half = BigInt(Math.max(0, Math.min(255, Math.trunc(board.halfmove || 0))));
   for (let sq = 0; sq < 64; sq++) {
     data[sq * stride + base + 0] = stm;
-    data[sq * stride + base + 1] = flags;
-    data[sq * stride + base + 2] = board.epSquare === sq ? 1n : 0n;
-    data[sq * stride + base + 3] = half;
+    if (base + 1 < stride) data[sq * stride + base + 1] = flags;
+    if (base + 2 < stride) data[sq * stride + base + 2] = board.epSquare === sq ? 1n : 0n;
+    if (base + 3 < stride) data[sq * stride + base + 3] = half;
+    // V2 compact token caches add static square topology tokens after rules.
+    if (base + 4 < stride) data[sq * stride + base + 4] = BigInt(Math.floor(sq / 8));
+    if (base + 5 < stride) data[sq * stride + base + 5] = BigInt(sq % 8);
+    if (base + 6 < stride) data[sq * stride + base + 6] = BigInt((Math.floor(sq / 8) + (sq % 8)) & 1);
+    if (base + 7 < stride) data[sq * stride + base + 7] = BigInt(sq);
   }
   return data;
 }
@@ -119,6 +130,19 @@ function squareformerPolicyIndex(move: Move): number {
   return ft;
 }
 
+function legalCandidateInputs(boards: BoardState[], width: number, contexts: EvaluationContext[] = []): { moves: Move[][]; classes: BigInt64Array; width: number } {
+  const moves = boards.map((board, i) => contexts[i]?.legalMoves ?? legalMoves(board));
+  const classes = new BigInt64Array(boards.length * width);
+  for (let i = 0; i < moves.length; i++) {
+    for (let j = 0; j < Math.min(width, moves[i].length); j++) classes[i * width + j] = BigInt(squareformerPolicyIndex(moves[i][j]));
+  }
+  return { moves, classes, width };
+}
+
+function isCompactMeta(meta: SquareFormerMeta): boolean {
+  return meta.input_mode === 'embedding' || meta.input_format === 'compact_uint8_embeddings' || meta.input_format === 'compact_uint8_tokens';
+}
+
 function sessionOptions(): ort.InferenceSession.SessionOptions {
   const threads = Number(globalThis.process?.env?.ORT_INTRA_OP_NUM_THREADS ?? globalThis.process?.env?.ORT_NUM_THREADS ?? '0');
   const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all' };
@@ -142,7 +166,7 @@ export class SquareFormerEvaluator implements Evaluator {
 
   async evaluateBatch(boards: BoardState[], contexts: EvaluationContext[] = []): Promise<Evaluation[]> {
     if (!boards.length) return [];
-    const compact = this.meta.input_format === 'compact_uint8_embeddings';
+    const compact = isCompactMeta(this.meta);
     const stride = compact ? this.meta.token_features ?? this.meta.history_plies + 9 : this.meta.input_dim;
     const one = 64 * stride;
     const input = compact ? new BigInt64Array(boards.length * one) : new Float32Array(boards.length * one);
@@ -151,9 +175,14 @@ export class SquareFormerEvaluator implements Evaluator {
       (input as BigInt64Array | Float32Array).set(row as never, i * one);
     }
     const shape: [number, number, number] = [boards.length, 64, stride];
-    const outputs = await this.session.run({ tokens: compact ? new ort.Tensor('int64', input as BigInt64Array, shape) : new ort.Tensor('float32', input as Float32Array, shape) });
+    const feeds: Record<string, ort.Tensor> = { tokens: compact ? new ort.Tensor('int64', input as BigInt64Array, shape) : new ort.Tensor('float32', input as Float32Array, shape) };
+    const avWidth = Math.max(1, Number(this.meta.onnx_fixed_legal_moves ?? this.meta.max_legal_moves ?? 0));
+    const legalInfo = this.meta.av_head_exported && avWidth > 0 ? legalCandidateInputs(boards, avWidth, contexts) : null;
+    if (legalInfo) feeds.legal_action_ids = new ort.Tensor('int64', legalInfo.classes, [boards.length, avWidth]);
+    const outputs = await this.session.run(feeds);
     const policyRaw = (outputs.policy?.data ?? Object.values(outputs)[0].data) as Float32Array;
     const wdlRaw = (outputs.wdl?.data ?? Object.values(outputs)[1].data) as Float32Array;
+    const avRaw = outputs.action_values?.data as Float32Array | undefined;
     const policySize = this.meta.policy_size;
     return boards.map((board, i) => {
       const legal = contexts[i]?.legalMoves ?? legalMoves(board);
@@ -161,9 +190,14 @@ export class SquareFormerEvaluator implements Evaluator {
       const logits = legal.map((move) => Number(policyRow[squareformerPolicyIndex(move)] ?? -100));
       const probs = softmax(logits);
       const policy = new Map<number, number>();
-      legal.forEach((move, j) => policy.set(moveToActionId(move), probs[j] ?? 0));
+      const actionValues = avRaw ? new Map<number, number>() : undefined;
+      legal.forEach((move, j) => {
+        const actionId = moveToActionId(move);
+        policy.set(actionId, probs[j] ?? 0);
+        if (actionValues && j < avWidth) actionValues.set(actionId, Number(avRaw[i * avWidth + j] ?? 0));
+      });
       const wdl = softmax(wdlRaw.subarray(i * 3, i * 3 + 3));
-      return { policy, wdl: [wdl[0] ?? 0, wdl[1] ?? 0, wdl[2] ?? 0] as [number, number, number] };
+      return { policy, wdl: [wdl[0] ?? 0, wdl[1] ?? 0, wdl[2] ?? 0] as [number, number, number], actionValues };
     });
   }
 }

@@ -27,7 +27,7 @@ const out = arg('--out', 'artifacts/eval/bucket_eval.json');
 const maxRowsPerBucket = Number(arg('--max-rows-per-bucket', '5000'));
 if (!input || !model || !meta) throw new Error('usage: --input dev.jsonl[.zst] --model x.onnx --meta x.meta.json');
 const metaJson = JSON.parse(readFileSync(meta, 'utf8'));
-const evaluator = metaJson.kind === 'squareformer' ? await SquareFormerEvaluator.create(model, metaJson) : await OnnxEvaluator.create(model, metaJson);
+const evaluator = (metaJson.kind === 'squareformer' || metaJson.kind === 'squareformer_v2') ? await SquareFormerEvaluator.create(model, metaJson) : await OnnxEvaluator.create(model, metaJson);
 const stats = {}; const counts = {}; let rows = 0, used = 0, bad = 0;
 for await (const line of openLines(input)) {
   if (!line.trim()) continue; rows++;

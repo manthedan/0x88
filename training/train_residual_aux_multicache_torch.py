@@ -44,6 +44,9 @@ def main():
     p.add_argument('--aux-q-weight', type=float, default=0.0)
     p.add_argument('--max-dev-policy-ce', type=float, default=2.85)
     p.add_argument('--patience', type=int, default=0, help='Early stop after N non-improving evals; 0 disables')
+    p.add_argument('--weight-qat', action='store_true', help='Constrain trainable matrix/conv weights to an int8 fake-quant grid after each optimizer step (weight-only QAT/fine-tuning).')
+    p.add_argument('--qat-bits', type=int, default=8, help='Fake-quant bits for --weight-qat.')
+    p.add_argument('--qat-per-tensor', action='store_true', help='Use one scale per tensor instead of per output channel for --weight-qat.')
     args = p.parse_args()
 
     import torch, torch.nn as nn, torch.nn.functional as F
@@ -123,6 +126,26 @@ def main():
         print(f'METRIC resume_model_only={1 if args.resume_model_only else 0}')
     else:
         print('METRIC resumed=0')
+
+    def apply_weight_qat_grid_():
+        if not args.weight_qat: return
+        qmax = float((1 << (args.qat_bits - 1)) - 1)
+        with torch.no_grad():
+            for name, p0 in net.named_parameters():
+                if not p0.is_floating_point() or p0.ndim < 2: continue
+                d = p0.data
+                if args.qat_per_tensor or d.ndim < 2:
+                    scale = d.abs().amax().clamp(min=1e-8) / qmax
+                    p0.copy_((d / scale).round().clamp(-qmax, qmax) * scale)
+                else:
+                    flat = d.reshape(d.shape[0], -1)
+                    scale = flat.abs().amax(dim=1).clamp(min=1e-8) / qmax
+                    p0.copy_(((flat / scale[:, None]).round().clamp(-qmax, qmax) * scale[:, None]).reshape_as(d))
+    if args.weight_qat:
+        print(f'METRIC weight_qat=1')
+        print(f'METRIC qat_bits={args.qat_bits}')
+        print(f'METRIC qat_per_channel={0 if args.qat_per_tensor else 1}')
+    apply_weight_qat_grid_()
 
     def gather(ids):
         xs=[]; ys=[]; vs=[]; ws=[]; qs=[]
@@ -238,7 +261,7 @@ def main():
             opt.zero_grad(set_to_none=True); scaler.scale(loss).backward()
             if args.grad_clip_norm > 0:
                 scaler.unscale_(opt); torch.nn.utils.clip_grad_norm_(net.parameters(), args.grad_clip_norm)
-            scaler.step(opt); scaler.update(); update_ema()
+            scaler.step(opt); scaler.update(); apply_weight_qat_grid_(); update_ema()
             loss_sum += float(loss.detach()) * len(yb); seen += len(yb); steps += 1; global_step += 1
             if args.progress_every and steps % args.progress_every == 0:
                 elapsed = time.time() - t; mem = torch.cuda.max_memory_allocated() / 1048576 if str(device).startswith('cuda') else 0.0
@@ -283,7 +306,8 @@ def main():
         if last_vals['dev_policy_ce'] > args.max_dev_policy_ce:
             print(f'METRIC stopped_dev_policy_ce={last_vals["dev_policy_ce"]:.6f}', flush=True); break
 
-    meta = {'kind': 'tiny_board_residual_onnx_student', 'architecture': 'residual_tower', 'policy_map': 'uci_queen_knight_promo_v1', 'moves': moves, 'channels': args.channels, 'blocks': args.blocks, 'policy_head': args.policy_head, 'se': bool(args.se), 'history_plies': metas[0]['history_plies'], 'input_planes': C, 'onnx': args.onnx_out}
+    apply_weight_qat_grid_()
+    meta = {'kind': 'tiny_board_residual_onnx_student', 'architecture': 'residual_tower', 'policy_map': 'uci_queen_knight_promo_v1', 'moves': moves, 'channels': args.channels, 'blocks': args.blocks, 'policy_head': args.policy_head, 'se': bool(args.se), 'history_plies': metas[0]['history_plies'], 'input_planes': C, 'onnx': args.onnx_out, 'weight_qat': bool(args.weight_qat), 'qat_bits': args.qat_bits if args.weight_qat else None}
     Path(args.out).parent.mkdir(parents=True, exist_ok=True); torch.save({'model': net.state_dict(), 'meta': meta}, args.out)
     if args.meta_out: Path(args.meta_out).write_text(json.dumps(meta, separators=(',', ':')))
     if args.onnx_out:

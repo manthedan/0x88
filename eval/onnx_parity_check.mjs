@@ -14,7 +14,7 @@ function arg(name, fallback = undefined) {
 }
 function num(name, fallback) { return Number(arg(name, String(fallback))); }
 async function load(model, meta) {
-  return meta.kind === 'squareformer' ? SquareFormerEvaluator.create(model, meta) : OnnxEvaluator.create(model, meta);
+  return (meta.kind === 'squareformer' || meta.kind === 'squareformer_v2') ? SquareFormerEvaluator.create(model, meta) : OnnxEvaluator.create(model, meta);
 }
 function sampleBoards(n) {
   const boards = [];

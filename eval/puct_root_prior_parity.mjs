@@ -16,7 +16,7 @@ function arg(name, fallback = undefined) {
 }
 async function loadEvaluator(model, metaPath) {
   const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
-  return meta.kind === 'squareformer' ? SquareFormerEvaluator.create(model, meta) : OnnxEvaluator.create(model, meta);
+  return (meta.kind === 'squareformer' || meta.kind === 'squareformer_v2') ? SquareFormerEvaluator.create(model, meta) : OnnxEvaluator.create(model, meta);
 }
 const model = arg('--model'), meta = arg('--meta'), pos = arg('--positions-json');
 const limit = Number(arg('--limit', '100'));

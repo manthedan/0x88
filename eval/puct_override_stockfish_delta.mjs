@@ -11,7 +11,7 @@ import { searchRoot } from '../src/search/puct.ts';
 
 function arg(name, fallback = undefined) { const p=`${name}=`; const x=process.argv.find(v=>v.startsWith(p)); if(x)return x.slice(p.length); const i=process.argv.indexOf(name); return i>=0?process.argv[i+1]:fallback; }
 function num(name, fallback) { return Number(arg(name, String(fallback))); }
-async function loadEvaluator(model, metaPath) { const meta=JSON.parse(readFileSync(metaPath,'utf8')); return meta.kind==='squareformer'?SquareFormerEvaluator.create(model,meta):OnnxEvaluator.create(model,meta); }
+async function loadEvaluator(model, metaPath) { const meta=JSON.parse(readFileSync(metaPath,'utf8')); return (meta.kind==='squareformer'||meta.kind==='squareformer_v2')?SquareFormerEvaluator.create(model,meta):OnnxEvaluator.create(model,meta); }
 function cpForSide(evalStm, fen, side) { if (evalStm.cp === null || evalStm.cp === undefined) return null; return fen.split(' ')[1] === side ? evalStm.cp : -evalStm.cp; }
 function material(fen) { const v={p:1,n:3,b:3,r:5,q:9}; const out={w:0,b:0,wq:0,bq:0}; for (const c of fen.split(' ')[0]) if (/[a-zA-Z]/.test(c)) { const s=c===c.toUpperCase()?'w':'b'; const p=c.toLowerCase(); out[s]+=v[p]??0; if(p==='q') out[`${s}q`]++; } return out; }
 class Stockfish {

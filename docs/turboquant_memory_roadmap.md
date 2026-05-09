@@ -11,6 +11,8 @@ Use FP16 / INT8 / QAT for model weights and inference.
 Use TurboQuant-like vector compression for stored embeddings and search memory.
 ```
 
+A 2026-05 Unsloth triage reinforced this order: treat quantization as a measured deployment/training issue, not a last-minute packaging trick.  The near-term path is PTQ first, QAT only if PTQ measurably hurts strength/calibration, and FP8 only later on hardware that actually supports it well.  See `docs/unsloth_rl_economics_triage_2026-05.md`.
+
 ## Why not use TurboQuant in v1 inference?
 
 SquareFormer-style chess models are fixed-context encoder models:
@@ -29,7 +31,8 @@ Do this before any TurboQuant-like work.
 - [ ] Measure browser policy-only eval/sec.
 - [ ] Measure PUCT eval/sec at 32/64/128 visits.
 - [ ] Try INT8 post-training quantization for WASM/CPU path.
-- [ ] If INT8 PTQ hurts too much, add INT8 QAT.
+- [ ] Measure PTQ drift on policy top-k, WDL calibration, candidate AV/ranking, catastrophic regret rate, fixed-node Elo, and browser latency.
+- [ ] If INT8 PTQ hurts too much, add INT8 QAT/fake-quant fine-tuning.
 - [ ] Store policies as top-k move lists, not full dense 1862-float arrays.
 - [ ] Store MCTS nodes in packed typed arrays, not JS object graphs.
 

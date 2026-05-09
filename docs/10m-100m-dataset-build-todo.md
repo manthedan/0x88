@@ -1,5 +1,7 @@
 # 10M → 100M dataset build TODO
 
+> **Status: Historical / partially superseded.** This records the dataset-build plan that led to the current 10M/100M datasets. For live truth, check dataset manifests under `data/datasets/*/manifest.json`, cache manifests, and queue status files under `artifacts/*/status.txt`.
+
 Objective: build a clean `10M` supervised dataset first, using the `5M` milestone as an intermediate validation point, then scale the same pipeline toward `100M`.
 
 ## Source policy

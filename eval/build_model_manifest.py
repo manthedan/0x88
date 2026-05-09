@@ -259,7 +259,11 @@ def scan_search_mode_arenas(models: list[dict[str, Any]], arena_globs: list[str]
                 data = json.loads(p.read_text())
             except Exception:
                 continue
+            if not isinstance(data, dict):
+                continue
             protocol = data.get("protocol") or {}
+            if not isinstance(protocol, dict):
+                protocol = {}
             resources = protocol.get("modelResources") or {}
             standings = {s.get("name"): s for s in data.get("standings", []) if isinstance(s, dict)}
             for player, res in resources.items():

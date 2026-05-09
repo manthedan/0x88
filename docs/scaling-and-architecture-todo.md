@@ -1,5 +1,7 @@
 # Tiny Leela scaling + architecture TODO
 
+> **Status: Superseded / historical.** This was an early all-in-one TODO. Prefer the current split in [`README.md`](README.md): CNN/100M scaling, Tactical-MoveFormer, and TinyBT/SquareFormer roadmaps. Keep this file for provenance and completed-checklist context.
+
 ## 0. Immediate cleanup
 
 - [ ] Add/verify `.gitignore` protects generated data:

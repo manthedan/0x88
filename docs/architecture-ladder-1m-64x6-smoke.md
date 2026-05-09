@@ -1,5 +1,7 @@
 # 1M 64x6 architecture ladder smoke
 
+> **Status: Historical result snapshot.** Keep for comparison/provenance; do not treat this as the current architecture ladder without checking newer head-ablation and model-manifest docs.
+
 Dataset: `supervised_1m_v1` / `supervised_1m_v1_winrate_aug`  
 Cache: history2 + state planes, 46 input planes  
 Hardware: RTX 3090, CUDA AMP  

@@ -112,6 +112,11 @@ def main():
     ap.add_argument('--amp', action='store_true', help='Use CUDA mixed precision training/eval')
     ap.add_argument('--amp-dtype', choices=['fp16','bf16'], default='bf16', help='AMP dtype on CUDA')
     ap.add_argument('--torch-compile', action='store_true', help='Compile model for training; ONNX export uses the original uncompiled module')
+    ap.add_argument('--weight-qat', action='store_true', help='Constrain trainable matrix weights to an int8 fake-quant grid after each optimizer step (weight-only QAT/fine-tuning).')
+    ap.add_argument('--qat-bits', type=int, default=8, help='Fake-quant bits for --weight-qat.')
+    ap.add_argument('--qat-per-tensor', action='store_true', help='Use one scale per tensor instead of per output channel for --weight-qat.')
+    ap.add_argument('--qat-quantize-embeddings', action='store_true', help='Also fake-quant embedding matrices during --weight-qat; default leaves embeddings full precision.')
+    ap.add_argument('--qat-quantize-pos', action='store_true', help='Also fake-quant positional parameters during --weight-qat; default leaves them full precision.')
     ap.add_argument('--fused-adamw', action='store_true', help='Use fused CUDA AdamW when available')
     ap.add_argument('--matmul-precision', choices=['highest','high','medium'], default='high', help='torch float32 matmul precision')
     ap.add_argument('--checkpoint-dir', default='', help='Save resumable checkpoint after every epoch')
@@ -231,6 +236,24 @@ def main():
     amp_enabled = bool(args.amp and args.device.startswith('cuda'))
     amp_dtype = torch.bfloat16 if args.amp_dtype == 'bf16' else torch.float16
     scaler = torch.amp.GradScaler('cuda', enabled=bool(amp_enabled and amp_dtype is torch.float16))
+    def apply_weight_qat_grid_():
+        if not args.weight_qat: return
+        qmax = float((1 << (args.qat_bits - 1)) - 1)
+        with torch.no_grad():
+            for name, p in raw_net.named_parameters():
+                if not p.is_floating_point() or p.ndim < 2: continue
+                if (not args.qat_quantize_embeddings) and ('.piece_emb.' in name or '.stm_emb.' in name or '.castle_emb.' in name or '.ep_emb.' in name): continue
+                if (not args.qat_quantize_pos) and name == 'pos': continue
+                d = p.data
+                if args.qat_per_tensor or d.ndim < 2:
+                    scale = d.abs().amax().clamp(min=1e-8) / qmax
+                    p.copy_((d / scale).round().clamp(-qmax, qmax) * scale)
+                else:
+                    flat = d.reshape(d.shape[0], -1)
+                    scale = flat.abs().amax(dim=1).clamp(min=1e-8) / qmax
+                    p.copy_(((flat / scale[:, None]).round().clamp(-qmax, qmax) * scale[:, None]).reshape_as(d))
+    if args.weight_qat:
+        print(f'[squareformer] weight_qat enabled bits={args.qat_bits} per_channel={not args.qat_per_tensor} quantize_embeddings={args.qat_quantize_embeddings} quantize_pos={args.qat_quantize_pos}', flush=True)
     train_rows_for_sched = min(args.max_rows or (cache['train_rows'] if cache is not None else len(train)), (cache['train_rows'] if cache is not None else len(train)))
     total_steps = max(1, math.ceil(train_rows_for_sched / args.batch_size) * args.epochs)
     warmup_steps = max(0, int(total_steps * args.warmup_frac)) if args.lr_schedule == 'cosine' else 0
@@ -238,6 +261,7 @@ def main():
     if resume_ckpt is not None and 'optimizer' in resume_ckpt:
         opt.load_state_dict(resume_ckpt['optimizer'])
         print(f'[squareformer] resumed optimizer global_step={global_step}', flush=True)
+    apply_weight_qat_grid_()
     def set_lr(step):
         if args.lr_schedule == 'constant': lr = args.lr
         elif warmup_steps and step < warmup_steps:
@@ -342,7 +366,7 @@ def main():
             opt.zero_grad(set_to_none=True)
             with torch.amp.autocast('cuda', enabled=amp_enabled, dtype=amp_dtype):
                 pl,wl=net(xb); loss=F.cross_entropy(pl,yb)+F.cross_entropy(wl,vb.argmax(1))
-            scaler.scale(loss).backward(); scaler.unscale_(opt); torch.nn.utils.clip_grad_norm_(raw_net.parameters(),1.0); scaler.step(opt); scaler.update(); ls += float(loss.detach())*len(yb); n += len(yb)
+            scaler.scale(loss).backward(); scaler.unscale_(opt); torch.nn.utils.clip_grad_norm_(raw_net.parameters(),1.0); scaler.step(opt); scaler.update(); apply_weight_qat_grid_(); ls += float(loss.detach())*len(yb); n += len(yb)
             if args.progress_every and batch_i % args.progress_every == 0:
                 dt=time.time()-st; rps=n/max(dt,1e-9); mem=torch.cuda.max_memory_allocated()/1048576 if args.device.startswith('cuda') else 0.0
                 print(f'progress epoch={ep} rows={n} loss_avg={ls/n:.6f} lr={lr_now:.8g} rows_per_sec={rps:.1f} seconds={dt:.1f} cuda_max_mem_mib={mem:.0f}', flush=True)
@@ -354,12 +378,13 @@ def main():
             torch.save(ckpt, cdir/f'epoch_{ep}.pt')
             (cdir/f'epoch_{ep}.meta.json').write_text(json.dumps({'epoch':ep,'train_loss':ls/n,**vals}, indent=2))
             print(f'[squareformer] saved checkpoint {cdir / f"epoch_{ep}.pt"}', flush=True)
+    apply_weight_qat_grid_()
     input_format = 'compact_uint8_embeddings' if use_compact else 'float_onehot_rules'
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True); torch.save({'model':raw_net.state_dict(),'variant':args.variant,'input_dim':input_dim,'policy_size':policy_size,'layers':layers,'d_model':d_model,'heads':heads,'d_ff':d_ff,'history_plies':history,'relation_bias':bool(args.relation_bias),'input_format':input_format}, args.out)
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True); torch.save({'model':raw_net.state_dict(),'variant':args.variant,'input_dim':input_dim,'policy_size':policy_size,'layers':layers,'d_model':d_model,'heads':heads,'d_ff':d_ff,'history_plies':history,'relation_bias':bool(args.relation_bias),'input_format':input_format,'weight_qat':bool(args.weight_qat),'qat_bits':args.qat_bits if args.weight_qat else None}, args.out)
     if args.onnx_out:
         raw_net.eval(); dummy=(torch.zeros(1,64,history+9,dtype=torch.long,device=args.device) if use_compact else torch.zeros(1,64,input_dim,device=args.device)); torch.onnx.export(raw_net,dummy,args.onnx_out,input_names=['tokens'],output_names=['policy','wdl'],dynamic_axes={'tokens':{0:'batch'},'policy':{0:'batch'},'wdl':{0:'batch'}},opset_version=17)
     if args.meta_out:
-        meta = {'kind':'squareformer','variant':args.variant,'input_dim':input_dim,'token_features':history+9,'input_format':input_format,'policy_size':policy_size,'layers':layers,'d_model':d_model,'heads':heads,'d_ff':d_ff,'history_plies':history,'relation_bias':bool(args.relation_bias),'from_to_policy_size':policy_size}
+        meta = {'kind':'squareformer','variant':args.variant,'input_dim':input_dim,'token_features':history+9,'input_format':input_format,'policy_size':policy_size,'layers':layers,'d_model':d_model,'heads':heads,'d_ff':d_ff,'history_plies':history,'relation_bias':bool(args.relation_bias),'from_to_policy_size':policy_size,'weight_qat':bool(args.weight_qat),'qat_bits':args.qat_bits if args.weight_qat else None}
         Path(args.meta_out).write_text(json.dumps(meta, indent=2))
 
 if __name__ == '__main__': main()

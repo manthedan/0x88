@@ -15,6 +15,53 @@ policy + value -> PUCT/search -> improved policy/value targets -> next network
 
 The deployed model may often play search-light, but the training loop should use search/reanalysis to create stronger labels than the raw model can produce.
 
+## Unsloth-inspired economics, translated to chess
+
+A 2026-05 pass over Unsloth RL/GRPO documentation produced one useful principle: copy the **rollout economics**, not the LLM stack.  For tiny Leela:
+
+```text
+position = prompt
+candidate moves / continuations = generations
+teacher/search Q or regret = reward
+candidate-group ranking = chess-specific GRPO analogue
+```
+
+This should be implemented as candidate regret/ranking distillation:
+
+```text
+candidate set per position:
+  teacher top-k
+  student top-k
+  played move
+  checks/captures/promotions
+  random legal distractors
+  known tactical or queen/material blunder candidates
+
+labels:
+  side-to-move-consistent teacher/search Q
+  regret = Q_best - Q_move
+  optional tactic/tablebase/material flags
+
+losses:
+  candidate AV prediction
+  regret prediction
+  pairwise or softmax-over-negative-regret ranking
+```
+
+Use chunked candidate heads for AV/regret/reply/PV-lite losses.  Dense policy logits are acceptable; dense all-move auxiliary tensors should not be the default.
+
+Operationally, optimize actor/search throughput before trainer throughput:
+
+```text
+positions per GPU-hour
+usable training positions per dollar
+batched PUCT evals/sec
+nodes/sec
+chunk IO throughput
+```
+
+If actor and trainer share one GPU, separate their memory lifecycles: actor/search buffers should be flushed before optimizer state and training activations are allocated.  See `docs/unsloth_rl_economics_triage_2026-05.md`.
+
 ## Recommended architecture target
 
 Primary target: `SquareFormer-AV-PUCT`.
@@ -109,10 +156,10 @@ Exit criterion: candidate checkpoint beats previous accepted net in fixed-openin
 
 ## Phase 2: action-value self-play distillation
 
-Use PUCT root stats to train an action-value head:
+Use PUCT root stats to train candidate-only action-value/regret/ranking heads:
 
 ```text
-(position, move) -> Q(move) / value bucket / regret bucket
+(position, move) -> Q(move) / value bucket / regret bucket / rank score
 ```
 
 Label only a compact candidate set:
@@ -120,10 +167,21 @@ Label only a compact candidate set:
 ```text
 PUCT top-k moves
 raw-policy top-k moves
+teacher top-k moves when available
 checks/captures/promotions
 played move
 random legal distractors
 moves where search overturns policy
+known tactical/queen/material hard negatives
+```
+
+Training rule:
+
+```text
+compute trunk once
+score candidate moves in chunks of 16/32
+train AV/regret plus pairwise or softmax ranking inside each position's candidate group
+fall back safely when candidate Q variance is flat/noisy
 ```
 
 Runtime goal:

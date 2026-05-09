@@ -1,5 +1,7 @@
 # Building a Tiny In-Browser Leela Chess Zero
 
+> **Status: Historical.** This is the original project framing. It remains useful background, but current execution is now organized around the CNN baseline, Tactical-MoveFormer, and TinyBT/SquareFormer lanes listed in [`README.md`](README.md).
+
 ## Executive Summary
 
 A browser-suitable “tiny lc0” should not try to be a full port of the modern engine. The practical goal is to borrow the *architecture pattern* that made lc0 successful—policy/value neural evaluation plus PUCT-style Monte Carlo Tree Search—while aggressively simplifying the network, the move encoding, the training pipeline, and the runtime stack. The strongest current lc0 direction has moved beyond the older SE-ResNet design toward transformer-based networks with flexible input formats, but the official project still documents the classic convolutional topology that powered most community experimentation and the small community nets that are easiest to deploy. For a toy browser engine, the right abstraction is therefore “AlphaZero-style search around a tiny distilled network,” not “compile the whole lc0 engine to WebAssembly and hope for the best.” citeturn22view0turn34view0turn23search3turn27view0turn21search0

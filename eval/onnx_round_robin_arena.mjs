@@ -77,7 +77,7 @@ class CachedEvaluator {
 const evalCacheEntries = Number(arg('--eval-cache-entries', process.env.EVAL_CACHE_ENTRIES ?? '50000'));
 async function loadEvaluator(onnx, metaPath) {
   const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
-  const inner = meta.kind === 'squareformer' ? await SquareFormerEvaluator.create(onnx, meta) : await OnnxEvaluator.create(onnx, meta);
+  const inner = (meta.kind === 'squareformer' || meta.kind === 'squareformer_v2') ? await SquareFormerEvaluator.create(onnx, meta) : await OnnxEvaluator.create(onnx, meta);
   return evalCacheEntries > 0 ? new CachedEvaluator(inner, evalCacheEntries) : inner;
 }
 const models = new Map();

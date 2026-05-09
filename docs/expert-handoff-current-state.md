@@ -1,5 +1,7 @@
 # tiny_leela Expert Handoff: Current State and Open Questions
 
+> **Status: Historical snapshot.** Useful for provenance, but it predates the current CNN / Tactical-MoveFormer / TinyBT portfolio and several completed queues. For current expert handoff, use [`expert_handoff_2026-05-current.md`](expert_handoff_2026-05-current.md). For general orientation, start with [`README.md`](README.md).
+
 ## Project goal
 
 `tiny_leela` is an experimental small Leela-like chess engine intended to run in-browser / lightweight runtimes. The near-term goal is not grandmaster strength, but a compact model/search stack that plays plausible chess, can be evaluated reliably, and can be iteratively improved.

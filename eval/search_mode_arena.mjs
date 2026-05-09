@@ -90,7 +90,7 @@ class CachedEvaluator {
 
 async function loadEvaluator(onnx, metaPath, evalCacheEntries) {
   const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
-  const inner = meta.kind === 'squareformer' ? await SquareFormerEvaluator.create(onnx, meta) : await OnnxEvaluator.create(onnx, meta);
+  const inner = (meta.kind === 'squareformer' || meta.kind === 'squareformer_v2') ? await SquareFormerEvaluator.create(onnx, meta) : await OnnxEvaluator.create(onnx, meta);
   return evalCacheEntries > 0 ? new CachedEvaluator(inner, evalCacheEntries) : inner;
 }
 async function loadSharedEvaluator(onnx, metaPath, evalCacheEntries, shared) {
@@ -151,6 +151,7 @@ const out = arg('--out', 'artifacts/search_mode_arena/arena.json');
 const openingsFile = arg('--openings-file', '');
 const maxOpenings = Number(arg('--max-openings', '0'));
 const evalCacheEntries = Number(arg('--eval-cache-entries', process.env.EVAL_CACHE_ENTRIES ?? '50000'));
+const recordMoves = ['1','true','yes','on'].includes(String(arg('--record-moves', '0')).toLowerCase());
 const judgeModel = arg('--judge-model', '');
 const judgeMeta = arg('--judge-meta', '');
 const adjudicateThreshold = Number(arg('--adjudicate-threshold', '0.05'));
@@ -191,8 +192,10 @@ process.stderr.write(`[search-mode-arena] shard ${shardIndex + 1}/${shardCount} 
 for (const job of selectedJobs) {
   const { i, j, g, a, b, pairKey } = job;
   const aColor = g % 2 === 0 ? 'w' : 'b';
-  let board = parseFen(openings[(i * 17 + j * 7 + g) % openings.length]);
+  const opening = openings[(i * 17 + j * 7 + g) % openings.length];
+  let board = parseFen(opening);
   const history = [];
+  const moves = [];
   let whiteScore = terminalWhiteScore(board), illegal = null, plies = 0;
   for (; whiteScore === null && plies < maxPlies; plies++) {
     const side = board.turn === aColor ? a : b;
@@ -200,6 +203,7 @@ for (const job of selectedJobs) {
     const legalUci = new Set(legalMoves(board).map(moveToUci));
     const result = await choosePlayerMove(side, board, evaluator, { visits, cpuct, batchSize }, history);
     if (!result.move) { whiteScore = inCheck(board) ? (board.turn === 'w' ? 0 : 1) : 0.5; break; }
+    const fenBefore = recordMoves ? boardToFen(board) : null;
     const uci = moveToUci(result.move);
     if (!legalUci.has(uci)) {
       illegal = side.name;
@@ -207,6 +211,7 @@ for (const job of selectedJobs) {
       table[side.name].illegal++;
       break;
     }
+    if (recordMoves) moves.push({ ply: plies + 1, side: board.turn, engine: side.name, uci, fenBefore });
     history.push(boardToFen(board));
     board = makeMove(board, result.move);
     whiteScore = terminalWhiteScore(board);
@@ -221,14 +226,14 @@ for (const job of selectedJobs) {
   pairTable[pairKey].aScore += aScore;
   pairTable[pairKey].games++;
   pairTable[pairKey].aWdl[aScore === 1 ? 0 : aScore === 0.5 ? 1 : 2]++;
-  games.push({ white: aColor === 'w' ? a.name : b.name, black: aColor === 'w' ? b.name : a.name, whiteScore, a: a.name, b: b.name, aScore, plies, illegal });
+  games.push({ white: aColor === 'w' ? a.name : b.name, black: aColor === 'w' ? b.name : a.name, opening, whiteScore, a: a.name, b: b.name, aScore, plies, finalFen: boardToFen(board), illegal, ...(recordMoves ? { moves } : {}) });
   process.stderr.write(`[search-mode-arena] ${a.name} vs ${b.name} game ${g + 1}/${gamesPerPair} aScore=${aScore} plies=${plies} elapsed_s=${((Date.now() - startedAt) / 1000).toFixed(1)}\n`);
 }
 const standings = Object.entries(table).map(([name, r]) => ({ name, ...r, scoreRate: r.score / Math.max(1, r.games), eloVsPool: elo(r.score / Math.max(1, r.games)) })).sort((a,b)=>b.scoreRate-a.scoreRate);
 const pairs = Object.values(pairTable).map((r) => ({ ...r, aScoreRate: r.aScore / Math.max(1, r.games) }));
 const cacheStats = Object.fromEntries([...evaluators.entries()].map(([name, evaluator]) => [name, { hits: evaluator.hits ?? 0, misses: evaluator.misses ?? 0, entries: evaluator.cache?.size ?? 0 }]));
 const modelResources = Object.fromEntries(players.map((p) => [p.name, { onnx: p.onnx, meta: p.meta, bundleBytes: bundleBytes(p.onnx) }]));
-const protocol = { kind:'search_mode_arena', players, visits, cpuct, batchSize, maxPlies, gamesPerPair, openingsFile, openings: openings.length, evalCacheEntries, cacheStats, modelResources, judgeModel, judgeMeta, adjudicateThreshold, anchorPlayer, shardCount, shardIndex, shardGames: selectedJobs.length, totalGames: jobs.length, ortThreads: process.env.ORT_INTRA_OP_NUM_THREADS ?? process.env.ORT_NUM_THREADS ?? null, elapsedMs: Date.now() - startedAt, createdUtc:new Date().toISOString() };
+const protocol = { kind:'search_mode_arena', players, visits, cpuct, batchSize, maxPlies, gamesPerPair, openingsFile, openings: openings.length, evalCacheEntries, recordMoves, cacheStats, modelResources, judgeModel, judgeMeta, adjudicateThreshold, anchorPlayer, shardCount, shardIndex, shardGames: selectedJobs.length, totalGames: jobs.length, ortThreads: process.env.ORT_INTRA_OP_NUM_THREADS ?? process.env.ORT_NUM_THREADS ?? null, elapsedMs: Date.now() - startedAt, createdUtc:new Date().toISOString() };
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, JSON.stringify({ protocol, standings, pairs, games }, null, 2));
 writeFileSync(`${out}.protocol.json`, JSON.stringify(protocol, null, 2));

@@ -32,6 +32,8 @@ SquareFormer-AV-PUCT
   + multi-teacher/on-policy distillation
 ```
 
+Modern lc0's BT4-family transformer nets validate this direction at large scale: square-token transformer body, chess-aware attention/topology bias, policy + WDL/value + moves-left heads, and PUCT/MCTS around the net. The scale is fundamentally different from this project, however: BT4-class nets are large GPU engines, while this roadmap targets tiny browser/deployment models. The lesson is therefore not “copy BT4,” but “use the same structural priors in a much smaller SquareFormer-AV-PUCT system.” The detailed small-BT4 progression is tracked in `docs/small_bt4_progression.md`: TinyBT-static as architecture baseline, TinyBT-AV as strength baseline, smolgen-lite as representation/efficiency experiment, MiniBT as scaling probe, and PUCT/self-play after value/action-value become search-useful.
+
 ---
 
 ## Guiding Principles

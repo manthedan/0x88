@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends awscli zstd ca-certificates tar \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --no-cache-dir numpy pyzstd
+
+WORKDIR /work
+COPY training/build_squareformer_token_cache.py /work/training/build_squareformer_token_cache.py
+COPY cloud/aws/worker_squareformer_cache.sh /work/cloud/aws/worker_squareformer_cache.sh
+
+ENV PYTHONPATH=/work
+ENTRYPOINT ["bash", "/work/cloud/aws/worker_squareformer_cache.sh"]
