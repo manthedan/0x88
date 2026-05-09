@@ -3,6 +3,7 @@ import type { Key } from 'chessground/types';
 import { parseFen, boardToFen, squareName, START_FEN, type BoardState } from './chess/board.ts';
 import { legalMoves, makeMove } from './chess/movegen.ts';
 import { moveFromUci, moveToActionId, moveToUci, type Move } from './chess/moveCodec.ts';
+import { moveToSan, uciLineToSan, uciToSan } from './chess/san.ts';
 import { actionValuePuctPolicy, chooseMove } from './search/puct.ts';
 import { OnnxEvaluator, type OnnxStudentMeta } from './nn/onnxEvaluator.ts';
 import { SquareFormerEvaluator, type SquareFormerMeta } from './nn/squareformerEvaluator.ts';
@@ -35,6 +36,9 @@ let ground: ReturnType<typeof Chessground> | null = null;
 let orientation: 'white' | 'black' = playerSide;
 let lastMove: string | null = null;
 let playedMoves: string[] = [];
+let playedMoveSans: string[] = [];
+let positionFens: string[] = [boardToFen(board)];
+let currentPly = 0;
 let pendingPremove: { from: string; to: string } | null = null;
 let brainPiece: PieceRole | null = null;
 let gameStarted = false;
@@ -53,6 +57,7 @@ let stockfishScore = '';
 let stockfishPv = '';
 let stockfishSeq = 0;
 let stockfishSearchTurn: 'w' | 'b' = board.turn;
+let stockfishSearchFen = boardToFen(board);
 const visits = Number(params.get('visits') ?? '128');
 const puctBatchSize = Math.max(1, Number(params.get('batch') ?? '16'));
 const puctPolicy = params.get('puctPolicy') ?? 'classic';
@@ -102,23 +107,45 @@ function legalDests() {
 function legalMoveByUci(uci: string) { return legalMoves(board).find((m) => moveToUci(m) === uci) ?? null; }
 function boardFen() { return boardToFen(board).split(' ')[0]; }
 function randomChoice<T>(values: T[]) { return values[Math.floor(Math.random() * values.length)]; }
-function resetPositionState() {
-  board = parseFen(START_FEN);
+function syncHistoryFens() {
+  historyFens = positionFens.slice(0, currentPly).reverse();
+}
+function resetLineFromBoard() {
+  positionFens = [boardToFen(board)];
+  currentPly = 0;
   historyFens = [];
   lastMove = null;
   playedMoves = [];
+  playedMoveSans = [];
+}
+function truncateLineForBranch() {
+  if (currentPly >= playedMoves.length) return;
+  playedMoves = playedMoves.slice(0, currentPly);
+  playedMoveSans = playedMoveSans.slice(0, currentPly);
+  positionFens = positionFens.slice(0, currentPly + 1);
+}
+function recordMove(move: Move, san: string) {
+  truncateLineForBranch();
+  const uci = moveToUci(move);
+  board = makeMove(board, move);
+  currentPly += 1;
+  lastMove = uci;
+  playedMoves.push(uci);
+  playedMoveSans.push(san);
+  positionFens[currentPly] = boardToFen(board);
+  syncHistoryFens();
+}
+function resetPositionState() {
+  board = parseFen(START_FEN);
+  resetLineFromBoard();
   pendingPremove = null;
   brainPiece = null;
   ground?.cancelPremove();
   resetClocks();
 }
 function applySetupMove(uci: string) {
-  const before = boardToFen(board);
   const move = legalMoves(board).find((m) => moveToUci(m) === uci) ?? moveFromUci(uci);
-  historyFens = [before, ...historyFens];
-  board = makeMove(board, move);
-  lastMove = uci;
-  playedMoves.push(uci);
+  recordMove(move, moveToSan(board, move));
 }
 function chooseBookReply(): Move | null {
   if (uiMode === 'analysis' || openingMode === 'start' || playerSide !== 'white' || playedMoves.length !== 1 || board.turn !== 'b') return null;
@@ -135,7 +162,7 @@ function startPlayGame() {
   if (playerSide === 'black') {
     const firstMove = randomChoice(Object.keys(COMMON_OPENING_BOOK));
     applySetupMove(firstMove);
-    return `Book first move: ${firstMove}. You to move as Black${playStyle === 'handbrain' ? ' · Hand & Brain' : ''}${timedGame ? ` · ${formatClock(selectedClockMs)} clocks` : ' · no clock'}.`;
+    return `Book first move: ${playedMoveSans.at(-1) ?? firstMove}. You to move as Black${playStyle === 'handbrain' ? ' · Hand & Brain' : ''}${timedGame ? ` · ${formatClock(selectedClockMs)} clocks` : ' · no clock'}.`;
   }
   return `Start position. Make White’s first move; Nibbler will answer from book when possible${playStyle === 'handbrain' ? ' · Hand & Brain' : ''}${timedGame ? ` · ${formatClock(selectedClockMs)} clocks` : ' · no clock'}.`;
 }
@@ -372,6 +399,8 @@ function initNavAndShortcuts() {
     else if (event.key === '2') { event.preventDefault(); setSideTab('eval'); }
     else if (event.key === '3') { event.preventDefault(); setSideTab('policy'); }
     else if (event.key === '4') { event.preventDefault(); setSideTab('setup'); }
+    else if (event.key === 'ArrowLeft') { event.preventDefault(); navigateHistory(currentPly - 1); }
+    else if (event.key === 'ArrowRight') { event.preventDefault(); navigateHistory(currentPly + 1); }
   });
 }
 function wdlPerspectiveName() {
@@ -387,12 +416,45 @@ function renderWdl(wdl: [number, number, number]) {
   ];
   $('wdl').innerHTML = `<div class="wdl-stack">${parts.map((p)=>`<div class="wdl-seg ${p.cls}" title="${p.name}" style="width:${Math.max(0, p.value * 100)}%">${(p.value * 100).toFixed(0)}%</div>`).join('')}</div><div class="wdl-labels"><span>${parts[0].name}</span><span>draw</span><span>${parts[2].name}</span></div><div class="wdl-perspective">WDL is from the current side-to-move perspective, not White/Black colors.</div>`;
 }
+async function navigateHistory(ply: number) {
+  if (busy || uiMode !== 'analysis') return;
+  const nextPly = Math.max(0, Math.min(playedMoves.length, ply));
+  const fen = positionFens[nextPly];
+  if (!fen) return;
+  currentPly = nextPly;
+  board = parseFen(fen);
+  lastMove = currentPly > 0 ? playedMoves[currentPly - 1] : null;
+  pendingPremove = null;
+  brainPiece = null;
+  ground?.cancelPremove();
+  syncHistoryFens();
+  await render(currentPly === playedMoves.length ? 'Returned to live position.' : 'Viewing earlier position. Make a move to branch from here.');
+}
+function initMoveHistoryControls() {
+  document.getElementById('pgn')?.addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('[data-ply]');
+    const ply = Number(button?.dataset.ply ?? NaN);
+    if (Number.isFinite(ply)) navigateHistory(ply);
+  });
+  document.getElementById('histStart')?.addEventListener('click', () => navigateHistory(0));
+  document.getElementById('histPrev')?.addEventListener('click', () => navigateHistory(currentPly - 1));
+  document.getElementById('histNext')?.addEventListener('click', () => navigateHistory(currentPly + 1));
+  document.getElementById('histEnd')?.addEventListener('click', () => navigateHistory(playedMoves.length));
+}
 function renderMoves() {
   const cells: string[] = [];
   for (let i = 0; i < playedMoves.length; i += 2) {
-    cells.push(`<span class="moveno">${Math.floor(i / 2) + 1}.</span><span class="moveuci">${playedMoves[i] ?? ''}</span><span class="moveuci">${playedMoves[i + 1] ?? ''}</span>`);
+    const whiteSan = playedMoveSans[i] ?? playedMoves[i] ?? '';
+    const blackSan = playedMoveSans[i + 1] ?? playedMoves[i + 1] ?? '';
+    cells.push(`<span class="moveno">${Math.floor(i / 2) + 1}.</span><button class="moveuci ${currentPly === i + 1 ? 'active' : ''}" type="button" data-ply="${i + 1}" title="${playedMoves[i] ?? ''}" ${uiMode === 'analysis' ? '' : 'disabled'}>${whiteSan}</button><button class="moveuci ${currentPly === i + 2 ? 'active' : ''}" type="button" data-ply="${i + 2}" title="${playedMoves[i + 1] ?? ''}" ${blackSan && uiMode === 'analysis' ? '' : 'disabled'}>${blackSan}</button>`);
   }
   $('pgn').innerHTML = cells.join('') || '<span class="muted">No moves yet.</span>';
+  const cursor = document.getElementById('moveCursor');
+  if (cursor) cursor.textContent = currentPly === playedMoves.length ? 'live' : `ply ${currentPly}/${playedMoves.length}`;
+  for (const [id, disabled] of Object.entries({ histStart: uiMode !== 'analysis' || currentPly === 0, histPrev: uiMode !== 'analysis' || currentPly === 0, histNext: uiMode !== 'analysis' || currentPly >= playedMoves.length, histEnd: uiMode !== 'analysis' || currentPly >= playedMoves.length })) {
+    const button = document.getElementById(id) as HTMLButtonElement | null;
+    if (button) button.disabled = disabled;
+  }
 }
 function renderMaterial() {
   const values: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9 };
@@ -411,17 +473,17 @@ function renderMaterial() {
 }
 function renderStockfish() {
   const status = !stockfish ? 'Off. Click “Start Stockfish” for browser-side depth analysis.' : stockfishThinking ? `Thinking to depth ${stockfishDepth}…` : stockfishReady ? 'Ready.' : 'Loading…';
-  $('stockfish').innerHTML = `<div>${status}</div><div class="score">${stockfishScore || '—'}</div><div>Best: <span class="mono">${stockfishBest || '—'}</span></div><div class="pv">PV: <span class="mono">${stockfishPv || '—'}</span></div><div class="eval-note">Score is normalized to White/Black advantage. Best move and PV are for the current side to move.</div>`;
+  const btn = document.getElementById('stockfishBtn') as HTMLButtonElement | null;
+  if (btn) btn.textContent = stockfish ? 'Stockfish running' : 'Start Stockfish';
+  $('stockfish').innerHTML = `<div>${status}</div><div class="score">${stockfishScore || '—'}</div><div>Best: <span class="mono">${stockfishBest || '—'}</span></div><div class="pv">PV: <span class="mono">${stockfishPv || '—'}</span></div><div class="eval-note">Scores and lines are shown in SAN. Score is normalized to White/Black advantage.</div>`;
 }
 function controlsEnabled(enabled: boolean) {
   for (const id of ['engine','engineAnalysis','reset','resetAnalysis','flip','flipAnalysis','loadFen','playWhite','playBlack','introWhite','introBlack','modeNormal','modeHandBrain','timeOff','time5','time10','startGame']) {
     const el = document.getElementById(id) as HTMLButtonElement | null;
     if (el) el.disabled = !enabled;
   }
-  for (const id of ['stockfishBtn','stockfishAnalysis']) {
-    const el = document.getElementById(id) as HTMLButtonElement | null;
-    if (el) el.disabled = !!stockfish && !stockfishReady;
-  }
+  const sfButton = document.getElementById('stockfishBtn') as HTMLButtonElement | null;
+  if (sfButton) sfButton.disabled = !enabled || !!stockfish;
 }
 async function chooseBrainPieceForTurn() {
   if (!evaluator || uiMode !== 'play' || !gameStarted || playStyle !== 'handbrain' || !isUserTurn()) {
@@ -470,9 +532,9 @@ async function render(message = '') {
   const ev = await evaluator.evaluate(board, { historyFens });
   if (seq !== renderSeq) return;
   renderWdl(ev.wdl);
-  const rows = legalMoves(board).map((m: Move) => ({ uci: moveToUci(m), prior: ev.policy.get(moveToActionId(m)) ?? 0 })).sort((a,b)=>b.prior-a.prior).slice(0,16);
+  const rows = legalMoves(board).map((m: Move) => ({ uci: moveToUci(m), san: moveToSan(board, m), prior: ev.policy.get(moveToActionId(m)) ?? 0 })).sort((a,b)=>b.prior-a.prior).slice(0,16);
   const maxPrior = Math.max(1e-9, ...rows.map((r) => r.prior));
-  $('moves').innerHTML = rows.map((r, i)=>`<li class="policy-row ${i === 0 ? 'best' : ''}"><span class="rank">${i + 1}</span><b>${r.uci}</b><span class="policy-meter"><span style="width:${Math.max(2, (r.prior / maxPrior) * 100)}%"></span></span><span class="pct">${(r.prior*100).toFixed(2)}%</span></li>`).join('');
+  $('moves').innerHTML = rows.map((r, i)=>`<li class="policy-row ${i === 0 ? 'best' : ''}"><span class="rank">${i + 1}</span><b title="${r.uci}">${r.san}</b><span class="policy-meter"><span style="width:${Math.max(2, (r.prior / maxPrior) * 100)}%"></span></span><span class="pct">${(r.prior*100).toFixed(2)}%</span></li>`).join('');
   requestStockfishAnalysis();
 }
 function startStockfish() {
@@ -507,10 +569,10 @@ function handleStockfishLine(line: string) {
   if (line === 'uciok') { sendStockfish('isready'); return; }
   if (line === 'readyok') { stockfishReady = true; requestStockfishAnalysis(); renderStockfish(); return; }
   const best = line.match(/^bestmove\s+(\S+)/);
-  if (best) { stockfishBest = best[1]; stockfishThinking = false; renderStockfish(); return; }
+  if (best) { stockfishBest = uciToSan(parseFen(stockfishSearchFen), best[1]); stockfishThinking = false; renderStockfish(); return; }
   if (!line.startsWith('info ')) return;
   const pv = line.match(/\spv\s+(.+)$/);
-  if (pv) stockfishPv = pv[1].split(/\s+/).slice(0, 12).join(' ');
+  if (pv) stockfishPv = uciLineToSan(parseFen(stockfishSearchFen), pv[1].split(/\s+/), 12);
   const mate = line.match(/\sscore\s+mate\s+(-?\d+)/);
   const cp = line.match(/\sscore\s+cp\s+(-?\d+)/);
   const depth = line.match(/\sdepth\s+(\d+)/);
@@ -522,9 +584,10 @@ function requestStockfishAnalysis() {
   stockfishSeq += 1;
   stockfishThinking = true;
   stockfishSearchTurn = board.turn;
+  stockfishSearchFen = boardToFen(board);
   stockfishBest = ''; stockfishPv = '';
   sendStockfish('stop');
-  sendStockfish(`position fen ${boardToFen(board)}`);
+  sendStockfish(`position fen ${stockfishSearchFen}`);
   sendStockfish(`go depth ${Math.max(1, stockfishDepth)}`);
   const seq = stockfishSeq;
   setTimeout(() => { if (seq === stockfishSeq && stockfishThinking) { sendStockfish('stop'); } }, 8000);
@@ -533,13 +596,9 @@ function requestStockfishAnalysis() {
 async function playMove(move: Move, who: string) {
   settleClock();
   brainPiece = null;
-  const before = boardToFen(board);
-  const uci = moveToUci(move);
-  historyFens = [before, ...historyFens];
-  board = makeMove(board, move);
-  lastMove = uci;
-  playedMoves.push(uci);
-  await render(`${who} played ${uci}.`);
+  const san = moveToSan(board, move);
+  recordMove(move, san);
+  await render(`${who} played ${san}.`);
 }
 function resolveUserMove(from: string, to: string) {
   const candidates = legalMovesForUser().filter((m) => squareName(m.from) === from && squareName(m.to) === to);
@@ -560,8 +619,8 @@ async function onUserMove(from: string, to: string) {
   if (busy || (uiMode === 'play' && !gameStarted)) return;
   const move = resolveUserMove(from, to);
   if (!move) { await render(playStyle === 'handbrain' && brainPiece ? `Brain said ${PIECE_NAMES[brainPiece]}; ${from}${to} is not available.` : `Illegal move ${from}${to}.`); return; }
-  await playMove(move, 'You');
-  await engineMove();
+  await playMove(move, uiMode === 'analysis' ? 'Analysis' : 'You');
+  if (uiMode === 'play') await engineMove();
 }
 async function choosePolicyMove(): Promise<Move | null> {
   if (!evaluator) return null;
@@ -609,17 +668,17 @@ const onFlip = async () => { if (busy) return; orientation = orientation === 'wh
 $('engine').onclick = () => engineMove();
 $('engineAnalysis').onclick = () => engineMove();
 $('stockfishBtn').onclick = () => { setSideTab('eval'); startStockfish(); };
-$('stockfishAnalysis').onclick = () => { setSideTab('eval'); startStockfish(); };
 $('reset').onclick = onReset;
 $('resetAnalysis').onclick = onResetAnalysis;
 $('flip').onclick = onFlip;
 $('flipAnalysis').onclick = onFlip;
-$('loadFen').onclick = async () => { if (busy) return; board = parseFen(($('fenInput') as HTMLInputElement).value || START_FEN); historyFens = []; lastMove = null; playedMoves = []; resetClocks(); await render('Loaded FEN.'); };
+$('loadFen').onclick = async () => { if (busy) return; board = parseFen(($('fenInput') as HTMLInputElement).value || START_FEN); resetLineFromBoard(); resetClocks(); await render('Loaded FEN.'); };
 
 async function main() {
   initUiMode();
   initSideTabs();
   initNavAndShortcuts();
+  initMoveHistoryControls();
   initPlayerSideControls();
   initModelSelect();
   initRunConfigChips();
