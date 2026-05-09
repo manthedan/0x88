@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Tiny in-browser Leela-like chess engine research prototype.",
   "scripts": {
-    "test": "node --test",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck && node --experimental-strip-types --test",
     "eval:phase-b": "node eval/phase_b_metrics.mjs",
     "eval:search": "node eval/search_suite.mjs",
     "eval:runtime": "node --experimental-strip-types eval/runtime_suite.mjs",

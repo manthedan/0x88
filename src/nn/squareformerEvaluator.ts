@@ -38,23 +38,21 @@ function pieceId(piece: string | null): number {
   return Math.max(0, PIECES.indexOf(ch));
 }
 
-function addBoardFeatures(data: Float32Array, board: BoardState, boardIndex: number, planesPerBoard: number) {
+function addBoardFeatures(data: Float32Array, board: BoardState, boardIndex: number, planesPerBoard: number, stride: number) {
   const base = boardIndex * planesPerBoard;
-  for (let sq = 0; sq < 64; sq++) data[sq * dataStride + base + pieceId(board.squares[sq])] = 1;
+  for (let sq = 0; sq < 64; sq++) data[sq * stride + base + pieceId(board.squares[sq])] = 1;
 }
 
-let dataStride = 0;
 
 function squareformerFloatInput(board: BoardState, meta: SquareFormerMeta, historyFens: string[] = []): Float32Array {
   const history = meta.history_plies;
   const planesPerBoard = 13;
   const inputDim = meta.input_dim;
-  dataStride = inputDim;
   const data = new Float32Array(64 * inputDim);
-  addBoardFeatures(data, board, 0, planesPerBoard);
+  addBoardFeatures(data, board, 0, planesPerBoard, inputDim);
   for (let h = 0; h < history; h++) {
     if (!historyFens[h]) continue;
-    try { addBoardFeatures(data, parseFenCached(historyFens[h]), h + 1, planesPerBoard); } catch { /* ignore bad history */ }
+    try { addBoardFeatures(data, parseFenCached(historyFens[h]), h + 1, planesPerBoard, inputDim); } catch { /* ignore bad history */ }
   }
   const base = (history + 1) * planesPerBoard;
   for (let sq = 0; sq < 64; sq++) {
@@ -194,7 +192,7 @@ export class SquareFormerEvaluator implements Evaluator {
       legal.forEach((move, j) => {
         const actionId = moveToActionId(move);
         policy.set(actionId, probs[j] ?? 0);
-        if (actionValues && j < avWidth) actionValues.set(actionId, Number(avRaw[i * avWidth + j] ?? 0));
+        if (avRaw && j < avWidth) actionValues?.set(actionId, Number(avRaw[i * avWidth + j] ?? 0));
       });
       const wdl = softmax(wdlRaw.subarray(i * 3, i * 3 + 3));
       return { policy, wdl: [wdl[0] ?? 0, wdl[1] ?? 0, wdl[2] ?? 0] as [number, number, number], actionValues };

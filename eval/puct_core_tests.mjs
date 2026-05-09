@@ -64,6 +64,15 @@ async function testBatchedEvaluatorPath(){
   assert.ok(r.move, 'batched PUCT should return a move');
 }
 
+async function testBatchedDuplicateLeafDoesNotBackupZero(){
+  const ev=batchEvaluator((board)=>({ policy:policyFor(board,{e2e4:1.0}), wdl:[0.9,0,0.1] }));
+  const r=await searchRoot(parseFen(START),ev,{visits:4,batchSize:4,temperature:0});
+  const edge=r.policy.find((entry)=>moveToUci(entry.move)==='e2e4');
+  assert.ok(edge, 'e2e4 edge exists');
+  assert.equal(edge.visits,4, 'batch should converge all duplicate leaf visits onto the forced-prior edge');
+  assert.ok(Math.abs(edge.q + 0.8) < 1e-9, `duplicate-leaf batched backup should preserve evaluator value, got ${edge.q}`);
+}
+
 async function testActionValuePolicyGuidesSelection(){
   const ev=evaluator((board)=>({
     policy:policyFor(board,{g1f3:0.51,e2e4:0.49}),
@@ -84,7 +93,7 @@ async function testGumbelRootPolicyIsBoundedToCandidateSet(){
   assert.ok(g.move, 'Gumbel root should return a legal move');
 }
 
-const tests=[testPolicyIdentity,testAllZeroPolicyUniformFallback,testValuePerspectiveFlip,testTerminalNoLegalMoves,testTieBreakByQThenPrior,testBatchedEvaluatorPath,testActionValuePolicyGuidesSelection,testGumbelRootPolicyIsBoundedToCandidateSet];
+const tests=[testPolicyIdentity,testAllZeroPolicyUniformFallback,testValuePerspectiveFlip,testTerminalNoLegalMoves,testTieBreakByQThenPrior,testBatchedEvaluatorPath,testBatchedDuplicateLeafDoesNotBackupZero,testActionValuePolicyGuidesSelection,testGumbelRootPolicyIsBoundedToCandidateSet];
 for (const t of tests) {
   await t();
   console.log(`ok ${t.name}`);

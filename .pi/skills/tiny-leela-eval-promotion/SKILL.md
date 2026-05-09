@@ -34,6 +34,7 @@ Before trusting an arena result, check:
 ```text
 model provenance / checkpoint path
 ONNX/export parity where applicable
+encoding parity: Python policy/action IDs ↔ TypeScript policy/action IDs
 opening suite and seed
 games/pairs count
 search params: visits, cpuct, AV/aux flags
@@ -42,6 +43,18 @@ protocol JSON if present
 ```
 
 Prefer existing summarizers and protocol files over ad-hoc parsing.
+
+## Pre-promotion code gates
+
+Before using new search/evaluator/training plumbing for a promotion decision, run the focused correctness gates first:
+
+```bash
+npm run typecheck
+node --experimental-strip-types eval/puct_core_tests.mjs
+node --experimental-strip-types --test tests/encoding_parity.test.mjs tests/policy_map.test.mjs
+```
+
+If a change touches Python/TS encoding, add or update parity coverage before refactoring training scripts.
 
 ## Promotion ladder
 
@@ -59,6 +72,7 @@ A model should generally pass:
 - AV improvements can be search-parameter sensitive; compare with classic PUCT baseline.
 - Tactical specialists should be tested on tactical suites and normal play.
 - Browser deployment requires latency and bundle-size awareness, not just Elo.
+- Do not expand the architecture matrix without a written kill criterion and a planned anchor protocol.
 
 ## Useful files/scripts to inspect
 

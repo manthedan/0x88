@@ -177,7 +177,7 @@ function bookCandidatesForCurrentLine(): string[] {
   return [...candidates];
 }
 function chooseOpeningBookMove(): Move | null {
-  if (uiMode === 'analysis' || openingMode === 'start' || !gameStarted || board.turn === playerSide) return null;
+  if (uiMode === 'analysis' || openingMode === 'start' || !gameStarted || board.turn === playerColorToMove()) return null;
   const legalReplies = bookCandidatesForCurrentLine().map((uci) => legalMoveByUci(uci)).filter((move): move is Move => !!move);
   return legalReplies.length ? randomChoice(legalReplies) : null;
 }
@@ -402,7 +402,10 @@ function setSideTab(tab: SideTab) {
 function initSideTabs() {
   document.querySelectorAll<HTMLButtonElement>('[data-tab-button]').forEach((button) => {
     const tab = button.dataset.tabButton;
-    if (isSideTab(tab ?? null)) button.addEventListener('click', () => setSideTab(tab));
+    if (tab && isSideTab(tab)) {
+      const sideTab = tab;
+      button.addEventListener('click', () => setSideTab(sideTab));
+    }
   });
   const requestedTab = params.get('tab');
   setSideTab(isSideTab(requestedTab) ? requestedTab : 'game');

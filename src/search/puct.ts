@@ -267,6 +267,14 @@ interface SelectedLeaf {
   path: Edge[];
 }
 
+type PreparedLeaf =
+  | { kind: 'terminal'; sel: SelectedLeaf; value: number }
+  | { kind: 'eval'; sel: SelectedLeaf; slot: number };
+
+function unwindVirtualVisits(path: Edge[]): void {
+  for (const edge of path) edge.virtualVisits = Math.max(0, edge.virtualVisits - 1);
+}
+
 function selectLeaf(node: Node, searchPolicy: SearchPolicy, context: SearchPolicyContext, path: Edge[] = []): SelectedLeaf {
   if (!node.expanded || node.terminalValue !== null) return { node, path };
   const best = selectBestEdge(node, searchPolicy, context);
@@ -323,12 +331,15 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
     const evalNodes: Node[] = [];
     const evalMoves: Move[][] = [];
     const evalIndex = new Map<Node, number>();
-    const prepared: Array<{ sel: SelectedLeaf; value?: number; evalSlot?: number }> = [];
+    const prepared: PreparedLeaf[] = [];
     for (const sel of selected) {
-      if (sel.node.terminalValue !== null) { prepared.push({ sel, value: sel.node.terminalValue }); stats.terminalHits += 1; continue; }
-      if (sel.node.expanded) { prepared.push({ sel, value: 0 }); continue; }
+      if (sel.node.terminalValue !== null) { prepared.push({ kind: 'terminal', sel, value: sel.node.terminalValue }); stats.terminalHits += 1; continue; }
+      if (sel.node.expanded) {
+        unwindVirtualVisits(sel.path);
+        throw new Error('selectLeaf returned an expanded non-terminal node');
+      }
       const prep = prepareExpansion(sel.node, stats);
-      if (typeof prep === 'number') prepared.push({ sel, value: prep });
+      if (typeof prep === 'number') prepared.push({ kind: 'terminal', sel, value: prep });
       else {
         let slot = evalIndex.get(sel.node);
         if (slot === undefined) {
@@ -337,7 +348,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
           evalNodes.push(sel.node);
           evalMoves.push(prep);
         }
-        prepared.push({ sel, evalSlot: slot });
+        prepared.push({ kind: 'eval', sel, slot });
       }
     }
 
@@ -355,7 +366,13 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
     }
     const values = evalNodes.map((node, i) => { stats.expansions += 1; return finishExpansion(node, evalMoves[i], evals[i]); });
     for (const item of prepared) {
-      searchPolicy.backup(item.sel.path, item.value ?? values[item.evalSlot ?? 0] ?? 0, context);
+      let value: number | undefined;
+      if (item.kind === 'terminal') value = item.value;
+      else {
+        value = values[item.slot];
+        if (value === undefined) throw new Error(`missing batched evaluation value for slot ${item.slot}`);
+      }
+      searchPolicy.backup(item.sel.path, value, context);
       stats.completedVisits += 1;
     }
     done += want;
