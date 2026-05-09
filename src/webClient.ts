@@ -9,18 +9,33 @@ import { OnnxEvaluator, type OnnxStudentMeta } from './nn/onnxEvaluator.ts';
 import { SquareFormerEvaluator, type SquareFormerMeta } from './nn/squareformerEvaluator.ts';
 import type { Evaluator } from './nn/evaluator.ts';
 
-const COMMON_OPENING_BOOK: Record<string, string[]> = {
-  e2e4: ['e7e5', 'c7c5', 'c7c6', 'e7e6', 'd7d6', 'g8f6'],
-  d2d4: ['d7d5', 'g8f6', 'e7e6', 'f7f5'],
-  c2c4: ['e7e5', 'c7c5', 'g8f6', 'e7e6'],
-  g1f3: ['d7d5', 'g8f6', 'c7c5'],
-  g2g3: ['d7d5', 'e7e5', 'g8f6'],
-  b2b3: ['e7e5', 'd7d5'],
-  f2f4: ['d7d5', 'e7e5', 'g8f6'],
-  b1c3: ['d7d5', 'e7e5'],
-  e2e3: ['d7d5', 'e7e5'],
-  c2c3: ['d7d5', 'e7e5'],
-};
+const OPENING_BOOK_LINES: string[][] = [
+  ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1b5', 'a7a6', 'b5a4', 'g8f6'], // Ruy Lopez
+  ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1c4', 'f8c5', 'c2c3', 'g8f6'], // Italian
+  ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'd2d4', 'e5d4', 'f3d4', 'g8f6'], // Scotch
+  ['e2e4', 'c7c5', 'g1f3', 'd7d6', 'd2d4', 'c5d4', 'f3d4', 'g8f6'], // Sicilian Najdorf/Dragon family
+  ['e2e4', 'c7c5', 'g1f3', 'b8c6', 'd2d4', 'c5d4', 'f3d4', 'g8f6'], // Sicilian Classical
+  ['e2e4', 'c7c5', 'g1f3', 'e7e6', 'd2d4', 'c5d4', 'f3d4', 'g8f6'], // Sicilian Kan/Taimanov family
+  ['e2e4', 'c7c6', 'd2d4', 'd7d5', 'e4e5', 'c8f5', 'g1f3', 'e7e6'], // Caro-Kann Advance
+  ['e2e4', 'e7e6', 'd2d4', 'd7d5', 'b1c3', 'g8f6', 'e4e5', 'f6d7'], // French Steinitz
+  ['e2e4', 'd7d6', 'd2d4', 'g8f6', 'b1c3', 'g7g6', 'f2f4', 'f8g7'], // Pirc/Austrian
+  ['e2e4', 'g8f6', 'e4e5', 'f6d5', 'd2d4', 'd7d6', 'g1f3', 'c8g4'], // Alekhine
+  ['d2d4', 'd7d5', 'c2c4', 'e7e6', 'b1c3', 'g8f6', 'c1g5', 'f8e7'], // Queen's Gambit Declined
+  ['d2d4', 'd7d5', 'c2c4', 'c7c6', 'g1f3', 'g8f6', 'b1c3', 'd5c4'], // Slav
+  ['d2d4', 'g8f6', 'c2c4', 'e7e6', 'b1c3', 'f8b4', 'e2e3', 'e8g8'], // Nimzo-Indian
+  ['d2d4', 'g8f6', 'c2c4', 'g7g6', 'b1c3', 'f8g7', 'e2e4', 'd7d6'], // King's Indian
+  ['d2d4', 'f7f5', 'c2c4', 'g8f6', 'g2g3', 'e7e6', 'f1g2', 'f8e7'], // Dutch
+  ['c2c4', 'e7e5', 'b1c3', 'g8f6', 'g2g3', 'd7d5', 'c4d5', 'f6d5'], // English Four Knights
+  ['c2c4', 'c7c5', 'b1c3', 'b8c6', 'g2g3', 'g7g6', 'f1g2', 'f8g7'], // Symmetrical English
+  ['g1f3', 'd7d5', 'd2d4', 'g8f6', 'c2c4', 'e7e6', 'b1c3', 'f8e7'], // Reti into QGD
+  ['g1f3', 'g8f6', 'c2c4', 'g7g6', 'g2g3', 'f8g7', 'f1g2', 'e8g8'], // Reti/KIA setup
+  ['g2g3', 'd7d5', 'f1g2', 'e7e5', 'd2d3', 'g8f6', 'g1f3', 'b8c6'], // King's Indian Attack
+  ['b2b3', 'e7e5', 'c1b2', 'b8c6', 'e2e3', 'd7d5', 'f1b5', 'f8d6'], // Nimzo-Larsen
+  ['f2f4', 'd7d5', 'g1f3', 'g8f6', 'e2e3', 'e7e6', 'b2b3', 'f8e7'], // Bird
+  ['b1c3', 'd7d5', 'e2e4', 'd5d4', 'c3e2', 'e7e5', 'g2g3', 'g8f6'], // Vienna/Van Geet
+  ['e2e3', 'd7d5', 'd2d4', 'g8f6', 'g1f3', 'e7e6', 'f1d3', 'c7c5'], // Colle
+  ['c2c3', 'd7d5', 'd2d4', 'g8f6', 'g1f3', 'e7e6', 'c1f4', 'f8d6'], // London/Slav structure
+];
 
 const params = new URLSearchParams(location.search);
 type PlayerSide = 'white' | 'black';
@@ -68,6 +83,7 @@ const topK = Number(params.get('topk') ?? '0');
 const topP = Number(params.get('topp') ?? '1');
 const stockfishDepth = Number(params.get('sfdepth') ?? '10');
 const openingMode = params.get('opening') ?? 'book';
+const openingBookMaxPlies = Math.max(0, Number(params.get('bookPlies') ?? '8'));
 const modelKey = params.get('model') ?? '32x4';
 let busy = false;
 let renderSeq = 0;
@@ -147,10 +163,19 @@ function applySetupMove(uci: string) {
   const move = legalMoves(board).find((m) => moveToUci(m) === uci) ?? moveFromUci(uci);
   recordMove(move, moveToSan(board, move));
 }
-function chooseBookReply(): Move | null {
-  if (uiMode === 'analysis' || openingMode === 'start' || playerSide !== 'white' || playedMoves.length !== 1 || board.turn !== 'b') return null;
-  const replies = COMMON_OPENING_BOOK[playedMoves[0]] ?? [];
-  const legalReplies = replies.map((uci) => legalMoveByUci(uci)).filter((move): move is Move => !!move);
+function bookCandidatesForCurrentLine(): string[] {
+  if (uiMode === 'analysis' || openingMode === 'start' || openingBookMaxPlies <= 0) return [];
+  if (playedMoves.length >= openingBookMaxPlies) return [];
+  const candidates = new Set<string>();
+  for (const line of OPENING_BOOK_LINES) {
+    if (line.length <= playedMoves.length) continue;
+    if (playedMoves.every((uci, idx) => line[idx] === uci)) candidates.add(line[playedMoves.length]);
+  }
+  return [...candidates];
+}
+function chooseOpeningBookMove(): Move | null {
+  if (uiMode === 'analysis' || openingMode === 'start' || !gameStarted || board.turn === playerSide) return null;
+  const legalReplies = bookCandidatesForCurrentLine().map((uci) => legalMoveByUci(uci)).filter((move): move is Move => !!move);
   return legalReplies.length ? randomChoice(legalReplies) : null;
 }
 function startPlayGame() {
@@ -160,11 +185,11 @@ function startPlayGame() {
   orientation = playerSide;
   if (openingMode === 'start') return `Start position. You are playing ${playerSide}${playStyle === 'handbrain' ? ' in Hand & Brain' : ''}${timedGame ? ` with ${formatClock(selectedClockMs)} clocks` : ' with no clock'}.`;
   if (playerSide === 'black') {
-    const firstMove = randomChoice(Object.keys(COMMON_OPENING_BOOK));
-    applySetupMove(firstMove);
-    return `Book first move: ${playedMoveSans.at(-1) ?? firstMove}. You to move as Black${playStyle === 'handbrain' ? ' · Hand & Brain' : ''}${timedGame ? ` · ${formatClock(selectedClockMs)} clocks` : ' · no clock'}.`;
+    const firstMove = chooseOpeningBookMove();
+    if (firstMove) applySetupMove(moveToUci(firstMove));
+    return `Book first move: ${playedMoveSans.at(-1) ?? 'start position'}. You to move as Black; book may continue through ply ${openingBookMaxPlies}${playStyle === 'handbrain' ? ' · Hand & Brain' : ''}${timedGame ? ` · ${formatClock(selectedClockMs)} clocks` : ' · no clock'}.`;
   }
-  return `Start position. Make White’s first move; Nibbler will answer from book when possible${playStyle === 'handbrain' ? ' · Hand & Brain' : ''}${timedGame ? ` · ${formatClock(selectedClockMs)} clocks` : ' · no clock'}.`;
+  return `Start position. Make White’s first move; Nibbler can answer from a varied book through ply ${openingBookMaxPlies}${playStyle === 'handbrain' ? ' · Hand & Brain' : ''}${timedGame ? ` · ${formatClock(selectedClockMs)} clocks` : ' · no clock'}.`;
 }
 function showPlayIntro(message = 'Choose side and clock, then start the game.') {
   gameStarted = false;
@@ -650,7 +675,7 @@ async function engineMove() {
   document.body.style.cursor = 'progress';
   await render('Engine thinking…');
   try {
-    const bookMove = chooseBookReply();
+    const bookMove = chooseOpeningBookMove();
     const move = bookMove ?? (playMode === 'puct' ? (await chooseMove(board, evaluator, { visits, batchSize: puctBatchSize, historyFens, searchPolicy: puctPolicy === 'av' ? actionValuePuctPolicy : undefined, avWeight })).move : await choosePolicyMove());
     if (move) await playMove(move, bookMove ? 'Book' : 'Engine');
     else await render('No legal engine move.');
