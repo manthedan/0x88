@@ -241,8 +241,8 @@ def enrich_model(model: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def scan_search_mode_arenas(models: list[dict[str, Any]], arena_globs: list[str]) -> dict[str, list[dict[str, Any]]]:
-    by_model = {m["model_id"]: [] for m in models}
+
+def model_onnx_lookup(models: list[dict[str, Any]]) -> dict[str, str]:
     onnx_to_model: dict[str, str] = {}
     for m in models:
         artifacts = m.get("artifacts") or {}
@@ -252,6 +252,83 @@ def scan_search_mode_arenas(models: list[dict[str, Any]], arena_globs: list[str]
         if isinstance(artifacts.get("onnx_buckets"), dict):
             for path in artifacts["onnx_buckets"].values():
                 onnx_to_model[str(Path(path))] = m["model_id"]
+    return onnx_to_model
+
+
+def scan_anchor_arenas(models: list[dict[str, Any]], anchor_globs: list[str]) -> dict[str, list[dict[str, Any]]]:
+    by_model = {m["model_id"]: [] for m in models}
+    onnx_to_model = model_onnx_lookup(models)
+    for glob in anchor_globs:
+        for p in ROOT.glob(glob):
+            if p.name.endswith(".protocol.json"):
+                continue
+            try:
+                data = json.loads(p.read_text())
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            candidate = data.get("candidate") if isinstance(data.get("candidate"), dict) else {}
+            model_id = onnx_to_model.get(str(Path(candidate.get("onnx")))) if candidate.get("onnx") else None
+            summaries = data.get("summaries")
+            protocol = data.get("protocol") if isinstance(data.get("protocol"), dict) else {}
+            if not model_id or not isinstance(summaries, list):
+                continue
+            for summary in summaries:
+                if not isinstance(summary, dict):
+                    continue
+                by_model[model_id].append({
+                    "arena": str(p.relative_to(ROOT)),
+                    "candidate": candidate.get("name"),
+                    "anchor": summary.get("anchor"),
+                    "visits": protocol.get("visits"),
+                    "pairs": summary.get("pairs") or protocol.get("pairs"),
+                    "games": summary.get("games"),
+                    "wdl": [summary.get("wins"), summary.get("draws"), summary.get("losses")],
+                    "score_rate": summary.get("scoreRate"),
+                    "elo_diff": summary.get("eloDiff"),
+                    "elo_ci95": summary.get("eloCi95"),
+                    "illegal": summary.get("illegal"),
+                    "mtime": p.stat().st_mtime,
+                })
+    for refs in by_model.values():
+        refs.sort(key=lambda r: (str(r.get("anchor") or ""), int(r.get("games") or 0), float(r.get("mtime") or 0)))
+        for r in refs:
+            r.pop("mtime", None)
+    return by_model
+
+
+def select_anchor_headline(refs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    stockfish = [r for r in refs if r.get("anchor") == "stockfish_1320"]
+    pool = stockfish or refs
+    if not pool:
+        return None
+    return max(pool, key=lambda r: (int(r.get("games") or 0), int(r.get("visits") or 0), str(r.get("arena") or "")))
+
+
+def fmt_anchor(ref: dict[str, Any] | None) -> str:
+    if not ref:
+        return "—"
+    elo = ref.get("elo_diff")
+    ci = ref.get("elo_ci95")
+    score = ref.get("score_rate")
+    bits = [str(ref.get("anchor") or "anchor")]
+    if elo is not None:
+        if ci is not None:
+            bits.append(f"{float(elo):+.0f} ± {float(ci):.0f} Elo")
+        else:
+            bits.append(f"{float(elo):+.0f} Elo")
+    elif score is not None:
+        bits.append(f"score {float(score):.3f}")
+    games = ref.get("games")
+    visits = ref.get("visits")
+    if games or visits:
+        bits.append(f"{games or '?'}g/{visits or '?'}v")
+    return " ".join(bits)
+
+def scan_search_mode_arenas(models: list[dict[str, Any]], arena_globs: list[str]) -> dict[str, list[dict[str, Any]]]:
+    by_model = {m["model_id"]: [] for m in models}
+    onnx_to_model = model_onnx_lookup(models)
 
     for glob in arena_globs:
         for p in ROOT.glob(glob):
@@ -287,7 +364,7 @@ def scan_search_mode_arenas(models: list[dict[str, Any]], arena_globs: list[str]
     return by_model
 
 
-def build(overrides_path: str, arena_globs: list[str]) -> dict[str, Any]:
+def build(overrides_path: str, arena_globs: list[str], anchor_arena_globs: list[str]) -> dict[str, Any]:
     overrides = read_json(overrides_path)
     if not isinstance(overrides, dict):
         raise SystemExit(f"Bad overrides JSON: {overrides_path}")
@@ -299,10 +376,18 @@ def build(overrides_path: str, arena_globs: list[str]) -> dict[str, Any]:
 
     models = [enrich_model(m) for m in overrides.get("models", [])]
     arena_refs = scan_search_mode_arenas(models, arena_globs)
+    anchor_refs = scan_anchor_arenas(models, anchor_arena_globs)
+    missing_anchor: list[str] = []
     for m in models:
         refs = arena_refs.get(m["model_id"], [])
         if refs:
             m["arena_refs"] = sorted(refs, key=lambda r: (r.get("arena") or "", r.get("player") or ""))[-20:]
+        anchors = anchor_refs.get(m["model_id"], [])
+        if anchors:
+            m["anchor_refs"] = anchors[-20:]
+            m["anchor_headline"] = select_anchor_headline(anchors)
+        elif m.get("status") == "completed":
+            missing_anchor.append(m["model_id"])
 
     completed = [m for m in models if m.get("status") == "completed"]
     pareto = []
@@ -323,6 +408,8 @@ def build(overrides_path: str, arena_globs: list[str]) -> dict[str, Any]:
             "running_count": sum(1 for m in models if m.get("status") == "running"),
             "queued_count": sum(1 for m in models if m.get("status") == "queued"),
             "onnx_available_count": sum(1 for m in models if m.get("bundle_bytes") is not None),
+            "anchor_headline_count": sum(1 for m in models if m.get("anchor_headline")),
+            "missing_anchor": missing_anchor,
         },
     }
 
@@ -350,11 +437,12 @@ def write_markdown(manifest: dict[str, Any], out_path: str) -> None:
         f"- Running: {manifest['summary']['running_count']}",
         f"- Queued: {manifest['summary']['queued_count']}",
         f"- ONNX exports available: {manifest['summary']['onnx_available_count']}",
+        f"- Anchor headlines available: {manifest['summary']['anchor_headline_count']}",
         "",
         "## Models",
         "",
-        "| Model | Status | Family | Arch | Params | ONNX MiB | INT8 est MiB | Training source | AV source | Tags |",
-        "|---|---|---|---|---:|---:|---:|---|---|---|",
+        "| Model | Status | Family | Arch | Params | ONNX MiB | INT8 est MiB | Anchor headline | Training source | AV source | Tags |",
+        "|---|---|---|---|---:|---:|---:|---|---|---|---|",
     ]
     for m in manifest["models"]:
         meta = m.get("runtime_meta") or {}
@@ -369,7 +457,7 @@ def write_markdown(manifest: dict[str, Any], out_path: str) -> None:
             int8 = (m.get("planned_size_estimate") or {}).get("int8_mib")
         lines.append(
             f"| `{m['model_id']}` | {m.get('status','')} | {m.get('family','')} | {arch} | {fmt_int(params)} | {fmt_mib(bundle)} | {fmt_mib(int8)} | "
-            f"{train.get('policy_dataset') or ''} | {train.get('av_dataset') or ''} | {', '.join(m.get('tags') or [])} |"
+            f"{fmt_anchor(m.get('anchor_headline'))} | {train.get('policy_dataset') or ''} | {train.get('av_dataset') or ''} | {', '.join(m.get('tags') or [])} |"
         )
     lines += ["", "## Dataset summaries", ""]
     for key, info in manifest["datasets"].items():
@@ -383,12 +471,18 @@ def write_markdown(manifest: dict[str, Any], out_path: str) -> None:
                     v = f"{v:,}"
                 lines.append(f"- {k}: `{v}`")
         lines.append("")
+    missing_anchor = manifest.get("summary", {}).get("missing_anchor") or []
+    if missing_anchor:
+        lines += ["", "## TODO", "", "Completed models missing anchor headline:", ""]
+        lines += [f"- `{model_id}`" for model_id in missing_anchor]
     lines += [
+        "",
         "## Notes",
         "",
         "- Provenance fields come from `eval/model_manifest_overrides.json`; computed fields come from ONNX/meta/log files.",
         "- Quantized sizes are parameter-only estimates unless actual quantized artifacts are listed.",
         "- Arena refs are discovered from `artifacts/search_mode_arena/*.json` when protocol model resources include ONNX paths.",
+        "- Anchor headlines are discovered from `artifacts/anchor_arena/**/*.json` when candidate ONNX paths match manifest models.",
     ]
     rel(out_path).parent.mkdir(parents=True, exist_ok=True)  # type: ignore[union-attr]
     rel(out_path).write_text("\n".join(lines) + "\n")  # type: ignore[union-attr]
@@ -400,9 +494,10 @@ def main() -> None:
     ap.add_argument("--out", default="artifacts/analysis/model_manifest.current.json")
     ap.add_argument("--md-out", default="artifacts/analysis/model_manifest.current.md")
     ap.add_argument("--arena-glob", action="append", default=["artifacts/search_mode_arena/*.json"])
+    ap.add_argument("--anchor-arena-glob", action="append", default=["artifacts/anchor_arena/**/*.json"])
     args = ap.parse_args()
 
-    manifest = build(args.overrides, args.arena_glob)
+    manifest = build(args.overrides, args.arena_glob, args.anchor_arena_glob)
     out = rel(args.out)
     assert out is not None
     out.parent.mkdir(parents=True, exist_ok=True)
