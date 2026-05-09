@@ -323,13 +323,42 @@ function initUiMode() {
     toggleUiMode();
   });
 }
+type SideTab = 'game' | 'eval' | 'policy' | 'setup';
+let activeSideTab: SideTab = 'game';
+function isSideTab(value: string | null): value is SideTab {
+  return value === 'game' || value === 'eval' || value === 'policy' || value === 'setup';
+}
+function setSideTab(tab: SideTab) {
+  if (activeSideTab === tab) return;
+  activeSideTab = tab;
+  document.querySelectorAll<HTMLElement>('[data-tab-panel]').forEach((panel) => {
+    const active = panel.dataset.tabPanel === tab;
+    panel.classList.toggle('active', active);
+    panel.hidden = !active;
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-tab-button]').forEach((button) => {
+    const active = button.dataset.tabButton === tab;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+}
+function initSideTabs() {
+  document.querySelectorAll<HTMLButtonElement>('[data-tab-button]').forEach((button) => {
+    const tab = button.dataset.tabButton;
+    if (isSideTab(tab ?? null)) button.addEventListener('click', () => setSideTab(tab));
+  });
+  const requestedTab = params.get('tab');
+  setSideTab(isSideTab(requestedTab) ? requestedTab : 'game');
+}
 function initNavAndShortcuts() {
   document.getElementById('modelsNav')?.addEventListener('click', () => {
+    setSideTab('setup');
     document.getElementById('modelSelect')?.focus();
   });
   document.getElementById('docsNav')?.addEventListener('click', () => {
+    setSideTab('setup');
     const panel = document.getElementById('docsPanel') as HTMLElement | null;
-    if (panel) panel.hidden = !panel.hidden;
+    if (panel) panel.hidden = false;
   });
   document.addEventListener('keydown', (event) => {
     const target = document.activeElement;
@@ -338,7 +367,11 @@ function initNavAndShortcuts() {
     else if (event.key === 'f') { event.preventDefault(); onFlip(); }
     else if (event.key === 'n') { event.preventDefault(); onReset(); }
     else if (event.key === ' ') { event.preventDefault(); if (uiMode === 'play' && !gameStarted) beginConfiguredGame(); else engineMove(); }
-    else if (event.key === 's') { event.preventDefault(); startStockfish(); }
+    else if (event.key === 's') { event.preventDefault(); setSideTab('eval'); startStockfish(); }
+    else if (event.key === '1') { event.preventDefault(); setSideTab('game'); }
+    else if (event.key === '2') { event.preventDefault(); setSideTab('eval'); }
+    else if (event.key === '3') { event.preventDefault(); setSideTab('policy'); }
+    else if (event.key === '4') { event.preventDefault(); setSideTab('setup'); }
   });
 }
 function wdlPerspectiveName() {
@@ -575,8 +608,8 @@ const onResetAnalysis = async () => { if (busy) return; await render(startAnalys
 const onFlip = async () => { if (busy) return; orientation = orientation === 'white' ? 'black' : 'white'; await render(); };
 $('engine').onclick = () => engineMove();
 $('engineAnalysis').onclick = () => engineMove();
-$('stockfishBtn').onclick = () => startStockfish();
-$('stockfishAnalysis').onclick = () => startStockfish();
+$('stockfishBtn').onclick = () => { setSideTab('eval'); startStockfish(); };
+$('stockfishAnalysis').onclick = () => { setSideTab('eval'); startStockfish(); };
 $('reset').onclick = onReset;
 $('resetAnalysis').onclick = onResetAnalysis;
 $('flip').onclick = onFlip;
@@ -585,6 +618,7 @@ $('loadFen').onclick = async () => { if (busy) return; board = parseFen(($('fenI
 
 async function main() {
   initUiMode();
+  initSideTabs();
   initNavAndShortcuts();
   initPlayerSideControls();
   initModelSelect();
