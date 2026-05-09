@@ -340,13 +340,18 @@ function initNavAndShortcuts() {
     else if (event.key === 's') { event.preventDefault(); startStockfish(); }
   });
 }
+function wdlPerspectiveName() {
+  if (uiMode === 'play' && gameStarted) return board.turn === playerColorToMove() ? 'You' : 'Nibbler';
+  return board.turn === 'w' ? 'White to move' : 'Black to move';
+}
 function renderWdl(wdl: [number, number, number]) {
+  const perspective = wdlPerspectiveName();
   const parts = [
-    { name: 'win', value: wdl[0] ?? 0, cls: 'wdl-win' },
+    { name: `${perspective} win`, value: wdl[0] ?? 0, cls: 'wdl-win' },
     { name: 'draw', value: wdl[1] ?? 0, cls: 'wdl-draw' },
-    { name: 'loss', value: wdl[2] ?? 0, cls: 'wdl-loss' },
+    { name: `${perspective} loss`, value: wdl[2] ?? 0, cls: 'wdl-loss' },
   ];
-  $('wdl').innerHTML = `<div class="wdl-stack">${parts.map((p)=>`<div class="wdl-seg ${p.cls}" style="width:${Math.max(0, p.value * 100)}%">${(p.value * 100).toFixed(0)}%</div>`).join('')}</div><div class="wdl-labels"><span>win</span><span>draw</span><span>loss</span></div>`;
+  $('wdl').innerHTML = `<div class="wdl-stack">${parts.map((p)=>`<div class="wdl-seg ${p.cls}" title="${p.name}" style="width:${Math.max(0, p.value * 100)}%">${(p.value * 100).toFixed(0)}%</div>`).join('')}</div><div class="wdl-labels"><span>${parts[0].name}</span><span>draw</span><span>${parts[2].name}</span></div><div class="wdl-perspective">WDL is from the current side-to-move perspective, not White/Black colors.</div>`;
 }
 function renderMoves() {
   const cells: string[] = [];
