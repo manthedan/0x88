@@ -52,6 +52,7 @@ let stockfishBest = '';
 let stockfishScore = '';
 let stockfishPv = '';
 let stockfishSeq = 0;
+let stockfishSearchTurn: 'w' | 'b' = board.turn;
 const visits = Number(params.get('visits') ?? '128');
 const puctBatchSize = Math.max(1, Number(params.get('batch') ?? '16'));
 const puctPolicy = params.get('puctPolicy') ?? 'classic';
@@ -377,7 +378,7 @@ function renderMaterial() {
 }
 function renderStockfish() {
   const status = !stockfish ? 'Off. Click “Start Stockfish” for browser-side depth analysis.' : stockfishThinking ? `Thinking to depth ${stockfishDepth}…` : stockfishReady ? 'Ready.' : 'Loading…';
-  $('stockfish').innerHTML = `<div>${status}</div><div class="score">${stockfishScore || '—'}</div><div>Best: <span class="mono">${stockfishBest || '—'}</span></div><div class="pv">PV: <span class="mono">${stockfishPv || '—'}</span></div>`;
+  $('stockfish').innerHTML = `<div>${status}</div><div class="score">${stockfishScore || '—'}</div><div>Best: <span class="mono">${stockfishBest || '—'}</span></div><div class="pv">PV: <span class="mono">${stockfishPv || '—'}</span></div><div class="eval-note">Score is normalized to White/Black advantage. Best move and PV are for the current side to move.</div>`;
 }
 function controlsEnabled(enabled: boolean) {
   for (const id of ['engine','engineAnalysis','reset','resetAnalysis','flip','flipAnalysis','loadFen','playWhite','playBlack','introWhite','introBlack','modeNormal','modeHandBrain','timeOff','time5','time10','startGame']) {
@@ -455,6 +456,20 @@ function startStockfish() {
   }
 }
 function sendStockfish(cmd: string) { stockfish?.postMessage(cmd); }
+function formatStockfishScore(cp: RegExpMatchArray | null, mate: RegExpMatchArray | null, depth: RegExpMatchArray | null) {
+  const whiteMultiplier = stockfishSearchTurn === 'w' ? 1 : -1;
+  const depthSuffix = depth ? ` d${depth[1]}` : '';
+  if (mate) {
+    const whiteMate = whiteMultiplier * Number(mate[1]);
+    return `${whiteMate >= 0 ? 'White' : 'Black'} M${Math.abs(whiteMate)}${depthSuffix}`;
+  }
+  if (cp) {
+    const whitePawns = whiteMultiplier * Number(cp[1]) / 100;
+    if (Math.abs(whitePawns) < 0.005) return `Equal${depthSuffix}`;
+    return `${whitePawns > 0 ? 'White' : 'Black'} +${Math.abs(whitePawns).toFixed(2)}${depthSuffix}`;
+  }
+  return stockfishScore;
+}
 function handleStockfishLine(line: string) {
   if (line === 'uciok') { sendStockfish('isready'); return; }
   if (line === 'readyok') { stockfishReady = true; requestStockfishAnalysis(); renderStockfish(); return; }
@@ -466,17 +481,14 @@ function handleStockfishLine(line: string) {
   const mate = line.match(/\sscore\s+mate\s+(-?\d+)/);
   const cp = line.match(/\sscore\s+cp\s+(-?\d+)/);
   const depth = line.match(/\sdepth\s+(\d+)/);
-  if (mate) stockfishScore = `M${mate[1]}${depth ? ` d${depth[1]}` : ''}`;
-  else if (cp) {
-    const pawns = Number(cp[1]) / 100;
-    stockfishScore = `${pawns >= 0 ? '+' : ''}${pawns.toFixed(2)}${depth ? ` d${depth[1]}` : ''}`;
-  }
+  stockfishScore = formatStockfishScore(cp, mate, depth);
   renderStockfish();
 }
 function requestStockfishAnalysis() {
   if (!stockfish || !stockfishReady || stockfishThinking) return;
   stockfishSeq += 1;
   stockfishThinking = true;
+  stockfishSearchTurn = board.turn;
   stockfishBest = ''; stockfishPv = '';
   sendStockfish('stop');
   sendStockfish(`position fen ${boardToFen(board)}`);
