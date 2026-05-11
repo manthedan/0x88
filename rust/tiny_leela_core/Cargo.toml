@@ -41,6 +41,10 @@ name = "tiny-leela-rust-feature-cache"
 path = "src/bin/feature_cache.rs"
 
 [[bin]]
+name = "tiny-leela-rust-squareformer-cache"
+path = "src/bin/squareformer_cache.rs"
+
+[[bin]]
 name = "tiny-leela-rust-onnx-card"
 path = "src/bin/onnx_card.rs"
 
