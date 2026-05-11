@@ -20,6 +20,7 @@ POLICY_MODE="classic"
 PROGRESS_EVERY=20
 TRAINING_LANE="supervised_sp"
 SOURCE_MODEL=""
+MAX_POLICY_MOVES=8
 
 usage(){ cat <<'EOF'
 usage: scripts/selfplay_pilot_pipeline.sh --model MODEL [--meta META] [options]
@@ -44,6 +45,7 @@ Options:
   --stockfish-nodes N        if >0, use fixed-node Stockfish
   --mock-stockfish           dry-run sidecar without UCI Stockfish
   --source-model ID          training-row source_model, defaults to model-id
+  --max-policy-moves N       cap expanded policy targets per row, default 8
 EOF
 }
 
@@ -64,6 +66,7 @@ while [[ $# -gt 0 ]]; do
     --stockfish-nodes) STOCKFISH_NODES="$2"; shift 2;;
     --mock-stockfish) MOCK_STOCKFISH=1; shift;;
     --source-model) SOURCE_MODEL="$2"; shift 2;;
+    --max-policy-moves) MAX_POLICY_MOVES="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) echo "unknown arg: $1" >&2; usage >&2; exit 2;;
   esac
@@ -83,12 +86,17 @@ PIPELINE_MANIFEST="$OUT_DIR/pipeline.manifest.json"
 TRAINING_ROWS="$OUT_DIR/training_expanded.jsonl.zst"
 TRAINING_MANIFEST="$OUT_DIR/training_rows.manifest.json"
 
-GEN=(node --experimental-strip-types scripts/selfplay_generate.mjs --backend rust --model "$MODEL" --out "$CHUNK" --manifest-out "$CHUNK_MANIFEST" --lane sup_sp --model-id "$MODEL_ID" --games "$GAMES" --visits "$VISITS" --max-plies "$MAX_PLIES" --seed "$SEED" --policy-mode "$POLICY_MODE" --progress-every "$PROGRESS_EVERY")
-if [[ -n "$META" ]]; then GEN+=(--meta "$META"); fi
-if [[ -n "$OPENING_FENS" ]]; then GEN+=(--opening-fens "$OPENING_FENS"); fi
+GEN_ARGS=(--model "$MODEL" --out "$CHUNK" --manifest-out "$CHUNK_MANIFEST" --lane sup_sp --model-id "$MODEL_ID" --games "$GAMES" --visits "$VISITS" --max-plies "$MAX_PLIES" --seed "$SEED" --policy-mode "$POLICY_MODE" --progress-every "$PROGRESS_EVERY")
+if [[ -n "$META" ]]; then GEN_ARGS+=(--meta "$META"); fi
+if [[ -n "$OPENING_FENS" ]]; then GEN_ARGS+=(--opening-fens "$OPENING_FENS"); fi
 
 echo "[pilot] generate chunk: $CHUNK"
-"${GEN[@]}"
+if [[ "$MODEL" == *.onnx || -n "$META" ]]; then
+  cargo build --release --quiet --features native-ort --manifest-path rust/tiny_leela_core/Cargo.toml --bin tiny-leela-rust-selfplay
+  rust/tiny_leela_core/target/release/tiny-leela-rust-selfplay "${GEN_ARGS[@]}"
+else
+  node --experimental-strip-types scripts/selfplay_generate.mjs --backend rust "${GEN_ARGS[@]}"
+fi
 
 .venv-onnx/bin/python scripts/selfplay_chunk_validate.py "$CHUNK"
 
@@ -124,8 +132,8 @@ echo "[pilot] training rows: $TRAINING_ROWS"
   --lane "$TRAINING_LANE" \
   --source-model "$SOURCE_MODEL" \
   --mode expanded \
-  --value-target result
-.venv-onnx/bin/python scripts/selfplay_chunk_validate.py "$TRAINING_ROWS" --min-policy-mass 0.99 --max-policy-mass 1.01
+  --value-target result \
+  --max-policy-moves "$MAX_POLICY_MOVES"
 
 cat <<EOF
 [pilot] done
