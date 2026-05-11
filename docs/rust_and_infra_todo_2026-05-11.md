@@ -49,11 +49,12 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
     - Covered by `tiny-leela-rust-squareformer-cache --history-plies <N>` for compact SquareFormer/BT4 token caches.
   - [x] MoveFormer sidecar cache builder.
   - [x] Tactical MoveFormer sidecar cache builder, but do not resume tactical training without explicit approval.
-  - [ ] Action-value / Stockfish / ChessBench overlay cache ingestion where deterministic preprocessing matters.
+  - [x] Action-value / Stockfish / ChessBench overlay cache ingestion where deterministic preprocessing matters.
+    - Covered for canonical `teacher.action_value.v1` overlays by `tiny-leela-rust-action-value-cache`.
 
 - [ ] Make Rust cache outputs contract-first.
   - [x] Emit `cache_manifest_v1`.
-    - Implemented for `tiny-leela-rust-feature-cache`, `tiny-leela-rust-residual-cache`, `tiny-leela-rust-squareformer-cache`, `tiny-leela-rust-moveformer-cache`, and `tiny-leela-rust-moveformer-tactical-cache`.
+    - Implemented for `tiny-leela-rust-feature-cache`, `tiny-leela-rust-residual-cache`, `tiny-leela-rust-squareformer-cache`, `tiny-leela-rust-moveformer-cache`, `tiny-leela-rust-moveformer-tactical-cache`, and `tiny-leela-rust-action-value-cache`.
   - [x] Atomic shard writes.
     - Feature-cache writes use temp-file/rename; SquareFormer cache writes to a temp output directory before publishing.
   - [x] Resume-safe shard completion markers.
