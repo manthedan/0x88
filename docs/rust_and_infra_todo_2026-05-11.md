@@ -6,36 +6,37 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 
 ## P0 — Current Evaluation/Arena Path
 
-- [ ] Finish Rust arena sharding/offload polish.
-  - [ ] Keep `--shard-count` / `--shard-index` in `rust/tiny_leela_core/src/bin/arena.rs` covered by tests or repeatable smoke commands.
-  - [ ] Promote `scripts/merge_rust_arena_shards.py` into the standard eval workflow.
-  - [ ] Add validation that merged shard outputs cover exactly the expected global game ids with no duplicates.
-  - [ ] Add a reusable Mac mini launcher for Rust arena shards instead of one-off shell commands.
-  - [ ] Add durable status, pid, log, and pullback handling, ideally via `scripts/tlops`.
+- [x] Finish Rust arena sharding/offload polish.
+  - [x] Keep `--shard-count` / `--shard-index` in `rust/tiny_leela_core/src/bin/arena.rs` covered by tests or repeatable smoke commands.
+  - [x] Promote `scripts/merge_rust_arena_shards.py` into the standard eval workflow.
+  - [x] Add validation that merged shard outputs cover exactly the expected global game ids with no duplicates.
+  - [x] Add a reusable Mac mini launcher for Rust arena shards instead of one-off shell commands.
+  - [x] Add durable status, pid, log, and pullback handling, ideally via `scripts/tlops`.
+    - Implemented in `scripts/remote_cpu_offload_rust_super_arena.sh`; full `tlops` registry integration remains optional future polish.
 
-- [ ] Keep Rust/native ORT as the canonical backend for the 100M super arena.
-  - [ ] Do not restart the TS/ORT-Web super arena for this workload.
-  - [ ] Merge Mac mini shard results when complete.
-  - [ ] Generate a compact standings/summary packet from merged output.
+- [x] Keep Rust/native ORT as the canonical backend for the 100M super arena.
+  - [x] Do not restart the TS/ORT-Web super arena for this workload.
+  - [x] Merge Mac mini shard results when complete.
+  - [x] Generate a compact standings/summary packet from merged output.
 
 ## P0 — Rust Core Refactor
 
 - [ ] Split `rust/tiny_leela_core/src/lib.rs` monolith into modules.
-  - [ ] `board.rs`: board representation, square indexing, piece/color types.
-  - [ ] `fen.rs`: FEN parse/serialize, start position constants.
-  - [ ] `movegen.rs`: legal move generation, checks, pins, castling/en-passant legality.
-  - [ ] `move_codec.rs`: UCI conversion, move/action id mapping.
+  - [x] `board.rs`: board representation, square indexing, piece/color types.
+  - [x] `fen.rs`: FEN parse/serialize, start position constants.
+  - [x] `movegen.rs`: legal move generation, checks, pins, castling/en-passant legality.
+  - [x] `move_codec.rs`: UCI conversion, move/action id mapping.
   - [ ] `encoding.rs`: CNN/residual board tensors and history encodings.
   - [ ] `squareformer.rs`: compact token construction and SquareFormer-specific preprocessing.
-  - [ ] `eval.rs`: `Evaluation`, `PositionEvaluator`, evaluator adapters.
-  - [ ] `onnx.rs`: native ORT evaluator implementation behind `native-ort`.
-  - [ ] `search.rs`: PUCT, aux/AV PUCT, search options/results.
+  - [x] `eval.rs`: `Evaluation`, `PositionEvaluator`, evaluator adapters.
+  - [x] `onnx.rs`: native ORT evaluator implementation behind `native-ort`.
+  - [x] `search.rs`: PUCT, aux/AV PUCT, search options/results.
   - [ ] `arena.rs` or `matchplay.rs`: reusable game/round-robin logic shared by bin tools.
 
 - [ ] Add module-level tests while splitting.
-  - [ ] FEN roundtrip/property tests.
+  - [x] FEN roundtrip/property tests.
   - [ ] Movegen perft/parity tests.
-  - [ ] Move/action-id contract tests.
+  - [x] Move/action-id contract tests.
   - [ ] Encoding parity tests vs fixtures.
   - [ ] Search trace parity tests for classic and aux/AV PUCT.
 
@@ -43,7 +44,7 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 
 - [ ] Replace the current toy/legacy `rust/tiny_leela_core/src/bin/feature_cache.rs` with production cache builders.
   - [ ] Residual/CNN H2/H8 cache builder.
-  - [ ] SquareFormer compact-token cache builder.
+  - [x] SquareFormer compact-token cache builder.
   - [ ] BT4/SquareFormer h7/h8 cache builder.
   - [ ] MoveFormer sidecar cache builder.
   - [ ] Tactical MoveFormer sidecar cache builder, but do not resume tactical training without explicit approval.
@@ -51,7 +52,9 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 
 - [ ] Make Rust cache outputs contract-first.
   - [ ] Emit `cache_manifest_v1`.
+    - Partial: `tiny-leela-rust-feature-cache` can emit `cache_manifest_v1`; SquareFormer shard builder currently emits Python-compatible `meta.json`.
   - [ ] Atomic shard writes.
+    - Partial: feature-cache writes are atomic; SquareFormer binary shard files still need temp-file/rename semantics.
   - [ ] Resume-safe shard completion markers.
   - [ ] `.jsonl.zst` or binary/zstd streaming for large outputs.
   - [ ] Deterministic row ordering and checksums.
