@@ -21,7 +21,7 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 
 ## P0 — Rust Core Refactor
 
-- [ ] Split `rust/tiny_leela_core/src/lib.rs` monolith into modules.
+- [x] Split `rust/tiny_leela_core/src/lib.rs` monolith into modules.
   - [x] `board.rs`: board representation, square indexing, piece/color types.
   - [x] `fen.rs`: FEN parse/serialize, start position constants.
   - [x] `movegen.rs`: legal move generation, checks, pins, castling/en-passant legality.
@@ -33,12 +33,12 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] `search.rs`: PUCT, aux/AV PUCT, search options/results.
   - [x] `arena.rs` or `matchplay.rs`: reusable game/round-robin logic shared by bin tools.
 
-- [ ] Add module-level tests while splitting.
+- [x] Add module-level tests while splitting.
   - [x] FEN roundtrip/property tests.
   - [x] Movegen perft/parity tests.
   - [x] Move/action-id contract tests.
   - [x] Encoding parity tests vs fixtures.
-  - [ ] Search trace parity tests for classic and aux/AV PUCT.
+  - [x] Search trace parity tests for classic and aux/AV PUCT.
 
 ## P1 — Production Cache Building in Rust
 
