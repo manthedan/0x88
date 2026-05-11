@@ -37,7 +37,7 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] FEN roundtrip/property tests.
   - [x] Movegen perft/parity tests.
   - [x] Move/action-id contract tests.
-  - [ ] Encoding parity tests vs fixtures.
+  - [x] Encoding parity tests vs fixtures.
   - [ ] Search trace parity tests for classic and aux/AV PUCT.
 
 ## P1 — Production Cache Building in Rust
