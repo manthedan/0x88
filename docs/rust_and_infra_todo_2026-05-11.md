@@ -42,7 +42,7 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 
 ## P1 — Production Cache Building in Rust
 
-- [ ] Replace the current toy/legacy `rust/tiny_leela_core/src/bin/feature_cache.rs` with production cache builders.
+- [x] Replace the current toy/legacy `rust/tiny_leela_core/src/bin/feature_cache.rs` with production cache builders.
   - [x] Residual/CNN H2/H8 cache builder.
   - [x] SquareFormer compact-token cache builder.
   - [x] BT4/SquareFormer h7/h8 cache builder.
@@ -52,7 +52,7 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] Action-value / Stockfish / ChessBench overlay cache ingestion where deterministic preprocessing matters.
     - Covered for canonical `teacher.action_value.v1` overlays by `tiny-leela-rust-action-value-cache`.
 
-- [ ] Make Rust cache outputs contract-first.
+- [x] Make Rust cache outputs contract-first.
   - [x] Emit `cache_manifest_v1`.
     - Implemented for `tiny-leela-rust-feature-cache`, `tiny-leela-rust-residual-cache`, `tiny-leela-rust-squareformer-cache`, `tiny-leela-rust-moveformer-cache`, `tiny-leela-rust-moveformer-tactical-cache`, and `tiny-leela-rust-action-value-cache`.
   - [x] Atomic shard writes.
@@ -62,7 +62,8 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
     - Rust cache builders now share streaming plain JSONL / `.jsonl.zst` input handling via `for_each_jsonl_line`.
   - [x] Deterministic row ordering and checksums.
     - Rust cache metadata/manifests now declare row ordering and include SHA-256 hashes for emitted cache artifacts.
-  - [ ] Python compatibility readers for training.
+  - [x] Python compatibility readers for training.
+    - Added `training/_lib/rust_cache_readers.py`; MoveFormer training now accepts Rust sidecar slot naming.
 
 - [ ] Keep Python as the training/export owner.
   - [ ] Rust should build deterministic tensors/tokens/caches.
