@@ -336,6 +336,7 @@ fn main() {
             cpuct,
             fpu,
             temperature,
+            ..SearchOptions::default()
         },
     );
     let elapsed = t0.elapsed().as_secs_f64().max(1e-9);

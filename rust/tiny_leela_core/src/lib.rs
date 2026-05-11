@@ -704,9 +704,29 @@ pub struct StudentArtifact {
     pub blocks: Option<usize>,
 }
 
+#[derive(Clone, Debug)]
 pub struct Evaluation {
     pub policy: Vec<(u32, f32)>,
     pub wdl: [f32; 3],
+    pub action_values: Option<Vec<(u32, f32)>>,
+    pub rank_scores: Option<Vec<(u32, f32)>>,
+    pub regrets: Option<Vec<(u32, f32)>>,
+    pub risks: Option<Vec<(u32, f32)>>,
+    pub uncertainties: Option<Vec<(u32, f32)>>,
+}
+
+impl Evaluation {
+    pub fn new(policy: Vec<(u32, f32)>, wdl: [f32; 3]) -> Self {
+        Self {
+            policy,
+            wdl,
+            action_values: None,
+            rank_scores: None,
+            regrets: None,
+            risks: None,
+            uncertainties: None,
+        }
+    }
 }
 pub trait PositionEvaluator {
     fn evaluate(&self, board: &Board) -> Evaluation;
@@ -1282,14 +1302,14 @@ impl PositionEvaluator for StudentEvaluator {
                 .collect()
         };
         let w = softmax(&wdl_logits);
-        Evaluation {
+        Evaluation::new(
             policy,
-            wdl: [
+            [
                 w.first().copied().unwrap_or(0.0),
                 w.get(1).copied().unwrap_or(0.0),
                 w.get(2).copied().unwrap_or(0.0),
             ],
-        }
+        )
     }
 }
 
@@ -1302,12 +1322,29 @@ impl PositionEvaluator for UniformEvaluator {
         } else {
             1.0 / moves.len() as f32
         };
-        Evaluation {
-            policy: moves
+        Evaluation::new(
+            moves
                 .into_iter()
                 .map(|m| (move_to_action_id(m), p))
                 .collect(),
-            wdl: [0.25, 0.5, 0.25],
+            [0.25, 0.5, 0.25],
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchPolicyMode {
+    Classic,
+    ActionValue,
+    Aux,
+}
+
+impl SearchPolicyMode {
+    pub fn from_name(name: &str) -> Self {
+        match name.to_ascii_lowercase().as_str() {
+            "av" | "action_value" | "action-value" => Self::ActionValue,
+            "aux" | "aux_puct" | "aux-puct" => Self::Aux,
+            _ => Self::Classic,
         }
     }
 }
@@ -1318,6 +1355,12 @@ pub struct SearchOptions {
     pub cpuct: f32,
     pub fpu: f32,
     pub temperature: f32,
+    pub policy_mode: SearchPolicyMode,
+    pub av_weight: f32,
+    pub rank_weight: f32,
+    pub regret_weight: f32,
+    pub risk_weight: f32,
+    pub uncertainty_weight: f32,
 }
 impl Default for SearchOptions {
     fn default() -> Self {
@@ -1326,6 +1369,12 @@ impl Default for SearchOptions {
             cpuct: 1.5,
             fpu: 0.0,
             temperature: 1.0,
+            policy_mode: SearchPolicyMode::Classic,
+            av_weight: 0.25,
+            rank_weight: 0.0,
+            regret_weight: 0.0,
+            risk_weight: 0.0,
+            uncertainty_weight: 0.0,
         }
     }
 }
@@ -1350,6 +1399,11 @@ struct Edge {
     child: Option<Box<Node>>,
     visits: u32,
     value_sum: f32,
+    action_value_prior: Option<f32>,
+    rank_score: Option<f32>,
+    regret: Option<f32>,
+    risk: Option<f32>,
+    uncertainty: Option<f32>,
 }
 struct Node {
     board: Board,
@@ -1393,7 +1447,32 @@ fn expand_node(node: &mut Node, evaluator: &dyn PositionEvaluator) -> f32 {
         return node.terminal_value.unwrap();
     }
     let evaln = evaluator.evaluate_with_history(&node.board, &node.history_fens);
-    let policy_map: HashMap<u32, f32> = evaln.policy.into_iter().collect();
+    let policy_map: HashMap<u32, f32> = evaln.policy.iter().copied().collect();
+    let action_values: HashMap<u32, f32> = evaln
+        .action_values
+        .as_ref()
+        .map(|xs| xs.iter().copied().collect())
+        .unwrap_or_default();
+    let rank_scores: HashMap<u32, f32> = evaln
+        .rank_scores
+        .as_ref()
+        .map(|xs| xs.iter().copied().collect())
+        .unwrap_or_default();
+    let regrets: HashMap<u32, f32> = evaln
+        .regrets
+        .as_ref()
+        .map(|xs| xs.iter().copied().collect())
+        .unwrap_or_default();
+    let risks: HashMap<u32, f32> = evaln
+        .risks
+        .as_ref()
+        .map(|xs| xs.iter().copied().collect())
+        .unwrap_or_default();
+    let uncertainties: HashMap<u32, f32> = evaln
+        .uncertainties
+        .as_ref()
+        .map(|xs| xs.iter().copied().collect())
+        .unwrap_or_default();
     let raw: Vec<f32> = moves
         .iter()
         .map(|&m| {
@@ -1409,23 +1488,49 @@ fn expand_node(node: &mut Node, evaluator: &dyn PositionEvaluator) -> f32 {
     node.edges = moves
         .into_iter()
         .enumerate()
-        .map(|(i, mv)| Edge {
-            mv,
-            prior: if total > 0.0 {
-                raw[i] / total
-            } else {
-                fallback
-            },
-            child: None,
-            visits: 0,
-            value_sum: 0.0,
+        .map(|(i, mv)| {
+            let action_id = move_to_action_id(mv);
+            Edge {
+                mv,
+                prior: if total > 0.0 {
+                    raw[i] / total
+                } else {
+                    fallback
+                },
+                child: None,
+                visits: 0,
+                value_sum: 0.0,
+                action_value_prior: action_values.get(&action_id).copied(),
+                rank_score: rank_scores.get(&action_id).copied(),
+                regret: regrets.get(&action_id).copied(),
+                risk: risks.get(&action_id).copied(),
+                uncertainty: uncertainties.get(&action_id).copied(),
+            }
         })
         .collect();
     node.expanded = true;
     node.terminal_value = None;
     value_from_wdl(evaln.wdl)
 }
-fn simulate(node: &mut Node, evaluator: &dyn PositionEvaluator, cpuct: f32, fpu: f32) -> f32 {
+fn aux_edge_bonus(edge: &Edge, options: SearchOptions) -> f32 {
+    let sv = 1.0 + edge.visits as f32;
+    match options.policy_mode {
+        SearchPolicyMode::Classic => 0.0,
+        SearchPolicyMode::ActionValue => {
+            options.av_weight * edge.action_value_prior.unwrap_or(0.0) / sv
+        }
+        SearchPolicyMode::Aux => {
+            (options.av_weight * edge.action_value_prior.unwrap_or(0.0)
+                + options.rank_weight * edge.rank_score.unwrap_or(0.0)
+                - options.regret_weight * edge.regret.unwrap_or(0.0)
+                - options.risk_weight * edge.risk.unwrap_or(0.0)
+                + options.uncertainty_weight * edge.uncertainty.unwrap_or(0.0))
+                / sv
+        }
+    }
+}
+
+fn simulate(node: &mut Node, evaluator: &dyn PositionEvaluator, options: SearchOptions) -> f32 {
     if !node.expanded {
         return expand_node(node, evaluator);
     }
@@ -1437,8 +1542,9 @@ fn simulate(node: &mut Node, evaluator: &dyn PositionEvaluator, cpuct: f32, fpu:
     let mut best_i = 0usize;
     let mut best_score = f32::NEG_INFINITY;
     for (i, edge) in node.edges.iter().enumerate() {
-        let score = edge_q_for_parent(edge, fpu)
-            + cpuct * edge.prior * sqrt_parent / (1.0 + edge.visits as f32);
+        let score = edge_q_for_parent(edge, options.fpu)
+            + options.cpuct * edge.prior * sqrt_parent / (1.0 + edge.visits as f32)
+            + aux_edge_bonus(edge, options);
         if score > best_score {
             best_i = i;
             best_score = score;
@@ -1459,7 +1565,7 @@ fn simulate(node: &mut Node, evaluator: &dyn PositionEvaluator, cpuct: f32, fpu:
             edges: Vec::new(),
         }));
     }
-    let child_value = simulate(edge.child.as_mut().unwrap(), evaluator, cpuct, fpu);
+    let child_value = simulate(edge.child.as_mut().unwrap(), evaluator, options);
     edge.visits += 1;
     edge.value_sum += child_value;
     -child_value
@@ -1529,7 +1635,7 @@ pub fn search_root_with_history(
         };
     }
     for _ in 0..visits {
-        simulate(&mut root, evaluator, options.cpuct, options.fpu);
+        simulate(&mut root, evaluator, options);
     }
     let policy = visit_policy(&root.edges, options.temperature, options.fpu);
     let mut best = policy.first();
@@ -1568,6 +1674,7 @@ pub extern "C" fn tiny_leela_startpos_uniform_search_best_action(visits: u32) ->
             cpuct: 1.5,
             fpu: 0.0,
             temperature: 0.0,
+            ..SearchOptions::default()
         },
     )
     .mv
@@ -1655,6 +1762,7 @@ pub unsafe extern "C" fn tiny_leela_student_search_best_action(
             cpuct: 1.5,
             fpu: 0.0,
             temperature: 0.0,
+            ..SearchOptions::default()
         },
     )
     .mv
@@ -2076,6 +2184,44 @@ pub fn encode_squareformer_legal_ids(board: &Board, width: usize) -> (Vec<Move>,
 }
 
 #[cfg(feature = "native-ort")]
+fn optional_output_vec(
+    outputs: &ort::session::SessionOutputs,
+    names: &[&str],
+) -> Result<Option<Vec<f32>>, String> {
+    for name in names {
+        if let Some(value) = outputs.get(*name) {
+            return Ok(Some(
+                value
+                    .try_extract_tensor::<f32>()
+                    .map_err(|e| e.to_string())?
+                    .1
+                    .to_vec(),
+            ));
+        }
+    }
+    Ok(None)
+}
+
+#[cfg(feature = "native-ort")]
+fn aux_pairs_for_moves(
+    moves: &[Move],
+    raw: Option<&[f32]>,
+    width: usize,
+) -> Option<Vec<(u32, f32)>> {
+    let raw = raw?;
+    let n = moves.len().min(width);
+    let mut out = Vec::with_capacity(n);
+    for (j, &mv) in moves.iter().take(n).enumerate() {
+        out.push((move_to_action_id(mv), raw.get(j).copied().unwrap_or(0.0)));
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+#[cfg(feature = "native-ort")]
 impl OnnxEvaluator {
     pub fn from_files(model_path: &str, meta_path: &str) -> Result<Self, String> {
         let meta_json = std::fs::read_to_string(meta_path).map_err(|e| e.to_string())?;
@@ -2209,14 +2355,26 @@ impl OnnxEvaluator {
             .zip(probs.iter())
             .map(|(&m, &p)| (move_to_action_id(m), p))
             .collect();
-        Ok(Evaluation {
+        let av_width = meta
+            .onnx_fixed_legal_moves
+            .or(meta.max_legal_moves)
+            .unwrap_or(legal.len())
+            .max(1);
+        let action_values = aux_pairs_for_moves(
+            &legal,
+            optional_output_vec(&outputs, &["action_values"])?.as_deref(),
+            av_width,
+        );
+        let mut eval = Evaluation::new(
             policy,
-            wdl: [
+            [
                 w.first().copied().unwrap_or(0.0),
                 w.get(1).copied().unwrap_or(0.0),
                 w.get(2).copied().unwrap_or(0.0),
             ],
-        })
+        );
+        eval.action_values = action_values;
+        Ok(eval)
     }
 
     fn eval_onnx(&self, board: &Board, history_fens: &[String]) -> Result<Evaluation, String> {
@@ -2312,14 +2470,49 @@ impl OnnxEvaluator {
             for &m in legal.iter().skip(n) {
                 policy.push((move_to_action_id(m), 0.0));
             }
-            Ok(Evaluation {
+            let action_values = aux_pairs_for_moves(
+                &legal,
+                optional_output_vec(
+                    &outputs,
+                    &["action_values", "action_value", "action_value_logits"],
+                )?
+                .as_deref(),
+                width,
+            );
+            let rank_scores = aux_pairs_for_moves(
+                &legal,
+                optional_output_vec(&outputs, &["rank_scores"])?.as_deref(),
+                width,
+            );
+            let regrets = aux_pairs_for_moves(
+                &legal,
+                optional_output_vec(&outputs, &["regrets"])?.as_deref(),
+                width,
+            );
+            let risks = aux_pairs_for_moves(
+                &legal,
+                optional_output_vec(&outputs, &["risks"])?.as_deref(),
+                width,
+            );
+            let uncertainties = aux_pairs_for_moves(
+                &legal,
+                optional_output_vec(&outputs, &["uncertainties"])?.as_deref(),
+                width,
+            );
+            let mut eval = Evaluation::new(
                 policy,
-                wdl: [
+                [
                     w.first().copied().unwrap_or(0.0),
                     w.get(1).copied().unwrap_or(0.0),
                     w.get(2).copied().unwrap_or(0.0),
                 ],
-            })
+            );
+            eval.action_values = action_values;
+            eval.rank_scores = rank_scores;
+            eval.regrets = regrets;
+            eval.risks = risks;
+            eval.uncertainties = uncertainties;
+            Ok(eval)
         } else {
             let logits = outputs
                 .get("policy_logits")
@@ -2355,14 +2548,50 @@ impl OnnxEvaluator {
                     )
                 })
                 .collect();
-            Ok(Evaluation {
+            let width = legal.len().max(1);
+            let action_values = aux_pairs_for_moves(
+                &legal,
+                optional_output_vec(
+                    &outputs,
+                    &["action_values", "action_value", "action_value_logits"],
+                )?
+                .as_deref(),
+                width,
+            );
+            let rank_scores = aux_pairs_for_moves(
+                &legal,
+                optional_output_vec(&outputs, &["rank_scores"])?.as_deref(),
+                width,
+            );
+            let regrets = aux_pairs_for_moves(
+                &legal,
+                optional_output_vec(&outputs, &["regrets"])?.as_deref(),
+                width,
+            );
+            let risks = aux_pairs_for_moves(
+                &legal,
+                optional_output_vec(&outputs, &["risks"])?.as_deref(),
+                width,
+            );
+            let uncertainties = aux_pairs_for_moves(
+                &legal,
+                optional_output_vec(&outputs, &["uncertainties"])?.as_deref(),
+                width,
+            );
+            let mut eval = Evaluation::new(
                 policy,
-                wdl: [
+                [
                     w.first().copied().unwrap_or(0.0),
                     w.get(1).copied().unwrap_or(0.0),
                     w.get(2).copied().unwrap_or(0.0),
                 ],
-            })
+            );
+            eval.action_values = action_values;
+            eval.rank_scores = rank_scores;
+            eval.regrets = regrets;
+            eval.risks = risks;
+            eval.uncertainties = uncertainties;
+            Ok(eval)
         }
     }
 }

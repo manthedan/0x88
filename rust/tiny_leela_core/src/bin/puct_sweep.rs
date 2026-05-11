@@ -179,6 +179,7 @@ fn eval_setting(
                 cpuct,
                 fpu,
                 temperature,
+                ..SearchOptions::default()
             },
         );
         let uci = result

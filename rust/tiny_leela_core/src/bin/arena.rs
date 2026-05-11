@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::HashMap;
 use std::io::Write;
 use std::{
     env, fs,
@@ -9,7 +10,8 @@ use std::{
 use tiny_leela_core::OnnxEvaluator;
 use tiny_leela_core::{
     board_to_fen, in_check, legal_moves, make_move, move_to_uci, parse_fen,
-    search_root_with_history, Color, PositionEvaluator, SearchOptions, StudentEvaluator, START_FEN,
+    search_root_with_history, Color, PositionEvaluator, SearchOptions, SearchPolicyMode,
+    StudentEvaluator, START_FEN,
 };
 
 fn arg(name: &str, fallback: &str) -> String {
@@ -203,6 +205,117 @@ struct ArenaOutput {
     games: Vec<GameRecord>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MultiProtocol {
+    backend: String,
+    players: Vec<String>,
+    visits: u32,
+    games_per_pair: usize,
+    max_plies: usize,
+    adjudicate: String,
+    openings: usize,
+    shard_count: usize,
+    shard_index: usize,
+    total_games: usize,
+    selected_games: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MultiGameRecord {
+    game: usize,
+    pair: String,
+    a: String,
+    b: String,
+    a_color: String,
+    opening: String,
+    a_score: f32,
+    true_score: f32,
+    plies: usize,
+    final_fen: String,
+    adjudicated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MultiArenaOutput {
+    protocol: MultiProtocol,
+    standings: Vec<StandingRecord>,
+    pairs: Vec<PairRecord>,
+    games: Vec<MultiGameRecord>,
+    illegal_losses: usize,
+}
+
+struct PlayerRuntime {
+    name: String,
+    evaluator: Box<dyn PositionEvaluator>,
+    options: SearchOptions,
+}
+
+#[derive(Default, Clone, Copy)]
+struct StandingAcc {
+    wins: usize,
+    draws: usize,
+    losses: usize,
+    score: f64,
+    games: usize,
+}
+
+#[derive(Default, Clone, Copy)]
+struct PairAcc {
+    a_score: f64,
+    games: usize,
+    a_wdl: [usize; 3],
+}
+
+fn parse_player_specs(
+    specs: &str,
+    visits: u32,
+    default_cpuct: f32,
+    default_fpu: f32,
+) -> Vec<PlayerRuntime> {
+    let mut players = Vec::new();
+    for spec in specs.split(',').filter(|s| !s.trim().is_empty()) {
+        let parts: Vec<&str> = spec.split(':').collect();
+        if parts.len() < 3 {
+            panic!("invalid --players entry: expected name:model:meta[:mode:av:rank:regret:risk:uncertainty:cpuct:fpu], got {spec}");
+        }
+        let name = parts[0].to_string();
+        let model = parts[1].to_string();
+        let meta = parts[2].to_string();
+        let mode = parts.get(3).copied().unwrap_or("puct");
+        let parse_f32 = |idx: usize, fallback: f32| -> f32 {
+            parts
+                .get(idx)
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(fallback)
+        };
+        let options = SearchOptions {
+            visits,
+            cpuct: parse_f32(9, default_cpuct),
+            fpu: parse_f32(10, default_fpu),
+            temperature: 0.0,
+            policy_mode: SearchPolicyMode::from_name(mode),
+            av_weight: parse_f32(4, 0.0),
+            rank_weight: parse_f32(5, 0.0),
+            regret_weight: parse_f32(6, 0.0),
+            risk_weight: parse_f32(7, 0.0),
+            uncertainty_weight: parse_f32(8, 0.0),
+        };
+        let evaluator = load_evaluator("", &model, &meta, &name);
+        players.push(PlayerRuntime {
+            name,
+            evaluator,
+            options,
+        });
+    }
+    if players.len() < 2 {
+        panic!("--players requires at least two players");
+    }
+    players
+}
+
 fn load_evaluator(
     json_path: &str,
     onnx_path: &str,
@@ -231,7 +344,277 @@ fn load_evaluator(
     Box::new(StudentEvaluator::from_json(&json).expect("parse student artifact"))
 }
 
+fn run_multi_arena(
+    players: Vec<PlayerRuntime>,
+    games_per_pair: usize,
+    visits: u32,
+    max_plies: usize,
+    progress_every: usize,
+    adjudicate: String,
+    adjudicate_threshold: f32,
+    stockfish: String,
+    stockfish_depth: u32,
+    stockfish_draw_cp: i32,
+    openings: Vec<String>,
+    out_path: String,
+    shard_count: usize,
+    shard_index: usize,
+) {
+    let started = Instant::now();
+    let mut standings = vec![StandingAcc::default(); players.len()];
+    let mut pairs: HashMap<(usize, usize), PairAcc> = HashMap::new();
+    let mut game_records = Vec::new();
+    let mut illegal_losses = 0usize;
+    let mut global_game = 0usize;
+    let mut selected_game = 0usize;
+    let total_games = players.len() * (players.len() - 1) / 2 * games_per_pair;
+    let selected_games = (0..total_games)
+        .filter(|game| game % shard_count == shard_index)
+        .count();
+    eprintln!(
+        "[rust-arena visits={visits}] round-robin players={} games={} selected_games={} shard={}/{} max_plies={} backend=native-ort",
+        players.len(),
+        total_games,
+        selected_games,
+        shard_index + 1,
+        shard_count,
+        max_plies
+    );
+
+    for a in 0..players.len() {
+        for b in (a + 1)..players.len() {
+            for local_game in 0..games_per_pair {
+                let game_id = global_game;
+                global_game += 1;
+                if game_id % shard_count != shard_index {
+                    continue;
+                }
+                let a_color = if local_game % 2 == 0 {
+                    Color::White
+                } else {
+                    Color::Black
+                };
+                let opening = openings[(local_game / 2) % openings.len()].clone();
+                let mut board = parse_fen(&opening).expect("parse opening");
+                let mut history: Vec<String> = Vec::new();
+                let mut white_score = terminal_white_score(&board);
+                let mut plies = 0usize;
+                eprintln!(
+                    "[rust-arena visits={visits}] shard_game {}/{} global_game {}/{} {} vs {} start a_color={}",
+                    selected_game + 1,
+                    selected_games,
+                    game_id + 1,
+                    total_games,
+                    players[a].name,
+                    players[b].name,
+                    if a_color == Color::White { "w" } else { "b" }
+                );
+                while white_score.is_none() && plies < max_plies {
+                    let side_is_a = board.turn == a_color;
+                    let player_idx = if side_is_a { a } else { b };
+                    let player = &players[player_idx];
+                    let legal_uci: Vec<String> = legal_moves(&board)
+                        .iter()
+                        .map(|&m| move_to_uci(m))
+                        .collect();
+                    let history_fens: Vec<String> = history.iter().rev().take(2).cloned().collect();
+                    let result = search_root_with_history(
+                        &board,
+                        player.evaluator.as_ref(),
+                        player.options,
+                        &history_fens,
+                    );
+                    let Some(mv) = result.mv else {
+                        white_score = Some(if in_check(&board, board.turn) {
+                            if board.turn == Color::White {
+                                0.0
+                            } else {
+                                1.0
+                            }
+                        } else {
+                            0.5
+                        });
+                        break;
+                    };
+                    let uci = move_to_uci(mv);
+                    if !legal_uci.contains(&uci) {
+                        illegal_losses += 1;
+                        white_score = Some(if side_is_a {
+                            if a_color == Color::White {
+                                0.0
+                            } else {
+                                1.0
+                            }
+                        } else if a_color == Color::White {
+                            1.0
+                        } else {
+                            0.0
+                        });
+                        break;
+                    }
+                    history.push(board_to_fen(&board));
+                    board = make_move(&board, mv);
+                    white_score = terminal_white_score(&board);
+                    plies += 1;
+                    if plies % progress_every == 0 {
+                        eprintln!(
+                            "[rust-arena visits={visits}] shard_game {}/{} global_game {}/{} ply={}/{} move={} elapsed_s={:.1}",
+                            selected_game + 1,
+                            selected_games,
+                            game_id + 1,
+                            total_games,
+                            plies,
+                            max_plies,
+                            uci,
+                            started.elapsed().as_secs_f64()
+                        );
+                    }
+                }
+                let true_white_score = white_score.unwrap_or(0.5);
+                let true_a_score = candidate_score(true_white_score, a_color);
+                let history_fens: Vec<String> = history.iter().rev().take(2).cloned().collect();
+                let adjudicator_idx = if board.turn == a_color { a } else { b };
+                let (final_white_score, adjudicated) = if let Some(score) = white_score {
+                    (score, false)
+                } else {
+                    adjudicated_white_score(
+                        &board,
+                        &history_fens,
+                        players[adjudicator_idx].evaluator.as_ref(),
+                        &adjudicate,
+                        adjudicate_threshold,
+                        &stockfish,
+                        stockfish_depth,
+                        stockfish_draw_cp,
+                    )
+                };
+                let a_score = candidate_score(final_white_score, a_color);
+                let b_score = 1.0 - a_score;
+                standings[a].games += 1;
+                standings[b].games += 1;
+                standings[a].score += a_score as f64;
+                standings[b].score += b_score as f64;
+                if a_score == 1.0 {
+                    standings[a].wins += 1;
+                    standings[b].losses += 1;
+                } else if a_score == 0.0 {
+                    standings[a].losses += 1;
+                    standings[b].wins += 1;
+                } else {
+                    standings[a].draws += 1;
+                    standings[b].draws += 1;
+                }
+                let pair = pairs.entry((a, b)).or_default();
+                pair.games += 1;
+                pair.a_score += a_score as f64;
+                if a_score == 1.0 {
+                    pair.a_wdl[0] += 1;
+                } else if a_score == 0.0 {
+                    pair.a_wdl[2] += 1;
+                } else {
+                    pair.a_wdl[1] += 1;
+                }
+                game_records.push(MultiGameRecord {
+                    game: game_id,
+                    pair: format!("{}__vs__{}", players[a].name, players[b].name),
+                    a: players[a].name.clone(),
+                    b: players[b].name.clone(),
+                    a_color: if a_color == Color::White {
+                        "white"
+                    } else {
+                        "black"
+                    }
+                    .to_string(),
+                    opening,
+                    a_score,
+                    true_score: true_a_score,
+                    plies,
+                    final_fen: board_to_fen(&board),
+                    adjudicated,
+                });
+                eprintln!(
+                    "[rust-arena visits={visits}] shard_game {}/{} global_game {}/{} done {} vs {} aScore={} plies={} elapsed_s={:.1}",
+                    selected_game + 1,
+                    selected_games,
+                    game_id + 1,
+                    total_games,
+                    players[a].name,
+                    players[b].name,
+                    a_score,
+                    plies,
+                    started.elapsed().as_secs_f64()
+                );
+                selected_game += 1;
+            }
+        }
+    }
+
+    let standing_records: Vec<StandingRecord> = players
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let s = standings[i];
+            StandingRecord {
+                name: p.name.clone(),
+                wins: s.wins,
+                draws: s.draws,
+                losses: s.losses,
+                score: s.score,
+                games: s.games,
+                score_rate: s.score / s.games.max(1) as f64,
+            }
+        })
+        .collect();
+    let mut pair_records = Vec::new();
+    for a in 0..players.len() {
+        for b in (a + 1)..players.len() {
+            if let Some(p) = pairs.get(&(a, b)) {
+                pair_records.push(PairRecord {
+                    a: players[a].name.clone(),
+                    b: players[b].name.clone(),
+                    a_score: p.a_score,
+                    games: p.games,
+                    a_wdl: p.a_wdl,
+                    a_score_rate: p.a_score / p.games.max(1) as f64,
+                });
+            }
+        }
+    }
+    if !out_path.is_empty() {
+        if let Some(parent) = std::path::Path::new(&out_path).parent() {
+            fs::create_dir_all(parent).expect("create arena output dir");
+        }
+        let output = MultiArenaOutput {
+            protocol: MultiProtocol {
+                backend: "rust-native-ort".to_string(),
+                players: players.iter().map(|p| p.name.clone()).collect(),
+                visits,
+                games_per_pair,
+                max_plies,
+                adjudicate: adjudicate.clone(),
+                openings: openings.len(),
+                shard_count,
+                shard_index,
+                total_games,
+                selected_games,
+            },
+            standings: standing_records,
+            pairs: pair_records,
+            games: game_records,
+            illegal_losses,
+        };
+        fs::write(&out_path, serde_json::to_string_pretty(&output).unwrap())
+            .expect("write arena output");
+    }
+    println!("METRIC arena_backend_rust=1");
+    println!("METRIC arena_players={}", players.len());
+    println!("METRIC arena_games={total_games}");
+    println!("METRIC arena_selected_games={selected_games}");
+    println!("METRIC arena_illegal_losses={illegal_losses}");
+}
+
 fn main() {
+    let players_arg = arg("--players", "");
     let candidate_path = arg("--candidate", "artifacts/student_distill_benchmark.json");
     let baseline_path = arg("--baseline", "artifacts/student_distill_benchmark.json");
     let candidate_onnx = arg("--candidate-onnx", "");
@@ -240,13 +623,20 @@ fn main() {
     let baseline_meta = arg("--baseline-meta", "");
     let candidate_name = arg("--candidate-name", "candidate");
     let baseline_name = arg("--baseline-name", "baseline");
-    let games: usize = arg("--games", "4").parse().unwrap_or(4);
+    let games: usize = arg("--games", &arg("--games-per-pair", "4"))
+        .parse()
+        .unwrap_or(4);
     let start_game: usize = arg("--start-game", "0").parse().unwrap_or(0);
     let visits: u32 = arg("--visits", "8").parse().unwrap_or(8);
     let cpuct: f32 = arg("--cpuct", "1.5").parse().unwrap_or(1.5);
     let fpu: f32 = arg("--fpu", "0").parse().unwrap_or(0.0);
     let max_plies: usize = arg("--max-plies", "40").parse().unwrap_or(40);
     let progress_every: usize = arg("--progress-every", "4").parse().unwrap_or(4).max(1);
+    let shard_count: usize = arg("--shard-count", "1").parse().unwrap_or(1).max(1);
+    let shard_index: usize = arg("--shard-index", "0").parse().unwrap_or(0);
+    if shard_index >= shard_count {
+        panic!("--shard-index must be less than --shard-count");
+    }
     let adjudicate = arg("--adjudicate", "terminal");
     let adjudicate_threshold: f32 = arg("--adjudicate-threshold", "0.02")
         .parse()
@@ -257,9 +647,40 @@ fn main() {
     );
     let stockfish_depth: u32 = arg("--stockfish-depth", "8").parse().unwrap_or(8);
     let stockfish_draw_cp: i32 = arg("--stockfish-draw-cp", "50").parse().unwrap_or(50);
-    let openings_text = arg("--openings", START_FEN);
-    let openings: Vec<String> = openings_text.split('|').map(|s| s.to_string()).collect();
+    let openings_file = arg("--openings-file", "");
+    let openings_text = if openings_file.is_empty() {
+        arg("--openings", START_FEN)
+    } else {
+        fs::read_to_string(&openings_file).expect("read openings file")
+    };
+    let openings: Vec<String> = openings_text
+        .lines()
+        .flat_map(|line| line.split('|'))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && !s.starts_with('#'))
+        .collect();
     let out_path = arg("--out", "");
+
+    if !players_arg.is_empty() {
+        let players = parse_player_specs(&players_arg, visits, cpuct, fpu);
+        run_multi_arena(
+            players,
+            games,
+            visits,
+            max_plies,
+            progress_every,
+            adjudicate,
+            adjudicate_threshold,
+            stockfish,
+            stockfish_depth,
+            stockfish_draw_cp,
+            openings,
+            out_path,
+            shard_count,
+            shard_index,
+        );
+        return;
+    }
 
     let candidate = load_evaluator(
         &candidate_path,
@@ -337,6 +758,7 @@ fn main() {
                     cpuct,
                     fpu,
                     temperature: 0.0,
+                    ..SearchOptions::default()
                 },
                 &history_fens,
             );

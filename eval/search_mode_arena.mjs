@@ -176,21 +176,27 @@ const defaultOpenings = [
 let openings = openingsFile ? readFileSync(openingsFile, 'utf8').split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.startsWith('#')).map(s => s.split(/\s+#/)[0].trim()) : defaultOpenings;
 if (maxOpenings > 0) openings = openings.slice(0, maxOpenings);
 if (backend === 'rust') {
-  if (players.length !== 2) throw new Error('--backend rust currently supports exactly two players');
-  if (players.some((p) => p.mode !== 'puct')) throw new Error('--backend rust currently supports puct mode only');
   if (judgeModel || judgeMeta) throw new Error('--backend rust currently adjudicates with terminal/value/stockfish only, not a separate judge model');
-  const [candidate, baseline] = players;
-  const cCpuct = candidate.cpuct ?? cpuct;
-  const bCpuct = baseline.cpuct ?? cpuct;
-  const cFpu = candidate.fpu ?? fpu;
-  const bFpu = baseline.fpu ?? fpu;
-  if (cCpuct !== bCpuct || cFpu !== bFpu) throw new Error('--backend rust currently requires identical cpuct/fpu for both players');
+  if (anchorPlayer) throw new Error('--backend rust does not yet support search_mode_arena anchor-player');
+  const rustPlayers = players.map((p) => [
+    p.name,
+    p.onnx,
+    p.meta,
+    p.mode,
+    String(p.avWeight),
+    String(p.rankWeight),
+    String(p.regretWeight),
+    String(p.riskWeight),
+    String(p.uncertaintyWeight),
+    String(p.cpuct ?? cpuct),
+    String(p.fpu ?? fpu),
+  ].join(':')).join(',');
   const rustArgs = [
     'run', '--release', '--features', 'native-ort', '--manifest-path', 'rust/tiny_leela_core/Cargo.toml', '--bin', 'tiny-leela-rust-arena', '--',
-    '--candidate-onnx', candidate.onnx, '--candidate-meta', candidate.meta, '--candidate-name', candidate.name,
-    '--baseline-onnx', baseline.onnx, '--baseline-meta', baseline.meta, '--baseline-name', baseline.name,
-    '--games', String(gamesPerPair), '--visits', String(visits), '--cpuct', String(cCpuct), '--fpu', String(cFpu),
-    '--max-plies', String(maxPlies), '--adjudicate', 'value', '--adjudicate-threshold', String(adjudicateThreshold),
+    '--players', rustPlayers,
+    '--games-per-pair', String(gamesPerPair), '--visits', String(visits), '--cpuct', String(cpuct), '--fpu', String(fpu),
+    '--max-plies', String(maxPlies), '--progress-every', '20', '--adjudicate', 'value', '--adjudicate-threshold', String(adjudicateThreshold),
+    '--shard-count', String(shardCount), '--shard-index', String(shardIndex),
     '--openings', openings.join('|'), '--out', out,
   ];
   const child = spawnSync('cargo', rustArgs, { stdio: 'inherit', env: process.env });

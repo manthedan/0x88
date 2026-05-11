@@ -146,6 +146,7 @@ fn main() {
                     cpuct: 1.5,
                     fpu: 0.0,
                     temperature,
+                    ..SearchOptions::default()
                 },
             );
             if result.mv.is_none() || result.policy.is_empty() {

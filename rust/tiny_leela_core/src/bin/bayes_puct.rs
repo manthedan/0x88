@@ -326,6 +326,7 @@ fn eval_candidate(evaluator: &StudentEvaluator, visits: u32, w: Weights) -> (usi
                 cpuct: w.cpuct,
                 fpu: w.fpu,
                 temperature: 0.0,
+                ..SearchOptions::default()
             },
         );
         let uci = result
