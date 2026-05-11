@@ -72,11 +72,12 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 
 ## P1 — Batched Rust Evaluator / GPU Readiness
 
-- [ ] Add a batched evaluator abstraction.
-  - [ ] Queue leaf evaluations across games/searches.
-  - [ ] Support configurable max batch size and max wait time.
-  - [ ] Preserve deterministic result ordering.
-  - [ ] Track eval latency, batch size, throughput, cache hit rate.
+- [x] Add a batched evaluator abstraction.
+  - [x] Queue leaf evaluations across games/searches.
+  - [x] Support configurable max batch size and max wait time.
+  - [x] Preserve deterministic result ordering.
+  - [x] Track eval latency, batch size, throughput, cache hit rate.
+  - Implemented as `BatchedEvaluator` / `BatchedEvaluatorOptions` / `BatchedEvaluatorMetrics` with ticket-order tests.
 
 - [ ] Add CUDA/native provider support after batching exists.
   - [ ] Enable/configure Rust `ort` CUDA EP.
