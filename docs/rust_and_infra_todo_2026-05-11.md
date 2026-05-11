@@ -51,10 +51,10 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [ ] Action-value / Stockfish / ChessBench overlay cache ingestion where deterministic preprocessing matters.
 
 - [ ] Make Rust cache outputs contract-first.
-  - [ ] Emit `cache_manifest_v1`.
-    - Partial: `tiny-leela-rust-feature-cache` can emit `cache_manifest_v1`; SquareFormer shard builder currently emits Python-compatible `meta.json`.
-  - [ ] Atomic shard writes.
-    - Partial: feature-cache writes are atomic; SquareFormer binary shard files still need temp-file/rename semantics.
+  - [x] Emit `cache_manifest_v1`.
+    - Implemented for `tiny-leela-rust-feature-cache` and `tiny-leela-rust-squareformer-cache`.
+  - [x] Atomic shard writes.
+    - Feature-cache writes use temp-file/rename; SquareFormer cache writes to a temp output directory before publishing.
   - [ ] Resume-safe shard completion markers.
   - [ ] `.jsonl.zst` or binary/zstd streaming for large outputs.
   - [ ] Deterministic row ordering and checksums.
