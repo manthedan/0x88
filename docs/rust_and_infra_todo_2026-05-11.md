@@ -80,7 +80,8 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - Implemented as `BatchedEvaluator` / `BatchedEvaluatorOptions` / `BatchedEvaluatorMetrics` with ticket-order tests.
 
 - [ ] Add CUDA/native provider support after batching exists.
-  - [ ] Enable/configure Rust `ort` CUDA EP.
+  - [x] Enable/configure Rust `ort` CUDA EP.
+    - `OnnxEvaluator` now accepts/env-parses `ORT_EXECUTION_PROVIDERS`, `ORT_ENABLE_CUDA`, and `ORT_REQUIRE_CUDA` for native ORT provider setup.
   - [ ] Require CUDA provider in CUDA smoke tests.
   - [ ] Add provider fallback reporting.
   - [ ] Benchmark CPU vs CUDA only with enough concurrent/batched evals to feed the GPU.
