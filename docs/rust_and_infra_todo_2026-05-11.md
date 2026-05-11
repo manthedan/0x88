@@ -58,7 +58,8 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] Atomic shard writes.
     - Feature-cache writes use temp-file/rename; SquareFormer cache writes to a temp output directory before publishing.
   - [x] Resume-safe shard completion markers.
-  - [ ] `.jsonl.zst` or binary/zstd streaming for large outputs.
+  - [x] `.jsonl.zst` or binary/zstd streaming for large outputs.
+    - Rust cache builders now share streaming plain JSONL / `.jsonl.zst` input handling via `for_each_jsonl_line`.
   - [ ] Deterministic row ordering and checksums.
   - [ ] Python compatibility readers for training.
 
