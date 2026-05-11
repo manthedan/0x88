@@ -28,6 +28,18 @@ self-play generation workers
 - Joined manifest: `scripts/selfplay_pipeline_manifest.py`
 - Training-row/cache-prep join: `scripts/selfplay_manifest_to_training.py`
 
+One-command pilot wrapper:
+
+```bash
+scripts/selfplay_pilot_pipeline.sh \
+  --model public/models/cnn96x8_100m_e8.onnx \
+  --meta public/models/cnn96x8_100m_e8.meta.json \
+  --model-id cnn96_e08_aux128 \
+  --games 100 \
+  --visits 64 \
+  --mock-stockfish
+```
+
 Example dry pipeline without a Stockfish binary:
 
 ```bash
