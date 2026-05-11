@@ -131,9 +131,10 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] Model manifest update helper.
     - Added `tiny-leela-rust-model-manifest-update` for upserting curated override entries consumed by `eval/build_model_manifest.py`.
 
-- [ ] Keep promotion policy conservative.
-  - [ ] Classic PUCT remains default.
-  - [ ] Aux/AV PUCT remains experimental until stronger gates support it.
+- [x] Keep promotion policy conservative.
+  - [x] Classic PUCT remains default.
+  - [x] Aux/AV PUCT remains experimental until stronger gates support it.
+  - `SearchOptions::default()` and self-play default to classic PUCT; aux/AV require explicit `--policy-mode`/player-spec opt-in, and release packets record the conservative policy stance.
 
 ## P1 — TypeScript Web Client Refactor
 
