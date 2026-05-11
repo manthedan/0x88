@@ -26,6 +26,7 @@ self-play generation workers
 - Annotation validation: `scripts/selfplay_annotation_validate.py`
 - Agent diagnostics: `scripts/selfplay_agent_diagnostics.py`
 - Joined manifest: `scripts/selfplay_pipeline_manifest.py`
+- Training-row/cache-prep join: `scripts/selfplay_manifest_to_training.py`
 
 Example dry pipeline without a Stockfish binary:
 
@@ -47,6 +48,15 @@ Example dry pipeline without a Stockfish binary:
   --annotation data/selfplay/pilot/agent_diagnostics.jsonl.zst \
   --out artifacts/selfplay_manifests/pilot.json \
   --strict-annotations
+
+.venv-onnx/bin/python scripts/selfplay_manifest_to_training.py \
+  --manifest artifacts/selfplay_manifests/pilot.json \
+  --output data/selfplay/pilot/training_expanded.jsonl.zst \
+  --manifest-out artifacts/selfplay_manifests/pilot.training_rows.json \
+  --lane supervised_sp \
+  --source-model cnn96_e08_aux128 \
+  --mode expanded \
+  --value-target result
 ```
 
 ## Why lc0-style side flipping exists
