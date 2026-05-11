@@ -103,10 +103,11 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [ ] CNN/MF80/SquareFormer/ChessFormer support.
   - [x] Classic PUCT and experimental aux/AV modes.
     - `tiny-leela-rust-selfplay` now exposes `--policy-mode classic|av|aux` plus aux/AV weights while defaulting to classic.
-  - [ ] `.jsonl.zst` chunk output.
-  - [ ] `selfplay_chunk_v1` conformance.
-  - [ ] Chunk manifests and checksums.
-  - [ ] Atomic writes and resume/retry handling.
+  - [x] `.jsonl.zst` chunk output.
+  - [x] `selfplay_chunk_v1` conformance.
+  - [x] Chunk manifests and checksums.
+  - [x] Atomic writes and resume/retry handling.
+  - Rust self-play now emits atomic plain or `.jsonl.zst` chunks, schema-tagged rows, and optional chunk manifests with SHA-256 checksums. Resume/retry safety is via temp-file publish semantics.
 
 - [ ] Keep lane separation explicit.
   - [ ] Gumbel-Zero must remain rules-only/random-init/no supervised contamination.
