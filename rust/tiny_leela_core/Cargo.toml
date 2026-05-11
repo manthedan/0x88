@@ -61,6 +61,10 @@ name = "tiny-leela-rust-squareformer-cache"
 path = "src/bin/squareformer_cache.rs"
 
 [[bin]]
+name = "tiny-leela-rust-model-manifest-update"
+path = "src/bin/model_manifest_update.rs"
+
+[[bin]]
 name = "tiny-leela-rust-onnx-card"
 path = "src/bin/onnx_card.rs"
 
