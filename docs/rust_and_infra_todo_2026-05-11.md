@@ -139,16 +139,18 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 ## P1 — TypeScript Web Client Refactor
 
 - [ ] Replace global mutable state in `src/webClient.ts` with an explicit app state model.
-  - [ ] Define `AppState` for board, ply, mode, selected square, legal moves, history, analysis state, engine state.
-  - [ ] Introduce a reducer or command/event model for state transitions.
+  - [x] Define `AppState` for board, ply, mode, selected square, legal moves, history, analysis state, engine state.
+  - [x] Introduce a reducer or command/event model for state transitions.
   - [ ] Separate rendering from state mutation.
   - [ ] Separate live gameplay state from analysis-board state.
-  - [ ] Add a single source of truth for `historyFens` / move history.
+  - [x] Add a single source of truth for `historyFens` / move history.
+  - `src/web/appState.ts` now contains the typed `AppState`/`AppAction` reducer, derived legal-move state from board position, single-source move/history fields, and unit tests; `src/webClient.ts` still needs to be wired off the legacy globals.
 
 - [ ] Isolate async engine/search interactions.
   - [ ] Add request ids / cancellation tokens to avoid stale async updates.
   - [ ] Make UI mode switches cancel or quarantine old analysis/search results.
-  - [ ] Add tests for mode switching and undo/redo/history consistency.
+  - [x] Add tests for mode switching and undo/redo/history consistency.
+  - Initial reducer state tracks `engine.requestId`; tests cover mode switch quarantine of premove/brain state and history branching, but browser async call sites still need to consume the request id before this item is complete.
 
 - [ ] Keep TS as browser/runtime glue.
   - [ ] Do not duplicate deterministic chess/search semantics in TS long-term unless contract-tested against Rust.
