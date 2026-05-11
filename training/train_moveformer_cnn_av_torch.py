@@ -155,37 +155,12 @@ def av_move_features_from_tokens(tok, compact_moves):
 
 
 def open_sidecar(path: str | Path):
-    d = Path(path)
-    meta = json.loads((d / "meta.json").read_text())
-    rows = int(meta["rows"])
-    K = int(meta["max_legal_moves"])
-    F = int(meta["num_move_features"])
-    out = {
-        "path": str(d),
-        "meta": meta,
-        "rows": rows,
-        "K": K,
-        "F": F,
-        "policy_slot": np.memmap(
-            d / "policy_legal_slot.int16", np.int16, "r", shape=(rows,)
-        ),
-        "wdl": np.memmap(d / "wdl.float32", np.float32, "r", shape=(rows, 3)),
-        "q": np.memmap(d / "q.float32", np.float32, "r", shape=(rows,)),
-        "legal_action_ids": np.memmap(
-            d / "legal_action_ids.int64", np.int64, "r", shape=(rows, K)
-        ),
-        "legal_features": np.memmap(
-            d / "legal_features.float32", np.float32, "r", shape=(rows, K, F)
-        ),
-        "legal_mask": np.memmap(
-            d / "legal_mask.float32", np.float32, "r", shape=(rows, K)
-        ),
-    }
-    if meta.get("has_board_cache"):
-        C = int(meta["input_planes"])
-        out["x"] = np.memmap(d / "x.int8", np.int8, "r", shape=(rows, C, 8, 8))
-        out["input_planes"] = C
-    return out
+    try:
+        from training._lib.rust_cache_readers import open_moveformer_sidecar
+    except ModuleNotFoundError:
+        from _lib.rust_cache_readers import open_moveformer_sidecar
+
+    return open_moveformer_sidecar(path)
 
 
 class ShardedX:
