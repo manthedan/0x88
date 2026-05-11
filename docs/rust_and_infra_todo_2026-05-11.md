@@ -47,7 +47,7 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] SquareFormer compact-token cache builder.
   - [x] BT4/SquareFormer h7/h8 cache builder.
     - Covered by `tiny-leela-rust-squareformer-cache --history-plies <N>` for compact SquareFormer/BT4 token caches.
-  - [ ] MoveFormer sidecar cache builder.
+  - [x] MoveFormer sidecar cache builder.
   - [ ] Tactical MoveFormer sidecar cache builder, but do not resume tactical training without explicit approval.
   - [ ] Action-value / Stockfish / ChessBench overlay cache ingestion where deterministic preprocessing matters.
 
