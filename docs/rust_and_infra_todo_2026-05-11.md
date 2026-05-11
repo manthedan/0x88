@@ -98,7 +98,8 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 ## P1 — Rust Self-Play
 
 - [ ] Upgrade `rust/tiny_leela_core/src/bin/selfplay.rs` from StudentEvaluator bootstrap to production ONNX self-play.
-  - [ ] Native ORT model loading.
+  - [x] Native ORT model loading.
+    - `tiny-leela-rust-selfplay` now accepts `--model model.onnx --meta model.meta.json` behind the `native-ort` feature while keeping JSON StudentEvaluator fallback.
   - [ ] CNN/MF80/SquareFormer/ChessFormer support.
   - [ ] Classic PUCT and experimental aux/AV modes.
   - [ ] `.jsonl.zst` chunk output.
