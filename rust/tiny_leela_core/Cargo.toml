@@ -41,6 +41,10 @@ name = "tiny-leela-rust-feature-cache"
 path = "src/bin/feature_cache.rs"
 
 [[bin]]
+name = "tiny-leela-rust-action-value-cache"
+path = "src/bin/action_value_cache.rs"
+
+[[bin]]
 name = "tiny-leela-rust-residual-cache"
 path = "src/bin/residual_cache.rs"
 
