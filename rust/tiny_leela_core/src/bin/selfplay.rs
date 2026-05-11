@@ -24,6 +24,10 @@ fn arg(name: &str, fallback: &str) -> String {
     fallback.to_string()
 }
 
+fn flag(name: &str) -> bool {
+    env::args().any(|a| a == name)
+}
+
 fn rng_next(s: &mut u32) -> f32 {
     *s = s.wrapping_mul(1664525).wrapping_add(1013904223);
     (*s as f64 / 4294967296.0) as f32
@@ -105,6 +109,19 @@ fn main() {
     let lane = arg("--lane", "sup_sp");
     let shard_id = arg("--shard-id", "");
     let model_id = arg("--model-id", "");
+    let rules_only = flag("--rules-only");
+    if lane == "gumbel_zero" {
+        eprintln!("tiny-leela-rust-selfplay refuses --lane gumbel_zero because this binary uses model-guided PUCT; use the dedicated rules-only Gumbel-Zero generator instead");
+        std::process::exit(2);
+    }
+    if !matches!(lane.as_str(), "sup_sp" | "eval_demo" | "other") {
+        eprintln!("unsupported --lane {lane}; choose sup_sp, eval_demo, other (gumbel_zero is intentionally blocked here)");
+        std::process::exit(2);
+    }
+    if rules_only {
+        eprintln!("--rules-only is only valid for dedicated Gumbel-Zero tooling, not model-guided Rust selfplay");
+        std::process::exit(2);
+    }
     let games: usize = arg("--games", "2").parse().unwrap_or(2);
     let visits: u32 = arg("--visits", "4").parse().unwrap_or(4);
     let max_plies: usize = arg("--max-plies", "40").parse().unwrap_or(40);
