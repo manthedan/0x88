@@ -56,7 +56,7 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
     - Implemented for `tiny-leela-rust-feature-cache` and `tiny-leela-rust-squareformer-cache`.
   - [x] Atomic shard writes.
     - Feature-cache writes use temp-file/rename; SquareFormer cache writes to a temp output directory before publishing.
-  - [ ] Resume-safe shard completion markers.
+  - [x] Resume-safe shard completion markers.
   - [ ] `.jsonl.zst` or binary/zstd streaming for large outputs.
   - [ ] Deterministic row ordering and checksums.
   - [ ] Python compatibility readers for training.
