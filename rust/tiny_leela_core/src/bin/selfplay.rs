@@ -250,11 +250,16 @@ fn main() {
                 }
             }
             let selected_uci = move_to_uci(chosen);
+            let game_id = if shard_id.is_empty() {
+                format!("g{game:06}")
+            } else {
+                format!("{shard_id}_g{game:06}")
+            };
             pending.push((
                 json!({
                     "schema": "selfplay_chunk_v1",
                     "lane": lane,
-                    "game_id": format!("g{game:06}"),
+                    "game_id": game_id,
                     "shard_id": if shard_id.is_empty() { serde_json::Value::Null } else { json!(shard_id) },
                     "ply": ply,
                     "fen": fen,
