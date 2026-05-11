@@ -83,6 +83,18 @@ const openingMode = params.get('opening') ?? 'book';
 const openingBookMaxPlies = Math.max(0, Number(params.get('bookPlies') ?? '8'));
 let busy = false;
 let renderSeq = 0;
+let engineRequestSeq = 0;
+function cancelAsyncWork() {
+  engineRequestSeq += 1;
+  renderSeq += 1;
+}
+function beginEngineRequest() {
+  engineRequestSeq += 1;
+  return engineRequestSeq;
+}
+function isCurrentEngineRequest(requestId: number) {
+  return requestId === engineRequestSeq;
+}
 type PlayableModel = { onnx: string; meta: string; label: string; forcedMode?: string; defaultMode?: string; defaultVisits?: number; defaultPuctPolicy?: string; defaultAvWeight?: number };
 const models: Record<string, PlayableModel> = {
   '32x4': { onnx: '/models/residual_32x4_history2.onnx', meta: '/models/residual_32x4_history2.meta.json', label: '32x4 supervised' },
@@ -353,7 +365,10 @@ function tickClocks() {
 type UiMode = 'play' | 'analysis';
 let uiMode: UiMode = 'play';
 function setUiMode(mode: UiMode) {
+  cancelAsyncWork();
   uiMode = mode;
+  busy = false;
+  document.body.style.cursor = '';
   if (mode === 'analysis') {
     pendingPremove = null;
     brainPiece = null;
@@ -520,7 +535,7 @@ function controlsEnabled(enabled: boolean) {
   const sfButton = document.getElementById('stockfishBtn') as HTMLButtonElement | null;
   if (sfButton) sfButton.disabled = !enabled || !!stockfish;
 }
-async function chooseBrainPieceForTurn() {
+async function chooseBrainPieceForTurn(requestSeq = renderSeq) {
   if (!evaluator || uiMode !== 'play' || !gameStarted || playStyle !== 'handbrain' || !isUserTurn()) {
     brainPiece = null;
     updateBrainHint();
@@ -530,6 +545,7 @@ async function chooseBrainPieceForTurn() {
   const moves = legalMoves(board);
   if (!moves.length) { updateBrainHint(); return; }
   const ev = await evaluator.evaluate(board, { historyFens });
+  if (requestSeq !== renderSeq) return;
   const scores = new Map<PieceRole, number>();
   for (const move of moves) {
     const role = board.squares[move.from]?.[1] as PieceRole | undefined;
@@ -553,7 +569,7 @@ async function render(message = '') {
   renderMoves();
   renderMaterial();
   renderStockfish();
-  await chooseBrainPieceForTurn();
+  await chooseBrainPieceForTurn(seq);
   if (seq !== renderSeq) return;
   const moveColor = movableColor();
   updateIntroControls();
@@ -679,22 +695,26 @@ async function choosePolicyMove(): Promise<Move | null> {
 }
 async function engineMove() {
   if (!evaluator || busy || (uiMode === 'play' && !gameStarted)) return;
+  const requestId = beginEngineRequest();
   busy = true;
   document.body.style.cursor = 'progress';
   await render('Engine thinking…');
   try {
+    if (!isCurrentEngineRequest(requestId)) return;
     const bookMove = chooseOpeningBookMove();
     const move = bookMove ?? (playMode === 'puct' ? (await chooseMove(board, evaluator, { visits, batchSize: puctBatchSize, historyFens, searchPolicy: puctPolicy === 'av' ? actionValuePuctPolicy : undefined, avWeight })).move : await choosePolicyMove());
+    if (!isCurrentEngineRequest(requestId)) return;
     if (move) await playMove(move, bookMove ? 'Book' : 'Engine');
     else await render('No legal engine move.');
   } catch (e) {
+    if (!isCurrentEngineRequest(requestId)) return;
     console.error(e);
     await render(`Engine failed: ${(e as Error).message}`);
   } finally {
     busy = false;
     document.body.style.cursor = '';
     await render();
-    await applyPendingPremove();
+    if (isCurrentEngineRequest(requestId)) await applyPendingPremove();
   }
 }
 const onReset = async () => { if (busy) return; await render(uiMode === 'analysis' ? startAnalysisBoard() : showPlayIntro('Choose settings for a new game.')); };
