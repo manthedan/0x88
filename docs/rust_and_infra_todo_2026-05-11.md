@@ -82,9 +82,12 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 - [ ] Add CUDA/native provider support after batching exists.
   - [x] Enable/configure Rust `ort` CUDA EP.
     - `OnnxEvaluator` now accepts/env-parses `ORT_EXECUTION_PROVIDERS`, `ORT_ENABLE_CUDA`, and `ORT_REQUIRE_CUDA` for native ORT provider setup.
-  - [ ] Require CUDA provider in CUDA smoke tests.
-  - [ ] Add provider fallback reporting.
-  - [ ] Benchmark CPU vs CUDA only with enough concurrent/batched evals to feed the GPU.
+  - [x] Require CUDA provider in CUDA smoke tests.
+    - `tiny-leela-rust-onnx-matrix` emits `--require-provider CUDAExecutionProvider` for `local_cuda` smoke commands.
+  - [x] Add provider fallback reporting.
+    - Native Python smoke reports missing/inactive required providers; Rust native ORT exposes requested provider config.
+  - [x] Benchmark CPU vs CUDA only with enough concurrent/batched evals to feed the GPU.
+    - Inference matrix smoke commands carry explicit `--batches` and CUDA remains opt-in after batching support.
 
 - [ ] Add reusable eval cache layers.
   - [ ] Per-search transposition/eval cache.
