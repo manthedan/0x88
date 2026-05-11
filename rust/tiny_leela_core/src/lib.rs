@@ -2,6 +2,7 @@ mod board;
 mod encoding;
 mod eval;
 mod fen;
+mod matchplay;
 mod move_codec;
 mod movegen;
 #[cfg(feature = "native-ort")]
@@ -15,6 +16,9 @@ pub use eval::{
     StudentEvaluator, UniformEvaluator,
 };
 pub use fen::{board_to_fen, parse_fen};
+pub use matchplay::{
+    plan_round_robin_jobs, round_robin_total_games, score_for_color, shard_jobs, RoundRobinJob,
+};
 pub use move_codec::{move_to_action_id, move_to_uci};
 pub use movegen::{
     in_check, is_square_attacked, king_square, legal_moves, make_move, pseudo_legal_moves,

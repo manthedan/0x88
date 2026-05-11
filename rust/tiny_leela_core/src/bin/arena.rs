@@ -9,9 +9,9 @@ use std::{
 #[cfg(feature = "native-ort")]
 use tiny_leela_core::OnnxEvaluator;
 use tiny_leela_core::{
-    board_to_fen, in_check, legal_moves, make_move, move_to_uci, parse_fen,
-    search_root_with_history, Color, PositionEvaluator, SearchOptions, SearchPolicyMode,
-    StudentEvaluator, START_FEN,
+    board_to_fen, in_check, legal_moves, make_move, move_to_uci, parse_fen, plan_round_robin_jobs,
+    score_for_color, search_root_with_history, shard_jobs, Color, PositionEvaluator, SearchOptions,
+    SearchPolicyMode, StudentEvaluator, START_FEN,
 };
 
 fn arg(name: &str, fallback: &str) -> String {
@@ -38,18 +38,6 @@ fn terminal_white_score(board: &tiny_leela_core::Board) -> Option<f32> {
         return Some(0.5);
     }
     Some(if board.turn == Color::White { 0.0 } else { 1.0 })
-}
-
-fn candidate_score(white_score: f32, candidate_color: Color) -> f32 {
-    if (white_score - 0.5).abs() < 1e-6 {
-        0.5
-    } else if (white_score == 1.0 && candidate_color == Color::White)
-        || (white_score == 0.0 && candidate_color == Color::Black)
-    {
-        1.0
-    } else {
-        0.0
-    }
 }
 
 fn stockfish_white_score(
@@ -365,12 +353,10 @@ fn run_multi_arena(
     let mut pairs: HashMap<(usize, usize), PairAcc> = HashMap::new();
     let mut game_records = Vec::new();
     let mut illegal_losses = 0usize;
-    let mut global_game = 0usize;
-    let mut selected_game = 0usize;
-    let total_games = players.len() * (players.len() - 1) / 2 * games_per_pair;
-    let selected_games = (0..total_games)
-        .filter(|game| game % shard_count == shard_index)
-        .count();
+    let all_jobs = plan_round_robin_jobs(players.len(), games_per_pair, openings.len());
+    let selected_jobs = shard_jobs(&all_jobs, shard_count, shard_index);
+    let total_games = all_jobs.len();
+    let selected_games = selected_jobs.len();
     eprintln!(
         "[rust-arena visits={visits}] round-robin players={} games={} selected_games={} shard={}/{} max_plies={} backend=native-ort",
         players.len(),
@@ -381,172 +367,161 @@ fn run_multi_arena(
         max_plies
     );
 
-    for a in 0..players.len() {
-        for b in (a + 1)..players.len() {
-            for local_game in 0..games_per_pair {
-                let game_id = global_game;
-                global_game += 1;
-                if game_id % shard_count != shard_index {
-                    continue;
-                }
-                let a_color = if local_game % 2 == 0 {
-                    Color::White
-                } else {
-                    Color::Black
-                };
-                let opening = openings[(local_game / 2) % openings.len()].clone();
-                let mut board = parse_fen(&opening).expect("parse opening");
-                let mut history: Vec<String> = Vec::new();
-                let mut white_score = terminal_white_score(&board);
-                let mut plies = 0usize;
-                eprintln!(
-                    "[rust-arena visits={visits}] shard_game {}/{} global_game {}/{} {} vs {} start a_color={}",
-                    selected_game + 1,
-                    selected_games,
-                    game_id + 1,
-                    total_games,
-                    players[a].name,
-                    players[b].name,
-                    if a_color == Color::White { "w" } else { "b" }
-                );
-                while white_score.is_none() && plies < max_plies {
-                    let side_is_a = board.turn == a_color;
-                    let player_idx = if side_is_a { a } else { b };
-                    let player = &players[player_idx];
-                    let legal_uci: Vec<String> = legal_moves(&board)
-                        .iter()
-                        .map(|&m| move_to_uci(m))
-                        .collect();
-                    let history_fens: Vec<String> = history.iter().rev().take(2).cloned().collect();
-                    let result = search_root_with_history(
-                        &board,
-                        player.evaluator.as_ref(),
-                        player.options,
-                        &history_fens,
-                    );
-                    let Some(mv) = result.mv else {
-                        white_score = Some(if in_check(&board, board.turn) {
-                            if board.turn == Color::White {
-                                0.0
-                            } else {
-                                1.0
-                            }
-                        } else {
-                            0.5
-                        });
-                        break;
-                    };
-                    let uci = move_to_uci(mv);
-                    if !legal_uci.contains(&uci) {
-                        illegal_losses += 1;
-                        white_score = Some(if side_is_a {
-                            if a_color == Color::White {
-                                0.0
-                            } else {
-                                1.0
-                            }
-                        } else if a_color == Color::White {
-                            1.0
-                        } else {
-                            0.0
-                        });
-                        break;
-                    }
-                    history.push(board_to_fen(&board));
-                    board = make_move(&board, mv);
-                    white_score = terminal_white_score(&board);
-                    plies += 1;
-                    if plies % progress_every == 0 {
-                        eprintln!(
-                            "[rust-arena visits={visits}] shard_game {}/{} global_game {}/{} ply={}/{} move={} elapsed_s={:.1}",
-                            selected_game + 1,
-                            selected_games,
-                            game_id + 1,
-                            total_games,
-                            plies,
-                            max_plies,
-                            uci,
-                            started.elapsed().as_secs_f64()
-                        );
-                    }
-                }
-                let true_white_score = white_score.unwrap_or(0.5);
-                let true_a_score = candidate_score(true_white_score, a_color);
-                let history_fens: Vec<String> = history.iter().rev().take(2).cloned().collect();
-                let adjudicator_idx = if board.turn == a_color { a } else { b };
-                let (final_white_score, adjudicated) = if let Some(score) = white_score {
-                    (score, false)
-                } else {
-                    adjudicated_white_score(
-                        &board,
-                        &history_fens,
-                        players[adjudicator_idx].evaluator.as_ref(),
-                        &adjudicate,
-                        adjudicate_threshold,
-                        &stockfish,
-                        stockfish_depth,
-                        stockfish_draw_cp,
-                    )
-                };
-                let a_score = candidate_score(final_white_score, a_color);
-                let b_score = 1.0 - a_score;
-                standings[a].games += 1;
-                standings[b].games += 1;
-                standings[a].score += a_score as f64;
-                standings[b].score += b_score as f64;
-                if a_score == 1.0 {
-                    standings[a].wins += 1;
-                    standings[b].losses += 1;
-                } else if a_score == 0.0 {
-                    standings[a].losses += 1;
-                    standings[b].wins += 1;
-                } else {
-                    standings[a].draws += 1;
-                    standings[b].draws += 1;
-                }
-                let pair = pairs.entry((a, b)).or_default();
-                pair.games += 1;
-                pair.a_score += a_score as f64;
-                if a_score == 1.0 {
-                    pair.a_wdl[0] += 1;
-                } else if a_score == 0.0 {
-                    pair.a_wdl[2] += 1;
-                } else {
-                    pair.a_wdl[1] += 1;
-                }
-                game_records.push(MultiGameRecord {
-                    game: game_id,
-                    pair: format!("{}__vs__{}", players[a].name, players[b].name),
-                    a: players[a].name.clone(),
-                    b: players[b].name.clone(),
-                    a_color: if a_color == Color::White {
-                        "white"
+    for (selected_game, job) in selected_jobs.iter().enumerate() {
+        let a = job.a;
+        let b = job.b;
+        let game_id = job.game;
+        let a_color = job.a_color;
+        let opening = openings[job.opening_index].clone();
+        let mut board = parse_fen(&opening).expect("parse opening");
+        let mut history: Vec<String> = Vec::new();
+        let mut white_score = terminal_white_score(&board);
+        let mut plies = 0usize;
+        eprintln!(
+            "[rust-arena visits={visits}] shard_game {}/{} global_game {}/{} {} vs {} start a_color={}",
+            selected_game + 1,
+            selected_games,
+            game_id + 1,
+            total_games,
+            players[a].name,
+            players[b].name,
+            if a_color == Color::White { "w" } else { "b" }
+        );
+        while white_score.is_none() && plies < max_plies {
+            let side_is_a = board.turn == a_color;
+            let player_idx = if side_is_a { a } else { b };
+            let player = &players[player_idx];
+            let legal_uci: Vec<String> = legal_moves(&board)
+                .iter()
+                .map(|&m| move_to_uci(m))
+                .collect();
+            let history_fens: Vec<String> = history.iter().rev().take(2).cloned().collect();
+            let result = search_root_with_history(
+                &board,
+                player.evaluator.as_ref(),
+                player.options,
+                &history_fens,
+            );
+            let Some(mv) = result.mv else {
+                white_score = Some(if in_check(&board, board.turn) {
+                    if board.turn == Color::White {
+                        0.0
                     } else {
-                        "black"
+                        1.0
                     }
-                    .to_string(),
-                    opening,
-                    a_score,
-                    true_score: true_a_score,
-                    plies,
-                    final_fen: board_to_fen(&board),
-                    adjudicated,
+                } else {
+                    0.5
                 });
+                break;
+            };
+            let uci = move_to_uci(mv);
+            if !legal_uci.contains(&uci) {
+                illegal_losses += 1;
+                white_score = Some(if side_is_a {
+                    if a_color == Color::White {
+                        0.0
+                    } else {
+                        1.0
+                    }
+                } else if a_color == Color::White {
+                    1.0
+                } else {
+                    0.0
+                });
+                break;
+            }
+            history.push(board_to_fen(&board));
+            board = make_move(&board, mv);
+            white_score = terminal_white_score(&board);
+            plies += 1;
+            if plies % progress_every == 0 {
                 eprintln!(
-                    "[rust-arena visits={visits}] shard_game {}/{} global_game {}/{} done {} vs {} aScore={} plies={} elapsed_s={:.1}",
+                    "[rust-arena visits={visits}] shard_game {}/{} global_game {}/{} ply={}/{} move={} elapsed_s={:.1}",
                     selected_game + 1,
                     selected_games,
                     game_id + 1,
                     total_games,
-                    players[a].name,
-                    players[b].name,
-                    a_score,
                     plies,
+                    max_plies,
+                    uci,
                     started.elapsed().as_secs_f64()
                 );
-                selected_game += 1;
             }
         }
+        let true_white_score = white_score.unwrap_or(0.5);
+        let true_a_score = score_for_color(true_white_score, a_color);
+        let history_fens: Vec<String> = history.iter().rev().take(2).cloned().collect();
+        let adjudicator_idx = if board.turn == a_color { a } else { b };
+        let (final_white_score, adjudicated) = if let Some(score) = white_score {
+            (score, false)
+        } else {
+            adjudicated_white_score(
+                &board,
+                &history_fens,
+                players[adjudicator_idx].evaluator.as_ref(),
+                &adjudicate,
+                adjudicate_threshold,
+                &stockfish,
+                stockfish_depth,
+                stockfish_draw_cp,
+            )
+        };
+        let a_score = score_for_color(final_white_score, a_color);
+        let b_score = 1.0 - a_score;
+        standings[a].games += 1;
+        standings[b].games += 1;
+        standings[a].score += a_score as f64;
+        standings[b].score += b_score as f64;
+        if a_score == 1.0 {
+            standings[a].wins += 1;
+            standings[b].losses += 1;
+        } else if a_score == 0.0 {
+            standings[a].losses += 1;
+            standings[b].wins += 1;
+        } else {
+            standings[a].draws += 1;
+            standings[b].draws += 1;
+        }
+        let pair = pairs.entry((a, b)).or_default();
+        pair.games += 1;
+        pair.a_score += a_score as f64;
+        if a_score == 1.0 {
+            pair.a_wdl[0] += 1;
+        } else if a_score == 0.0 {
+            pair.a_wdl[2] += 1;
+        } else {
+            pair.a_wdl[1] += 1;
+        }
+        game_records.push(MultiGameRecord {
+            game: game_id,
+            pair: format!("{}__vs__{}", players[a].name, players[b].name),
+            a: players[a].name.clone(),
+            b: players[b].name.clone(),
+            a_color: if a_color == Color::White {
+                "white"
+            } else {
+                "black"
+            }
+            .to_string(),
+            opening,
+            a_score,
+            true_score: true_a_score,
+            plies,
+            final_fen: board_to_fen(&board),
+            adjudicated,
+        });
+        eprintln!(
+            "[rust-arena visits={visits}] shard_game {}/{} global_game {}/{} done {} vs {} aScore={} plies={} elapsed_s={:.1}",
+            selected_game + 1,
+            selected_games,
+            game_id + 1,
+            total_games,
+            players[a].name,
+            players[b].name,
+            a_score,
+            plies,
+            started.elapsed().as_secs_f64()
+        );
     }
 
     let standing_records: Vec<StandingRecord> = players
@@ -815,7 +790,7 @@ fn main() {
             max_ply_draws += 1;
         }
         let true_white_score = white_score.unwrap_or(0.5);
-        let true_score = candidate_score(true_white_score, candidate_color);
+        let true_score = score_for_color(true_white_score, candidate_color);
         if true_score == 1.0 {
             true_play_wins += 1;
         } else if true_score == 0.0 {
@@ -843,7 +818,7 @@ fn main() {
                 stockfish_draw_cp,
             )
         };
-        let score = candidate_score(white_score, candidate_color);
+        let score = score_for_color(white_score, candidate_color);
         if adjudicated {
             adjudicated_games += 1;
             adjudicated_score_sum += score as f64;
