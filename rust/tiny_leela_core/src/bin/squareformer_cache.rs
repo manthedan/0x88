@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 use std::{
     env, fs,
     io::{BufRead, BufReader, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 const FILES: &str = "abcdefgh";
@@ -161,6 +161,15 @@ fn valid_row(line: &str, history: usize) -> Option<(Vec<u8>, i64, [f32; 3])> {
     Some((x, y, wdl))
 }
 
+fn write_atomic(path: &str, body: &str) {
+    if let Some(parent) = Path::new(path).parent() {
+        fs::create_dir_all(parent).expect("create output dir");
+    }
+    let tmp = format!("{path}.tmp-{}", std::process::id());
+    fs::write(&tmp, body).expect("write temp output");
+    fs::rename(&tmp, path).expect("rename temp output");
+}
+
 fn input_lines(path: &str) -> impl Iterator<Item = String> {
     let file = fs::File::open(path).unwrap_or_else(|e| panic!("open input {path}: {e}"));
     BufReader::new(file)
@@ -171,6 +180,8 @@ fn input_lines(path: &str) -> impl Iterator<Item = String> {
 fn main() {
     let input = arg("--input", "");
     let out = arg("--out", "artifacts/cache_squareformer_rust/shard_0000");
+    let manifest_out = arg("--manifest-out", "");
+    let dataset_manifest = arg("--dataset-manifest", "unknown");
     let history: usize = arg("--history-plies", "2").parse().unwrap_or(2);
     let max_rows: usize = arg("--max-rows", "0").parse().unwrap_or(0);
     if input.is_empty() {
@@ -195,12 +206,23 @@ fn main() {
             }
         }
     }
-    let out_path = Path::new(&out);
-    fs::create_dir_all(out_path).expect("create output dir");
+    let out_path = PathBuf::from(&out);
+    let tmp_path = out_path.with_file_name(format!(
+        ".{}.tmp-{}",
+        out_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("squareformer_cache"),
+        std::process::id()
+    ));
+    if tmp_path.exists() {
+        fs::remove_dir_all(&tmp_path).expect("remove stale temp output dir");
+    }
+    fs::create_dir_all(&tmp_path).expect("create temp output dir");
     let fdim = history + 9;
-    let mut tokens = fs::File::create(out_path.join("tokens.uint8")).expect("create tokens");
-    let mut policy = fs::File::create(out_path.join("policy.int64")).expect("create policy");
-    let mut wdl_file = fs::File::create(out_path.join("wdl.float32")).expect("create wdl");
+    let mut tokens = fs::File::create(tmp_path.join("tokens.uint8")).expect("create tokens");
+    let mut policy = fs::File::create(tmp_path.join("policy.int64")).expect("create policy");
+    let mut wdl_file = fs::File::create(tmp_path.join("wdl.float32")).expect("create wdl");
     let mut written = 0usize;
     'outer: for path in &inputs {
         for line in input_lines(path) {
@@ -231,10 +253,48 @@ fn main() {
         "producer": { "language": "rust", "binary": "tiny-leela-rust-squareformer-cache" },
     });
     fs::write(
-        out_path.join("meta.json"),
+        tmp_path.join("meta.json"),
         serde_json::to_string(&meta).unwrap(),
     )
     .expect("write meta");
+    drop(tokens);
+    drop(policy);
+    drop(wdl_file);
+    if out_path.exists() {
+        fs::remove_dir_all(&out_path).expect("remove existing output dir");
+    }
+    fs::rename(&tmp_path, &out_path).expect("publish output dir");
+    if !manifest_out.is_empty() {
+        let manifest = json!({
+            "schema": "cache_manifest_v1",
+            "format": "compact_square_tokens_v1",
+            "source": {
+                "dataset_manifest": dataset_manifest,
+                "inputs": inputs,
+                "history_plies": history,
+            },
+            "producer": {
+                "language": "rust",
+                "binary": "tiny-leela-rust-squareformer-cache",
+                "contract_versions": ["cache_manifest_v1", "squareformer_token_cache_v1"],
+            },
+            "arrays": [
+                { "path": format!("{out}/tokens.uint8"), "dtype": "uint8", "shape": [rows, 64, fdim], "endianness": "native" },
+                { "path": format!("{out}/policy.int64"), "dtype": "int64", "shape": [rows], "endianness": "little" },
+                { "path": format!("{out}/wdl.float32"), "dtype": "float32", "shape": [rows, 3], "endianness": "little" }
+            ],
+            "shards": [out],
+            "validation": {
+                "rows": { "total": rows, "bad_or_skipped": bad },
+                "token_features": fdim,
+                "policy_size": 4096 + 4096 * 4,
+            },
+        });
+        write_atomic(
+            &manifest_out,
+            &(serde_json::to_string_pretty(&manifest).expect("serialize manifest") + "\n"),
+        );
+    }
     println!("METRIC square_cache_rows={rows}");
     println!("METRIC square_cache_token_features={fdim}");
     println!("METRIC square_cache_bad_rows={bad}");
