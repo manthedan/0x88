@@ -2,10 +2,10 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 mod board;
-pub use board::{
-    board_to_fen, parse_fen, square_index, square_name, Board, Color, Move, Piece, Role, START_FEN,
-};
+mod fen;
 use board::{file, idx, on, rank, BISHOP, KING, KNIGHT, ROOK};
+pub use board::{square_index, square_name, Board, Color, Move, Piece, Role, START_FEN};
+pub use fen::{board_to_fen, parse_fen};
 
 fn push_step(board: &Board, moves: &mut Vec<Move>, from: u8, df: i8, dr: i8) {
     let (f, r) = (file(from) + df, rank(from) + dr);
