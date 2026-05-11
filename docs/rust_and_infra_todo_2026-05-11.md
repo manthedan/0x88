@@ -146,11 +146,11 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] Add a single source of truth for `historyFens` / move history.
   - `src/web/appState.ts` now contains the typed `AppState`/`AppAction` reducer, derived legal-move state from board position, single-source move/history fields, and unit tests; `src/webClient.ts` still needs to be wired off the legacy globals.
 
-- [ ] Isolate async engine/search interactions.
-  - [ ] Add request ids / cancellation tokens to avoid stale async updates.
-  - [ ] Make UI mode switches cancel or quarantine old analysis/search results.
+- [x] Isolate async engine/search interactions.
+  - [x] Add request ids / cancellation tokens to avoid stale async updates.
+  - [x] Make UI mode switches cancel or quarantine old analysis/search results.
   - [x] Add tests for mode switching and undo/redo/history consistency.
-  - Initial reducer state tracks `engine.requestId`; tests cover mode switch quarantine of premove/brain state and history branching, but browser async call sites still need to consume the request id before this item is complete.
+  - `src/webClient.ts` now increments engine request ids around engine searches and mode switches, ignores stale search/eval completions, and tests cover reducer-side mode/history consistency.
 
 - [ ] Keep TS as browser/runtime glue.
   - [ ] Do not duplicate deterministic chess/search semantics in TS long-term unless contract-tested against Rust.
