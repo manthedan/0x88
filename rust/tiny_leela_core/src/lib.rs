@@ -1,4 +1,5 @@
 mod board;
+mod encoding;
 mod eval;
 mod fen;
 mod move_codec;
@@ -7,6 +8,11 @@ mod movegen;
 mod onnx;
 mod search;
 pub use board::{square_index, square_name, Board, Color, Move, Piece, Role, START_FEN};
+pub use encoding::{
+    encode_moveformer_legal_inputs, encode_onnx_input_planes, encode_squareformer_compact_input,
+    encode_squareformer_float_input, encode_squareformer_legal_ids, is_squareformer_compact_meta,
+    OnnxEvaluatorMeta, SquareFormerEvaluatorMeta,
+};
 pub use eval::{
     fen_features, frozen_conv_student_features, Evaluation, PositionEvaluator, StudentArtifact,
     StudentEvaluator, UniformEvaluator,
@@ -17,11 +23,7 @@ pub use movegen::{
     in_check, is_square_attacked, king_square, legal_moves, make_move, pseudo_legal_moves,
 };
 #[cfg(feature = "native-ort")]
-pub use onnx::{
-    encode_moveformer_legal_inputs, encode_onnx_input_planes, encode_squareformer_compact_input,
-    encode_squareformer_float_input, encode_squareformer_legal_ids, is_squareformer_compact_meta,
-    OnnxEvaluator, OnnxEvaluatorMeta, SquareFormerEvaluatorMeta,
-};
+pub use onnx::OnnxEvaluator;
 pub use search::{
     search_root, search_root_with_history, SearchOptions, SearchPolicyEntry, SearchPolicyMode,
     SearchResult,
