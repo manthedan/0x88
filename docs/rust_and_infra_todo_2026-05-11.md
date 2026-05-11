@@ -31,7 +31,7 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] `eval.rs`: `Evaluation`, `PositionEvaluator`, evaluator adapters.
   - [x] `onnx.rs`: native ORT evaluator implementation behind `native-ort`.
   - [x] `search.rs`: PUCT, aux/AV PUCT, search options/results.
-  - [ ] `arena.rs` or `matchplay.rs`: reusable game/round-robin logic shared by bin tools.
+  - [x] `arena.rs` or `matchplay.rs`: reusable game/round-robin logic shared by bin tools.
 
 - [ ] Add module-level tests while splitting.
   - [x] FEN roundtrip/property tests.
