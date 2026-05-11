@@ -257,6 +257,7 @@ fn main() {
         serde_json::to_string(&meta).unwrap(),
     )
     .expect("write meta");
+    fs::write(tmp_path.join("_SUCCESS"), b"ok\n").expect("write success marker");
     drop(tokens);
     drop(policy);
     drop(wdl_file);

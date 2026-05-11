@@ -31,6 +31,7 @@ fn main() {
     let arch = arg("--arch", "64x6");
     let out = arg("--out", "artifacts/cache/conv_features_64x6.json");
     let manifest_out = arg("--manifest-out", "");
+    let success_marker = arg("--success-marker", "");
     let dataset_manifest = arg("--dataset-manifest", "unknown");
     let git_commit = arg("--git-commit", "unknown");
     let inputs = arg(
@@ -98,6 +99,9 @@ fn main() {
             &manifest_out,
             &(serde_json::to_string_pretty(&manifest).expect("serialize manifest") + "\n"),
         );
+    }
+    if !success_marker.is_empty() {
+        write_atomic(&success_marker, "ok\n");
     }
     println!("METRIC rust_feature_cache_entries={}", cache.len());
     println!(
