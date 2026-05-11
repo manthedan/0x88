@@ -1,8 +1,11 @@
 use serde::Deserialize;
 
-use crate::board::{file, rank};
+use crate::board::{file, idx, on, rank, KING, KNIGHT};
 use crate::eval::piece_index;
-use crate::{king_square, legal_moves, move_to_action_id, parse_fen, Board, Color, Move, Role};
+use crate::{
+    in_check, king_square, legal_moves, make_move, move_to_action_id, parse_fen, Board, Color,
+    Move, Piece, Role,
+};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct OnnxEvaluatorMeta {
@@ -153,6 +156,672 @@ fn chebyshev(a: u8, b: u8) -> f32 {
     ((file(a) - file(b)).abs()).max((rank(a) - rank(b)).abs()) as f32
 }
 
+fn captured_piece_for_move(board: &Board, mv: Move) -> Option<Piece> {
+    let moving = board.squares[mv.from as usize]?;
+    let direct = board.squares[mv.to as usize];
+    if moving.role == Role::Pawn
+        && Some(mv.to) == board.ep_square
+        && direct.is_none()
+        && file(mv.from) != file(mv.to)
+    {
+        board.squares[idx(file(mv.to), rank(mv.from)) as usize]
+    } else {
+        direct
+    }
+}
+
+fn ray_clear(board: &Board, from: u8, to: u8, df: i8, dr: i8) -> bool {
+    let (mut f, mut r) = (file(from) + df, rank(from) + dr);
+    while on(f, r) {
+        let sq = idx(f, r);
+        if sq == to {
+            return true;
+        }
+        if board.squares[sq as usize].is_some() {
+            return false;
+        }
+        f += df;
+        r += dr;
+    }
+    false
+}
+
+fn piece_attacks_square(board: &Board, from: u8, piece: Piece, to: u8) -> bool {
+    let df = file(to) - file(from);
+    let dr = rank(to) - rank(from);
+    match piece.role {
+        Role::Pawn => dr == if piece.color == Color::White { 1 } else { -1 } && df.abs() == 1,
+        Role::Knight => KNIGHT.iter().any(|&(f, r)| f == df && r == dr),
+        Role::King => KING.iter().any(|&(f, r)| f == df && r == dr),
+        Role::Bishop => {
+            df.abs() == dr.abs() && df != 0 && ray_clear(board, from, to, df.signum(), dr.signum())
+        }
+        Role::Rook => {
+            (df == 0) ^ (dr == 0)
+                && (df != 0 || dr != 0)
+                && ray_clear(board, from, to, df.signum(), dr.signum())
+        }
+        Role::Queen => {
+            let bishop_like = df.abs() == dr.abs() && df != 0;
+            let rook_like = (df == 0) ^ (dr == 0);
+            (bishop_like || rook_like) && ray_clear(board, from, to, df.signum(), dr.signum())
+        }
+    }
+}
+
+fn attacker_count(board: &Board, color: Color, sq: u8) -> usize {
+    board
+        .squares
+        .iter()
+        .enumerate()
+        .filter(|(from, piece)| {
+            piece
+                .map(|p| p.color == color && piece_attacks_square(board, *from as u8, p, sq))
+                .unwrap_or(false)
+        })
+        .count()
+}
+
+fn attacker_counts_by_role(board: &Board, color: Color, sq: u8) -> [usize; 6] {
+    let mut counts = [0usize; 6];
+    for (from, piece) in board.squares.iter().enumerate() {
+        let Some(piece) = *piece else {
+            continue;
+        };
+        if piece.color == color && piece_attacks_square(board, from as u8, piece, sq) {
+            counts[piece.role as usize] += 1;
+        }
+    }
+    counts
+}
+
+fn least_attacker_value(board: &Board, color: Color, sq: u8) -> f32 {
+    board
+        .squares
+        .iter()
+        .enumerate()
+        .filter_map(|(from, piece)| {
+            let piece = (*piece)?;
+            if piece.color == color && piece_attacks_square(board, from as u8, piece, sq) {
+                Some(piece_value(piece.role))
+            } else {
+                None
+            }
+        })
+        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap_or(0.0)
+}
+
+fn is_pinned_to_king(board: &Board, color: Color, sq: u8) -> bool {
+    let Some(piece) = board.squares[sq as usize] else {
+        return false;
+    };
+    if piece.color != color || piece.role == Role::King {
+        return false;
+    }
+    let Some(king) = king_square(board, color) else {
+        return false;
+    };
+    let mut without = board.clone();
+    without.squares[sq as usize] = None;
+    crate::is_square_attacked(&without, king, color.opposite())
+}
+
+pub const MOVEFORMER_BASE_FEATURE_NAMES: [&str; 20] = [
+    "moving_piece_type",
+    "captured_piece_type",
+    "promotion_type",
+    "is_capture",
+    "is_check",
+    "is_castle",
+    "is_promotion",
+    "is_en_passant",
+    "from_attacked_by_enemy_pre",
+    "from_defended_by_own_pre",
+    "to_attacked_by_enemy_after",
+    "to_defended_by_own_after",
+    "to_enemy_attackers_after_capped8",
+    "to_own_defenders_after_capped8",
+    "moving_piece_value",
+    "captured_piece_value",
+    "material_delta",
+    "from_piece_pinned_pre",
+    "king_distance_to_enemy_after",
+    "king_distance_to_own_after",
+];
+
+pub const MOVEFORMER_ATTACK_FEATURE_NAMES: [&str; 19] = [
+    "from_enemy_attackers_count_pre_capped8",
+    "from_own_defenders_count_pre_capped8",
+    "to_enemy_attackers_after_pawn",
+    "to_enemy_attackers_after_knight",
+    "to_enemy_attackers_after_bishop",
+    "to_enemy_attackers_after_rook",
+    "to_enemy_attackers_after_queen",
+    "to_enemy_attackers_after_king",
+    "to_own_defenders_after_pawn",
+    "to_own_defenders_after_knight",
+    "to_own_defenders_after_bishop",
+    "to_own_defenders_after_rook",
+    "to_own_defenders_after_queen",
+    "to_own_defenders_after_king",
+    "to_lva_enemy_after",
+    "to_lvd_own_after",
+    "to_see_lite_after",
+    "moved_piece_hanging_after",
+    "moved_piece_defended_after",
+];
+
+pub const MOVEFORMER_DELTA_FEATURE_NAMES: [&str; 12] = [
+    "queen_lost_immediately_after",
+    "own_queen_en_prise_after",
+    "enemy_can_capture_own_queen_after",
+    "enemy_can_capture_moved_piece_after",
+    "capture_value_minus_moved_value",
+    "promotion_gain",
+    "material_delta_after_move_signed",
+    "own_legal_moves_pre_capped64",
+    "enemy_replies_after_capped64",
+    "is_quiet_hanging_move",
+    "is_capture_to_undefended_square",
+    "is_sacrifice_like",
+];
+
+pub const MOVEFORMER_RAY_FEATURE_NAMES: [&str; 12] = [
+    "own_slider_attackers_enemy_king_pre",
+    "own_slider_attackers_enemy_king_after",
+    "own_slider_attackers_enemy_king_delta",
+    "own_slider_attackers_enemy_queen_pre",
+    "own_slider_attackers_enemy_queen_after",
+    "own_slider_attackers_enemy_queen_delta",
+    "enemy_slider_attackers_own_king_after",
+    "enemy_slider_attackers_own_queen_after",
+    "moved_piece_slider_pressure_enemy_king_after",
+    "moved_piece_slider_pressure_enemy_queen_after",
+    "move_opens_line_from_own_rook_bishop_queen",
+    "queen_exposed_to_slider_after",
+];
+
+pub const MOVEFORMER_KINGZONE_FEATURE_NAMES: [&str; 12] = [
+    "move_to_enemy_king_zone",
+    "move_from_own_king_zone",
+    "capture_in_enemy_king_zone",
+    "check_or_adjacent_enemy_king",
+    "own_attacks_enemy_king_zone_pre_capped16",
+    "own_attacks_enemy_king_zone_after_capped16",
+    "own_attacks_enemy_king_zone_delta",
+    "enemy_attacks_own_king_zone_pre_capped16",
+    "enemy_attacks_own_king_zone_after_capped16",
+    "enemy_attacks_own_king_zone_delta",
+    "enemy_king_escape_squares_after_capped8",
+    "own_king_escape_squares_after_capped8",
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MoveFormerFeatureGroup {
+    Base,
+    Attack,
+    Delta,
+    Ray,
+    KingZone,
+}
+
+fn base_moveformer_feature(board: &Board, mv: Move) -> [f32; 20] {
+    let moving = board.squares[mv.from as usize];
+    let moved_color = moving.map(|p| p.color).unwrap_or(board.turn);
+    let enemy = moved_color.opposite();
+    let moving_role = moving.map(|p| p.role);
+    let captured = captured_piece_for_move(board, mv);
+    let captured_role = captured.map(|p| p.role);
+    let promo = mv.promotion.map(promo_index).unwrap_or(0.0);
+    let is_ep = moving_role == Some(Role::Pawn)
+        && Some(mv.to) == board.ep_square
+        && captured.is_some()
+        && board.squares[mv.to as usize].is_none()
+        && file(mv.from) != file(mv.to);
+    let from_enemy = attacker_count(board, enemy, mv.from);
+    let from_own = attacker_count(board, moved_color, mv.from);
+    let is_castle = moving_role == Some(Role::King) && (file(mv.to) - file(mv.from)).abs() == 2;
+    let after = make_move(board, mv);
+    let gives_check = in_check(&after, enemy);
+    let to_enemy = attacker_count(&after, enemy, mv.to);
+    let to_own = attacker_count(&after, moved_color, mv.to);
+    let own_king = king_square(&after, moved_color).unwrap_or(if moved_color == Color::White {
+        4
+    } else {
+        60
+    });
+    let enemy_king =
+        king_square(&after, enemy).unwrap_or(if enemy == Color::White { 4 } else { 60 });
+    let captured_value = captured_role.map(piece_value).unwrap_or(0.0);
+    let promo_gain = mv.promotion.map(|r| piece_value(r) - 1.0).unwrap_or(0.0);
+    [
+        moving_role.map(role_index).unwrap_or(0.0),
+        captured_role.map(role_index).unwrap_or(0.0),
+        promo,
+        if captured.is_some() || is_ep {
+            1.0
+        } else {
+            0.0
+        },
+        if gives_check { 1.0 } else { 0.0 },
+        if is_castle { 1.0 } else { 0.0 },
+        if promo != 0.0 { 1.0 } else { 0.0 },
+        if is_ep { 1.0 } else { 0.0 },
+        if from_enemy > 0 { 1.0 } else { 0.0 },
+        if from_own > 0 { 1.0 } else { 0.0 },
+        if to_enemy > 0 { 1.0 } else { 0.0 },
+        if to_own > 0 { 1.0 } else { 0.0 },
+        to_enemy.min(8) as f32,
+        to_own.min(8) as f32,
+        moving_role.map(piece_value).unwrap_or(0.0),
+        captured_value,
+        captured_value + promo_gain,
+        if is_pinned_to_king(board, moved_color, mv.from) {
+            1.0
+        } else {
+            0.0
+        },
+        chebyshev(mv.to, enemy_king),
+        chebyshev(mv.to, own_king),
+    ]
+}
+
+fn first_piece_square(board: &Board, color: Color, role: Role) -> Option<u8> {
+    board
+        .squares
+        .iter()
+        .position(|&p| p == Some(Piece { color, role }))
+        .map(|i| i as u8)
+}
+
+fn slider_attackers_to(board: &Board, color: Color, target: Option<u8>) -> usize {
+    let Some(target) = target else {
+        return 0;
+    };
+    board
+        .squares
+        .iter()
+        .enumerate()
+        .filter(|(from, piece)| {
+            let Some(piece) = **piece else {
+                return false;
+            };
+            piece.color == color
+                && matches!(piece.role, Role::Bishop | Role::Rook | Role::Queen)
+                && piece_attacks_square(board, *from as u8, piece, target)
+        })
+        .count()
+}
+
+fn king_zone(center: Option<u8>) -> Vec<u8> {
+    let Some(center) = center else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(9);
+    for df in -1..=1 {
+        for dr in -1..=1 {
+            let f = file(center) + df;
+            let r = rank(center) + dr;
+            if on(f, r) {
+                out.push(idx(f, r));
+            }
+        }
+    }
+    out
+}
+
+fn zone_attack_count(board: &Board, color: Color, zone: &[u8]) -> usize {
+    zone.iter()
+        .map(|&sq| attacker_count(board, color, sq))
+        .sum()
+}
+
+fn escape_squares(board: &Board, color: Color) -> usize {
+    let Some(king) = king_square(board, color) else {
+        return 0;
+    };
+    let enemy = color.opposite();
+    king_zone(Some(king))
+        .into_iter()
+        .filter(|&sq| sq != king)
+        .filter(|&sq| board.squares[sq as usize].map(|p| p.color) != Some(color))
+        .filter(|&sq| !crate::is_square_attacked(board, sq, enemy))
+        .count()
+}
+
+fn moved_slider_pressure(board: &Board, mv: Move, color: Color, target: Option<u8>) -> bool {
+    let Some(target) = target else {
+        return false;
+    };
+    let Some(piece) = board.squares[mv.to as usize] else {
+        return false;
+    };
+    piece.color == color
+        && matches!(piece.role, Role::Bishop | Role::Rook | Role::Queen)
+        && piece_attacks_square(board, mv.to, piece, target)
+}
+
+fn append_attack_features(
+    board: &Board,
+    after: &Board,
+    mv: Move,
+    color: Color,
+    out: &mut Vec<f32>,
+) {
+    let enemy = color.opposite();
+    let moved_value = board.squares[mv.from as usize]
+        .map(|p| piece_value(p.role))
+        .unwrap_or(0.0);
+    let enemy_counts = attacker_counts_by_role(after, enemy, mv.to);
+    let own_counts = attacker_counts_by_role(after, color, mv.to);
+    let lva_enemy = least_attacker_value(after, enemy, mv.to);
+    let lvd_own = least_attacker_value(after, color, mv.to);
+    out.push(attacker_count(board, enemy, mv.from).min(8) as f32);
+    out.push(attacker_count(board, color, mv.from).min(8) as f32);
+    out.extend(enemy_counts.into_iter().map(|x| x.min(8) as f32));
+    out.extend(own_counts.into_iter().map(|x| x.min(8) as f32));
+    out.push(lva_enemy);
+    out.push(lvd_own);
+    out.push(if lva_enemy > 0.0 {
+        moved_value - lva_enemy
+    } else {
+        moved_value
+    });
+    out.push(
+        if lva_enemy > 0.0 && (lvd_own == 0.0 || lva_enemy < moved_value) {
+            1.0
+        } else {
+            0.0
+        },
+    );
+    out.push(if lvd_own > 0.0 { 1.0 } else { 0.0 });
+}
+
+fn append_delta_features(board: &Board, after: &Board, mv: Move, color: Color, out: &mut Vec<f32>) {
+    let enemy = color.opposite();
+    let moved_value = board.squares[mv.from as usize]
+        .map(|p| piece_value(p.role))
+        .unwrap_or(0.0);
+    let cap_value = captured_piece_for_move(board, mv)
+        .map(|p| piece_value(p.role))
+        .unwrap_or(0.0);
+    let promo_gain = mv.promotion.map(|r| piece_value(r) - 1.0).unwrap_or(0.0);
+    let own_queens_before = board
+        .squares
+        .iter()
+        .filter(|&&p| {
+            p == Some(Piece {
+                color,
+                role: Role::Queen,
+            })
+        })
+        .count();
+    let own_queen_after = first_piece_square(after, color, Role::Queen);
+    let own_queens_after = after
+        .squares
+        .iter()
+        .filter(|&&p| {
+            p == Some(Piece {
+                color,
+                role: Role::Queen,
+            })
+        })
+        .count();
+    let queen_lost = own_queens_after < own_queens_before;
+    let queen_en_prise = own_queen_after
+        .map(|q| crate::is_square_attacked(after, q, enemy))
+        .unwrap_or(false);
+    let replies = legal_moves(after);
+    let mut queen_can_be_captured = false;
+    let mut moved_piece_can_be_captured = false;
+    for reply in &replies {
+        let target = after.squares[reply.to as usize];
+        if target
+            == Some(Piece {
+                color,
+                role: Role::Queen,
+            })
+        {
+            queen_can_be_captured = true;
+        }
+        if reply.to == mv.to && target.map(|p| p.color) == Some(color) {
+            moved_piece_can_be_captured = true;
+        }
+    }
+    let own_legal = legal_moves(board).len();
+    let hanging = moved_piece_can_be_captured && !crate::is_square_attacked(after, mv.to, color);
+    out.extend([
+        if queen_lost { 1.0 } else { 0.0 },
+        if queen_en_prise { 1.0 } else { 0.0 },
+        if queen_can_be_captured { 1.0 } else { 0.0 },
+        if moved_piece_can_be_captured {
+            1.0
+        } else {
+            0.0
+        },
+        cap_value - moved_value,
+        promo_gain,
+        cap_value + promo_gain
+            - if moved_piece_can_be_captured && cap_value < moved_value {
+                moved_value
+            } else {
+                0.0
+            },
+        own_legal.min(64) as f32,
+        replies.len().min(64) as f32,
+        if hanging && cap_value == 0.0 {
+            1.0
+        } else {
+            0.0
+        },
+        if cap_value > 0.0 && !crate::is_square_attacked(after, mv.to, color) {
+            1.0
+        } else {
+            0.0
+        },
+        if moved_piece_can_be_captured && cap_value + promo_gain < moved_value {
+            1.0
+        } else {
+            0.0
+        },
+    ]);
+}
+
+fn append_ray_features(board: &Board, after: &Board, mv: Move, color: Color, out: &mut Vec<f32>) {
+    let enemy = color.opposite();
+    let enemy_king_pre = king_square(board, enemy);
+    let own_king_after = king_square(after, color);
+    let enemy_king_after = king_square(after, enemy);
+    let own_queen_after = first_piece_square(after, color, Role::Queen);
+    let enemy_queen_pre = first_piece_square(board, enemy, Role::Queen);
+    let enemy_queen_after = first_piece_square(after, enemy, Role::Queen);
+    let kpre = slider_attackers_to(board, color, enemy_king_pre);
+    let kafter = slider_attackers_to(after, color, enemy_king_after);
+    let qpre = slider_attackers_to(board, color, enemy_queen_pre);
+    let qafter = slider_attackers_to(after, color, enemy_queen_after);
+    let enemy_ok = slider_attackers_to(after, enemy, own_king_after);
+    let enemy_oq = slider_attackers_to(after, enemy, own_queen_after);
+    let moved_k = moved_slider_pressure(after, mv, color, enemy_king_after);
+    let moved_q = moved_slider_pressure(after, mv, color, enemy_queen_after);
+    out.extend([
+        kpre as f32,
+        kafter as f32,
+        kafter as f32 - kpre as f32,
+        qpre as f32,
+        qafter as f32,
+        qafter as f32 - qpre as f32,
+        enemy_ok as f32,
+        enemy_oq as f32,
+        if moved_k { 1.0 } else { 0.0 },
+        if moved_q { 1.0 } else { 0.0 },
+        if kafter > kpre || qafter > qpre {
+            1.0
+        } else {
+            0.0
+        },
+        if enemy_oq > 0 { 1.0 } else { 0.0 },
+    ]);
+}
+
+fn append_kingzone_features(
+    board: &Board,
+    after: &Board,
+    mv: Move,
+    color: Color,
+    out: &mut Vec<f32>,
+) {
+    let enemy = color.opposite();
+    let own_king_pre = king_square(board, color);
+    let enemy_king_pre = king_square(board, enemy);
+    let own_king_after = king_square(after, color);
+    let enemy_king_after = king_square(after, enemy);
+    let enemy_zone_pre = king_zone(enemy_king_pre);
+    let own_zone_pre = king_zone(own_king_pre);
+    let enemy_zone_after = king_zone(enemy_king_after);
+    let own_zone_after = king_zone(own_king_after);
+    let own_pre = zone_attack_count(board, color, &enemy_zone_pre);
+    let own_after = zone_attack_count(after, color, &enemy_zone_after);
+    let enemy_pre = zone_attack_count(board, enemy, &own_zone_pre);
+    let enemy_after = zone_attack_count(after, enemy, &own_zone_after);
+    let near_enemy = enemy_king_after
+        .map(|k| chebyshev(mv.to, k) <= 1.0)
+        .unwrap_or(false);
+    let from_own = own_king_pre
+        .map(|k| chebyshev(mv.from, k) <= 1.0)
+        .unwrap_or(false);
+    let capture_enemy_zone = captured_piece_for_move(board, mv).is_some() && near_enemy;
+    out.extend([
+        if near_enemy { 1.0 } else { 0.0 },
+        if from_own { 1.0 } else { 0.0 },
+        if capture_enemy_zone { 1.0 } else { 0.0 },
+        if in_check(after, enemy) || near_enemy {
+            1.0
+        } else {
+            0.0
+        },
+        own_pre.min(16) as f32,
+        own_after.min(16) as f32,
+        (own_after as i32 - own_pre as i32).clamp(-16, 16) as f32,
+        enemy_pre.min(16) as f32,
+        enemy_after.min(16) as f32,
+        (enemy_after as i32 - enemy_pre as i32).clamp(-16, 16) as f32,
+        escape_squares(after, enemy).min(8) as f32,
+        escape_squares(after, color).min(8) as f32,
+    ]);
+}
+
+pub fn moveformer_feature_groups_from_spec(
+    spec: &str,
+) -> Result<Vec<MoveFormerFeatureGroup>, String> {
+    let raw: Vec<String> = spec
+        .replace('+', ",")
+        .split(',')
+        .filter_map(|s| {
+            let s = s.trim().to_ascii_lowercase();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        })
+        .collect();
+    let raw = if raw.is_empty() {
+        vec!["base".to_string()]
+    } else {
+        raw
+    };
+    let expanded = if raw.iter().any(|s| s == "all" || s == "all_tactical") {
+        vec!["base", "attack", "delta", "ray", "kingzone"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    } else {
+        raw
+    };
+    let mut groups = Vec::new();
+    if !expanded.iter().any(|s| s == "base") {
+        groups.push(MoveFormerFeatureGroup::Base);
+    }
+    for item in expanded {
+        let group = match item.as_str() {
+            "base" => MoveFormerFeatureGroup::Base,
+            "attack" | "attackmap" => MoveFormerFeatureGroup::Attack,
+            "delta" | "afterstate" => MoveFormerFeatureGroup::Delta,
+            "ray" | "ray_summary" => MoveFormerFeatureGroup::Ray,
+            "king" | "kingzone" => MoveFormerFeatureGroup::KingZone,
+            _ => return Err(format!("unknown MoveFormer feature group: {item}")),
+        };
+        if !groups.contains(&group) {
+            groups.push(group);
+        }
+    }
+    Ok(groups)
+}
+
+pub fn moveformer_feature_names_for_groups(groups: &[MoveFormerFeatureGroup]) -> Vec<&'static str> {
+    let mut names = Vec::new();
+    for group in groups {
+        match group {
+            MoveFormerFeatureGroup::Base => names.extend(MOVEFORMER_BASE_FEATURE_NAMES),
+            MoveFormerFeatureGroup::Attack => names.extend(MOVEFORMER_ATTACK_FEATURE_NAMES),
+            MoveFormerFeatureGroup::Delta => names.extend(MOVEFORMER_DELTA_FEATURE_NAMES),
+            MoveFormerFeatureGroup::Ray => names.extend(MOVEFORMER_RAY_FEATURE_NAMES),
+            MoveFormerFeatureGroup::KingZone => names.extend(MOVEFORMER_KINGZONE_FEATURE_NAMES),
+        }
+    }
+    names
+}
+
+pub(crate) fn tactical_moveformer_legal_inputs(
+    board: &Board,
+    width: usize,
+    groups: &[MoveFormerFeatureGroup],
+) -> (Vec<Move>, Vec<i64>, Vec<f32>, Vec<f32>) {
+    let moves = legal_moves(board);
+    let feature_count = moveformer_feature_names_for_groups(groups).len();
+    let mut action_ids = vec![20480i64; width];
+    let mut features = vec![0.0f32; width * feature_count];
+    let mut mask = vec![0.0f32; width];
+    for (j, mv) in moves.iter().take(width).enumerate() {
+        action_ids[j] = move_to_action_id(*mv) as i64;
+        mask[j] = 1.0;
+        let color = board.squares[mv.from as usize]
+            .map(|p| p.color)
+            .unwrap_or(board.turn);
+        let after = make_move(board, *mv);
+        let mut row = Vec::with_capacity(feature_count);
+        for group in groups {
+            match group {
+                MoveFormerFeatureGroup::Base => row.extend(base_moveformer_feature(board, *mv)),
+                MoveFormerFeatureGroup::Attack => {
+                    append_attack_features(board, &after, *mv, color, &mut row)
+                }
+                MoveFormerFeatureGroup::Delta => {
+                    append_delta_features(board, &after, *mv, color, &mut row)
+                }
+                MoveFormerFeatureGroup::Ray => {
+                    append_ray_features(board, &after, *mv, color, &mut row)
+                }
+                MoveFormerFeatureGroup::KingZone => {
+                    append_kingzone_features(board, &after, *mv, color, &mut row)
+                }
+            }
+        }
+        let base = j * feature_count;
+        features[base..base + feature_count].copy_from_slice(&row[..feature_count]);
+    }
+    (moves, action_ids, features, mask)
+}
+
+pub fn encode_tactical_moveformer_legal_inputs(
+    board: &Board,
+    width: usize,
+    groups: &[MoveFormerFeatureGroup],
+) -> (Vec<Move>, Vec<i64>, Vec<f32>, Vec<f32>) {
+    tactical_moveformer_legal_inputs(board, width, groups)
+}
+
 pub(crate) fn moveformer_legal_inputs(
     board: &Board,
     width: usize,
@@ -162,55 +831,13 @@ pub(crate) fn moveformer_legal_inputs(
     let mut action_ids = vec![20480i64; width];
     let mut features = vec![0.0f32; width * feature_count];
     let mut mask = vec![0.0f32; width];
-    let own_king =
-        king_square(board, board.turn).unwrap_or(if board.turn == Color::White { 4 } else { 60 });
-    let enemy_king = king_square(board, board.turn.opposite()).unwrap_or(
-        if board.turn.opposite() == Color::White {
-            4
-        } else {
-            60
-        },
-    );
     for (j, mv) in moves.iter().take(width).enumerate() {
         action_ids[j] = move_to_action_id(*mv) as i64;
         mask[j] = 1.0;
         let base = j * feature_count;
-        let moving = board.squares[mv.from as usize];
-        let captured = board.squares[mv.to as usize];
-        let moving_role = moving.map(|p| p.role);
-        let captured_role = captured.map(|p| p.role);
-        let promo = mv.promotion.map(promo_index).unwrap_or(0.0);
-        if feature_count > 0 {
-            features[base] = moving_role.map(role_index).unwrap_or(0.0);
-        }
-        if feature_count > 1 {
-            features[base + 1] = captured_role.map(role_index).unwrap_or(0.0);
-        }
-        if feature_count > 2 {
-            features[base + 2] = promo;
-        }
-        if feature_count > 3 {
-            features[base + 3] = if captured.is_some() { 1.0 } else { 0.0 };
-        }
-        if feature_count > 6 {
-            features[base + 6] = if promo != 0.0 { 1.0 } else { 0.0 };
-        }
-        if feature_count > 14 {
-            features[base + 14] = moving_role.map(piece_value).unwrap_or(0.0);
-        }
-        let captured_value = captured_role.map(piece_value).unwrap_or(0.0);
-        let promo_value = mv.promotion.map(|r| piece_value(r) - 1.0).unwrap_or(0.0);
-        if feature_count > 15 {
-            features[base + 15] = captured_value;
-        }
-        if feature_count > 16 {
-            features[base + 16] = captured_value + promo_value;
-        }
-        if feature_count > 18 {
-            features[base + 18] = chebyshev(mv.to, enemy_king);
-        }
-        if feature_count > 19 {
-            features[base + 19] = chebyshev(mv.to, own_king);
+        let base_features = base_moveformer_feature(board, *mv);
+        for (k, value) in base_features.into_iter().take(feature_count).enumerate() {
+            features[base + k] = value;
         }
     }
     (moves, action_ids, features, mask)
@@ -274,13 +901,36 @@ mod tests {
     #[test]
     fn moveformer_legal_inputs_are_aligned() {
         let board = parse_fen(crate::START_FEN).unwrap();
-        let (moves, ids, features, mask) = encode_moveformer_legal_inputs(&board, 32, 12);
+        let (moves, ids, features, mask) = encode_moveformer_legal_inputs(&board, 32, 20);
         assert_eq!(moves.len(), 20);
         assert_eq!(ids.len(), 32);
-        assert_eq!(features.len(), 32 * 12);
+        assert_eq!(features.len(), 32 * 20);
         assert_eq!(mask.iter().filter(|&&v| v == 1.0).count(), 20);
         for (mv, id) in moves.iter().zip(ids.iter()) {
             assert_eq!(*id, move_to_action_id(*mv) as i64);
         }
+        let e2e4 = moves
+            .iter()
+            .position(|m| crate::move_to_uci(*m) == "e2e4")
+            .unwrap();
+        let row = &features[e2e4 * 20..e2e4 * 20 + 20];
+        assert_eq!(row[0], 1.0);
+        assert_eq!(row[1], 0.0);
+        assert_eq!(row[3], 0.0);
+        assert_eq!(row[14], 1.0);
+    }
+
+    #[test]
+    fn tactical_moveformer_feature_groups_shape_outputs() {
+        let board = parse_fen("r3k2r/8/8/3pP3/8/8/8/R3K2R w KQkq d6 0 1").unwrap();
+        let groups = moveformer_feature_groups_from_spec("base,attack,delta,ray,kingzone").unwrap();
+        let names = moveformer_feature_names_for_groups(&groups);
+        assert_eq!(names.len(), 75);
+        let (moves, ids, features, mask) =
+            encode_tactical_moveformer_legal_inputs(&board, 96, &groups);
+        assert_eq!(ids.len(), 96);
+        assert_eq!(features.len(), 96 * names.len());
+        assert_eq!(mask.iter().filter(|&&v| v == 1.0).count(), moves.len());
+        assert!(moves.iter().any(|m| crate::move_to_uci(*m) == "e5d6"));
     }
 }

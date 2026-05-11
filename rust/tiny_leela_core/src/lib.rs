@@ -10,7 +10,11 @@ mod onnx;
 mod search;
 mod squareformer;
 pub use board::{square_index, square_name, Board, Color, Move, Piece, Role, START_FEN};
-pub use encoding::{encode_moveformer_legal_inputs, encode_onnx_input_planes, OnnxEvaluatorMeta};
+pub use encoding::{
+    encode_moveformer_legal_inputs, encode_onnx_input_planes,
+    encode_tactical_moveformer_legal_inputs, moveformer_feature_groups_from_spec,
+    moveformer_feature_names_for_groups, MoveFormerFeatureGroup, OnnxEvaluatorMeta,
+};
 pub use eval::{
     fen_features, frozen_conv_student_features, Evaluation, PositionEvaluator, StudentArtifact,
     StudentEvaluator, UniformEvaluator,
