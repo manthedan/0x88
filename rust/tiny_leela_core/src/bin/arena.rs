@@ -40,6 +40,34 @@ fn terminal_white_score(board: &tiny_leela_core::Board) -> Option<f32> {
     Some(if board.turn == Color::White { 0.0 } else { 1.0 })
 }
 
+fn uci_bestmove(board: &tiny_leela_core::Board, engine: &str, depth: u32) -> Option<String> {
+    let fen = board_to_fen(board);
+    let mut child = Command::new(engine)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    {
+        let stdin = child.stdin.as_mut()?;
+        writeln!(stdin, "uci").ok()?;
+        writeln!(stdin, "isready").ok()?;
+        writeln!(stdin, "position fen {fen}").ok()?;
+        writeln!(stdin, "go depth {depth}").ok()?;
+        writeln!(stdin, "quit").ok()?;
+    }
+    let output = child.wait_with_output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.lines().rev().find_map(|line| {
+        let mut parts = line.split_whitespace();
+        if parts.next() == Some("bestmove") {
+            parts.next().map(str::to_string)
+        } else {
+            None
+        }
+    })
+}
+
 fn stockfish_white_score(
     board: &tiny_leela_core::Board,
     stockfish: &str,
@@ -647,6 +675,8 @@ fn main() {
     let candidate_meta = arg("--candidate-meta", "");
     let baseline_onnx = arg("--baseline-onnx", "");
     let baseline_meta = arg("--baseline-meta", "");
+    let baseline_uci = arg("--baseline-uci", "");
+    let baseline_uci_depth: u32 = arg("--baseline-uci-depth", "8").parse().unwrap_or(8);
     let candidate_name = arg("--candidate-name", "candidate");
     let baseline_name = arg("--baseline-name", "baseline");
     let games: usize = arg("--games", &arg("--games-per-pair", "4"))
@@ -773,10 +803,43 @@ fn main() {
             } else {
                 baseline.as_ref()
             };
-            let legal_uci: Vec<String> = legal_moves(&board)
-                .iter()
-                .map(|&m| move_to_uci(m))
-                .collect();
+            let legal = legal_moves(&board);
+            let legal_uci: Vec<String> = legal.iter().map(|&m| move_to_uci(m)).collect();
+            if !side_is_candidate && !baseline_uci.is_empty() {
+                let Some(uci) = uci_bestmove(&board, &baseline_uci, baseline_uci_depth) else {
+                    white_score = Some(if candidate_color == Color::White {
+                        1.0
+                    } else {
+                        0.0
+                    });
+                    break;
+                };
+                let Some(mv) = legal.iter().copied().find(|&m| move_to_uci(m) == uci) else {
+                    white_score = Some(if candidate_color == Color::White {
+                        1.0
+                    } else {
+                        0.0
+                    });
+                    break;
+                };
+                game_moves.push(uci.clone());
+                history.push(board_to_fen(&board));
+                board = make_move(&board, mv);
+                white_score = terminal_white_score(&board);
+                plies += 1;
+                if plies % progress_every == 0 {
+                    eprintln!(
+                        "[rust-arena visits={visits}] game {}/{} ply={}/{} uci_move={} elapsed_s={:.1}",
+                        local_game + 1,
+                        games,
+                        plies,
+                        max_plies,
+                        uci,
+                        started.elapsed().as_secs_f64()
+                    );
+                }
+                continue;
+            }
             let history_fens: Vec<String> = history.iter().rev().take(2).cloned().collect();
             let result = search_root_with_history(
                 &board,
