@@ -65,9 +65,10 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] Python compatibility readers for training.
     - Added `training/_lib/rust_cache_readers.py`; MoveFormer training now accepts Rust sidecar slot naming.
 
-- [ ] Keep Python as the training/export owner.
-  - [ ] Rust should build deterministic tensors/tokens/caches.
-  - [ ] Python should train models and export ONNX.
+- [x] Keep Python as the training/export owner.
+  - [x] Rust should build deterministic tensors/tokens/caches.
+  - [x] Python should train models and export ONNX.
+  - Rust cache builders now stop at deterministic preprocessing; Python readers/trainers consume those artifacts without moving training/export into Rust.
 
 ## P1 — Batched Rust Evaluator / GPU Readiness
 
