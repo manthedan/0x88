@@ -2,6 +2,7 @@ mod batch_eval;
 mod board;
 mod encoding;
 mod eval;
+mod eval_cache;
 mod fen;
 mod jsonl;
 mod matchplay;
@@ -24,6 +25,7 @@ pub use eval::{
     fen_features, frozen_conv_student_features, Evaluation, PositionEvaluator, StudentArtifact,
     StudentEvaluator, UniformEvaluator,
 };
+pub use eval_cache::{CachedEvaluator, EvalCacheKey, EvalCacheMetrics, EvalCacheOptions};
 pub use fen::{board_to_fen, parse_fen};
 pub use jsonl::{for_each_jsonl_line, sha256_file_hex};
 pub use matchplay::{
