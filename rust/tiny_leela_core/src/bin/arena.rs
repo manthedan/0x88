@@ -126,7 +126,7 @@ fn adjudicated_white_score(
     (if white_wins { 1.0 } else { 0.0 }, true)
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GameRecord {
     game: usize,
@@ -134,9 +134,11 @@ struct GameRecord {
     opening: String,
     score: f32,
     true_score: f32,
+    white_score: f32,
     plies: usize,
     final_fen: String,
     adjudicated: bool,
+    moves: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -191,6 +193,55 @@ struct ArenaOutput {
     losses: usize,
     illegal_losses: usize,
     games: Vec<GameRecord>,
+}
+
+fn pgn_result(white_score: f32) -> &'static str {
+    if white_score == 1.0 {
+        "1-0"
+    } else if white_score == 0.0 {
+        "0-1"
+    } else {
+        "1/2-1/2"
+    }
+}
+
+fn uci_movetext(moves: &[String], result: &str) -> String {
+    let mut parts = Vec::new();
+    for (idx, chunk) in moves.chunks(2).enumerate() {
+        if chunk.len() == 2 {
+            parts.push(format!("{}. {} {}", idx + 1, chunk[0], chunk[1]));
+        } else {
+            parts.push(format!("{}. {}", idx + 1, chunk[0]));
+        }
+    }
+    parts.push(result.to_string());
+    parts.join(" ")
+}
+
+fn write_pgn(path: &str, games: &[GameRecord], candidate_name: &str, baseline_name: &str) {
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        fs::create_dir_all(parent).expect("create PGN dir");
+    }
+    let mut out = String::new();
+    for game in games {
+        let result = pgn_result(game.white_score);
+        let (white, black) = if game.candidate_color == "white" {
+            (candidate_name, baseline_name)
+        } else {
+            (baseline_name, candidate_name)
+        };
+        out.push_str(&format!(
+            "[Event \"Tiny Leela Rust Arena\"]\n[Site \"local\"]\n[Round \"{}\"]\n[White \"{}\"]\n[Black \"{}\"]\n[Result \"{}\"]\n[OpeningFEN \"{}\"]\n[FinalFEN \"{}\"]\n\n{}\n\n",
+            game.game + 1,
+            white,
+            black,
+            result,
+            game.opening,
+            game.final_fen,
+            uci_movetext(&game.moves, result)
+        ));
+    }
+    fs::write(path, out).expect("write PGN");
 }
 
 #[derive(Serialize)]
@@ -635,6 +686,7 @@ fn main() {
         .filter(|s| !s.is_empty() && !s.starts_with('#'))
         .collect();
     let out_path = arg("--out", "");
+    let pgn_out = arg("--pgn-out", "");
 
     if !players_arg.is_empty() {
         let players = parse_player_specs(&players_arg, visits, cpuct, fpu);
@@ -711,6 +763,7 @@ fn main() {
         let opening = openings[(game / 2) % openings.len()].clone();
         let mut board = parse_fen(&opening).expect("parse opening");
         let mut history: Vec<String> = Vec::new();
+        let mut game_moves: Vec<String> = Vec::new();
         let mut white_score = terminal_white_score(&board);
         let mut plies = 0usize;
         while white_score.is_none() && plies < max_plies {
@@ -769,6 +822,7 @@ fn main() {
                 });
                 break;
             }
+            game_moves.push(uci.clone());
             history.push(board_to_fen(&board));
             board = make_move(&board, mv);
             white_score = terminal_white_score(&board);
@@ -841,9 +895,11 @@ fn main() {
             opening,
             score,
             true_score,
+            white_score,
             plies,
             final_fen: board_to_fen(&board),
             adjudicated,
+            moves: game_moves,
         });
         eprintln!("[rust-arena visits={visits}] game {}/{} done score={} wdl={}/{}/{} illegal={} elapsed_s={:.1}", local_game + 1, games, score, wins, draws, losses, illegal_losses, started.elapsed().as_secs_f64());
     }
@@ -938,13 +994,16 @@ fn main() {
             draws,
             losses,
             illegal_losses,
-            games: game_records,
+            games: game_records.clone(),
         };
         fs::write(
             &out_path,
             serde_json::to_string_pretty(&output).expect("serialize arena output"),
         )
         .expect("write arena output");
+    }
+    if !pgn_out.is_empty() {
+        write_pgn(&pgn_out, &game_records, &candidate_name, &baseline_name);
     }
     println!("METRIC arena_backend_rust=1");
     println!("METRIC arena_score_rate={score_rate:.6}");
