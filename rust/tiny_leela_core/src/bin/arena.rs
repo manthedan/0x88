@@ -1,4 +1,5 @@
 use serde::Serialize;
+use serde_json::json;
 use std::collections::HashMap;
 use std::io::Write;
 use std::{
@@ -717,6 +718,7 @@ fn main() {
         .collect();
     let out_path = arg("--out", "");
     let pgn_out = arg("--pgn-out", "");
+    let release_gate_out = arg("--release-gate-out", "");
 
     if !players_arg.is_empty() {
         let players = parse_player_specs(&players_arg, visits, cpuct, fpu);
@@ -1067,6 +1069,32 @@ fn main() {
     }
     if !pgn_out.is_empty() {
         write_pgn(&pgn_out, &game_records, &candidate_name, &baseline_name);
+    }
+    if !release_gate_out.is_empty() {
+        if let Some(parent) = std::path::Path::new(&release_gate_out).parent() {
+            fs::create_dir_all(parent).expect("create release gate dir");
+        }
+        let packet = serde_json::json!({
+            "schema": "rust_release_gate_packet_v1",
+            "candidate": candidate_name,
+            "baseline": baseline_name,
+            "games": games,
+            "wins": wins,
+            "draws": draws,
+            "losses": losses,
+            "score_rate": score_rate,
+            "elo_estimate": elo,
+            "illegal_losses": illegal_losses,
+            "promotion_ready": promotion_ready == 1,
+            "arena_json": if out_path.is_empty() { serde_json::Value::Null } else { json!(out_path) },
+            "pgn": if pgn_out.is_empty() { serde_json::Value::Null } else { json!(pgn_out) },
+            "policy": { "classic_puct_default": true, "aux_av_experimental": true },
+        });
+        fs::write(
+            &release_gate_out,
+            serde_json::to_string_pretty(&packet).expect("serialize release gate packet") + "\n",
+        )
+        .expect("write release gate packet");
     }
     println!("METRIC arena_backend_rust=1");
     println!("METRIC arena_score_rate={score_rate:.6}");
