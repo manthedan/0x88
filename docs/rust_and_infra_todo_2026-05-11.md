@@ -89,10 +89,11 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] Benchmark CPU vs CUDA only with enough concurrent/batched evals to feed the GPU.
     - Inference matrix smoke commands carry explicit `--batches` and CUDA remains opt-in after batching support.
 
-- [ ] Add reusable eval cache layers.
-  - [ ] Per-search transposition/eval cache.
-  - [ ] Optional cross-game cache for repeated openings/positions.
-  - [ ] History-aware cache key for models that consume history.
+- [x] Add reusable eval cache layers.
+  - [x] Per-search transposition/eval cache.
+  - [x] Optional cross-game cache for repeated openings/positions.
+  - [x] History-aware cache key for models that consume history.
+  - Implemented as `CachedEvaluator` with bounded cross-game mode, history-aware keys, hit-rate metrics, and eviction tests.
 
 ## P1 — Rust Self-Play
 
