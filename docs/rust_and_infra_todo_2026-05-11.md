@@ -43,7 +43,7 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 ## P1 — Production Cache Building in Rust
 
 - [ ] Replace the current toy/legacy `rust/tiny_leela_core/src/bin/feature_cache.rs` with production cache builders.
-  - [ ] Residual/CNN H2/H8 cache builder.
+  - [x] Residual/CNN H2/H8 cache builder.
   - [x] SquareFormer compact-token cache builder.
   - [ ] BT4/SquareFormer h7/h8 cache builder.
   - [ ] MoveFormer sidecar cache builder.
