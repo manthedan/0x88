@@ -3,11 +3,13 @@ use std::collections::HashMap;
 
 mod board;
 mod fen;
+mod move_codec;
 mod movegen;
 #[cfg(feature = "native-ort")]
 use board::{file, rank};
 pub use board::{square_index, square_name, Board, Color, Move, Piece, Role, START_FEN};
 pub use fen::{board_to_fen, parse_fen};
+pub use move_codec::{move_to_action_id, move_to_uci};
 pub use movegen::{
     in_check, is_square_attacked, king_square, legal_moves, make_move, pseudo_legal_moves,
 };
@@ -41,28 +43,6 @@ fn piece_index(piece: Piece) -> usize {
         Role::King => 5,
     };
     base + if piece.color == Color::White { 0 } else { 6 }
-}
-
-pub fn move_to_uci(m: Move) -> String {
-    let promo = match m.promotion {
-        Some(Role::Knight) => "n",
-        Some(Role::Bishop) => "b",
-        Some(Role::Rook) => "r",
-        Some(Role::Queen) => "q",
-        _ => "",
-    };
-    format!("{}{}{}", square_name(m.from), square_name(m.to), promo)
-}
-
-pub fn move_to_action_id(m: Move) -> u32 {
-    let promo = match m.promotion {
-        Some(Role::Knight) => 1,
-        Some(Role::Bishop) => 2,
-        Some(Role::Rook) => 3,
-        Some(Role::Queen) => 4,
-        _ => 0,
-    };
-    ((m.from as u32 * 64 + m.to as u32) * 5) + promo
 }
 
 #[derive(Clone, Debug, Deserialize)]
