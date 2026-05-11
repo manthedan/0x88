@@ -28,7 +28,8 @@ When a model/runtime is ready for public browser distribution, the browser-optim
 - `board_encoding_v*`: model input planes/tokens and value perspective.
 - `puct_trace_v1`: deterministic search trace for implementation parity.
 - `cache_manifest_v1`: training-cache file layout, dtype, shape, and provenance.
-- `selfplay_chunk_v1`: self-play JSONL row/provenance contract.
+- `selfplay_chunk_v1`: immutable self-play JSONL row/provenance contract.
+- `selfplay_annotation_v1`: sidecar annotation rows for Stockfish labels, diagnostics, and cache-prep metadata.
 - `failure_packet_v1`: structured repro packet for tactical/backend/cache failures.
 - `export_target_card_v1`: ONNX/runtime target card for deployment and promotion gates.
 

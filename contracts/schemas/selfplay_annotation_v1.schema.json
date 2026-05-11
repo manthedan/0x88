@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tiny-leela.local/contracts/selfplay_annotation_v1.schema.json",
+  "title": "Tiny Leela self-play annotation sidecar row v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "source", "game_id", "ply", "fen", "annotations", "provenance"],
+  "properties": {
+    "schema": { "const": "selfplay_annotation_v1" },
+    "source": {
+      "type": "object",
+      "required": ["chunk", "row_key"],
+      "properties": {
+        "chunk": { "type": ["string", "null"] },
+        "chunk_sha256": { "type": ["string", "null"] },
+        "row_key": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "game_id": { "type": "string" },
+    "ply": { "type": "integer", "minimum": 0 },
+    "fen": { "type": "string" },
+    "selected_uci": { "type": ["string", "null"] },
+    "legal_uci": { "type": "array", "items": { "type": "string" } },
+    "annotations": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "stockfish": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "available": { "type": "boolean" },
+            "depth": { "type": ["integer", "null"] },
+            "nodes": { "type": ["integer", "null"] },
+            "before_cp": { "type": ["number", "null"] },
+            "after_cp": { "type": ["number", "null"] },
+            "cp_loss": { "type": ["number", "null"] },
+            "best_uci": { "type": ["string", "null"] },
+            "pv": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "agent": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["annotator", "created_utc"],
+      "properties": {
+        "annotator": { "type": "string" },
+        "created_utc": { "type": "string" },
+        "version": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

@@ -22,6 +22,7 @@ test('contract schemas are versioned and declare required fields', () => {
     'contracts/schemas/cache_manifest_v1.schema.json',
     'contracts/schemas/failure_packet_v1.schema.json',
     'contracts/schemas/selfplay_chunk_v1.schema.json',
+    'contracts/schemas/selfplay_annotation_v1.schema.json',
   ];
   for (const path of schemas) {
     const s = json(path);
