@@ -346,3 +346,45 @@ pub fn make_move(board: &Board, m: Move) -> Board {
     next.fullmove = board.fullmove + if board.turn == Color::Black { 1 } else { 0 };
     next
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{move_to_uci, parse_fen, Piece, START_FEN};
+
+    #[test]
+    fn start_position_has_20_legal_moves() {
+        assert_eq!(legal_moves(&parse_fen(START_FEN).unwrap()).len(), 20);
+    }
+
+    #[test]
+    fn rejects_king_into_check() {
+        let b = parse_fen("k3r3/8/8/8/8/8/8/4K3 w - - 0 1").unwrap();
+        let moves: Vec<String> = legal_moves(&b).into_iter().map(move_to_uci).collect();
+        assert!(!moves.contains(&"e1e2".to_string()));
+    }
+
+    #[test]
+    fn castling_and_ep() {
+        let b = parse_fen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1").unwrap();
+        let moves: Vec<String> = legal_moves(&b).into_iter().map(move_to_uci).collect();
+        assert!(moves.contains(&"e1g1".to_string()));
+        assert!(moves.contains(&"e1c1".to_string()));
+        let ep = make_move(
+            &parse_fen("8/8/8/3pP3/8/8/8/4K2k w - d6 0 1").unwrap(),
+            Move {
+                from: 36,
+                to: 43,
+                promotion: None,
+            },
+        );
+        assert!(ep.squares[35].is_none());
+        assert_eq!(
+            ep.squares[43],
+            Some(Piece {
+                color: Color::White,
+                role: Role::Pawn
+            })
+        );
+    }
+}

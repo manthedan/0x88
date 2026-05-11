@@ -156,3 +156,19 @@ pub fn board_to_fen(board: &Board) -> String {
         board.fullmove
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::board::START_FEN;
+
+    #[test]
+    fn fen_roundtrip_start() {
+        assert_eq!(board_to_fen(&parse_fen(START_FEN).unwrap()), START_FEN);
+    }
+
+    #[test]
+    fn rejects_bad_rank_count() {
+        assert!(parse_fen("8/8/8/8/8/8/8 w - - 0 1").is_err());
+    }
+}

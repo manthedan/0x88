@@ -21,3 +21,19 @@ pub fn move_to_action_id(m: Move) -> u32 {
     };
     ((m.from as u32 * 64 + m.to as u32) * 5) + promo
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uci_and_action_id_include_promotion() {
+        let m = Move {
+            from: 48,
+            to: 56,
+            promotion: Some(Role::Queen),
+        };
+        assert_eq!(move_to_uci(m), "a7a8q");
+        assert_eq!(move_to_action_id(m), ((48u32 * 64 + 56u32) * 5) + 4);
+    }
+}
