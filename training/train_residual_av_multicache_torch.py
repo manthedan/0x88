@@ -489,6 +489,11 @@ def main():
         if dev or args.av_prefetch_rows <= args.av_batch_size:
             c = av_caches[int(np_rng.integers(0, len(av_caches)))]
             n = min(c["rows"], args.max_av_dev_positions) if dev else c["rows"]
+            if n <= 0:
+                raise ValueError(
+                    "requested AV dev batch with no available rows; set "
+                    "--max-av-dev-positions > 0 or disable AV dev evaluation"
+                )
             ids = np_rng.integers(0, n, size=args.av_batch_size, endpoint=False)
             K = min(args.max_candidates, c["max_candidates"])
             xb = compact_tokens_to_residual_planes(
@@ -538,6 +543,7 @@ def main():
         net.eval()
         ce = wc = t1 = t4 = t8 = seen = 0
         av_mse = av_ok = av_seen = av_pos = 0
+        av_dev_enabled = bool(av_caches) and args.max_av_dev_positions > 0
         with torch.no_grad():
             for off in range(0, DN, args.batch_size):
                 xb = to_dev(np.asarray(dx[off : off + args.batch_size]), torch.float32)
@@ -553,22 +559,23 @@ def main():
                 t4 += int((pred[:, :4] == yb[:, None]).any(1).sum())
                 t8 += int((pred == yb[:, None]).any(1).sum())
                 seen += bs
-            nb = max(
-                1, min(20, args.max_av_dev_positions // max(1, args.av_batch_size))
-            )
-            for _ in range(nb):
-                xb, mv, val, _, mask = av_batch(dev=True)
-                _, _, h = net(xb)
-                sc = torch.tanh(net.av_scores(h, mv).float())
-                av_mse += float(F.mse_loss(sc[mask], val[mask], reduction="sum"))
-                av_pos += int(mask.sum())
-                av_ok += int(
-                    (
-                        sc.masked_fill(~mask, -1e9).argmax(1)
-                        == val.masked_fill(~mask, -1e9).argmax(1)
-                    ).sum()
+            if av_dev_enabled:
+                nb = max(
+                    1, min(20, args.max_av_dev_positions // max(1, args.av_batch_size))
                 )
-                av_seen += xb.shape[0]
+                for _ in range(nb):
+                    xb, mv, val, _, mask = av_batch(dev=True)
+                    _, _, h = net(xb)
+                    sc = torch.tanh(net.av_scores(h, mv).float())
+                    av_mse += float(F.mse_loss(sc[mask], val[mask], reduction="sum"))
+                    av_pos += int(mask.sum())
+                    av_ok += int(
+                        (
+                            sc.masked_fill(~mask, -1e9).argmax(1)
+                            == val.masked_fill(~mask, -1e9).argmax(1)
+                        ).sum()
+                    )
+                    av_seen += xb.shape[0]
         m = {
             "dev_policy_ce": ce / max(1, seen),
             "dev_wdl_ce": wc / max(1, seen),
@@ -578,9 +585,11 @@ def main():
             "dev_av_mse": av_mse / max(1, av_pos),
             "dev_av_top1": av_ok / max(1, av_seen),
         }
-        m["composite"] = (
-            m["dev_policy_ce"] + 0.25 * m["dev_wdl_ce"] + 2.0 * m["dev_av_mse"]
-        )
+        m["composite"] = m["dev_policy_ce"] + 0.25 * m["dev_wdl_ce"]
+        if av_dev_enabled:
+            m["composite"] += 2.0 * m["dev_av_mse"]
+        else:
+            m["dev_av_eval_enabled"] = 0.0
         for k, v in m.items():
             print(f"METRIC {label}_{k}={v:.6f}", flush=True)
         net.train()
