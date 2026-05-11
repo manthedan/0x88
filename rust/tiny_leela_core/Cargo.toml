@@ -49,6 +49,10 @@ name = "tiny-leela-rust-moveformer-cache"
 path = "src/bin/moveformer_cache.rs"
 
 [[bin]]
+name = "tiny-leela-rust-moveformer-tactical-cache"
+path = "src/bin/moveformer_tactical_cache.rs"
+
+[[bin]]
 name = "tiny-leela-rust-squareformer-cache"
 path = "src/bin/squareformer_cache.rs"
 
