@@ -35,7 +35,7 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 
 - [ ] Add module-level tests while splitting.
   - [x] FEN roundtrip/property tests.
-  - [ ] Movegen perft/parity tests.
+  - [x] Movegen perft/parity tests.
   - [x] Move/action-id contract tests.
   - [ ] Encoding parity tests vs fixtures.
   - [ ] Search trace parity tests for classic and aux/AV PUCT.
