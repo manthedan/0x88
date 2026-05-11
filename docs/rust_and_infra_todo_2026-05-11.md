@@ -118,7 +118,7 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 
 ## P1 — Promotion / Anchor Eval Infra
 
-- [ ] Add Rust-native promotion gates where useful.
+- [x] Add Rust-native promotion gates where useful.
   - [x] Stockfish anchor arena integration.
     - Rust arena supports `--adjudicate stockfish`, `--stockfish`, `--stockfish-depth`, and draw-CP adjudication.
   - [x] Maia/lc0 wrapper integration where available.
@@ -128,7 +128,8 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
     - Rust arena emits PGN via `--pgn-out` and reports WDL/score-rate/Elo estimate metrics in JSON/stdout.
   - [x] Release-gate packet generation.
     - Rust arena can emit `rust_release_gate_packet_v1` via `--release-gate-out`.
-  - [ ] Model manifest update helper.
+  - [x] Model manifest update helper.
+    - Added `tiny-leela-rust-model-manifest-update` for upserting curated override entries consumed by `eval/build_model_manifest.py`.
 
 - [ ] Keep promotion policy conservative.
   - [ ] Classic PUCT remains default.
