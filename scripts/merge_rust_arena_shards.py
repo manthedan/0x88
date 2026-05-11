@@ -20,6 +20,12 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("shards", nargs="+", help="Shard JSON files")
     ap.add_argument("--out", required=True, help="Merged output JSON")
+    ap.add_argument("--summary-tsv", help="Optional compact standings TSV")
+    ap.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="Allow missing global game ids instead of requiring full shard coverage",
+    )
     args = ap.parse_args()
 
     docs = []
@@ -40,7 +46,20 @@ def main() -> None:
     games_by_id = {}
     illegal_losses = 0
 
-    for doc in docs:
+    expected_protocol_keys = ["players", "visits", "gamesPerPair", "maxPlies", "adjudicate", "totalGames"]
+    seen_shard_indexes = set()
+    for idx, doc in enumerate(docs):
+        protocol = doc.get("protocol", {})
+        for key in expected_protocol_keys:
+            if protocol.get(key) != first_protocol.get(key):
+                raise SystemExit(
+                    f"incompatible shard protocol for {key}: shard0={first_protocol.get(key)!r} "
+                    f"shard{idx}={protocol.get(key)!r}"
+                )
+        shard_index = protocol.get("shardIndex")
+        if shard_index in seen_shard_indexes:
+            raise SystemExit(f"duplicate shardIndex across inputs: {shard_index}")
+        seen_shard_indexes.add(shard_index)
         illegal_losses += int(doc.get("illegalLosses", 0))
         for game in doc.get("games", []):
             gid = int(game["game"])
@@ -97,11 +116,26 @@ def main() -> None:
         )
 
     games = [games_by_id[k] for k in sorted(games_by_id)]
+    total_games = int(first_protocol.get("totalGames", len(games)))
+    expected_ids = set(range(total_games))
+    observed_ids = set(games_by_id)
+    missing_ids = sorted(expected_ids - observed_ids)
+    extra_ids = sorted(observed_ids - expected_ids)
+    if extra_ids:
+        raise SystemExit(f"game ids outside expected range 0..{total_games - 1}: {extra_ids[:20]}")
+    if missing_ids and not args.allow_partial:
+        sample = missing_ids[:20]
+        raise SystemExit(
+            f"missing {len(missing_ids)} expected game ids; first missing ids: {sample}. "
+            "Use --allow-partial only for deliberate partial merges."
+        )
+
     protocol = dict(first_protocol)
     protocol["backend"] = "rust-native-ort-merged"
     protocol["mergedShards"] = len(docs)
     protocol["selectedGames"] = len(games)
-    protocol["totalGames"] = first_protocol.get("totalGames", len(games))
+    protocol["totalGames"] = total_games
+    protocol["missingGames"] = len(missing_ids)
 
     output = {
         "protocol": protocol,
@@ -113,7 +147,18 @@ def main() -> None:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(output, indent=2) + "\n")
-    print(f"merged {len(docs)} shards / {len(games)} games -> {out}")
+    if args.summary_tsv:
+        summary = Path(args.summary_tsv)
+        summary.parent.mkdir(parents=True, exist_ok=True)
+        with summary.open("w") as f:
+            f.write("name\twins\tdraws\tlosses\tscore\tgames\tscoreRate\n")
+            for s in standing_records:
+                f.write(
+                    f"{s['name']}\t{s['wins']}\t{s['draws']}\t{s['losses']}\t"
+                    f"{s['score']}\t{s['games']}\t{s['scoreRate']:.6f}\n"
+                )
+    coverage = "complete" if not missing_ids else f"partial missing={len(missing_ids)}"
+    print(f"merged {len(docs)} shards / {len(games)} games ({coverage}) -> {out}")
 
 
 if __name__ == "__main__":

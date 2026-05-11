@@ -218,17 +218,7 @@ if [[ "\$fail" != 0 ]]; then
 fi
 PHASE=merge
 mark 'MERGE shards'
-python3 scripts/merge_rust_arena_shards.py "\$BASE"/shards/shard_*.json --out "\$MERGED" > "\$BASE/merge.log" 2>&1
-PHASE=summary
-python3 - <<'PY' "\$MERGED" "\$BASE/summary.tsv"
-import json, sys
-src, out = sys.argv[1:]
-data = json.load(open(src))
-with open(out, 'w') as f:
-    f.write('name\twins\tdraws\tlosses\tscore\tgames\tscoreRate\n')
-    for s in data['standings']:
-        f.write(f"{s['name']}\t{s['wins']}\t{s['draws']}\t{s['losses']}\t{s['score']}\t{s['games']}\t{s['scoreRate']:.6f}\n")
-PY
+python3 scripts/merge_rust_arena_shards.py "\$BASE"/shards/shard_*.json --out "\$MERGED" --summary-tsv "\$BASE/summary.tsv" > "\$BASE/merge.log" 2>&1
 mark 'DONE parallel rust super arena'
 echo succeeded > "\$BASE/status.final"
 EOF_RUNNER
