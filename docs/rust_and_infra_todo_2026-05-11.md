@@ -53,7 +53,7 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 
 - [ ] Make Rust cache outputs contract-first.
   - [x] Emit `cache_manifest_v1`.
-    - Implemented for `tiny-leela-rust-feature-cache` and `tiny-leela-rust-squareformer-cache`.
+    - Implemented for `tiny-leela-rust-feature-cache`, `tiny-leela-rust-residual-cache`, `tiny-leela-rust-squareformer-cache`, and `tiny-leela-rust-moveformer-cache`.
   - [x] Atomic shard writes.
     - Feature-cache writes use temp-file/rename; SquareFormer cache writes to a temp output directory before publishing.
   - [x] Resume-safe shard completion markers.
