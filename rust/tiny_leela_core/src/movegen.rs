@@ -352,9 +352,35 @@ mod tests {
     use super::*;
     use crate::{move_to_uci, parse_fen, Piece, START_FEN};
 
+    fn perft(board: &Board, depth: u32) -> u64 {
+        if depth == 0 {
+            return 1;
+        }
+        legal_moves(board)
+            .into_iter()
+            .map(|mv| perft(&make_move(board, mv), depth - 1))
+            .sum()
+    }
+
     #[test]
     fn start_position_has_20_legal_moves() {
         assert_eq!(legal_moves(&parse_fen(START_FEN).unwrap()).len(), 20);
+    }
+
+    #[test]
+    fn start_position_perft_known_counts() {
+        let b = parse_fen(START_FEN).unwrap();
+        assert_eq!(perft(&b, 1), 20);
+        assert_eq!(perft(&b, 2), 400);
+        assert_eq!(perft(&b, 3), 8902);
+    }
+
+    #[test]
+    fn complex_castling_position_perft_counts() {
+        let b = parse_fen("r3k2r/p1ppqpb1/bn2pnp1/2pPN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1")
+            .unwrap();
+        assert_eq!(perft(&b, 1), 48);
+        assert_eq!(perft(&b, 2), 1991);
     }
 
     #[test]
