@@ -1,3 +1,4 @@
+mod batch_eval;
 mod board;
 mod encoding;
 mod eval;
@@ -10,6 +11,9 @@ mod movegen;
 mod onnx;
 mod search;
 mod squareformer;
+pub use batch_eval::{
+    BatchedEvaluator, BatchedEvaluatorMetrics, BatchedEvaluatorOptions, EvaluationTicket,
+};
 pub use board::{square_index, square_name, Board, Color, Move, Piece, Role, START_FEN};
 pub use encoding::{
     encode_moveformer_legal_inputs, encode_onnx_input_planes,
