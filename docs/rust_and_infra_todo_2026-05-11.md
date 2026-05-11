@@ -97,10 +97,11 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 
 ## P1 — Rust Self-Play
 
-- [ ] Upgrade `rust/tiny_leela_core/src/bin/selfplay.rs` from StudentEvaluator bootstrap to production ONNX self-play.
+- [x] Upgrade `rust/tiny_leela_core/src/bin/selfplay.rs` from StudentEvaluator bootstrap to production ONNX self-play.
   - [x] Native ORT model loading.
     - `tiny-leela-rust-selfplay` now accepts `--model model.onnx --meta model.meta.json` behind the `native-ort` feature while keeping JSON StudentEvaluator fallback.
-  - [ ] CNN/MF80/SquareFormer/ChessFormer support.
+  - [x] CNN/MF80/SquareFormer/ChessFormer support.
+    - Self-play now uses the shared native `OnnxEvaluator`, covering board/CNN, MoveFormer/MF80 legal-move inputs, and SquareFormer/ChessFormer compact-token metadata paths.
   - [x] Classic PUCT and experimental aux/AV modes.
     - `tiny-leela-rust-selfplay` now exposes `--policy-mode classic|av|aux` plus aux/AV weights while defaulting to classic.
   - [x] `.jsonl.zst` chunk output.
@@ -109,10 +110,11 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] Atomic writes and resume/retry handling.
   - Rust self-play now emits atomic plain or `.jsonl.zst` chunks, schema-tagged rows, and optional chunk manifests with SHA-256 checksums. Resume/retry safety is via temp-file publish semantics.
 
-- [ ] Keep lane separation explicit.
-  - [ ] Gumbel-Zero must remain rules-only/random-init/no supervised contamination.
-  - [ ] SUP-SP can use supervised/distilled initialization.
-  - [ ] Tooling should make contamination hard, not just documented.
+- [x] Keep lane separation explicit.
+  - [x] Gumbel-Zero must remain rules-only/random-init/no supervised contamination.
+  - [x] SUP-SP can use supervised/distilled initialization.
+  - [x] Tooling should make contamination hard, not just documented.
+  - `tiny-leela-rust-selfplay` refuses `--lane gumbel_zero` and only emits model-guided `sup_sp` / `eval_demo` / `other` chunks.
 
 ## P1 — Promotion / Anchor Eval Infra
 
