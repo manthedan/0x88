@@ -101,7 +101,8 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] Native ORT model loading.
     - `tiny-leela-rust-selfplay` now accepts `--model model.onnx --meta model.meta.json` behind the `native-ort` feature while keeping JSON StudentEvaluator fallback.
   - [ ] CNN/MF80/SquareFormer/ChessFormer support.
-  - [ ] Classic PUCT and experimental aux/AV modes.
+  - [x] Classic PUCT and experimental aux/AV modes.
+    - `tiny-leela-rust-selfplay` now exposes `--policy-mode classic|av|aux` plus aux/AV weights while defaulting to classic.
   - [ ] `.jsonl.zst` chunk output.
   - [ ] `selfplay_chunk_v1` conformance.
   - [ ] Chunk manifests and checksums.
