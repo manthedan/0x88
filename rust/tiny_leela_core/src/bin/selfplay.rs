@@ -1,5 +1,7 @@
 use serde_json::json;
 use std::{env, fs, time::Instant};
+#[cfg(feature = "native-ort")]
+use tiny_leela_core::OnnxEvaluator;
 use tiny_leela_core::{
     board_to_fen, in_check, legal_moves, make_move, move_to_uci, parse_fen, search_root, Color,
     PositionEvaluator, SearchOptions, StudentEvaluator, START_FEN,
@@ -51,7 +53,7 @@ fn result_for_turn(white_score: f32, turn: Color) -> [u8; 3] {
 
 fn adjudicated_white_score(
     board: &tiny_leela_core::Board,
-    evaluator: &StudentEvaluator,
+    evaluator: &dyn PositionEvaluator,
     adjudicate: &str,
     threshold: f32,
 ) -> (f32, bool) {
@@ -74,6 +76,7 @@ fn adjudicated_white_score(
 
 fn main() {
     let model_path = arg("--model", "artifacts/student_distill_benchmark.json");
+    let meta_path = arg("--meta", "");
     let out_path = arg("--out", "data/selfplay/bootstrap.jsonl");
     let games: usize = arg("--games", "2").parse().unwrap_or(2);
     let visits: u32 = arg("--visits", "4").parse().unwrap_or(4);
@@ -103,8 +106,26 @@ fn main() {
     };
     let mut rng: u32 = arg("--seed", "1").parse().unwrap_or(1);
 
-    let json_text = fs::read_to_string(&model_path).expect("read model");
-    let evaluator = StudentEvaluator::from_json(&json_text).expect("parse model");
+    let evaluator: Box<dyn PositionEvaluator> = if !meta_path.is_empty()
+        || model_path.to_ascii_lowercase().ends_with(".onnx")
+    {
+        #[cfg(feature = "native-ort")]
+        {
+            if meta_path.is_empty() {
+                eprintln!("--meta is required when --model points at an ONNX file");
+                std::process::exit(2);
+            }
+            Box::new(OnnxEvaluator::from_files(&model_path, &meta_path).expect("load ONNX model"))
+        }
+        #[cfg(not(feature = "native-ort"))]
+        {
+            eprintln!("ONNX self-play requires cargo feature native-ort");
+            std::process::exit(2);
+        }
+    } else {
+        let json_text = fs::read_to_string(&model_path).expect("read model");
+        Box::new(StudentEvaluator::from_json(&json_text).expect("parse model"))
+    };
     let started = Instant::now();
     eprintln!(
         "[rust-selfplay visits={visits}] start games={games} max_plies={max_plies} out={out_path}"
@@ -140,7 +161,7 @@ fn main() {
             }
             let result = search_root(
                 &board,
-                &evaluator,
+                &*evaluator,
                 SearchOptions {
                     visits,
                     cpuct: 1.5,
@@ -194,7 +215,7 @@ fn main() {
         let (score, adjudicated) = if let Some(score) = white_score {
             (score, false)
         } else {
-            adjudicated_white_score(&board, &evaluator, &adjudicate, adjudicate_threshold)
+            adjudicated_white_score(&board, &*evaluator, &adjudicate, adjudicate_threshold)
         };
         if adjudicated {
             adjudicated_games += 1;
