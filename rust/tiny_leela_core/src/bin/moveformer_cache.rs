@@ -6,6 +6,7 @@ use std::{
 };
 use tiny_leela_core::{
     encode_moveformer_legal_inputs, for_each_jsonl_line, move_to_action_id, parse_fen,
+    sha256_file_hex,
 };
 
 fn arg(name: &str, fallback: &str) -> String {
@@ -199,11 +200,29 @@ fn main() {
         })
         .expect("stream MoveFormer input");
     }
+    target_file.flush().expect("flush target");
+    slot_file.flush().expect("flush slot");
+    wdl_file.flush().expect("flush wdl");
+    q_file.flush().expect("flush q");
+    ids_file.flush().expect("flush ids");
+    feat_file.flush().expect("flush features");
+    mask_file.flush().expect("flush mask");
+    let checksums = json!({
+        "target_action_id.int64": sha256_file_hex(tmp_path.join("target_action_id.int64")).expect("checksum target"),
+        "target_legal_slot.int16": sha256_file_hex(tmp_path.join("target_legal_slot.int16")).expect("checksum slot"),
+        "wdl.float32": sha256_file_hex(tmp_path.join("wdl.float32")).expect("checksum wdl"),
+        "q.float32": sha256_file_hex(tmp_path.join("q.float32")).expect("checksum q"),
+        "legal_action_ids.int64": sha256_file_hex(tmp_path.join("legal_action_ids.int64")).expect("checksum ids"),
+        "legal_features.float32": sha256_file_hex(tmp_path.join("legal_features.float32")).expect("checksum features"),
+        "legal_mask.float32": sha256_file_hex(tmp_path.join("legal_mask.float32")).expect("checksum mask"),
+    });
     let meta = json!({
         "format": "moveformer_sidecar_cache_rust_v1",
         "rows": written,
         "max_legal_moves": max_legal_moves,
         "num_move_features": num_features,
+        "row_order": "input order after deterministic JSONL/.jsonl.zst streaming and row validation",
+        "checksums_sha256": checksums,
         "policy_target_legal_rate": target_found as f64 / written.max(1) as f64,
         "legal_truncation_rate": truncated as f64 / written.max(1) as f64,
         "bad_or_skipped_rows": bad,
@@ -240,7 +259,7 @@ fn main() {
                 { "path": format!("{out}/legal_mask.float32"), "dtype": "float32", "shape": [written, max_legal_moves], "endianness": "little" }
             ],
             "shards": [out],
-            "validation": { "rows": { "total": written, "bad_or_skipped": bad }, "max_legal_moves": max_legal_moves },
+            "validation": { "rows": { "total": written, "bad_or_skipped": bad }, "max_legal_moves": max_legal_moves, "hashes": meta["checksums_sha256"] },
         });
         write_atomic(
             &manifest_out,

@@ -21,7 +21,7 @@ pub use eval::{
     StudentEvaluator, UniformEvaluator,
 };
 pub use fen::{board_to_fen, parse_fen};
-pub use jsonl::for_each_jsonl_line;
+pub use jsonl::{for_each_jsonl_line, sha256_file_hex};
 pub use matchplay::{
     plan_round_robin_jobs, round_robin_total_games, score_for_color, shard_jobs, RoundRobinJob,
 };

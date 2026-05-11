@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, env, fs, path::Path};
-use tiny_leela_core::{for_each_jsonl_line, frozen_conv_student_features};
+use tiny_leela_core::{for_each_jsonl_line, frozen_conv_student_features, sha256_file_hex};
 
 fn arg(name: &str, fallback: &str) -> String {
     let prefix = format!("{name}=");
@@ -68,6 +68,7 @@ fn main() {
         &out,
         &serde_json::to_string(&cache).expect("serialize cache"),
     );
+    let out_sha256 = sha256_file_hex(&out).unwrap_or_else(|_| "unavailable".to_string());
     if !manifest_out.is_empty() {
         let manifest = json!({
             "schema": "cache_manifest_v1",
@@ -94,6 +95,8 @@ fn main() {
                 "rows": { "total": cache.len(), "new": cache.len().saturating_sub(before) },
                 "feature_dim": feature_dim,
                 "arch": arch,
+                "row_order": "BTreeMap sorted by FEN key for deterministic JSON object serialization",
+                "sha256": out_sha256,
             },
         });
         write_atomic(

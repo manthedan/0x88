@@ -5,7 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 use tiny_leela_core::{
-    encode_squareformer_compact_input, for_each_jsonl_line, parse_fen, SquareFormerEvaluatorMeta,
+    encode_squareformer_compact_input, for_each_jsonl_line, parse_fen, sha256_file_hex,
+    SquareFormerEvaluatorMeta,
 };
 
 const SCHEMA_ACTION_VALUE: &str = "teacher.action_value.v1";
@@ -331,6 +332,18 @@ fn main() {
             }
         }
     }
+    token_file.flush().expect("flush tokens");
+    moves_file.flush().expect("flush moves");
+    values_file.flush().expect("flush values");
+    regrets_file.flush().expect("flush regrets");
+    mask_file.flush().expect("flush mask");
+    let checksums = json!({
+        "tokens.uint8": sha256_file_hex(tmp_path.join("tokens.uint8")).expect("checksum tokens"),
+        "candidate_moves.int64": sha256_file_hex(tmp_path.join("candidate_moves.int64")).expect("checksum moves"),
+        "candidate_values.float32": sha256_file_hex(tmp_path.join("candidate_values.float32")).expect("checksum values"),
+        "candidate_regrets.float32": sha256_file_hex(tmp_path.join("candidate_regrets.float32")).expect("checksum regrets"),
+        "candidate_mask.float32": sha256_file_hex(tmp_path.join("candidate_mask.float32")).expect("checksum mask"),
+    });
     let cache_meta = json!({
         "format": "compact_action_value_cache_rust_v1",
         "source_schema": SCHEMA_ACTION_VALUE,
@@ -341,6 +354,8 @@ fn main() {
         "token_features": history_plies + 9,
         "policy_size": POLICY_SIZE,
         "source_shards": inputs,
+        "row_order": "input order after deterministic JSONL/.jsonl.zst streaming; contiguous records are grouped by position_key/fen and candidates are sorted by rank, source order, then value",
+        "checksums_sha256": checksums,
         "scanned_rows": scanned_rows,
         "malformed_rows": malformed_rows,
         "skipped_rows": skipped_rows,
@@ -379,7 +394,7 @@ fn main() {
                 { "path": format!("{out}/candidate_mask.float32"), "dtype": "float32", "shape": [positions, max_candidates], "endianness": "little" }
             ],
             "shards": [out],
-            "validation": { "rows": { "total": positions, "candidates": candidate_rows, "skipped": skipped_rows, "malformed": malformed_rows } }
+            "validation": { "rows": { "total": positions, "candidates": candidate_rows, "skipped": skipped_rows, "malformed": malformed_rows }, "hashes": cache_meta["checksums_sha256"] }
         });
         write_atomic(
             &manifest_out,

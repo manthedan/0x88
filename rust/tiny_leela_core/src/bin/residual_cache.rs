@@ -5,7 +5,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
-use tiny_leela_core::for_each_jsonl_line;
+use tiny_leela_core::{for_each_jsonl_line, sha256_file_hex};
 
 const FILES: &str = "abcdefgh";
 const PIECES: &str = "PNBRQKpnbrqk";
@@ -385,6 +385,22 @@ fn main() {
         })
         .expect("stream residual input");
     }
+    x_file.flush().expect("flush x");
+    y_file.flush().expect("flush policy");
+    wdl_file.flush().expect("flush wdl");
+    weight_file.flush().expect("flush weight");
+    sfq_file.flush().expect("flush stockfish_q");
+    wr_file.flush().expect("flush stockfish winrate loss");
+    blunder_file.flush().expect("flush blunder");
+    let checksums = json!({
+        "x.int8": sha256_file_hex(tmp_path.join("x.int8")).expect("checksum x"),
+        "policy.int64": sha256_file_hex(tmp_path.join("policy.int64")).expect("checksum policy"),
+        "wdl.float32": sha256_file_hex(tmp_path.join("wdl.float32")).expect("checksum wdl"),
+        "weight.float32": sha256_file_hex(tmp_path.join("weight.float32")).expect("checksum weight"),
+        "stockfish_q.float32": sha256_file_hex(tmp_path.join("stockfish_q.float32")).expect("checksum stockfish_q"),
+        "stockfish_winrate_loss.float32": sha256_file_hex(tmp_path.join("stockfish_winrate_loss.float32")).expect("checksum winrate loss"),
+        "stockfish_blunder_bucket.int64": sha256_file_hex(tmp_path.join("stockfish_blunder_bucket.int64")).expect("checksum blunder"),
+    });
     let meta = json!({
         "rows": rows,
         "input_planes": c,
@@ -393,6 +409,8 @@ fn main() {
         "input_mode": if current18 { "current_board_18" } else { "history" },
         "policy_size": moves.len(),
         "moves": moves,
+        "row_order": "input order after deterministic JSONL/.jsonl.zst streaming and row validation",
+        "checksums_sha256": checksums,
         "skipped_unknown_moves": skipped_unknown_moves,
         "has_stockfish_q": true,
         "has_stockfish_winrate_loss": true,
@@ -430,7 +448,7 @@ fn main() {
                 { "path": format!("{out}/wdl.float32"), "dtype": "float32", "shape": [rows, 3], "endianness": "little" }
             ],
             "shards": [out],
-            "validation": { "rows": { "total": rows }, "policy_size": meta["policy_size"], "input_planes": c, "hashes": {} },
+            "validation": { "rows": { "total": rows }, "policy_size": meta["policy_size"], "input_planes": c, "hashes": meta["checksums_sha256"] },
         });
         write_atomic(
             &manifest_out,

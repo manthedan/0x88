@@ -4,7 +4,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
-use tiny_leela_core::for_each_jsonl_line;
+use tiny_leela_core::{for_each_jsonl_line, sha256_file_hex};
 
 const FILES: &str = "abcdefgh";
 const PIECES: &str = ".PNBRQKpnbrqk";
@@ -241,12 +241,22 @@ fn main() {
         })
         .expect("stream SquareFormer input");
     }
+    tokens.flush().expect("flush tokens");
+    policy.flush().expect("flush policy");
+    wdl_file.flush().expect("flush wdl");
+    let checksums = json!({
+        "tokens.uint8": sha256_file_hex(tmp_path.join("tokens.uint8")).expect("checksum tokens"),
+        "policy.int64": sha256_file_hex(tmp_path.join("policy.int64")).expect("checksum policy"),
+        "wdl.float32": sha256_file_hex(tmp_path.join("wdl.float32")).expect("checksum wdl"),
+    });
     let meta = json!({
         "rows": rows,
         "token_features": fdim,
         "history_plies": history,
         "policy_size": 4096 + 4096 * 4,
         "format": "compact_square_tokens_v1",
+        "row_order": "input order after deterministic JSONL/.jsonl.zst streaming and row validation",
+        "checksums_sha256": checksums,
         "bad_or_skipped_rows": bad,
         "producer": { "language": "rust", "binary": "tiny-leela-rust-squareformer-cache" },
     });
@@ -287,6 +297,7 @@ fn main() {
                 "rows": { "total": rows, "bad_or_skipped": bad },
                 "token_features": fdim,
                 "policy_size": 4096 + 4096 * 4,
+                "hashes": meta["checksums_sha256"],
             },
         });
         write_atomic(
