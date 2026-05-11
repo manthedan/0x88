@@ -447,3 +447,91 @@ pub unsafe extern "C" fn tiny_leela_student_search_best_action(
 pub extern "C" fn tiny_leela_startpos_legal_count() -> u32 {
     legal_moves(&parse_fen(START_FEN).expect("valid start fen")).len() as u32
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{move_to_uci, Evaluation};
+
+    struct RootHintEvaluator {
+        policy_hint: &'static str,
+        action_value_hint: Option<&'static str>,
+    }
+
+    impl PositionEvaluator for RootHintEvaluator {
+        fn evaluate(&self, board: &Board) -> Evaluation {
+            let moves = legal_moves(board);
+            let mut eval = Evaluation::new(
+                moves
+                    .iter()
+                    .map(|&m| {
+                        let p = if move_to_uci(m) == self.policy_hint {
+                            100.0
+                        } else {
+                            1.0
+                        };
+                        (move_to_action_id(m), p)
+                    })
+                    .collect(),
+                [0.5, 0.0, 0.5],
+            );
+            if let Some(hint) = self.action_value_hint {
+                eval.action_values = Some(
+                    moves
+                        .iter()
+                        .map(|&m| {
+                            let av = if move_to_uci(m) == hint { 100.0 } else { 0.0 };
+                            (move_to_action_id(m), av)
+                        })
+                        .collect(),
+                );
+            }
+            eval
+        }
+    }
+
+    #[test]
+    fn classic_search_trace_prefers_policy_hint() {
+        let board = parse_fen(START_FEN).unwrap();
+        let evaluator = RootHintEvaluator {
+            policy_hint: "e2e4",
+            action_value_hint: None,
+        };
+        let result = search_root(
+            &board,
+            &evaluator,
+            SearchOptions {
+                visits: 16,
+                temperature: 0.0,
+                ..SearchOptions::default()
+            },
+        );
+        assert_eq!(result.visits, 16);
+        assert_eq!(result.policy.len(), 20);
+        assert_eq!(result.mv.map(move_to_uci).as_deref(), Some("e2e4"));
+        let prob_sum: f32 = result.policy.iter().map(|p| p.probability).sum();
+        assert!((prob_sum - 1.0).abs() < 1e-5, "prob_sum={prob_sum}");
+    }
+
+    #[test]
+    fn action_value_search_trace_can_override_uniform_policy() {
+        let board = parse_fen(START_FEN).unwrap();
+        let evaluator = RootHintEvaluator {
+            policy_hint: "a2a3",
+            action_value_hint: Some("d2d4"),
+        };
+        let result = search_root(
+            &board,
+            &evaluator,
+            SearchOptions {
+                visits: 16,
+                temperature: 0.0,
+                policy_mode: SearchPolicyMode::ActionValue,
+                av_weight: 10.0,
+                ..SearchOptions::default()
+            },
+        );
+        assert_eq!(result.policy.len(), 20);
+        assert_eq!(result.mv.map(move_to_uci).as_deref(), Some("d2d4"));
+    }
+}
