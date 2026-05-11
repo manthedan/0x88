@@ -1,10 +1,11 @@
 use serde_json::json;
-use std::{env, fs, time::Instant};
+use std::{env, fs, path::Path, process::Command, time::Instant};
 #[cfg(feature = "native-ort")]
 use tiny_leela_core::OnnxEvaluator;
 use tiny_leela_core::{
-    board_to_fen, in_check, legal_moves, make_move, move_to_uci, parse_fen, search_root, Color,
-    PositionEvaluator, SearchOptions, SearchPolicyMode, StudentEvaluator, START_FEN,
+    board_to_fen, in_check, legal_moves, make_move, move_to_uci, parse_fen, search_root,
+    sha256_file_hex, Color, PositionEvaluator, SearchOptions, SearchPolicyMode, StudentEvaluator,
+    START_FEN,
 };
 
 fn arg(name: &str, fallback: &str) -> String {
@@ -36,6 +37,28 @@ fn terminal_white_score(board: &tiny_leela_core::Board) -> Option<f32> {
         return Some(0.5);
     }
     Some(if board.turn == Color::White { 0.0 } else { 1.0 })
+}
+
+fn write_selfplay_output(path: &str, body: &str) {
+    if let Some(parent) = Path::new(path).parent() {
+        fs::create_dir_all(parent).expect("create output dir");
+    }
+    let tmp = format!("{path}.tmp-{}", std::process::id());
+    if path.ends_with(".zst") {
+        let plain = format!("{tmp}.jsonl");
+        fs::write(&plain, body).expect("write temp jsonl");
+        let status = Command::new("zstd")
+            .args(["-q", "-f", &plain, "-o", &tmp])
+            .status()
+            .expect("run zstd");
+        if !status.success() {
+            panic!("zstd compression failed for {path}: {status}");
+        }
+        let _ = fs::remove_file(&plain);
+    } else {
+        fs::write(&tmp, body).expect("write temp jsonl");
+    }
+    fs::rename(&tmp, path).expect("publish selfplay output");
 }
 
 fn result_for_turn(white_score: f32, turn: Color) -> [u8; 3] {
@@ -78,6 +101,10 @@ fn main() {
     let model_path = arg("--model", "artifacts/student_distill_benchmark.json");
     let meta_path = arg("--meta", "");
     let out_path = arg("--out", "data/selfplay/bootstrap.jsonl");
+    let manifest_out = arg("--manifest-out", "");
+    let lane = arg("--lane", "sup_sp");
+    let shard_id = arg("--shard-id", "");
+    let model_id = arg("--model-id", "");
     let games: usize = arg("--games", "2").parse().unwrap_or(2);
     let visits: u32 = arg("--visits", "4").parse().unwrap_or(4);
     let max_plies: usize = arg("--max-plies", "40").parse().unwrap_or(40);
@@ -165,6 +192,7 @@ fn main() {
             if white_score.is_some() {
                 break;
             }
+            let legal_uci: Vec<String> = legal_moves(&board).into_iter().map(move_to_uci).collect();
             let result = search_root(
                 &board,
                 &*evaluator,
@@ -195,19 +223,6 @@ fn main() {
             policy_mass += mass;
             let fen = board_to_fen(&board);
             let turn = board.turn;
-            pending.push((
-                json!({
-                    "game_id": format!("g{game:06}"),
-                    "ply": ply,
-                    "fen": fen,
-                    "turn": if turn == Color::White { "w" } else { "b" },
-                    "visits": result.visits,
-                    "policy": policy_obj,
-                    "root_value": ((result.value * 1e8).round() / 1e8),
-                }),
-                turn,
-            ));
-
             let mut r = rng_next(&mut rng);
             let mut chosen = result.policy.last().map(|e| e.mv).unwrap();
             for entry in &result.policy {
@@ -217,6 +232,38 @@ fn main() {
                     break;
                 }
             }
+            let selected_uci = move_to_uci(chosen);
+            pending.push((
+                json!({
+                    "schema": "selfplay_chunk_v1",
+                    "lane": lane,
+                    "game_id": format!("g{game:06}"),
+                    "shard_id": if shard_id.is_empty() { serde_json::Value::Null } else { json!(shard_id) },
+                    "ply": ply,
+                    "fen": fen,
+                    "turn": if turn == Color::White { "w" } else { "b" },
+                    "legal_uci": legal_uci,
+                    "selected_uci": selected_uci,
+                    "visits": result.visits,
+                    "policy": policy_obj,
+                    "q": ((result.value * 1e8).round() / 1e8),
+                    "root_value": ((result.value * 1e8).round() / 1e8),
+                    "search": {
+                        "visits": result.visits,
+                        "policy_mode": format!("{policy_mode:?}"),
+                        "cpuct": 1.5,
+                        "temperature": temperature,
+                    },
+                    "provenance": {
+                        "generator": "tiny-leela-rust-selfplay",
+                        "seed": rng,
+                        "model_id": if model_id.is_empty() { serde_json::Value::Null } else { json!(model_id) },
+                        "model_sha256": sha256_file_hex(&model_path).ok(),
+                        "rules_only": false,
+                    },
+                }),
+                turn,
+            ));
             board = make_move(&board, chosen);
             total_plies += 1;
             if (ply + 1) % progress_every == 0 {
@@ -236,7 +283,9 @@ fn main() {
         }
         for (mut row, turn) in pending {
             let obj = row.as_object_mut().unwrap();
-            obj.insert("result".into(), json!(result_for_turn(score, turn)));
+            let wdl = result_for_turn(score, turn);
+            obj.insert("result".into(), json!(wdl));
+            obj.insert("wdl".into(), json!(wdl));
             obj.insert("white_score".into(), json!(score));
             rows.push(row);
         }
@@ -244,23 +293,17 @@ fn main() {
         eprintln!("[rust-selfplay visits={visits}] game {}/{} done white_score={} rows_total={} adjudicated={} elapsed_s={:.1}", game + 1, games, score, rows.len(), adjudicated_games, started.elapsed().as_secs_f64());
     }
 
-    if let Some(parent) = std::path::Path::new(&out_path).parent() {
-        fs::create_dir_all(parent).expect("create output dir");
-    }
     let body = rows
         .iter()
         .map(|row| serde_json::to_string(row).unwrap())
         .collect::<Vec<_>>()
         .join("\n");
-    fs::write(
-        &out_path,
-        if body.is_empty() {
-            String::new()
-        } else {
-            format!("{body}\n")
-        },
-    )
-    .expect("write jsonl");
+    let output_body = if body.is_empty() {
+        String::new()
+    } else {
+        format!("{body}\n")
+    };
+    write_selfplay_output(&out_path, &output_body);
     let bytes = fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
 
     println!("METRIC selfplay_backend_rust=1");
@@ -285,4 +328,27 @@ fn main() {
         policy_mass as f64 / rows.len().max(1) as f64
     );
     println!("METRIC selfplay_output_bytes={bytes}");
+    if !manifest_out.is_empty() {
+        let manifest = json!({
+            "schema": "selfplay_chunk_manifest_v1",
+            "chunk_schema": "selfplay_chunk_v1",
+            "path": out_path,
+            "rows": rows.len(),
+            "games": completed_games,
+            "lane": lane,
+            "shard_id": shard_id,
+            "sha256": sha256_file_hex(&out_path).ok(),
+            "atomic_write": true,
+            "compressed": out_path.ends_with(".zst"),
+            "producer": { "language": "rust", "binary": "tiny-leela-rust-selfplay" },
+        });
+        if let Some(parent) = Path::new(&manifest_out).parent() {
+            fs::create_dir_all(parent).expect("create manifest dir");
+        }
+        fs::write(
+            &manifest_out,
+            serde_json::to_string_pretty(&manifest).unwrap() + "\n",
+        )
+        .expect("write manifest");
+    }
 }
