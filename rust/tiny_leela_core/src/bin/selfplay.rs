@@ -4,7 +4,7 @@ use std::{env, fs, time::Instant};
 use tiny_leela_core::OnnxEvaluator;
 use tiny_leela_core::{
     board_to_fen, in_check, legal_moves, make_move, move_to_uci, parse_fen, search_root, Color,
-    PositionEvaluator, SearchOptions, StudentEvaluator, START_FEN,
+    PositionEvaluator, SearchOptions, SearchPolicyMode, StudentEvaluator, START_FEN,
 };
 
 fn arg(name: &str, fallback: &str) -> String {
@@ -82,6 +82,12 @@ fn main() {
     let visits: u32 = arg("--visits", "4").parse().unwrap_or(4);
     let max_plies: usize = arg("--max-plies", "40").parse().unwrap_or(40);
     let temperature: f32 = arg("--temperature", "1").parse().unwrap_or(1.0);
+    let policy_mode = SearchPolicyMode::from_name(&arg("--policy-mode", "classic"));
+    let av_weight: f32 = arg("--av-weight", "0.25").parse().unwrap_or(0.25);
+    let rank_weight: f32 = arg("--rank-weight", "0.0").parse().unwrap_or(0.0);
+    let regret_weight: f32 = arg("--regret-weight", "0.0").parse().unwrap_or(0.0);
+    let risk_weight: f32 = arg("--risk-weight", "0.0").parse().unwrap_or(0.0);
+    let uncertainty_weight: f32 = arg("--uncertainty-weight", "0.0").parse().unwrap_or(0.0);
     let progress_every: usize = arg("--progress-every", "1").parse().unwrap_or(1).max(1);
     let adjudicate = arg("--adjudicate", "terminal");
     let adjudicate_threshold: f32 = arg("--adjudicate-threshold", "0.02")
@@ -167,7 +173,12 @@ fn main() {
                     cpuct: 1.5,
                     fpu: 0.0,
                     temperature,
-                    ..SearchOptions::default()
+                    policy_mode,
+                    av_weight,
+                    rank_weight,
+                    regret_weight,
+                    risk_weight,
+                    uncertainty_weight,
                 },
             );
             if result.mv.is_none() || result.policy.is_empty() {
@@ -254,6 +265,7 @@ fn main() {
 
     println!("METRIC selfplay_backend_rust=1");
     println!("METRIC selfplay_opening_fens={}", opening_fens.len());
+    println!("METRIC selfplay_search_policy_mode={policy_mode:?}");
     println!("METRIC selfplay_games={completed_games}");
     println!("METRIC selfplay_positions={}", rows.len());
     println!(
