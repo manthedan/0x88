@@ -167,3 +167,44 @@ pub fn encode_squareformer_legal_ids(board: &Board, width: usize) -> (Vec<Move>,
     }
     (moves, ids)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compact_squareformer_tokens_encode_state() {
+        let board = parse_fen("8/8/8/3pP3/8/8/8/4K2k w Kq d6 17 1").unwrap();
+        let meta = SquareFormerEvaluatorMeta {
+            kind: "squareformer".to_string(),
+            input_dim: None,
+            token_features: Some(11),
+            input_mode: Some("compact".to_string()),
+            input_format: None,
+            policy_size: 4096 + 4096 * 4,
+            history_plies: 2,
+            av_head_exported: false,
+            max_legal_moves: None,
+            onnx_fixed_legal_moves: None,
+        };
+        let tokens = encode_squareformer_compact_input(&board, &meta, &[]);
+        assert_eq!(tokens.len(), 64 * 11);
+        assert_eq!(tokens[36 * 11], 1); // white pawn on e5
+        assert_eq!(tokens[35 * 11], 7); // black pawn on d5
+        assert_eq!(tokens[43 * 11 + 5], 1); // en-passant square d6
+        assert_eq!(tokens[11 + 4], 9); // Kq castling mask broadcast
+        assert_eq!(tokens[11 + 6], 17); // halfmove clock broadcast
+        assert_eq!(tokens[11 + 3], 1); // white to move broadcast
+    }
+
+    #[test]
+    fn squareformer_legal_ids_match_move_classes() {
+        let board = parse_fen(crate::START_FEN).unwrap();
+        let (moves, ids) = encode_squareformer_legal_ids(&board, 32);
+        assert_eq!(moves.len(), 20);
+        for (mv, id) in moves.iter().zip(ids.iter()) {
+            assert_eq!(*id, move_to_chessbench_av_class(*mv));
+        }
+        assert!(ids[20..].iter().all(|&v| v == 0));
+    }
+}

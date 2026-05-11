@@ -223,3 +223,64 @@ pub fn encode_moveformer_legal_inputs(
 ) -> (Vec<Move>, Vec<i64>, Vec<f32>, Vec<f32>) {
     moveformer_legal_inputs(board, width, feature_count)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+    use std::path::Path;
+
+    fn fixture_positions() -> Vec<Value> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let path = root.join("tests/fixtures/contracts/positions.edge_cases.jsonl");
+        std::fs::read_to_string(path)
+            .expect("read position fixtures")
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| serde_json::from_str(line).expect("parse position fixture"))
+            .collect()
+    }
+
+    #[test]
+    fn onnx_planes_cover_contract_position_fixtures() {
+        let meta = OnnxEvaluatorMeta {
+            kind: "onnx".to_string(),
+            architecture: "residual".to_string(),
+            policy_map: "move_action_id_v1".to_string(),
+            moves: Vec::new(),
+            input_planes: 22,
+            history_plies: 0,
+            av_head_exported: false,
+            max_legal_moves: None,
+            onnx_fixed_legal_moves: None,
+            num_move_features: None,
+            allow_legal_overflow_zero_prior: false,
+        };
+        for row in fixture_positions() {
+            let fen = row["fen"].as_str().unwrap();
+            let expected_side = row["expected"]["side_to_move"].as_str().unwrap();
+            let board = parse_fen(fen).unwrap();
+            let planes = encode_onnx_input_planes(&board, &meta, &[]);
+            assert_eq!(planes.len(), meta.input_planes * 64, "{}", row["id"]);
+            let piece_count = board.squares.iter().filter(|p| p.is_some()).count() as f32;
+            let piece_plane_sum: f32 = planes[..12 * 64].iter().sum();
+            assert_eq!(piece_plane_sum, piece_count, "{}", row["id"]);
+            let side_plane = &planes[12 * 64..13 * 64];
+            let expected = if expected_side == "w" { 1.0 } else { -1.0 };
+            assert!(side_plane.iter().all(|&v| v == expected), "{}", row["id"]);
+        }
+    }
+
+    #[test]
+    fn moveformer_legal_inputs_are_aligned() {
+        let board = parse_fen(crate::START_FEN).unwrap();
+        let (moves, ids, features, mask) = encode_moveformer_legal_inputs(&board, 32, 12);
+        assert_eq!(moves.len(), 20);
+        assert_eq!(ids.len(), 32);
+        assert_eq!(features.len(), 32 * 12);
+        assert_eq!(mask.iter().filter(|&&v| v == 1.0).count(), 20);
+        for (mv, id) in moves.iter().zip(ids.iter()) {
+            assert_eq!(*id, move_to_action_id(*mv) as i64);
+        }
+    }
+}
