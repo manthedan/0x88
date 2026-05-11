@@ -22,6 +22,7 @@ export interface SquareFormerMeta {
   max_legal_moves?: number;
   onnx_fixed_legal_moves?: number;
   outputs?: string[];
+  onnx_dynamic_batch?: boolean;
 }
 
 function softmax(xs: ArrayLike<number>): number[] {
@@ -179,6 +180,11 @@ export class SquareFormerEvaluator implements Evaluator {
 
   async evaluateBatch(boards: BoardState[], contexts: EvaluationContext[] = []): Promise<Evaluation[]> {
     if (!boards.length) return [];
+    if (boards.length > 1 && this.meta.onnx_dynamic_batch !== true) {
+      const out: Evaluation[] = [];
+      for (let i = 0; i < boards.length; i++) out.push((await this.evaluateBatch([boards[i]], [contexts[i] ?? {}]))[0]);
+      return out;
+    }
     const compact = isCompactMeta(this.meta);
     const stride = compact ? this.meta.token_features ?? this.meta.history_plies + 9 : this.meta.input_dim;
     const one = 64 * stride;

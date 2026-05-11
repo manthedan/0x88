@@ -73,7 +73,7 @@ let stockfishPv = '';
 let stockfishSeq = 0;
 let stockfishSearchTurn: 'w' | 'b' = board.turn;
 let stockfishSearchFen = boardToFen(board);
-const modelKey = params.get('model') ?? '32x4';
+const modelKey = params.get('model') ?? 'cnn-96x8-100m-e8';
 const puctBatchSize = Math.max(1, Number(params.get('batch') ?? '16'));
 const temperature = Number(params.get('temperature') ?? '1');
 const topK = Number(params.get('topk') ?? '0');
@@ -97,31 +97,16 @@ function isCurrentEngineRequest(requestId: number) {
 }
 type PlayableModel = { onnx: string; meta: string; label: string; forcedMode?: string; defaultMode?: string; defaultVisits?: number; defaultPuctPolicy?: string; defaultAvWeight?: number };
 const models: Record<string, PlayableModel> = {
-  '32x4': { onnx: '/models/residual_32x4_history2.onnx', meta: '/models/residual_32x4_history2.meta.json', label: '32x4 supervised' },
-  '48x5': { onnx: '/models/residual_48x5_history2_2026mix_best.onnx', meta: '/models/residual_48x5_history2_2026mix_best.meta.json', label: '48x5 supervised best' },
-  'sfaux': { onnx: '/models/residual_48x5_history2_2026mix_sfauxfull_d8_mpv4.onnx', meta: '/models/residual_48x5_history2_2026mix_sfauxfull_d8_mpv4.meta.json', label: '48x5 Stockfish aux full' },
-  '48x5-10m': { onnx: '/models/residual_48x5_10m_e6.onnx', meta: '/models/residual_48x5_10m_e6.meta.json', label: '48x5 10M e6' },
-  '64x6-10m': { onnx: '/models/residual_64x6_10m_e9.onnx', meta: '/models/residual_64x6_10m_e9.meta.json', label: '64x6 10M e9' },
-  '80x5hyb-10m': { onnx: '/models/residual_80x5_hybrid_10m_e9.onnx', meta: '/models/residual_80x5_hybrid_10m_e9.meta.json', label: '80x5 hybrid 10M e9' },
-  '48x5-10m-e9': { onnx: '/models/residual_48x5_10m_e9.onnx', meta: '/models/residual_48x5_10m_e9.meta.json', label: '48x5 10M e9 guarded' },
-  '64x6-10m-e12ema': { onnx: '/models/residual_64x6_10m_e12_ema.onnx', meta: '/models/residual_64x6_10m_e12_ema.meta.json', label: '64x6 10M e12 EMA' },
-  '80x5hyb-10m-e12ema': { onnx: '/models/residual_80x5_hybrid_10m_e12_ema.onnx', meta: '/models/residual_80x5_hybrid_10m_e12_ema.meta.json', label: '80x5 hybrid 10M e12 EMA' },
-  'square-v1-smoke-policy': { onnx: '/models/squareformer_v1_100k_e3_single.onnx', meta: '/models/squareformer_v1_100k_e3_single.meta.json', label: 'SquareFormer v1 100k policy-only', forcedMode: 'argmax' },
-  'square-v1-smoke-puct': { onnx: '/models/squareformer_v1_100k_e3_single.onnx', meta: '/models/squareformer_v1_100k_e3_single.meta.json', label: 'SquareFormer v1 100k PUCT', forcedMode: 'puct' },
-  'chessformer-v1-100m-e3-policy': { onnx: '/models/chessformer_v1_100m_e3_single.onnx', meta: '/models/chessformer_v1_100m_e3_single.meta.json', label: 'ChessFormer v1 100M e3 policy-only', forcedMode: 'argmax' },
-  'chessformer-v1-100m-e3-puct': { onnx: '/models/chessformer_v1_100m_e3_single.onnx', meta: '/models/chessformer_v1_100m_e3_single.meta.json', label: 'ChessFormer v1 100M e3 PUCT', forcedMode: 'puct' },
-  'cnn96x8-100m-e8-puct': { onnx: '/models/cnn96x8_100m_e8.onnx', meta: '/models/cnn96x8_100m_e8.meta.json', label: 'CNN 96x8 100M e8 PUCT', forcedMode: 'puct' },
-  'cnn96x8-100m-e8-policy': { onnx: '/models/cnn96x8_100m_e8.onnx', meta: '/models/cnn96x8_100m_e8.meta.json', label: 'CNN 96x8 100M e8 policy-only', forcedMode: 'argmax' },
-  'cnn-64x6-100m-e3-puct': { onnx: '/models/cnn_64x6_100m_e3.onnx', meta: '/models/cnn_64x6_100m_e3.meta.json', label: 'CNN 64x6 100M e3 PUCT', forcedMode: 'puct' },
-  'cnn-64x6-100m-e3-policy': { onnx: '/models/cnn_64x6_100m_e3.onnx', meta: '/models/cnn_64x6_100m_e3.meta.json', label: 'CNN 64x6 100M e3 policy-only', forcedMode: 'argmax' },
-  'cnn-48x5-100m-e3-puct': { onnx: '/models/cnn_48x5_100m_e3.onnx', meta: '/models/cnn_48x5_100m_e3.meta.json', label: 'CNN 48x5 100M e3 PUCT', forcedMode: 'puct' },
-  'cnn-48x5-100m-e3-policy': { onnx: '/models/cnn_48x5_100m_e3.onnx', meta: '/models/cnn_48x5_100m_e3.meta.json', label: 'CNN 48x5 100M e3 policy-only', forcedMode: 'argmax' },
-  'cnn-32x4-100m-e3-puct': { onnx: '/models/cnn_32x4_100m_e3.onnx', meta: '/models/cnn_32x4_100m_e3.meta.json', label: 'CNN 32x4 100M e3 PUCT', forcedMode: 'puct' },
-  'cnn-32x4-100m-e3-policy': { onnx: '/models/cnn_32x4_100m_e3.onnx', meta: '/models/cnn_32x4_100m_e3.meta.json', label: 'CNN 32x4 100M e3 policy-only', forcedMode: 'argmax' },
-  'mf80-e3-10m-puct256': { onnx: '/models/mf80_e3_k128_onnxsim.onnx', meta: '/models/mf80_e3_k128_onnxsim.meta.json', label: 'MoveFormer 80x5 10M e3 tuned PUCT256', defaultMode: 'puct', defaultVisits: 256, defaultPuctPolicy: 'classic' },
-  'mf80-e3-10m-av128': { onnx: '/models/mf80_e3_k128_onnxsim.onnx', meta: '/models/mf80_e3_k128_onnxsim.meta.json', label: 'MoveFormer 80x5 10M e3 AV-tuned PUCT128', defaultMode: 'puct', defaultVisits: 128, defaultPuctPolicy: 'av', defaultAvWeight: 0.0025 },
+  'cnn-32x4-100m-e3': { onnx: '/models/cnn_32x4_100m_e3.onnx', meta: '/models/cnn_32x4_100m_e3.meta.json', label: 'CNN 32x4 · 100M · e3', defaultMode: 'puct' },
+  'cnn-48x5-100m-e3': { onnx: '/models/cnn_48x5_100m_e3.onnx', meta: '/models/cnn_48x5_100m_e3.meta.json', label: 'CNN 48x5 · 100M · e3', defaultMode: 'puct' },
+  'cnn-64x6-100m-e3': { onnx: '/models/cnn_64x6_100m_e3.onnx', meta: '/models/cnn_64x6_100m_e3.meta.json', label: 'CNN 64x6 · 100M · e3', defaultMode: 'puct' },
+  'cnn-80x5-100m-e3': { onnx: '/models/cnn_80x5_100m_e3.onnx', meta: '/models/cnn_80x5_100m_e3.meta.json', label: 'CNN 80x5 · 100M · e3', defaultMode: 'puct' },
+  'cnn-96x8-100m-e8': { onnx: '/models/cnn96x8_100m_e8.onnx', meta: '/models/cnn96x8_100m_e8.meta.json', label: 'CNN 96x8 · 100M · e8', defaultMode: 'puct' },
+  'moveformer-80x5-100m-e8-k128': { onnx: '/models/moveformer_80x5_100m_e8_k128.onnx', meta: '/models/moveformer_80x5_100m_e8_k128.meta.json', label: 'MoveFormer 80x5 k128 · 100M · e8', defaultMode: 'puct', defaultVisits: 128 },
+  'chessformer-v1-100m-e3': { onnx: '/models/chessformer_v1_100m_e3_single.onnx', meta: '/models/chessformer_v1_100m_e3_single.meta.json', label: 'ChessFormer v1 · 100M · e3', defaultMode: 'puct' },
+  'bt4-h8-100m-e5': { onnx: '/models/bt4_h8_100m_e5.onnx', meta: '/models/bt4_h8_100m_e5.meta.json', label: 'BT4 h8 · 100M · e5', defaultMode: 'puct' },
 };
-const selectedModel = models[modelKey] ?? models['32x4'];
+const selectedModel = models[modelKey] ?? models['cnn-96x8-100m-e8'];
 const requestedPlayMode = params.get('mode') ?? selectedModel.defaultMode ?? 'puct';
 const visits = Number(params.get('visits') ?? selectedModel.defaultVisits ?? '128');
 const puctPolicy = params.get('puctPolicy') ?? selectedModel.defaultPuctPolicy ?? 'classic';

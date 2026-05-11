@@ -80,41 +80,102 @@ def _is_wdl(x) -> bool:
     return all(math.isfinite(v) and v >= 0 for v in vals) and abs(sum(vals) - 1.0) <= 1e-5
 
 
+def _validate_policy(policy, line_no: int, *, min_policy_mass: float, max_policy_mass: float, legal_uci: set[str] | None = None) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(policy, dict) or not policy:
+        return [f'line {line_no}: empty/non-dict policy']
+    mass = 0.0
+    for move, prob in policy.items():
+        try:
+            p = float(prob)
+        except Exception:
+            errors.append(f'line {line_no}: nonnumeric policy prob for {move}')
+            continue
+        if not isinstance(move, str) or len(move) not in {4, 5}:
+            errors.append(f'line {line_no}: invalid UCI move key {move!r}')
+        elif legal_uci is not None and move not in legal_uci:
+            errors.append(f'line {line_no}: policy move {move} absent from legal_uci')
+        if not math.isfinite(p) or p < 0:
+            errors.append(f'line {line_no}: invalid policy prob for {move}')
+        mass += p
+    if not (min_policy_mass <= mass <= max_policy_mass):
+        errors.append(f'line {line_no}: policy mass {mass:.8f} outside [{min_policy_mass}, {max_policy_mass}]')
+    return errors
+
+
+def _validate_common(row: dict, line_no: int) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(row.get('game_id'), str) or not row.get('game_id'):
+        errors.append(f'line {line_no}: invalid game_id')
+    if not isinstance(row.get('ply'), int) or row.get('ply') < 0:
+        errors.append(f'line {line_no}: invalid ply')
+    if not isinstance(row.get('fen'), str) or not _fen_plausible(row.get('fen', '')):
+        errors.append(f'line {line_no}: invalid fen')
+    return errors
+
+
 def validate_row(row: dict, line_no: int, *, min_policy_mass: float, max_policy_mass: float) -> list[str]:
+    schema = row.get('schema')
+    if schema == 'selfplay_chunk_v1':
+        return validate_selfplay_chunk_v1(row, line_no, min_policy_mass=min_policy_mass, max_policy_mass=max_policy_mass)
+    return validate_legacy_row(row, line_no, min_policy_mass=min_policy_mass, max_policy_mass=max_policy_mass)
+
+
+def validate_selfplay_chunk_v1(row: dict, line_no: int, *, min_policy_mass: float, max_policy_mass: float) -> list[str]:
+    errors: list[str] = []
+    for key in ['schema', 'lane', 'game_id', 'ply', 'fen', 'legal_uci', 'selected_uci', 'policy', 'wdl', 'provenance']:
+        if key not in row:
+            errors.append(f'line {line_no}: missing {key}')
+    if errors:
+        return errors
+    errors.extend(_validate_common(row, line_no))
+    if row.get('lane') not in {'gumbel_zero', 'sup_sp', 'eval_demo', 'other'}:
+        errors.append(f'line {line_no}: invalid lane')
+    legal = row.get('legal_uci')
+    if not isinstance(legal, list) or not legal or not all(isinstance(m, str) and len(m) in {4, 5} for m in legal):
+        errors.append(f'line {line_no}: invalid legal_uci')
+        legal_set: set[str] | None = None
+    else:
+        legal_set = set(legal)
+    selected = row.get('selected_uci')
+    if not isinstance(selected, str) or len(selected) not in {4, 5}:
+        errors.append(f'line {line_no}: invalid selected_uci')
+    elif legal_set is not None and selected not in legal_set:
+        errors.append(f'line {line_no}: selected_uci {selected} absent from legal_uci')
+    if not _is_wdl(row.get('wdl')):
+        errors.append(f'line {line_no}: invalid wdl')
+    if 'q' in row:
+        try:
+            q = float(row['q'])
+            if not math.isfinite(q) or q < -1.0001 or q > 1.0001:
+                errors.append(f'line {line_no}: q outside [-1,1]')
+        except Exception:
+            errors.append(f'line {line_no}: invalid q')
+    provenance = row.get('provenance')
+    if not isinstance(provenance, dict):
+        errors.append(f'line {line_no}: invalid provenance')
+    else:
+        if not isinstance(provenance.get('generator'), str) or not provenance.get('generator'):
+            errors.append(f'line {line_no}: missing provenance.generator')
+        if 'seed' not in provenance or not isinstance(provenance.get('seed'), (int, str)):
+            errors.append(f'line {line_no}: missing provenance.seed')
+    errors.extend(_validate_policy(row.get('policy'), line_no, min_policy_mass=min_policy_mass, max_policy_mass=max_policy_mass, legal_uci=legal_set))
+    return errors
+
+
+def validate_legacy_row(row: dict, line_no: int, *, min_policy_mass: float, max_policy_mass: float) -> list[str]:
     errors: list[str] = []
     for key in ['game_id', 'ply', 'fen', 'turn', 'policy', 'result']:
         if key not in row:
             errors.append(f'line {line_no}: missing {key}')
     if errors:
         return errors
-    if not isinstance(row['game_id'], str) or not row['game_id']:
-        errors.append(f'line {line_no}: invalid game_id')
-    if not isinstance(row['ply'], int) or row['ply'] < 0:
-        errors.append(f'line {line_no}: invalid ply')
+    errors.extend(_validate_common(row, line_no))
     if row['turn'] not in {'w', 'b'}:
         errors.append(f'line {line_no}: invalid turn')
-    if not isinstance(row['fen'], str) or not _fen_plausible(row['fen']):
-        errors.append(f'line {line_no}: invalid fen')
     if not _is_wdl(row['result']):
         errors.append(f'line {line_no}: invalid result WDL')
-    policy = row.get('policy')
-    if not isinstance(policy, dict) or not policy:
-        errors.append(f'line {line_no}: empty/non-dict policy')
-    else:
-        mass = 0.0
-        for move, prob in policy.items():
-            try:
-                p = float(prob)
-            except Exception:
-                errors.append(f'line {line_no}: nonnumeric policy prob for {move}')
-                continue
-            if not isinstance(move, str) or len(move) not in {4, 5}:
-                errors.append(f'line {line_no}: invalid UCI move key {move!r}')
-            if not math.isfinite(p) or p < 0:
-                errors.append(f'line {line_no}: invalid policy prob for {move}')
-            mass += p
-        if not (min_policy_mass <= mass <= max_policy_mass):
-            errors.append(f'line {line_no}: policy mass {mass:.8f} outside [{min_policy_mass}, {max_policy_mass}]')
+    errors.extend(_validate_policy(row.get('policy'), line_no, min_policy_mass=min_policy_mass, max_policy_mass=max_policy_mass))
     if 'white_score' in row:
         try:
             ws = float(row['white_score'])
