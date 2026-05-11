@@ -34,7 +34,7 @@ pub use movegen::{
     in_check, is_square_attacked, king_square, legal_moves, make_move, pseudo_legal_moves,
 };
 #[cfg(feature = "native-ort")]
-pub use onnx::OnnxEvaluator;
+pub use onnx::{OnnxEvaluator, OnnxExecutionProviderConfig};
 pub use search::{
     search_root, search_root_with_history, SearchOptions, SearchPolicyEntry, SearchPolicyMode,
     SearchResult,

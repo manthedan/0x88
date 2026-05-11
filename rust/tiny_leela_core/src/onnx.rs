@@ -7,10 +7,41 @@ use crate::{
 };
 
 #[cfg(feature = "native-ort")]
+#[derive(Clone, Debug)]
+pub struct OnnxExecutionProviderConfig {
+    pub requested: Vec<String>,
+    pub require_cuda: bool,
+}
+
+#[cfg(feature = "native-ort")]
+impl OnnxExecutionProviderConfig {
+    pub fn from_env() -> Self {
+        let mut requested: Vec<String> = std::env::var("ORT_EXECUTION_PROVIDERS")
+            .ok()
+            .map(|s| {
+                s.split(',')
+                    .map(|x| x.trim().to_ascii_lowercase())
+                    .filter(|x| !x.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if requested.is_empty() && std::env::var("ORT_ENABLE_CUDA").ok().as_deref() == Some("1") {
+            requested.push("cuda".to_string());
+            requested.push("cpu".to_string());
+        }
+        Self {
+            requested,
+            require_cuda: std::env::var("ORT_REQUIRE_CUDA").ok().as_deref() == Some("1"),
+        }
+    }
+}
+
+#[cfg(feature = "native-ort")]
 pub struct OnnxEvaluator {
     session: std::sync::Mutex<ort::session::Session>,
     board_meta: Option<OnnxEvaluatorMeta>,
     square_meta: Option<SquareFormerEvaluatorMeta>,
+    provider_config: OnnxExecutionProviderConfig,
 }
 
 #[cfg(feature = "native-ort")]
@@ -54,6 +85,18 @@ fn aux_pairs_for_moves(
 #[cfg(feature = "native-ort")]
 impl OnnxEvaluator {
     pub fn from_files(model_path: &str, meta_path: &str) -> Result<Self, String> {
+        Self::from_files_with_provider_config(
+            model_path,
+            meta_path,
+            OnnxExecutionProviderConfig::from_env(),
+        )
+    }
+
+    pub fn from_files_with_provider_config(
+        model_path: &str,
+        meta_path: &str,
+        provider_config: OnnxExecutionProviderConfig,
+    ) -> Result<Self, String> {
         let meta_json = std::fs::read_to_string(meta_path).map_err(|e| e.to_string())?;
         let meta_value: serde_json::Value =
             serde_json::from_str(&meta_json).map_err(|e| e.to_string())?;
@@ -74,6 +117,44 @@ impl OnnxEvaluator {
             (Some(meta), None)
         };
         let mut builder = ort::session::Session::builder().map_err(|e| e.to_string())?;
+        if !provider_config.requested.is_empty() {
+            let wants_cuda = provider_config
+                .requested
+                .iter()
+                .any(|ep| ep == "cuda" || ep == "cudaexecutionprovider");
+            let wants_cpu = provider_config
+                .requested
+                .iter()
+                .any(|ep| ep == "cpu" || ep == "cpuexecutionprovider");
+            if wants_cuda && wants_cpu {
+                builder = builder
+                    .with_execution_providers([
+                        ort::ep::CUDA::default().build(),
+                        ort::ep::CPU::default().build(),
+                    ])
+                    .map_err(|e| format!("configure CUDA+CPU execution providers: {e}"))?;
+            } else if wants_cuda {
+                builder = builder
+                    .with_execution_providers([ort::ep::CUDA::default().build()])
+                    .map_err(|e| format!("configure CUDA execution provider: {e}"))?;
+            } else if wants_cpu {
+                builder = builder
+                    .with_execution_providers([ort::ep::CPU::default().build()])
+                    .map_err(|e| format!("configure CPU execution provider: {e}"))?;
+            } else {
+                return Err(format!(
+                    "unsupported ORT execution providers {:?}; supported: cuda,cpu",
+                    provider_config.requested
+                ));
+            }
+            if provider_config.require_cuda && !wants_cuda {
+                return Err("ORT_REQUIRE_CUDA=1 but CUDA was not requested".to_string());
+            }
+        } else if provider_config.require_cuda {
+            return Err(
+                "ORT_REQUIRE_CUDA=1 but no ORT execution providers were requested".to_string(),
+            );
+        }
         if let Ok(t) =
             std::env::var("ORT_INTRA_OP_NUM_THREADS").or_else(|_| std::env::var("ORT_NUM_THREADS"))
         {
@@ -90,7 +171,12 @@ impl OnnxEvaluator {
             session: std::sync::Mutex::new(session),
             board_meta,
             square_meta,
+            provider_config,
         })
+    }
+
+    pub fn provider_config(&self) -> &OnnxExecutionProviderConfig {
+        &self.provider_config
     }
 
     fn eval_squareformer_onnx(
