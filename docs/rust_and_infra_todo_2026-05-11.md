@@ -126,7 +126,8 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] PGN export from Rust arenas.
   - [x] Elo/SPRT/confidence summaries.
     - Rust arena emits PGN via `--pgn-out` and reports WDL/score-rate/Elo estimate metrics in JSON/stdout.
-  - [ ] Release-gate packet generation.
+  - [x] Release-gate packet generation.
+    - Rust arena can emit `rust_release_gate_packet_v1` via `--release-gate-out`.
   - [ ] Model manifest update helper.
 
 - [ ] Keep promotion policy conservative.
