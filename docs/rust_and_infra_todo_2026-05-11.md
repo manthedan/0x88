@@ -27,7 +27,7 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] `movegen.rs`: legal move generation, checks, pins, castling/en-passant legality.
   - [x] `move_codec.rs`: UCI conversion, move/action id mapping.
   - [x] `encoding.rs`: CNN/residual board tensors and history encodings.
-  - [ ] `squareformer.rs`: compact token construction and SquareFormer-specific preprocessing.
+  - [x] `squareformer.rs`: compact token construction and SquareFormer-specific preprocessing.
   - [x] `eval.rs`: `Evaluation`, `PositionEvaluator`, evaluator adapters.
   - [x] `onnx.rs`: native ORT evaluator implementation behind `native-ort`.
   - [x] `search.rs`: PUCT, aux/AV PUCT, search options/results.
