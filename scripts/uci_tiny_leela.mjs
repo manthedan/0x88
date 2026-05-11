@@ -76,6 +76,7 @@ function setOption(line) {
   else if (name === 'meta') { opts.meta = value; evaluatorPromise = null; }
   else if (name === 'visits' || name === 'nodes') opts.visits = Math.max(1, Number(value) || opts.visits);
   else if (name === 'batchsize') opts.batchSize = Math.max(1, Number(value) || opts.batchSize);
+  else if (name === 'threads' || name === 'hash' || name === 'clearhash' || name === 'ponder' || name === 'ucianalysemode') { /* accepted for UCI GUI/OpenBench compatibility; search is controlled by JS/ORT env. */ }
   else if (name === 'cpuct') opts.cpuct = Number(value) || opts.cpuct;
   else if (name === 'searchmode') opts.mode = value || opts.mode;
   else if (name === 'avweight') opts.avWeight = Number(value) || 0;
@@ -126,7 +127,13 @@ function visitsFromGo(line) {
   const depth = getNum('depth');
   if (Number.isFinite(depth) && depth > 0) return Math.max(1, Math.floor(depth));
   const movetime = getNum('movetime');
-  if (Number.isFinite(movetime) && movetime > 0) return Math.max(1, Math.floor(Math.min(512, movetime / 10)));
+  if (Number.isFinite(movetime) && movetime > 0) return Math.max(1, Math.floor(Math.min(1024, movetime / 10)));
+  const sideTime = board.turn === 'w' ? getNum('wtime') : getNum('btime');
+  const sideInc = board.turn === 'w' ? getNum('winc') : getNum('binc');
+  if (Number.isFinite(sideTime) && sideTime > 0) {
+    const softMs = Math.max(10, Math.min(1000, sideTime / 30 + (Number.isFinite(sideInc) ? sideInc * 0.5 : 0)));
+    return Math.max(1, Math.floor(Math.min(1024, softMs / 10)));
+  }
   return opts.visits;
 }
 
@@ -168,6 +175,9 @@ function uci() {
   send(`option name Visits type spin default ${opts.visits} min 1 max 100000`);
   send(`option name BatchSize type spin default ${opts.batchSize} min 1 max 1024`);
   send(`option name Cpuct type string default ${opts.cpuct}`);
+  send('option name Threads type spin default 1 min 1 max 128');
+  send('option name Hash type spin default 16 min 1 max 4096');
+  send('option name Ponder type check default false');
   send('option name SearchMode type combo default puct var puct var av var aux');
   send('option name AvWeight type string default 0');
   send('option name RankWeight type string default 0');
@@ -189,6 +199,7 @@ rl.on('line', async (raw) => {
     else if (line.startsWith('position ')) setPosition(line);
     else if (line.startsWith('go')) void go(line);
     else if (line === 'stop') stopped = true;
+    else if (line === 'ponderhit') { /* no-op */ }
     else if (line === 'quit') process.exit(0);
     else if (line === 'd') send(`info string fen ${boardToFen(board)}`);
   } catch (e) {

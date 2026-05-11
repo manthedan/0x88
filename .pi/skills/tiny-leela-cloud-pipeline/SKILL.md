@@ -126,5 +126,6 @@ Failure taxonomy and policy:
 - Row shortfall: add more high-quality elite/TCEC months first, then rerun `preflight-h8-dataset --estimate-capacity`; only loosen `--max-rows-per-game`, `--skip-plies`, or caps with explicit user approval.
 - Manifest missing/invalid: do not submit cache fanout.
 - Worker/image mismatch: record image/tag, git SHA, and full command in logs/registry before submit.
+- 100M h8 SquareFormer train cache `Bus error` / rc=135 failures are repairable as bounded shard repairs after the original array drains; use `cloud/aws/repair_100m_h8_squareformer_cache_shards.sh --submit --lanes 2 --max-submit 40` rather than rerunning the full h7/h8 fanout.
 - If logs are noisy, filter for semantic messages such as `progress`, `ERROR`, `manifest`, `validation`, or `uploaded`.
 - Never start 100M BT4 training until both h7/h8 cache manifests validate.

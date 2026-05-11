@@ -3,8 +3,13 @@ from __future__ import annotations
 FILES = "abcdefgh"
 PIECES = ".PNBRQKpnbrqk"
 PIECE_INDEX = {ch: i for i, ch in enumerate(PIECES)}
+PIECE_SYMBOLS = PIECES[1:]
+PIECE_SYMBOL_INDEX = {ch: i for i, ch in enumerate(PIECE_SYMBOLS)}
 POLICY_MAP = "uci_queen_knight_promo_v1"
 PROMOTIONS = "qrbn"
+CHESSBENCH_PROMOTIONS = {"n": 0, "b": 1, "r": 2, "q": 3}
+ACTION_SPACE = 64 * 64 * 5
+CHESSBENCH_AV_POLICY_SIZE = 4096 + 4096 * 4
 _ACTION_PROMOTIONS = {"n": 1, "b": 2, "r": 3, "q": 4}
 
 
@@ -70,5 +75,24 @@ def move_to_action_id(move: str) -> int:
         raise ValueError(f"invalid UCI move: {move}")
     from_sq = square_index(move[:2])
     to_sq = square_index(move[2:4])
-    promo = _ACTION_PROMOTIONS.get(move[4], 0) if len(move) == 5 else 0
+    promo = _ACTION_PROMOTIONS.get(move[4].lower(), 0) if len(move) == 5 else 0
     return (from_sq * 64 + to_sq) * 5 + promo
+
+
+def move_to_chessbench_av_class(move: str) -> int:
+    if len(move) not in (4, 5):
+        raise ValueError(f"invalid UCI move: {move}")
+    from_sq = square_index(move[:2])
+    to_sq = square_index(move[2:4])
+    ft = from_sq * 64 + to_sq
+    if len(move) >= 5:
+        promo = move[4].lower()
+        if promo in CHESSBENCH_PROMOTIONS:
+            return 4096 + ft * 4 + CHESSBENCH_PROMOTIONS[promo]
+    return ft
+
+
+# SquareFormer policy and ChessBench direct AV caches intentionally share the
+# compact 20,480-class map: 4,096 from-to classes followed by 4 promotion classes
+# for every from-to pair in n/b/r/q order.
+move_to_squareformer_policy_index = move_to_chessbench_av_class

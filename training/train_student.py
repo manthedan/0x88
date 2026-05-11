@@ -5,6 +5,7 @@ This is intentionally dependency-free. It is a real optimization loop over gener
 but it is not yet a chess-strength claim: with the bootstrap seed set it only proves the pipeline and
 provides policy/WDL losses for comparing future student designs.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -13,8 +14,16 @@ import math
 import random
 from pathlib import Path
 
-PIECES = "PNBRQKpnbrqk"
-PIECE_INDEX = {piece: i for i, piece in enumerate(PIECES)}
+try:
+    from training._lib.encoding import (
+        PIECE_SYMBOL_INDEX as PIECE_INDEX,
+        PIECE_SYMBOLS as BOARD_PIECES,
+    )
+except ModuleNotFoundError:
+    from _lib.encoding import (
+        PIECE_SYMBOL_INDEX as PIECE_INDEX,
+        PIECE_SYMBOLS as BOARD_PIECES,
+    )
 
 
 def softmax(xs: list[float]) -> list[float]:
@@ -26,7 +35,7 @@ def softmax(xs: list[float]) -> list[float]:
 
 def fen_features(fen: str) -> list[float]:
     board, side, *_ = fen.split()
-    counts = {p: 0 for p in PIECES}
+    counts = {p: 0 for p in BOARD_PIECES}
     for ch in board:
         if ch in counts:
             counts[ch] += 1
@@ -34,7 +43,7 @@ def fen_features(fen: str) -> list[float]:
     white_mat = sum(counts[p] * vals[p] for p in "PNBRQK")
     black_mat = sum(counts[p] * vals[p.upper()] for p in "pnbrqk")
     feats = [1.0, 1.0 if side == "w" else -1.0]
-    feats += [(counts[p] - 2.0) / 8.0 for p in PIECES]
+    feats += [(counts[p] - 2.0) / 8.0 for p in BOARD_PIECES]
     feats += [(white_mat - black_mat) / 39.0]
     return feats
 
@@ -87,7 +96,9 @@ def conv_student_features(fen: str, channels: int, layers: int) -> list[float]:
                             for df in (-1, 0, 1):
                                 ff = f + df
                                 if 0 <= ff < 8:
-                                    acc += prev[pc][rr][ff] * stable_weight(layer, c, pc, dr + 1, df + 1)
+                                    acc += prev[pc][rr][ff] * stable_weight(
+                                        layer, c, pc, dr + 1, df + 1
+                                    )
                     out[c][r][f] = math.tanh(acc / math.sqrt(prev_channels * 4.0))
         prev = out
     feats = [1.0, side_value]
@@ -108,12 +119,14 @@ def cached_feature_fn(fn, disk_path: str | None = None):
         except Exception:
             cache.clear()
     dirty = False
+
     def inner(fen: str) -> list[float]:
         nonlocal dirty
         if fen not in cache:
             cache[fen] = fn(fen)
             dirty = True
         return cache[fen]
+
     def flush() -> None:
         nonlocal dirty
         if path and dirty:
@@ -122,6 +135,7 @@ def cached_feature_fn(fn, disk_path: str | None = None):
             tmp.write_text(json.dumps(cache, separators=(",", ":")))
             tmp.replace(path)
             dirty = False
+
     inner.flush = flush  # type: ignore[attr-defined]
     inner.cache_size = lambda: len(cache)  # type: ignore[attr-defined]
     return inner
@@ -141,18 +155,22 @@ def load_selfplay_rows(paths: list[str], weight: float) -> list[dict]:
     for row in load_rows(paths):
         if not row.get("policy") or not row.get("result"):
             continue
-        policy = {move: float(prob) for move, prob in row["policy"].items() if float(prob) > 0}
+        policy = {
+            move: float(prob) for move, prob in row["policy"].items() if float(prob) > 0
+        }
         mass = sum(policy.values())
         if mass <= 0:
             continue
-        rows.append({
-            "fen": row["fen"],
-            "policy": {move: prob / mass for move, prob in policy.items()},
-            "wdl": [float(v) for v in row["result"]],
-            "q": float(row["result"][0]) - float(row["result"][2]),
-            "_source": "selfplay",
-            "_weight": weight,
-        })
+        rows.append(
+            {
+                "fen": row["fen"],
+                "policy": {move: prob / mass for move, prob in policy.items()},
+                "wdl": [float(v) for v in row["result"]],
+                "q": float(row["result"][0]) - float(row["result"][2]),
+                "_source": "selfplay",
+                "_weight": weight,
+            }
+        )
     return rows
 
 
@@ -180,7 +198,14 @@ def merge_fen_rows(rows: list[dict]) -> list[dict]:
         if mass > 0:
             policy = {move: prob / mass for move, prob in policy.items()}
         q = (acc["wdl"][0] - acc["wdl"][2]) / count
-        out.append({"fen": fen, "policy": policy, "wdl": [prob / count for prob in acc["wdl"]], "q": q})
+        out.append(
+            {
+                "fen": fen,
+                "policy": policy,
+                "wdl": [prob / count for prob in acc["wdl"]],
+                "q": q,
+            }
+        )
     return out
 
 
@@ -188,7 +213,9 @@ def cross_entropy(target: list[float], pred: list[float]) -> float:
     return -sum(t * math.log(max(p, 1e-12)) for t, p in zip(target, pred))
 
 
-def average_weights(weights: list[list[float]], totals: list[list[float]], count: int) -> list[list[float]]:
+def average_weights(
+    weights: list[list[float]], totals: list[list[float]], count: int
+) -> list[list[float]]:
     if count <= 0:
         return weights
     return [[total / count for total in row] for row in totals]
@@ -199,18 +226,29 @@ def q_to_wdl(q: float) -> list[float]:
     return [max(q, 0.0), 1.0 - abs(q), max(-q, 0.0)]
 
 
-def evaluate_q_wdl(rows: list[dict], ww: list[list[float]], value_feature_fn=wdl_features) -> float:
+def evaluate_q_wdl(
+    rows: list[dict], ww: list[list[float]], value_feature_fn=wdl_features
+) -> float:
     if not rows:
         return 0.0
     total = 0.0
     for row in rows:
         xv = value_feature_fn(row["fen"])
         wdl_logits = [sum(w * v for w, v in zip(weights, xv)) for weights in ww]
-        total += cross_entropy(q_to_wdl(row.get("q", row["wdl"][0] - row["wdl"][2])), softmax(wdl_logits))
+        total += cross_entropy(
+            q_to_wdl(row.get("q", row["wdl"][0] - row["wdl"][2])), softmax(wdl_logits)
+        )
     return total / len(rows)
 
 
-def evaluate(rows: list[dict], moves: list[str], wp: list[list[float]], ww: list[list[float]], policy_feature_fn=fen_features, value_feature_fn=wdl_features) -> tuple[float, float, float]:
+def evaluate(
+    rows: list[dict],
+    moves: list[str],
+    wp: list[list[float]],
+    ww: list[list[float]],
+    policy_feature_fn=fen_features,
+    value_feature_fn=wdl_features,
+) -> tuple[float, float, float]:
     if not rows:
         return 0.0, 0.0, 0.0
     p_ce = 0.0
@@ -236,16 +274,34 @@ def evaluate(rows: list[dict], moves: list[str], wp: list[list[float]], ww: list
     return p_ce / n, w_ce / n, top1 / n
 
 
-def train_once_tinygrad(rows: list[dict], moves: list[str], epochs: int, lr: float, holdout_mod: int, holdout_offset: int, average: bool, average_policy_only: bool, policy_feature_fn=fen_features, value_feature_fn=wdl_features) -> dict:
+def train_once_tinygrad(
+    rows: list[dict],
+    moves: list[str],
+    epochs: int,
+    lr: float,
+    holdout_mod: int,
+    holdout_offset: int,
+    average: bool,
+    average_policy_only: bool,
+    policy_feature_fn=fen_features,
+    value_feature_fn=wdl_features,
+) -> dict:
     from tinygrad import Tensor
     from tinygrad.nn.optim import SGD
-    train_rows = [row for i, row in enumerate(rows) if i % holdout_mod != holdout_offset]
+
+    train_rows = [
+        row for i, row in enumerate(rows) if i % holdout_mod != holdout_offset
+    ]
     dev_rows = [row for i, row in enumerate(rows) if i % holdout_mod == holdout_offset]
     feat_dim = len(policy_feature_fn(rows[0]["fen"]))
     value_feat_dim = len(value_feature_fn(rows[0]["fen"]))
     rng = random.Random(7 + holdout_offset)
-    wp_init = [[rng.uniform(-0.01, 0.01) for _ in range(len(moves))] for _ in range(feat_dim)]
-    ww_init = [[rng.uniform(-0.01, 0.01) for _ in range(3)] for _ in range(value_feat_dim)]
+    wp_init = [
+        [rng.uniform(-0.01, 0.01) for _ in range(len(moves))] for _ in range(feat_dim)
+    ]
+    ww_init = [
+        [rng.uniform(-0.01, 0.01) for _ in range(3)] for _ in range(value_feat_dim)
+    ]
     x = Tensor([policy_feature_fn(row["fen"]) for row in train_rows])
     xv = Tensor([value_feature_fn(row["fen"]) for row in train_rows])
     target = []
@@ -280,20 +336,54 @@ def train_once_tinygrad(rows: list[dict], moves: list[str], epochs: int, lr: flo
             avg_ww = avg_ww + ww.detach()
     Tensor.training = False
     final_wp_t = (avg_wp / avg_count) if average and avg_count else wp
-    final_ww_t = (avg_ww / avg_count) if average and not average_policy_only and avg_count else ww
+    final_ww_t = (
+        (avg_ww / avg_count)
+        if average and not average_policy_only and avg_count
+        else ww
+    )
     wp_cols = final_wp_t.numpy().tolist()
     ww_cols = final_ww_t.numpy().tolist()
     final_wp = [[wp_cols[j][i] for j in range(feat_dim)] for i in range(len(moves))]
     final_ww = [[ww_cols[j][i] for j in range(value_feat_dim)] for i in range(3)]
-    train_policy_ce, train_wdl_ce, _train_top1 = evaluate(train_rows, moves, final_wp, final_ww, policy_feature_fn, value_feature_fn)
-    dev_policy_ce, dev_wdl_ce, dev_top1 = evaluate(dev_rows, moves, final_wp, final_ww, policy_feature_fn, value_feature_fn)
+    train_policy_ce, train_wdl_ce, _train_top1 = evaluate(
+        train_rows, moves, final_wp, final_ww, policy_feature_fn, value_feature_fn
+    )
+    dev_policy_ce, dev_wdl_ce, dev_top1 = evaluate(
+        dev_rows, moves, final_wp, final_ww, policy_feature_fn, value_feature_fn
+    )
     dev_q_wdl_ce = evaluate_q_wdl(dev_rows, final_ww, value_feature_fn)
     quality = 100.0 / (1.0 + dev_policy_ce + dev_wdl_ce)
-    return {"score": quality, "train_policy_ce": train_policy_ce, "train_wdl_ce": train_wdl_ce, "dev_policy_ce": dev_policy_ce, "dev_wdl_ce": dev_wdl_ce, "dev_q_wdl_ce": dev_q_wdl_ce, "dev_top1": dev_top1, "policy_weights": final_wp, "wdl_weights": final_ww, "feature_dim": feat_dim, "wdl_feature_dim": value_feat_dim, "weight_average_count": avg_count}
+    return {
+        "score": quality,
+        "train_policy_ce": train_policy_ce,
+        "train_wdl_ce": train_wdl_ce,
+        "dev_policy_ce": dev_policy_ce,
+        "dev_wdl_ce": dev_wdl_ce,
+        "dev_q_wdl_ce": dev_q_wdl_ce,
+        "dev_top1": dev_top1,
+        "policy_weights": final_wp,
+        "wdl_weights": final_ww,
+        "feature_dim": feat_dim,
+        "wdl_feature_dim": value_feat_dim,
+        "weight_average_count": avg_count,
+    }
 
 
-def train_once(rows: list[dict], moves: list[str], epochs: int, lr: float, holdout_mod: int, holdout_offset: int, average: bool, average_policy_only: bool, policy_feature_fn=fen_features, value_feature_fn=wdl_features) -> dict:
-    train_rows = [row for i, row in enumerate(rows) if i % holdout_mod != holdout_offset]
+def train_once(
+    rows: list[dict],
+    moves: list[str],
+    epochs: int,
+    lr: float,
+    holdout_mod: int,
+    holdout_offset: int,
+    average: bool,
+    average_policy_only: bool,
+    policy_feature_fn=fen_features,
+    value_feature_fn=wdl_features,
+) -> dict:
+    train_rows = [
+        row for i, row in enumerate(rows) if i % holdout_mod != holdout_offset
+    ]
     dev_rows = [row for i, row in enumerate(rows) if i % holdout_mod == holdout_offset]
     feat_dim = len(policy_feature_fn(rows[0]["fen"]))
     value_feat_dim = len(value_feature_fn(rows[0]["fen"]))
@@ -335,9 +425,17 @@ def train_once(rows: list[dict], moves: list[str], epochs: int, lr: float, holdo
                     avg_ww[i][j] += val
 
     final_wp = average_weights(wp, avg_wp, avg_count) if average else wp
-    final_ww = average_weights(ww, avg_ww, avg_count) if average and not average_policy_only else ww
-    train_policy_ce, train_wdl_ce, _train_top1 = evaluate(train_rows, moves, final_wp, final_ww, policy_feature_fn, value_feature_fn)
-    dev_policy_ce, dev_wdl_ce, dev_top1 = evaluate(dev_rows, moves, final_wp, final_ww, policy_feature_fn, value_feature_fn)
+    final_ww = (
+        average_weights(ww, avg_ww, avg_count)
+        if average and not average_policy_only
+        else ww
+    )
+    train_policy_ce, train_wdl_ce, _train_top1 = evaluate(
+        train_rows, moves, final_wp, final_ww, policy_feature_fn, value_feature_fn
+    )
+    dev_policy_ce, dev_wdl_ce, dev_top1 = evaluate(
+        dev_rows, moves, final_wp, final_ww, policy_feature_fn, value_feature_fn
+    )
     dev_q_wdl_ce = evaluate_q_wdl(dev_rows, final_ww, value_feature_fn)
     quality = 100.0 / (1.0 + dev_policy_ce + dev_wdl_ce)
     return {
@@ -358,21 +456,72 @@ def train_once(rows: list[dict], moves: list[str], epochs: int, lr: float, holdo
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train", nargs="+", default=["data/teacher_labels.jsonl", "data/stockfish_teacher_labels.jsonl"])
-    parser.add_argument("--selfplay-train", nargs="*", default=[], help="optional self-play JSONL rows with visit policy and result targets")
-    parser.add_argument("--selfplay-weight", type=float, default=0.0, help="per-row training weight for self-play rows")
+    parser.add_argument(
+        "--train",
+        nargs="+",
+        default=["data/teacher_labels.jsonl", "data/stockfish_teacher_labels.jsonl"],
+    )
+    parser.add_argument(
+        "--selfplay-train",
+        nargs="*",
+        default=[],
+        help="optional self-play JSONL rows with visit policy and result targets",
+    )
+    parser.add_argument(
+        "--selfplay-weight",
+        type=float,
+        default=0.0,
+        help="per-row training weight for self-play rows",
+    )
     parser.add_argument("--epochs", type=int, default=1200)
     parser.add_argument("--lr", type=float, default=0.05)
-    parser.add_argument("--holdout-mod", type=int, default=2, help="hold out rows whose index modulo this value is 0")
+    parser.add_argument(
+        "--holdout-mod",
+        type=int,
+        default=2,
+        help="hold out rows whose index modulo this value is 0",
+    )
     parser.add_argument("--out", default="artifacts/student_linear.json")
-    parser.add_argument("--merge-fen", action="store_true", help="average labels that share the same FEN before splitting")
-    parser.add_argument("--average-weights", action="store_true", help="use Polyak/SWA-style averaged weights from the second half of training")
-    parser.add_argument("--average-policy-only", action="store_true", help="when averaging, average only policy weights and keep final WDL weights")
-    parser.add_argument("--report-folds", action="store_true", help="also train alternate holdout folds for robustness reporting without changing the primary metric")
-    parser.add_argument("--compare-conv-archs", action="store_true", help="train frozen-conv feature students for 16x2/24x3/48x5/64x6 architecture diagnostics")
-    parser.add_argument("--primary-conv-arch", choices=["16x2", "24x3", "48x5", "64x6"], help="use the selected frozen-conv feature student as the primary artifact and metric")
-    parser.add_argument("--feature-cache", help="optional JSON cache for expensive frozen-conv features keyed by FEN")
-    parser.add_argument("--trainer", choices=["python", "tinygrad"], default="python", help="training backend for the linear heads")
+    parser.add_argument(
+        "--merge-fen",
+        action="store_true",
+        help="average labels that share the same FEN before splitting",
+    )
+    parser.add_argument(
+        "--average-weights",
+        action="store_true",
+        help="use Polyak/SWA-style averaged weights from the second half of training",
+    )
+    parser.add_argument(
+        "--average-policy-only",
+        action="store_true",
+        help="when averaging, average only policy weights and keep final WDL weights",
+    )
+    parser.add_argument(
+        "--report-folds",
+        action="store_true",
+        help="also train alternate holdout folds for robustness reporting without changing the primary metric",
+    )
+    parser.add_argument(
+        "--compare-conv-archs",
+        action="store_true",
+        help="train frozen-conv feature students for 16x2/24x3/48x5/64x6 architecture diagnostics",
+    )
+    parser.add_argument(
+        "--primary-conv-arch",
+        choices=["16x2", "24x3", "48x5", "64x6"],
+        help="use the selected frozen-conv feature student as the primary artifact and metric",
+    )
+    parser.add_argument(
+        "--feature-cache",
+        help="optional JSON cache for expensive frozen-conv features keyed by FEN",
+    )
+    parser.add_argument(
+        "--trainer",
+        choices=["python", "tinygrad"],
+        default="python",
+        help="training backend for the linear heads",
+    )
     args = parser.parse_args()
 
     raw_rows = load_rows(args.train)
@@ -380,7 +529,11 @@ def main() -> int:
     for row in teacher_rows:
         row.setdefault("_source", "teacher")
         row.setdefault("_weight", 1.0)
-    selfplay_rows = load_selfplay_rows(args.selfplay_train, args.selfplay_weight) if args.selfplay_train and args.selfplay_weight > 0 else []
+    selfplay_rows = (
+        load_selfplay_rows(args.selfplay_train, args.selfplay_weight)
+        if args.selfplay_train and args.selfplay_weight > 0
+        else []
+    )
     rows = teacher_rows + selfplay_rows
     if len(rows) < 2:
         raise SystemExit("Need at least two teacher rows")
@@ -391,31 +544,88 @@ def main() -> int:
     primary_conv_channels = 0
     primary_conv_layers = 0
     if args.primary_conv_arch:
-        primary_conv_channels, primary_conv_layers = [int(v) for v in args.primary_conv_arch.split("x")]
-        cache_path = args.feature_cache or f"artifacts/cache/conv_features_{args.primary_conv_arch}.json"
-        primary_feature_fn = cached_feature_fn(lambda fen, c=primary_conv_channels, l=primary_conv_layers: conv_student_features(fen, c, l), cache_path)
+        primary_conv_channels, primary_conv_layers = [
+            int(v) for v in args.primary_conv_arch.split("x")
+        ]
+        cache_path = (
+            args.feature_cache
+            or f"artifacts/cache/conv_features_{args.primary_conv_arch}.json"
+        )
+        primary_feature_fn = cached_feature_fn(
+            lambda fen, c=primary_conv_channels, l=primary_conv_layers: (
+                conv_student_features(fen, c, l)
+            ),
+            cache_path,
+        )
         primary_value_feature_fn = primary_feature_fn
         primary_kind = "frozen_conv_fen_student"
     trainer_fn = train_once_tinygrad if args.trainer == "tinygrad" else train_once
-    result = trainer_fn(rows, moves, args.epochs, args.lr, args.holdout_mod, 0, args.average_weights, args.average_policy_only, primary_feature_fn, primary_value_feature_fn)
+    result = trainer_fn(
+        rows,
+        moves,
+        args.epochs,
+        args.lr,
+        args.holdout_mod,
+        0,
+        args.average_weights,
+        args.average_policy_only,
+        primary_feature_fn,
+        primary_value_feature_fn,
+    )
     fold_scores = [result["score"]]
     if args.report_folds:
         for offset in range(1, args.holdout_mod):
-            fold_scores.append(trainer_fn(rows, moves, args.epochs, args.lr, args.holdout_mod, offset, args.average_weights, args.average_policy_only, primary_feature_fn, primary_value_feature_fn)["score"])
+            fold_scores.append(
+                trainer_fn(
+                    rows,
+                    moves,
+                    args.epochs,
+                    args.lr,
+                    args.holdout_mod,
+                    offset,
+                    args.average_weights,
+                    args.average_policy_only,
+                    primary_feature_fn,
+                    primary_value_feature_fn,
+                )["score"]
+            )
     fold_mean = sum(fold_scores) / len(fold_scores)
-    fold_std = math.sqrt(sum((score - fold_mean) ** 2 for score in fold_scores) / len(fold_scores))
+    fold_std = math.sqrt(
+        sum((score - fold_mean) ** 2 for score in fold_scores) / len(fold_scores)
+    )
 
     conv_best = None
     conv_results = []
     if args.compare_conv_archs:
         for channels, layers in ((16, 2), (24, 3), (48, 5), (64, 6)):
-            feature_fn = cached_feature_fn(lambda fen, c=channels, l=layers: conv_student_features(fen, c, l))
-            conv = train_once(rows, moves, args.epochs, args.lr, args.holdout_mod, 0, args.average_weights, args.average_policy_only, feature_fn, feature_fn)
-            conv_params = (13 * channels * 9) + max(0, layers - 1) * (channels * channels * 9)
+            feature_fn = cached_feature_fn(
+                lambda fen, c=channels, l=layers: conv_student_features(fen, c, l)
+            )
+            conv = train_once(
+                rows,
+                moves,
+                args.epochs,
+                args.lr,
+                args.holdout_mod,
+                0,
+                args.average_weights,
+                args.average_policy_only,
+                feature_fn,
+                feature_fn,
+            )
+            conv_params = (13 * channels * 9) + max(0, layers - 1) * (
+                channels * channels * 9
+            )
             head_params = (len(moves) + 3) * conv["feature_dim"]
             bytes_est = 4 * (conv_params + head_params)
             score_per_kb = conv["score"] / max(bytes_est / 1024.0, 1e-9)
-            item = {"channels": channels, "layers": layers, "score": conv["score"], "bytes": bytes_est, "score_per_kb": score_per_kb}
+            item = {
+                "channels": channels,
+                "layers": layers,
+                "score": conv["score"],
+                "bytes": bytes_est,
+                "score_per_kb": score_per_kb,
+            }
             conv_results.append(item)
             if conv_best is None or item["score_per_kb"] > conv_best["score_per_kb"]:
                 conv_best = item
@@ -424,21 +634,39 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     if hasattr(primary_feature_fn, "flush"):
         primary_feature_fn.flush()  # type: ignore[attr-defined]
-    artifact = {"kind": primary_kind, "moves": moves, "policy_weights": result["policy_weights"], "wdl_weights": result["wdl_weights"], "policy_feature_dim": result["feature_dim"], "wdl_feature_dim": result["wdl_feature_dim"], "weight_average_count": result["weight_average_count"], "conv_channels": primary_conv_channels, "conv_layers": primary_conv_layers}
+    artifact = {
+        "kind": primary_kind,
+        "moves": moves,
+        "policy_weights": result["policy_weights"],
+        "wdl_weights": result["wdl_weights"],
+        "policy_feature_dim": result["feature_dim"],
+        "wdl_feature_dim": result["wdl_feature_dim"],
+        "weight_average_count": result["weight_average_count"],
+        "conv_channels": primary_conv_channels,
+        "conv_layers": primary_conv_layers,
+    }
     artifact_text = json.dumps(artifact, separators=(",", ":"))
     out.write_text(artifact_text)
-    model_weight_count = (len(moves) * result["feature_dim"]) + (3 * result["wdl_feature_dim"])
-    estimated_eval_ops = model_weight_count + (primary_conv_channels * primary_conv_layers * 64 if primary_conv_channels else 0)
+    model_weight_count = (len(moves) * result["feature_dim"]) + (
+        3 * result["wdl_feature_dim"]
+    )
+    estimated_eval_ops = model_weight_count + (
+        primary_conv_channels * primary_conv_layers * 64 if primary_conv_channels else 0
+    )
     print(f"METRIC distill_student_score={result['score']:.6f}")
     print(f"METRIC train_policy_ce={result['train_policy_ce']:.6f}")
     print(f"METRIC train_wdl_ce={result['train_wdl_ce']:.6f}")
     print(f"METRIC dev_policy_ce={result['dev_policy_ce']:.6f}")
     print(f"METRIC dev_wdl_ce={result['dev_wdl_ce']:.6f}")
     print(f"METRIC dev_q_wdl_ce={result['dev_q_wdl_ce']:.6f}")
-    print(f"METRIC dev_wdl_q_ce_gap={result['dev_q_wdl_ce'] - result['dev_wdl_ce']:.6f}")
+    print(
+        f"METRIC dev_wdl_q_ce_gap={result['dev_q_wdl_ce'] - result['dev_wdl_ce']:.6f}"
+    )
     print(f"METRIC dev_policy_only_score={100.0 / (1.0 + result['dev_policy_ce']):.6f}")
     print(f"METRIC dev_wdl_only_score={100.0 / (1.0 + result['dev_wdl_ce']):.6f}")
-    print(f"METRIC dev_loss_balance_gap={result['dev_policy_ce'] - result['dev_wdl_ce']:.6f}")
+    print(
+        f"METRIC dev_loss_balance_gap={result['dev_policy_ce'] - result['dev_wdl_ce']:.6f}"
+    )
     print(f"METRIC dev_policy_top1={result['dev_top1']:.6f}")
     print(f"METRIC teacher_rows={len(teacher_rows)}")
     print(f"METRIC raw_teacher_rows={len(raw_rows)}")
@@ -455,14 +683,20 @@ def main() -> int:
     print(f"METRIC model_json_bytes={len(artifact_text.encode('utf-8'))}")
     print(f"METRIC model_weight_count={model_weight_count}")
     print(f"METRIC estimated_eval_ops={estimated_eval_ops}")
-    print(f"METRIC feature_cache_entries={primary_feature_fn.cache_size() if hasattr(primary_feature_fn, 'cache_size') else 0}")
+    print(
+        f"METRIC feature_cache_entries={primary_feature_fn.cache_size() if hasattr(primary_feature_fn, 'cache_size') else 0}"
+    )
     print(f"METRIC browser_json_compatible=1")
     print(f"METRIC fold_score_mean={fold_mean:.6f}")
     print(f"METRIC fold_score_std={fold_std:.6f}")
     if conv_best is not None:
         for item in conv_results:
-            print(f"METRIC conv_{item['channels']}x{item['layers']}_score={item['score']:.6f}")
-            print(f"METRIC conv_{item['channels']}x{item['layers']}_score_per_kb={item['score_per_kb']:.6f}")
+            print(
+                f"METRIC conv_{item['channels']}x{item['layers']}_score={item['score']:.6f}"
+            )
+            print(
+                f"METRIC conv_{item['channels']}x{item['layers']}_score_per_kb={item['score_per_kb']:.6f}"
+            )
         print(f"METRIC best_conv_channels={conv_best['channels']}")
         print(f"METRIC best_conv_layers={conv_best['layers']}")
         print(f"METRIC best_conv_score={conv_best['score']:.6f}")

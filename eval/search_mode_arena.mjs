@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { parseFen, START_FEN, boardToFen } from '../src/chess/board.ts';
 import { inCheck, legalMoves, makeMove } from '../src/chess/movegen.ts';
@@ -37,10 +38,10 @@ function cacheKey(board, context = {}) {
 function parsePlayers() {
   return arg('--players', '').split(',').filter(Boolean).map((entry) => {
     const parts = entry.split(':');
-    const [name, onnx, meta, mode = 'puct', avWeight = '0.25', rankWeight = '0', regretWeight = '0', riskWeight = '0', uncertaintyWeight = '0'] = parts;
+    const [name, onnx, meta, mode = 'puct', avWeight = '0.25', rankWeight = '0', regretWeight = '0', riskWeight = '0', uncertaintyWeight = '0', cpuctOverride = '', fpuOverride = ''] = parts;
     if (!name || !onnx || !meta) throw new Error(`Bad --players entry: ${entry}`);
     if (!['policy', 'puct', 'av', 'aux'].includes(mode)) throw new Error(`Bad player mode for ${name}: ${mode}`);
-    return { name, onnx, meta, mode, avWeight: Number(avWeight), rankWeight: Number(rankWeight), regretWeight: Number(regretWeight), riskWeight: Number(riskWeight), uncertaintyWeight: Number(uncertaintyWeight) }; 
+    return { name, onnx, meta, mode, avWeight: Number(avWeight), rankWeight: Number(rankWeight), regretWeight: Number(regretWeight), riskWeight: Number(riskWeight), uncertaintyWeight: Number(uncertaintyWeight), cpuct: cpuctOverride === '' ? null : Number(cpuctOverride), fpu: fpuOverride === '' ? null : Number(fpuOverride) }; 
   });
 }
 function valueFromWdl(wdl) { return wdl[0] - wdl[2]; }
@@ -118,7 +119,8 @@ async function choosePlayerMove(player, board, evaluator, opts, history) {
   if (player.mode === 'policy') return choosePolicyMove(board, evaluator, historyFens);
   return chooseMove(board, evaluator, {
     visits: opts.visits,
-    cpuct: opts.cpuct,
+    cpuct: player.cpuct ?? opts.cpuct,
+    fpu: player.fpu ?? opts.fpu,
     batchSize: opts.batchSize,
     historyFens,
     searchPolicy: player.mode === 'aux' ? auxPuctPolicy : (player.mode === 'av' ? actionValuePuctPolicy : classicPuctPolicy),
@@ -142,9 +144,11 @@ async function adjudicateWhiteScore(board, history, judge, threshold) {
 
 const players = parsePlayers();
 if (players.length < 2) throw new Error('Need --players=name:onnx:meta:mode[:avWeight],...');
+const backend = arg('--backend', 'ts');
 const gamesPerPair = Number(arg('--games-per-pair', '2'));
 const visits = Number(arg('--visits', '32'));
 const cpuct = Number(arg('--cpuct', '1.5'));
+const fpu = Number(arg('--fpu', '0'));
 const batchSize = Number(arg('--batch-size', '16'));
 const maxPlies = Number(arg('--max-plies', '80'));
 const out = arg('--out', 'artifacts/search_mode_arena/arena.json');
@@ -157,6 +161,7 @@ const judgeMeta = arg('--judge-meta', '');
 const adjudicateThreshold = Number(arg('--adjudicate-threshold', '0.05'));
 const shardCount = Math.max(1, Number(arg('--shard-count', '1')));
 const shardIndex = Math.max(0, Number(arg('--shard-index', '0')));
+const openingOffset = Number(arg('--opening-offset', '0'));
 const anchorPlayer = arg('--anchor-player', '');
 if (shardIndex >= shardCount) throw new Error(`Bad shard index ${shardIndex} for shard count ${shardCount}`);
 if (anchorPlayer && !players.some((p) => p.name === anchorPlayer)) throw new Error(`Unknown --anchor-player: ${anchorPlayer}`);
@@ -170,6 +175,28 @@ const defaultOpenings = [
 ];
 let openings = openingsFile ? readFileSync(openingsFile, 'utf8').split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.startsWith('#')).map(s => s.split(/\s+#/)[0].trim()) : defaultOpenings;
 if (maxOpenings > 0) openings = openings.slice(0, maxOpenings);
+if (backend === 'rust') {
+  if (players.length !== 2) throw new Error('--backend rust currently supports exactly two players');
+  if (players.some((p) => p.mode !== 'puct')) throw new Error('--backend rust currently supports puct mode only');
+  if (judgeModel || judgeMeta) throw new Error('--backend rust currently adjudicates with terminal/value/stockfish only, not a separate judge model');
+  const [candidate, baseline] = players;
+  const cCpuct = candidate.cpuct ?? cpuct;
+  const bCpuct = baseline.cpuct ?? cpuct;
+  const cFpu = candidate.fpu ?? fpu;
+  const bFpu = baseline.fpu ?? fpu;
+  if (cCpuct !== bCpuct || cFpu !== bFpu) throw new Error('--backend rust currently requires identical cpuct/fpu for both players');
+  const rustArgs = [
+    'run', '--release', '--features', 'native-ort', '--manifest-path', 'rust/tiny_leela_core/Cargo.toml', '--bin', 'tiny-leela-rust-arena', '--',
+    '--candidate-onnx', candidate.onnx, '--candidate-meta', candidate.meta, '--candidate-name', candidate.name,
+    '--baseline-onnx', baseline.onnx, '--baseline-meta', baseline.meta, '--baseline-name', baseline.name,
+    '--games', String(gamesPerPair), '--visits', String(visits), '--cpuct', String(cCpuct), '--fpu', String(cFpu),
+    '--max-plies', String(maxPlies), '--adjudicate', 'value', '--adjudicate-threshold', String(adjudicateThreshold),
+    '--openings', openings.join('|'), '--out', out,
+  ];
+  const child = spawnSync('cargo', rustArgs, { stdio: 'inherit', env: process.env });
+  process.exit(child.status ?? 1);
+}
+if (backend !== 'ts') throw new Error(`Unknown --backend ${backend}`);
 const sharedEvaluators = new Map();
 const evaluators = new Map();
 for (const p of players) evaluators.set(p.name, await loadSharedEvaluator(p.onnx, p.meta, evalCacheEntries, sharedEvaluators));
@@ -192,7 +219,7 @@ process.stderr.write(`[search-mode-arena] shard ${shardIndex + 1}/${shardCount} 
 for (const job of selectedJobs) {
   const { i, j, g, a, b, pairKey } = job;
   const aColor = g % 2 === 0 ? 'w' : 'b';
-  const opening = openings[(i * 17 + j * 7 + g) % openings.length];
+  const opening = openings[(openingOffset + i * 17 + j * 7 + g) % openings.length];
   let board = parseFen(opening);
   const history = [];
   const moves = [];
@@ -201,7 +228,7 @@ for (const job of selectedJobs) {
     const side = board.turn === aColor ? a : b;
     const evaluator = evaluators.get(side.name);
     const legalUci = new Set(legalMoves(board).map(moveToUci));
-    const result = await choosePlayerMove(side, board, evaluator, { visits, cpuct, batchSize }, history);
+    const result = await choosePlayerMove(side, board, evaluator, { visits, cpuct, fpu, batchSize }, history);
     if (!result.move) { whiteScore = inCheck(board) ? (board.turn === 'w' ? 0 : 1) : 0.5; break; }
     const fenBefore = recordMoves ? boardToFen(board) : null;
     const uci = moveToUci(result.move);
@@ -233,7 +260,7 @@ const standings = Object.entries(table).map(([name, r]) => ({ name, ...r, scoreR
 const pairs = Object.values(pairTable).map((r) => ({ ...r, aScoreRate: r.aScore / Math.max(1, r.games) }));
 const cacheStats = Object.fromEntries([...evaluators.entries()].map(([name, evaluator]) => [name, { hits: evaluator.hits ?? 0, misses: evaluator.misses ?? 0, entries: evaluator.cache?.size ?? 0 }]));
 const modelResources = Object.fromEntries(players.map((p) => [p.name, { onnx: p.onnx, meta: p.meta, bundleBytes: bundleBytes(p.onnx) }]));
-const protocol = { kind:'search_mode_arena', players, visits, cpuct, batchSize, maxPlies, gamesPerPair, openingsFile, openings: openings.length, evalCacheEntries, recordMoves, cacheStats, modelResources, judgeModel, judgeMeta, adjudicateThreshold, anchorPlayer, shardCount, shardIndex, shardGames: selectedJobs.length, totalGames: jobs.length, ortThreads: process.env.ORT_INTRA_OP_NUM_THREADS ?? process.env.ORT_NUM_THREADS ?? null, elapsedMs: Date.now() - startedAt, createdUtc:new Date().toISOString() };
+const protocol = { kind:'search_mode_arena', backend, players, visits, cpuct, fpu, batchSize, maxPlies, gamesPerPair, openingsFile, openings: openings.length, openingOffset, evalCacheEntries, recordMoves, cacheStats, modelResources, judgeModel, judgeMeta, adjudicateThreshold, anchorPlayer, shardCount, shardIndex, shardGames: selectedJobs.length, totalGames: jobs.length, ortThreads: process.env.ORT_INTRA_OP_NUM_THREADS ?? process.env.ORT_NUM_THREADS ?? null, elapsedMs: Date.now() - startedAt, createdUtc:new Date().toISOString() };
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, JSON.stringify({ protocol, standings, pairs, games }, null, 2));
 writeFileSync(`${out}.protocol.json`, JSON.stringify(protocol, null, 2));

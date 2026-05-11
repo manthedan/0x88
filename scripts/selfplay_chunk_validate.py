@@ -12,21 +12,39 @@ import argparse
 import gzip
 import json
 import math
+import shutil
+import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable, TextIO
 
 
-def _open_text(path: Path) -> TextIO:
+@contextmanager
+def _zstd_cli_reader(path: Path):
+    if not shutil.which('zstd'):
+        raise SystemExit(f'zstandard python module or zstd CLI is required to read {path}')
+    proc = subprocess.Popen(['zstd', '-dc', str(path)], stdout=subprocess.PIPE)
+    assert proc.stdout is not None
+    with proc.stdout, open(proc.stdout.fileno(), mode='r', encoding='utf-8', closefd=False) as fh:
+        yield fh
+    rc = proc.wait()
+    if rc != 0:
+        raise SystemExit(f'zstd failed while reading {path} rc={rc}')
+
+
+def _open_text(path: Path):
     if str(path).endswith('.gz'):
         return gzip.open(path, 'rt', encoding='utf-8')
     if str(path).endswith('.zst'):
         try:
             import zstandard as zstd  # type: ignore
+            fh = path.open('rb')
+            return zstd.open(fh, mode='rt', encoding='utf-8')  # type: ignore[return-value]
+        except ImportError:
+            return _zstd_cli_reader(path)
         except Exception as exc:  # pragma: no cover - depends on env
-            raise SystemExit(f'zstandard is required to read {path}: {exc}')
-        fh = path.open('rb')
-        return zstd.open(fh, mode='rt', encoding='utf-8')  # type: ignore[return-value]
+            raise SystemExit(f'zstandard failed to read {path}: {exc}')
     return path.open('r', encoding='utf-8')
 
 

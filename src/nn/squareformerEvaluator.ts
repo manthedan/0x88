@@ -44,7 +44,7 @@ function addBoardFeatures(data: Float32Array, board: BoardState, boardIndex: num
 }
 
 
-function squareformerFloatInput(board: BoardState, meta: SquareFormerMeta, historyFens: string[] = []): Float32Array {
+export function squareformerFloatInput(board: BoardState, meta: SquareFormerMeta, historyFens: string[] = []): Float32Array {
   const history = meta.history_plies;
   const planesPerBoard = 13;
   const inputDim = meta.input_dim;
@@ -76,7 +76,7 @@ function addCompactBoard(data: BigInt64Array, board: BoardState, boardIndex: num
   for (let sq = 0; sq < 64; sq++) data[sq * stride + boardIndex] = BigInt(pieceId(board.squares[sq]));
 }
 
-function squareformerCompactInput(board: BoardState, meta: SquareFormerMeta, historyFens: string[] = []): BigInt64Array {
+export function squareformerCompactInput(board: BoardState, meta: SquareFormerMeta, historyFens: string[] = []): BigInt64Array {
   const history = meta.history_plies;
   const stride = meta.token_features ?? history + 9;
   const data = new BigInt64Array(64 * stride);
@@ -122,7 +122,7 @@ function parseFenCached(fen: string): BoardState {
   return { squares, turn: turn as 'w' | 'b', castling, epSquare, halfmove: Number(half), fullmove: Number(full) };
 }
 
-function legalCandidateInputs(boards: BoardState[], width: number, contexts: EvaluationContext[] = []): { moves: Move[][]; classes: BigInt64Array; width: number } {
+export function squareformerLegalCandidateInputs(boards: BoardState[], width: number, contexts: EvaluationContext[] = []): { moves: Move[][]; classes: BigInt64Array; width: number } {
   const moves = boards.map((board, i) => contexts[i]?.legalMoves ?? legalMoves(board));
   const classes = new BigInt64Array(boards.length * width);
   for (let i = 0; i < moves.length; i++) {
@@ -131,7 +131,7 @@ function legalCandidateInputs(boards: BoardState[], width: number, contexts: Eva
   return { moves, classes, width };
 }
 
-function isCompactMeta(meta: SquareFormerMeta): boolean {
+export function isCompactMeta(meta: SquareFormerMeta): boolean {
   return meta.input_mode === 'embedding' || meta.input_format === 'compact_uint8_embeddings' || meta.input_format === 'compact_uint8_tokens';
 }
 
@@ -156,6 +156,9 @@ function optionalFloatOutput(outputs: Record<string, ort.Tensor>, name: string):
 function sessionOptions(): ort.InferenceSession.SessionOptions {
   const threads = Number(globalThis.process?.env?.ORT_INTRA_OP_NUM_THREADS ?? globalThis.process?.env?.ORT_NUM_THREADS ?? '0');
   const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all' };
+  const epEnv = globalThis.process?.env?.TINY_LEELA_ORT_EP ?? globalThis.process?.env?.ORT_EXECUTION_PROVIDERS ?? '';
+  const executionProviders = epEnv.split(',').map((s) => s.trim()).filter(Boolean);
+  if (executionProviders.length) opts.executionProviders = executionProviders;
   if (Number.isFinite(threads) && threads > 0) {
     opts.intraOpNumThreads = Math.floor(threads);
     opts.interOpNumThreads = 1;
@@ -187,7 +190,7 @@ export class SquareFormerEvaluator implements Evaluator {
     const shape: [number, number, number] = [boards.length, 64, stride];
     const feeds: Record<string, ort.Tensor> = { tokens: compact ? new ort.Tensor('int64', input as BigInt64Array, shape) : new ort.Tensor('float32', input as Float32Array, shape) };
     const avWidth = Math.max(1, Number(this.meta.onnx_fixed_legal_moves ?? this.meta.max_legal_moves ?? 0));
-    const legalInfo = this.meta.av_head_exported && avWidth > 0 ? legalCandidateInputs(boards, avWidth, contexts) : null;
+    const legalInfo = this.meta.av_head_exported && avWidth > 0 ? squareformerLegalCandidateInputs(boards, avWidth, contexts) : null;
     if (legalInfo) feeds.legal_action_ids = new ort.Tensor('int64', legalInfo.classes, [boards.length, avWidth]);
     const outputs = await this.session.run(feeds);
     const policyRaw = requiredFloatOutput(outputs, 'policy');

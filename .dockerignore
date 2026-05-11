@@ -1,0 +1,16 @@
+.git
+node_modules
+.venv
+.venv-onnx
+artifacts
+data
+dist-client
+public/models/*.onnx
+public/models/*.json
+*.pt
+*.onnx
+*.npz
+*.npy
+__pycache__
+.pytest_cache
+.DS_Store

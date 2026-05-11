@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tiny-leela.local/contracts/puct_trace_v1.schema.json",
+  "title": "Tiny Leela PUCT trace v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "implementation", "root_fen", "options", "root", "steps"],
+  "properties": {
+    "schema": { "const": "puct_trace_v1" },
+    "implementation": { "type": "string", "enum": ["typescript", "rust", "python", "other"] },
+    "implementation_version": { "type": "string" },
+    "model": { "type": "object", "additionalProperties": true },
+    "root_fen": { "type": "string" },
+    "options": {
+      "type": "object",
+      "required": ["visits", "cpuct", "temperature"],
+      "properties": {
+        "visits": { "type": "integer", "minimum": 0 },
+        "cpuct": { "type": "number" },
+        "fpu": { "type": "number" },
+        "temperature": { "type": "number" },
+        "batch_size": { "type": "integer", "minimum": 1 },
+        "search_policy": { "type": "string" },
+        "seed": { "type": ["integer", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "root": {
+      "type": "object",
+      "required": ["value", "priors"],
+      "properties": {
+        "value": { "type": "number" },
+        "legal_count": { "type": "integer", "minimum": 0 },
+        "priors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["uci", "action_id", "prior"],
+            "properties": {
+              "uci": { "type": "string" },
+              "action_id": { "type": "integer", "minimum": 0 },
+              "prior": { "type": "number" }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sim", "selected_uci", "selected_action_id", "prior", "q_before", "score", "visits_before", "child_value", "q_after"],
+        "properties": {
+          "sim": { "type": "integer", "minimum": 0 },
+          "selected_uci": { "type": "string" },
+          "selected_action_id": { "type": "integer", "minimum": 0 },
+          "prior": { "type": "number" },
+          "q_before": { "type": "number" },
+          "score": { "type": "number" },
+          "visits_before": { "type": "integer", "minimum": 0 },
+          "child_value": { "type": "number" },
+          "q_after": { "type": "number" }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}

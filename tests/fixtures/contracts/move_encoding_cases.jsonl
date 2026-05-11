@@ -1,0 +1,12 @@
+{"schema":"move_action_id_v1_case","uci":"a1a8","category":"long_rook_like","action_id":280,"policy_index":6}
+{"schema":"move_action_id_v1_case","uci":"h8a1","category":"long_bishop_like","action_id":20160,"policy_index":1945}
+{"schema":"move_action_id_v1_case","uci":"e2e4","category":"ordinary_pawn_push","action_id":3980,"policy_index":1031}
+{"schema":"move_action_id_v1_case","uci":"e7e8q","category":"queen_promotion","action_id":16944,"policy_index":1211}
+{"schema":"move_action_id_v1_case","uci":"e7e8r","category":"rook_promotion","action_id":16943,"policy_index":1212}
+{"schema":"move_action_id_v1_case","uci":"e7e8b","category":"bishop_promotion","action_id":16942,"policy_index":1209}
+{"schema":"move_action_id_v1_case","uci":"e7e8n","category":"knight_promotion","action_id":16941,"policy_index":1210}
+{"schema":"move_action_id_v1_case","uci":"a2b1q","category":"diagonal_underpromotion_edge","action_id":2569,"policy_index":37}
+{"schema":"move_action_id_v1_case","uci":"h7h8n","category":"file_h_knight_promotion","action_id":17916,"policy_index":1942}
+{"schema":"move_action_id_v1_case","uci":"e1g1","category":"king_side_castle_encoded_as_king_move","action_id":1310,"policy_index":1004}
+{"schema":"move_action_id_v1_case","uci":"e1c1","category":"queen_side_castle_encoded_as_king_move","action_id":1290,"policy_index":988}
+{"schema":"move_action_id_v1_case","uci":"e5d6","category":"en_passant_capture_shape","action_id":11735,"policy_index":1131}

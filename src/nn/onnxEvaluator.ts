@@ -79,7 +79,7 @@ function chebyshev(a: number, b: number): number {
   return Math.max(Math.abs((a % 8) - (b % 8)), Math.abs(Math.floor(a / 8) - Math.floor(b / 8)));
 }
 
-function moveformerLegalInputs(boards: BoardState[], width: number, featureCount: number, contexts: EvaluationContext[] = []): { moves: Move[][]; actionIds: BigInt64Array; features: Float32Array; mask: Float32Array; width: number } {
+export function moveformerLegalInputs(boards: BoardState[], width: number, featureCount: number, contexts: EvaluationContext[] = []): { moves: Move[][]; actionIds: BigInt64Array; features: Float32Array; mask: Float32Array; width: number } {
   const moves = boards.map((board, i) => contexts[i]?.legalMoves ?? legalMoves(board));
   const actionIds = new BigInt64Array(boards.length * width);
   const features = new Float32Array(boards.length * width * featureCount);
@@ -180,6 +180,9 @@ function optionalFloatOutput(outputs: Record<string, ort.Tensor>, ...names: stri
 function sessionOptions(): ort.InferenceSession.SessionOptions {
   const threads = Number(globalThis.process?.env?.ORT_INTRA_OP_NUM_THREADS ?? globalThis.process?.env?.ORT_NUM_THREADS ?? '0');
   const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all' };
+  const epEnv = globalThis.process?.env?.TINY_LEELA_ORT_EP ?? globalThis.process?.env?.ORT_EXECUTION_PROVIDERS ?? '';
+  const executionProviders = epEnv.split(',').map((s) => s.trim()).filter(Boolean);
+  if (executionProviders.length) opts.executionProviders = executionProviders;
   if (Number.isFinite(threads) && threads > 0) {
     opts.intraOpNumThreads = Math.floor(threads);
     opts.interOpNumThreads = 1;

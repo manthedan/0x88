@@ -5,7 +5,7 @@ import type { Evaluation, Evaluator } from '../nn/evaluator.ts';
 
 export interface SearchPolicyEntry { move: Move; visits: number; prior: number; q: number; probability: number; }
 export interface SearchResult { move: Move | null; visits: number; value: number; policy: SearchPolicyEntry[]; stats?: SearchStats; }
-export interface SearchOptions { visits?: number; cpuct?: number; temperature?: number; historyFens?: string[]; batchSize?: number; searchPolicy?: SearchPolicy; avWeight?: number; rankWeight?: number; regretWeight?: number; riskWeight?: number; uncertaintyWeight?: number; }
+export interface SearchOptions { visits?: number; cpuct?: number; fpu?: number; temperature?: number; historyFens?: string[]; batchSize?: number; searchPolicy?: SearchPolicy; avWeight?: number; rankWeight?: number; regretWeight?: number; riskWeight?: number; uncertaintyWeight?: number; }
 export interface GumbelRootOptions { candidateCount?: number; seed?: number; gumbelScale?: number; qWeight?: number; priorWeight?: number; visitPenalty?: number; }
 
 export interface SearchStats {
@@ -45,6 +45,7 @@ export interface Node {
 
 export interface SearchPolicyContext {
   cpuct: number;
+  fpu: number;
   temperature: number;
   /** Weights for optional edge-local aux signals in experimental search policies. */
   avWeight: number;
@@ -57,7 +58,7 @@ export interface SearchPolicyContext {
 export interface SearchPolicy {
   scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext): number;
   backup(path: Edge[], leafValue: number, context: SearchPolicyContext): void;
-  rootPolicy(edges: Edge[], context: SearchPolicyContext): SearchPolicyEntry[];
+  rootPolicy(edges: Edge[], context: SearchPolicyContext, node?: Node): SearchPolicyEntry[];
   chooseFinalMove(entries: SearchPolicyEntry[], context: SearchPolicyContext): SearchPolicyEntry | null;
 }
 
@@ -65,8 +66,8 @@ function valueFromWdl(wdl: [number, number, number]): number {
   return wdl[0] - wdl[2];
 }
 
-export function edgeQForParent(edge: Edge): number {
-  return edge.visits ? -edge.valueSum / edge.visits : 0;
+export function edgeQForParent(edge: Edge, fpu = 0): number {
+  return edge.visits ? -edge.valueSum / edge.visits : fpu;
 }
 
 export function edgeSelectVisits(edge: Edge): number {
@@ -77,7 +78,7 @@ export class ClassicPUCTPolicy implements SearchPolicy {
   scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext): number {
     const parentVisits = node.edges.reduce((sum, e) => sum + edgeSelectVisits(e), 0);
     const sqrtParent = Math.sqrt(parentVisits + 1);
-    const q = edgeQForParent(edge);
+    const q = edgeQForParent(edge, context.fpu);
     const sv = edgeSelectVisits(edge);
     const u = context.cpuct * edge.prior * sqrtParent / (1 + sv);
     return q + u;
@@ -100,16 +101,16 @@ export class ClassicPUCTPolicy implements SearchPolicy {
     if (tau === 0) {
       const better = (a: Edge, b: Edge) => {
         if (b.visits !== a.visits) return b.visits > a.visits;
-        const aq = edgeQForParent(a), bq = edgeQForParent(b);
+        const aq = edgeQForParent(a, context.fpu), bq = edgeQForParent(b, context.fpu);
         if (bq !== aq) return bq > aq;
         return b.prior > a.prior;
       };
       const best = edges.reduce((a, b) => better(a, b) ? b : a);
-      return edges.map((edge) => ({ move: edge.move, visits: edge.visits, prior: edge.prior, q: edgeQForParent(edge), probability: edge === best ? 1 : 0 }));
+      return edges.map((edge) => ({ move: edge.move, visits: edge.visits, prior: edge.prior, q: edgeQForParent(edge, context.fpu), probability: edge === best ? 1 : 0 }));
     }
     const weights = edges.map((edge) => Math.pow(Math.max(edge.visits, 1e-9), 1 / tau));
     const total = weights.reduce((a, b) => a + b, 0) || 1;
-    return edges.map((edge, i) => ({ move: edge.move, visits: edge.visits, prior: edge.prior, q: edgeQForParent(edge), probability: weights[i] / total }));
+    return edges.map((edge, i) => ({ move: edge.move, visits: edge.visits, prior: edge.prior, q: edgeQForParent(edge, context.fpu), probability: weights[i] / total }));
   }
 
   chooseFinalMove(entries: SearchPolicyEntry[]): SearchPolicyEntry | null {
@@ -197,7 +198,7 @@ export class GumbelRootPolicy extends ClassicPUCTPolicy {
     const state = this.rootState(node);
     if (!state.candidates.has(edge)) return -Infinity;
     const parentVisits = node.edges.reduce((sum, e) => sum + edgeSelectVisits(e), 0);
-    const q = edgeQForParent(edge);
+    const q = edgeQForParent(edge, context.fpu);
     const sv = edgeSelectVisits(edge);
     const puct = context.cpuct * edge.prior * Math.sqrt(parentVisits + 1) / (1 + sv);
     const g = state.noise.get(edge) ?? 0;
@@ -381,7 +382,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
 
 export async function searchRoot(board: BoardState, evaluator: Evaluator, options: SearchOptions = {}): Promise<SearchResult> {
   const visits = Math.max(1, Math.floor(options.visits ?? 8));
-  const context: SearchPolicyContext = { cpuct: options.cpuct ?? 1.5, temperature: options.temperature ?? 1, avWeight: options.avWeight ?? 0.25, rankWeight: options.rankWeight ?? 0, regretWeight: options.regretWeight ?? 0, riskWeight: options.riskWeight ?? 0, uncertaintyWeight: options.uncertaintyWeight ?? 0 };
+  const context: SearchPolicyContext = { cpuct: options.cpuct ?? 1.5, fpu: options.fpu ?? 0, temperature: options.temperature ?? 1, avWeight: options.avWeight ?? 0.25, rankWeight: options.rankWeight ?? 0, regretWeight: options.regretWeight ?? 0, riskWeight: options.riskWeight ?? 0, uncertaintyWeight: options.uncertaintyWeight ?? 0 };
   const searchPolicy = options.searchPolicy ?? classicPuctPolicy;
   const stats = makeStats(visits);
   const root: Node = { board, historyFens: options.historyFens ?? [], expanded: false, terminalValue: null, edges: [], isRoot: true };
@@ -395,7 +396,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
       stats.completedVisits += 1;
     }
   }
-  const policy = searchPolicy.rootPolicy(root.edges, context);
+  const policy = searchPolicy.rootPolicy(root.edges, context, root);
   const bestEntry = searchPolicy.chooseFinalMove(policy, context);
   return { move: bestEntry?.move ?? null, visits: root.edges.reduce((sum, edge) => sum + edge.visits, 0), value: bestEntry?.q ?? rootValue, policy, stats };
 }

@@ -18,11 +18,18 @@ Options:
   --visits-list CSV          default 1,32,128,512
   --full-visits N            default 512
   --cpuct X                  default 1.5
+  --stockfish-lite PATH      default .local_engines/stockfish-lite-single.sh
+  --stockfish-lite-full-searches SPECS
+                              default shallow:nodes=32,deep:depth=6; comma-separated LABEL:SPEC entries
+                              where SPEC is nodes=N, depth=N, or movetime=N
+  --stockfish-lite-full-search SPEC
+                              compatibility alias for one unlabeled full-strength Lite anchor
+  --skip-full-stockfish-lite skip the full-strength Stockfish Lite anchors
   --skip-build               skip npm run build:client
 EOF
 }
 
-NAME=""; MODEL=""; META=""; OUT_DIR=""; POSITIONS="artifacts/diagnostics/queen_risk_fixed_suite_drop300_or_capture.json"; DEV="data/datasets/supervised_100m_elite_tcec_v1/dev/dev_1000000.jsonl.zst"; OPENINGS="eval/opening_suite_uho_lite_v1.fen"; BUCKET_ROWS=5000; QUICK_PAIRS=3; FULL_PAIRS=0; VISITS_LIST="1,32,128,512"; FULL_VISITS=512; CPUCT=1.5; SKIP_BUILD=0
+NAME=""; MODEL=""; META=""; OUT_DIR=""; POSITIONS="artifacts/diagnostics/queen_risk_fixed_suite_drop300_or_capture.json"; DEV="data/datasets/supervised_100m_elite_tcec_v1/dev/dev_1000000.jsonl.zst"; OPENINGS="eval/opening_suite_uho_lite_v1.fen"; BUCKET_ROWS=5000; QUICK_PAIRS=3; FULL_PAIRS=0; VISITS_LIST="1,32,128,512"; FULL_VISITS=512; CPUCT=1.5; STOCKFISH_LITE=".local_engines/stockfish-lite-single.sh"; STOCKFISH_LITE_FULL_SEARCHES="shallow:nodes=32,deep:depth=6"; INCLUDE_FULL_STOCKFISH_LITE=1; SKIP_BUILD=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --name) NAME="$2"; shift 2;;
@@ -38,6 +45,10 @@ while [[ $# -gt 0 ]]; do
     --visits-list) VISITS_LIST="$2"; shift 2;;
     --full-visits) FULL_VISITS="$2"; shift 2;;
     --cpuct) CPUCT="$2"; shift 2;;
+    --stockfish-lite) STOCKFISH_LITE="$2"; shift 2;;
+    --stockfish-lite-full-searches) STOCKFISH_LITE_FULL_SEARCHES="$2"; shift 2;;
+    --stockfish-lite-full-search) STOCKFISH_LITE_FULL_SEARCHES="$2"; shift 2;;
+    --skip-full-stockfish-lite) INCLUDE_FULL_STOCKFISH_LITE=0; shift;;
     --skip-build) SKIP_BUILD=1; shift;;
     -h|--help) usage; exit 0;;
     *) echo "unknown arg: $1" >&2; usage; exit 2;;
@@ -67,6 +78,9 @@ cat > "$OUT_DIR/protocol_card.json" <<EOF
   "visits_list": "$VISITS_LIST",
   "full_visits": $FULL_VISITS,
   "cpuct": $CPUCT,
+  "include_full_stockfish_lite": $INCLUDE_FULL_STOCKFISH_LITE,
+  "stockfish_lite": "$STOCKFISH_LITE",
+  "stockfish_lite_full_searches": "$STOCKFISH_LITE_FULL_SEARCHES",
   "created_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "git_commit": "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 }
@@ -80,6 +94,14 @@ run queen_fixed node --experimental-strip-types eval/queen_plumbing_diagnostic.m
 run bucket_eval node --experimental-strip-types eval/onnx_bucket_eval_jsonl.mjs --input "$DEV" --model "$MODEL" --meta "$META" --out "$OUT_DIR/bucket_eval.json" --max-rows-per-bucket "$BUCKET_ROWS"
 
 IFS=',' read -ra VISITS <<< "$VISITS_LIST"
+STOCKFISH_LITE_FULL_ARGS=()
+if [[ "$INCLUDE_FULL_STOCKFISH_LITE" == 1 ]]; then
+  STOCKFISH_LITE_FULL_ARGS=(
+    --include-stockfish-lite-full=true
+    --stockfish-lite="$STOCKFISH_LITE"
+    --stockfish-lite-full-searches="$STOCKFISH_LITE_FULL_SEARCHES"
+  )
+fi
 for v in "${VISITS[@]}"; do
   run "anchor_quick_v${v}" node --experimental-strip-types eval/uci_anchor_arena.mjs \
     --candidate="${NAME}_v${v}:${MODEL}:${META}" \
@@ -89,6 +111,7 @@ for v in "${VISITS[@]}"; do
     --cpuct="$CPUCT" \
     --stockfish-levels=1320,1600 \
     --stockfish-nodes=32 \
+    "${STOCKFISH_LITE_FULL_ARGS[@]}" \
     --max-plies=100 \
     --uci-anchors='maia1100|.local_engines/maia/lc0-maia-1100.sh|32' \
     --out "$OUT_DIR/anchor_quick_v${v}.json"
@@ -103,9 +126,19 @@ if [[ "$FULL_PAIRS" -gt 0 ]]; then
     --cpuct="$CPUCT" \
     --stockfish-levels=1320,1600 \
     --stockfish-nodes=32 \
+    "${STOCKFISH_LITE_FULL_ARGS[@]}" \
     --max-plies=100 \
     --uci-anchors='maia1100|.local_engines/maia/lc0-maia-1100.sh|32,maia1500|.local_engines/maia/lc0-maia-1500.sh|32,maia1900|.local_engines/maia/lc0-maia-1900.sh|32' \
     --out "$OUT_DIR/anchor_full_v${FULL_VISITS}.json"
 fi
 
+SUMMARY="$OUT_DIR/summary.tsv"
+printf 'test\tanchor\tgames\twins\tdraws\tlosses\tscoreRate\teloDiff\tillegal\n' > "$SUMMARY"
+for f in "$OUT_DIR"/anchor_*.json; do
+  [[ -s "$f" ]] || continue
+  [[ "$f" == *.protocol.json ]] && continue
+  jq -r --arg test "$(basename "$f" .json)" '(.summaries // [])[] | [$test,.anchor,.games,.wins,.draws,.losses,.scoreRate,.eloDiff,.illegal] | @tsv' "$f" >> "$SUMMARY"
+done
+
 echo "[gate] wrote $OUT_DIR"
+echo "[gate] wrote $SUMMARY"

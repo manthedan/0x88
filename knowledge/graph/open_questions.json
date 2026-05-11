@@ -1,0 +1,42 @@
+[
+  {
+    "path": "09_agent_context/open_questions.md",
+    "question": "Does h7/h8 history improve strength per byte enough for BT4/SquareFormer?",
+    "source": "agent_context.open_questions"
+  },
+  {
+    "path": "09_agent_context/open_questions.md",
+    "question": "Which aux-PUCT weights transfer across visit counts and anchor types?",
+    "source": "agent_context.open_questions"
+  },
+  {
+    "path": "09_agent_context/open_questions.md",
+    "question": "Does action-value reranking reduce catastrophic regret without harming tactical sacrifices?",
+    "source": "agent_context.open_questions"
+  },
+  {
+    "path": "09_agent_context/open_questions.md",
+    "question": "When does PUCT become value-useful for each architecture lane?",
+    "source": "agent_context.open_questions"
+  },
+  {
+    "path": "09_agent_context/open_questions.md",
+    "question": "What minimal self-play correctness suite is sufficient before larger generation runs?",
+    "source": "agent_context.open_questions"
+  },
+  {
+    "path": "09_agent_context/open_questions.md",
+    "question": "Which model/backend/precision/batch/thread/legal-bucket combinations dominate the strength-vs-latency-vs-bytes Pareto frontier?",
+    "source": "agent_context.open_questions"
+  },
+  {
+    "path": "09_agent_context/open_questions.md",
+    "question": "Which cache-generation hot paths should move first from Python loops to Rust workers while preserving NumPy memmap trainer compatibility?",
+    "source": "agent_context.open_questions"
+  },
+  {
+    "path": "09_agent_context/open_questions.md",
+    "question": "Which browser boundary is fastest and simplest: TypeScript PUCT, Rust/WASM PUCT with batched ORT Web callback, or a deeper custom runtime integration?",
+    "source": "agent_context.open_questions"
+  }
+]

@@ -368,6 +368,8 @@ def build(overrides_path: str, arena_globs: list[str], anchor_arena_globs: list[
     overrides = read_json(overrides_path)
     if not isinstance(overrides, dict):
         raise SystemExit(f"Bad overrides JSON: {overrides_path}")
+    family_promotion_gates = overrides.get("family_promotion_gates") or {}
+    anchor_waivers = overrides.get("anchor_waivers") or {}
     dataset_defs = overrides.get("datasets") or {}
     datasets = {}
     for key, info in dataset_defs.items():
@@ -378,7 +380,12 @@ def build(overrides_path: str, arena_globs: list[str], anchor_arena_globs: list[
     arena_refs = scan_search_mode_arenas(models, arena_globs)
     anchor_refs = scan_anchor_arenas(models, anchor_arena_globs)
     missing_anchor: list[str] = []
+    waived_anchor: list[str] = []
     for m in models:
+        if not m.get("promotion_gate"):
+            gate = family_promotion_gates.get(m.get("family"))
+            if gate:
+                m["promotion_gate"] = gate
         refs = arena_refs.get(m["model_id"], [])
         if refs:
             m["arena_refs"] = sorted(refs, key=lambda r: (r.get("arena") or "", r.get("player") or ""))[-20:]
@@ -387,7 +394,12 @@ def build(overrides_path: str, arena_globs: list[str], anchor_arena_globs: list[
             m["anchor_refs"] = anchors[-20:]
             m["anchor_headline"] = select_anchor_headline(anchors)
         elif m.get("status") == "completed":
-            missing_anchor.append(m["model_id"])
+            waiver = anchor_waivers.get(m["model_id"])
+            if waiver:
+                m["anchor_waiver"] = waiver
+                waived_anchor.append(m["model_id"])
+            else:
+                missing_anchor.append(m["model_id"])
 
     completed = [m for m in models if m.get("status") == "completed"]
     pareto = []
@@ -409,7 +421,9 @@ def build(overrides_path: str, arena_globs: list[str], anchor_arena_globs: list[
             "queued_count": sum(1 for m in models if m.get("status") == "queued"),
             "onnx_available_count": sum(1 for m in models if m.get("bundle_bytes") is not None),
             "anchor_headline_count": sum(1 for m in models if m.get("anchor_headline")),
+            "anchor_waived_count": len(waived_anchor),
             "missing_anchor": missing_anchor,
+            "waived_anchor": waived_anchor,
         },
     }
 
@@ -438,11 +452,12 @@ def write_markdown(manifest: dict[str, Any], out_path: str) -> None:
         f"- Queued: {manifest['summary']['queued_count']}",
         f"- ONNX exports available: {manifest['summary']['onnx_available_count']}",
         f"- Anchor headlines available: {manifest['summary']['anchor_headline_count']}",
+        f"- Anchor waivers: {manifest['summary'].get('anchor_waived_count', 0)}",
         "",
         "## Models",
         "",
-        "| Model | Status | Family | Arch | Params | ONNX MiB | INT8 est MiB | Anchor headline | Training source | AV source | Tags |",
-        "|---|---|---|---|---:|---:|---:|---|---|---|---|",
+        "| Model | Status | Family | Arch | Params | ONNX MiB | INT8 est MiB | Anchor headline | Promotion / kill criteria | Training source | AV source | Tags |",
+        "|---|---|---|---|---:|---:|---:|---|---|---|---|---|",
     ]
     for m in manifest["models"]:
         meta = m.get("runtime_meta") or {}
@@ -455,9 +470,16 @@ def write_markdown(manifest: dict[str, Any], out_path: str) -> None:
             int8 = mib(m["params"])
         elif (m.get("planned_size_estimate") or {}).get("int8_mib") is not None:
             int8 = (m.get("planned_size_estimate") or {}).get("int8_mib")
+        gate = m.get("promotion_gate") or {}
+        gate_text = gate.get("kill_if") or gate.get("promote_if") or ""
+        if len(gate_text) > 120:
+            gate_text = gate_text[:117] + "…"
+        anchor_text = fmt_anchor(m.get('anchor_headline'))
+        if anchor_text == "—" and m.get("anchor_waiver"):
+            anchor_text = "waived"
         lines.append(
             f"| `{m['model_id']}` | {m.get('status','')} | {m.get('family','')} | {arch} | {fmt_int(params)} | {fmt_mib(bundle)} | {fmt_mib(int8)} | "
-            f"{fmt_anchor(m.get('anchor_headline'))} | {train.get('policy_dataset') or ''} | {train.get('av_dataset') or ''} | {', '.join(m.get('tags') or [])} |"
+            f"{anchor_text} | {gate_text} | {train.get('policy_dataset') or ''} | {train.get('av_dataset') or ''} | {', '.join(m.get('tags') or [])} |"
         )
     lines += ["", "## Dataset summaries", ""]
     for key, info in manifest["datasets"].items():
@@ -472,9 +494,16 @@ def write_markdown(manifest: dict[str, Any], out_path: str) -> None:
                 lines.append(f"- {k}: `{v}`")
         lines.append("")
     missing_anchor = manifest.get("summary", {}).get("missing_anchor") or []
+    waived_anchor = manifest.get("summary", {}).get("waived_anchor") or []
     if missing_anchor:
-        lines += ["", "## TODO", "", "Completed models missing anchor headline:", ""]
+        lines += ["", "## TODO", "", "Completed models missing anchor headline and no waiver:", ""]
         lines += [f"- `{model_id}`" for model_id in missing_anchor]
+    if waived_anchor:
+        lines += ["", "## Anchor waivers", ""]
+        models_by_id = {m["model_id"]: m for m in manifest.get("models", [])}
+        for model_id in waived_anchor:
+            waiver = (models_by_id.get(model_id, {}).get("anchor_waiver") or {})
+            lines.append(f"- `{model_id}`: {waiver.get('reason', 'waived')}")
     lines += [
         "",
         "## Notes",

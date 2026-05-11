@@ -1,0 +1,386 @@
+[
+  {
+    "field": "body",
+    "source": "concept.squareformer",
+    "target": "design.squareformer_av_puct",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "concept.action_value_head",
+    "target": "finding.action_value_reranking_strength_per_node",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "concept.search_improved_self_play",
+    "target": "finding.self_play_needs_search_improved_targets",
+    "type": "wikilink"
+  },
+  {
+    "field": "depends_on",
+    "source": "finding.chess_specific_geometry_high_roi",
+    "target": "concept.squareformer",
+    "type": "depends_on"
+  },
+  {
+    "field": "supports",
+    "source": "finding.chess_specific_geometry_high_roi",
+    "target": "design.squareformer_av_puct",
+    "type": "supports"
+  },
+  {
+    "field": "risks",
+    "source": "finding.action_value_reranking_strength_per_node",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
+    "field": "depends_on",
+    "source": "finding.action_value_reranking_strength_per_node",
+    "target": "concept.action_value_head",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "finding.action_value_reranking_strength_per_node",
+    "target": "concept.puct",
+    "type": "depends_on"
+  },
+  {
+    "field": "supports",
+    "source": "finding.action_value_reranking_strength_per_node",
+    "target": "design.squareformer_av_puct",
+    "type": "supports"
+  },
+  {
+    "field": "depends_on",
+    "source": "finding.self_play_needs_search_improved_targets",
+    "target": "concept.search_improved_self_play",
+    "type": "depends_on"
+  },
+  {
+    "field": "risks",
+    "source": "design.squareformer_av_puct",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
+    "field": "supported_by",
+    "source": "design.squareformer_av_puct",
+    "target": "finding.action_value_reranking_strength_per_node",
+    "type": "supported_by"
+  },
+  {
+    "field": "supported_by",
+    "source": "design.squareformer_av_puct",
+    "target": "finding.chess_specific_geometry_high_roi",
+    "type": "supported_by"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.squareformer_av_puct",
+    "target": "concept.squareformer",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.squareformer_av_puct",
+    "target": "concept.action_value_head",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.squareformer_av_puct",
+    "target": "concept.puct",
+    "type": "depends_on"
+  },
+  {
+    "field": "risks",
+    "source": "design.agent_friendly_knowledge_graph",
+    "target": "risk.deprecated_roadmap_active_context",
+    "type": "risks"
+  },
+  {
+    "field": "supported_by",
+    "source": "design.agent_friendly_knowledge_graph",
+    "target": "decision.use_markdown_knowledge_graph",
+    "type": "supported_by"
+  },
+  {
+    "field": "body",
+    "source": "design.agentic_engine_maintenance",
+    "target": "design.squareformer_av_puct",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "design.agentic_engine_maintenance",
+    "target": "concept.search_improved_self_play",
+    "type": "wikilink"
+  },
+  {
+    "field": "risks",
+    "source": "design.agentic_engine_maintenance",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
+    "field": "supported_by",
+    "source": "design.agentic_engine_maintenance",
+    "target": "finding.self_play_needs_search_improved_targets",
+    "type": "supported_by"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.agentic_engine_maintenance",
+    "target": "design.squareformer_av_puct",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.agentic_engine_maintenance",
+    "target": "concept.search_improved_self_play",
+    "type": "depends_on"
+  },
+  {
+    "field": "related",
+    "source": "design.agentic_engine_maintenance",
+    "target": "design.agent_friendly_knowledge_graph",
+    "type": "related"
+  },
+  {
+    "field": "risks",
+    "source": "design.cross_language_contracts_and_drift_control",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.cross_language_contracts_and_drift_control",
+    "target": "design.runtime_target_matrix_and_workflow_delegation",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.cross_language_contracts_and_drift_control",
+    "target": "design.agentic_engine_maintenance",
+    "type": "depends_on"
+  },
+  {
+    "field": "related",
+    "source": "design.cross_language_contracts_and_drift_control",
+    "target": "design.inference_optimization",
+    "type": "related"
+  },
+  {
+    "field": "related",
+    "source": "design.cross_language_contracts_and_drift_control",
+    "target": "roadmap.current_tiny_leela_portfolio",
+    "type": "related"
+  },
+  {
+    "field": "body",
+    "source": "design.inference_optimization",
+    "target": "design.runtime_target_matrix_and_workflow_delegation",
+    "type": "wikilink"
+  },
+  {
+    "field": "risks",
+    "source": "design.inference_optimization",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.inference_optimization",
+    "target": "design.squareformer_av_puct",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.inference_optimization",
+    "target": "design.agentic_engine_maintenance",
+    "type": "depends_on"
+  },
+  {
+    "field": "related",
+    "source": "design.inference_optimization",
+    "target": "roadmap.current_tiny_leela_portfolio",
+    "type": "related"
+  },
+  {
+    "field": "related",
+    "source": "design.inference_optimization",
+    "target": "design.runtime_target_matrix_and_workflow_delegation",
+    "type": "related"
+  },
+  {
+    "field": "body",
+    "source": "design.runtime_target_matrix_and_workflow_delegation",
+    "target": "design.cross_language_contracts_and_drift_control",
+    "type": "wikilink"
+  },
+  {
+    "field": "risks",
+    "source": "design.runtime_target_matrix_and_workflow_delegation",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.runtime_target_matrix_and_workflow_delegation",
+    "target": "design.inference_optimization",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.runtime_target_matrix_and_workflow_delegation",
+    "target": "design.agentic_engine_maintenance",
+    "type": "depends_on"
+  },
+  {
+    "field": "related",
+    "source": "design.runtime_target_matrix_and_workflow_delegation",
+    "target": "roadmap.current_tiny_leela_portfolio",
+    "type": "related"
+  },
+  {
+    "field": "related",
+    "source": "design.runtime_target_matrix_and_workflow_delegation",
+    "target": "design.cross_language_contracts_and_drift_control",
+    "type": "related"
+  },
+  {
+    "field": "risks",
+    "source": "design.h7_h8_bt4_training_pipeline",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.h7_h8_bt4_training_pipeline",
+    "target": "concept.squareformer",
+    "type": "depends_on"
+  },
+  {
+    "field": "risks",
+    "source": "decision.use_markdown_knowledge_graph",
+    "target": "risk.deprecated_roadmap_active_context",
+    "type": "risks"
+  },
+  {
+    "field": "supports",
+    "source": "decision.use_markdown_knowledge_graph",
+    "target": "design.agent_friendly_knowledge_graph",
+    "type": "supports"
+  },
+  {
+    "field": "body",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "design.inference_optimization",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "design.runtime_target_matrix_and_workflow_delegation",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "design.cross_language_contracts_and_drift_control",
+    "type": "wikilink"
+  },
+  {
+    "field": "risks",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "risk.deprecated_roadmap_active_context",
+    "type": "risks"
+  },
+  {
+    "field": "depends_on",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "design.squareformer_av_puct",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "design.h7_h8_bt4_training_pipeline",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "design.agentic_engine_maintenance",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "design.inference_optimization",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "design.runtime_target_matrix_and_workflow_delegation",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "design.cross_language_contracts_and_drift_control",
+    "type": "depends_on"
+  },
+  {
+    "field": "body",
+    "source": "agent_context.active_roadmap",
+    "target": "roadmap.current_tiny_leela_portfolio",
+    "type": "wikilink"
+  },
+  {
+    "field": "depends_on",
+    "source": "agent_context.active_roadmap",
+    "target": "roadmap.current_tiny_leela_portfolio",
+    "type": "depends_on"
+  },
+  {
+    "field": "body",
+    "source": "agent_context.current_architecture",
+    "target": "design.squareformer_av_puct",
+    "type": "wikilink"
+  },
+  {
+    "field": "depends_on",
+    "source": "agent_context.current_architecture",
+    "target": "design.squareformer_av_puct",
+    "type": "depends_on"
+  },
+  {
+    "field": "body",
+    "source": "agent_context.glossary",
+    "target": "concept.squareformer",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "agent_context.glossary",
+    "target": "concept.puct",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "agent_context.glossary",
+    "target": "concept.action_value_head",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "agent_context.glossary",
+    "target": "concept.search_improved_self_play",
+    "type": "wikilink"
+  }
+]

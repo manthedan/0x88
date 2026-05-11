@@ -106,8 +106,30 @@ Active path protection currently includes:
 - current 100M h8 cloud staging
 - local 10M h7/h8 BT4 cache/training paths
 
+## 6. Compute placement policy
 
-## 6. Repo-local agent skills
+Default placement is:
+
+```text
+local workstation: GPU training, exports, tiny correctness smokes
+Mac mini: bounded CPU post-training evals, PUCT tuning, anchor arenas
+cloud: massive datasets, cache fanout, teacher/reanalysis, large self-play
+```
+
+See `docs/mac_mini_cpu_offload_plan.md` for the current Mac-mini workflow and measured ~3x CPU speedup over the local CPU on CNN96 ONNX/PUCT benchmarks.
+
+Use the remote offload wrappers for Mac jobs instead of ad-hoc SSH:
+
+```bash
+./scripts/remote_cpu_offload_puct_visit_curve.sh
+./scripts/remote_cpu_offload_puct_bayes_by_visit.sh
+./scripts/remote_cpu_offload_tuned_puct_anchor_sweep.sh
+```
+
+Results should land under `artifacts/remote_offload/<job-name>/` and should not be committed.
+
+
+## 7. Repo-local agent skills
 
 Repo-local skills live under `.pi/skills/` and encode durable workflow policy, not live run state. Current skills:
 

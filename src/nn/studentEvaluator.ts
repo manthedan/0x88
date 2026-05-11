@@ -7,8 +7,18 @@ import type { Evaluation, Evaluator } from './evaluator.ts';
 const PIECES = 'PNBRQKpnbrqk';
 const PIECE_INDEX = new Map([...PIECES].map((piece, index) => [piece, index]));
 
+type LegacyStudentArtifactKind =
+  // Historical pure-TS artifacts kept readable for old demos/regression files.
+  // New deploy/eval paths should prefer ONNX metadata and OnnxEvaluator.
+  | 'linear_fen_student'
+  | 'frozen_conv_fen_student'
+  | 'frozen_conv_feature_mlp_student'
+  | 'tiny_board_cnn_student';
+
+type CurrentStudentArtifactKind = 'tiny_board_residual_student';
+
 export interface StudentArtifact {
-  kind: 'linear_fen_student' | 'frozen_conv_fen_student' | 'frozen_conv_feature_mlp_student' | 'tiny_board_cnn_student' | 'tiny_board_residual_student';
+  kind: LegacyStudentArtifactKind | CurrentStudentArtifactKind;
   moves: string[];
   policy_weights?: number[][];
   wdl_weights?: number[][];

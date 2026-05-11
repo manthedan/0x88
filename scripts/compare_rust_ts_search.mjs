@@ -108,4 +108,4 @@ if (mismatches.length) {
   console.log('MISMATCHES');
   for (const m of mismatches) console.log(JSON.stringify(m));
 }
-if (wdlMaxAbsError > 1e-5 || legalRate !== 1) process.exit(1);
+if (wdlMaxAbsError > 1e-5 || legalRate !== 1 || bestRate !== 1 || rootPolicyMaxL1 > 1e-6 || rootPolicyMaxKl > 1e-6) process.exit(1);

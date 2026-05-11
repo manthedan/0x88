@@ -16,9 +16,11 @@ This directory is intentionally treated as a **living research notebook plus sta
 | Doc | Status | Why |
 | --- | --- | --- |
 | [`expert_handoff_2026-05-current.md`](expert_handoff_2026-05-current.md) | Current | Best single packet for an outside expert: project state, open questions, and where help matters. |
+| [`process_and_architecture_flows.md`](process_and_architecture_flows.md) | Current | Diagram-first atlas for model lanes, architecture breakdowns, training loops, cloud pipelines, self-play, eval, and deployment. |
 | [`model_manifest.md`](model_manifest.md) | Current | Human-readable model inventory and promotion context. |
 | [`model_efficiency_metrics.md`](model_efficiency_metrics.md) | Current | How we compare strength/bytes/params/latency/search usefulness. |
 | [`release_gate_and_distributed_bench.md`](release_gate_and_distributed_bench.md) | Current | Promotion gates, protocol cards, distributed benchmark shape. |
+| [`mac_mini_cpu_offload_plan.md`](mac_mini_cpu_offload_plan.md) | Current | Compute split and Mac-mini workflow for CPU-bound post-training evals, arenas, tuning, and self-play limits. |
 | [`100m-scaling-training-plan.md`](100m-scaling-training-plan.md) | Active | Current CNN/100M supervised scaling plan and anti-overfit notes. |
 | [`transformer_model_roadmap.md`](transformer_model_roadmap.md) | Active | Current SquareFormer/TinyBT transformer roadmap. |
 | [`unified_squareformer_architecture_roadmap.md`](unified_squareformer_architecture_roadmap.md) | Active | Unified SquareFormer architecture plan and BT4-inspired direction. |
@@ -37,6 +39,7 @@ This directory is intentionally treated as a **living research notebook plus sta
 | --- | --- | --- |
 | [`elo-evaluation-process.md`](elo-evaluation-process.md) | Current | Arena/protocol methodology and Elo evaluation pitfalls. |
 | [`release_gate_and_distributed_bench.md`](release_gate_and_distributed_bench.md) | Current | Release gates, protocol cards, distributed jobs. |
+| [`mac_mini_cpu_offload_plan.md`](mac_mini_cpu_offload_plan.md) | Current | Mac-mini CPU offload process for post-training evals, PUCT tuning, anchor arenas, and two-machine self-play limits. |
 | [`model_efficiency_metrics.md`](model_efficiency_metrics.md) | Current | Size/latency/FLOPs/browser deployment metrics. |
 | [`model_manifest.md`](model_manifest.md) | Current | Curated model inventory. |
 | [`onnx_deploy_workflow.md`](onnx_deploy_workflow.md) | Current | ONNX simplification/parity/deployment workflow. |
@@ -47,6 +50,7 @@ This directory is intentionally treated as a **living research notebook plus sta
 
 | Doc | Status | Notes |
 | --- | --- | --- |
+| [`process_and_architecture_flows.md`](process_and_architecture_flows.md) | Current | Visual process map covering supervised training, cloud Batch/S3, Gumbel SUP-SP, clean Zero, Spark-style curation, eval, and deployment. |
 | [`puffer_selfplay_infra_plan.md`](puffer_selfplay_infra_plan.md) | Active | Near-term local self-play infrastructure plan with MiniZero/Puffer systems lessons, ChessOcean validation, and chunk schema. |
 | [`self_play_scaling_roadmap.md`](self_play_scaling_roadmap.md) | Reference / Active | Longer self-play roadmap; now includes MiniZero-style batched actor loop, config separation, Gumbel-root and resign calibration TODOs. |
 | [`distributed_selfplay_training_system_design.md`](distributed_selfplay_training_system_design.md) | Reference / future architecture | Distributed design drawing from MiniZero/KataGo/lczero-training; use now for schemas, WAL, accepted-model discipline, and validation. |

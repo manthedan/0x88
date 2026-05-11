@@ -419,5 +419,91 @@
         "tiny"
       ]
     }
-  ]
+  ],
+  "family_promotion_gates": {
+    "ResidualCNN": {
+      "promote_if": "beats current in-lane CNN baseline by >= +20 Elo at equal visits and is non-regressing on dev CE/top-k",
+      "kill_if": "fails to improve over smaller/in-lane baseline after two comparable training/eval attempts or exceeds deploy latency budget without Elo gain",
+      "anchor_protocol": "Stockfish/Maia UCI anchor or shared search-mode arena, deterministic classic PUCT, >=32 visits smoke then >=64 visits confirmation"
+    },
+    "ResidualCNN_AV": {
+      "promote_if": "aux/AV-PUCT shows >= +30 Elo over equal-budget classic-PUCT CNN at 64 visits, with no Stockfish cp-loss regression on override diagnostics",
+      "kill_if": "aux heads do not beat classic PUCT in two seeds/visit counts, or AV/Q diagnostics show systematic blunder amplification",
+      "anchor_protocol": "classic PUCT baseline plus calibrated aux-PUCT candidate against Stockfish/Maia anchors and visit curve"
+    },
+    "ResidualCNNHybrid": {
+      "promote_if": "beats same-scale residual CNN at equal visits and preserves browser latency/size budget",
+      "kill_if": "hybrid head/trunk adds size or latency without anchor-Elo improvement over the simpler CNN lane",
+      "anchor_protocol": "same openings and visits as current CNN anchor protocol"
+    },
+    "MoveFormer_CNN_AV": {
+      "promote_if": "beats best equal-budget CNN/AV baseline on anchor arena and tactical/cp-loss diagnostics after sidecar/cache costs are included",
+      "kill_if": "sidecar/cache/runtime complexity is not offset by anchor-Elo or tactical gain after one 10M and one 100M-scale attempt",
+      "anchor_protocol": "bucketed ONNX export, classic and tuned aux-PUCT, Stockfish/Maia anchors, latency noted by legal-bucket size"
+    },
+    "CNN_ChannelFormer": {
+      "promote_if": "beats same-dataset residual CNN by >= +20 Elo or materially improves latency/size at equal Elo",
+      "kill_if": "no anchor gain over residual CNN after supervised e3/e6-style attempts; park as architecture note",
+      "anchor_protocol": "same 10M/100M anchor arena as residual CNN comparator"
+    },
+    "SquareFormer": {
+      "promote_if": "meets browser-deploy size/latency target and beats CNN floor at equal visits after h7/h8 cache training",
+      "kill_if": "cannot match CNN floor after true h7/h8 cache training or misses browser deploy latency/size target",
+      "anchor_protocol": "BT4/SquareFormer h7/h8 lane: classic PUCT first, PTQ deploy check, Stockfish/Maia anchors"
+    }
+  },
+  "anchor_waivers": {
+    "chessformer_v1_100m_e3": {
+      "reason": "superseded SquareFormer v1 baseline; defer anchor until BT4 h7/h8 100M lane is ready",
+      "expires": null
+    },
+    "cnn_32x4_100m_e3": {
+      "reason": "small canonical ladder point superseded by stronger canonical CNNs; use as size/latency floor only",
+      "expires": null
+    },
+    "cnn_48x5_100m_e3": {
+      "reason": "canonical ladder point superseded by cnn_64x6/80x5; anchor only if size-tier comparison is reopened",
+      "expires": null
+    },
+    "cnn_64x6_100m_e3": {
+      "reason": "canonical ladder point; anchor coverage can be recovered from current CNN anchor batch if needed",
+      "expires": null
+    },
+    "cnn_80x5_100m_e3": {
+      "reason": "current-search-champion tag predates anchor-headline rollup; anchor gap is waived until next consolidated anchor batch refresh",
+      "expires": null
+    },
+    "cnn48x5_10m_e6": {
+      "reason": "old 10M baseline superseded by guarded e9/e12 models",
+      "expires": null
+    },
+    "cnn64x6_10m_e9": {
+      "reason": "old 10M baseline superseded by guarded e12 EMA model",
+      "expires": null
+    },
+    "cnn80x5_hybrid_10m_e9": {
+      "reason": "old 10M hybrid baseline superseded by guarded e12 EMA model",
+      "expires": null
+    },
+    "cnn64x6_top8_phase2": {
+      "reason": "intermediate CNN-AV top8 checkpoint; only re-anchor if AV lane is reactivated by promotion gate",
+      "expires": null
+    },
+    "cnn80x5_top8_phase3": {
+      "reason": "intermediate CNN-AV top8 checkpoint; only re-anchor if AV lane is reactivated by promotion gate",
+      "expires": null
+    },
+    "cnn64x6_cand48_phase1": {
+      "reason": "intermediate C=48 AV checkpoint; compare through tuned AV-PUCT frontier before anchor promotion",
+      "expires": null
+    },
+    "moveformer_c48_1m": {
+      "reason": "1M MoveFormer architecture probe; superseded by 10M/100M MF80 plan",
+      "expires": null
+    },
+    "cnn64x6_channelformer_c32_d128_l2_e3": {
+      "reason": "10M ChannelFormer probe; anchor only if lane is reopened by kill-criteria exception",
+      "expires": null
+    }
+  }
 }

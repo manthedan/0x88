@@ -1,0 +1,18 @@
+preferred_context_order:
+  - project_brief.md
+  - ops_constraints.md
+  - current_architecture.md
+  - active_roadmap.md
+  - open_questions.md
+  - glossary.md
+deprecated_do_not_use_for_planning:
+  - ../07_roadmaps/deprecated/
+canonical_topics:
+  squareformer:
+    start: ../02_concepts/architecture/concept.squareformer.md
+  action_value:
+    start: ../02_concepts/training/concept.action_value_head.md
+  search:
+    start: ../02_concepts/search/concept.puct.md
+  self_play:
+    start: ../02_concepts/training/concept.search_improved_self_play.md

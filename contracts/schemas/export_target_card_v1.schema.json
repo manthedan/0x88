@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tiny-leela.local/contracts/export_target_card_v1.schema.json",
+  "title": "Tiny Leela export target card v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "model", "artifact", "target", "runtime", "precision", "input", "outputs", "parity", "benchmarks"],
+  "properties": {
+    "schema": { "const": "export_target_card_v1" },
+    "model": {
+      "type": "object",
+      "required": ["id", "architecture"],
+      "properties": {
+        "id": { "type": "string" },
+        "architecture": { "type": "string", "enum": ["cnn", "moveformer", "squareformer", "bt4", "other"] },
+        "checkpoint": { "type": "string" },
+        "model_sha256": { "type": "string" },
+        "meta_sha256": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["onnx", "meta"],
+      "properties": {
+        "onnx": { "type": "string" },
+        "meta": { "type": "string" },
+        "onnx_bytes": { "type": "integer", "minimum": 0 },
+        "external_data": { "type": "boolean" },
+        "simplified": { "type": "boolean" },
+        "quantized_from": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "target": { "type": "string", "enum": ["browser_webgpu", "browser_wasm", "local_cuda", "mac_mini_native", "aws_batch_cpu", "aws_batch_gpu", "native_cpu"] },
+    "runtime": {
+      "type": "object",
+      "required": ["name", "execution_providers"],
+      "properties": {
+        "name": { "type": "string" },
+        "execution_providers": { "type": "array", "items": { "type": "string" } },
+        "host_language": { "type": "string", "enum": ["typescript", "rust", "python", "cpp", "mixed"] },
+        "threads": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "precision": { "type": "string", "enum": ["fp32", "fp16", "dynamic_int8", "static_int8", "int4_candidate"] },
+    "input": {
+      "type": "object",
+      "required": ["encoding", "history_plies"],
+      "properties": {
+        "encoding": { "type": "string" },
+        "history_plies": { "type": "integer", "minimum": 0 },
+        "legal_bucket": { "type": "string" },
+        "batch_axis": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "outputs": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "parity": { "type": "object", "additionalProperties": true },
+    "benchmarks": { "type": "object", "additionalProperties": true },
+    "known_issues": { "type": "array", "items": { "type": "string" } }
+  }
+}

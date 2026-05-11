@@ -67,6 +67,22 @@ function stockfishShallowAnchors(path, depths, threads, hash) {
 function stockfishLiteShallowAnchors(path, depths, hash) {
   return depths.map(depth => ({ type:'uci', name:`stockfish_lite_depth${depth}`, command:path, search:{ go:`depth ${depth}`, depth }, options:{ Hash:hash, UCI_LimitStrength:'false' }}));
 }
+function searchLabel(search) {
+  if (search.nodes) return `nodes${search.nodes}`;
+  if (search.depth) return `depth${search.depth}`;
+  if (search.movetime) return `movetime${search.movetime}`;
+  return String(search.go || 'search').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'search';
+}
+function stockfishLiteFullAnchors(path, specsRaw, defaultNodes, hash) {
+  return String(specsRaw || '').split(',').filter(Boolean).map((entry) => {
+    const sep = entry.indexOf(':');
+    const hasLabel = sep > 0 && /^[A-Za-z0-9_-]+$/.test(entry.slice(0, sep));
+    const label = hasLabel ? entry.slice(0, sep) : '';
+    const search = parseSearch(hasLabel ? entry.slice(sep + 1) : entry, defaultNodes);
+    const suffix = [label, searchLabel(search)].filter(Boolean).join('_');
+    return { type:'uci', name:`stockfish_lite_full_${suffix}`, command:path, search, options:{ Hash:hash, UCI_LimitStrength:'false' }};
+  });
+}
 function parseSearch(raw, defaultNodes) {
   if (!raw) return { go:`nodes ${defaultNodes}`, nodes:defaultNodes };
   if (/^\d+$/.test(raw)) return { go:`nodes ${Number(raw)}`, nodes:Number(raw) };
@@ -112,6 +128,8 @@ const includeStockfishShallow = boolArg('--include-stockfish-shallow', false);
 const sfShallowDepths = arg('--stockfish-shallow-depths', '1,2,3').split(',').filter(Boolean).map(Number);
 const includeStockfishLiteShallow = boolArg('--include-stockfish-lite-shallow', false);
 const sfLiteShallowDepths = arg('--stockfish-lite-shallow-depths', sfShallowDepths.join(',')).split(',').filter(Boolean).map(Number);
+const includeStockfishLiteFull = boolArg('--include-stockfish-lite-full', false);
+const sfLiteFullSearches = arg('--stockfish-lite-full-searches', arg('--stockfish-lite-full-search', 'nodes=256'));
 
 async function loadEvaluator(onnx, metaPath) {
   const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
@@ -127,6 +145,7 @@ const anchors = [
   ...(includeStockfishLite ? stockfishLiteAnchors(stockfishLitePath, sfLiteLevels, sfLiteNodes, hash) : []),
   ...(includeStockfishShallow ? stockfishShallowAnchors(stockfishPath, sfShallowDepths, threads, hash) : []),
   ...(includeStockfishLiteShallow ? stockfishLiteShallowAnchors(stockfishLitePath, sfLiteShallowDepths, hash) : []),
+  ...(includeStockfishLiteFull ? stockfishLiteFullAnchors(stockfishLitePath, sfLiteFullSearches, sfLiteNodes || sfNodes, hash) : []),
   ...customUciAnchors(arg('--uci-anchors',''), sfNodes),
 ];
 if (!anchors.length) throw new Error('No anchors configured');
@@ -192,7 +211,7 @@ for (const anchor of anchors) {
 }
 for (const a of anchors) a.engine.quit();
 mkdirSync(dirname(out), { recursive:true });
-const protocol = { kind:'uci_anchor_arena', candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta, mode:candidate.mode, avWeight:candidate.avWeight, rankWeight:candidate.rankWeight, regretWeight:candidate.regretWeight, riskWeight:candidate.riskWeight, uncertaintyWeight:candidate.uncertaintyWeight }, anchors:anchors.map(a=>({ name:a.name, type:a.type, command:a.command, search:a.search, nodes:a.nodes, options:a.options })), openingsFile, openingsTotal:allOpenings.length, openingStart, openingCount:openings.length, openings:openings.length, pairs, visits, cpuct, batchSize, maxPlies, stockfishNodes:sfNodes, stockfishLiteNodes:sfLiteNodes, includeStockfishLite, includeStockfishShallow, stockfishShallowDepths:sfShallowDepths, includeStockfishLiteShallow, stockfishLiteShallowDepths:sfLiteShallowDepths, threads, hash, createdUtc:new Date().toISOString() };
+const protocol = { kind:'uci_anchor_arena', candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta, mode:candidate.mode, avWeight:candidate.avWeight, rankWeight:candidate.rankWeight, regretWeight:candidate.regretWeight, riskWeight:candidate.riskWeight, uncertaintyWeight:candidate.uncertaintyWeight }, anchors:anchors.map(a=>({ name:a.name, type:a.type, command:a.command, search:a.search, nodes:a.nodes, options:a.options })), openingsFile, openingsTotal:allOpenings.length, openingStart, openingCount:openings.length, openings:openings.length, pairs, visits, cpuct, batchSize, maxPlies, stockfishNodes:sfNodes, stockfishLiteNodes:sfLiteNodes, includeStockfishLite, includeStockfishShallow, stockfishShallowDepths:sfShallowDepths, includeStockfishLiteShallow, stockfishLiteShallowDepths:sfLiteShallowDepths, includeStockfishLiteFull, stockfishLiteFullSearches:sfLiteFullSearches, threads, hash, createdUtc:new Date().toISOString() };
 writeFileSync(out, JSON.stringify({ candidate:{ name:candidate.name, onnx:candidate.onnx, meta:candidate.meta }, protocol, summaries, games }, null, 2));
 writeFileSync(`${out}.protocol.json`, JSON.stringify(protocol, null, 2));
 for (const s of summaries) {

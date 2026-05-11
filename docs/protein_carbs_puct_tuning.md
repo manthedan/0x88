@@ -35,6 +35,28 @@ score = winrate_vs_anchor
 
 Keep raw metrics in each row so the scoring formula can be changed later.
 
+## Implemented aux-PUCT tuning upgrade
+
+`eval/bayesian_aux_puct_tune.mjs` now uses a Protein/CARBS-style loop:
+
+- append-only `ledger.jsonl` per visit count, including params, score, wall-clock cost, games, and artifacts
+- actual surrogate-guided search once `--initial-budget` is exhausted
+- cost-aware acquisition via `--cost-aware 1`
+- conditional aux weight dimensions through `--dims av,rank,regret`
+- optional `cpuct` and `fpu` tuning with `--cpuct-values` and `--fpu-values`
+- adaptive refinement from a previous `best_by_visit.tsv` via `--prior-best-tsv`
+- confirmation reruns for near-frontier candidates via `--confirm-top-k` and `--confirm-games`
+- failures are recorded in the ledger before the run exits
+
+The Mac-mini wrapper defaults to a larger tuning run plus confirmation:
+
+```bash
+ITERATIONS=20 \
+CONFIRM_TOP_K=3 \
+CONFIRM_GAMES=24 \
+./scripts/remote_cpu_offload_puct_bayes_by_visit.sh
+```
+
 ## Pareto reporting
 
 A small local report script is available:

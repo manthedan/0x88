@@ -57,6 +57,19 @@ For a known run:
 ./scripts/tlops run show RUN_ID
 ```
 
+## Native Rust eval/search jobs
+
+For bounded native ONNX arena or parity work, prefer the Rust tools once local correctness gates pass:
+
+```bash
+npm run rust:arena -- --candidate-onnx C.onnx --candidate-meta C.meta.json --baseline-onnx B.onnx --baseline-meta B.meta.json
+npm run compare:rust-ts-board -- --meta MODEL.meta.json
+npm run compare:rust-ts-onnx-eval -- --model MODEL.onnx --meta MODEL.meta.json --generated 4
+npm run bench:rust-ts-board
+```
+
+`eval/search_mode_arena.mjs --backend rust` is currently a launcher for exactly two classic-PUCT players. Record whether an eval result came from TS/ORT Web, Rust/native ORT, browser WebGPU, Mac mini native CPU, local CUDA, or AWS Batch; runtime backend is part of the artifact provenance.
+
 ## When adopting an already-running process
 
 1. Identify the durable identity:

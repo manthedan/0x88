@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tiny-leela.local/contracts/cache_manifest_v1.schema.json",
+  "title": "Tiny Leela training cache manifest v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "format", "source", "shards", "validation"],
+  "properties": {
+    "schema": { "const": "cache_manifest_v1" },
+    "format": { "type": "string" },
+    "source": {
+      "type": "object",
+      "required": ["dataset_manifest"],
+      "properties": {
+        "dataset_manifest": { "type": "string" },
+        "dataset_sha256": { "type": "string" },
+        "history_plies": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "producer": {
+      "type": "object",
+      "properties": {
+        "language": { "type": "string", "enum": ["rust", "python", "typescript", "mixed"] },
+        "binary": { "type": "string" },
+        "git_commit": { "type": "string" },
+        "contract_versions": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "arrays": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "dtype", "shape"],
+        "properties": {
+          "path": { "type": "string" },
+          "dtype": { "type": "string" },
+          "shape": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+          "endianness": { "type": "string", "enum": ["little", "native"] }
+        },
+        "additionalProperties": true
+      }
+    },
+    "shards": { "type": "array", "items": { "type": "string" } },
+    "dev_cache": { "type": "string" },
+    "validation": {
+      "type": "object",
+      "required": ["rows"],
+      "properties": {
+        "rows": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "policy_size": { "type": "integer", "minimum": 1 },
+        "max_legal_moves": { "type": "integer", "minimum": 1 },
+        "token_features": { "type": "integer", "minimum": 1 },
+        "hashes": { "type": "object", "additionalProperties": { "type": "string" } }
+      },
+      "additionalProperties": true
+    }
+  }
+}

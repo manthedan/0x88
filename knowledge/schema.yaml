@@ -1,0 +1,42 @@
+valid_types:
+  - concept
+  - finding
+  - design
+  - decision
+  - experiment
+  - roadmap
+  - source
+  - risk
+  - task
+  - ops_context
+  - agent_context
+valid_statuses:
+  - active
+  - evergreen
+  - draft
+  - planned
+  - running
+  - completed
+  - deprecated
+  - archive
+required_common:
+  - id
+  - type
+  - title
+  - status
+  - created
+  - updated
+  - agent_summary
+relationship_fields:
+  - supports
+  - supported_by
+  - depends_on
+  - tested_by
+  - implemented_by
+  - supersedes
+  - superseded_by
+  - risks
+  - derived_from
+  - source_notes
+  - contradicts
+  - related

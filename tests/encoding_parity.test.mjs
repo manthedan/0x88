@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { POLICY_MOVES, POLICY_SIZE } from '../src/chess/policyMap.ts';
 import { moveFromUci, moveToActionId } from '../src/chess/moveCodec.ts';
+import { moveToChessBenchAvClass, moveToSquareformerPolicyIndex } from '../src/chess/moveEncodings.ts';
 
 function pyJson(source) {
   const stdout = execFileSync('.venv-onnx/bin/python', ['-c', source], { encoding: 'utf8' });
@@ -24,5 +25,15 @@ test('move_to_action_id parity between Python and TypeScript', () => {
   const moves = ['a1a8', 'h8a1', 'e2e4', 'e7e8q', 'e7e8r', 'e7e8b', 'e7e8n', 'a2b1q', 'h7h8n'];
   const py = pyJson(`from training._lib.encoding import move_to_action_id; import json; moves=${JSON.stringify(moves)}; print(json.dumps([move_to_action_id(m) for m in moves]))`);
   const ts = moves.map((uci) => moveToActionId(moveFromUci(uci)));
+  assert.deepEqual(py, ts);
+});
+
+test('ChessBench/SquareFormer compact AV class parity between Python and TypeScript', () => {
+  const moves = ['a1a8', 'h8a1', 'e2e4', 'e7e8q', 'e7e8r', 'e7e8b', 'e7e8n', 'a2b1q', 'h7h8n'];
+  const py = pyJson(`from training._lib.encoding import move_to_chessbench_av_class, move_to_squareformer_policy_index; import json; moves=${JSON.stringify(moves)}; print(json.dumps([[move_to_chessbench_av_class(m), move_to_squareformer_policy_index(m)] for m in moves]))`);
+  const ts = moves.map((uci) => {
+    const move = moveFromUci(uci);
+    return [moveToChessBenchAvClass(move), moveToSquareformerPolicyIndex(move)];
+  });
   assert.deepEqual(py, ts);
 });

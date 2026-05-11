@@ -90,3 +90,5 @@ console.log(`METRIC rust_ts_arena_games=${games}`);
 console.log(`METRIC rust_ts_arena_rust_score_rate=${(rustScore / games).toFixed(6)}`);
 console.log(`METRIC rust_ts_arena_rust_illegal_losses=${rustIllegalLosses}`);
 console.log(`METRIC rust_ts_arena_ts_illegal_losses=${tsIllegalLosses}`);
+const rustScoreRate = rustScore / games;
+if (rustIllegalLosses || tsIllegalLosses || Math.abs(rustScoreRate - 0.5) > 1e-9) process.exit(1);

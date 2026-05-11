@@ -19,10 +19,11 @@ Useful knobs:
 --full-pairs 20
 --cpuct 1.5
 --bucket-rows 5000
+--stockfish-lite-full-searches shallow:nodes=32,deep:depth=6
 --out-dir artifacts/release_gates/MODEL_NAME
 ```
 
-The gate runs client build/tests, PUCT consistency, queen-risk diagnostics, bucket eval, and quick anchor games.
+The gate runs client build/tests, PUCT consistency, queen-risk diagnostics, bucket eval, and quick anchor games. By default, each quick/full anchor packet also includes two full-strength Stockfish Lite anchors (`UCI_LimitStrength=false`): `stockfish_lite_full_shallow_nodes32` to test whether we can contend with shallow full-strength search, and `stockfish_lite_full_deep_depth6` to expose how we lose to deeper Stockfish Lite. The budgets are bounded and can be overridden.
 
 ## Protocol cards
 
@@ -50,7 +51,7 @@ Cheap curve:
 ```text
 visits: 1, 32, 64, 128, 192, 256, 384, 512
 optional: 768, 1024
-anchors: Stockfish1320, Stockfish1600, Maia1100
+anchors: Stockfish1320, Stockfish1600, Maia1100, full-strength Stockfish Lite shallow nodes32, full-strength Stockfish Lite deep depth6
 pairs: 3-5
 max plies: 100
 openings: eval/opening_suite_uho_lite_v1.fen, reversed pairs
@@ -62,7 +63,7 @@ Promotion protocol:
 
 ```text
 If a visit setting wins the cheap curve, rerun it with pairs=10-20 and full anchors:
-Stockfish1320, Stockfish1600, Maia1100, Maia1500, Maia1900.
+Stockfish1320, Stockfish1600, Maia1100, Maia1500, Maia1900, and full-strength Stockfish Lite shallow/deep anchors (or documented stronger Lite budgets).
 ```
 
 Claims should stay protocol-relative and include WDL, illegal counts, anchors, visit budget, openings, backend, and error bars.
