@@ -60,7 +60,8 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
   - [x] Resume-safe shard completion markers.
   - [x] `.jsonl.zst` or binary/zstd streaming for large outputs.
     - Rust cache builders now share streaming plain JSONL / `.jsonl.zst` input handling via `for_each_jsonl_line`.
-  - [ ] Deterministic row ordering and checksums.
+  - [x] Deterministic row ordering and checksums.
+    - Rust cache metadata/manifests now declare row ordering and include SHA-256 hashes for emitted cache artifacts.
   - [ ] Python compatibility readers for training.
 
 - [ ] Keep Python as the training/export owner.
