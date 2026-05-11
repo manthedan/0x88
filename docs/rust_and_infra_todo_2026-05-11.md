@@ -119,10 +119,12 @@ This list tracks missing Rust implementations, production infra gaps, and cross-
 ## P1 — Promotion / Anchor Eval Infra
 
 - [ ] Add Rust-native promotion gates where useful.
-  - [ ] Stockfish anchor arena integration.
+  - [x] Stockfish anchor arena integration.
+    - Rust arena supports `--adjudicate stockfish`, `--stockfish`, `--stockfish-depth`, and draw-CP adjudication.
   - [ ] Maia/lc0 wrapper integration where available.
-  - [ ] PGN export from Rust arenas.
-  - [ ] Elo/SPRT/confidence summaries.
+  - [x] PGN export from Rust arenas.
+  - [x] Elo/SPRT/confidence summaries.
+    - Rust arena emits PGN via `--pgn-out` and reports WDL/score-rate/Elo estimate metrics in JSON/stdout.
   - [ ] Release-gate packet generation.
   - [ ] Model manifest update helper.
 
