@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, env, fs, path::Path};
-use tiny_leela_core::frozen_conv_student_features;
+use tiny_leela_core::{for_each_jsonl_line, frozen_conv_student_features};
 
 fn arg(name: &str, fallback: &str) -> String {
     let prefix = format!("{name}=");
@@ -48,20 +48,21 @@ fn main() {
         .unwrap_or_default();
     let before = cache.len();
     for path in inputs.split(',').filter(|s| !s.is_empty()) {
-        let Ok(text) = fs::read_to_string(path) else {
-            continue;
-        };
-        for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let _ = for_each_jsonl_line(path, |line| {
+            if line.trim().is_empty() {
+                return Ok(true);
+            }
             let Ok(row) = serde_json::from_str::<Value>(line) else {
-                continue;
+                return Ok(true);
             };
             let Some(fen) = row.get("fen").and_then(|v| v.as_str()) else {
-                continue;
+                return Ok(true);
             };
             cache
                 .entry(fen.to_string())
                 .or_insert_with(|| frozen_conv_student_features(fen, channels, layers));
-        }
+            Ok(true)
+        });
     }
     write_atomic(
         &out,

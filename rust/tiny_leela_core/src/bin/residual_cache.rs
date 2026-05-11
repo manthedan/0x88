@@ -2,9 +2,10 @@ use serde_json::{json, Value};
 use std::{
     collections::{BTreeSet, HashMap},
     env, fs,
-    io::{BufRead, BufReader, Write},
+    io::Write,
     path::{Path, PathBuf},
 };
+use tiny_leela_core::for_each_jsonl_line;
 
 const FILES: &str = "abcdefgh";
 const PIECES: &str = "PNBRQKpnbrqk";
@@ -258,13 +259,6 @@ fn parse_row(
     })
 }
 
-fn input_lines(path: &str) -> impl Iterator<Item = String> {
-    let file = fs::File::open(path).unwrap_or_else(|e| panic!("open input {path}: {e}"));
-    BufReader::new(file)
-        .lines()
-        .map(|l| l.expect("read input line"))
-}
-
 fn write_atomic(path: &str, body: &str) {
     if let Some(parent) = Path::new(path).parent() {
         fs::create_dir_all(parent).expect("create output dir");
@@ -300,11 +294,11 @@ fn main() {
     let mut rows = 0usize;
     let mut skipped_unknown_moves = 0usize;
     for path in &inputs {
-        for line in input_lines(path) {
+        for_each_jsonl_line(path, |line| {
             if max_rows > 0 && rows >= max_rows {
-                break;
+                return Ok(false);
             }
-            let row: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
+            let row: Value = serde_json::from_str(line).unwrap_or(Value::Null);
             let mv = row.get("policy").and_then(|p| p.as_object()).and_then(|p| {
                 if p.len() == 1 {
                     p.keys().next().cloned()
@@ -315,13 +309,15 @@ fn main() {
             if let Some(mv) = mv {
                 if !mid.contains_key(&mv) {
                     skipped_unknown_moves += 1;
-                    continue;
+                    return Ok(true);
                 }
             }
-            if parse_row(&line, &mid, history_plies, state_planes, current18).is_some() {
+            if parse_row(line, &mid, history_plies, state_planes, current18).is_some() {
                 rows += 1;
             }
-        }
+            Ok(true)
+        })
+        .expect("stream residual input");
     }
     let out_path = PathBuf::from(&out);
     let tmp_path = out_path.with_file_name(format!(
@@ -352,13 +348,13 @@ fn main() {
     let mut blunder_file =
         fs::File::create(tmp_path.join("stockfish_blunder_bucket.int64")).expect("create blunder");
     let mut written = 0usize;
-    'outer: for path in &inputs {
-        for line in input_lines(path) {
+    for path in &inputs {
+        for_each_jsonl_line(path, |line| {
             if written >= rows {
-                break 'outer;
+                return Ok(false);
             }
-            let Some(row) = parse_row(&line, &mid, history_plies, state_planes, current18) else {
-                continue;
+            let Some(row) = parse_row(line, &mid, history_plies, state_planes, current18) else {
+                return Ok(true);
             };
             x_file
                 .write_all(unsafe {
@@ -385,7 +381,9 @@ fn main() {
             if written % 100000 == 0 {
                 println!("METRIC residual_cache_rows_written={written}");
             }
-        }
+            Ok(true)
+        })
+        .expect("stream residual input");
     }
     let meta = json!({
         "rows": rows,

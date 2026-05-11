@@ -1,10 +1,12 @@
 use serde_json::{json, Value};
 use std::{
     env, fs,
-    io::{BufRead, BufReader, Write},
+    io::Write,
     path::{Path, PathBuf},
 };
-use tiny_leela_core::{encode_squareformer_compact_input, parse_fen, SquareFormerEvaluatorMeta};
+use tiny_leela_core::{
+    encode_squareformer_compact_input, for_each_jsonl_line, parse_fen, SquareFormerEvaluatorMeta,
+};
 
 const SCHEMA_ACTION_VALUE: &str = "teacher.action_value.v1";
 const POLICY_SIZE: usize = 4096 + 4096 * 4;
@@ -69,13 +71,6 @@ fn chessbench_move_class(uci: &str) -> Option<i64> {
     } else {
         Some(ft)
     }
-}
-
-fn input_lines(path: &str) -> impl Iterator<Item = String> {
-    let file = fs::File::open(path).unwrap_or_else(|e| panic!("open input {path}: {e}"));
-    BufReader::new(file)
-        .lines()
-        .map(|l| l.expect("read input line"))
 }
 
 fn write_atomic(path: &str, body: &str) {
@@ -260,25 +255,25 @@ fn main() {
     let mut skipped_rows = 0usize;
     let mut bad_position_groups = 0usize;
     for path in &inputs {
-        for line in input_lines(path) {
+        for_each_jsonl_line(path, |line| {
             if max_positions > 0 && positions >= max_positions {
-                break;
+                return Ok(false);
             }
             if line.trim().is_empty() {
-                continue;
+                return Ok(true);
             }
             scanned_rows += 1;
-            let row: Value = match serde_json::from_str(&line) {
+            let row: Value = match serde_json::from_str(line) {
                 Ok(row) => row,
                 Err(_) => {
                     malformed_rows += 1;
-                    continue;
+                    return Ok(true);
                 }
             };
             source_order += 1;
             let Some((key, fen, hist, cand)) = candidate_from_row(&row, source_order) else {
                 skipped_rows += 1;
-                continue;
+                return Ok(true);
             };
             if current.as_ref().map(|g| g.key.as_str()) != Some(key.as_str()) {
                 if let Some(group) = current.take() {
@@ -299,7 +294,7 @@ fn main() {
                         None => bad_position_groups += 1,
                     }
                     if max_positions > 0 && positions >= max_positions {
-                        break;
+                        return Ok(false);
                     }
                 }
                 current = Some(Group {
@@ -312,7 +307,9 @@ fn main() {
             if let Some(group) = current.as_mut() {
                 group.candidates.push(cand);
             }
-        }
+            Ok(true)
+        })
+        .expect("stream action-value input");
     }
     if max_positions == 0 || positions < max_positions {
         if let Some(group) = current.take() {

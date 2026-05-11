@@ -1,9 +1,10 @@
 use serde_json::{json, Value};
 use std::{
     env, fs,
-    io::{BufRead, BufReader, Write},
+    io::Write,
     path::{Path, PathBuf},
 };
+use tiny_leela_core::for_each_jsonl_line;
 
 const FILES: &str = "abcdefgh";
 const PIECES: &str = ".PNBRQKpnbrqk";
@@ -170,13 +171,6 @@ fn write_atomic(path: &str, body: &str) {
     fs::rename(&tmp, path).expect("rename temp output");
 }
 
-fn input_lines(path: &str) -> impl Iterator<Item = String> {
-    let file = fs::File::open(path).unwrap_or_else(|e| panic!("open input {path}: {e}"));
-    BufReader::new(file)
-        .lines()
-        .map(|l| l.expect("read input line"))
-}
-
 fn main() {
     let input = arg("--input", "");
     let out = arg("--out", "artifacts/cache_squareformer_rust/shard_0000");
@@ -195,16 +189,18 @@ fn main() {
     let mut rows = 0usize;
     let mut bad = 0usize;
     for path in &inputs {
-        for line in input_lines(path) {
+        for_each_jsonl_line(path, |line| {
             if max_rows > 0 && rows >= max_rows {
-                break;
+                return Ok(false);
             }
-            if valid_row(&line, history).is_some() {
+            if valid_row(line, history).is_some() {
                 rows += 1;
             } else {
                 bad += 1;
             }
-        }
+            Ok(true)
+        })
+        .expect("stream SquareFormer input");
     }
     let out_path = PathBuf::from(&out);
     let tmp_path = out_path.with_file_name(format!(
@@ -224,13 +220,13 @@ fn main() {
     let mut policy = fs::File::create(tmp_path.join("policy.int64")).expect("create policy");
     let mut wdl_file = fs::File::create(tmp_path.join("wdl.float32")).expect("create wdl");
     let mut written = 0usize;
-    'outer: for path in &inputs {
-        for line in input_lines(path) {
+    for path in &inputs {
+        for_each_jsonl_line(path, |line| {
             if written >= rows {
-                break 'outer;
+                return Ok(false);
             }
-            let Some((x, y, wdl)) = valid_row(&line, history) else {
-                continue;
+            let Some((x, y, wdl)) = valid_row(line, history) else {
+                return Ok(true);
             };
             tokens.write_all(&x).expect("write tokens");
             policy.write_all(&y.to_le_bytes()).expect("write policy");
@@ -241,7 +237,9 @@ fn main() {
             if written % 100000 == 0 {
                 println!("METRIC square_cache_rows_written={written}");
             }
-        }
+            Ok(true)
+        })
+        .expect("stream SquareFormer input");
     }
     let meta = json!({
         "rows": rows,

@@ -1,10 +1,12 @@
 use serde_json::{json, Value};
 use std::{
     env, fs,
-    io::{BufRead, BufReader, Write},
+    io::Write,
     path::{Path, PathBuf},
 };
-use tiny_leela_core::{encode_moveformer_legal_inputs, move_to_action_id, parse_fen};
+use tiny_leela_core::{
+    encode_moveformer_legal_inputs, for_each_jsonl_line, move_to_action_id, parse_fen,
+};
 
 fn arg(name: &str, fallback: &str) -> String {
     let prefix = format!("{name}=");
@@ -48,13 +50,6 @@ fn action_id_from_uci(uci: &str) -> Option<i64> {
         0
     };
     Some(((from * 64 + to) * 5 + promo) as i64)
-}
-
-fn input_lines(path: &str) -> impl Iterator<Item = String> {
-    let file = fs::File::open(path).unwrap_or_else(|e| panic!("open input {path}: {e}"));
-    BufReader::new(file)
-        .lines()
-        .map(|l| l.expect("read input line"))
 }
 
 fn write_atomic(path: &str, body: &str) {
@@ -113,16 +108,18 @@ fn main() {
     let mut rows = 0usize;
     let mut bad = 0usize;
     for path in &inputs {
-        for line in input_lines(path) {
+        for_each_jsonl_line(path, |line| {
             if max_rows > 0 && rows >= max_rows {
-                break;
+                return Ok(false);
             }
-            if parse_row(&line).is_some() {
+            if parse_row(line).is_some() {
                 rows += 1;
             } else {
                 bad += 1;
             }
-        }
+            Ok(true)
+        })
+        .expect("stream MoveFormer input");
     }
 
     let out_path = PathBuf::from(&out);
@@ -152,16 +149,16 @@ fn main() {
     let mut written = 0usize;
     let mut target_found = 0usize;
     let mut truncated = 0usize;
-    'outer: for path in &inputs {
-        for line in input_lines(path) {
+    for path in &inputs {
+        for_each_jsonl_line(path, |line| {
             if written >= rows {
-                break 'outer;
+                return Ok(false);
             }
-            let Some((fen, target, wdl, q)) = parse_row(&line) else {
-                continue;
+            let Some((fen, target, wdl, q)) = parse_row(line) else {
+                return Ok(true);
             };
             let Ok(board) = parse_fen(&fen) else {
-                continue;
+                return Ok(true);
             };
             let (moves, ids, features, mask) =
                 encode_moveformer_legal_inputs(&board, max_legal_moves, num_features);
@@ -198,7 +195,9 @@ fn main() {
                 mask_file.write_all(&v.to_le_bytes()).expect("write mask");
             }
             written += 1;
-        }
+            Ok(true)
+        })
+        .expect("stream MoveFormer input");
     }
     let meta = json!({
         "format": "moveformer_sidecar_cache_rust_v1",
