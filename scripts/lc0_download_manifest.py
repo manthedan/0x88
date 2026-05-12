@@ -37,7 +37,7 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return h.hexdigest()
 
 
-def download(url: str, dst: Path, *, max_bytes: int | None = None, range_bytes: int | None = None) -> tuple[int, str | None, str | None]:
+def download(url: str, dst: Path, *, max_bytes: int | None = None, range_bytes: int | None = None) -> tuple[int, str | None, str | None, bool, bool]:
     dst.parent.mkdir(parents=True, exist_ok=True)
     headers = {"User-Agent": "tiny-leela-lc0-manifest/1"}
     requested_range = None
@@ -51,6 +51,8 @@ def download(url: str, dst: Path, *, max_bytes: int | None = None, range_bytes: 
     with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 - explicit user-provided URL tool
         content_type = resp.headers.get("content-type")
         content_range = resp.headers.get("content-range")
+        range_respected = bool(content_range)
+        truncated_response = False
         total = 0
         with tempfile.NamedTemporaryFile(dir=str(dst.parent), delete=False) as tmp:
             tmp_path = Path(tmp.name)
@@ -58,6 +60,13 @@ def download(url: str, dst: Path, *, max_bytes: int | None = None, range_bytes: 
                 while True:
                     block = resp.read(1024 * 1024)
                     if not block:
+                        break
+                    if range_bytes is not None and total + len(block) > range_bytes:
+                        keep = range_bytes - total
+                        if keep > 0:
+                            tmp.write(block[:keep])
+                            total += keep
+                        truncated_response = True
                         break
                     total += len(block)
                     if max_bytes is not None and total > max_bytes:
@@ -69,7 +78,7 @@ def download(url: str, dst: Path, *, max_bytes: int | None = None, range_bytes: 
             except Exception:
                 tmp_path.unlink(missing_ok=True)
                 raise
-    return total, content_type, content_range or requested_range
+    return total, content_type, content_range or requested_range, range_respected, truncated_response
 
 
 def read_text_url(url: str, *, max_bytes: int = 256 * 1024) -> str:
@@ -81,7 +90,15 @@ def read_text_url(url: str, *, max_bytes: int = 256 * 1024) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def build_manifest(args: argparse.Namespace, raw_path: Path, license_path: Path | None, content_type: str | None) -> dict[str, Any]:
+def build_manifest(
+    args: argparse.Namespace,
+    raw_path: Path,
+    license_path: Path | None,
+    content_type: str | None,
+    *,
+    range_respected: bool | None = None,
+    truncated_response: bool | None = None,
+) -> dict[str, Any]:
     stat = raw_path.stat()
     return {
         "schema": "tiny_leela.lc0_public_manifest.v1",
@@ -95,6 +112,8 @@ def build_manifest(args: argparse.Namespace, raw_path: Path, license_path: Path 
             "format_hint": args.format_hint,
             "content_type": content_type,
             "http_range": args.range_bytes and f"bytes=0-{args.range_bytes - 1}",
+            "http_range_respected": range_respected if args.range_bytes else None,
+            "response_truncated_to_range_bytes": truncated_response if args.range_bytes else None,
             "license_url": args.license_url,
         },
         "local": {
@@ -135,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest_path = Path(args.manifest_dir) / (args.manifest_name or f"{raw_path.name}.manifest.json")
 
     print(f"download {args.url} -> {raw_path}", file=sys.stderr)
-    nbytes, content_type, content_range = download(args.url, raw_path, max_bytes=args.max_bytes, range_bytes=args.range_bytes)
+    nbytes, content_type, content_range, range_respected, truncated_response = download(args.url, raw_path, max_bytes=args.max_bytes, range_bytes=args.range_bytes)
     print(f"downloaded bytes={nbytes} sha256={sha256_file(raw_path)}", file=sys.stderr)
 
     license_path = None
@@ -146,7 +165,14 @@ def main(argv: list[str] | None = None) -> int:
         text = read_text_url(args.license_url)
         license_path.write_text(text)
 
-    manifest = build_manifest(args, raw_path, license_path, content_type)
+    manifest = build_manifest(
+        args,
+        raw_path,
+        license_path,
+        content_type,
+        range_respected=range_respected,
+        truncated_response=truncated_response,
+    )
     if content_range:
         manifest["source"]["content_range"] = content_range
         manifest["partial_sample"] = bool(args.range_bytes)

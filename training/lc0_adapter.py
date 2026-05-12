@@ -36,6 +36,7 @@ LC0_V6_PROBS = struct.Struct("<1858f")
 LC0_V6_PLANES = struct.Struct("<104Q")
 LC0_V6_TAIL = struct.Struct("<BBBBBBBB15fIHHfI")
 assert LC0_V6_TAIL.size == LC0_V6_RECORD_BYTES - 8272
+STANDARD_START_BOARD_FEN = chess.Board().board_fen()
 
 FILES = "abcdefgh"
 RANKS = "12345678"
@@ -461,23 +462,41 @@ def _legal_policy_uci(record: V6Record, board: chess.Board, *, top_k: int, min_p
     return {k: v / mass for k, v in sorted(mapped.items())}
 
 
+def record_board(record: V6Record) -> chess.Board:
+    fen = planes_to_fen(
+        record.planes,
+        input_format=record.input_format,
+        us_ooo=record.us_ooo,
+        us_oo=record.us_oo,
+        them_ooo=record.them_ooo,
+        them_oo=record.them_oo,
+        side_to_move_or_enpassant=record.side_to_move_or_enpassant,
+        rule50_count=record.rule50_count,
+    )
+    return chess.Board(fen)
+
+
+def is_standard_initial_record(record: V6Record) -> bool:
+    """Return whether the first record of a game/member is ordinary chess startpos.
+
+    Some modern LC0 public chunks include Chess960/FRC games. Tiny Leela's
+    current LC0-distillation lane is standard chess only, so converters skip an
+    entire gzip member when its first record is not normal startpos instead of
+    later reporting its castling policy as illegal ordinary-chess mass.
+    """
+    if record.input_format != 1:
+        return False
+    board = record_board(record)
+    return board.board_fen() == STANDARD_START_BOARD_FEN and board.turn == chess.WHITE
+
+
 def record_to_example(record: V6Record, *, source_ref: dict[str, Any], top_k: int, min_prob: float, audit: DropAudit) -> dict[str, Any] | None:
     audit.input_format_counts[str(record.input_format)] = audit.input_format_counts.get(str(record.input_format), 0) + 1
     if record.input_format != 1:
         audit.drop("unsupported_input_format", {"input_format": record.input_format, "source_ref": source_ref})
         return None
     try:
-        fen = planes_to_fen(
-            record.planes,
-            input_format=record.input_format,
-            us_ooo=record.us_ooo,
-            us_oo=record.us_oo,
-            them_ooo=record.them_ooo,
-            them_oo=record.them_oo,
-            side_to_move_or_enpassant=record.side_to_move_or_enpassant,
-            rule50_count=record.rule50_count,
-        )
-        board = chess.Board(fen)
+        board = record_board(record)
     except Exception as exc:
         audit.drop("invalid_board_decode", {"source_ref": source_ref, "error": f"{type(exc).__name__}: {exc}"})
         return None
@@ -573,8 +592,20 @@ def iter_record_bytes(path: Path, *, max_members: int | None = None) -> Iterator
     raise ValueError(f"unsupported input path (expected .gz or .tar/.tar.part): {path}")
 
 
-def convert_v6(input_path: Path, output_path: Path, audit_path: Path, *, limit_records: int, top_k: int, min_prob: float, max_members: int | None) -> None:
+def convert_v6(
+    input_path: Path,
+    output_path: Path,
+    audit_path: Path,
+    *,
+    limit_records: int,
+    top_k: int,
+    min_prob: float,
+    max_members: int | None,
+    skip_nonstandard_initial_position: bool,
+) -> None:
     audit = DropAudit()
+    skipped_chunks: set[str] = set()
+    seen_chunks: set[str] = set()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w") as out:
         for chunk_name, record_idx, rec_bytes in iter_record_bytes(input_path, max_members=max_members):
@@ -582,11 +613,25 @@ def convert_v6(input_path: Path, output_path: Path, audit_path: Path, *, limit_r
                 break
             audit.total_records += 1
             audit.chunk_counts[chunk_name] = audit.chunk_counts.get(chunk_name, 0) + 1
+            source_ref = {"input_path": str(input_path), "chunk": chunk_name, "record_idx": record_idx}
             try:
                 record = parse_v6_record(rec_bytes)
+                if skip_nonstandard_initial_position:
+                    if chunk_name not in seen_chunks:
+                        seen_chunks.add(chunk_name)
+                        if not is_standard_initial_record(record):
+                            skipped_chunks.add(chunk_name)
+                            audit.drop(
+                                "unsupported_nonstandard_initial_position",
+                                {"source_ref": source_ref, "fen": record_board(record).fen()},
+                            )
+                            continue
+                    elif chunk_name in skipped_chunks:
+                        audit.drop("unsupported_nonstandard_initial_position", {"source_ref": source_ref})
+                        continue
                 ex = record_to_example(
                     record,
-                    source_ref={"input_path": str(input_path), "chunk": chunk_name, "record_idx": record_idx},
+                    source_ref=source_ref,
                     top_k=top_k,
                     min_prob=min_prob,
                     audit=audit,
@@ -655,6 +700,13 @@ def main(argv: list[str] | None = None) -> int:
     conv.add_argument("--top-k", type=int, default=8, help="Keep top-k positive policy entries per raw position")
     conv.add_argument("--min-prob", type=float, default=1e-12)
     conv.add_argument("--max-members", type=int, default=None, help="Limit .gz members read from tar sample")
+    conv.add_argument(
+        "--include-nonstandard-initial-position",
+        dest="skip_nonstandard_initial_position",
+        action="store_false",
+        help="Do not skip gzip members whose first record is not ordinary chess startpos (e.g. FRC/Chess960).",
+    )
+    conv.set_defaults(skip_nonstandard_initial_position=True)
 
     args = parser.parse_args(argv)
     if args.cmd == "qd-to-wdl":
@@ -673,6 +725,7 @@ def main(argv: list[str] | None = None) -> int:
             top_k=args.top_k,
             min_prob=args.min_prob,
             max_members=args.max_members,
+            skip_nonstandard_initial_position=args.skip_nonstandard_initial_position,
         )
         return 0
     raise AssertionError(args.cmd)
