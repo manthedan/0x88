@@ -1,7 +1,7 @@
 # Model manifest
 
 Tiny Leela model metadata is split across ONNX files, runtime `*.meta.json` files,
-dataset manifests, training logs, and arena results. The project-level model
+dataset manifests, training logs, arena results, and frontier cards. The project-level model
 manifest makes those pieces queryable from one place.
 
 ## Files
@@ -70,9 +70,17 @@ Each generated model entry contains:
   "exports": {
     "primary": {
       "params": 8545012,
+      "flops_estimate": null,
       "bundle_bytes": 34201144,
       "int8_param_mib_est": 8.15
     }
+  },
+  "frontier_card": {
+    "params": 8545012,
+    "flops_macs_estimate": null,
+    "fixed_visit_strength": {},
+    "fixed_time_strength": {},
+    "deployment": null
   },
   "training_metrics": {
     "metrics": {
@@ -94,6 +102,7 @@ Computed by `eval/build_model_manifest.py`:
 - ONNX parameter count
 - ONNX bundle bytes, including `.onnx.data` sidecars
 - FP16/INT8/INT4 parameter-size estimates
+- FLOPs/MACs estimates when an architecture-specific counter is available
 - compact runtime metadata from `*.meta.json` with huge move lists removed
 - `METRIC key=value` lines from training logs
 - dataset row/candidate totals from dataset manifests
@@ -112,5 +121,6 @@ Manual in `eval/model_manifest_overrides.json`:
 - Use explicit candidate-count names, e.g. `cnn64x6_cand48_phase1`.
 - Do not claim one global Elo; keep strength protocol-relative.
 - Track policy-only, classic PUCT, AV-PUCT, fixed-visit, and fixed-time results separately.
-- Quantized size estimates are not release claims until actual quantized artifacts are tested.
+- Quantized size estimates are not release claims until actual quantized artifacts are tested with effectively zero quality loss.
+- Do not use a hard MB cap as the promotion rule; use the frontier-card axes: strength, params, FLOPs/MACs, bytes, latency, blunders, and calibration.
 - For old artifacts with incomplete metadata, prefer `provenance_confidence: low` or notes instead of guessing.

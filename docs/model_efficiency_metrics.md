@@ -1,6 +1,6 @@
 # Tiny Leela model efficiency metrics
 
-We optimize Tiny Leela as a Pareto problem, not as one absolute Elo number.  A model is only unambiguously better when it is stronger, smaller, and faster, or at least no worse on every axis.
+We optimize Tiny Leela as a Pareto problem, not as one absolute Elo number. A model is only unambiguously better when it is stronger, smaller/simpler, and faster, or at least no worse on every axis. Do not reduce "tiny" to a hard MB cap: params, FLOPs/MACs, ONNX/export bytes, memory, latency, and strength per real wall-clock move are separate axes.
 
 ## Official comparison axes
 
@@ -11,6 +11,8 @@ model name
 architecture
 training data / phase
 params
+params
+estimated FLOPs/MACs
 FP32 bytes
 ONNX bundle bytes
 quantized bytes when available
@@ -36,12 +38,12 @@ fixed-time @ T ms/move
 A candidate is dominated if another candidate in the same protocol is:
 
 ```text
->= Elo
-<= bytes
-<= latency
+>= Elo / quality
+<= latency or stronger at the same wall-clock budget
+<= params / FLOPs / bytes / memory pressure where those axes matter
 ```
 
-with at least one strict improvement.  Follow-up runs should focus on non-dominated candidates.
+with at least one strict improvement. Follow-up runs should focus on non-dominated candidates, but interpret dominance per target: CNNs may have more params/bytes while transformers may have higher FLOPs.
 
 ## Resource efficiency metrics
 
@@ -89,7 +91,7 @@ Tau/ranking metrics matter because search mostly needs the model to order candid
 
 ## Quantization reporting
 
-Quantization changes bytes and latency, not parameter count.  Report all deployed variants independently:
+Quantization changes bytes and latency, not parameter count. Treat PTQ/QAT as deployment polish for now, not an architecture-selection gate. Report all deployed variants independently:
 
 ```text
 FP32
@@ -107,7 +109,7 @@ INT8 = 1 byte/param + scales/zero-points
 INT4 = 0.5 byte/param + packing/scales
 ```
 
-Quantized models must pass:
+Quantized models should replace FP32 only with effectively zero quality loss. They must pass:
 
 ```text
 policy KL vs FP32
@@ -149,5 +151,6 @@ For any model we might promote to browser/default search, produce an analysis pa
 3. fixed-visit arena: policy, PUCT, AV-PUCT if applicable
 4. fixed-time arena: browser-relevant ms/move
 5. quantization parity report, if quantized
-6. final Pareto decision: keep / reject / promote / needs larger run
+6. browser WebGPU/WASM adaptive export/visit benchmark for final deployable models only
+7. final Pareto decision: keep / reject / promote / needs larger run
 ```

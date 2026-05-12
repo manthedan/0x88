@@ -9,12 +9,22 @@ status: active
 depends_on:
   - [[Design - SquareFormer-AV-PUCT]]
 agent_summary: >
-  Current preferred architecture is SquareFormer-AV-PUCT: square-token model, WDL/value heads, action-value top-k reranking, uncertainty, and conditional PUCT.
+  Current preferred architecture portfolio is MF80 plus promoted SquareFormer/BT4. The BT4/SquareFormer provisional 10M winner is bt4_h2_flip_av_relbank_d256_l8; the MF80 provisional 10M winner is mf80_av_top48_10m_flipped_moverel_gate. SquareFormer-AV-PUCT remains the compact-transformer design direction.
 ---
 
 # Current architecture
 
-Current preferred direction: [[Design - SquareFormer-AV-PUCT]].
+Current preferred portfolio:
+
+```text
+MF80 lane:
+  mf80_av_top48_10m_flipped_moverel_gate
+
+BT4/SquareFormer lane:
+  bt4_h2_flip_av_relbank_d256_l8
+```
+
+Current compact-transformer design direction: [[Design - SquareFormer-AV-PUCT]].
 
 Core components:
 

@@ -179,15 +179,38 @@
     },
     "id": "finding.action_value_reranking_strength_per_node",
     "links": [
-      "Risk - Move-map mismatch",
       "Concept - Action-value head",
       "Concept - PUCT",
-      "Design - SquareFormer-AV-PUCT"
+      "Design - SquareFormer-AV-PUCT",
+      "Risk - Move-map mismatch"
     ],
     "path": "03_findings/search/finding.action_value_reranking_strength_per_node.md",
     "status": "active",
     "title": "Finding - Action-value reranking is central to strength per node",
     "type": "finding"
+  },
+  {
+    "agent_summary": "Agents may reuse browser/TypeScript code for expensive local jobs even when Rust/native/GPU paths exist, causing large avoidable slowdowns and sometimes semantic drift.",
+    "frontmatter": {
+      "agent_summary": "Agents may reuse browser/TypeScript code for expensive local jobs even when Rust/native/GPU paths exist, causing large avoidable slowdowns and sometimes semantic drift.",
+      "created": "2026-05-11",
+      "id": "risk.browser_path_for_offline_work",
+      "priority": "high",
+      "project": "tiny-neural-chess",
+      "status": "active",
+      "title": "Risk - Browser path used for expensive offline work",
+      "type": "risk",
+      "updated": "2026-05-11"
+    },
+    "id": "risk.browser_path_for_offline_work",
+    "links": [
+      "ADR-0002 Workload execution boundaries",
+      "Execution policy"
+    ],
+    "path": "03_findings/systems/risk.browser_path_for_offline_work.md",
+    "status": "active",
+    "title": "Risk - Browser path used for expensive offline work",
+    "type": "risk"
   },
   {
     "agent_summary": "Agents may treat old brainstorming or roadmaps as current instructions unless deprecation metadata and curated entrypoints are enforced.",
@@ -207,6 +230,26 @@
     "path": "03_findings/systems/risk.deprecated_roadmap_active_context.md",
     "status": "active",
     "title": "Risk - Deprecated roadmap retrieved as active context",
+    "type": "risk"
+  },
+  {
+    "agent_summary": "LC0 public training chunks appear technically ideal for Tiny Leela distillation, but every derived dataset/model must preserve provenance, license metadata, and deployability constraints before product use.",
+    "frontmatter": {
+      "agent_summary": "LC0 public training chunks appear technically ideal for Tiny Leela distillation, but every derived dataset/model must preserve provenance, license metadata, and deployability constraints before product use.",
+      "created": "2026-05-12",
+      "id": "risk.lc0_data_provenance_and_license",
+      "priority": "high",
+      "project": "tiny-neural-chess",
+      "status": "active",
+      "title": "Risk - LC0 data provenance and license",
+      "type": "risk",
+      "updated": "2026-05-12"
+    },
+    "id": "risk.lc0_data_provenance_and_license",
+    "links": [],
+    "path": "03_findings/systems/risk.lc0_data_provenance_and_license.md",
+    "status": "active",
+    "title": "Risk - LC0 data provenance and license",
     "type": "risk"
   },
   {
@@ -237,6 +280,44 @@
     "type": "finding"
   },
   {
+    "agent_summary": "Every serious Tiny Leela model candidate should get one compact frontier card with required core fields and optional final-deployment fields. The card combines calibrated protocol Elo at multiple search budgets, fixed-time strength, params/FLOPs/bytes/runtime, blunder rates, and value calibration. Quantization and adaptive browser export selection are deployment polish, not routine ablation overhead.",
+    "frontmatter": {
+      "agent_summary": "Every serious Tiny Leela model candidate should get one compact frontier card with required core fields and optional final-deployment fields. The card combines calibrated protocol Elo at multiple search budgets, fixed-time strength, params/FLOPs/bytes/runtime, blunder rates, and value calibration. Quantization and adaptive browser export selection are deployment polish, not routine ablation overhead.",
+      "created": "2026-05-12",
+      "depends_on": [
+        "[[Design - Inference optimization]]",
+        "[[Design - Runtime target matrix and workflow delegation]]",
+        "[[Finding - Self-play needs search-improved targets]]"
+      ],
+      "id": "design.candidate_frontier_cards",
+      "priority": "high",
+      "related": [
+        "[[Roadmap - Current Tiny Leela portfolio]]",
+        "[[Decision - LC0 architecture funnel and deployability frontier]]"
+      ],
+      "risks": [
+        "[[Risk - Move-map mismatch]]"
+      ],
+      "status": "active",
+      "title": "Design - Candidate frontier cards",
+      "type": "design",
+      "updated": "2026-05-12"
+    },
+    "id": "design.candidate_frontier_cards",
+    "links": [
+      "Design - Inference optimization",
+      "Design - Runtime target matrix and workflow delegation",
+      "Finding - Self-play needs search-improved targets",
+      "Roadmap - Current Tiny Leela portfolio",
+      "Decision - LC0 architecture funnel and deployability frontier",
+      "Risk - Move-map mismatch"
+    ],
+    "path": "04_designs/evaluation/design.candidate_frontier_cards.md",
+    "status": "active",
+    "title": "Design - Candidate frontier cards",
+    "type": "design"
+  },
+  {
     "agent_summary": "Current preferred lightweight architecture: SquareFormer policy/WDL/AV outputs with action-value reranking and calibrated conditional PUCT.",
     "frontmatter": {
       "agent_summary": "Current preferred lightweight architecture: SquareFormer policy/WDL/AV outputs with action-value reranking and calibrated conditional PUCT.",
@@ -264,12 +345,12 @@
     },
     "id": "design.squareformer_av_puct",
     "links": [
-      "Risk - Move-map mismatch",
       "Finding - Action-value reranking is central to strength per node",
       "Finding - Chess-specific geometry is high ROI for tiny models",
       "Concept - SquareFormer",
       "Concept - Action-value head",
-      "Concept - PUCT"
+      "Concept - PUCT",
+      "Risk - Move-map mismatch"
     ],
     "path": "04_designs/models/design.squareformer_av_puct.md",
     "status": "active",
@@ -298,8 +379,8 @@
     },
     "id": "design.agent_friendly_knowledge_graph",
     "links": [
-      "Risk - Deprecated roadmap retrieved as active context",
-      "ADR-0001 Use Markdown knowledge graph overlay"
+      "ADR-0001 Use Markdown knowledge graph overlay",
+      "Risk - Deprecated roadmap retrieved as active context"
     ],
     "path": "04_designs/systems/design.agent_friendly_knowledge_graph.md",
     "status": "active",
@@ -337,9 +418,9 @@
     "links": [
       "Design - SquareFormer-AV-PUCT",
       "Concept - Search-improved self-play",
-      "Risk - Move-map mismatch",
       "Finding - Self-play needs search-improved targets",
-      "Design - Agent-friendly knowledge graph"
+      "Design - Agent-friendly knowledge graph",
+      "Risk - Move-map mismatch"
     ],
     "path": "04_designs/systems/design.agentic_engine_maintenance.md",
     "status": "active",
@@ -373,11 +454,11 @@
     },
     "id": "design.cross_language_contracts_and_drift_control",
     "links": [
-      "Risk - Move-map mismatch",
       "Design - Runtime target matrix and workflow delegation",
       "Design - Agentic engine maintenance",
       "Design - Inference optimization",
-      "Roadmap - Current Tiny Leela portfolio"
+      "Roadmap - Current Tiny Leela portfolio",
+      "Risk - Move-map mismatch"
     ],
     "path": "04_designs/systems/design.cross_language_contracts_and_drift_control.md",
     "status": "active",
@@ -385,9 +466,9 @@
     "type": "design"
   },
   {
-    "agent_summary": "Inference performance is a first-class roadmap lane, not a cleanup task: Tiny Leela should repeatedly benchmark, optimize, quantize, cache, batch, and parity-check every deployable model/backend across browser, Node, native CPU, Mac mini, and GPU-adjacent workflows.",
+    "agent_summary": "Inference performance is a first-class roadmap lane, not a cleanup task: Tiny Leela should benchmark params/FLOPs/bytes/latency and parity-check serious candidates, while reserving adaptive browser export selection and quantization polish for final deployable models.",
     "frontmatter": {
-      "agent_summary": "Inference performance is a first-class roadmap lane, not a cleanup task: Tiny Leela should repeatedly benchmark, optimize, quantize, cache, batch, and parity-check every deployable model/backend across browser, Node, native CPU, Mac mini, and GPU-adjacent workflows.",
+      "agent_summary": "Inference performance is a first-class roadmap lane, not a cleanup task: Tiny Leela should benchmark params/FLOPs/bytes/latency and parity-check serious candidates, while reserving adaptive browser export selection and quantization polish for final deployable models.",
       "confidence": "high",
       "created": "2026-05-10",
       "depends_on": [
@@ -399,7 +480,8 @@
       "project": "tiny-neural-chess",
       "related": [
         "[[Roadmap - Current Tiny Leela portfolio]]",
-        "[[Design - Runtime target matrix and workflow delegation]]"
+        "[[Design - Runtime target matrix and workflow delegation]]",
+        "[[Design - Candidate frontier cards]]"
       ],
       "risks": [
         "[[Risk - Move-map mismatch]]"
@@ -412,10 +494,11 @@
     "id": "design.inference_optimization",
     "links": [
       "Design - Runtime target matrix and workflow delegation",
-      "Risk - Move-map mismatch",
+      "Design - Candidate frontier cards",
       "Design - SquareFormer-AV-PUCT",
       "Design - Agentic engine maintenance",
-      "Roadmap - Current Tiny Leela portfolio"
+      "Roadmap - Current Tiny Leela portfolio",
+      "Risk - Move-map mismatch"
     ],
     "path": "04_designs/systems/design.inference_optimization.md",
     "status": "active",
@@ -449,11 +532,12 @@
     },
     "id": "design.runtime_target_matrix_and_workflow_delegation",
     "links": [
+      "Design - Candidate frontier cards",
       "Design - Cross-language contracts and drift control",
-      "Risk - Move-map mismatch",
       "Design - Inference optimization",
       "Design - Agentic engine maintenance",
-      "Roadmap - Current Tiny Leela portfolio"
+      "Roadmap - Current Tiny Leela portfolio",
+      "Risk - Move-map mismatch"
     ],
     "path": "04_designs/systems/design.runtime_target_matrix_and_workflow_delegation.md",
     "status": "active",
@@ -482,13 +566,97 @@
     },
     "id": "design.h7_h8_bt4_training_pipeline",
     "links": [
-      "Risk - Move-map mismatch",
-      "Concept - SquareFormer"
+      "Concept - SquareFormer",
+      "Risk - Move-map mismatch"
     ],
     "path": "04_designs/training_system/design.h7_h8_bt4_training_pipeline.md",
     "status": "active",
     "title": "Design - 100M h7-h8 BT4 training pipeline",
     "type": "design"
+  },
+  {
+    "agent_summary": "Make LC0 public search-generated training chunks the primary supervised/distillation lane for MF80 and promoted BT4/SquareFormer architectures, with Gumbel-Zero kept as a separate research lane and ChessBench/Stockfish-style action-value data added later for ranking/regret.",
+    "frontmatter": {
+      "agent_summary": "Make LC0 public search-generated training chunks the primary supervised/distillation lane for MF80 and promoted BT4/SquareFormer architectures, with Gumbel-Zero kept as a separate research lane and ChessBench/Stockfish-style action-value data added later for ranking/regret.",
+      "confidence": "medium",
+      "created": "2026-05-12",
+      "depends_on": [
+        "[[Design - SquareFormer-AV-PUCT]]",
+        "[[Concept - Search-improved self-play]]"
+      ],
+      "id": "design.lc0_search_distillation_pipeline",
+      "priority": "high",
+      "project": "tiny-neural-chess",
+      "related": [
+        "[[Design - Candidate frontier cards]]",
+        "[[Decision - AWS Batch self-play parallelism policy]]",
+        "[[Decision - LC0 architecture funnel and deployability frontier]]"
+      ],
+      "risks": [
+        "[[Risk - Move-map mismatch]]",
+        "[[Risk - LC0 data provenance and license]]"
+      ],
+      "status": "active",
+      "supports": [
+        "[[Roadmap - Current Tiny Leela portfolio]]"
+      ],
+      "title": "Design - LC0 search-distillation pipeline",
+      "type": "design",
+      "updated": "2026-05-12"
+    },
+    "id": "design.lc0_search_distillation_pipeline",
+    "links": [
+      "Concept - Search-improved self-play",
+      "Decision - LC0 architecture funnel and deployability frontier",
+      "Operations constraints",
+      "Design - Candidate frontier cards",
+      "Design - SquareFormer-AV-PUCT",
+      "Decision - AWS Batch self-play parallelism policy",
+      "Roadmap - Current Tiny Leela portfolio",
+      "Risk - Move-map mismatch",
+      "Risk - LC0 data provenance and license"
+    ],
+    "path": "04_designs/training_system/design.lc0_search_distillation_pipeline.md",
+    "status": "active",
+    "title": "Design - LC0 search-distillation pipeline",
+    "type": "design"
+  },
+  {
+    "agent_summary": "Historical/source note for the BT4/SquareFormer 10M ablation push after board-flipping became standard. The lane is frozen for now: bt4_h2_flip_av_relbank_d256_l8 is the provisional winner for LC0 promotion, and further ablations require explicit reopen criteria from the LC0 architecture funnel decision.",
+    "frontmatter": {
+      "agent_summary": "Historical/source note for the BT4/SquareFormer 10M ablation push after board-flipping became standard. The lane is frozen for now: bt4_h2_flip_av_relbank_d256_l8 is the provisional winner for LC0 promotion, and further ablations require explicit reopen criteria from the LC0 architecture funnel decision.",
+      "created": "2026-05-11",
+      "depends_on": [
+        "[[Design - SquareFormer-AV-PUCT]]",
+        "[[Design - 100M h7-h8 BT4 training pipeline]]"
+      ],
+      "id": "experiment.bt4_arch_roadmap_next_ablations",
+      "priority": "medium",
+      "related": [
+        "[[Finding - Chess-specific geometry is high ROI for tiny models]]",
+        "[[Concept - SquareFormer]]"
+      ],
+      "source_notes": [
+        "docs/bt4_chessformer_browser_architecture_synthesis.md",
+        "docs/transformer_model_roadmap.md"
+      ],
+      "status": "completed",
+      "title": "Experiment - BT4 architecture roadmap next ablations",
+      "type": "experiment",
+      "updated": "2026-05-12"
+    },
+    "id": "experiment.bt4_arch_roadmap_next_ablations",
+    "links": [
+      "Decision - LC0 architecture funnel and deployability frontier",
+      "Design - SquareFormer-AV-PUCT",
+      "Design - 100M h7-h8 BT4 training pipeline",
+      "Finding - Chess-specific geometry is high ROI for tiny models",
+      "Concept - SquareFormer"
+    ],
+    "path": "05_experiments/completed/experiment.bt4_arch_roadmap_next_ablations.md",
+    "status": "completed",
+    "title": "Experiment - BT4 architecture roadmap next ablations",
+    "type": "experiment"
   },
   {
     "agent_summary": "Use a Git-backed Obsidian-compatible Markdown vault as canonical knowledge source; generated graph JSON is a derived view.",
@@ -512,8 +680,8 @@
     },
     "id": "decision.use_markdown_knowledge_graph",
     "links": [
-      "Risk - Deprecated roadmap retrieved as active context",
-      "Design - Agent-friendly knowledge graph"
+      "Design - Agent-friendly knowledge graph",
+      "Risk - Deprecated roadmap retrieved as active context"
     ],
     "path": "06_decisions/ADR-0001-use-markdown-knowledge-graph.md",
     "status": "active",
@@ -521,9 +689,103 @@
     "type": "decision"
   },
   {
-    "agent_summary": "Current roadmap keeps CNN, Tactical MoveFormer, Tiny BT4/SquareFormer, inference-optimization, and runtime/workflow delegation lanes separate, with 100M MF80/BT4/CNN96 as the near-term portfolio, agentic maintenance around the learner, and latency/throughput/bytes as first-class promotion metrics.",
+    "agent_summary": "Choose execution backends by workload: browser/TypeScript for UI and browser parity, Rust/native for deterministic long-running chess/cache/search work, Python for training/export/orchestration, and GPU/native ORT for large batched inference.",
     "frontmatter": {
-      "agent_summary": "Current roadmap keeps CNN, Tactical MoveFormer, Tiny BT4/SquareFormer, inference-optimization, and runtime/workflow delegation lanes separate, with 100M MF80/BT4/CNN96 as the near-term portfolio, agentic maintenance around the learner, and latency/throughput/bytes as first-class promotion metrics.",
+      "agent_summary": "Choose execution backends by workload: browser/TypeScript for UI and browser parity, Rust/native for deterministic long-running chess/cache/search work, Python for training/export/orchestration, and GPU/native ORT for large batched inference.",
+      "confidence": "high",
+      "created": "2026-05-11",
+      "id": "decision.workload_execution_boundaries",
+      "priority": "high",
+      "project": "tiny-neural-chess",
+      "risks": [
+        "[[Risk - Browser path used for expensive offline work]]"
+      ],
+      "status": "active",
+      "supports": [
+        "[[Design - Runtime target matrix and workflow delegation]]"
+      ],
+      "title": "ADR-0002 Workload execution boundaries",
+      "type": "decision",
+      "updated": "2026-05-11"
+    },
+    "id": "decision.workload_execution_boundaries",
+    "links": [
+      "Design - Runtime target matrix and workflow delegation",
+      "Risk - Browser path used for expensive offline work"
+    ],
+    "path": "06_decisions/ADR-0002-workload-execution-boundaries.md",
+    "status": "active",
+    "title": "ADR-0002 Workload execution boundaries",
+    "type": "decision"
+  },
+  {
+    "agent_summary": "Scale SUP-SP self-play on AWS primarily with Batch array shards, and only use multiple workers inside one container to fill explicitly requested vCPUs. Use one ORT thread per worker, globally unique shard IDs, per-worker chunks, and optimize raw searched positions per vCPU-hour.",
+    "frontmatter": {
+      "agent_summary": "Scale SUP-SP self-play on AWS primarily with Batch array shards, and only use multiple workers inside one container to fill explicitly requested vCPUs. Use one ORT thread per worker, globally unique shard IDs, per-worker chunks, and optimize raw searched positions per vCPU-hour.",
+      "created": "2026-05-11",
+      "depends_on": [
+        "[[Concept - Search-improved self-play]]",
+        "[[Finding - Self-play needs search-improved targets]]"
+      ],
+      "id": "decision.aws_batch_selfplay_parallelism",
+      "priority": "high",
+      "status": "active",
+      "title": "Decision - AWS Batch self-play parallelism policy",
+      "type": "decision",
+      "updated": "2026-05-11"
+    },
+    "id": "decision.aws_batch_selfplay_parallelism",
+    "links": [
+      "Concept - Search-improved self-play",
+      "Finding - Self-play needs search-improved targets"
+    ],
+    "path": "06_decisions/decision.aws_batch_selfplay_parallelism.md",
+    "status": "active",
+    "title": "Decision - AWS Batch self-play parallelism policy",
+    "type": "decision"
+  },
+  {
+    "agent_summary": "Freeze current 10M architecture ablation churn and promote one BT4/SquareFormer winner plus one MF80 winner into LC0 smoke, 10M LC0 pilot, and 100M+ LC0 scaling if sanity gates pass. Promotion is based on a multi-axis strength, latency, FLOPs, params, and deployment frontier; quantization is deployment polish, not an architecture-selection gate.",
+    "frontmatter": {
+      "agent_summary": "Freeze current 10M architecture ablation churn and promote one BT4/SquareFormer winner plus one MF80 winner into LC0 smoke, 10M LC0 pilot, and 100M+ LC0 scaling if sanity gates pass. Promotion is based on a multi-axis strength, latency, FLOPs, params, and deployment frontier; quantization is deployment polish, not an architecture-selection gate.",
+      "created": "2026-05-12",
+      "depends_on": [
+        "[[Design - LC0 search-distillation pipeline]]",
+        "[[Design - Candidate frontier cards]]",
+        "[[Experiment - BT4 architecture roadmap next ablations]]"
+      ],
+      "id": "decision.lc0_architecture_funnel_and_deployability_frontier",
+      "priority": "high",
+      "related": [
+        "[[Design - Inference optimization]]",
+        "[[Design - Runtime target matrix and workflow delegation]]"
+      ],
+      "status": "active",
+      "supports": [
+        "[[Roadmap - Current Tiny Leela portfolio]]"
+      ],
+      "title": "Decision - LC0 architecture funnel and deployability frontier",
+      "type": "decision",
+      "updated": "2026-05-12"
+    },
+    "id": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "links": [
+      "Design - Candidate frontier cards",
+      "Design - LC0 search-distillation pipeline",
+      "Experiment - BT4 architecture roadmap next ablations",
+      "Design - Inference optimization",
+      "Design - Runtime target matrix and workflow delegation",
+      "Roadmap - Current Tiny Leela portfolio"
+    ],
+    "path": "06_decisions/decision.lc0_architecture_funnel_and_deployability_frontier.md",
+    "status": "active",
+    "title": "Decision - LC0 architecture funnel and deployability frontier",
+    "type": "decision"
+  },
+  {
+    "agent_summary": "Current roadmap keeps LC0 search-distillation as the primary supervised strength lane and Gumbel-Zero self-play as the separate clean research/control lane. The 10M ablation matrix is frozen for now: one MF80 winner and one BT4/SquareFormer winner advance to LC0 sanity, 10M pilot, and 100M+ scaling if eval/correctness gates pass. Promotion uses a multi-axis frontier: strength, latency, params, FLOPs, bytes, blunders, and calibration.",
+    "frontmatter": {
+      "agent_summary": "Current roadmap keeps LC0 search-distillation as the primary supervised strength lane and Gumbel-Zero self-play as the separate clean research/control lane. The 10M ablation matrix is frozen for now: one MF80 winner and one BT4/SquareFormer winner advance to LC0 sanity, 10M pilot, and 100M+ scaling if eval/correctness gates pass. Promotion uses a multi-axis frontier: strength, latency, params, FLOPs, bytes, blunders, and calibration.",
       "created": "2026-05-09",
       "depends_on": [
         "[[Design - SquareFormer-AV-PUCT]]",
@@ -531,7 +793,11 @@
         "[[Design - Agentic engine maintenance]]",
         "[[Design - Inference optimization]]",
         "[[Design - Runtime target matrix and workflow delegation]]",
-        "[[Design - Cross-language contracts and drift control]]"
+        "[[Design - Candidate frontier cards]]",
+        "[[Design - Cross-language contracts and drift control]]",
+        "[[Design - LC0 search-distillation pipeline]]",
+        "[[Decision - AWS Batch self-play parallelism policy]]",
+        "[[Decision - LC0 architecture funnel and deployability frontier]]"
       ],
       "id": "roadmap.current_tiny_leela_portfolio",
       "priority": "high",
@@ -542,22 +808,59 @@
       "status": "active",
       "title": "Roadmap - Current Tiny Leela portfolio",
       "type": "roadmap",
-      "updated": "2026-05-11"
+      "updated": "2026-05-12"
     },
     "id": "roadmap.current_tiny_leela_portfolio",
     "links": [
+      "Decision - LC0 architecture funnel and deployability frontier",
+      "Design - LC0 search-distillation pipeline",
       "Design - Inference optimization",
       "Design - Runtime target matrix and workflow delegation",
+      "Design - Candidate frontier cards",
       "Design - Cross-language contracts and drift control",
-      "Risk - Deprecated roadmap retrieved as active context",
+      "Experiment - BT4 architecture roadmap next ablations",
       "Design - SquareFormer-AV-PUCT",
       "Design - 100M h7-h8 BT4 training pipeline",
-      "Design - Agentic engine maintenance"
+      "Design - Agentic engine maintenance",
+      "Decision - AWS Batch self-play parallelism policy",
+      "Risk - Deprecated roadmap retrieved as active context"
     ],
     "path": "07_roadmaps/active/roadmap.current_tiny_leela_portfolio.md",
     "status": "active",
     "title": "Roadmap - Current Tiny Leela portfolio",
     "type": "roadmap"
+  },
+  {
+    "agent_summary": "Start a conservative legacy-doc archiving process: keep knowledge/ as the current source of truth, classify old docs as source material, extract any still-current ideas into canonical KG notes, then move only clearly superseded docs with stubs or updated links.",
+    "frontmatter": {
+      "agent_summary": "Start a conservative legacy-doc archiving process: keep knowledge/ as the current source of truth, classify old docs as source material, extract any still-current ideas into canonical KG notes, then move only clearly superseded docs with stubs or updated links.",
+      "created": "2026-05-12",
+      "depends_on": [
+        "[[Design - Agent-friendly knowledge graph]]",
+        "[[Roadmap - Current Tiny Leela portfolio]]",
+        "[[Decision - LC0 architecture funnel and deployability frontier]]"
+      ],
+      "id": "task.legacy_docs_archive_after_kg_extraction",
+      "priority": "medium",
+      "risks": [
+        "[[Risk - Deprecated roadmap retrieved as active context]]"
+      ],
+      "status": "planned",
+      "title": "Task - Legacy docs archive after KG extraction",
+      "type": "task",
+      "updated": "2026-05-12"
+    },
+    "id": "task.legacy_docs_archive_after_kg_extraction",
+    "links": [
+      "Design - Agent-friendly knowledge graph",
+      "Roadmap - Current Tiny Leela portfolio",
+      "Decision - LC0 architecture funnel and deployability frontier",
+      "Risk - Deprecated roadmap retrieved as active context"
+    ],
+    "path": "08_tasks/planned/task.legacy_docs_archive_after_kg_extraction.md",
+    "status": "planned",
+    "title": "Task - Legacy docs archive after KG extraction",
+    "type": "task"
   },
   {
     "agent_summary": "Entrypoint for active planning. Old docs and roadmaps are source material only unless represented here or in an active roadmap note.",
@@ -584,9 +887,9 @@
     "type": "agent_context"
   },
   {
-    "agent_summary": "Current preferred architecture is SquareFormer-AV-PUCT: square-token model, WDL/value heads, action-value top-k reranking, uncertainty, and conditional PUCT.",
+    "agent_summary": "Current preferred architecture portfolio is MF80 plus promoted SquareFormer/BT4. The BT4/SquareFormer provisional 10M winner is bt4_h2_flip_av_relbank_d256_l8; the MF80 provisional 10M winner is mf80_av_top48_10m_flipped_moverel_gate. SquareFormer-AV-PUCT remains the compact-transformer design direction.",
     "frontmatter": {
-      "agent_summary": "Current preferred architecture is SquareFormer-AV-PUCT: square-token model, WDL/value heads, action-value top-k reranking, uncertainty, and conditional PUCT.",
+      "agent_summary": "Current preferred architecture portfolio is MF80 plus promoted SquareFormer/BT4. The BT4/SquareFormer provisional 10M winner is bt4_h2_flip_av_relbank_d256_l8; the MF80 provisional 10M winner is mf80_av_top48_10m_flipped_moverel_gate. SquareFormer-AV-PUCT remains the compact-transformer design direction.",
       "created": "2026-05-09",
       "depends_on": [
         "[[Design - SquareFormer-AV-PUCT]]"
@@ -606,6 +909,31 @@
     "status": "active",
     "title": "Current architecture",
     "type": "agent_context"
+  },
+  {
+    "agent_summary": "Expensive local/offline work must use the workload-appropriate native/Rust/GPU path when it exists. Browser/TypeScript paths are for UI, browser parity, and small probes, not bulk cache generation, arenas, self-play, or long-running evaluation.",
+    "frontmatter": {
+      "agent_summary": "Expensive local/offline work must use the workload-appropriate native/Rust/GPU path when it exists. Browser/TypeScript paths are for UI, browser parity, and small probes, not bulk cache generation, arenas, self-play, or long-running evaluation.",
+      "created": "2026-05-11",
+      "depends_on": [
+        "[[ADR-0002 Workload execution boundaries]]"
+      ],
+      "id": "agent_context.execution_policy",
+      "priority": "high",
+      "project": "tiny-neural-chess",
+      "status": "active",
+      "title": "Execution policy",
+      "type": "ops_context",
+      "updated": "2026-05-11"
+    },
+    "id": "agent_context.execution_policy",
+    "links": [
+      "ADR-0002 Workload execution boundaries"
+    ],
+    "path": "09_agent_context/execution_policy.md",
+    "status": "active",
+    "title": "Execution policy",
+    "type": "ops_context"
   },
   {
     "agent_summary": "Short glossary mapping common Tiny Leela terms to canonical concept notes.",
@@ -641,7 +969,7 @@
       "status": "active",
       "title": "Open questions",
       "type": "agent_context",
-      "updated": "2026-05-11"
+      "updated": "2026-05-12"
     },
     "id": "agent_context.open_questions",
     "links": [],
@@ -651,9 +979,9 @@
     "type": "agent_context"
   },
   {
-    "agent_summary": "Current operational guardrails: QAT and Tactical MoveFormer are paused, BT4 waits for validated h7/h8 100M caches, generated artifacts are not committed, and classic PUCT remains default for deterministic eval.",
+    "agent_summary": "Current operational guardrails: broad 10M architecture ablations are frozen, QAT is deployment polish unless explicitly reopened, BT4/SquareFormer and MF80 LC0 promotion should use the selected winners, generated artifacts are not committed, classic PUCT remains default for deterministic eval, and expensive offline work must use Rust/native/GPU paths when available.",
     "frontmatter": {
-      "agent_summary": "Current operational guardrails: QAT and Tactical MoveFormer are paused, BT4 waits for validated h7/h8 100M caches, generated artifacts are not committed, and classic PUCT remains default for deterministic eval.",
+      "agent_summary": "Current operational guardrails: broad 10M architecture ablations are frozen, QAT is deployment polish unless explicitly reopened, BT4/SquareFormer and MF80 LC0 promotion should use the selected winners, generated artifacts are not committed, classic PUCT remains default for deterministic eval, and expensive offline work must use Rust/native/GPU paths when available.",
       "created": "2026-05-09",
       "id": "agent_context.ops_constraints",
       "priority": "high",
@@ -661,10 +989,13 @@
       "status": "active",
       "title": "Operations constraints",
       "type": "ops_context",
-      "updated": "2026-05-09"
+      "updated": "2026-05-11"
     },
     "id": "agent_context.ops_constraints",
-    "links": [],
+    "links": [
+      "Decision - LC0 architecture funnel and deployability frontier",
+      "Decision - AWS Batch self-play parallelism policy"
+    ],
     "path": "09_agent_context/ops_constraints.md",
     "status": "active",
     "title": "Operations constraints",

@@ -30,12 +30,6 @@
     "type": "supports"
   },
   {
-    "field": "risks",
-    "source": "finding.action_value_reranking_strength_per_node",
-    "target": "risk.move_map_mismatch",
-    "type": "risks"
-  },
-  {
     "field": "depends_on",
     "source": "finding.action_value_reranking_strength_per_node",
     "target": "concept.action_value_head",
@@ -54,14 +48,62 @@
     "type": "supports"
   },
   {
+    "field": "risks",
+    "source": "finding.action_value_reranking_strength_per_node",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
+    "field": "body",
+    "source": "risk.browser_path_for_offline_work",
+    "target": "decision.workload_execution_boundaries",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "risk.browser_path_for_offline_work",
+    "target": "agent_context.execution_policy",
+    "type": "wikilink"
+  },
+  {
     "field": "depends_on",
     "source": "finding.self_play_needs_search_improved_targets",
     "target": "concept.search_improved_self_play",
     "type": "depends_on"
   },
   {
+    "field": "depends_on",
+    "source": "design.candidate_frontier_cards",
+    "target": "design.inference_optimization",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.candidate_frontier_cards",
+    "target": "design.runtime_target_matrix_and_workflow_delegation",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.candidate_frontier_cards",
+    "target": "finding.self_play_needs_search_improved_targets",
+    "type": "depends_on"
+  },
+  {
+    "field": "related",
+    "source": "design.candidate_frontier_cards",
+    "target": "roadmap.current_tiny_leela_portfolio",
+    "type": "related"
+  },
+  {
+    "field": "related",
+    "source": "design.candidate_frontier_cards",
+    "target": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "type": "related"
+  },
+  {
     "field": "risks",
-    "source": "design.squareformer_av_puct",
+    "source": "design.candidate_frontier_cards",
     "target": "risk.move_map_mismatch",
     "type": "risks"
   },
@@ -97,8 +139,8 @@
   },
   {
     "field": "risks",
-    "source": "design.agent_friendly_knowledge_graph",
-    "target": "risk.deprecated_roadmap_active_context",
+    "source": "design.squareformer_av_puct",
+    "target": "risk.move_map_mismatch",
     "type": "risks"
   },
   {
@@ -106,6 +148,12 @@
     "source": "design.agent_friendly_knowledge_graph",
     "target": "decision.use_markdown_knowledge_graph",
     "type": "supported_by"
+  },
+  {
+    "field": "risks",
+    "source": "design.agent_friendly_knowledge_graph",
+    "target": "risk.deprecated_roadmap_active_context",
+    "type": "risks"
   },
   {
     "field": "body",
@@ -118,12 +166,6 @@
     "source": "design.agentic_engine_maintenance",
     "target": "concept.search_improved_self_play",
     "type": "wikilink"
-  },
-  {
-    "field": "risks",
-    "source": "design.agentic_engine_maintenance",
-    "target": "risk.move_map_mismatch",
-    "type": "risks"
   },
   {
     "field": "supported_by",
@@ -151,7 +193,7 @@
   },
   {
     "field": "risks",
-    "source": "design.cross_language_contracts_and_drift_control",
+    "source": "design.agentic_engine_maintenance",
     "target": "risk.move_map_mismatch",
     "type": "risks"
   },
@@ -180,16 +222,22 @@
     "type": "related"
   },
   {
+    "field": "risks",
+    "source": "design.cross_language_contracts_and_drift_control",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
     "field": "body",
     "source": "design.inference_optimization",
     "target": "design.runtime_target_matrix_and_workflow_delegation",
     "type": "wikilink"
   },
   {
-    "field": "risks",
+    "field": "body",
     "source": "design.inference_optimization",
-    "target": "risk.move_map_mismatch",
-    "type": "risks"
+    "target": "design.candidate_frontier_cards",
+    "type": "wikilink"
   },
   {
     "field": "depends_on",
@@ -216,16 +264,28 @@
     "type": "related"
   },
   {
+    "field": "related",
+    "source": "design.inference_optimization",
+    "target": "design.candidate_frontier_cards",
+    "type": "related"
+  },
+  {
+    "field": "risks",
+    "source": "design.inference_optimization",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
+    "field": "body",
+    "source": "design.runtime_target_matrix_and_workflow_delegation",
+    "target": "design.candidate_frontier_cards",
+    "type": "wikilink"
+  },
+  {
     "field": "body",
     "source": "design.runtime_target_matrix_and_workflow_delegation",
     "target": "design.cross_language_contracts_and_drift_control",
     "type": "wikilink"
-  },
-  {
-    "field": "risks",
-    "source": "design.runtime_target_matrix_and_workflow_delegation",
-    "target": "risk.move_map_mismatch",
-    "type": "risks"
   },
   {
     "field": "depends_on",
@@ -253,7 +313,7 @@
   },
   {
     "field": "risks",
-    "source": "design.h7_h8_bt4_training_pipeline",
+    "source": "design.runtime_target_matrix_and_workflow_delegation",
     "target": "risk.move_map_mismatch",
     "type": "risks"
   },
@@ -265,15 +325,201 @@
   },
   {
     "field": "risks",
-    "source": "decision.use_markdown_knowledge_graph",
-    "target": "risk.deprecated_roadmap_active_context",
+    "source": "design.h7_h8_bt4_training_pipeline",
+    "target": "risk.move_map_mismatch",
     "type": "risks"
+  },
+  {
+    "field": "body",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "concept.search_improved_self_play",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "agent_context.ops_constraints",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "design.candidate_frontier_cards",
+    "type": "wikilink"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "design.squareformer_av_puct",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "concept.search_improved_self_play",
+    "type": "depends_on"
+  },
+  {
+    "field": "related",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "design.candidate_frontier_cards",
+    "type": "related"
+  },
+  {
+    "field": "related",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "decision.aws_batch_selfplay_parallelism",
+    "type": "related"
+  },
+  {
+    "field": "related",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "type": "related"
+  },
+  {
+    "field": "supports",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "roadmap.current_tiny_leela_portfolio",
+    "type": "supports"
+  },
+  {
+    "field": "risks",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
+    "field": "risks",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "risk.lc0_data_provenance_and_license",
+    "type": "risks"
+  },
+  {
+    "field": "body",
+    "source": "experiment.bt4_arch_roadmap_next_ablations",
+    "target": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "type": "wikilink"
+  },
+  {
+    "field": "depends_on",
+    "source": "experiment.bt4_arch_roadmap_next_ablations",
+    "target": "design.squareformer_av_puct",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "experiment.bt4_arch_roadmap_next_ablations",
+    "target": "design.h7_h8_bt4_training_pipeline",
+    "type": "depends_on"
+  },
+  {
+    "field": "related",
+    "source": "experiment.bt4_arch_roadmap_next_ablations",
+    "target": "finding.chess_specific_geometry_high_roi",
+    "type": "related"
+  },
+  {
+    "field": "related",
+    "source": "experiment.bt4_arch_roadmap_next_ablations",
+    "target": "concept.squareformer",
+    "type": "related"
   },
   {
     "field": "supports",
     "source": "decision.use_markdown_knowledge_graph",
     "target": "design.agent_friendly_knowledge_graph",
     "type": "supports"
+  },
+  {
+    "field": "risks",
+    "source": "decision.use_markdown_knowledge_graph",
+    "target": "risk.deprecated_roadmap_active_context",
+    "type": "risks"
+  },
+  {
+    "field": "supports",
+    "source": "decision.workload_execution_boundaries",
+    "target": "design.runtime_target_matrix_and_workflow_delegation",
+    "type": "supports"
+  },
+  {
+    "field": "risks",
+    "source": "decision.workload_execution_boundaries",
+    "target": "risk.browser_path_for_offline_work",
+    "type": "risks"
+  },
+  {
+    "field": "depends_on",
+    "source": "decision.aws_batch_selfplay_parallelism",
+    "target": "concept.search_improved_self_play",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "decision.aws_batch_selfplay_parallelism",
+    "target": "finding.self_play_needs_search_improved_targets",
+    "type": "depends_on"
+  },
+  {
+    "field": "body",
+    "source": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "target": "design.candidate_frontier_cards",
+    "type": "wikilink"
+  },
+  {
+    "field": "depends_on",
+    "source": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "target": "design.lc0_search_distillation_pipeline",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "target": "design.candidate_frontier_cards",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "target": "experiment.bt4_arch_roadmap_next_ablations",
+    "type": "depends_on"
+  },
+  {
+    "field": "related",
+    "source": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "target": "design.inference_optimization",
+    "type": "related"
+  },
+  {
+    "field": "related",
+    "source": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "target": "design.runtime_target_matrix_and_workflow_delegation",
+    "type": "related"
+  },
+  {
+    "field": "supports",
+    "source": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "target": "roadmap.current_tiny_leela_portfolio",
+    "type": "supports"
+  },
+  {
+    "field": "body",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "design.lc0_search_distillation_pipeline",
+    "type": "wikilink"
   },
   {
     "field": "body",
@@ -290,14 +536,20 @@
   {
     "field": "body",
     "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "design.candidate_frontier_cards",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "roadmap.current_tiny_leela_portfolio",
     "target": "design.cross_language_contracts_and_drift_control",
     "type": "wikilink"
   },
   {
-    "field": "risks",
+    "field": "body",
     "source": "roadmap.current_tiny_leela_portfolio",
-    "target": "risk.deprecated_roadmap_active_context",
-    "type": "risks"
+    "target": "experiment.bt4_arch_roadmap_next_ablations",
+    "type": "wikilink"
   },
   {
     "field": "depends_on",
@@ -332,10 +584,64 @@
   {
     "field": "depends_on",
     "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "design.candidate_frontier_cards",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "roadmap.current_tiny_leela_portfolio",
     "target": "design.cross_language_contracts_and_drift_control",
     "type": "depends_on"
   },
   {
+    "field": "depends_on",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "design.lc0_search_distillation_pipeline",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "decision.aws_batch_selfplay_parallelism",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "type": "depends_on"
+  },
+  {
+    "field": "risks",
+    "source": "roadmap.current_tiny_leela_portfolio",
+    "target": "risk.deprecated_roadmap_active_context",
+    "type": "risks"
+  },
+  {
+    "field": "depends_on",
+    "source": "task.legacy_docs_archive_after_kg_extraction",
+    "target": "design.agent_friendly_knowledge_graph",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "task.legacy_docs_archive_after_kg_extraction",
+    "target": "roadmap.current_tiny_leela_portfolio",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "task.legacy_docs_archive_after_kg_extraction",
+    "target": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "type": "depends_on"
+  },
+  {
+    "field": "risks",
+    "source": "task.legacy_docs_archive_after_kg_extraction",
+    "target": "risk.deprecated_roadmap_active_context",
+    "type": "risks"
+  },
+  {
     "field": "body",
     "source": "agent_context.active_roadmap",
     "target": "roadmap.current_tiny_leela_portfolio",
@@ -357,6 +663,12 @@
     "field": "depends_on",
     "source": "agent_context.current_architecture",
     "target": "design.squareformer_av_puct",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "agent_context.execution_policy",
+    "target": "decision.workload_execution_boundaries",
     "type": "depends_on"
   },
   {
@@ -381,6 +693,18 @@
     "field": "body",
     "source": "agent_context.glossary",
     "target": "concept.search_improved_self_play",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "agent_context.ops_constraints",
+    "target": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "type": "wikilink"
+  },
+  {
+    "field": "body",
+    "source": "agent_context.ops_constraints",
+    "target": "decision.aws_batch_selfplay_parallelism",
     "type": "wikilink"
   }
 ]

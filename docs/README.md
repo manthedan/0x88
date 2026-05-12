@@ -1,6 +1,6 @@
 # tiny_leela docs map
 
-This directory is intentionally treated as a **living research notebook plus stable project docs**.  Many older notes are still useful, but not all of them are canonical.  This index is the current sorting layer: it keeps existing file paths stable while making it clear what to read first, what is active, and what is historical/reference material.
+This directory is intentionally treated as a **living research notebook plus stable project docs**. Many older notes are still useful, but not all of them are canonical. The current source of truth for planning is now the Markdown knowledge graph under `knowledge/`, especially `knowledge/09_agent_context/active_roadmap.md` and `knowledge/07_roadmaps/active/roadmap.current_tiny_leela_portfolio.md`. This index keeps existing file paths stable while making it clear what to read first, what is active, and what is historical/reference material.
 
 ## Status labels
 
@@ -13,6 +13,8 @@ This directory is intentionally treated as a **living research notebook plus sta
 
 ## Start here
 
+For current planning, start in `knowledge/` first. Use `docs/` as stable references and source material after checking the KG.
+
 | Doc | Status | Why |
 | --- | --- | --- |
 | [`expert_handoff_2026-05-current.md`](expert_handoff_2026-05-current.md) | Current | Best single packet for an outside expert: project state, open questions, and where help matters. |
@@ -22,10 +24,10 @@ This directory is intentionally treated as a **living research notebook plus sta
 | [`release_gate_and_distributed_bench.md`](release_gate_and_distributed_bench.md) | Current | Promotion gates, protocol cards, distributed benchmark shape. |
 | [`mac_mini_cpu_offload_plan.md`](mac_mini_cpu_offload_plan.md) | Current | Compute split and Mac-mini workflow for CPU-bound post-training evals, arenas, tuning, and self-play limits. |
 | [`100m-scaling-training-plan.md`](100m-scaling-training-plan.md) | Active | Current CNN/100M supervised scaling plan and anti-overfit notes. |
-| [`transformer_model_roadmap.md`](transformer_model_roadmap.md) | Active | Current SquareFormer/TinyBT transformer roadmap. |
-| [`unified_squareformer_architecture_roadmap.md`](unified_squareformer_architecture_roadmap.md) | Active | Unified SquareFormer architecture plan and BT4-inspired direction. |
-| [`squareformer_v2_v3_implementation_plan.md`](squareformer_v2_v3_implementation_plan.md) | Active | Implementation-level SquareFormer V2/V3 plan. |
-| [`small_bt4_progression.md`](small_bt4_progression.md) | Active | TinyBT-static → TinyBT-AV → smolgen-lite → MiniBT progression. |
+| [`transformer_model_roadmap.md`](transformer_model_roadmap.md) | Reference / source | SquareFormer/TinyBT roadmap source material; current promotion/freeze decision lives in the KG. |
+| [`unified_squareformer_architecture_roadmap.md`](unified_squareformer_architecture_roadmap.md) | Reference / source | Unified SquareFormer architecture plan; current promotion/freeze decision lives in the KG. |
+| [`squareformer_v2_v3_implementation_plan.md`](squareformer_v2_v3_implementation_plan.md) | Reference / source | Implementation-level SquareFormer V2/V3 source material. |
+| [`small_bt4_progression.md`](small_bt4_progression.md) | Reference / source | TinyBT-static → TinyBT-AV → smolgen-lite → MiniBT progression source material; not a live ablation queue. |
 | [`deepresearch_architecture_triage_2026-05.md`](deepresearch_architecture_triage_2026-05.md) | Active | Triage of external DeepResearch architecture analysis: accepted useful ideas only. |
 | [`unsloth_rl_economics_triage_2026-05.md`](unsloth_rl_economics_triage_2026-05.md) | Active | Triage of Unsloth RL/GRPO economics: candidate-regret ranking, chunked aux losses, actor/trainer memory lifecycle, PTQ→QAT. |
 | [`puffer_selfplay_infra_plan.md`](puffer_selfplay_infra_plan.md) | Active | PufferLib/MiniZero-inspired local self-play worker plan: batched actors, WAL/chunks, ChessOcean env tests, resign/Gumbel experiments. |
@@ -69,10 +71,10 @@ This directory is intentionally treated as a **living research notebook plus sta
 | --- | --- | --- |
 | [`100m-scaling-training-plan.md`](100m-scaling-training-plan.md) | Active | CNN/residual scaling baseline. |
 | [`head_ablation_roadmap.md`](head_ablation_roadmap.md) | Active | Aux-head and search calibration experiments. |
-| [`transformer_model_roadmap.md`](transformer_model_roadmap.md) | Active | SquareFormer/TinyBT roadmap. |
-| [`unified_squareformer_architecture_roadmap.md`](unified_squareformer_architecture_roadmap.md) | Active | Unifies SquareFormer/TinyBT direction. |
-| [`squareformer_v2_v3_implementation_plan.md`](squareformer_v2_v3_implementation_plan.md) | Active | Concrete SquareFormer V2/V3 implementation plan. |
-| [`small_bt4_progression.md`](small_bt4_progression.md) | Active | Current BT4-inspired tiny progression. |
+| [`transformer_model_roadmap.md`](transformer_model_roadmap.md) | Reference / source | SquareFormer/TinyBT roadmap source; KG decision controls current promotion/freeze state. |
+| [`unified_squareformer_architecture_roadmap.md`](unified_squareformer_architecture_roadmap.md) | Reference / source | Unifies SquareFormer/TinyBT direction; use KG for current execution. |
+| [`squareformer_v2_v3_implementation_plan.md`](squareformer_v2_v3_implementation_plan.md) | Reference / source | Concrete SquareFormer V2/V3 implementation plan; not a live queue. |
+| [`small_bt4_progression.md`](small_bt4_progression.md) | Reference / source | BT4-inspired tiny progression source; not a live ablation queue. |
 | [`deepresearch_architecture_triage_2026-05.md`](deepresearch_architecture_triage_2026-05.md) | Active | External research triage; preserves only useful additions: search-light framing, geometry/history bias, move-query decoder, regret metrics. |
 | [`unsloth_rl_economics_triage_2026-05.md`](unsloth_rl_economics_triage_2026-05.md) | Active | Unsloth-inspired training-loop economics: candidate groups, chunked AV/regret losses, actor throughput, memory lifecycle, QAT ladder. |
 | [`channelformer_architecture.md`](channelformer_architecture.md) | Active | ChannelFormer CNN architecture note. |
@@ -119,6 +121,8 @@ Keep these for provenance, but prefer the current docs above for decisions.
 | [`fun_goals.md`](fun_goals.md) | Seed | Small idea stub. |
 
 ## Cleanup policy for future passes
+
+A KG-backed archive process has started at `knowledge/08_tasks/planned/task.legacy_docs_archive_after_kg_extraction.md`. Do not move/delete old docs in bulk; classify, extract current decisions into KG, then move only clearly superseded docs with stubs or updated references.
 
 1. **Do not delete useful notes.** Mark as historical/superseded first.
 2. **Avoid moving paths used by scripts/tests.** If a file is moved, leave a short stub at the old path or update references in the same change.

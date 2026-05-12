@@ -160,7 +160,7 @@ benchmark gates: rows/sec or games/sec, cost per million rows/games, shard valid
 
 ## ONNX export target configurations
 
-Every serious model should have an explicit export target card, not only `model.onnx`.
+Every serious model should have enough metadata for a [[Design - Candidate frontier cards]] core section. Final deployable models should additionally have explicit export target information, not only `model.onnx`.
 
 Canonical export dimensions:
 
@@ -173,14 +173,21 @@ runtime target: browser-wasm, browser-webgpu, native-cpu, native-cuda, native-co
 packaging: single ONNX, external-data ONNX, simplified ONNX, quantized ONNX, converted CoreML/TensorRT derivative
 ```
 
-Minimum artifact set per promoted candidate:
+Minimum artifact set per serious candidate:
 
 ```text
 model.fp32.onnx                 canonical reference export
 model.fp32.meta.json            metadata: policy map, input encoding, history, K, heads, hashes
+frontier_card.{json,md}         core strength/runtime/model-efficiency report when promoted to serious eval
+```
+
+Additional artifact set for final deployable candidates:
+
+```text
 model.fp32.onnxsim.onnx         simplified candidate if it passes parity
-model.int8.onnx                 quantized candidate only after drift gate
-export_target_card.json         intended runtimes, EPs, precision, known unsupported EPs, benchmark results
+model.int8.onnx                 quantized candidate only after drift gate and effectively zero quality loss
+export_target_section/card      intended runtimes, EPs, precision, known unsupported EPs, benchmark results
+browser_benchmark.json          WebGPU/WASM detection, warmup timings, selected adaptive visits
 ```
 
 Recommended default targets:
@@ -342,4 +349,4 @@ cache hit rate
 3. Prototype Rust native `ort` evaluator for CNN96 FP32 and compare against TS ORT Web parity/latency.
 4. Move cache-builder hot paths to Rust while preserving existing memmap file names and trainer reads.
 5. Add browser Rust/WASM search with batched ORT Web callback after native Rust search/evaluator contracts are stable.
-6. Promote runtime target cards into release gates so models cannot ship without target-specific latency/bytes/parity evidence.
+6. Promote runtime target/deployment sections into release gates so models cannot ship without target-specific latency/bytes/parity evidence, WebGPU/WASM fallback behavior, and adaptive visit-selection behavior.
