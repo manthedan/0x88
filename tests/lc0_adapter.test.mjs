@@ -15,6 +15,31 @@ test('lc0_adapter q/d converts to side-to-move WDL', () => {
   assert(Math.abs(wdl.loss - 0.25) < 1e-9);
 });
 
+test('lc0_adapter exposes LC0 1858 map and decodes mirrored raw startpos planes', () => {
+  const script = String.raw`
+import training.lc0_adapter as a
+planes=[0]*104
+# Raw LC0 V6 plane masks are file-mirrored before board decode.
+planes[0]=0x00ff00
+planes[1]=0x42
+planes[2]=0x24
+planes[3]=0x81
+planes[4]=0x10
+planes[5]=0x08
+planes[6]=0x00ff000000000000
+planes[7]=0x4200000000000000
+planes[8]=0x2400000000000000
+planes[9]=0x8100000000000000
+planes[10]=0x1000000000000000
+planes[11]=0x0800000000000000
+print(len(a.LC0_POLICY_MOVES), a.LC0_POLICY_MOVES[0], a.LC0_POLICY_MOVES[-1])
+print(a.planes_to_fen(planes, input_format=1, us_ooo=1, us_oo=1, them_ooo=1, them_oo=1, side_to_move_or_enpassant=0, rule50_count=0))
+`;
+  const out = execFileSync(PY, ['-c', script], { encoding: 'utf8' }).trim().split('\n');
+  assert.equal(out[0], '1858 a1b1 h7h8b');
+  assert.equal(out[1], 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+});
+
 test('lc0_adapter jsonl-smoke rejects illegal positive policy mass', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tl-lc0-adapter-'));
   const input = join(dir, 'in.jsonl');

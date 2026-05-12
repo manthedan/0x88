@@ -37,12 +37,20 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return h.hexdigest()
 
 
-def download(url: str, dst: Path, *, max_bytes: int | None = None) -> tuple[int, str | None]:
+def download(url: str, dst: Path, *, max_bytes: int | None = None, range_bytes: int | None = None) -> tuple[int, str | None, str | None]:
     dst.parent.mkdir(parents=True, exist_ok=True)
-    req = urllib.request.Request(url, headers={"User-Agent": "tiny-leela-lc0-manifest/1"})
+    headers = {"User-Agent": "tiny-leela-lc0-manifest/1"}
+    requested_range = None
+    if range_bytes is not None:
+        if range_bytes <= 0:
+            raise ValueError("range_bytes must be positive")
+        requested_range = f"bytes=0-{range_bytes - 1}"
+        headers["Range"] = requested_range
+    req = urllib.request.Request(url, headers=headers)
     content_type = None
     with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 - explicit user-provided URL tool
         content_type = resp.headers.get("content-type")
+        content_range = resp.headers.get("content-range")
         total = 0
         with tempfile.NamedTemporaryFile(dir=str(dst.parent), delete=False) as tmp:
             tmp_path = Path(tmp.name)
@@ -61,7 +69,7 @@ def download(url: str, dst: Path, *, max_bytes: int | None = None) -> tuple[int,
             except Exception:
                 tmp_path.unlink(missing_ok=True)
                 raise
-    return total, content_type
+    return total, content_type, content_range or requested_range
 
 
 def read_text_url(url: str, *, max_bytes: int = 256 * 1024) -> str:
@@ -86,6 +94,7 @@ def build_manifest(args: argparse.Namespace, raw_path: Path, license_path: Path 
             "chunk_id": args.chunk_id or raw_path.name,
             "format_hint": args.format_hint,
             "content_type": content_type,
+            "http_range": args.range_bytes and f"bytes=0-{args.range_bytes - 1}",
             "license_url": args.license_url,
         },
         "local": {
@@ -115,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--license-url", default=DEFAULT_LICENSE_URL)
     parser.add_argument("--skip-license", action="store_true")
     parser.add_argument("--max-bytes", type=int, default=None, help="Safety cap for download size")
+    parser.add_argument("--range-bytes", type=int, default=None, help="Download only the first N bytes using HTTP Range and record this as a partial sample")
     parser.add_argument("--notes", default=None)
     args = parser.parse_args(argv)
 
@@ -125,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest_path = Path(args.manifest_dir) / (args.manifest_name or f"{raw_path.name}.manifest.json")
 
     print(f"download {args.url} -> {raw_path}", file=sys.stderr)
-    nbytes, content_type = download(args.url, raw_path, max_bytes=args.max_bytes)
+    nbytes, content_type, content_range = download(args.url, raw_path, max_bytes=args.max_bytes, range_bytes=args.range_bytes)
     print(f"downloaded bytes={nbytes} sha256={sha256_file(raw_path)}", file=sys.stderr)
 
     license_path = None
@@ -137,6 +147,9 @@ def main(argv: list[str] | None = None) -> int:
         license_path.write_text(text)
 
     manifest = build_manifest(args, raw_path, license_path, content_type)
+    if content_range:
+        manifest["source"]["content_range"] = content_range
+        manifest["partial_sample"] = bool(args.range_bytes)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print(json.dumps(manifest, indent=2, sort_keys=True))
