@@ -200,22 +200,7 @@ fn main() {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect();
-    let mut rows = 0usize;
     let mut bad = 0usize;
-    for path in &inputs {
-        for_each_jsonl_line(path, |line| {
-            if max_rows > 0 && rows >= max_rows {
-                return Ok(false);
-            }
-            if valid_row(line, history, &board_normalization).is_some() {
-                rows += 1;
-            } else {
-                bad += 1;
-            }
-            Ok(true)
-        })
-        .expect("stream SquareFormer input");
-    }
     let out_path = PathBuf::from(&out);
     let tmp_path = out_path.with_file_name(format!(
         ".{}.tmp-{}",
@@ -237,10 +222,11 @@ fn main() {
     let mut written = 0usize;
     for path in &inputs {
         for_each_jsonl_line(path, |line| {
-            if written >= rows {
+            if max_rows > 0 && written >= max_rows {
                 return Ok(false);
             }
             let Some((x, y, wdl, weight)) = valid_row(line, history, &board_normalization) else {
+                bad += 1;
                 return Ok(true);
             };
             tokens.write_all(&x).expect("write tokens");
@@ -259,6 +245,7 @@ fn main() {
         })
         .expect("stream SquareFormer input");
     }
+    let rows = written;
     tokens.flush().expect("flush tokens");
     policy.flush().expect("flush policy");
     wdl_file.flush().expect("flush wdl");

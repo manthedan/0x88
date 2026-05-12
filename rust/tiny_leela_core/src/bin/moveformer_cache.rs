@@ -123,22 +123,7 @@ fn main() {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect();
-    let mut rows = 0usize;
     let mut bad = 0usize;
-    for path in &inputs {
-        for_each_jsonl_line(path, |line| {
-            if max_rows > 0 && rows >= max_rows {
-                return Ok(false);
-            }
-            if parse_row(line, &board_normalization).is_some() {
-                rows += 1;
-            } else {
-                bad += 1;
-            }
-            Ok(true)
-        })
-        .expect("stream MoveFormer input");
-    }
 
     let out_path = PathBuf::from(&out);
     let tmp_path = out_path.with_file_name(format!(
@@ -170,13 +155,15 @@ fn main() {
     let mut truncated = 0usize;
     for path in &inputs {
         for_each_jsonl_line(path, |line| {
-            if written >= rows {
+            if max_rows > 0 && written >= max_rows {
                 return Ok(false);
             }
             let Some((fen, target, wdl, q, weight)) = parse_row(line, &board_normalization) else {
+                bad += 1;
                 return Ok(true);
             };
             let Ok(board) = parse_fen(&fen) else {
+                bad += 1;
                 return Ok(true);
             };
             let (moves, ids, features, mask) =
