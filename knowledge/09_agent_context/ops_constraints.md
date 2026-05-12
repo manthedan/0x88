@@ -1,6 +1,6 @@
 ---
 created: 2026-05-09
-updated: 2026-05-11
+updated: 2026-05-12
 project: tiny-neural-chess
 id: agent_context.ops_constraints
 type: ops_context
@@ -25,4 +25,5 @@ agent_summary: >
 - Use `scripts/gpu_queue.py` / `npm run gpuq -- ...` for new expensive local GPU jobs that need serialization or artifact dependencies. Cloud workers should produce validated chunks/manifests/markers; local trainer/export/eval jobs consume those markers through the queue.
 - New training/eval artifacts should use `board_normalization=stm_white_rankflip_v1` by default. Raw datasets/self-play chunks stay unmodified; cache/train/export/inference artifacts must declare normalization and reject mixed normalized/un-normalized inputs. See `docs/board_normalization_standard.md`.
 - Before launching jobs expected to take more than a few minutes, state the long-run preflight: input size, expected wall time, parallelism, Rust/native/GPU availability, resumability, and whether the selected path is canonical.
+- Local storage topology for LC0-scale work: root `/` is the active repo/working tree, `/mnt/backup_plus` is cold storage/archive, and `/dev/sda1` is mounted at `/mnt/data` with substantial free SSD space. Prefer `/mnt/data/tiny_leela_lc0/` for large active LC0 raw samples, normalized intermediates, and cache outputs when root disk pressure matters; use symlinks/manifests back into repo paths as needed.
 - If a materially faster or more canonical execution path is discovered mid-run, compare restart cost with remaining runtime and prefer stopping/restarting when savings or correctness risk justify it.
