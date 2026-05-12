@@ -93,7 +93,7 @@ def stream_convert_v6(
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--input", action="append", required=True, help="LC0 .tar/.tar.part/.gz input; may be repeated")
+    ap.add_argument("--input", action="append", default=[], help="LC0 .tar/.tar.part/.gz input; may be repeated")
     ap.add_argument("--input-list", help="Optional newline-delimited input path list")
     ap.add_argument("--output", default="-", help="Output JSONL path, or '-' for stdout")
     ap.add_argument("--audit", required=True)
@@ -113,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
     inputs = [Path(p) for p in args.input]
     if args.input_list:
         inputs.extend(Path(line.strip()) for line in Path(args.input_list).read_text().splitlines() if line.strip())
+    if not inputs:
+        ap.error("at least one --input or --input-list entry is required")
     if args.output == "-":
         stream_convert_v6(
             inputs,
