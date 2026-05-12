@@ -18,6 +18,12 @@
     "type": "wikilink"
   },
   {
+    "field": "supports",
+    "source": "finding.chess_specific_geometry_high_roi",
+    "target": "design.squareformer_av_puct",
+    "type": "supports"
+  },
+  {
     "field": "depends_on",
     "source": "finding.chess_specific_geometry_high_roi",
     "target": "concept.squareformer",
@@ -25,7 +31,7 @@
   },
   {
     "field": "supports",
-    "source": "finding.chess_specific_geometry_high_roi",
+    "source": "finding.action_value_reranking_strength_per_node",
     "target": "design.squareformer_av_puct",
     "type": "supports"
   },
@@ -40,12 +46,6 @@
     "source": "finding.action_value_reranking_strength_per_node",
     "target": "concept.puct",
     "type": "depends_on"
-  },
-  {
-    "field": "supports",
-    "source": "finding.action_value_reranking_strength_per_node",
-    "target": "design.squareformer_av_puct",
-    "type": "supports"
   },
   {
     "field": "risks",
@@ -90,6 +90,12 @@
     "type": "depends_on"
   },
   {
+    "field": "risks",
+    "source": "design.candidate_frontier_cards",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
     "field": "related",
     "source": "design.candidate_frontier_cards",
     "target": "roadmap.current_tiny_leela_portfolio",
@@ -100,24 +106,6 @@
     "source": "design.candidate_frontier_cards",
     "target": "decision.lc0_architecture_funnel_and_deployability_frontier",
     "type": "related"
-  },
-  {
-    "field": "risks",
-    "source": "design.candidate_frontier_cards",
-    "target": "risk.move_map_mismatch",
-    "type": "risks"
-  },
-  {
-    "field": "supported_by",
-    "source": "design.squareformer_av_puct",
-    "target": "finding.action_value_reranking_strength_per_node",
-    "type": "supported_by"
-  },
-  {
-    "field": "supported_by",
-    "source": "design.squareformer_av_puct",
-    "target": "finding.chess_specific_geometry_high_roi",
-    "type": "supported_by"
   },
   {
     "field": "depends_on",
@@ -145,8 +133,14 @@
   },
   {
     "field": "supported_by",
-    "source": "design.agent_friendly_knowledge_graph",
-    "target": "decision.use_markdown_knowledge_graph",
+    "source": "design.squareformer_av_puct",
+    "target": "finding.action_value_reranking_strength_per_node",
+    "type": "supported_by"
+  },
+  {
+    "field": "supported_by",
+    "source": "design.squareformer_av_puct",
+    "target": "finding.chess_specific_geometry_high_roi",
     "type": "supported_by"
   },
   {
@@ -156,6 +150,12 @@
     "type": "risks"
   },
   {
+    "field": "supported_by",
+    "source": "design.agent_friendly_knowledge_graph",
+    "target": "decision.use_markdown_knowledge_graph",
+    "type": "supported_by"
+  },
+  {
     "field": "body",
     "source": "design.agentic_engine_maintenance",
     "target": "design.squareformer_av_puct",
@@ -166,6 +166,30 @@
     "source": "design.agentic_engine_maintenance",
     "target": "concept.search_improved_self_play",
     "type": "wikilink"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.agentic_engine_maintenance",
+    "target": "design.squareformer_av_puct",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "design.agentic_engine_maintenance",
+    "target": "concept.search_improved_self_play",
+    "type": "depends_on"
+  },
+  {
+    "field": "risks",
+    "source": "design.agentic_engine_maintenance",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
+    "field": "related",
+    "source": "design.agentic_engine_maintenance",
+    "target": "design.agent_friendly_knowledge_graph",
+    "type": "related"
   },
   {
     "field": "supported_by",
@@ -175,30 +199,6 @@
   },
   {
     "field": "depends_on",
-    "source": "design.agentic_engine_maintenance",
-    "target": "design.squareformer_av_puct",
-    "type": "depends_on"
-  },
-  {
-    "field": "depends_on",
-    "source": "design.agentic_engine_maintenance",
-    "target": "concept.search_improved_self_play",
-    "type": "depends_on"
-  },
-  {
-    "field": "related",
-    "source": "design.agentic_engine_maintenance",
-    "target": "design.agent_friendly_knowledge_graph",
-    "type": "related"
-  },
-  {
-    "field": "risks",
-    "source": "design.agentic_engine_maintenance",
-    "target": "risk.move_map_mismatch",
-    "type": "risks"
-  },
-  {
-    "field": "depends_on",
     "source": "design.cross_language_contracts_and_drift_control",
     "target": "design.runtime_target_matrix_and_workflow_delegation",
     "type": "depends_on"
@@ -208,6 +208,12 @@
     "source": "design.cross_language_contracts_and_drift_control",
     "target": "design.agentic_engine_maintenance",
     "type": "depends_on"
+  },
+  {
+    "field": "risks",
+    "source": "design.cross_language_contracts_and_drift_control",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
   },
   {
     "field": "related",
@@ -220,12 +226,6 @@
     "source": "design.cross_language_contracts_and_drift_control",
     "target": "roadmap.current_tiny_leela_portfolio",
     "type": "related"
-  },
-  {
-    "field": "risks",
-    "source": "design.cross_language_contracts_and_drift_control",
-    "target": "risk.move_map_mismatch",
-    "type": "risks"
   },
   {
     "field": "body",
@@ -252,6 +252,12 @@
     "type": "depends_on"
   },
   {
+    "field": "risks",
+    "source": "design.inference_optimization",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
     "field": "related",
     "source": "design.inference_optimization",
     "target": "roadmap.current_tiny_leela_portfolio",
@@ -268,12 +274,6 @@
     "source": "design.inference_optimization",
     "target": "design.candidate_frontier_cards",
     "type": "related"
-  },
-  {
-    "field": "risks",
-    "source": "design.inference_optimization",
-    "target": "risk.move_map_mismatch",
-    "type": "risks"
   },
   {
     "field": "body",
@@ -300,6 +300,12 @@
     "type": "depends_on"
   },
   {
+    "field": "risks",
+    "source": "design.runtime_target_matrix_and_workflow_delegation",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
     "field": "related",
     "source": "design.runtime_target_matrix_and_workflow_delegation",
     "target": "roadmap.current_tiny_leela_portfolio",
@@ -310,12 +316,6 @@
     "source": "design.runtime_target_matrix_and_workflow_delegation",
     "target": "design.cross_language_contracts_and_drift_control",
     "type": "related"
-  },
-  {
-    "field": "risks",
-    "source": "design.runtime_target_matrix_and_workflow_delegation",
-    "target": "risk.move_map_mismatch",
-    "type": "risks"
   },
   {
     "field": "depends_on",
@@ -354,6 +354,12 @@
     "type": "wikilink"
   },
   {
+    "field": "supports",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "roadmap.current_tiny_leela_portfolio",
+    "type": "supports"
+  },
+  {
     "field": "depends_on",
     "source": "design.lc0_search_distillation_pipeline",
     "target": "design.squareformer_av_puct",
@@ -364,6 +370,18 @@
     "source": "design.lc0_search_distillation_pipeline",
     "target": "concept.search_improved_self_play",
     "type": "depends_on"
+  },
+  {
+    "field": "risks",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
+    "field": "risks",
+    "source": "design.lc0_search_distillation_pipeline",
+    "target": "risk.lc0_data_provenance_and_license",
+    "type": "risks"
   },
   {
     "field": "related",
@@ -382,24 +400,6 @@
     "source": "design.lc0_search_distillation_pipeline",
     "target": "decision.lc0_architecture_funnel_and_deployability_frontier",
     "type": "related"
-  },
-  {
-    "field": "supports",
-    "source": "design.lc0_search_distillation_pipeline",
-    "target": "roadmap.current_tiny_leela_portfolio",
-    "type": "supports"
-  },
-  {
-    "field": "risks",
-    "source": "design.lc0_search_distillation_pipeline",
-    "target": "risk.move_map_mismatch",
-    "type": "risks"
-  },
-  {
-    "field": "risks",
-    "source": "design.lc0_search_distillation_pipeline",
-    "target": "risk.lc0_data_provenance_and_license",
-    "type": "risks"
   },
   {
     "field": "body",
@@ -474,6 +474,12 @@
     "type": "wikilink"
   },
   {
+    "field": "supports",
+    "source": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "target": "roadmap.current_tiny_leela_portfolio",
+    "type": "supports"
+  },
+  {
     "field": "depends_on",
     "source": "decision.lc0_architecture_funnel_and_deployability_frontier",
     "target": "design.lc0_search_distillation_pipeline",
@@ -502,12 +508,6 @@
     "source": "decision.lc0_architecture_funnel_and_deployability_frontier",
     "target": "design.runtime_target_matrix_and_workflow_delegation",
     "type": "related"
-  },
-  {
-    "field": "supports",
-    "source": "decision.lc0_architecture_funnel_and_deployability_frontier",
-    "target": "roadmap.current_tiny_leela_portfolio",
-    "type": "supports"
   },
   {
     "field": "body",
@@ -615,6 +615,36 @@
     "field": "risks",
     "source": "roadmap.current_tiny_leela_portfolio",
     "target": "risk.deprecated_roadmap_active_context",
+    "type": "risks"
+  },
+  {
+    "field": "depends_on",
+    "source": "task.lc0_distillation_adapter_and_scaling",
+    "target": "design.lc0_search_distillation_pipeline",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "task.lc0_distillation_adapter_and_scaling",
+    "target": "decision.lc0_architecture_funnel_and_deployability_frontier",
+    "type": "depends_on"
+  },
+  {
+    "field": "depends_on",
+    "source": "task.lc0_distillation_adapter_and_scaling",
+    "target": "design.candidate_frontier_cards",
+    "type": "depends_on"
+  },
+  {
+    "field": "risks",
+    "source": "task.lc0_distillation_adapter_and_scaling",
+    "target": "risk.move_map_mismatch",
+    "type": "risks"
+  },
+  {
+    "field": "risks",
+    "source": "task.lc0_distillation_adapter_and_scaling",
+    "target": "risk.lc0_data_provenance_and_license",
     "type": "risks"
   },
   {

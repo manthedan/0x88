@@ -124,8 +124,8 @@
     },
     "id": "finding.chess_specific_geometry_high_roi",
     "links": [
-      "Concept - SquareFormer",
-      "Design - SquareFormer-AV-PUCT"
+      "Design - SquareFormer-AV-PUCT",
+      "Concept - SquareFormer"
     ],
     "path": "03_findings/architecture/finding.chess_specific_geometry_high_roi.md",
     "status": "active",
@@ -179,9 +179,9 @@
     },
     "id": "finding.action_value_reranking_strength_per_node",
     "links": [
+      "Design - SquareFormer-AV-PUCT",
       "Concept - Action-value head",
       "Concept - PUCT",
-      "Design - SquareFormer-AV-PUCT",
       "Risk - Move-map mismatch"
     ],
     "path": "03_findings/search/finding.action_value_reranking_strength_per_node.md",
@@ -308,9 +308,9 @@
       "Design - Inference optimization",
       "Design - Runtime target matrix and workflow delegation",
       "Finding - Self-play needs search-improved targets",
+      "Risk - Move-map mismatch",
       "Roadmap - Current Tiny Leela portfolio",
-      "Decision - LC0 architecture funnel and deployability frontier",
-      "Risk - Move-map mismatch"
+      "Decision - LC0 architecture funnel and deployability frontier"
     ],
     "path": "04_designs/evaluation/design.candidate_frontier_cards.md",
     "status": "active",
@@ -345,12 +345,12 @@
     },
     "id": "design.squareformer_av_puct",
     "links": [
-      "Finding - Action-value reranking is central to strength per node",
-      "Finding - Chess-specific geometry is high ROI for tiny models",
       "Concept - SquareFormer",
       "Concept - Action-value head",
       "Concept - PUCT",
-      "Risk - Move-map mismatch"
+      "Risk - Move-map mismatch",
+      "Finding - Action-value reranking is central to strength per node",
+      "Finding - Chess-specific geometry is high ROI for tiny models"
     ],
     "path": "04_designs/models/design.squareformer_av_puct.md",
     "status": "active",
@@ -379,8 +379,8 @@
     },
     "id": "design.agent_friendly_knowledge_graph",
     "links": [
-      "ADR-0001 Use Markdown knowledge graph overlay",
-      "Risk - Deprecated roadmap retrieved as active context"
+      "Risk - Deprecated roadmap retrieved as active context",
+      "ADR-0001 Use Markdown knowledge graph overlay"
     ],
     "path": "04_designs/systems/design.agent_friendly_knowledge_graph.md",
     "status": "active",
@@ -418,9 +418,9 @@
     "links": [
       "Design - SquareFormer-AV-PUCT",
       "Concept - Search-improved self-play",
-      "Finding - Self-play needs search-improved targets",
+      "Risk - Move-map mismatch",
       "Design - Agent-friendly knowledge graph",
-      "Risk - Move-map mismatch"
+      "Finding - Self-play needs search-improved targets"
     ],
     "path": "04_designs/systems/design.agentic_engine_maintenance.md",
     "status": "active",
@@ -456,9 +456,9 @@
     "links": [
       "Design - Runtime target matrix and workflow delegation",
       "Design - Agentic engine maintenance",
+      "Risk - Move-map mismatch",
       "Design - Inference optimization",
-      "Roadmap - Current Tiny Leela portfolio",
-      "Risk - Move-map mismatch"
+      "Roadmap - Current Tiny Leela portfolio"
     ],
     "path": "04_designs/systems/design.cross_language_contracts_and_drift_control.md",
     "status": "active",
@@ -497,8 +497,8 @@
       "Design - Candidate frontier cards",
       "Design - SquareFormer-AV-PUCT",
       "Design - Agentic engine maintenance",
-      "Roadmap - Current Tiny Leela portfolio",
-      "Risk - Move-map mismatch"
+      "Risk - Move-map mismatch",
+      "Roadmap - Current Tiny Leela portfolio"
     ],
     "path": "04_designs/systems/design.inference_optimization.md",
     "status": "active",
@@ -536,8 +536,8 @@
       "Design - Cross-language contracts and drift control",
       "Design - Inference optimization",
       "Design - Agentic engine maintenance",
-      "Roadmap - Current Tiny Leela portfolio",
-      "Risk - Move-map mismatch"
+      "Risk - Move-map mismatch",
+      "Roadmap - Current Tiny Leela portfolio"
     ],
     "path": "04_designs/systems/design.runtime_target_matrix_and_workflow_delegation.md",
     "status": "active",
@@ -610,11 +610,11 @@
       "Decision - LC0 architecture funnel and deployability frontier",
       "Operations constraints",
       "Design - Candidate frontier cards",
-      "Design - SquareFormer-AV-PUCT",
-      "Decision - AWS Batch self-play parallelism policy",
       "Roadmap - Current Tiny Leela portfolio",
+      "Design - SquareFormer-AV-PUCT",
       "Risk - Move-map mismatch",
-      "Risk - LC0 data provenance and license"
+      "Risk - LC0 data provenance and license",
+      "Decision - AWS Batch self-play parallelism policy"
     ],
     "path": "04_designs/training_system/design.lc0_search_distillation_pipeline.md",
     "status": "active",
@@ -771,11 +771,11 @@
     "id": "decision.lc0_architecture_funnel_and_deployability_frontier",
     "links": [
       "Design - Candidate frontier cards",
+      "Roadmap - Current Tiny Leela portfolio",
       "Design - LC0 search-distillation pipeline",
       "Experiment - BT4 architecture roadmap next ablations",
       "Design - Inference optimization",
-      "Design - Runtime target matrix and workflow delegation",
-      "Roadmap - Current Tiny Leela portfolio"
+      "Design - Runtime target matrix and workflow delegation"
     ],
     "path": "06_decisions/decision.lc0_architecture_funnel_and_deployability_frontier.md",
     "status": "active",
@@ -829,6 +829,40 @@
     "status": "active",
     "title": "Roadmap - Current Tiny Leela portfolio",
     "type": "roadmap"
+  },
+  {
+    "agent_summary": "Implementation checklist for going from LC0 public chunk adapter proof to 10M and 100M distillation on the two promoted lanes: bt4_h2_flip_av_relbank_d256_l8 and mf80_av_top48_10m_flipped_moverel_gate. Scale is blocked until adapter legality, normalization, provenance, and tiny-overfit gates pass.",
+    "frontmatter": {
+      "agent_summary": "Implementation checklist for going from LC0 public chunk adapter proof to 10M and 100M distillation on the two promoted lanes: bt4_h2_flip_av_relbank_d256_l8 and mf80_av_top48_10m_flipped_moverel_gate. Scale is blocked until adapter legality, normalization, provenance, and tiny-overfit gates pass.",
+      "created": "2026-05-12",
+      "depends_on": [
+        "[[Design - LC0 search-distillation pipeline]]",
+        "[[Decision - LC0 architecture funnel and deployability frontier]]",
+        "[[Design - Candidate frontier cards]]"
+      ],
+      "id": "task.lc0_distillation_adapter_and_scaling",
+      "priority": "high",
+      "risks": [
+        "[[Risk - Move-map mismatch]]",
+        "[[Risk - LC0 data provenance and license]]"
+      ],
+      "status": "planned",
+      "title": "Task - LC0 distillation adapter and scaling path",
+      "type": "task",
+      "updated": "2026-05-12"
+    },
+    "id": "task.lc0_distillation_adapter_and_scaling",
+    "links": [
+      "Design - LC0 search-distillation pipeline",
+      "Decision - LC0 architecture funnel and deployability frontier",
+      "Design - Candidate frontier cards",
+      "Risk - Move-map mismatch",
+      "Risk - LC0 data provenance and license"
+    ],
+    "path": "08_tasks/planned/task.lc0_distillation_adapter_and_scaling.md",
+    "status": "planned",
+    "title": "Task - LC0 distillation adapter and scaling path",
+    "type": "task"
   },
   {
     "agent_summary": "Start a conservative legacy-doc archiving process: keep knowledge/ as the current source of truth, classify old docs as source material, extract any still-current ideas into canonical KG notes, then move only clearly superseded docs with stubs or updated links.",
