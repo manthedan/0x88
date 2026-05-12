@@ -59,6 +59,12 @@ def open_moveformer_sidecar(path: str | Path, *, verify_sha256: bool = False) ->
         "legal_features": np.memmap(d / "legal_features.float32", np.float32, "r", shape=(rows, k, f)),
         "legal_mask": np.memmap(d / "legal_mask.float32", np.float32, "r", shape=(rows, k)),
     }
+    weight_path = d / "weight.float32"
+    out["weight"] = (
+        np.memmap(weight_path, np.float32, "r", shape=(rows,))
+        if weight_path.exists()
+        else np.ones(rows, dtype=np.float32)
+    )
     if meta.get("has_board_cache"):
         c = int(meta["input_planes"])
         out["x"] = np.memmap(d / "x.int8", np.int8, "r", shape=(rows, c, 8, 8))
@@ -71,6 +77,7 @@ def open_squareformer_token_cache(path: str | Path, *, verify_sha256: bool = Fal
     _check_sha256(d, meta, strict=verify_sha256)
     rows = int(meta["rows"])
     f = int(meta["token_features"])
+    weight_path = d / "weight.float32"
     return {
         "path": str(d),
         "meta": meta,
@@ -79,6 +86,7 @@ def open_squareformer_token_cache(path: str | Path, *, verify_sha256: bool = Fal
         "tokens": np.memmap(d / "tokens.uint8", np.uint8, "r", shape=(rows, 64, f)),
         "policy": np.memmap(d / "policy.int64", np.int64, "r", shape=(rows,)),
         "wdl": np.memmap(d / "wdl.float32", np.float32, "r", shape=(rows, 3)),
+        "weight": np.memmap(weight_path, np.float32, "r", shape=(rows,)) if weight_path.exists() else np.ones(rows, dtype=np.float32),
     }
 
 

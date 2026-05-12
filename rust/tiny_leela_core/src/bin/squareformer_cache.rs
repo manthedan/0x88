@@ -4,7 +4,10 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
-use tiny_leela_core::{for_each_jsonl_line, sha256_file_hex};
+use tiny_leela_core::{
+    for_each_jsonl_line, normalize_row_for_stm_white, normalize_uci_for_stm_white, sha256_file_hex,
+    STM_WHITE_RANKFLIP_V1,
+};
 
 const FILES: &str = "abcdefgh";
 const PIECES: &str = ".PNBRQKpnbrqk";
@@ -129,7 +132,11 @@ fn encode(fen: &str, hist: &[String], history: usize) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn valid_row(line: &str, history: usize) -> Option<(Vec<u8>, i64, [f32; 3])> {
+fn valid_row(
+    line: &str,
+    history: usize,
+    board_normalization: &str,
+) -> Option<(Vec<u8>, i64, [f32; 3], f32)> {
     if line.trim().is_empty() {
         return None;
     }
@@ -140,7 +147,6 @@ fn valid_row(line: &str, history: usize) -> Option<(Vec<u8>, i64, [f32; 3])> {
         return None;
     }
     let mv = policy.keys().next()?;
-    let y = move_class(mv)?;
     let hist: Vec<String> = row
         .get("history_fens")
         .and_then(|v| v.as_array())
@@ -150,7 +156,10 @@ fn valid_row(line: &str, history: usize) -> Option<(Vec<u8>, i64, [f32; 3])> {
                 .collect()
         })
         .unwrap_or_default();
-    let x = encode(fen, &hist, history)?;
+    let norm = normalize_row_for_stm_white(fen, &hist, board_normalization).ok()?;
+    let norm_mv = normalize_uci_for_stm_white(mv, norm.flipped).ok()?;
+    let y = move_class(&norm_mv)?;
+    let x = encode(&norm.fen, &norm.history_fens, history)?;
     let mut wdl = [0.25f32, 0.5, 0.25];
     if let Some(xs) = row.get("wdl").and_then(|v| v.as_array()) {
         for i in 0..3.min(xs.len()) {
@@ -159,7 +168,8 @@ fn valid_row(line: &str, history: usize) -> Option<(Vec<u8>, i64, [f32; 3])> {
             }
         }
     }
-    Some((x, y, wdl))
+    let weight = row.get("weight").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+    Some((x, y, wdl, weight))
 }
 
 fn write_atomic(path: &str, body: &str) {
@@ -178,6 +188,10 @@ fn main() {
     let dataset_manifest = arg("--dataset-manifest", "unknown");
     let history: usize = arg("--history-plies", "2").parse().unwrap_or(2);
     let max_rows: usize = arg("--max-rows", "0").parse().unwrap_or(0);
+    let board_normalization = arg("--board-normalization", "none");
+    if board_normalization != "none" && board_normalization != STM_WHITE_RANKFLIP_V1 {
+        panic!("unsupported --board-normalization={board_normalization}");
+    }
     if input.is_empty() {
         panic!("--input is required");
     }
@@ -193,7 +207,7 @@ fn main() {
             if max_rows > 0 && rows >= max_rows {
                 return Ok(false);
             }
-            if valid_row(line, history).is_some() {
+            if valid_row(line, history, &board_normalization).is_some() {
                 rows += 1;
             } else {
                 bad += 1;
@@ -219,13 +233,14 @@ fn main() {
     let mut tokens = fs::File::create(tmp_path.join("tokens.uint8")).expect("create tokens");
     let mut policy = fs::File::create(tmp_path.join("policy.int64")).expect("create policy");
     let mut wdl_file = fs::File::create(tmp_path.join("wdl.float32")).expect("create wdl");
+    let mut weight_file = fs::File::create(tmp_path.join("weight.float32")).expect("create weight");
     let mut written = 0usize;
     for path in &inputs {
         for_each_jsonl_line(path, |line| {
             if written >= rows {
                 return Ok(false);
             }
-            let Some((x, y, wdl)) = valid_row(line, history) else {
+            let Some((x, y, wdl, weight)) = valid_row(line, history, &board_normalization) else {
                 return Ok(true);
             };
             tokens.write_all(&x).expect("write tokens");
@@ -233,6 +248,9 @@ fn main() {
             for v in wdl {
                 wdl_file.write_all(&v.to_le_bytes()).expect("write wdl");
             }
+            weight_file
+                .write_all(&weight.to_le_bytes())
+                .expect("write weight");
             written += 1;
             if written % 100000 == 0 {
                 println!("METRIC square_cache_rows_written={written}");
@@ -244,10 +262,12 @@ fn main() {
     tokens.flush().expect("flush tokens");
     policy.flush().expect("flush policy");
     wdl_file.flush().expect("flush wdl");
+    weight_file.flush().expect("flush weight");
     let checksums = json!({
         "tokens.uint8": sha256_file_hex(tmp_path.join("tokens.uint8")).expect("checksum tokens"),
         "policy.int64": sha256_file_hex(tmp_path.join("policy.int64")).expect("checksum policy"),
         "wdl.float32": sha256_file_hex(tmp_path.join("wdl.float32")).expect("checksum wdl"),
+        "weight.float32": sha256_file_hex(tmp_path.join("weight.float32")).expect("checksum weight"),
     });
     let meta = json!({
         "rows": rows,
@@ -255,9 +275,11 @@ fn main() {
         "history_plies": history,
         "policy_size": 4096 + 4096 * 4,
         "format": "compact_square_tokens_v1",
+        "has_row_weight": true,
         "row_order": "input order after deterministic JSONL/.jsonl.zst streaming and row validation",
         "checksums_sha256": checksums,
         "bad_or_skipped_rows": bad,
+        "board_normalization": if board_normalization == "none" { Value::Null } else { Value::String(board_normalization.clone()) },
         "producer": { "language": "rust", "binary": "tiny-leela-rust-squareformer-cache" },
     });
     fs::write(
@@ -269,6 +291,7 @@ fn main() {
     drop(tokens);
     drop(policy);
     drop(wdl_file);
+    drop(weight_file);
     if out_path.exists() {
         fs::remove_dir_all(&out_path).expect("remove existing output dir");
     }
@@ -281,6 +304,7 @@ fn main() {
                 "dataset_manifest": dataset_manifest,
                 "inputs": inputs,
                 "history_plies": history,
+                "board_normalization": if board_normalization == "none" { Value::Null } else { Value::String(board_normalization.clone()) },
             },
             "producer": {
                 "language": "rust",
@@ -290,13 +314,15 @@ fn main() {
             "arrays": [
                 { "path": format!("{out}/tokens.uint8"), "dtype": "uint8", "shape": [rows, 64, fdim], "endianness": "native" },
                 { "path": format!("{out}/policy.int64"), "dtype": "int64", "shape": [rows], "endianness": "little" },
-                { "path": format!("{out}/wdl.float32"), "dtype": "float32", "shape": [rows, 3], "endianness": "little" }
+                { "path": format!("{out}/wdl.float32"), "dtype": "float32", "shape": [rows, 3], "endianness": "little" },
+                { "path": format!("{out}/weight.float32"), "dtype": "float32", "shape": [rows], "endianness": "little" }
             ],
             "shards": [out],
             "validation": {
                 "rows": { "total": rows, "bad_or_skipped": bad },
                 "token_features": fdim,
                 "policy_size": 4096 + 4096 * 4,
+                "board_normalization": if board_normalization == "none" { Value::Null } else { Value::String(board_normalization.clone()) },
                 "hashes": meta["checksums_sha256"],
             },
         });

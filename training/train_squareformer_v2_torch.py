@@ -143,6 +143,106 @@ def relation_ids(heads: int):
     return rel
 
 
+def relation_template_bank():
+    names = [
+        "same_square",
+        "same_rank",
+        "same_file",
+        "same_diagonal",
+        "knight_move",
+        "king_move",
+        "same_color_complex",
+        "white_pawn_attack",
+        "black_pawn_attack",
+        "rook_ray_distance_1",
+        "rook_ray_distance_2_3",
+        "rook_ray_distance_4_plus",
+        "bishop_ray_distance_1",
+        "bishop_ray_distance_2_3",
+        "bishop_ray_distance_4_plus",
+        "center_to_center",
+        "center_to_edge",
+        "edge_to_edge",
+        "corner_relation",
+        "promotion_rank_relation",
+    ]
+    templates = np.zeros((len(names), 64, 64), dtype=np.float32)
+    centers = {(3, 3), (3, 4), (4, 3), (4, 4)}
+    edges = {(r, f) for r in range(8) for f in range(8) if r in (0, 7) or f in (0, 7)}
+    corners = {(0, 0), (0, 7), (7, 0), (7, 7)}
+    promotion_ranks = {0, 7}
+    idx = {name: i for i, name in enumerate(names)}
+    for i in range(64):
+        r1, f1 = divmod(i, 8)
+        for j in range(64):
+            r2, f2 = divmod(j, 8)
+            dr = r2 - r1
+            df = f2 - f1
+            adr, adf = abs(dr), abs(df)
+            if i == j:
+                templates[idx["same_square"], i, j] = 1
+            if r1 == r2 and i != j:
+                templates[idx["same_rank"], i, j] = 1
+            if f1 == f2 and i != j:
+                templates[idx["same_file"], i, j] = 1
+            if adr == adf and i != j:
+                templates[idx["same_diagonal"], i, j] = 1
+            if (adr, adf) in ((1, 2), (2, 1)):
+                templates[idx["knight_move"], i, j] = 1
+            if max(adr, adf) == 1 and i != j:
+                templates[idx["king_move"], i, j] = 1
+            if (r1 + f1) & 1 == (r2 + f2) & 1:
+                templates[idx["same_color_complex"], i, j] = 1
+            if dr == 1 and adf == 1:
+                templates[idx["white_pawn_attack"], i, j] = 1
+            if dr == -1 and adf == 1:
+                templates[idx["black_pawn_attack"], i, j] = 1
+            if (r1 == r2 or f1 == f2) and i != j:
+                d = max(adr, adf)
+                if d == 1:
+                    templates[idx["rook_ray_distance_1"], i, j] = 1
+                elif d <= 3:
+                    templates[idx["rook_ray_distance_2_3"], i, j] = 1
+                else:
+                    templates[idx["rook_ray_distance_4_plus"], i, j] = 1
+            if adr == adf and i != j:
+                if adr == 1:
+                    templates[idx["bishop_ray_distance_1"], i, j] = 1
+                elif adr <= 3:
+                    templates[idx["bishop_ray_distance_2_3"], i, j] = 1
+                else:
+                    templates[idx["bishop_ray_distance_4_plus"], i, j] = 1
+            a = (r1, f1)
+            b = (r2, f2)
+            if a in centers and b in centers:
+                templates[idx["center_to_center"], i, j] = 1
+            if (a in centers and b in edges) or (a in edges and b in centers):
+                templates[idx["center_to_edge"], i, j] = 1
+            if a in edges and b in edges:
+                templates[idx["edge_to_edge"], i, j] = 1
+            if a in corners or b in corners:
+                templates[idx["corner_relation"], i, j] = 1
+            if r1 in promotion_ranks or r2 in promotion_ranks:
+                templates[idx["promotion_rank_relation"], i, j] = 1
+    return names, templates
+
+
+def legacy_relation_coefficients(template_names: list[str], layers: int, heads: int):
+    weights = {
+        "same_square": 1.0 / 8.0,
+        "same_rank": 2.0 / 8.0,
+        "same_file": 3.0 / 8.0,
+        "same_diagonal": 4.0 / 8.0,
+        "knight_move": 5.0 / 8.0,
+        "king_move": 6.0 / 8.0,
+        "same_color_complex": 1.0 / 8.0,
+    }
+    coeff = np.zeros((layers, heads, len(template_names)), dtype=np.float32)
+    for i, name in enumerate(template_names):
+        coeff[:, :, i] = weights.get(name, 0.0)
+    return coeff
+
+
 def decode_move_classes(classes):
     arr = np.asarray(classes, dtype=np.int64)
     promo = np.full_like(arr, 4)
@@ -236,10 +336,17 @@ def open_cache_dir(d, rows):
     d = Path(d)
     meta = json.loads((d / "meta.json").read_text())
     F = int(meta["token_features"])
+    weight_path = d / "weight.float32"
+    weight = (
+        np.memmap(weight_path, np.float32, "r", shape=(rows,))
+        if weight_path.exists()
+        else np.ones(rows, dtype=np.float32)
+    )
     return (
         np.memmap(d / "tokens.uint8", np.uint8, "r", shape=(rows, 64, F)),
         np.memmap(d / "policy.int64", np.int64, "r", shape=(rows,)),
         np.memmap(d / "wdl.float32", np.float32, "r", shape=(rows, 3)),
+        weight,
     )
 
 
@@ -351,6 +458,62 @@ def main():
     ap.add_argument("--history-plies", type=int, default=2)
     ap.add_argument("--relation-bias", action="store_true")
     ap.add_argument(
+        "--relation-bias-mode",
+        choices=["legacy", "template_bank"],
+        default="legacy",
+        help="legacy uses the original scalar chess mask; template_bank learns per-layer/head coefficients over explicit chess templates",
+    )
+    ap.add_argument(
+        "--gab-lite",
+        action="store_true",
+        help="Alias for --relation-bias --relation-bias-mode template_bank --dynamic-relation-gate",
+    )
+    ap.add_argument(
+        "--dynamic-relation-gate",
+        action="store_true",
+        help="Condition relation-template coefficients on pooled board state",
+    )
+    ap.add_argument(
+        "--relation-gate-hidden",
+        type=int,
+        default=64,
+        help="Hidden width for pooled dynamic relation gate MLP",
+    )
+    ap.add_argument(
+        "--relation-gate-pool",
+        choices=["mean", "mean_max"],
+        default="mean",
+        help="Board summary used by --dynamic-relation-gate",
+    )
+    ap.add_argument(
+        "--relation-gate-scale",
+        type=float,
+        default=0.25,
+        help="Scale applied to tanh dynamic relation-template gates before adding to static coefficients",
+    )
+    ap.add_argument(
+        "--relation-gate-init-scale",
+        type=float,
+        default=0.02,
+        help="Normal init std for final dynamic gate projection; lower values make the gate start closer to the static relation bank",
+    )
+    ap.add_argument(
+        "--smolgen-lite",
+        action="store_true",
+        help="Condition relation-template attention bias on the current position via tiny per-layer gates",
+    )
+    ap.add_argument(
+        "--smolgen-hidden",
+        type=int,
+        default=64,
+        help="Hidden width for --smolgen-lite relation gate MLP",
+    )
+    ap.add_argument(
+        "--separate-aux-heads",
+        action="store_true",
+        help="Use separate candidate rank and regret heads instead of sharing the AV scorer",
+    )
+    ap.add_argument(
         "--max-rows",
         type=int,
         default=1000000,
@@ -431,6 +594,14 @@ def main():
         help="optional structured metrics JSONL output",
     )
     args = ap.parse_args()
+    if args.gab_lite:
+        args.relation_bias = True
+        args.relation_bias_mode = "template_bank"
+        args.dynamic_relation_gate = True
+    if args.dynamic_relation_gate and args.relation_bias_mode != "template_bank":
+        raise SystemExit("--dynamic-relation-gate requires --relation-bias-mode template_bank")
+    if args.dynamic_relation_gate and not args.relation_bias:
+        raise SystemExit("--dynamic-relation-gate requires --relation-bias")
     install_metric_print_tee(args.metrics_jsonl_out, run_id=Path(args.out).stem)
 
     import torch, torch.nn as nn, torch.nn.functional as F
@@ -445,12 +616,20 @@ def main():
     policy_stream = next(s for s in cfg["streams"] if s["kind"] == "supervised_cache")
     cm = json.loads(Path(policy_stream["cache_manifest"]).read_text())
     history = int(cm.get("history_plies", args.history_plies))
+    board_normalization = cm.get("board_normalization")
     cache_dirs = [Path(p) for p in cm["shards"]]
     cache_meta = [json.loads((p / "meta.json").read_text()) for p in cache_dirs]
+    if board_normalization is None and cache_meta:
+        board_normalization = cache_meta[0].get("board_normalization")
+    for m in cache_meta:
+        if m.get("board_normalization") != board_normalization:
+            raise SystemExit(
+                f"policy cache board_normalization mismatch: {m.get('board_normalization')!r} expected {board_normalization!r}"
+            )
     cache_train = [
         open_cache_dir(d, int(m["rows"])) for d, m in zip(cache_dirs, cache_meta)
     ]
-    cache_rows = sum(len(pol) for _, pol, _ in cache_train)
+    cache_rows = sum(len(pol) for _, pol, _, _ in cache_train)
     cache_dev = open_cache_dir(
         Path(cm["dev_cache"]),
         int(json.loads((Path(cm["dev_cache"]) / "meta.json").read_text())["rows"]),
@@ -501,6 +680,11 @@ def main():
         for p in value_cache_paths:
             print(f"[v2] opening value cache {p}", flush=True)
             value_caches.append(open_position_eval_cache_dir(p))
+        for c in value_caches:
+            if c["meta"].get("board_normalization") != board_normalization:
+                raise SystemExit(
+                    f"value cache board_normalization mismatch: {c['dir']} has {c['meta'].get('board_normalization')!r}, expected {board_normalization!r}"
+                )
         print(
             f"[v2] value_cache_count={len(value_caches)} value_cache_rows={sum(c['rows'] for c in value_caches)}",
             flush=True,
@@ -515,6 +699,11 @@ def main():
         for p in av_cache_paths:
             print(f"[v2] opening av cache {p}", flush=True)
             av_caches.append(open_av_cache_dir(p))
+        for c in av_caches:
+            if c["meta"].get("board_normalization") != board_normalization:
+                raise SystemExit(
+                    f"AV cache board_normalization mismatch: {c['dir']} has {c['meta'].get('board_normalization')!r}, expected {board_normalization!r}"
+                )
         print(
             f"[v2] av_cache_count={len(av_caches)} av_cache_rows={sum(c['rows'] for c in av_caches)} max_candidates={min(c['max_candidates'] for c in av_caches)}",
             flush=True,
@@ -527,15 +716,18 @@ def main():
             av_paths, history, args.max_av_positions, args.max_candidates
         )
         print(f"[v2] av_groups={len(av_groups)}", flush=True)
-    if (not value_caches and not value_rows) or (not av_caches and not av_groups):
-        raise SystemExit("missing value or AV rows")
+    if args.value_rows > 0 and not value_caches and not value_rows:
+        raise SystemExit("missing value rows/cache while --value-rows > 0")
+    if args.av_positions > 0 and not av_caches and not av_groups:
+        raise SystemExit("missing AV rows/cache while --av-positions > 0")
 
     compact_token_features = history + 9
     input_dim = (history + 1) * len(PIECES) + 8
 
     class Layer(nn.Module):
-        def __init__(self):
+        def __init__(self, layer_index: int):
             super().__init__()
+            self.layer_index = layer_index
             self.n1 = nn.LayerNorm(args.d_model)
             self.att = nn.MultiheadAttention(args.d_model, args.heads, batch_first=True)
             self.n2 = nn.LayerNorm(args.d_model)
@@ -545,7 +737,17 @@ def main():
                 nn.Linear(args.d_ff, args.d_model),
             )
 
-        def forward(self, x, attn_mask=None):
+        def forward(self, x, attn_mask=None, smolgen=None):
+            if attn_mask is not None and attn_mask.dim() == 4:
+                attn_mask = attn_mask[self.layer_index]
+            if smolgen is not None:
+                if smolgen.dim() == 5:
+                    dyn = smolgen[:, self.layer_index].reshape(
+                        x.shape[0] * args.heads, 64, 64
+                    )
+                else:
+                    dyn = smolgen[self.layer_index]
+                attn_mask = dyn if attn_mask is None else attn_mask + dyn
             y, _ = self.att(
                 self.n1(x),
                 self.n1(x),
@@ -569,7 +771,7 @@ def main():
             self.color_emb = nn.Embedding(2, args.d_model)
             self.square_emb = nn.Embedding(64, args.d_model)
             self.pos = nn.Parameter(torch.zeros(64, args.d_model))
-            self.layers = nn.ModuleList([Layer() for _ in range(args.layers)])
+            self.layers = nn.ModuleList([Layer(i) for i in range(args.layers)])
             self.fq = nn.Linear(args.d_model, args.d_model)
             self.tk = nn.Linear(args.d_model, args.d_model)
             self.prom = nn.Linear(args.d_model, 64 * 4)
@@ -581,11 +783,76 @@ def main():
                 nn.GELU(),
                 nn.Linear(args.d_model, 1),
             )
+            self.rank = (
+                nn.Sequential(
+                    nn.Linear(args.d_model * 4, args.d_model),
+                    nn.GELU(),
+                    nn.Linear(args.d_model, 1),
+                )
+                if args.separate_aux_heads
+                else None
+            )
+            self.regret = (
+                nn.Sequential(
+                    nn.Linear(args.d_model * 4, args.d_model),
+                    nn.GELU(),
+                    nn.Linear(args.d_model, 1),
+                )
+                if args.separate_aux_heads
+                else None
+            )
+            self.smolgen = (
+                nn.Sequential(
+                    nn.LayerNorm(args.d_model),
+                    nn.Linear(args.d_model, args.smolgen_hidden),
+                    nn.GELU(),
+                    nn.Linear(args.smolgen_hidden, args.layers * args.heads),
+                    nn.Tanh(),
+                )
+                if args.smolgen_lite
+                else None
+            )
+            self.relation_gate_pool = args.relation_gate_pool
+            names, templates = relation_template_bank()
+            self.relation_template_names = names
+            self.relation_bias_mode = args.relation_bias_mode
+            if args.relation_bias and args.relation_bias_mode == "template_bank":
+                self.rel_template_coeff = nn.Parameter(
+                    torch.tensor(
+                        legacy_relation_coefficients(names, args.layers, args.heads)
+                    )
+                )
+            else:
+                self.rel_template_coeff = None
+            gate_in = args.d_model * (2 if args.relation_gate_pool == "mean_max" else 1)
+            self.relation_gate = (
+                nn.Sequential(
+                    nn.LayerNorm(gate_in),
+                    nn.Linear(gate_in, args.relation_gate_hidden),
+                    nn.GELU(),
+                    nn.Linear(
+                        args.relation_gate_hidden,
+                        args.layers * args.heads * len(names),
+                    ),
+                    nn.Tanh(),
+                )
+                if args.dynamic_relation_gate
+                else None
+            )
+            if self.relation_gate is not None:
+                final = self.relation_gate[-2]
+                nn.init.normal_(final.weight, mean=0.0, std=args.relation_gate_init_scale)
+                nn.init.zeros_(final.bias)
             self.register_buffer(
                 "rel_mask",
                 torch.tensor(relation_ids(args.heads))
                 if args.relation_bias
                 else torch.zeros(args.heads, 64, 64),
+                persistent=False,
+            )
+            self.register_buffer(
+                "relation_templates",
+                torch.tensor(templates),
                 persistent=False,
             )
             self.register_buffer(
@@ -625,11 +892,46 @@ def main():
             h = (
                 self.token_embed(x) if self.input_mode == "embedding" else self.inp(x)
             ) + self.pos
-            mask = (
-                self.rel_mask.repeat(x.shape[0], 1, 1) if args.relation_bias else None
-            )
+            mask = None
+            dynamic_relation = None
+            if args.relation_bias:
+                if args.relation_bias_mode == "template_bank":
+                    static = torch.einsum(
+                        "lhr,rij->lhij",
+                        self.rel_template_coeff,
+                        self.relation_templates.to(h.dtype),
+                    )
+                    mask = static[:, None, :, :, :].expand(
+                        -1, x.shape[0], -1, -1, -1
+                    )
+                    mask = mask.reshape(args.layers, x.shape[0] * args.heads, 64, 64)
+                    if self.relation_gate is not None:
+                        pooled = h.mean(1)
+                        if self.relation_gate_pool == "mean_max":
+                            pooled = torch.cat([pooled, h.max(1).values], -1)
+                        gates = self.relation_gate(pooled).view(
+                            x.shape[0],
+                            args.layers,
+                            args.heads,
+                            len(self.relation_template_names),
+                        )
+                        dyn_coeff = args.relation_gate_scale * gates
+                        dynamic_relation = torch.einsum(
+                            "blhr,rij->blhij",
+                            dyn_coeff,
+                            self.relation_templates.to(h.dtype),
+                        )
+                else:
+                    mask = self.rel_mask.repeat(x.shape[0], 1, 1)
+            smolgen = None
+            if self.smolgen is not None:
+                gates = self.smolgen(h.mean(1)).view(x.shape[0], args.layers, args.heads)
+                rel = self.rel_mask.view(1, 1, args.heads, 64, 64)
+                smolgen = gates[:, :, :, None, None] * rel
+            if dynamic_relation is not None:
+                smolgen = dynamic_relation if smolgen is None else smolgen + dynamic_relation
             for l in self.layers:
-                h = l(h, mask)
+                h = l(h, mask, smolgen)
             return h
 
         def forward(self, x):
@@ -649,6 +951,9 @@ def main():
             return pol, self.wdl(pooled), self.q(pooled).squeeze(1), h
 
         def av_scores(self, h, moves):
+            return self.av(self.candidate_features(h, moves)).squeeze(-1)
+
+        def candidate_features(self, h, moves):
             B, C = moves.shape
             m = moves.detach().cpu().numpy()
             fr, to, pr = decode_move_classes(m.reshape(-1))
@@ -660,7 +965,15 @@ def main():
             ht = h[hb, to]
             pooled = h.mean(1)[:, None, :].expand(-1, C, -1)
             pe = self.promo_emb(pr.clamp(0, 4))
-            return self.av(torch.cat([pooled, hf, ht, pe], -1)).squeeze(-1)
+            return torch.cat([pooled, hf, ht, pe], -1)
+
+        def rank_scores(self, h, moves):
+            features = self.candidate_features(h, moves)
+            return (self.rank if self.rank is not None else self.av)(features).squeeze(-1)
+
+        def regret_scores(self, h, moves):
+            features = self.candidate_features(h, moves)
+            return (self.regret if self.regret is not None else self.av)(features).squeeze(-1)
 
     net = Net().to(args.device)
     if args.resume:
@@ -691,11 +1004,24 @@ def main():
                 "d_ff": args.d_ff,
                 "history_plies": history,
                 "relation_bias": bool(args.relation_bias),
+                "relation_bias_mode": args.relation_bias_mode,
+                "relation_template_names": relation_template_bank()[0]
+                if args.relation_bias_mode == "template_bank"
+                else [],
+                "gab_lite": bool(args.gab_lite),
+                "dynamic_relation_gate": bool(args.dynamic_relation_gate),
+                "relation_gate_hidden": args.relation_gate_hidden,
+                "relation_gate_pool": args.relation_gate_pool,
+                "relation_gate_scale": args.relation_gate_scale,
+                "smolgen_lite": bool(args.smolgen_lite),
+                "smolgen_hidden": args.smolgen_hidden,
+                "separate_aux_heads": bool(args.separate_aux_heads),
                 "input_dim": input_dim,
                 "token_features": compact_token_features,
                 "input_mode": args.input_mode,
                 "policy_size": POLICY_SIZE,
                 "kind": "squareformer_v2",
+                "board_normalization": board_normalization,
             },
             path,
         )
@@ -720,13 +1046,14 @@ def main():
 
     def policy_batch(rng):
         si = int(np_rng.integers(0, len(cache_train)))
-        tok, pol, wdl = cache_train[si]
+        tok, pol, wdl, weight = cache_train[si]
         n = len(pol)
         ids = random_ids(n, args.batch_size)
         return (
             tokens_to_dev(tok[ids]),
             to_dev(np.asarray(pol[ids]), torch.long),
             to_dev(np.asarray(wdl[ids])),
+            to_dev(np.asarray(weight[ids])),
         )
 
     def value_batch(rng):
@@ -841,39 +1168,44 @@ def main():
         av_ok = av_n = 0
         av_mse = 0.0
         with torch.no_grad():
-            tok, pol, wdl = cache_dev
+            tok, pol, wdl, weight = cache_dev
             dn = min(args.max_dev_rows, len(pol))
             for off in range(0, dn, args.batch_size):
                 ids = range(off, min(dn, off + args.batch_size))
-                xb = tokens_to_dev(tok[list(ids)])
-                yb = to_dev(np.asarray(pol[list(ids)]), torch.long)
-                wb = to_dev(np.asarray(wdl[list(ids)]))
+                idx = list(ids)
+                xb = tokens_to_dev(tok[idx])
+                yb = to_dev(np.asarray(pol[idx]), torch.long)
+                wb = to_dev(np.asarray(wdl[idx]))
+                row_weight = to_dev(np.asarray(weight[idx]))
                 pl, wl, _, _ = net(xb)
-                bs = len(yb)
-                ce += float(F.cross_entropy(pl.float(), yb, reduction="sum"))
-                wc += float(F.cross_entropy(wl.float(), wb.argmax(1), reduction="sum"))
+                bs_weight = float(row_weight.sum().detach().cpu())
+                ce += float((F.cross_entropy(pl.float(), yb, reduction="none") * row_weight).sum())
+                wc += float((F.cross_entropy(wl.float(), wb.argmax(1), reduction="none") * row_weight).sum())
                 pred = pl.topk(8, 1).indices
-                t1 += int((pred[:, :1] == yb[:, None]).any(1).sum())
-                t4 += int((pred[:, :4] == yb[:, None]).any(1).sum())
-                t8 += int((pred == yb[:, None]).any(1).sum())
-                n += bs
-            erng = random.Random(args.seed + 999)
-            eval_batches = max(
-                1, min(50, args.max_av_dev_positions // max(1, args.av_batch_size))
-            )
-            for _ in range(eval_batches):
-                xb, mv, val, _, mask = av_batch(erng, dev=True)
-                _, _, _, h = net(xb)
-                sc = torch.tanh(net.av_scores(h, mv).float())
-                valid = mask > 0
-                av_mse += float(F.mse_loss(sc[valid], val[valid], reduction="sum"))
-                av_n += int(valid.sum())
-                av_ok += int(
-                    (
-                        sc.masked_fill(~valid, -1e9).argmax(1)
-                        == val.masked_fill(~valid, -1e9).argmax(1)
-                    ).sum()
+                t1 += float(((pred[:, :1] == yb[:, None]).any(1).float() * row_weight).sum())
+                t4 += float(((pred[:, :4] == yb[:, None]).any(1).float() * row_weight).sum())
+                t8 += float(((pred == yb[:, None]).any(1).float() * row_weight).sum())
+                n += bs_weight
+            has_av_dev = bool((av_caches or av_groups) and args.max_av_dev_positions > 0)
+            eval_batches = 0
+            if has_av_dev:
+                erng = random.Random(args.seed + 999)
+                eval_batches = max(
+                    1, min(50, args.max_av_dev_positions // max(1, args.av_batch_size))
                 )
+                for _ in range(eval_batches):
+                    xb, mv, val, _, mask = av_batch(erng, dev=True)
+                    _, _, _, h = net(xb)
+                    sc = torch.tanh(net.av_scores(h, mv).float())
+                    valid = mask > 0
+                    av_mse += float(F.mse_loss(sc[valid], val[valid], reduction="sum"))
+                    av_n += int(valid.sum())
+                    av_ok += int(
+                        (
+                            sc.masked_fill(~valid, -1e9).argmax(1)
+                            == val.masked_fill(~valid, -1e9).argmax(1)
+                        ).sum()
+                    )
         metrics = {
             "dev_policy_ce": ce / max(1, n),
             "dev_wdl_ce": wc / max(1, n),
@@ -949,14 +1281,14 @@ def main():
         for step, kind in enumerate(sched, 1):
             with torch.amp.autocast("cuda", enabled=amp_enabled, dtype=amp_dtype):
                 if kind == "supervised_cache":
-                    xb, yb, wb = policy_batch(rng)
+                    xb, yb, wb, row_weight = policy_batch(rng)
                     pl, wl, ql, _ = net(xb)
                     qtar = wb[:, 0] - wb[:, 2]
-                    loss = (
-                        F.cross_entropy(pl, yb)
-                        + F.cross_entropy(wl, wb.argmax(1))
-                        + 0.25 * F.mse_loss(torch.tanh(ql.float()), qtar.float())
-                    )
+                    denom = row_weight.sum().clamp_min(1e-8)
+                    policy_loss = (F.cross_entropy(pl, yb, reduction="none") * row_weight).sum() / denom
+                    wdl_loss = (F.cross_entropy(wl, wb.argmax(1), reduction="none") * row_weight).sum() / denom
+                    q_loss = (((torch.tanh(ql.float()) - qtar.float()) ** 2) * row_weight).sum() / denom
+                    loss = policy_loss + wdl_loss + 0.25 * q_loss
                     counts["policy_rows"] += len(yb)
                 elif kind == "position_eval_overlay":
                     xb, yb, wb, qb = value_batch(rng)
@@ -972,15 +1304,18 @@ def main():
                     xb, mv, val, reg, mask = av_batch(rng)
                     _, _, _, h = net(xb)
                     sc = net.av_scores(h, mv)
+                    rank_sc = net.rank_scores(h, mv)
+                    regret_sc = net.regret_scores(h, mv)
                     valid = mask > 0
                     av_loss = F.smooth_l1_loss(
                         torch.tanh(sc.float())[valid], val.float()[valid]
                     )
-                    masked = sc.float().masked_fill(~valid, -1e9)
+                    masked = rank_sc.float().masked_fill(~valid, -1e9)
                     target = val.float().masked_fill(~valid, -1e9).argmax(1)
                     rank_loss = F.cross_entropy(masked, target)
                     pred_reg = (
-                        sc.float().max(1, keepdim=True).values - sc.float()
+                        regret_sc.float().max(1, keepdim=True).values
+                        - regret_sc.float()
                     ).masked_select(valid)
                     reg_loss = F.smooth_l1_loss(
                         pred_reg, reg.float().masked_select(valid)
@@ -1047,11 +1382,24 @@ def main():
             "d_ff": args.d_ff,
             "history_plies": history,
             "relation_bias": bool(args.relation_bias),
+            "relation_bias_mode": args.relation_bias_mode,
+            "relation_template_names": relation_template_bank()[0]
+            if args.relation_bias_mode == "template_bank"
+            else [],
+            "gab_lite": bool(args.gab_lite),
+            "dynamic_relation_gate": bool(args.dynamic_relation_gate),
+            "relation_gate_hidden": args.relation_gate_hidden,
+            "relation_gate_pool": args.relation_gate_pool,
+            "relation_gate_scale": args.relation_gate_scale,
+            "smolgen_lite": bool(args.smolgen_lite),
+            "smolgen_hidden": args.smolgen_hidden,
+            "separate_aux_heads": bool(args.separate_aux_heads),
             "input_dim": input_dim,
             "token_features": compact_token_features,
             "input_mode": args.input_mode,
             "policy_size": POLICY_SIZE,
             "kind": "squareformer_v2",
+            "board_normalization": board_normalization,
         },
         args.out,
     )
@@ -1097,8 +1445,21 @@ def main():
                     "d_ff": args.d_ff,
                     "history_plies": history,
                     "relation_bias": bool(args.relation_bias),
+                    "relation_bias_mode": args.relation_bias_mode,
+                    "relation_template_names": relation_template_bank()[0]
+                    if args.relation_bias_mode == "template_bank"
+                    else [],
+                    "gab_lite": bool(args.gab_lite),
+                    "dynamic_relation_gate": bool(args.dynamic_relation_gate),
+                    "relation_gate_hidden": args.relation_gate_hidden,
+                    "relation_gate_pool": args.relation_gate_pool,
+                    "relation_gate_scale": args.relation_gate_scale,
+                    "smolgen_lite": bool(args.smolgen_lite),
+                    "smolgen_hidden": args.smolgen_hidden,
+                    "separate_aux_heads": bool(args.separate_aux_heads),
                     "from_to_policy_size": POLICY_SIZE,
                     "outputs": ["policy", "wdl", "q", "hidden"],
+                    "board_normalization": board_normalization,
                 },
                 indent=2,
             )

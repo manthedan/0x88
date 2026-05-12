@@ -32,7 +32,7 @@ def main():
     ap = argparse.ArgumentParser(description='MoveFormer kitchen-sink: CNN trunk + legal move tokens, trained on sidecar policy/WDL plus ChessBench AV/rank/regret candidates.')
     ap.add_argument('--sidecar-cache', required=True)
     ap.add_argument('--board-cache', required=True, help='Residual cache manifest/dir matching sidecar row order; use h2_state for 46-plane tests.')
-    ap.add_argument('--av-cache', nargs='+', required=True)
+    ap.add_argument('--av-cache', nargs='*', default=[])
     ap.add_argument('--out', required=True); ap.add_argument('--onnx-out', default=''); ap.add_argument('--meta-out', default='')
     ap.add_argument('--checkpoint-dir', default='')
     ap.add_argument('--resume', default='', help='Optional checkpoint/model.pt to initialize weights before training more epochs.')
@@ -63,6 +63,8 @@ def main():
     if len(sidecar_feature_names) != MF:
         sidecar_feature_names = [f'move_feature_{i}' for i in range(MF)]
     av_caches = [open_av_cache_dir(p) for p in expand_collection(args.av_cache)]
+    if args.av_positions > 0 and not av_caches:
+        raise SystemExit('missing --av-cache while --av-positions > 0')
     print(f'[moveformer-ks] sidecar_rows={sc["rows"]} board_rows={board_rows} policy_rows={N} input_planes={C} legal_K={K_side} move_features={MF}', flush=True)
     print(f'[moveformer-ks] av_cache_count={len(av_caches)} av_cache_rows={sum(c["rows"] for c in av_caches)} max_candidates={args.max_candidates}', flush=True)
 
@@ -122,18 +124,18 @@ def main():
         t=torch.as_tensor(a,dtype=dtype)
         return t.pin_memory().to(device,non_blocking=True) if str(device).startswith('cuda') else t.to(device)
 
-    policy_pool={'pos':0,'rows':0,'order':None,'x':None,'aid':None,'mf':None,'mask':None,'slot':None,'wdl':None}
+    policy_pool={'pos':0,'rows':0,'order':None,'x':None,'aid':None,'mf':None,'mask':None,'slot':None,'wdl':None,'weight':None}
     av_pool={'pos':0,'rows':0,'order':None,'tokens':None,'moves':None,'values':None,'regrets':None,'mask':None,'K':None}
     def _window(n,want):
         rows=max(1,min(int(want),int(n))); start=0 if rows>=n else int(np_rng.integers(0,n-rows+1)); return slice(start,start+rows), rows
     def refill_policy_pool():
         sl,rows=_window(N, max(args.batch_size,args.policy_prefetch_rows))
         aid=np.array(sc['legal_action_ids'][sl],copy=True); aid=np.where(aid<0,20480,aid)
-        policy_pool.update({'pos':0,'rows':rows,'order':np_rng.permutation(rows),'x':np.array(x[sl],copy=True),'aid':aid,'mf':np.array(sc['legal_features'][sl],copy=True),'mask':np.array(sc['legal_mask'][sl],copy=True),'slot':np.array(sc['policy_slot'][sl],copy=True),'wdl':np.array(sc['wdl'][sl],copy=True)})
+        policy_pool.update({'pos':0,'rows':rows,'order':np_rng.permutation(rows),'x':np.array(x[sl],copy=True),'aid':aid,'mf':np.array(sc['legal_features'][sl],copy=True),'mask':np.array(sc['legal_mask'][sl],copy=True),'slot':np.array(sc['policy_slot'][sl],copy=True),'wdl':np.array(sc['wdl'][sl],copy=True),'weight':np.array(sc['weight'][sl],copy=True)})
     def policy_batch():
         if policy_pool['order'] is None or policy_pool['pos']+args.batch_size > policy_pool['rows']: refill_policy_pool()
         ids=policy_pool['order'][policy_pool['pos']:policy_pool['pos']+args.batch_size]; policy_pool['pos']+=args.batch_size
-        return to_dev(policy_pool['x'][ids],torch.float32), to_dev(policy_pool['aid'][ids],torch.long), to_dev(policy_pool['mf'][ids],torch.float32), to_dev(policy_pool['mask'][ids],torch.float32), to_dev(policy_pool['slot'][ids],torch.long), to_dev(policy_pool['wdl'][ids],torch.float32)
+        return to_dev(policy_pool['x'][ids],torch.float32), to_dev(policy_pool['aid'][ids],torch.long), to_dev(policy_pool['mf'][ids],torch.float32), to_dev(policy_pool['mask'][ids],torch.float32), to_dev(policy_pool['slot'][ids],torch.long), to_dev(policy_pool['wdl'][ids],torch.float32), to_dev(policy_pool['weight'][ids],torch.float32)
     def refill_av_pool():
         c=av_caches[int(np_rng.integers(0,len(av_caches)))]; n=c['rows']; K=min(args.max_candidates,c['K']); sl,rows=_window(n, max(args.av_batch_size,args.av_prefetch_rows))
         av_pool.update({'pos':0,'rows':rows,'order':np_rng.permutation(rows),'tokens':np.array(c['tokens'][sl],copy=True),'moves':np.array(c['moves'][sl,:K],copy=True),'values':np.array(c['values'][sl,:K],copy=True),'regrets':np.array(c['regrets'][sl,:K],copy=True),'mask':np.array(c['mask'][sl,:K],copy=True),'K':K})
@@ -157,9 +159,10 @@ def main():
             opt.zero_grad(set_to_none=True)
             with torch.amp.autocast('cuda',enabled=amp_enabled,dtype=amp_dtype):
                 if kind == 'policy':
-                    xb,aid,mf,mask,slot,wdl_t=policy_batch(); pol,wdl,_,_,_=net(xb,aid,mf,mask); valid=slot>=0
-                    ploss=F.cross_entropy(pol[valid].float(), slot[valid]) if bool(valid.any()) else pol.sum()*0
-                    wloss=(-(F.log_softmax(wdl.float(),1)*wdl_t).sum(1)).mean()
+                    xb,aid,mf,mask,slot,wdl_t,row_weight=policy_batch(); pol,wdl,_,_,_=net(xb,aid,mf,mask); valid=slot>=0
+                    denom=row_weight[valid].sum().clamp_min(1e-8) if bool(valid.any()) else row_weight.sum().clamp_min(1e-8)
+                    ploss=(F.cross_entropy(pol[valid].float(), slot[valid], reduction='none')*row_weight[valid]).sum()/denom if bool(valid.any()) else pol.sum()*0
+                    wloss=(-(F.log_softmax(wdl.float(),1)*wdl_t).sum(1)*row_weight).sum()/row_weight.sum().clamp_min(1e-8)
                     loss=args.policy_weight*ploss + args.wdl_weight*wloss
                 else:
                     xb,aid,mf,mask,val,reg=av_batch(); pol,wdl,av,rank,regret=net(xb,aid,mf,mask); mbool=mask > 0
