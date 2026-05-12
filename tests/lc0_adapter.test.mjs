@@ -76,3 +76,47 @@ test('lc0_adapter jsonl-smoke rejects illegal positive policy mass', () => {
   assert.equal(auditJson.emitted_records, 1);
   assert.equal(auditJson.drop_counts.illegal_positive_policy_mass, 1);
 });
+
+test('lc0_adapter exports sparse normalized policy as weighted hard-label rows', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tl-lc0-adapter-expand-'));
+  const input = join(dir, 'normalized.jsonl');
+  const output = join(dir, 'weighted.jsonl');
+  const audit = join(dir, 'weighted.audit.json');
+  writeFileSync(input, JSON.stringify({
+    schema: 'tiny_leela.lc0_normalized_example.v1',
+    teacher: 'lc0_public',
+    source_ref: { chunk: 'chunk.gz', record_idx: 7 },
+    board_normalization: 'stm_white_rankflip_v1',
+    board: { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', input_format: 1 },
+    legal_moves_uci: ['e2e4', 'd2d4', 'g1f3'],
+    policy_target_uci: { e2e4: 0.5, d2d4: 0.25, g1f3: 0.25 },
+    value_targets: {
+      root_q: 0.2,
+      root_d: 0.3,
+      wdl_root: { win: 0.45, draw: 0.3, loss: 0.25 },
+    },
+    metadata: { visits: 123, top_k: 3 },
+  }) + '\n');
+
+  execFileSync(PY, [
+    'training/lc0_adapter.py', 'export-weighted-policy',
+    '--input', input,
+    '--output', output,
+    '--audit', audit,
+    '--max-moves', '2',
+  ]);
+  const rows = readFileSync(output, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((r) => Object.keys(r.policy)[0]), ['e2e4', 'd2d4']);
+  assert(Math.abs(rows[0].weight - (2 / 3)) < 1e-9);
+  assert(Math.abs(rows[1].weight - (1 / 3)) < 1e-9);
+  assert.deepEqual(rows[0].wdl, [0.45, 0.3, 0.25]);
+  assert.equal(rows[0].q, 0.2);
+  assert.equal(rows[0].nodes, 123);
+
+  const auditJson = JSON.parse(readFileSync(audit, 'utf8'));
+  assert.equal(auditJson.emitted_positions, 1);
+  assert.equal(auditJson.emitted_rows, 2);
+  assert.equal(auditJson.skipped_policy_entries, 1);
+  assert(Math.abs(auditJson.mean_weight_per_position - 1) < 1e-9);
+});

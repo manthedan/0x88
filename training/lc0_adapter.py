@@ -678,6 +678,143 @@ def convert_jsonl_smoke(input_path: Path, output_path: Path, audit_path: Path) -
     audit_path.write_text(json.dumps(audit.as_dict(), indent=2, sort_keys=True) + "\n")
 
 
+def _wdl_list(wdl: dict[str, Any]) -> list[float]:
+    return [float(wdl["win"]), float(wdl["draw"]), float(wdl["loss"])]
+
+
+def _weighted_row_id(source_ref: dict[str, Any], move: str, fallback_line: int) -> str:
+    chunk = str(source_ref.get("chunk", source_ref.get("input_path", "unknown")))
+    record_idx = source_ref.get("record_idx", fallback_line)
+    return f"lc0_public:{chunk}:{record_idx}:{move}"
+
+
+def export_weighted_policy_rows(
+    input_path: Path,
+    output_path: Path,
+    audit_path: Path,
+    *,
+    limit_positions: int,
+    max_moves: int,
+    min_prob: float,
+) -> None:
+    """Expand normalized sparse LC0 policy rows into legacy weighted hard-label rows.
+
+    Existing Tiny Leela cache builders/trainers mostly consume rows shaped like
+    {fen, policy:{uci:1.0}, wdl, q, weight}.  Emitting one weighted row per LC0
+    sparse target move preserves the soft policy in expectation while keeping the
+    first LC0 pilots on the already-tested hard-label cache path.  For serious
+    100M+ scale this remains an adapter bridge, not a replacement for native
+    sparse-KL caches/trainers.
+    """
+    total_positions = 0
+    emitted_positions = 0
+    emitted_rows = 0
+    skipped_policy_entries = 0
+    weight_sum = 0.0
+    drop_counts: dict[str, int] = {}
+    samples: dict[str, list[dict[str, Any]]] = {}
+
+    def drop(reason: str, sample: dict[str, Any]) -> None:
+        drop_counts[reason] = drop_counts.get(reason, 0) + 1
+        bucket = samples.setdefault(reason, [])
+        if len(bucket) < 5:
+            bucket.append(sample)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with input_path.open() as src, output_path.open("w") as out:
+        for line_no, line in enumerate(src, 1):
+            if limit_positions > 0 and emitted_positions >= limit_positions:
+                break
+            if not line.strip():
+                continue
+            total_positions += 1
+            try:
+                rec = json.loads(line)
+                fen = rec["board"]["fen"]
+                source_ref = rec.get("source_ref", {"line": line_no})
+                legal = set(rec.get("legal_moves_uci") or [])
+                policy_obj = rec["policy_target_uci"]
+                if not isinstance(policy_obj, dict) or not policy_obj:
+                    drop("empty_policy", {"line": line_no})
+                    continue
+                raw_items: list[tuple[str, float]] = []
+                for move, prob0 in policy_obj.items():
+                    prob = float(prob0)
+                    if not math.isfinite(prob) or prob <= min_prob:
+                        skipped_policy_entries += 1
+                        continue
+                    if legal and move not in legal:
+                        drop("illegal_policy_move", {"line": line_no, "move": move, "prob": prob})
+                        raw_items = []
+                        break
+                    raw_items.append((move, prob))
+                if not raw_items:
+                    drop("zero_policy_after_filter", {"line": line_no})
+                    continue
+                raw_items.sort(key=lambda item: item[1], reverse=True)
+                if max_moves > 0:
+                    skipped_policy_entries += max(0, len(raw_items) - max_moves)
+                    raw_items = raw_items[:max_moves]
+                mass = sum(prob for _, prob in raw_items)
+                if mass <= 0.0 or not math.isfinite(mass):
+                    drop("bad_policy_mass", {"line": line_no, "mass": mass})
+                    continue
+                value_targets = rec.get("value_targets") or {}
+                wdl = _wdl_list(value_targets["wdl_root"])
+                q = float(value_targets.get("root_q", wdl[0] - wdl[2]))
+                metadata = rec.get("metadata") or {}
+                visits = metadata.get("visits")
+            except Exception as exc:
+                drop("parse_or_export_error", {"line": line_no, "error": f"{type(exc).__name__}: {exc}"})
+                continue
+
+            emitted_positions += 1
+            for move, raw_prob in raw_items:
+                weight = raw_prob / mass
+                row = {
+                    "schema": "tiny_leela.lc0_weighted_policy_row.v1",
+                    "teacher": TEACHER,
+                    "id": _weighted_row_id(source_ref, move, line_no),
+                    "fen": fen,
+                    "history_fens": [],
+                    "policy": {move: 1.0},
+                    "wdl": wdl,
+                    "q": q,
+                    "weight": weight,
+                    "_weight": weight,
+                    "lc0_policy_prob": weight,
+                    "lc0_policy_prob_raw": raw_prob,
+                    "source_ref": source_ref,
+                    "source_schema": rec.get("schema"),
+                    "source_board_normalization": rec.get("board_normalization"),
+                    "policy_source": "lc0_topk_weighted_expansion_v1",
+                }
+                if visits is not None:
+                    row["nodes"] = visits
+                out.write(json.dumps(row, sort_keys=True) + "\n")
+                emitted_rows += 1
+                weight_sum += weight
+    audit = {
+        "schema": "tiny_leela.lc0_weighted_policy_export_audit.v1",
+        "teacher": TEACHER,
+        "input": str(input_path),
+        "output": str(output_path),
+        "total_positions": total_positions,
+        "emitted_positions": emitted_positions,
+        "emitted_rows": emitted_rows,
+        "skipped_policy_entries": skipped_policy_entries,
+        "weight_sum": weight_sum,
+        "mean_rows_per_position": emitted_rows / emitted_positions if emitted_positions else 0.0,
+        "mean_weight_per_position": weight_sum / emitted_positions if emitted_positions else 0.0,
+        "max_moves": max_moves,
+        "min_prob": min_prob,
+        "drop_counts": dict(sorted(drop_counts.items())),
+        "samples": samples,
+    }
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    audit_path.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -691,6 +828,17 @@ def main(argv: list[str] | None = None) -> int:
     smoke.add_argument("--input", required=True)
     smoke.add_argument("--output", required=True)
     smoke.add_argument("--audit", required=True)
+
+    expand = sub.add_parser(
+        "export-weighted-policy",
+        help="Expand normalized sparse LC0 JSONL to legacy weighted hard-label rows for existing cache builders",
+    )
+    expand.add_argument("--input", required=True)
+    expand.add_argument("--output", required=True)
+    expand.add_argument("--audit", required=True)
+    expand.add_argument("--limit-positions", type=int, default=0, help="Stop after this many emitted positions; <=0 means no limit")
+    expand.add_argument("--max-moves", type=int, default=0, help="Optional top-N cap during export; <=0 keeps all normalized policy moves")
+    expand.add_argument("--min-prob", type=float, default=0.0, help="Drop policy entries at or below this probability, then renormalize weights")
 
     conv = sub.add_parser("convert-v6", help="Convert LC0 V6 .gz/.tar sample to auditable normalized JSONL")
     conv.add_argument("--input", required=True)
@@ -715,6 +863,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "jsonl-smoke":
         convert_jsonl_smoke(Path(args.input), Path(args.output), Path(args.audit))
+        return 0
+    if args.cmd == "export-weighted-policy":
+        export_weighted_policy_rows(
+            Path(args.input),
+            Path(args.output),
+            Path(args.audit),
+            limit_positions=args.limit_positions,
+            max_moves=args.max_moves,
+            min_prob=args.min_prob,
+        )
         return 0
     if args.cmd == "convert-v6":
         convert_v6(
