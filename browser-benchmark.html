@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tiny Leela Browser Benchmark</title>
+  <style>
+    :root { color-scheme: light; --bg:#f6f1e8; --panel:#fffaf1; --ink:#211d17; --muted:#746b5e; --rule:#d7cbb9; --accent:#526820; }
+    body { margin:0; padding:24px; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    h1 { margin:0 0 6px; font-family:Georgia,serif; font-size:28px; }
+    .muted { color:var(--muted); }
+    .panel { max-width:1100px; margin:14px 0; padding:14px; border:1px solid var(--rule); border-radius:8px; background:var(--panel); }
+    button { padding:8px 12px; border:1px solid var(--rule); border-radius:6px; background:#efe6d6; color:var(--ink); cursor:pointer; }
+    button.primary { background:var(--accent); border-color:var(--accent); color:white; font-weight:700; }
+    table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+    th,td { padding:6px 8px; border-bottom:1px solid var(--rule); text-align:left; }
+    th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+    code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+    pre { max-height:420px; overflow:auto; padding:12px; background:#211d17; color:#f7eddb; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <h1>Tiny Leela Browser Benchmark</h1>
+  <div class="muted">Direct browser ONNX/PUCT benchmark for playable deployability toggles. Use <code>?autorun=1&amp;matrix=smoke|full&amp;ortEp=wasm</code>.</div>
+  <div class="panel">
+    <button id="runSmoke" class="primary">Run smoke</button>
+    <button id="runFull">Run full matrix</button>
+    <button id="copyJson">Copy JSON</button>
+    <span id="status" class="muted">idle</span>
+  </div>
+  <div class="panel"><strong>Runtime diagnostics:</strong> <span id="diagnostics" class="muted">idle</span></div>
+  <div class="panel"><table><thead><tr><th>#</th><th>EP</th><th>visits</th><th>cache</th><th>root</th><th>TT</th><th>plies</th><th>total ms</th><th>ms/search</th><th>evals</th><th>cache hit</th><th>moves</th></tr></thead><tbody id="rows"></tbody></table></div>
+  <div class="panel"><pre id="json">[]</pre></div>
+  <script type="module" src="/src/browserBenchmark.ts"></script>
+</body>
+</html>

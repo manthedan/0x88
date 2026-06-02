@@ -3,6 +3,7 @@ import { inCheck, legalMoves } from '../chess/movegen.ts';
 import { moveToActionId, moveToUci, type Move } from '../chess/moveCodec.ts';
 import { POLICY_INDEX, POLICY_MAP, moveToPolicyIndex } from '../chess/policyMap.ts';
 import type { Evaluation, Evaluator } from './evaluator.ts';
+import { softmax } from './numerics.ts';
 
 const PIECES = 'PNBRQKpnbrqk';
 const PIECE_INDEX = new Map([...PIECES].map((piece, index) => [piece, index]));
@@ -52,13 +53,6 @@ export interface StudentArtifact {
   input_planes?: number;
   architecture?: 'legacy3' | 'residual_tower';
   blocks?: number;
-}
-
-function softmax(xs: number[]): number[] {
-  const m = Math.max(...xs);
-  const exps = xs.map((x) => Math.exp(x - m));
-  const total = exps.reduce((a, b) => a + b, 0);
-  return exps.map((x) => x / total);
 }
 
 function dot(weights: number[], values: number[]): number {

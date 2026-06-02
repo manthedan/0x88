@@ -35,25 +35,44 @@ function pieceFromFen(ch: string): Piece {
 }
 
 export function parseFen(fen = START_FEN): BoardState {
-  const [placement, turn = 'w', castling = '-', ep = '-', half = '0', full = '1'] = fen.trim().split(/\s+/);
+  const parts = fen.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0 || parts.length > 6) throw new Error(`Invalid FEN field count: ${fen}`);
+  const [placement, turn = 'w', castling = '-', ep = '-', half = '0', full = '1'] = parts;
+  if (turn !== 'w' && turn !== 'b') throw new Error(`Invalid FEN turn: ${turn}`);
+  if (!/^(?:-|[KQkq]{1,4})$/.test(castling) || new Set(castling === '-' ? [] : castling.split('')).size !== (castling === '-' ? 0 : castling.length)) {
+    throw new Error(`Invalid FEN castling rights: ${castling}`);
+  }
+  if (ep !== '-' && !/^[a-h][36]$/.test(ep)) throw new Error(`Invalid FEN en-passant square: ${ep}`);
+  if (!/^\d+$/.test(half) || !/^\d+$/.test(full)) throw new Error(`Invalid FEN move counters: ${half} ${full}`);
+  const halfmove = Number(half);
+  const fullmove = Number(full);
+  if (!Number.isSafeInteger(halfmove) || !Number.isSafeInteger(fullmove) || fullmove < 1) {
+    throw new Error(`Invalid FEN move counters: ${half} ${full}`);
+  }
+
   const squares: (Piece | null)[] = Array(64).fill(null);
   const ranks = placement.split('/');
   if (ranks.length !== 8) throw new Error(`Invalid FEN placement: ${placement}`);
   for (let fenRank = 0; fenRank < 8; fenRank++) {
     let file = 0;
     for (const ch of ranks[fenRank]) {
-      if (/\d/.test(ch)) file += Number(ch);
-      else squares[file++ + (7 - fenRank) * 8] = pieceFromFen(ch);
+      if (/^[1-8]$/.test(ch)) {
+        file += Number(ch);
+        if (file > 8) throw new Error(`Invalid FEN rank: ${ranks[fenRank]}`);
+      } else {
+        if (file >= 8) throw new Error(`Invalid FEN rank: ${ranks[fenRank]}`);
+        squares[file++ + (7 - fenRank) * 8] = pieceFromFen(ch);
+      }
     }
     if (file !== 8) throw new Error(`Invalid FEN rank: ${ranks[fenRank]}`);
   }
   return {
     squares,
-    turn: turn as Color,
+    turn,
     castling,
     epSquare: ep === '-' ? null : squareIndex(ep),
-    halfmove: Number(half),
-    fullmove: Number(full),
+    halfmove,
+    fullmove,
   };
 }
 

@@ -14,3 +14,5 @@ Research lanes may add:
 - progressive loading from micro to balanced model.
 
 Those lanes must not change move encoding or feature fixtures without a new benchmark id.
+
+See also: [Browser inference research lane: Rust-owned search, optional Rust-owned inference](browser_inference_research_lane_20260522.md). The current opinion there is that ORT-Web remains the production inference baseline, while RTen/tract/Lele/Burn/Candle are bounded research probes behind a Rust evaluator abstraction.

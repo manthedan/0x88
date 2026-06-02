@@ -11,8 +11,9 @@ const PLAYABLE_100M_MODELS = [
   { id: 'cnn-80x5-100m-e3', architecture: 'cnn', onnx: 'public/models/cnn_80x5_100m_e3.onnx', meta: 'public/models/cnn_80x5_100m_e3.meta.json' },
   { id: 'cnn-96x8-100m-e8', architecture: 'cnn', onnx: 'public/models/cnn96x8_100m_e8.onnx', meta: 'public/models/cnn96x8_100m_e8.meta.json' },
   { id: 'moveformer-80x5-100m-e8-k128', architecture: 'moveformer', onnx: 'public/models/moveformer_80x5_100m_e8_k128.onnx', meta: 'public/models/moveformer_80x5_100m_e8_k128.meta.json' },
-  { id: 'chessformer-v1-100m-e3', architecture: 'squareformer', onnx: 'public/models/chessformer_v1_100m_e3_single.onnx', meta: 'public/models/chessformer_v1_100m_e3_single.meta.json' },
-  { id: 'bt4-h8-100m-e5', architecture: 'squareformer', onnx: 'public/models/bt4_h8_100m_e5.onnx', meta: 'public/models/bt4_h8_100m_e5.meta.json' },
+  { id: 'bt4-sampled1b-best', architecture: 'squareformer', onnx: 'public/models/bt4_sampled1b_best.onnx', meta: 'public/models/bt4_sampled1b_best.meta.json' },
+  { id: 'bt4-1b-mix50-noav-best', architecture: 'squareformer', onnx: 'public/models/bt4_1b_mix50_noav_best.onnx', meta: 'public/models/bt4_1b_mix50_noav_best.meta.json' },
+  { id: 'bt4-1b-mix50-noav-best-ema', architecture: 'squareformer', onnx: 'public/models/bt4_1b_mix50_noav_best_ema.onnx', meta: 'public/models/bt4_1b_mix50_noav_best_ema.meta.json' },
 ];
 
 function arg(name, fallback = '') {

@@ -1,3 +1,6 @@
+// Pure reducer/state-model for the web UI. The current src/webClient.ts still
+// owns the imperative DOM/engine wiring; keep this module side-effect-free so it
+// can be integrated incrementally and regression-tested in isolation.
 import { boardToFen, parseFen, START_FEN, type BoardState } from '../chess/board.ts';
 import { makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
