@@ -3,26 +3,39 @@ import type { Key } from 'chessground/types';
 import { boardToFen, parseFen, squareName, START_FEN, type BoardState } from '../chess/board.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
-import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig } from '../nn/ortRuntime.ts';
+import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
-import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
+import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchResult } from './search.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
 type NativeRecord = { id: string; backend?: string; fen: string; startFen?: string; moves?: string[]; bestmove: string; topPriors: NativePrior[] };
+type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; elapsedMs?: number };
+type WorkerResponse =
+  | { type: 'ready'; id: number; backend: string }
+  | { type: 'searchResult'; id: number; result: RenderableSearchResult }
+  | { type: 'error'; id: number; error: string };
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
 const PLAYER_SIDE = params.get('side') === 'black' ? 'black' : 'white';
+const SEARCH_VISITS = Math.max(1, Math.floor(Number(params.get('visits') ?? '32') || 32));
+const SEARCH_WORKER_REQUESTED = params.get('worker') === '1' || params.get('searchWorker') === '1';
 
 let board: BoardState = parseFen(params.get('fen') ?? START_FEN);
 let historyBoards: BoardState[] = [board];
 let ground: Ground | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
 let searcher: Lc0PuctSearcher | null = null;
+let searchWorker: Worker | null = null;
+let useSearchWorker = SEARCH_WORKER_REQUESTED;
+let searchWorkerReady = false;
+let searchWorkerBackend = '—';
+let workerRequestSeq = 0;
+const workerPending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 let busy = false;
 let lastMove: string | null = null;
 let renderSeq = 0;
@@ -37,6 +50,23 @@ function el(id: string): HTMLElement {
 
 function htmlEscape(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]!));
+}
+
+function requestedWorkerEp(): OrtExecutionProviderPreference {
+  const raw = String(params.get('ortEp') ?? params.get('ep') ?? params.get('executionProviders') ?? '').toLowerCase();
+  if (raw === 'webgpu' || raw === 'gpu') return 'webgpu';
+  if (raw === 'webgpu,wasm' || raw === 'webgpu+wasm' || raw === 'gpu,wasm' || raw === 'gpu+wasm') return 'webgpu,wasm';
+  if (raw === 'auto' || raw === '') return 'auto';
+  return 'wasm';
+}
+
+function searchAvailable(): boolean {
+  return useSearchWorker ? searchWorkerReady : !!searcher;
+}
+
+function searchModeLabel(): string {
+  if (!useSearchWorker) return 'main thread';
+  return searchWorkerReady ? `worker (${searchWorkerBackend})` : 'worker loading';
 }
 
 function boardFenOnly() {
@@ -92,7 +122,7 @@ function setBusy(next: boolean, message?: string) {
   busy = next;
   if (message) el('message').textContent = message;
   el('engineMove').toggleAttribute('disabled', busy || !player);
-  el('searchMove').toggleAttribute('disabled', busy || !searcher);
+  el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
   el('runParity').toggleAttribute('disabled', busy || !player);
 }
 
@@ -103,8 +133,10 @@ function renderStatic() {
   el('modelPath').textContent = MODEL_URL;
   el('backend').textContent = describeOrtBackendConfig();
   el('status').textContent = player ? 'ready' : 'loading';
+  el('searchMode').textContent = searchModeLabel();
+  el('searchMove').textContent = `Search ${SEARCH_VISITS}`;
   el('engineMove').toggleAttribute('disabled', busy || !player);
-  el('searchMove').toggleAttribute('disabled', busy || !searcher);
+  el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
   el('runParity').toggleAttribute('disabled', busy || !player);
   const config = {
     orientation,
@@ -126,8 +158,9 @@ function renderStatic() {
   else ground.set(config);
 }
 
-function renderSearchResult(result: Lc0SearchResult) {
+function renderSearchResult(result: RenderableSearchResult) {
   el('searchSummary').textContent = `${result.move ?? '—'} · ${result.visits} visits · Q ${result.value.toFixed(5)}`;
+  el('searchLatency').textContent = result.elapsedMs === undefined ? '—' : `${result.elapsedMs.toFixed(0)} ms`;
   const maxVisits = Math.max(1, ...result.children.slice(0, 10).map((entry) => entry.visits));
   el('searchChildren').innerHTML = result.children.slice(0, 10).map((entry, i) => {
     const width = Math.max(2, (entry.visits / maxVisits) * 100).toFixed(1);
@@ -137,6 +170,7 @@ function renderSearchResult(result: Lc0SearchResult) {
 
 function clearSearchResult() {
   el('searchSummary').textContent = 'not run';
+  el('searchLatency').textContent = '—';
   el('searchChildren').innerHTML = '';
 }
 
@@ -162,6 +196,44 @@ function renderEvaluation() {
   });
 }
 
+function postWorkerRequest<T>(message: Record<string, unknown>): Promise<T> {
+  if (!searchWorker) return Promise.reject(new Error('LC0 search worker unavailable'));
+  const id = ++workerRequestSeq;
+  return new Promise<T>((resolve, reject) => {
+    workerPending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+    searchWorker!.postMessage({ ...message, id });
+  });
+}
+
+async function initSearchWorker(): Promise<void> {
+  searchWorker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
+  searchWorker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
+    const message = event.data;
+    const pending = workerPending.get(message.id);
+    if (!pending) return;
+    workerPending.delete(message.id);
+    if (message.type === 'error') pending.reject(new Error(message.error));
+    else pending.resolve(message);
+  });
+  searchWorker.addEventListener('error', (event) => {
+    for (const pending of workerPending.values()) pending.reject(new Error(event.message || 'LC0 search worker error'));
+    workerPending.clear();
+  });
+  const ready = await postWorkerRequest<{ type: 'ready'; backend: string }>({ type: 'init', modelUrl: MODEL_URL, ep: requestedWorkerEp() });
+  searchWorkerReady = true;
+  searchWorkerBackend = ready.backend;
+  renderStatic();
+}
+
+async function searchWithWorker(): Promise<RenderableSearchResult> {
+  const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
+    type: 'search',
+    input: currentEvaluationInput(),
+    visits: SEARCH_VISITS,
+  });
+  return response.result;
+}
+
 async function onUserMove(from: Key, to: Key) {
   if (busy) return;
   const move = legalMoveFromDrag(from, to);
@@ -178,12 +250,15 @@ async function onUserMove(from: Key, to: Key) {
 }
 
 async function searchRootPosition() {
-  if (!searcher || busy) return;
-  setBusy(true, 'LC0 fixed-visit PUCT search running…');
+  if (!searchAvailable() || busy) return;
+  setBusy(true, `LC0 fixed-visit PUCT search running (${searchModeLabel()})…`);
   try {
-    const result = await searcher.search(currentEvaluationInput(), { visits: 32 });
+    const started = performance.now();
+    const result = useSearchWorker
+      ? await searchWithWorker()
+      : { ...await searcher!.search(currentEvaluationInput(), { visits: SEARCH_VISITS }), elapsedMs: performance.now() - started };
     renderSearchResult(result);
-    el('message').textContent = `Search selected ${result.move ?? '—'} (${result.visits} visits, fixed PUCT).`;
+    el('message').textContent = `Search selected ${result.move ?? '—'} (${result.visits} visits, fixed PUCT via ${searchModeLabel()}).`;
   } catch (error) {
     el('message').textContent = `Search failed: ${(error as Error).message}`;
   } finally {
@@ -287,6 +362,18 @@ async function init() {
     searcher = new Lc0PuctSearcher(evaluator);
     const diagnostics = await collectOrtRuntimeDiagnostics();
     el('backend').textContent = diagnostics.describe;
+    if (SEARCH_WORKER_REQUESTED) {
+      el('message').textContent = 'Initializing LC0 search worker…';
+      try {
+        await initSearchWorker();
+      } catch (error) {
+        searchWorker?.terminate();
+        searchWorker = null;
+        searchWorkerReady = false;
+        useSearchWorker = false;
+        console.warn('LC0 search worker failed; falling back to main-thread search.', error);
+      }
+    }
     el('message').textContent = 'Ready. Drag a legal move or ask the engine to move.';
     renderEvaluation();
     if (params.get('parity') === '1' || params.get('fixtures') === '1') await runParityFixtures();

@@ -76,6 +76,12 @@ export function tinyLeelaLogLatency(label: string, payload: Record<string, unkno
   console.info(`Tiny Leela latency: ${label}`, Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, typeof value === 'number' ? roundMs(value) : value])));
 }
 
+let forcedOrtExecutionProvider: OrtExecutionProviderPreference | null = null;
+
+export function setRequestedOrtExecutionProviderForCurrentThread(value: OrtExecutionProviderPreference | null): void {
+  forcedOrtExecutionProvider = value;
+}
+
 function normalizeEp(value: string | null | undefined): OrtExecutionProviderPreference {
   const raw = String(value ?? '').trim().toLowerCase();
   if (!raw) return 'auto';
@@ -86,6 +92,7 @@ function normalizeEp(value: string | null | undefined): OrtExecutionProviderPref
 }
 
 export function requestedOrtExecutionProvider(): OrtExecutionProviderPreference {
+  if (forcedOrtExecutionProvider) return forcedOrtExecutionProvider;
   return normalizeEp(
     browserParam('ortEp')
       ?? browserParam('ep')
