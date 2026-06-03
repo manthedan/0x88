@@ -43,8 +43,8 @@ test('lc0AnalysisLines builds MultiPV lines with SAN and root-mover score', () =
     pv: ['d2d4', 'd7d5'],
     multiPv: [['d2d4', 'd7d5', 'c2c4'], ['g1f3', 'g8f6']],
     children: [
-      { uci: 'd2d4', visits: 21, q: -0.12 }, // child q is from black's view; root (white) score = +0.12
-      { uci: 'g1f3', visits: 12, q: -0.05 },
+      { uci: 'd2d4', visits: 21, q: 0.12 }, // child q is the move's value for the root mover (white)
+      { uci: 'g1f3', visits: 12, q: 0.05 },
     ],
   };
   const lines = lc0AnalysisLines(result, START_FEN, 'LC0');

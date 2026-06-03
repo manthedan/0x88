@@ -76,8 +76,9 @@ export function lc0AnalysisLines(result: Lc0SearchLike, fen: string, engine = 'L
   return lines.map((pvUci, index) => {
     const rootUci = pvUci[0];
     const child = result.children.find((entry) => entry.uci === rootUci);
-    // children[].q is from the child's side-to-move; negate for the root mover.
-    const q = child ? -child.q : result.value;
+    // children[].q is already the move's value from the root mover's perspective
+    // (edgeQForParentInNode), matching result.value; positive favors the mover.
+    const q = child ? child.q : result.value;
     const visits = child?.visits ?? result.visits;
     const scoreCp = qToCentipawns(q);
     return {
