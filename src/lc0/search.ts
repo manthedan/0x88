@@ -1,7 +1,7 @@
 import { boardToFen, parseFen, type BoardState } from '../chess/board.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { moveToActionId, moveToUci, type Move } from '../chess/moveCodec.ts';
-import { searchRoot, type SearchOptions, type SearchResult } from '../search/puct.ts';
+import { searchRoot, type Node as PuctNode, type SearchOptions, type SearchResult } from '../search/puct.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from '../nn/evaluator.ts';
 import { Lc0OnnxEvaluator, type Lc0EvaluatorInput, type Lc0Evaluation, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
 import type { Lc0PositionHistoryInput } from './encoder112.ts';
@@ -9,6 +9,8 @@ import type { Lc0PositionHistoryInput } from './encoder112.ts';
 export interface Lc0SearchOptions extends SearchOptions {
   /** Fixed PUCT visits. Kept explicit here because Phase 2 starts with fixed-visit search parity. */
   visits?: number;
+  /** Reuse the previous compatible search subtree, mirroring native LC0's practical tree reuse between moves. */
+  reuseTree?: boolean;
 }
 
 export interface Lc0SearchResult {
@@ -86,9 +88,33 @@ export class Lc0SearchEvaluator implements Evaluator {
 
 export class Lc0PuctSearcher {
   private readonly evaluator: Lc0SearchEvaluator;
+  private cachedRoot: PuctNode | null = null;
 
   constructor(evaluator: Lc0SearchEvaluator | Lc0EvaluationProvider) {
     this.evaluator = evaluator instanceof Lc0SearchEvaluator ? evaluator : new Lc0SearchEvaluator(evaluator);
+  }
+
+  resetTree(): void {
+    this.cachedRoot = null;
+  }
+
+  private compatibleCachedRoot(board: BoardState, historyFens: string[]): PuctNode | null {
+    const targetFen = boardToFen(board);
+    const sameHistory = (candidate: string[]) => candidate.length === historyFens.length && candidate.every((fen, i) => fen === historyFens[i]);
+    const root = this.cachedRoot;
+    if (!root) return null;
+    if (boardToFen(root.board) === targetFen && sameHistory(root.historyFens)) return root;
+    if (!root.expanded) return null;
+    for (const edge of root.edges) {
+      const child = edge.child;
+      if (!child) continue;
+      if (boardToFen(child.board) === targetFen && sameHistory(child.historyFens)) {
+        root.isRoot = false;
+        child.isRoot = true;
+        return child;
+      }
+    }
+    return null;
   }
 
   static async create(modelPath: string | Uint8Array | ArrayBuffer, options: Lc0OnnxEvaluatorOptions = {}): Promise<Lc0PuctSearcher> {
@@ -97,17 +123,25 @@ export class Lc0PuctSearcher {
 
   async search(input: Lc0EvaluatorInput, options: Lc0SearchOptions = {}): Promise<Lc0SearchResult> {
     const { board, historyFens } = currentBoardAndHistory(input);
+    const { reuseTree = false, ...searchOptions } = options;
+    const hasExplicitRoot = Object.prototype.hasOwnProperty.call(searchOptions, 'root');
+    const useInternalTree = reuseTree && !hasExplicitRoot && !searchOptions.rootMoves;
+    const root = hasExplicitRoot
+      ? searchOptions.root
+      : useInternalTree ? this.compatibleCachedRoot(board, historyFens) : undefined;
     const result = await searchRoot(board, this.evaluator, {
-      ...options,
+      ...searchOptions,
       visits: options.visits ?? 32,
       temperature: options.temperature ?? 0,
       cpuctSchedule: options.cpuctSchedule ?? 'lc0-log',
       fpuStrategy: options.fpuStrategy ?? 'lc0-reduction',
       includePv: options.includePv ?? true,
+      root,
       // History belongs to the LC0 input. Do not let generic SearchOptions
       // accidentally replace it and desynchronize the 112-plane encoder.
       historyFens,
     });
+    if (useInternalTree) this.cachedRoot = result.root ?? null;
     const children = result.policy
       .map((entry) => ({ uci: moveToUci(entry.move), visits: entry.visits, prior: entry.prior, q: entry.q, probability: entry.probability }))
       .sort((a, b) => b.visits - a.visits || b.prior - a.prior);

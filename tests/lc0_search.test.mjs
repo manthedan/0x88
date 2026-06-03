@@ -87,6 +87,23 @@ function uniformEvaluator() {
   };
 }
 
+test('LC0 search can reuse the previous subtree after a played move', async () => {
+  const searcher = new Lc0PuctSearcher(uniformEvaluator());
+  const first = await searcher.search(START_FEN, { visits: 12, reuseTree: true });
+  assert.equal(first.search.stats?.rootReused, false, 'first search starts from a fresh root');
+  assert.ok(first.move, 'first search chooses a move');
+
+  const positions = buildBoardHistoryFromMoves([first.move]);
+  const second = await searcher.search({ positions }, { visits: 16, reuseTree: true });
+  assert.equal(second.search.stats?.rootReused, true, 'second search reuses the subtree for the played move');
+  assert.equal(second.visits, 16, 'reused subtree is topped up to the requested visit budget');
+  assert.ok((second.search.stats?.completedVisits ?? 16) < 16, 'reuse avoids rerunning the full target budget');
+
+  searcher.resetTree();
+  const fresh = await searcher.search({ positions }, { visits: 16, reuseTree: true });
+  assert.equal(fresh.search.stats?.rootReused, false, 'resetTree clears cached search state');
+});
+
 test('LC0 search exposes a principal variation of legal UCI moves', async () => {
   const result = await new Lc0PuctSearcher(uniformEvaluator()).search(START_FEN, { visits: 24 });
   assert.ok(Array.isArray(result.pv), 'pv is an array');
