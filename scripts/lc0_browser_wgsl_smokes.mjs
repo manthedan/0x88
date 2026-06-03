@@ -29,6 +29,11 @@ const SMOKES = [
     doneText: 'ATTENTION_OUTPUT_BENCH_DONE',
   },
   {
+    name: 'encoder0-ffn',
+    query: 'encoder0FfnBench=1&encoder0FfnWarmup=1&encoder0FfnIters=1&packVerify=0',
+    doneText: 'FFN_BENCH_DONE',
+  },
+  {
     name: 'kernel-bench-scalar',
     query: 'kernelBench=1&kernelBenchWarmup=1&kernelBenchIters=3&packVerify=0',
     doneText: 'KERNEL_BENCH_DONE',

@@ -2535,3 +2535,263 @@ export async function runLc0WebAttentionOutputBenchmark(options: Lc0WebAttention
     for (const buffer of buffers) buffer.destroy?.();
   }
 }
+
+const DEFAULT_FFN_DENSE1_WEIGHT = '/encoder0/ffn/dense1/w/w';
+const DEFAULT_FFN_DENSE1_BIAS = '/encoder0/ffn/dense1/b/w';
+const DEFAULT_FFN_DENSE2_WEIGHT = '/encoder0/ffn/dense2/w/w';
+const DEFAULT_FFN_DENSE2_BIAS = '/encoder0/ffn/dense2/b/w';
+const DEFAULT_FFN_ALPHA = '/encoder0/ffn/alpha/w';
+const DEFAULT_LN2_SCALE = '/encoder0/ln2/w/scale';
+const DEFAULT_LN2_BIAS = '/encoder0/ln2/w/bias';
+const DEFAULT_FFN_HIDDEN = 1024;
+
+export interface Lc0WebEncoder0FfnBenchmarkOptions {
+  packUrl: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+}
+
+export interface Lc0WebEncoder0FfnBenchmarkResult {
+  status: 'FFN_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  tokens: number;
+  channels: number;
+  hidden: number;
+  epsilon: number;
+  alpha: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  uploadSetupMs: number;
+  dispatchLoopMs: number;
+  dispatchLoopAvgMs: number;
+  readbackSyncedMs: number;
+  endToEndMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+}
+
+type Encoder0FfnTensors = ReturnType<typeof loadAttentionOutputInputs> & {
+  ffnDense1Weight: Lc0WebTensorView;
+  ffnDense1Bias: Lc0WebTensorView;
+  ffnDense2Weight: Lc0WebTensorView;
+  ffnDense2Bias: Lc0WebTensorView;
+  ffnAlpha: Lc0WebTensorView;
+  ln2Scale: Lc0WebTensorView;
+  ln2Bias: Lc0WebTensorView;
+};
+
+function loadEncoder0FfnInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>): Encoder0FfnTensors {
+  const base = loadAttentionOutputInputs(pack);
+  const ffnDense1Weight = pack.tensors.get(DEFAULT_FFN_DENSE1_WEIGHT);
+  const ffnDense1Bias = pack.tensors.get(DEFAULT_FFN_DENSE1_BIAS);
+  const ffnDense2Weight = pack.tensors.get(DEFAULT_FFN_DENSE2_WEIGHT);
+  const ffnDense2Bias = pack.tensors.get(DEFAULT_FFN_DENSE2_BIAS);
+  const ffnAlpha = pack.tensors.get(DEFAULT_FFN_ALPHA);
+  const ln2Scale = pack.tensors.get(DEFAULT_LN2_SCALE);
+  const ln2Bias = pack.tensors.get(DEFAULT_LN2_BIAS);
+  if (!ffnDense1Weight || !ffnDense1Bias || !ffnDense2Weight || !ffnDense2Bias || !ffnAlpha || !ln2Scale || !ln2Bias) throw new Error('lc0web encoder0 FFN tensors were not loaded');
+  assertTensorShapeAndBytes(ffnDense1Weight, [DEFAULT_N, DEFAULT_FFN_HIDDEN], 2, 'ffnDense1Weight');
+  assertTensorShapeAndBytes(ffnDense1Bias, [DEFAULT_FFN_HIDDEN], 2, 'ffnDense1Bias');
+  assertTensorShapeAndBytes(ffnDense2Weight, [DEFAULT_FFN_HIDDEN, DEFAULT_N], 2, 'ffnDense2Weight');
+  assertTensorShapeAndBytes(ffnDense2Bias, [DEFAULT_N], 2, 'ffnDense2Bias');
+  assertTensorShapeAndBytes(ffnAlpha, [1], 2, 'ffnAlpha');
+  assertTensorShapeAndBytes(ln2Scale, [DEFAULT_N], 2, 'ln2Scale');
+  assertTensorShapeAndBytes(ln2Bias, [DEFAULT_N], 2, 'ln2Bias');
+  for (const tensor of [ffnDense1Weight, ffnDense1Bias, ffnDense2Weight, ffnDense2Bias, ffnAlpha, ln2Scale, ln2Bias]) {
+    if (tensor.info.dtype !== 'f16') throw new Error(`lc0web encoder0 FFN expects f16 tensor ${tensor.info.name}, got ${tensor.info.dtype}`);
+  }
+  return { ...base, ffnDense1Weight, ffnDense1Bias, ffnDense2Weight, ffnDense2Bias, ffnAlpha, ln2Scale, ln2Bias };
+}
+
+function cpuSqrRelu(input: Float32Array<ArrayBufferLike>): Float32Array<ArrayBufferLike> {
+  const output = new Float32Array(input.length);
+  for (let i = 0; i < input.length; i++) {
+    const value = Math.max(0, input[i]);
+    output[i] = value * value;
+  }
+  return output;
+}
+
+function buildEncoder0FfnReference(tensors: Encoder0FfnTensors): { input: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; alpha: number } {
+  const input = buildAttentionOutputReference(tensors).output;
+  const hidden = cpuSqrRelu(cpuProjectTokens(input, tensors.ffnDense1Weight.bytes, tensors.ffnDense1Bias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_FFN_HIDDEN));
+  const projected = cpuProjectTokens(hidden, tensors.ffnDense2Weight.bytes, tensors.ffnDense2Bias.bytes, DEFAULT_TOKENS, DEFAULT_FFN_HIDDEN, DEFAULT_N);
+  const alpha = readF16At(tensors.ffnAlpha.bytes, 0);
+  const skip = new Float32Array(projected.length);
+  for (let i = 0; i < projected.length; i++) skip[i] = projected[i] * alpha + input[i];
+  return { input, output: cpuLayerNormRows(skip, tensors.ln2Scale.bytes, tensors.ln2Bias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_LN_EPSILON), alpha };
+}
+
+const FFN_DENSE1_WGSL = `${WGSL_HEADER}
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let col = gid.x;
+  let token = gid.y;
+  if (col >= 1024u || token >= 64u) { return; }
+  var sum = pick_lane(biasF16[col >> 1u], col);
+  for (var row = 0u; row < 256u; row = row + 1u) {
+    sum = sum + inputVec[token * 256u + row] * pick_lane(weightsF16[(row * 1024u + col) >> 1u], row * 1024u + col);
+  }
+  let value = max(sum, 0.0);
+  outputVec[token * 1024u + col] = value * value;
+}
+`;
+
+const FFN_DENSE2_WGSL = `${WGSL_HEADER}
+@group(0) @binding(4) var<storage, read> residualVec: array<f32>;
+@group(0) @binding(5) var<storage, read> alphaF16: array<u32>;
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let col = gid.x;
+  let token = gid.y;
+  if (col >= 256u || token >= 64u) { return; }
+  var sum = pick_lane(biasF16[col >> 1u], col);
+  for (var row = 0u; row < 1024u; row = row + 1u) {
+    sum = sum + inputVec[token * 1024u + row] * pick_lane(weightsF16[(row * 256u + col) >> 1u], row * 256u + col);
+  }
+  outputVec[token * 256u + col] = sum * pick_lane(alphaF16[0], 0u) + residualVec[token * 256u + col];
+}
+`;
+
+const FFN_LN2_WGSL = ATTENTION_OUTPUT_NORM_WGSL;
+
+function createEncoder0FfnPipelines(device: DeviceLike, buffers: {
+  input: BufferLike;
+  dense1Weight: BufferLike;
+  dense1Bias: BufferLike;
+  hidden: BufferLike;
+  dense2Weight: BufferLike;
+  dense2Bias: BufferLike;
+  alpha: BufferLike;
+  skip: BufferLike;
+  ln2Scale: BufferLike;
+  ln2Bias: BufferLike;
+  output: BufferLike;
+}): { dense1: PipelineLike; dense1Bind: unknown; dense2: PipelineLike; dense2Bind: unknown; ln2: PipelineLike; ln2Bind: unknown } {
+  const dense1Module = device.createShaderModule({ label: 'lc0web encoder0 FFN dense1 sqrrelu', code: FFN_DENSE1_WGSL });
+  const dense1 = device.createComputePipeline({ layout: 'auto', compute: { module: dense1Module, entryPoint: 'main' } }) as PipelineLike;
+  const dense1Bind = device.createBindGroup({ layout: dense1.getBindGroupLayout(0), entries: [
+    { binding: 0, resource: { buffer: buffers.input } },
+    { binding: 1, resource: { buffer: buffers.dense1Weight } },
+    { binding: 2, resource: { buffer: buffers.dense1Bias } },
+    { binding: 3, resource: { buffer: buffers.hidden } },
+  ] });
+  const dense2Module = device.createShaderModule({ label: 'lc0web encoder0 FFN dense2 residual', code: FFN_DENSE2_WGSL });
+  const dense2 = device.createComputePipeline({ layout: 'auto', compute: { module: dense2Module, entryPoint: 'main' } }) as PipelineLike;
+  const dense2Bind = device.createBindGroup({ layout: dense2.getBindGroupLayout(0), entries: [
+    { binding: 0, resource: { buffer: buffers.hidden } },
+    { binding: 1, resource: { buffer: buffers.dense2Weight } },
+    { binding: 2, resource: { buffer: buffers.dense2Bias } },
+    { binding: 3, resource: { buffer: buffers.skip } },
+    { binding: 4, resource: { buffer: buffers.input } },
+    { binding: 5, resource: { buffer: buffers.alpha } },
+  ] });
+  const ln2Module = device.createShaderModule({ label: 'lc0web encoder0 FFN ln2', code: FFN_LN2_WGSL });
+  const ln2 = device.createComputePipeline({ layout: 'auto', compute: { module: ln2Module, entryPoint: 'main' } }) as PipelineLike;
+  const ln2Bind = device.createBindGroup({ layout: ln2.getBindGroupLayout(0), entries: [
+    { binding: 0, resource: { buffer: buffers.skip } },
+    { binding: 1, resource: { buffer: buffers.ln2Scale } },
+    { binding: 2, resource: { buffer: buffers.ln2Bias } },
+    { binding: 3, resource: { buffer: buffers.output } },
+  ] });
+  return { dense1, dense1Bind, dense2, dense2Bind, ln2, ln2Bind };
+}
+
+function encodeEncoder0FfnDispatches(device: DeviceLike, pipelines: ReturnType<typeof createEncoder0FfnPipelines>, iterations: number): unknown {
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  for (let i = 0; i < iterations; i++) {
+    pass.setPipeline(pipelines.dense1);
+    pass.setBindGroup(0, pipelines.dense1Bind);
+    pass.dispatchWorkgroups(Math.ceil(DEFAULT_FFN_HIDDEN / 8), Math.ceil(DEFAULT_TOKENS / 8));
+    pass.setPipeline(pipelines.dense2);
+    pass.setBindGroup(0, pipelines.dense2Bind);
+    pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+    pass.setPipeline(pipelines.ln2);
+    pass.setBindGroup(0, pipelines.ln2Bind);
+    pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
+  }
+  pass.end();
+  return encoder.finish();
+}
+
+export async function runLc0WebEncoder0FfnBenchmark(options: Lc0WebEncoder0FfnBenchmarkOptions): Promise<Lc0WebEncoder0FfnBenchmarkResult> {
+  const totalStarted = nowMs();
+  const warmup = clampInteger(options.warmup, 2, 0, 1000);
+  const iterations = clampInteger(options.iterations, 10, 1, 10_000);
+  const { device, adapterInfo } = await requestDevice();
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: [
+      ...Object.values(DEFAULT_QKV_TENSORS), DEFAULT_SCALE_TENSOR, ...Object.values(DEFAULT_SMOLGEN_TENSORS),
+      DEFAULT_OUT_DENSE_WEIGHT, DEFAULT_OUT_DENSE_BIAS, DEFAULT_OUT_ALPHA, DEFAULT_LN1_SCALE, DEFAULT_LN1_BIAS,
+      DEFAULT_FFN_DENSE1_WEIGHT, DEFAULT_FFN_DENSE1_BIAS, DEFAULT_FFN_DENSE2_WEIGHT, DEFAULT_FFN_DENSE2_BIAS,
+      DEFAULT_FFN_ALPHA, DEFAULT_LN2_SCALE, DEFAULT_LN2_BIAS,
+    ],
+  });
+  const tensors = loadEncoder0FfnInputs(pack);
+  const reference = buildEncoder0FfnReference(tensors);
+  const outputElements = DEFAULT_TOKENS * DEFAULT_N;
+  const globals = gpuGlobals();
+  const usage = globals.GPUBufferUsage!;
+  const buffers: BufferLike[] = [];
+  try {
+    const setupStarted = nowMs();
+    const input = createStorageBuffer(device, reference.input, usage.STORAGE | usage.COPY_DST);
+    const dense1Weight = createStorageBuffer(device, tensors.ffnDense1Weight.bytes, usage.STORAGE | usage.COPY_DST);
+    const dense1Bias = createStorageBuffer(device, tensors.ffnDense1Bias.bytes, usage.STORAGE | usage.COPY_DST);
+    const dense2Weight = createStorageBuffer(device, tensors.ffnDense2Weight.bytes, usage.STORAGE | usage.COPY_DST);
+    const dense2Bias = createStorageBuffer(device, tensors.ffnDense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
+    const alpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.ffnAlpha.bytes), usage.STORAGE | usage.COPY_DST);
+    const ln2Scale = createStorageBuffer(device, tensors.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
+    const ln2Bias = createStorageBuffer(device, tensors.ln2Bias.bytes, usage.STORAGE | usage.COPY_DST);
+    const hidden = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN * 4, usage: usage.STORAGE });
+    const skip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE });
+    const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC });
+    const readback = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
+    buffers.push(input, dense1Weight, dense1Bias, dense2Weight, dense2Bias, alpha, ln2Scale, ln2Bias, hidden, skip, output, readback);
+    const pipelines = createEncoder0FfnPipelines(device, { input, dense1Weight, dense1Bias, hidden, dense2Weight, dense2Bias, alpha, skip, ln2Scale, ln2Bias, output });
+    const uploadSetupMs = nowMs() - setupStarted;
+    if (warmup > 0) {
+      device.queue.submit([encodeEncoder0FfnDispatches(device, pipelines, warmup)]);
+      await device.queue.onSubmittedWorkDone?.();
+    }
+    const dispatchStarted = nowMs();
+    device.queue.submit([encodeEncoder0FfnDispatches(device, pipelines, iterations)]);
+    const dispatchLoopMs = nowMs() - dispatchStarted;
+    const readbackStarted = nowMs();
+    const gpuOutput = await readF32OutputOnce(device, output, readback, outputElements);
+    const readbackSyncedMs = nowMs() - readbackStarted;
+    const { maxAbsError, rmsError } = computeErrorStats(gpuOutput, reference.output, outputElements);
+    assertErrorInTolerance(maxAbsError);
+    return {
+      status: 'FFN_BENCH_DONE',
+      packUrl: pack.manifestUrl,
+      modelName: pack.manifest.model.name,
+      adapterInfo,
+      tokens: DEFAULT_TOKENS,
+      channels: DEFAULT_N,
+      hidden: DEFAULT_FFN_HIDDEN,
+      epsilon: DEFAULT_LN_EPSILON,
+      alpha: reference.alpha,
+      warmup,
+      iterations,
+      packLoadMs: pack.elapsedMs,
+      uploadSetupMs,
+      dispatchLoopMs,
+      dispatchLoopAvgMs: dispatchLoopMs / iterations,
+      readbackSyncedMs,
+      endToEndMs: nowMs() - totalStarted,
+      maxAbsError,
+      rmsError,
+      outputSample: Array.from(gpuOutput.slice(0, 8)),
+    };
+  } finally {
+    for (const buffer of buffers) buffer.destroy?.();
+  }
+}
