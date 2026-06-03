@@ -1522,17 +1522,24 @@ function battleSleep(ms: number, signal: AbortSignal): Promise<void> {
 
 type MoveProvider = (positions: BoardState[]) => Promise<string | null>;
 
+async function resetBattleSearchTree(): Promise<void> {
+  searcher?.resetTree();
+  if (searchWorkerReady) {
+    await postWorkerRequest<{ type: 'searchReset' }>({ type: 'resetSearch' });
+  }
+}
+
 // LC0 fixed-visit search move, run in the worker when available so the board
 // keeps animating; falls back to a cancellable main-thread search otherwise.
 async function battleSearchMove(positions: BoardState[]): Promise<string | null> {
   if (searchWorkerReady) {
     const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>(
-      { type: 'search', input: { positions }, visits: searchVisits, batchSize: searchBatchSize },
+      { type: 'search', input: { positions }, visits: searchVisits, batchSize: searchBatchSize, reuseTree: true },
       (id) => { activeWorkerSearchId = id; },
     );
     return response.result.cancelled ? null : (response.result.move ?? null);
   }
-  const result = await searcher!.search({ positions }, { visits: searchVisits, batchSize: searchBatchSize, signal: battleAbort!.signal, yieldEveryMs: 16 });
+  const result = await searcher!.search({ positions }, { visits: searchVisits, batchSize: searchBatchSize, signal: battleAbort!.signal, yieldEveryMs: 16, reuseTree: true });
   return result.move ?? null;
 }
 
@@ -1561,6 +1568,7 @@ function opponentProvider(): { provider: MoveProvider; label: string } {
 // moves are watchable. Reuses the page board/history/move-list state.
 async function playGameOnBoard(white: MoveProvider, black: MoveProvider, signal: AbortSignal): Promise<{ result: GameResultCode; reason: string }> {
   loadPosition(parseFen(START_FEN));
+  await resetBattleSearchTree();
   // Show the start position without kicking off an evaluation: that eval shares
   // the main ORT session with the policy/search move providers, and concurrent
   // session.run() on one session is unsafe. The eval panel refreshes when the

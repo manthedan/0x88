@@ -43,6 +43,12 @@ type SearchMessage = {
   visits: number;
   batchSize?: number;
   multiPv?: number;
+  reuseTree?: boolean;
+};
+
+type ResetSearchMessage = {
+  type: 'resetSearch';
+  id: number;
 };
 
 type EvaluateMessage = {
@@ -182,7 +188,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | ResetSearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -222,6 +228,7 @@ type WorkerResponse =
   | { type: 'attentionBlockBenchmarkResult'; id: number; result: Lc0WebAttentionBlockBenchmarkResult }
   | { type: 'attentionOutputBenchmarkResult'; id: number; result: Lc0WebAttentionOutputBenchmarkResult }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
+  | { type: 'searchReset'; id: number }
   | { type: 'error'; id: number; error: string };
 
 let evaluator: Lc0OnnxEvaluator | null = null;
@@ -430,6 +437,7 @@ async function handleSearch(message: SearchMessage): Promise<void> {
       visits: message.visits,
       batchSize: message.batchSize ?? 1,
       multiPv: message.multiPv,
+      reuseTree: message.reuseTree,
       signal: controller.signal,
       yieldEveryMs: 16,
     });
@@ -499,6 +507,9 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       } else if (message.type === 'evaluateBatch') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleEvaluateBatch(message);
+      } else if (message.type === 'resetSearch') {
+        searcher?.resetTree();
+        post({ type: 'searchReset', id: message.id });
       } else if (message.type === 'search') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleSearch(message);

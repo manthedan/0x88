@@ -102,18 +102,24 @@ export class Lc0PuctSearcher {
     const sameHistory = (candidate: string[]) => candidate.length === historyFens.length && candidate.every((fen, i) => fen === historyFens[i]);
     const root = this.cachedRoot;
     if (!root) return null;
-    if (boardToFen(root.board) === targetFen && sameHistory(root.historyFens)) return root;
-    if (!root.expanded) return null;
-    for (const edge of root.edges) {
-      const child = edge.child;
-      if (!child) continue;
-      if (boardToFen(child.board) === targetFen && sameHistory(child.historyFens)) {
-        root.isRoot = false;
-        child.isRoot = true;
-        return child;
+    const seen = new Set<PuctNode>();
+    const find = (node: PuctNode): PuctNode | null => {
+      if (seen.has(node)) return null;
+      seen.add(node);
+      if (boardToFen(node.board) === targetFen && sameHistory(node.historyFens)) return node;
+      if (!node.expanded) return null;
+      for (const edge of node.edges) {
+        if (!edge.child) continue;
+        const found = find(edge.child);
+        if (found) return found;
       }
-    }
-    return null;
+      return null;
+    };
+    const found = find(root);
+    if (!found) return null;
+    root.isRoot = false;
+    found.isRoot = true;
+    return found;
   }
 
   static async create(modelPath: string | Uint8Array | ArrayBuffer, options: Lc0OnnxEvaluatorOptions = {}): Promise<Lc0PuctSearcher> {

@@ -41,6 +41,7 @@ let searcher: Lc0PuctSearcher | null = null;
 let lc0Cache: CachedLc0Evaluator | null = null;
 let stockfish: StockfishEngine | null = null;
 const engines = new Map<string, ArenaEngine>();
+const lc0Searchers = new Map<string, Lc0PuctSearcher>();
 const games: GameRecord[] = [];
 
 function el(id: string): HTMLElement {
@@ -114,16 +115,31 @@ function renderCacheInfo(): void {
   el('cacheInfo').textContent = cacheMetricsText(lc0Cache?.metrics());
 }
 
+function lc0SearcherFor(engineId: string): Lc0PuctSearcher {
+  const existing = lc0Searchers.get(engineId);
+  if (existing) return existing;
+  if (!lc0Cache) throw new Error('LC0 evaluator is not initialized');
+  const created = new Lc0PuctSearcher(lc0Cache);
+  lc0Searchers.set(engineId, created);
+  return created;
+}
+
+function resetLc0SearchTrees(ids?: string[]): void {
+  const targets = ids ? ids.map((id) => lc0Searchers.get(id)).filter((entry): entry is Lc0PuctSearcher => !!entry) : [...lc0Searchers.values()];
+  for (const search of targets) search.resetTree();
+}
+
 function buildEngines() {
   engines.clear();
   const warmupPositions = [parseFen(START_FEN)];
-  const lc0Search = (visits: number): ArenaEngine['move'] => async (positions, signal) => {
+  const lc0Search = (engineId: string, visits: number): ArenaEngine['move'] => async (positions, signal) => {
     const timed = arenaBudgetMode() === 'movetime';
-    return (await searcher!.search({ positions }, {
+    return (await lc0SearcherFor(engineId).search({ positions }, {
       visits: timed ? undefined : visits,
       movetimeMs: timed ? arenaMovetimeMs() : undefined,
       signal,
       yieldEveryMs: 16,
+      reuseTree: true,
     })).move ?? null;
   };
   const sf = (depth: number): ArenaEngine['move'] => async (positions, signal) => {
@@ -131,9 +147,10 @@ function buildEngines() {
     else stockfish!.setOptions({ depth, movetimeMs: undefined });
     return stockfish!.bestMove(boardToFen(positions[positions.length - 1]), signal);
   };
-  const lc0SearchWarmup = async (signal: AbortSignal) => {
-    await searcher!.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
-    searcher!.resetTree();
+  const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {
+    const search = lc0SearcherFor(engineId);
+    await search.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
+    search.resetTree();
     renderCacheInfo();
   };
   const stockfishWarmup = async (signal: AbortSignal) => {
@@ -146,8 +163,8 @@ function buildEngines() {
     move: async (positions) => (await player!.chooseMove({ positions })).move ?? null,
     warmup: async () => { await player!.chooseMove({ positions: warmupPositions }); },
   });
-  engines.set('lc0-s100', { id: 'lc0-s100', name: 'LC0 search 100', move: lc0Search(100), warmup: lc0SearchWarmup });
-  engines.set('lc0-s400', { id: 'lc0-s400', name: 'LC0 search 400', move: lc0Search(400), warmup: lc0SearchWarmup });
+  engines.set('lc0-s100', { id: 'lc0-s100', name: 'LC0 search 100', move: lc0Search('lc0-s100', 100), warmup: lc0SearchWarmup('lc0-s100') });
+  engines.set('lc0-s400', { id: 'lc0-s400', name: 'LC0 search 400', move: lc0Search('lc0-s400', 400), warmup: lc0SearchWarmup('lc0-s400') });
   engines.set('sf-d4', { id: 'sf-d4', name: 'SF lite d4', move: sf(4), warmup: stockfishWarmup });
   engines.set('sf-d8', { id: 'sf-d8', name: 'SF lite d8', move: sf(8), warmup: stockfishWarmup });
 }
@@ -327,6 +344,7 @@ async function startTournament() {
   renderStandings(standings);
   let played = 0;
   try {
+    resetLc0SearchTrees(ids);
     await warmUpSelectedEngines(ids, abort.signal);
     if (abort.signal.aborted) return;
     for (let i = 0; i < pairings.length; i++) {
@@ -334,6 +352,7 @@ async function startTournament() {
       const { white, black, opening } = pairings[i];
       const whiteEngine = engines.get(white)!;
       const blackEngine = engines.get(black)!;
+      resetLc0SearchTrees([white, black]);
       setBoardSideEngines(whiteEngine.name, blackEngine.name);
       el('pairing').textContent = `Game ${i + 1}/${pairings.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
       el('message').textContent = 'Playing…';
@@ -381,7 +400,9 @@ function wireEvents() {
   el('engines').addEventListener('change', refreshChampionOptions);
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
   el('openingText').addEventListener('input', refreshOpeningPreview);
-  el('cacheEntriesInput').addEventListener('input', renderCacheInfo);
+  el('cacheEntriesInput').addEventListener('input', () => { renderCacheInfo(); resetLc0SearchTrees(); });
+  el('budgetModeSelect').addEventListener('change', () => resetLc0SearchTrees());
+  el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
 }
 
 async function init() {
@@ -394,6 +415,7 @@ async function init() {
     const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
     const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
     lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
+    lc0Searchers.clear();
     player = new Lc0PolicyOnlyPlayer(lc0Cache);
     searcher = new Lc0PuctSearcher(lc0Cache);
     stockfish = new StockfishEngine({ depth: 4 });

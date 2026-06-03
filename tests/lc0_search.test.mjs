@@ -104,6 +104,21 @@ test('LC0 search can reuse the previous subtree after a played move', async () =
   assert.equal(fresh.search.stats?.rootReused, false, 'resetTree clears cached search state');
 });
 
+test('LC0 search can reuse a deeper subtree after an opponent reply', async () => {
+  const searcher = new Lc0PuctSearcher(uniformEvaluator());
+  const first = await searcher.search(START_FEN, { visits: 80, reuseTree: true });
+  const root = first.search.root;
+  const playedEdge = root?.edges.find((edge) => moveToUci(edge.move) === first.move);
+  const replyEdge = playedEdge?.child?.edges.find((edge) => edge.child);
+  assert.ok(first.move && replyEdge, 'initial search explored at least one reply subtree');
+
+  const reply = moveToUci(replyEdge.move);
+  const positions = buildBoardHistoryFromMoves([first.move, reply]);
+  const second = await searcher.search({ positions }, { visits: 88, reuseTree: true });
+  assert.equal(second.search.stats?.rootReused, true, `reused subtree after ${first.move} ${reply}`);
+  assert.equal(second.visits, 88, 'reused reply subtree is topped up to requested visits');
+});
+
 test('LC0 search exposes a principal variation of legal UCI moves', async () => {
   const result = await new Lc0PuctSearcher(uniformEvaluator()).search(START_FEN, { visits: 24 });
   assert.ok(Array.isArray(result.pv), 'pv is an array');
