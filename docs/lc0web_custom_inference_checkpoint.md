@@ -20,7 +20,7 @@ This checkpoint records the current custom-kernel path for the batch-8 f16 `lc0w
 - `?encoder0BlockBench=1`: full encoder0 attention+FFN block through ln2.
 - `?encoder0BlockOrtBench=1`: tiny ORT comparison for attention-value output through attention output projection/ln1 plus FFN/ln2.
 
-The browser page now emits a `benchmarkReport` object with browser metadata, GPU adapter info where available, pack verification mode, and timing summaries. `scripts/lc0_browser_wgsl_smokes.mjs` automates the main browser smokes and parses `maxAbsError`.
+The browser page now emits a `benchmarkReport` object with browser metadata, GPU adapter info where available, pack verification mode, and timing summaries. `scripts/lc0_browser_wgsl_smokes.mjs` automates the main browser smokes and parses `maxAbsError`. `scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs` runs fresh-session, alternating encoder0-block WGSL vs ORT WebGPU measurements and marks results as non-promotional diagnostics.
 
 ## Current evidence
 
@@ -37,6 +37,10 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
   - `FFN_ORT_BENCH_DONE`, max absolute error about `1.91e-6`.
 - `npm run lc0:browser-wgsl-smokes -- --only encoder0-block-ort-wasm --timeout 25000`
   - `ENCODER0_BLOCK_ORT_BENCH_DONE`, max absolute error about `1.97e-6`.
+- `npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2`
+  - Alternated fresh browser sessions in order `wgsl, ort, ort, wgsl`.
+  - ORT reported `webgpu->webgpu` with WebGPU provider accepted in both ORT samples.
+  - Sample medians from that run: WGSL synchronized readback/block about `3.25 ms`, ORT WebGPU average/run about `2.55 ms`; measurement-only, not promotion evidence.
 
 Validation commands used during this checkpoint:
 
@@ -48,6 +52,8 @@ npm run lc0:browser-wgsl-smokes -- --no-server --only attention-value-ort-wasm -
 npm run lc0:browser-wgsl-smokes -- --only attention-output-ort-wasm --timeout 25000
 npm run lc0:browser-wgsl-smokes -- --only encoder0-ffn-ort-wasm --timeout 25000
 npm run lc0:browser-wgsl-smokes -- --only encoder0-block-ort-wasm --timeout 25000
+npm run lc0:browser-wgsl-vs-ort-webgpu -- --dry-run --samples 2
+npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2
 ```
 
 ## Current interpretation
@@ -67,6 +73,6 @@ Next gates before an end-to-end custom runtime:
 
 1. Repeat encoder-block validation across additional encoder layers or generalized tensor names.
 2. Add ORT comparisons for attention output and/or full attention block if practical.
-3. Measure multiple alternating browser runs against ORT WebGPU with fresh sessions.
+3. Repeat and broaden alternating browser runs against ORT WebGPU after generalizing beyond encoder0.
 4. Prove layer-to-layer activation layout reuse without extra main-thread copies.
 5. Preserve f32 ONNX/native parity as the correctness ladder while using f16/WebGPU as deployment target.
