@@ -164,4 +164,14 @@ export class Lc0OnnxEvaluator {
       bestMove: legalPriors[0]?.uci,
     };
   }
+
+  async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
+    // The committed browser ONNX artifacts are exported with a static batch-1
+    // input shape. Keep the public batch API serial for now so batched search
+    // can select/dispatch leaf groups without issuing concurrent session.run()
+    // calls against a single ORT/WebGPU session.
+    const out: Lc0Evaluation[] = [];
+    for (const input of inputs) out.push(await this.evaluate(input));
+    return out;
+  }
 }

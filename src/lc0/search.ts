@@ -44,29 +44,46 @@ function contextInput(board: BoardState, context?: EvaluationContext): BoardStat
   return { positions: [...history].reverse().map(parseFen).concat(board) };
 }
 
-export class Lc0SearchEvaluator implements Evaluator {
-  readonly inner: { evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> | Lc0Evaluation };
+type Lc0EvaluationProvider = {
+  evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> | Lc0Evaluation;
+  evaluateBatch?(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> | Lc0Evaluation[];
+};
 
-  constructor(inner: { evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> | Lc0Evaluation }) {
+function lc0ToSearchEvaluation(board: BoardState, lc0: Lc0Evaluation, context?: EvaluationContext): Evaluation {
+  const policy = new Map<number, number>();
+  const legalByUci = new Map<string, Move>((context?.legalMoves ?? legalMoves(board)).map((move) => [moveToUci(move), move]));
+  for (const prior of lc0.legalPriors) {
+    const move = legalByUci.get(prior.uci);
+    if (move) policy.set(moveToActionId(move), prior.prior);
+  }
+  return { policy, wdl: lc0.wdl };
+}
+
+export class Lc0SearchEvaluator implements Evaluator {
+  readonly inner: Lc0EvaluationProvider;
+
+  constructor(inner: Lc0EvaluationProvider) {
     this.inner = inner;
   }
 
   async evaluate(board: BoardState, context?: EvaluationContext): Promise<Evaluation> {
     const lc0 = await this.inner.evaluate(contextInput(board, context));
-    const policy = new Map<number, number>();
-    const legalByUci = new Map<string, Move>(legalMoves(board).map((move) => [moveToUci(move), move]));
-    for (const prior of lc0.legalPriors) {
-      const move = legalByUci.get(prior.uci);
-      if (move) policy.set(moveToActionId(move), prior.prior);
-    }
-    return { policy, wdl: lc0.wdl };
+    return lc0ToSearchEvaluation(board, lc0, context);
+  }
+
+  async evaluateBatch(boards: BoardState[], contexts: EvaluationContext[] = []): Promise<Evaluation[]> {
+    const inputs = boards.map((board, i) => contextInput(board, contexts[i]));
+    const evals = this.inner.evaluateBatch
+      ? await this.inner.evaluateBatch(inputs)
+      : await Promise.all(inputs.map((input) => this.inner.evaluate(input)));
+    return evals.map((lc0, i) => lc0ToSearchEvaluation(boards[i], lc0, contexts[i]));
   }
 }
 
 export class Lc0PuctSearcher {
   private readonly evaluator: Lc0SearchEvaluator;
 
-  constructor(evaluator: Lc0SearchEvaluator | { evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> | Lc0Evaluation }) {
+  constructor(evaluator: Lc0SearchEvaluator | Lc0EvaluationProvider) {
     this.evaluator = evaluator instanceof Lc0SearchEvaluator ? evaluator : new Lc0SearchEvaluator(evaluator);
   }
 

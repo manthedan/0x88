@@ -13,7 +13,7 @@ import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchResult } from './se
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
 type NativeRecord = { id: string; backend?: string; fen: string; startFen?: string; moves?: string[]; bestmove: string; topPriors: NativePrior[] };
-type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; elapsedMs?: number };
+type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; elapsedMs?: number; stats?: Lc0SearchResult['search']['stats'] };
 type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
@@ -24,6 +24,7 @@ const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.on
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
 const PLAYER_SIDE = params.get('side') === 'black' ? 'black' : 'white';
 const SEARCH_VISITS = Math.max(1, Math.floor(Number(params.get('visits') ?? '32') || 32));
+const SEARCH_BATCH_SIZE = Math.max(1, Math.floor(Number(params.get('batch') ?? params.get('batchSize') ?? '1') || 1));
 const SEARCH_WORKER_REQUESTED = params.get('worker') === '1' || params.get('searchWorker') === '1';
 const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
 
@@ -139,6 +140,7 @@ function renderStatic() {
   el('backend').textContent = describeOrtBackendConfig();
   el('status').textContent = player ? 'ready' : 'loading';
   el('searchMode').textContent = searchModeLabel();
+  el('searchBatch').textContent = `${SEARCH_BATCH_SIZE}`;
   el('searchMove').textContent = `Search ${SEARCH_VISITS}`;
   el('engineMove').toggleAttribute('disabled', busy || !player);
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
@@ -166,7 +168,9 @@ function renderStatic() {
 function renderSearchResult(result: RenderableSearchResult) {
   el('searchSummary').textContent = `${result.move ?? '—'} · ${result.visits} visits · Q ${result.value.toFixed(5)}`;
   const visitsPerSecond = result.elapsedMs && result.elapsedMs > 0 ? result.visits / (result.elapsedMs / 1000) : undefined;
-  el('searchLatency').textContent = result.elapsedMs === undefined ? '—' : `${result.elapsedMs.toFixed(0)} ms · ${visitsPerSecond?.toFixed(1) ?? '—'} visits/s`;
+  const stats = result.stats;
+  const batchStats = stats ? ` · eval batches ${stats.batchEvalCalls}/${stats.maxEvalBatch}` : '';
+  el('searchLatency').textContent = result.elapsedMs === undefined ? '—' : `${result.elapsedMs.toFixed(0)} ms · ${visitsPerSecond?.toFixed(1) ?? '—'} visits/s${batchStats}`;
   const maxVisits = Math.max(1, ...result.children.slice(0, 10).map((entry) => entry.visits));
   el('searchChildren').innerHTML = result.children.slice(0, 10).map((entry, i) => {
     const width = Math.max(2, (entry.visits / maxVisits) * 100).toFixed(1);
@@ -237,6 +241,7 @@ async function searchWithWorker(): Promise<RenderableSearchResult> {
     type: 'search',
     input: currentEvaluationInput(),
     visits: SEARCH_VISITS,
+    batchSize: SEARCH_BATCH_SIZE,
   });
   return response.result;
 }
@@ -265,9 +270,12 @@ async function searchRootPosition() {
     const started = performance.now();
     const result = useSearchWorker
       ? await searchWithWorker()
-      : { ...await searcher!.search(currentEvaluationInput(), { visits: SEARCH_VISITS }), elapsedMs: performance.now() - started };
+      : await (async () => {
+        const search = await searcher!.search(currentEvaluationInput(), { visits: SEARCH_VISITS, batchSize: SEARCH_BATCH_SIZE });
+        return { ...search, stats: search.search.stats, elapsedMs: performance.now() - started };
+      })();
     renderSearchResult(result);
-    el('message').textContent = `Search selected ${result.move ?? '—'} (${result.visits} visits, fixed PUCT via ${searchModeLabel()}).`;
+    el('message').textContent = `Search selected ${result.move ?? '—'} (${result.visits} visits, batch ${SEARCH_BATCH_SIZE}, fixed PUCT via ${searchModeLabel()}).`;
   } catch (error) {
     el('message').textContent = `Search failed: ${(error as Error).message}`;
   } finally {

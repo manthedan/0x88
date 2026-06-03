@@ -16,6 +16,7 @@ type SearchMessage = {
   id: number;
   input: Lc0EvaluatorInput;
   visits: number;
+  batchSize?: number;
 };
 
 type WorkerRequest = InitMessage | SearchMessage;
@@ -53,7 +54,7 @@ async function handleInit(message: InitMessage): Promise<void> {
 async function handleSearch(message: SearchMessage): Promise<void> {
   if (!searcher) throw new Error('LC0 search worker is not initialized');
   const started = nowMs();
-  const result = await searcher.search(message.input, { visits: message.visits });
+  const result = await searcher.search(message.input, { visits: message.visits, batchSize: message.batchSize ?? 1 });
   post({
     type: 'searchResult',
     id: message.id,

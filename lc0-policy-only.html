@@ -41,6 +41,7 @@
       <dt>Parity</dt><dd id="parity" class="mono">not run</dd>
       <dt>Search</dt><dd id="searchSummary" class="mono">not run</dd>
       <dt>Search mode</dt><dd id="searchMode" class="mono">main thread</dd>
+      <dt>Search batch</dt><dd id="searchBatch" class="mono">1</dd>
       <dt>Search timing</dt><dd id="searchLatency" class="mono">—</dd>
       <dt>Moves</dt><dd id="moveList" class="mono">—</dd>
     </dl>
@@ -50,7 +51,7 @@
     <ol id="searchChildren" class="policy-list"></ol>
     <h2>FEN</h2>
     <p id="fen" class="fen">—</p>
-    <p class="small">Open with <code>?ep=wasm&amp;parity=1</code> to force WASM and automatically compare browser outputs against committed native BLAS FEN-only plus explicit-history fixture priors. Use <code>?search=1</code> to auto-run a fixed-visit PUCT root search, or <code>?worker=1&amp;search=1</code> to run that search in a dedicated browser worker with its own ORT session. Add <code>?cache=1</code> to persist the selected ONNX model in Cache Storage. Use <code>?model=/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx</code> to smoke the f16 deployment artifact.</p>
+    <p class="small">Open with <code>?ep=wasm&amp;parity=1</code> to force WASM and automatically compare browser outputs against committed native BLAS FEN-only plus explicit-history fixture priors. Use <code>?search=1</code> to auto-run a fixed-visit PUCT root search, or <code>?worker=1&amp;search=1</code> to run that search in a dedicated browser worker with its own ORT session. Add <code>?batch=8</code> to select/evaluate search leaves in batches. Add <code>?cache=1</code> to persist the selected ONNX model in Cache Storage. Use <code>?model=/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx</code> to smoke the f16 deployment artifact.</p>
   </aside>
 </main>
 <script type="module" src="/src/lc0/policyOnlyBrowser.ts"></script>

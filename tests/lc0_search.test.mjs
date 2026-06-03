@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
+import { legalMoves } from '../src/chess/movegen.ts';
+import { moveToUci } from '../src/chess/moveCodec.ts';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
 import { Lc0PuctSearcher, Lc0SearchEvaluator } from '../src/lc0/search.ts';
 
@@ -38,6 +40,29 @@ test('LC0 search evaluator reconstructs explicit history from search context', a
   assert.equal(calls[0].positions.length, 2);
   assert.equal(boardToFen(calls[0].positions[0]), boardToFen(root));
   assert.equal(boardToFen(calls[0].positions[1]), boardToFen(current));
+});
+
+test('LC0 batched PUCT groups leaf evaluations through the LC0 adapter', async () => {
+  const batchSizes = [];
+  const fakeLc0 = {
+    async evaluateBatch(inputs) {
+      batchSizes.push(inputs.length);
+      return inputs.map((input) => {
+        const board = typeof input === 'object' && input !== null && 'positions' in input ? input.positions[input.positions.length - 1] : input;
+        const parsed = typeof board === 'string' ? parseFen(board) : board;
+        const priors = legalMoves(parsed).map((move) => ({ uci: moveToUci(move), index: 0, logit: 0, prior: 1 }));
+        return { fen: boardToFen(parsed), wdl: [0.34, 0.32, 0.34], q: 0, mlh: 80, legalPriors: priors };
+      });
+    },
+    async evaluate(input) {
+      return (await this.evaluateBatch([input]))[0];
+    },
+  };
+  const result = await new Lc0PuctSearcher(fakeLc0).search(START_FEN, { visits: 8, batchSize: 4 });
+  assert.equal(result.search.stats?.completedVisits, 8);
+  assert.equal(result.search.stats?.batchEvalCalls, 2);
+  assert.equal(result.search.stats?.maxEvalBatch, 4);
+  assert.ok(batchSizes.includes(4), `expected a batch of 4, got ${batchSizes.join(',')}`);
 });
 
 test('LC0 fixed-visit PUCT matches native BLAS nodes32 fixture best moves', { skip: (!existsSync(MODEL) || !existsSync(NATIVE_FEN_SEARCH) || !existsSync(NATIVE_HISTORY_SEARCH)) && 'missing model or native search artifacts' }, async () => {
