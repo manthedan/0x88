@@ -69,6 +69,7 @@
     "lc0:policy-only": "node --experimental-strip-types scripts/lc0_policy_only.mjs",
     "lc0:search": "node --experimental-strip-types scripts/lc0_search.mjs",
     "lc0:drift-sweep": "node --experimental-strip-types scripts/lc0_drift_sweep.mjs",
+    "lc0:battle": "node --experimental-strip-types scripts/lc0_engine_battle.mjs",
     "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs"
   },
   "devDependencies": {
