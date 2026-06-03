@@ -1660,25 +1660,43 @@ const SOFTMAX_WGSL = `
 @group(0) @binding(0) var<storage, read> inputScores: array<f32>;
 @group(0) @binding(1) var<storage, read_write> outputProbs: array<f32>;
 
+var<workgroup> scratch: array<f32, 64>;
+
+fn reduce_max(col: u32) {
+  for (var stride = 32u; stride > 0u; stride = stride / 2u) {
+    if (col < stride) {
+      scratch[col] = max(scratch[col], scratch[col + stride]);
+    }
+    workgroupBarrier();
+  }
+}
+
+fn reduce_sum(col: u32) {
+  for (var stride = 32u; stride > 0u; stride = stride / 2u) {
+    if (col < stride) {
+      scratch[col] = scratch[col] + scratch[col + stride];
+    }
+    workgroupBarrier();
+  }
+}
+
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let row = gid.x;
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let row = wid.x;
+  let col = lid.x;
   if (row >= 512u) { return; }
-  let base = row * 64u;
-  var max_value = -3.4028234663852886e+38;
-  for (var col = 0u; col < 64u; col = col + 1u) {
-    max_value = max(max_value, inputScores[base + col]);
-  }
-  var sum = 0.0;
-  for (var col = 0u; col < 64u; col = col + 1u) {
-    let value = exp(inputScores[base + col] - max_value);
-    outputProbs[base + col] = value;
-    sum = sum + value;
-  }
-  let inv_sum = 1.0 / sum;
-  for (var col = 0u; col < 64u; col = col + 1u) {
-    outputProbs[base + col] = outputProbs[base + col] * inv_sum;
-  }
+  let index = row * 64u + col;
+  scratch[col] = inputScores[index];
+  workgroupBarrier();
+  reduce_max(col);
+  let max_value = scratch[0];
+
+  let value = exp(inputScores[index] - max_value);
+  outputProbs[index] = value;
+  scratch[col] = value;
+  workgroupBarrier();
+  reduce_sum(col);
+  outputProbs[index] = value / scratch[0];
 }
 `;
 
@@ -1700,7 +1718,7 @@ function encodeSoftmaxDispatches(device: DeviceLike, pipeline: PipelineLike, bin
   const pass = encoder.beginComputePass();
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bindGroup);
-  for (let i = 0; i < iterations; i++) pass.dispatchWorkgroups(Math.ceil(rows / 64));
+  for (let i = 0; i < iterations; i++) pass.dispatchWorkgroups(rows);
   pass.end();
   return encoder.finish();
 }
@@ -2192,7 +2210,7 @@ function encodeAttentionBlockDispatches(device: DeviceLike, pipelines: ReturnTyp
     pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
     pass.setPipeline(pipelines.softmax);
     pass.setBindGroup(0, pipelines.softmaxBind);
-    pass.dispatchWorkgroups(Math.ceil((DEFAULT_HEADS * DEFAULT_TOKENS) / 64));
+    pass.dispatchWorkgroups(DEFAULT_HEADS * DEFAULT_TOKENS);
     pass.setPipeline(pipelines.value);
     pass.setBindGroup(0, pipelines.valueBind);
     pass.dispatchWorkgroups(Math.ceil(DEFAULT_HEAD_DIM / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
@@ -2525,7 +2543,7 @@ function encodeAttentionOutputDispatches(device: DeviceLike, pipelines: ReturnTy
     pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
     pass.setPipeline(pipelines.softmax);
     pass.setBindGroup(0, pipelines.softmaxBind);
-    pass.dispatchWorkgroups(Math.ceil((DEFAULT_HEADS * DEFAULT_TOKENS) / 64));
+    pass.dispatchWorkgroups(DEFAULT_HEADS * DEFAULT_TOKENS);
     pass.setPipeline(pipelines.value);
     pass.setBindGroup(0, pipelines.valueBind);
     pass.dispatchWorkgroups(Math.ceil(DEFAULT_HEAD_DIM / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
@@ -3513,7 +3531,7 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
     const encodeSoftmax = (count: number) => encodePipelineStage(
       attentionPipelines.softmax,
       attentionPipelines.softmaxBind,
-      (pass) => pass.dispatchWorkgroups(Math.ceil((DEFAULT_HEADS * DEFAULT_TOKENS) / 64)),
+      (pass) => pass.dispatchWorkgroups(DEFAULT_HEADS * DEFAULT_TOKENS),
       count,
     );
     const encodeAttentionValue = (count: number) => encodePipelineStage(
@@ -3566,7 +3584,7 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
         pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
         pass.setPipeline(attentionPipelines.softmax);
         pass.setBindGroup(0, attentionPipelines.softmaxBind);
-        pass.dispatchWorkgroups(Math.ceil((DEFAULT_HEADS * DEFAULT_TOKENS) / 64));
+        pass.dispatchWorkgroups(DEFAULT_HEADS * DEFAULT_TOKENS);
         pass.setPipeline(attentionPipelines.value);
         pass.setBindGroup(0, attentionPipelines.valueBind);
         pass.dispatchWorkgroups(Math.ceil(DEFAULT_HEAD_DIM / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
@@ -3598,7 +3616,7 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
           attentionPass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
           attentionPass.setPipeline(attentionPipelines.softmax);
           attentionPass.setBindGroup(0, attentionPipelines.softmaxBind);
-          attentionPass.dispatchWorkgroups(Math.ceil((DEFAULT_HEADS * DEFAULT_TOKENS) / 64));
+          attentionPass.dispatchWorkgroups(DEFAULT_HEADS * DEFAULT_TOKENS);
           attentionPass.setPipeline(attentionPipelines.value);
           attentionPass.setBindGroup(0, attentionPipelines.valueBind);
           attentionPass.dispatchWorkgroups(Math.ceil(DEFAULT_HEAD_DIM / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
