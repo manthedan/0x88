@@ -34,7 +34,7 @@ export type CpuctSchedule = 'constant' | 'lc0-log';
 export type FpuStrategy = 'constant' | 'lc0-reduction';
 export type SearchBudgetMode = 'visits' | 'neural';
 export type SearchBatchCollisionMode = 'retry' | 'backup';
-export type SearchEarlyStop = 'none' | 'root-dominance' | 'kld-stable';
+export type SearchEarlyStop = 'none' | 'root-dominance' | 'kld-stable' | 'best-stable';
 export type ValueWdlBlendMode = 'constant' | 'confidence';
 export interface SearchOptions {
   visits?: number;
@@ -98,6 +98,12 @@ export interface SearchOptions {
   kldCheckInterval?: number;
   kldThreshold?: number;
   kldStableChecks?: number;
+  /** Best-move stability early-stop guardrails for play/search UX. */
+  bestStableMinVisits?: number;
+  bestStableCheckInterval?: number;
+  bestStableChecks?: number;
+  bestStableMinVisitLead?: number;
+  bestStableMaxQDelta?: number;
   /** Experimental variance-aware exploration multiplier. 0 disables. */
   cpuctVarianceWeight?: number;
   cpuctVarianceMaxScale?: number;
@@ -126,7 +132,7 @@ export interface SearchStats {
   neuralEvalMisses?: number;
   cacheHits?: number;
   maxRootVisits?: number;
-  stopReason?: 'visit-budget' | 'movetime' | 'neural-budget' | 'max-visits' | 'root-dominance' | 'kld-stable' | 'no-cache-metrics-fixed-visits';
+  stopReason?: 'visit-budget' | 'movetime' | 'neural-budget' | 'max-visits' | 'root-dominance' | 'kld-stable' | 'best-stable' | 'no-cache-metrics-fixed-visits';
   rootReused?: boolean;
   transpositionHits?: number;
 }
@@ -602,6 +608,7 @@ function rootVisitDominanceStop(root: Node, maxRootVisits: number): boolean {
 }
 
 interface KldEarlyStopState { lastDistribution?: number[]; lastBest?: number; stableChecks: number; }
+interface BestStableEarlyStopState { lastBest?: number; lastBestQ?: number; stableChecks: number; }
 
 function rootVisitDistribution(root: Node): number[] {
   const total = Math.max(1, rootVisitCount(root));
@@ -649,6 +656,40 @@ function rootKldEarlyStop(root: Node, options: SearchOptions, state: KldEarlySto
   state.lastBest = best;
   state.stableChecks = stable ? state.stableChecks + 1 : 0;
   return state.stableChecks >= Math.max(1, Math.floor(options.kldStableChecks ?? 2));
+}
+
+function rootBestStableEarlyStop(root: Node, context: SearchPolicyContext, options: SearchOptions, state: BestStableEarlyStopState): boolean {
+  if (options.earlyStop !== 'best-stable') return false;
+  const visits = rootVisitCount(root);
+  const minVisits = Math.max(1, Math.floor(options.bestStableMinVisits ?? 32));
+  const interval = Math.max(1, Math.floor(options.bestStableCheckInterval ?? 8));
+  if (visits < minVisits || visits % interval !== 0) return false;
+  const best = rootBestEdgeIndex(root);
+  if (best === undefined) return false;
+  const sorted = root.edges
+    .map((edge, index) => ({ index, visits: edge.visits, q: edgeQForParentInNode(edge, root, context) }))
+    .sort((a, b) => b.visits - a.visits || b.q - a.q);
+  const bestEntry = sorted[0];
+  const secondVisits = sorted[1]?.visits ?? 0;
+  const minLead = Math.max(0, Math.floor(options.bestStableMinVisitLead ?? interval));
+  const maxQDelta = Math.max(0, options.bestStableMaxQDelta ?? 0.05);
+  const sameBest = bestEntry.index === state.lastBest;
+  const stableQ = state.lastBestQ === undefined || Math.abs(bestEntry.q - state.lastBestQ) <= maxQDelta;
+  const stable = sameBest && bestEntry.visits >= secondVisits + minLead && stableQ;
+  state.lastBest = bestEntry.index;
+  state.lastBestQ = bestEntry.q;
+  state.stableChecks = stable ? state.stableChecks + 1 : 0;
+  return state.stableChecks >= Math.max(1, Math.floor(options.bestStableChecks ?? 2));
+}
+
+function rootEarlyStopReason(root: Node, context: SearchPolicyContext, options: SearchOptions, visitTarget: number, kldState: KldEarlyStopState, bestState: BestStableEarlyStopState): SearchStats['stopReason'] | undefined {
+  // Early-stop telemetry should only report a real early exit, not completion
+  // exactly at the scheduled visit cap.
+  if (rootVisitCount(root) >= visitTarget) return undefined;
+  if (options.earlyStop === 'root-dominance' && rootVisitDominanceStop(root, visitTarget)) return 'root-dominance';
+  if (rootBestStableEarlyStop(root, context, options, bestState)) return 'best-stable';
+  if (rootKldEarlyStop(root, options, kldState)) return 'kld-stable';
+  return undefined;
 }
 
 function searchAbortError(): Error {
@@ -1085,6 +1126,8 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   const budgetMode = options.budgetMode ?? 'visits';
   stats.budgetMode = budgetMode;
   const kldState: KldEarlyStopState = { stableChecks: 0 };
+  const bestStableState: BestStableEarlyStopState = { stableChecks: 0 };
+  const fixedVisitTarget = Math.max(visits, rootVisitCount(root));
   throwIfAborted(signal);
   if (budgetMode === 'neural') {
     stats.requestedNeuralEvals = visits;
@@ -1127,12 +1170,9 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
           break;
         }
         if (stats.completedVisits === beforeCompleted) break;
-        if (options.earlyStop === 'root-dominance' && rootVisitDominanceStop(root, maxRootVisits)) {
-          stats.stopReason = 'root-dominance';
-          break;
-        }
-        if (rootKldEarlyStop(root, options, kldState)) {
-          stats.stopReason = 'kld-stable';
+        const earlyStop = rootEarlyStopReason(root, context, options, maxRootVisits, kldState, bestStableState);
+        if (earlyStop) {
+          stats.stopReason = earlyStop;
           break;
         }
         if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
@@ -1150,8 +1190,9 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
       await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
       done += chunk;
       if (deadlineExpired(deadlineMs)) break;
-      if (rootKldEarlyStop(root, options, kldState)) {
-        stats.stopReason = 'kld-stable';
+      const earlyStop = rootEarlyStopReason(root, context, options, fixedVisitTarget, kldState, bestStableState);
+      if (earlyStop) {
+        stats.stopReason = earlyStop;
         break;
       }
     }
@@ -1163,8 +1204,9 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
       await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
       stats.completedVisits += 1;
       if (deadlineExpired(deadlineMs)) break;
-      if (rootKldEarlyStop(root, options, kldState)) {
-        stats.stopReason = 'kld-stable';
+      const earlyStop = rootEarlyStopReason(root, context, options, fixedVisitTarget, kldState, bestStableState);
+      if (earlyStop) {
+        stats.stopReason = earlyStop;
         break;
       }
       if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {

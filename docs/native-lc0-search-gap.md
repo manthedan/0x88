@@ -99,15 +99,20 @@ Examples:
 - stop when policy/value distribution is stable
 - avoid wasting time in obvious positions
 
-Our search mostly stops at fixed visits today.
+Our search supports fixed visits/time by default, plus opt-in smarter stops for controlled play/search experiments:
+
+- `earlyStop: 'root-dominance'` stops when no remaining fixed-visit budget can catch the root leader.
+- `earlyStop: 'best-stable'` stops after the same best move remains ahead for repeated guarded checks.
+- `earlyStop: 'kld-stable'` stops when the root visit distribution stabilizes.
+
+These modes keep minimum-visit/check-interval safeguards and remain opt-in so native fixture parity and deterministic fixed-visit comparisons stay strict.
 
 ### Missing pieces
 
-- best-move stability checks
-- root visit dominance thresholds
-- value/Q stability checks
-- KLD/policy-stability stop tuned for play strength
-- minimum-search safeguards before early stop
+- tuning these thresholds against real play strength
+- richer value/Q stability checks beyond the current best-move Q guard
+- time-management integration that extends sharp/unstable positions
+- per-position difficulty heuristics
 
 ## 6. Tablebases
 
