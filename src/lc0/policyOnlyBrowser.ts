@@ -5,6 +5,7 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
+import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchResult } from './search.ts';
@@ -14,7 +15,7 @@ type NativePrior = { uci: string; index: number; prior: number };
 type NativeRecord = { id: string; backend?: string; fen: string; startFen?: string; moves?: string[]; bestmove: string; topPriors: NativePrior[] };
 type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; elapsedMs?: number };
 type WorkerResponse =
-  | { type: 'ready'; id: number; backend: string }
+  | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
   | { type: 'error'; id: number; error: string };
 
@@ -24,6 +25,7 @@ const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
 const PLAYER_SIDE = params.get('side') === 'black' ? 'black' : 'white';
 const SEARCH_VISITS = Math.max(1, Math.floor(Number(params.get('visits') ?? '32') || 32));
 const SEARCH_WORKER_REQUESTED = params.get('worker') === '1' || params.get('searchWorker') === '1';
+const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
 
 let board: BoardState = parseFen(params.get('fen') ?? START_FEN);
 let historyBoards: BoardState[] = [board];
@@ -34,6 +36,8 @@ let searchWorker: Worker | null = null;
 let useSearchWorker = SEARCH_WORKER_REQUESTED;
 let searchWorkerReady = false;
 let searchWorkerBackend = '—';
+let mainModelCacheStatus = CACHE_MODEL ? 'pending' : 'disabled';
+let workerModelCacheStatus = '';
 let workerRequestSeq = 0;
 const workerPending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 let busy = false;
@@ -131,6 +135,7 @@ function renderStatic() {
   el('sideToMove').textContent = sideToMoveName();
   el('moveList').textContent = playedMoves.length ? playedMoves.join(' ') : '—';
   el('modelPath').textContent = MODEL_URL;
+  el('modelCache').textContent = workerModelCacheStatus ? `main ${mainModelCacheStatus}; worker ${workerModelCacheStatus}` : mainModelCacheStatus;
   el('backend').textContent = describeOrtBackendConfig();
   el('status').textContent = player ? 'ready' : 'loading';
   el('searchMode').textContent = searchModeLabel();
@@ -160,7 +165,8 @@ function renderStatic() {
 
 function renderSearchResult(result: RenderableSearchResult) {
   el('searchSummary').textContent = `${result.move ?? '—'} · ${result.visits} visits · Q ${result.value.toFixed(5)}`;
-  el('searchLatency').textContent = result.elapsedMs === undefined ? '—' : `${result.elapsedMs.toFixed(0)} ms`;
+  const visitsPerSecond = result.elapsedMs && result.elapsedMs > 0 ? result.visits / (result.elapsedMs / 1000) : undefined;
+  el('searchLatency').textContent = result.elapsedMs === undefined ? '—' : `${result.elapsedMs.toFixed(0)} ms · ${visitsPerSecond?.toFixed(1) ?? '—'} visits/s`;
   const maxVisits = Math.max(1, ...result.children.slice(0, 10).map((entry) => entry.visits));
   el('searchChildren').innerHTML = result.children.slice(0, 10).map((entry, i) => {
     const width = Math.max(2, (entry.visits / maxVisits) * 100).toFixed(1);
@@ -219,9 +225,10 @@ async function initSearchWorker(): Promise<void> {
     for (const pending of workerPending.values()) pending.reject(new Error(event.message || 'LC0 search worker error'));
     workerPending.clear();
   });
-  const ready = await postWorkerRequest<{ type: 'ready'; backend: string }>({ type: 'init', modelUrl: MODEL_URL, ep: requestedWorkerEp() });
+  const ready = await postWorkerRequest<{ type: 'ready'; backend: string; modelCache: string }>({ type: 'init', modelUrl: MODEL_URL, ep: requestedWorkerEp(), cacheModel: CACHE_MODEL });
   searchWorkerReady = true;
   searchWorkerBackend = ready.backend;
+  workerModelCacheStatus = ready.modelCache;
   renderStatic();
 }
 
@@ -357,7 +364,9 @@ async function init() {
   el('message').textContent = 'Loading LC0 ONNX model…';
   renderStatic();
   try {
-    const evaluator = await Lc0OnnxEvaluator.create(MODEL_URL);
+    const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: CACHE_MODEL });
+    mainModelCacheStatus = describeLc0ModelLoad(modelLoad);
+    const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
     player = new Lc0PolicyOnlyPlayer(evaluator);
     searcher = new Lc0PuctSearcher(evaluator);
     const diagnostics = await collectOrtRuntimeDiagnostics();
@@ -371,6 +380,7 @@ async function init() {
         searchWorker = null;
         searchWorkerReady = false;
         useSearchWorker = false;
+        workerModelCacheStatus = 'worker unavailable';
         console.warn('LC0 search worker failed; falling back to main-thread search.', error);
       }
     }

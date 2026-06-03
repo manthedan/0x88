@@ -1,4 +1,5 @@
 import { collectOrtRuntimeDiagnostics, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
+import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import type { Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 
@@ -7,6 +8,7 @@ type InitMessage = {
   id: number;
   modelUrl: string;
   ep: OrtExecutionProviderPreference;
+  cacheModel: boolean;
 };
 
 type SearchMessage = {
@@ -24,7 +26,7 @@ type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
 };
 
 type WorkerResponse =
-  | { type: 'ready'; id: number; backend: string }
+  | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'error'; id: number; error: string };
 
@@ -41,10 +43,11 @@ function post(message: WorkerResponse): void {
 
 async function handleInit(message: InitMessage): Promise<void> {
   setRequestedOrtExecutionProviderForCurrentThread(message.ep);
-  searcher = await Lc0PuctSearcher.create(message.modelUrl);
+  const modelLoad = await loadLc0ModelForOrt(message.modelUrl, { cache: message.cacheModel });
+  searcher = await Lc0PuctSearcher.create(modelLoad.model);
   configuredModelUrl = message.modelUrl;
   const diagnostics = await collectOrtRuntimeDiagnostics();
-  post({ type: 'ready', id: message.id, backend: diagnostics.describe });
+  post({ type: 'ready', id: message.id, backend: diagnostics.describe, modelCache: describeLc0ModelLoad(modelLoad) });
 }
 
 async function handleSearch(message: SearchMessage): Promise<void> {
