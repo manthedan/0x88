@@ -19,6 +19,7 @@ This checkpoint records the current custom-kernel path for the batch-8 f16 `lc0w
 - `?encoder0FfnOrtBench=1`: tiny ORT comparison for encoder0 FFN dense1/sqrrelu/dense2/alpha residual/ln2.
 - `?encoder0BlockBench=1`: full encoder0 attention+FFN block through ln2.
 - `?encoder0BlockOrtBench=1`: tiny ORT comparison for attention-value output through attention output projection/ln1 plus FFN/ln2.
+- `?encoderPrefix=/encoderN`: experimental tensor-prefix override for attention-output/FFN/full-block routes so the same plumbing can target later encoder layers.
 
 The browser page now emits a `benchmarkReport` object with browser metadata, GPU adapter info where available, pack verification mode, and timing summaries. `scripts/lc0_browser_wgsl_smokes.mjs` automates the main browser smokes and parses `maxAbsError`. `scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs` runs fresh-session, alternating encoder0-block WGSL vs ORT WebGPU measurements and marks results as non-promotional diagnostics.
 
@@ -71,8 +72,8 @@ Do **not** promote full custom LC0 inference yet.
 
 Next gates before an end-to-end custom runtime:
 
-1. Repeat encoder-block validation across additional encoder layers or generalized tensor names.
-2. Add ORT comparisons for attention output and/or full attention block if practical.
-3. Repeat and broaden alternating browser runs against ORT WebGPU after generalizing beyond encoder0.
+1. Repeat encoder-block validation across additional encoder layers using `?encoderPrefix=/encoderN` once later-layer activation handoff is implemented.
+2. Add ORT comparisons for the remaining full attention block if practical.
+3. Repeat and broaden alternating browser runs against ORT WebGPU after validating more than encoder0.
 4. Prove layer-to-layer activation layout reuse without extra main-thread copies.
 5. Preserve f32 ONNX/native parity as the correctness ladder while using f16/WebGPU as deployment target.

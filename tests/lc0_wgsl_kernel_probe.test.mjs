@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as ort from '../src/nn/ortRuntime.ts';
-import { createTinyAttentionOutputOnnxForTest, createTinyEncoder0BlockOnnxForTest, createTinyEncoder0FfnOnnxForTest, createTinyMatmulAddOnnxForTest, f16BitsToF32 } from '../src/lc0/wgslMatmulAddProbe.ts';
+import { createTinyAttentionOutputOnnxForTest, createTinyEncoder0BlockOnnxForTest, createTinyEncoder0FfnOnnxForTest, createTinyMatmulAddOnnxForTest, f16BitsToF32, lc0WebEncoderBlockTensorNames } from '../src/lc0/wgslMatmulAddProbe.ts';
 
 test('f16BitsToF32 decodes representative IEEE half values used by lc0web kernels', () => {
   assert.equal(f16BitsToF32(0x0000), 0);
@@ -13,6 +13,15 @@ test('f16BitsToF32 decodes representative IEEE half values used by lc0web kernel
   assert.equal(f16BitsToF32(0xfc00), -Infinity);
   assert.ok(Number.isNaN(f16BitsToF32(0x7e00)));
   assert.ok(Math.abs(f16BitsToF32(0x0001) - 5.960464477539063e-8) < 1e-15);
+});
+
+test('lc0web encoder block tensor names can target later encoder prefixes', () => {
+  const names = lc0WebEncoderBlockTensorNames('/encoder3');
+  assert.equal(names.qkv.qWeight, '/encoder3/mha/Q/w/w');
+  assert.equal(names.outDenseWeight, '/encoder3/mha/out/dense/w/w');
+  assert.equal(names.ffnDense2Bias, '/encoder3/ffn/dense2/b/w');
+  assert.equal(names.ln2Scale, '/encoder3/ln2/w/scale');
+  assert.equal(names.smolgen.smolgenWeight, '/const/smolgen_w');
 });
 
 test('tiny MatMul+Add ONNX bytes run through ORT WASM from Uint8Array', async () => {

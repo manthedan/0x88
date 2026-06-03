@@ -1402,8 +1402,8 @@ type AttentionScoreInputs = {
   smolgen: Encoder0SmolgenTensors;
 };
 
-function loadEncoder0SmolgenTensors(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>): Encoder0SmolgenTensors {
-  const tensors = Object.fromEntries(Object.entries(DEFAULT_SMOLGEN_TENSORS).map(([key, name]) => [key, pack.tensors.get(name)])) as Record<keyof typeof DEFAULT_SMOLGEN_TENSORS, Lc0WebTensorView | undefined>;
+function loadEncoder0SmolgenTensors(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>, tensorNames: Record<keyof typeof DEFAULT_SMOLGEN_TENSORS, string> = DEFAULT_SMOLGEN_TENSORS): Encoder0SmolgenTensors {
+  const tensors = Object.fromEntries(Object.entries(tensorNames).map(([key, name]) => [key, pack.tensors.get(name)])) as Record<keyof typeof DEFAULT_SMOLGEN_TENSORS, Lc0WebTensorView | undefined>;
   for (const [key, tensor] of Object.entries(tensors)) if (!tensor) throw new Error(`lc0web encoder0 smolgen tensor missing: ${key}`);
   assertTensorShapeAndBytes(tensors.compressWeight!, [DEFAULT_N, DEFAULT_SMOLGEN_COMPRESSED], 2, 'smolgen.compressWeight');
   assertTensorShapeAndBytes(tensors.dense1Weight!, [DEFAULT_SMOLGEN_FLAT, DEFAULT_SMOLGEN_HIDDEN], 2, 'smolgen.dense1Weight');
@@ -1421,12 +1421,12 @@ function loadEncoder0SmolgenTensors(pack: Awaited<ReturnType<typeof loadLc0WebMo
   return tensors as Encoder0SmolgenTensors;
 }
 
-function loadAttentionScoreInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>): AttentionScoreInputs {
-  const qWeight = pack.tensors.get(DEFAULT_QKV_TENSORS.qWeight);
-  const qBias = pack.tensors.get(DEFAULT_QKV_TENSORS.qBias);
-  const kWeight = pack.tensors.get(DEFAULT_QKV_TENSORS.kWeight);
-  const kBias = pack.tensors.get(DEFAULT_QKV_TENSORS.kBias);
-  const scale = pack.tensors.get(DEFAULT_SCALE_TENSOR);
+function loadAttentionScoreInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>, tensorNames: Pick<Lc0WebEncoderBlockTensorNames, 'qkv' | 'scaleTensor' | 'smolgen'> = { qkv: DEFAULT_QKV_TENSORS, scaleTensor: DEFAULT_SCALE_TENSOR, smolgen: DEFAULT_SMOLGEN_TENSORS }): AttentionScoreInputs {
+  const qWeight = pack.tensors.get(tensorNames.qkv.qWeight);
+  const qBias = pack.tensors.get(tensorNames.qkv.qBias);
+  const kWeight = pack.tensors.get(tensorNames.qkv.kWeight);
+  const kBias = pack.tensors.get(tensorNames.qkv.kBias);
+  const scale = pack.tensors.get(tensorNames.scaleTensor);
   if (!qWeight || !qBias || !kWeight || !kBias || !scale) throw new Error('lc0web attention score tensors were not loaded');
   assertTensorShapeAndBytes(qWeight, [DEFAULT_K, DEFAULT_N], 2, 'qWeight');
   assertTensorShapeAndBytes(qBias, [DEFAULT_N], 2, 'qBias');
@@ -1436,7 +1436,7 @@ function loadAttentionScoreInputs(pack: Awaited<ReturnType<typeof loadLc0WebMode
   for (const tensor of [qWeight, qBias, kWeight, kBias, scale]) {
     if (tensor.info.dtype !== 'f16') throw new Error(`lc0web attention score expects f16 tensor ${tensor.info.name}, got ${tensor.info.dtype}`);
   }
-  return { qWeight, qBias, kWeight, kBias, scale, smolgen: loadEncoder0SmolgenTensors(pack) };
+  return { qWeight, qBias, kWeight, kBias, scale, smolgen: loadEncoder0SmolgenTensors(pack, tensorNames.smolgen) };
 }
 
 function paddedF16ScalarBytes(bytes: Uint8Array): Uint8Array {
@@ -1861,7 +1861,7 @@ function encodeAttentionValueDispatches(device: DeviceLike, pipeline: PipelineLi
   return encoder.finish();
 }
 
-function loadAttentionValueInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>): {
+function loadAttentionValueInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>, tensorNames: Pick<Lc0WebEncoderBlockTensorNames, 'qkv' | 'scaleTensor' | 'smolgen'> = { qkv: DEFAULT_QKV_TENSORS, scaleTensor: DEFAULT_SCALE_TENSOR, smolgen: DEFAULT_SMOLGEN_TENSORS }): {
   qWeight: Lc0WebTensorView;
   qBias: Lc0WebTensorView;
   kWeight: Lc0WebTensorView;
@@ -1871,13 +1871,13 @@ function loadAttentionValueInputs(pack: Awaited<ReturnType<typeof loadLc0WebMode
   scale: Lc0WebTensorView;
   smolgen: Encoder0SmolgenTensors;
 } {
-  const qWeight = pack.tensors.get(DEFAULT_QKV_TENSORS.qWeight);
-  const qBias = pack.tensors.get(DEFAULT_QKV_TENSORS.qBias);
-  const kWeight = pack.tensors.get(DEFAULT_QKV_TENSORS.kWeight);
-  const kBias = pack.tensors.get(DEFAULT_QKV_TENSORS.kBias);
-  const vWeight = pack.tensors.get(DEFAULT_QKV_TENSORS.vWeight);
-  const vBias = pack.tensors.get(DEFAULT_QKV_TENSORS.vBias);
-  const scale = pack.tensors.get(DEFAULT_SCALE_TENSOR);
+  const qWeight = pack.tensors.get(tensorNames.qkv.qWeight);
+  const qBias = pack.tensors.get(tensorNames.qkv.qBias);
+  const kWeight = pack.tensors.get(tensorNames.qkv.kWeight);
+  const kBias = pack.tensors.get(tensorNames.qkv.kBias);
+  const vWeight = pack.tensors.get(tensorNames.qkv.vWeight);
+  const vBias = pack.tensors.get(tensorNames.qkv.vBias);
+  const scale = pack.tensors.get(tensorNames.scaleTensor);
   if (!qWeight || !qBias || !kWeight || !kBias || !vWeight || !vBias || !scale) throw new Error('lc0web attention value tensors were not loaded');
   for (const [label, tensor] of Object.entries({ qWeight, kWeight, vWeight })) assertTensorShapeAndBytes(tensor, [DEFAULT_K, DEFAULT_N], 2, label);
   for (const [label, tensor] of Object.entries({ qBias, kBias, vBias })) assertTensorShapeAndBytes(tensor, [DEFAULT_N], 2, label);
@@ -1885,7 +1885,7 @@ function loadAttentionValueInputs(pack: Awaited<ReturnType<typeof loadLc0WebMode
   for (const tensor of [qWeight, qBias, kWeight, kBias, vWeight, vBias, scale]) {
     if (tensor.info.dtype !== 'f16') throw new Error(`lc0web attention value expects f16 tensor ${tensor.info.name}, got ${tensor.info.dtype}`);
   }
-  return { qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgen: loadEncoder0SmolgenTensors(pack) };
+  return { qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgen: loadEncoder0SmolgenTensors(pack, tensorNames.smolgen) };
 }
 
 function buildAttentionValueReference(tensors: ReturnType<typeof loadAttentionValueInputs>): { probs: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; scale: number; smolgenBias: Float32Array<ArrayBufferLike> } {
@@ -2250,6 +2250,7 @@ export interface Lc0WebAttentionOutputBenchmarkOptions {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  encoderPrefix?: string;
 }
 
 export interface Lc0WebAttentionOutputBenchmarkResult {
@@ -2281,6 +2282,7 @@ export interface Lc0WebAttentionOutputOrtBenchmarkOptions {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  encoderPrefix?: string;
 }
 
 export interface Lc0WebAttentionOutputOrtBenchmarkResult {
@@ -2325,19 +2327,19 @@ function cpuLayerNormRows(input: Float32Array<ArrayBufferLike>, scale: Uint8Arra
   return output;
 }
 
-function loadAttentionOutputInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>): ReturnType<typeof loadAttentionValueInputs> & {
+function loadAttentionOutputInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>, tensorNames: Lc0WebEncoderBlockTensorNames = lc0WebEncoderBlockTensorNames()): ReturnType<typeof loadAttentionValueInputs> & {
   outWeight: Lc0WebTensorView;
   outBias: Lc0WebTensorView;
   alpha: Lc0WebTensorView;
   lnScale: Lc0WebTensorView;
   lnBias: Lc0WebTensorView;
 } {
-  const base = loadAttentionValueInputs(pack);
-  const outWeight = pack.tensors.get(DEFAULT_OUT_DENSE_WEIGHT);
-  const outBias = pack.tensors.get(DEFAULT_OUT_DENSE_BIAS);
-  const alpha = pack.tensors.get(DEFAULT_OUT_ALPHA);
-  const lnScale = pack.tensors.get(DEFAULT_LN1_SCALE);
-  const lnBias = pack.tensors.get(DEFAULT_LN1_BIAS);
+  const base = loadAttentionValueInputs(pack, tensorNames);
+  const outWeight = pack.tensors.get(tensorNames.outDenseWeight);
+  const outBias = pack.tensors.get(tensorNames.outDenseBias);
+  const alpha = pack.tensors.get(tensorNames.outAlpha);
+  const lnScale = pack.tensors.get(tensorNames.ln1Scale);
+  const lnBias = pack.tensors.get(tensorNames.ln1Bias);
   if (!outWeight || !outBias || !alpha || !lnScale || !lnBias) throw new Error('lc0web attention output tensors were not loaded');
   assertTensorShapeAndBytes(outWeight, [DEFAULT_N, DEFAULT_N], 2, 'outWeight');
   assertTensorShapeAndBytes(outBias, [DEFAULT_N], 2, 'outBias');
@@ -2506,11 +2508,15 @@ export async function runLc0WebAttentionOutputBenchmark(options: Lc0WebAttention
   const warmup = clampInteger(options.warmup, 3, 0, 1000);
   const iterations = clampInteger(options.iterations, 50, 1, 10_000);
   const { device, adapterInfo } = await requestDevice();
+  const tensorNames = lc0WebEncoderBlockTensorNames(options.encoderPrefix);
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
-    tensorNames: [...Object.values(DEFAULT_QKV_TENSORS), DEFAULT_SCALE_TENSOR, ...Object.values(DEFAULT_SMOLGEN_TENSORS), DEFAULT_OUT_DENSE_WEIGHT, DEFAULT_OUT_DENSE_BIAS, DEFAULT_OUT_ALPHA, DEFAULT_LN1_SCALE, DEFAULT_LN1_BIAS],
+    tensorNames: [
+      ...Object.values(tensorNames.qkv), tensorNames.scaleTensor, ...Object.values(tensorNames.smolgen),
+      tensorNames.outDenseWeight, tensorNames.outDenseBias, tensorNames.outAlpha, tensorNames.ln1Scale, tensorNames.ln1Bias,
+    ],
   });
-  const tensors = loadAttentionOutputInputs(pack);
+  const tensors = loadAttentionOutputInputs(pack, tensorNames);
   const reference = buildAttentionOutputReference(tensors);
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
   const globals = gpuGlobals();
@@ -2616,11 +2622,15 @@ export function createTinyAttentionOutputOnnxForTest(
 export async function runLc0WebAttentionOutputOrtBenchmark(options: Lc0WebAttentionOutputOrtBenchmarkOptions): Promise<Lc0WebAttentionOutputOrtBenchmarkResult> {
   const warmup = clampInteger(options.warmup, 5, 0, 100);
   const iterations = clampInteger(options.iterations, 25, 1, 1000);
+  const tensorNames = lc0WebEncoderBlockTensorNames(options.encoderPrefix);
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
-    tensorNames: [...Object.values(DEFAULT_QKV_TENSORS), DEFAULT_SCALE_TENSOR, ...Object.values(DEFAULT_SMOLGEN_TENSORS), DEFAULT_OUT_DENSE_WEIGHT, DEFAULT_OUT_DENSE_BIAS, DEFAULT_OUT_ALPHA, DEFAULT_LN1_SCALE, DEFAULT_LN1_BIAS],
+    tensorNames: [
+      ...Object.values(tensorNames.qkv), tensorNames.scaleTensor, ...Object.values(tensorNames.smolgen),
+      tensorNames.outDenseWeight, tensorNames.outDenseBias, tensorNames.outAlpha, tensorNames.ln1Scale, tensorNames.ln1Bias,
+    ],
   });
-  const tensors = loadAttentionOutputInputs(pack);
+  const tensors = loadAttentionOutputInputs(pack, tensorNames);
   const attentionReference = buildAttentionValueReference(tensors);
   const reference = buildAttentionOutputReference(tensors);
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
@@ -2688,12 +2698,86 @@ const DEFAULT_FFN_ALPHA = '/encoder0/ffn/alpha/w';
 const DEFAULT_LN2_SCALE = '/encoder0/ln2/w/scale';
 const DEFAULT_LN2_BIAS = '/encoder0/ln2/w/bias';
 const DEFAULT_FFN_HIDDEN = 1024;
+const DEFAULT_ENCODER_PREFIX = '/encoder0';
+
+type Lc0WebEncoderBlockTensorNames = {
+  qkv: Record<keyof typeof DEFAULT_QKV_TENSORS, string>;
+  scaleTensor: string;
+  smolgen: Record<keyof typeof DEFAULT_SMOLGEN_TENSORS, string>;
+  outDenseWeight: string;
+  outDenseBias: string;
+  outAlpha: string;
+  ln1Scale: string;
+  ln1Bias: string;
+  ffnDense1Weight: string;
+  ffnDense1Bias: string;
+  ffnDense2Weight: string;
+  ffnDense2Bias: string;
+  ffnAlpha: string;
+  ln2Scale: string;
+  ln2Bias: string;
+};
+
+function normalizeEncoderPrefix(prefix: string | undefined): string {
+  const raw = (prefix ?? DEFAULT_ENCODER_PREFIX).trim().replace(/\/+$/, '');
+  if (!raw || !raw.startsWith('/')) throw new Error(`Invalid lc0web encoder prefix: ${prefix}`);
+  return raw;
+}
+
+export function lc0WebEncoderBlockTensorNames(prefix?: string): Lc0WebEncoderBlockTensorNames {
+  const p = normalizeEncoderPrefix(prefix);
+  return {
+    qkv: {
+      qWeight: `${p}/mha/Q/w/w`,
+      qBias: `${p}/mha/Q/b/w`,
+      kWeight: `${p}/mha/K/w/w`,
+      kBias: `${p}/mha/K/b/w`,
+      vWeight: `${p}/mha/V/w/w`,
+      vBias: `${p}/mha/V/b/w`,
+    },
+    scaleTensor: `${p}/mha/QK/scale/w`,
+    smolgen: {
+      compressWeight: `${p}/smolgen/compress/w`,
+      dense1Weight: `${p}/smolgen/dense1/w/w`,
+      dense1Bias: `${p}/smolgen/dense1/b/w`,
+      ln1Scale: `${p}/smolgen/ln1/w/scale`,
+      ln1Bias: `${p}/smolgen/ln1/w/bias`,
+      dense2Weight: `${p}/smolgen/dense2/w/w`,
+      dense2Bias: `${p}/smolgen/dense2/b/w`,
+      ln2Scale: `${p}/smolgen/ln2/w/scale`,
+      ln2Bias: `${p}/smolgen/ln2/w/bias`,
+      smolgenWeight: DEFAULT_SMOLGEN_TENSORS.smolgenWeight,
+    },
+    outDenseWeight: `${p}/mha/out/dense/w/w`,
+    outDenseBias: `${p}/mha/out/dense/b/w`,
+    outAlpha: `${p}/alpha*input/w`,
+    ln1Scale: `${p}/ln1/w/scale`,
+    ln1Bias: `${p}/ln1/w/bias`,
+    ffnDense1Weight: `${p}/ffn/dense1/w/w`,
+    ffnDense1Bias: `${p}/ffn/dense1/b/w`,
+    ffnDense2Weight: `${p}/ffn/dense2/w/w`,
+    ffnDense2Bias: `${p}/ffn/dense2/b/w`,
+    ffnAlpha: `${p}/ffn/alpha/w`,
+    ln2Scale: `${p}/ln2/w/scale`,
+    ln2Bias: `${p}/ln2/w/bias`,
+  };
+}
+
+function encoderBlockTensorNameList(names: Lc0WebEncoderBlockTensorNames): string[] {
+  return [
+    ...Object.values(names.qkv), names.scaleTensor, ...Object.values(names.smolgen),
+    names.outDenseWeight, names.outDenseBias, names.outAlpha, names.ln1Scale, names.ln1Bias,
+    names.ffnDense1Weight, names.ffnDense1Bias, names.ffnDense2Weight, names.ffnDense2Bias,
+    names.ffnAlpha, names.ln2Scale, names.ln2Bias,
+  ];
+}
 
 export interface Lc0WebEncoder0FfnBenchmarkOptions {
   packUrl: string;
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  encoderPrefix?: string;
 }
 
 export interface Lc0WebEncoder0FfnBenchmarkResult {
@@ -2754,15 +2838,15 @@ type Encoder0FfnTensors = ReturnType<typeof loadAttentionOutputInputs> & {
   ln2Bias: Lc0WebTensorView;
 };
 
-function loadEncoder0FfnInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>): Encoder0FfnTensors {
-  const base = loadAttentionOutputInputs(pack);
-  const ffnDense1Weight = pack.tensors.get(DEFAULT_FFN_DENSE1_WEIGHT);
-  const ffnDense1Bias = pack.tensors.get(DEFAULT_FFN_DENSE1_BIAS);
-  const ffnDense2Weight = pack.tensors.get(DEFAULT_FFN_DENSE2_WEIGHT);
-  const ffnDense2Bias = pack.tensors.get(DEFAULT_FFN_DENSE2_BIAS);
-  const ffnAlpha = pack.tensors.get(DEFAULT_FFN_ALPHA);
-  const ln2Scale = pack.tensors.get(DEFAULT_LN2_SCALE);
-  const ln2Bias = pack.tensors.get(DEFAULT_LN2_BIAS);
+function loadEncoder0FfnInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>, tensorNames: Lc0WebEncoderBlockTensorNames = lc0WebEncoderBlockTensorNames()): Encoder0FfnTensors {
+  const base = loadAttentionOutputInputs(pack, tensorNames);
+  const ffnDense1Weight = pack.tensors.get(tensorNames.ffnDense1Weight);
+  const ffnDense1Bias = pack.tensors.get(tensorNames.ffnDense1Bias);
+  const ffnDense2Weight = pack.tensors.get(tensorNames.ffnDense2Weight);
+  const ffnDense2Bias = pack.tensors.get(tensorNames.ffnDense2Bias);
+  const ffnAlpha = pack.tensors.get(tensorNames.ffnAlpha);
+  const ln2Scale = pack.tensors.get(tensorNames.ln2Scale);
+  const ln2Bias = pack.tensors.get(tensorNames.ln2Bias);
   if (!ffnDense1Weight || !ffnDense1Bias || !ffnDense2Weight || !ffnDense2Bias || !ffnAlpha || !ln2Scale || !ln2Bias) throw new Error('lc0web encoder0 FFN tensors were not loaded');
   assertTensorShapeAndBytes(ffnDense1Weight, [DEFAULT_N, DEFAULT_FFN_HIDDEN], 2, 'ffnDense1Weight');
   assertTensorShapeAndBytes(ffnDense1Bias, [DEFAULT_FFN_HIDDEN], 2, 'ffnDense1Bias');
@@ -2936,16 +3020,12 @@ export async function runLc0WebEncoder0FfnBenchmark(options: Lc0WebEncoder0FfnBe
   const warmup = clampInteger(options.warmup, 2, 0, 1000);
   const iterations = clampInteger(options.iterations, 10, 1, 10_000);
   const { device, adapterInfo } = await requestDevice();
+  const tensorNames = lc0WebEncoderBlockTensorNames(options.encoderPrefix);
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
-    tensorNames: [
-      ...Object.values(DEFAULT_QKV_TENSORS), DEFAULT_SCALE_TENSOR, ...Object.values(DEFAULT_SMOLGEN_TENSORS),
-      DEFAULT_OUT_DENSE_WEIGHT, DEFAULT_OUT_DENSE_BIAS, DEFAULT_OUT_ALPHA, DEFAULT_LN1_SCALE, DEFAULT_LN1_BIAS,
-      DEFAULT_FFN_DENSE1_WEIGHT, DEFAULT_FFN_DENSE1_BIAS, DEFAULT_FFN_DENSE2_WEIGHT, DEFAULT_FFN_DENSE2_BIAS,
-      DEFAULT_FFN_ALPHA, DEFAULT_LN2_SCALE, DEFAULT_LN2_BIAS,
-    ],
+    tensorNames: encoderBlockTensorNameList(tensorNames),
   });
-  const tensors = loadEncoder0FfnInputs(pack);
+  const tensors = loadEncoder0FfnInputs(pack, tensorNames);
   const reference = buildEncoder0FfnReference(tensors);
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
   const globals = gpuGlobals();
@@ -3010,16 +3090,12 @@ export async function runLc0WebEncoder0FfnBenchmark(options: Lc0WebEncoder0FfnBe
 export async function runLc0WebEncoder0FfnOrtBenchmark(options: Lc0WebEncoder0FfnBenchmarkOptions): Promise<Lc0WebEncoder0FfnOrtBenchmarkResult> {
   const warmup = clampInteger(options.warmup, 5, 0, 100);
   const iterations = clampInteger(options.iterations, 25, 1, 1000);
+  const tensorNames = lc0WebEncoderBlockTensorNames(options.encoderPrefix);
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
-    tensorNames: [
-      ...Object.values(DEFAULT_QKV_TENSORS), DEFAULT_SCALE_TENSOR, ...Object.values(DEFAULT_SMOLGEN_TENSORS),
-      DEFAULT_OUT_DENSE_WEIGHT, DEFAULT_OUT_DENSE_BIAS, DEFAULT_OUT_ALPHA, DEFAULT_LN1_SCALE, DEFAULT_LN1_BIAS,
-      DEFAULT_FFN_DENSE1_WEIGHT, DEFAULT_FFN_DENSE1_BIAS, DEFAULT_FFN_DENSE2_WEIGHT, DEFAULT_FFN_DENSE2_BIAS,
-      DEFAULT_FFN_ALPHA, DEFAULT_LN2_SCALE, DEFAULT_LN2_BIAS,
-    ],
+    tensorNames: encoderBlockTensorNameList(tensorNames),
   });
-  const tensors = loadEncoder0FfnInputs(pack);
+  const tensors = loadEncoder0FfnInputs(pack, tensorNames);
   const reference = buildEncoder0FfnReference(tensors);
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
   const modelBuildStarted = nowMs();
@@ -3136,6 +3212,7 @@ export interface Lc0WebEncoder0BlockBenchmarkOptions {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  encoderPrefix?: string;
 }
 
 export interface Lc0WebEncoder0BlockBenchmarkResult {
@@ -3204,16 +3281,12 @@ function buildEncoder0BlockReference(tensors: Encoder0FfnTensors): { input: Floa
 export async function runLc0WebEncoder0BlockOrtBenchmark(options: Lc0WebEncoder0BlockBenchmarkOptions): Promise<Lc0WebEncoder0BlockOrtBenchmarkResult> {
   const warmup = clampInteger(options.warmup, 3, 0, 100);
   const iterations = clampInteger(options.iterations, 10, 1, 1000);
+  const tensorNames = lc0WebEncoderBlockTensorNames(options.encoderPrefix);
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
-    tensorNames: [
-      ...Object.values(DEFAULT_QKV_TENSORS), DEFAULT_SCALE_TENSOR, ...Object.values(DEFAULT_SMOLGEN_TENSORS),
-      DEFAULT_OUT_DENSE_WEIGHT, DEFAULT_OUT_DENSE_BIAS, DEFAULT_OUT_ALPHA, DEFAULT_LN1_SCALE, DEFAULT_LN1_BIAS,
-      DEFAULT_FFN_DENSE1_WEIGHT, DEFAULT_FFN_DENSE1_BIAS, DEFAULT_FFN_DENSE2_WEIGHT, DEFAULT_FFN_DENSE2_BIAS,
-      DEFAULT_FFN_ALPHA, DEFAULT_LN2_SCALE, DEFAULT_LN2_BIAS,
-    ],
+    tensorNames: encoderBlockTensorNameList(tensorNames),
   });
-  const tensors = loadEncoder0FfnInputs(pack);
+  const tensors = loadEncoder0FfnInputs(pack, tensorNames);
   const attentionValue = buildAttentionValueReference(tensors);
   const reference = buildEncoder0BlockReference(tensors);
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
@@ -3292,16 +3365,12 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
   const warmup = clampInteger(options.warmup, 1, 0, 1000);
   const iterations = clampInteger(options.iterations, 5, 1, 10_000);
   const { device, adapterInfo } = await requestDevice();
+  const tensorNames = lc0WebEncoderBlockTensorNames(options.encoderPrefix);
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
-    tensorNames: [
-      ...Object.values(DEFAULT_QKV_TENSORS), DEFAULT_SCALE_TENSOR, ...Object.values(DEFAULT_SMOLGEN_TENSORS),
-      DEFAULT_OUT_DENSE_WEIGHT, DEFAULT_OUT_DENSE_BIAS, DEFAULT_OUT_ALPHA, DEFAULT_LN1_SCALE, DEFAULT_LN1_BIAS,
-      DEFAULT_FFN_DENSE1_WEIGHT, DEFAULT_FFN_DENSE1_BIAS, DEFAULT_FFN_DENSE2_WEIGHT, DEFAULT_FFN_DENSE2_BIAS,
-      DEFAULT_FFN_ALPHA, DEFAULT_LN2_SCALE, DEFAULT_LN2_BIAS,
-    ],
+    tensorNames: encoderBlockTensorNameList(tensorNames),
   });
-  const tensors = loadEncoder0FfnInputs(pack);
+  const tensors = loadEncoder0FfnInputs(pack, tensorNames);
   const reference = buildEncoder0BlockReference(tensors);
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
   const globals = gpuGlobals();

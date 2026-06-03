@@ -183,6 +183,7 @@ type AttentionOutputBenchmarkMessage = {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  encoderPrefix?: string;
 };
 
 type AttentionOutputOrtBenchmarkMessage = {
@@ -193,6 +194,7 @@ type AttentionOutputOrtBenchmarkMessage = {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  encoderPrefix?: string;
 };
 
 type Encoder0FfnBenchmarkMessage = {
@@ -202,6 +204,7 @@ type Encoder0FfnBenchmarkMessage = {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  encoderPrefix?: string;
 };
 
 type Encoder0FfnOrtBenchmarkMessage = {
@@ -212,6 +215,7 @@ type Encoder0FfnOrtBenchmarkMessage = {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  encoderPrefix?: string;
 };
 
 type Encoder0BlockBenchmarkMessage = {
@@ -221,6 +225,7 @@ type Encoder0BlockBenchmarkMessage = {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  encoderPrefix?: string;
 };
 
 type Encoder0BlockOrtBenchmarkMessage = {
@@ -231,6 +236,7 @@ type Encoder0BlockOrtBenchmarkMessage = {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  encoderPrefix?: string;
 };
 
 type OrtBenchmarkMessage = {
@@ -486,6 +492,7 @@ async function handleAttentionOutputBenchmark(message: AttentionOutputBenchmarkM
     iterations: message.iterations,
     warmup: message.warmup,
     verifyShards: message.verifyShards,
+    encoderPrefix: message.encoderPrefix,
   });
   post({ type: 'attentionOutputBenchmarkResult', id: message.id, result });
 }
@@ -497,6 +504,7 @@ async function handleAttentionOutputOrtBenchmark(message: AttentionOutputOrtBenc
     iterations: message.iterations,
     warmup: message.warmup,
     verifyShards: message.verifyShards,
+    encoderPrefix: message.encoderPrefix,
   });
   post({ type: 'attentionOutputOrtBenchmarkResult', id: message.id, result });
 }
@@ -507,6 +515,7 @@ async function handleEncoder0FfnBenchmark(message: Encoder0FfnBenchmarkMessage):
     iterations: message.iterations,
     warmup: message.warmup,
     verifyShards: message.verifyShards,
+    encoderPrefix: message.encoderPrefix,
   });
   post({ type: 'encoder0FfnBenchmarkResult', id: message.id, result });
 }
@@ -518,6 +527,7 @@ async function handleEncoder0FfnOrtBenchmark(message: Encoder0FfnOrtBenchmarkMes
     iterations: message.iterations,
     warmup: message.warmup,
     verifyShards: message.verifyShards,
+    encoderPrefix: message.encoderPrefix,
   });
   post({ type: 'encoder0FfnOrtBenchmarkResult', id: message.id, result });
 }
@@ -528,6 +538,7 @@ async function handleEncoder0BlockBenchmark(message: Encoder0BlockBenchmarkMessa
     iterations: message.iterations,
     warmup: message.warmup,
     verifyShards: message.verifyShards,
+    encoderPrefix: message.encoderPrefix,
   });
   post({ type: 'encoder0BlockBenchmarkResult', id: message.id, result });
 }
@@ -539,6 +550,7 @@ async function handleEncoder0BlockOrtBenchmark(message: Encoder0BlockOrtBenchmar
     iterations: message.iterations,
     warmup: message.warmup,
     verifyShards: message.verifyShards,
+    encoderPrefix: message.encoderPrefix,
   });
   post({ type: 'encoder0BlockOrtBenchmarkResult', id: message.id, result });
 }

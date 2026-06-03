@@ -487,6 +487,7 @@ const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.on
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
 const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
 const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
+const ENCODER_PREFIX = params.get('encoderPrefix') ?? undefined;
 const SOFTMAX_BENCH_REQUESTED = params.get('softmaxBench') === '1' || params.get('attentionSoftmaxBench') === '1';
 const ATTENTION_VALUE_BENCH_REQUESTED = params.get('attentionValueBench') === '1' || params.get('valueBench') === '1';
 const ATTENTION_VALUE_ORT_BENCH_REQUESTED = params.get('attentionValueOrtBench') === '1' || params.get('valueOrtBench') === '1';
@@ -993,6 +994,7 @@ async function runAttentionOutputBenchmark(): Promise<void> {
       iterations,
       warmup,
       verifyShards: params.get('packVerify') !== '0',
+      encoderPrefix: ENCODER_PREFIX,
     });
     const rounded = {
       ...response.result,
@@ -1034,6 +1036,7 @@ async function runAttentionOutputOrtBenchmark(): Promise<void> {
       iterations,
       warmup,
       verifyShards: params.get('packVerify') !== '0',
+      encoderPrefix: ENCODER_PREFIX,
     });
     const rounded = {
       ...response.result,
@@ -1077,6 +1080,7 @@ async function runEncoder0BlockOrtBenchmark(): Promise<void> {
       iterations,
       warmup,
       verifyShards: params.get('packVerify') !== '0',
+      encoderPrefix: ENCODER_PREFIX,
     });
     const rounded = {
       ...response.result,
@@ -1119,6 +1123,7 @@ async function runEncoder0BlockBenchmark(): Promise<void> {
       iterations,
       warmup,
       verifyShards: params.get('packVerify') !== '0',
+      encoderPrefix: ENCODER_PREFIX,
     });
     const rounded = {
       ...response.result,
@@ -1159,6 +1164,7 @@ async function runEncoder0FfnBenchmark(): Promise<void> {
       iterations,
       warmup,
       verifyShards: params.get('packVerify') !== '0',
+      encoderPrefix: ENCODER_PREFIX,
     });
     const rounded = {
       ...response.result,
@@ -1200,6 +1206,7 @@ async function runEncoder0FfnOrtBenchmark(): Promise<void> {
       iterations,
       warmup,
       verifyShards: params.get('packVerify') !== '0',
+      encoderPrefix: ENCODER_PREFIX,
     });
     const rounded = {
       ...response.result,
