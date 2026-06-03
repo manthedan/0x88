@@ -93,3 +93,29 @@ Mode 3 — Serious analysis board (flagship delta). Add:
 
 Each step ships behind its own HTML entry (added to `vite.config.ts`), with pure
 logic unit-tested and pages verified via typecheck + build.
+
+## Status (delivered)
+
+Done and verified in-browser (agent-browser against `vite build` + `vite preview`):
+
+- **Shared:** `gameTree.ts` (variation tree + nav + LC0 history) and
+  `chess/pgn.ts` (SAN parse, PGN parse with variations, serialize, multi-game).
+- **Mode 3 — analysis board** (`lc0-analysis.html`): eval bar, MultiPV engine
+  lines (click to enter, hover to preview), LC0 **and** Stockfish analyzing
+  simultaneously, clickable variation move-list, first/prev/next/last + arrow
+  keys, FEN load, PGN load/copy, and an **opening explorer** (multi-game PGN
+  import → per-position move stats with W/D/L, click to walk; transpositions).
+- **Mode 2 — arena** (`lc0-arena.html`): engine registry (LC0 policy / search@100
+  / search@400 / Stockfish d4 / d8), round-robin or gauntlet, games-per-pair and
+  move delay, board-driven games watched live, live standings table, game log,
+  stop, PGN export.
+- **Mode 1 — single engine** (`lc0-policy-only.html`): the existing play/test/
+  debug page, now linked into the shared three-mode nav header.
+- Cross-page nav header on all three; pure logic covered by 20 unit tests.
+
+Verification note: ORT wasm 404s under `vite dev`; verify with
+`vite build` + `vite preview` (see memory `browser-verification`).
+
+Not yet done (future deltas): position editor, eval graph over the mainline,
+game-review accuracy/move-classification, MCTS N/Q charts and per-move Leela
+N/P/Q/WDL detail, and Lichess/Chess.com username import (only PGN paste today).
