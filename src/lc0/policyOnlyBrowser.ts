@@ -18,10 +18,26 @@ type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
 type NativeRecord = { id: string; backend?: string; fen: string; startFen?: string; moves?: string[]; bestmove: string; topPriors: NativePrior[] };
 type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; pv?: string[]; multiPv?: string[][]; elapsedMs?: number; cancelled?: boolean; stats?: Lc0SearchResult['search']['stats'] };
+type PackLoadResult = {
+  packUrl: string;
+  modelName: string;
+  sourceSha256?: string;
+  layout?: string;
+  recommendedRuntime?: string;
+  tensorCount: number;
+  loadedTensorCount: number;
+  loadedTensorBytes: number;
+  shardCount: number;
+  verifiedShardCount: number;
+  shardBytes: number;
+  elapsedMs: number;
+};
+
 type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
+  | { type: 'packLoadResult'; id: number; result: PackLoadResult }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
   | { type: 'error'; id: number; error: string };
 
@@ -51,8 +67,11 @@ type EngineReplyMode = 'policy' | 'search';
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
+const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
+const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
+const PACK_PROBE_REQUESTED = params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null;
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
-const WORKER_ONLY_MODEL = BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
+const WORKER_ONLY_MODEL = PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
 const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
 const BENCH_WARMUP = Math.min(100, Math.max(0, Math.floor(Number(params.get('benchWarmup') ?? '5') || 0)));
@@ -214,10 +233,10 @@ function renderStatic() {
   el('fen').textContent = boardToFen(board);
   el('sideToMove').textContent = sideToMoveName();
   el('moveList').textContent = playedMoves.length ? playedMoves.join(' ') : '—';
-  el('modelPath').textContent = MODEL_URL;
+  el('modelPath').textContent = PACK_PROBE_REQUESTED ? `${MODEL_URL} · pack ${PACK_URL}` : MODEL_URL;
   el('modelCache').textContent = workerModelCacheStatus ? `main ${mainModelCacheStatus}; worker ${workerModelCacheStatus}` : mainModelCacheStatus;
   el('backend').textContent = WORKER_ONLY_MODEL && searchWorkerReady ? searchWorkerBackend : describeOrtBackendConfig();
-  el('status').textContent = evaluationAvailable() ? 'ready' : 'loading';
+  el('status').textContent = PACK_PROBE_REQUESTED ? 'pack probe' : evaluationAvailable() ? 'ready' : 'loading';
   el('searchMode').textContent = searchModeLabel();
   el('searchBatch').textContent = `${searchBatchSize}`;
   el('searchMove').textContent = `Search ${searchVisits}`;
@@ -310,7 +329,8 @@ function postWorkerRequest<T>(message: Record<string, unknown>, onId?: (id: numb
   });
 }
 
-async function initSearchWorker(): Promise<void> {
+async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<void> {
+  const initModel = options.initModel ?? true;
   searchWorker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
   searchWorker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
     const message = event.data;
@@ -324,6 +344,7 @@ async function initSearchWorker(): Promise<void> {
     for (const pending of workerPending.values()) pending.reject(new Error(event.message || 'LC0 search worker error'));
     workerPending.clear();
   });
+  if (!initModel) return;
   const initStarted = performance.now();
   const ready = await postWorkerRequest<{ type: 'ready'; backend: string; modelCache: string }>({ type: 'init', modelUrl: MODEL_URL, ep: requestedWorkerEp(), cacheModel: CACHE_MODEL });
   searchWorkerInitMs = performance.now() - initStarted;
@@ -376,6 +397,41 @@ function renderBenchmarkResult(result: EvalBenchResult) {
   };
   el('benchResult').textContent = JSON.stringify(rounded);
   el('message').textContent = `BENCH_DONE ${rounded.iterations} evals · avg ${rounded.avgMs.toFixed(1)} ms · ${rounded.evalsPerSecond.toFixed(2)} eval/s · ${rounded.backend}`;
+}
+
+async function runPackProbe(): Promise<void> {
+  if (!searchWorker) throw new Error('pack probe requires LC0 worker');
+  const tensorParam = params.get('packTensor') ?? params.get('tensor');
+  const tensorNames = tensorParam ? tensorParam.split(',').map((name) => name.trim()).filter(Boolean) : undefined;
+  const verifyShards = params.get('packVerify') !== '0';
+  el('benchResult').textContent = 'PACK_RUNNING';
+  setBusy(true, `Loading lc0web pack in dedicated worker${tensorNames ? ` (${tensorNames.length} tensor filter)` : ''}…`);
+  try {
+    const started = performance.now();
+    const response = await postWorkerRequest<{ type: 'packLoadResult'; result: PackLoadResult }>({
+      type: 'loadPack',
+      packUrl: PACK_URL,
+      loadWeights: params.get('packWeights') !== '0',
+      verifyShards,
+      tensorNames,
+    });
+    const result = {
+      status: 'PACK_DONE',
+      ...response.result,
+      roundTripMs: Number((performance.now() - started).toFixed(3)),
+      elapsedMs: Number(response.result.elapsedMs.toFixed(3)),
+      shardMB: Number((response.result.shardBytes / 1_000_000).toFixed(3)),
+      loadedTensorMB: Number((response.result.loadedTensorBytes / 1_000_000).toFixed(3)),
+    };
+    el('benchResult').textContent = JSON.stringify(result);
+    el('message').textContent = `PACK_DONE ${result.modelName} · ${result.shardMB.toFixed(1)} MB shards · ${result.elapsedMs.toFixed(0)} ms worker load`;
+  } catch (error) {
+    el('benchResult').textContent = `PACK_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Pack probe failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function runWorkerEvalBenchmark(): Promise<void> {
@@ -883,9 +939,19 @@ function renderWorkerGpuStatus(backend: string) {
 }
 
 async function init() {
-  el('message').textContent = WORKER_ONLY_MODEL ? 'Loading LC0 model in dedicated worker…' : 'Loading LC0 ONNX model…';
+  el('message').textContent = PACK_PROBE_REQUESTED ? 'Preparing dedicated worker for lc0web pack probe…' : WORKER_ONLY_MODEL ? 'Loading LC0 model in dedicated worker…' : 'Loading LC0 ONNX model…';
   renderStatic();
   try {
+    if (PACK_PROBE_REQUESTED) {
+      mainModelCacheStatus = 'pack-probe worker-only (no ONNX session)';
+      workerModelCacheStatus = 'pack shards worker-owned';
+      useSearchWorker = true;
+      await initSearchWorker({ initModel: false });
+      searchWorkerBackend = 'lc0web-pack-loader';
+      renderStatic();
+      await runPackProbe();
+      return;
+    }
     if (WORKER_ONLY_MODEL) {
       mainModelCacheStatus = 'worker-only (not loaded on main thread)';
       useSearchWorker = true;

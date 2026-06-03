@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, copyFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, copyFileSync } from 'node:fs';
 import { basename, dirname, relative, resolve } from 'node:path';
 
 const mode = process.argv.includes('--copy') ? 'copy' : 'symlink';
 const repoRoot = resolve(new URL('..', import.meta.url).pathname);
 const workspaceRoot = resolve(repoRoot, '..');
 const sourceDir = resolve(workspaceRoot, 'models/lc0-bestnets/onnx');
+const packSourceDir = resolve(workspaceRoot, 'models/lc0-bestnets/lc0web');
 const publicDir = resolve(repoRoot, 'public/models/lc0');
 const files = [
   't1-256x10-distilled-swa-2432500.batch1.f32.onnx',
@@ -15,8 +16,21 @@ const files = [
   't1-256x10-distilled-swa-2432500.batch8.f16.onnx',
 ];
 
+const packDirs = [
+  't1-256x10-distilled-swa-2432500.batch8.f16.lc0web',
+];
+
 function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function exposeAsset(source, target) {
+  rmSync(target, { force: true, recursive: true });
+  if (mode === 'copy') {
+    copyFileSync(source, target);
+  } else {
+    symlinkSync(relative(dirname(target), source), target);
+  }
 }
 
 mkdirSync(publicDir, { recursive: true });
@@ -25,12 +39,7 @@ for (const file of files) {
   const source = resolve(sourceDir, file);
   if (!existsSync(source)) throw new Error(`Missing LC0 ONNX source model: ${source}`);
   const target = resolve(publicDir, file);
-  rmSync(target, { force: true });
-  if (mode === 'copy') {
-    copyFileSync(source, target);
-  } else {
-    symlinkSync(relative(dirname(target), source), target);
-  }
+  exposeAsset(source, target);
   const stat = lstatSync(target);
   models.push({
     file,
@@ -42,10 +51,44 @@ for (const file of files) {
   });
 }
 
+const packs = [];
+for (const packDir of packDirs) {
+  const source = resolve(packSourceDir, packDir);
+  if (!existsSync(source)) continue;
+  const target = resolve(publicDir, packDir);
+  rmSync(target, { force: true, recursive: true });
+  mkdirSync(target, { recursive: true });
+  const packFiles = readdirSync(source).filter((file) => !file.startsWith('.')).sort();
+  for (const file of packFiles) {
+    exposeAsset(resolve(source, file), resolve(target, file));
+  }
+  const packManifestPath = resolve(source, 'model.lc0web.json');
+  const packManifest = JSON.parse(readFileSync(packManifestPath, 'utf8'));
+  const metadataBytes = lstatSync(packManifestPath).size;
+  const shardBytes = packManifest.weights.shards.reduce((sum, shard) => sum + shard.bytes, 0);
+  packs.push({
+    id: packDir,
+    url: `/models/lc0/${packDir}/model.lc0web.json`,
+    mode,
+    source: relative(repoRoot, source),
+    format: packManifest.format,
+    version: packManifest.version,
+    sourceSha256: packManifest.model.sourceSha256,
+    packSha256: packManifest.packSha256,
+    metadataBytes,
+    shardBytes,
+    tensorCount: packManifest.weights.tensorCount,
+    shards: packManifest.weights.shards,
+    recommendedRuntime: packManifest.model.recommendedRuntime,
+    layout: packManifest.model.layout,
+  });
+}
+
 const manifest = {
   generatedBy: 'scripts/lc0_prepare_model_assets.mjs',
-  note: 'Local LC0 browser model assets. The large ONNX files are exposed as symlinks by default so they are not committed as blobs.',
+  note: 'Local LC0 browser model assets. The large ONNX/model-pack files are exposed as symlinks by default so they are not committed as blobs.',
   models,
+  packs,
 };
 writeFileSync(resolve(publicDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 console.log(JSON.stringify(manifest, null, 2));

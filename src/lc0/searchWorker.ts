@@ -1,5 +1,6 @@
 import { collectOrtRuntimeDiagnostics, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
 import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
+import { loadLc0WebModelPack } from './modelPack.ts';
 import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 
@@ -32,6 +33,15 @@ type EvaluateBatchMessage = {
   inputs: Lc0EvaluatorInput[];
 };
 
+type LoadPackMessage = {
+  type: 'loadPack';
+  id: number;
+  packUrl: string;
+  loadWeights?: boolean;
+  verifyShards?: boolean;
+  tensorNames?: string[];
+};
+
 type CancelMessage = {
   type: 'cancel';
   id: number;
@@ -39,7 +49,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -47,10 +57,26 @@ type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   cancelled?: boolean;
 };
 
+type PackLoadResult = {
+  packUrl: string;
+  modelName: string;
+  sourceSha256?: string;
+  layout?: string;
+  recommendedRuntime?: string;
+  tensorCount: number;
+  loadedTensorCount: number;
+  loadedTensorBytes: number;
+  shardCount: number;
+  verifiedShardCount: number;
+  shardBytes: number;
+  elapsedMs: number;
+};
+
 type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
+  | { type: 'packLoadResult'; id: number; result: PackLoadResult }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'error'; id: number; error: string };
 
@@ -96,6 +122,34 @@ async function handleEvaluate(message: EvaluateMessage): Promise<void> {
 async function handleEvaluateBatch(message: EvaluateBatchMessage): Promise<void> {
   if (!evaluator) throw new Error('LC0 search worker evaluator is not initialized');
   post({ type: 'evaluationBatchResult', id: message.id, result: await evaluator.evaluateBatch(message.inputs) });
+}
+
+async function handleLoadPack(message: LoadPackMessage): Promise<void> {
+  const pack = await loadLc0WebModelPack(message.packUrl, {
+    loadWeights: message.loadWeights,
+    verifyShards: message.verifyShards,
+    tensorNames: message.tensorNames,
+  });
+  let loadedTensorBytes = 0;
+  for (const tensor of pack.tensors.values()) loadedTensorBytes += tensor.bytes.byteLength;
+  post({
+    type: 'packLoadResult',
+    id: message.id,
+    result: {
+      packUrl: pack.manifestUrl,
+      modelName: pack.manifest.model.name,
+      sourceSha256: pack.manifest.model.sourceSha256,
+      layout: pack.manifest.model.layout,
+      recommendedRuntime: pack.manifest.model.recommendedRuntime,
+      tensorCount: pack.manifest.weights.tensorCount,
+      loadedTensorCount: pack.tensors.size,
+      loadedTensorBytes,
+      shardCount: pack.manifest.weights.shards.length,
+      verifiedShardCount: pack.verifiedShards.length,
+      shardBytes: pack.manifest.weights.shards.reduce((sum, shard) => sum + shard.bytes, 0),
+      elapsedMs: pack.elapsedMs,
+    },
+  });
 }
 
 function isAbortError(error: unknown): boolean {
@@ -163,6 +217,7 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
   void enqueueModelOperation(async () => {
     try {
       if (message.type === 'init') await handleInit(message);
+      else if (message.type === 'loadPack') await handleLoadPack(message);
       else if (message.type === 'evaluate') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleEvaluate(message);
