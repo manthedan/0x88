@@ -131,7 +131,7 @@ export class Lc0PuctSearcher {
       : useInternalTree ? this.compatibleCachedRoot(board, historyFens) : undefined;
     const result = await searchRoot(board, this.evaluator, {
       ...searchOptions,
-      visits: options.visits ?? 32,
+      visits: options.visits ?? (options.movetimeMs && options.movetimeMs > 0 ? Number.MAX_SAFE_INTEGER : 32),
       temperature: options.temperature ?? 0,
       cpuctSchedule: options.cpuctSchedule ?? 'lc0-log',
       fpuStrategy: options.fpuStrategy ?? 'lc0-reduction',

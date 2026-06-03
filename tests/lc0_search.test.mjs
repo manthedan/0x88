@@ -136,6 +136,23 @@ test('LC0 search omits multiPv when multiPv <= 1', async () => {
   assert.ok(result.pv.length >= 1, 'single pv is still present');
 });
 
+test('LC0 movetime search returns best-so-far instead of aborting on soft timeout', async () => {
+  const slowEvaluator = {
+    async evaluate(input) {
+      await new Promise((resolve) => setTimeout(resolve, 8));
+      const board = typeof input === 'object' && input !== null && 'positions' in input ? input.positions[input.positions.length - 1] : input;
+      const parsed = typeof board === 'string' ? parseFen(board) : board;
+      const priors = legalMoves(parsed).map((move) => ({ uci: moveToUci(move), index: 0, logit: 0, prior: 1 }));
+      return { fen: boardToFen(parsed), wdl: [0.34, 0.32, 0.34], q: 0, mlh: 80, legalPriors: priors };
+    },
+  };
+  const result = await new Lc0PuctSearcher(slowEvaluator).search(START_FEN, { movetimeMs: 25 });
+  assert.ok(result.move, 'soft timeout still returns a move');
+  assert.equal(result.search.stats?.stopReason, 'movetime');
+  assert.equal(result.search.stats?.requestedVisits, Number.MAX_SAFE_INTEGER, 'movetime-only search uses deadline rather than a reachable visit cap');
+  assert.ok((result.search.stats?.completedVisits ?? Number.MAX_SAFE_INTEGER) < 200, `completed only best-so-far visits, got ${result.search.stats?.completedVisits}`);
+});
+
 test('LC0 search throws AbortError when given an already-aborted signal', async () => {
   const controller = new AbortController();
   controller.abort();

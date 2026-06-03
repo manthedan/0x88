@@ -20,6 +20,7 @@ interface ArenaEngine {
   id: string;
   name: string;
   move(positions: BoardState[], signal: AbortSignal): Promise<string | null>;
+  warmup?(signal: AbortSignal): Promise<void>;
 }
 interface GameRecord { pgn: string; }
 interface ScheduledArenaGame extends ArenaPairing { opening: ArenaOpening; }
@@ -90,19 +91,49 @@ function selectedEngineIds(): string[] {
   return [...el('engines').querySelectorAll('input:checked')].map((node) => (node as HTMLInputElement).value);
 }
 
+function arenaBudgetMode(): 'fixed' | 'movetime' {
+  return selectEl('budgetModeSelect').value === 'movetime' ? 'movetime' : 'fixed';
+}
+
+function arenaMovetimeMs(): number {
+  return Math.max(10, Math.min(60000, Math.floor(Number(inputEl('movetimeInput').value) || 500)));
+}
+
 function buildEngines() {
   engines.clear();
-  const lc0Search = (visits: number): ArenaEngine['move'] => async (positions, signal) =>
-    (await searcher!.search({ positions }, { visits, signal, yieldEveryMs: 16 })).move ?? null;
+  const warmupPositions = [parseFen(START_FEN)];
+  const lc0Search = (visits: number): ArenaEngine['move'] => async (positions, signal) => {
+    const timed = arenaBudgetMode() === 'movetime';
+    return (await searcher!.search({ positions }, {
+      visits: timed ? undefined : visits,
+      movetimeMs: timed ? arenaMovetimeMs() : undefined,
+      signal,
+      yieldEveryMs: 16,
+    })).move ?? null;
+  };
   const sf = (depth: number): ArenaEngine['move'] => async (positions, signal) => {
-    stockfish!.setOptions({ depth });
+    if (arenaBudgetMode() === 'movetime') stockfish!.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
+    else stockfish!.setOptions({ depth, movetimeMs: undefined });
     return stockfish!.bestMove(boardToFen(positions[positions.length - 1]), signal);
   };
-  engines.set('lc0-policy', { id: 'lc0-policy', name: 'LC0 policy', move: async (positions) => (await player!.chooseMove({ positions })).move ?? null });
-  engines.set('lc0-s100', { id: 'lc0-s100', name: 'LC0 search 100', move: lc0Search(100) });
-  engines.set('lc0-s400', { id: 'lc0-s400', name: 'LC0 search 400', move: lc0Search(400) });
-  engines.set('sf-d4', { id: 'sf-d4', name: 'SF lite d4', move: sf(4) });
-  engines.set('sf-d8', { id: 'sf-d8', name: 'SF lite d8', move: sf(8) });
+  const lc0SearchWarmup = async (signal: AbortSignal) => {
+    await searcher!.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
+    searcher!.resetTree();
+  };
+  const stockfishWarmup = async (signal: AbortSignal) => {
+    stockfish!.setOptions({ depth: 1, movetimeMs: undefined });
+    await stockfish!.bestMove(START_FEN, signal);
+  };
+  engines.set('lc0-policy', {
+    id: 'lc0-policy',
+    name: 'LC0 policy',
+    move: async (positions) => (await player!.chooseMove({ positions })).move ?? null,
+    warmup: async () => { await player!.chooseMove({ positions: warmupPositions }); },
+  });
+  engines.set('lc0-s100', { id: 'lc0-s100', name: 'LC0 search 100', move: lc0Search(100), warmup: lc0SearchWarmup });
+  engines.set('lc0-s400', { id: 'lc0-s400', name: 'LC0 search 400', move: lc0Search(400), warmup: lc0SearchWarmup });
+  engines.set('sf-d4', { id: 'sf-d4', name: 'SF lite d4', move: sf(4), warmup: stockfishWarmup });
+  engines.set('sf-d8', { id: 'sf-d8', name: 'SF lite d8', move: sf(8), warmup: stockfishWarmup });
 }
 
 function refreshChampionOptions() {
@@ -194,6 +225,18 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
+async function warmUpSelectedEngines(ids: string[], signal: AbortSignal): Promise<void> {
+  const warmed = new Set<string>();
+  for (const id of ids) {
+    if (signal.aborted) return;
+    const engine = engines.get(id);
+    if (!engine?.warmup || warmed.has(id)) continue;
+    el('message').textContent = `Warming up ${engine.name}…`;
+    await engine.warmup(signal);
+    warmed.add(id);
+  }
+}
+
 function legalFromUci(current: BoardState, uci: string | null): Move | undefined {
   return uci ? legalMoves(current).find((m) => moveToUci(m) === uci) : undefined;
 }
@@ -267,6 +310,8 @@ async function startTournament() {
   renderStandings(standings);
   let played = 0;
   try {
+    await warmUpSelectedEngines(ids, abort.signal);
+    if (abort.signal.aborted) return;
     for (let i = 0; i < pairings.length; i++) {
       if (abort.signal.aborted) break;
       const { white, black, opening } = pairings[i];
@@ -290,7 +335,13 @@ async function startTournament() {
       : `Tournament done (${played} games). Winner: ${leader?.name ?? '—'} with ${leader?.score ?? 0}.`;
     el('pairing').textContent = 'Tournament finished.';
   } catch (error) {
-    el('message').textContent = `Tournament failed: ${(error as Error).message}`;
+    if (isAbortError(error) || abort?.signal.aborted) {
+      const leader = rankedStandings(standings)[0];
+      el('message').textContent = `Stopped after ${played} game(s). Leader: ${leader?.name ?? '—'}.`;
+      el('pairing').textContent = 'Tournament stopped.';
+    } else {
+      el('message').textContent = `Tournament failed: ${(error as Error).message}`;
+    }
   } finally {
     running = false;
     abort = null;

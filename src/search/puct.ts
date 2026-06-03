@@ -70,6 +70,8 @@ export interface SearchOptions {
   multiPv?: number;
   rootMoves?: Move[];
   signal?: AbortSignal;
+  /** Soft wall-clock budget. When elapsed, search returns best-so-far instead of throwing. */
+  movetimeMs?: number;
   yieldEveryMs?: number;
   /** Reusable root from a previous search at the same position. Ignored when rootMoves restricts the root. */
   root?: Node | null;
@@ -110,7 +112,7 @@ export interface SearchStats {
   neuralEvalMisses?: number;
   cacheHits?: number;
   maxRootVisits?: number;
-  stopReason?: 'visit-budget' | 'neural-budget' | 'max-visits' | 'root-dominance' | 'kld-stable' | 'no-cache-metrics-fixed-visits';
+  stopReason?: 'visit-budget' | 'movetime' | 'neural-budget' | 'max-visits' | 'root-dominance' | 'kld-stable' | 'no-cache-metrics-fixed-visits';
   rootReused?: boolean;
   transpositionHits?: number;
 }
@@ -679,6 +681,14 @@ function yieldToUi(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function deadlineFromMovetime(startMs: number, movetimeMs?: number): number | undefined {
+  return movetimeMs && Number.isFinite(movetimeMs) && movetimeMs > 0 ? startMs + Math.floor(movetimeMs) : undefined;
+}
+
+function deadlineExpired(deadlineMs?: number): boolean {
+  return deadlineMs !== undefined && nowMs() >= deadlineMs;
+}
+
 function sameHistory(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((fen, i) => fen === b[i]);
 }
@@ -890,10 +900,10 @@ function finishExpansion(node: Node, moves: Move[], evaln: Evaluation, context: 
   return valueFromEvaluation(evaln, context);
 }
 
-async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>) {
+async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>, deadlineMs?: number) {
   let done = 0;
   let lastYield = nowMs();
-  while (done < visits) {
+  while (done < visits && !deadlineExpired(deadlineMs)) {
     throwIfAborted(signal);
     const want = Math.min(batchSize, visits - done);
     const selected: SelectedLeaf[] = [];
@@ -950,6 +960,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
     }
     done += want;
     throwIfAborted(signal);
+    if (deadlineExpired(deadlineMs)) break;
     if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
       await yieldToUi();
       lastYield = nowMs();
@@ -960,7 +971,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
 
 export async function searchRoot(board: BoardState, evaluator: Evaluator, options: SearchOptions = {}): Promise<SearchResult> {
   const tSearch0 = nowMs();
-  const visits = Math.max(1, Math.floor(options.visits ?? 8));
+  const visits = Math.max(1, Math.floor(options.visits ?? (options.movetimeMs && options.movetimeMs > 0 ? Number.MAX_SAFE_INTEGER : 8)));
   const context: SearchPolicyContext = {
     cpuct: options.cpuct ?? 1.5,
     fpu: options.fpu ?? 0,
@@ -1030,6 +1041,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   }
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? 1));
   const signal = options.signal;
+  const deadlineMs = deadlineFromMovetime(tSearch0, options.movetimeMs);
   const yieldEveryMs = Math.max(0, Math.floor(options.yieldEveryMs ?? 0));
   const priorRootVisits = reusableRoot ? (root.visits ?? root.edges.reduce((sum, edge) => sum + edge.visits, 0)) : 0;
   const visitsToRun = reusableRoot ? Math.max(0, visits - priorRootVisits) : visits;
@@ -1044,13 +1056,14 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     stats.maxRootVisits = maxRootVisits;
     if (!cacheAware) {
       stats.stopReason = 'no-cache-metrics-fixed-visits';
-      if (batchSize > 1) await runBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable);
+      if (batchSize > 1) await runBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs);
       else {
         let lastYield = nowMs();
-        for (let i = 0; i < visitsToRun; i++) {
+        for (let i = 0; i < visitsToRun && !deadlineExpired(deadlineMs); i++) {
           throwIfAborted(signal);
           await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
           stats.completedVisits += 1;
+          if (deadlineExpired(deadlineMs)) break;
           if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
             await yieldToUi();
             lastYield = nowMs();
@@ -1058,18 +1071,23 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
           }
         }
       }
+      if (deadlineExpired(deadlineMs) && stats.completedVisits < visitsToRun) stats.stopReason = 'movetime';
     } else {
       const startMisses = stats.neuralEvalMisses ?? 0;
       let lastYield = nowMs();
-      while (((stats.neuralEvalMisses ?? 0) - startMisses) < visits && rootVisitCount(root) < maxRootVisits) {
+      while (((stats.neuralEvalMisses ?? 0) - startMisses) < visits && rootVisitCount(root) < maxRootVisits && !deadlineExpired(deadlineMs)) {
         throwIfAborted(signal);
         const room = Math.max(0, maxRootVisits - rootVisitCount(root));
         const chunk = Math.max(1, Math.min(batchSize, room));
         const beforeCompleted = stats.completedVisits;
-        if (batchSize > 1) await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable);
+        if (batchSize > 1) await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs);
         else {
           await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
           stats.completedVisits += 1;
+        }
+        if (deadlineExpired(deadlineMs)) {
+          stats.stopReason = 'movetime';
+          break;
         }
         if (stats.completedVisits === beforeCompleted) break;
         if (options.earlyStop === 'root-dominance' && rootVisitDominanceStop(root, maxRootVisits)) {
@@ -1086,26 +1104,28 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
           throwIfAborted(signal);
         }
       }
-      if (!stats.stopReason) stats.stopReason = ((stats.neuralEvalMisses ?? 0) - startMisses) >= visits ? 'neural-budget' : 'max-visits';
+      if (!stats.stopReason) stats.stopReason = deadlineExpired(deadlineMs) ? 'movetime' : ((stats.neuralEvalMisses ?? 0) - startMisses) >= visits ? 'neural-budget' : 'max-visits';
     }
   } else if (batchSize > 1) {
     let done = 0;
-    while (done < visitsToRun) {
+    while (done < visitsToRun && !deadlineExpired(deadlineMs)) {
       const chunk = Math.min(batchSize, visitsToRun - done);
-      await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable);
+      await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs);
       done += chunk;
+      if (deadlineExpired(deadlineMs)) break;
       if (rootKldEarlyStop(root, options, kldState)) {
         stats.stopReason = 'kld-stable';
         break;
       }
     }
-    if (!stats.stopReason) stats.stopReason = 'visit-budget';
+    if (!stats.stopReason) stats.stopReason = deadlineExpired(deadlineMs) && done < visitsToRun ? 'movetime' : 'visit-budget';
   } else {
     let lastYield = nowMs();
-    for (let i = 0; i < visitsToRun; i++) {
+    for (let i = 0; i < visitsToRun && !deadlineExpired(deadlineMs); i++) {
       throwIfAborted(signal);
       await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
       stats.completedVisits += 1;
+      if (deadlineExpired(deadlineMs)) break;
       if (rootKldEarlyStop(root, options, kldState)) {
         stats.stopReason = 'kld-stable';
         break;
@@ -1116,7 +1136,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
         throwIfAborted(signal);
       }
     }
-    if (!stats.stopReason) stats.stopReason = 'visit-budget';
+    if (!stats.stopReason) stats.stopReason = deadlineExpired(deadlineMs) && stats.completedVisits < visitsToRun ? 'movetime' : 'visit-budget';
   }
   root.visits = priorRootVisits + stats.completedVisits;
   const policy = searchPolicy.rootPolicy(root.edges, context, root);
