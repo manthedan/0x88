@@ -3,6 +3,14 @@ import { loadLc0WebModelPack, type Lc0WebTensorView } from './modelPack.ts';
 
 const DEFAULT_WEIGHT_TENSOR = '/encoder0/mha/Q/w/w';
 const DEFAULT_BIAS_TENSOR = '/encoder0/mha/Q/b/w';
+const DEFAULT_QKV_TENSORS = {
+  qWeight: '/encoder0/mha/Q/w/w',
+  qBias: '/encoder0/mha/Q/b/w',
+  kWeight: '/encoder0/mha/K/w/w',
+  kBias: '/encoder0/mha/K/b/w',
+  vWeight: '/encoder0/mha/V/w/w',
+  vBias: '/encoder0/mha/V/b/w',
+} as const;
 const DEFAULT_K = 256;
 const DEFAULT_N = 256;
 
@@ -73,6 +81,13 @@ export interface Lc0WebMatmulAddKernelBenchmarkResult {
   outputSample: number[];
 }
 
+export interface Lc0WebQkvProjectionProbeOptions {
+  packUrl: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+}
+
 export interface Lc0WebMatmulAddOrtBenchmarkResult {
   status: 'ORT_BENCH_DONE';
   packUrl: string;
@@ -94,6 +109,25 @@ export interface Lc0WebMatmulAddOrtBenchmarkResult {
   maxAbsError: number;
   rmsError: number;
   outputSample: number[];
+}
+
+export interface Lc0WebQkvProjectionProbeResult {
+  status: 'QKV_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  k: number;
+  n: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  avgMs: number;
+  minMs: number;
+  maxMs: number;
+  firstMs: number;
+  maxAbsError: { q: number; k: number; v: number };
+  rmsError: { q: number; k: number; v: number };
+  outputSample: { q: number[]; k: number[]; v: number[] };
 }
 
 type GpuGlobals = typeof globalThis & {
@@ -766,4 +800,163 @@ export async function runLc0WebMatmulAddOrtBenchmark(options: Lc0WebMatmulAddOrt
     rmsError,
     outputSample: Array.from(output.slice(0, 8)),
   };
+}
+
+const QKV_WGSL = `${WGSL_HEADER}
+@group(0) @binding(4) var<storage, read> kWeightsF16: array<u32>;
+@group(0) @binding(5) var<storage, read> kBiasF16: array<u32>;
+@group(0) @binding(6) var<storage, read> vWeightsF16: array<u32>;
+@group(0) @binding(7) var<storage, read> vBiasF16: array<u32>;
+
+fn load_k_weight(index: u32) -> f32 {
+  return pick_lane(kWeightsF16[index >> 1u], index);
+}
+
+fn load_k_bias(index: u32) -> f32 {
+  return pick_lane(kBiasF16[index >> 1u], index);
+}
+
+fn load_v_weight(index: u32) -> f32 {
+  return pick_lane(vWeightsF16[index >> 1u], index);
+}
+
+fn load_v_bias(index: u32) -> f32 {
+  return pick_lane(vBiasF16[index >> 1u], index);
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let col = gid.x;
+  if (col >= 256u) { return; }
+  var q_sum = load_bias(col);
+  var k_sum = load_k_bias(col);
+  var v_sum = load_v_bias(col);
+  for (var row = 0u; row < 256u; row = row + 1u) {
+    let x = inputVec[row];
+    let base = row * 256u + col;
+    q_sum = q_sum + x * load_weight(base);
+    k_sum = k_sum + x * load_k_weight(base);
+    v_sum = v_sum + x * load_v_weight(base);
+  }
+  outputVec[col] = q_sum;
+  outputVec[256u + col] = k_sum;
+  outputVec[512u + col] = v_sum;
+}
+`;
+
+function createQkvPipeline(device: DeviceLike, buffers: {
+  input: BufferLike;
+  qWeight: BufferLike;
+  qBias: BufferLike;
+  kWeight: BufferLike;
+  kBias: BufferLike;
+  vWeight: BufferLike;
+  vBias: BufferLike;
+  output: BufferLike;
+}): { pipeline: PipelineLike; bindGroup: unknown } {
+  const module = device.createShaderModule({ label: 'lc0web qkv projection probe', code: QKV_WGSL });
+  const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
+  const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.input } },
+      { binding: 1, resource: { buffer: buffers.qWeight } },
+      { binding: 2, resource: { buffer: buffers.qBias } },
+      { binding: 3, resource: { buffer: buffers.output } },
+      { binding: 4, resource: { buffer: buffers.kWeight } },
+      { binding: 5, resource: { buffer: buffers.kBias } },
+      { binding: 6, resource: { buffer: buffers.vWeight } },
+      { binding: 7, resource: { buffer: buffers.vBias } },
+    ],
+  });
+  return { pipeline, bindGroup };
+}
+
+async function runQkvOnce(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, outputBuffer: BufferLike, readbackBuffer: BufferLike): Promise<{ q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike> }> {
+  const globals = gpuGlobals();
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 64));
+  pass.end();
+  encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, DEFAULT_N * 3 * 4);
+  device.queue.submit([encoder.finish()]);
+  await readbackBuffer.mapAsync(globals.GPUMapMode!.READ);
+  const all = new Float32Array(readbackBuffer.getMappedRange().slice(0));
+  readbackBuffer.unmap();
+  return { q: all.slice(0, DEFAULT_N), k: all.slice(DEFAULT_N, DEFAULT_N * 2), v: all.slice(DEFAULT_N * 2, DEFAULT_N * 3) };
+}
+
+export async function runLc0WebQkvProjectionProbe(options: Lc0WebQkvProjectionProbeOptions): Promise<Lc0WebQkvProjectionProbeResult> {
+  const warmup = clampInteger(options.warmup, 2, 0, 50);
+  const iterations = clampInteger(options.iterations, 10, 1, 1000);
+  const { device, adapterInfo } = await requestDevice();
+  const tensorNames = Object.values(DEFAULT_QKV_TENSORS);
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames,
+  });
+  const tensors = Object.fromEntries(Object.entries(DEFAULT_QKV_TENSORS).map(([key, name]) => [key, pack.tensors.get(name)])) as Record<keyof typeof DEFAULT_QKV_TENSORS, Lc0WebTensorView | undefined>;
+  for (const [key, tensor] of Object.entries(tensors)) {
+    if (!tensor) throw new Error(`lc0web QKV projection tensor missing: ${key}`);
+    const isBias = key.endsWith('Bias');
+    assertTensorShapeAndBytes(tensor, isBias ? [DEFAULT_N] : [DEFAULT_K, DEFAULT_N], 2, key);
+    if (tensor.info.dtype !== 'f16') throw new Error(`lc0web QKV projection expects f16 tensor ${tensor.info.name}, got ${tensor.info.dtype}`);
+  }
+
+  const globals = gpuGlobals();
+  const usage = globals.GPUBufferUsage!;
+  const input = makeInputVector(DEFAULT_K);
+  const cpuQ = cpuMatmulAdd(input, tensors.qWeight!.bytes, tensors.qBias!.bytes, DEFAULT_K, DEFAULT_N);
+  const cpuK = cpuMatmulAdd(input, tensors.kWeight!.bytes, tensors.kBias!.bytes, DEFAULT_K, DEFAULT_N);
+  const cpuV = cpuMatmulAdd(input, tensors.vWeight!.bytes, tensors.vBias!.bytes, DEFAULT_K, DEFAULT_N);
+  const liveBuffers: BufferLike[] = [];
+  try {
+    const inputBuffer = createStorageBuffer(device, input, usage.STORAGE | usage.COPY_DST);
+    const qWeight = createStorageBuffer(device, tensors.qWeight!.bytes, usage.STORAGE | usage.COPY_DST);
+    const qBias = createStorageBuffer(device, tensors.qBias!.bytes, usage.STORAGE | usage.COPY_DST);
+    const kWeight = createStorageBuffer(device, tensors.kWeight!.bytes, usage.STORAGE | usage.COPY_DST);
+    const kBias = createStorageBuffer(device, tensors.kBias!.bytes, usage.STORAGE | usage.COPY_DST);
+    const vWeight = createStorageBuffer(device, tensors.vWeight!.bytes, usage.STORAGE | usage.COPY_DST);
+    const vBias = createStorageBuffer(device, tensors.vBias!.bytes, usage.STORAGE | usage.COPY_DST);
+    const outputBuffer = device.createBuffer({ size: DEFAULT_N * 3 * 4, usage: usage.STORAGE | usage.COPY_SRC });
+    const readbackBuffer = device.createBuffer({ size: DEFAULT_N * 3 * 4, usage: usage.MAP_READ | usage.COPY_DST });
+    liveBuffers.push(inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, outputBuffer, readbackBuffer);
+    const { pipeline, bindGroup } = createQkvPipeline(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, output: outputBuffer });
+
+    let outputs: { q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike> } = { q: new Float32Array(DEFAULT_N), k: new Float32Array(DEFAULT_N), v: new Float32Array(DEFAULT_N) };
+    for (let i = 0; i < warmup; i++) outputs = await runQkvOnce(device, pipeline, bindGroup, outputBuffer, readbackBuffer);
+    const times: number[] = [];
+    for (let i = 0; i < iterations; i++) {
+      const started = nowMs();
+      outputs = await runQkvOnce(device, pipeline, bindGroup, outputBuffer, readbackBuffer);
+      times.push(nowMs() - started);
+    }
+    const qErr = computeErrorStats(outputs.q, cpuQ, DEFAULT_N);
+    const kErr = computeErrorStats(outputs.k, cpuK, DEFAULT_N);
+    const vErr = computeErrorStats(outputs.v, cpuV, DEFAULT_N);
+    assertErrorInTolerance(Math.max(qErr.maxAbsError, kErr.maxAbsError, vErr.maxAbsError));
+    const avgMs = times.reduce((sum, value) => sum + value, 0) / times.length;
+    return {
+      status: 'QKV_DONE',
+      packUrl: pack.manifestUrl,
+      modelName: pack.manifest.model.name,
+      adapterInfo,
+      k: DEFAULT_K,
+      n: DEFAULT_N,
+      warmup,
+      iterations,
+      packLoadMs: pack.elapsedMs,
+      avgMs,
+      minMs: Math.min(...times),
+      maxMs: Math.max(...times),
+      firstMs: times[0],
+      maxAbsError: { q: qErr.maxAbsError, k: kErr.maxAbsError, v: vErr.maxAbsError },
+      rmsError: { q: qErr.rmsError, k: kErr.rmsError, v: vErr.rmsError },
+      outputSample: { q: Array.from(outputs.q.slice(0, 8)), k: Array.from(outputs.k.slice(0, 8)), v: Array.from(outputs.v.slice(0, 8)) },
+    };
+  } finally {
+    for (const buffer of liveBuffers) buffer.destroy?.();
+  }
 }

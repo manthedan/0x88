@@ -80,6 +80,25 @@ type KernelBenchmarkResult = {
   outputSample: number[];
 };
 
+type QkvProbeResult = {
+  status: 'QKV_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  k: number;
+  n: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  avgMs: number;
+  minMs: number;
+  maxMs: number;
+  firstMs: number;
+  maxAbsError: { q: number; k: number; v: number };
+  rmsError: { q: number; k: number; v: number };
+  outputSample: { q: number[]; k: number[]; v: number[] };
+};
+
 type OrtBenchmarkResult = {
   status: 'ORT_BENCH_DONE';
   packUrl: string;
@@ -111,6 +130,7 @@ type WorkerResponse =
   | { type: 'kernelProbeResult'; id: number; result: KernelProbeResult }
   | { type: 'kernelBenchmarkResult'; id: number; result: KernelBenchmarkResult }
   | { type: 'ortBenchmarkResult'; id: number; result: OrtBenchmarkResult }
+  | { type: 'qkvProbeResult'; id: number; result: QkvProbeResult }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
   | { type: 'error'; id: number; error: string };
 
@@ -142,9 +162,10 @@ const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.on
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
 const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
 const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
+const QKV_PROBE_REQUESTED = params.get('qkvProbe') === '1' || params.get('qkvBench') === '1';
 const ORT_OP_BENCH_REQUESTED = params.get('ortOpBench') === '1' || params.get('ortBench') === '1';
 const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('kernelBenchmark') === '1' || params.get('wgslBench') === '1';
-const KERNEL_PROBE_REQUESTED = ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
+const KERNEL_PROBE_REQUESTED = QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
 const PACK_PROBE_REQUESTED = KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null;
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const WORKER_ONLY_MODEL = PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
@@ -508,6 +529,45 @@ async function runPackProbe(): Promise<void> {
   } catch (error) {
     el('benchResult').textContent = `PACK_FAILED ${(error as Error).message}`;
     el('message').textContent = `Pack probe failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runQkvProbe(): Promise<void> {
+  if (!searchWorker) throw new Error('QKV projection probe requires LC0 worker');
+  const rawIters = Number(params.get('qkvIters') ?? params.get('kernelIters') ?? '10');
+  const rawWarmup = Number(params.get('qkvWarmup') ?? params.get('kernelWarmup') ?? '2');
+  const iterations = Math.min(1000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 10)));
+  const warmup = Math.min(50, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 2)));
+  el('benchResult').textContent = 'QKV_RUNNING';
+  setBusy(true, `Running lc0web WGSL Q/K/V projection probe: ${warmup} warmup + ${iterations} timed…`);
+  try {
+    const response = await postWorkerRequest<{ type: 'qkvProbeResult'; result: QkvProbeResult }>({
+      type: 'qkvProbe',
+      packUrl: PACK_URL,
+      iterations,
+      warmup,
+      verifyShards: params.get('packVerify') !== '0',
+    });
+    const rounded = {
+      ...response.result,
+      packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
+      avgMs: Number(response.result.avgMs.toFixed(4)),
+      minMs: Number(response.result.minMs.toFixed(4)),
+      maxMs: Number(response.result.maxMs.toFixed(4)),
+      firstMs: Number(response.result.firstMs.toFixed(4)),
+      maxAbsError: Object.fromEntries(Object.entries(response.result.maxAbsError).map(([key, value]) => [key, Number(value.toExponential(6))])),
+      rmsError: Object.fromEntries(Object.entries(response.result.rmsError).map(([key, value]) => [key, Number(value.toExponential(6))])),
+      outputSample: Object.fromEntries(Object.entries(response.result.outputSample).map(([key, values]) => [key, values.map((value) => Number(value.toFixed(6)))])),
+    };
+    const maxErr = Math.max(...Object.values(response.result.maxAbsError));
+    el('benchResult').textContent = JSON.stringify(rounded);
+    el('message').textContent = `QKV_DONE encoder0 Q/K/V projections · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${maxErr.toExponential(2)}`;
+  } catch (error) {
+    el('benchResult').textContent = `QKV_FAILED ${(error as Error).message}`;
+    el('message').textContent = `QKV projection probe failed: ${(error as Error).message}`;
     throw error;
   } finally {
     setBusy(false);
@@ -1156,9 +1216,10 @@ async function init() {
       workerModelCacheStatus = 'pack shards worker-owned';
       useSearchWorker = true;
       await initSearchWorker({ initModel: false });
-      searchWorkerBackend = ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
+      searchWorkerBackend = QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
       renderStatic();
-      if (ORT_OP_BENCH_REQUESTED) await runOrtOpBenchmark();
+      if (QKV_PROBE_REQUESTED) await runQkvProbe();
+      else if (ORT_OP_BENCH_REQUESTED) await runOrtOpBenchmark();
       else if (KERNEL_BENCH_REQUESTED) await runKernelBenchmark();
       else if (KERNEL_PROBE_REQUESTED) await runKernelProbe();
       else await runPackProbe();
