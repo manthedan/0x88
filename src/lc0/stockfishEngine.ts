@@ -65,8 +65,11 @@ export class StockfishEngine {
   private worker: Worker | null = null;
   private readyPromise: Promise<void> | null = null;
   private resolveMove: ((uci: string | null) => void) | null = null;
+  private rejectMove: ((error: Error) => void) | null = null;
   private resolveAnalyze: ((lines: StockfishInfoLine[]) => void) | null = null;
+  private rejectAnalyze: ((error: Error) => void) | null = null;
   private analyzeLines: Map<number, StockfishInfoLine> | null = null;
+  private queueTail: Promise<void> = Promise.resolve();
   private options: StockfishOptions;
   private readonly url: string;
 
@@ -82,6 +85,34 @@ export class StockfishEngine {
 
   private applyOptions(): void {
     if (this.options.skillLevel !== undefined) this.worker?.postMessage(skillLevelCommand(this.options.skillLevel));
+  }
+
+  private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.queueTail;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    this.queueTail = previous.then(() => gate, () => gate);
+    await previous.catch(() => undefined);
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  private failActive(error: Error): void {
+    const rejectMove = this.rejectMove;
+    const rejectAnalyze = this.rejectAnalyze;
+    this.resolveMove = null;
+    this.rejectMove = null;
+    this.resolveAnalyze = null;
+    this.rejectAnalyze = null;
+    this.analyzeLines = null;
+    this.worker?.terminate();
+    this.worker = null;
+    this.readyPromise = null;
+    rejectMove?.(error);
+    rejectAnalyze?.(error);
   }
 
   private init(): Promise<void> {
@@ -104,6 +135,7 @@ export class StockfishEngine {
               const resolveAnalyze = this.resolveAnalyze;
               const lines = [...(this.analyzeLines?.values() ?? [])].sort((a, b) => a.multipv - b.multipv);
               this.resolveAnalyze = null;
+              this.rejectAnalyze = null;
               this.analyzeLines = null;
               resolveAnalyze(lines);
               return;
@@ -111,11 +143,16 @@ export class StockfishEngine {
             if (this.resolveMove) {
               const resolveMove = this.resolveMove;
               this.resolveMove = null;
+              this.rejectMove = null;
               resolveMove(parseBestMove(line));
             }
           }
         };
-        worker.onerror = (event) => reject(new Error(event.message || 'Stockfish worker error'));
+        worker.onerror = (event) => {
+          const error = new Error(event.message || 'Stockfish worker error');
+          this.failActive(error);
+          reject(error);
+        };
         worker.postMessage('uci');
       } catch (error) {
         reject(error as Error);
@@ -126,38 +163,52 @@ export class StockfishEngine {
 
   /** Best move for a FEN. Aborting sends `stop`, so Stockfish returns its current best. */
   async bestMove(fen: string, signal?: AbortSignal): Promise<string | null> {
-    await this.init();
-    if (!this.worker || signal?.aborted) return null;
-    return new Promise<string | null>((resolve) => {
-      const onAbort = () => this.worker?.postMessage('stop');
-      // Clean up the abort listener whether the move completes or is aborted, so
-      // listeners don't accumulate on the battle-lifetime signal (one per ply).
-      this.resolveMove = (uci) => {
-        signal?.removeEventListener('abort', onAbort);
-        resolve(uci);
-      };
-      signal?.addEventListener('abort', onAbort);
-      this.worker!.postMessage(`position fen ${fen}`);
-      this.worker!.postMessage(stockfishGoCommand(this.options));
+    return this.runExclusive(async () => {
+      await this.init();
+      if (!this.worker || signal?.aborted) return null;
+      return new Promise<string | null>((resolve, reject) => {
+        const onAbort = () => this.worker?.postMessage('stop');
+        // Clean up the abort listener whether the move completes or is aborted, so
+        // listeners don't accumulate on the battle-lifetime signal (one per ply).
+        this.resolveMove = (uci) => {
+          signal?.removeEventListener('abort', onAbort);
+          this.rejectMove = null;
+          resolve(uci);
+        };
+        this.rejectMove = (error) => {
+          signal?.removeEventListener('abort', onAbort);
+          reject(error);
+        };
+        signal?.addEventListener('abort', onAbort);
+        this.worker!.postMessage(`position fen ${fen}`);
+        this.worker!.postMessage(stockfishGoCommand(this.options));
+      });
     });
   }
 
   /** MultiPV analysis of a FEN: returns one info line per PV, sorted by rank. */
   async analyze(fen: string, opts: { multipv?: number; depth?: number; movetimeMs?: number; signal?: AbortSignal } = {}): Promise<StockfishInfoLine[]> {
-    await this.init();
-    if (!this.worker || opts.signal?.aborted) return [];
-    const multipv = Math.max(1, Math.floor(opts.multipv ?? 1));
-    this.worker.postMessage(`setoption name MultiPV value ${multipv}`);
-    return new Promise<StockfishInfoLine[]>((resolve) => {
-      this.analyzeLines = new Map();
-      const onAbort = () => this.worker?.postMessage('stop');
-      this.resolveAnalyze = (lines) => {
-        opts.signal?.removeEventListener('abort', onAbort);
-        resolve(lines);
-      };
-      opts.signal?.addEventListener('abort', onAbort);
-      this.worker!.postMessage(`position fen ${fen}`);
-      this.worker!.postMessage(stockfishGoCommand({ depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs }));
+    return this.runExclusive(async () => {
+      await this.init();
+      if (!this.worker || opts.signal?.aborted) return [];
+      const multipv = Math.max(1, Math.floor(opts.multipv ?? 1));
+      this.worker.postMessage(`setoption name MultiPV value ${multipv}`);
+      return new Promise<StockfishInfoLine[]>((resolve, reject) => {
+        this.analyzeLines = new Map();
+        const onAbort = () => this.worker?.postMessage('stop');
+        this.resolveAnalyze = (lines) => {
+          opts.signal?.removeEventListener('abort', onAbort);
+          this.rejectAnalyze = null;
+          resolve(lines);
+        };
+        this.rejectAnalyze = (error) => {
+          opts.signal?.removeEventListener('abort', onAbort);
+          reject(error);
+        };
+        opts.signal?.addEventListener('abort', onAbort);
+        this.worker!.postMessage(`position fen ${fen}`);
+        this.worker!.postMessage(stockfishGoCommand({ depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs }));
+      });
     });
   }
 
@@ -166,7 +217,9 @@ export class StockfishEngine {
     this.worker = null;
     this.readyPromise = null;
     this.resolveMove = null;
+    this.rejectMove = null;
     this.resolveAnalyze = null;
+    this.rejectAnalyze = null;
     this.analyzeLines = null;
   }
 }

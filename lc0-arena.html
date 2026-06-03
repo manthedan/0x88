@@ -22,6 +22,7 @@ button.primary{background:var(--accent);border-color:var(--accent);color:white;f
 .field{display:grid;gap:3px}.field label{font-size:11px;color:var(--muted)}
 input[type=number]{width:70px;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;font-family:var(--mono)}
 select{font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;background:white}
+.field.wide{flex:1 1 100%}.field.wide textarea{margin-top:0;min-height:86px}
 .engines{display:grid;gap:4px;margin-top:8px}.engines label{font-size:13px;display:flex;gap:8px;align-items:center}
 table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
 th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--rule)}th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase}
@@ -62,11 +63,19 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
         <select id="formatSelect"><option value="round-robin">Round robin</option><option value="gauntlet">Gauntlet</option></select></div>
       <div class="field"><label for="championSelect">Gauntlet champion</label>
         <select id="championSelect"></select></div>
-      <div class="field"><label for="gamesInput">Games/pair</label>
+      <div class="field"><label for="gamesInput">Games/opening</label>
         <input id="gamesInput" type="number" min="1" max="20" step="1" value="2" /></div>
       <div class="field"><label for="delayInput">Delay ms</label>
         <input id="delayInput" type="number" min="0" max="3000" step="50" value="250" /></div>
     </div>
+    <h2>Starting positions</h2>
+    <div class="row">
+      <div class="field"><label for="startingPositionSelect">Suite</label>
+        <select id="startingPositionSelect"><option value="start">Start position</option><option value="built-in">Built-in opening suite</option><option value="custom">Custom FENs</option></select></div>
+      <div class="field wide"><label for="openingText">Custom positions (one per line: FEN, or Name | FEN)</label>
+        <textarea id="openingText" spellcheck="false" placeholder="Sicilian Open | rnbqkbnr/pp1ppppp/8/2p5/3PP3/8/PPP2PPP/RNBQKBNR b KQkq d3 0 2"></textarea></div>
+    </div>
+    <div id="openingInfo" class="small">Start position only.</div>
     <div class="row">
       <button id="start" class="primary" type="button" disabled>Start tournament</button>
       <button id="stop" type="button" disabled>Stop</button>

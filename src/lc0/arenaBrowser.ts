@@ -6,6 +6,7 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
 import { applyGameResult, gauntletPairings, initStandings, rankedStandings, roundRobinPairings, type ArenaPairing, type Standing } from './arena.ts';
+import { BUILTIN_ARENA_OPENINGS, parseArenaOpenings, scheduleOpenings, type ArenaOpening } from './arenaOpenings.ts';
 import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { GameTree } from './gameTree.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
@@ -21,6 +22,7 @@ interface ArenaEngine {
   move(positions: BoardState[], signal: AbortSignal): Promise<string | null>;
 }
 interface GameRecord { pgn: string; }
+interface ScheduledArenaGame extends ArenaPairing { opening: ArenaOpening; }
 
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
@@ -92,6 +94,40 @@ function refreshChampionOptions() {
   if (ids.includes(prev)) select.value = prev;
 }
 
+function selectedOpenings(): ArenaOpening[] {
+  const mode = selectEl('startingPositionSelect').value;
+  if (mode === 'built-in') return BUILTIN_ARENA_OPENINGS;
+  if (mode === 'custom') {
+    const parsed = parseArenaOpenings((el('openingText') as HTMLTextAreaElement).value);
+    if (!parsed.length) throw new Error('Add at least one custom FEN, or choose Start position.');
+    return parsed;
+  }
+  return [{ name: 'Start position', fen: START_FEN }];
+}
+
+function setOpeningPreview(opening: ArenaOpening): void {
+  board = parseFen(opening.fen);
+  historyBoards = [board];
+  lastUci = null;
+  renderBoard();
+}
+
+function refreshOpeningPreview(): void {
+  const select = selectEl('startingPositionSelect');
+  const textarea = el('openingText') as HTMLTextAreaElement;
+  const custom = select.value === 'custom';
+  select.disabled = running;
+  textarea.disabled = running || !custom;
+  if (running) return;
+  try {
+    const openings = selectedOpenings();
+    el('openingInfo').textContent = `${openings.length} starting position${openings.length === 1 ? '' : 's'} · each pair plays every selected position with the configured color schedule.`;
+    setOpeningPreview(openings[0]);
+  } catch (error) {
+    el('openingInfo').textContent = `Opening setup error: ${(error as Error).message}`;
+  }
+}
+
 function renderStandings(standings: Map<string, Standing>) {
   const ranked = rankedStandings(standings);
   el('standings').querySelector('tbody')!.innerHTML = ranked.map((s, i) =>
@@ -121,9 +157,9 @@ function legalFromUci(current: BoardState, uci: string | null): Move | undefined
   return uci ? legalMoves(current).find((m) => moveToUci(m) === uci) : undefined;
 }
 
-async function playArenaGame(white: ArenaEngine, black: ArenaEngine, signal: AbortSignal): Promise<{ result: GameResultCode; reason: string; tree: GameTree }> {
-  const tree = new GameTree(START_FEN);
-  board = parseFen(START_FEN);
+async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: ArenaOpening, signal: AbortSignal): Promise<{ result: GameResultCode; reason: string; tree: GameTree }> {
+  const tree = new GameTree(opening.fen);
+  board = parseFen(opening.fen);
   historyBoards = [board];
   lastUci = null;
   renderBoard();
@@ -162,17 +198,25 @@ async function startTournament() {
   const participants = ids.map((id) => ({ id, name: engines.get(id)!.name }));
   const gamesPerPair = Math.max(1, Math.floor(Number(inputEl('gamesInput').value) || 2));
   const format = selectEl('formatSelect').value;
-  let pairings: ArenaPairing[];
+  let basePairings: ArenaPairing[];
   if (format === 'gauntlet') {
     const champion = selectEl('championSelect').value || ids[0];
-    pairings = gauntletPairings([champion], ids.filter((id) => id !== champion), gamesPerPair);
+    basePairings = gauntletPairings([champion], ids.filter((id) => id !== champion), gamesPerPair);
   } else {
-    pairings = roundRobinPairings(ids, gamesPerPair);
+    basePairings = roundRobinPairings(ids, gamesPerPair);
+  }
+  let pairings: ScheduledArenaGame[];
+  try {
+    pairings = scheduleOpenings(basePairings, selectedOpenings());
+  } catch (error) {
+    el('message').textContent = `Opening setup error: ${(error as Error).message}`;
+    return;
   }
   if (!pairings.length) { el('message').textContent = 'No pairings to play.'; return; }
 
   running = true;
   abort = new AbortController();
+  refreshOpeningPreview();
   games.length = 0;
   el('log').innerHTML = '';
   el('start').toggleAttribute('disabled', true);
@@ -183,17 +227,19 @@ async function startTournament() {
   try {
     for (let i = 0; i < pairings.length; i++) {
       if (abort.signal.aborted) break;
-      const { white, black } = pairings[i];
+      const { white, black, opening } = pairings[i];
       const whiteEngine = engines.get(white)!;
       const blackEngine = engines.get(black)!;
-      el('pairing').textContent = `Game ${i + 1}/${pairings.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B)`;
+      el('pairing').textContent = `Game ${i + 1}/${pairings.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
       el('message').textContent = 'Playing…';
-      const { result, reason, tree } = await playArenaGame(whiteEngine, blackEngine, abort.signal);
+      const { result, reason, tree } = await playArenaGame(whiteEngine, blackEngine, opening, abort.signal);
       if (reason === 'cancelled') break;
       applyGameResult(standings, white, black, result);
       played += 1;
-      games.push({ pgn: gameTreeToPgn(tree, { Event: 'LC0 arena', White: whiteEngine.name, Black: blackEngine.name }, result) });
-      appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name}: ${result} (${reason})`);
+      const tags: Record<string, string> = { Event: 'LC0 arena', White: whiteEngine.name, Black: blackEngine.name, Opening: opening.name };
+      if (opening.fen !== START_FEN) { tags.SetUp = '1'; tags.FEN = opening.fen; }
+      games.push({ pgn: gameTreeToPgn(tree, tags, result) });
+      appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason})`);
       renderStandings(standings);
     }
     const leader = rankedStandings(standings)[0];
@@ -208,6 +254,7 @@ async function startTournament() {
     abort = null;
     el('start').toggleAttribute('disabled', false);
     el('stop').toggleAttribute('disabled', true);
+    refreshOpeningPreview();
   }
 }
 
@@ -221,6 +268,8 @@ function wireEvents() {
   el('stop').addEventListener('click', () => { abort?.abort(); el('message').textContent = 'Stopping…'; });
   el('exportPgn').addEventListener('click', exportPgn);
   el('engines').addEventListener('change', refreshChampionOptions);
+  el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
+  el('openingText').addEventListener('input', refreshOpeningPreview);
 }
 
 async function init() {
@@ -228,6 +277,7 @@ async function init() {
   buildEngines();
   refreshChampionOptions();
   wireEvents();
+  refreshOpeningPreview();
   try {
     const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
     const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);

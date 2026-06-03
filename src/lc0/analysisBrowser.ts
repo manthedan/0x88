@@ -9,7 +9,7 @@ import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
-import { openingStatsForPosition, openingSummary, type ImportedGame } from './openingStats.ts';
+import { openingStatsForPosition, openingSummary, type ImportedGame, type OpeningMoveStat } from './openingStats.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
@@ -30,6 +30,80 @@ let analyzing = false;
 const lineCache = new Map<string, AnalysisLine[]>();
 const nodeIndex = new Map<number, GameNode>();
 let importedGames: ImportedGame[] = [];
+const bookCache = new Map<string, OpeningMoveStat[]>();
+// Distinct brush for the opening-book most-played move (not LC0 green / SF blue).
+const BOOK_BRUSH = 'yellow';
+const BOOK_SWATCH = '#e68f00';
+
+function currentBookStats(): OpeningMoveStat[] {
+  if (!importedGames.length) return [];
+  const fen = tree.current.fen;
+  let stats = bookCache.get(fen);
+  if (!stats) { stats = openingStatsForPosition(importedGames, fen); bookCache.set(fen, stats); }
+  return stats;
+}
+
+// LC0 analysis runs in a dedicated search worker so navigation never blocks the
+// UI; a new position cancels the in-flight worker search by id.
+let searchWorker: Worker | null = null;
+let workerReady = false;
+let workerSeq = 0;
+const workerPending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+let activeWorkerSearchId: number | null = null;
+
+interface WorkerSearchResult {
+  value: number;
+  visits: number;
+  pv: string[];
+  multiPv?: string[][];
+  children: { uci: string; visits: number; q: number }[];
+  cancelled?: boolean;
+}
+
+function requestedEp(): string {
+  const raw = (params.get('ep') ?? 'auto').toLowerCase();
+  if (raw === 'webgpu' || raw === 'gpu') return 'webgpu';
+  if (raw === 'wasm') return 'wasm';
+  if (raw === 'webgpu,wasm' || raw === 'gpu,wasm') return 'webgpu,wasm';
+  return 'auto';
+}
+
+function postWorker<T>(message: Record<string, unknown>, onId?: (id: number) => void): Promise<T> {
+  if (!searchWorker) return Promise.reject(new Error('LC0 worker unavailable'));
+  const id = ++workerSeq;
+  onId?.(id);
+  return new Promise<T>((resolve, reject) => {
+    workerPending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+    searchWorker!.postMessage({ ...message, id });
+  });
+}
+
+async function initWorker(): Promise<string> {
+  searchWorker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
+  searchWorker.addEventListener('message', (event: MessageEvent) => {
+    const message = event.data as { id: number; type: string; error?: string };
+    const pending = workerPending.get(message.id);
+    if (!pending) return;
+    workerPending.delete(message.id);
+    if (message.type === 'error') pending.reject(new Error(message.error ?? 'worker error'));
+    else pending.resolve(message);
+  });
+  searchWorker.addEventListener('error', (event) => {
+    for (const pending of workerPending.values()) pending.reject(new Error(event.message || 'LC0 worker error'));
+    workerPending.clear();
+  });
+  const ready = await postWorker<{ backend: string }>({ type: 'init', modelUrl: MODEL_URL, ep: requestedEp(), cacheModel: false });
+  workerReady = true;
+  return ready.backend;
+}
+
+async function workerLc0Lines(fen: string): Promise<AnalysisLine[]> {
+  const response = await postWorker<{ result: WorkerSearchResult }>(
+    { type: 'search', input: { positions: tree.historyBoards() }, visits: visits(), batchSize: 1, multiPv: multiPv() },
+    (id) => { activeWorkerSearchId = id; },
+  );
+  return response.result.cancelled ? [] : lc0AnalysisLines(response.result, fen, 'LC0');
+}
 
 function el(id: string): HTMLElement {
   const node = document.getElementById(id);
@@ -74,23 +148,29 @@ function legalMoveFromDrag(board: BoardState, from: Key, to: Key): Move | undefi
     ?? all.find((m) => moveToUci(m) === `${base}n`);
 }
 
-// One arrow per engine's candidate moves, colored by engine (LC0 green family,
-// Stockfish blue family). Each engine's best move uses the solid brush, its
-// other MultiPV moves the pale brush. Primaries claim a square before alts, so
-// when engines disagree both top moves show; when they agree, one arrow wins.
+// Board arrows, colored by source and de-duplicated by move so the board stays
+// readable: each engine's best move (solid engine color) and the opening book's
+// most-played move (yellow) take priority over engines' alternative MultiPV
+// moves (pale). When two sources agree on a move, the higher-priority arrow wins.
 function bestShapes(): DrawShape[] {
   const lines = lineCache.get(tree.current.fen) ?? [];
-  const ordered = [...lines].sort((a, b) => (a.multipv === 1 ? 0 : 1) - (b.multipv === 1 ? 0 : 1));
-  const shapes: DrawShape[] = [];
-  const seen = new Set<string>();
-  for (const line of ordered) {
+  const candidates: { uci: string; brush: string; prio: number }[] = [];
+  for (const line of lines) {
     const uci = line.pvUci[0];
     if (!uci || uci.length < 4) continue;
-    const key = uci.slice(0, 4);
+    const brushes = engineBrushes(line.engine);
+    candidates.push({ uci, brush: line.multipv === 1 ? brushes.primary : brushes.alt, prio: line.multipv === 1 ? 0 : 2 });
+  }
+  const book = currentBookStats()[0];
+  if (book && book.uci.length >= 4) candidates.push({ uci: book.uci, brush: BOOK_BRUSH, prio: 1 });
+  candidates.sort((a, b) => a.prio - b.prio);
+  const shapes: DrawShape[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const key = candidate.uci.slice(0, 4);
     if (seen.has(key)) continue;
     seen.add(key);
-    const brushes = engineBrushes(line.engine);
-    const shape = uciShape(uci, line.multipv === 1 ? brushes.primary : brushes.alt);
+    const shape = uciShape(candidate.uci, candidate.brush);
     if (shape) shapes.push(shape);
   }
   return shapes;
@@ -130,9 +210,10 @@ function renderEvalBar() {
 }
 
 function renderLegend(lines: AnalysisLine[]) {
-  const engines = [...new Set(lines.map((line) => line.engine))];
-  el('engineLegend').innerHTML = engines.map((engine) =>
-    `<span class="key"><span class="dot" style="background:${engineBrushes(engine).swatch}"></span>${htmlEscape(engine)}</span>`).join('');
+  const keys = [...new Set(lines.map((line) => line.engine))].map((engine) => ({ label: engine, swatch: engineBrushes(engine).swatch }));
+  if (currentBookStats().length) keys.push({ label: 'Book (most played)', swatch: BOOK_SWATCH });
+  el('engineLegend').innerHTML = keys.map((key) =>
+    `<span class="key"><span class="dot" style="background:${key.swatch}"></span>${htmlEscape(key.label)}</span>`).join('');
 }
 
 function renderLines() {
@@ -193,7 +274,7 @@ function renderMoveList() {
 function renderOpening() {
   const body = el('opening').querySelector('tbody')!;
   if (!importedGames.length) { body.innerHTML = '<tr><td colspan="3" class="small">import games to see opening stats</td></tr>'; return; }
-  const stats = openingStatsForPosition(importedGames, tree.current.fen);
+  const stats = currentBookStats();
   const summary = openingSummary(stats);
   el('importInfo').textContent = `${importedGames.length} games · ${summary.total} from here`;
   if (!stats.length) { body.innerHTML = '<tr><td colspan="3" class="small">no games reached this position</td></tr>'; return; }
@@ -211,8 +292,11 @@ function importGames() {
   if (!raw) { el('importInfo').textContent = 'paste or fetch PGN first'; return; }
   try {
     importedGames = parsePgnGames(raw).map((game) => ({ tree: game.tree, result: game.result }));
+    bookCache.clear();
     el('importInfo').textContent = `imported ${importedGames.length} games`;
     renderOpening();
+    renderLines(); // refresh the legend so the Book key appears
+    setShapes(bestShapes());
   } catch (error) {
     el('importInfo').textContent = `import failed: ${(error as Error).message}`;
   }
@@ -264,7 +348,10 @@ function renderAll() {
 
 async function analyzeCurrent() {
   if (!useLc0() && !useStockfish()) { el('message').textContent = 'Enable LC0 or Stockfish to analyze.'; return; }
+  // Interrupt any in-flight analysis: abort the Stockfish signal and cancel the
+  // worker's LC0 search by id, so a new position takes over immediately.
   analysisAbort?.abort();
+  if (activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
   const controller = new AbortController();
   analysisAbort = controller;
   analyzing = true;
@@ -276,8 +363,9 @@ async function analyzeCurrent() {
   el('message').textContent = `Analyzing (${useLc0() ? `LC0 ${visits()}v` : ''}${useLc0() && useStockfish() ? ' + ' : ''}${useStockfish() ? `SF d${sfDepth()}` : ''}, ${multiPv()} lines)…`;
   try {
     const tasks: Promise<AnalysisLine[]>[] = [];
-    if (useLc0() && searcher) {
-      tasks.push(searcher.search({ positions: tree.historyBoards() }, { visits: visits(), multiPv: multiPv(), signal: controller.signal, yieldEveryMs: 16 })
+    if (useLc0()) {
+      if (workerReady) tasks.push(workerLc0Lines(fen));
+      else if (searcher) tasks.push(searcher.search({ positions: tree.historyBoards() }, { visits: visits(), multiPv: multiPv(), signal: controller.signal, yieldEveryMs: 16 })
         .then((result) => lc0AnalysisLines(result, fen, 'LC0')));
     }
     if (useStockfish()) {
@@ -353,16 +441,10 @@ function copyPgn() {
 }
 
 function hoverLine(pvUci: string[], engine: string) {
-  const brushes = engineBrushes(engine);
-  const shapes: DrawShape[] = [];
-  let first = true;
-  for (const uci of pvUci.slice(0, 5)) {
-    // The played move (first ply) in the engine's solid color, the rest pale.
-    const shape = uciShape(uci, first ? brushes.primary : brushes.alt);
-    if (shape) shapes.push(shape);
-    first = false;
-  }
-  setShapes(shapes.length ? shapes : bestShapes());
+  // Only the line's first move: the rest of the PV is from future positions, so
+  // drawing every ply on the current board is misleading clutter.
+  const shape = pvUci[0] ? uciShape(pvUci[0], engineBrushes(engine).primary) : null;
+  setShapes(shape ? [shape] : bestShapes());
 }
 
 function wireEvents() {
@@ -376,7 +458,10 @@ function wireEvents() {
   el('loadPgn').addEventListener('click', loadPgn);
   el('copyPgn').addEventListener('click', copyPgn);
   el('analyze').addEventListener('click', () => { void analyzeCurrent(); });
-  el('stop').addEventListener('click', () => { analysisAbort?.abort(); });
+  el('stop').addEventListener('click', () => {
+    analysisAbort?.abort();
+    if (activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
+  });
   for (const id of ['useLc0', 'useStockfish', 'sfDepthInput', 'visitsInput', 'multiPvInput']) {
     el(id).addEventListener('change', () => { lineCache.delete(tree.current.fen); void analyzeCurrent(); });
   }
@@ -420,17 +505,26 @@ function wireEvents() {
 async function init() {
   renderAll();
   wireEvents();
+  el('message').textContent = 'Loading LC0 model in a worker…';
   try {
-    const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
-    const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
-    searcher = new Lc0PuctSearcher(evaluator);
-    const diagnostics = await collectOrtRuntimeDiagnostics();
-    el('backend').textContent = diagnostics.describe;
+    el('backend').textContent = await initWorker();
     el('analyze').toggleAttribute('disabled', false);
-    el('message').textContent = 'Ready. Drag a move, load a PGN/FEN, or Analyze.';
+    el('message').textContent = 'Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.';
     if (inputEl('autoAnalyze').checked) void analyzeCurrent();
-  } catch (error) {
-    el('message').textContent = `Model load failed: ${(error as Error).message}`;
+  } catch (workerError) {
+    // Fall back to a main-thread evaluator (analysis will block the UI, but works).
+    console.warn('LC0 worker init failed; falling back to the main thread.', workerError);
+    try {
+      const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
+      searcher = new Lc0PuctSearcher(await Lc0OnnxEvaluator.create(modelLoad.model));
+      const diagnostics = await collectOrtRuntimeDiagnostics();
+      el('backend').textContent = `${diagnostics.describe} (main thread)`;
+      el('analyze').toggleAttribute('disabled', false);
+      el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
+      if (inputEl('autoAnalyze').checked) void analyzeCurrent();
+    } catch (error) {
+      el('message').textContent = `Model load failed: ${(error as Error).message}`;
+    }
   }
 }
 
