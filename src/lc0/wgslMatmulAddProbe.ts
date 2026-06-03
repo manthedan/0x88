@@ -3607,7 +3607,7 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
           attentionPass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
           attentionPass.setPipeline(attentionPipelines.norm);
           attentionPass.setBindGroup(0, attentionPipelines.normBind);
-          attentionPass.dispatchWorkgroups(DEFAULT_TOKENS);
+          attentionPass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
         }
         attentionPass.end();
         const ffnPass = encoder.beginComputePass({ timestampWrites: { querySet, endOfPassWriteIndex: 1 } });
@@ -3620,7 +3620,7 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
           ffnPass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
           ffnPass.setPipeline(ffnPipelines.ln2);
           ffnPass.setBindGroup(0, ffnPipelines.ln2Bind);
-          ffnPass.dispatchWorkgroups(DEFAULT_TOKENS);
+          ffnPass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
         }
         ffnPass.end();
         encoder.resolveQuerySet?.(querySet, 0, 2, resolveBuffer, 0);
