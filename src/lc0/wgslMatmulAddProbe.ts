@@ -3189,6 +3189,7 @@ export interface Lc0WebEncoder0BlockOrtBenchmarkResult {
   firstMs: number;
   timesMs: number[];
   runsPerSecond: number;
+  ortDiagnostics?: Record<string, unknown>;
   maxAbsError: number;
   rmsError: number;
   outputSample: number[];
@@ -3254,6 +3255,7 @@ export async function runLc0WebEncoder0BlockOrtBenchmark(options: Lc0WebEncoder0
   const { maxAbsError, rmsError } = computeErrorStats(output, reference.output, outputElements);
   assertErrorInTolerance(maxAbsError);
   const avgMs = times.reduce((sum, value) => sum + value, 0) / times.length;
+  const ortDiagnostics = await ort.collectOrtRuntimeDiagnostics();
   return {
     status: 'ENCODER0_BLOCK_ORT_BENCH_DONE',
     packUrl: pack.manifestUrl,
@@ -3278,6 +3280,7 @@ export async function runLc0WebEncoder0BlockOrtBenchmark(options: Lc0WebEncoder0
     firstMs: times[0],
     timesMs: times,
     runsPerSecond: 1000 / avgMs,
+    ortDiagnostics: ortDiagnostics as unknown as Record<string, unknown>,
     maxAbsError,
     rmsError,
     outputSample: Array.from(output.slice(0, 8)),
