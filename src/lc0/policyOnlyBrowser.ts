@@ -29,6 +29,10 @@ const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.on
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
 const SEARCH_WORKER_REQUESTED = params.get('worker') === '1' || params.get('searchWorker') === '1';
 const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
+// Register the offline app-shell SW in production builds, or opt in with ?sw=1.
+// Disabled in dev by default so it never serves stale HMR modules.
+const SW_ENABLED = params.get('sw') === '1'
+  || (params.get('sw') !== '0' && (import.meta as { env?: { PROD?: boolean } }).env?.PROD === true);
 
 // Runtime-adjustable settings: seeded from query params, then driven by the UI.
 let playerSide: 'white' | 'black' = params.get('side') === 'black' ? 'black' : 'white';
@@ -630,5 +634,17 @@ selectEl('modeSelect').addEventListener('change', () => {
   el('message').textContent = `Engine reply mode: ${engineReplyMode === 'search' ? 'fixed-visit search' : 'policy-only'}.`;
 });
 
+function registerAppServiceWorker() {
+  if (!SW_ENABLED || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/lc0-sw.js').then((registration) => {
+      console.info('LC0 app shell service worker registered.', registration.scope);
+    }).catch((error) => {
+      console.warn('LC0 app shell service worker registration failed.', error);
+    });
+  });
+}
+
 seedSettingsInputs();
+registerAppServiceWorker();
 void init();
