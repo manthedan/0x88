@@ -6,7 +6,7 @@ import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
 import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
-import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchResult } from './search.ts';
 
@@ -16,8 +16,11 @@ type NativeRecord = { id: string; backend?: string; fen: string; startFen?: stri
 type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; elapsedMs?: number; stats?: Lc0SearchResult['search']['stats'] };
 type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
+  | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
   | { type: 'error'; id: number; error: string };
+
+type BrowserEvaluationChoice = { move?: string; evaluation: Lc0Evaluation };
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
@@ -236,6 +239,14 @@ async function initSearchWorker(): Promise<void> {
   renderStatic();
 }
 
+async function evaluateWithWorker(input: Lc0EvaluatorInput): Promise<BrowserEvaluationChoice> {
+  const response = await postWorkerRequest<{ type: 'evaluationResult'; result: Lc0Evaluation }>({
+    type: 'evaluate',
+    input,
+  });
+  return { move: response.result.bestMove, evaluation: response.result };
+}
+
 async function searchWithWorker(): Promise<RenderableSearchResult> {
   const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
     type: 'search',
@@ -324,7 +335,7 @@ async function fetchNativeRecords(path: string): Promise<NativeRecord[]> {
 }
 
 async function runParityFixtures() {
-  if (!player || busy) return;
+  if ((!player && !searchWorkerReady) || busy) return;
   setBusy(true, 'Running FEN-only and explicit-history fixture parity in browser…');
   el('parity').textContent = 'running…';
   try {
@@ -332,10 +343,13 @@ async function runParityFixtures() {
       ...await fetchNativeRecords('/lc0/native_fen_only_blas.jsonl'),
       ...await fetchNativeRecords('/lc0/native_history_blas.jsonl'),
     ];
+    const started = performance.now();
+    let evaluated = 0;
     const failures: string[] = [];
     for (const native of records) {
       const input = native.moves ? { positions: buildBoardHistoryFromMoves(native.moves, native.startFen) } : native.fen;
-      const choice = await player.chooseMove(input);
+      const choice = searchWorkerReady ? await evaluateWithWorker(input) : await player!.chooseMove(input);
+      evaluated += 1;
       const expected = nativeCastlingToStandard(native.bestmove);
       if (choice.move !== expected) failures.push(`${native.id}: best ${choice.move} != ${expected}`);
       for (const prior of native.topPriors.slice(0, 5)) {
@@ -348,8 +362,10 @@ async function runParityFixtures() {
       el('parity').textContent = `failed: ${failures.slice(0, 3).join('; ')}`;
       el('message').textContent = `Parity failed (${failures.length} issue(s)).`;
     } else {
-      el('parity').textContent = `passed ${records.length}/${records.length} native BLAS fixtures`;
-      el('message').textContent = 'Browser FEN-only and explicit-history fixture parity passed.';
+      const elapsedMs = performance.now() - started;
+      const evalsPerSecond = evaluated / Math.max(1e-9, elapsedMs / 1000);
+      el('parity').textContent = `passed ${records.length}/${records.length} native BLAS fixtures · ${elapsedMs.toFixed(0)} ms · ${evalsPerSecond.toFixed(1)} eval/s`;
+      el('message').textContent = `Browser FEN-only and explicit-history fixture parity passed (${evaluated} evals via ${describeOrtBackendConfig()}).`;
     }
   } catch (error) {
     el('parity').textContent = `failed: ${(error as Error).message}`;

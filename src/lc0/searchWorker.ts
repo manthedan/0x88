@@ -1,6 +1,6 @@
 import { collectOrtRuntimeDiagnostics, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
 import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
-import type { Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 
 type InitMessage = {
@@ -19,7 +19,13 @@ type SearchMessage = {
   batchSize?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage;
+type EvaluateMessage = {
+  type: 'evaluate';
+  id: number;
+  input: Lc0EvaluatorInput;
+};
+
+type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -28,9 +34,11 @@ type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
 
 type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
+  | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'error'; id: number; error: string };
 
+let evaluator: Lc0OnnxEvaluator | null = null;
 let searcher: Lc0PuctSearcher | null = null;
 let configuredModelUrl: string | null = null;
 
@@ -45,10 +53,16 @@ function post(message: WorkerResponse): void {
 async function handleInit(message: InitMessage): Promise<void> {
   setRequestedOrtExecutionProviderForCurrentThread(message.ep);
   const modelLoad = await loadLc0ModelForOrt(message.modelUrl, { cache: message.cacheModel });
-  searcher = await Lc0PuctSearcher.create(modelLoad.model);
+  evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+  searcher = new Lc0PuctSearcher(evaluator);
   configuredModelUrl = message.modelUrl;
   const diagnostics = await collectOrtRuntimeDiagnostics();
   post({ type: 'ready', id: message.id, backend: diagnostics.describe, modelCache: describeLc0ModelLoad(modelLoad) });
+}
+
+async function handleEvaluate(message: EvaluateMessage): Promise<void> {
+  if (!evaluator) throw new Error('LC0 search worker evaluator is not initialized');
+  post({ type: 'evaluationResult', id: message.id, result: await evaluator.evaluate(message.input) });
 }
 
 async function handleSearch(message: SearchMessage): Promise<void> {
@@ -75,7 +89,10 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
   void (async () => {
     try {
       if (message.type === 'init') await handleInit(message);
-      else if (message.type === 'search') {
+      else if (message.type === 'evaluate') {
+        if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
+        await handleEvaluate(message);
+      } else if (message.type === 'search') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleSearch(message);
       }
