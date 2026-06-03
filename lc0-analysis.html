@@ -35,6 +35,10 @@ textarea{width:100%;min-height:64px;font-family:var(--mono);font-size:12px;borde
 .lines .score{font-family:var(--mono);font-weight:700}
 .lines .score.neg{color:#a5461b}.lines .score.pos{color:var(--accent)}
 .lines .pv{font-family:var(--mono);overflow-wrap:anywhere}.lines .eng{font-size:10px;color:var(--muted)}
+.lines li{padding-left:9px}
+.legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:12px;color:var(--muted)}
+.legend .key{display:inline-flex;align-items:center;gap:5px}
+.legend .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
 .movelist{font-family:var(--mono);font-size:13px;line-height:1.7;margin-top:8px;max-height:240px;overflow:auto}
 .movelist .mv{cursor:pointer;padding:0 3px;border-radius:4px}.movelist .mv:hover{background:var(--soft)}
 .movelist .mv.current{background:var(--accent);color:white}
@@ -104,6 +108,7 @@ table.opening .san{font-family:var(--mono);font-weight:700}
         <input id="sfDepthInput" type="number" min="1" max="30" step="1" value="14" /></div>
     </div>
     <h2>Engine lines</h2>
+    <div id="engineLegend" class="legend"></div>
     <ol id="lines" class="lines"></ol>
     <h2>Moves</h2>
     <div id="movelist" class="movelist"></div>

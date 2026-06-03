@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import {
+  engineBrushes,
+  engineColorKey,
   evalBarWhitePercent,
   formatScore,
   lc0AnalysisLines,
@@ -57,6 +59,18 @@ test('lc0AnalysisLines builds MultiPV lines with SAN and root-mover score', () =
   assert.match(lines[0].pvSan, /^d4 d5 c4/);
   assert.equal(lines[0].detail, '21 visits');
   assert.match(lines[1].pvSan, /^Nf3 Nf6/);
+});
+
+test('engineColorKey assigns stable per-engine color families', () => {
+  assert.equal(engineColorKey('LC0'), 'green');
+  assert.equal(engineColorKey('LC0 search 400'), 'green');
+  assert.equal(engineColorKey('SF d14'), 'blue');
+  assert.equal(engineColorKey('Stockfish lite'), 'blue');
+  assert.equal(engineColorKey('Komodo'), 'yellow');
+  const lc0 = engineBrushes('LC0');
+  assert.equal(lc0.primary, 'green');
+  assert.equal(lc0.alt, 'paleGreen');
+  assert.equal(engineBrushes('SF d8').primary, 'blue');
 });
 
 test('parseStockfishInfo extracts multipv, score, mate, and PV', () => {

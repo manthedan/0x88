@@ -6,7 +6,7 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import { evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
+import { engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
 import { openingStatsForPosition, openingSummary, type ImportedGame } from './openingStats.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
@@ -72,14 +72,24 @@ function legalMoveFromDrag(board: BoardState, from: Key, to: Key): Move | undefi
     ?? all.find((m) => moveToUci(m) === `${base}n`);
 }
 
+// One arrow per engine's candidate moves, colored by engine (LC0 green family,
+// Stockfish blue family). Each engine's best move uses the solid brush, its
+// other MultiPV moves the pale brush. Primaries claim a square before alts, so
+// when engines disagree both top moves show; when they agree, one arrow wins.
 function bestShapes(): DrawShape[] {
   const lines = lineCache.get(tree.current.fen) ?? [];
+  const ordered = [...lines].sort((a, b) => (a.multipv === 1 ? 0 : 1) - (b.multipv === 1 ? 0 : 1));
   const shapes: DrawShape[] = [];
-  const best = lines[0]?.pvUci[0] ? uciShape(lines[0].pvUci[0], 'green') : null;
-  if (best) shapes.push(best);
-  for (const line of lines.slice(1)) {
-    const alt = line.pvUci[0] ? uciShape(line.pvUci[0], 'blue') : null;
-    if (alt && !(best && alt.orig === best.orig && alt.dest === best.dest)) shapes.push(alt);
+  const seen = new Set<string>();
+  for (const line of ordered) {
+    const uci = line.pvUci[0];
+    if (!uci || uci.length < 4) continue;
+    const key = uci.slice(0, 4);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const brushes = engineBrushes(line.engine);
+    const shape = uciShape(uci, line.multipv === 1 ? brushes.primary : brushes.alt);
+    if (shape) shapes.push(shape);
   }
   return shapes;
 }
@@ -117,11 +127,19 @@ function renderEvalBar() {
   el('posEval').textContent = line ? `${line.scoreText} (${line.engine})` : '—';
 }
 
+function renderLegend(lines: AnalysisLine[]) {
+  const engines = [...new Set(lines.map((line) => line.engine))];
+  el('engineLegend').innerHTML = engines.map((engine) =>
+    `<span class="key"><span class="dot" style="background:${engineBrushes(engine).swatch}"></span>${htmlEscape(engine)}</span>`).join('');
+}
+
 function renderLines() {
   const lines = lineCache.get(tree.current.fen) ?? [];
+  renderLegend(lines);
   el('lines').innerHTML = lines.map((line) => {
     const cls = line.scoreCp === undefined ? '' : line.scoreCp > 0 ? 'pos' : line.scoreCp < 0 ? 'neg' : '';
-    return `<li data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}">`
+    const swatch = engineBrushes(line.engine).swatch;
+    return `<li data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}">`
       + `<span class="score ${cls}">${htmlEscape(line.scoreText)}<br><span class="eng">${htmlEscape(line.engine)} · ${htmlEscape(line.detail)}</span></span>`
       + `<span class="pv">${htmlEscape(line.pvSan)}</span></li>`;
   }).join('') || '<li class="small">no analysis yet</li>';
@@ -295,14 +313,15 @@ function copyPgn() {
   el('message').textContent = 'PGN copied to the box and clipboard.';
 }
 
-function hoverLine(pvUci: string[]) {
-  const board = parseFen(tree.current.fen);
+function hoverLine(pvUci: string[], engine: string) {
+  const brushes = engineBrushes(engine);
   const shapes: DrawShape[] = [];
-  let stm = board.turn;
-  for (const uci of pvUci.slice(0, 4)) {
-    const shape = uciShape(uci, stm === board.turn ? 'green' : 'paleGreen');
+  let first = true;
+  for (const uci of pvUci.slice(0, 5)) {
+    // The played move (first ply) in the engine's solid color, the rest pale.
+    const shape = uciShape(uci, first ? brushes.primary : brushes.alt);
     if (shape) shapes.push(shape);
-    stm = stm === 'w' ? 'b' : 'w';
+    first = false;
   }
   setShapes(shapes.length ? shapes : bestShapes());
 }
@@ -336,7 +355,7 @@ function wireEvents() {
   el('lines').addEventListener('mouseover', (event) => {
     const li = (event.target as HTMLElement).closest('li[data-pv]');
     const pv = li?.getAttribute('data-pv');
-    if (pv) hoverLine(pv.split(' ').filter(Boolean));
+    if (pv) hoverLine(pv.split(' ').filter(Boolean), li!.getAttribute('data-engine') ?? 'LC0');
   });
   el('lines').addEventListener('mouseout', () => setShapes(bestShapes()));
   el('importGames').addEventListener('click', importGames);

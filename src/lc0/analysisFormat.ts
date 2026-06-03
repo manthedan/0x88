@@ -58,6 +58,36 @@ export function evalBarWhitePercent(scoreCp: number | undefined, mateIn: number 
   return Math.max(0, Math.min(100, 50 + 50 * whiteAdvantage));
 }
 
+export type EngineColorKey = 'green' | 'blue' | 'red' | 'yellow';
+
+export interface EngineBrushes {
+  /** Chessground brush for the engine's best move. */
+  primary: string;
+  /** Chessground brush for the engine's alternative (lower MultiPV) moves. */
+  alt: string;
+  /** Hex matching the chessground brush, for legend/panel swatches. */
+  swatch: string;
+}
+
+const ENGINE_BRUSHES: Record<EngineColorKey, EngineBrushes> = {
+  green: { primary: 'green', alt: 'paleGreen', swatch: '#15781B' },
+  blue: { primary: 'blue', alt: 'paleBlue', swatch: '#003088' },
+  red: { primary: 'red', alt: 'paleRed', swatch: '#882020' },
+  yellow: { primary: 'yellow', alt: 'paleGrey', swatch: '#e68f00' },
+};
+
+/** Stable color family per engine: LC0 green, Stockfish blue, others fall back. */
+export function engineColorKey(engine: string): EngineColorKey {
+  const lower = engine.toLowerCase();
+  if (lower.startsWith('lc0')) return 'green';
+  if (lower.startsWith('sf') || lower.startsWith('stockfish')) return 'blue';
+  return 'yellow';
+}
+
+export function engineBrushes(engine: string): EngineBrushes {
+  return ENGINE_BRUSHES[engineColorKey(engine)];
+}
+
 export interface StockfishInfoLineLike {
   multipv: number;
   depth: number;
