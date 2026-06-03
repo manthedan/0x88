@@ -3,24 +3,25 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>LC0 policy-only browser engine</title>
+<title>LC0 browser engine</title>
 <link rel="stylesheet" href="/chessground.base.css" />
 <link rel="stylesheet" href="/chessground.brown.css" />
 <link rel="stylesheet" href="/chessground.cburnett.css" />
 <style>
-:root{--bg:#f3eee4;--panel:#fbf8f0;--ink:#1f1c17;--muted:#6e665c;--rule:#d8cfbe;--accent:#5a6e2a;--soft:#e8efd3;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;--sans:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans)}header{padding:16px 24px;border-bottom:1px solid var(--rule);background:var(--panel)}h1{margin:0;font-size:22px}header p{margin:4px 0 0;color:var(--muted)}main{display:grid;grid-template-columns:minmax(320px,560px) minmax(320px,430px);gap:24px;align-items:start;justify-content:center;padding:24px}.board-card,.panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:14px}.board-shell{width:100%;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 16px 42px -28px #000}.cg-wrap{width:100%!important;height:100%!important}.controls{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}button{border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink);padding:10px 8px;font:inherit;font-size:13px;cursor:pointer}button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:700}button:disabled{opacity:.55;cursor:not-allowed}.status-grid{display:grid;grid-template-columns:120px 1fr;gap:8px 12px;font-size:13px}.status-grid dt{color:var(--muted)}.status-grid dd{margin:0;overflow-wrap:anywhere}.mono,code{font-family:var(--mono)}#message{margin-top:12px;padding:10px;border:1px solid var(--rule);border-radius:6px;background:var(--soft);font-family:var(--mono);font-size:12px}.policy-list{list-style:none;margin:10px 0 0;padding:0}.policy-list li{display:grid;grid-template-columns:24px 72px 1fr 64px;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--rule);font-family:var(--mono);font-size:12px}.policy-list li.best b{color:var(--accent)}meter{width:100%}.fen{font-family:var(--mono);font-size:12px;line-height:1.45;overflow-wrap:anywhere}.small{font-size:12px;color:var(--muted);line-height:1.5}@media(max-width:900px){main{grid-template-columns:1fr;padding:14px}.controls{grid-template-columns:repeat(2,1fr)}}
+:root{--bg:#f3eee4;--panel:#fbf8f0;--ink:#1f1c17;--muted:#6e665c;--rule:#d8cfbe;--accent:#5a6e2a;--soft:#e8efd3;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;--sans:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans)}header{padding:16px 24px;border-bottom:1px solid var(--rule);background:var(--panel)}h1{margin:0;font-size:22px}header p{margin:4px 0 0;color:var(--muted)}main{display:grid;grid-template-columns:minmax(320px,560px) minmax(320px,430px);gap:24px;align-items:start;justify-content:center;padding:24px}.board-card,.panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:14px}.board-shell{width:100%;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 16px 42px -28px #000}.cg-wrap{width:100%!important;height:100%!important}.controls{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:12px}button{border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink);padding:10px 8px;font:inherit;font-size:13px;cursor:pointer}button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:700}button:disabled{opacity:.55;cursor:not-allowed}.status-grid{display:grid;grid-template-columns:120px 1fr;gap:8px 12px;font-size:13px}.status-grid dt{color:var(--muted)}.status-grid dd{margin:0;overflow-wrap:anywhere}.mono,code{font-family:var(--mono)}#message{margin-top:12px;padding:10px;border:1px solid var(--rule);border-radius:6px;background:var(--soft);font-family:var(--mono);font-size:12px}.policy-list{list-style:none;margin:10px 0 0;padding:0}.policy-list li{display:grid;grid-template-columns:24px 72px 1fr 64px;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--rule);font-family:var(--mono);font-size:12px}.policy-list li.best b{color:var(--accent)}meter{width:100%}.fen{font-family:var(--mono);font-size:12px;line-height:1.45;overflow-wrap:anywhere}.small{font-size:12px;color:var(--muted);line-height:1.5}@media(max-width:900px){main{grid-template-columns:1fr;padding:14px}.controls{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
 <header>
-  <h1>LC0 policy-only browser engine</h1>
-  <p>FEN-only LC0 evaluator parity · argmax legal prior · no search</p>
+  <h1>LC0 browser engine</h1>
+  <p>LC0 evaluator parity · policy-only moves · fixed-visit PUCT search</p>
 </header>
 <main>
   <section class="board-card" aria-label="Playable chess board">
     <div class="board-shell"><div id="ground"></div></div>
     <div class="controls">
-      <button id="engineMove" class="primary" type="button" disabled>Engine move</button>
+      <button id="engineMove" class="primary" type="button" disabled>Policy move</button>
+      <button id="searchMove" type="button" disabled>Search 32</button>
       <button id="runParity" type="button" disabled>Run parity</button>
       <button id="reset" type="button">Reset</button>
       <button id="flip" type="button">Flip</button>
@@ -37,13 +38,16 @@
       <dt>WDL</dt><dd id="wdl">—</dd>
       <dt>Q / MLH</dt><dd id="qMlh" class="mono">—</dd>
       <dt>Parity</dt><dd id="parity" class="mono">not run</dd>
+      <dt>Search</dt><dd id="searchSummary" class="mono">not run</dd>
       <dt>Moves</dt><dd id="moveList" class="mono">—</dd>
     </dl>
     <h2>Top legal priors</h2>
     <ol id="priors" class="policy-list"></ol>
+    <h2>Top search children</h2>
+    <ol id="searchChildren" class="policy-list"></ol>
     <h2>FEN</h2>
     <p id="fen" class="fen">—</p>
-    <p class="small">Open with <code>?ep=wasm&amp;parity=1</code> to force WASM and automatically compare browser outputs against committed native BLAS FEN-only plus explicit-history fixture priors. Use <code>?model=/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx</code> to smoke the f16 deployment artifact.</p>
+    <p class="small">Open with <code>?ep=wasm&amp;parity=1</code> to force WASM and automatically compare browser outputs against committed native BLAS FEN-only plus explicit-history fixture priors. Use <code>?search=1</code> to auto-run a fixed 32-visit PUCT root search. Use <code>?model=/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx</code> to smoke the f16 deployment artifact.</p>
   </aside>
 </main>
 <script type="module" src="/src/lc0/policyOnlyBrowser.ts"></script>

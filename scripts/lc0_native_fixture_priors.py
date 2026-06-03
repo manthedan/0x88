@@ -4,8 +4,8 @@ import argparse, json, re, subprocess, sys, time
 from pathlib import Path
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
-STAT = re.compile(r"^info string\s+(\S+)\s+\(\s*(\d+)\s*\).*?\(P:\s*([0-9.]+)%\).*?\(Q:\s*([-.0-9]+)\)")
-NODE = re.compile(r"^info string node\s+\(\s*(\d+)\).*?\(WL:\s*([-.0-9]+)\)\s+\(D:\s*([-.0-9]+)\)\s+\(M:\s*([-.0-9]+)\)\s+\(Q:\s*([-.0-9]+)\)\s+\(V:\s*([-.0-9]+)\)")
+STAT = re.compile(r"^info string\s+([a-h][1-8][a-h][1-8][qrbn]?)\s+\(\s*(\d+)\s*\)\s+N:\s*(\d+).*?\(P:\s*([0-9.]+)%\).*?\(Q:\s*([-.0-9]+)\)")
+NODE = re.compile(r"^info string node\s+\(\s*(\d+)\)\s+N:\s*(\d+).*?\(WL:\s*([-.0-9]+)\)\s+\(D:\s*([-.0-9]+)\)\s+\(M:\s*([-.0-9]+)\)\s+\(Q:\s*([-.0-9]+)\)\s+\(V:\s*([-.0-9]+)\)")
 
 parser = argparse.ArgumentParser(description="Collect native LC0 nodes=1 VerboseMoveStats for FEN or explicit move-history fixtures.")
 parser.add_argument("--lc0", default="../native/lc0-release-0.32/build/release/lc0")
@@ -64,11 +64,11 @@ def parse_result(fixture: dict, lines: list[str], backend: str) -> dict:
             bestmove = line.split()[1]
         m = STAT.search(line)
         if m:
-            moves.append({"uci": m.group(1), "index": int(m.group(2)), "prior": float(m.group(3)) / 100.0, "q": float(m.group(4))})
+            moves.append({"uci": m.group(1), "index": int(m.group(2)), "visits": int(m.group(3)), "prior": float(m.group(4)) / 100.0, "q": float(m.group(5))})
             continue
         n = NODE.search(line)
         if n:
-            node = {"visits": int(n.group(1)), "wl": float(n.group(2)), "d": float(n.group(3)), "mlh": float(n.group(4)), "q": float(n.group(5)), "v": float(n.group(6))}
+            node = {"index": int(n.group(1)), "visits": int(n.group(2)), "wl": float(n.group(3)), "d": float(n.group(4)), "mlh": float(n.group(5)), "q": float(n.group(6)), "v": float(n.group(7))}
     moves.sort(key=lambda x: x["prior"], reverse=True)
     record = {"id": fixture["id"], "backend": backend, "fen": fixture_fen(fixture), "bestmove": bestmove, "node": node, "topPriors": moves[:10]}
     if "moves" in fixture:
@@ -88,6 +88,12 @@ try:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w") as f:
         for fixture in fixtures:
+            # Avoid accidental tree/history carry-over between unrelated fixture
+            # records. This matters for FEN-only parity: LC0 can otherwise reuse
+            # a previous root if a later FEN is reachable from it.
+            send("ucinewgame")
+            send("isready")
+            read_until("readyok", 30)
             send(position_command(fixture))
             send(f"go nodes {args.nodes}")
             lines = read_until("bestmove", 120)

@@ -67,6 +67,7 @@
     "lc0:eval-history": "node --experimental-strip-types scripts/lc0_eval_fixtures.mjs ../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx fixtures/lc0/history.json",
     "lc0:eval-f16-fixtures": "node --experimental-strip-types scripts/lc0_eval_fixtures.mjs ../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.onnx fixtures/lc0/fen_only.json",
     "lc0:policy-only": "node --experimental-strip-types scripts/lc0_policy_only.mjs",
+    "lc0:search": "node --experimental-strip-types scripts/lc0_search.mjs",
     "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs"
   },
   "devDependencies": {

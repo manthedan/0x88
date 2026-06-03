@@ -5,7 +5,9 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig } from '../nn/ortRuntime.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
+import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
+import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
@@ -20,6 +22,7 @@ let board: BoardState = parseFen(params.get('fen') ?? START_FEN);
 let historyBoards: BoardState[] = [board];
 let ground: Ground | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
+let searcher: Lc0PuctSearcher | null = null;
 let busy = false;
 let lastMove: string | null = null;
 let renderSeq = 0;
@@ -81,6 +84,7 @@ function applyMove(move: Move): string {
   historyBoards.push(board);
   lastMove = uci;
   playedMoves.push(uci);
+  clearSearchResult();
   return uci;
 }
 
@@ -88,6 +92,7 @@ function setBusy(next: boolean, message?: string) {
   busy = next;
   if (message) el('message').textContent = message;
   el('engineMove').toggleAttribute('disabled', busy || !player);
+  el('searchMove').toggleAttribute('disabled', busy || !searcher);
   el('runParity').toggleAttribute('disabled', busy || !player);
 }
 
@@ -99,6 +104,7 @@ function renderStatic() {
   el('backend').textContent = describeOrtBackendConfig();
   el('status').textContent = player ? 'ready' : 'loading';
   el('engineMove').toggleAttribute('disabled', busy || !player);
+  el('searchMove').toggleAttribute('disabled', busy || !searcher);
   el('runParity').toggleAttribute('disabled', busy || !player);
   const config = {
     orientation,
@@ -118,6 +124,20 @@ function renderStatic() {
   };
   if (!ground) ground = Chessground(el('ground'), config);
   else ground.set(config);
+}
+
+function renderSearchResult(result: Lc0SearchResult) {
+  el('searchSummary').textContent = `${result.move ?? '—'} · ${result.visits} visits · Q ${result.value.toFixed(5)}`;
+  const maxVisits = Math.max(1, ...result.children.slice(0, 10).map((entry) => entry.visits));
+  el('searchChildren').innerHTML = result.children.slice(0, 10).map((entry, i) => {
+    const width = Math.max(2, (entry.visits / maxVisits) * 100).toFixed(1);
+    return `<li class="${i === 0 ? 'best' : ''}"><span>${i + 1}</span><b>${htmlEscape(entry.uci)}</b><meter min="0" max="100" value="${width}"></meter><code>${entry.visits} · ${(entry.prior * 100).toFixed(1)}%</code></li>`;
+  }).join('');
+}
+
+function clearSearchResult() {
+  el('searchSummary').textContent = 'not run';
+  el('searchChildren').innerHTML = '';
 }
 
 function renderEvaluation() {
@@ -154,6 +174,21 @@ async function onUserMove(from: Key, to: Key) {
   renderEvaluation();
   if ((PLAYER_SIDE === 'white' && board.turn === 'b') || (PLAYER_SIDE === 'black' && board.turn === 'w')) {
     await engineMove();
+  }
+}
+
+async function searchRootPosition() {
+  if (!searcher || busy) return;
+  setBusy(true, 'LC0 fixed-visit PUCT search running…');
+  try {
+    const result = await searcher.search(currentEvaluationInput(), { visits: 32 });
+    renderSearchResult(result);
+    el('message').textContent = `Search selected ${result.move ?? '—'} (${result.visits} visits, fixed PUCT).`;
+  } catch (error) {
+    el('message').textContent = `Search failed: ${(error as Error).message}`;
+  } finally {
+    setBusy(false);
+    renderEvaluation();
   }
 }
 
@@ -238,6 +273,7 @@ function resetBoard() {
   historyBoards = [board];
   lastMove = null;
   playedMoves.length = 0;
+  clearSearchResult();
   el('message').textContent = 'Reset to start position.';
   renderEvaluation();
 }
@@ -246,12 +282,15 @@ async function init() {
   el('message').textContent = 'Loading LC0 ONNX model…';
   renderStatic();
   try {
-    player = await Lc0PolicyOnlyPlayer.create(MODEL_URL);
+    const evaluator = await Lc0OnnxEvaluator.create(MODEL_URL);
+    player = new Lc0PolicyOnlyPlayer(evaluator);
+    searcher = new Lc0PuctSearcher(evaluator);
     const diagnostics = await collectOrtRuntimeDiagnostics();
     el('backend').textContent = diagnostics.describe;
     el('message').textContent = 'Ready. Drag a legal move or ask the engine to move.';
     renderEvaluation();
     if (params.get('parity') === '1' || params.get('fixtures') === '1') await runParityFixtures();
+    if (params.get('search') === '1') await searchRootPosition();
     if (params.get('engineMove') === '1') await engineMove();
   } catch (error) {
     el('message').textContent = `Model load failed: ${(error as Error).message}`;
@@ -260,6 +299,7 @@ async function init() {
 }
 
 el('engineMove').addEventListener('click', () => { void engineMove(); });
+el('searchMove').addEventListener('click', () => { void searchRootPosition(); });
 el('runParity').addEventListener('click', () => { void runParityFixtures(); });
 el('reset').addEventListener('click', resetBoard);
 el('flip').addEventListener('click', () => { orientation = orientation === 'white' ? 'black' : 'white'; renderStatic(); });
