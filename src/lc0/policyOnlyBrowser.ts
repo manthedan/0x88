@@ -67,6 +67,14 @@ function legalMoveFromDrag(from: Key, to: Key): Move | undefined {
     ?? legalMoveFromUci(`${base}n`);
 }
 
+function currentEvaluationInput(): string | { positions: BoardState[] } {
+  // A direct ?fen= load has no real prior boards. Evaluate it through the
+  // evaluator's normal FEN-only path so non-start FENs get LC0-compatible
+  // synthetic history. Once a move is played, preserve the actual browser move
+  // history from the loaded root.
+  return playedMoves.length === 0 ? boardToFen(board) : { positions: historyBoards };
+}
+
 function applyMove(move: Move): string {
   const uci = moveToUci(move);
   board = makeMove(board, move);
@@ -116,7 +124,7 @@ function renderEvaluation() {
   const seq = ++renderSeq;
   renderStatic();
   if (!player) return;
-  player.chooseMove({ positions: historyBoards }).then((choice) => {
+  player.chooseMove(currentEvaluationInput()).then((choice) => {
     if (seq !== renderSeq) return;
     const ev = choice.evaluation;
     const [win, draw, loss] = ev.wdl;
@@ -159,7 +167,7 @@ async function engineMove() {
   setBusy(true, 'LC0 policy-only engine thinking…');
   renderStatic();
   try {
-    const choice = await player.chooseMove({ positions: historyBoards });
+    const choice = await player.chooseMove(currentEvaluationInput());
     const move = choice.move ? legalMoveFromUci(choice.move) : undefined;
     if (!move) throw new Error(`Evaluator chose illegal or missing move: ${choice.move ?? 'none'}`);
     const uci = applyMove(move);
