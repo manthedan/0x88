@@ -5,6 +5,7 @@ import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './
 import {
   runLc0WebAttentionScoreBenchmark,
   runLc0WebAttentionScoreOrtBenchmark,
+  runLc0WebAttentionValueBenchmark,
   runLc0WebMatmulAddKernelBenchmark,
   runLc0WebMatmulAddKernelProbe,
   runLc0WebMatmulAddOrtBenchmark,
@@ -13,6 +14,7 @@ import {
   runLc0WebSoftmaxBenchmark,
   type Lc0WebAttentionScoreBenchmarkResult,
   type Lc0WebAttentionScoreOrtBenchmarkResult,
+  type Lc0WebAttentionValueBenchmarkResult,
   type Lc0WebMatmulAddKernelBenchmarkResult,
   type Lc0WebMatmulAddKernelProbeResult,
   type Lc0WebMatmulAddOrtBenchmarkResult,
@@ -130,6 +132,15 @@ type SoftmaxBenchmarkMessage = {
   verifyShards?: boolean;
 };
 
+type AttentionValueBenchmarkMessage = {
+  type: 'attentionValueBenchmark';
+  id: number;
+  packUrl: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+};
+
 type OrtBenchmarkMessage = {
   type: 'ortBenchmark';
   id: number;
@@ -149,7 +160,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -185,6 +196,7 @@ type WorkerResponse =
   | { type: 'attentionScoreBenchmarkResult'; id: number; result: Lc0WebAttentionScoreBenchmarkResult }
   | { type: 'attentionScoreOrtBenchmarkResult'; id: number; result: Lc0WebAttentionScoreOrtBenchmarkResult }
   | { type: 'softmaxBenchmarkResult'; id: number; result: Lc0WebSoftmaxBenchmarkResult }
+  | { type: 'attentionValueBenchmarkResult'; id: number; result: Lc0WebAttentionValueBenchmarkResult }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'error'; id: number; error: string };
 
@@ -337,6 +349,16 @@ async function handleSoftmaxBenchmark(message: SoftmaxBenchmarkMessage): Promise
   post({ type: 'softmaxBenchmarkResult', id: message.id, result });
 }
 
+async function handleAttentionValueBenchmark(message: AttentionValueBenchmarkMessage): Promise<void> {
+  const result = await runLc0WebAttentionValueBenchmark({
+    packUrl: message.packUrl,
+    iterations: message.iterations,
+    warmup: message.warmup,
+    verifyShards: message.verifyShards,
+  });
+  post({ type: 'attentionValueBenchmarkResult', id: message.id, result });
+}
+
 async function handleOrtBenchmark(message: OrtBenchmarkMessage): Promise<void> {
   setRequestedOrtExecutionProviderForCurrentThread(message.ep);
   const result = await runLc0WebMatmulAddOrtBenchmark({
@@ -424,6 +446,7 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       else if (message.type === 'attentionScoreBenchmark') await handleAttentionScoreBenchmark(message);
       else if (message.type === 'attentionScoreOrtBenchmark') await handleAttentionScoreOrtBenchmark(message);
       else if (message.type === 'softmaxBenchmark') await handleSoftmaxBenchmark(message);
+      else if (message.type === 'attentionValueBenchmark') await handleAttentionValueBenchmark(message);
       else if (message.type === 'evaluate') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleEvaluate(message);

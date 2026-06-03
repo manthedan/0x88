@@ -185,6 +185,28 @@ type SoftmaxBenchmarkResult = {
   outputSample: number[];
 };
 
+type AttentionValueBenchmarkResult = {
+  status: 'ATTENTION_VALUE_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  tokens: number;
+  channels: number;
+  heads: number;
+  headDim: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  uploadSetupMs: number;
+  dispatchLoopMs: number;
+  dispatchLoopAvgMs: number;
+  readbackSyncedMs: number;
+  endToEndMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+};
+
 type OrtBenchmarkResult = {
   status: 'ORT_BENCH_DONE';
   packUrl: string;
@@ -221,6 +243,7 @@ type WorkerResponse =
   | { type: 'attentionScoreBenchmarkResult'; id: number; result: AttentionScoreBenchmarkResult }
   | { type: 'attentionScoreOrtBenchmarkResult'; id: number; result: AttentionScoreOrtBenchmarkResult }
   | { type: 'softmaxBenchmarkResult'; id: number; result: SoftmaxBenchmarkResult }
+  | { type: 'attentionValueBenchmarkResult'; id: number; result: AttentionValueBenchmarkResult }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
   | { type: 'error'; id: number; error: string };
 
@@ -253,13 +276,14 @@ const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
 const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
 const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
 const SOFTMAX_BENCH_REQUESTED = params.get('softmaxBench') === '1' || params.get('attentionSoftmaxBench') === '1';
+const ATTENTION_VALUE_BENCH_REQUESTED = params.get('attentionValueBench') === '1' || params.get('valueBench') === '1';
 const ATTENTION_SCORE_BENCH_REQUESTED = params.get('attentionScoreBench') === '1' || params.get('scoreBench') === '1';
 const ATTENTION_SCORE_ORT_BENCH_REQUESTED = params.get('attentionScoreOrtBench') === '1' || params.get('scoreOrtBench') === '1';
 const QKV_BENCH_REQUESTED = params.get('qkvBench') === '1' || params.get('qkvBenchmark') === '1';
 const QKV_PROBE_REQUESTED = params.get('qkvProbe') === '1';
 const ORT_OP_BENCH_REQUESTED = params.get('ortOpBench') === '1' || params.get('ortBench') === '1';
 const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('kernelBenchmark') === '1' || params.get('wgslBench') === '1';
-const KERNEL_PROBE_REQUESTED = SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
+const KERNEL_PROBE_REQUESTED = ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
 const PACK_PROBE_REQUESTED = KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null;
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const WORKER_ONLY_MODEL = PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
@@ -662,6 +686,45 @@ async function runSoftmaxBenchmark(): Promise<void> {
   } catch (error) {
     el('benchResult').textContent = `SOFTMAX_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Softmax benchmark failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runAttentionValueBenchmark(): Promise<void> {
+  if (!searchWorker) throw new Error('attention value benchmark requires LC0 worker');
+  const rawIters = Number(params.get('attentionValueIters') ?? params.get('valueIters') ?? params.get('kernelBenchIters') ?? '1000');
+  const rawWarmup = Number(params.get('attentionValueWarmup') ?? params.get('valueWarmup') ?? params.get('kernelBenchWarmup') ?? '10');
+  const iterations = Math.min(100_000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 1000)));
+  const warmup = Math.min(1000, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 10)));
+  el('benchResult').textContent = 'ATTENTION_VALUE_BENCH_RUNNING';
+  setBusy(true, `Benchmarking lc0web WGSL attention value: ${warmup} warmup + ${iterations} queued dispatches, one final readback…`);
+  try {
+    const response = await postWorkerRequest<{ type: 'attentionValueBenchmarkResult'; result: AttentionValueBenchmarkResult }>({
+      type: 'attentionValueBenchmark',
+      packUrl: PACK_URL,
+      iterations,
+      warmup,
+      verifyShards: params.get('packVerify') !== '0',
+    });
+    const rounded = {
+      ...response.result,
+      packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
+      uploadSetupMs: Number(response.result.uploadSetupMs.toFixed(3)),
+      dispatchLoopMs: Number(response.result.dispatchLoopMs.toFixed(4)),
+      dispatchLoopAvgMs: Number(response.result.dispatchLoopAvgMs.toExponential(6)),
+      readbackSyncedMs: Number(response.result.readbackSyncedMs.toFixed(4)),
+      endToEndMs: Number(response.result.endToEndMs.toFixed(3)),
+      maxAbsError: Number(response.result.maxAbsError.toExponential(6)),
+      rmsError: Number(response.result.rmsError.toExponential(6)),
+      outputSample: response.result.outputSample.map((value) => Number(value.toFixed(8))),
+    };
+    el('benchResult').textContent = JSON.stringify(rounded);
+    el('message').textContent = `ATTENTION_VALUE_BENCH_DONE ${rounded.tokens}x${rounded.channels} · ${rounded.iterations} queued dispatches · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+  } catch (error) {
+    el('benchResult').textContent = `ATTENTION_VALUE_BENCH_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Attention value benchmark failed: ${(error as Error).message}`;
     throw error;
   } finally {
     setBusy(false);
@@ -1472,9 +1535,10 @@ async function init() {
       workerModelCacheStatus = 'pack shards worker-owned';
       useSearchWorker = true;
       await initSearchWorker({ initModel: false });
-      searchWorkerBackend = SOFTMAX_BENCH_REQUESTED ? 'lc0web-wgsl-softmax-bench' : ATTENTION_SCORE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-score-bench' : ATTENTION_SCORE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-score-bench' : QKV_BENCH_REQUESTED ? 'lc0web-wgsl-qkv-bench' : QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
+      searchWorkerBackend = ATTENTION_VALUE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-value-bench' : SOFTMAX_BENCH_REQUESTED ? 'lc0web-wgsl-softmax-bench' : ATTENTION_SCORE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-score-bench' : ATTENTION_SCORE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-score-bench' : QKV_BENCH_REQUESTED ? 'lc0web-wgsl-qkv-bench' : QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
       renderStatic();
-      if (SOFTMAX_BENCH_REQUESTED) await runSoftmaxBenchmark();
+      if (ATTENTION_VALUE_BENCH_REQUESTED) await runAttentionValueBenchmark();
+      else if (SOFTMAX_BENCH_REQUESTED) await runSoftmaxBenchmark();
       else if (ATTENTION_SCORE_ORT_BENCH_REQUESTED) await runAttentionScoreOrtBenchmark();
       else if (ATTENTION_SCORE_BENCH_REQUESTED) await runAttentionScoreBenchmark();
       else if (QKV_BENCH_REQUESTED) await runQkvBenchmark();
