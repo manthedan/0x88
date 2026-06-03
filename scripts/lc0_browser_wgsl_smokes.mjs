@@ -249,6 +249,8 @@ async function runSmoke(args, baseUrl, smoke) {
     maxAbsError: error,
     iterations: result.iterations ?? null,
     readbackSyncedMs: result.readbackSyncedMs ?? null,
+    gpuTimestampSupported: result.gpuTimestampSupported ?? null,
+    gpuTimestampMs: result.gpuTimestampMs ?? null,
     stageTimingTotalMs: result.stageTimingTotalMs ?? null,
     slowestStage: slowestStage ? { stage: slowestStage.stage, label: slowestStage.label, avgMs: slowestStage.avgMs } : null,
     stageTimings: result.stageTimings ?? null,

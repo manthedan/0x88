@@ -246,7 +246,8 @@ type GpuLike = {
 };
 
 type AdapterLike = {
-  requestDevice: () => Promise<DeviceLike>;
+  features?: { has: (feature: string) => boolean };
+  requestDevice: (descriptor?: Record<string, unknown>) => Promise<DeviceLike>;
   requestAdapterInfo?: () => Promise<Record<string, unknown>>;
   info?: Record<string, unknown>;
 };
@@ -258,10 +259,15 @@ type DeviceLike = {
     onSubmittedWorkDone?: () => Promise<void>;
   };
   createBuffer: (descriptor: Record<string, unknown>) => BufferLike;
+  createQuerySet?: (descriptor: Record<string, unknown>) => QuerySetLike;
   createShaderModule: (descriptor: Record<string, unknown>) => unknown;
   createComputePipeline: (descriptor: Record<string, unknown>) => PipelineLike;
   createBindGroup: (descriptor: Record<string, unknown>) => unknown;
   createCommandEncoder: () => CommandEncoderLike;
+};
+
+type QuerySetLike = {
+  destroy?: () => void;
 };
 
 type BufferLike = {
@@ -276,8 +282,10 @@ type PipelineLike = {
 };
 
 type CommandEncoderLike = {
-  beginComputePass: () => ComputePassLike;
+  beginComputePass: (descriptor?: Record<string, unknown>) => ComputePassLike;
   copyBufferToBuffer: (source: unknown, sourceOffset: number, destination: unknown, destinationOffset: number, size: number) => void;
+  writeTimestamp?: (querySet: unknown, queryIndex: number) => void;
+  resolveQuerySet?: (querySet: unknown, firstQuery: number, queryCount: number, destination: unknown, destinationOffset: number) => void;
   finish: () => unknown;
 };
 
@@ -753,15 +761,16 @@ function cloneableAdapterInfo(info: unknown): Record<string, unknown> | undefine
   return Object.keys(out).length ? out : undefined;
 }
 
-async function requestDevice(): Promise<{ device: DeviceLike; adapterInfo?: Record<string, unknown> }> {
+async function requestDevice(options: { timestampQuery?: boolean } = {}): Promise<{ device: DeviceLike; adapterInfo?: Record<string, unknown>; timestampQuerySupported: boolean }> {
   const globals = gpuGlobals();
   const gpu = globals.navigator?.gpu as GpuLike | undefined;
   if (!gpu) throw new Error('WebGPU unavailable for lc0web kernel probe');
   const adapter = await gpu.requestAdapter() as AdapterLike | null;
   if (!adapter) throw new Error('WebGPU adapter unavailable for lc0web kernel probe');
   const rawAdapterInfo = adapter.requestAdapterInfo ? await adapter.requestAdapterInfo() : adapter.info;
-  const device = await adapter.requestDevice();
-  return { device, adapterInfo: cloneableAdapterInfo(rawAdapterInfo) };
+  const timestampQuerySupported = adapter.features?.has('timestamp-query') === true;
+  const device = await adapter.requestDevice(options.timestampQuery && timestampQuerySupported ? { requiredFeatures: ['timestamp-query'] } : undefined);
+  return { device, adapterInfo: cloneableAdapterInfo(rawAdapterInfo), timestampQuerySupported };
 }
 
 function dispatchKernel(pass: ComputePassLike, variant: Lc0WebMatmulAddKernelVariant, n: number): void {
@@ -1705,6 +1714,34 @@ async function readF32OutputOnce(device: DeviceLike, outputBuffer: BufferLike, r
   const output = new Float32Array(readbackBuffer.getMappedRange().slice(0));
   readbackBuffer.unmap();
   return output;
+}
+
+async function measureGpuTimestampMs(device: DeviceLike, commandBuffers: unknown[]): Promise<number | undefined> {
+  const globals = gpuGlobals();
+  const usage = globals.GPUBufferUsage!;
+  if (!device.createQuerySet || !usage.QUERY_RESOLVE) return undefined;
+  const startEncoder = device.createCommandEncoder();
+  const finishEncoder = device.createCommandEncoder();
+  if (!startEncoder.writeTimestamp || !finishEncoder.writeTimestamp || !finishEncoder.resolveQuerySet) return undefined;
+  const querySet = device.createQuerySet({ type: 'timestamp', count: 2 });
+  const resolveBuffer = device.createBuffer({ size: 16, usage: usage.QUERY_RESOLVE | usage.COPY_SRC });
+  const readbackBuffer = device.createBuffer({ size: 16, usage: usage.MAP_READ | usage.COPY_DST });
+  try {
+    startEncoder.writeTimestamp(querySet, 0);
+    finishEncoder.writeTimestamp(querySet, 1);
+    finishEncoder.resolveQuerySet(querySet, 0, 2, resolveBuffer, 0);
+    finishEncoder.copyBufferToBuffer(resolveBuffer, 0, readbackBuffer, 0, 16);
+    device.queue.submit([startEncoder.finish(), ...commandBuffers, finishEncoder.finish()]);
+    await readbackBuffer.mapAsync(globals.GPUMapMode!.READ);
+    const timestamps = new BigUint64Array(readbackBuffer.getMappedRange().slice(0));
+    readbackBuffer.unmap();
+    const elapsedNs = timestamps[1] > timestamps[0] ? timestamps[1] - timestamps[0] : 0n;
+    return Number(elapsedNs) / 1_000_000;
+  } finally {
+    querySet.destroy?.();
+    resolveBuffer.destroy?.();
+    readbackBuffer.destroy?.();
+  }
 }
 
 export async function runLc0WebSoftmaxBenchmark(options: Lc0WebSoftmaxBenchmarkOptions): Promise<Lc0WebSoftmaxBenchmarkResult> {
@@ -3254,6 +3291,8 @@ export interface Lc0WebEncoder0BlockBenchmarkResult {
   dispatchLoopMs: number;
   dispatchLoopAvgMs: number;
   readbackSyncedMs: number;
+  gpuTimestampSupported: boolean;
+  gpuTimestampMs?: number;
   stageTimings: Lc0WebEncoder0BlockStageTiming[];
   stageTimingTotalMs: number;
   endToEndMs: number;
@@ -3384,7 +3423,7 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
   const totalStarted = nowMs();
   const warmup = clampInteger(options.warmup, 1, 0, 1000);
   const iterations = clampInteger(options.iterations, 5, 1, 10_000);
-  const { device, adapterInfo } = await requestDevice();
+  const { device, adapterInfo, timestampQuerySupported } = await requestDevice({ timestampQuery: true });
   const tensorNames = lc0WebEncoderBlockTensorNames(options.encoderPrefix);
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
@@ -3542,6 +3581,64 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
       return encoder.finish();
     };
     const encodeFfn = (count: number) => encodeEncoder0FfnDispatches(device, ffnPipelines, count);
+    const measureBlockGpuTimestampMs = async (count: number): Promise<number | undefined> => {
+      if (!timestampQuerySupported || !device.createQuerySet || !usage.QUERY_RESOLVE) return undefined;
+      const querySet = device.createQuerySet({ type: 'timestamp', count: 2 });
+      const resolveBuffer = device.createBuffer({ size: 16, usage: usage.QUERY_RESOLVE | usage.COPY_SRC });
+      const timestampReadback = device.createBuffer({ size: 16, usage: usage.MAP_READ | usage.COPY_DST });
+      try {
+        const encoder = device.createCommandEncoder();
+        const attentionPass = encoder.beginComputePass({ timestampWrites: { querySet, beginningOfPassWriteIndex: 0 } });
+        for (let i = 0; i < count; i++) {
+          attentionPass.setPipeline(attentionPipelines.qkv);
+          attentionPass.setBindGroup(0, attentionPipelines.qkvBind);
+          attentionPass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+          attentionPass.setPipeline(attentionPipelines.score);
+          attentionPass.setBindGroup(0, attentionPipelines.scoreBind);
+          attentionPass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+          attentionPass.setPipeline(attentionPipelines.softmax);
+          attentionPass.setBindGroup(0, attentionPipelines.softmaxBind);
+          attentionPass.dispatchWorkgroups(Math.ceil((DEFAULT_HEADS * DEFAULT_TOKENS) / 64));
+          attentionPass.setPipeline(attentionPipelines.value);
+          attentionPass.setBindGroup(0, attentionPipelines.valueBind);
+          attentionPass.dispatchWorkgroups(Math.ceil(DEFAULT_HEAD_DIM / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+          attentionPass.setPipeline(attentionPipelines.outProj);
+          attentionPass.setBindGroup(0, attentionPipelines.outProjBind);
+          attentionPass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+          attentionPass.setPipeline(attentionPipelines.norm);
+          attentionPass.setBindGroup(0, attentionPipelines.normBind);
+          attentionPass.dispatchWorkgroups(DEFAULT_TOKENS);
+        }
+        attentionPass.end();
+        const ffnPass = encoder.beginComputePass({ timestampWrites: { querySet, endOfPassWriteIndex: 1 } });
+        for (let i = 0; i < count; i++) {
+          ffnPass.setPipeline(ffnPipelines.dense1);
+          ffnPass.setBindGroup(0, ffnPipelines.dense1Bind);
+          ffnPass.dispatchWorkgroups(Math.ceil(DEFAULT_FFN_HIDDEN / 8), Math.ceil(DEFAULT_TOKENS / 8));
+          ffnPass.setPipeline(ffnPipelines.dense2);
+          ffnPass.setBindGroup(0, ffnPipelines.dense2Bind);
+          ffnPass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+          ffnPass.setPipeline(ffnPipelines.ln2);
+          ffnPass.setBindGroup(0, ffnPipelines.ln2Bind);
+          ffnPass.dispatchWorkgroups(DEFAULT_TOKENS);
+        }
+        ffnPass.end();
+        encoder.resolveQuerySet?.(querySet, 0, 2, resolveBuffer, 0);
+        encoder.copyBufferToBuffer(resolveBuffer, 0, timestampReadback, 0, 16);
+        device.queue.submit([encoder.finish()]);
+        await timestampReadback.mapAsync(globals.GPUMapMode!.READ);
+        const timestamps = new BigUint64Array(timestampReadback.getMappedRange().slice(0));
+        timestampReadback.unmap();
+        const elapsedNs = timestamps[1] > timestamps[0] ? timestamps[1] - timestamps[0] : 0n;
+        return Number(elapsedNs) / 1_000_000;
+      } catch {
+        return undefined;
+      } finally {
+        querySet.destroy?.();
+        resolveBuffer.destroy?.();
+        timestampReadback.destroy?.();
+      }
+    };
     const measureStageTimings = async (count: number): Promise<Lc0WebEncoder0BlockStageTiming[]> => {
       const stageDefs: { stage: Lc0WebEncoder0BlockStageName; label: string; encode: (iterations: number) => unknown }[] = [
         { stage: 'qkvProjection', label: 'QKV projection', encode: encodeQkv },
@@ -3586,6 +3683,7 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
     const readbackSyncedMs = nowMs() - dispatchStarted;
     const { maxAbsError, rmsError } = computeErrorStats(gpuOutput, reference.output, outputElements);
     assertErrorInTolerance(maxAbsError);
+    const gpuTimestampMs = await measureBlockGpuTimestampMs(iterations);
     const stageTimings = await measureStageTimings(iterations);
     const stageTimingTotalMs = stageTimings.reduce((sum, timing) => sum + timing.totalMs, 0);
     return {
@@ -3609,6 +3707,8 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
       dispatchLoopMs,
       dispatchLoopAvgMs: dispatchLoopMs / iterations,
       readbackSyncedMs,
+      gpuTimestampSupported: timestampQuerySupported,
+      gpuTimestampMs,
       stageTimings,
       stageTimingTotalMs,
       endToEndMs: nowMs() - totalStarted,

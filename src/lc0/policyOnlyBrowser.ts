@@ -335,6 +335,8 @@ type Encoder0BlockBenchmarkResult = {
   dispatchLoopMs: number;
   dispatchLoopAvgMs: number;
   readbackSyncedMs: number;
+  gpuTimestampSupported?: boolean;
+  gpuTimestampMs?: number;
   stageTimings: Encoder0BlockStageTiming[];
   stageTimingTotalMs: number;
   endToEndMs: number;
@@ -1143,6 +1145,7 @@ async function runEncoder0BlockBenchmark(): Promise<void> {
       dispatchLoopMs: Number(response.result.dispatchLoopMs.toFixed(4)),
       dispatchLoopAvgMs: Number(response.result.dispatchLoopAvgMs.toExponential(6)),
       readbackSyncedMs: Number(response.result.readbackSyncedMs.toFixed(4)),
+      gpuTimestampMs: response.result.gpuTimestampMs === undefined ? undefined : Number(response.result.gpuTimestampMs.toFixed(6)),
       stageTimings: response.result.stageTimings.map((timing) => ({
         ...timing,
         totalMs: Number(timing.totalMs.toFixed(4)),
@@ -1156,7 +1159,8 @@ async function runEncoder0BlockBenchmark(): Promise<void> {
     };
     el('benchResult').textContent = JSON.stringify(rounded);
     const slowestStage = rounded.stageTimings.reduce((best, timing) => timing.avgMs > best.avgMs ? timing : best, rounded.stageTimings[0]);
-    el('message').textContent = `ENCODER0_BLOCK_BENCH_DONE attention+FFN ${rounded.tokens}x${rounded.channels} · ${rounded.iterations} queued blocks · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · slowest stage ${slowestStage.label} ${slowestStage.avgMs.toFixed(3)} ms avg · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    const gpuTimeText = rounded.gpuTimestampMs === undefined ? '' : ` · gpu-timestamp ${rounded.gpuTimestampMs.toFixed(3)} ms`;
+    el('message').textContent = `ENCODER0_BLOCK_BENCH_DONE attention+FFN ${rounded.tokens}x${rounded.channels} · ${rounded.iterations} queued blocks · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms${gpuTimeText} · slowest stage ${slowestStage.label} ${slowestStage.avgMs.toFixed(3)} ms avg · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `ENCODER0_BLOCK_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Encoder0 block benchmark failed: ${(error as Error).message}`;
