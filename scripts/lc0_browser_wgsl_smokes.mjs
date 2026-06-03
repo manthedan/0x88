@@ -54,6 +54,11 @@ const SMOKES = [
     doneText: 'ENCODER0_BLOCK_BENCH_DONE',
   },
   {
+    name: 'encoder0-block-ort-wasm',
+    query: 'encoder0BlockOrtBench=1&encoder0BlockOrtWarmup=0&encoder0BlockOrtIters=1&ep=wasm&packVerify=0',
+    doneText: 'ENCODER0_BLOCK_ORT_BENCH_DONE',
+  },
+  {
     name: 'kernel-bench-scalar',
     query: 'kernelBench=1&kernelBenchWarmup=1&kernelBenchIters=3&packVerify=0',
     doneText: 'KERNEL_BENCH_DONE',

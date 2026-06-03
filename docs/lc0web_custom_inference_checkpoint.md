@@ -18,6 +18,7 @@ This checkpoint records the current custom-kernel path for the batch-8 f16 `lc0w
 - `?encoder0FfnBench=1`: encoder0 FFN from ln1 through dense1/bias/sqrrelu/dense2/bias/alpha residual/ln2.
 - `?encoder0FfnOrtBench=1`: tiny ORT comparison for encoder0 FFN dense1/sqrrelu/dense2/alpha residual/ln2.
 - `?encoder0BlockBench=1`: full encoder0 attention+FFN block through ln2.
+- `?encoder0BlockOrtBench=1`: tiny ORT comparison for attention-value output through attention output projection/ln1 plus FFN/ln2.
 
 The browser page now emits a `benchmarkReport` object with browser metadata, GPU adapter info where available, pack verification mode, and timing summaries. `scripts/lc0_browser_wgsl_smokes.mjs` automates the main browser smokes and parses `maxAbsError`.
 
@@ -34,6 +35,8 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
   - `ATTENTION_OUTPUT_ORT_BENCH_DONE`, max absolute error about `1.67e-6`.
 - `npm run lc0:browser-wgsl-smokes -- --only encoder0-ffn-ort-wasm --timeout 25000`
   - `FFN_ORT_BENCH_DONE`, max absolute error about `1.91e-6`.
+- `npm run lc0:browser-wgsl-smokes -- --only encoder0-block-ort-wasm --timeout 25000`
+  - `ENCODER0_BLOCK_ORT_BENCH_DONE`, max absolute error about `1.97e-6`.
 
 Validation commands used during this checkpoint:
 
@@ -44,6 +47,7 @@ npm run lc0:browser-wgsl-smokes -- --no-server --only encoder0-ffn,encoder0-bloc
 npm run lc0:browser-wgsl-smokes -- --no-server --only attention-value-ort-wasm --timeout 25000
 npm run lc0:browser-wgsl-smokes -- --only attention-output-ort-wasm --timeout 25000
 npm run lc0:browser-wgsl-smokes -- --only encoder0-ffn-ort-wasm --timeout 25000
+npm run lc0:browser-wgsl-smokes -- --only encoder0-block-ort-wasm --timeout 25000
 ```
 
 ## Current interpretation
