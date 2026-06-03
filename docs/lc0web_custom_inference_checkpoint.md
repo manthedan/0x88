@@ -19,6 +19,7 @@ This checkpoint records the current custom-kernel path for the batch-8 f16 `lc0w
 - `?encoder0FfnOrtBench=1`: tiny ORT comparison for encoder0 FFN dense1/sqrrelu/dense2/alpha residual/ln2.
 - `?encoder0BlockBench=1`: full encoder0 attention+FFN block through ln2.
 - `?encoder0BlockOrtBench=1`: tiny ORT comparison for attention-value output through attention output projection/ln1 plus FFN/ln2.
+- `?encoderStackBench=1&encoderLayers=N`: reusable WGSL encoder-block primitive loop over `/encoder0..N-1`, with per-block CPU f32 reference checks and optional per-block tiny f32 ONNX/ORT comparison for attention-output+FFN (`encoderStackOrt=1`, default).
 - `?encoderPrefix=/encoderN`: experimental tensor-prefix override for attention-output/FFN/full-block routes so the same plumbing can target later encoder layers.
 
 The browser page now emits a `benchmarkReport` object with browser metadata, GPU adapter info where available, pack verification mode, and timing summaries. Full encoder0 WGSL block results also include per-stage diagnostic timings for QKV projection, attention scores, softmax, attention value, output projection + ln1, FFN dense1, FFN dense2 + residual, and ln2. When Chromium exposes WebGPU `timestamp-query`, the encoder0 block route also reports a GPU timestamp duration for the attention+FFN command sequence. `scripts/lc0_browser_wgsl_smokes.mjs` automates the main browser smokes, parses `maxAbsError`, and surfaces encoder-block stage/timestamp timings when present. `scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs` runs fresh-session, alternating encoder0-block WGSL vs ORT WebGPU measurements and marks results as non-promotional diagnostics.
@@ -46,6 +47,9 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
 - `npm run lc0:browser-wgsl-smokes -- --only encoder1-block --timeout 25000`
   - `ENCODER0_BLOCK_BENCH_DONE` using `encoderPrefix=/encoder1`, max absolute error about `5.72e-6`.
   - This validates the prefix-generalized tensor plumbing against a later encoder layer's weights; it still uses the staged synthetic input/reference for that layer, not true layer-to-layer activation handoff.
+- `npm run lc0:browser-wgsl-smokes -- --only encoder-stack-2-wasm --timeout 25000`
+  - `ENCODER_STACK_BENCH_DONE` over `/encoder0` then `/encoder1`, max absolute error about `5.25e-6`.
+  - This is the first reusable encoder-block primitive loop: it feeds each WGSL block's GPU output buffer into the next block, while validating every block against a CPU f32 reference and a tiny f32 ONNX/ORT attention-output+FFN subgraph. The smolgen/QKV/softmax/attention-value portions are still checked against the CPU f32 reference, not a full block ONNX graph.
 - `npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2`
   - Alternated fresh browser sessions in order `wgsl, ort, ort, wgsl`.
   - ORT reported `webgpu->webgpu` with WebGPU provider accepted in both ORT samples.
@@ -66,6 +70,7 @@ npm run lc0:browser-wgsl-smokes -- --only attention-output-ort-wasm --timeout 25
 npm run lc0:browser-wgsl-smokes -- --only encoder0-ffn-ort-wasm --timeout 25000
 npm run lc0:browser-wgsl-smokes -- --only encoder0-block-ort-wasm --timeout 25000
 npm run lc0:browser-wgsl-smokes -- --only encoder1-block --timeout 25000
+npm run lc0:browser-wgsl-smokes -- --only encoder-stack-2-wasm --timeout 25000
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --dry-run --samples 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 10 --timeout 25000 --wgsl-iters 3 --ort-iters 3
@@ -75,7 +80,7 @@ npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 10 --timeout 25000 --wgsl-it
 
 The custom path now validates a complete encoder0 block in staged WGSL form, including smolgen score bias and FFN. This is a stronger milestone than the earlier attention-core-only checkpoint, but it is still not an end-to-end LC0 evaluator:
 
-- Only encoder0 is covered; remaining transformer layers still need repeated-layer validation.
+- The reusable encoder-block loop now covers `/encoder0` → `/encoder1` with GPU-buffer handoff, but the full 10-layer stack and policy/value heads are not yet covered.
 - Timing reports both command submission/readback synchronization and, when Chromium exposes WebGPU `timestamp-query`, a GPU timestamp duration for the encoder0 attention+FFN command sequence.
 - The full encoder0 benchmark no longer forces an explicit queue-completion boundary between attention-output and FFN; both command buffers are submitted together and rely on WebGPU queue ordering for the ln1-output → FFN-dense1 dependency.
 - The per-stage encoder0 timing breakdown currently points first at projection/matmul-style kernels rather than softmax after switching softmax to a per-row workgroup reduction; stage timings still include queue-completion overhead.
@@ -87,8 +92,8 @@ Do **not** promote full custom LC0 inference yet.
 
 Next gates before an end-to-end custom runtime:
 
-1. Repeat encoder-block validation across additional encoder layers using `?encoderPrefix=/encoderN` once later-layer activation handoff is implemented.
+1. Extend `?encoderStackBench=1` from two layers to the full 10-layer encoder stack and keep per-block parity green.
 2. Add ORT comparisons for the remaining full attention block if practical.
 3. Repeat and broaden alternating browser runs against ORT WebGPU after validating more than encoder0.
-4. Prove layer-to-layer activation layout reuse without extra main-thread copies.
+4. Add policy/value heads after encoder-stack confidence, then compare final policy/value drift against f32 ONNX and native LC0 BLAS fixtures.
 5. Preserve f32 ONNX/native parity as the correctness ladder while using f16/WebGPU as deployment target.

@@ -1475,8 +1475,7 @@ function addElementwise(a: Float32Array<ArrayBufferLike>, b: Float32Array<ArrayB
   return out;
 }
 
-function buildAttentionScoreReference(tensors: ReturnType<typeof loadAttentionScoreInputs>): { input: Float32Array<ArrayBufferLike>; q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; scale: number; qkScores: Float32Array<ArrayBufferLike>; smolgenBias: Float32Array<ArrayBufferLike>; scores: Float32Array<ArrayBufferLike> } {
-  const input = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K);
+function buildAttentionScoreReference(tensors: ReturnType<typeof loadAttentionScoreInputs>, input: Float32Array<ArrayBufferLike> = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K)): { input: Float32Array<ArrayBufferLike>; q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; scale: number; qkScores: Float32Array<ArrayBufferLike>; smolgenBias: Float32Array<ArrayBufferLike>; scores: Float32Array<ArrayBufferLike> } {
   const q = cpuProjectTokens(input, tensors.qWeight.bytes, tensors.qBias.bytes, DEFAULT_TOKENS, DEFAULT_K, DEFAULT_N);
   const k = cpuProjectTokens(input, tensors.kWeight.bytes, tensors.kBias.bytes, DEFAULT_TOKENS, DEFAULT_K, DEFAULT_N);
   const scale = readF16At(tensors.scale.bytes, 0);
@@ -1943,8 +1942,7 @@ function loadAttentionValueInputs(pack: Awaited<ReturnType<typeof loadLc0WebMode
   return { qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgen: loadEncoder0SmolgenTensors(pack, tensorNames.smolgen) };
 }
 
-function buildAttentionValueReference(tensors: ReturnType<typeof loadAttentionValueInputs>): { probs: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; scale: number; smolgenBias: Float32Array<ArrayBufferLike> } {
-  const input = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K);
+function buildAttentionValueReference(tensors: ReturnType<typeof loadAttentionValueInputs>, input: Float32Array<ArrayBufferLike> = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K)): { probs: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; scale: number; smolgenBias: Float32Array<ArrayBufferLike> } {
   const q = cpuProjectTokens(input, tensors.qWeight.bytes, tensors.qBias.bytes, DEFAULT_TOKENS, DEFAULT_K, DEFAULT_N);
   const k = cpuProjectTokens(input, tensors.kWeight.bytes, tensors.kBias.bytes, DEFAULT_TOKENS, DEFAULT_K, DEFAULT_N);
   const v = cpuProjectTokens(input, tensors.vWeight.bytes, tensors.vBias.bytes, DEFAULT_TOKENS, DEFAULT_K, DEFAULT_N);
@@ -2407,9 +2405,8 @@ function loadAttentionOutputInputs(pack: Awaited<ReturnType<typeof loadLc0WebMod
   return { ...base, outWeight, outBias, alpha, lnScale, lnBias };
 }
 
-function buildAttentionOutputReference(tensors: ReturnType<typeof loadAttentionOutputInputs>): { input: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; alpha: number; smolgenBias: Float32Array<ArrayBufferLike> } {
-  const input = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K);
-  const attentionReference = buildAttentionValueReference(tensors);
+function buildAttentionOutputReference(tensors: ReturnType<typeof loadAttentionOutputInputs>, input: Float32Array<ArrayBufferLike> = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K)): { input: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; alpha: number; smolgenBias: Float32Array<ArrayBufferLike> } {
+  const attentionReference = buildAttentionValueReference(tensors, input);
   const attention = attentionReference.output;
   const projected = cpuProjectTokens(attention, tensors.outWeight.bytes, tensors.outBias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N);
   const alpha = readF16At(tensors.alpha.bytes, 0);
@@ -3070,6 +3067,44 @@ function encodeEncoder0FfnDispatches(device: DeviceLike, pipelines: ReturnType<t
   return encoder.finish();
 }
 
+function encodeLc0WebEncoderBlockPass(pass: ComputePassLike, attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>, ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>): void {
+  pass.setPipeline(attentionPipelines.qkv);
+  pass.setBindGroup(0, attentionPipelines.qkvBind);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+  pass.setPipeline(attentionPipelines.score);
+  pass.setBindGroup(0, attentionPipelines.scoreBind);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+  pass.setPipeline(attentionPipelines.softmax);
+  pass.setBindGroup(0, attentionPipelines.softmaxBind);
+  pass.dispatchWorkgroups(DEFAULT_HEADS * DEFAULT_TOKENS);
+  pass.setPipeline(attentionPipelines.value);
+  pass.setBindGroup(0, attentionPipelines.valueBind);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_HEAD_DIM / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+  pass.setPipeline(attentionPipelines.outProj);
+  pass.setBindGroup(0, attentionPipelines.outProjBind);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+  pass.setPipeline(attentionPipelines.norm);
+  pass.setBindGroup(0, attentionPipelines.normBind);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
+  pass.setPipeline(ffnPipelines.dense1);
+  pass.setBindGroup(0, ffnPipelines.dense1Bind);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_FFN_HIDDEN / 8), Math.ceil(DEFAULT_TOKENS / 8));
+  pass.setPipeline(ffnPipelines.dense2);
+  pass.setBindGroup(0, ffnPipelines.dense2Bind);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+  pass.setPipeline(ffnPipelines.ln2);
+  pass.setBindGroup(0, ffnPipelines.ln2Bind);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
+}
+
+function encodeLc0WebEncoderBlockDispatches(device: DeviceLike, attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>, ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>, iterations: number): unknown {
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  for (let i = 0; i < iterations; i++) encodeLc0WebEncoderBlockPass(pass, attentionPipelines, ffnPipelines);
+  pass.end();
+  return encoder.finish();
+}
+
 export async function runLc0WebEncoder0FfnBenchmark(options: Lc0WebEncoder0FfnBenchmarkOptions): Promise<Lc0WebEncoder0FfnBenchmarkResult> {
   const totalStarted = nowMs();
   const warmup = clampInteger(options.warmup, 2, 0, 1000);
@@ -3349,8 +3384,56 @@ export interface Lc0WebEncoder0BlockOrtBenchmarkResult {
   outputSample: number[];
 }
 
-function buildEncoder0BlockReference(tensors: Encoder0FfnTensors): { input: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; attentionAlpha: number; ffnAlpha: number; smolgenBias: Float32Array<ArrayBufferLike> } {
-  const attention = buildAttentionOutputReference(tensors);
+export interface Lc0WebEncoderStackBenchmarkOptions {
+  packUrl: string;
+  layers?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+  compareOrt?: boolean;
+}
+
+export interface Lc0WebEncoderStackBlockResult {
+  layer: number;
+  prefix: string;
+  dispatchSyncedMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  ortMaxAbsError?: number;
+  ortRmsError?: number;
+  ortVsCpuMaxAbsError?: number;
+  ortVsCpuRmsError?: number;
+  outputSample: number[];
+}
+
+export interface Lc0WebEncoderStackBenchmarkResult {
+  status: 'ENCODER_STACK_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  tokens: number;
+  channels: number;
+  heads: number;
+  headDim: number;
+  ffnHidden: number;
+  lnEpsilon: number;
+  warmup: number;
+  layers: number;
+  prefixes: string[];
+  compareOrt: boolean;
+  ortCoveredStages: string;
+  packLoadMs: number;
+  setupAndDispatchMs: number;
+  dispatchSyncedMs: number;
+  avgBlockDispatchSyncedMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  ortMaxAbsError?: number;
+  outputSample: number[];
+  blocks: Lc0WebEncoderStackBlockResult[];
+}
+
+function buildEncoder0BlockReference(tensors: Encoder0FfnTensors, input: Float32Array<ArrayBufferLike> = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K)): { input: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; attentionAlpha: number; ffnAlpha: number; smolgenBias: Float32Array<ArrayBufferLike> } {
+  const attention = buildAttentionOutputReference(tensors, input);
   const ffn = cpuEncoder0FfnFromLn1(attention.output, tensors);
   return { input: attention.input, output: ffn.output, attentionAlpha: attention.alpha, ffnAlpha: ffn.alpha, smolgenBias: attention.smolgenBias };
 }
@@ -3733,6 +3816,170 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
       maxAbsError,
       rmsError,
       outputSample: Array.from(gpuOutput.slice(0, 8)),
+    };
+  } finally {
+    for (const buffer of buffers) buffer.destroy?.();
+  }
+}
+
+export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStackBenchmarkOptions): Promise<Lc0WebEncoderStackBenchmarkResult> {
+  const totalStarted = nowMs();
+  const warmup = clampInteger(options.warmup, 0, 0, 10);
+  const layers = clampInteger(options.layers, 2, 1, 32);
+  const compareOrt = options.compareOrt ?? true;
+  const prefixes = Array.from({ length: layers }, (_, layer) => `/encoder${layer}`);
+  const layerTensorNames = prefixes.map((prefix) => lc0WebEncoderBlockTensorNames(prefix));
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: Array.from(new Set(layerTensorNames.flatMap((names) => encoderBlockTensorNameList(names)))),
+  });
+  const tensorsByLayer = layerTensorNames.map((names) => loadEncoder0FfnInputs(pack, names));
+  const { device, adapterInfo } = await requestDevice();
+  const globals = gpuGlobals();
+  const usage = globals.GPUBufferUsage!;
+  const outputElements = DEFAULT_TOKENS * DEFAULT_N;
+  const buffers: BufferLike[] = [];
+  const blocks: Lc0WebEncoderStackBlockResult[] = [];
+  try {
+    const setupStarted = nowMs();
+    let cpuInput = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K);
+    let gpuInput = createStorageBuffer(device, cpuInput, usage.STORAGE | usage.COPY_DST);
+    buffers.push(gpuInput);
+    let lastGpuOutput = cpuInput;
+    const dispatchStarted = nowMs();
+    for (let layer = 0; layer < layers; layer++) {
+      const tensors = tensorsByLayer[layer];
+      const reference = buildEncoder0BlockReference(tensors, cpuInput);
+      const qWeight = createStorageBuffer(device, tensors.qWeight.bytes, usage.STORAGE | usage.COPY_DST);
+      const qBias = createStorageBuffer(device, tensors.qBias.bytes, usage.STORAGE | usage.COPY_DST);
+      const kWeight = createStorageBuffer(device, tensors.kWeight.bytes, usage.STORAGE | usage.COPY_DST);
+      const kBias = createStorageBuffer(device, tensors.kBias.bytes, usage.STORAGE | usage.COPY_DST);
+      const vWeight = createStorageBuffer(device, tensors.vWeight.bytes, usage.STORAGE | usage.COPY_DST);
+      const vBias = createStorageBuffer(device, tensors.vBias.bytes, usage.STORAGE | usage.COPY_DST);
+      const scale = createStorageBuffer(device, paddedF16ScalarBytes(tensors.scale.bytes), usage.STORAGE | usage.COPY_DST);
+      const smolgenBias = createStorageBuffer(device, reference.smolgenBias, usage.STORAGE | usage.COPY_DST);
+      const outWeight = createStorageBuffer(device, tensors.outWeight.bytes, usage.STORAGE | usage.COPY_DST);
+      const outBias = createStorageBuffer(device, tensors.outBias.bytes, usage.STORAGE | usage.COPY_DST);
+      const attentionAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.alpha.bytes), usage.STORAGE | usage.COPY_DST);
+      const ln1Scale = createStorageBuffer(device, tensors.lnScale.bytes, usage.STORAGE | usage.COPY_DST);
+      const ln1Bias = createStorageBuffer(device, tensors.lnBias.bytes, usage.STORAGE | usage.COPY_DST);
+      const ffnDense1Weight = createStorageBuffer(device, tensors.ffnDense1Weight.bytes, usage.STORAGE | usage.COPY_DST);
+      const ffnDense1Bias = createStorageBuffer(device, tensors.ffnDense1Bias.bytes, usage.STORAGE | usage.COPY_DST);
+      const ffnDense2Weight = createStorageBuffer(device, tensors.ffnDense2Weight.bytes, usage.STORAGE | usage.COPY_DST);
+      const ffnDense2Bias = createStorageBuffer(device, tensors.ffnDense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
+      const ffnAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.ffnAlpha.bytes), usage.STORAGE | usage.COPY_DST);
+      const ln2Scale = createStorageBuffer(device, tensors.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
+      const ln2Bias = createStorageBuffer(device, tensors.ln2Bias.bytes, usage.STORAGE | usage.COPY_DST);
+      const qkv = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 3 * 4, usage: usage.STORAGE });
+      const scores = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE });
+      const probs = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE });
+      const attn = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE });
+      const attentionSkip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE });
+      const attentionOutput = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE });
+      const ffnHidden = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN * 4, usage: usage.STORAGE });
+      const ffnSkip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE });
+      const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC });
+      const readback = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
+      buffers.push(qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, outWeight, outBias, attentionAlpha, ln1Scale, ln1Bias, ffnDense1Weight, ffnDense1Bias, ffnDense2Weight, ffnDense2Bias, ffnAlpha, ln2Scale, ln2Bias, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, output, readback);
+      const attentionPipelines = createAttentionOutputPipelines(device, {
+        input: gpuInput, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv, scores, probs, attn,
+        outWeight, outBias, alpha: attentionAlpha, skip: attentionSkip, lnScale: ln1Scale, lnBias: ln1Bias, output: attentionOutput,
+      });
+      const ffnPipelines = createEncoder0FfnPipelines(device, {
+        input: attentionOutput,
+        dense1Weight: ffnDense1Weight,
+        dense1Bias: ffnDense1Bias,
+        hidden: ffnHidden,
+        dense2Weight: ffnDense2Weight,
+        dense2Bias: ffnDense2Bias,
+        alpha: ffnAlpha,
+        skip: ffnSkip,
+        ln2Scale,
+        ln2Bias,
+        output,
+      });
+      if (warmup > 0) {
+        device.queue.submit([encodeLc0WebEncoderBlockDispatches(device, attentionPipelines, ffnPipelines, warmup)]);
+        await device.queue.onSubmittedWorkDone?.();
+      }
+      const blockStarted = nowMs();
+      device.queue.submit([encodeLc0WebEncoderBlockDispatches(device, attentionPipelines, ffnPipelines, 1)]);
+      const gpuOutput = await readF32OutputOnce(device, output, readback, outputElements);
+      const dispatchSyncedMs = nowMs() - blockStarted;
+      const { maxAbsError, rmsError } = computeErrorStats(gpuOutput, reference.output, outputElements);
+      assertErrorInTolerance(maxAbsError);
+      const block: Lc0WebEncoderStackBlockResult = {
+        layer,
+        prefix: prefixes[layer],
+        dispatchSyncedMs,
+        maxAbsError,
+        rmsError,
+        outputSample: Array.from(gpuOutput.slice(0, 8)),
+      };
+      if (compareOrt) {
+        const attentionValue = buildAttentionValueReference(tensors, cpuInput);
+        const tinyOnnx = createTinyEncoder0BlockOnnxForTest(
+          f16BytesToF32Array(tensors.outWeight.bytes, DEFAULT_N * DEFAULT_N),
+          f16BytesToF32Array(tensors.outBias.bytes, DEFAULT_N),
+          reference.attentionAlpha,
+          f16BytesToF32Array(tensors.lnScale.bytes, DEFAULT_N),
+          f16BytesToF32Array(tensors.lnBias.bytes, DEFAULT_N),
+          f16BytesToF32Array(tensors.ffnDense1Weight.bytes, DEFAULT_N * DEFAULT_FFN_HIDDEN),
+          f16BytesToF32Array(tensors.ffnDense1Bias.bytes, DEFAULT_FFN_HIDDEN),
+          f16BytesToF32Array(tensors.ffnDense2Weight.bytes, DEFAULT_FFN_HIDDEN * DEFAULT_N),
+          f16BytesToF32Array(tensors.ffnDense2Bias.bytes, DEFAULT_N),
+          reference.ffnAlpha,
+          f16BytesToF32Array(tensors.ln2Scale.bytes, DEFAULT_N),
+          f16BytesToF32Array(tensors.ln2Bias.bytes, DEFAULT_N),
+        );
+        const session = await ort.createOrtSession(tinyOnnx);
+        const ortOutputs = await session.run({
+          attention: new ort.Tensor('float32', attentionValue.output, [DEFAULT_TOKENS, DEFAULT_N]),
+          residual: new ort.Tensor('float32', cpuInput, [DEFAULT_TOKENS, DEFAULT_N]),
+        });
+        const ortOutput = ortOutputs.output.data as Float32Array<ArrayBufferLike>;
+        const ortVsGpu = computeErrorStats(gpuOutput, ortOutput, outputElements);
+        const ortVsCpu = computeErrorStats(ortOutput, reference.output, outputElements);
+        assertErrorInTolerance(ortVsGpu.maxAbsError);
+        block.ortMaxAbsError = ortVsGpu.maxAbsError;
+        block.ortRmsError = ortVsGpu.rmsError;
+        block.ortVsCpuMaxAbsError = ortVsCpu.maxAbsError;
+        block.ortVsCpuRmsError = ortVsCpu.rmsError;
+      }
+      blocks.push(block);
+      cpuInput = reference.output;
+      gpuInput = output;
+      lastGpuOutput = gpuOutput;
+    }
+    const dispatchSyncedMs = nowMs() - dispatchStarted;
+    const maxBlock = blocks.reduce((max, block) => Math.max(max, block.maxAbsError), 0);
+    const rmsBlock = Math.sqrt(blocks.reduce((sum, block) => sum + block.rmsError * block.rmsError, 0) / blocks.length);
+    const ortMax = compareOrt ? blocks.reduce((max, block) => Math.max(max, block.ortMaxAbsError ?? 0), 0) : undefined;
+    return {
+      status: 'ENCODER_STACK_BENCH_DONE',
+      packUrl: pack.manifestUrl,
+      modelName: pack.manifest.model.name,
+      adapterInfo,
+      tokens: DEFAULT_TOKENS,
+      channels: DEFAULT_N,
+      heads: DEFAULT_HEADS,
+      headDim: DEFAULT_HEAD_DIM,
+      ffnHidden: DEFAULT_FFN_HIDDEN,
+      lnEpsilon: DEFAULT_LN_EPSILON,
+      warmup,
+      layers,
+      prefixes,
+      compareOrt,
+      ortCoveredStages: 'attention output projection/ln1 + FFN/ln2 f32 ONNX subgraph per block; QKV/softmax/attention value are checked against the CPU f32 reference',
+      packLoadMs: pack.elapsedMs,
+      setupAndDispatchMs: nowMs() - setupStarted,
+      dispatchSyncedMs,
+      avgBlockDispatchSyncedMs: dispatchSyncedMs / layers,
+      maxAbsError: maxBlock,
+      rmsError: rmsBlock,
+      ortMaxAbsError: ortMax,
+      outputSample: Array.from(lastGpuOutput.slice(0, 8)),
+      blocks,
     };
   } finally {
     for (const buffer of buffers) buffer.destroy?.();
