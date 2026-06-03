@@ -1,5 +1,4 @@
 import { collectOrtRuntimeDiagnostics, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
-import { runMatch, type BattleEngine, type GameResult, type MatchSummary } from './engineBattle.ts';
 import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
@@ -27,23 +26,14 @@ type EvaluateMessage = {
   input: Lc0EvaluatorInput;
 };
 
-type BattleMessage = {
-  type: 'battle';
-  id: number;
-  games: number;
-  visits: number;
-  maxPlies?: number;
-  startFen?: string;
-};
-
 type CancelMessage = {
   type: 'cancel';
   id: number;
-  /** Optional target request id; when omitted, cancels any in-flight search/battle. */
+  /** Optional target request id; when omitted, cancels any in-flight search. */
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | BattleMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -55,16 +45,13 @@ type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
-  | { type: 'battleProgress'; id: number; game: number; total: number; result: GameResult }
-  | { type: 'battleResult'; id: number; result: MatchSummary; elapsedMs: number }
   | { type: 'error'; id: number; error: string };
 
 let evaluator: Lc0OnnxEvaluator | null = null;
 let searcher: Lc0PuctSearcher | null = null;
 let configuredModelUrl: string | null = null;
-/** In-flight search/battle abort controllers keyed by request id, so cancel messages can stop them. */
+/** In-flight search abort controllers keyed by request id, so cancel messages can stop them. */
 const activeSearches = new Map<number, AbortController>();
-const activeBattles = new Map<number, AbortController>();
 
 function nowMs(): number {
   return typeof performance === 'undefined' ? Date.now() : performance.now();
@@ -135,47 +122,12 @@ async function handleSearch(message: SearchMessage): Promise<void> {
   }
 }
 
-async function handleBattle(message: BattleMessage): Promise<void> {
-  if (!searcher || !evaluator) throw new Error('LC0 search worker is not initialized');
-  const localSearcher = searcher;
-  const localEvaluator = evaluator;
-  const started = nowMs();
-  const controller = new AbortController();
-  activeBattles.set(message.id, controller);
-  try {
-    const searchEngine: BattleEngine = {
-      name: `lc0-search-${message.visits}`,
-      async chooseMove(positions) {
-        const result = await localSearcher.search({ positions }, { visits: message.visits, signal: controller.signal, yieldEveryMs: 16 });
-        return result.move ?? null;
-      },
-    };
-    const policyEngine: BattleEngine = {
-      name: 'lc0-policy',
-      async chooseMove(positions) {
-        return (await localEvaluator.evaluate({ positions })).bestMove ?? null;
-      },
-    };
-    const summary = await runMatch(searchEngine, policyEngine, message.games, {
-      maxPlies: message.maxPlies ?? 200,
-      startFen: message.startFen,
-      signal: controller.signal,
-      onGame: (game, total, result) => post({ type: 'battleProgress', id: message.id, game, total, result }),
-    });
-    post({ type: 'battleResult', id: message.id, result: summary, elapsedMs: nowMs() - started });
-  } finally {
-    activeBattles.delete(message.id);
-  }
-}
-
 function handleCancel(message: CancelMessage): void {
   if (message.target !== undefined) {
     activeSearches.get(message.target)?.abort();
-    activeBattles.get(message.target)?.abort();
     return;
   }
   for (const controller of activeSearches.values()) controller.abort();
-  for (const controller of activeBattles.values()) controller.abort();
 }
 
 self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
@@ -195,9 +147,6 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       } else if (message.type === 'search') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleSearch(message);
-      } else if (message.type === 'battle') {
-        if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
-        await handleBattle(message);
       }
     } catch (error) {
       post({ type: 'error', id: message.id, error: (error as Error).message });

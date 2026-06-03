@@ -51,6 +51,19 @@ function terminalResult(board: BoardState): { result: GameResultCode; reason: st
   return null;
 }
 
+/**
+ * Whether the game is over at this board: checkmate/stalemate or an automatic
+ * draw (fifty-move/threefold/insufficient material). Returns null if play
+ * continues. Shared by playGame and the browser's board-driven game loop.
+ */
+export function gameOutcome(board: BoardState, priorFens: string[] = []): { result: GameResultCode; reason: string } | null {
+  const terminal = terminalResult(board);
+  if (terminal) return terminal;
+  const drawReason = automaticDrawReason(board, priorFens);
+  if (drawReason) return { result: '1/2-1/2', reason: drawReason };
+  return null;
+}
+
 export async function playGame(white: BattleEngine, black: BattleEngine, options: PlayGameOptions = {}): Promise<GameResult> {
   const maxPlies = options.maxPlies ?? 300;
   let board = parseFen(options.startFen ?? START_FEN);
@@ -62,10 +75,8 @@ export async function playGame(white: BattleEngine, black: BattleEngine, options
 
   for (let ply = 0; ply < maxPlies; ply++) {
     if (options.signal?.aborted) return { result: '1/2-1/2', reason: 'cancelled', plies: ply, moves, finalFen: boardToFen(board) };
-    const terminal = terminalResult(board);
-    if (terminal) return { ...terminal, plies: ply, moves, finalFen: boardToFen(board) };
-    const drawReason = automaticDrawReason(board, priorFens);
-    if (drawReason) return { result: '1/2-1/2', reason: drawReason, plies: ply, moves, finalFen: boardToFen(board) };
+    const outcome = gameOutcome(board, priorFens);
+    if (outcome) return { ...outcome, plies: ply, moves, finalFen: boardToFen(board) };
 
     const engine = board.turn === 'w' ? white : black;
     const legal = legalMoves(board);

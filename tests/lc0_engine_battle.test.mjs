@@ -4,11 +4,13 @@ import { test } from 'node:test';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
 import {
+  gameOutcome,
   lc0PolicyBattleEngine,
   lc0SearchBattleEngine,
   playGame,
   runMatch,
 } from '../src/lc0/engineBattle.ts';
+import { parseFen } from '../src/chess/board.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from '../src/lc0/policyOnlyPlayer.ts';
 import { Lc0PuctSearcher } from '../src/lc0/search.ts';
@@ -81,6 +83,14 @@ test('runMatch alternates colors and tallies scores from A perspective', async (
   assert.equal(summary.aScore, 2);
   assert.equal(summary.results[0].reason, 'checkmate');
   assert.equal(summary.results[1].reason, 'resigned');
+});
+
+test('gameOutcome classifies terminal, draw, and ongoing positions', () => {
+  // The board-driven browser loop relies on this shared check.
+  assert.equal(gameOutcome(parseFen(BACK_RANK_MATE)), null, 'mate-in-1 root is still playable');
+  assert.deepEqual(gameOutcome(parseFen('rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 0 3')), { result: '0-1', reason: 'checkmate' });
+  assert.deepEqual(gameOutcome(parseFen(STALEMATE)), { result: '1/2-1/2', reason: 'stalemate' });
+  assert.deepEqual(gameOutcome(parseFen(KING_VS_KING)), { result: '1/2-1/2', reason: 'insufficientMaterial' });
 });
 
 test('runMatch streams per-game progress via onGame with alternating colors', async () => {

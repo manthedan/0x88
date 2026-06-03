@@ -6,7 +6,7 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { bestMoveShapes, searchShapes } from './boardArrows.ts';
 import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig, type OrtExecutionProviderPreference, type OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import type { GameResult, MatchSummary } from './engineBattle.ts';
+import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
 import { clearLc0ModelCache, describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
@@ -21,8 +21,6 @@ type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
-  | { type: 'battleProgress'; id: number; game: number; total: number; result: GameResult }
-  | { type: 'battleResult'; id: number; result: MatchSummary; elapsedMs: number }
   | { type: 'error'; id: number; error: string };
 
 type BrowserEvaluationChoice = { move?: string; evaluation: Lc0Evaluation };
@@ -64,9 +62,10 @@ let searching = false;
 let mainSearchAbort: AbortController | null = null;
 let activeWorkerSearchId: number | null = null;
 let battleRunning = false;
-let battleGames = Math.max(1, Math.floor(Number(params.get('battleGames') ?? '2') || 2));
-let activeBattleId: number | null = null;
-let battleProgressHandler: ((message: Extract<WorkerResponse, { type: 'battleProgress' }>) => void) | null = null;
+let battleGames = Math.max(1, Math.floor(Number(params.get('battleGames') ?? '1') || 1));
+// Delay between plies so the game is watchable on the board.
+let battleDelayMs = Math.max(0, Math.floor(Number(params.get('battleDelay') ?? '350') || 350));
+let battleAbort: AbortController | null = null;
 let lastMove: string | null = null;
 let renderSeq = 0;
 let orientation: 'white' | 'black' = playerSide;
@@ -281,12 +280,6 @@ async function initSearchWorker(): Promise<void> {
   searchWorker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
   searchWorker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
     const message = event.data;
-    // Battle progress is a stream of intermediate messages for one request id;
-    // it must not resolve the pending promise (that waits for battleResult).
-    if (message.type === 'battleProgress') {
-      battleProgressHandler?.(message);
-      return;
-    }
     const pending = workerPending.get(message.id);
     if (!pending) return;
     workerPending.delete(message.id);
@@ -410,8 +403,10 @@ async function searchRootPosition() {
 
 function stopSearch() {
   if (battleRunning) {
-    el('message').textContent = 'Cancelling battle…';
-    if (activeBattleId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeBattleId });
+    el('message').textContent = 'Stopping game…';
+    battleAbort?.abort();
+    // Also abort the in-flight per-move worker search so it stops immediately.
+    if (searchWorkerReady && activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
     return;
   }
   if (!searching) return;
@@ -527,9 +522,9 @@ async function runParityFixtures() {
   }
 }
 
-// EngineBattle runs in the search worker so the UI stays responsive and the
-// match can be stopped. Spin up the worker lazily even when the page was not
-// opened with ?worker=1, without changing the normal (main-thread) search path.
+// Spin up the search worker lazily so battle search runs off the main thread,
+// even when the page was not opened with ?worker=1, without changing the normal
+// (main-thread) interactive search path.
 async function ensureBattleWorker(): Promise<boolean> {
   if (searchWorkerReady) return true;
   if (!searchWorker) {
@@ -541,51 +536,121 @@ async function ensureBattleWorker(): Promise<boolean> {
       (searchWorker as Worker | null)?.terminate();
       searchWorker = null;
       searchWorkerReady = false;
-      el('message').textContent = `Battle worker unavailable: ${(error as Error).message}`;
+      console.warn('LC0 battle worker unavailable; using main-thread search.', error);
       return false;
     }
   }
   return searchWorkerReady;
 }
 
-function renderBattleGame(message: Extract<WorkerResponse, { type: 'battleProgress' }>) {
-  const r = message.result;
-  const li = document.createElement('li');
-  li.textContent = `game ${message.game + 1}/${message.total}: ${r.result} (${r.reason}) · ${r.plies} plies`;
-  el('battleResults').appendChild(li);
+function battleSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (ms <= 0 || signal.aborted) return resolve();
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+  });
 }
 
-function renderBattleSummary(summary: MatchSummary, elapsedMs: number) {
-  const tag = summary.cancelled ? ' · cancelled' : '';
-  el('battleSummary').textContent =
-    `${summary.engineA} vs ${summary.engineB}: ${summary.aWins}W ${summary.bWins}L ${summary.draws}D · score ${summary.aScore}/${summary.played} · ${elapsedMs.toFixed(0)} ms${tag}`;
+type MoveProvider = (positions: BoardState[]) => Promise<string | null>;
+
+// LC0 fixed-visit search move, run in the worker when available so the board
+// keeps animating; falls back to a cancellable main-thread search otherwise.
+async function battleSearchMove(positions: BoardState[]): Promise<string | null> {
+  if (searchWorkerReady) {
+    const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>(
+      { type: 'search', input: { positions }, visits: searchVisits, batchSize: searchBatchSize },
+      (id) => { activeWorkerSearchId = id; },
+    );
+    return response.result.cancelled ? null : (response.result.move ?? null);
+  }
+  const result = await searcher!.search({ positions }, { visits: searchVisits, batchSize: searchBatchSize, signal: battleAbort!.signal, yieldEveryMs: 16 });
+  return result.move ?? null;
+}
+
+async function battlePolicyMove(positions: BoardState[]): Promise<string | null> {
+  return (await player!.chooseMove({ positions })).move ?? null;
+}
+
+// Play one full game on the visible board, animating each ply, so the engines'
+// moves are watchable. Reuses the page board/history/move-list state.
+async function playGameOnBoard(white: MoveProvider, black: MoveProvider, signal: AbortSignal): Promise<{ result: GameResultCode; reason: string }> {
+  loadPosition(parseFen(START_FEN));
+  // Show the start position without kicking off an evaluation: that eval shares
+  // the main ORT session with the policy/search move providers, and concurrent
+  // session.run() on one session is unsafe. The eval panel refreshes when the
+  // game ends.
+  renderStatic();
+  const priorFens: string[] = [];
+  const maxPlies = 300;
+  for (let ply = 0; ply < maxPlies; ply++) {
+    if (signal.aborted) return { result: '1/2-1/2', reason: 'cancelled' };
+    const outcome = gameOutcome(board, priorFens);
+    if (outcome) return outcome;
+    const provider = board.turn === 'w' ? white : black;
+    let uci: string | null;
+    try {
+      uci = await provider(historyBoards);
+    } catch (error) {
+      if (isAbortError(error)) return { result: '1/2-1/2', reason: 'cancelled' };
+      throw error;
+    }
+    // A null move from a cancelled search must read as cancelled, not a forfeit.
+    if (signal.aborted) return { result: '1/2-1/2', reason: 'cancelled' };
+    const move = uci ? legalMoveFromUci(uci) : undefined;
+    if (!move) return { result: board.turn === 'w' ? '0-1' : '1-0', reason: uci ? `illegal ${uci}` : 'resigned' };
+    priorFens.push(boardToFen(board));
+    const played = applyMove(move);
+    renderStatic();
+    setBoardShapes(bestMoveShapes(played));
+    await battleSleep(battleDelayMs, signal);
+  }
+  return { result: '1/2-1/2', reason: 'max plies' };
+}
+
+function appendBattleResultLine(text: string) {
+  const li = document.createElement('li');
+  li.textContent = text;
+  el('battleResults').appendChild(li);
 }
 
 async function startBattle() {
   if (busy || battleRunning) return;
-  if (!(await ensureBattleWorker())) return;
+  await ensureBattleWorker();
   battleRunning = true;
-  activeBattleId = null;
-  setBusy(true, `EngineBattle: search ${searchVisits} vs policy, ${battleGames} games… press Stop to cancel.`);
+  battleAbort = new AbortController();
+  activeWorkerSearchId = null;
+  const mode = searchWorkerReady ? 'worker' : 'main thread';
+  setBusy(true, `Watching LC0 search ${searchVisits} vs policy (${mode})… press Stop to end.`);
   el('battleResults').innerHTML = '';
-  el('battleSummary').textContent = 'running…';
-  battleProgressHandler = renderBattleGame;
+  let aWins = 0, bWins = 0, draws = 0, played = 0, cancelled = false;
   try {
-    const response = await postWorkerRequest<{ type: 'battleResult'; result: MatchSummary; elapsedMs: number }>(
-      { type: 'battle', games: battleGames, visits: searchVisits, maxPlies: 200 },
-      (id) => { activeBattleId = id; },
-    );
-    renderBattleSummary(response.result, response.elapsedMs);
-    el('message').textContent = response.result.cancelled
-      ? `Battle cancelled after ${response.result.played} game(s).`
-      : `Battle done: ${response.result.engineA} scored ${response.result.aScore}/${response.result.played}.`;
+    for (let game = 0; game < battleGames; game++) {
+      if (battleAbort.signal.aborted) { cancelled = true; break; }
+      const aIsWhite = game % 2 === 0;
+      el('battleSummary').textContent = `game ${game + 1}/${battleGames}: search is ${aIsWhite ? 'White' : 'Black'} · playing…`;
+      const outcome = await playGameOnBoard(
+        aIsWhite ? battleSearchMove : battlePolicyMove,
+        aIsWhite ? battlePolicyMove : battleSearchMove,
+        battleAbort.signal,
+      );
+      if (outcome.reason === 'cancelled') { cancelled = true; break; }
+      played += 1;
+      if (outcome.result === '1/2-1/2') draws += 1;
+      else if ((outcome.result === '1-0') === aIsWhite) aWins += 1;
+      else bWins += 1;
+      appendBattleResultLine(`game ${game + 1}: ${outcome.result} (${outcome.reason}) · search ${aIsWhite ? 'White' : 'Black'}`);
+      el('battleSummary').textContent = `search ${aWins}W ${bWins}L ${draws}D vs policy · ${played}/${battleGames}`;
+    }
+    el('message').textContent = cancelled
+      ? `Game stopped (search ${aWins}W ${bWins}L ${draws}D over ${played} game(s)).`
+      : `Done: search scored ${aWins + draws * 0.5}/${played} vs policy.`;
   } catch (error) {
     el('battleSummary').textContent = `failed: ${(error as Error).message}`;
     el('message').textContent = `Battle failed: ${(error as Error).message}`;
   } finally {
     battleRunning = false;
-    activeBattleId = null;
-    battleProgressHandler = null;
+    battleAbort = null;
+    activeWorkerSearchId = null;
     setBusy(false);
     renderEvaluation();
   }
