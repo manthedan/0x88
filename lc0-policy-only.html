@@ -50,9 +50,13 @@
           <input id="multiPvInput" type="number" min="1" max="20" step="1" value="1" /></div>
       </div>
       <div class="settings-row">
-        <div class="field"><label for="battleGamesInput">Battle games</label>
-          <input id="battleGamesInput" type="number" min="1" max="100" step="1" value="2" /></div>
-        <button id="battleStart" type="button" disabled>Watch: search vs policy</button>
+        <div class="field"><label for="opponentSelect">LC0 opponent</label>
+          <select id="opponentSelect"><option value="policy">LC0 policy</option><option value="stockfish">Stockfish lite</option></select></div>
+        <div class="field"><label for="sfDepthInput">SF depth</label>
+          <input id="sfDepthInput" type="number" min="1" max="20" step="1" value="4" /></div>
+        <div class="field"><label for="battleGamesInput">Games</label>
+          <input id="battleGamesInput" type="number" min="1" max="100" step="1" value="1" /></div>
+        <button id="battleStart" type="button" disabled>Watch LC0 game</button>
       </div>
     </div>
     <div id="message">Loading…</div>
@@ -85,7 +89,7 @@
     <ol id="battleResults" class="battle-list"></ol>
     <h2>FEN</h2>
     <p id="fen" class="fen">—</p>
-    <p class="small">Use the controls above to paste a FEN and analyze it, choose your side, pick the engine reply mode (policy-only or fixed-visit search), set visits/batch, and clear the model cache. The <b>WebGPU</b> row flags when an inference backend silently fell back to WASM. Query params still work for smokes: open with <code>?ep=wasm&amp;parity=1</code> to force WASM and automatically compare browser outputs against committed native BLAS FEN-only plus explicit-history fixture priors with elapsed time and eval/s. Use <code>?search=1</code> to auto-run a fixed-visit PUCT root search, or <code>?worker=1&amp;search=1</code> to run that search in a dedicated browser worker with its own ORT session. Add <code>?batch=8</code> to select/evaluate search leaves in batches. Add <code>?cache=1</code> to persist the selected ONNX model in Cache Storage. Use <code>?model=/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx</code> to smoke the f16 deployment artifact.</p>
+    <p class="small">Use the controls above to paste a FEN and analyze it (analysis is drawn on the board as arrows), choose your side, pick the engine reply mode (policy-only or fixed-visit search), set visits/batch, and clear the model cache. <b>Watch LC0 game</b> plays the LC0 search engine out on the board against LC0 policy or <b>Stockfish lite</b> (adjustable depth) so you can watch the moves; press Stop to end it. The <b>WebGPU</b> row flags when an inference backend silently fell back to WASM. Query params still work for smokes: open with <code>?ep=wasm&amp;parity=1</code> to force WASM and automatically compare browser outputs against committed native BLAS FEN-only plus explicit-history fixture priors with elapsed time and eval/s. Use <code>?search=1</code> to auto-run a fixed-visit PUCT root search, or <code>?worker=1&amp;search=1</code> to run that search in a dedicated browser worker with its own ORT session. Add <code>?batch=8</code> to select/evaluate search leaves in batches. Add <code>?cache=1</code> to persist the selected ONNX model in Cache Storage. Use <code>?model=/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx</code> to smoke the f16 deployment artifact.</p>
   </aside>
 </main>
 <script type="module" src="/src/lc0/policyOnlyBrowser.ts"></script>

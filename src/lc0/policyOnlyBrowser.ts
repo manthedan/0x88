@@ -12,6 +12,7 @@ import { clearLc0ModelCache, describeLc0ModelLoad, loadLc0ModelForOrt } from './
 import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchResult } from './search.ts';
+import { StockfishEngine } from './stockfishEngine.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
@@ -66,6 +67,10 @@ let battleGames = Math.max(1, Math.floor(Number(params.get('battleGames') ?? '1'
 // Delay between plies so the game is watchable on the board.
 let battleDelayMs = Math.max(0, Math.floor(Number(params.get('battleDelay') ?? '350') || 350));
 let battleAbort: AbortController | null = null;
+type BattleOpponent = 'policy' | 'stockfish';
+let battleOpponent: BattleOpponent = params.get('opponent') === 'stockfish' ? 'stockfish' : 'policy';
+let stockfishDepth = Math.max(1, Math.floor(Number(params.get('sfDepth') ?? '4') || 4));
+let stockfish: StockfishEngine | null = null;
 let lastMove: string | null = null;
 let renderSeq = 0;
 let orientation: 'white' | 'black' = playerSide;
@@ -571,6 +576,23 @@ async function battlePolicyMove(positions: BoardState[]): Promise<string | null>
   return (await player!.chooseMove({ positions })).move ?? null;
 }
 
+function getStockfish(): StockfishEngine {
+  if (!stockfish) stockfish = new StockfishEngine({ depth: stockfishDepth });
+  else stockfish.setOptions({ depth: stockfishDepth });
+  return stockfish;
+}
+
+// Stockfish only needs the current FEN, not LC0 history.
+async function battleStockfishMove(positions: BoardState[]): Promise<string | null> {
+  const current = positions[positions.length - 1];
+  return getStockfish().bestMove(boardToFen(current), battleAbort?.signal);
+}
+
+function opponentProvider(): { provider: MoveProvider; label: string } {
+  if (battleOpponent === 'stockfish') return { provider: battleStockfishMove, label: `Stockfish d${stockfishDepth}` };
+  return { provider: battlePolicyMove, label: 'LC0 policy' };
+}
+
 // Play one full game on the visible board, animating each ply, so the engines'
 // moves are watchable. Reuses the page board/history/move-list state.
 async function playGameOnBoard(white: MoveProvider, black: MoveProvider, signal: AbortSignal): Promise<{ result: GameResultCode; reason: string }> {
@@ -620,17 +642,19 @@ async function startBattle() {
   battleAbort = new AbortController();
   activeWorkerSearchId = null;
   const mode = searchWorkerReady ? 'worker' : 'main thread';
-  setBusy(true, `Watching LC0 search ${searchVisits} vs policy (${mode})… press Stop to end.`);
+  const { provider: opponentMove, label: opponentLabel } = opponentProvider();
+  const lc0Label = `LC0 search ${searchVisits}`;
+  setBusy(true, `Watching ${lc0Label} vs ${opponentLabel} (${mode})… press Stop to end.`);
   el('battleResults').innerHTML = '';
   let aWins = 0, bWins = 0, draws = 0, played = 0, cancelled = false;
   try {
     for (let game = 0; game < battleGames; game++) {
       if (battleAbort.signal.aborted) { cancelled = true; break; }
       const aIsWhite = game % 2 === 0;
-      el('battleSummary').textContent = `game ${game + 1}/${battleGames}: search is ${aIsWhite ? 'White' : 'Black'} · playing…`;
+      el('battleSummary').textContent = `game ${game + 1}/${battleGames}: ${lc0Label} is ${aIsWhite ? 'White' : 'Black'} · playing…`;
       const outcome = await playGameOnBoard(
-        aIsWhite ? battleSearchMove : battlePolicyMove,
-        aIsWhite ? battlePolicyMove : battleSearchMove,
+        aIsWhite ? battleSearchMove : opponentMove,
+        aIsWhite ? opponentMove : battleSearchMove,
         battleAbort.signal,
       );
       if (outcome.reason === 'cancelled') { cancelled = true; break; }
@@ -638,12 +662,12 @@ async function startBattle() {
       if (outcome.result === '1/2-1/2') draws += 1;
       else if ((outcome.result === '1-0') === aIsWhite) aWins += 1;
       else bWins += 1;
-      appendBattleResultLine(`game ${game + 1}: ${outcome.result} (${outcome.reason}) · search ${aIsWhite ? 'White' : 'Black'}`);
-      el('battleSummary').textContent = `search ${aWins}W ${bWins}L ${draws}D vs policy · ${played}/${battleGames}`;
+      appendBattleResultLine(`game ${game + 1}: ${outcome.result} (${outcome.reason}) · LC0 ${aIsWhite ? 'White' : 'Black'}`);
+      el('battleSummary').textContent = `${lc0Label} ${aWins}W ${bWins}L ${draws}D vs ${opponentLabel} · ${played}/${battleGames}`;
     }
     el('message').textContent = cancelled
-      ? `Game stopped (search ${aWins}W ${bWins}L ${draws}D over ${played} game(s)).`
-      : `Done: search scored ${aWins + draws * 0.5}/${played} vs policy.`;
+      ? `Game stopped (LC0 ${aWins}W ${bWins}L ${draws}D vs ${opponentLabel} over ${played} game(s)).`
+      : `Done: LC0 scored ${aWins + draws * 0.5}/${played} vs ${opponentLabel}.`;
   } catch (error) {
     el('battleSummary').textContent = `failed: ${(error as Error).message}`;
     el('message').textContent = `Battle failed: ${(error as Error).message}`;
@@ -777,6 +801,8 @@ function seedSettingsInputs() {
   inputEl('batchInput').value = String(searchBatchSize);
   inputEl('multiPvInput').value = String(searchMultiPv);
   inputEl('battleGamesInput').value = String(battleGames);
+  inputEl('sfDepthInput').value = String(stockfishDepth);
+  selectEl('opponentSelect').value = battleOpponent;
   selectEl('sideSelect').value = playerSide;
   selectEl('modeSelect').value = engineReplyMode;
 }
@@ -811,6 +837,13 @@ inputEl('multiPvInput').addEventListener('change', () => {
 inputEl('battleGamesInput').addEventListener('change', () => {
   battleGames = clampInt(inputEl('battleGamesInput').value, 1, 100, battleGames);
   inputEl('battleGamesInput').value = String(battleGames);
+});
+inputEl('sfDepthInput').addEventListener('change', () => {
+  stockfishDepth = clampInt(inputEl('sfDepthInput').value, 1, 20, stockfishDepth);
+  inputEl('sfDepthInput').value = String(stockfishDepth);
+});
+selectEl('opponentSelect').addEventListener('change', () => {
+  battleOpponent = selectEl('opponentSelect').value === 'stockfish' ? 'stockfish' : 'policy';
 });
 el('battleStart').addEventListener('click', () => { void startBattle(); });
 selectEl('sideSelect').addEventListener('change', () => {
