@@ -52,6 +52,10 @@ let searcher: Lc0PuctSearcher | null = null;
 let configuredModelUrl: string | null = null;
 /** In-flight search abort controllers keyed by request id, so cancel messages can stop them. */
 const activeSearches = new Map<number, AbortController>();
+// This worker owns exactly one ORT session. Queue all model operations so the
+// page can broker repeated eval/search requests here without concurrent
+// session.run() calls against the same static batch-1 WebGPU/WASM session.
+let operationQueue: Promise<void> = Promise.resolve();
 
 function nowMs(): number {
   return typeof performance === 'undefined' ? Date.now() : performance.now();
@@ -59,6 +63,12 @@ function nowMs(): number {
 
 function post(message: WorkerResponse): void {
   self.postMessage(message);
+}
+
+function enqueueModelOperation(work: () => Promise<void>): Promise<void> {
+  const run = operationQueue.then(work, work);
+  operationQueue = run.catch(() => undefined);
+  return run;
 }
 
 async function handleInit(message: InitMessage): Promise<void> {
@@ -138,7 +148,7 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
     handleCancel(message);
     return;
   }
-  void (async () => {
+  void enqueueModelOperation(async () => {
     try {
       if (message.type === 'init') await handleInit(message);
       else if (message.type === 'evaluate') {
@@ -151,5 +161,5 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
     } catch (error) {
       post({ type: 'error', id: message.id, error: (error as Error).message });
     }
-  })();
+  });
 });

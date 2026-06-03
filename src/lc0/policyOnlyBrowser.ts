@@ -31,7 +31,8 @@ type EngineReplyMode = 'policy' | 'search';
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
-const SEARCH_WORKER_REQUESTED = params.get('worker') === '1' || params.get('searchWorker') === '1';
+const WORKER_ONLY_MODEL = params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
+const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
 const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
 // Register the offline app-shell SW in production builds, or opt in with ?sw=1.
 // Disabled in dev by default so it never serves stale HMR modules.
@@ -112,6 +113,10 @@ function requestedWorkerEp(): OrtExecutionProviderPreference {
   return 'wasm';
 }
 
+function evaluationAvailable(): boolean {
+  return !!player || searchWorkerReady;
+}
+
 function searchAvailable(): boolean {
   return useSearchWorker ? searchWorkerReady : !!searcher;
 }
@@ -173,12 +178,12 @@ function applyMove(move: Move): string {
 function setBusy(next: boolean, message?: string) {
   busy = next;
   if (message) el('message').textContent = message;
-  el('engineMove').toggleAttribute('disabled', busy || !player);
+  el('engineMove').toggleAttribute('disabled', busy || !evaluationAvailable());
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
   el('analyze').toggleAttribute('disabled', busy || !searchAvailable());
-  el('runParity').toggleAttribute('disabled', busy || !player);
+  el('runParity').toggleAttribute('disabled', busy || !evaluationAvailable());
   el('stopSearch').toggleAttribute('disabled', !(searching || battleRunning));
-  el('battleStart').toggleAttribute('disabled', busy || battleRunning || !player);
+  el('battleStart').toggleAttribute('disabled', busy || battleRunning || !evaluationAvailable());
 }
 
 function renderStatic() {
@@ -187,17 +192,17 @@ function renderStatic() {
   el('moveList').textContent = playedMoves.length ? playedMoves.join(' ') : '—';
   el('modelPath').textContent = MODEL_URL;
   el('modelCache').textContent = workerModelCacheStatus ? `main ${mainModelCacheStatus}; worker ${workerModelCacheStatus}` : mainModelCacheStatus;
-  el('backend').textContent = describeOrtBackendConfig();
-  el('status').textContent = player ? 'ready' : 'loading';
+  el('backend').textContent = WORKER_ONLY_MODEL && searchWorkerReady ? searchWorkerBackend : describeOrtBackendConfig();
+  el('status').textContent = evaluationAvailable() ? 'ready' : 'loading';
   el('searchMode').textContent = searchModeLabel();
   el('searchBatch').textContent = `${searchBatchSize}`;
   el('searchMove').textContent = `Search ${searchVisits}`;
-  el('engineMove').toggleAttribute('disabled', busy || !player);
+  el('engineMove').toggleAttribute('disabled', busy || !evaluationAvailable());
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
   el('analyze').toggleAttribute('disabled', busy || !searchAvailable());
-  el('runParity').toggleAttribute('disabled', busy || !player);
+  el('runParity').toggleAttribute('disabled', busy || !evaluationAvailable());
   el('stopSearch').toggleAttribute('disabled', !(searching || battleRunning));
-  el('battleStart').toggleAttribute('disabled', busy || battleRunning || !player);
+  el('battleStart').toggleAttribute('disabled', busy || battleRunning || !evaluationAvailable());
   const config = {
     orientation,
     fen: boardFenOnly(),
@@ -250,8 +255,8 @@ function clearSearchResult() {
 function renderEvaluation() {
   const seq = ++renderSeq;
   renderStatic();
-  if (!player) return;
-  player.chooseMove(currentEvaluationInput()).then((choice) => {
+  if (!evaluationAvailable()) return;
+  choosePolicyMove(currentEvaluationInput()).then((choice) => {
     if (seq !== renderSeq) return;
     const ev = choice.evaluation;
     const [win, draw, loss] = ev.wdl;
@@ -308,6 +313,11 @@ async function evaluateWithWorker(input: Lc0EvaluatorInput): Promise<BrowserEval
     input,
   });
   return { move: response.result.bestMove, evaluation: response.result };
+}
+
+async function choosePolicyMove(input: Lc0EvaluatorInput): Promise<BrowserEvaluationChoice> {
+  if (WORKER_ONLY_MODEL || !player) return evaluateWithWorker(input);
+  return player.chooseMove(input);
 }
 
 async function searchWithWorker(): Promise<RenderableSearchResult> {
@@ -424,7 +434,7 @@ function stopSearch() {
 }
 
 async function engineMove() {
-  if (!player || busy) return;
+  if (!evaluationAvailable() || busy) return;
   const legal = legalMoves(board);
   if (!legal.length) {
     el('message').textContent = 'No legal engine move.';
@@ -448,7 +458,7 @@ async function engineMove() {
       uci = result.move;
       note = `(${result.visits}-visit search via ${searchModeLabel()})`;
     } else {
-      const choice = await player.chooseMove(currentEvaluationInput());
+      const choice = await choosePolicyMove(currentEvaluationInput());
       uci = choice.move;
       note = '(argmax legal prior, no search)';
     }
@@ -486,7 +496,7 @@ async function fetchNativeRecords(path: string): Promise<NativeRecord[]> {
 }
 
 async function runParityFixtures() {
-  if ((!player && !searchWorkerReady) || busy) return;
+  if (!evaluationAvailable() || busy) return;
   setBusy(true, 'Running FEN-only and explicit-history fixture parity in browser…');
   el('parity').textContent = 'running…';
   try {
@@ -499,7 +509,7 @@ async function runParityFixtures() {
     const failures: string[] = [];
     for (const native of records) {
       const input = native.moves ? { positions: buildBoardHistoryFromMoves(native.moves, native.startFen) } : native.fen;
-      const choice = searchWorkerReady ? await evaluateWithWorker(input) : await player!.chooseMove(input);
+      const choice = await choosePolicyMove(input);
       evaluated += 1;
       const expected = nativeCastlingToStandard(native.bestmove);
       if (choice.move !== expected) failures.push(`${native.id}: best ${choice.move} != ${expected}`);
@@ -516,7 +526,7 @@ async function runParityFixtures() {
       const elapsedMs = performance.now() - started;
       const evalsPerSecond = evaluated / Math.max(1e-9, elapsedMs / 1000);
       el('parity').textContent = `passed ${records.length}/${records.length} native BLAS fixtures · ${elapsedMs.toFixed(0)} ms · ${evalsPerSecond.toFixed(1)} eval/s`;
-      el('message').textContent = `Browser FEN-only and explicit-history fixture parity passed (${evaluated} evals via ${describeOrtBackendConfig()}).`;
+      el('message').textContent = `Browser FEN-only and explicit-history fixture parity passed (${evaluated} evals via ${WORKER_ONLY_MODEL ? searchWorkerBackend : describeOrtBackendConfig()}).`;
     }
   } catch (error) {
     el('parity').textContent = `failed: ${(error as Error).message}`;
@@ -573,7 +583,7 @@ async function battleSearchMove(positions: BoardState[]): Promise<string | null>
 }
 
 async function battlePolicyMove(positions: BoardState[]): Promise<string | null> {
-  return (await player!.chooseMove({ positions })).move ?? null;
+  return (await choosePolicyMove({ positions })).move ?? null;
 }
 
 function getStockfish(): StockfishEngine {
@@ -760,32 +770,51 @@ function renderGpuStatus(diag: OrtRuntimeDiagnostics) {
   node.classList.toggle('warn', warn);
 }
 
+function renderWorkerGpuStatus(backend: string) {
+  const node = el('gpuStatus');
+  const requestedGpu = requestedWorkerEp() !== 'wasm';
+  const usingGpu = backend.includes('webgpu->webgpu') || backend === 'webgpu';
+  node.textContent = usingGpu
+    ? 'active (worker-only)'
+    : requestedGpu ? `worker ${backend} — GPU fallback` : `worker ${backend}`;
+  node.classList.toggle('warn', requestedGpu && !usingGpu);
+}
+
 async function init() {
-  el('message').textContent = 'Loading LC0 ONNX model…';
+  el('message').textContent = WORKER_ONLY_MODEL ? 'Loading LC0 model in dedicated worker…' : 'Loading LC0 ONNX model…';
   renderStatic();
   try {
-    const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: CACHE_MODEL });
-    mainModelCacheStatus = describeLc0ModelLoad(modelLoad);
-    const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
-    player = new Lc0PolicyOnlyPlayer(evaluator);
-    searcher = new Lc0PuctSearcher(evaluator);
-    const diagnostics = await collectOrtRuntimeDiagnostics();
-    el('backend').textContent = diagnostics.describe;
-    renderGpuStatus(diagnostics);
-    if (SEARCH_WORKER_REQUESTED) {
-      el('message').textContent = 'Initializing LC0 search worker…';
-      try {
-        await initSearchWorker();
-      } catch (error) {
-        searchWorker?.terminate();
-        searchWorker = null;
-        searchWorkerReady = false;
-        useSearchWorker = false;
-        workerModelCacheStatus = 'worker unavailable';
-        console.warn('LC0 search worker failed; falling back to main-thread search.', error);
+    if (WORKER_ONLY_MODEL) {
+      mainModelCacheStatus = 'worker-only (not loaded on main thread)';
+      useSearchWorker = true;
+      await initSearchWorker();
+      renderWorkerGpuStatus(searchWorkerBackend);
+    } else {
+      const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: CACHE_MODEL });
+      mainModelCacheStatus = describeLc0ModelLoad(modelLoad);
+      const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+      player = new Lc0PolicyOnlyPlayer(evaluator);
+      searcher = new Lc0PuctSearcher(evaluator);
+      const diagnostics = await collectOrtRuntimeDiagnostics();
+      el('backend').textContent = diagnostics.describe;
+      renderGpuStatus(diagnostics);
+      if (SEARCH_WORKER_REQUESTED) {
+        el('message').textContent = 'Initializing LC0 search worker…';
+        try {
+          await initSearchWorker();
+        } catch (error) {
+          searchWorker?.terminate();
+          searchWorker = null;
+          searchWorkerReady = false;
+          useSearchWorker = false;
+          workerModelCacheStatus = 'worker unavailable';
+          console.warn('LC0 search worker failed; falling back to main-thread search.', error);
+        }
       }
     }
-    el('message').textContent = 'Ready. Drag a legal move or ask the engine to move.';
+    el('message').textContent = WORKER_ONLY_MODEL
+      ? 'Ready. LC0 model is loaded only in the dedicated worker.'
+      : 'Ready. Drag a legal move or ask the engine to move.';
     renderEvaluation();
     if (params.get('parity') === '1' || params.get('fixtures') === '1') await runParityFixtures();
     if (params.get('search') === '1') await searchRootPosition();
