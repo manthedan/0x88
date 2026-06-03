@@ -546,14 +546,6 @@ export function createTinyMatmulAddOnnxForTest(weightF32: Float32Array<ArrayBuff
   return writer.finish();
 }
 
-function transposeF32Matrix(values: Float32Array<ArrayBufferLike>, rows: number, cols: number): Float32Array<ArrayBufferLike> {
-  const out = new Float32Array(values.length);
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) out[col * rows + row] = values[row * cols + col];
-  }
-  return out;
-}
-
 export function createTinyAttentionScoreOnnxForTest(scale: number): Uint8Array {
   const writer = new ProtoWriter();
   writer.int64(1, 8);
@@ -1446,4 +1438,173 @@ export async function runLc0WebAttentionScoreOrtBenchmark(options: Lc0WebAttenti
     rmsError,
     outputSample: Array.from(output.slice(0, 8)),
   };
+}
+
+export interface Lc0WebSoftmaxBenchmarkOptions {
+  packUrl: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+}
+
+export interface Lc0WebSoftmaxBenchmarkResult {
+  status: 'SOFTMAX_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  tokens: number;
+  heads: number;
+  rows: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  uploadSetupMs: number;
+  dispatchLoopMs: number;
+  dispatchLoopAvgMs: number;
+  readbackSyncedMs: number;
+  endToEndMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+}
+
+function cpuSoftmaxRows(input: Float32Array<ArrayBufferLike>, rows: number, cols: number): Float32Array<ArrayBufferLike> {
+  const out = new Float32Array(input.length);
+  for (let row = 0; row < rows; row++) {
+    const base = row * cols;
+    let maxValue = -Infinity;
+    for (let col = 0; col < cols; col++) maxValue = Math.max(maxValue, input[base + col]);
+    let sum = 0;
+    for (let col = 0; col < cols; col++) {
+      const value = Math.exp(input[base + col] - maxValue);
+      out[base + col] = value;
+      sum += value;
+    }
+    const inv = 1 / sum;
+    for (let col = 0; col < cols; col++) out[base + col] *= inv;
+  }
+  return out;
+}
+
+const SOFTMAX_WGSL = `
+@group(0) @binding(0) var<storage, read> inputScores: array<f32>;
+@group(0) @binding(1) var<storage, read_write> outputProbs: array<f32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let row = gid.x;
+  if (row >= 512u) { return; }
+  let base = row * 64u;
+  var max_value = -3.4028234663852886e+38;
+  for (var col = 0u; col < 64u; col = col + 1u) {
+    max_value = max(max_value, inputScores[base + col]);
+  }
+  var sum = 0.0;
+  for (var col = 0u; col < 64u; col = col + 1u) {
+    let value = exp(inputScores[base + col] - max_value);
+    outputProbs[base + col] = value;
+    sum = sum + value;
+  }
+  let inv_sum = 1.0 / sum;
+  for (var col = 0u; col < 64u; col = col + 1u) {
+    outputProbs[base + col] = outputProbs[base + col] * inv_sum;
+  }
+}
+`;
+
+function createSoftmaxPipeline(device: DeviceLike, buffers: { input: BufferLike; output: BufferLike }): { pipeline: PipelineLike; bindGroup: unknown } {
+  const module = device.createShaderModule({ label: 'lc0web attention softmax probe', code: SOFTMAX_WGSL });
+  const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
+  const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.input } },
+      { binding: 1, resource: { buffer: buffers.output } },
+    ],
+  });
+  return { pipeline, bindGroup };
+}
+
+function encodeSoftmaxDispatches(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, rows: number, iterations: number): unknown {
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  for (let i = 0; i < iterations; i++) pass.dispatchWorkgroups(Math.ceil(rows / 64));
+  pass.end();
+  return encoder.finish();
+}
+
+async function readF32OutputOnce(device: DeviceLike, outputBuffer: BufferLike, readbackBuffer: BufferLike, elements: number): Promise<Float32Array<ArrayBufferLike>> {
+  const globals = gpuGlobals();
+  const encoder = device.createCommandEncoder();
+  encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, elements * 4);
+  device.queue.submit([encoder.finish()]);
+  await readbackBuffer.mapAsync(globals.GPUMapMode!.READ);
+  const output = new Float32Array(readbackBuffer.getMappedRange().slice(0));
+  readbackBuffer.unmap();
+  return output;
+}
+
+export async function runLc0WebSoftmaxBenchmark(options: Lc0WebSoftmaxBenchmarkOptions): Promise<Lc0WebSoftmaxBenchmarkResult> {
+  const totalStarted = nowMs();
+  const warmup = clampInteger(options.warmup, 10, 0, 1000);
+  const iterations = clampInteger(options.iterations, 1000, 1, 100_000);
+  const { device, adapterInfo } = await requestDevice();
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: [DEFAULT_QKV_TENSORS.qWeight, DEFAULT_QKV_TENSORS.qBias, DEFAULT_QKV_TENSORS.kWeight, DEFAULT_QKV_TENSORS.kBias, DEFAULT_SCALE_TENSOR],
+  });
+  const tensors = loadAttentionScoreInputs(pack);
+  const reference = buildAttentionScoreReference(tensors);
+  const rows = DEFAULT_HEADS * DEFAULT_TOKENS;
+  const elements = rows * DEFAULT_TOKENS;
+  const cpu = cpuSoftmaxRows(reference.scores, rows, DEFAULT_TOKENS);
+  const globals = gpuGlobals();
+  const usage = globals.GPUBufferUsage!;
+  const buffers: BufferLike[] = [];
+  try {
+    const setupStarted = nowMs();
+    const inputBuffer = createStorageBuffer(device, reference.scores, usage.STORAGE | usage.COPY_DST);
+    const outputBuffer = device.createBuffer({ size: elements * 4, usage: usage.STORAGE | usage.COPY_SRC });
+    const readbackBuffer = device.createBuffer({ size: elements * 4, usage: usage.MAP_READ | usage.COPY_DST });
+    buffers.push(inputBuffer, outputBuffer, readbackBuffer);
+    const { pipeline, bindGroup } = createSoftmaxPipeline(device, { input: inputBuffer, output: outputBuffer });
+    const uploadSetupMs = nowMs() - setupStarted;
+
+    if (warmup > 0) {
+      device.queue.submit([encodeSoftmaxDispatches(device, pipeline, bindGroup, rows, warmup)]);
+      await device.queue.onSubmittedWorkDone?.();
+    }
+    const dispatchStarted = nowMs();
+    device.queue.submit([encodeSoftmaxDispatches(device, pipeline, bindGroup, rows, iterations)]);
+    const dispatchLoopMs = nowMs() - dispatchStarted;
+    const readbackStarted = nowMs();
+    const output = await readF32OutputOnce(device, outputBuffer, readbackBuffer, elements);
+    const readbackSyncedMs = nowMs() - readbackStarted;
+    const { maxAbsError, rmsError } = computeErrorStats(output, cpu, elements);
+    assertErrorInTolerance(maxAbsError);
+    return {
+      status: 'SOFTMAX_BENCH_DONE',
+      packUrl: pack.manifestUrl,
+      modelName: pack.manifest.model.name,
+      adapterInfo,
+      tokens: DEFAULT_TOKENS,
+      heads: DEFAULT_HEADS,
+      rows,
+      warmup,
+      iterations,
+      packLoadMs: pack.elapsedMs,
+      uploadSetupMs,
+      dispatchLoopMs,
+      dispatchLoopAvgMs: dispatchLoopMs / iterations,
+      readbackSyncedMs,
+      endToEndMs: nowMs() - totalStarted,
+      maxAbsError,
+      rmsError,
+      outputSample: Array.from(output.slice(0, 8)),
+    };
+  } finally {
+    for (const buffer of buffers) buffer.destroy?.();
+  }
 }
