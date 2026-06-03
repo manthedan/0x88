@@ -3569,26 +3569,19 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
       }
       return timings;
     };
-    const submitBlockBatches = async (count: number) => {
-      // Make the stage boundary explicit: the FFN reads ln1 output produced by
-      // the attention-output pass, and Chrome/WebGPU currently needs the queue
-      // completion boundary here for this composed probe to match the staged
-      // attention-output and FFN smokes.
-      device.queue.submit([encodeAttention(count)]);
-      await device.queue.onSubmittedWorkDone?.();
-      device.queue.submit([encodeFfn(count)]);
+    const submitBlockBatches = (count: number) => {
+      // Submit attention-output and FFN command buffers together. WebGPU queue
+      // ordering preserves the write/read dependency from ln1 output into FFN
+      // dense1 without forcing an intermediate queue-completion sync.
+      device.queue.submit([encodeAttention(count), encodeFfn(count)]);
     };
     if (warmup > 0) {
-      await submitBlockBatches(warmup);
+      submitBlockBatches(warmup);
       await device.queue.onSubmittedWorkDone?.();
     }
     const dispatchStarted = nowMs();
-    await submitBlockBatches(iterations);
+    submitBlockBatches(iterations);
     const dispatchLoopMs = nowMs() - dispatchStarted;
-    // This composed benchmark needs an explicit queue boundary between the
-    // attention-output stage and FFN stage. Include that boundary in the synced
-    // timing so per-block reports cover the full encoder0 block, not just the
-    // final FFN/copy tail.
     const gpuOutput = await readF32OutputOnce(device, output, readback, outputElements);
     const readbackSyncedMs = nowMs() - dispatchStarted;
     const { maxAbsError, rmsError } = computeErrorStats(gpuOutput, reference.output, outputElements);

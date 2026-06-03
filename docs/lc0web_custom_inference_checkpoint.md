@@ -32,7 +32,8 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
   - `ENCODER0_BLOCK_BENCH_DONE`, max absolute error about `3.58e-6`.
 - `npm run lc0:browser-wgsl-smokes -- --only encoder0-block --timeout 25000`
   - Stage-timing smoke passed with max absolute error about `3.58e-6`.
-  - One local single-iteration diagnostic sample reported stage avg timings: QKV projection `0.6 ms`, attention scores `0.4 ms`, softmax `0.3 ms`, attention value `0.2 ms`, output projection + ln1 `0.5 ms`, FFN dense1 `0.6 ms`, FFN dense2 + residual `1.0 ms`, ln2 `0.7 ms`; these include per-stage queue completion overhead and are bottleneck hints, not pure GPU timestamps.
+  - One local single-iteration diagnostic sample after removing the attention→FFN queue-completion boundary reported stage avg timings: QKV projection `0.3 ms`, attention scores `0.5 ms`, softmax `0.3 ms`, attention value `0.3 ms`, output projection + ln1 `0.5 ms`, FFN dense1 `0.6 ms`, FFN dense2 + residual `0.7 ms`, ln2 `0.3 ms`; these include per-stage queue completion overhead and are bottleneck hints, not pure GPU timestamps.
+  - The same smoke validated submitting attention-output and FFN command buffers together, without an intermediate `queue.onSubmittedWorkDone()` sync, at max absolute error about `3.58e-6`.
 - `npm run lc0:browser-wgsl-smokes -- --no-server --only attention-value-ort-wasm --timeout 25000`
   - `ATTENTION_VALUE_ORT_BENCH_DONE`, max absolute error about `9.54e-7`.
 - `npm run lc0:browser-wgsl-smokes -- --only attention-output-ort-wasm --timeout 25000`
@@ -66,8 +67,8 @@ The custom path now validates a complete encoder0 block in staged WGSL form, inc
 
 - Only encoder0 is covered; remaining transformer layers still need repeated-layer validation.
 - Timing uses command submission/readback synchronization rather than GPU timestamp queries.
-- The full encoder0 benchmark uses an explicit queue boundary between attention-output and FFN stages so the reported synchronized time covers the whole block.
-- The per-stage encoder0 timing breakdown currently points first at the naive FFN dense2 + residual and ln2/QKV/dense1 kernels, but stage timings include queue-completion overhead until GPU timestamp timing is added.
+- The full encoder0 benchmark no longer forces an explicit queue-completion boundary between attention-output and FFN; both command buffers are submitted together and rely on WebGPU queue ordering for the ln1-output → FFN-dense1 dependency.
+- The per-stage encoder0 timing breakdown currently points first at the naive FFN dense2 + residual, FFN dense1, attention scores, and output projection + ln1 kernels, but stage timings include queue-completion overhead until GPU timestamp timing is added.
 - ORT tiny comparisons are same-value subgraph checks, not full deployment performance proof.
 
 ## Decision on full custom inference
