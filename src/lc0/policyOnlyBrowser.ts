@@ -250,9 +250,11 @@ async function onUserMove(from: Key, to: Key) {
   }
   const uci = applyMove(move);
   el('message').textContent = `User played ${uci}`;
-  renderEvaluation();
-  if ((PLAYER_SIDE === 'white' && board.turn === 'b') || (PLAYER_SIDE === 'black' && board.turn === 'w')) {
+  const engineToMove = (PLAYER_SIDE === 'white' && board.turn === 'b') || (PLAYER_SIDE === 'black' && board.turn === 'w');
+  if (engineToMove) {
     await engineMove();
+  } else {
+    renderEvaluation();
   }
 }
 
