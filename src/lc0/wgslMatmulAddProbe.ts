@@ -11,8 +11,12 @@ const DEFAULT_QKV_TENSORS = {
   vWeight: '/encoder0/mha/V/w/w',
   vBias: '/encoder0/mha/V/b/w',
 } as const;
+const DEFAULT_SCALE_TENSOR = '/encoder0/mha/QK/scale/w';
 const DEFAULT_K = 256;
 const DEFAULT_N = 256;
+const DEFAULT_TOKENS = 64;
+const DEFAULT_HEADS = 8;
+const DEFAULT_HEAD_DIM = DEFAULT_N / DEFAULT_HEADS;
 
 export type Lc0WebMatmulAddKernelVariant = 'scalar' | 'tiled16' | 'scalar-transposed';
 
@@ -34,6 +38,13 @@ export interface Lc0WebMatmulAddKernelBenchmarkOptions extends Lc0WebMatmulAddKe
 export interface Lc0WebMatmulAddOrtBenchmarkOptions extends Lc0WebMatmulAddKernelProbeOptions {
   iterations?: number;
   warmup?: number;
+}
+
+export interface Lc0WebAttentionScoreBenchmarkOptions {
+  packUrl: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
 }
 
 export interface Lc0WebMatmulAddKernelProbeResult {
@@ -155,6 +166,53 @@ export interface Lc0WebQkvProjectionBenchmarkResult {
   outputSample: { q: number[]; k: number[]; v: number[] };
 }
 
+export interface Lc0WebAttentionScoreBenchmarkResult {
+  status: 'ATTENTION_SCORE_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  tokens: number;
+  channels: number;
+  heads: number;
+  headDim: number;
+  scale: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  uploadSetupMs: number;
+  dispatchLoopMs: number;
+  dispatchLoopAvgMs: number;
+  readbackSyncedMs: number;
+  endToEndMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+}
+
+export interface Lc0WebAttentionScoreOrtBenchmarkResult {
+  status: 'ATTENTION_SCORE_ORT_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  tokens: number;
+  channels: number;
+  heads: number;
+  headDim: number;
+  scale: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  modelBuildMs: number;
+  sessionCreateMs: number;
+  avgMs: number;
+  minMs: number;
+  maxMs: number;
+  firstMs: number;
+  runsPerSecond: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+}
+
 type GpuGlobals = typeof globalThis & {
   navigator?: { gpu?: unknown };
   GPUBufferUsage?: Record<string, number>;
@@ -249,6 +307,17 @@ function makeInputVector(k: number): Float32Array {
   return input;
 }
 
+function makeInputTokenMatrix(tokens: number, channels: number): Float32Array<ArrayBufferLike> {
+  const input = new Float32Array(tokens * channels);
+  for (let token = 0; token < tokens; token++) {
+    for (let channel = 0; channel < channels; channel++) {
+      const i = token * channels + channel;
+      input[i] = Math.sin((token + 1) * 0.037 + channel * 0.071) * 0.5 + Math.cos(token * 0.019 - channel * 0.013) * 0.25;
+    }
+  }
+  return input;
+}
+
 function cpuMatmulAdd(input: Float32Array<ArrayBufferLike>, weight: Uint8Array, bias: Uint8Array, k: number, n: number): Float32Array<ArrayBufferLike> {
   const output = new Float32Array(n);
   for (let col = 0; col < n; col++) {
@@ -257,6 +326,59 @@ function cpuMatmulAdd(input: Float32Array<ArrayBufferLike>, weight: Uint8Array, 
     output[col] = sum;
   }
   return output;
+}
+
+function cpuProjectTokens(input: Float32Array<ArrayBufferLike>, weight: Uint8Array, bias: Uint8Array, tokens: number, k: number, n: number): Float32Array<ArrayBufferLike> {
+  const output = new Float32Array(tokens * n);
+  for (let token = 0; token < tokens; token++) {
+    const tokenInput = input.subarray(token * k, (token + 1) * k);
+    output.set(cpuMatmulAdd(tokenInput, weight, bias, k, n), token * n);
+  }
+  return output;
+}
+
+function cpuAttentionScores(q: Float32Array<ArrayBufferLike>, k: Float32Array<ArrayBufferLike>, scale: number, tokens: number, channels: number, heads: number): Float32Array<ArrayBufferLike> {
+  const headDim = channels / heads;
+  const output = new Float32Array(heads * tokens * tokens);
+  for (let head = 0; head < heads; head++) {
+    const channelOffset = head * headDim;
+    for (let row = 0; row < tokens; row++) {
+      for (let col = 0; col < tokens; col++) {
+        let sum = 0;
+        for (let channel = 0; channel < headDim; channel++) {
+          sum += q[row * channels + channelOffset + channel] * k[col * channels + channelOffset + channel];
+        }
+        output[(head * tokens + row) * tokens + col] = sum * scale;
+      }
+    }
+  }
+  return output;
+}
+
+function packHeadsQ(input: Float32Array<ArrayBufferLike>, tokens: number, channels: number, heads: number): Float32Array<ArrayBufferLike> {
+  const headDim = channels / heads;
+  const out = new Float32Array(input.length);
+  for (let head = 0; head < heads; head++) {
+    for (let token = 0; token < tokens; token++) {
+      for (let channel = 0; channel < headDim; channel++) {
+        out[(head * tokens + token) * headDim + channel] = input[token * channels + head * headDim + channel];
+      }
+    }
+  }
+  return out;
+}
+
+function packHeadsKt(input: Float32Array<ArrayBufferLike>, tokens: number, channels: number, heads: number): Float32Array<ArrayBufferLike> {
+  const headDim = channels / heads;
+  const out = new Float32Array(input.length);
+  for (let head = 0; head < heads; head++) {
+    for (let channel = 0; channel < headDim; channel++) {
+      for (let token = 0; token < tokens; token++) {
+        out[(head * headDim + channel) * tokens + token] = input[token * channels + head * headDim + channel];
+      }
+    }
+  }
+  return out;
 }
 
 function assertTensorShapeAndBytes(tensor: Lc0WebTensorView, expected: number[], bytesPerElement: number, label: string): void {
@@ -419,6 +541,31 @@ export function createTinyMatmulAddOnnxForTest(weightF32: Float32Array<ArrayBuff
     graph.bytes(5, onnxTensor('bias', [DEFAULT_N], biasF32));
     graph.bytes(11, onnxValueInfo('input', 1, [1, DEFAULT_K]));
     graph.bytes(12, onnxValueInfo('output', 1, [1, DEFAULT_N]));
+  });
+  writer.message(8, (opset) => opset.int64(2, 13));
+  return writer.finish();
+}
+
+function transposeF32Matrix(values: Float32Array<ArrayBufferLike>, rows: number, cols: number): Float32Array<ArrayBufferLike> {
+  const out = new Float32Array(values.length);
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) out[col * rows + row] = values[row * cols + col];
+  }
+  return out;
+}
+
+export function createTinyAttentionScoreOnnxForTest(scale: number): Uint8Array {
+  const writer = new ProtoWriter();
+  writer.int64(1, 8);
+  writer.string(2, 'lc0web');
+  writer.message(7, (graph) => {
+    graph.bytes(1, onnxNode('MatMul', ['q', 'kt'], ['matmul_out'], 'matmul'));
+    graph.bytes(1, onnxNode('Mul', ['matmul_out', 'scale'], ['output'], 'scale'));
+    graph.string(2, 'lc0web_attention_score_heads');
+    graph.bytes(5, onnxTensor('scale', [1], new Float32Array([scale])));
+    graph.bytes(11, onnxValueInfo('q', 1, [DEFAULT_HEADS, DEFAULT_TOKENS, DEFAULT_HEAD_DIM]));
+    graph.bytes(11, onnxValueInfo('kt', 1, [DEFAULT_HEADS, DEFAULT_HEAD_DIM, DEFAULT_TOKENS]));
+    graph.bytes(12, onnxValueInfo('output', 1, [DEFAULT_HEADS, DEFAULT_TOKENS, DEFAULT_TOKENS]));
   });
   writer.message(8, (opset) => opset.int64(2, 13));
   return writer.finish();
@@ -1076,4 +1223,227 @@ export async function runLc0WebQkvProjectionBenchmark(options: Lc0WebQkvProjecti
   } finally {
     for (const buffer of liveBuffers) buffer.destroy?.();
   }
+}
+
+const ATTENTION_SCORE_WGSL = `
+@group(0) @binding(0) var<storage, read> qVec: array<f32>;
+@group(0) @binding(1) var<storage, read> kVec: array<f32>;
+@group(0) @binding(2) var<storage, read> scaleF16: array<u32>;
+@group(0) @binding(3) var<storage, read_write> scoreVec: array<f32>;
+
+fn pick_lane(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let col = gid.x;
+  let row = gid.y;
+  let head = gid.z;
+  if (row >= 64u || col >= 64u || head >= 8u) { return; }
+  let channel_offset = head * 32u;
+  var sum = 0.0;
+  for (var channel = 0u; channel < 32u; channel = channel + 1u) {
+    sum = sum + qVec[row * 256u + channel_offset + channel] * kVec[col * 256u + channel_offset + channel];
+  }
+  scoreVec[(head * 64u + row) * 64u + col] = sum * pick_lane(scaleF16[0], 0u);
+}
+`;
+
+function createAttentionScorePipeline(device: DeviceLike, buffers: { q: BufferLike; k: BufferLike; scale: BufferLike; output: BufferLike }): { pipeline: PipelineLike; bindGroup: unknown } {
+  const module = device.createShaderModule({ label: 'lc0web attention score probe', code: ATTENTION_SCORE_WGSL });
+  const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
+  const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.q } },
+      { binding: 1, resource: { buffer: buffers.k } },
+      { binding: 2, resource: { buffer: buffers.scale } },
+      { binding: 3, resource: { buffer: buffers.output } },
+    ],
+  });
+  return { pipeline, bindGroup };
+}
+
+function encodeAttentionScoreDispatches(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, iterations: number): unknown {
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  for (let i = 0; i < iterations; i++) pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+  pass.end();
+  return encoder.finish();
+}
+
+async function readAttentionScoreOutputOnce(device: DeviceLike, outputBuffer: BufferLike, readbackBuffer: BufferLike): Promise<Float32Array<ArrayBufferLike>> {
+  const globals = gpuGlobals();
+  const bytes = DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4;
+  const encoder = device.createCommandEncoder();
+  encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, bytes);
+  device.queue.submit([encoder.finish()]);
+  await readbackBuffer.mapAsync(globals.GPUMapMode!.READ);
+  const output = new Float32Array(readbackBuffer.getMappedRange().slice(0));
+  readbackBuffer.unmap();
+  return output;
+}
+
+function loadAttentionScoreInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>): {
+  qWeight: Lc0WebTensorView;
+  qBias: Lc0WebTensorView;
+  kWeight: Lc0WebTensorView;
+  kBias: Lc0WebTensorView;
+  scale: Lc0WebTensorView;
+} {
+  const qWeight = pack.tensors.get(DEFAULT_QKV_TENSORS.qWeight);
+  const qBias = pack.tensors.get(DEFAULT_QKV_TENSORS.qBias);
+  const kWeight = pack.tensors.get(DEFAULT_QKV_TENSORS.kWeight);
+  const kBias = pack.tensors.get(DEFAULT_QKV_TENSORS.kBias);
+  const scale = pack.tensors.get(DEFAULT_SCALE_TENSOR);
+  if (!qWeight || !qBias || !kWeight || !kBias || !scale) throw new Error('lc0web attention score tensors were not loaded');
+  assertTensorShapeAndBytes(qWeight, [DEFAULT_K, DEFAULT_N], 2, 'qWeight');
+  assertTensorShapeAndBytes(qBias, [DEFAULT_N], 2, 'qBias');
+  assertTensorShapeAndBytes(kWeight, [DEFAULT_K, DEFAULT_N], 2, 'kWeight');
+  assertTensorShapeAndBytes(kBias, [DEFAULT_N], 2, 'kBias');
+  assertTensorShapeAndBytes(scale, [1], 2, 'scale');
+  for (const tensor of [qWeight, qBias, kWeight, kBias, scale]) {
+    if (tensor.info.dtype !== 'f16') throw new Error(`lc0web attention score expects f16 tensor ${tensor.info.name}, got ${tensor.info.dtype}`);
+  }
+  return { qWeight, qBias, kWeight, kBias, scale };
+}
+
+function paddedF16ScalarBytes(bytes: Uint8Array): Uint8Array {
+  const out = new Uint8Array(4);
+  out[0] = bytes[0];
+  out[1] = bytes[1];
+  return out;
+}
+
+function buildAttentionScoreReference(tensors: ReturnType<typeof loadAttentionScoreInputs>): { q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; scale: number; scores: Float32Array<ArrayBufferLike> } {
+  const input = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K);
+  const q = cpuProjectTokens(input, tensors.qWeight.bytes, tensors.qBias.bytes, DEFAULT_TOKENS, DEFAULT_K, DEFAULT_N);
+  const k = cpuProjectTokens(input, tensors.kWeight.bytes, tensors.kBias.bytes, DEFAULT_TOKENS, DEFAULT_K, DEFAULT_N);
+  const scale = readF16At(tensors.scale.bytes, 0);
+  const scores = cpuAttentionScores(q, k, scale, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_HEADS);
+  return { q, k, scale, scores };
+}
+
+export async function runLc0WebAttentionScoreBenchmark(options: Lc0WebAttentionScoreBenchmarkOptions): Promise<Lc0WebAttentionScoreBenchmarkResult> {
+  const totalStarted = nowMs();
+  const warmup = clampInteger(options.warmup, 10, 0, 1000);
+  const iterations = clampInteger(options.iterations, 1000, 1, 100_000);
+  const { device, adapterInfo } = await requestDevice();
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: [DEFAULT_QKV_TENSORS.qWeight, DEFAULT_QKV_TENSORS.qBias, DEFAULT_QKV_TENSORS.kWeight, DEFAULT_QKV_TENSORS.kBias, DEFAULT_SCALE_TENSOR],
+  });
+  const tensors = loadAttentionScoreInputs(pack);
+  const reference = buildAttentionScoreReference(tensors);
+  const globals = gpuGlobals();
+  const usage = globals.GPUBufferUsage!;
+  const buffers: BufferLike[] = [];
+  try {
+    const setupStarted = nowMs();
+    const qBuffer = createStorageBuffer(device, reference.q, usage.STORAGE | usage.COPY_DST);
+    const kBuffer = createStorageBuffer(device, reference.k, usage.STORAGE | usage.COPY_DST);
+    const scaleBuffer = createStorageBuffer(device, paddedF16ScalarBytes(tensors.scale.bytes), usage.STORAGE | usage.COPY_DST);
+    const outputBuffer = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_SRC });
+    const readbackBuffer = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.MAP_READ | usage.COPY_DST });
+    buffers.push(qBuffer, kBuffer, scaleBuffer, outputBuffer, readbackBuffer);
+    const { pipeline, bindGroup } = createAttentionScorePipeline(device, { q: qBuffer, k: kBuffer, scale: scaleBuffer, output: outputBuffer });
+    const uploadSetupMs = nowMs() - setupStarted;
+
+    if (warmup > 0) {
+      device.queue.submit([encodeAttentionScoreDispatches(device, pipeline, bindGroup, warmup)]);
+      await device.queue.onSubmittedWorkDone?.();
+    }
+    const dispatchStarted = nowMs();
+    device.queue.submit([encodeAttentionScoreDispatches(device, pipeline, bindGroup, iterations)]);
+    const dispatchLoopMs = nowMs() - dispatchStarted;
+    const readbackStarted = nowMs();
+    const output = await readAttentionScoreOutputOnce(device, outputBuffer, readbackBuffer);
+    const readbackSyncedMs = nowMs() - readbackStarted;
+    const { maxAbsError, rmsError } = computeErrorStats(output, reference.scores, output.length);
+    assertErrorInTolerance(maxAbsError);
+    return {
+      status: 'ATTENTION_SCORE_BENCH_DONE',
+      packUrl: pack.manifestUrl,
+      modelName: pack.manifest.model.name,
+      adapterInfo,
+      tokens: DEFAULT_TOKENS,
+      channels: DEFAULT_N,
+      heads: DEFAULT_HEADS,
+      headDim: DEFAULT_HEAD_DIM,
+      scale: reference.scale,
+      warmup,
+      iterations,
+      packLoadMs: pack.elapsedMs,
+      uploadSetupMs,
+      dispatchLoopMs,
+      dispatchLoopAvgMs: dispatchLoopMs / iterations,
+      readbackSyncedMs,
+      endToEndMs: nowMs() - totalStarted,
+      maxAbsError,
+      rmsError,
+      outputSample: Array.from(output.slice(0, 8)),
+    };
+  } finally {
+    for (const buffer of buffers) buffer.destroy?.();
+  }
+}
+
+export async function runLc0WebAttentionScoreOrtBenchmark(options: Lc0WebAttentionScoreBenchmarkOptions): Promise<Lc0WebAttentionScoreOrtBenchmarkResult> {
+  const warmup = clampInteger(options.warmup, 5, 0, 100);
+  const iterations = clampInteger(options.iterations, 25, 1, 1000);
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: [DEFAULT_QKV_TENSORS.qWeight, DEFAULT_QKV_TENSORS.qBias, DEFAULT_QKV_TENSORS.kWeight, DEFAULT_QKV_TENSORS.kBias, DEFAULT_SCALE_TENSOR],
+  });
+  const tensors = loadAttentionScoreInputs(pack);
+  const reference = buildAttentionScoreReference(tensors);
+  const modelBuildStarted = nowMs();
+  const tinyOnnx = createTinyAttentionScoreOnnxForTest(reference.scale);
+  const modelBuildMs = nowMs() - modelBuildStarted;
+  const sessionStarted = nowMs();
+  const session = await ort.createOrtSession(tinyOnnx);
+  const sessionCreateMs = nowMs() - sessionStarted;
+  const feeds = { q: new ort.Tensor('float32', packHeadsQ(reference.q, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_HEADS), [DEFAULT_HEADS, DEFAULT_TOKENS, DEFAULT_HEAD_DIM]), kt: new ort.Tensor('float32', packHeadsKt(reference.k, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_HEADS), [DEFAULT_HEADS, DEFAULT_HEAD_DIM, DEFAULT_TOKENS]) };
+  let output: Float32Array<ArrayBufferLike> = new Float32Array(DEFAULT_TOKENS * DEFAULT_TOKENS);
+  for (let i = 0; i < warmup; i++) {
+    const outputs = await session.run(feeds);
+    output = outputs.output.data as Float32Array<ArrayBufferLike>;
+  }
+  const times: number[] = [];
+  for (let i = 0; i < iterations; i++) {
+    const started = nowMs();
+    const outputs = await session.run(feeds);
+    times.push(nowMs() - started);
+    output = outputs.output.data as Float32Array<ArrayBufferLike>;
+  }
+  const { maxAbsError, rmsError } = computeErrorStats(output, reference.scores, output.length);
+  assertErrorInTolerance(maxAbsError);
+  const avgMs = times.reduce((sum, value) => sum + value, 0) / times.length;
+  return {
+    status: 'ATTENTION_SCORE_ORT_BENCH_DONE',
+    packUrl: pack.manifestUrl,
+    modelName: pack.manifest.model.name,
+    tokens: DEFAULT_TOKENS,
+    channels: DEFAULT_N,
+    heads: DEFAULT_HEADS,
+    headDim: DEFAULT_HEAD_DIM,
+    scale: reference.scale,
+    warmup,
+    iterations,
+    packLoadMs: pack.elapsedMs,
+    modelBuildMs,
+    sessionCreateMs,
+    avgMs,
+    minMs: Math.min(...times),
+    maxMs: Math.max(...times),
+    firstMs: times[0],
+    runsPerSecond: 1000 / avgMs,
+    maxAbsError,
+    rmsError,
+    outputSample: Array.from(output.slice(0, 8)),
+  };
 }

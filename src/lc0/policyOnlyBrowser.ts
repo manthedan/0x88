@@ -119,6 +119,49 @@ type QkvBenchmarkResult = {
   outputSample: { q: number[]; k: number[]; v: number[] };
 };
 
+type AttentionScoreBenchmarkResult = {
+  status: 'ATTENTION_SCORE_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  tokens: number;
+  channels: number;
+  scale: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  uploadSetupMs: number;
+  dispatchLoopMs: number;
+  dispatchLoopAvgMs: number;
+  readbackSyncedMs: number;
+  endToEndMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+};
+
+type AttentionScoreOrtBenchmarkResult = {
+  status: 'ATTENTION_SCORE_ORT_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  tokens: number;
+  channels: number;
+  scale: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  modelBuildMs: number;
+  sessionCreateMs: number;
+  avgMs: number;
+  minMs: number;
+  maxMs: number;
+  firstMs: number;
+  runsPerSecond: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+};
+
 type OrtBenchmarkResult = {
   status: 'ORT_BENCH_DONE';
   packUrl: string;
@@ -152,6 +195,8 @@ type WorkerResponse =
   | { type: 'ortBenchmarkResult'; id: number; result: OrtBenchmarkResult }
   | { type: 'qkvProbeResult'; id: number; result: QkvProbeResult }
   | { type: 'qkvBenchmarkResult'; id: number; result: QkvBenchmarkResult }
+  | { type: 'attentionScoreBenchmarkResult'; id: number; result: AttentionScoreBenchmarkResult }
+  | { type: 'attentionScoreOrtBenchmarkResult'; id: number; result: AttentionScoreOrtBenchmarkResult }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
   | { type: 'error'; id: number; error: string };
 
@@ -183,11 +228,13 @@ const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.on
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
 const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
 const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
+const ATTENTION_SCORE_BENCH_REQUESTED = params.get('attentionScoreBench') === '1' || params.get('scoreBench') === '1';
+const ATTENTION_SCORE_ORT_BENCH_REQUESTED = params.get('attentionScoreOrtBench') === '1' || params.get('scoreOrtBench') === '1';
 const QKV_BENCH_REQUESTED = params.get('qkvBench') === '1' || params.get('qkvBenchmark') === '1';
 const QKV_PROBE_REQUESTED = params.get('qkvProbe') === '1';
 const ORT_OP_BENCH_REQUESTED = params.get('ortOpBench') === '1' || params.get('ortBench') === '1';
 const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('kernelBenchmark') === '1' || params.get('wgslBench') === '1';
-const KERNEL_PROBE_REQUESTED = QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
+const KERNEL_PROBE_REQUESTED = ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
 const PACK_PROBE_REQUESTED = KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null;
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const WORKER_ONLY_MODEL = PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
@@ -551,6 +598,89 @@ async function runPackProbe(): Promise<void> {
   } catch (error) {
     el('benchResult').textContent = `PACK_FAILED ${(error as Error).message}`;
     el('message').textContent = `Pack probe failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runAttentionScoreBenchmark(): Promise<void> {
+  if (!searchWorker) throw new Error('attention-score benchmark requires LC0 worker');
+  const rawIters = Number(params.get('attentionScoreIters') ?? params.get('scoreIters') ?? params.get('kernelBenchIters') ?? '1000');
+  const rawWarmup = Number(params.get('attentionScoreWarmup') ?? params.get('scoreWarmup') ?? params.get('kernelBenchWarmup') ?? '10');
+  const iterations = Math.min(100_000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 1000)));
+  const warmup = Math.min(1000, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 10)));
+  el('benchResult').textContent = 'ATTENTION_SCORE_BENCH_RUNNING';
+  setBusy(true, `Benchmarking lc0web WGSL attention scores Q @ Kᵀ * scale: ${warmup} warmup + ${iterations} queued dispatches, one final readback…`);
+  try {
+    const response = await postWorkerRequest<{ type: 'attentionScoreBenchmarkResult'; result: AttentionScoreBenchmarkResult }>({
+      type: 'attentionScoreBenchmark',
+      packUrl: PACK_URL,
+      iterations,
+      warmup,
+      verifyShards: params.get('packVerify') !== '0',
+    });
+    const rounded = {
+      ...response.result,
+      scale: Number(response.result.scale.toExponential(6)),
+      packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
+      uploadSetupMs: Number(response.result.uploadSetupMs.toFixed(3)),
+      dispatchLoopMs: Number(response.result.dispatchLoopMs.toFixed(4)),
+      dispatchLoopAvgMs: Number(response.result.dispatchLoopAvgMs.toExponential(6)),
+      readbackSyncedMs: Number(response.result.readbackSyncedMs.toFixed(4)),
+      endToEndMs: Number(response.result.endToEndMs.toFixed(3)),
+      maxAbsError: Number(response.result.maxAbsError.toExponential(6)),
+      rmsError: Number(response.result.rmsError.toExponential(6)),
+      outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
+    };
+    el('benchResult').textContent = JSON.stringify(rounded);
+    el('message').textContent = `ATTENTION_SCORE_BENCH_DONE ${rounded.tokens}x${rounded.tokens} · ${rounded.iterations} queued dispatches · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+  } catch (error) {
+    el('benchResult').textContent = `ATTENTION_SCORE_BENCH_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Attention-score benchmark failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runAttentionScoreOrtBenchmark(): Promise<void> {
+  if (!searchWorker) throw new Error('attention-score ORT benchmark requires LC0 worker');
+  const rawIters = Number(params.get('attentionScoreOrtIters') ?? params.get('scoreOrtIters') ?? params.get('ortBenchIters') ?? '25');
+  const rawWarmup = Number(params.get('attentionScoreOrtWarmup') ?? params.get('scoreOrtWarmup') ?? params.get('ortBenchWarmup') ?? '5');
+  const iterations = Math.min(1000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 25)));
+  const warmup = Math.min(100, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 5)));
+  el('benchResult').textContent = 'ATTENTION_SCORE_ORT_BENCH_RUNNING';
+  setBusy(true, `Benchmarking ORT tiny attention-score op: ${warmup} warmup + ${iterations} timed runs…`);
+  try {
+    const response = await postWorkerRequest<{ type: 'attentionScoreOrtBenchmarkResult'; result: AttentionScoreOrtBenchmarkResult }>({
+      type: 'attentionScoreOrtBenchmark',
+      packUrl: PACK_URL,
+      ep: requestedWorkerEp(),
+      iterations,
+      warmup,
+      verifyShards: params.get('packVerify') !== '0',
+    });
+    const rounded = {
+      ...response.result,
+      scale: Number(response.result.scale.toExponential(6)),
+      packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
+      modelBuildMs: Number(response.result.modelBuildMs.toFixed(3)),
+      sessionCreateMs: Number(response.result.sessionCreateMs.toFixed(3)),
+      avgMs: Number(response.result.avgMs.toFixed(4)),
+      minMs: Number(response.result.minMs.toFixed(4)),
+      maxMs: Number(response.result.maxMs.toFixed(4)),
+      firstMs: Number(response.result.firstMs.toFixed(4)),
+      runsPerSecond: Number(response.result.runsPerSecond.toFixed(3)),
+      maxAbsError: Number(response.result.maxAbsError.toExponential(6)),
+      rmsError: Number(response.result.rmsError.toExponential(6)),
+      outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
+    };
+    el('benchResult').textContent = JSON.stringify(rounded);
+    el('message').textContent = `ATTENTION_SCORE_ORT_BENCH_DONE ${rounded.tokens}x${rounded.tokens} · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+  } catch (error) {
+    el('benchResult').textContent = `ATTENTION_SCORE_ORT_BENCH_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Attention-score ORT benchmark failed: ${(error as Error).message}`;
     throw error;
   } finally {
     setBusy(false);
@@ -1278,9 +1408,11 @@ async function init() {
       workerModelCacheStatus = 'pack shards worker-owned';
       useSearchWorker = true;
       await initSearchWorker({ initModel: false });
-      searchWorkerBackend = QKV_BENCH_REQUESTED ? 'lc0web-wgsl-qkv-bench' : QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
+      searchWorkerBackend = ATTENTION_SCORE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-score-bench' : ATTENTION_SCORE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-score-bench' : QKV_BENCH_REQUESTED ? 'lc0web-wgsl-qkv-bench' : QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
       renderStatic();
-      if (QKV_BENCH_REQUESTED) await runQkvBenchmark();
+      if (ATTENTION_SCORE_ORT_BENCH_REQUESTED) await runAttentionScoreOrtBenchmark();
+      else if (ATTENTION_SCORE_BENCH_REQUESTED) await runAttentionScoreBenchmark();
+      else if (QKV_BENCH_REQUESTED) await runQkvBenchmark();
       else if (QKV_PROBE_REQUESTED) await runQkvProbe();
       else if (ORT_OP_BENCH_REQUESTED) await runOrtOpBenchmark();
       else if (KERNEL_BENCH_REQUESTED) await runKernelBenchmark();
