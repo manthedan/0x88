@@ -10,6 +10,7 @@ import {
   runLc0WebEncoder0FfnBenchmark,
   runLc0WebAttentionScoreOrtBenchmark,
   runLc0WebAttentionValueBenchmark,
+  runLc0WebAttentionValueOrtBenchmark,
   runLc0WebMatmulAddKernelBenchmark,
   runLc0WebMatmulAddKernelProbe,
   runLc0WebMatmulAddOrtBenchmark,
@@ -21,6 +22,7 @@ import {
   type Lc0WebAttentionScoreBenchmarkResult,
   type Lc0WebAttentionScoreOrtBenchmarkResult,
   type Lc0WebAttentionValueBenchmarkResult,
+  type Lc0WebAttentionValueOrtBenchmarkResult,
   type Lc0WebEncoder0BlockBenchmarkResult,
   type Lc0WebEncoder0FfnBenchmarkResult,
   type Lc0WebMatmulAddKernelBenchmarkResult,
@@ -149,6 +151,16 @@ type AttentionValueBenchmarkMessage = {
   verifyShards?: boolean;
 };
 
+type AttentionValueOrtBenchmarkMessage = {
+  type: 'attentionValueOrtBenchmark';
+  id: number;
+  packUrl: string;
+  ep: OrtExecutionProviderPreference;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+};
+
 type AttentionBlockBenchmarkMessage = {
   type: 'attentionBlockBenchmark';
   id: number;
@@ -204,7 +216,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0BlockBenchmarkMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionValueOrtBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0BlockBenchmarkMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -241,6 +253,7 @@ type WorkerResponse =
   | { type: 'attentionScoreOrtBenchmarkResult'; id: number; result: Lc0WebAttentionScoreOrtBenchmarkResult }
   | { type: 'softmaxBenchmarkResult'; id: number; result: Lc0WebSoftmaxBenchmarkResult }
   | { type: 'attentionValueBenchmarkResult'; id: number; result: Lc0WebAttentionValueBenchmarkResult }
+  | { type: 'attentionValueOrtBenchmarkResult'; id: number; result: Lc0WebAttentionValueOrtBenchmarkResult }
   | { type: 'attentionBlockBenchmarkResult'; id: number; result: Lc0WebAttentionBlockBenchmarkResult }
   | { type: 'attentionOutputBenchmarkResult'; id: number; result: Lc0WebAttentionOutputBenchmarkResult }
   | { type: 'encoder0FfnBenchmarkResult'; id: number; result: Lc0WebEncoder0FfnBenchmarkResult }
@@ -407,6 +420,17 @@ async function handleAttentionValueBenchmark(message: AttentionValueBenchmarkMes
   post({ type: 'attentionValueBenchmarkResult', id: message.id, result });
 }
 
+async function handleAttentionValueOrtBenchmark(message: AttentionValueOrtBenchmarkMessage): Promise<void> {
+  setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  const result = await runLc0WebAttentionValueOrtBenchmark({
+    packUrl: message.packUrl,
+    iterations: message.iterations,
+    warmup: message.warmup,
+    verifyShards: message.verifyShards,
+  });
+  post({ type: 'attentionValueOrtBenchmarkResult', id: message.id, result });
+}
+
 async function handleAttentionBlockBenchmark(message: AttentionBlockBenchmarkMessage): Promise<void> {
   const result = await runLc0WebAttentionBlockBenchmark({
     packUrl: message.packUrl,
@@ -535,6 +559,7 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       else if (message.type === 'attentionScoreOrtBenchmark') await handleAttentionScoreOrtBenchmark(message);
       else if (message.type === 'softmaxBenchmark') await handleSoftmaxBenchmark(message);
       else if (message.type === 'attentionValueBenchmark') await handleAttentionValueBenchmark(message);
+      else if (message.type === 'attentionValueOrtBenchmark') await handleAttentionValueOrtBenchmark(message);
       else if (message.type === 'attentionBlockBenchmark') await handleAttentionBlockBenchmark(message);
       else if (message.type === 'attentionOutputBenchmark') await handleAttentionOutputBenchmark(message);
       else if (message.type === 'encoder0FfnBenchmark') await handleEncoder0FfnBenchmark(message);

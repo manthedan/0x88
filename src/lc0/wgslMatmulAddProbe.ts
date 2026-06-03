@@ -2994,3 +2994,124 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
     for (const buffer of buffers) buffer.destroy?.();
   }
 }
+
+export interface Lc0WebAttentionValueOrtBenchmarkOptions {
+  packUrl: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+}
+
+export interface Lc0WebAttentionValueOrtBenchmarkResult {
+  status: 'ATTENTION_VALUE_ORT_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  tokens: number;
+  channels: number;
+  heads: number;
+  headDim: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  modelBuildMs: number;
+  sessionCreateMs: number;
+  avgMs: number;
+  minMs: number;
+  maxMs: number;
+  firstMs: number;
+  timesMs: number[];
+  runsPerSecond: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+}
+
+export function createTinyAttentionValueOnnxForTest(): Uint8Array {
+  const writer = new ProtoWriter();
+  writer.int64(1, 8);
+  writer.string(2, 'lc0web');
+  writer.message(7, (graph) => {
+    graph.bytes(1, onnxNode('MatMul', ['probs', 'v'], ['output'], 'attention_value'));
+    graph.string(2, 'lc0web_attention_value_heads');
+    graph.bytes(11, onnxValueInfo('probs', 1, [DEFAULT_HEADS, DEFAULT_TOKENS, DEFAULT_TOKENS]));
+    graph.bytes(11, onnxValueInfo('v', 1, [DEFAULT_HEADS, DEFAULT_TOKENS, DEFAULT_HEAD_DIM]));
+    graph.bytes(12, onnxValueInfo('output', 1, [DEFAULT_HEADS, DEFAULT_TOKENS, DEFAULT_HEAD_DIM]));
+  });
+  writer.message(8, (opset) => opset.int64(2, 13));
+  return writer.finish();
+}
+
+function unpackHeadsToTokenChannels(input: Float32Array<ArrayBufferLike>, tokens: number, channels: number, heads: number): Float32Array<ArrayBufferLike> {
+  const headDim = channels / heads;
+  const out = new Float32Array(input.length);
+  for (let head = 0; head < heads; head++) {
+    for (let token = 0; token < tokens; token++) {
+      for (let channel = 0; channel < headDim; channel++) {
+        out[token * channels + head * headDim + channel] = input[(head * tokens + token) * headDim + channel];
+      }
+    }
+  }
+  return out;
+}
+
+export async function runLc0WebAttentionValueOrtBenchmark(options: Lc0WebAttentionValueOrtBenchmarkOptions): Promise<Lc0WebAttentionValueOrtBenchmarkResult> {
+  const warmup = clampInteger(options.warmup, 5, 0, 100);
+  const iterations = clampInteger(options.iterations, 25, 1, 1000);
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: [...Object.values(DEFAULT_QKV_TENSORS), DEFAULT_SCALE_TENSOR, ...Object.values(DEFAULT_SMOLGEN_TENSORS)],
+  });
+  const tensors = loadAttentionValueInputs(pack);
+  const reference = buildAttentionValueReference(tensors);
+  const probs = reference.probs;
+  const vByHead = packHeadsQ(reference.v, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_HEADS);
+  const modelBuildStarted = nowMs();
+  const tinyOnnx = createTinyAttentionValueOnnxForTest();
+  const modelBuildMs = nowMs() - modelBuildStarted;
+  const sessionStarted = nowMs();
+  const session = await ort.createOrtSession(tinyOnnx);
+  const sessionCreateMs = nowMs() - sessionStarted;
+  const feeds = {
+    probs: new ort.Tensor('float32', probs, [DEFAULT_HEADS, DEFAULT_TOKENS, DEFAULT_TOKENS]),
+    v: new ort.Tensor('float32', vByHead, [DEFAULT_HEADS, DEFAULT_TOKENS, DEFAULT_HEAD_DIM]),
+  };
+  let outputHeads: Float32Array<ArrayBufferLike> = new Float32Array(DEFAULT_TOKENS * DEFAULT_N);
+  for (let i = 0; i < warmup; i++) {
+    const outputs = await session.run(feeds);
+    outputHeads = outputs.output.data as Float32Array<ArrayBufferLike>;
+  }
+  const times: number[] = [];
+  for (let i = 0; i < iterations; i++) {
+    const started = nowMs();
+    const outputs = await session.run(feeds);
+    times.push(nowMs() - started);
+    outputHeads = outputs.output.data as Float32Array<ArrayBufferLike>;
+  }
+  const output = unpackHeadsToTokenChannels(outputHeads, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_HEADS);
+  const { maxAbsError, rmsError } = computeErrorStats(output, reference.output, DEFAULT_TOKENS * DEFAULT_N);
+  assertErrorInTolerance(maxAbsError);
+  const avgMs = times.reduce((sum, value) => sum + value, 0) / times.length;
+  return {
+    status: 'ATTENTION_VALUE_ORT_BENCH_DONE',
+    packUrl: pack.manifestUrl,
+    modelName: pack.manifest.model.name,
+    tokens: DEFAULT_TOKENS,
+    channels: DEFAULT_N,
+    heads: DEFAULT_HEADS,
+    headDim: DEFAULT_HEAD_DIM,
+    warmup,
+    iterations,
+    packLoadMs: pack.elapsedMs,
+    modelBuildMs,
+    sessionCreateMs,
+    avgMs,
+    minMs: Math.min(...times),
+    maxMs: Math.max(...times),
+    firstMs: times[0],
+    timesMs: times,
+    runsPerSecond: 1000 / avgMs,
+    maxAbsError,
+    rmsError,
+    outputSample: Array.from(output.slice(0, 8)),
+  };
+}

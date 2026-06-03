@@ -19,6 +19,11 @@ const SMOKES = [
     doneText: 'ATTENTION_VALUE_BENCH_DONE',
   },
   {
+    name: 'attention-value-ort-wasm',
+    query: 'attentionValueOrtBench=1&attentionValueOrtWarmup=0&attentionValueOrtIters=1&ep=wasm&packVerify=0',
+    doneText: 'ATTENTION_VALUE_ORT_BENCH_DONE',
+  },
+  {
     name: 'attention-block',
     query: 'attentionBlockBench=1&attentionBlockWarmup=1&attentionBlockIters=1&packVerify=0',
     doneText: 'ATTENTION_BLOCK_BENCH_DONE',
