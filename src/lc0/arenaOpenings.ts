@@ -1,6 +1,7 @@
 import { boardToFen, parseFen, START_FEN, type BoardState } from '../chess/board.ts';
+import { makeMove } from '../chess/movegen.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
-import { parsePgnGame } from '../chess/pgn.ts';
+import { sanToMove } from '../chess/pgn.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
 
 export interface ArenaOpening {
@@ -95,15 +96,47 @@ function parseUciOpening(name: string, body: string): ArenaOpening | null {
   return openingFromUciMoves(name, moves);
 }
 
+function pgnStartFen(body: string): string {
+  return body.match(/\[FEN\s+"([^"]+)"\]/)?.[1] ?? START_FEN;
+}
+
+function pgnSanTokens(body: string): string[] {
+  const movetext = body
+    .replace(/\[[^\]]+\]/g, ' ')
+    .replace(/\{[^}]*\}/g, ' ')
+    .replace(/;.*$/g, ' ')
+    .trim();
+  if (!movetext) return [];
+  if (/[()]/.test(movetext)) throw new Error('PGN variations are not supported in arena opening lines');
+  const results = new Set(['1-0', '0-1', '1/2-1/2', '*']);
+  const tokens: string[] = [];
+  for (const raw of movetext.split(/[\s,]+/)) {
+    let token = raw.trim();
+    if (!token || results.has(token)) continue;
+    if (token.startsWith('$')) {
+      if (/^\$\d+$/.test(token)) continue;
+      throw new Error(`Malformed PGN NAG token ${token}`);
+    }
+    token = token.replace(/^\d+\.(?:\.\.)?/, '');
+    if (!token || token === '...' || results.has(token)) continue;
+    tokens.push(token);
+  }
+  return tokens;
+}
+
 function parsePgnOpening(name: string, body: string): ArenaOpening | null {
-  const game = parsePgnGame(body);
-  const line = game.tree.mainlineFrom(game.tree.root);
-  if (!line.length) return null;
-  const moves = line.map((node) => {
-    if (!node.move) throw new Error(`Missing move in parsed PGN opening ${name}`);
-    return moveToUci(node.move);
-  });
-  return openingFromUciMoves(name, moves, game.tree.root.fen);
+  const tokens = pgnSanTokens(body);
+  if (!tokens.length) return null;
+  const startFen = pgnStartFen(body);
+  let board = parseFen(startFen);
+  const moves: string[] = [];
+  for (const token of tokens) {
+    const move = sanToMove(board, token);
+    if (!move) throw new Error(`Opening ${name} has illegal or unsupported SAN token ${token}`);
+    moves.push(moveToUci(move));
+    board = makeMove(board, move);
+  }
+  return openingFromUciMoves(name, moves, startFen);
 }
 
 function parseOpeningLine(line: string, index: number): ArenaOpening {

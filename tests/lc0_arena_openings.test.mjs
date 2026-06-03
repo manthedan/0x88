@@ -47,6 +47,17 @@ Italian PGN | 1. e4 e5 2. Nf3 Nc6 3. Bc4
   assert.equal(rows[1].positions.length, 6);
 });
 
+test('parseArenaOpenings rejects malformed PGN/SAN instead of silently skipping tokens', () => {
+  assert.throws(
+    () => parseArenaOpenings('Bad | 1. e4 bogus e5'),
+    /illegal or unsupported SAN token bogus/,
+  );
+  assert.throws(
+    () => parseArenaOpenings('Bad NAG | 1. e4 $bogus e5'),
+    /Malformed PGN NAG token \$bogus/,
+  );
+});
+
 test('scheduleOpenings plays every pairing on every configured position', () => {
   const pairings = [{ white: 'a', black: 'b' }, { white: 'b', black: 'a' }];
   const openings = [{ name: 'Start', fen: START_FEN }, { name: 'French', fen: 'fen2' }];
