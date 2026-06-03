@@ -64,6 +64,7 @@ export interface Lc0WebMatmulAddKernelProbeResult {
   minMs: number;
   maxMs: number;
   firstMs: number;
+  timesMs?: number[];
   maxAbsError: number;
   rmsError: number;
   outputSample: number[];
@@ -121,6 +122,7 @@ export interface Lc0WebMatmulAddOrtBenchmarkResult {
   minMs: number;
   maxMs: number;
   firstMs: number;
+  timesMs?: number[];
   runsPerSecond: number;
   maxAbsError: number;
   rmsError: number;
@@ -141,6 +143,7 @@ export interface Lc0WebQkvProjectionProbeResult {
   minMs: number;
   maxMs: number;
   firstMs: number;
+  timesMs?: number[];
   maxAbsError: { q: number; k: number; v: number };
   rmsError: { q: number; k: number; v: number };
   outputSample: { q: number[]; k: number[]; v: number[] };
@@ -207,6 +210,7 @@ export interface Lc0WebAttentionScoreOrtBenchmarkResult {
   minMs: number;
   maxMs: number;
   firstMs: number;
+  timesMs?: number[];
   runsPerSecond: number;
   maxAbsError: number;
   rmsError: number;
@@ -803,6 +807,7 @@ export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKern
       minMs: Math.min(...times),
       maxMs: Math.max(...times),
       firstMs: times[0],
+      timesMs: times,
       maxAbsError,
       rmsError,
       outputSample: Array.from(gpuOutput.slice(0, 8)),
@@ -959,6 +964,7 @@ export async function runLc0WebMatmulAddOrtBenchmark(options: Lc0WebMatmulAddOrt
     minMs: Math.min(...times),
     maxMs: Math.max(...times),
     firstMs: times[0],
+    timesMs: times,
     runsPerSecond: 1000 / avgMs,
     maxAbsError,
     rmsError,
@@ -1126,6 +1132,7 @@ export async function runLc0WebQkvProjectionProbe(options: Lc0WebQkvProjectionPr
       minMs: Math.min(...times),
       maxMs: Math.max(...times),
       firstMs: times[0],
+      timesMs: times,
       maxAbsError: { q: qErr.maxAbsError, k: kErr.maxAbsError, v: vErr.maxAbsError },
       rmsError: { q: qErr.rmsError, k: kErr.rmsError, v: vErr.rmsError },
       outputSample: { q: Array.from(outputs.q.slice(0, 8)), k: Array.from(outputs.k.slice(0, 8)), v: Array.from(outputs.v.slice(0, 8)) },
@@ -1433,6 +1440,7 @@ export async function runLc0WebAttentionScoreOrtBenchmark(options: Lc0WebAttenti
     minMs: Math.min(...times),
     maxMs: Math.max(...times),
     firstMs: times[0],
+    timesMs: times,
     runsPerSecond: 1000 / avgMs,
     maxAbsError,
     rmsError,

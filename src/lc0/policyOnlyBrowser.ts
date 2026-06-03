@@ -52,6 +52,7 @@ type KernelProbeResult = {
   minMs: number;
   maxMs: number;
   firstMs: number;
+  timesMs?: number[];
   maxAbsError: number;
   rmsError: number;
   outputSample: number[];
@@ -94,6 +95,7 @@ type QkvProbeResult = {
   minMs: number;
   maxMs: number;
   firstMs: number;
+  timesMs?: number[];
   maxAbsError: { q: number; k: number; v: number };
   rmsError: { q: number; k: number; v: number };
   outputSample: { q: number[]; k: number[]; v: number[] };
@@ -158,6 +160,7 @@ type AttentionScoreOrtBenchmarkResult = {
   minMs: number;
   maxMs: number;
   firstMs: number;
+  timesMs?: number[];
   runsPerSecond: number;
   maxAbsError: number;
   rmsError: number;
@@ -270,6 +273,7 @@ type OrtBenchmarkResult = {
   minMs: number;
   maxMs: number;
   firstMs: number;
+  timesMs?: number[];
   runsPerSecond: number;
   maxAbsError: number;
   rmsError: number;
@@ -650,6 +654,71 @@ function summarizeTimes(times: number[]): Pick<EvalBenchResult, 'avgMs' | 'media
   };
 }
 
+type BenchmarkReportInput = {
+  adapterInfo?: Record<string, unknown>;
+  iterations?: number;
+  readbackSyncedMs?: number;
+  dispatchLoopAvgMs?: number;
+  avgMs?: number;
+  minMs?: number;
+  maxMs?: number;
+  timesMs?: number[];
+};
+
+function roundReportMs(value: number | undefined, digits = 4): number | undefined {
+  return value === undefined || !Number.isFinite(value) ? undefined : Number(value.toFixed(digits));
+}
+
+function browserReportInfo(): Record<string, unknown> {
+  return {
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    hardwareConcurrency: navigator.hardwareConcurrency,
+  };
+}
+
+function sampleTimingStats(samples: number[], source: string): Record<string, unknown> | undefined {
+  const finite = samples.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (!finite.length) return undefined;
+  const percentile = (p: number) => finite[Math.min(finite.length - 1, Math.max(0, Math.ceil(finite.length * p) - 1))] ?? 0;
+  const trim = finite.length >= 5 ? Math.floor(finite.length * 0.1) : 0;
+  const trimmed = finite.slice(trim, finite.length - trim || finite.length);
+  const mean = finite.reduce((sum, value) => sum + value, 0) / finite.length;
+  const trimmedMean = trimmed.reduce((sum, value) => sum + value, 0) / trimmed.length;
+  return {
+    source,
+    sampleCount: finite.length,
+    meanMs: roundReportMs(mean),
+    trimmedMeanMs: roundReportMs(trimmedMean),
+    p50Ms: roundReportMs(percentile(0.5)),
+    p95Ms: roundReportMs(percentile(0.95)),
+    minMs: roundReportMs(finite[0]),
+    maxMs: roundReportMs(finite[finite.length - 1]),
+  };
+}
+
+function buildBenchmarkReport(result: BenchmarkReportInput): Record<string, unknown> {
+  const perDispatchSyncedMs = result.readbackSyncedMs !== undefined && result.iterations ? result.readbackSyncedMs / result.iterations : undefined;
+  const sampleStats = result.timesMs ? sampleTimingStats(result.timesMs, 'timed samples') : undefined;
+  const aggregateStats = sampleStats ?? (result.avgMs !== undefined && result.minMs !== undefined && result.maxMs !== undefined ? {
+    source: 'aggregate result fields (raw samples not returned)',
+    sampleCount: result.iterations ?? 1,
+    meanMs: roundReportMs(result.avgMs),
+    trimmedMeanMs: roundReportMs(result.avgMs),
+    minMs: roundReportMs(result.minMs),
+    maxMs: roundReportMs(result.maxMs),
+    percentileNote: 'p50/p95 unavailable because this result did not include raw timing samples',
+  } : undefined);
+  return {
+    browserInfo: browserReportInfo(),
+    gpuAdapterInfo: result.adapterInfo,
+    packVerification: params.get('packVerify') === '0' ? 'packVerify=0; shard sha256 verification skipped for this benchmark run' : 'pack shard sha256 verification enabled',
+    perDispatchSyncedMs: roundReportMs(perDispatchSyncedMs, 6),
+    dispatchLoopAvgMs: roundReportMs(result.dispatchLoopAvgMs, 6),
+    timingStats: aggregateStats ?? (perDispatchSyncedMs === undefined ? undefined : sampleTimingStats([perDispatchSyncedMs], 'single queued readback/iterations estimate')),
+  };
+}
+
 function renderBenchmarkResult(result: EvalBenchResult) {
   const rounded: EvalBenchResult = {
     ...result,
@@ -721,6 +790,7 @@ async function runSoftmaxBenchmark(): Promise<void> {
     });
     const rounded = {
       ...response.result,
+      benchmarkReport: buildBenchmarkReport(response.result),
       packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
       uploadSetupMs: Number(response.result.uploadSetupMs.toFixed(3)),
       dispatchLoopMs: Number(response.result.dispatchLoopMs.toFixed(4)),
@@ -760,6 +830,7 @@ async function runAttentionOutputBenchmark(): Promise<void> {
     });
     const rounded = {
       ...response.result,
+      benchmarkReport: buildBenchmarkReport(response.result),
       packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
       uploadSetupMs: Number(response.result.uploadSetupMs.toFixed(3)),
       dispatchLoopMs: Number(response.result.dispatchLoopMs.toFixed(4)),
@@ -799,6 +870,7 @@ async function runAttentionBlockBenchmark(): Promise<void> {
     });
     const rounded = {
       ...response.result,
+      benchmarkReport: buildBenchmarkReport(response.result),
       packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
       uploadSetupMs: Number(response.result.uploadSetupMs.toFixed(3)),
       dispatchLoopMs: Number(response.result.dispatchLoopMs.toFixed(4)),
@@ -838,6 +910,7 @@ async function runAttentionValueBenchmark(): Promise<void> {
     });
     const rounded = {
       ...response.result,
+      benchmarkReport: buildBenchmarkReport(response.result),
       packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
       uploadSetupMs: Number(response.result.uploadSetupMs.toFixed(3)),
       dispatchLoopMs: Number(response.result.dispatchLoopMs.toFixed(4)),
@@ -877,6 +950,7 @@ async function runAttentionScoreBenchmark(): Promise<void> {
     });
     const rounded = {
       ...response.result,
+      benchmarkReport: buildBenchmarkReport(response.result),
       scale: Number(response.result.scale.toExponential(6)),
       packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
       uploadSetupMs: Number(response.result.uploadSetupMs.toFixed(3)),
@@ -918,6 +992,7 @@ async function runAttentionScoreOrtBenchmark(): Promise<void> {
     });
     const rounded = {
       ...response.result,
+      benchmarkReport: buildBenchmarkReport(response.result),
       scale: Number(response.result.scale.toExponential(6)),
       packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
       modelBuildMs: Number(response.result.modelBuildMs.toFixed(3)),
@@ -960,6 +1035,7 @@ async function runQkvBenchmark(): Promise<void> {
     });
     const rounded = {
       ...response.result,
+      benchmarkReport: buildBenchmarkReport(response.result),
       packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
       uploadSetupMs: Number(response.result.uploadSetupMs.toFixed(3)),
       dispatchLoopMs: Number(response.result.dispatchLoopMs.toFixed(4)),
@@ -1000,6 +1076,7 @@ async function runQkvProbe(): Promise<void> {
     });
     const rounded = {
       ...response.result,
+      benchmarkReport: buildBenchmarkReport(response.result),
       packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
       avgMs: Number(response.result.avgMs.toFixed(4)),
       minMs: Number(response.result.minMs.toFixed(4)),
@@ -1042,6 +1119,7 @@ async function runOrtOpBenchmark(): Promise<void> {
     });
     const rounded = {
       ...response.result,
+      benchmarkReport: buildBenchmarkReport(response.result),
       packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
       modelBuildMs: Number(response.result.modelBuildMs.toFixed(3)),
       sessionCreateMs: Number(response.result.sessionCreateMs.toFixed(3)),
@@ -1087,6 +1165,7 @@ async function runKernelBenchmark(): Promise<void> {
     });
     const rounded = {
       ...response.result,
+      benchmarkReport: buildBenchmarkReport(response.result),
       packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
       uploadSetupMs: Number(response.result.uploadSetupMs.toFixed(3)),
       dispatchLoopMs: Number(response.result.dispatchLoopMs.toFixed(4)),
@@ -1130,6 +1209,7 @@ async function runKernelProbe(): Promise<void> {
     });
     const rounded = {
       ...response.result,
+      benchmarkReport: buildBenchmarkReport(response.result),
       packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
       avgMs: Number(response.result.avgMs.toFixed(4)),
       minMs: Number(response.result.minMs.toFixed(4)),
