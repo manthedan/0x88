@@ -19,6 +19,8 @@ export interface Lc0SearchResult {
   children: Lc0SearchChild[];
   /** Principal variation as UCI move strings from the root, best line first. */
   pv: string[];
+  /** MultiPV lines (UCI), one per top root move, present only when multiPv > 1. */
+  multiPv?: string[][];
   search: SearchResult;
 }
 
@@ -110,6 +112,7 @@ export class Lc0PuctSearcher {
       .map((entry) => ({ uci: moveToUci(entry.move), visits: entry.visits, prior: entry.prior, q: entry.q, probability: entry.probability }))
       .sort((a, b) => b.visits - a.visits || b.prior - a.prior);
     const pv = (result.principalVariation ?? []).map((entry) => moveToUci(entry.move));
+    const multiPv = result.multiPvLines?.map((line) => line.map((entry) => moveToUci(entry.move)));
     return {
       fen: boardToFen(board),
       move: result.move ? moveToUci(result.move) : undefined,
@@ -117,6 +120,7 @@ export class Lc0PuctSearcher {
       value: result.value,
       children,
       pv,
+      ...(multiPv ? { multiPv } : {}),
       search: result,
     };
   }

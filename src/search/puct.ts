@@ -29,7 +29,7 @@ export interface ProgressiveWideningOptions {
   minExploreScale?: number;
   maxExploreScale?: number;
 }
-export interface SearchResult { move: Move | null; visits: number; value: number; policy: SearchPolicyEntry[]; principalVariation?: PrincipalVariationEntry[]; stats?: SearchStats; root?: Node; }
+export interface SearchResult { move: Move | null; visits: number; value: number; policy: SearchPolicyEntry[]; principalVariation?: PrincipalVariationEntry[]; multiPvLines?: PrincipalVariationEntry[][]; stats?: SearchStats; root?: Node; }
 export type CpuctSchedule = 'constant' | 'lc0-log';
 export type FpuStrategy = 'constant' | 'lc0-reduction';
 export type SearchBudgetMode = 'visits' | 'neural';
@@ -66,6 +66,8 @@ export interface SearchOptions {
   includePv?: boolean;
   pvDepth?: number;
   pvSelector?: PrincipalVariationSelector;
+  /** Extract this many principal variations (one per top visited root move). >1 enables MultiPV. */
+  multiPv?: number;
   rootMoves?: Move[];
   signal?: AbortSignal;
   yieldEveryMs?: number;
@@ -759,6 +761,31 @@ function extractPrincipalVariation(root: Node, context: SearchPolicyContext, sea
   return pv;
 }
 
+// MultiPV: one principal variation per top visited root move, each line starting
+// with its root move and then following the usual best-visited continuation.
+function extractMultiPv(root: Node, context: SearchPolicyContext, searchPolicy: SearchPolicy, maxDepth: number, selector: PrincipalVariationSelector, count: number): PrincipalVariationEntry[][] {
+  const depthLimit = Math.max(1, Math.floor(maxDepth));
+  const rootEdges = root.edges
+    .filter((edge) => edge.visits > 0)
+    .sort((a, b) => b.visits - a.visits || b.prior - a.prior)
+    .slice(0, Math.max(1, Math.floor(count)));
+  return rootEdges.map((rootEdge) => {
+    const line: PrincipalVariationEntry[] = [{
+      move: rootEdge.move,
+      visits: rootEdge.visits,
+      prior: rootEdge.prior,
+      q: edgeQForParentInNode(rootEdge, root, context),
+      depth: 1,
+    }];
+    if (rootEdge.child) {
+      for (const entry of extractPrincipalVariation(rootEdge.child, context, searchPolicy, depthLimit - 1, selector)) {
+        line.push({ ...entry, depth: entry.depth + 1 });
+      }
+    }
+    return line;
+  });
+}
+
 async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyContext, stats?: SearchStats): Promise<number> {
   const moves = legalMoves(node.board);
   if (!moves.length) {
@@ -1094,7 +1121,13 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   root.visits = priorRootVisits + stats.completedVisits;
   const policy = searchPolicy.rootPolicy(root.edges, context, root);
   const bestEntry = searchPolicy.chooseFinalMove(policy, context);
-  const principalVariation = options.includePv ? extractPrincipalVariation(root, context, searchPolicy, options.pvDepth ?? 12, options.pvSelector ?? 'visits') : undefined;
+  const pvDepth = options.pvDepth ?? 12;
+  const pvSelector = options.pvSelector ?? 'visits';
+  const principalVariation = options.includePv ? extractPrincipalVariation(root, context, searchPolicy, pvDepth, pvSelector) : undefined;
+  const multiPvCount = Math.max(0, Math.floor(options.multiPv ?? 0));
+  const multiPvLines = options.includePv && multiPvCount > 1
+    ? extractMultiPv(root, context, searchPolicy, pvDepth, pvSelector, multiPvCount)
+    : undefined;
   const realizedVisits = Math.max(root.visits, root.edges.reduce((sum, edge) => sum + edge.visits, 0));
   logSearchLatency('puct.search', {
     totalMs: nowMs() - tSearch0,
@@ -1114,7 +1147,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     neuralEvalMisses: stats.neuralEvalMisses,
     transpositionHits: stats.transpositionHits ?? 0,
   });
-  return { move: bestEntry?.move ?? null, visits: realizedVisits, value: bestEntry?.q ?? rootValue, policy, ...(principalVariation ? { principalVariation } : {}), stats, root };
+  return { move: bestEntry?.move ?? null, visits: realizedVisits, value: bestEntry?.q ?? rootValue, policy, ...(principalVariation ? { principalVariation } : {}), ...(multiPvLines ? { multiPvLines } : {}), stats, root };
 }
 
 export async function chooseMove(board: BoardState, evaluator: Evaluator, options: SearchOptions = {}): Promise<SearchResult> {

@@ -13,7 +13,7 @@ import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchResult } from './se
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
 type NativeRecord = { id: string; backend?: string; fen: string; startFen?: string; moves?: string[]; bestmove: string; topPriors: NativePrior[] };
-type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; pv?: string[]; elapsedMs?: number; cancelled?: boolean; stats?: Lc0SearchResult['search']['stats'] };
+type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; pv?: string[]; multiPv?: string[][]; elapsedMs?: number; cancelled?: boolean; stats?: Lc0SearchResult['search']['stats'] };
 type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
@@ -38,6 +38,7 @@ const SW_ENABLED = params.get('sw') === '1'
 let playerSide: 'white' | 'black' = params.get('side') === 'black' ? 'black' : 'white';
 let searchVisits = Math.max(1, Math.floor(Number(params.get('visits') ?? '32') || 32));
 let searchBatchSize = Math.max(1, Math.floor(Number(params.get('batch') ?? params.get('batchSize') ?? '1') || 1));
+let searchMultiPv = Math.max(1, Math.floor(Number(params.get('multipv') ?? params.get('multiPv') ?? '1') || 1));
 let engineReplyMode: EngineReplyMode = params.get('mode') === 'search' ? 'search' : 'policy';
 
 let board: BoardState = parseFen(params.get('fen') ?? START_FEN);
@@ -204,7 +205,13 @@ function renderSearchResult(result: RenderableSearchResult) {
   const stats = result.stats;
   const batchStats = stats ? ` · eval batches ${stats.batchEvalCalls}/${stats.maxEvalBatch}` : '';
   el('searchLatency').textContent = result.elapsedMs === undefined ? '—' : `${result.elapsedMs.toFixed(0)} ms · ${visitsPerSecond?.toFixed(1) ?? '—'} visits/s${batchStats}`;
-  el('searchPv').textContent = result.pv && result.pv.length ? result.pv.join(' ') : '—';
+  if (result.multiPv && result.multiPv.length > 1) {
+    el('searchPv').innerHTML = result.multiPv
+      .map((line, i) => `<div><b>${i + 1}.</b> ${htmlEscape(line.join(' '))}</div>`)
+      .join('');
+  } else {
+    el('searchPv').textContent = result.pv && result.pv.length ? result.pv.join(' ') : '—';
+  }
   const maxVisits = Math.max(1, ...result.children.slice(0, 10).map((entry) => entry.visits));
   el('searchChildren').innerHTML = result.children.slice(0, 10).map((entry, i) => {
     const width = Math.max(2, (entry.visits / maxVisits) * 100).toFixed(1);
@@ -286,6 +293,7 @@ async function searchWithWorker(): Promise<RenderableSearchResult> {
     input: currentEvaluationInput(),
     visits: searchVisits,
     batchSize: searchBatchSize,
+    multiPv: searchMultiPv,
   }, (id) => { activeWorkerSearchId = id; });
   return response.result;
 }
@@ -334,6 +342,7 @@ async function executeSearchResult(): Promise<RenderableSearchResult> {
   const search = await searcher!.search(currentEvaluationInput(), {
     visits: searchVisits,
     batchSize: searchBatchSize,
+    multiPv: searchMultiPv,
     signal: mainSearchAbort!.signal,
     yieldEveryMs: 16,
   });
@@ -600,6 +609,7 @@ async function init() {
 function seedSettingsInputs() {
   inputEl('visitsInput').value = String(searchVisits);
   inputEl('batchInput').value = String(searchBatchSize);
+  inputEl('multiPvInput').value = String(searchMultiPv);
   selectEl('sideSelect').value = playerSide;
   selectEl('modeSelect').value = engineReplyMode;
 }
@@ -624,6 +634,11 @@ inputEl('visitsInput').addEventListener('change', () => {
 inputEl('batchInput').addEventListener('change', () => {
   searchBatchSize = clampInt(inputEl('batchInput').value, 1, 512, searchBatchSize);
   inputEl('batchInput').value = String(searchBatchSize);
+  renderStatic();
+});
+inputEl('multiPvInput').addEventListener('change', () => {
+  searchMultiPv = clampInt(inputEl('multiPvInput').value, 1, 20, searchMultiPv);
+  inputEl('multiPvInput').value = String(searchMultiPv);
   renderStatic();
 });
 selectEl('sideSelect').addEventListener('change', () => {

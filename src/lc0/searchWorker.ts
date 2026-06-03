@@ -17,6 +17,7 @@ type SearchMessage = {
   input: Lc0EvaluatorInput;
   visits: number;
   batchSize?: number;
+  multiPv?: number;
 };
 
 type EvaluateMessage = {
@@ -88,6 +89,7 @@ async function handleSearch(message: SearchMessage): Promise<void> {
     const result = await searcher.search(message.input, {
       visits: message.visits,
       batchSize: message.batchSize ?? 1,
+      multiPv: message.multiPv,
       signal: controller.signal,
       yieldEveryMs: 16,
     });
@@ -101,6 +103,7 @@ async function handleSearch(message: SearchMessage): Promise<void> {
         value: result.value,
         children: result.children,
         pv: result.pv,
+        multiPv: result.multiPv,
         stats: result.search.stats,
         elapsedMs: nowMs() - started,
         cancelled: controller.signal.aborted,

@@ -96,6 +96,29 @@ test('LC0 search exposes a principal variation of legal UCI moves', async () => 
   assert.ok(startLegal.has(result.pv[0]), `pv[0] ${result.pv[0]} is legal at the root`);
 });
 
+test('LC0 search returns MultiPV lines, one per top root move', async () => {
+  const result = await new Lc0PuctSearcher(uniformEvaluator()).search(START_FEN, { visits: 40, multiPv: 3 });
+  assert.ok(Array.isArray(result.multiPv), 'multiPv is an array');
+  assert.ok(result.multiPv.length >= 2 && result.multiPv.length <= 3, `2-3 lines, got ${result.multiPv.length}`);
+  // The first MultiPV line is the principal variation / chosen move.
+  assert.equal(result.multiPv[0][0], result.move, 'first MultiPV line starts with the best move');
+  assert.deepEqual(result.multiPv[0], result.pv, 'first MultiPV line equals the single PV');
+  const startLegal = new Set(legalMoves(parseFen(START_FEN)).map(moveToUci));
+  const rootMoves = new Set();
+  for (const line of result.multiPv) {
+    assert.ok(line.length >= 1, 'each line has at least the root move');
+    assert.ok(startLegal.has(line[0]), `line root ${line[0]} is legal`);
+    rootMoves.add(line[0]);
+  }
+  assert.equal(rootMoves.size, result.multiPv.length, 'each MultiPV line has a distinct root move');
+});
+
+test('LC0 search omits multiPv when multiPv <= 1', async () => {
+  const result = await new Lc0PuctSearcher(uniformEvaluator()).search(START_FEN, { visits: 16, multiPv: 1 });
+  assert.equal(result.multiPv, undefined, 'no multiPv lines for multiPv=1');
+  assert.ok(result.pv.length >= 1, 'single pv is still present');
+});
+
 test('LC0 search throws AbortError when given an already-aborted signal', async () => {
   const controller = new AbortController();
   controller.abort();
