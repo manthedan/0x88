@@ -59,6 +59,7 @@ type KernelProbeMessage = {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  variant?: 'scalar' | 'tiled16' | 'scalar-transposed';
 };
 
 type KernelBenchmarkMessage = {
@@ -70,6 +71,7 @@ type KernelBenchmarkMessage = {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  variant?: 'scalar' | 'tiled16' | 'scalar-transposed';
 };
 
 type OrtBenchmarkMessage = {
@@ -205,6 +207,7 @@ async function handleKernelProbe(message: KernelProbeMessage): Promise<void> {
     iterations: message.iterations,
     warmup: message.warmup,
     verifyShards: message.verifyShards,
+    variant: message.variant,
   });
   post({ type: 'kernelProbeResult', id: message.id, result });
 }
@@ -217,6 +220,7 @@ async function handleKernelBenchmark(message: KernelBenchmarkMessage): Promise<v
     iterations: message.iterations,
     warmup: message.warmup,
     verifyShards: message.verifyShards,
+    variant: message.variant,
   });
   post({ type: 'kernelBenchmarkResult', id: message.id, result });
 }

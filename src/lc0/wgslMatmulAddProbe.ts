@@ -6,6 +6,8 @@ const DEFAULT_BIAS_TENSOR = '/encoder0/mha/Q/b/w';
 const DEFAULT_K = 256;
 const DEFAULT_N = 256;
 
+export type Lc0WebMatmulAddKernelVariant = 'scalar' | 'tiled16' | 'scalar-transposed';
+
 export interface Lc0WebMatmulAddKernelProbeOptions {
   packUrl: string;
   weightTensorName?: string;
@@ -13,6 +15,7 @@ export interface Lc0WebMatmulAddKernelProbeOptions {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  variant?: Lc0WebMatmulAddKernelVariant;
 }
 
 export interface Lc0WebMatmulAddKernelBenchmarkOptions extends Lc0WebMatmulAddKernelProbeOptions {
@@ -32,6 +35,7 @@ export interface Lc0WebMatmulAddKernelProbeResult {
   adapterInfo?: Record<string, unknown>;
   weightTensor: string;
   biasTensor: string;
+  variant: Lc0WebMatmulAddKernelVariant;
   k: number;
   n: number;
   warmup: number;
@@ -53,6 +57,7 @@ export interface Lc0WebMatmulAddKernelBenchmarkResult {
   adapterInfo?: Record<string, unknown>;
   weightTensor: string;
   biasTensor: string;
+  variant: Lc0WebMatmulAddKernelVariant;
   k: number;
   n: number;
   warmup: number;
@@ -156,6 +161,10 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
   const numeric = Number(value ?? fallback);
   const finite = Number.isFinite(numeric) ? numeric : fallback;
   return Math.min(max, Math.max(min, Math.floor(finite)));
+}
+
+function normalizeKernelVariant(value: unknown): Lc0WebMatmulAddKernelVariant {
+  return value === 'tiled16' || value === 'scalar-transposed' ? value : 'scalar';
 }
 
 export function f16BitsToF32(bits: number): number {
@@ -282,6 +291,19 @@ function f16BytesToF32Array(bytes: Uint8Array, elements: number): Float32Array<A
   return out;
 }
 
+function transposeF16MatrixBytes(bytes: Uint8Array, rows: number, cols: number): Uint8Array {
+  const out = new Uint8Array(bytes.byteLength);
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const source = (row * cols + col) * 2;
+      const target = (col * rows + row) * 2;
+      out[target] = bytes[source];
+      out[target + 1] = bytes[source + 1];
+    }
+  }
+  return out;
+}
+
 function onnxDim(value: number): Uint8Array {
   const writer = new ProtoWriter();
   writer.int64(1, value);
@@ -343,7 +365,7 @@ export function createTinyMatmulAddOnnxForTest(weightF32: Float32Array<ArrayBuff
   return writer.finish();
 }
 
-const WGSL = `
+const WGSL_HEADER = `
 @group(0) @binding(0) var<storage, read> inputVec: array<f32>;
 @group(0) @binding(1) var<storage, read> weightsF16: array<u32>;
 @group(0) @binding(2) var<storage, read> biasF16: array<u32>;
@@ -361,7 +383,9 @@ fn load_weight(index: u32) -> f32 {
 fn load_bias(index: u32) -> f32 {
   return pick_lane(biasF16[index >> 1u], index);
 }
+`;
 
+const SCALAR_WGSL = `${WGSL_HEADER}
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let col = gid.x;
@@ -373,6 +397,58 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   outputVec[col] = sum;
 }
 `;
+
+const SCALAR_TRANSPOSED_WGSL = `${WGSL_HEADER}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let col = gid.x;
+  if (col >= 256u) { return; }
+  var sum = load_bias(col);
+  for (var row = 0u; row < 256u; row = row + 1u) {
+    sum = sum + inputVec[row] * load_weight(col * 256u + row);
+  }
+  outputVec[col] = sum;
+}
+`;
+
+const TILED16_WGSL = `${WGSL_HEADER}
+var<workgroup> partial: array<f32, 256>;
+
+@compute @workgroup_size(16, 16)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let col = wid.x * 16u + lid.x;
+  let local_index = lid.y * 16u + lid.x;
+  var sum = 0.0;
+  if (col < 256u) {
+    for (var row = lid.y; row < 256u; row = row + 16u) {
+      sum = sum + inputVec[row] * load_weight(row * 256u + col);
+    }
+  }
+  partial[local_index] = sum;
+  workgroupBarrier();
+
+  var stride = 8u;
+  loop {
+    if (lid.y < stride) {
+      partial[lid.y * 16u + lid.x] = partial[lid.y * 16u + lid.x] + partial[(lid.y + stride) * 16u + lid.x];
+    }
+    workgroupBarrier();
+    if (stride == 1u) { break; }
+    stride = stride / 2u;
+  }
+
+  if (lid.y == 0u && col < 256u) {
+    outputVec[col] = load_bias(col) + partial[lid.x];
+  }
+}
+`;
+
+function wgslForVariant(variant: Lc0WebMatmulAddKernelVariant): string {
+  if (variant === 'tiled16') return TILED16_WGSL;
+  if (variant === 'scalar-transposed') return SCALAR_TRANSPOSED_WGSL;
+  return SCALAR_WGSL;
+}
+
 
 function cloneableAdapterInfo(info: unknown): Record<string, unknown> | undefined {
   if (!info || typeof info !== 'object') return undefined;
@@ -396,13 +472,17 @@ async function requestDevice(): Promise<{ device: DeviceLike; adapterInfo?: Reco
   return { device, adapterInfo: cloneableAdapterInfo(rawAdapterInfo) };
 }
 
-function encodeKernelDispatches(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, n: number, iterations: number): unknown {
+function dispatchKernel(pass: ComputePassLike, variant: Lc0WebMatmulAddKernelVariant, n: number): void {
+  if (variant === 'tiled16') pass.dispatchWorkgroups(Math.ceil(n / 16));
+  else pass.dispatchWorkgroups(Math.ceil(n / 64));
+}
+
+function encodeKernelDispatches(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, n: number, iterations: number, variant: Lc0WebMatmulAddKernelVariant): unknown {
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bindGroup);
-  const workgroups = Math.ceil(n / 64);
-  for (let i = 0; i < iterations; i++) pass.dispatchWorkgroups(workgroups);
+  for (let i = 0; i < iterations; i++) dispatchKernel(pass, variant, n);
   pass.end();
   return encoder.finish();
 }
@@ -418,8 +498,8 @@ async function readOutputOnce(device: DeviceLike, outputBuffer: BufferLike, read
   return copy;
 }
 
-async function runKernelOnce(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, outputBuffer: BufferLike, readbackBuffer: BufferLike, n: number): Promise<Float32Array<ArrayBufferLike>> {
-  device.queue.submit([encodeKernelDispatches(device, pipeline, bindGroup, n, 1)]);
+async function runKernelOnce(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, outputBuffer: BufferLike, readbackBuffer: BufferLike, n: number, variant: Lc0WebMatmulAddKernelVariant): Promise<Float32Array<ArrayBufferLike>> {
+  device.queue.submit([encodeKernelDispatches(device, pipeline, bindGroup, n, 1, variant)]);
   return readOutputOnce(device, outputBuffer, readbackBuffer, n);
 }
 
@@ -441,8 +521,8 @@ function assertErrorInTolerance(maxAbsError: number): void {
   }
 }
 
-function createMatmulAddPipeline(device: DeviceLike, inputBuffer: BufferLike, weightBuffer: BufferLike, biasBuffer: BufferLike, outputBuffer: BufferLike): { pipeline: PipelineLike; bindGroup: unknown } {
-  const module = device.createShaderModule({ label: 'lc0web matmul+add probe', code: WGSL });
+function createMatmulAddPipeline(device: DeviceLike, inputBuffer: BufferLike, weightBuffer: BufferLike, biasBuffer: BufferLike, outputBuffer: BufferLike, variant: Lc0WebMatmulAddKernelVariant): { pipeline: PipelineLike; bindGroup: unknown } {
+  const module = device.createShaderModule({ label: `lc0web matmul+add ${variant}`, code: wgslForVariant(variant) });
   const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
   const bindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
@@ -459,6 +539,7 @@ function createMatmulAddPipeline(device: DeviceLike, inputBuffer: BufferLike, we
 export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKernelProbeOptions): Promise<Lc0WebMatmulAddKernelProbeResult> {
   const weightTensorName = options.weightTensorName ?? DEFAULT_WEIGHT_TENSOR;
   const biasTensorName = options.biasTensorName ?? DEFAULT_BIAS_TENSOR;
+  const variant = normalizeKernelVariant(options.variant);
   const warmup = clampInteger(options.warmup, 2, 0, 50);
   const iterations = clampInteger(options.iterations, 10, 1, 1000);
   // Request WebGPU before fetching pack shards so unsupported browsers fail
@@ -486,19 +567,20 @@ export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKern
   const buffers: BufferLike[] = [];
   try {
     const inputBuffer = createStorageBuffer(device, input, usage.STORAGE | usage.COPY_DST);
-    const weightBuffer = createStorageBuffer(device, weight.bytes, usage.STORAGE | usage.COPY_DST);
+    const kernelWeightBytes = variant === 'scalar-transposed' ? transposeF16MatrixBytes(weight.bytes, DEFAULT_K, DEFAULT_N) : weight.bytes;
+    const weightBuffer = createStorageBuffer(device, kernelWeightBytes, usage.STORAGE | usage.COPY_DST);
     const biasBuffer = createStorageBuffer(device, bias.bytes, usage.STORAGE | usage.COPY_DST);
     const outputBuffer = device.createBuffer({ size: DEFAULT_N * 4, usage: usage.STORAGE | usage.COPY_SRC });
     const readbackBuffer = device.createBuffer({ size: DEFAULT_N * 4, usage: usage.MAP_READ | usage.COPY_DST });
     buffers.push(inputBuffer, weightBuffer, biasBuffer, outputBuffer, readbackBuffer);
-    const { pipeline, bindGroup } = createMatmulAddPipeline(device, inputBuffer, weightBuffer, biasBuffer, outputBuffer);
+    const { pipeline, bindGroup } = createMatmulAddPipeline(device, inputBuffer, weightBuffer, biasBuffer, outputBuffer, variant);
 
     let gpuOutput: Float32Array<ArrayBufferLike> = new Float32Array(DEFAULT_N);
-    for (let i = 0; i < warmup; i++) gpuOutput = await runKernelOnce(device, pipeline, bindGroup, outputBuffer, readbackBuffer, DEFAULT_N);
+    for (let i = 0; i < warmup; i++) gpuOutput = await runKernelOnce(device, pipeline, bindGroup, outputBuffer, readbackBuffer, DEFAULT_N, variant);
     const times: number[] = [];
     for (let i = 0; i < iterations; i++) {
       const started = nowMs();
-      gpuOutput = await runKernelOnce(device, pipeline, bindGroup, outputBuffer, readbackBuffer, DEFAULT_N);
+      gpuOutput = await runKernelOnce(device, pipeline, bindGroup, outputBuffer, readbackBuffer, DEFAULT_N, variant);
       times.push(nowMs() - started);
     }
 
@@ -513,6 +595,7 @@ export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKern
       adapterInfo,
       weightTensor: weightTensorName,
       biasTensor: biasTensorName,
+      variant,
       k: DEFAULT_K,
       n: DEFAULT_N,
       warmup,
@@ -535,6 +618,7 @@ export async function runLc0WebMatmulAddKernelBenchmark(options: Lc0WebMatmulAdd
   const totalStarted = nowMs();
   const weightTensorName = options.weightTensorName ?? DEFAULT_WEIGHT_TENSOR;
   const biasTensorName = options.biasTensorName ?? DEFAULT_BIAS_TENSOR;
+  const variant = normalizeKernelVariant(options.variant);
   const warmup = clampInteger(options.warmup, 10, 0, 1000);
   const iterations = clampInteger(options.iterations, 1000, 1, 100_000);
   const { device, adapterInfo } = await requestDevice();
@@ -559,16 +643,17 @@ export async function runLc0WebMatmulAddKernelBenchmark(options: Lc0WebMatmulAdd
   try {
     const setupStarted = nowMs();
     const inputBuffer = createStorageBuffer(device, input, usage.STORAGE | usage.COPY_DST);
-    const weightBuffer = createStorageBuffer(device, weight.bytes, usage.STORAGE | usage.COPY_DST);
+    const kernelWeightBytes = variant === 'scalar-transposed' ? transposeF16MatrixBytes(weight.bytes, DEFAULT_K, DEFAULT_N) : weight.bytes;
+    const weightBuffer = createStorageBuffer(device, kernelWeightBytes, usage.STORAGE | usage.COPY_DST);
     const biasBuffer = createStorageBuffer(device, bias.bytes, usage.STORAGE | usage.COPY_DST);
     const outputBuffer = device.createBuffer({ size: DEFAULT_N * 4, usage: usage.STORAGE | usage.COPY_SRC });
     const readbackBuffer = device.createBuffer({ size: DEFAULT_N * 4, usage: usage.MAP_READ | usage.COPY_DST });
     buffers.push(inputBuffer, weightBuffer, biasBuffer, outputBuffer, readbackBuffer);
-    const { pipeline, bindGroup } = createMatmulAddPipeline(device, inputBuffer, weightBuffer, biasBuffer, outputBuffer);
+    const { pipeline, bindGroup } = createMatmulAddPipeline(device, inputBuffer, weightBuffer, biasBuffer, outputBuffer, variant);
     const uploadSetupMs = nowMs() - setupStarted;
 
     if (warmup > 0) {
-      device.queue.submit([encodeKernelDispatches(device, pipeline, bindGroup, DEFAULT_N, warmup)]);
+      device.queue.submit([encodeKernelDispatches(device, pipeline, bindGroup, DEFAULT_N, warmup, variant)]);
       // Prefer a no-readback warmup barrier when supported so timed readback
       // is not polluted by pending warmup dispatches. Some browsers omit it;
       // correctness still holds, but readbackSyncedMs may include warmup work.
@@ -576,7 +661,7 @@ export async function runLc0WebMatmulAddKernelBenchmark(options: Lc0WebMatmulAdd
     }
 
     const dispatchStarted = nowMs();
-    device.queue.submit([encodeKernelDispatches(device, pipeline, bindGroup, DEFAULT_N, iterations)]);
+    device.queue.submit([encodeKernelDispatches(device, pipeline, bindGroup, DEFAULT_N, iterations, variant)]);
     const dispatchLoopMs = nowMs() - dispatchStarted;
 
     const readbackStarted = nowMs();
@@ -592,6 +677,7 @@ export async function runLc0WebMatmulAddKernelBenchmark(options: Lc0WebMatmulAdd
       adapterInfo,
       weightTensor: weightTensorName,
       biasTensor: biasTensorName,
+      variant,
       k: DEFAULT_K,
       n: DEFAULT_N,
       warmup,

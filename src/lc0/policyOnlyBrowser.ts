@@ -33,6 +33,8 @@ type PackLoadResult = {
   elapsedMs: number;
 };
 
+type KernelVariant = 'scalar' | 'tiled16' | 'scalar-transposed';
+
 type KernelProbeResult = {
   status: 'KERNEL_DONE';
   packUrl: string;
@@ -40,6 +42,7 @@ type KernelProbeResult = {
   adapterInfo?: Record<string, unknown>;
   weightTensor: string;
   biasTensor: string;
+  variant: KernelVariant;
   k: number;
   n: number;
   warmup: number;
@@ -61,6 +64,7 @@ type KernelBenchmarkResult = {
   adapterInfo?: Record<string, unknown>;
   weightTensor: string;
   biasTensor: string;
+  variant: KernelVariant;
   k: number;
   n: number;
   warmup: number;
@@ -148,6 +152,10 @@ const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1
 const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
 const BENCH_WARMUP = Math.min(100, Math.max(0, Math.floor(Number(params.get('benchWarmup') ?? '5') || 0)));
 const BENCH_ITERS = Math.min(1000, Math.max(1, Math.floor(Number(params.get('benchIters') ?? params.get('iters') ?? '25') || 25)));
+function requestedKernelVariant(): KernelVariant {
+  const value = params.get('kernelVariant') ?? params.get('variant');
+  return value === 'tiled16' || value === 'scalar-transposed' ? value : 'scalar';
+}
 // Register the offline app-shell SW in production builds, or opt in with ?sw=1.
 // Disabled in dev by default so it never serves stale HMR modules.
 const SW_ENABLED = params.get('sw') === '1'
@@ -556,8 +564,9 @@ async function runKernelBenchmark(): Promise<void> {
   const rawKernelWarmup = Number(params.get('kernelBenchWarmup') ?? params.get('kernelWarmup') ?? '10');
   const iterations = Math.min(100_000, Math.max(1, Math.floor(Number.isFinite(rawKernelIters) ? rawKernelIters : 1000)));
   const warmup = Math.min(1000, Math.max(0, Math.floor(Number.isFinite(rawKernelWarmup) ? rawKernelWarmup : 10)));
+  const variant = requestedKernelVariant();
   el('benchResult').textContent = 'KERNEL_BENCH_RUNNING';
-  setBusy(true, `Benchmarking lc0web WGSL MatMul+Add: ${warmup} warmup + ${iterations} queued dispatches, one final readback…`);
+  setBusy(true, `Benchmarking lc0web WGSL MatMul+Add (${variant}): ${warmup} warmup + ${iterations} queued dispatches, one final readback…`);
   try {
     const response = await postWorkerRequest<{ type: 'kernelBenchmarkResult'; result: KernelBenchmarkResult }>({
       type: 'kernelBenchmark',
@@ -567,6 +576,7 @@ async function runKernelBenchmark(): Promise<void> {
       verifyShards: params.get('packVerify') !== '0',
       weightTensorName: params.get('weightTensor') ?? undefined,
       biasTensorName: params.get('biasTensor') ?? undefined,
+      variant,
     });
     const rounded = {
       ...response.result,
@@ -581,7 +591,7 @@ async function runKernelBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `KERNEL_BENCH_DONE ${rounded.iterations} queued dispatches · dispatch loop ${rounded.dispatchLoopMs.toFixed(3)} ms · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent = `KERNEL_BENCH_DONE ${rounded.variant} · ${rounded.iterations} queued dispatches · dispatch loop ${rounded.dispatchLoopMs.toFixed(3)} ms · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `KERNEL_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Kernel benchmark failed: ${(error as Error).message}`;
@@ -597,8 +607,9 @@ async function runKernelProbe(): Promise<void> {
   const rawKernelWarmup = Number(params.get('kernelWarmup') ?? '3');
   const iterations = Math.min(1000, Math.max(1, Math.floor(Number.isFinite(rawKernelIters) ? rawKernelIters : 25)));
   const warmup = Math.min(50, Math.max(0, Math.floor(Number.isFinite(rawKernelWarmup) ? rawKernelWarmup : 3)));
+  const variant = requestedKernelVariant();
   el('benchResult').textContent = 'KERNEL_RUNNING';
-  setBusy(true, `Running lc0web WGSL MatMul+Add kernel probe: ${warmup} warmup + ${iterations} timed…`);
+  setBusy(true, `Running lc0web WGSL MatMul+Add kernel probe (${variant}): ${warmup} warmup + ${iterations} timed…`);
   try {
     const response = await postWorkerRequest<{ type: 'kernelProbeResult'; result: KernelProbeResult }>({
       type: 'kernelProbe',
@@ -608,6 +619,7 @@ async function runKernelProbe(): Promise<void> {
       verifyShards: params.get('packVerify') !== '0',
       weightTensorName: params.get('weightTensor') ?? undefined,
       biasTensorName: params.get('biasTensor') ?? undefined,
+      variant,
     });
     const rounded = {
       ...response.result,
@@ -621,7 +633,7 @@ async function runKernelProbe(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `KERNEL_DONE 256x256 MatMul+Add · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent = `KERNEL_DONE ${rounded.variant} 256x256 MatMul+Add · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `KERNEL_FAILED ${(error as Error).message}`;
     el('message').textContent = `Kernel probe failed: ${(error as Error).message}`;
