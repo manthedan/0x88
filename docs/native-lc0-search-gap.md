@@ -40,7 +40,9 @@ We currently mostly use fixed visits. A time-parity arena mode would add fixed `
 
 Native LC0 performs multi-threaded search with virtual loss/collision handling and batched neural-network evaluation.
 
-Our browser search is mostly single-threaded JavaScript search. This means:
+Our browser path now improves batch leaf collection with virtual in-flight visits and duplicate-leaf retries, but full shared-tree multi-worker MCTS is still intentionally not wired into the user-facing browser UI. That keeps cancellation, ONNX/WebGPU session ownership, and UI responsiveness predictable.
+
+Our browser search is still mostly single-threaded JavaScript tree traversal. This means:
 
 - fewer visits per second
 - weaker GPU/backend utilization
@@ -51,8 +53,7 @@ Our browser search is mostly single-threaded JavaScript search. This means:
 ### Missing pieces
 
 - worker-based parallel search
-- virtual loss / in-flight node accounting
-- batched leaf collection across workers
+- cross-worker search coordination
 - shared or message-passed tree updates
 - stable performance instrumentation for visits/sec and evals/sec
 
@@ -65,15 +66,13 @@ Native LC0 aggressively reuses work:
 - transposition-aware reuse
 - repeated-position reuse
 
-We have some experimental reusable-root and transposition hooks, but the arena does not yet exploit them like native LC0.
+We now have persistent evaluator cache support plus opt-in tree reuse in the arena, policy-only page, and worker search paths. Reuse can find compatible deeper subtrees after opponent replies.
 
 ### Missing pieces
 
-- persistent per-engine NN cache across moves/games
-- search tree reuse after making a move
-- sibling/opponent-move subtree preservation
 - cache sizing/eviction controls
-- arena-visible cache metrics
+- richer arena-visible cache metrics
+- transposition-aware reuse beyond compatible history/FEN roots
 
 ## 4. Pondering
 
@@ -131,21 +130,19 @@ We currently rely on chess rules plus network/search only.
 
 Native LC0 exposes many UCI options for search behavior and backend performance.
 
-We expose only a small subset in code/UI.
+The single-engine UI now exposes a broader but still curated subset: visits, soft movetime, batch size, MultiPV, early-stop mode, CPuct, CPuct schedule, FPU strategy, FPU reduction, and final-move temperature. These settings are plumbed through both main-thread and dedicated-worker search paths.
 
 ### Missing option families
 
-- CPuct variants and schedules
-- FPU options
-- policy temperature controls
+- additional CPuct variants and schedule parameters
+- additional FPU options
+- deeper policy temperature controls
 - draw/contempt-style controls
 - cache size
-- minibatch size
-- thread count
-- backend selection
-- MultiPV controls
+- browser-safe parallel/thread count controls
+- backend selection beyond current query/runtime controls
 - tablebase settings
-- nodes/depth/visits/movetime/clock limits
+- depth/clock limits beyond visits and soft movetime
 - optional search heuristics and pruning settings
 
 ## 8. Backend performance
@@ -200,7 +197,7 @@ For our current project direction, the most impactful native-LC0-like upgrades a
 3. **NN cache and tree reuse across moves**: large practical strength/speed improvement.
 4. **Batched search improvements**: better use of browser/custom inference throughput.
 5. **Smart early stopping**: spend less time in obvious positions and more in unclear ones.
-6. **Pondering**: especially useful for arena games if we can manage cancellation safely.
+6. **Browser-safe parallelism plan**: exploit batching/worker isolation without long-running background compute.
 7. **Syzygy/tablebase plan**: probably remote/proxy first, not full browser-local tablebases.
 8. **Fuller LC0 option UI/runtime controls**.
 

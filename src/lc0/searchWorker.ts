@@ -26,8 +26,8 @@ import {
   type Lc0WebQkvProjectionProbeResult,
   type Lc0WebSoftmaxBenchmarkResult,
 } from './wgslMatmulAddProbe.ts';
-import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
-import type { SearchEarlyStop } from '../search/puct.ts';
+import { Lc0PuctSearcher, type Lc0SearchOptions, type Lc0SearchResult } from './search.ts';
+import type { CpuctSchedule, FpuStrategy, SearchEarlyStop } from '../search/puct.ts';
 
 type InitMessage = {
   type: 'init';
@@ -41,11 +41,17 @@ type SearchMessage = {
   type: 'search';
   id: number;
   input: Lc0EvaluatorInput;
-  visits: number;
+  visits?: number;
+  movetimeMs?: number;
   batchSize?: number;
   multiPv?: number;
   reuseTree?: boolean;
   earlyStop?: SearchEarlyStop;
+  cpuct?: number;
+  cpuctSchedule?: CpuctSchedule;
+  fpuStrategy?: FpuStrategy;
+  fpuReduction?: number;
+  temperature?: number;
 };
 
 type ResetSearchMessage = {
@@ -435,15 +441,22 @@ async function handleSearch(message: SearchMessage): Promise<void> {
   const controller = new AbortController();
   activeSearches.set(message.id, controller);
   try {
-    const result = await searcher.search(message.input, {
+    const searchOptions: Lc0SearchOptions = {
       visits: message.visits,
+      movetimeMs: message.movetimeMs,
       batchSize: message.batchSize ?? 1,
       multiPv: message.multiPv,
       reuseTree: message.reuseTree,
       earlyStop: message.earlyStop,
+      cpuct: message.cpuct,
+      cpuctSchedule: message.cpuctSchedule,
+      fpuStrategy: message.fpuStrategy,
+      fpuReduction: message.fpuReduction,
+      temperature: message.temperature,
       signal: controller.signal,
       yieldEveryMs: 16,
-    });
+    };
+    const result = await searcher.search(message.input, searchOptions);
     post({
       type: 'searchResult',
       id: message.id,
