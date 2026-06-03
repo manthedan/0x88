@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 const PY = '.venv-onnx/bin/python';
+// These tests drive the python lc0 adapter; skip cleanly when the onnx venv is
+// not provisioned (e.g. CI/dev boxes without it) instead of hard-failing.
+const SKIP_NO_PY = !existsSync(PY) && 'missing .venv-onnx python (run the onnx venv setup)';
 
-test('lc0_adapter q/d converts to side-to-move WDL', () => {
+test('lc0_adapter q/d converts to side-to-move WDL', { skip: SKIP_NO_PY }, () => {
   const raw = execFileSync(PY, ['training/lc0_adapter.py', 'qd-to-wdl', '--q', '0.2', '--d', '0.3'], { encoding: 'utf8' });
   const wdl = JSON.parse(raw);
   assert(Math.abs(wdl.win - 0.45) < 1e-9);
@@ -15,7 +18,7 @@ test('lc0_adapter q/d converts to side-to-move WDL', () => {
   assert(Math.abs(wdl.loss - 0.25) < 1e-9);
 });
 
-test('lc0_adapter exposes LC0 1858 map and decodes mirrored raw startpos planes', () => {
+test('lc0_adapter exposes LC0 1858 map and decodes mirrored raw startpos planes', { skip: SKIP_NO_PY }, () => {
   const script = String.raw`
 import training.lc0_adapter as a
 planes=[0]*104
@@ -40,7 +43,7 @@ print(a.planes_to_fen(planes, input_format=1, us_ooo=1, us_oo=1, them_ooo=1, the
   assert.equal(out[1], 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
 });
 
-test('lc0_adapter jsonl-smoke rejects illegal positive policy mass', () => {
+test('lc0_adapter jsonl-smoke rejects illegal positive policy mass', { skip: SKIP_NO_PY }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'tl-lc0-adapter-'));
   const input = join(dir, 'in.jsonl');
   const output = join(dir, 'out.jsonl');
@@ -77,7 +80,7 @@ test('lc0_adapter jsonl-smoke rejects illegal positive policy mass', () => {
   assert.equal(auditJson.drop_counts.illegal_positive_policy_mass, 1);
 });
 
-test('lc0_adapter exports sparse normalized policy as weighted hard-label rows', () => {
+test('lc0_adapter exports sparse normalized policy as weighted hard-label rows', { skip: SKIP_NO_PY }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'tl-lc0-adapter-expand-'));
   const input = join(dir, 'normalized.jsonl');
   const output = join(dir, 'weighted.jsonl');
