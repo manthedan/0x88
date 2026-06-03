@@ -10,6 +10,12 @@ import { Lc0PuctSearcher, Lc0SearchEvaluator } from '../src/lc0/search.ts';
 const MODEL = '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const NATIVE_FEN_SEARCH = 'fixtures/lc0/native_search_fen_only_blas_nodes32.jsonl';
 const NATIVE_HISTORY_SEARCH = 'fixtures/lc0/native_search_history_blas_nodes32.jsonl';
+// Higher-visit native BLAS fixtures for stronger best-move sanity. Exact visit
+// distributions are intentionally not asserted (see docs/lc0_search_parity_strictness.md).
+const HIGHER_VISIT_SUITES = [
+  { visits: 64, files: ['fixtures/lc0/native_search_fen_only_blas_nodes64.jsonl', 'fixtures/lc0/native_search_history_blas_nodes64.jsonl'] },
+  { visits: 128, files: ['fixtures/lc0/native_search_fen_only_blas_nodes128.jsonl', 'fixtures/lc0/native_search_history_blas_nodes128.jsonl'] },
+];
 
 function readJsonl(path) {
   return readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
@@ -137,3 +143,27 @@ test('LC0 fixed-visit PUCT matches native BLAS nodes32 fixture best moves', { sk
     }
   }
 });
+
+for (const { visits, files } of HIGHER_VISIT_SUITES) {
+  const present = existsSync(MODEL) && files.every(existsSync);
+  test(`LC0 fixed-visit PUCT matches native BLAS nodes${visits} fixture best moves`, { skip: !present && `missing model or native nodes${visits} artifacts` }, async () => {
+    const searcher = await Lc0PuctSearcher.create(readFileSync(MODEL));
+    const records = files.flatMap(readJsonl);
+    for (const native of records) {
+      const input = native.moves ? { positions: buildBoardHistoryFromMoves(native.moves, native.startFen) } : native.fen;
+      const result = await searcher.search(input, { visits });
+      const expected = nativeCastlingToStandard(native.bestmove);
+      // Best-move parity is the strict criterion; root prior consistency is a
+      // soft check. Exact visit distributions are not asserted at higher visits.
+      assert.equal(result.move, expected, `nodes${visits} ${native.id} best move`);
+      assert.equal(result.children[0]?.uci, expected, `nodes${visits} ${native.id} top child by visits`);
+      assert.equal(result.search.stats?.completedVisits, visits, `nodes${visits} ${native.id} completed visits`);
+      for (const prior of native.topPriors.slice(0, 3)) {
+        const uci = nativeCastlingToStandard(prior.uci);
+        const actual = result.children.find((entry) => entry.uci === uci);
+        assert.ok(actual, `nodes${visits} ${native.id} has ${uci}`);
+        assert.ok(Math.abs(actual.prior - prior.prior) < 0.0035, `nodes${visits} ${native.id} ${uci} prior native=${prior.prior} search=${actual.prior}`);
+      }
+    }
+  });
+}
