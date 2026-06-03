@@ -8,6 +8,7 @@ import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
+import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { openingStatsForPosition, openingSummary, type ImportedGame } from './openingStats.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
@@ -36,6 +37,7 @@ function el(id: string): HTMLElement {
   return node;
 }
 function inputEl(id: string): HTMLInputElement { return el(id) as HTMLInputElement; }
+function selectEl(id: string): HTMLSelectElement { return el(id) as HTMLSelectElement; }
 function htmlEscape(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
@@ -206,7 +208,7 @@ function renderOpening() {
 
 function importGames() {
   const raw = inputEl('importGamesInput').value.trim();
-  if (!raw) { el('importInfo').textContent = 'paste PGN first'; return; }
+  if (!raw) { el('importInfo').textContent = 'paste or fetch PGN first'; return; }
   try {
     importedGames = parsePgnGames(raw).map((game) => ({ tree: game.tree, result: game.result }));
     el('importInfo').textContent = `imported ${importedGames.length} games`;
@@ -214,6 +216,43 @@ function importGames() {
   } catch (error) {
     el('importInfo').textContent = `import failed: ${(error as Error).message}`;
   }
+}
+
+async function fetchGames() {
+  const site = selectEl('importSite').value as ImportSite;
+  const username = inputEl('importUser').value.trim();
+  if (!username) { el('importInfo').textContent = 'enter a username'; return; }
+  const opts = { max: Number(inputEl('importMax').value) || 40, color: selectEl('importColor').value as ImportColor };
+  el('fetchGames').toggleAttribute('disabled', true);
+  el('importInfo').textContent = `fetching ${username}'s games from ${site}…`;
+  try {
+    const pgn = await fetchGameHistoryPgn(site, username, opts, fetch);
+    inputEl('importGamesInput').value = pgn;
+    if (!pgn.trim()) { el('importInfo').textContent = 'no games found'; return; }
+    importGames();
+  } catch (error) {
+    // A network/CORS failure surfaces as a TypeError with no status.
+    const message = (error as Error).message || 'fetch failed';
+    el('importInfo').textContent = `fetch failed: ${message}`;
+  } finally {
+    el('fetchGames').toggleAttribute('disabled', false);
+  }
+}
+
+function downloadPgn() {
+  const pgn = inputEl('importGamesInput').value;
+  if (!pgn.trim()) { el('importInfo').textContent = 'nothing to download'; return; }
+  const name = (inputEl('importUser').value.trim() || 'games').replace(/[^\w.-]+/g, '_');
+  const blob = new Blob([pgn], { type: 'application/x-chess-pgn' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `${name}.pgn`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  el('importInfo').textContent = `downloaded ${name}.pgn`;
 }
 
 function renderAll() {
@@ -359,6 +398,9 @@ function wireEvents() {
   });
   el('lines').addEventListener('mouseout', () => setShapes(bestShapes()));
   el('importGames').addEventListener('click', importGames);
+  el('fetchGames').addEventListener('click', () => { void fetchGames(); });
+  el('downloadPgn').addEventListener('click', downloadPgn);
+  inputEl('importUser').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') void fetchGames(); });
   el('opening').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest('tr[data-uci]');
     const uci = row?.getAttribute('data-uci');

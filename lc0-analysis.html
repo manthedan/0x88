@@ -118,9 +118,21 @@ table.opening .san{font-family:var(--mono);font-weight:700}
       <dt>Side</dt><dd id="sideToMove">—</dd>
     </dl>
     <h2>Opening explorer</h2>
-    <textarea id="importGamesInput" spellcheck="false" placeholder="paste many games (PGN) to build an opening tree, then Import"></textarea>
+    <div class="row">
+      <div class="field"><label for="importSite">Site</label>
+        <select id="importSite"><option value="lichess">Lichess</option><option value="chesscom">Chess.com</option></select></div>
+      <div class="field" style="flex:1 1 120px"><label for="importUser">Username</label>
+        <input id="importUser" type="text" spellcheck="false" autocomplete="off" placeholder="your username" /></div>
+      <div class="field"><label for="importMax">Max</label>
+        <input id="importMax" type="number" min="1" max="300" step="1" value="40" /></div>
+      <div class="field"><label for="importColor">Color</label>
+        <select id="importColor"><option value="">both</option><option value="white">white</option><option value="black">black</option></select></div>
+      <button id="fetchGames" type="button">Fetch games</button>
+    </div>
+    <textarea id="importGamesInput" spellcheck="false" placeholder="fetch by username above, or paste many games (PGN) here, then Import"></textarea>
     <div class="row">
       <button id="importGames" type="button">Import games</button>
+      <button id="downloadPgn" type="button">Download PGN</button>
       <span id="importInfo" class="small"></span>
     </div>
     <table id="opening" class="opening"><thead><tr><th>Move</th><th class="num">Games</th><th>White / Draw / Black</th></tr></thead><tbody></tbody></table>
