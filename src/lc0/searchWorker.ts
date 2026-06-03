@@ -26,6 +26,12 @@ type EvaluateMessage = {
   input: Lc0EvaluatorInput;
 };
 
+type EvaluateBatchMessage = {
+  type: 'evaluateBatch';
+  id: number;
+  inputs: Lc0EvaluatorInput[];
+};
+
 type CancelMessage = {
   type: 'cancel';
   id: number;
@@ -33,7 +39,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -44,6 +50,7 @@ type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
 type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
+  | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'error'; id: number; error: string };
 
@@ -84,6 +91,11 @@ async function handleInit(message: InitMessage): Promise<void> {
 async function handleEvaluate(message: EvaluateMessage): Promise<void> {
   if (!evaluator) throw new Error('LC0 search worker evaluator is not initialized');
   post({ type: 'evaluationResult', id: message.id, result: await evaluator.evaluate(message.input) });
+}
+
+async function handleEvaluateBatch(message: EvaluateBatchMessage): Promise<void> {
+  if (!evaluator) throw new Error('LC0 search worker evaluator is not initialized');
+  post({ type: 'evaluationBatchResult', id: message.id, result: await evaluator.evaluateBatch(message.inputs) });
 }
 
 function isAbortError(error: unknown): boolean {
@@ -154,6 +166,9 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       else if (message.type === 'evaluate') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleEvaluate(message);
+      } else if (message.type === 'evaluateBatch') {
+        if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
+        await handleEvaluateBatch(message);
       } else if (message.type === 'search') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleSearch(message);

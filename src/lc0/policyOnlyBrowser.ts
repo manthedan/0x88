@@ -21,19 +21,42 @@ type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 
 type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
+  | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
   | { type: 'error'; id: number; error: string };
 
 type BrowserEvaluationChoice = { move?: string; evaluation: Lc0Evaluation };
+type EvalBenchResult = {
+  status: 'BENCH_DONE';
+  model: string;
+  backend: string;
+  workerOnly: boolean;
+  warmup: number;
+  iterations: number;
+  avgMs: number;
+  medianMs: number;
+  minMs: number;
+  maxMs: number;
+  p90Ms: number;
+  evalsPerSecond: number;
+  workerInitMs?: number;
+  timesMs: number[];
+  bestMove?: string;
+  q?: number;
+  mlh?: number;
+};
 
 type EngineReplyMode = 'policy' | 'search';
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
-const WORKER_ONLY_MODEL = params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
+const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
+const WORKER_ONLY_MODEL = BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
 const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
+const BENCH_WARMUP = Math.min(100, Math.max(0, Math.floor(Number(params.get('benchWarmup') ?? '5') || 0)));
+const BENCH_ITERS = Math.min(1000, Math.max(1, Math.floor(Number(params.get('benchIters') ?? params.get('iters') ?? '25') || 25)));
 // Register the offline app-shell SW in production builds, or opt in with ?sw=1.
 // Disabled in dev by default so it never serves stale HMR modules.
 const SW_ENABLED = params.get('sw') === '1'
@@ -57,6 +80,7 @@ let searchWorkerReady = false;
 let searchWorkerBackend = '—';
 let mainModelCacheStatus = CACHE_MODEL ? 'pending' : 'disabled';
 let workerModelCacheStatus = '';
+let searchWorkerInitMs: number | undefined;
 let workerRequestSeq = 0;
 const workerPending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 let busy = false;
@@ -300,7 +324,9 @@ async function initSearchWorker(): Promise<void> {
     for (const pending of workerPending.values()) pending.reject(new Error(event.message || 'LC0 search worker error'));
     workerPending.clear();
   });
+  const initStarted = performance.now();
   const ready = await postWorkerRequest<{ type: 'ready'; backend: string; modelCache: string }>({ type: 'init', modelUrl: MODEL_URL, ep: requestedWorkerEp(), cacheModel: CACHE_MODEL });
+  searchWorkerInitMs = performance.now() - initStarted;
   searchWorkerReady = true;
   searchWorkerBackend = ready.backend;
   workerModelCacheStatus = ready.modelCache;
@@ -318,6 +344,82 @@ async function evaluateWithWorker(input: Lc0EvaluatorInput): Promise<BrowserEval
 async function choosePolicyMove(input: Lc0EvaluatorInput): Promise<BrowserEvaluationChoice> {
   if (WORKER_ONLY_MODEL || !player) return evaluateWithWorker(input);
   return player.chooseMove(input);
+}
+
+function summarizeTimes(times: number[]): Pick<EvalBenchResult, 'avgMs' | 'medianMs' | 'minMs' | 'maxMs' | 'p90Ms' | 'evalsPerSecond'> {
+  const sorted = [...times].sort((a, b) => a - b);
+  const avg = times.reduce((sum, value) => sum + value, 0) / Math.max(1, times.length);
+  const percentile = (p: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * p) - 1))] ?? 0;
+  return {
+    avgMs: avg,
+    medianMs: percentile(0.5),
+    minMs: sorted[0] ?? 0,
+    maxMs: sorted[sorted.length - 1] ?? 0,
+    p90Ms: percentile(0.9),
+    evalsPerSecond: 1000 / Math.max(1e-9, avg),
+  };
+}
+
+function renderBenchmarkResult(result: EvalBenchResult) {
+  const rounded: EvalBenchResult = {
+    ...result,
+    avgMs: Number(result.avgMs.toFixed(3)),
+    medianMs: Number(result.medianMs.toFixed(3)),
+    minMs: Number(result.minMs.toFixed(3)),
+    maxMs: Number(result.maxMs.toFixed(3)),
+    p90Ms: Number(result.p90Ms.toFixed(3)),
+    evalsPerSecond: Number(result.evalsPerSecond.toFixed(3)),
+    workerInitMs: result.workerInitMs === undefined ? undefined : Number(result.workerInitMs.toFixed(3)),
+    timesMs: result.timesMs.map((time) => Number(time.toFixed(3))),
+    q: result.q === undefined ? undefined : Number(result.q.toFixed(8)),
+    mlh: result.mlh === undefined ? undefined : Number(result.mlh.toFixed(3)),
+  };
+  el('benchResult').textContent = JSON.stringify(rounded);
+  el('message').textContent = `BENCH_DONE ${rounded.iterations} evals · avg ${rounded.avgMs.toFixed(1)} ms · ${rounded.evalsPerSecond.toFixed(2)} eval/s · ${rounded.backend}`;
+}
+
+async function runWorkerEvalBenchmark(): Promise<void> {
+  if (!searchWorkerReady) throw new Error('benchmark requires ready LC0 worker');
+  const input = currentEvaluationInput();
+  const times: number[] = [];
+  let last: BrowserEvaluationChoice | undefined;
+  setBusy(true, `Running LC0 worker eval benchmark: ${BENCH_WARMUP} warmup + ${BENCH_ITERS} timed evals…`);
+  el('benchResult').textContent = 'BENCH_RUNNING';
+  try {
+    for (let i = 0; i < BENCH_WARMUP; i++) {
+      last = await evaluateWithWorker(input);
+      el('benchResult').textContent = `BENCH_WARMUP ${i + 1}/${BENCH_WARMUP}`;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    for (let i = 0; i < BENCH_ITERS; i++) {
+      const started = performance.now();
+      last = await evaluateWithWorker(input);
+      times.push(performance.now() - started);
+      el('benchResult').textContent = `BENCH_TIMED ${i + 1}/${BENCH_ITERS}`;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    const stats = summarizeTimes(times);
+    renderBenchmarkResult({
+      status: 'BENCH_DONE',
+      model: MODEL_URL,
+      backend: searchWorkerBackend,
+      workerOnly: WORKER_ONLY_MODEL,
+      warmup: BENCH_WARMUP,
+      iterations: BENCH_ITERS,
+      workerInitMs: searchWorkerInitMs,
+      timesMs: times,
+      bestMove: last?.move,
+      q: last?.evaluation.q,
+      mlh: last?.evaluation.mlh,
+      ...stats,
+    });
+  } catch (error) {
+    el('benchResult').textContent = `BENCH_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Benchmark failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function searchWithWorker(): Promise<RenderableSearchResult> {
@@ -815,10 +917,11 @@ async function init() {
     el('message').textContent = WORKER_ONLY_MODEL
       ? 'Ready. LC0 model is loaded only in the dedicated worker.'
       : 'Ready. Drag a legal move or ask the engine to move.';
-    renderEvaluation();
-    if (params.get('parity') === '1' || params.get('fixtures') === '1') await runParityFixtures();
-    if (params.get('search') === '1') await searchRootPosition();
-    if (params.get('engineMove') === '1') await engineMove();
+    if (BENCH_REQUESTED) await runWorkerEvalBenchmark();
+    else renderEvaluation();
+    if (!BENCH_REQUESTED && (params.get('parity') === '1' || params.get('fixtures') === '1')) await runParityFixtures();
+    if (!BENCH_REQUESTED && params.get('search') === '1') await searchRootPosition();
+    if (!BENCH_REQUESTED && params.get('engineMove') === '1') await engineMove();
   } catch (error) {
     el('message').textContent = `Model load failed: ${(error as Error).message}`;
     renderStatic();

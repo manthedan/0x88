@@ -10,6 +10,10 @@ export const LC0_ONNX_OUTPUT_POLICY = '/output/policy';
 export const LC0_ONNX_OUTPUT_WDL = '/output/wdl';
 export const LC0_ONNX_OUTPUT_MLH = '/output/mlh';
 export const LC0_DEFAULT_POLICY_TEMPERATURE = 1.359;
+const LC0_POLICY_SIZE = 1858;
+const LC0_WDL_SIZE = 3;
+const LC0_MLH_SIZE = 1;
+const LC0_INPUT_PLANES_SIZE = 112 * 8 * 8;
 
 export interface Lc0LegalPrior {
   uci: string;
@@ -93,9 +97,25 @@ function tensorData(outputs: Awaited<ReturnType<ort.InferenceSession['run']>>, n
   return tensor.data as Float32Array | number[];
 }
 
+function sessionInputMetadata(session: ort.InferenceSession): { type?: string; shape?: unknown[] } | undefined {
+  return (session.inputMetadata?.find?.((entry: { name?: string }) => entry.name === LC0_ONNX_INPUT_PLANES) ?? session.inputMetadata?.[0]) as { type?: string; shape?: unknown[] } | undefined;
+}
+
 function sessionInputType(session: ort.InferenceSession): 'float32' | 'float16' {
-  const metadata = (session.inputMetadata?.find?.((entry: { name?: string }) => entry.name === LC0_ONNX_INPUT_PLANES) ?? session.inputMetadata?.[0]) as { type?: string } | undefined;
-  return metadata?.type === 'float16' ? 'float16' : 'float32';
+  return sessionInputMetadata(session)?.type === 'float16' ? 'float16' : 'float32';
+}
+
+function sessionFixedInputBatchSize(session: ort.InferenceSession): number {
+  const firstDim = sessionInputMetadata(session)?.shape?.[0];
+  return typeof firstDim === 'number' && Number.isFinite(firstDim) && firstDim > 0 ? Math.floor(firstDim) : 1;
+}
+
+function arraySlice<T extends ArrayLike<number>>(values: T, start: number, length: number): ArrayLike<number> {
+  const end = start + length;
+  const maybe = values as T & { subarray?: (start: number, end?: number) => ArrayLike<number>; slice?: (start: number, end?: number) => ArrayLike<number> };
+  if (typeof maybe.subarray === 'function') return maybe.subarray(start, end);
+  if (typeof maybe.slice === 'function') return maybe.slice(start, end);
+  return Array.from({ length }, (_, i) => Number(values[start + i]));
 }
 
 function currentBoardAndFen(input: Lc0EvaluatorInput): { board: BoardState; fen: string } {
@@ -141,37 +161,59 @@ export class Lc0OnnxEvaluator {
   }
 
   async evaluate(boardOrFen: Lc0EvaluatorInput): Promise<Lc0Evaluation> {
-    const { board, fen } = currentBoardAndFen(boardOrFen);
-    const encoded = encodeLc0Classical112(boardOrFen as Lc0EncoderInput, { historyFill: this.historyFill });
+    return (await this.evaluateBatch([boardOrFen]))[0];
+  }
+
+  private async runPhysicalBatch(inputs: Lc0EvaluatorInput[], physicalBatchSize: number): Promise<Lc0Evaluation[]> {
+    if (!inputs.length) return [];
+    const encodedPlanes = new Float32Array(physicalBatchSize * LC0_INPUT_PLANES_SIZE);
+    const boards: BoardState[] = [];
+    const fens: string[] = [];
+    for (let i = 0; i < inputs.length; i++) {
+      const input = inputs[i];
+      const { board, fen } = currentBoardAndFen(input);
+      boards.push(board);
+      fens.push(fen);
+      encodedPlanes.set(encodeLc0Classical112(input as Lc0EncoderInput, { historyFill: this.historyFill }).planes, i * LC0_INPUT_PLANES_SIZE);
+    }
+    // Fixed batch-N artifacts require a full physical batch. Pad by copying the
+    // last encoded position rather than re-encoding it for every unused slot;
+    // callers only receive the real `inputs.length` outputs below.
+    for (let i = inputs.length; i < physicalBatchSize; i++) {
+      encodedPlanes.copyWithin(i * LC0_INPUT_PLANES_SIZE, (inputs.length - 1) * LC0_INPUT_PLANES_SIZE, inputs.length * LC0_INPUT_PLANES_SIZE);
+    }
     const inputType = sessionInputType(this.session);
     const inputTensor = inputType === 'float16'
-      ? new ort.Tensor('float16', float32ToFloat16Array(encoded.planes), [1, 112, 8, 8])
-      : new ort.Tensor('float32', encoded.planes, [1, 112, 8, 8]);
+      ? new ort.Tensor('float16', float32ToFloat16Array(encodedPlanes), [physicalBatchSize, 112, 8, 8])
+      : new ort.Tensor('float32', encodedPlanes, [physicalBatchSize, 112, 8, 8]);
     const outputs = await this.session.run({
       [LC0_ONNX_INPUT_PLANES]: inputTensor,
     });
     const policy = tensorData(outputs, LC0_ONNX_OUTPUT_POLICY);
     const wdlRaw = tensorData(outputs, LC0_ONNX_OUTPUT_WDL);
     const mlhRaw = tensorData(outputs, LC0_ONNX_OUTPUT_MLH);
-    const wdl: [number, number, number] = [Number(wdlRaw[0]), Number(wdlRaw[1]), Number(wdlRaw[2])];
-    const legalPriors = legalPolicyPriors(board, policy, this.policyTemperature);
-    return {
-      fen,
-      wdl,
-      q: wdl[0] - wdl[2],
-      mlh: Number(mlhRaw[0]),
-      legalPriors,
-      bestMove: legalPriors[0]?.uci,
-    };
+    return inputs.map((_, i) => {
+      const wdlSlice = arraySlice(wdlRaw, i * LC0_WDL_SIZE, LC0_WDL_SIZE);
+      const wdl: [number, number, number] = [Number(wdlSlice[0]), Number(wdlSlice[1]), Number(wdlSlice[2])];
+      const legalPriors = legalPolicyPriors(boards[i], arraySlice(policy, i * LC0_POLICY_SIZE, LC0_POLICY_SIZE), this.policyTemperature);
+      return {
+        fen: fens[i],
+        wdl,
+        q: wdl[0] - wdl[2],
+        mlh: Number(arraySlice(mlhRaw, i * LC0_MLH_SIZE, LC0_MLH_SIZE)[0]),
+        legalPriors,
+        bestMove: legalPriors[0]?.uci,
+      };
+    });
   }
 
   async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
-    // The committed browser ONNX artifacts are exported with a static batch-1
-    // input shape. Keep the public batch API serial for now so batched search
-    // can select/dispatch leaf groups without issuing concurrent session.run()
-    // calls against a single ORT/WebGPU session.
+    if (!inputs.length) return [];
+    const physicalBatchSize = sessionFixedInputBatchSize(this.session);
     const out: Lc0Evaluation[] = [];
-    for (const input of inputs) out.push(await this.evaluate(input));
+    for (let offset = 0; offset < inputs.length; offset += physicalBatchSize) {
+      out.push(...await this.runPhysicalBatch(inputs.slice(offset, offset + physicalBatchSize), physicalBatchSize));
+    }
     return out;
   }
 }

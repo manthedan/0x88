@@ -17,6 +17,22 @@
       "source": "../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.onnx",
       "bytes": 40491226,
       "sha256": "34ed77d4eaf9f628980cb40eb026666467fae982ae58592a71aed80e8e6b3ac6"
+    },
+    {
+      "file": "t1-256x10-distilled-swa-2432500.batch4.f16.onnx",
+      "url": "/models/lc0/t1-256x10-distilled-swa-2432500.batch4.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch4.f16.onnx",
+      "bytes": 40491226,
+      "sha256": "878ddb3f35de0cf96bd1ead1f5d74dca4e2a4005aa4d34ebee0a7d81ed79e511"
+    },
+    {
+      "file": "t1-256x10-distilled-swa-2432500.batch8.f16.onnx",
+      "url": "/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch8.f16.onnx",
+      "bytes": 40491226,
+      "sha256": "4a3d0b0ee3080c36d1f18c4a1acbdb0ef9751bb32fc33f28db032f4c230418eb"
     }
   ]
 }

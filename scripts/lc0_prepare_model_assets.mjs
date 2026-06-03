@@ -11,6 +11,8 @@ const publicDir = resolve(repoRoot, 'public/models/lc0');
 const files = [
   't1-256x10-distilled-swa-2432500.batch1.f32.onnx',
   't1-256x10-distilled-swa-2432500.batch1.f16.onnx',
+  't1-256x10-distilled-swa-2432500.batch4.f16.onnx',
+  't1-256x10-distilled-swa-2432500.batch8.f16.onnx',
 ];
 
 function sha256(path) {
