@@ -3,7 +3,7 @@ import { legalMoves } from '../chess/movegen.ts';
 import { moveToActionId, moveToUci, type Move } from '../chess/moveCodec.ts';
 import { searchRoot, type Node as PuctNode, type SearchOptions, type SearchResult } from '../search/puct.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from '../nn/evaluator.ts';
-import { Lc0OnnxEvaluator, type Lc0EvaluatorInput, type Lc0Evaluation, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
+import { Lc0OnnxEvaluator, type Lc0EvaluationCacheMetrics, type Lc0EvaluationProvider, type Lc0EvaluatorInput, type Lc0Evaluation, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
 import type { Lc0PositionHistoryInput } from './encoder112.ts';
 
 export interface Lc0SearchOptions extends SearchOptions {
@@ -50,11 +50,6 @@ function contextInput(board: BoardState, context?: EvaluationContext): BoardStat
   return { positions: [...history].reverse().map(parseFen).concat(board) };
 }
 
-type Lc0EvaluationProvider = {
-  evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> | Lc0Evaluation;
-  evaluateBatch?(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> | Lc0Evaluation[];
-};
-
 function lc0ToSearchEvaluation(board: BoardState, lc0: Lc0Evaluation, context?: EvaluationContext): Evaluation {
   const policy = new Map<number, number>();
   const legalByUci = new Map<string, Move>((context?.legalMoves ?? legalMoves(board)).map((move) => [moveToUci(move), move]));
@@ -83,6 +78,10 @@ export class Lc0SearchEvaluator implements Evaluator {
       ? await this.inner.evaluateBatch(inputs)
       : await Promise.all(inputs.map((input) => this.inner.evaluate(input)));
     return evals.map((lc0, i) => lc0ToSearchEvaluation(boards[i], lc0, contexts[i]));
+  }
+
+  metrics(): Lc0EvaluationCacheMetrics | undefined {
+    return (this.inner as Lc0EvaluationProvider & { metrics?: () => Lc0EvaluationCacheMetrics }).metrics?.();
   }
 }
 

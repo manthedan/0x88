@@ -10,7 +10,7 @@ import { BUILTIN_ARENA_OPENINGS, parseArenaOpenings, scheduleOpenings, type Aren
 import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { GameTree } from './gameTree.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
-import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
@@ -38,6 +38,7 @@ let running = false;
 let abort: AbortController | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
 let searcher: Lc0PuctSearcher | null = null;
+let lc0Cache: CachedLc0Evaluator | null = null;
 let stockfish: StockfishEngine | null = null;
 const engines = new Map<string, ArenaEngine>();
 const games: GameRecord[] = [];
@@ -99,6 +100,20 @@ function arenaMovetimeMs(): number {
   return Math.max(10, Math.min(60000, Math.floor(Number(inputEl('movetimeInput').value) || 500)));
 }
 
+function arenaCacheEntries(): number {
+  return Math.max(0, Math.min(100000, Math.floor(Number(inputEl('cacheEntriesInput').value) || 0)));
+}
+
+function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): string {
+  if (!metrics) return 'NN cache: unavailable';
+  return `NN cache: ${metrics.entries}/${metrics.maxEntries} entries · ${metrics.hits} hit${metrics.hits === 1 ? '' : 's'} · ${metrics.misses} miss${metrics.misses === 1 ? '' : 'es'}`;
+}
+
+function renderCacheInfo(): void {
+  lc0Cache?.setMaxEntries(arenaCacheEntries());
+  el('cacheInfo').textContent = cacheMetricsText(lc0Cache?.metrics());
+}
+
 function buildEngines() {
   engines.clear();
   const warmupPositions = [parseFen(START_FEN)];
@@ -119,6 +134,7 @@ function buildEngines() {
   const lc0SearchWarmup = async (signal: AbortSignal) => {
     await searcher!.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
     searcher!.resetTree();
+    renderCacheInfo();
   };
   const stockfishWarmup = async (signal: AbortSignal) => {
     stockfish!.setOptions({ depth: 1, movetimeMs: undefined });
@@ -234,6 +250,7 @@ async function warmUpSelectedEngines(ids: string[], signal: AbortSignal): Promis
     el('message').textContent = `Warming up ${engine.name}…`;
     await engine.warmup(signal);
     warmed.add(id);
+    renderCacheInfo();
   }
 }
 
@@ -326,7 +343,8 @@ async function startTournament() {
       played += 1;
       const tags: Record<string, string> = { Event: 'LC0 arena', White: whiteEngine.name, Black: blackEngine.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
       games.push({ pgn: gameTreeToPgn(tree, tags, result) });
-      appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason})`);
+      renderCacheInfo();
+      appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason}) · ${cacheMetricsText(lc0Cache?.metrics())}`);
       renderStandings(standings);
     }
     const leader = rankedStandings(standings)[0];
@@ -363,6 +381,7 @@ function wireEvents() {
   el('engines').addEventListener('change', refreshChampionOptions);
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
   el('openingText').addEventListener('input', refreshOpeningPreview);
+  el('cacheEntriesInput').addEventListener('input', renderCacheInfo);
 }
 
 async function init() {
@@ -374,9 +393,11 @@ async function init() {
   try {
     const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
     const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
-    player = new Lc0PolicyOnlyPlayer(evaluator);
-    searcher = new Lc0PuctSearcher(evaluator);
+    lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
+    player = new Lc0PolicyOnlyPlayer(lc0Cache);
+    searcher = new Lc0PuctSearcher(lc0Cache);
     stockfish = new StockfishEngine({ depth: 4 });
+    renderCacheInfo();
     el('start').toggleAttribute('disabled', false);
     el('message').textContent = 'Ready. Pick engines and start a tournament.';
   } catch (error) {
