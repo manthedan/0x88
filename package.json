@@ -63,6 +63,7 @@
     "eval:pareto-sweep": ".venv-onnx/bin/python eval/pareto_sweep_report.py",
     "eval:onnx-parity": "node --experimental-strip-types eval/onnx_parity_check.mjs",
     "lc0:eval-fixtures": "node --experimental-strip-types scripts/lc0_eval_fixtures.mjs",
+    "lc0:policy-only": "node --experimental-strip-types scripts/lc0_policy_only.mjs",
     "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs"
   },
   "devDependencies": {
