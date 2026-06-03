@@ -62,6 +62,7 @@
     "eval:chess-ocean": "node --experimental-strip-types eval/chess_ocean_tests.mjs",
     "eval:pareto-sweep": ".venv-onnx/bin/python eval/pareto_sweep_report.py",
     "eval:onnx-parity": "node --experimental-strip-types eval/onnx_parity_check.mjs",
+    "lc0:prepare-model-assets": "node scripts/lc0_prepare_model_assets.mjs",
     "lc0:eval-fixtures": "node --experimental-strip-types scripts/lc0_eval_fixtures.mjs",
     "lc0:eval-history": "node --experimental-strip-types scripts/lc0_eval_fixtures.mjs ../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx fixtures/lc0/history.json",
     "lc0:eval-f16-fixtures": "node --experimental-strip-types scripts/lc0_eval_fixtures.mjs ../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.onnx fixtures/lc0/fen_only.json",

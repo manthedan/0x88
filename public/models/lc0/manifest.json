@@ -1,0 +1,22 @@
+{
+  "generatedBy": "scripts/lc0_prepare_model_assets.mjs",
+  "note": "Local LC0 browser model assets. The large ONNX files are exposed as symlinks by default so they are not committed as blobs.",
+  "models": [
+    {
+      "file": "t1-256x10-distilled-swa-2432500.batch1.f32.onnx",
+      "url": "/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx",
+      "bytes": 80895900,
+      "sha256": "9942420798729cfd3ba0f20ced7b1e9650dadc832527a5ad28f8b990ca0d230e"
+    },
+    {
+      "file": "t1-256x10-distilled-swa-2432500.batch1.f16.onnx",
+      "url": "/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.onnx",
+      "bytes": 40491226,
+      "sha256": "34ed77d4eaf9f628980cb40eb026666467fae982ae58592a71aed80e8e6b3ac6"
+    }
+  ]
+}
