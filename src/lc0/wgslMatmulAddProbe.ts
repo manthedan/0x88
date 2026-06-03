@@ -615,11 +615,51 @@ function onnxTensor(name: string, dims: number[], values: Float32Array<ArrayBuff
   return writer.finish();
 }
 
+function onnxInt64Tensor(name: string, dims: number[], values: readonly number[]): Uint8Array {
+  const raw = new Uint8Array(values.length * 8);
+  const view = new DataView(raw.buffer);
+  values.forEach((value, index) => view.setBigInt64(index * 8, BigInt(value), true));
+  const writer = new ProtoWriter();
+  for (const dim of dims) writer.int64(1, dim);
+  writer.int32(2, 7); // TensorProto.INT64
+  writer.string(8, name);
+  writer.bytes(9, raw);
+  return writer.finish();
+}
+
+function onnxInt32Tensor(name: string, dims: number[], values: readonly number[]): Uint8Array {
+  const raw = new Uint8Array(values.length * 4);
+  const view = new DataView(raw.buffer);
+  values.forEach((value, index) => view.setInt32(index * 4, value, true));
+  const writer = new ProtoWriter();
+  for (const dim of dims) writer.int64(1, dim);
+  writer.int32(2, 6); // TensorProto.INT32
+  writer.string(8, name);
+  writer.bytes(9, raw);
+  return writer.finish();
+}
+
 function onnxFloatAttribute(name: string, value: number): Uint8Array {
   const writer = new ProtoWriter();
   writer.string(1, name);
   writer.float32(2, value);
   writer.int32(20, 1); // AttributeProto.FLOAT
+  return writer.finish();
+}
+
+function onnxIntAttribute(name: string, value: number): Uint8Array {
+  const writer = new ProtoWriter();
+  writer.string(1, name);
+  writer.int64(3, value);
+  writer.int32(20, 2); // AttributeProto.INT
+  return writer.finish();
+}
+
+function onnxIntsAttribute(name: string, values: readonly number[]): Uint8Array {
+  const writer = new ProtoWriter();
+  writer.string(1, name);
+  for (const value of values) writer.int64(8, value);
+  writer.int32(20, 7); // AttributeProto.INTS
   return writer.finish();
 }
 
@@ -3394,6 +3434,7 @@ export interface Lc0WebEncoderStackBenchmarkOptions {
   warmup?: number;
   verifyShards?: boolean;
   compareOrt?: boolean;
+  compareHeads?: boolean;
 }
 
 export interface Lc0WebEncoderStackBlockResult {
@@ -3407,6 +3448,19 @@ export interface Lc0WebEncoderStackBlockResult {
   ortVsCpuMaxAbsError?: number;
   ortVsCpuRmsError?: number;
   outputSample: number[];
+}
+
+export interface Lc0WebEncoderStackHeadsResult {
+  mode: 'ort-policy-value';
+  modelBuildMs: number;
+  sessionCreateMs: number;
+  runMs: number;
+  policyMaxAbsError: number;
+  policyRmsError: number;
+  wdlMaxAbsError: number;
+  wdlRmsError: number;
+  policySample: number[];
+  wdl: number[];
 }
 
 export interface Lc0WebEncoderStackBenchmarkResult {
@@ -3424,6 +3478,7 @@ export interface Lc0WebEncoderStackBenchmarkResult {
   layers: number;
   prefixes: string[];
   compareOrt: boolean;
+  compareHeads: boolean;
   ortCoveredStages: string;
   packLoadMs: number;
   setupAndDispatchMs: number;
@@ -3433,6 +3488,7 @@ export interface Lc0WebEncoderStackBenchmarkResult {
   rmsError: number;
   ortMaxAbsError?: number;
   outputSample: number[];
+  policyValueHeads?: Lc0WebEncoderStackHeadsResult;
   blocks: Lc0WebEncoderStackBlockResult[];
 }
 
@@ -3440,6 +3496,252 @@ function buildEncoder0BlockReference(tensors: Encoder0FfnTensors, input: Float32
   const attention = buildAttentionOutputReference(tensors, input);
   const ffn = cpuEncoder0FfnFromLn1(attention.output, tensors);
   return { input: attention.input, output: ffn.output, attentionAlpha: attention.alpha, ffnAlpha: ffn.alpha, smolgenBias: attention.smolgenBias };
+}
+
+const DEFAULT_POLICY_HEAD_TENSORS = {
+  dense1Weight: '/policy/dense1/matmul/w',
+  dense1Bias: '/policy/dense1/add/w',
+  qWeight: '/policy/Q/matmul/w',
+  qBias: '/policy/Q/add/w',
+  kWeight: '/policy/K/matmul/w',
+  kBias: '/policy/K/add/w',
+  scale: '/policy/scale/w',
+  promotionWeight: '/policy/promotion/matmul/w',
+  mappingTable: '/const/mapping_table',
+} as const;
+const DEFAULT_VALUE_HEAD_TENSORS = {
+  embedWeight: '/value/embed/matmul/w',
+  embedBias: '/value/embed/add/w',
+  dense1Weight: '/value/dense1/matmul/w',
+  dense1Bias: '/value/dense1/add/w',
+  dense2Weight: '/value/dense2/matmul/w',
+  dense2Bias: '/value/dense2/add/w',
+} as const;
+const DEFAULT_POLICY_OUTPUTS = DEFAULT_TOKENS * DEFAULT_TOKENS;
+const DEFAULT_POLICY_MAPPED_OUTPUTS = 1858;
+const DEFAULT_POLICY_FLAT = 4288;
+const DEFAULT_VALUE_EMBED = 32;
+const DEFAULT_VALUE_HIDDEN = 128;
+
+type Lc0WebPolicyValueHeadTensors = {
+  policyDense1Weight: Lc0WebTensorView;
+  policyDense1Bias: Lc0WebTensorView;
+  policyQWeight: Lc0WebTensorView;
+  policyQBias: Lc0WebTensorView;
+  policyKWeight: Lc0WebTensorView;
+  policyKBias: Lc0WebTensorView;
+  policyScale: Lc0WebTensorView;
+  policyPromotionWeight: Lc0WebTensorView;
+  policyMappingTable: Lc0WebTensorView;
+  valueEmbedWeight: Lc0WebTensorView;
+  valueEmbedBias: Lc0WebTensorView;
+  valueDense1Weight: Lc0WebTensorView;
+  valueDense1Bias: Lc0WebTensorView;
+  valueDense2Weight: Lc0WebTensorView;
+  valueDense2Bias: Lc0WebTensorView;
+};
+
+function policyValueHeadTensorNameList(): string[] {
+  return [...Object.values(DEFAULT_POLICY_HEAD_TENSORS), ...Object.values(DEFAULT_VALUE_HEAD_TENSORS)];
+}
+
+function loadPolicyValueHeadTensors(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>): Lc0WebPolicyValueHeadTensors {
+  const get = (name: string): Lc0WebTensorView => {
+    const tensor = pack.tensors.get(name);
+    if (!tensor) throw new Error(`lc0web policy/value head tensor was not loaded: ${name}`);
+    return tensor;
+  };
+  const tensors: Lc0WebPolicyValueHeadTensors = {
+    policyDense1Weight: get(DEFAULT_POLICY_HEAD_TENSORS.dense1Weight),
+    policyDense1Bias: get(DEFAULT_POLICY_HEAD_TENSORS.dense1Bias),
+    policyQWeight: get(DEFAULT_POLICY_HEAD_TENSORS.qWeight),
+    policyQBias: get(DEFAULT_POLICY_HEAD_TENSORS.qBias),
+    policyKWeight: get(DEFAULT_POLICY_HEAD_TENSORS.kWeight),
+    policyKBias: get(DEFAULT_POLICY_HEAD_TENSORS.kBias),
+    policyScale: get(DEFAULT_POLICY_HEAD_TENSORS.scale),
+    policyPromotionWeight: get(DEFAULT_POLICY_HEAD_TENSORS.promotionWeight),
+    policyMappingTable: get(DEFAULT_POLICY_HEAD_TENSORS.mappingTable),
+    valueEmbedWeight: get(DEFAULT_VALUE_HEAD_TENSORS.embedWeight),
+    valueEmbedBias: get(DEFAULT_VALUE_HEAD_TENSORS.embedBias),
+    valueDense1Weight: get(DEFAULT_VALUE_HEAD_TENSORS.dense1Weight),
+    valueDense1Bias: get(DEFAULT_VALUE_HEAD_TENSORS.dense1Bias),
+    valueDense2Weight: get(DEFAULT_VALUE_HEAD_TENSORS.dense2Weight),
+    valueDense2Bias: get(DEFAULT_VALUE_HEAD_TENSORS.dense2Bias),
+  };
+  assertTensorShapeAndBytes(tensors.policyDense1Weight, [DEFAULT_N, DEFAULT_N], 2, 'policyDense1Weight');
+  assertTensorShapeAndBytes(tensors.policyDense1Bias, [DEFAULT_N], 2, 'policyDense1Bias');
+  assertTensorShapeAndBytes(tensors.policyQWeight, [DEFAULT_N, DEFAULT_N], 2, 'policyQWeight');
+  assertTensorShapeAndBytes(tensors.policyQBias, [DEFAULT_N], 2, 'policyQBias');
+  assertTensorShapeAndBytes(tensors.policyKWeight, [DEFAULT_N, DEFAULT_N], 2, 'policyKWeight');
+  assertTensorShapeAndBytes(tensors.policyKBias, [DEFAULT_N], 2, 'policyKBias');
+  assertTensorShapeAndBytes(tensors.policyScale, [1], 2, 'policyScale');
+  assertTensorShapeAndBytes(tensors.policyPromotionWeight, [DEFAULT_N, 4], 2, 'policyPromotionWeight');
+  assertTensorShapeAndBytes(tensors.policyMappingTable, [DEFAULT_POLICY_MAPPED_OUTPUTS], 4, 'policyMappingTable');
+  assertTensorShapeAndBytes(tensors.valueEmbedWeight, [DEFAULT_N, DEFAULT_VALUE_EMBED], 2, 'valueEmbedWeight');
+  assertTensorShapeAndBytes(tensors.valueEmbedBias, [DEFAULT_VALUE_EMBED], 2, 'valueEmbedBias');
+  assertTensorShapeAndBytes(tensors.valueDense1Weight, [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN], 2, 'valueDense1Weight');
+  assertTensorShapeAndBytes(tensors.valueDense1Bias, [DEFAULT_VALUE_HIDDEN], 2, 'valueDense1Bias');
+  assertTensorShapeAndBytes(tensors.valueDense2Weight, [DEFAULT_VALUE_HIDDEN, 3], 2, 'valueDense2Weight');
+  assertTensorShapeAndBytes(tensors.valueDense2Bias, [3], 2, 'valueDense2Bias');
+  return tensors;
+}
+
+function readI32Array(bytes: Uint8Array, elements: number): Int32Array<ArrayBufferLike> {
+  const out = new Int32Array(elements);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let i = 0; i < elements; i++) out[i] = view.getInt32(i * 4, true);
+  return out;
+}
+
+function cpuMish(input: Float32Array<ArrayBufferLike>): Float32Array<ArrayBufferLike> {
+  const output = new Float32Array(input.length);
+  for (let i = 0; i < input.length; i++) {
+    const x = input[i];
+    output[i] = x * Math.tanh(Math.log1p(Math.exp(x)));
+  }
+  return output;
+}
+
+function cpuSoftmaxVector(input: Float32Array<ArrayBufferLike>): Float32Array<ArrayBufferLike> {
+  const output = new Float32Array(input.length);
+  let max = -Infinity;
+  for (const value of input) max = Math.max(max, value);
+  let denom = 0;
+  for (let i = 0; i < input.length; i++) {
+    const value = Math.exp(input[i] - max);
+    output[i] = value;
+    denom += value;
+  }
+  for (let i = 0; i < output.length; i++) output[i] /= denom;
+  return output;
+}
+
+function cpuPolicyHead(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors): Float32Array<ArrayBufferLike> {
+  const dense = cpuMish(cpuProjectTokens(input, tensors.policyDense1Weight.bytes, tensors.policyDense1Bias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N));
+  const q = cpuProjectTokens(dense, tensors.policyQWeight.bytes, tensors.policyQBias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N);
+  const k = cpuProjectTokens(dense, tensors.policyKWeight.bytes, tensors.policyKBias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N);
+  const scaleValue = readF16At(tensors.policyScale.bytes, 0);
+  const scale = new Float32Array(DEFAULT_TOKENS * DEFAULT_TOKENS);
+  for (let row = 0; row < DEFAULT_TOKENS; row++) {
+    for (let col = 0; col < DEFAULT_TOKENS; col++) {
+      let sum = 0;
+      for (let channel = 0; channel < DEFAULT_N; channel++) sum += q[row * DEFAULT_N + channel] * k[col * DEFAULT_N + channel];
+      scale[row * DEFAULT_TOKENS + col] = sum * scaleValue;
+    }
+  }
+  return scale;
+}
+
+function cpuValueHead(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors): Float32Array<ArrayBufferLike> {
+  const embed = cpuMish(cpuProjectTokens(input, tensors.valueEmbedWeight.bytes, tensors.valueEmbedBias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_VALUE_EMBED));
+  const dense1 = cpuMish(cpuMatmulAddVector(embed, tensors.valueDense1Weight.bytes, tensors.valueDense1Bias.bytes, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN));
+  const logits = cpuMatmulAddVector(dense1, tensors.valueDense2Weight.bytes, tensors.valueDense2Bias.bytes, DEFAULT_VALUE_HIDDEN, 3);
+  return cpuSoftmaxVector(logits);
+}
+
+function buildPolicyValueHeadReference(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors): { policy: Float32Array<ArrayBufferLike>; wdl: Float32Array<ArrayBufferLike> } {
+  return { policy: cpuPolicyHead(input, tensors), wdl: cpuValueHead(input, tensors) };
+}
+
+export function createTinyPolicyValueHeadsOnnxForTest(tensors: Lc0WebPolicyValueHeadTensors): Uint8Array {
+  const writer = new ProtoWriter();
+  writer.int64(1, 8);
+  writer.string(2, 'lc0web');
+  writer.message(7, (graph) => {
+    graph.bytes(1, onnxNode('MatMul', ['input', 'policyDense1Weight'], ['policyDense1'], 'policy_dense1_matmul'));
+    graph.bytes(1, onnxNode('Add', ['policyDense1', 'policyDense1Bias'], ['policyDense1Biased'], 'policy_dense1_bias'));
+    graph.bytes(1, onnxNode('Softplus', ['policyDense1Biased'], ['policyDense1Softplus'], 'policy_dense1_softplus'));
+    graph.bytes(1, onnxNode('Tanh', ['policyDense1Softplus'], ['policyDense1Tanh'], 'policy_dense1_tanh'));
+    graph.bytes(1, onnxNode('Mul', ['policyDense1Biased', 'policyDense1Tanh'], ['policyDense1Mish'], 'policy_dense1_mish'));
+    graph.bytes(1, onnxNode('MatMul', ['policyDense1Mish', 'policyQWeight'], ['policyQMatmul'], 'policy_q_matmul'));
+    graph.bytes(1, onnxNode('Add', ['policyQMatmul', 'policyQBias'], ['policyQ'], 'policy_q_bias'));
+    graph.bytes(1, onnxNode('MatMul', ['policyDense1Mish', 'policyKWeight'], ['policyKMatmul'], 'policy_k_matmul'));
+    graph.bytes(1, onnxNode('Add', ['policyKMatmul', 'policyKBias'], ['policyK'], 'policy_k_bias'));
+    graph.bytes(1, onnxNode('Transpose', ['policyK'], ['policyKt'], 'policy_k_transpose', [onnxIntsAttribute('perm', [1, 0])]));
+    graph.bytes(1, onnxNode('MatMul', ['policyQ', 'policyKt'], ['policyMatmul'], 'policy_matmul'));
+    graph.bytes(1, onnxNode('Mul', ['policyMatmul', 'policyScale'], ['policy'], 'policy_scale')); 
+
+    graph.bytes(1, onnxNode('MatMul', ['input', 'valueEmbedWeight'], ['valueEmbed'], 'value_embed_matmul'));
+    graph.bytes(1, onnxNode('Add', ['valueEmbed', 'valueEmbedBias'], ['valueEmbedBiased'], 'value_embed_bias'));
+    graph.bytes(1, onnxNode('Softplus', ['valueEmbedBiased'], ['valueEmbedSoftplus'], 'value_embed_softplus'));
+    graph.bytes(1, onnxNode('Tanh', ['valueEmbedSoftplus'], ['valueEmbedTanh'], 'value_embed_tanh'));
+    graph.bytes(1, onnxNode('Mul', ['valueEmbedBiased', 'valueEmbedTanh'], ['valueEmbedMish'], 'value_embed_mish'));
+    graph.bytes(1, onnxNode('Reshape', ['valueEmbedMish', 'valueShape'], ['valueFlat'], 'value_reshape'));
+    graph.bytes(1, onnxNode('MatMul', ['valueFlat', 'valueDense1Weight'], ['valueDense1'], 'value_dense1_matmul'));
+    graph.bytes(1, onnxNode('Add', ['valueDense1', 'valueDense1Bias'], ['valueDense1Biased'], 'value_dense1_bias'));
+    graph.bytes(1, onnxNode('Softplus', ['valueDense1Biased'], ['valueDense1Softplus'], 'value_dense1_softplus'));
+    graph.bytes(1, onnxNode('Tanh', ['valueDense1Softplus'], ['valueDense1Tanh'], 'value_dense1_tanh'));
+    graph.bytes(1, onnxNode('Mul', ['valueDense1Biased', 'valueDense1Tanh'], ['valueDense1Mish'], 'value_dense1_mish'));
+    graph.bytes(1, onnxNode('MatMul', ['valueDense1Mish', 'valueDense2Weight'], ['valueDense2'], 'value_dense2_matmul'));
+    graph.bytes(1, onnxNode('Add', ['valueDense2', 'valueDense2Bias'], ['valueLogits'], 'value_dense2_bias'));
+    graph.bytes(1, onnxNode('Softmax', ['valueLogits'], ['wdl'], 'output_wdl', [onnxIntAttribute('axis', 1)]));
+
+    graph.string(2, 'lc0web_policy_value_heads');
+    graph.bytes(5, onnxTensor('policyDense1Weight', [DEFAULT_N, DEFAULT_N], f16BytesToF32Array(tensors.policyDense1Weight.bytes, DEFAULT_N * DEFAULT_N)));
+    graph.bytes(5, onnxTensor('policyDense1Bias', [DEFAULT_N], f16BytesToF32Array(tensors.policyDense1Bias.bytes, DEFAULT_N)));
+    graph.bytes(5, onnxTensor('policyQWeight', [DEFAULT_N, DEFAULT_N], f16BytesToF32Array(tensors.policyQWeight.bytes, DEFAULT_N * DEFAULT_N)));
+    graph.bytes(5, onnxTensor('policyQBias', [DEFAULT_N], f16BytesToF32Array(tensors.policyQBias.bytes, DEFAULT_N)));
+    graph.bytes(5, onnxTensor('policyKWeight', [DEFAULT_N, DEFAULT_N], f16BytesToF32Array(tensors.policyKWeight.bytes, DEFAULT_N * DEFAULT_N)));
+    graph.bytes(5, onnxTensor('policyKBias', [DEFAULT_N], f16BytesToF32Array(tensors.policyKBias.bytes, DEFAULT_N)));
+    graph.bytes(5, onnxTensor('policyScale', [1], f16BytesToF32Array(tensors.policyScale.bytes, 1)));
+    graph.bytes(5, onnxInt64Tensor('valueShape', [2], [1, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED]));
+    graph.bytes(5, onnxTensor('valueEmbedWeight', [DEFAULT_N, DEFAULT_VALUE_EMBED], f16BytesToF32Array(tensors.valueEmbedWeight.bytes, DEFAULT_N * DEFAULT_VALUE_EMBED)));
+    graph.bytes(5, onnxTensor('valueEmbedBias', [DEFAULT_VALUE_EMBED], f16BytesToF32Array(tensors.valueEmbedBias.bytes, DEFAULT_VALUE_EMBED)));
+    graph.bytes(5, onnxTensor('valueDense1Weight', [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN], f16BytesToF32Array(tensors.valueDense1Weight.bytes, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * DEFAULT_VALUE_HIDDEN)));
+    graph.bytes(5, onnxTensor('valueDense1Bias', [DEFAULT_VALUE_HIDDEN], f16BytesToF32Array(tensors.valueDense1Bias.bytes, DEFAULT_VALUE_HIDDEN)));
+    graph.bytes(5, onnxTensor('valueDense2Weight', [DEFAULT_VALUE_HIDDEN, 3], f16BytesToF32Array(tensors.valueDense2Weight.bytes, DEFAULT_VALUE_HIDDEN * 3)));
+    graph.bytes(5, onnxTensor('valueDense2Bias', [3], f16BytesToF32Array(tensors.valueDense2Bias.bytes, 3)));
+    graph.bytes(11, onnxValueInfo('input', 1, [DEFAULT_TOKENS, DEFAULT_N]));
+    graph.bytes(12, onnxValueInfo('policy', 1, [DEFAULT_TOKENS, DEFAULT_TOKENS]));
+    graph.bytes(12, onnxValueInfo('wdl', 1, [1, 3]));
+  });
+  writer.message(8, (opset) => opset.int64(2, 17));
+  return writer.finish();
+}
+
+async function runPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors): Promise<{
+  modelBuildMs: number;
+  sessionCreateMs: number;
+  runMs: number;
+  policyMaxAbsError: number;
+  policyRmsError: number;
+  wdlMaxAbsError: number;
+  wdlRmsError: number;
+  policySample: number[];
+  wdl: number[];
+  mode: 'ort-policy-value';
+}> {
+  const reference = buildPolicyValueHeadReference(input, tensors);
+  const modelBuildStarted = nowMs();
+  const tinyOnnx = createTinyPolicyValueHeadsOnnxForTest(tensors);
+  const modelBuildMs = nowMs() - modelBuildStarted;
+  const sessionStarted = nowMs();
+  const session = await ort.createOrtSession(tinyOnnx);
+  const sessionCreateMs = nowMs() - sessionStarted;
+  const runStarted = nowMs();
+  const outputs = await session.run({ input: new ort.Tensor('float32', input, [DEFAULT_TOKENS, DEFAULT_N]) });
+  const runMs = nowMs() - runStarted;
+  const policy = outputs.policy.data as Float32Array<ArrayBufferLike>;
+  const wdl = outputs.wdl.data as Float32Array<ArrayBufferLike>;
+  const policyError = computeErrorStats(policy, reference.policy, DEFAULT_POLICY_OUTPUTS);
+  const wdlError = computeErrorStats(wdl, reference.wdl, 3);
+  // The policy logits are a diagnostic CPU-vs-ORT comparison for the ORT head
+  // handoff path. They are not used as the WGSL stack correctness gate because
+  // this CPU helper accumulates large policy matmuls in JS number precision;
+  // the f32 ORT head output itself is the baseline consumed by the hybrid path.
+  assertErrorInTolerance(wdlError.maxAbsError);
+  return {
+    mode: 'ort-policy-value',
+    modelBuildMs,
+    sessionCreateMs,
+    runMs,
+    policyMaxAbsError: policyError.maxAbsError,
+    policyRmsError: policyError.rmsError,
+    wdlMaxAbsError: wdlError.maxAbsError,
+    wdlRmsError: wdlError.rmsError,
+    policySample: Array.from(policy.slice(0, 8)),
+    wdl: Array.from(wdl),
+  };
 }
 
 export async function runLc0WebEncoder0BlockOrtBenchmark(options: Lc0WebEncoder0BlockBenchmarkOptions): Promise<Lc0WebEncoder0BlockOrtBenchmarkResult> {
@@ -3831,13 +4133,18 @@ export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStack
   const warmup = clampInteger(options.warmup, 0, 0, 10);
   const layers = clampInteger(options.layers, 2, 1, 32);
   const compareOrt = options.compareOrt ?? true;
+  const compareHeads = options.compareHeads ?? false;
   const prefixes = Array.from({ length: layers }, (_, layer) => `/encoder${layer}`);
   const layerTensorNames = prefixes.map((prefix) => lc0WebEncoderBlockTensorNames(prefix));
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
-    tensorNames: Array.from(new Set(layerTensorNames.flatMap((names) => encoderBlockTensorNameList(names)))),
+    tensorNames: Array.from(new Set([
+      ...layerTensorNames.flatMap((names) => encoderBlockTensorNameList(names)),
+      ...(compareHeads ? policyValueHeadTensorNameList() : []),
+    ])),
   });
   const tensorsByLayer = layerTensorNames.map((names) => loadEncoder0FfnInputs(pack, names));
+  const headTensors = compareHeads ? loadPolicyValueHeadTensors(pack) : undefined;
   const { device, adapterInfo } = await requestDevice();
   const globals = gpuGlobals();
   const usage = globals.GPUBufferUsage!;
@@ -3961,6 +4268,7 @@ export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStack
     const maxBlock = blocks.reduce((max, block) => Math.max(max, block.maxAbsError), 0);
     const rmsBlock = Math.sqrt(blocks.reduce((sum, block) => sum + block.rmsError * block.rmsError, 0) / blocks.length);
     const ortMax = compareOrt ? blocks.reduce((max, block) => Math.max(max, block.ortMaxAbsError ?? 0), 0) : undefined;
+    const policyValueHeads = headTensors ? await runPolicyValueHeadsOrt(lastGpuOutput, headTensors) : undefined;
     return {
       status: 'ENCODER_STACK_BENCH_DONE',
       packUrl: pack.manifestUrl,
@@ -3976,7 +4284,10 @@ export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStack
       layers,
       prefixes,
       compareOrt,
-      ortCoveredStages: 'attention output projection/ln1 + FFN/ln2 f32 ONNX subgraph per block; QKV/softmax/attention value are checked against the CPU f32 reference',
+      compareHeads,
+      ortCoveredStages: compareHeads
+        ? 'attention output projection/ln1 + FFN/ln2 f32 ONNX subgraph per block; final policy/value heads run through a tiny f32 ONNX subgraph from the WGSL stack output; QKV/softmax/attention value are checked against the CPU f32 reference'
+        : 'attention output projection/ln1 + FFN/ln2 f32 ONNX subgraph per block; QKV/softmax/attention value are checked against the CPU f32 reference',
       packLoadMs: pack.elapsedMs,
       setupAndDispatchMs: nowMs() - setupStarted,
       dispatchSyncedMs,
@@ -3985,6 +4296,7 @@ export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStack
       rmsError: rmsBlock,
       ortMaxAbsError: ortMax,
       outputSample: Array.from(lastGpuOutput.slice(0, 8)),
+      policyValueHeads,
       blocks,
     };
   } finally {

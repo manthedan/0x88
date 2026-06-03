@@ -374,6 +374,19 @@ type Encoder0BlockOrtBenchmarkResult = {
   outputSample: number[];
 };
 
+type EncoderStackHeadsResult = {
+  mode: 'ort-policy-value';
+  modelBuildMs: number;
+  sessionCreateMs: number;
+  runMs: number;
+  policyMaxAbsError: number;
+  policyRmsError: number;
+  wdlMaxAbsError: number;
+  wdlRmsError: number;
+  policySample: number[];
+  wdl: number[];
+};
+
 type EncoderStackBenchmarkResult = {
   status: 'ENCODER_STACK_BENCH_DONE';
   packUrl: string;
@@ -389,6 +402,7 @@ type EncoderStackBenchmarkResult = {
   layers: number;
   prefixes: string[];
   compareOrt: boolean;
+  compareHeads: boolean;
   ortCoveredStages: string;
   packLoadMs: number;
   setupAndDispatchMs: number;
@@ -398,6 +412,7 @@ type EncoderStackBenchmarkResult = {
   rmsError: number;
   ortMaxAbsError?: number;
   outputSample: number[];
+  policyValueHeads?: EncoderStackHeadsResult;
   blocks: Array<{
     layer: number;
     prefix: string;
@@ -547,7 +562,7 @@ const ATTENTION_OUTPUT_BENCH_REQUESTED = params.get('attentionOutputBench') === 
 const ATTENTION_OUTPUT_ORT_BENCH_REQUESTED = params.get('attentionOutputOrtBench') === '1' || params.get('outputOrtBench') === '1' || params.get('attnOutOrtBench') === '1';
 const ENCODER0_BLOCK_BENCH_REQUESTED = params.get('encoder0BlockBench') === '1' || params.get('fullEncoder0Bench') === '1';
 const ENCODER0_BLOCK_ORT_BENCH_REQUESTED = params.get('encoder0BlockOrtBench') === '1' || params.get('fullEncoder0OrtBench') === '1';
-const ENCODER_STACK_BENCH_REQUESTED = params.get('encoderStackBench') === '1' || params.get('encoderBlocksBench') === '1';
+const ENCODER_STACK_BENCH_REQUESTED = params.get('encoderStackBench') === '1' || params.get('encoderBlocksBench') === '1' || params.get('encoderStackHeadsBench') === '1';
 const ENCODER0_FFN_BENCH_REQUESTED = params.get('encoder0FfnBench') === '1' || params.get('ffnBench') === '1';
 const ENCODER0_FFN_ORT_BENCH_REQUESTED = params.get('encoder0FfnOrtBench') === '1' || params.get('ffnOrtBench') === '1';
 const ATTENTION_SCORE_BENCH_REQUESTED = params.get('attentionScoreBench') === '1' || params.get('scoreBench') === '1';
@@ -1217,8 +1232,9 @@ async function runEncoderStackBenchmark(): Promise<void> {
   const layers = Math.min(32, Math.max(1, Math.floor(Number.isFinite(rawLayers) ? rawLayers : 2)));
   const warmup = Math.min(10, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 0)));
   const compareOrt = params.get('encoderStackOrt') !== '0';
+  const compareHeads = params.get('encoderStackHeads') === '1' || params.get('encoderStackHeadsBench') === '1';
   el('benchResult').textContent = 'ENCODER_STACK_BENCH_RUNNING';
-  setBusy(true, `Running reusable WGSL encoder-block stack over ${layers} layer(s), with block-by-block ${compareOrt ? 'f32 ONNX/ORT ' : ''}parity…`);
+  setBusy(true, `Running reusable WGSL encoder-block stack over ${layers} layer(s), with block-by-block ${compareOrt ? 'f32 ONNX/ORT ' : ''}parity${compareHeads ? ' and ORT policy/value heads' : ''}…`);
   try {
     const response = await postWorkerRequest<{ type: 'encoderStackBenchmarkResult'; result: EncoderStackBenchmarkResult }>({
       type: 'encoderStackBenchmark',
@@ -1228,6 +1244,7 @@ async function runEncoderStackBenchmark(): Promise<void> {
       warmup,
       verifyShards: params.get('packVerify') !== '0',
       compareOrt,
+      compareHeads,
     });
     const rounded = {
       ...response.result,
@@ -1240,6 +1257,18 @@ async function runEncoderStackBenchmark(): Promise<void> {
       rmsError: Number(response.result.rmsError.toExponential(6)),
       ortMaxAbsError: response.result.ortMaxAbsError === undefined ? undefined : Number(response.result.ortMaxAbsError.toExponential(6)),
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(8))),
+      policyValueHeads: response.result.policyValueHeads ? {
+        ...response.result.policyValueHeads,
+        modelBuildMs: Number(response.result.policyValueHeads.modelBuildMs.toFixed(3)),
+        sessionCreateMs: Number(response.result.policyValueHeads.sessionCreateMs.toFixed(3)),
+        runMs: Number(response.result.policyValueHeads.runMs.toFixed(3)),
+        policyMaxAbsError: Number(response.result.policyValueHeads.policyMaxAbsError.toExponential(6)),
+        policyRmsError: Number(response.result.policyValueHeads.policyRmsError.toExponential(6)),
+        wdlMaxAbsError: Number(response.result.policyValueHeads.wdlMaxAbsError.toExponential(6)),
+        wdlRmsError: Number(response.result.policyValueHeads.wdlRmsError.toExponential(6)),
+        policySample: response.result.policyValueHeads.policySample.map((value) => Number(value.toFixed(8))),
+        wdl: response.result.policyValueHeads.wdl.map((value) => Number(value.toFixed(8))),
+      } : undefined,
       blocks: response.result.blocks.map((block) => ({
         ...block,
         dispatchSyncedMs: Number(block.dispatchSyncedMs.toFixed(4)),
@@ -1254,7 +1283,8 @@ async function runEncoderStackBenchmark(): Promise<void> {
     };
     el('benchResult').textContent = JSON.stringify(rounded);
     const ortText = rounded.ortMaxAbsError === undefined ? '' : ` · ORT max |err| ${rounded.ortMaxAbsError.toExponential(2)}`;
-    el('message').textContent = `ENCODER_STACK_BENCH_DONE ${rounded.layers} reusable WGSL block(s) · avg block ${rounded.avgBlockDispatchSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}${ortText}`;
+    const headsText = rounded.policyValueHeads ? ` · heads policy |err| ${rounded.policyValueHeads.policyMaxAbsError.toExponential(2)} · WDL |err| ${rounded.policyValueHeads.wdlMaxAbsError.toExponential(2)}` : '';
+    el('message').textContent = `ENCODER_STACK_BENCH_DONE ${rounded.layers} reusable WGSL block(s) · avg block ${rounded.avgBlockDispatchSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}${ortText}${headsText}`;
   } catch (error) {
     el('benchResult').textContent = `ENCODER_STACK_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Encoder stack benchmark failed: ${(error as Error).message}`;

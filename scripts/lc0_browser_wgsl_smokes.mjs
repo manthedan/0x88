@@ -75,6 +75,12 @@ const SMOKES = [
     default: false,
   },
   {
+    name: 'encoder-stack-heads-2-wasm',
+    query: 'encoderStackHeadsBench=1&encoderLayers=2&encoderStackWarmup=0&encoderStackOrt=1&encoderStackHeads=1&ep=wasm&packVerify=0',
+    doneText: 'ENCODER_STACK_BENCH_DONE',
+    default: false,
+  },
+  {
     name: 'kernel-bench-scalar',
     query: 'kernelBench=1&kernelBenchWarmup=1&kernelBenchIters=3&packVerify=0',
     doneText: 'KERNEL_BENCH_DONE',
@@ -103,7 +109,7 @@ const SMOKES = [
 
 function usage() {
   console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_smokes.mjs [options]\n\nRuns lc0-policy-only.html WebGPU smoke benchmarks through agent-browser.\n\nOptions:\n  --base-url URL        Use an existing dev server, e.g. http://127.0.0.1:5179\n  --port N             Port for the auto-started Vite dev server (default ${DEFAULT_PORT})\n  --host HOST          Host for the auto-started Vite dev server (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name (default: lc0-wgsl-smokes-PID)\n  --timeout MS         Per-smoke wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --max-error N        Max accepted maxAbsError across outputs (default ${DEFAULT_MAX_ERROR})\n  --only a,b,c         Comma-separated smoke names to run\n  --list               Print smoke names and URLs, then exit
-                       Heavy smokes such as encoder-stack-10-wasm are listed but excluded from the default run.\n  --no-server          Do not auto-start Vite; requires --base-url or an already-running default URL\n  -h, --help           Show this help\n`);
+                       Heavy smokes such as encoder-stack-10-wasm and encoder-stack-heads-2-wasm are listed but excluded from the default run.\n  --no-server          Do not auto-start Vite; requires --base-url or an already-running default URL\n  -h, --help           Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -236,6 +242,22 @@ function textFromGetResult(result) {
   return typeof result?.text === 'string' ? result.text : typeof result?.data?.text === 'string' ? result.data.text : '';
 }
 
+function waitForText(args, text, totalTimeoutMs) {
+  const deadline = Date.now() + totalTimeoutMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    const chunk = Math.min(25_000, Math.max(1_000, remaining));
+    try {
+      return runJsonCommand(args.agentBrowser, ['wait', '--text', text, '--timeout', String(chunk)], chunk + 5_000, args.session);
+    } catch (error) {
+      lastError = error;
+      if (!String(error?.message ?? error).includes('Wait timed out')) throw error;
+    }
+  }
+  throw lastError ?? new Error(`Timed out waiting for ${text}`);
+}
+
 function parseBenchResult(rawText, smoke) {
   let result;
   try {
@@ -252,7 +274,7 @@ function parseBenchResult(rawText, smoke) {
 async function runSmoke(args, baseUrl, smoke) {
   const url = smokeUrl(baseUrl, smoke);
   runJsonCommand(args.agentBrowser, ['open', url], args.timeoutMs, args.session);
-  runJsonCommand(args.agentBrowser, ['wait', '--text', smoke.doneText, '--timeout', String(args.timeoutMs)], args.timeoutMs + 5_000, args.session);
+  waitForText(args, smoke.doneText, args.timeoutMs);
   const bench = runJsonCommand(args.agentBrowser, ['get', 'text', '#benchResult'], args.timeoutMs, args.session);
   const result = parseBenchResult(textFromGetResult(bench), smoke);
   const error = maxAbsError(result);

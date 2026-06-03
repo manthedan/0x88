@@ -250,6 +250,7 @@ type EncoderStackBenchmarkMessage = {
   warmup?: number;
   verifyShards?: boolean;
   compareOrt?: boolean;
+  compareHeads?: boolean;
 };
 
 type OrtBenchmarkMessage = {
@@ -577,6 +578,7 @@ async function handleEncoderStackBenchmark(message: EncoderStackBenchmarkMessage
     warmup: message.warmup,
     verifyShards: message.verifyShards,
     compareOrt: message.compareOrt,
+    compareHeads: message.compareHeads,
   });
   post({ type: 'encoderStackBenchmarkResult', id: message.id, result });
 }
