@@ -6,10 +6,12 @@ import {
   runLc0WebMatmulAddKernelBenchmark,
   runLc0WebMatmulAddKernelProbe,
   runLc0WebMatmulAddOrtBenchmark,
+  runLc0WebQkvProjectionBenchmark,
   runLc0WebQkvProjectionProbe,
   type Lc0WebMatmulAddKernelBenchmarkResult,
   type Lc0WebMatmulAddKernelProbeResult,
   type Lc0WebMatmulAddOrtBenchmarkResult,
+  type Lc0WebQkvProjectionBenchmarkResult,
   type Lc0WebQkvProjectionProbeResult,
 } from './wgslMatmulAddProbe.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
@@ -85,6 +87,15 @@ type QkvProbeMessage = {
   verifyShards?: boolean;
 };
 
+type QkvBenchmarkMessage = {
+  type: 'qkvBenchmark';
+  id: number;
+  packUrl: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+};
+
 type OrtBenchmarkMessage = {
   type: 'ortBenchmark';
   id: number;
@@ -104,7 +115,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | QkvProbeMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | QkvProbeMessage | QkvBenchmarkMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -136,6 +147,7 @@ type WorkerResponse =
   | { type: 'kernelBenchmarkResult'; id: number; result: Lc0WebMatmulAddKernelBenchmarkResult }
   | { type: 'ortBenchmarkResult'; id: number; result: Lc0WebMatmulAddOrtBenchmarkResult }
   | { type: 'qkvProbeResult'; id: number; result: Lc0WebQkvProjectionProbeResult }
+  | { type: 'qkvBenchmarkResult'; id: number; result: Lc0WebQkvProjectionBenchmarkResult }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'error'; id: number; error: string };
 
@@ -247,6 +259,16 @@ async function handleQkvProbe(message: QkvProbeMessage): Promise<void> {
   post({ type: 'qkvProbeResult', id: message.id, result });
 }
 
+async function handleQkvBenchmark(message: QkvBenchmarkMessage): Promise<void> {
+  const result = await runLc0WebQkvProjectionBenchmark({
+    packUrl: message.packUrl,
+    iterations: message.iterations,
+    warmup: message.warmup,
+    verifyShards: message.verifyShards,
+  });
+  post({ type: 'qkvBenchmarkResult', id: message.id, result });
+}
+
 async function handleOrtBenchmark(message: OrtBenchmarkMessage): Promise<void> {
   setRequestedOrtExecutionProviderForCurrentThread(message.ep);
   const result = await runLc0WebMatmulAddOrtBenchmark({
@@ -330,6 +352,7 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       else if (message.type === 'kernelBenchmark') await handleKernelBenchmark(message);
       else if (message.type === 'ortBenchmark') await handleOrtBenchmark(message);
       else if (message.type === 'qkvProbe') await handleQkvProbe(message);
+      else if (message.type === 'qkvBenchmark') await handleQkvBenchmark(message);
       else if (message.type === 'evaluate') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleEvaluate(message);

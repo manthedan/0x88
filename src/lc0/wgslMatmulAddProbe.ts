@@ -88,6 +88,11 @@ export interface Lc0WebQkvProjectionProbeOptions {
   verifyShards?: boolean;
 }
 
+export interface Lc0WebQkvProjectionBenchmarkOptions extends Lc0WebQkvProjectionProbeOptions {
+  /** Optional extra dispatches submitted before timing, with no readback. */
+  warmup?: number;
+}
+
 export interface Lc0WebMatmulAddOrtBenchmarkResult {
   status: 'ORT_BENCH_DONE';
   packUrl: string;
@@ -125,6 +130,26 @@ export interface Lc0WebQkvProjectionProbeResult {
   minMs: number;
   maxMs: number;
   firstMs: number;
+  maxAbsError: { q: number; k: number; v: number };
+  rmsError: { q: number; k: number; v: number };
+  outputSample: { q: number[]; k: number[]; v: number[] };
+}
+
+export interface Lc0WebQkvProjectionBenchmarkResult {
+  status: 'QKV_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  k: number;
+  n: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  uploadSetupMs: number;
+  dispatchLoopMs: number;
+  dispatchLoopAvgMs: number;
+  readbackSyncedMs: number;
+  endToEndMs: number;
   maxAbsError: { q: number; k: number; v: number };
   rmsError: { q: number; k: number; v: number };
   outputSample: { q: number[]; k: number[]; v: number[] };
@@ -872,20 +897,30 @@ function createQkvPipeline(device: DeviceLike, buffers: {
   return { pipeline, bindGroup };
 }
 
-async function runQkvOnce(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, outputBuffer: BufferLike, readbackBuffer: BufferLike): Promise<{ q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike> }> {
-  const globals = gpuGlobals();
+function encodeQkvDispatches(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, iterations: number): unknown {
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bindGroup);
-  pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 64));
+  for (let i = 0; i < iterations; i++) pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 64));
   pass.end();
+  return encoder.finish();
+}
+
+async function readQkvOutputOnce(device: DeviceLike, outputBuffer: BufferLike, readbackBuffer: BufferLike): Promise<{ q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike> }> {
+  const globals = gpuGlobals();
+  const encoder = device.createCommandEncoder();
   encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, DEFAULT_N * 3 * 4);
   device.queue.submit([encoder.finish()]);
   await readbackBuffer.mapAsync(globals.GPUMapMode!.READ);
   const all = new Float32Array(readbackBuffer.getMappedRange().slice(0));
   readbackBuffer.unmap();
   return { q: all.slice(0, DEFAULT_N), k: all.slice(DEFAULT_N, DEFAULT_N * 2), v: all.slice(DEFAULT_N * 2, DEFAULT_N * 3) };
+}
+
+async function runQkvOnce(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, outputBuffer: BufferLike, readbackBuffer: BufferLike): Promise<{ q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike> }> {
+  device.queue.submit([encodeQkvDispatches(device, pipeline, bindGroup, 1)]);
+  return readQkvOutputOnce(device, outputBuffer, readbackBuffer);
 }
 
 export async function runLc0WebQkvProjectionProbe(options: Lc0WebQkvProjectionProbeOptions): Promise<Lc0WebQkvProjectionProbeResult> {
@@ -952,6 +987,88 @@ export async function runLc0WebQkvProjectionProbe(options: Lc0WebQkvProjectionPr
       minMs: Math.min(...times),
       maxMs: Math.max(...times),
       firstMs: times[0],
+      maxAbsError: { q: qErr.maxAbsError, k: kErr.maxAbsError, v: vErr.maxAbsError },
+      rmsError: { q: qErr.rmsError, k: kErr.rmsError, v: vErr.rmsError },
+      outputSample: { q: Array.from(outputs.q.slice(0, 8)), k: Array.from(outputs.k.slice(0, 8)), v: Array.from(outputs.v.slice(0, 8)) },
+    };
+  } finally {
+    for (const buffer of liveBuffers) buffer.destroy?.();
+  }
+}
+
+
+export async function runLc0WebQkvProjectionBenchmark(options: Lc0WebQkvProjectionBenchmarkOptions): Promise<Lc0WebQkvProjectionBenchmarkResult> {
+  const totalStarted = nowMs();
+  const warmup = clampInteger(options.warmup, 10, 0, 1000);
+  const iterations = clampInteger(options.iterations, 1000, 1, 100_000);
+  const { device, adapterInfo } = await requestDevice();
+  const tensorNames = Object.values(DEFAULT_QKV_TENSORS);
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames,
+  });
+  const tensors = Object.fromEntries(Object.entries(DEFAULT_QKV_TENSORS).map(([key, name]) => [key, pack.tensors.get(name)])) as Record<keyof typeof DEFAULT_QKV_TENSORS, Lc0WebTensorView | undefined>;
+  for (const [key, tensor] of Object.entries(tensors)) {
+    if (!tensor) throw new Error(`lc0web QKV benchmark tensor missing: ${key}`);
+    const isBias = key.endsWith('Bias');
+    assertTensorShapeAndBytes(tensor, isBias ? [DEFAULT_N] : [DEFAULT_K, DEFAULT_N], 2, key);
+    if (tensor.info.dtype !== 'f16') throw new Error(`lc0web QKV benchmark expects f16 tensor ${tensor.info.name}, got ${tensor.info.dtype}`);
+  }
+
+  const globals = gpuGlobals();
+  const usage = globals.GPUBufferUsage!;
+  const input = makeInputVector(DEFAULT_K);
+  const cpuQ = cpuMatmulAdd(input, tensors.qWeight!.bytes, tensors.qBias!.bytes, DEFAULT_K, DEFAULT_N);
+  const cpuK = cpuMatmulAdd(input, tensors.kWeight!.bytes, tensors.kBias!.bytes, DEFAULT_K, DEFAULT_N);
+  const cpuV = cpuMatmulAdd(input, tensors.vWeight!.bytes, tensors.vBias!.bytes, DEFAULT_K, DEFAULT_N);
+  const liveBuffers: BufferLike[] = [];
+  try {
+    const setupStarted = nowMs();
+    const inputBuffer = createStorageBuffer(device, input, usage.STORAGE | usage.COPY_DST);
+    const qWeight = createStorageBuffer(device, tensors.qWeight!.bytes, usage.STORAGE | usage.COPY_DST);
+    const qBias = createStorageBuffer(device, tensors.qBias!.bytes, usage.STORAGE | usage.COPY_DST);
+    const kWeight = createStorageBuffer(device, tensors.kWeight!.bytes, usage.STORAGE | usage.COPY_DST);
+    const kBias = createStorageBuffer(device, tensors.kBias!.bytes, usage.STORAGE | usage.COPY_DST);
+    const vWeight = createStorageBuffer(device, tensors.vWeight!.bytes, usage.STORAGE | usage.COPY_DST);
+    const vBias = createStorageBuffer(device, tensors.vBias!.bytes, usage.STORAGE | usage.COPY_DST);
+    const outputBuffer = device.createBuffer({ size: DEFAULT_N * 3 * 4, usage: usage.STORAGE | usage.COPY_SRC });
+    const readbackBuffer = device.createBuffer({ size: DEFAULT_N * 3 * 4, usage: usage.MAP_READ | usage.COPY_DST });
+    liveBuffers.push(inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, outputBuffer, readbackBuffer);
+    const { pipeline, bindGroup } = createQkvPipeline(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, output: outputBuffer });
+    const uploadSetupMs = nowMs() - setupStarted;
+
+    if (warmup > 0) {
+      device.queue.submit([encodeQkvDispatches(device, pipeline, bindGroup, warmup)]);
+      await device.queue.onSubmittedWorkDone?.();
+    }
+
+    const dispatchStarted = nowMs();
+    device.queue.submit([encodeQkvDispatches(device, pipeline, bindGroup, iterations)]);
+    const dispatchLoopMs = nowMs() - dispatchStarted;
+
+    const readbackStarted = nowMs();
+    const outputs = await readQkvOutputOnce(device, outputBuffer, readbackBuffer);
+    const readbackSyncedMs = nowMs() - readbackStarted;
+    const qErr = computeErrorStats(outputs.q, cpuQ, DEFAULT_N);
+    const kErr = computeErrorStats(outputs.k, cpuK, DEFAULT_N);
+    const vErr = computeErrorStats(outputs.v, cpuV, DEFAULT_N);
+    assertErrorInTolerance(Math.max(qErr.maxAbsError, kErr.maxAbsError, vErr.maxAbsError));
+
+    return {
+      status: 'QKV_BENCH_DONE',
+      packUrl: pack.manifestUrl,
+      modelName: pack.manifest.model.name,
+      adapterInfo,
+      k: DEFAULT_K,
+      n: DEFAULT_N,
+      warmup,
+      iterations,
+      packLoadMs: pack.elapsedMs,
+      uploadSetupMs,
+      dispatchLoopMs,
+      dispatchLoopAvgMs: dispatchLoopMs / iterations,
+      readbackSyncedMs,
+      endToEndMs: nowMs() - totalStarted,
       maxAbsError: { q: qErr.maxAbsError, k: kErr.maxAbsError, v: vErr.maxAbsError },
       rmsError: { q: qErr.rmsError, k: kErr.rmsError, v: vErr.rmsError },
       outputSample: { q: Array.from(outputs.q.slice(0, 8)), k: Array.from(outputs.k.slice(0, 8)), v: Array.from(outputs.v.slice(0, 8)) },
