@@ -54,6 +54,11 @@ const SMOKES = [
     doneText: 'ENCODER0_BLOCK_BENCH_DONE',
   },
   {
+    name: 'encoder1-block',
+    query: 'encoder0BlockBench=1&encoder0BlockWarmup=1&encoder0BlockIters=1&encoderPrefix=%2Fencoder1&packVerify=0',
+    doneText: 'ENCODER0_BLOCK_BENCH_DONE',
+  },
+  {
     name: 'encoder0-block-ort-wasm',
     query: 'encoder0BlockOrtBench=1&encoder0BlockOrtWarmup=0&encoder0BlockOrtIters=1&ep=wasm&packVerify=0',
     doneText: 'ENCODER0_BLOCK_ORT_BENCH_DONE',

@@ -43,6 +43,9 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
   - `FFN_ORT_BENCH_DONE`, max absolute error about `1.91e-6`.
 - `npm run lc0:browser-wgsl-smokes -- --only encoder0-block-ort-wasm --timeout 25000`
   - `ENCODER0_BLOCK_ORT_BENCH_DONE`, max absolute error about `1.97e-6`.
+- `npm run lc0:browser-wgsl-smokes -- --only encoder1-block --timeout 25000`
+  - `ENCODER0_BLOCK_BENCH_DONE` using `encoderPrefix=/encoder1`, max absolute error about `5.72e-6`.
+  - This validates the prefix-generalized tensor plumbing against a later encoder layer's weights; it still uses the staged synthetic input/reference for that layer, not true layer-to-layer activation handoff.
 - `npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2`
   - Alternated fresh browser sessions in order `wgsl, ort, ort, wgsl`.
   - ORT reported `webgpu->webgpu` with WebGPU provider accepted in both ORT samples.
@@ -62,6 +65,7 @@ npm run lc0:browser-wgsl-smokes -- --no-server --only attention-value-ort-wasm -
 npm run lc0:browser-wgsl-smokes -- --only attention-output-ort-wasm --timeout 25000
 npm run lc0:browser-wgsl-smokes -- --only encoder0-ffn-ort-wasm --timeout 25000
 npm run lc0:browser-wgsl-smokes -- --only encoder0-block-ort-wasm --timeout 25000
+npm run lc0:browser-wgsl-smokes -- --only encoder1-block --timeout 25000
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --dry-run --samples 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 10 --timeout 25000 --wgsl-iters 3 --ort-iters 3
