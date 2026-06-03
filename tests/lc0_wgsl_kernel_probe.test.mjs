@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as ort from '../src/nn/ortRuntime.ts';
-import { createTinyMatmulAddOnnxForTest, f16BitsToF32 } from '../src/lc0/wgslMatmulAddProbe.ts';
+import { createTinyAttentionOutputOnnxForTest, createTinyMatmulAddOnnxForTest, f16BitsToF32 } from '../src/lc0/wgslMatmulAddProbe.ts';
 
 test('f16BitsToF32 decodes representative IEEE half values used by lc0web kernels', () => {
   assert.equal(f16BitsToF32(0x0000), 0);
@@ -35,4 +35,31 @@ test('tiny MatMul+Add ONNX bytes run through ORT WASM from Uint8Array', async ()
   assert.equal(output[0], 8.5);
   assert.equal(output[1], 7.25);
   assert.equal(output[2], 0);
+});
+
+test('tiny attention-output ONNX bytes run projection residual and layernorm through ORT WASM', async () => {
+  ort.setRequestedOrtExecutionProviderForCurrentThread('wasm');
+  const weight = new Float32Array(256 * 256);
+  const bias = new Float32Array(256);
+  const scale = new Float32Array(256).fill(1);
+  const lnBias = new Float32Array(256);
+  for (let i = 0; i < 256; i++) weight[i * 256 + i] = 1;
+  const model = createTinyAttentionOutputOnnxForTest(weight, bias, 1, scale, lnBias);
+  const session = await ort.createOrtSession(model);
+  const attention = new Float32Array(64 * 256);
+  const residual = new Float32Array(64 * 256);
+  attention[0] = 1;
+  attention[1] = -1;
+  const outputs = await session.run({
+    attention: new ort.Tensor('float32', attention, [64, 256]),
+    residual: new ort.Tensor('float32', residual, [64, 256]),
+  });
+  const output = outputs.output.data;
+  assert.ok(output instanceof Float32Array);
+  assert.equal(output.length, 64 * 256);
+  const expected = 1 / Math.sqrt(2 / 256 + 9.999999974752427e-7);
+  assert.ok(Math.abs(output[0] - expected) < 1e-5);
+  assert.ok(Math.abs(output[1] + expected) < 1e-5);
+  assert.equal(output[2], 0);
+  assert.equal(output[256], 0);
 });

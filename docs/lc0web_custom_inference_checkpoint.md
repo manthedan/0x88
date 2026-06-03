@@ -14,6 +14,7 @@ This checkpoint records the current custom-kernel path for the batch-8 f16 `lc0w
 - `?attentionValueOrtBench=1`: tiny ORT batched attention-value MatMul comparison.
 - `?attentionBlockBench=1`: QKV → QK(+smolgen) → softmax → value.
 - `?attentionOutputBench=1`: attention block plus output projection, residual, and ln1.
+- `?attentionOutputOrtBench=1`: tiny ORT comparison for attention-value output through output projection, alpha residual, and ln1.
 - `?encoder0FfnBench=1`: encoder0 FFN from ln1 through dense1/bias/sqrrelu/dense2/bias/alpha residual/ln2.
 - `?encoder0BlockBench=1`: full encoder0 attention+FFN block through ln2.
 
@@ -28,6 +29,8 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
   - `ENCODER0_BLOCK_BENCH_DONE`, max absolute error about `3.58e-6`.
 - `npm run lc0:browser-wgsl-smokes -- --no-server --only attention-value-ort-wasm --timeout 25000`
   - `ATTENTION_VALUE_ORT_BENCH_DONE`, max absolute error about `9.54e-7`.
+- `npm run lc0:browser-wgsl-smokes -- --only attention-output-ort-wasm --timeout 25000`
+  - `ATTENTION_OUTPUT_ORT_BENCH_DONE`, max absolute error about `1.67e-6`.
 
 Validation commands used during this checkpoint:
 
@@ -36,6 +39,7 @@ npm run typecheck
 TINY_LEELA_ORT_EP=wasm node --experimental-strip-types --test tests/lc0_wgsl_kernel_probe.test.mjs
 npm run lc0:browser-wgsl-smokes -- --no-server --only encoder0-ffn,encoder0-block --timeout 25000
 npm run lc0:browser-wgsl-smokes -- --no-server --only attention-value-ort-wasm --timeout 25000
+npm run lc0:browser-wgsl-smokes -- --only attention-output-ort-wasm --timeout 25000
 ```
 
 ## Current interpretation

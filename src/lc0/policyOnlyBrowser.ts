@@ -282,6 +282,30 @@ type AttentionOutputBenchmarkResult = {
   outputSample: number[];
 };
 
+type AttentionOutputOrtBenchmarkResult = {
+  status: 'ATTENTION_OUTPUT_ORT_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  tokens: number;
+  channels: number;
+  epsilon: number;
+  alpha: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  modelBuildMs: number;
+  sessionCreateMs: number;
+  avgMs: number;
+  minMs: number;
+  maxMs: number;
+  firstMs: number;
+  timesMs?: number[];
+  runsPerSecond: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+};
+
 type Encoder0BlockBenchmarkResult = {
   status: 'ENCODER0_BLOCK_BENCH_DONE';
   packUrl: string;
@@ -373,6 +397,7 @@ type WorkerResponse =
   | { type: 'attentionValueOrtBenchmarkResult'; id: number; result: AttentionValueOrtBenchmarkResult }
   | { type: 'attentionBlockBenchmarkResult'; id: number; result: AttentionBlockBenchmarkResult }
   | { type: 'attentionOutputBenchmarkResult'; id: number; result: AttentionOutputBenchmarkResult }
+  | { type: 'attentionOutputOrtBenchmarkResult'; id: number; result: AttentionOutputOrtBenchmarkResult }
   | { type: 'encoder0BlockBenchmarkResult'; id: number; result: Encoder0BlockBenchmarkResult }
   | { type: 'encoder0FfnBenchmarkResult'; id: number; result: Encoder0FfnBenchmarkResult }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
@@ -411,6 +436,7 @@ const ATTENTION_VALUE_BENCH_REQUESTED = params.get('attentionValueBench') === '1
 const ATTENTION_VALUE_ORT_BENCH_REQUESTED = params.get('attentionValueOrtBench') === '1' || params.get('valueOrtBench') === '1';
 const ATTENTION_BLOCK_BENCH_REQUESTED = params.get('attentionBlockBench') === '1' || params.get('attnBlockBench') === '1';
 const ATTENTION_OUTPUT_BENCH_REQUESTED = params.get('attentionOutputBench') === '1' || params.get('attentionNormBench') === '1' || params.get('attnOutBench') === '1';
+const ATTENTION_OUTPUT_ORT_BENCH_REQUESTED = params.get('attentionOutputOrtBench') === '1' || params.get('outputOrtBench') === '1' || params.get('attnOutOrtBench') === '1';
 const ENCODER0_BLOCK_BENCH_REQUESTED = params.get('encoder0BlockBench') === '1' || params.get('fullEncoder0Bench') === '1';
 const ENCODER0_FFN_BENCH_REQUESTED = params.get('encoder0FfnBench') === '1' || params.get('ffnBench') === '1';
 const ATTENTION_SCORE_BENCH_REQUESTED = params.get('attentionScoreBench') === '1' || params.get('scoreBench') === '1';
@@ -419,7 +445,7 @@ const QKV_BENCH_REQUESTED = params.get('qkvBench') === '1' || params.get('qkvBen
 const QKV_PROBE_REQUESTED = params.get('qkvProbe') === '1';
 const ORT_OP_BENCH_REQUESTED = params.get('ortOpBench') === '1' || params.get('ortBench') === '1';
 const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('kernelBenchmark') === '1' || params.get('wgslBench') === '1';
-const KERNEL_PROBE_REQUESTED = ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
+const KERNEL_PROBE_REQUESTED = ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_ORT_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
 const PACK_PROBE_REQUESTED = KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null;
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const WORKER_ONLY_MODEL = PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
@@ -928,6 +954,49 @@ async function runAttentionOutputBenchmark(): Promise<void> {
   } catch (error) {
     el('benchResult').textContent = `ATTENTION_OUTPUT_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Attention output benchmark failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runAttentionOutputOrtBenchmark(): Promise<void> {
+  if (!searchWorker) throw new Error('attention-output ORT benchmark requires LC0 worker');
+  const rawIters = Number(params.get('attentionOutputOrtIters') ?? params.get('outputOrtIters') ?? params.get('ortBenchIters') ?? '25');
+  const rawWarmup = Number(params.get('attentionOutputOrtWarmup') ?? params.get('outputOrtWarmup') ?? params.get('ortBenchWarmup') ?? '5');
+  const iterations = Math.min(1000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 25)));
+  const warmup = Math.min(100, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 5)));
+  el('benchResult').textContent = 'ATTENTION_OUTPUT_ORT_BENCH_RUNNING';
+  setBusy(true, `Benchmarking ORT tiny attention-output projection/residual/ln1: ${warmup} warmup + ${iterations} timed runs…`);
+  try {
+    const response = await postWorkerRequest<{ type: 'attentionOutputOrtBenchmarkResult'; result: AttentionOutputOrtBenchmarkResult }>({
+      type: 'attentionOutputOrtBenchmark',
+      packUrl: PACK_URL,
+      ep: requestedWorkerEp(),
+      iterations,
+      warmup,
+      verifyShards: params.get('packVerify') !== '0',
+    });
+    const rounded = {
+      ...response.result,
+      benchmarkReport: buildBenchmarkReport(response.result),
+      packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
+      modelBuildMs: Number(response.result.modelBuildMs.toFixed(3)),
+      sessionCreateMs: Number(response.result.sessionCreateMs.toFixed(3)),
+      avgMs: Number(response.result.avgMs.toFixed(4)),
+      minMs: Number(response.result.minMs.toFixed(4)),
+      maxMs: Number(response.result.maxMs.toFixed(4)),
+      firstMs: Number(response.result.firstMs.toFixed(4)),
+      runsPerSecond: Number(response.result.runsPerSecond.toFixed(3)),
+      maxAbsError: Number(response.result.maxAbsError.toExponential(6)),
+      rmsError: Number(response.result.rmsError.toExponential(6)),
+      outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
+    };
+    el('benchResult').textContent = JSON.stringify(rounded);
+    el('message').textContent = `ATTENTION_OUTPUT_ORT_BENCH_DONE ${rounded.tokens}x${rounded.channels} · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+  } catch (error) {
+    el('benchResult').textContent = `ATTENTION_OUTPUT_ORT_BENCH_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Attention-output ORT benchmark failed: ${(error as Error).message}`;
     throw error;
   } finally {
     setBusy(false);
@@ -1948,10 +2017,11 @@ async function init() {
       workerModelCacheStatus = 'pack shards worker-owned';
       useSearchWorker = true;
       await initSearchWorker({ initModel: false });
-      searchWorkerBackend = ENCODER0_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-block-bench' : ENCODER0_FFN_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-ffn-bench' : ATTENTION_OUTPUT_BENCH_REQUESTED ? 'lc0web-wgsl-attention-output-bench' : ATTENTION_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-attention-block-bench' : ATTENTION_VALUE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-value-bench' : ATTENTION_VALUE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-value-bench' : SOFTMAX_BENCH_REQUESTED ? 'lc0web-wgsl-softmax-bench' : ATTENTION_SCORE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-score-bench' : ATTENTION_SCORE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-score-bench' : QKV_BENCH_REQUESTED ? 'lc0web-wgsl-qkv-bench' : QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
+      searchWorkerBackend = ENCODER0_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-block-bench' : ENCODER0_FFN_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-ffn-bench' : ATTENTION_OUTPUT_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-output-bench' : ATTENTION_OUTPUT_BENCH_REQUESTED ? 'lc0web-wgsl-attention-output-bench' : ATTENTION_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-attention-block-bench' : ATTENTION_VALUE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-value-bench' : ATTENTION_VALUE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-value-bench' : SOFTMAX_BENCH_REQUESTED ? 'lc0web-wgsl-softmax-bench' : ATTENTION_SCORE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-score-bench' : ATTENTION_SCORE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-score-bench' : QKV_BENCH_REQUESTED ? 'lc0web-wgsl-qkv-bench' : QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
       renderStatic();
       if (ENCODER0_BLOCK_BENCH_REQUESTED) await runEncoder0BlockBenchmark();
       else if (ENCODER0_FFN_BENCH_REQUESTED) await runEncoder0FfnBenchmark();
+      else if (ATTENTION_OUTPUT_ORT_BENCH_REQUESTED) await runAttentionOutputOrtBenchmark();
       else if (ATTENTION_OUTPUT_BENCH_REQUESTED) await runAttentionOutputBenchmark();
       else if (ATTENTION_BLOCK_BENCH_REQUESTED) await runAttentionBlockBenchmark();
       else if (ATTENTION_VALUE_ORT_BENCH_REQUESTED) await runAttentionValueOrtBenchmark();

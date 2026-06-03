@@ -34,6 +34,11 @@ const SMOKES = [
     doneText: 'ATTENTION_OUTPUT_BENCH_DONE',
   },
   {
+    name: 'attention-output-ort-wasm',
+    query: 'attentionOutputOrtBench=1&attentionOutputOrtWarmup=0&attentionOutputOrtIters=1&ep=wasm&packVerify=0',
+    doneText: 'ATTENTION_OUTPUT_ORT_BENCH_DONE',
+  },
+  {
     name: 'encoder0-ffn',
     query: 'encoder0FfnBench=1&encoder0FfnWarmup=1&encoder0FfnIters=1&packVerify=0',
     doneText: 'FFN_BENCH_DONE',

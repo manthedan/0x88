@@ -520,6 +520,13 @@ class ProtoWriter {
     this.varint(BigInt(value));
   }
 
+  float32(field: number, value: number): void {
+    const bytes = new Uint8Array(4);
+    new DataView(bytes.buffer).setFloat32(0, value, true);
+    this.tag(field, 5);
+    this.chunks.push(bytes);
+  }
+
   string(field: number, value: string): void {
     const bytes = new TextEncoder().encode(value);
     this.bytes(field, bytes);
@@ -596,12 +603,21 @@ function onnxTensor(name: string, dims: number[], values: Float32Array<ArrayBuff
   return writer.finish();
 }
 
-function onnxNode(opType: string, inputs: string[], outputs: string[], name: string): Uint8Array {
+function onnxFloatAttribute(name: string, value: number): Uint8Array {
+  const writer = new ProtoWriter();
+  writer.string(1, name);
+  writer.float32(2, value);
+  writer.int32(20, 1); // AttributeProto.FLOAT
+  return writer.finish();
+}
+
+function onnxNode(opType: string, inputs: string[], outputs: string[], name: string, attributes: Uint8Array[] = []): Uint8Array {
   const writer = new ProtoWriter();
   for (const input of inputs) writer.string(1, input);
   for (const output of outputs) writer.string(2, output);
   writer.string(3, name);
   writer.string(4, opType);
+  for (const attribute of attributes) writer.bytes(5, attribute);
   return writer.finish();
 }
 
@@ -2260,6 +2276,37 @@ export interface Lc0WebAttentionOutputBenchmarkResult {
   outputSample: number[];
 }
 
+export interface Lc0WebAttentionOutputOrtBenchmarkOptions {
+  packUrl: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+}
+
+export interface Lc0WebAttentionOutputOrtBenchmarkResult {
+  status: 'ATTENTION_OUTPUT_ORT_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  tokens: number;
+  channels: number;
+  epsilon: number;
+  alpha: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  modelBuildMs: number;
+  sessionCreateMs: number;
+  avgMs: number;
+  minMs: number;
+  maxMs: number;
+  firstMs: number;
+  timesMs: number[];
+  runsPerSecond: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+}
+
 function cpuLayerNormRows(input: Float32Array<ArrayBufferLike>, scale: Uint8Array, bias: Uint8Array, rows: number, cols: number, epsilon: number): Float32Array<ArrayBufferLike> {
   const output = new Float32Array(input.length);
   for (let row = 0; row < rows; row++) {
@@ -2534,6 +2581,103 @@ export async function runLc0WebAttentionOutputBenchmark(options: Lc0WebAttention
   } finally {
     for (const buffer of buffers) buffer.destroy?.();
   }
+}
+
+export function createTinyAttentionOutputOnnxForTest(
+  outWeight: Float32Array<ArrayBufferLike>,
+  outBias: Float32Array<ArrayBufferLike>,
+  alpha: number,
+  lnScale: Float32Array<ArrayBufferLike>,
+  lnBias: Float32Array<ArrayBufferLike>,
+): Uint8Array {
+  const writer = new ProtoWriter();
+  writer.int64(1, 8);
+  writer.string(2, 'lc0web');
+  writer.message(7, (graph) => {
+    graph.bytes(1, onnxNode('MatMul', ['attention', 'outWeight'], ['projected'], 'attention_output_matmul'));
+    graph.bytes(1, onnxNode('Add', ['projected', 'outBias'], ['biased'], 'attention_output_bias'));
+    graph.bytes(1, onnxNode('Mul', ['biased', 'alpha'], ['scaled'], 'attention_output_alpha'));
+    graph.bytes(1, onnxNode('Add', ['scaled', 'residual'], ['skip'], 'attention_output_residual'));
+    graph.bytes(1, onnxNode('LayerNormalization', ['skip', 'lnScale', 'lnBias'], ['output'], 'attention_output_ln1', [onnxFloatAttribute('epsilon', DEFAULT_LN_EPSILON)]));
+    graph.string(2, 'lc0web_attention_output_projection_residual_ln1');
+    graph.bytes(5, onnxTensor('outWeight', [DEFAULT_N, DEFAULT_N], outWeight));
+    graph.bytes(5, onnxTensor('outBias', [DEFAULT_N], outBias));
+    graph.bytes(5, onnxTensor('alpha', [1], new Float32Array([alpha])));
+    graph.bytes(5, onnxTensor('lnScale', [DEFAULT_N], lnScale));
+    graph.bytes(5, onnxTensor('lnBias', [DEFAULT_N], lnBias));
+    graph.bytes(11, onnxValueInfo('attention', 1, [DEFAULT_TOKENS, DEFAULT_N]));
+    graph.bytes(11, onnxValueInfo('residual', 1, [DEFAULT_TOKENS, DEFAULT_N]));
+    graph.bytes(12, onnxValueInfo('output', 1, [DEFAULT_TOKENS, DEFAULT_N]));
+  });
+  writer.message(8, (opset) => opset.int64(2, 17));
+  return writer.finish();
+}
+
+export async function runLc0WebAttentionOutputOrtBenchmark(options: Lc0WebAttentionOutputOrtBenchmarkOptions): Promise<Lc0WebAttentionOutputOrtBenchmarkResult> {
+  const warmup = clampInteger(options.warmup, 5, 0, 100);
+  const iterations = clampInteger(options.iterations, 25, 1, 1000);
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: [...Object.values(DEFAULT_QKV_TENSORS), DEFAULT_SCALE_TENSOR, ...Object.values(DEFAULT_SMOLGEN_TENSORS), DEFAULT_OUT_DENSE_WEIGHT, DEFAULT_OUT_DENSE_BIAS, DEFAULT_OUT_ALPHA, DEFAULT_LN1_SCALE, DEFAULT_LN1_BIAS],
+  });
+  const tensors = loadAttentionOutputInputs(pack);
+  const attentionReference = buildAttentionValueReference(tensors);
+  const reference = buildAttentionOutputReference(tensors);
+  const outputElements = DEFAULT_TOKENS * DEFAULT_N;
+  const modelBuildStarted = nowMs();
+  const tinyOnnx = createTinyAttentionOutputOnnxForTest(
+    f16BytesToF32Array(tensors.outWeight.bytes, DEFAULT_N * DEFAULT_N),
+    f16BytesToF32Array(tensors.outBias.bytes, DEFAULT_N),
+    reference.alpha,
+    f16BytesToF32Array(tensors.lnScale.bytes, DEFAULT_N),
+    f16BytesToF32Array(tensors.lnBias.bytes, DEFAULT_N),
+  );
+  const modelBuildMs = nowMs() - modelBuildStarted;
+  const sessionStarted = nowMs();
+  const session = await ort.createOrtSession(tinyOnnx);
+  const sessionCreateMs = nowMs() - sessionStarted;
+  const feeds = {
+    attention: new ort.Tensor('float32', attentionReference.output, [DEFAULT_TOKENS, DEFAULT_N]),
+    residual: new ort.Tensor('float32', reference.input, [DEFAULT_TOKENS, DEFAULT_N]),
+  };
+  let output: Float32Array<ArrayBufferLike> = new Float32Array(outputElements);
+  for (let i = 0; i < warmup; i++) {
+    const outputs = await session.run(feeds);
+    output = outputs.output.data as Float32Array<ArrayBufferLike>;
+  }
+  const times: number[] = [];
+  for (let i = 0; i < iterations; i++) {
+    const started = nowMs();
+    const outputs = await session.run(feeds);
+    times.push(nowMs() - started);
+    output = outputs.output.data as Float32Array<ArrayBufferLike>;
+  }
+  const { maxAbsError, rmsError } = computeErrorStats(output, reference.output, outputElements);
+  assertErrorInTolerance(maxAbsError);
+  const avgMs = times.reduce((sum, value) => sum + value, 0) / times.length;
+  return {
+    status: 'ATTENTION_OUTPUT_ORT_BENCH_DONE',
+    packUrl: pack.manifestUrl,
+    modelName: pack.manifest.model.name,
+    tokens: DEFAULT_TOKENS,
+    channels: DEFAULT_N,
+    epsilon: DEFAULT_LN_EPSILON,
+    alpha: reference.alpha,
+    warmup,
+    iterations,
+    packLoadMs: pack.elapsedMs,
+    modelBuildMs,
+    sessionCreateMs,
+    avgMs,
+    minMs: Math.min(...times),
+    maxMs: Math.max(...times),
+    firstMs: times[0],
+    timesMs: times,
+    runsPerSecond: 1000 / avgMs,
+    maxAbsError,
+    rmsError,
+    outputSample: Array.from(output.slice(0, 8)),
+  };
 }
 
 const DEFAULT_FFN_DENSE1_WEIGHT = '/encoder0/ffn/dense1/w/w';
