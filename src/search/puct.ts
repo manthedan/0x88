@@ -33,6 +33,7 @@ export interface SearchResult { move: Move | null; visits: number; value: number
 export type CpuctSchedule = 'constant' | 'lc0-log';
 export type FpuStrategy = 'constant' | 'lc0-reduction';
 export type SearchBudgetMode = 'visits' | 'neural';
+export type SearchBatchCollisionMode = 'retry' | 'backup';
 export type SearchEarlyStop = 'none' | 'root-dominance' | 'kld-stable';
 export type ValueWdlBlendMode = 'constant' | 'confidence';
 export interface SearchOptions {
@@ -49,6 +50,15 @@ export interface SearchOptions {
   fpuReduction?: number;
   historyFens?: string[];
   batchSize?: number;
+  /**
+   * Batched MCTS leaf collisions. `retry` keeps temporary virtual visits on
+   * already-selected in-flight leaves and tries to fill the batch with distinct
+   * leaves; `backup` preserves the older behavior of backing up duplicate leaf
+   * hits after one shared evaluation.
+   */
+  batchCollisionMode?: SearchBatchCollisionMode;
+  /** Max retry selections per desired batch slot when avoiding in-flight leaves. */
+  batchCollisionRetryLimit?: number;
   searchPolicy?: SearchPolicy;
   avWeight?: number;
   rankWeight?: number;
@@ -107,6 +117,10 @@ export interface SearchStats {
   evalCalls: number;
   batchEvalCalls: number;
   maxEvalBatch: number;
+  /** Duplicate in-flight leaves encountered while collecting a search batch. */
+  batchLeafCollisions?: number;
+  /** Extra selection attempts spent to avoid duplicate in-flight leaves. */
+  batchLeafRetries?: number;
   budgetMode?: SearchBudgetMode;
   requestedNeuralEvals?: number;
   neuralEvalMisses?: number;
@@ -900,14 +914,37 @@ function finishExpansion(node: Node, moves: Move[], evaln: Evaluation, context: 
   return valueFromEvaluation(evaln, context);
 }
 
-async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>, deadlineMs?: number) {
+async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>, deadlineMs?: number, collisionMode: SearchBatchCollisionMode = 'retry', collisionRetryLimit = batchSize * 4) {
   let done = 0;
   let lastYield = nowMs();
   while (done < visits && !deadlineExpired(deadlineMs)) {
     throwIfAborted(signal);
     const want = Math.min(batchSize, visits - done);
     const selected: SelectedLeaf[] = [];
-    for (let i = 0; i < want; i++) selected.push(selectLeaf(root, searchPolicy, context, [], transpositionTable, stats));
+    const inFlightEvalLeaves = new Set<Node>();
+    const retryVirtualPaths: Edge[][] = [];
+    let attempts = 0;
+    const maxAttempts = collisionMode === 'retry'
+      ? Math.max(want, want + Math.max(0, Math.floor(collisionRetryLimit)))
+      : want;
+    while (selected.length < want && attempts < maxAttempts) {
+      attempts += 1;
+      const sel = selectLeaf(root, searchPolicy, context, [], transpositionTable, stats);
+      if (collisionMode === 'retry' && !sel.node.expanded && sel.node.terminalValue === null) {
+        if (inFlightEvalLeaves.has(sel.node)) {
+          stats.batchLeafCollisions = (stats.batchLeafCollisions ?? 0) + 1;
+          stats.batchLeafRetries = (stats.batchLeafRetries ?? 0) + 1;
+          // Keep this temporary virtual path until batch collection finishes so
+          // subsequent selections see the leaf as in flight and can diversify.
+          retryVirtualPaths.push(sel.path);
+          continue;
+        }
+        inFlightEvalLeaves.add(sel.node);
+      }
+      selected.push(sel);
+    }
+    while (selected.length < want) selected.push(selectLeaf(root, searchPolicy, context, [], transpositionTable, stats));
+    for (const path of retryVirtualPaths) unwindVirtualVisits(path);
 
     const evalNodes: Node[] = [];
     const evalMoves: Move[][] = [];
@@ -1056,7 +1093,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     stats.maxRootVisits = maxRootVisits;
     if (!cacheAware) {
       stats.stopReason = 'no-cache-metrics-fixed-visits';
-      if (batchSize > 1) await runBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs);
+      if (batchSize > 1) await runBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
       else {
         let lastYield = nowMs();
         for (let i = 0; i < visitsToRun && !deadlineExpired(deadlineMs); i++) {
@@ -1080,7 +1117,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
         const room = Math.max(0, maxRootVisits - rootVisitCount(root));
         const chunk = Math.max(1, Math.min(batchSize, room));
         const beforeCompleted = stats.completedVisits;
-        if (batchSize > 1) await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs);
+        if (batchSize > 1) await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
         else {
           await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
           stats.completedVisits += 1;
@@ -1110,7 +1147,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     let done = 0;
     while (done < visitsToRun && !deadlineExpired(deadlineMs)) {
       const chunk = Math.min(batchSize, visitsToRun - done);
-      await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs);
+      await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
       done += chunk;
       if (deadlineExpired(deadlineMs)) break;
       if (rootKldEarlyStop(root, options, kldState)) {
@@ -1166,6 +1203,8 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     cacheHits: stats.cacheHits,
     neuralEvalMisses: stats.neuralEvalMisses,
     transpositionHits: stats.transpositionHits ?? 0,
+    batchLeafCollisions: stats.batchLeafCollisions ?? 0,
+    batchLeafRetries: stats.batchLeafRetries ?? 0,
   });
   return { move: bestEntry?.move ?? null, visits: realizedVisits, value: bestEntry?.q ?? rootValue, policy, ...(principalVariation ? { principalVariation } : {}), ...(multiPvLines ? { multiPvLines } : {}), stats, root };
 }

@@ -79,15 +79,14 @@ We have some experimental reusable-root and transposition hooks, but the arena d
 
 Native LC0 can think during the opponent's turn and then continue if the opponent plays the expected move.
 
-We currently do not ponder. Each engine starts thinking only when it is its turn.
+We intentionally do **not** implement pondering in the browser execution environment. Background search during the user's/opponent's turn would compete with UI responsiveness, ONNX/WASM/WebGPU session lifecycle, cancellation, and browser worker scheduling. For this project, tree reuse after an actual move plus optional NN-cache persistence is the safer user-facing substitute.
 
-### Missing pieces
+### Non-goals
 
 - background search during opponent turn
-- expected reply tracking
 - `ponderhit`-style continuation
-- safe cancellation when opponent plays a different move
-- arena UI indication that an engine is pondering
+- speculative worker searches that must be cancelled on every unexpected move
+- arena UI modes that keep engines consuming compute while it is not their turn
 
 ## 5. Smarter stop conditions
 

@@ -33,6 +33,26 @@ class UniformContextEvaluator {
   }
 }
 
+class MildlyPeakedEvaluator {
+  batchSizes = [];
+
+  evaluate(board, context = {}) {
+    const legal = context.legalMoves ?? legalMoves(board);
+    const policy = new Map();
+    if (legal.length) {
+      policy.set(moveToActionId(legal[0]), 0.1);
+      const rest = legal.length > 1 ? 0.9 / (legal.length - 1) : 0;
+      for (const move of legal.slice(1)) policy.set(moveToActionId(move), rest);
+    }
+    return { policy, wdl: [0.33, 0.34, 0.33] };
+  }
+
+  evaluateBatch(boards, contexts = []) {
+    this.batchSizes.push(boards.length);
+    return boards.map((board, i) => this.evaluate(board, contexts[i] ?? {}));
+  }
+}
+
 function legalUcis(board) {
   return new Set(legalMoves(board).map(moveToUci));
 }
@@ -48,6 +68,16 @@ test('PUCT masks illegal evaluator policy mass instead of selecting illegal move
   assert.ok(legalUcis(board).has(moveToUci(result.move)), `selected illegal move ${moveToUci(result.move)}`);
   assert.equal(result.policy.length, legalMoves(board).length, 'root policy should only contain legal moves');
   assert.ok(result.policy.every((entry) => legalUcis(board).has(moveToUci(entry.move))), 'root policy contains illegal moves');
+});
+
+test('batched PUCT retries in-flight leaf collisions to keep evaluator batches full', async () => {
+  const board = parseFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+  const evaluator = new MildlyPeakedEvaluator();
+  const result = await searchRoot(board, evaluator, { visits: 4, temperature: 1, batchSize: 4 });
+  assert.equal(result.stats?.completedVisits, 4);
+  assert.equal(result.stats?.maxEvalBatch, 4, `expected a full physical leaf batch, got ${evaluator.batchSizes.join(',')}`);
+  assert.ok((result.stats?.batchLeafCollisions ?? 0) > 0, 'collision retry path was exercised');
+  assert.equal(result.root?.edges.reduce((sum, edge) => sum + edge.virtualVisits, 0), 0, 'temporary virtual visits were unwound');
 });
 
 test('batched and unbatched PUCT are deterministic-equivalent for a stateless evaluator', async () => {
