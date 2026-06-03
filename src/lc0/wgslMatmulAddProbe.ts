@@ -1800,3 +1800,271 @@ export async function runLc0WebAttentionValueBenchmark(options: Lc0WebAttentionV
     for (const buffer of buffers) buffer.destroy?.();
   }
 }
+
+export interface Lc0WebAttentionBlockBenchmarkOptions {
+  packUrl: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+}
+
+export interface Lc0WebAttentionBlockBenchmarkResult {
+  status: 'ATTENTION_BLOCK_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  tokens: number;
+  channels: number;
+  heads: number;
+  headDim: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  uploadSetupMs: number;
+  dispatchLoopMs: number;
+  dispatchLoopAvgMs: number;
+  readbackSyncedMs: number;
+  endToEndMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+}
+
+const ATTENTION_BLOCK_QKV_WGSL = `
+@group(0) @binding(0) var<storage, read> inputMat: array<f32>;
+@group(0) @binding(1) var<storage, read> qWeightsF16: array<u32>;
+@group(0) @binding(2) var<storage, read> qBiasF16: array<u32>;
+@group(0) @binding(3) var<storage, read> kWeightsF16: array<u32>;
+@group(0) @binding(4) var<storage, read> kBiasF16: array<u32>;
+@group(0) @binding(5) var<storage, read> vWeightsF16: array<u32>;
+@group(0) @binding(6) var<storage, read> vBiasF16: array<u32>;
+@group(0) @binding(7) var<storage, read_write> qkvOut: array<f32>;
+
+fn pick_lane(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+
+fn load_q_weight(index: u32) -> f32 { return pick_lane(qWeightsF16[index >> 1u], index); }
+fn load_q_bias(index: u32) -> f32 { return pick_lane(qBiasF16[index >> 1u], index); }
+fn load_k_weight(index: u32) -> f32 { return pick_lane(kWeightsF16[index >> 1u], index); }
+fn load_k_bias(index: u32) -> f32 { return pick_lane(kBiasF16[index >> 1u], index); }
+fn load_v_weight(index: u32) -> f32 { return pick_lane(vWeightsF16[index >> 1u], index); }
+fn load_v_bias(index: u32) -> f32 { return pick_lane(vBiasF16[index >> 1u], index); }
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let col = gid.x;
+  let token = gid.y;
+  if (col >= 256u || token >= 64u) { return; }
+  var q_sum = load_q_bias(col);
+  var k_sum = load_k_bias(col);
+  var v_sum = load_v_bias(col);
+  for (var row = 0u; row < 256u; row = row + 1u) {
+    let x = inputMat[token * 256u + row];
+    let base = row * 256u + col;
+    q_sum = q_sum + x * load_q_weight(base);
+    k_sum = k_sum + x * load_k_weight(base);
+    v_sum = v_sum + x * load_v_weight(base);
+  }
+  qkvOut[token * 256u + col] = q_sum;
+  qkvOut[16384u + token * 256u + col] = k_sum;
+  qkvOut[32768u + token * 256u + col] = v_sum;
+}
+`;
+
+const ATTENTION_BLOCK_SCORE_WGSL = `
+@group(0) @binding(0) var<storage, read> qkvVec: array<f32>;
+@group(0) @binding(1) var<storage, read> scaleF16: array<u32>;
+@group(0) @binding(2) var<storage, read_write> scoreVec: array<f32>;
+
+fn pick_lane(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let col = gid.x;
+  let row = gid.y;
+  let head = gid.z;
+  if (row >= 64u || col >= 64u || head >= 8u) { return; }
+  let channel_offset = head * 32u;
+  var sum = 0.0;
+  for (var channel = 0u; channel < 32u; channel = channel + 1u) {
+    let q = qkvVec[row * 256u + channel_offset + channel];
+    let k = qkvVec[16384u + col * 256u + channel_offset + channel];
+    sum = sum + q * k;
+  }
+  scoreVec[(head * 64u + row) * 64u + col] = sum * pick_lane(scaleF16[0], 0u);
+}
+`;
+
+const ATTENTION_BLOCK_VALUE_WGSL = `
+@group(0) @binding(0) var<storage, read> probsVec: array<f32>;
+@group(0) @binding(1) var<storage, read> qkvVec: array<f32>;
+@group(0) @binding(2) var<storage, read_write> outputVec: array<f32>;
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let channel = gid.x;
+  let row = gid.y;
+  let head = gid.z;
+  if (channel >= 32u || row >= 64u || head >= 8u) { return; }
+  let channel_offset = head * 32u;
+  var sum = 0.0;
+  for (var col = 0u; col < 64u; col = col + 1u) {
+    let prob = probsVec[(head * 64u + row) * 64u + col];
+    let value = qkvVec[32768u + col * 256u + channel_offset + channel];
+    sum = sum + prob * value;
+  }
+  outputVec[row * 256u + channel_offset + channel] = sum;
+}
+`;
+
+function createAttentionBlockPipelines(device: DeviceLike, buffers: {
+  input: BufferLike;
+  qWeight: BufferLike;
+  qBias: BufferLike;
+  kWeight: BufferLike;
+  kBias: BufferLike;
+  vWeight: BufferLike;
+  vBias: BufferLike;
+  scale: BufferLike;
+  qkv: BufferLike;
+  scores: BufferLike;
+  probs: BufferLike;
+  output: BufferLike;
+}): { qkv: PipelineLike; qkvBind: unknown; score: PipelineLike; scoreBind: unknown; softmax: PipelineLike; softmaxBind: unknown; value: PipelineLike; valueBind: unknown } {
+  const qkvModule = device.createShaderModule({ label: 'lc0web attention block qkv', code: ATTENTION_BLOCK_QKV_WGSL });
+  const qkv = device.createComputePipeline({ layout: 'auto', compute: { module: qkvModule, entryPoint: 'main' } }) as PipelineLike;
+  const qkvBind = device.createBindGroup({
+    layout: qkv.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.input } },
+      { binding: 1, resource: { buffer: buffers.qWeight } },
+      { binding: 2, resource: { buffer: buffers.qBias } },
+      { binding: 3, resource: { buffer: buffers.kWeight } },
+      { binding: 4, resource: { buffer: buffers.kBias } },
+      { binding: 5, resource: { buffer: buffers.vWeight } },
+      { binding: 6, resource: { buffer: buffers.vBias } },
+      { binding: 7, resource: { buffer: buffers.qkv } },
+    ],
+  });
+  const scoreModule = device.createShaderModule({ label: 'lc0web attention block score', code: ATTENTION_BLOCK_SCORE_WGSL });
+  const score = device.createComputePipeline({ layout: 'auto', compute: { module: scoreModule, entryPoint: 'main' } }) as PipelineLike;
+  const scoreBind = device.createBindGroup({
+    layout: score.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.qkv } },
+      { binding: 1, resource: { buffer: buffers.scale } },
+      { binding: 2, resource: { buffer: buffers.scores } },
+    ],
+  });
+  const { pipeline: softmax, bindGroup: softmaxBind } = createSoftmaxPipeline(device, { input: buffers.scores, output: buffers.probs });
+  const valueModule = device.createShaderModule({ label: 'lc0web attention block value', code: ATTENTION_BLOCK_VALUE_WGSL });
+  const value = device.createComputePipeline({ layout: 'auto', compute: { module: valueModule, entryPoint: 'main' } }) as PipelineLike;
+  const valueBind = device.createBindGroup({
+    layout: value.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.probs } },
+      { binding: 1, resource: { buffer: buffers.qkv } },
+      { binding: 2, resource: { buffer: buffers.output } },
+    ],
+  });
+  return { qkv, qkvBind, score, scoreBind, softmax, softmaxBind, value, valueBind };
+}
+
+function encodeAttentionBlockDispatches(device: DeviceLike, pipelines: ReturnType<typeof createAttentionBlockPipelines>, iterations: number): unknown {
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  for (let i = 0; i < iterations; i++) {
+    pass.setPipeline(pipelines.qkv);
+    pass.setBindGroup(0, pipelines.qkvBind);
+    pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+    pass.setPipeline(pipelines.score);
+    pass.setBindGroup(0, pipelines.scoreBind);
+    pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+    pass.setPipeline(pipelines.softmax);
+    pass.setBindGroup(0, pipelines.softmaxBind);
+    pass.dispatchWorkgroups(Math.ceil((DEFAULT_HEADS * DEFAULT_TOKENS) / 64));
+    pass.setPipeline(pipelines.value);
+    pass.setBindGroup(0, pipelines.valueBind);
+    pass.dispatchWorkgroups(Math.ceil(DEFAULT_HEAD_DIM / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+  }
+  pass.end();
+  return encoder.finish();
+}
+
+export async function runLc0WebAttentionBlockBenchmark(options: Lc0WebAttentionBlockBenchmarkOptions): Promise<Lc0WebAttentionBlockBenchmarkResult> {
+  const totalStarted = nowMs();
+  const warmup = clampInteger(options.warmup, 5, 0, 1000);
+  const iterations = clampInteger(options.iterations, 100, 1, 10_000);
+  const { device, adapterInfo } = await requestDevice();
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: [...Object.values(DEFAULT_QKV_TENSORS), DEFAULT_SCALE_TENSOR],
+  });
+  const tensors = loadAttentionValueInputs(pack);
+  const input = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K);
+  const reference = buildAttentionValueReference(tensors);
+  const outputElements = DEFAULT_TOKENS * DEFAULT_N;
+  const globals = gpuGlobals();
+  const usage = globals.GPUBufferUsage!;
+  const buffers: BufferLike[] = [];
+  try {
+    const setupStarted = nowMs();
+    const inputBuffer = createStorageBuffer(device, input, usage.STORAGE | usage.COPY_DST);
+    const qWeight = createStorageBuffer(device, tensors.qWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const qBias = createStorageBuffer(device, tensors.qBias.bytes, usage.STORAGE | usage.COPY_DST);
+    const kWeight = createStorageBuffer(device, tensors.kWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const kBias = createStorageBuffer(device, tensors.kBias.bytes, usage.STORAGE | usage.COPY_DST);
+    const vWeight = createStorageBuffer(device, tensors.vWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const vBias = createStorageBuffer(device, tensors.vBias.bytes, usage.STORAGE | usage.COPY_DST);
+    const scale = createStorageBuffer(device, paddedF16ScalarBytes(tensors.scale.bytes), usage.STORAGE | usage.COPY_DST);
+    const qkvBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 3 * 4, usage: usage.STORAGE });
+    const scoreBuffer = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE });
+    const probBuffer = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE });
+    const outputBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC });
+    const readbackBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
+    buffers.push(inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, qkvBuffer, scoreBuffer, probBuffer, outputBuffer, readbackBuffer);
+    const pipelines = createAttentionBlockPipelines(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, qkv: qkvBuffer, scores: scoreBuffer, probs: probBuffer, output: outputBuffer });
+    const uploadSetupMs = nowMs() - setupStarted;
+
+    if (warmup > 0) {
+      device.queue.submit([encodeAttentionBlockDispatches(device, pipelines, warmup)]);
+      await device.queue.onSubmittedWorkDone?.();
+    }
+    const dispatchStarted = nowMs();
+    device.queue.submit([encodeAttentionBlockDispatches(device, pipelines, iterations)]);
+    const dispatchLoopMs = nowMs() - dispatchStarted;
+    const readbackStarted = nowMs();
+    const output = await readF32OutputOnce(device, outputBuffer, readbackBuffer, outputElements);
+    const readbackSyncedMs = nowMs() - readbackStarted;
+    const { maxAbsError, rmsError } = computeErrorStats(output, reference.output, outputElements);
+    assertErrorInTolerance(maxAbsError);
+    return {
+      status: 'ATTENTION_BLOCK_BENCH_DONE',
+      packUrl: pack.manifestUrl,
+      modelName: pack.manifest.model.name,
+      adapterInfo,
+      tokens: DEFAULT_TOKENS,
+      channels: DEFAULT_N,
+      heads: DEFAULT_HEADS,
+      headDim: DEFAULT_HEAD_DIM,
+      warmup,
+      iterations,
+      packLoadMs: pack.elapsedMs,
+      uploadSetupMs,
+      dispatchLoopMs,
+      dispatchLoopAvgMs: dispatchLoopMs / iterations,
+      readbackSyncedMs,
+      endToEndMs: nowMs() - totalStarted,
+      maxAbsError,
+      rmsError,
+      outputSample: Array.from(output.slice(0, 8)),
+    };
+  } finally {
+    for (const buffer of buffers) buffer.destroy?.();
+  }
+}
