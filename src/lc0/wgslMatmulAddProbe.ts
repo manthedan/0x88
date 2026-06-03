@@ -2113,24 +2113,46 @@ fn load_k_bias(index: u32) -> f32 { return pick_lane(kBiasF16[index >> 1u], inde
 fn load_v_weight(index: u32) -> f32 { return pick_lane(vWeightsF16[index >> 1u], index); }
 fn load_v_bias(index: u32) -> f32 { return pick_lane(vBiasF16[index >> 1u], index); }
 
+var<workgroup> qkvInputTile: array<f32, 128>;
+var<workgroup> qWeightTile: array<f32, 128>;
+var<workgroup> kWeightTile: array<f32, 128>;
+var<workgroup> vWeightTile: array<f32, 128>;
+
 @compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let col = gid.x;
-  let token = gid.y;
-  if (col >= 256u || token >= 64u) { return; }
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let col = wid.x * 8u + lid.x;
+  let token = wid.y * 8u + lid.y;
+  let local_index = lid.y * 8u + lid.x;
   var q_sum = load_q_bias(col);
   var k_sum = load_k_bias(col);
   var v_sum = load_v_bias(col);
-  for (var row = 0u; row < 256u; row = row + 1u) {
-    let x = inputMat[token * 256u + row];
-    let base = col * 256u + row;
-    q_sum = q_sum + x * load_q_weight(base);
-    k_sum = k_sum + x * load_k_weight(base);
-    v_sum = v_sum + x * load_v_weight(base);
+  for (var tile = 0u; tile < 256u; tile = tile + 16u) {
+    for (var i = local_index; i < 128u; i = i + 64u) {
+      let tile_row = i / 16u;
+      let tile_k = i % 16u;
+      let input_token = wid.y * 8u + tile_row;
+      let weight_col = wid.x * 8u + (i % 8u);
+      let weight_k = tile + (i / 8u);
+      qkvInputTile[i] = select(inputMat[input_token * 256u + tile + tile_k], 0.0, input_token >= 64u);
+      qWeightTile[i] = select(load_q_weight(weight_col * 256u + weight_k), 0.0, weight_col >= 256u);
+      kWeightTile[i] = select(load_k_weight(weight_col * 256u + weight_k), 0.0, weight_col >= 256u);
+      vWeightTile[i] = select(load_v_weight(weight_col * 256u + weight_k), 0.0, weight_col >= 256u);
+    }
+    workgroupBarrier();
+    for (var k = 0u; k < 16u; k = k + 1u) {
+      let x = qkvInputTile[lid.y * 16u + k];
+      let weight_index = k * 8u + lid.x;
+      q_sum = q_sum + x * qWeightTile[weight_index];
+      k_sum = k_sum + x * kWeightTile[weight_index];
+      v_sum = v_sum + x * vWeightTile[weight_index];
+    }
+    workgroupBarrier();
   }
-  qkvOut[token * 256u + col] = q_sum;
-  qkvOut[16384u + token * 256u + col] = k_sum;
-  qkvOut[32768u + token * 256u + col] = v_sum;
+  if (col < 256u && token < 64u) {
+    qkvOut[token * 256u + col] = q_sum;
+    qkvOut[16384u + token * 256u + col] = k_sum;
+    qkvOut[32768u + token * 256u + col] = v_sum;
+  }
 }
 `;
 
@@ -2475,14 +2497,30 @@ fn pick_lane(word: u32, index: u32) -> f32 {
 fn load_weight(index: u32) -> f32 { return pick_lane(weightF16[index >> 1u], index); }
 fn load_bias(index: u32) -> f32 { return pick_lane(biasF16[index >> 1u], index); }
 
+var<workgroup> projInputTile: array<f32, 128>;
+var<workgroup> projWeightTile: array<f32, 128>;
+
 @compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let col = gid.x;
-  let token = gid.y;
-  if (col >= 256u || token >= 64u) { return; }
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let col = wid.x * 8u + lid.x;
+  let token = wid.y * 8u + lid.y;
+  let local_index = lid.y * 8u + lid.x;
   var sum = load_bias(col);
-  for (var row = 0u; row < 256u; row = row + 1u) {
-    sum = sum + attnVec[token * 256u + row] * load_weight(col * 256u + row);
+  for (var tile = 0u; tile < 256u; tile = tile + 16u) {
+    for (var i = local_index; i < 128u; i = i + 64u) {
+      let tile_row = i / 16u;
+      let tile_k = i % 16u;
+      let input_token = wid.y * 8u + tile_row;
+      let weight_col = wid.x * 8u + (i % 8u);
+      let weight_k = tile + (i / 8u);
+      projInputTile[i] = attnVec[input_token * 256u + tile + tile_k];
+      projWeightTile[i] = load_weight(weight_col * 256u + weight_k);
+    }
+    workgroupBarrier();
+    for (var k = 0u; k < 16u; k = k + 1u) {
+      sum = sum + projInputTile[lid.y * 16u + k] * projWeightTile[k * 8u + lid.x];
+    }
+    workgroupBarrier();
   }
   let index = token * 256u + col;
   skipVec[index] = sum * pick_lane(alphaF16[0], 0u) + residualVec[index];
@@ -3019,14 +3057,30 @@ export function createTinyEncoder0FfnOnnxForTest(
 }
 
 const FFN_DENSE1_WGSL = `${WGSL_HEADER}
+var<workgroup> dense1InputTile: array<f32, 128>;
+var<workgroup> dense1WeightTile: array<f32, 128>;
+
 @compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let col = gid.x;
-  let token = gid.y;
-  if (col >= 1024u || token >= 64u) { return; }
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let col = wid.x * 8u + lid.x;
+  let token = wid.y * 8u + lid.y;
+  let local_index = lid.y * 8u + lid.x;
   var sum = pick_lane(biasF16[col >> 1u], col);
-  for (var row = 0u; row < 256u; row = row + 1u) {
-    sum = sum + inputVec[token * 256u + row] * pick_lane(weightsF16[(col * 256u + row) >> 1u], col * 256u + row);
+  for (var tile = 0u; tile < 256u; tile = tile + 16u) {
+    for (var i = local_index; i < 128u; i = i + 64u) {
+      let tile_row = i / 16u;
+      let tile_k = i % 16u;
+      let input_token = wid.y * 8u + tile_row;
+      let weight_col = wid.x * 8u + (i % 8u);
+      let weight_k = tile + (i / 8u);
+      dense1InputTile[i] = inputVec[input_token * 256u + tile + tile_k];
+      dense1WeightTile[i] = pick_lane(weightsF16[(weight_col * 256u + weight_k) >> 1u], weight_col * 256u + weight_k);
+    }
+    workgroupBarrier();
+    for (var k = 0u; k < 16u; k = k + 1u) {
+      sum = sum + dense1InputTile[lid.y * 16u + k] * dense1WeightTile[k * 8u + lid.x];
+    }
+    workgroupBarrier();
   }
   let value = max(sum, 0.0);
   outputVec[token * 1024u + col] = value * value;
@@ -3036,14 +3090,30 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 const FFN_DENSE2_WGSL = `${WGSL_HEADER}
 @group(0) @binding(4) var<storage, read> residualVec: array<f32>;
 @group(0) @binding(5) var<storage, read> alphaF16: array<u32>;
+var<workgroup> dense2InputTile: array<f32, 128>;
+var<workgroup> dense2WeightTile: array<f32, 128>;
+
 @compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let col = gid.x;
-  let token = gid.y;
-  if (col >= 256u || token >= 64u) { return; }
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let col = wid.x * 8u + lid.x;
+  let token = wid.y * 8u + lid.y;
+  let local_index = lid.y * 8u + lid.x;
   var sum = pick_lane(biasF16[col >> 1u], col);
-  for (var row = 0u; row < 1024u; row = row + 1u) {
-    sum = sum + inputVec[token * 1024u + row] * pick_lane(weightsF16[(col * 1024u + row) >> 1u], col * 1024u + row);
+  for (var tile = 0u; tile < 1024u; tile = tile + 16u) {
+    for (var i = local_index; i < 128u; i = i + 64u) {
+      let tile_row = i / 16u;
+      let tile_k = i % 16u;
+      let input_token = wid.y * 8u + tile_row;
+      let weight_col = wid.x * 8u + (i % 8u);
+      let weight_k = tile + (i / 8u);
+      dense2InputTile[i] = inputVec[input_token * 1024u + tile + tile_k];
+      dense2WeightTile[i] = pick_lane(weightsF16[(weight_col * 1024u + weight_k) >> 1u], weight_col * 1024u + weight_k);
+    }
+    workgroupBarrier();
+    for (var k = 0u; k < 16u; k = k + 1u) {
+      sum = sum + dense2InputTile[lid.y * 16u + k] * dense2WeightTile[k * 8u + lid.x];
+    }
+    workgroupBarrier();
   }
   outputVec[token * 256u + col] = sum * pick_lane(alphaF16[0], 0u) + residualVec[token * 256u + col];
 }
