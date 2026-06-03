@@ -21,7 +21,7 @@ This checkpoint records the current custom-kernel path for the batch-8 f16 `lc0w
 - `?encoder0BlockOrtBench=1`: tiny ORT comparison for attention-value output through attention output projection/ln1 plus FFN/ln2.
 - `?encoderPrefix=/encoderN`: experimental tensor-prefix override for attention-output/FFN/full-block routes so the same plumbing can target later encoder layers.
 
-The browser page now emits a `benchmarkReport` object with browser metadata, GPU adapter info where available, pack verification mode, and timing summaries. `scripts/lc0_browser_wgsl_smokes.mjs` automates the main browser smokes and parses `maxAbsError`. `scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs` runs fresh-session, alternating encoder0-block WGSL vs ORT WebGPU measurements and marks results as non-promotional diagnostics.
+The browser page now emits a `benchmarkReport` object with browser metadata, GPU adapter info where available, pack verification mode, and timing summaries. Full encoder0 WGSL block results also include per-stage diagnostic timings for QKV projection, attention scores, softmax, attention value, output projection + ln1, FFN dense1, FFN dense2 + residual, and ln2. `scripts/lc0_browser_wgsl_smokes.mjs` automates the main browser smokes, parses `maxAbsError`, and surfaces encoder-block stage timings when present. `scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs` runs fresh-session, alternating encoder0-block WGSL vs ORT WebGPU measurements and marks results as non-promotional diagnostics.
 
 ## Current evidence
 
@@ -30,6 +30,9 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
 - `npm run lc0:browser-wgsl-smokes -- --no-server --only encoder0-ffn,encoder0-block --timeout 25000`
   - `FFN_BENCH_DONE`, max absolute error about `3.34e-6`.
   - `ENCODER0_BLOCK_BENCH_DONE`, max absolute error about `3.58e-6`.
+- `npm run lc0:browser-wgsl-smokes -- --only encoder0-block --timeout 25000`
+  - Stage-timing smoke passed with max absolute error about `3.58e-6`.
+  - One local single-iteration diagnostic sample reported stage avg timings: QKV projection `0.6 ms`, attention scores `0.4 ms`, softmax `0.3 ms`, attention value `0.2 ms`, output projection + ln1 `0.5 ms`, FFN dense1 `0.6 ms`, FFN dense2 + residual `1.0 ms`, ln2 `0.7 ms`; these include per-stage queue completion overhead and are bottleneck hints, not pure GPU timestamps.
 - `npm run lc0:browser-wgsl-smokes -- --no-server --only attention-value-ort-wasm --timeout 25000`
   - `ATTENTION_VALUE_ORT_BENCH_DONE`, max absolute error about `9.54e-7`.
 - `npm run lc0:browser-wgsl-smokes -- --only attention-output-ort-wasm --timeout 25000`
@@ -64,6 +67,7 @@ The custom path now validates a complete encoder0 block in staged WGSL form, inc
 - Only encoder0 is covered; remaining transformer layers still need repeated-layer validation.
 - Timing uses command submission/readback synchronization rather than GPU timestamp queries.
 - The full encoder0 benchmark uses an explicit queue boundary between attention-output and FFN stages so the reported synchronized time covers the whole block.
+- The per-stage encoder0 timing breakdown currently points first at the naive FFN dense2 + residual and ln2/QKV/dense1 kernels, but stage timings include queue-completion overhead until GPU timestamp timing is added.
 - ORT tiny comparisons are same-value subgraph checks, not full deployment performance proof.
 
 ## Decision on full custom inference

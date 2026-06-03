@@ -306,6 +306,14 @@ type AttentionOutputOrtBenchmarkResult = {
   outputSample: number[];
 };
 
+type Encoder0BlockStageTiming = {
+  stage: string;
+  label: string;
+  iterations: number;
+  totalMs: number;
+  avgMs: number;
+};
+
 type Encoder0BlockBenchmarkResult = {
   status: 'ENCODER0_BLOCK_BENCH_DONE';
   packUrl: string;
@@ -327,6 +335,8 @@ type Encoder0BlockBenchmarkResult = {
   dispatchLoopMs: number;
   dispatchLoopAvgMs: number;
   readbackSyncedMs: number;
+  stageTimings: Encoder0BlockStageTiming[];
+  stageTimingTotalMs: number;
   endToEndMs: number;
   maxAbsError: number;
   rmsError: number;
@@ -1133,13 +1143,20 @@ async function runEncoder0BlockBenchmark(): Promise<void> {
       dispatchLoopMs: Number(response.result.dispatchLoopMs.toFixed(4)),
       dispatchLoopAvgMs: Number(response.result.dispatchLoopAvgMs.toExponential(6)),
       readbackSyncedMs: Number(response.result.readbackSyncedMs.toFixed(4)),
+      stageTimings: response.result.stageTimings.map((timing) => ({
+        ...timing,
+        totalMs: Number(timing.totalMs.toFixed(4)),
+        avgMs: Number(timing.avgMs.toFixed(6)),
+      })),
+      stageTimingTotalMs: Number(response.result.stageTimingTotalMs.toFixed(4)),
       endToEndMs: Number(response.result.endToEndMs.toFixed(3)),
       maxAbsError: Number(response.result.maxAbsError.toExponential(6)),
       rmsError: Number(response.result.rmsError.toExponential(6)),
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(8))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `ENCODER0_BLOCK_BENCH_DONE attention+FFN ${rounded.tokens}x${rounded.channels} · ${rounded.iterations} queued blocks · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    const slowestStage = rounded.stageTimings.reduce((best, timing) => timing.avgMs > best.avgMs ? timing : best, rounded.stageTimings[0]);
+    el('message').textContent = `ENCODER0_BLOCK_BENCH_DONE attention+FFN ${rounded.tokens}x${rounded.channels} · ${rounded.iterations} queued blocks · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · slowest stage ${slowestStage.label} ${slowestStage.avgMs.toFixed(3)} ms avg · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `ENCODER0_BLOCK_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Encoder0 block benchmark failed: ${(error as Error).message}`;

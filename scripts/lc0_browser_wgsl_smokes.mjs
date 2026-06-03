@@ -240,7 +240,19 @@ async function runSmoke(args, baseUrl, smoke) {
   if (error > args.maxError) {
     throw new Error(`${smoke.name}: maxAbsError ${error} exceeded threshold ${args.maxError}`);
   }
-  return { smoke: smoke.name, status: result.status, maxAbsError: error, iterations: result.iterations ?? null, readbackSyncedMs: result.readbackSyncedMs ?? null };
+  const slowestStage = Array.isArray(result.stageTimings) && result.stageTimings.length
+    ? result.stageTimings.reduce((best, timing) => timing.avgMs > best.avgMs ? timing : best, result.stageTimings[0])
+    : undefined;
+  return {
+    smoke: smoke.name,
+    status: result.status,
+    maxAbsError: error,
+    iterations: result.iterations ?? null,
+    readbackSyncedMs: result.readbackSyncedMs ?? null,
+    stageTimingTotalMs: result.stageTimingTotalMs ?? null,
+    slowestStage: slowestStage ? { stage: slowestStage.stage, label: slowestStage.label, avgMs: slowestStage.avgMs } : null,
+    stageTimings: result.stageTimings ?? null,
+  };
 }
 
 async function main() {

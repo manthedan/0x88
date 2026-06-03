@@ -3215,6 +3215,24 @@ export interface Lc0WebEncoder0BlockBenchmarkOptions {
   encoderPrefix?: string;
 }
 
+export type Lc0WebEncoder0BlockStageName =
+  | 'qkvProjection'
+  | 'attentionScores'
+  | 'softmax'
+  | 'attentionValue'
+  | 'outputProjectionLn1'
+  | 'ffnDense1'
+  | 'ffnDense2Residual'
+  | 'ln2';
+
+export interface Lc0WebEncoder0BlockStageTiming {
+  stage: Lc0WebEncoder0BlockStageName;
+  label: string;
+  iterations: number;
+  totalMs: number;
+  avgMs: number;
+}
+
 export interface Lc0WebEncoder0BlockBenchmarkResult {
   status: 'ENCODER0_BLOCK_BENCH_DONE';
   packUrl: string;
@@ -3236,6 +3254,8 @@ export interface Lc0WebEncoder0BlockBenchmarkResult {
   dispatchLoopMs: number;
   dispatchLoopAvgMs: number;
   readbackSyncedMs: number;
+  stageTimings: Lc0WebEncoder0BlockStageTiming[];
+  stageTimingTotalMs: number;
   endToEndMs: number;
   maxAbsError: number;
   rmsError: number;
@@ -3428,6 +3448,73 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
       output,
     });
     const uploadSetupMs = nowMs() - setupStarted;
+    const encodePipelineStage = (pipeline: PipelineLike, bindGroup: unknown, dispatch: (pass: ComputePassLike) => void, count: number): unknown => {
+      const encoder = device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      for (let i = 0; i < count; i++) {
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, bindGroup);
+        dispatch(pass);
+      }
+      pass.end();
+      return encoder.finish();
+    };
+    const encodeQkv = (count: number) => encodePipelineStage(
+      attentionPipelines.qkv,
+      attentionPipelines.qkvBind,
+      (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8)),
+      count,
+    );
+    const encodeAttentionScores = (count: number) => encodePipelineStage(
+      attentionPipelines.score,
+      attentionPipelines.scoreBind,
+      (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS),
+      count,
+    );
+    const encodeSoftmax = (count: number) => encodePipelineStage(
+      attentionPipelines.softmax,
+      attentionPipelines.softmaxBind,
+      (pass) => pass.dispatchWorkgroups(Math.ceil((DEFAULT_HEADS * DEFAULT_TOKENS) / 64)),
+      count,
+    );
+    const encodeAttentionValue = (count: number) => encodePipelineStage(
+      attentionPipelines.value,
+      attentionPipelines.valueBind,
+      (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_HEAD_DIM / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS),
+      count,
+    );
+    const encodeOutputProjectionLn1 = (count: number): unknown => {
+      const encoder = device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      for (let i = 0; i < count; i++) {
+        pass.setPipeline(attentionPipelines.outProj);
+        pass.setBindGroup(0, attentionPipelines.outProjBind);
+        pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+        pass.setPipeline(attentionPipelines.norm);
+        pass.setBindGroup(0, attentionPipelines.normBind);
+        pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
+      }
+      pass.end();
+      return encoder.finish();
+    };
+    const encodeFfnDense1 = (count: number) => encodePipelineStage(
+      ffnPipelines.dense1,
+      ffnPipelines.dense1Bind,
+      (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_FFN_HIDDEN / 8), Math.ceil(DEFAULT_TOKENS / 8)),
+      count,
+    );
+    const encodeFfnDense2Residual = (count: number) => encodePipelineStage(
+      ffnPipelines.dense2,
+      ffnPipelines.dense2Bind,
+      (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8)),
+      count,
+    );
+    const encodeLn2 = (count: number) => encodePipelineStage(
+      ffnPipelines.ln2,
+      ffnPipelines.ln2Bind,
+      (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64)),
+      count,
+    );
     const encodeAttention = (count: number) => {
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginComputePass();
@@ -3455,6 +3542,33 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
       return encoder.finish();
     };
     const encodeFfn = (count: number) => encodeEncoder0FfnDispatches(device, ffnPipelines, count);
+    const measureStageTimings = async (count: number): Promise<Lc0WebEncoder0BlockStageTiming[]> => {
+      const stageDefs: { stage: Lc0WebEncoder0BlockStageName; label: string; encode: (iterations: number) => unknown }[] = [
+        { stage: 'qkvProjection', label: 'QKV projection', encode: encodeQkv },
+        { stage: 'attentionScores', label: 'attention scores', encode: encodeAttentionScores },
+        { stage: 'softmax', label: 'softmax', encode: encodeSoftmax },
+        { stage: 'attentionValue', label: 'attention value', encode: encodeAttentionValue },
+        { stage: 'outputProjectionLn1', label: 'output projection + ln1', encode: encodeOutputProjectionLn1 },
+        { stage: 'ffnDense1', label: 'FFN dense1', encode: encodeFfnDense1 },
+        { stage: 'ffnDense2Residual', label: 'FFN dense2 + residual', encode: encodeFfnDense2Residual },
+        { stage: 'ln2', label: 'ln2', encode: encodeLn2 },
+      ];
+      const timings: Lc0WebEncoder0BlockStageTiming[] = [];
+      for (const stageDef of stageDefs) {
+        const started = nowMs();
+        device.queue.submit([stageDef.encode(count)]);
+        await device.queue.onSubmittedWorkDone?.();
+        const totalMs = nowMs() - started;
+        timings.push({
+          stage: stageDef.stage,
+          label: stageDef.label,
+          iterations: count,
+          totalMs,
+          avgMs: totalMs / count,
+        });
+      }
+      return timings;
+    };
     const submitBlockBatches = async (count: number) => {
       // Make the stage boundary explicit: the FFN reads ln1 output produced by
       // the attention-output pass, and Chrome/WebGPU currently needs the queue
@@ -3479,6 +3593,8 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
     const readbackSyncedMs = nowMs() - dispatchStarted;
     const { maxAbsError, rmsError } = computeErrorStats(gpuOutput, reference.output, outputElements);
     assertErrorInTolerance(maxAbsError);
+    const stageTimings = await measureStageTimings(iterations);
+    const stageTimingTotalMs = stageTimings.reduce((sum, timing) => sum + timing.totalMs, 0);
     return {
       status: 'ENCODER0_BLOCK_BENCH_DONE',
       packUrl: pack.manifestUrl,
@@ -3500,6 +3616,8 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
       dispatchLoopMs,
       dispatchLoopAvgMs: dispatchLoopMs / iterations,
       readbackSyncedMs,
+      stageTimings,
+      stageTimingTotalMs,
       endToEndMs: nowMs() - totalStarted,
       maxAbsError,
       rmsError,
