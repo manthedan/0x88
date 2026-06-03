@@ -4,10 +4,11 @@ import type { Key } from 'chessground/types';
 import { boardToFen, parseFen, squareName, START_FEN, type BoardState } from '../chess/board.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
-import { gameTreeToPgn, parsePgnGame } from '../chess/pgn.ts';
+import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
+import { openingStatsForPosition, openingSummary, type ImportedGame } from './openingStats.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
@@ -27,6 +28,7 @@ let analysisAbort: AbortController | null = null;
 let analyzing = false;
 const lineCache = new Map<string, AnalysisLine[]>();
 const nodeIndex = new Map<number, GameNode>();
+let importedGames: ImportedGame[] = [];
 
 function el(id: string): HTMLElement {
   const node = document.getElementById(id);
@@ -168,10 +170,39 @@ function renderMoveList() {
   el('movelist').innerHTML = html || '<span class="small">no moves — drag a piece or load a PGN</span>';
 }
 
+function renderOpening() {
+  const body = el('opening').querySelector('tbody')!;
+  if (!importedGames.length) { body.innerHTML = '<tr><td colspan="3" class="small">import games to see opening stats</td></tr>'; return; }
+  const stats = openingStatsForPosition(importedGames, tree.current.fen);
+  const summary = openingSummary(stats);
+  el('importInfo').textContent = `${importedGames.length} games · ${summary.total} from here`;
+  if (!stats.length) { body.innerHTML = '<tr><td colspan="3" class="small">no games reached this position</td></tr>'; return; }
+  body.innerHTML = stats.map((stat) => {
+    const pct = (n: number) => (stat.count ? (n / stat.count) * 100 : 0).toFixed(0);
+    return `<tr class="mv" data-uci="${htmlEscape(stat.uci)}"><td class="san">${htmlEscape(stat.san)}</td>`
+      + `<td class="num">${stat.count}</td>`
+      + `<td><div class="wdlbar" title="W ${stat.whiteWins} / D ${stat.draws} / B ${stat.blackWins}">`
+      + `<div class="w" style="width:${pct(stat.whiteWins)}%"></div><div class="d" style="width:${pct(stat.draws)}%"></div><div class="b" style="width:${pct(stat.blackWins)}%"></div></div></td></tr>`;
+  }).join('');
+}
+
+function importGames() {
+  const raw = inputEl('importGamesInput').value.trim();
+  if (!raw) { el('importInfo').textContent = 'paste PGN first'; return; }
+  try {
+    importedGames = parsePgnGames(raw).map((game) => ({ tree: game.tree, result: game.result }));
+    el('importInfo').textContent = `imported ${importedGames.length} games`;
+    renderOpening();
+  } catch (error) {
+    el('importInfo').textContent = `import failed: ${(error as Error).message}`;
+  }
+}
+
 function renderAll() {
   renderBoard();
   renderLines();
   renderMoveList();
+  renderOpening();
 }
 
 async function analyzeCurrent() {
@@ -308,6 +339,12 @@ function wireEvents() {
     if (pv) hoverLine(pv.split(' ').filter(Boolean));
   });
   el('lines').addEventListener('mouseout', () => setShapes(bestShapes()));
+  el('importGames').addEventListener('click', importGames);
+  el('opening').addEventListener('click', (event) => {
+    const row = (event.target as HTMLElement).closest('tr[data-uci]');
+    const uci = row?.getAttribute('data-uci');
+    if (uci && tree.addUci(uci)) afterNavigation();
+  });
   document.addEventListener('keydown', (event) => {
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
     if (event.key === 'ArrowLeft') { tree.back(); afterNavigation(); }

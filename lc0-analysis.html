@@ -44,6 +44,14 @@ textarea{width:100%;min-height:64px;font-family:var(--mono);font-size:12px;borde
 h2{font-size:13px;margin:14px 0 0;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
 #message{margin-top:10px;padding:8px;border:1px solid var(--rule);border-radius:6px;background:var(--soft);font-family:var(--mono);font-size:12px}
 .small{font-size:12px;color:var(--muted)}
+table.opening{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+table.opening th,table.opening td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--rule)}
+table.opening th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase}
+table.opening td.num,table.opening th.num{text-align:right;font-family:var(--mono)}
+table.opening tr.mv{cursor:pointer}table.opening tr.mv:hover td{background:var(--soft)}
+table.opening .san{font-family:var(--mono);font-weight:700}
+.wdlbar{display:flex;height:14px;border-radius:3px;overflow:hidden;min-width:120px;border:1px solid var(--rule)}
+.wdlbar .w{background:#f4f1e8}.wdlbar .d{background:#b9b3a4}.wdlbar .b{background:#3a3a3a}
 @media(max-width:900px){main{grid-template-columns:1fr}}
 </style>
 </head>
@@ -104,6 +112,13 @@ h2{font-size:13px;margin:14px 0 0;text-transform:uppercase;letter-spacing:.04em;
       <dt>Position</dt><dd id="posEval">—</dd>
       <dt>Side</dt><dd id="sideToMove">—</dd>
     </dl>
+    <h2>Opening explorer</h2>
+    <textarea id="importGamesInput" spellcheck="false" placeholder="paste many games (PGN) to build an opening tree, then Import"></textarea>
+    <div class="row">
+      <button id="importGames" type="button">Import games</button>
+      <span id="importInfo" class="small"></span>
+    </div>
+    <table id="opening" class="opening"><thead><tr><th>Move</th><th class="num">Games</th><th>White / Draw / Black</th></tr></thead><tbody></tbody></table>
   </section>
 </main>
 <script type="module" src="/src/lc0/analysisBrowser.ts"></script>
