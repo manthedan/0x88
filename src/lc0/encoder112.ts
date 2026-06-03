@@ -7,6 +7,13 @@ export const LC0_AUX_PLANE_BASE = LC0_HISTORY_PLANES * LC0_PLANES_PER_HISTORY;
 export const LC0_BOARD_SQUARES = 64;
 
 export type Lc0HistoryFill = 'no' | 'fen_only';
+export type Lc0HistoryPosition = BoardState | string;
+
+export interface Lc0PositionHistoryInput {
+  positions: readonly Lc0HistoryPosition[];
+}
+
+export type Lc0EncoderInput = BoardState | string | Lc0PositionHistoryInput;
 
 export interface Lc0EncodedPlanes112 {
   planes: Float32Array;
@@ -50,16 +57,16 @@ function setAll(masks: bigint[], values: number[], plane: number, value = 1): vo
   values[plane] = value;
 }
 
-function setPiecePlanes(board: BoardState, masks: bigint[], historySlot: number): void {
+function setPiecePlanes(board: BoardState, masks: bigint[], historySlot: number, perspectiveTurn: Color): void {
   const base = historySlot * LC0_PLANES_PER_HISTORY;
   for (let source = 0; source < 64; source++) {
     const piece = board.squares[source];
     if (!piece) continue;
     const color = piece[0] as Color;
     const role = piece[1] as PieceRole;
-    const sideOffset = color === board.turn ? 0 : 6;
+    const sideOffset = color === perspectiveTurn ? 0 : 6;
     const plane = base + sideOffset + ROLE_TO_OFFSET[role];
-    const target = perspectiveSquare(source, board.turn);
+    const target = perspectiveSquare(source, perspectiveTurn);
     masks[plane] |= 1n << BigInt(target);
   }
 }
@@ -116,22 +123,31 @@ function setClassicalAuxPlanes(board: BoardState, masks: bigint[], values: numbe
   setAll(masks, values, LC0_AUX_PLANE_BASE + 7);
 }
 
-export function encodeLc0Classical112(boardOrFen: BoardState | string, options?: { historyFill?: Lc0HistoryFill }): Lc0EncodedPlanes112 {
-  const board = typeof boardOrFen === 'string' ? parseFen(boardOrFen) : boardOrFen;
+function parseHistoryInput(input: Lc0EncoderInput): { board: BoardState; historyBoards: BoardState[]; explicitHistory: boolean } {
+  if (typeof input === 'object' && input !== null && 'positions' in input) {
+    if (input.positions.length === 0) throw new Error('LC0 history input requires at least one position');
+    const chronological = input.positions.map((position) => typeof position === 'string' ? parseFen(position) : position);
+    return { board: chronological[chronological.length - 1], historyBoards: [...chronological].reverse(), explicitHistory: true };
+  }
+  const board = typeof input === 'string' ? parseFen(input) : input;
+  return { board, historyBoards: [board], explicitHistory: false };
+}
+
+export function encodeLc0Classical112(boardOrFen: Lc0EncoderInput, options?: { historyFill?: Lc0HistoryFill }): Lc0EncodedPlanes112 {
+  const { board, historyBoards, explicitHistory } = parseHistoryInput(boardOrFen);
   const historyFill = options?.historyFill ?? 'fen_only';
   const masks = Array<bigint>(LC0_CLASSICAL_112_PLANES).fill(0n);
   const values = Array<number>(LC0_CLASSICAL_112_PLANES).fill(1);
 
-  const historyBoards: BoardState[] = [board];
-  if (historyFill === 'fen_only' && !isExactStartPosition(board)) {
+  if (!explicitHistory && historyFill === 'fen_only' && !isExactStartPosition(board)) {
     const syntheticHistoryBoard = boardBeforeEpDoublePush(board);
     while (historyBoards.length < LC0_HISTORY_PLANES) historyBoards.push(syntheticHistoryBoard);
   }
 
   for (let i = 0; i < Math.min(historyBoards.length, LC0_HISTORY_PLANES); i++) {
-    setPiecePlanes(historyBoards[i], masks, i);
-    // Repetition plane remains zero for FEN-only fixtures: no repetition count
-    // is present in a FEN string.
+    setPiecePlanes(historyBoards[i], masks, i, board.turn);
+    // Repetition plane remains zero for Phase 1.5 explicit fixtures: no fixture
+    // yet includes a repeated position that would set LC0's repetition plane.
   }
   setClassicalAuxPlanes(board, masks, values);
 

@@ -4,11 +4,12 @@ import { boardToFen, parseFen, squareName, START_FEN, type BoardState } from '..
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig } from '../nn/ortRuntime.ts';
+import { buildBoardHistoryFromMoves } from './history.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
-type NativeRecord = { id: string; backend?: string; fen: string; bestmove: string; topPriors: NativePrior[] };
+type NativeRecord = { id: string; backend?: string; fen: string; startFen?: string; moves?: string[]; bestmove: string; topPriors: NativePrior[] };
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
@@ -16,6 +17,7 @@ const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
 const PLAYER_SIDE = params.get('side') === 'black' ? 'black' : 'white';
 
 let board: BoardState = parseFen(params.get('fen') ?? START_FEN);
+let historyBoards: BoardState[] = [board];
 let ground: Ground | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
 let busy = false;
@@ -68,6 +70,7 @@ function legalMoveFromDrag(from: Key, to: Key): Move | undefined {
 function applyMove(move: Move): string {
   const uci = moveToUci(move);
   board = makeMove(board, move);
+  historyBoards.push(board);
   lastMove = uci;
   playedMoves.push(uci);
   return uci;
@@ -113,8 +116,7 @@ function renderEvaluation() {
   const seq = ++renderSeq;
   renderStatic();
   if (!player) return;
-  const fen = boardToFen(board);
-  player.chooseMove(fen).then((choice) => {
+  player.chooseMove({ positions: historyBoards }).then((choice) => {
     if (seq !== renderSeq) return;
     const ev = choice.evaluation;
     const [win, draw, loss] = ev.wdl;
@@ -157,7 +159,7 @@ async function engineMove() {
   setBusy(true, 'LC0 policy-only engine thinking…');
   renderStatic();
   try {
-    const choice = await player.chooseMove(boardToFen(board));
+    const choice = await player.chooseMove({ positions: historyBoards });
     const move = choice.move ? legalMoveFromUci(choice.move) : undefined;
     if (!move) throw new Error(`Evaluator chose illegal or missing move: ${choice.move ?? 'none'}`);
     const uci = applyMove(move);
@@ -180,17 +182,25 @@ function nativeCastlingToStandard(uci: string) {
   }
 }
 
+async function fetchNativeRecords(path: string): Promise<NativeRecord[]> {
+  const response = await fetch(path);
+  if (!response.ok) throw new Error(`native fixture fetch failed for ${path}: ${response.status}`);
+  return (await response.text()).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as NativeRecord);
+}
+
 async function runParityFixtures() {
   if (!player || busy) return;
-  setBusy(true, 'Running FEN-only fixture parity in browser…');
+  setBusy(true, 'Running FEN-only and explicit-history fixture parity in browser…');
   el('parity').textContent = 'running…';
   try {
-    const response = await fetch('/lc0/native_fen_only_blas.jsonl');
-    if (!response.ok) throw new Error(`native fixture fetch failed: ${response.status}`);
-    const records = (await response.text()).trim().split('\n').map((line) => JSON.parse(line) as NativeRecord);
+    const records = [
+      ...await fetchNativeRecords('/lc0/native_fen_only_blas.jsonl'),
+      ...await fetchNativeRecords('/lc0/native_history_blas.jsonl'),
+    ];
     const failures: string[] = [];
     for (const native of records) {
-      const choice = await player.chooseMove(native.fen);
+      const input = native.moves ? { positions: buildBoardHistoryFromMoves(native.moves, native.startFen) } : native.fen;
+      const choice = await player.chooseMove(input);
       const expected = nativeCastlingToStandard(native.bestmove);
       if (choice.move !== expected) failures.push(`${native.id}: best ${choice.move} != ${expected}`);
       for (const prior of native.topPriors.slice(0, 5)) {
@@ -204,7 +214,7 @@ async function runParityFixtures() {
       el('message').textContent = `Parity failed (${failures.length} issue(s)).`;
     } else {
       el('parity').textContent = `passed ${records.length}/${records.length} native BLAS fixtures`;
-      el('message').textContent = 'Browser FEN-only fixture parity passed.';
+      el('message').textContent = 'Browser FEN-only and explicit-history fixture parity passed.';
     }
   } catch (error) {
     el('parity').textContent = `failed: ${(error as Error).message}`;
@@ -217,6 +227,7 @@ async function runParityFixtures() {
 
 function resetBoard() {
   board = parseFen(START_FEN);
+  historyBoards = [board];
   lastMove = null;
   playedMoves.length = 0;
   el('message').textContent = 'Reset to start position.';
@@ -224,7 +235,7 @@ function resetBoard() {
 }
 
 async function init() {
-  el('message').textContent = 'Loading LC0 f32 ONNX model…';
+  el('message').textContent = 'Loading LC0 ONNX model…';
   renderStatic();
   try {
     player = await Lc0PolicyOnlyPlayer.create(MODEL_URL);

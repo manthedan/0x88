@@ -1,0 +1,23 @@
+[
+  {
+    "id": "italian-four-ply-history",
+    "description": "Non-repeating opening history where the current board is white-to-move after both sides moved knights.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "moves": ["e2e4", "e7e5", "g1f3", "b8c6"],
+    "finalFen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"
+  },
+  {
+    "id": "castled-black-to-move-history",
+    "description": "Opening history with a white castle and black to move, exercising side-relative castling/state history.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "moves": ["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6", "e1g1"],
+    "finalFen": "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 5 4"
+  },
+  {
+    "id": "history-current-en-passant",
+    "description": "Move history ending in an en-passant target, preserving the real prior boards instead of FEN-only synthetic fill.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "moves": ["e2e4", "a7a6", "e4e5", "d7d5"],
+    "finalFen": "rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3"
+  }
+]

@@ -1,5 +1,4 @@
-import type { BoardState } from '../chess/board.ts';
-import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
+import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
 
 export interface Lc0PolicyOnlyChoice {
   fen: string;
@@ -8,7 +7,7 @@ export interface Lc0PolicyOnlyChoice {
 }
 
 export interface Lc0PolicyOnlyEvaluator {
-  evaluate(boardOrFen: BoardState | string): Promise<Lc0Evaluation>;
+  evaluate(boardOrFen: Lc0EvaluatorInput): Promise<Lc0Evaluation>;
 }
 
 export class Lc0PolicyOnlyPlayer {
@@ -22,7 +21,7 @@ export class Lc0PolicyOnlyPlayer {
     return new Lc0PolicyOnlyPlayer(await Lc0OnnxEvaluator.create(modelPath, options));
   }
 
-  async chooseMove(boardOrFen: BoardState | string): Promise<Lc0PolicyOnlyChoice> {
+  async chooseMove(boardOrFen: Lc0EvaluatorInput): Promise<Lc0PolicyOnlyChoice> {
     const evaluation = await this.evaluator.evaluate(boardOrFen);
     return {
       fen: evaluation.fen,

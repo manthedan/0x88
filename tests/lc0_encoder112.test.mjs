@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseFen, squareIndex, START_FEN } from '../src/chess/board.ts';
+import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
 import {
   LC0_AUX_PLANE_BASE,
   LC0_CLASSICAL_112_PLANES,
@@ -92,4 +93,26 @@ test('LC0 classical 112 synthetic en-passant history undoes the double pawn push
   // Synthetic missing history moves that pawn back to d7.
   assert.equal((encoded.masks[13 + 6] & bit('d5')) !== 0n, false);
   assert.equal((encoded.masks[13 + 6] & bit('d7')) !== 0n, true);
+});
+
+test('LC0 classical 112 explicit move history uses current side perspective for prior boards', () => {
+  const positions = buildBoardHistoryFromMoves(['e2e4', 'e7e5', 'g1f3', 'b8c6']);
+  const encoded = encodeLc0Classical112({ positions }, { historyFill: 'fen_only' });
+  // Current white-to-move slot after ...Nc6.
+  assert.equal((encoded.masks[1] & bit('f3')) !== 0n, true, 'current white knight f3');
+  assert.equal((encoded.masks[13 + 1] & bit('f3')) !== 0n, true, 'previous white knight f3 remains ours from current perspective');
+  assert.equal((encoded.masks[6 * 13 + 1] & bit('g1')) !== 0n, false, 'unused history stays empty');
+  // One ply back is before ...Nc6, so black knight is still on b8 in their knight plane.
+  assert.equal((encoded.masks[13 + 7] & bit('b8')) !== 0n, true, 'previous black knight b8');
+  assert.equal((encoded.masks[13 + 7] & bit('c6')) !== 0n, false, 'previous black knight not yet c6');
+});
+
+test('LC0 classical 112 explicit history preserves real en-passant prior boards', () => {
+  const positions = buildBoardHistoryFromMoves(['e2e4', 'a7a6', 'e4e5', 'd7d5']);
+  const encoded = encodeLc0Classical112({ positions }, { historyFill: 'fen_only' });
+  assert.equal((encoded.masks[6] & bit('d5')) !== 0n, true, 'current black pawn d5');
+  assert.equal((encoded.masks[13 + 6] & bit('d7')) !== 0n, true, 'explicit previous black pawn d7');
+  assert.equal((encoded.masks[13 + 6] & bit('d5')) !== 0n, false, 'previous board has not yet pushed d-pawn');
+  assert.equal((encoded.masks[13 + 0] & bit('e5')) !== 0n, true, 'one ply back includes white pawn e5');
+  assert.equal((encoded.masks[2 * 13 + 0] & bit('e4')) !== 0n, true, 'two plies back includes white pawn e4');
 });

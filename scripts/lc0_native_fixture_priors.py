@@ -7,7 +7,7 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 STAT = re.compile(r"^info string\s+(\S+)\s+\(\s*(\d+)\s*\).*?\(P:\s*([0-9.]+)%\).*?\(Q:\s*([-.0-9]+)\)")
 NODE = re.compile(r"^info string node\s+\(\s*(\d+)\).*?\(WL:\s*([-.0-9]+)\)\s+\(D:\s*([-.0-9]+)\)\s+\(M:\s*([-.0-9]+)\)\s+\(Q:\s*([-.0-9]+)\)\s+\(V:\s*([-.0-9]+)\)")
 
-parser = argparse.ArgumentParser(description="Collect native LC0 nodes=1 VerboseMoveStats for FEN fixtures.")
+parser = argparse.ArgumentParser(description="Collect native LC0 nodes=1 VerboseMoveStats for FEN or explicit move-history fixtures.")
 parser.add_argument("--lc0", default="../native/lc0-release-0.32/build/release/lc0")
 parser.add_argument("--weights", default="../models/lc0-bestnets/t1-256x10-distilled-swa-2432500.pb.gz")
 parser.add_argument("--fixtures", default="fixtures/lc0/fen_only.json")
@@ -44,6 +44,17 @@ def read_until(prefix: str, timeout: float) -> list[str]:
             return lines
     raise TimeoutError(f"timed out waiting for {prefix}")
 
+def position_command(fixture: dict) -> str:
+    if "moves" in fixture:
+        start_fen = fixture.get("startFen", "startpos")
+        prefix = "position startpos" if start_fen == "startpos" else "position fen " + start_fen
+        moves = " ".join(fixture["moves"])
+        return prefix + (" moves " + moves if moves else "")
+    return "position fen " + fixture["fen"]
+
+def fixture_fen(fixture: dict) -> str:
+    return fixture.get("fen") or fixture.get("finalFen") or ""
+
 def parse_result(fixture: dict, lines: list[str], backend: str) -> dict:
     moves = []
     node = None
@@ -59,7 +70,11 @@ def parse_result(fixture: dict, lines: list[str], backend: str) -> dict:
         if n:
             node = {"visits": int(n.group(1)), "wl": float(n.group(2)), "d": float(n.group(3)), "mlh": float(n.group(4)), "q": float(n.group(5)), "v": float(n.group(6))}
     moves.sort(key=lambda x: x["prior"], reverse=True)
-    return {"id": fixture["id"], "backend": backend, "fen": fixture["fen"], "bestmove": bestmove, "node": node, "topPriors": moves[:10]}
+    record = {"id": fixture["id"], "backend": backend, "fen": fixture_fen(fixture), "bestmove": bestmove, "node": node, "topPriors": moves[:10]}
+    if "moves" in fixture:
+        record["startFen"] = fixture.get("startFen", "startpos")
+        record["moves"] = fixture["moves"]
+    return record
 
 try:
     send("uci")
@@ -73,7 +88,7 @@ try:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w") as f:
         for fixture in fixtures:
-            send("position fen " + fixture["fen"])
+            send(position_command(fixture))
             send(f"go nodes {args.nodes}")
             lines = read_until("bestmove", 120)
             record = parse_result(fixture, lines, args.backend)
