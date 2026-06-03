@@ -12,6 +12,8 @@ import {
   runLc0WebEncoder0FfnBenchmark,
   runLc0WebEncoderStackBenchmark,
   runLc0WebEncoder0FfnOrtBenchmark,
+  Lc0WebHybridEvaluator,
+  runLc0WebHybridEvaluation,
   runLc0WebAttentionScoreOrtBenchmark,
   runLc0WebAttentionValueBenchmark,
   runLc0WebAttentionValueOrtBenchmark,
@@ -33,6 +35,7 @@ import {
   type Lc0WebEncoder0FfnBenchmarkResult,
   type Lc0WebEncoderStackBenchmarkResult,
   type Lc0WebEncoder0FfnOrtBenchmarkResult,
+  type Lc0WebHybridEvaluationResult,
   type Lc0WebMatmulAddKernelBenchmarkResult,
   type Lc0WebMatmulAddKernelProbeResult,
   type Lc0WebMatmulAddOrtBenchmarkResult,
@@ -48,6 +51,10 @@ type InitMessage = {
   modelUrl: string;
   ep: OrtExecutionProviderPreference;
   cacheModel: boolean;
+  runtime?: 'onnx' | 'hybrid';
+  packUrl?: string;
+  layers?: number;
+  verifyShards?: boolean;
 };
 
 type SearchMessage = {
@@ -69,6 +76,15 @@ type EvaluateBatchMessage = {
   type: 'evaluateBatch';
   id: number;
   inputs: Lc0EvaluatorInput[];
+};
+
+type HybridEvaluateMessage = {
+  type: 'hybridEvaluate';
+  id: number;
+  packUrl: string;
+  input: Lc0EvaluatorInput;
+  layers?: number;
+  verifyShards?: boolean;
 };
 
 type LoadPackMessage = {
@@ -272,7 +288,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionValueOrtBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | AttentionOutputOrtBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0FfnOrtBenchmarkMessage | Encoder0BlockBenchmarkMessage | Encoder0BlockOrtBenchmarkMessage | EncoderStackBenchmarkMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | HybridEvaluateMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionValueOrtBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | AttentionOutputOrtBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0FfnOrtBenchmarkMessage | Encoder0BlockBenchmarkMessage | Encoder0BlockOrtBenchmarkMessage | EncoderStackBenchmarkMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -299,6 +315,7 @@ type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
+  | { type: 'hybridEvaluationResult'; id: number; result: Lc0WebHybridEvaluationResult }
   | { type: 'packLoadResult'; id: number; result: PackLoadResult }
   | { type: 'kernelProbeResult'; id: number; result: Lc0WebMatmulAddKernelProbeResult }
   | { type: 'kernelBenchmarkResult'; id: number; result: Lc0WebMatmulAddKernelBenchmarkResult }
@@ -321,7 +338,7 @@ type WorkerResponse =
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'error'; id: number; error: string };
 
-let evaluator: Lc0OnnxEvaluator | null = null;
+let evaluator: { evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation>; evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> } | null = null;
 let searcher: Lc0PuctSearcher | null = null;
 let configuredModelUrl: string | null = null;
 /** In-flight search abort controllers keyed by request id, so cancel messages can stop them. */
@@ -347,6 +364,18 @@ function enqueueModelOperation(work: () => Promise<void>): Promise<void> {
 
 async function handleInit(message: InitMessage): Promise<void> {
   setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  if (message.runtime === 'hybrid') {
+    if (!message.packUrl) throw new Error('hybrid LC0 worker init requires packUrl');
+    evaluator = new Lc0WebHybridEvaluator({
+      packUrl: message.packUrl,
+      layers: message.layers,
+      verifyShards: message.verifyShards,
+    });
+    searcher = new Lc0PuctSearcher(evaluator);
+    configuredModelUrl = message.packUrl;
+    post({ type: 'ready', id: message.id, backend: 'lc0web-wgsl-encoder-ort-heads', modelCache: 'hybrid-pack-lazy' });
+    return;
+  }
   const modelLoad = await loadLc0ModelForOrt(message.modelUrl, { cache: message.cacheModel });
   evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
   searcher = new Lc0PuctSearcher(evaluator);
@@ -642,6 +671,17 @@ async function handleSearch(message: SearchMessage): Promise<void> {
   }
 }
 
+async function handleHybridEvaluate(message: HybridEvaluateMessage): Promise<void> {
+  setRequestedOrtExecutionProviderForCurrentThread('wasm');
+  const result = await runLc0WebHybridEvaluation({
+    packUrl: message.packUrl,
+    input: message.input,
+    layers: message.layers,
+    verifyShards: message.verifyShards,
+  });
+  post({ type: 'hybridEvaluationResult', id: message.id, result });
+}
+
 function handleCancel(message: CancelMessage): void {
   if (message.target !== undefined) {
     activeSearches.get(message.target)?.abort();
@@ -680,6 +720,7 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       else if (message.type === 'encoder0BlockBenchmark') await handleEncoder0BlockBenchmark(message);
       else if (message.type === 'encoder0BlockOrtBenchmark') await handleEncoder0BlockOrtBenchmark(message);
       else if (message.type === 'encoderStackBenchmark') await handleEncoderStackBenchmark(message);
+      else if (message.type === 'hybridEvaluate') await handleHybridEvaluate(message);
       else if (message.type === 'evaluate') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleEvaluate(message);

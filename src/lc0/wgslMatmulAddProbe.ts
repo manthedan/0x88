@@ -1,4 +1,6 @@
 import * as ort from '../nn/ortRuntime.ts';
+import { encodeLc0Classical112, type Lc0HistoryFill } from './encoder112.ts';
+import { currentBoardAndFen, LC0_DEFAULT_POLICY_TEMPERATURE, legalPolicyPriors, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { loadLc0WebModelPack, type Lc0WebTensorView } from './modelPack.ts';
 
 const DEFAULT_WEIGHT_TENSOR = '/encoder0/mha/Q/w/w';
@@ -3531,6 +3533,10 @@ export interface Lc0WebEncoderStackBenchmarkOptions {
   verifyShards?: boolean;
   compareOrt?: boolean;
   compareHeads?: boolean;
+  /** Optional real model activation entering /encoder0; defaults to synthetic benchmark input. */
+  input?: Float32Array<ArrayBufferLike>;
+  /** Include full policy/head arrays in policyValueHeads for evaluator/drift callers. */
+  includeHeadOutputs?: boolean;
 }
 
 export interface Lc0WebEncoderStackBlockResult {
@@ -3560,6 +3566,10 @@ export interface Lc0WebEncoderStackHeadsResult {
   policySample: number[];
   mappedPolicySample: number[];
   wdl: number[];
+  /** Optional full 64x64 policy logits. Omitted by benchmark callers to keep reports compact. */
+  policy?: number[];
+  /** Optional full final 1858 LC0 policy logits. */
+  mappedPolicy?: number[];
 }
 
 export interface Lc0WebEncoderStackBenchmarkResult {
@@ -3873,7 +3883,7 @@ export function createTinyPolicyValueHeadsOnnxForTest(tensors: Lc0WebPolicyValue
   return writer.finish();
 }
 
-async function runPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors): Promise<{
+async function runPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors, options: { includeOutputs?: boolean } = {}): Promise<{
   modelBuildMs: number;
   sessionCreateMs: number;
   runMs: number;
@@ -3886,6 +3896,8 @@ async function runPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>, tens
   policySample: number[];
   mappedPolicySample: number[];
   wdl: number[];
+  policy?: number[];
+  mappedPolicy?: number[];
   mode: 'ort-policy-value';
 }> {
   const reference = buildPolicyValueHeadReference(input, tensors);
@@ -3923,7 +3935,164 @@ async function runPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>, tens
     policySample: Array.from(policy.slice(0, 8)),
     mappedPolicySample: Array.from(mappedPolicy.slice(0, 8)),
     wdl: Array.from(wdl),
+    ...(options.includeOutputs ? { policy: Array.from(policy), mappedPolicy: Array.from(mappedPolicy) } : {}),
   };
+}
+
+const DEFAULT_INPUT_BODY_TENSORS = {
+  posEncoding: '/const/pos_encoding',
+  inputWeight: '/attn_body/matmul/w',
+  inputBias: '/attn_body/add/w',
+  mulGate: '/ip_mul_gate/w',
+  addGate: '/ip_add_gate/w',
+} as const;
+const DEFAULT_INPUT_PLANES = 112;
+const DEFAULT_POSITIONAL_CHANNELS = 64;
+const DEFAULT_PADDED_INPUT_CHANNELS = DEFAULT_INPUT_PLANES + DEFAULT_POSITIONAL_CHANNELS;
+
+interface Lc0WebInitialInputTensors {
+  posEncoding: Lc0WebTensorView;
+  inputWeight: Lc0WebTensorView;
+  inputBias: Lc0WebTensorView;
+  mulGate: Lc0WebTensorView;
+  addGate: Lc0WebTensorView;
+}
+
+export interface Lc0WebHybridEvaluationOptions {
+  packUrl: string;
+  input: Lc0EvaluatorInput;
+  layers?: number;
+  verifyShards?: boolean;
+  historyFill?: Lc0HistoryFill;
+  policyTemperature?: number;
+}
+
+export interface Lc0WebHybridEvaluationResult extends Lc0Evaluation {
+  status: 'LC0WEB_HYBRID_EVALUATION_DONE';
+  backend: 'lc0web-wgsl-encoder-ort-heads';
+  packUrl: string;
+  layers: number;
+  packLoadMs: number;
+  encoderDispatchSyncedMs: number;
+  headRunMs: number;
+  mappedPolicy: number[];
+}
+
+function inputBodyTensorNameList(): string[] {
+  return Object.values(DEFAULT_INPUT_BODY_TENSORS);
+}
+
+function loadInitialInputTensors(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>): Lc0WebInitialInputTensors {
+  const get = (name: string): Lc0WebTensorView => {
+    const tensor = pack.tensors.get(name);
+    if (!tensor) throw new Error(`lc0web input tensor was not loaded: ${name}`);
+    return tensor;
+  };
+  const tensors: Lc0WebInitialInputTensors = {
+    posEncoding: get(DEFAULT_INPUT_BODY_TENSORS.posEncoding),
+    inputWeight: get(DEFAULT_INPUT_BODY_TENSORS.inputWeight),
+    inputBias: get(DEFAULT_INPUT_BODY_TENSORS.inputBias),
+    mulGate: get(DEFAULT_INPUT_BODY_TENSORS.mulGate),
+    addGate: get(DEFAULT_INPUT_BODY_TENSORS.addGate),
+  };
+  assertTensorShapeAndBytes(tensors.posEncoding, [1, DEFAULT_TOKENS, DEFAULT_POSITIONAL_CHANNELS], 2, 'posEncoding');
+  assertTensorShapeAndBytes(tensors.inputWeight, [DEFAULT_PADDED_INPUT_CHANNELS, DEFAULT_N], 2, 'inputWeight');
+  assertTensorShapeAndBytes(tensors.inputBias, [DEFAULT_N], 2, 'inputBias');
+  assertTensorShapeAndBytes(tensors.mulGate, [DEFAULT_TOKENS, DEFAULT_N], 2, 'mulGate');
+  assertTensorShapeAndBytes(tensors.addGate, [DEFAULT_TOKENS, DEFAULT_N], 2, 'addGate');
+  return tensors;
+}
+
+function buildInitialEncoderActivation(input: Lc0EvaluatorInput, tensors: Lc0WebInitialInputTensors, historyFill: Lc0HistoryFill): Float32Array<ArrayBufferLike> {
+  const encoded = encodeLc0Classical112(input, { historyFill }).planes;
+  const padded = new Float32Array(DEFAULT_TOKENS * DEFAULT_PADDED_INPUT_CHANNELS);
+  for (let token = 0; token < DEFAULT_TOKENS; token++) {
+    const base = token * DEFAULT_PADDED_INPUT_CHANNELS;
+    for (let plane = 0; plane < DEFAULT_INPUT_PLANES; plane++) padded[base + plane] = encoded[plane * DEFAULT_TOKENS + token];
+    for (let channel = 0; channel < DEFAULT_POSITIONAL_CHANNELS; channel++) padded[base + DEFAULT_INPUT_PLANES + channel] = readF16At(tensors.posEncoding.bytes, token * DEFAULT_POSITIONAL_CHANNELS + channel);
+  }
+  const projected = cpuProjectTokens(padded, tensors.inputWeight.bytes, tensors.inputBias.bytes, DEFAULT_TOKENS, DEFAULT_PADDED_INPUT_CHANNELS, DEFAULT_N);
+  const out = new Float32Array(DEFAULT_TOKENS * DEFAULT_N);
+  for (let i = 0; i < projected.length; i++) {
+    const x = projected[i];
+    const mish = x * Math.tanh(Math.log1p(Math.exp(x)));
+    out[i] = mish * readF16At(tensors.mulGate.bytes, i) + readF16At(tensors.addGate.bytes, i);
+  }
+  return out;
+}
+
+export async function runLc0WebHybridEvaluation(options: Lc0WebHybridEvaluationOptions): Promise<Lc0WebHybridEvaluationResult> {
+  const layers = clampInteger(options.layers, 10, 1, 32);
+  const historyFill = options.historyFill ?? 'fen_only';
+  const { board, fen } = currentBoardAndFen(options.input);
+  const inputPack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: inputBodyTensorNameList(),
+  });
+  const encoderInput = buildInitialEncoderActivation(options.input, loadInitialInputTensors(inputPack), historyFill);
+  const stack = await runLc0WebEncoderStackBenchmark({
+    packUrl: options.packUrl,
+    layers,
+    warmup: 0,
+    verifyShards: options.verifyShards,
+    compareOrt: false,
+    compareHeads: true,
+    input: encoderInput,
+    includeHeadOutputs: true,
+  });
+  const heads = stack.policyValueHeads;
+  if (!heads?.mappedPolicy) throw new Error('lc0web hybrid evaluation did not produce mapped policy logits');
+  const wdl: [number, number, number] = [Number(heads.wdl[0]), Number(heads.wdl[1]), Number(heads.wdl[2])];
+  const legalPriors = legalPolicyPriors(board, heads.mappedPolicy, options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE);
+  return {
+    status: 'LC0WEB_HYBRID_EVALUATION_DONE',
+    backend: 'lc0web-wgsl-encoder-ort-heads',
+    packUrl: stack.packUrl,
+    layers,
+    packLoadMs: inputPack.elapsedMs + stack.packLoadMs,
+    encoderDispatchSyncedMs: stack.dispatchSyncedMs,
+    headRunMs: heads.runMs,
+    fen,
+    wdl,
+    q: wdl[0] - wdl[2],
+    mlh: 0,
+    legalPriors,
+    bestMove: legalPriors[0]?.uci,
+    mappedPolicy: heads.mappedPolicy,
+  };
+}
+
+export class Lc0WebHybridEvaluator {
+  readonly packUrl: string;
+  readonly layers: number;
+  readonly historyFill: Lc0HistoryFill;
+  readonly policyTemperature: number;
+  readonly verifyShards: boolean;
+
+  constructor(options: Omit<Lc0WebHybridEvaluationOptions, 'input'>) {
+    this.packUrl = options.packUrl;
+    this.layers = clampInteger(options.layers, 10, 1, 32);
+    this.historyFill = options.historyFill ?? 'fen_only';
+    this.policyTemperature = options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE;
+    this.verifyShards = options.verifyShards ?? true;
+  }
+
+  async evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> {
+    return runLc0WebHybridEvaluation({
+      packUrl: this.packUrl,
+      input,
+      layers: this.layers,
+      historyFill: this.historyFill,
+      policyTemperature: this.policyTemperature,
+      verifyShards: this.verifyShards,
+    });
+  }
+
+  async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
+    const out: Lc0Evaluation[] = [];
+    for (const input of inputs) out.push(await this.evaluate(input));
+    return out;
+  }
 }
 
 export async function runLc0WebEncoder0BlockOrtBenchmark(options: Lc0WebEncoder0BlockBenchmarkOptions): Promise<Lc0WebEncoder0BlockOrtBenchmarkResult> {
@@ -4335,7 +4504,8 @@ export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStack
   const blocks: Lc0WebEncoderStackBlockResult[] = [];
   try {
     const setupStarted = nowMs();
-    let cpuInput = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K);
+    let cpuInput = options.input ?? makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K);
+    if (cpuInput.length !== outputElements) throw new Error(`encoder stack input length ${cpuInput.length} != ${outputElements}`);
     let gpuInput = createStorageBuffer(device, cpuInput, usage.STORAGE | usage.COPY_DST);
     buffers.push(gpuInput);
     let lastGpuOutput = cpuInput;
@@ -4450,7 +4620,7 @@ export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStack
     const maxBlock = blocks.reduce((max, block) => Math.max(max, block.maxAbsError), 0);
     const rmsBlock = Math.sqrt(blocks.reduce((sum, block) => sum + block.rmsError * block.rmsError, 0) / blocks.length);
     const ortMax = compareOrt ? blocks.reduce((max, block) => Math.max(max, block.ortMaxAbsError ?? 0), 0) : undefined;
-    const policyValueHeads = headTensors ? await runPolicyValueHeadsOrt(lastGpuOutput, headTensors) : undefined;
+    const policyValueHeads = headTensors ? await runPolicyValueHeadsOrt(lastGpuOutput, headTensors, { includeOutputs: options.includeHeadOutputs }) : undefined;
     return {
       status: 'ENCODER_STACK_BENCH_DONE',
       packUrl: pack.manifestUrl,

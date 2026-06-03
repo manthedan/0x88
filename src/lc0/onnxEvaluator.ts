@@ -118,7 +118,7 @@ function arraySlice<T extends ArrayLike<number>>(values: T, start: number, lengt
   return Array.from({ length }, (_, i) => Number(values[start + i]));
 }
 
-function currentBoardAndFen(input: Lc0EvaluatorInput): { board: BoardState; fen: string } {
+export function currentBoardAndFen(input: Lc0EvaluatorInput): { board: BoardState; fen: string } {
   if (typeof input === 'object' && input !== null && 'positions' in input) {
     if (input.positions.length === 0) throw new Error('LC0 evaluator history input requires at least one position');
     const last = input.positions[input.positions.length - 1];
@@ -129,7 +129,7 @@ function currentBoardAndFen(input: Lc0EvaluatorInput): { board: BoardState; fen:
   return { board, fen: typeof input === 'string' ? input : boardToFen(board) };
 }
 
-function legalPolicyPriors(board: BoardState, logits: ArrayLike<number>, policyTemperature: number): Lc0LegalPrior[] {
+export function legalPolicyPriors(board: BoardState, logits: ArrayLike<number>, policyTemperature: number): Lc0LegalPrior[] {
   const moveTransform = board.turn === 'b' ? LC0_MIRROR_TRANSFORM : 0;
   const legal = legalMoves(board).map((move) => {
     const uci = moveToUci(move);

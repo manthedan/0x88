@@ -575,9 +575,11 @@ const QKV_PROBE_REQUESTED = params.get('qkvProbe') === '1';
 const ORT_OP_BENCH_REQUESTED = params.get('ortOpBench') === '1' || params.get('ortBench') === '1';
 const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('kernelBenchmark') === '1' || params.get('wgslBench') === '1';
 const KERNEL_PROBE_REQUESTED = ENCODER_STACK_BENCH_REQUESTED || ENCODER0_BLOCK_ORT_BENCH_REQUESTED || ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_ORT_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_ORT_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
-const PACK_PROBE_REQUESTED = KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null;
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
-const WORKER_ONLY_MODEL = PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
+const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
+const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
+const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
+const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
 const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
 const BENCH_WARMUP = Math.min(100, Math.max(0, Math.floor(Number(params.get('benchWarmup') ?? '5') || 0)));
@@ -856,7 +858,18 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
   });
   if (!initModel) return;
   const initStarted = performance.now();
-  const ready = await postWorkerRequest<{ type: 'ready'; backend: string; modelCache: string }>({ type: 'init', modelUrl: MODEL_URL, ep: requestedWorkerEp(), cacheModel: CACHE_MODEL });
+  const ready = await postWorkerRequest<{ type: 'ready'; backend: string; modelCache: string }>({
+    type: 'init',
+    modelUrl: MODEL_URL,
+    ep: requestedWorkerEp(),
+    cacheModel: CACHE_MODEL,
+    ...(HYBRID_EVALUATOR_REQUESTED ? {
+      runtime: 'hybrid',
+      packUrl: PACK_URL,
+      layers: Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10))),
+      verifyShards: params.get('packVerify') !== '0',
+    } : {}),
+  });
   searchWorkerInitMs = performance.now() - initStarted;
   searchWorkerReady = true;
   searchWorkerBackend = ready.backend;
@@ -2025,6 +2038,53 @@ async function fetchNativeRecords(path: string): Promise<NativeRecord[]> {
   return (await response.text()).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as NativeRecord);
 }
 
+async function runHybridDriftFixtures() {
+  if (!searchWorkerReady) throw new Error('hybrid drift requires initialized LC0 worker');
+  setBusy(true, 'Running hybrid WGSL encoder + ORT heads fixture evaluations in browser…');
+  el('benchResult').textContent = 'HYBRID_DRIFT_RUNNING';
+  try {
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(params.get('hybridDriftLimit') ?? params.get('fixtureLimit') ?? '9') || 9)));
+    const records = [
+      ...await fetchNativeRecords('/lc0/native_fen_only_blas.jsonl'),
+      ...await fetchNativeRecords('/lc0/native_history_blas.jsonl'),
+    ].slice(0, limit);
+    const started = performance.now();
+    const evaluations = [];
+    for (const native of records) {
+      const input = native.moves ? { positions: buildBoardHistoryFromMoves(native.moves, native.startFen) } : native.fen;
+      const choice = await choosePolicyMove(input);
+      evaluations.push({
+        id: native.id,
+        fen: native.fen,
+        startFen: native.startFen,
+        moves: native.moves,
+        bestMove: choice.evaluation.bestMove,
+        wdl: choice.evaluation.wdl,
+        q: choice.evaluation.q,
+        topPriors: choice.evaluation.legalPriors.slice(0, 10).map(({ uci, index, prior }) => ({ uci, index, prior })),
+      });
+    }
+    const elapsedMs = performance.now() - started;
+    const result = {
+      status: 'HYBRID_DRIFT_DONE',
+      backend: searchWorkerBackend,
+      packUrl: PACK_URL,
+      layers: Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10))),
+      fixtures: evaluations.length,
+      elapsedMs: Number(elapsedMs.toFixed(3)),
+      evaluations,
+    };
+    el('benchResult').textContent = JSON.stringify(result);
+    el('message').textContent = `HYBRID_DRIFT_DONE ${evaluations.length} fixture(s) · ${(elapsedMs / Math.max(1, evaluations.length)).toFixed(1)} ms/eval`;
+  } catch (error) {
+    el('benchResult').textContent = `HYBRID_DRIFT_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Hybrid drift failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function runParityFixtures() {
   if (!evaluationAvailable() || busy) return;
   setBusy(true, 'Running FEN-only and explicit-history fixture parity in browser…');
@@ -2373,6 +2433,10 @@ async function init() {
     el('message').textContent = WORKER_ONLY_MODEL
       ? 'Ready. LC0 model is loaded only in the dedicated worker.'
       : 'Ready. Drag a legal move or ask the engine to move.';
+    if (HYBRID_DRIFT_REQUESTED) {
+      await runHybridDriftFixtures();
+      return;
+    }
     if (BENCH_REQUESTED) await runWorkerEvalBenchmark();
     else renderEvaluation();
     if (!BENCH_REQUESTED && (params.get('parity') === '1' || params.get('fixtures') === '1')) await runParityFixtures();
