@@ -13,6 +13,7 @@ import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchResult } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
+import type { SearchEarlyStop } from '../search/puct.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
@@ -354,11 +355,18 @@ function requestedKernelVariant(): KernelVariant {
 const SW_ENABLED = params.get('sw') === '1'
   || (params.get('sw') !== '0' && (import.meta as { env?: { PROD?: boolean } }).env?.PROD === true);
 
+function parseEarlyStop(raw: string | null): SearchEarlyStop {
+  const normalized = (raw ?? 'none').toLowerCase().replace(/[ _]/g, '-');
+  if (normalized === 'root-dominance' || normalized === 'best-stable' || normalized === 'kld-stable') return normalized;
+  return 'none';
+}
+
 // Runtime-adjustable settings: seeded from query params, then driven by the UI.
 let playerSide: 'white' | 'black' = params.get('side') === 'black' ? 'black' : 'white';
 let searchVisits = Math.max(1, Math.floor(Number(params.get('visits') ?? '32') || 32));
 let searchBatchSize = Math.max(1, Math.floor(Number(params.get('batch') ?? params.get('batchSize') ?? '1') || 1));
 let searchMultiPv = Math.max(1, Math.floor(Number(params.get('multipv') ?? params.get('multiPv') ?? '1') || 1));
+let searchEarlyStop: SearchEarlyStop = parseEarlyStop(params.get('earlyStop') ?? params.get('stop'));
 let engineReplyMode: EngineReplyMode = params.get('mode') === 'search' ? 'search' : 'policy';
 
 let board: BoardState = parseFen(params.get('fen') ?? START_FEN);
@@ -511,7 +519,7 @@ function renderStatic() {
   el('backend').textContent = WORKER_ONLY_MODEL && searchWorkerReady ? searchWorkerBackend : describeOrtBackendConfig();
   el('status').textContent = PACK_PROBE_REQUESTED ? 'pack probe' : evaluationAvailable() ? 'ready' : 'loading';
   el('searchMode').textContent = searchModeLabel();
-  el('searchBatch').textContent = `${searchBatchSize}`;
+  el('searchBatch').textContent = searchEarlyStop === 'none' ? `${searchBatchSize}` : `${searchBatchSize} · ${searchEarlyStop}`;
   el('searchMove').textContent = `Search ${searchVisits}`;
   el('engineMove').toggleAttribute('disabled', busy || !evaluationAvailable());
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
@@ -1281,6 +1289,7 @@ async function searchWithWorker(): Promise<RenderableSearchResult> {
     visits: searchVisits,
     batchSize: searchBatchSize,
     multiPv: searchMultiPv,
+    earlyStop: searchEarlyStop,
   }, (id) => { activeWorkerSearchId = id; });
   return response.result;
 }
@@ -1330,6 +1339,7 @@ async function executeSearchResult(): Promise<RenderableSearchResult> {
     visits: searchVisits,
     batchSize: searchBatchSize,
     multiPv: searchMultiPv,
+    earlyStop: searchEarlyStop,
     signal: mainSearchAbort!.signal,
     yieldEveryMs: 16,
   });
@@ -1534,12 +1544,12 @@ async function resetBattleSearchTree(): Promise<void> {
 async function battleSearchMove(positions: BoardState[]): Promise<string | null> {
   if (searchWorkerReady) {
     const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>(
-      { type: 'search', input: { positions }, visits: searchVisits, batchSize: searchBatchSize, reuseTree: true },
+      { type: 'search', input: { positions }, visits: searchVisits, batchSize: searchBatchSize, reuseTree: true, earlyStop: searchEarlyStop },
       (id) => { activeWorkerSearchId = id; },
     );
     return response.result.cancelled ? null : (response.result.move ?? null);
   }
-  const result = await searcher!.search({ positions }, { visits: searchVisits, batchSize: searchBatchSize, signal: battleAbort!.signal, yieldEveryMs: 16, reuseTree: true });
+  const result = await searcher!.search({ positions }, { visits: searchVisits, batchSize: searchBatchSize, earlyStop: searchEarlyStop, signal: battleAbort!.signal, yieldEveryMs: 16, reuseTree: true });
   return result.move ?? null;
 }
 
@@ -1813,6 +1823,7 @@ function seedSettingsInputs() {
   inputEl('visitsInput').value = String(searchVisits);
   inputEl('batchInput').value = String(searchBatchSize);
   inputEl('multiPvInput').value = String(searchMultiPv);
+  selectEl('earlyStopSelect').value = searchEarlyStop;
   inputEl('battleGamesInput').value = String(battleGames);
   inputEl('sfDepthInput').value = String(stockfishDepth);
   selectEl('opponentSelect').value = battleOpponent;
@@ -1845,6 +1856,11 @@ inputEl('batchInput').addEventListener('change', () => {
 inputEl('multiPvInput').addEventListener('change', () => {
   searchMultiPv = clampInt(inputEl('multiPvInput').value, 1, 20, searchMultiPv);
   inputEl('multiPvInput').value = String(searchMultiPv);
+  renderStatic();
+});
+selectEl('earlyStopSelect').addEventListener('change', () => {
+  searchEarlyStop = parseEarlyStop(selectEl('earlyStopSelect').value);
+  selectEl('earlyStopSelect').value = searchEarlyStop;
   renderStatic();
 });
 inputEl('battleGamesInput').addEventListener('change', () => {

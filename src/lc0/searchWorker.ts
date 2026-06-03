@@ -27,6 +27,7 @@ import {
   type Lc0WebSoftmaxBenchmarkResult,
 } from './wgslMatmulAddProbe.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
+import type { SearchEarlyStop } from '../search/puct.ts';
 
 type InitMessage = {
   type: 'init';
@@ -44,6 +45,7 @@ type SearchMessage = {
   batchSize?: number;
   multiPv?: number;
   reuseTree?: boolean;
+  earlyStop?: SearchEarlyStop;
 };
 
 type ResetSearchMessage = {
@@ -438,6 +440,7 @@ async function handleSearch(message: SearchMessage): Promise<void> {
       batchSize: message.batchSize ?? 1,
       multiPv: message.multiPv,
       reuseTree: message.reuseTree,
+      earlyStop: message.earlyStop,
       signal: controller.signal,
       yieldEveryMs: 16,
     });
