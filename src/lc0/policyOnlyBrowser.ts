@@ -129,6 +129,7 @@ type AttentionScoreBenchmarkResult = {
   tokens: number;
   channels: number;
   scale: number;
+  smolgen?: { enabled: boolean; epsilon: number };
   warmup: number;
   iterations: number;
   packLoadMs: number;
@@ -151,6 +152,7 @@ type AttentionScoreOrtBenchmarkResult = {
   heads?: number;
   headDim?: number;
   scale: number;
+  smolgen?: { enabled: boolean; epsilon: number };
   warmup: number;
   iterations: number;
   packLoadMs: number;
