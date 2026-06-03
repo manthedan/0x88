@@ -2540,23 +2540,49 @@ fn pick_lane(word: u32, index: u32) -> f32 {
 fn load_scale(index: u32) -> f32 { return pick_lane(scaleF16[index >> 1u], index); }
 fn load_bias(index: u32) -> f32 { return pick_lane(biasF16[index >> 1u], index); }
 
+var<workgroup> lnPartial: array<f32, 64>;
+var<workgroup> lnMean: f32;
+var<workgroup> lnInvStd: f32;
+
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let token = gid.x;
-  if (token >= 64u) { return; }
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let token = wid.x;
+  let lane = lid.x;
   let base = token * 256u;
-  var mean = 0.0;
-  for (var col = 0u; col < 256u; col = col + 1u) { mean = mean + skipVec[base + col]; }
-  mean = mean / 256.0;
-  var variance = 0.0;
-  for (var col = 0u; col < 256u; col = col + 1u) {
-    let centered = skipVec[base + col] - mean;
-    variance = variance + centered * centered;
+  let col0 = lane;
+  let col1 = lane + 64u;
+  let col2 = lane + 128u;
+  let col3 = lane + 192u;
+  let v0 = skipVec[base + col0];
+  let v1 = skipVec[base + col1];
+  let v2 = skipVec[base + col2];
+  let v3 = skipVec[base + col3];
+  lnPartial[lane] = v0 + v1 + v2 + v3;
+  workgroupBarrier();
+
+  for (var stride = 32u; stride > 0u; stride = stride / 2u) {
+    if (lane < stride) { lnPartial[lane] = lnPartial[lane] + lnPartial[lane + stride]; }
+    workgroupBarrier();
   }
-  let inv_std = inverseSqrt(variance / 256.0 + 0.000001);
-  for (var col = 0u; col < 256u; col = col + 1u) {
-    outputVec[base + col] = (skipVec[base + col] - mean) * inv_std * load_scale(col) + load_bias(col);
+  if (lane == 0u) { lnMean = lnPartial[0] / 256.0; }
+  workgroupBarrier();
+  let c0 = v0 - lnMean;
+  let c1 = v1 - lnMean;
+  let c2 = v2 - lnMean;
+  let c3 = v3 - lnMean;
+  lnPartial[lane] = c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3;
+  workgroupBarrier();
+
+  for (var stride = 32u; stride > 0u; stride = stride / 2u) {
+    if (lane < stride) { lnPartial[lane] = lnPartial[lane] + lnPartial[lane + stride]; }
+    workgroupBarrier();
   }
+  if (lane == 0u) { lnInvStd = inverseSqrt(lnPartial[0] / 256.0 + 0.000001); }
+  workgroupBarrier();
+  outputVec[base + col0] = c0 * lnInvStd * load_scale(col0) + load_bias(col0);
+  outputVec[base + col1] = c1 * lnInvStd * load_scale(col1) + load_bias(col1);
+  outputVec[base + col2] = c2 * lnInvStd * load_scale(col2) + load_bias(col2);
+  outputVec[base + col3] = c3 * lnInvStd * load_scale(col3) + load_bias(col3);
 }
 `;
 
@@ -2631,7 +2657,7 @@ function encodeAttentionOutputDispatches(device: DeviceLike, pipelines: ReturnTy
     pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
     pass.setPipeline(pipelines.norm);
     pass.setBindGroup(0, pipelines.normBind);
-    pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
+    pass.dispatchWorkgroups(DEFAULT_TOKENS);
   }
   pass.end();
   return encoder.finish();
@@ -3175,7 +3201,7 @@ function encodeEncoder0FfnDispatches(device: DeviceLike, pipelines: ReturnType<t
     pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
     pass.setPipeline(pipelines.ln2);
     pass.setBindGroup(0, pipelines.ln2Bind);
-    pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
+    pass.dispatchWorkgroups(DEFAULT_TOKENS);
   }
   pass.end();
   return encoder.finish();
@@ -3199,7 +3225,7 @@ function encodeLc0WebEncoderBlockPass(pass: ComputePassLike, attentionPipelines:
   pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
   pass.setPipeline(attentionPipelines.norm);
   pass.setBindGroup(0, attentionPipelines.normBind);
-  pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
+  pass.dispatchWorkgroups(DEFAULT_TOKENS);
   pass.setPipeline(ffnPipelines.dense1);
   pass.setBindGroup(0, ffnPipelines.dense1Bind);
   pass.dispatchWorkgroups(Math.ceil(DEFAULT_FFN_HIDDEN / 8), Math.ceil(DEFAULT_TOKENS / 8));
@@ -3208,7 +3234,7 @@ function encodeLc0WebEncoderBlockPass(pass: ComputePassLike, attentionPipelines:
   pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
   pass.setPipeline(ffnPipelines.ln2);
   pass.setBindGroup(0, ffnPipelines.ln2Bind);
-  pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
+  pass.dispatchWorkgroups(DEFAULT_TOKENS);
 }
 
 function encodeLc0WebEncoderBlockDispatches(device: DeviceLike, attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>, ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>, iterations: number): unknown {
@@ -4008,7 +4034,7 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
         pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
         pass.setPipeline(attentionPipelines.norm);
         pass.setBindGroup(0, attentionPipelines.normBind);
-        pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
+        pass.dispatchWorkgroups(DEFAULT_TOKENS);
       }
       pass.end();
       return encoder.finish();
@@ -4028,7 +4054,7 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
     const encodeLn2 = (count: number) => encodePipelineStage(
       ffnPipelines.ln2,
       ffnPipelines.ln2Bind,
-      (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64)),
+      (pass) => pass.dispatchWorkgroups(DEFAULT_TOKENS),
       count,
     );
     const encodeAttention = (count: number) => {
@@ -4052,7 +4078,7 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
         pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
         pass.setPipeline(attentionPipelines.norm);
         pass.setBindGroup(0, attentionPipelines.normBind);
-        pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
+        pass.dispatchWorkgroups(DEFAULT_TOKENS);
       }
       pass.end();
       return encoder.finish();
@@ -4084,7 +4110,7 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
           attentionPass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
           attentionPass.setPipeline(attentionPipelines.norm);
           attentionPass.setBindGroup(0, attentionPipelines.normBind);
-          attentionPass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
+          attentionPass.dispatchWorkgroups(DEFAULT_TOKENS);
         }
         attentionPass.end();
         const ffnPass = encoder.beginComputePass({ timestampWrites: { querySet, endOfPassWriteIndex: 1 } });
@@ -4097,7 +4123,7 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
           ffnPass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
           ffnPass.setPipeline(ffnPipelines.ln2);
           ffnPass.setBindGroup(0, ffnPipelines.ln2Bind);
-          ffnPass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 64));
+          ffnPass.dispatchWorkgroups(DEFAULT_TOKENS);
         }
         ffnPass.end();
         encoder.resolveQuerySet?.(querySet, 0, 2, resolveBuffer, 0);
