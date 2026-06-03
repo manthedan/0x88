@@ -4,6 +4,7 @@ import { boardToFen, parseFen, squareName, START_FEN, type BoardState } from '..
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig, type OrtExecutionProviderPreference, type OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
+import type { GameResult, MatchSummary } from './engineBattle.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
 import { clearLc0ModelCache, describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
@@ -18,6 +19,8 @@ type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
+  | { type: 'battleProgress'; id: number; game: number; total: number; result: GameResult }
+  | { type: 'battleResult'; id: number; result: MatchSummary; elapsedMs: number }
   | { type: 'error'; id: number; error: string };
 
 type BrowserEvaluationChoice = { move?: string; evaluation: Lc0Evaluation };
@@ -58,6 +61,10 @@ let busy = false;
 let searching = false;
 let mainSearchAbort: AbortController | null = null;
 let activeWorkerSearchId: number | null = null;
+let battleRunning = false;
+let battleGames = Math.max(1, Math.floor(Number(params.get('battleGames') ?? '2') || 2));
+let activeBattleId: number | null = null;
+let battleProgressHandler: ((message: Extract<WorkerResponse, { type: 'battleProgress' }>) => void) | null = null;
 let lastMove: string | null = null;
 let renderSeq = 0;
 let orientation: 'white' | 'black' = playerSide;
@@ -160,7 +167,8 @@ function setBusy(next: boolean, message?: string) {
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
   el('analyze').toggleAttribute('disabled', busy || !searchAvailable());
   el('runParity').toggleAttribute('disabled', busy || !player);
-  el('stopSearch').toggleAttribute('disabled', !searching);
+  el('stopSearch').toggleAttribute('disabled', !(searching || battleRunning));
+  el('battleStart').toggleAttribute('disabled', busy || battleRunning || !player);
 }
 
 function renderStatic() {
@@ -178,7 +186,8 @@ function renderStatic() {
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
   el('analyze').toggleAttribute('disabled', busy || !searchAvailable());
   el('runParity').toggleAttribute('disabled', busy || !player);
-  el('stopSearch').toggleAttribute('disabled', !searching);
+  el('stopSearch').toggleAttribute('disabled', !(searching || battleRunning));
+  el('battleStart').toggleAttribute('disabled', busy || battleRunning || !player);
   const config = {
     orientation,
     fen: boardFenOnly(),
@@ -262,6 +271,12 @@ async function initSearchWorker(): Promise<void> {
   searchWorker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
   searchWorker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
     const message = event.data;
+    // Battle progress is a stream of intermediate messages for one request id;
+    // it must not resolve the pending promise (that waits for battleResult).
+    if (message.type === 'battleProgress') {
+      battleProgressHandler?.(message);
+      return;
+    }
     const pending = workerPending.get(message.id);
     if (!pending) return;
     workerPending.delete(message.id);
@@ -377,6 +392,11 @@ async function searchRootPosition() {
 }
 
 function stopSearch() {
+  if (battleRunning) {
+    el('message').textContent = 'Cancelling battle…';
+    if (activeBattleId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeBattleId });
+    return;
+  }
   if (!searching) return;
   el('message').textContent = 'Cancelling search…';
   if (useSearchWorker) {
@@ -485,6 +505,70 @@ async function runParityFixtures() {
     el('parity').textContent = `failed: ${(error as Error).message}`;
     el('message').textContent = `Parity failed: ${(error as Error).message}`;
   } finally {
+    setBusy(false);
+    renderEvaluation();
+  }
+}
+
+// EngineBattle runs in the search worker so the UI stays responsive and the
+// match can be stopped. Spin up the worker lazily even when the page was not
+// opened with ?worker=1, without changing the normal (main-thread) search path.
+async function ensureBattleWorker(): Promise<boolean> {
+  if (searchWorkerReady) return true;
+  if (!searchWorker) {
+    try {
+      await initSearchWorker();
+    } catch (error) {
+      // initSearchWorker may have created the worker before failing; cast past
+      // the narrowing of the module-level binding to tear it down.
+      (searchWorker as Worker | null)?.terminate();
+      searchWorker = null;
+      searchWorkerReady = false;
+      el('message').textContent = `Battle worker unavailable: ${(error as Error).message}`;
+      return false;
+    }
+  }
+  return searchWorkerReady;
+}
+
+function renderBattleGame(message: Extract<WorkerResponse, { type: 'battleProgress' }>) {
+  const r = message.result;
+  const li = document.createElement('li');
+  li.textContent = `game ${message.game + 1}/${message.total}: ${r.result} (${r.reason}) · ${r.plies} plies`;
+  el('battleResults').appendChild(li);
+}
+
+function renderBattleSummary(summary: MatchSummary, elapsedMs: number) {
+  const tag = summary.cancelled ? ' · cancelled' : '';
+  el('battleSummary').textContent =
+    `${summary.engineA} vs ${summary.engineB}: ${summary.aWins}W ${summary.bWins}L ${summary.draws}D · score ${summary.aScore}/${summary.played} · ${elapsedMs.toFixed(0)} ms${tag}`;
+}
+
+async function startBattle() {
+  if (busy || battleRunning) return;
+  if (!(await ensureBattleWorker())) return;
+  battleRunning = true;
+  activeBattleId = null;
+  setBusy(true, `EngineBattle: search ${searchVisits} vs policy, ${battleGames} games… press Stop to cancel.`);
+  el('battleResults').innerHTML = '';
+  el('battleSummary').textContent = 'running…';
+  battleProgressHandler = renderBattleGame;
+  try {
+    const response = await postWorkerRequest<{ type: 'battleResult'; result: MatchSummary; elapsedMs: number }>(
+      { type: 'battle', games: battleGames, visits: searchVisits, maxPlies: 200 },
+      (id) => { activeBattleId = id; },
+    );
+    renderBattleSummary(response.result, response.elapsedMs);
+    el('message').textContent = response.result.cancelled
+      ? `Battle cancelled after ${response.result.played} game(s).`
+      : `Battle done: ${response.result.engineA} scored ${response.result.aScore}/${response.result.played}.`;
+  } catch (error) {
+    el('battleSummary').textContent = `failed: ${(error as Error).message}`;
+    el('message').textContent = `Battle failed: ${(error as Error).message}`;
+  } finally {
+    battleRunning = false;
+    activeBattleId = null;
+    battleProgressHandler = null;
     setBusy(false);
     renderEvaluation();
   }
@@ -610,6 +694,7 @@ function seedSettingsInputs() {
   inputEl('visitsInput').value = String(searchVisits);
   inputEl('batchInput').value = String(searchBatchSize);
   inputEl('multiPvInput').value = String(searchMultiPv);
+  inputEl('battleGamesInput').value = String(battleGames);
   selectEl('sideSelect').value = playerSide;
   selectEl('modeSelect').value = engineReplyMode;
 }
@@ -641,6 +726,11 @@ inputEl('multiPvInput').addEventListener('change', () => {
   inputEl('multiPvInput').value = String(searchMultiPv);
   renderStatic();
 });
+inputEl('battleGamesInput').addEventListener('change', () => {
+  battleGames = clampInt(inputEl('battleGamesInput').value, 1, 100, battleGames);
+  inputEl('battleGamesInput').value = String(battleGames);
+});
+el('battleStart').addEventListener('click', () => { void startBattle(); });
 selectEl('sideSelect').addEventListener('change', () => {
   applySideChange(selectEl('sideSelect').value === 'black' ? 'black' : 'white');
 });

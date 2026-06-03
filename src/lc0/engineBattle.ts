@@ -32,6 +32,12 @@ export interface GameResult {
 export interface PlayGameOptions {
   startFen?: string;
   maxPlies?: number;
+  /** Abort between plies (and via an engine that honors the signal). */
+  signal?: AbortSignal;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 function terminalResult(board: BoardState): { result: GameResultCode; reason: string } | null {
@@ -55,6 +61,7 @@ export async function playGame(white: BattleEngine, black: BattleEngine, options
   const moves: string[] = [];
 
   for (let ply = 0; ply < maxPlies; ply++) {
+    if (options.signal?.aborted) return { result: '1/2-1/2', reason: 'cancelled', plies: ply, moves, finalFen: boardToFen(board) };
     const terminal = terminalResult(board);
     if (terminal) return { ...terminal, plies: ply, moves, finalFen: boardToFen(board) };
     const drawReason = automaticDrawReason(board, priorFens);
@@ -62,7 +69,13 @@ export async function playGame(white: BattleEngine, black: BattleEngine, options
 
     const engine = board.turn === 'w' ? white : black;
     const legal = legalMoves(board);
-    const uci = await engine.chooseMove(positions);
+    let uci: string | null;
+    try {
+      uci = await engine.chooseMove(positions);
+    } catch (error) {
+      if (isAbortError(error)) return { result: '1/2-1/2', reason: 'cancelled', plies: ply, moves, finalFen: boardToFen(board) };
+      throw error;
+    }
     const move = uci ? legal.find((m) => moveToUci(m) === uci) : undefined;
     if (!move) {
       // A resignation or an illegal/missing move forfeits the game.
@@ -82,36 +95,49 @@ export interface MatchSummary {
   engineA: string;
   engineB: string;
   games: number;
+  /** Games actually played (< games if the match was cancelled). */
+  played: number;
   aWins: number;
   bWins: number;
   draws: number;
-  /** Score for engine A: win=1, draw=0.5. */
+  /** Score for engine A: win=1, draw=0.5 (cancelled games excluded). */
   aScore: number;
+  cancelled: boolean;
   results: GameResult[];
+}
+
+export interface RunMatchOptions extends PlayGameOptions {
+  /** Called after each completed game, for streaming progress. aIsWhite tells which color A had. */
+  onGame?: (index: number, total: number, result: GameResult, aIsWhite: boolean) => void;
 }
 
 /**
  * Play a match alternating colors so neither engine keeps the white advantage.
- * Even games: A is white. Odd games: B is white.
+ * Even games: A is white. Odd games: B is white. A cancelled game ends the match.
  */
-export async function runMatch(engineA: BattleEngine, engineB: BattleEngine, games: number, options: PlayGameOptions = {}): Promise<MatchSummary> {
+export async function runMatch(engineA: BattleEngine, engineB: BattleEngine, games: number, options: RunMatchOptions = {}): Promise<MatchSummary> {
   let aWins = 0;
   let bWins = 0;
   let draws = 0;
+  let played = 0;
+  let cancelled = false;
   const results: GameResult[] = [];
   for (let i = 0; i < games; i++) {
+    if (options.signal?.aborted) { cancelled = true; break; }
     const aIsWhite = i % 2 === 0;
     const result = await playGame(aIsWhite ? engineA : engineB, aIsWhite ? engineB : engineA, options);
+    if (result.reason === 'cancelled') { cancelled = true; break; }
     results.push(result);
+    played += 1;
     if (result.result === '1/2-1/2') draws += 1;
     else {
       const whiteWon = result.result === '1-0';
-      const aWon = whiteWon === aIsWhite;
-      if (aWon) aWins += 1;
+      if (whiteWon === aIsWhite) aWins += 1;
       else bWins += 1;
     }
+    options.onGame?.(i, games, result, aIsWhite);
   }
-  return { engineA: engineA.name, engineB: engineB.name, games, aWins, bWins, draws, aScore: aWins + draws * 0.5, results };
+  return { engineA: engineA.name, engineB: engineB.name, games, played, aWins, bWins, draws, aScore: aWins + draws * 0.5, cancelled, results };
 }
 
 // --- LC0 engine adapters ---

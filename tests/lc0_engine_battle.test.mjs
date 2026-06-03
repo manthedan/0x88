@@ -83,6 +83,44 @@ test('runMatch alternates colors and tallies scores from A perspective', async (
   assert.equal(summary.results[1].reason, 'resigned');
 });
 
+test('runMatch streams per-game progress via onGame with alternating colors', async () => {
+  const seen = [];
+  const summary = await runMatch(fixedEngine('mater', 'a1a8'), fixedEngine('passive', null), 3, {
+    startFen: BACK_RANK_MATE,
+    onGame: (index, total, result, aIsWhite) => seen.push({ index, total, reason: result.reason, aIsWhite }),
+  });
+  assert.equal(seen.length, 3, 'onGame fires once per game');
+  assert.deepEqual(seen.map((s) => s.index), [0, 1, 2]);
+  assert.deepEqual(seen.map((s) => s.aIsWhite), [true, false, true], 'colors alternate');
+  assert.equal(summary.played, 3);
+  assert.equal(summary.cancelled, false);
+});
+
+test('runMatch stops cleanly when its signal is already aborted', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const summary = await runMatch(fixedEngine('a', 'a1a8'), fixedEngine('b', null), 4, { startFen: BACK_RANK_MATE, signal: controller.signal });
+  assert.equal(summary.cancelled, true);
+  assert.equal(summary.played, 0);
+  assert.equal(summary.results.length, 0);
+});
+
+test('playGame reports a cancelled result when an engine aborts mid-move', async () => {
+  const controller = new AbortController();
+  const abortingEngine = {
+    name: 'aborter',
+    chooseMove: () => {
+      controller.abort();
+      const err = new Error('cancelled');
+      err.name = 'AbortError';
+      throw err;
+    },
+  };
+  const result = await playGame(abortingEngine, fixedEngine('b', null), { signal: controller.signal });
+  assert.equal(result.result, '1/2-1/2');
+  assert.equal(result.reason, 'cancelled');
+});
+
 test('LC0 adapters play a finite game from a near-terminal position', { skip: !existsSync(MODEL) && 'missing ONNX model' }, async () => {
   const evaluator = await Lc0OnnxEvaluator.create(readFileSync(MODEL));
   const search = lc0SearchBattleEngine(new Lc0PuctSearcher(evaluator), 8);
