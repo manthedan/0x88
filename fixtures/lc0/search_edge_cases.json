@@ -1,0 +1,41 @@
+[
+  {
+    "id": "mate-in-1-back-rank",
+    "fen": "6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1",
+    "kind": "mate-in-1",
+    "expectBestMove": "a1a8",
+    "note": "Ra8# back-rank mate; the engine should find the only mate."
+  },
+  {
+    "id": "checkmate-terminal-fools-mate",
+    "fen": "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 0 3",
+    "kind": "terminal-checkmate",
+    "note": "White is checkmated (fool's mate); no legal moves."
+  },
+  {
+    "id": "stalemate-terminal",
+    "fen": "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1",
+    "kind": "terminal-stalemate",
+    "note": "Black is stalemated; no legal moves and not in check."
+  },
+  {
+    "id": "promotion-free-queen",
+    "fen": "8/P6k/8/8/8/8/7K/8 w - - 0 1",
+    "kind": "promotion",
+    "note": "a7-a8 promotion is available and clearly best."
+  },
+  {
+    "id": "castling-both-sides",
+    "fen": "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+    "kind": "castling",
+    "requiredLegal": ["e1g1", "e1c1"],
+    "note": "Both white castling moves are legal and policy-mappable."
+  },
+  {
+    "id": "en-passant-available",
+    "fen": "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1",
+    "kind": "en-passant",
+    "requiredLegal": ["e5d6"],
+    "note": "White can capture en passant with e5xd6."
+  }
+]
