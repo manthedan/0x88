@@ -25,11 +25,19 @@ type EvaluateMessage = {
   input: Lc0EvaluatorInput;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage;
+type CancelMessage = {
+  type: 'cancel';
+  id: number;
+  /** Optional target search request id; when omitted, cancels any in-flight search. */
+  target?: number;
+};
+
+type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
   elapsedMs: number;
+  cancelled?: boolean;
 };
 
 type WorkerResponse =
@@ -41,6 +49,8 @@ type WorkerResponse =
 let evaluator: Lc0OnnxEvaluator | null = null;
 let searcher: Lc0PuctSearcher | null = null;
 let configuredModelUrl: string | null = null;
+/** In-flight search abort controllers keyed by request id, so cancel messages can stop them. */
+const activeSearches = new Map<number, AbortController>();
 
 function nowMs(): number {
   return typeof performance === 'undefined' ? Date.now() : performance.now();
@@ -65,27 +75,66 @@ async function handleEvaluate(message: EvaluateMessage): Promise<void> {
   post({ type: 'evaluationResult', id: message.id, result: await evaluator.evaluate(message.input) });
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 async function handleSearch(message: SearchMessage): Promise<void> {
   if (!searcher) throw new Error('LC0 search worker is not initialized');
   const started = nowMs();
-  const result = await searcher.search(message.input, { visits: message.visits, batchSize: message.batchSize ?? 1 });
-  post({
-    type: 'searchResult',
-    id: message.id,
-    result: {
-      fen: result.fen,
-      move: result.move,
-      visits: result.visits,
-      value: result.value,
-      children: result.children,
-      stats: result.search.stats,
-      elapsedMs: nowMs() - started,
-    },
-  });
+  const controller = new AbortController();
+  activeSearches.set(message.id, controller);
+  try {
+    const result = await searcher.search(message.input, {
+      visits: message.visits,
+      batchSize: message.batchSize ?? 1,
+      signal: controller.signal,
+      yieldEveryMs: 16,
+    });
+    post({
+      type: 'searchResult',
+      id: message.id,
+      result: {
+        fen: result.fen,
+        move: result.move,
+        visits: result.visits,
+        value: result.value,
+        children: result.children,
+        pv: result.pv,
+        stats: result.search.stats,
+        elapsedMs: nowMs() - started,
+        cancelled: controller.signal.aborted,
+      },
+    });
+  } catch (error) {
+    if (!isAbortError(error)) throw error;
+    // Cancellation discards the partial tree; report an empty cancelled result.
+    post({
+      type: 'searchResult',
+      id: message.id,
+      result: { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true, elapsedMs: nowMs() - started },
+    });
+  } finally {
+    activeSearches.delete(message.id);
+  }
+}
+
+function handleCancel(message: CancelMessage): void {
+  if (message.target !== undefined) {
+    activeSearches.get(message.target)?.abort();
+    return;
+  }
+  for (const controller of activeSearches.values()) controller.abort();
 }
 
 self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
   const message = event.data;
+  // Cancellation is synchronous and must not be wrapped in the error reporter,
+  // so an abort never posts a spurious error for the cancel request itself.
+  if (message.type === 'cancel') {
+    handleCancel(message);
+    return;
+  }
   void (async () => {
     try {
       if (message.type === 'init') await handleInit(message);

@@ -13,7 +13,7 @@ import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchResult } from './se
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
 type NativeRecord = { id: string; backend?: string; fen: string; startFen?: string; moves?: string[]; bestmove: string; topPriors: NativePrior[] };
-type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; elapsedMs?: number; stats?: Lc0SearchResult['search']['stats'] };
+type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; pv?: string[]; elapsedMs?: number; cancelled?: boolean; stats?: Lc0SearchResult['search']['stats'] };
 type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
@@ -45,6 +45,9 @@ let workerModelCacheStatus = '';
 let workerRequestSeq = 0;
 const workerPending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 let busy = false;
+let searching = false;
+let mainSearchAbort: AbortController | null = null;
+let activeWorkerSearchId: number | null = null;
 let lastMove: string | null = null;
 let renderSeq = 0;
 let orientation: 'white' | 'black' = PLAYER_SIDE;
@@ -132,6 +135,7 @@ function setBusy(next: boolean, message?: string) {
   el('engineMove').toggleAttribute('disabled', busy || !player);
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
   el('runParity').toggleAttribute('disabled', busy || !player);
+  el('stopSearch').toggleAttribute('disabled', !searching);
 }
 
 function renderStatic() {
@@ -148,6 +152,7 @@ function renderStatic() {
   el('engineMove').toggleAttribute('disabled', busy || !player);
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
   el('runParity').toggleAttribute('disabled', busy || !player);
+  el('stopSearch').toggleAttribute('disabled', !searching);
   const config = {
     orientation,
     fen: boardFenOnly(),
@@ -174,6 +179,7 @@ function renderSearchResult(result: RenderableSearchResult) {
   const stats = result.stats;
   const batchStats = stats ? ` · eval batches ${stats.batchEvalCalls}/${stats.maxEvalBatch}` : '';
   el('searchLatency').textContent = result.elapsedMs === undefined ? '—' : `${result.elapsedMs.toFixed(0)} ms · ${visitsPerSecond?.toFixed(1) ?? '—'} visits/s${batchStats}`;
+  el('searchPv').textContent = result.pv && result.pv.length ? result.pv.join(' ') : '—';
   const maxVisits = Math.max(1, ...result.children.slice(0, 10).map((entry) => entry.visits));
   el('searchChildren').innerHTML = result.children.slice(0, 10).map((entry, i) => {
     const width = Math.max(2, (entry.visits / maxVisits) * 100).toFixed(1);
@@ -184,6 +190,7 @@ function renderSearchResult(result: RenderableSearchResult) {
 function clearSearchResult() {
   el('searchSummary').textContent = 'not run';
   el('searchLatency').textContent = '—';
+  el('searchPv').textContent = '—';
   el('searchChildren').innerHTML = '';
 }
 
@@ -209,9 +216,10 @@ function renderEvaluation() {
   });
 }
 
-function postWorkerRequest<T>(message: Record<string, unknown>): Promise<T> {
+function postWorkerRequest<T>(message: Record<string, unknown>, onId?: (id: number) => void): Promise<T> {
   if (!searchWorker) return Promise.reject(new Error('LC0 search worker unavailable'));
   const id = ++workerRequestSeq;
+  onId?.(id);
   return new Promise<T>((resolve, reject) => {
     workerPending.set(id, { resolve: resolve as (value: unknown) => void, reject });
     searchWorker!.postMessage({ ...message, id });
@@ -253,7 +261,7 @@ async function searchWithWorker(): Promise<RenderableSearchResult> {
     input: currentEvaluationInput(),
     visits: SEARCH_VISITS,
     batchSize: SEARCH_BATCH_SIZE,
-  });
+  }, (id) => { activeWorkerSearchId = id; });
   return response.result;
 }
 
@@ -274,24 +282,61 @@ async function onUserMove(from: Key, to: Key) {
   }
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 async function searchRootPosition() {
   if (!searchAvailable() || busy) return;
-  setBusy(true, `LC0 fixed-visit PUCT search running (${searchModeLabel()})…`);
+  searching = true;
+  activeWorkerSearchId = null;
+  mainSearchAbort = useSearchWorker ? null : new AbortController();
+  setBusy(true, `LC0 fixed-visit PUCT search running (${searchModeLabel()})… press Stop to cancel.`);
   try {
     const started = performance.now();
-    const result = useSearchWorker
+    const result: RenderableSearchResult = useSearchWorker
       ? await searchWithWorker()
-      : await (async () => {
-        const search = await searcher!.search(currentEvaluationInput(), { visits: SEARCH_VISITS, batchSize: SEARCH_BATCH_SIZE });
+      : await (async (): Promise<RenderableSearchResult> => {
+        // yieldEveryMs lets the main-thread search relinquish the event loop so
+        // the Stop button stays responsive and the page never feels frozen.
+        const search = await searcher!.search(currentEvaluationInput(), {
+          visits: SEARCH_VISITS,
+          batchSize: SEARCH_BATCH_SIZE,
+          signal: mainSearchAbort!.signal,
+          yieldEveryMs: 16,
+        });
         return { ...search, stats: search.search.stats, elapsedMs: performance.now() - started };
       })();
-    renderSearchResult(result);
-    el('message').textContent = `Search selected ${result.move ?? '—'} (${result.visits} visits, batch ${SEARCH_BATCH_SIZE}, fixed PUCT via ${searchModeLabel()}).`;
+    if (result.cancelled) {
+      clearSearchResult();
+      el('message').textContent = `Search cancelled (${searchModeLabel()}).`;
+    } else {
+      renderSearchResult(result);
+      el('message').textContent = `Search selected ${result.move ?? '—'} (${result.visits} visits, batch ${SEARCH_BATCH_SIZE}, fixed PUCT via ${searchModeLabel()}).`;
+    }
   } catch (error) {
-    el('message').textContent = `Search failed: ${(error as Error).message}`;
+    if (isAbortError(error)) {
+      clearSearchResult();
+      el('message').textContent = `Search cancelled (${searchModeLabel()}).`;
+    } else {
+      el('message').textContent = `Search failed: ${(error as Error).message}`;
+    }
   } finally {
+    searching = false;
+    mainSearchAbort = null;
+    activeWorkerSearchId = null;
     setBusy(false);
     renderEvaluation();
+  }
+}
+
+function stopSearch() {
+  if (!searching) return;
+  el('message').textContent = 'Cancelling search…';
+  if (useSearchWorker) {
+    if (activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
+  } else {
+    mainSearchAbort?.abort();
   }
 }
 
@@ -423,6 +468,7 @@ async function init() {
 
 el('engineMove').addEventListener('click', () => { void engineMove(); });
 el('searchMove').addEventListener('click', () => { void searchRootPosition(); });
+el('stopSearch').addEventListener('click', stopSearch);
 el('runParity').addEventListener('click', () => { void runParityFixtures(); });
 el('reset').addEventListener('click', resetBoard);
 el('flip').addEventListener('click', () => { orientation = orientation === 'white' ? 'black' : 'white'; renderStatic(); });

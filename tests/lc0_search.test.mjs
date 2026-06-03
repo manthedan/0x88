@@ -65,6 +65,60 @@ test('LC0 batched PUCT groups leaf evaluations through the LC0 adapter', async (
   assert.ok(batchSizes.includes(4), `expected a batch of 4, got ${batchSizes.join(',')}`);
 });
 
+function uniformEvaluator() {
+  return {
+    async evaluateBatch(inputs) {
+      return inputs.map((input) => {
+        const board = typeof input === 'object' && input !== null && 'positions' in input ? input.positions[input.positions.length - 1] : input;
+        const parsed = typeof board === 'string' ? parseFen(board) : board;
+        const priors = legalMoves(parsed).map((move) => ({ uci: moveToUci(move), index: 0, logit: 0, prior: 1 }));
+        return { fen: boardToFen(parsed), wdl: [0.34, 0.32, 0.34], q: 0, mlh: 80, legalPriors: priors };
+      });
+    },
+    async evaluate(input) {
+      return (await this.evaluateBatch([input]))[0];
+    },
+  };
+}
+
+test('LC0 search exposes a principal variation of legal UCI moves', async () => {
+  const result = await new Lc0PuctSearcher(uniformEvaluator()).search(START_FEN, { visits: 24 });
+  assert.ok(Array.isArray(result.pv), 'pv is an array');
+  assert.ok(result.pv.length >= 1, `pv has at least one move, got ${result.pv.length}`);
+  assert.equal(result.pv[0], result.move, 'pv starts with the chosen root move');
+  const startLegal = new Set(legalMoves(parseFen(START_FEN)).map(moveToUci));
+  assert.ok(startLegal.has(result.pv[0]), `pv[0] ${result.pv[0]} is legal at the root`);
+});
+
+test('LC0 search throws AbortError when given an already-aborted signal', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    () => new Lc0PuctSearcher(uniformEvaluator()).search(START_FEN, { visits: 64, signal: controller.signal }),
+    (error) => error.name === 'AbortError',
+  );
+});
+
+test('LC0 search honors a signal aborted mid-flight and stops early', async () => {
+  const controller = new AbortController();
+  let evalCount = 0;
+  const slowEvaluator = {
+    async evaluate(input) {
+      evalCount += 1;
+      if (evalCount === 3) controller.abort();
+      const board = typeof input === 'object' && input !== null && 'positions' in input ? input.positions[input.positions.length - 1] : input;
+      const parsed = typeof board === 'string' ? parseFen(board) : board;
+      const priors = legalMoves(parsed).map((move) => ({ uci: moveToUci(move), index: 0, logit: 0, prior: 1 }));
+      return { fen: boardToFen(parsed), wdl: [0.34, 0.32, 0.34], q: 0, mlh: 80, legalPriors: priors };
+    },
+  };
+  await assert.rejects(
+    () => new Lc0PuctSearcher(slowEvaluator).search(START_FEN, { visits: 200, signal: controller.signal }),
+    (error) => error.name === 'AbortError',
+  );
+  assert.ok(evalCount < 200, `aborted search stopped early after ${evalCount} evals`);
+});
+
 test('LC0 fixed-visit PUCT matches native BLAS nodes32 fixture best moves', { skip: (!existsSync(MODEL) || !existsSync(NATIVE_FEN_SEARCH) || !existsSync(NATIVE_HISTORY_SEARCH)) && 'missing model or native search artifacts' }, async () => {
   const searcher = await Lc0PuctSearcher.create(readFileSync(MODEL));
   const records = [...readJsonl(NATIVE_FEN_SEARCH), ...readJsonl(NATIVE_HISTORY_SEARCH)];

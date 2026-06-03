@@ -22,6 +22,7 @@ if (fenOrFixture.endsWith('.json')) {
       visits: result.visits,
       bestMove: result.move,
       value: result.value,
+      pv: result.pv,
       topChildren: result.children.slice(0, 10),
       stats: result.search.stats,
     }));

@@ -17,6 +17,8 @@ export interface Lc0SearchResult {
   visits: number;
   value: number;
   children: Lc0SearchChild[];
+  /** Principal variation as UCI move strings from the root, best line first. */
+  pv: string[];
   search: SearchResult;
 }
 
@@ -107,12 +109,14 @@ export class Lc0PuctSearcher {
     const children = result.policy
       .map((entry) => ({ uci: moveToUci(entry.move), visits: entry.visits, prior: entry.prior, q: entry.q, probability: entry.probability }))
       .sort((a, b) => b.visits - a.visits || b.prior - a.prior);
+    const pv = (result.principalVariation ?? []).map((entry) => moveToUci(entry.move));
     return {
       fen: boardToFen(board),
       move: result.move ? moveToUci(result.move) : undefined,
       visits: result.visits,
       value: result.value,
       children,
+      pv,
       search: result,
     };
   }
