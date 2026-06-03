@@ -58,6 +58,31 @@ export function evalBarWhitePercent(scoreCp: number | undefined, mateIn: number 
   return Math.max(0, Math.min(100, 50 + 50 * whiteAdvantage));
 }
 
+export interface StockfishInfoLineLike {
+  multipv: number;
+  depth: number;
+  scoreCp?: number;
+  mateIn?: number;
+  pvUci: string[];
+}
+
+/** Build analysis lines from Stockfish MultiPV info for the given FEN. */
+export function stockfishAnalysisLines(infos: StockfishInfoLineLike[], fen: string, engine = 'Stockfish'): AnalysisLine[] {
+  const board = parseFen(fen);
+  return infos
+    .filter((info) => info.pvUci.length)
+    .map((info) => ({
+      engine,
+      multipv: info.multipv,
+      scoreCp: info.scoreCp,
+      mateIn: info.mateIn,
+      scoreText: formatScore(info.scoreCp, info.mateIn),
+      detail: `depth ${info.depth}`,
+      pvUci: info.pvUci,
+      pvSan: uciLineToSan(board, info.pvUci, 12),
+    }));
+}
+
 export interface Lc0SearchLike {
   value: number;
   multiPv?: string[][];

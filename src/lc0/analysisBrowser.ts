@@ -6,11 +6,12 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { gameTreeToPgn, parsePgnGame } from '../chess/pgn.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import { evalBarWhitePercent, lc0AnalysisLines, type AnalysisLine } from './analysisFormat.ts';
+import { evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
+import { StockfishEngine } from './stockfishEngine.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
@@ -19,6 +20,7 @@ const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-24
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
+let stockfish: StockfishEngine | null = null;
 let ground: Ground | null = null;
 let orientation: 'white' | 'black' = 'white';
 let analysisAbort: AbortController | null = null;
@@ -41,6 +43,14 @@ function uciShape(uci: string, brush: string): DrawShape | null {
 }
 function visits(): number { return Math.max(1, Math.floor(Number(inputEl('visitsInput').value) || 400)); }
 function multiPv(): number { return Math.max(1, Math.floor(Number(inputEl('multiPvInput').value) || 3)); }
+function sfDepth(): number { return Math.max(1, Math.floor(Number(inputEl('sfDepthInput').value) || 14)); }
+function useLc0(): boolean { return inputEl('useLc0').checked; }
+function useStockfish(): boolean { return inputEl('useStockfish').checked; }
+
+function getStockfish(): StockfishEngine {
+  if (!stockfish) stockfish = new StockfishEngine({ depth: sfDepth() });
+  return stockfish;
+}
 
 function legalDests(board: BoardState) {
   const dests = new Map<Key, Key[]>();
@@ -165,7 +175,7 @@ function renderAll() {
 }
 
 async function analyzeCurrent() {
-  if (!searcher) return;
+  if (!useLc0() && !useStockfish()) { el('message').textContent = 'Enable LC0 or Stockfish to analyze.'; return; }
   analysisAbort?.abort();
   const controller = new AbortController();
   analysisAbort = controller;
@@ -175,11 +185,20 @@ async function analyzeCurrent() {
   const fen = tree.current.fen;
   const board = parseFen(fen);
   if (legalMoves(board).length === 0) { analyzing = false; el('stop').toggleAttribute('disabled', true); el('analyze').toggleAttribute('disabled', false); return; }
-  el('message').textContent = `Analyzing (${visits()} visits, ${multiPv()} lines)…`;
+  el('message').textContent = `Analyzing (${useLc0() ? `LC0 ${visits()}v` : ''}${useLc0() && useStockfish() ? ' + ' : ''}${useStockfish() ? `SF d${sfDepth()}` : ''}, ${multiPv()} lines)…`;
   try {
-    const result = await searcher.search({ positions: tree.historyBoards() }, { visits: visits(), multiPv: multiPv(), signal: controller.signal, yieldEveryMs: 16 });
+    const tasks: Promise<AnalysisLine[]>[] = [];
+    if (useLc0() && searcher) {
+      tasks.push(searcher.search({ positions: tree.historyBoards() }, { visits: visits(), multiPv: multiPv(), signal: controller.signal, yieldEveryMs: 16 })
+        .then((result) => lc0AnalysisLines(result, fen, 'LC0')));
+    }
+    if (useStockfish()) {
+      tasks.push(getStockfish().analyze(fen, { multipv: multiPv(), depth: sfDepth(), signal: controller.signal })
+        .then((infos) => stockfishAnalysisLines(infos, fen, `SF d${sfDepth()}`)));
+    }
+    const grouped = await Promise.all(tasks);
     if (controller.signal.aborted) return;
-    lineCache.set(fen, lc0AnalysisLines(result, fen, 'LC0'));
+    lineCache.set(fen, grouped.flat());
     if (tree.current.fen === fen) { renderLines(); renderEvalBar(); setShapes(bestShapes()); }
     el('message').textContent = `Analyzed: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`;
   } catch (error) {
@@ -269,6 +288,9 @@ function wireEvents() {
   el('copyPgn').addEventListener('click', copyPgn);
   el('analyze').addEventListener('click', () => { void analyzeCurrent(); });
   el('stop').addEventListener('click', () => { analysisAbort?.abort(); });
+  for (const id of ['useLc0', 'useStockfish', 'sfDepthInput', 'visitsInput', 'multiPvInput']) {
+    el(id).addEventListener('change', () => { lineCache.delete(tree.current.fen); void analyzeCurrent(); });
+  }
   el('movelist').addEventListener('click', (event) => {
     const target = (event.target as HTMLElement).closest('[data-node]');
     if (!target) return;

@@ -35,11 +35,38 @@ function skillLevelCommand(skillLevel: number): string {
   return `setoption name Skill Level value ${Math.max(0, Math.min(20, Math.floor(skillLevel)))}`;
 }
 
+export interface StockfishInfoLine {
+  multipv: number;
+  depth: number;
+  scoreCp?: number;
+  mateIn?: number;
+  pvUci: string[];
+}
+
+/** Parse a UCI `info ... multipv K ... score ... pv ...` line, or null if it lacks a PV. */
+export function parseStockfishInfo(line: string): StockfishInfoLine | null {
+  if (!line.startsWith('info ') || !line.includes(' pv ')) return null;
+  const multipv = Number(line.match(/\bmultipv (\d+)/)?.[1] ?? '1');
+  const depth = Number(line.match(/\bdepth (\d+)/)?.[1] ?? '0');
+  const cp = line.match(/\bscore cp (-?\d+)/);
+  const mate = line.match(/\bscore mate (-?\d+)/);
+  const pv = line.match(/ pv (.+)$/)?.[1].trim().split(/\s+/) ?? [];
+  return {
+    multipv,
+    depth,
+    scoreCp: cp ? Number(cp[1]) : undefined,
+    mateIn: mate ? Number(mate[1]) : undefined,
+    pvUci: pv,
+  };
+}
+
 export class StockfishEngine {
   readonly name = 'stockfish-lite';
   private worker: Worker | null = null;
   private readyPromise: Promise<void> | null = null;
   private resolveMove: ((uci: string | null) => void) | null = null;
+  private resolveAnalyze: ((lines: StockfishInfoLine[]) => void) | null = null;
+  private analyzeLines: Map<number, StockfishInfoLine> | null = null;
   private options: StockfishOptions;
   private readonly url: string;
 
@@ -67,10 +94,25 @@ export class StockfishEngine {
           const line = typeof event.data === 'string' ? event.data : String(event.data);
           if (line === 'uciok') { this.applyOptions(); worker.postMessage('isready'); return; }
           if (line === 'readyok') { resolve(); return; }
-          if (line.startsWith('bestmove') && this.resolveMove) {
-            const resolveMove = this.resolveMove;
-            this.resolveMove = null;
-            resolveMove(parseBestMove(line));
+          if (line.startsWith('info ') && this.analyzeLines) {
+            const info = parseStockfishInfo(line);
+            if (info) this.analyzeLines.set(info.multipv, info);
+            return;
+          }
+          if (line.startsWith('bestmove')) {
+            if (this.resolveAnalyze) {
+              const resolveAnalyze = this.resolveAnalyze;
+              const lines = [...(this.analyzeLines?.values() ?? [])].sort((a, b) => a.multipv - b.multipv);
+              this.resolveAnalyze = null;
+              this.analyzeLines = null;
+              resolveAnalyze(lines);
+              return;
+            }
+            if (this.resolveMove) {
+              const resolveMove = this.resolveMove;
+              this.resolveMove = null;
+              resolveMove(parseBestMove(line));
+            }
           }
         };
         worker.onerror = (event) => reject(new Error(event.message || 'Stockfish worker error'));
@@ -100,10 +142,31 @@ export class StockfishEngine {
     });
   }
 
+  /** MultiPV analysis of a FEN: returns one info line per PV, sorted by rank. */
+  async analyze(fen: string, opts: { multipv?: number; depth?: number; movetimeMs?: number; signal?: AbortSignal } = {}): Promise<StockfishInfoLine[]> {
+    await this.init();
+    if (!this.worker || opts.signal?.aborted) return [];
+    const multipv = Math.max(1, Math.floor(opts.multipv ?? 1));
+    this.worker.postMessage(`setoption name MultiPV value ${multipv}`);
+    return new Promise<StockfishInfoLine[]>((resolve) => {
+      this.analyzeLines = new Map();
+      const onAbort = () => this.worker?.postMessage('stop');
+      this.resolveAnalyze = (lines) => {
+        opts.signal?.removeEventListener('abort', onAbort);
+        resolve(lines);
+      };
+      opts.signal?.addEventListener('abort', onAbort);
+      this.worker!.postMessage(`position fen ${fen}`);
+      this.worker!.postMessage(stockfishGoCommand({ depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs }));
+    });
+  }
+
   dispose(): void {
     this.worker?.terminate();
     this.worker = null;
     this.readyPromise = null;
     this.resolveMove = null;
+    this.resolveAnalyze = null;
+    this.analyzeLines = null;
   }
 }

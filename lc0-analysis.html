@@ -84,10 +84,16 @@ h2{font-size:13px;margin:14px 0 0;text-transform:uppercase;letter-spacing:.04em;
       <button id="analyze" class="primary" type="button" disabled>Analyze</button>
       <button id="stop" type="button" disabled>Stop</button>
       <label class="small"><input type="checkbox" id="autoAnalyze" checked /> auto</label>
-      <div class="field"><label for="visitsInput">LC0 visits</label>
-        <input id="visitsInput" type="number" min="1" max="100000" step="1" value="400" /></div>
       <div class="field"><label for="multiPvInput">Lines</label>
         <input id="multiPvInput" type="number" min="1" max="10" step="1" value="3" /></div>
+    </div>
+    <div class="row">
+      <label class="small"><input type="checkbox" id="useLc0" checked /> LC0</label>
+      <div class="field"><label for="visitsInput">LC0 visits</label>
+        <input id="visitsInput" type="number" min="1" max="100000" step="1" value="400" /></div>
+      <label class="small"><input type="checkbox" id="useStockfish" /> Stockfish</label>
+      <div class="field"><label for="sfDepthInput">SF depth</label>
+        <input id="sfDepthInput" type="number" min="1" max="30" step="1" value="14" /></div>
     </div>
     <h2>Engine lines</h2>
     <ol id="lines" class="lines"></ol>
