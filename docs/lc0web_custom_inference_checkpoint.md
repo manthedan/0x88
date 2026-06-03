@@ -49,7 +49,7 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
   - This validates the prefix-generalized tensor plumbing against a later encoder layer's weights; it still uses the staged synthetic input/reference for that layer, not true layer-to-layer activation handoff.
 - `npm run lc0:browser-wgsl-smokes -- --only encoder-stack-2-wasm --timeout 25000`
   - `ENCODER_STACK_BENCH_DONE` over `/encoder0` then `/encoder1`, max absolute error about `5.25e-6`.
-  - This is the first reusable encoder-block primitive loop: it feeds each WGSL block's GPU output buffer into the next block, while validating every block against a CPU f32 reference and a tiny f32 ONNX/ORT attention-output+FFN subgraph. The smolgen/QKV/softmax/attention-value portions are still checked against the CPU f32 reference, not a full block ONNX graph.
+  - This is the first reusable encoder-block primitive loop: it feeds each WGSL block's GPU output buffer into the next block, while validating every block against a CPU f32 reference recomputed from the actual GPU handoff activation and a tiny f32 ONNX/ORT attention-output+FFN subgraph. The smolgen/QKV/softmax/attention-value portions are still checked against the CPU f32 reference, not a full block ONNX graph.
 - `npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2`
   - Alternated fresh browser sessions in order `wgsl, ort, ort, wgsl`.
   - ORT reported `webgpu->webgpu` with WebGPU provider accepted in both ORT samples.

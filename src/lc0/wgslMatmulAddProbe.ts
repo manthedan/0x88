@@ -3947,7 +3947,10 @@ export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStack
         block.ortVsCpuRmsError = ortVsCpu.rmsError;
       }
       blocks.push(block);
-      cpuInput = reference.output;
+      // Use the actual previous-layer GPU output as the next CPU reference
+      // input too, so CPU-side smolgen bias matches the GPU-buffer handoff
+      // activation instead of an idealized CPU-only stack activation.
+      cpuInput = gpuOutput;
       gpuInput = output;
       lastGpuOutput = gpuOutput;
     }
