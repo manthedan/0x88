@@ -20,7 +20,7 @@ This checkpoint records the current custom-kernel path for the batch-8 f16 `lc0w
 - `?encoder0BlockBench=1`: full encoder0 attention+FFN block through ln2.
 - `?encoder0BlockOrtBench=1`: tiny ORT comparison for attention-value output through attention output projection/ln1 plus FFN/ln2.
 - `?encoderStackBench=1&encoderLayers=N`: reusable WGSL encoder-block primitive loop over `/encoder0..N-1`, with per-block CPU f32 reference checks and optional per-block tiny f32 ONNX/ORT comparison for attention-output+FFN (`encoderStackOrt=1`, default).
-- `?encoderStackHeadsBench=1&encoderLayers=N&encoderStackHeads=1`: hybrid end-to-end probe that feeds the custom WGSL encoder-stack output into tiny f32 ONNX/ORT policy and WDL value heads. The policy head currently covers the main 64×64 move-logit matmul path; underpromotion remapping remains outside this tiny-head probe.
+- `?encoderStackHeadsBench=1&encoderLayers=N&encoderStackHeads=1`: hybrid end-to-end probe that feeds the custom WGSL encoder-stack output into tiny f32 ONNX/ORT policy and WDL value heads. The policy head covers the main 64×64 move-logit matmul path plus the promotion slice/add/remap path to the final 1858 LC0 policy logits.
 - `?encoderPrefix=/encoderN`: experimental tensor-prefix override for attention-output/FFN/full-block routes so the same plumbing can target later encoder layers.
 
 The browser page now emits a `benchmarkReport` object with browser metadata, GPU adapter info where available, pack verification mode, and timing summaries. Full encoder0 WGSL block results also include per-stage diagnostic timings for QKV projection, attention scores, softmax, attention value, output projection + ln1, FFN dense1, FFN dense2 + residual, and ln2. Matmul-style block kernels now upload QKV/output/FFN weights transposed and use small tiled workgroups for QKV, output projection, and both FFN dense layers so each block reuses activation/weight tiles instead of every output invocation walking the full K dimension alone. The shared ln1/ln2 WGSL now uses one token workgroup with a 64-lane parallel mean/variance reduction instead of one serial invocation per token. When Chromium exposes WebGPU `timestamp-query`, the encoder0 block route also reports a GPU timestamp duration for the attention+FFN command sequence. `scripts/lc0_browser_wgsl_smokes.mjs` automates the main browser smokes, parses `maxAbsError`, and surfaces encoder-block stage/timestamp timings when present. `scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs` runs fresh-session, alternating encoder0-block WGSL vs ORT WebGPU measurements and marks results as non-promotional diagnostics.
@@ -54,8 +54,8 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
 - `npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-10-wasm --timeout 80000`
   - `ENCODER_STACK_BENCH_DONE` over `/encoder0` through `/encoder9`, max absolute error about `2.31e-5` before the parallel ln1/ln2 reduction and about `2.29e-5` after it; per-block ORT-vs-WGSL max absolute error was about `2.46e-5` in the earlier full-stack run.
   - This validates layer-to-layer GPU-buffer handoff across the full 10-layer encoder stack for the synthetic 64×256 activation path.
-- `npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-heads-2-wasm --timeout 50000`
-  - `ENCODER_STACK_BENCH_DONE` over `/encoder0` then `/encoder1`, then tiny f32 ONNX/ORT policy/WDL heads from the WGSL stack output. Encoder-stack max absolute error was about `4.29e-6`; policy-head diagnostic max absolute error was about `7.75e-7`; WDL max absolute error was about `2.98e-8`.
+- `npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-heads-2-wasm --timeout 120000`
+  - `ENCODER_STACK_BENCH_DONE` over `/encoder0` then `/encoder1`, then tiny f32 ONNX/ORT policy/WDL heads from the WGSL stack output. Before policy remapping was included, encoder-stack max absolute error was about `4.29e-6`, policy-head diagnostic max absolute error was about `7.75e-7`, and WDL max absolute error was about `2.98e-8`. After adding the final 1858-logit mapped policy output and parallel ln1/ln2 reduction, the same smoke reported encoder-stack max absolute error about `3.34e-6`, main policy diagnostic max absolute error about `9.54e-7`, mapped-policy diagnostic max absolute error about `1.67e-6`, and WDL max absolute error about `2.98e-8`.
 - Manual split-wait browser probe: `?encoderStackHeadsBench=1&encoderLayers=10&encoderStackWarmup=0&encoderStackOrt=1&encoderStackHeads=1&ep=wasm&packVerify=0`
   - `ENCODER_STACK_BENCH_DONE` over `/encoder0` through `/encoder9`, then tiny f32 ONNX/ORT policy/WDL heads from the full WGSL stack output.
   - Representative local result: encoder-stack max absolute error about `2.31e-5`, per-block ORT-vs-WGSL max absolute error about `2.46e-5`, policy-head diagnostic max absolute error about `9.54e-7`, and WDL max absolute error about `5.96e-8`.
@@ -85,7 +85,7 @@ npm run lc0:browser-wgsl-smokes -- --no-server --only encoder0-block,encoder-sta
 npm run lc0:browser-wgsl-smokes -- --no-server --only attention-output,encoder0-block --timeout 50000
 npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-2-wasm,encoder-stack-heads-2-wasm --timeout 80000
 npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-10-wasm --timeout 80000
-npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-heads-2-wasm --timeout 50000
+npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-heads-2-wasm --timeout 120000
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --dry-run --samples 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 10 --timeout 25000 --wgsl-iters 3 --ort-iters 3
@@ -95,7 +95,7 @@ npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 10 --timeout 25000 --wgsl-it
 
 The custom path now validates a complete encoder0 block in staged WGSL form, including smolgen score bias and FFN. This is a stronger milestone than the earlier attention-core-only checkpoint, but it is still not an end-to-end LC0 evaluator:
 
-- The reusable encoder-block loop now covers `/encoder0` → `/encoder9` with GPU-buffer handoff. A hybrid probe can feed the WGSL stack output into tiny f32 ONNX/ORT policy/WDL heads, but it is not yet the production evaluator path and the tiny policy head currently omits underpromotion remapping.
+- The reusable encoder-block loop now covers `/encoder0` → `/encoder9` with GPU-buffer handoff. A hybrid probe can feed the WGSL stack output into tiny f32 ONNX/ORT policy/WDL heads, including final policy promotion/remap to 1858 logits, but it is not yet the production evaluator path.
 - Timing reports both command submission/readback synchronization and, when Chromium exposes WebGPU `timestamp-query`, a GPU timestamp duration for the encoder0 attention+FFN command sequence.
 - The full encoder0 benchmark no longer forces an explicit queue-completion boundary between attention-output and FFN; both command buffers are submitted together and rely on WebGPU queue ordering for the ln1-output → FFN-dense1 dependency.
 - The per-stage encoder0 timing breakdown now covers tiled projection/FFN kernels and the parallel ln1/ln2 reduction; stage timings still include queue-completion overhead and remain bottleneck hints rather than promotion evidence.
@@ -109,6 +109,6 @@ Next gates before an end-to-end custom runtime:
 
 1. Add ORT comparisons for the remaining full attention block if practical.
 2. Repeat and broaden alternating browser runs against ORT WebGPU after validating the full encoder stack.
-3. Expand the hybrid policy/value-head probe into a production evaluator path, including underpromotion remapping, then compare final policy/value drift against f32 ONNX and native LC0 BLAS fixtures.
+3. Expand the hybrid policy/value-head probe into a production evaluator path, then compare final policy/value drift against f32 ONNX and native LC0 BLAS fixtures.
 4. Continue replacing remaining correctness-first kernels (for example attention score/value and any profitable fusion points) with tiled/fused variants without loosening the parity gate.
 5. Preserve f32 ONNX/native parity as the correctness ladder while using f16/WebGPU as deployment target.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as ort from '../src/nn/ortRuntime.ts';
-import { createTinyAttentionOutputOnnxForTest, createTinyEncoder0BlockOnnxForTest, createTinyEncoder0FfnOnnxForTest, createTinyMatmulAddOnnxForTest, f16BitsToF32, lc0WebEncoderBlockTensorNames } from '../src/lc0/wgslMatmulAddProbe.ts';
+import { createTinyAttentionOutputOnnxForTest, createTinyEncoder0BlockOnnxForTest, createTinyEncoder0FfnOnnxForTest, createTinyMatmulAddOnnxForTest, createTinyPolicyValueHeadsOnnxForTest, f16BitsToF32, lc0WebEncoderBlockTensorNames } from '../src/lc0/wgslMatmulAddProbe.ts';
 
 test('f16BitsToF32 decodes representative IEEE half values used by lc0web kernels', () => {
   assert.equal(f16BitsToF32(0x0000), 0);
@@ -107,6 +107,41 @@ test('tiny encoder0 FFN ONNX bytes run sqrrelu residual and layernorm through OR
   assert.ok(Math.abs(output[1] - expected[1]) < 1e-5);
   assert.ok(Math.abs(output[2] - expected[2]) < 1e-5);
   assert.equal(output[256], 0);
+});
+
+test('tiny policy/value heads ONNX bytes include remapped policy output', async () => {
+  ort.setRequestedOrtExecutionProviderForCurrentThread('wasm');
+  const f16Zeros = (elements) => new Uint8Array(elements * 2);
+  const mappingBytes = new Uint8Array(1858 * 4);
+  const mapping = new DataView(mappingBytes.buffer);
+  for (let i = 0; i < 1858; i++) mapping.setInt32(i * 4, i, true);
+  const tensor = (bytes) => ({ bytes });
+  const tensors = {
+    policyDense1Weight: tensor(f16Zeros(256 * 256)),
+    policyDense1Bias: tensor(f16Zeros(256)),
+    policyQWeight: tensor(f16Zeros(256 * 256)),
+    policyQBias: tensor(f16Zeros(256)),
+    policyKWeight: tensor(f16Zeros(256 * 256)),
+    policyKBias: tensor(f16Zeros(256)),
+    policyScale: tensor(f16Zeros(1)),
+    policyPromotionWeight: tensor(f16Zeros(256 * 4)),
+    policyMappingTable: tensor(mappingBytes),
+    valueEmbedWeight: tensor(f16Zeros(256 * 32)),
+    valueEmbedBias: tensor(f16Zeros(32)),
+    valueDense1Weight: tensor(f16Zeros(64 * 32 * 128)),
+    valueDense1Bias: tensor(f16Zeros(128)),
+    valueDense2Weight: tensor(f16Zeros(128 * 3)),
+    valueDense2Bias: tensor(f16Zeros(3)),
+  };
+  const model = createTinyPolicyValueHeadsOnnxForTest(tensors);
+  const session = await ort.createOrtSession(model);
+  const input = new Float32Array(64 * 256);
+  const outputs = await session.run({ input: new ort.Tensor('float32', input, [64, 256]) });
+  assert.equal(outputs.policy.data.length, 64 * 64);
+  assert.equal(outputs.mappedPolicy.data.length, 1858);
+  assert.equal(outputs.mappedPolicy.data[0], 0);
+  assert.equal(outputs.wdl.data.length, 3);
+  assert.ok(Math.abs(outputs.wdl.data[0] - 1 / 3) < 1e-6);
 });
 
 test('tiny encoder0 block ONNX bytes run attention output plus FFN through ORT WASM', async () => {

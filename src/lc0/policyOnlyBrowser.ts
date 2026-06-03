@@ -381,9 +381,12 @@ type EncoderStackHeadsResult = {
   runMs: number;
   policyMaxAbsError: number;
   policyRmsError: number;
+  mappedPolicyMaxAbsError: number;
+  mappedPolicyRmsError: number;
   wdlMaxAbsError: number;
   wdlRmsError: number;
   policySample: number[];
+  mappedPolicySample: number[];
   wdl: number[];
 };
 
@@ -1264,9 +1267,12 @@ async function runEncoderStackBenchmark(): Promise<void> {
         runMs: Number(response.result.policyValueHeads.runMs.toFixed(3)),
         policyMaxAbsError: Number(response.result.policyValueHeads.policyMaxAbsError.toExponential(6)),
         policyRmsError: Number(response.result.policyValueHeads.policyRmsError.toExponential(6)),
+        mappedPolicyMaxAbsError: Number(response.result.policyValueHeads.mappedPolicyMaxAbsError.toExponential(6)),
+        mappedPolicyRmsError: Number(response.result.policyValueHeads.mappedPolicyRmsError.toExponential(6)),
         wdlMaxAbsError: Number(response.result.policyValueHeads.wdlMaxAbsError.toExponential(6)),
         wdlRmsError: Number(response.result.policyValueHeads.wdlRmsError.toExponential(6)),
         policySample: response.result.policyValueHeads.policySample.map((value) => Number(value.toFixed(8))),
+        mappedPolicySample: response.result.policyValueHeads.mappedPolicySample.map((value) => Number(value.toFixed(8))),
         wdl: response.result.policyValueHeads.wdl.map((value) => Number(value.toFixed(8))),
       } : undefined,
       blocks: response.result.blocks.map((block) => ({
@@ -1283,7 +1289,7 @@ async function runEncoderStackBenchmark(): Promise<void> {
     };
     el('benchResult').textContent = JSON.stringify(rounded);
     const ortText = rounded.ortMaxAbsError === undefined ? '' : ` · ORT max |err| ${rounded.ortMaxAbsError.toExponential(2)}`;
-    const headsText = rounded.policyValueHeads ? ` · heads policy |err| ${rounded.policyValueHeads.policyMaxAbsError.toExponential(2)} · WDL |err| ${rounded.policyValueHeads.wdlMaxAbsError.toExponential(2)}` : '';
+    const headsText = rounded.policyValueHeads ? ` · heads policy |err| ${rounded.policyValueHeads.policyMaxAbsError.toExponential(2)} · mapped |err| ${rounded.policyValueHeads.mappedPolicyMaxAbsError.toExponential(2)} · WDL |err| ${rounded.policyValueHeads.wdlMaxAbsError.toExponential(2)}` : '';
     el('message').textContent = `ENCODER_STACK_BENCH_DONE ${rounded.layers} reusable WGSL block(s) · avg block ${rounded.avgBlockDispatchSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}${ortText}${headsText}`;
   } catch (error) {
     el('benchResult').textContent = `ENCODER_STACK_BENCH_FAILED ${(error as Error).message}`;

@@ -3553,9 +3553,12 @@ export interface Lc0WebEncoderStackHeadsResult {
   runMs: number;
   policyMaxAbsError: number;
   policyRmsError: number;
+  mappedPolicyMaxAbsError: number;
+  mappedPolicyRmsError: number;
   wdlMaxAbsError: number;
   wdlRmsError: number;
   policySample: number[];
+  mappedPolicySample: number[];
   wdl: number[];
 }
 
@@ -3712,20 +3715,58 @@ function cpuSoftmaxVector(input: Float32Array<ArrayBufferLike>): Float32Array<Ar
   return output;
 }
 
-function cpuPolicyHead(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors): Float32Array<ArrayBufferLike> {
+function cpuPolicyHead(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors): { policy: Float32Array<ArrayBufferLike>; mappedPolicy: Float32Array<ArrayBufferLike> } {
   const dense = cpuMish(cpuProjectTokens(input, tensors.policyDense1Weight.bytes, tensors.policyDense1Bias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N));
   const q = cpuProjectTokens(dense, tensors.policyQWeight.bytes, tensors.policyQBias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N);
   const k = cpuProjectTokens(dense, tensors.policyKWeight.bytes, tensors.policyKBias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N);
   const scaleValue = readF16At(tensors.policyScale.bytes, 0);
-  const scale = new Float32Array(DEFAULT_TOKENS * DEFAULT_TOKENS);
+  const policy = new Float32Array(DEFAULT_POLICY_OUTPUTS);
   for (let row = 0; row < DEFAULT_TOKENS; row++) {
     for (let col = 0; col < DEFAULT_TOKENS; col++) {
       let sum = 0;
       for (let channel = 0; channel < DEFAULT_N; channel++) sum += q[row * DEFAULT_N + channel] * k[col * DEFAULT_N + channel];
-      scale[row * DEFAULT_TOKENS + col] = sum * scaleValue;
+      policy[row * DEFAULT_TOKENS + col] = sum * scaleValue;
     }
   }
-  return scale;
+
+  const promotionMatmul = new Float32Array(8 * 4);
+  for (let token = 0; token < 8; token++) {
+    const kToken = 56 + token;
+    for (let col = 0; col < 4; col++) {
+      let sum = 0;
+      for (let channel = 0; channel < DEFAULT_N; channel++) {
+        sum += k[kToken * DEFAULT_N + channel] * readF16At(tensors.policyPromotionWeight.bytes, channel * 4 + col);
+      }
+      promotionMatmul[token * 4 + col] = sum;
+    }
+  }
+  const promotionBias = new Float32Array(8 * 3);
+  for (let token = 0; token < 8; token++) {
+    for (let under = 0; under < 3; under++) promotionBias[token * 3 + under] = promotionMatmul[token * 4 + under] + promotionMatmul[token * 4 + 3];
+  }
+  const promotionBaseReshaped = new Float32Array(8 * 24);
+  for (let from = 0; from < 8; from++) {
+    for (let to = 0; to < 8; to++) {
+      const base = policy[(48 + from) * DEFAULT_TOKENS + 56 + to];
+      const flat = from * 8 + to;
+      for (let under = 0; under < 3; under++) {
+        const concatFlat = flat * 3 + under;
+        promotionBaseReshaped[concatFlat] = base;
+      }
+    }
+  }
+  const promotionRows = new Float32Array(3 * DEFAULT_TOKENS);
+  for (let i = 0; i < promotionRows.length; i++) {
+    promotionRows[i] = promotionBaseReshaped[i] + promotionBias[i % 24];
+  }
+
+  const policyFlat = new Float32Array(DEFAULT_POLICY_FLAT);
+  policyFlat.set(policy);
+  policyFlat.set(promotionRows, DEFAULT_POLICY_OUTPUTS);
+  const mapping = readI32Array(tensors.policyMappingTable.bytes, DEFAULT_POLICY_MAPPED_OUTPUTS);
+  const mappedPolicy = new Float32Array(DEFAULT_POLICY_MAPPED_OUTPUTS);
+  for (let i = 0; i < DEFAULT_POLICY_MAPPED_OUTPUTS; i++) mappedPolicy[i] = policyFlat[mapping[i]];
+  return { policy, mappedPolicy };
 }
 
 function cpuValueHead(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors): Float32Array<ArrayBufferLike> {
@@ -3735,8 +3776,9 @@ function cpuValueHead(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolic
   return cpuSoftmaxVector(logits);
 }
 
-function buildPolicyValueHeadReference(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors): { policy: Float32Array<ArrayBufferLike>; wdl: Float32Array<ArrayBufferLike> } {
-  return { policy: cpuPolicyHead(input, tensors), wdl: cpuValueHead(input, tensors) };
+function buildPolicyValueHeadReference(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors): { policy: Float32Array<ArrayBufferLike>; mappedPolicy: Float32Array<ArrayBufferLike>; wdl: Float32Array<ArrayBufferLike> } {
+  const policy = cpuPolicyHead(input, tensors);
+  return { policy: policy.policy, mappedPolicy: policy.mappedPolicy, wdl: cpuValueHead(input, tensors) };
 }
 
 export function createTinyPolicyValueHeadsOnnxForTest(tensors: Lc0WebPolicyValueHeadTensors): Uint8Array {
@@ -3755,7 +3797,24 @@ export function createTinyPolicyValueHeadsOnnxForTest(tensors: Lc0WebPolicyValue
     graph.bytes(1, onnxNode('Add', ['policyKMatmul', 'policyKBias'], ['policyK'], 'policy_k_bias'));
     graph.bytes(1, onnxNode('Transpose', ['policyK'], ['policyKt'], 'policy_k_transpose', [onnxIntsAttribute('perm', [1, 0])]));
     graph.bytes(1, onnxNode('MatMul', ['policyQ', 'policyKt'], ['policyMatmul'], 'policy_matmul'));
-    graph.bytes(1, onnxNode('Mul', ['policyMatmul', 'policyScale'], ['policy'], 'policy_scale')); 
+    graph.bytes(1, onnxNode('Mul', ['policyMatmul', 'policyScale'], ['policy'], 'policy_scale'));
+    graph.bytes(1, onnxNode('Slice', ['policyK', 'policyPromStarts', 'policyPromEnds', 'policyPromAxes'], ['policyPromK'], 'policy_promotion_slice'));
+    graph.bytes(1, onnxNode('MatMul', ['policyPromK', 'policyPromotionWeight'], ['policyPromMatmul'], 'policy_promotion_matmul'));
+    graph.bytes(1, onnxNode('Transpose', ['policyPromMatmul'], ['policyPromT'], 'policy_promotion_transpose', [onnxIntsAttribute('perm', [1, 0])]));
+    graph.bytes(1, onnxNode('Slice', ['policyPromT', 'policyPromUnderStarts', 'policyPromUnderEnds', 'policyPromUnderAxes'], ['policyPromUnder'], 'policy_promotion_under_slice'));
+    graph.bytes(1, onnxNode('Slice', ['policyPromT', 'policyPromQueenStarts', 'policyPromQueenEnds', 'policyPromUnderAxes'], ['policyPromQueen'], 'policy_promotion_queen_slice'));
+    graph.bytes(1, onnxNode('Add', ['policyPromUnder', 'policyPromQueen'], ['policyPromAdd'], 'policy_promotion_add'));
+    graph.bytes(1, onnxNode('Transpose', ['policyPromAdd'], ['policyPromAddT'], 'policy_promotion_transpose2', [onnxIntsAttribute('perm', [1, 0])]));
+    graph.bytes(1, onnxNode('Reshape', ['policyPromAddT', 'policyPromotionShape1'], ['policyPromBias'], 'policy_promotion_reshape'));
+    graph.bytes(1, onnxNode('Slice', ['policy', 'policyBaseStarts', 'policyBaseEnds', 'policyBaseAxes'], ['policyPromotionBase'], 'policy_promotion_base_slice'));
+    graph.bytes(1, onnxNode('Reshape', ['policyPromotionBase', 'policyPromotionShape2'], ['policyPromotionBaseFlat'], 'policy_promotion_base_reshape'));
+    graph.bytes(1, onnxNode('Concat', ['policyPromotionBaseFlat', 'policyPromotionBaseFlat', 'policyPromotionBaseFlat'], ['policyPromotionBaseTripled'], 'policy_promotion_base_concat', [onnxIntAttribute('axis', 1)]));
+    graph.bytes(1, onnxNode('Reshape', ['policyPromotionBaseTripled', 'policyPromotionShape3'], ['policyPromotionBaseReshaped'], 'policy_promotion_base_reshape2'));
+    graph.bytes(1, onnxNode('Add', ['policyPromotionBaseReshaped', 'policyPromBias'], ['policyPromotionAdd'], 'policy_promotion_add2'));
+    graph.bytes(1, onnxNode('Reshape', ['policyPromotionAdd', 'policyPromotionShape4'], ['policyPromotionRows'], 'policy_promotion_reshape4'));
+    graph.bytes(1, onnxNode('Concat', ['policy', 'policyPromotionRows'], ['policyConcat'], 'policy_concat', [onnxIntAttribute('axis', 0)]));
+    graph.bytes(1, onnxNode('Reshape', ['policyConcat', 'policyFlatShape'], ['policyFlat'], 'policy_reshape'));
+    graph.bytes(1, onnxNode('Gather', ['policyFlat', 'policyMappingTable'], ['mappedPolicy'], 'policy_mapping_gather', [onnxIntAttribute('axis', 1)]));
 
     graph.bytes(1, onnxNode('MatMul', ['input', 'valueEmbedWeight'], ['valueEmbed'], 'value_embed_matmul'));
     graph.bytes(1, onnxNode('Add', ['valueEmbed', 'valueEmbedBias'], ['valueEmbedBiased'], 'value_embed_bias'));
@@ -3780,6 +3839,24 @@ export function createTinyPolicyValueHeadsOnnxForTest(tensors: Lc0WebPolicyValue
     graph.bytes(5, onnxTensor('policyKWeight', [DEFAULT_N, DEFAULT_N], f16BytesToF32Array(tensors.policyKWeight.bytes, DEFAULT_N * DEFAULT_N)));
     graph.bytes(5, onnxTensor('policyKBias', [DEFAULT_N], f16BytesToF32Array(tensors.policyKBias.bytes, DEFAULT_N)));
     graph.bytes(5, onnxTensor('policyScale', [1], f16BytesToF32Array(tensors.policyScale.bytes, 1)));
+    graph.bytes(5, onnxTensor('policyPromotionWeight', [DEFAULT_N, 4], f16BytesToF32Array(tensors.policyPromotionWeight.bytes, DEFAULT_N * 4)));
+    graph.bytes(5, onnxInt64Tensor('policyPromStarts', [1], [56]));
+    graph.bytes(5, onnxInt64Tensor('policyPromEnds', [1], [64]));
+    graph.bytes(5, onnxInt64Tensor('policyPromAxes', [1], [0]));
+    graph.bytes(5, onnxInt64Tensor('policyPromUnderStarts', [1], [0]));
+    graph.bytes(5, onnxInt64Tensor('policyPromUnderEnds', [1], [3]));
+    graph.bytes(5, onnxInt64Tensor('policyPromQueenStarts', [1], [3]));
+    graph.bytes(5, onnxInt64Tensor('policyPromQueenEnds', [1], [4]));
+    graph.bytes(5, onnxInt64Tensor('policyPromUnderAxes', [1], [0]));
+    graph.bytes(5, onnxInt64Tensor('policyBaseStarts', [2], [48, 56]));
+    graph.bytes(5, onnxInt64Tensor('policyBaseEnds', [2], [56, 64]));
+    graph.bytes(5, onnxInt64Tensor('policyBaseAxes', [2], [0, 1]));
+    graph.bytes(5, onnxInt64Tensor('policyPromotionShape1', [2], [1, 24]));
+    graph.bytes(5, onnxInt64Tensor('policyPromotionShape2', [2], [64, 1]));
+    graph.bytes(5, onnxInt64Tensor('policyPromotionShape3', [2], [8, 24]));
+    graph.bytes(5, onnxInt64Tensor('policyPromotionShape4', [2], [3, 64]));
+    graph.bytes(5, onnxInt64Tensor('policyFlatShape', [2], [1, DEFAULT_POLICY_FLAT]));
+    graph.bytes(5, onnxInt64Tensor('policyMappingTable', [DEFAULT_POLICY_MAPPED_OUTPUTS], Array.from(readI32Array(tensors.policyMappingTable.bytes, DEFAULT_POLICY_MAPPED_OUTPUTS))));
     graph.bytes(5, onnxInt64Tensor('valueShape', [2], [1, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED]));
     graph.bytes(5, onnxTensor('valueEmbedWeight', [DEFAULT_N, DEFAULT_VALUE_EMBED], f16BytesToF32Array(tensors.valueEmbedWeight.bytes, DEFAULT_N * DEFAULT_VALUE_EMBED)));
     graph.bytes(5, onnxTensor('valueEmbedBias', [DEFAULT_VALUE_EMBED], f16BytesToF32Array(tensors.valueEmbedBias.bytes, DEFAULT_VALUE_EMBED)));
@@ -3789,6 +3866,7 @@ export function createTinyPolicyValueHeadsOnnxForTest(tensors: Lc0WebPolicyValue
     graph.bytes(5, onnxTensor('valueDense2Bias', [3], f16BytesToF32Array(tensors.valueDense2Bias.bytes, 3)));
     graph.bytes(11, onnxValueInfo('input', 1, [DEFAULT_TOKENS, DEFAULT_N]));
     graph.bytes(12, onnxValueInfo('policy', 1, [DEFAULT_TOKENS, DEFAULT_TOKENS]));
+    graph.bytes(12, onnxValueInfo('mappedPolicy', 1, [1, DEFAULT_POLICY_MAPPED_OUTPUTS]));
     graph.bytes(12, onnxValueInfo('wdl', 1, [1, 3]));
   });
   writer.message(8, (opset) => opset.int64(2, 17));
@@ -3801,9 +3879,12 @@ async function runPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>, tens
   runMs: number;
   policyMaxAbsError: number;
   policyRmsError: number;
+  mappedPolicyMaxAbsError: number;
+  mappedPolicyRmsError: number;
   wdlMaxAbsError: number;
   wdlRmsError: number;
   policySample: number[];
+  mappedPolicySample: number[];
   wdl: number[];
   mode: 'ort-policy-value';
 }> {
@@ -3818,8 +3899,10 @@ async function runPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>, tens
   const outputs = await session.run({ input: new ort.Tensor('float32', input, [DEFAULT_TOKENS, DEFAULT_N]) });
   const runMs = nowMs() - runStarted;
   const policy = outputs.policy.data as Float32Array<ArrayBufferLike>;
+  const mappedPolicy = outputs.mappedPolicy.data as Float32Array<ArrayBufferLike>;
   const wdl = outputs.wdl.data as Float32Array<ArrayBufferLike>;
   const policyError = computeErrorStats(policy, reference.policy, DEFAULT_POLICY_OUTPUTS);
+  const mappedPolicyError = computeErrorStats(mappedPolicy, reference.mappedPolicy, DEFAULT_POLICY_MAPPED_OUTPUTS);
   const wdlError = computeErrorStats(wdl, reference.wdl, 3);
   // The policy logits are a diagnostic CPU-vs-ORT comparison for the ORT head
   // handoff path. They are not used as the WGSL stack correctness gate because
@@ -3833,9 +3916,12 @@ async function runPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>, tens
     runMs,
     policyMaxAbsError: policyError.maxAbsError,
     policyRmsError: policyError.rmsError,
+    mappedPolicyMaxAbsError: mappedPolicyError.maxAbsError,
+    mappedPolicyRmsError: mappedPolicyError.rmsError,
     wdlMaxAbsError: wdlError.maxAbsError,
     wdlRmsError: wdlError.rmsError,
     policySample: Array.from(policy.slice(0, 8)),
+    mappedPolicySample: Array.from(mappedPolicy.slice(0, 8)),
     wdl: Array.from(wdl),
   };
 }
