@@ -576,6 +576,10 @@ function transposeF16MatrixBytes(bytes: Uint8Array, rows: number, cols: number):
   return out;
 }
 
+function createTransposedF16StorageBuffer(device: DeviceLike, bytes: Uint8Array, rows: number, cols: number, usage: number): BufferLike {
+  return createStorageBuffer(device, transposeF16MatrixBytes(bytes, rows, cols), usage);
+}
+
 function onnxDim(value: number): Uint8Array {
   const writer = new ProtoWriter();
   writer.int64(1, value);
@@ -2079,7 +2083,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var v_sum = load_v_bias(col);
   for (var row = 0u; row < 256u; row = row + 1u) {
     let x = inputMat[token * 256u + row];
-    let base = row * 256u + col;
+    let base = col * 256u + row;
     q_sum = q_sum + x * load_q_weight(base);
     k_sum = k_sum + x * load_k_weight(base);
     v_sum = v_sum + x * load_v_weight(base);
@@ -2236,11 +2240,11 @@ export async function runLc0WebAttentionBlockBenchmark(options: Lc0WebAttentionB
   try {
     const setupStarted = nowMs();
     const inputBuffer = createStorageBuffer(device, input, usage.STORAGE | usage.COPY_DST);
-    const qWeight = createStorageBuffer(device, tensors.qWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const qWeight = createTransposedF16StorageBuffer(device, tensors.qWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
     const qBias = createStorageBuffer(device, tensors.qBias.bytes, usage.STORAGE | usage.COPY_DST);
-    const kWeight = createStorageBuffer(device, tensors.kWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const kWeight = createTransposedF16StorageBuffer(device, tensors.kWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
     const kBias = createStorageBuffer(device, tensors.kBias.bytes, usage.STORAGE | usage.COPY_DST);
-    const vWeight = createStorageBuffer(device, tensors.vWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const vWeight = createTransposedF16StorageBuffer(device, tensors.vWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
     const vBias = createStorageBuffer(device, tensors.vBias.bytes, usage.STORAGE | usage.COPY_DST);
     const scale = createStorageBuffer(device, paddedF16ScalarBytes(tensors.scale.bytes), usage.STORAGE | usage.COPY_DST);
     const smolgenBias = createStorageBuffer(device, reference.smolgenBias, usage.STORAGE | usage.COPY_DST);
@@ -2438,7 +2442,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (col >= 256u || token >= 64u) { return; }
   var sum = load_bias(col);
   for (var row = 0u; row < 256u; row = row + 1u) {
-    sum = sum + attnVec[token * 256u + row] * load_weight(row * 256u + col);
+    sum = sum + attnVec[token * 256u + row] * load_weight(col * 256u + row);
   }
   let index = token * 256u + col;
   skipVec[index] = sum * pick_lane(alphaF16[0], 0u) + residualVec[index];
@@ -2577,15 +2581,15 @@ export async function runLc0WebAttentionOutputBenchmark(options: Lc0WebAttention
   try {
     const setupStarted = nowMs();
     const inputBuffer = createStorageBuffer(device, reference.input, usage.STORAGE | usage.COPY_DST);
-    const qWeight = createStorageBuffer(device, tensors.qWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const qWeight = createTransposedF16StorageBuffer(device, tensors.qWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
     const qBias = createStorageBuffer(device, tensors.qBias.bytes, usage.STORAGE | usage.COPY_DST);
-    const kWeight = createStorageBuffer(device, tensors.kWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const kWeight = createTransposedF16StorageBuffer(device, tensors.kWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
     const kBias = createStorageBuffer(device, tensors.kBias.bytes, usage.STORAGE | usage.COPY_DST);
-    const vWeight = createStorageBuffer(device, tensors.vWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const vWeight = createTransposedF16StorageBuffer(device, tensors.vWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
     const vBias = createStorageBuffer(device, tensors.vBias.bytes, usage.STORAGE | usage.COPY_DST);
     const scale = createStorageBuffer(device, paddedF16ScalarBytes(tensors.scale.bytes), usage.STORAGE | usage.COPY_DST);
     const smolgenBias = createStorageBuffer(device, reference.smolgenBias, usage.STORAGE | usage.COPY_DST);
-    const outWeight = createStorageBuffer(device, tensors.outWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const outWeight = createTransposedF16StorageBuffer(device, tensors.outWeight.bytes, DEFAULT_N, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
     const outBias = createStorageBuffer(device, tensors.outBias.bytes, usage.STORAGE | usage.COPY_DST);
     const alpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.alpha.bytes), usage.STORAGE | usage.COPY_DST);
     const lnScale = createStorageBuffer(device, tensors.lnScale.bytes, usage.STORAGE | usage.COPY_DST);
@@ -2982,7 +2986,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (col >= 1024u || token >= 64u) { return; }
   var sum = pick_lane(biasF16[col >> 1u], col);
   for (var row = 0u; row < 256u; row = row + 1u) {
-    sum = sum + inputVec[token * 256u + row] * pick_lane(weightsF16[(row * 1024u + col) >> 1u], row * 1024u + col);
+    sum = sum + inputVec[token * 256u + row] * pick_lane(weightsF16[(col * 256u + row) >> 1u], col * 256u + row);
   }
   let value = max(sum, 0.0);
   outputVec[token * 1024u + col] = value * value;
@@ -2999,7 +3003,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (col >= 256u || token >= 64u) { return; }
   var sum = pick_lane(biasF16[col >> 1u], col);
   for (var row = 0u; row < 1024u; row = row + 1u) {
-    sum = sum + inputVec[token * 1024u + row] * pick_lane(weightsF16[(row * 256u + col) >> 1u], row * 256u + col);
+    sum = sum + inputVec[token * 1024u + row] * pick_lane(weightsF16[(col * 1024u + row) >> 1u], col * 1024u + row);
   }
   outputVec[token * 256u + col] = sum * pick_lane(alphaF16[0], 0u) + residualVec[token * 256u + col];
 }
@@ -3124,9 +3128,9 @@ export async function runLc0WebEncoder0FfnBenchmark(options: Lc0WebEncoder0FfnBe
   try {
     const setupStarted = nowMs();
     const input = createStorageBuffer(device, reference.input, usage.STORAGE | usage.COPY_DST);
-    const dense1Weight = createStorageBuffer(device, tensors.ffnDense1Weight.bytes, usage.STORAGE | usage.COPY_DST);
+    const dense1Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense1Weight.bytes, DEFAULT_N, DEFAULT_FFN_HIDDEN, usage.STORAGE | usage.COPY_DST);
     const dense1Bias = createStorageBuffer(device, tensors.ffnDense1Bias.bytes, usage.STORAGE | usage.COPY_DST);
-    const dense2Weight = createStorageBuffer(device, tensors.ffnDense2Weight.bytes, usage.STORAGE | usage.COPY_DST);
+    const dense2Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense2Weight.bytes, DEFAULT_FFN_HIDDEN, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
     const dense2Bias = createStorageBuffer(device, tensors.ffnDense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
     const alpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.ffnAlpha.bytes), usage.STORAGE | usage.COPY_DST);
     const ln2Scale = createStorageBuffer(device, tensors.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
@@ -3539,22 +3543,22 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
   try {
     const setupStarted = nowMs();
     const input = createStorageBuffer(device, reference.input, usage.STORAGE | usage.COPY_DST);
-    const qWeight = createStorageBuffer(device, tensors.qWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const qWeight = createTransposedF16StorageBuffer(device, tensors.qWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
     const qBias = createStorageBuffer(device, tensors.qBias.bytes, usage.STORAGE | usage.COPY_DST);
-    const kWeight = createStorageBuffer(device, tensors.kWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const kWeight = createTransposedF16StorageBuffer(device, tensors.kWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
     const kBias = createStorageBuffer(device, tensors.kBias.bytes, usage.STORAGE | usage.COPY_DST);
-    const vWeight = createStorageBuffer(device, tensors.vWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const vWeight = createTransposedF16StorageBuffer(device, tensors.vWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
     const vBias = createStorageBuffer(device, tensors.vBias.bytes, usage.STORAGE | usage.COPY_DST);
     const scale = createStorageBuffer(device, paddedF16ScalarBytes(tensors.scale.bytes), usage.STORAGE | usage.COPY_DST);
     const smolgenBias = createStorageBuffer(device, reference.smolgenBias, usage.STORAGE | usage.COPY_DST);
-    const outWeight = createStorageBuffer(device, tensors.outWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const outWeight = createTransposedF16StorageBuffer(device, tensors.outWeight.bytes, DEFAULT_N, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
     const outBias = createStorageBuffer(device, tensors.outBias.bytes, usage.STORAGE | usage.COPY_DST);
     const attentionAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.alpha.bytes), usage.STORAGE | usage.COPY_DST);
     const ln1Scale = createStorageBuffer(device, tensors.lnScale.bytes, usage.STORAGE | usage.COPY_DST);
     const ln1Bias = createStorageBuffer(device, tensors.lnBias.bytes, usage.STORAGE | usage.COPY_DST);
-    const ffnDense1Weight = createStorageBuffer(device, tensors.ffnDense1Weight.bytes, usage.STORAGE | usage.COPY_DST);
+    const ffnDense1Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense1Weight.bytes, DEFAULT_N, DEFAULT_FFN_HIDDEN, usage.STORAGE | usage.COPY_DST);
     const ffnDense1Bias = createStorageBuffer(device, tensors.ffnDense1Bias.bytes, usage.STORAGE | usage.COPY_DST);
-    const ffnDense2Weight = createStorageBuffer(device, tensors.ffnDense2Weight.bytes, usage.STORAGE | usage.COPY_DST);
+    const ffnDense2Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense2Weight.bytes, DEFAULT_FFN_HIDDEN, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
     const ffnDense2Bias = createStorageBuffer(device, tensors.ffnDense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
     const ffnAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.ffnAlpha.bytes), usage.STORAGE | usage.COPY_DST);
     const ln2Scale = createStorageBuffer(device, tensors.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
@@ -3850,22 +3854,22 @@ export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStack
     for (let layer = 0; layer < layers; layer++) {
       const tensors = tensorsByLayer[layer];
       const reference = buildEncoder0BlockReference(tensors, cpuInput);
-      const qWeight = createStorageBuffer(device, tensors.qWeight.bytes, usage.STORAGE | usage.COPY_DST);
+      const qWeight = createTransposedF16StorageBuffer(device, tensors.qWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
       const qBias = createStorageBuffer(device, tensors.qBias.bytes, usage.STORAGE | usage.COPY_DST);
-      const kWeight = createStorageBuffer(device, tensors.kWeight.bytes, usage.STORAGE | usage.COPY_DST);
+      const kWeight = createTransposedF16StorageBuffer(device, tensors.kWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
       const kBias = createStorageBuffer(device, tensors.kBias.bytes, usage.STORAGE | usage.COPY_DST);
-      const vWeight = createStorageBuffer(device, tensors.vWeight.bytes, usage.STORAGE | usage.COPY_DST);
+      const vWeight = createTransposedF16StorageBuffer(device, tensors.vWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
       const vBias = createStorageBuffer(device, tensors.vBias.bytes, usage.STORAGE | usage.COPY_DST);
       const scale = createStorageBuffer(device, paddedF16ScalarBytes(tensors.scale.bytes), usage.STORAGE | usage.COPY_DST);
       const smolgenBias = createStorageBuffer(device, reference.smolgenBias, usage.STORAGE | usage.COPY_DST);
-      const outWeight = createStorageBuffer(device, tensors.outWeight.bytes, usage.STORAGE | usage.COPY_DST);
+      const outWeight = createTransposedF16StorageBuffer(device, tensors.outWeight.bytes, DEFAULT_N, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
       const outBias = createStorageBuffer(device, tensors.outBias.bytes, usage.STORAGE | usage.COPY_DST);
       const attentionAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.alpha.bytes), usage.STORAGE | usage.COPY_DST);
       const ln1Scale = createStorageBuffer(device, tensors.lnScale.bytes, usage.STORAGE | usage.COPY_DST);
       const ln1Bias = createStorageBuffer(device, tensors.lnBias.bytes, usage.STORAGE | usage.COPY_DST);
-      const ffnDense1Weight = createStorageBuffer(device, tensors.ffnDense1Weight.bytes, usage.STORAGE | usage.COPY_DST);
+      const ffnDense1Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense1Weight.bytes, DEFAULT_N, DEFAULT_FFN_HIDDEN, usage.STORAGE | usage.COPY_DST);
       const ffnDense1Bias = createStorageBuffer(device, tensors.ffnDense1Bias.bytes, usage.STORAGE | usage.COPY_DST);
-      const ffnDense2Weight = createStorageBuffer(device, tensors.ffnDense2Weight.bytes, usage.STORAGE | usage.COPY_DST);
+      const ffnDense2Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense2Weight.bytes, DEFAULT_FFN_HIDDEN, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
       const ffnDense2Bias = createStorageBuffer(device, tensors.ffnDense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
       const ffnAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.ffnAlpha.bytes), usage.STORAGE | usage.COPY_DST);
       const ln2Scale = createStorageBuffer(device, tensors.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
