@@ -3,9 +3,9 @@ import type { Key } from 'chessground/types';
 import { boardToFen, parseFen, squareName, START_FEN, type BoardState } from '../chess/board.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
-import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
+import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig, type OrtExecutionProviderPreference, type OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
-import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
+import { clearLc0ModelCache, describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchResult } from './search.ts';
@@ -22,14 +22,19 @@ type WorkerResponse =
 
 type BrowserEvaluationChoice = { move?: string; evaluation: Lc0Evaluation };
 
+type EngineReplyMode = 'policy' | 'search';
+
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
-const PLAYER_SIDE = params.get('side') === 'black' ? 'black' : 'white';
-const SEARCH_VISITS = Math.max(1, Math.floor(Number(params.get('visits') ?? '32') || 32));
-const SEARCH_BATCH_SIZE = Math.max(1, Math.floor(Number(params.get('batch') ?? params.get('batchSize') ?? '1') || 1));
 const SEARCH_WORKER_REQUESTED = params.get('worker') === '1' || params.get('searchWorker') === '1';
 const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
+
+// Runtime-adjustable settings: seeded from query params, then driven by the UI.
+let playerSide: 'white' | 'black' = params.get('side') === 'black' ? 'black' : 'white';
+let searchVisits = Math.max(1, Math.floor(Number(params.get('visits') ?? '32') || 32));
+let searchBatchSize = Math.max(1, Math.floor(Number(params.get('batch') ?? params.get('batchSize') ?? '1') || 1));
+let engineReplyMode: EngineReplyMode = params.get('mode') === 'search' ? 'search' : 'policy';
 
 let board: BoardState = parseFen(params.get('fen') ?? START_FEN);
 let historyBoards: BoardState[] = [board];
@@ -50,13 +55,27 @@ let mainSearchAbort: AbortController | null = null;
 let activeWorkerSearchId: number | null = null;
 let lastMove: string | null = null;
 let renderSeq = 0;
-let orientation: 'white' | 'black' = PLAYER_SIDE;
+let orientation: 'white' | 'black' = playerSide;
 const playedMoves: string[] = [];
 
 function el(id: string): HTMLElement {
   const node = document.getElementById(id);
   if (!node) throw new Error(`Missing #${id}`);
   return node;
+}
+
+function inputEl(id: string): HTMLInputElement {
+  return el(id) as HTMLInputElement;
+}
+
+function selectEl(id: string): HTMLSelectElement {
+  return el(id) as HTMLSelectElement;
+}
+
+function clampInt(raw: string, min: number, max: number, fallback: number): number {
+  const value = Math.floor(Number(raw));
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
 }
 
 function htmlEscape(value: unknown): string {
@@ -134,6 +153,7 @@ function setBusy(next: boolean, message?: string) {
   if (message) el('message').textContent = message;
   el('engineMove').toggleAttribute('disabled', busy || !player);
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
+  el('analyze').toggleAttribute('disabled', busy || !searchAvailable());
   el('runParity').toggleAttribute('disabled', busy || !player);
   el('stopSearch').toggleAttribute('disabled', !searching);
 }
@@ -147,10 +167,11 @@ function renderStatic() {
   el('backend').textContent = describeOrtBackendConfig();
   el('status').textContent = player ? 'ready' : 'loading';
   el('searchMode').textContent = searchModeLabel();
-  el('searchBatch').textContent = `${SEARCH_BATCH_SIZE}`;
-  el('searchMove').textContent = `Search ${SEARCH_VISITS}`;
+  el('searchBatch').textContent = `${searchBatchSize}`;
+  el('searchMove').textContent = `Search ${searchVisits}`;
   el('engineMove').toggleAttribute('disabled', busy || !player);
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
+  el('analyze').toggleAttribute('disabled', busy || !searchAvailable());
   el('runParity').toggleAttribute('disabled', busy || !player);
   el('stopSearch').toggleAttribute('disabled', !searching);
   const config = {
@@ -259,8 +280,8 @@ async function searchWithWorker(): Promise<RenderableSearchResult> {
   const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
     type: 'search',
     input: currentEvaluationInput(),
-    visits: SEARCH_VISITS,
-    batchSize: SEARCH_BATCH_SIZE,
+    visits: searchVisits,
+    batchSize: searchBatchSize,
   }, (id) => { activeWorkerSearchId = id; });
   return response.result;
 }
@@ -274,7 +295,7 @@ async function onUserMove(from: Key, to: Key) {
   }
   const uci = applyMove(move);
   el('message').textContent = `User played ${uci}`;
-  const engineToMove = (PLAYER_SIDE === 'white' && board.turn === 'b') || (PLAYER_SIDE === 'black' && board.turn === 'w');
+  const engineToMove = (playerSide === 'white' && board.turn === 'b') || (playerSide === 'black' && board.turn === 'w');
   if (engineToMove) {
     await engineMove();
   } else {
@@ -286,33 +307,47 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-async function searchRootPosition() {
-  if (!searchAvailable() || busy) return;
+function beginSearch() {
   searching = true;
   activeWorkerSearchId = null;
+  // Worker searches are cancelled by message id; main-thread searches by signal.
   mainSearchAbort = useSearchWorker ? null : new AbortController();
+}
+
+function endSearch() {
+  searching = false;
+  mainSearchAbort = null;
+  activeWorkerSearchId = null;
+}
+
+// Produce one search result for the current position. The caller owns the
+// searching/abort lifecycle (beginSearch/endSearch) and the busy state.
+async function executeSearchResult(): Promise<RenderableSearchResult> {
+  if (useSearchWorker) return await searchWithWorker();
+  const started = performance.now();
+  // yieldEveryMs lets the main-thread search relinquish the event loop so the
+  // Stop button stays responsive and the page never feels frozen.
+  const search = await searcher!.search(currentEvaluationInput(), {
+    visits: searchVisits,
+    batchSize: searchBatchSize,
+    signal: mainSearchAbort!.signal,
+    yieldEveryMs: 16,
+  });
+  return { ...search, stats: search.search.stats, elapsedMs: performance.now() - started };
+}
+
+async function searchRootPosition() {
+  if (!searchAvailable() || busy) return;
+  beginSearch();
   setBusy(true, `LC0 fixed-visit PUCT search running (${searchModeLabel()})… press Stop to cancel.`);
   try {
-    const started = performance.now();
-    const result: RenderableSearchResult = useSearchWorker
-      ? await searchWithWorker()
-      : await (async (): Promise<RenderableSearchResult> => {
-        // yieldEveryMs lets the main-thread search relinquish the event loop so
-        // the Stop button stays responsive and the page never feels frozen.
-        const search = await searcher!.search(currentEvaluationInput(), {
-          visits: SEARCH_VISITS,
-          batchSize: SEARCH_BATCH_SIZE,
-          signal: mainSearchAbort!.signal,
-          yieldEveryMs: 16,
-        });
-        return { ...search, stats: search.search.stats, elapsedMs: performance.now() - started };
-      })();
+    const result = await executeSearchResult();
     if (result.cancelled) {
       clearSearchResult();
       el('message').textContent = `Search cancelled (${searchModeLabel()}).`;
     } else {
       renderSearchResult(result);
-      el('message').textContent = `Search selected ${result.move ?? '—'} (${result.visits} visits, batch ${SEARCH_BATCH_SIZE}, fixed PUCT via ${searchModeLabel()}).`;
+      el('message').textContent = `Search selected ${result.move ?? '—'} (${result.visits} visits, batch ${searchBatchSize}, fixed PUCT via ${searchModeLabel()}).`;
     }
   } catch (error) {
     if (isAbortError(error)) {
@@ -322,9 +357,7 @@ async function searchRootPosition() {
       el('message').textContent = `Search failed: ${(error as Error).message}`;
     }
   } finally {
-    searching = false;
-    mainSearchAbort = null;
-    activeWorkerSearchId = null;
+    endSearch();
     setBusy(false);
     renderEvaluation();
   }
@@ -347,17 +380,40 @@ async function engineMove() {
     el('message').textContent = 'No legal engine move.';
     return;
   }
-  setBusy(true, 'LC0 policy-only engine thinking…');
+  const replyWithSearch = engineReplyMode === 'search' && searchAvailable();
+  if (replyWithSearch) beginSearch();
+  setBusy(true, replyWithSearch
+    ? `LC0 engine replying with ${searchVisits}-visit search (${searchModeLabel()})… press Stop to cancel.`
+    : 'LC0 policy-only engine thinking…');
   renderStatic();
   try {
-    const choice = await player.chooseMove(currentEvaluationInput());
-    const move = choice.move ? legalMoveFromUci(choice.move) : undefined;
-    if (!move) throw new Error(`Evaluator chose illegal or missing move: ${choice.move ?? 'none'}`);
-    const uci = applyMove(move);
-    el('message').textContent = `Engine played ${uci} (argmax legal prior, no search)`;
+    let uci: string | undefined;
+    let note: string;
+    if (replyWithSearch) {
+      const result = await executeSearchResult();
+      if (result.cancelled) {
+        el('message').textContent = `Engine search reply cancelled (${searchModeLabel()}).`;
+        return;
+      }
+      uci = result.move;
+      note = `(${result.visits}-visit search via ${searchModeLabel()})`;
+    } else {
+      const choice = await player.chooseMove(currentEvaluationInput());
+      uci = choice.move;
+      note = '(argmax legal prior, no search)';
+    }
+    const move = uci ? legalMoveFromUci(uci) : undefined;
+    if (!move) throw new Error(`Evaluator chose illegal or missing move: ${uci ?? 'none'}`);
+    const played = applyMove(move);
+    el('message').textContent = `Engine played ${played} ${note}`;
   } catch (error) {
-    el('message').textContent = `Engine move failed: ${(error as Error).message}`;
+    if (isAbortError(error)) {
+      el('message').textContent = `Engine search reply cancelled (${searchModeLabel()}).`;
+    } else {
+      el('message').textContent = `Engine move failed: ${(error as Error).message}`;
+    }
   } finally {
+    if (replyWithSearch) endSearch();
     setBusy(false);
     renderEvaluation();
   }
@@ -421,14 +477,84 @@ async function runParityFixtures() {
   }
 }
 
-function resetBoard() {
-  board = parseFen(START_FEN);
+// Load a fresh root position with no real prior boards, matching a ?fen= load.
+function loadPosition(next: BoardState) {
+  board = next;
   historyBoards = [board];
   lastMove = null;
   playedMoves.length = 0;
   clearSearchResult();
+}
+
+function resetBoard() {
+  loadPosition(parseFen(START_FEN));
   el('message').textContent = 'Reset to start position.';
   renderEvaluation();
+}
+
+function loadFenFromInput(): boolean {
+  const raw = inputEl('fenInput').value.trim();
+  if (!raw) {
+    el('message').textContent = 'Enter a FEN to load.';
+    return false;
+  }
+  let parsed: BoardState;
+  try {
+    parsed = parseFen(raw);
+  } catch (error) {
+    el('message').textContent = `Invalid FEN: ${(error as Error).message}`;
+    return false;
+  }
+  loadPosition(parsed);
+  el('message').textContent = `Loaded FEN. ${sideToMoveName()} to move.`;
+  renderEvaluation();
+  return true;
+}
+
+async function clearModelCache() {
+  if (busy) return;
+  try {
+    const result = await clearLc0ModelCache();
+    const summary = result.cleared
+      ? `cleared ${result.removedEntries} entr${result.removedEntries === 1 ? 'y' : 'ies'}`
+      : 'nothing to clear';
+    mainModelCacheStatus = summary;
+    workerModelCacheStatus = workerModelCacheStatus ? `stale (cleared); reload to refetch` : '';
+    el('message').textContent = `Model cache ${summary}. Reload the page to refetch from the network.`;
+  } catch (error) {
+    el('message').textContent = `Clear model cache failed: ${(error as Error).message}`;
+  }
+  renderStatic();
+}
+
+function applySideChange(side: 'white' | 'black') {
+  playerSide = side;
+  orientation = side;
+  renderStatic();
+}
+
+// Surface whether WebGPU is actually driving inference or silently fell back to
+// WASM, so a degraded backend is visible instead of looking like success.
+function renderGpuStatus(diag: OrtRuntimeDiagnostics) {
+  const node = el('gpuStatus');
+  const requestedGpu = diag.requestedEp !== 'wasm';
+  const usingGpu = diag.resolvedExecutionProviders.includes('webgpu');
+  const lastWebgpuError = [...diag.sessionAttempts].reverse().find((a) => a.providers.includes('webgpu') && a.error)?.error;
+  let text: string;
+  let warn = false;
+  if (usingGpu) {
+    text = 'active';
+  } else if (!diag.webgpuAvailable) {
+    text = 'unavailable — no navigator.gpu';
+    warn = requestedGpu && diag.requestedEp !== 'auto';
+  } else if (requestedGpu) {
+    text = `requested → fell back to WASM${lastWebgpuError ? ` (${lastWebgpuError})` : ''}`;
+    warn = true;
+  } else {
+    text = 'available — WASM selected';
+  }
+  node.textContent = text;
+  node.classList.toggle('warn', warn);
 }
 
 async function init() {
@@ -442,6 +568,7 @@ async function init() {
     searcher = new Lc0PuctSearcher(evaluator);
     const diagnostics = await collectOrtRuntimeDiagnostics();
     el('backend').textContent = diagnostics.describe;
+    renderGpuStatus(diagnostics);
     if (SEARCH_WORKER_REQUESTED) {
       el('message').textContent = 'Initializing LC0 search worker…';
       try {
@@ -466,11 +593,42 @@ async function init() {
   }
 }
 
+function seedSettingsInputs() {
+  inputEl('visitsInput').value = String(searchVisits);
+  inputEl('batchInput').value = String(searchBatchSize);
+  selectEl('sideSelect').value = playerSide;
+  selectEl('modeSelect').value = engineReplyMode;
+}
+
 el('engineMove').addEventListener('click', () => { void engineMove(); });
 el('searchMove').addEventListener('click', () => { void searchRootPosition(); });
 el('stopSearch').addEventListener('click', stopSearch);
+// "Analyze position" runs a search on the current board. Loading a different
+// position is the explicit job of the FEN box + Load FEN.
+el('analyze').addEventListener('click', () => { void searchRootPosition(); });
 el('runParity').addEventListener('click', () => { void runParityFixtures(); });
 el('reset').addEventListener('click', resetBoard);
 el('flip').addEventListener('click', () => { orientation = orientation === 'white' ? 'black' : 'white'; renderStatic(); });
+el('loadFen').addEventListener('click', () => { loadFenFromInput(); });
+el('clearCache').addEventListener('click', () => { void clearModelCache(); });
+inputEl('fenInput').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') loadFenFromInput(); });
+inputEl('visitsInput').addEventListener('change', () => {
+  searchVisits = clampInt(inputEl('visitsInput').value, 1, 100000, searchVisits);
+  inputEl('visitsInput').value = String(searchVisits);
+  renderStatic();
+});
+inputEl('batchInput').addEventListener('change', () => {
+  searchBatchSize = clampInt(inputEl('batchInput').value, 1, 512, searchBatchSize);
+  inputEl('batchInput').value = String(searchBatchSize);
+  renderStatic();
+});
+selectEl('sideSelect').addEventListener('change', () => {
+  applySideChange(selectEl('sideSelect').value === 'black' ? 'black' : 'white');
+});
+selectEl('modeSelect').addEventListener('change', () => {
+  engineReplyMode = selectEl('modeSelect').value === 'search' ? 'search' : 'policy';
+  el('message').textContent = `Engine reply mode: ${engineReplyMode === 'search' ? 'fixed-visit search' : 'policy-only'}.`;
+});
 
+seedSettingsInputs();
 void init();

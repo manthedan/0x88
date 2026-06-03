@@ -87,6 +87,26 @@ export async function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoad
   return { model, url: modelUrl, mode: 'cache', cacheStatus: 'miss', bytes: model.byteLength, expectedBytes, elapsedMs: nowMs() - started };
 }
 
+export interface Lc0ModelCacheClearResult {
+  cleared: boolean;
+  removedEntries: number;
+}
+
+/**
+ * Delete the LC0 model Cache Storage bucket. Returns how many cached entries
+ * were removed so the UI can report a meaningful result. Safe to call when the
+ * Cache API is unavailable or the cache was never created.
+ */
+export async function clearLc0ModelCache(cacheName: string = DEFAULT_CACHE_NAME): Promise<Lc0ModelCacheClearResult> {
+  if (!cacheApiAvailable()) return { cleared: false, removedEntries: 0 };
+  const has = await caches.has(cacheName);
+  if (!has) return { cleared: false, removedEntries: 0 };
+  const cache = await caches.open(cacheName);
+  const removedEntries = (await cache.keys()).length;
+  const cleared = await caches.delete(cacheName);
+  return { cleared, removedEntries };
+}
+
 export function describeLc0ModelLoad(result: Lc0ModelLoadResult): string {
   const mb = result.bytes === undefined ? '' : ` · ${(result.bytes / 1_000_000).toFixed(1)} MB`;
   const timing = ` · ${result.elapsedMs.toFixed(0)} ms`;
