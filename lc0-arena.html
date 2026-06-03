@@ -15,6 +15,9 @@ header h1{margin:0;font-size:19px}header nav a{color:var(--muted);text-decoratio
 main{display:grid;grid-template-columns:minmax(300px,460px) minmax(340px,1fr);gap:20px;align-items:start;padding:18px}
 .panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:12px}
 .board-shell{width:100%;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 14px 38px -26px #000}
+.side-label{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:6px 0;padding:7px 9px;border:1px solid var(--rule);border-radius:6px;background:white;font-size:13px}
+.side-label .color{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700}.side-label .engine{font-weight:700}.side-label .turn{font-family:var(--mono);font-size:11px;color:var(--accent);font-weight:700}
+.side-label.active{background:var(--soft);border-color:#cbd8a6}
 .cg-wrap{width:100%!important;height:100%!important}
 button{border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink);padding:8px 10px;font:inherit;font-size:13px;cursor:pointer}
 button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:700}button:disabled{opacity:.55;cursor:not-allowed}
@@ -45,7 +48,9 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
 </header>
 <main>
   <section class="panel" aria-label="Board">
+    <div id="blackSideLabel" class="side-label" aria-label="Black side"></div>
     <div class="board-shell"><div id="ground"></div></div>
+    <div id="whiteSideLabel" class="side-label" aria-label="White side"></div>
     <div id="pairing">Select engines and start a tournament.</div>
     <div id="message">Loading model…</div>
   </section>

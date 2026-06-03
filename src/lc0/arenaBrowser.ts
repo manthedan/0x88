@@ -31,6 +31,8 @@ let ground: Ground | null = null;
 let board: BoardState = parseFen(START_FEN);
 let historyBoards: BoardState[] = [board];
 let lastUci: string | null = null;
+let boardWhiteName: string | null = null;
+let boardBlackName: string | null = null;
 let running = false;
 let abort: AbortController | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
@@ -50,6 +52,22 @@ function htmlEscape(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
 
+function renderSideLabels() {
+  const update = (id: string, color: 'White' | 'Black', engineName: string | null, active: boolean) => {
+    const node = el(id);
+    node.classList.toggle('active', active);
+    node.innerHTML = `<span><span class="color">${color}</span> <span class="engine">${htmlEscape(engineName ?? '—')}</span></span>${active ? '<span class="turn">to move</span>' : ''}`;
+  };
+  update('blackSideLabel', 'Black', boardBlackName, board.turn === 'b');
+  update('whiteSideLabel', 'White', boardWhiteName, board.turn === 'w');
+}
+
+function setBoardSideEngines(whiteName: string | null, blackName: string | null): void {
+  boardWhiteName = whiteName;
+  boardBlackName = blackName;
+  renderSideLabels();
+}
+
 function renderBoard() {
   const config = {
     orientation: 'white' as const,
@@ -65,6 +83,7 @@ function renderBoard() {
   const shapes: DrawShape[] = lastUci && lastUci.length >= 4
     ? [{ orig: lastUci.slice(0, 2) as Key, dest: lastUci.slice(2, 4) as Key, brush: 'green' }] : [];
   ground.setAutoShapes(shapes);
+  renderSideLabels();
 }
 
 function selectedEngineIds(): string[] {
@@ -109,6 +128,7 @@ function setOpeningPreview(opening: ArenaOpening): void {
   board = parseFen(opening.fen);
   historyBoards = [board];
   lastUci = null;
+  setBoardSideEngines(null, null);
   renderBoard();
 }
 
@@ -162,6 +182,7 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
   board = parseFen(opening.fen);
   historyBoards = [board];
   lastUci = null;
+  setBoardSideEngines(white.name, black.name);
   renderBoard();
   const priorFens: string[] = [];
   const delay = Math.max(0, Math.floor(Number(inputEl('delayInput').value) || 0));
@@ -230,6 +251,7 @@ async function startTournament() {
       const { white, black, opening } = pairings[i];
       const whiteEngine = engines.get(white)!;
       const blackEngine = engines.get(black)!;
+      setBoardSideEngines(whiteEngine.name, blackEngine.name);
       el('pairing').textContent = `Game ${i + 1}/${pairings.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
       el('message').textContent = 'Playing…';
       const { result, reason, tree } = await playArenaGame(whiteEngine, blackEngine, opening, abort.signal);
