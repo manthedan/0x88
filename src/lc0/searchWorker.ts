@@ -5,8 +5,10 @@ import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './
 import {
   runLc0WebMatmulAddKernelBenchmark,
   runLc0WebMatmulAddKernelProbe,
+  runLc0WebMatmulAddOrtBenchmark,
   type Lc0WebMatmulAddKernelBenchmarkResult,
   type Lc0WebMatmulAddKernelProbeResult,
+  type Lc0WebMatmulAddOrtBenchmarkResult,
 } from './wgslMatmulAddProbe.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 
@@ -70,6 +72,18 @@ type KernelBenchmarkMessage = {
   verifyShards?: boolean;
 };
 
+type OrtBenchmarkMessage = {
+  type: 'ortBenchmark';
+  id: number;
+  packUrl: string;
+  ep: OrtExecutionProviderPreference;
+  weightTensorName?: string;
+  biasTensorName?: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+};
+
 type CancelMessage = {
   type: 'cancel';
   id: number;
@@ -77,7 +91,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -107,6 +121,7 @@ type WorkerResponse =
   | { type: 'packLoadResult'; id: number; result: PackLoadResult }
   | { type: 'kernelProbeResult'; id: number; result: Lc0WebMatmulAddKernelProbeResult }
   | { type: 'kernelBenchmarkResult'; id: number; result: Lc0WebMatmulAddKernelBenchmarkResult }
+  | { type: 'ortBenchmarkResult'; id: number; result: Lc0WebMatmulAddOrtBenchmarkResult }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'error'; id: number; error: string };
 
@@ -206,6 +221,19 @@ async function handleKernelBenchmark(message: KernelBenchmarkMessage): Promise<v
   post({ type: 'kernelBenchmarkResult', id: message.id, result });
 }
 
+async function handleOrtBenchmark(message: OrtBenchmarkMessage): Promise<void> {
+  setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  const result = await runLc0WebMatmulAddOrtBenchmark({
+    packUrl: message.packUrl,
+    weightTensorName: message.weightTensorName,
+    biasTensorName: message.biasTensorName,
+    iterations: message.iterations,
+    warmup: message.warmup,
+    verifyShards: message.verifyShards,
+  });
+  post({ type: 'ortBenchmarkResult', id: message.id, result });
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
@@ -274,6 +302,7 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       else if (message.type === 'loadPack') await handleLoadPack(message);
       else if (message.type === 'kernelProbe') await handleKernelProbe(message);
       else if (message.type === 'kernelBenchmark') await handleKernelBenchmark(message);
+      else if (message.type === 'ortBenchmark') await handleOrtBenchmark(message);
       else if (message.type === 'evaluate') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleEvaluate(message);

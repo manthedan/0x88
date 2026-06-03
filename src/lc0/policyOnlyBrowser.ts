@@ -76,6 +76,29 @@ type KernelBenchmarkResult = {
   outputSample: number[];
 };
 
+type OrtBenchmarkResult = {
+  status: 'ORT_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  weightTensor: string;
+  biasTensor: string;
+  k: number;
+  n: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  modelBuildMs: number;
+  sessionCreateMs: number;
+  avgMs: number;
+  minMs: number;
+  maxMs: number;
+  firstMs: number;
+  runsPerSecond: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+};
+
 type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
@@ -83,6 +106,7 @@ type WorkerResponse =
   | { type: 'packLoadResult'; id: number; result: PackLoadResult }
   | { type: 'kernelProbeResult'; id: number; result: KernelProbeResult }
   | { type: 'kernelBenchmarkResult'; id: number; result: KernelBenchmarkResult }
+  | { type: 'ortBenchmarkResult'; id: number; result: OrtBenchmarkResult }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
   | { type: 'error'; id: number; error: string };
 
@@ -114,8 +138,9 @@ const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.on
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
 const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
 const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
+const ORT_OP_BENCH_REQUESTED = params.get('ortOpBench') === '1' || params.get('ortBench') === '1';
 const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('kernelBenchmark') === '1' || params.get('wgslBench') === '1';
-const KERNEL_PROBE_REQUESTED = KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
+const KERNEL_PROBE_REQUESTED = ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
 const PACK_PROBE_REQUESTED = KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null;
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const WORKER_ONLY_MODEL = PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
@@ -475,6 +500,50 @@ async function runPackProbe(): Promise<void> {
   } catch (error) {
     el('benchResult').textContent = `PACK_FAILED ${(error as Error).message}`;
     el('message').textContent = `Pack probe failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runOrtOpBenchmark(): Promise<void> {
+  if (!searchWorker) throw new Error('ORT op benchmark requires LC0 worker');
+  const rawIters = Number(params.get('ortBenchIters') ?? params.get('kernelBenchIters') ?? params.get('iters') ?? '25');
+  const rawWarmup = Number(params.get('ortBenchWarmup') ?? params.get('kernelBenchWarmup') ?? '5');
+  const iterations = Math.min(1000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 25)));
+  const warmup = Math.min(100, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 5)));
+  el('benchResult').textContent = 'ORT_BENCH_RUNNING';
+  setBusy(true, `Benchmarking ORT MatMul+Add tiny ONNX op: ${warmup} warmup + ${iterations} timed runs…`);
+  try {
+    const response = await postWorkerRequest<{ type: 'ortBenchmarkResult'; result: OrtBenchmarkResult }>({
+      type: 'ortBenchmark',
+      packUrl: PACK_URL,
+      ep: requestedWorkerEp(),
+      iterations,
+      warmup,
+      verifyShards: params.get('packVerify') !== '0',
+      weightTensorName: params.get('weightTensor') ?? undefined,
+      biasTensorName: params.get('biasTensor') ?? undefined,
+    });
+    const rounded = {
+      ...response.result,
+      packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
+      modelBuildMs: Number(response.result.modelBuildMs.toFixed(3)),
+      sessionCreateMs: Number(response.result.sessionCreateMs.toFixed(3)),
+      avgMs: Number(response.result.avgMs.toFixed(4)),
+      minMs: Number(response.result.minMs.toFixed(4)),
+      maxMs: Number(response.result.maxMs.toFixed(4)),
+      firstMs: Number(response.result.firstMs.toFixed(4)),
+      runsPerSecond: Number(response.result.runsPerSecond.toFixed(3)),
+      maxAbsError: Number(response.result.maxAbsError.toExponential(6)),
+      rmsError: Number(response.result.rmsError.toExponential(6)),
+      outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
+    };
+    el('benchResult').textContent = JSON.stringify(rounded);
+    el('message').textContent = `ORT_BENCH_DONE tiny MatMul+Add · avg ${rounded.avgMs.toFixed(3)} ms · ${rounded.runsPerSecond.toFixed(1)} run/s · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+  } catch (error) {
+    el('benchResult').textContent = `ORT_BENCH_FAILED ${(error as Error).message}`;
+    el('message').textContent = `ORT op benchmark failed: ${(error as Error).message}`;
     throw error;
   } finally {
     setBusy(false);
@@ -1075,9 +1144,10 @@ async function init() {
       workerModelCacheStatus = 'pack shards worker-owned';
       useSearchWorker = true;
       await initSearchWorker({ initModel: false });
-      searchWorkerBackend = KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
+      searchWorkerBackend = ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
       renderStatic();
-      if (KERNEL_BENCH_REQUESTED) await runKernelBenchmark();
+      if (ORT_OP_BENCH_REQUESTED) await runOrtOpBenchmark();
+      else if (KERNEL_BENCH_REQUESTED) await runKernelBenchmark();
       else if (KERNEL_PROBE_REQUESTED) await runKernelProbe();
       else await runPackProbe();
       return;

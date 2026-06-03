@@ -1,3 +1,4 @@
+import * as ort from '../nn/ortRuntime.ts';
 import { loadLc0WebModelPack, type Lc0WebTensorView } from './modelPack.ts';
 
 const DEFAULT_WEIGHT_TENSOR = '/encoder0/mha/Q/w/w';
@@ -16,6 +17,11 @@ export interface Lc0WebMatmulAddKernelProbeOptions {
 
 export interface Lc0WebMatmulAddKernelBenchmarkOptions extends Lc0WebMatmulAddKernelProbeOptions {
   /** Optional extra dispatches submitted before timing, with no readback. */
+  warmup?: number;
+}
+
+export interface Lc0WebMatmulAddOrtBenchmarkOptions extends Lc0WebMatmulAddKernelProbeOptions {
+  iterations?: number;
   warmup?: number;
 }
 
@@ -57,6 +63,29 @@ export interface Lc0WebMatmulAddKernelBenchmarkResult {
   dispatchLoopAvgMs: number;
   readbackSyncedMs: number;
   endToEndMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+}
+
+export interface Lc0WebMatmulAddOrtBenchmarkResult {
+  status: 'ORT_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  weightTensor: string;
+  biasTensor: string;
+  k: number;
+  n: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  modelBuildMs: number;
+  sessionCreateMs: number;
+  avgMs: number;
+  minMs: number;
+  maxMs: number;
+  firstMs: number;
+  runsPerSecond: number;
   maxAbsError: number;
   rmsError: number;
   outputSample: number[];
@@ -184,6 +213,134 @@ function createStorageBuffer(device: DeviceLike, data: ArrayBufferView | ArrayBu
   mapped.set(source);
   buffer.unmap();
   return buffer;
+}
+
+class ProtoWriter {
+  private readonly chunks: Uint8Array[] = [];
+
+  finish(): Uint8Array {
+    const total = this.chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of this.chunks) {
+      out.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return out;
+  }
+
+  varint(value: number | bigint): void {
+    let v = BigInt(value);
+    const bytes: number[] = [];
+    while (v >= 0x80n) {
+      bytes.push(Number((v & 0x7fn) | 0x80n));
+      v >>= 7n;
+    }
+    bytes.push(Number(v));
+    this.chunks.push(Uint8Array.from(bytes));
+  }
+
+  tag(field: number, wireType: number): void {
+    this.varint((field << 3) | wireType);
+  }
+
+  int32(field: number, value: number): void {
+    this.tag(field, 0);
+    this.varint(value);
+  }
+
+  int64(field: number, value: number): void {
+    this.tag(field, 0);
+    this.varint(BigInt(value));
+  }
+
+  string(field: number, value: string): void {
+    const bytes = new TextEncoder().encode(value);
+    this.bytes(field, bytes);
+  }
+
+  bytes(field: number, bytes: Uint8Array): void {
+    this.tag(field, 2);
+    this.varint(bytes.byteLength);
+    this.chunks.push(bytes);
+  }
+
+  message(field: number, write: (writer: ProtoWriter) => void): void {
+    const nested = new ProtoWriter();
+    write(nested);
+    this.bytes(field, nested.finish());
+  }
+}
+
+function f32ArrayToBytes(values: Float32Array<ArrayBufferLike>): Uint8Array {
+  return new Uint8Array(new Uint8Array(values.buffer, values.byteOffset, values.byteLength));
+}
+
+function f16BytesToF32Array(bytes: Uint8Array, elements: number): Float32Array<ArrayBufferLike> {
+  const out = new Float32Array(elements);
+  for (let i = 0; i < elements; i++) out[i] = readF16At(bytes, i);
+  return out;
+}
+
+function onnxDim(value: number): Uint8Array {
+  const writer = new ProtoWriter();
+  writer.int64(1, value);
+  return writer.finish();
+}
+
+function onnxShape(dims: number[]): Uint8Array {
+  const writer = new ProtoWriter();
+  for (const dim of dims) writer.bytes(1, onnxDim(dim));
+  return writer.finish();
+}
+
+function onnxTensorType(elemType: number, dims: number[]): Uint8Array {
+  const writer = new ProtoWriter();
+  writer.int32(1, elemType);
+  writer.bytes(2, onnxShape(dims));
+  return writer.finish();
+}
+
+function onnxValueInfo(name: string, elemType: number, dims: number[]): Uint8Array {
+  const writer = new ProtoWriter();
+  writer.string(1, name);
+  writer.message(2, (type) => type.bytes(1, onnxTensorType(elemType, dims)));
+  return writer.finish();
+}
+
+function onnxTensor(name: string, dims: number[], values: Float32Array<ArrayBufferLike>): Uint8Array {
+  const writer = new ProtoWriter();
+  for (const dim of dims) writer.int64(1, dim);
+  writer.int32(2, 1); // TensorProto.FLOAT
+  writer.string(8, name);
+  writer.bytes(9, f32ArrayToBytes(values));
+  return writer.finish();
+}
+
+function onnxNode(opType: string, inputs: string[], outputs: string[], name: string): Uint8Array {
+  const writer = new ProtoWriter();
+  for (const input of inputs) writer.string(1, input);
+  for (const output of outputs) writer.string(2, output);
+  writer.string(3, name);
+  writer.string(4, opType);
+  return writer.finish();
+}
+
+export function createTinyMatmulAddOnnxForTest(weightF32: Float32Array<ArrayBufferLike>, biasF32: Float32Array<ArrayBufferLike>): Uint8Array {
+  const writer = new ProtoWriter();
+  writer.int64(1, 8); // IR_VERSION_2021_7_30; new enough for opset 13.
+  writer.string(2, 'lc0web');
+  writer.message(7, (graph) => {
+    graph.bytes(1, onnxNode('MatMul', ['input', 'weight'], ['matmul_out'], 'matmul'));
+    graph.bytes(1, onnxNode('Add', ['matmul_out', 'bias'], ['output'], 'add'));
+    graph.string(2, 'lc0web_matmul_add_256');
+    graph.bytes(5, onnxTensor('weight', [DEFAULT_K, DEFAULT_N], weightF32));
+    graph.bytes(5, onnxTensor('bias', [DEFAULT_N], biasF32));
+    graph.bytes(11, onnxValueInfo('input', 1, [1, DEFAULT_K]));
+    graph.bytes(12, onnxValueInfo('output', 1, [1, DEFAULT_N]));
+  });
+  writer.message(8, (opset) => opset.int64(2, 13));
+  return writer.finish();
 }
 
 const WGSL = `
@@ -452,4 +609,75 @@ export async function runLc0WebMatmulAddKernelBenchmark(options: Lc0WebMatmulAdd
   } finally {
     for (const buffer of buffers) buffer.destroy?.();
   }
+}
+
+export async function runLc0WebMatmulAddOrtBenchmark(options: Lc0WebMatmulAddOrtBenchmarkOptions): Promise<Lc0WebMatmulAddOrtBenchmarkResult> {
+  const weightTensorName = options.weightTensorName ?? DEFAULT_WEIGHT_TENSOR;
+  const biasTensorName = options.biasTensorName ?? DEFAULT_BIAS_TENSOR;
+  const warmup = clampInteger(options.warmup, 5, 0, 100);
+  const iterations = clampInteger(options.iterations, 25, 1, 1000);
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: [weightTensorName, biasTensorName],
+  });
+  const weight = pack.tensors.get(weightTensorName);
+  const bias = pack.tensors.get(biasTensorName);
+  if (!weight || !bias) throw new Error('lc0web ORT benchmark tensors were not loaded');
+  assertTensorShapeAndBytes(weight, [DEFAULT_K, DEFAULT_N], 2, 'weight');
+  assertTensorShapeAndBytes(bias, [DEFAULT_N], 2, 'bias');
+  if (weight.info.dtype !== 'f16' || bias.info.dtype !== 'f16') {
+    throw new Error(`lc0web ORT benchmark expects f16 tensors, got ${weight.info.dtype}/${bias.info.dtype}`);
+  }
+
+  const input = makeInputVector(DEFAULT_K);
+  const cpu = cpuMatmulAdd(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N);
+  const modelBuildStarted = nowMs();
+  const weightF32 = f16BytesToF32Array(weight.bytes, DEFAULT_K * DEFAULT_N);
+  const biasF32 = f16BytesToF32Array(bias.bytes, DEFAULT_N);
+  const tinyOnnx = createTinyMatmulAddOnnxForTest(weightF32, biasF32);
+  const modelBuildMs = nowMs() - modelBuildStarted;
+
+  const sessionStarted = nowMs();
+  const session = await ort.createOrtSession(tinyOnnx);
+  const sessionCreateMs = nowMs() - sessionStarted;
+  const feeds = { input: new ort.Tensor('float32', input, [1, DEFAULT_K]) };
+
+  let output: Float32Array<ArrayBufferLike> = new Float32Array(DEFAULT_N);
+  for (let i = 0; i < warmup; i++) {
+    const outputs = await session.run(feeds);
+    output = outputs.output.data as Float32Array<ArrayBufferLike>;
+  }
+  const times: number[] = [];
+  for (let i = 0; i < iterations; i++) {
+    const started = nowMs();
+    const outputs = await session.run(feeds);
+    times.push(nowMs() - started);
+    output = outputs.output.data as Float32Array<ArrayBufferLike>;
+  }
+  const { maxAbsError, rmsError } = computeErrorStats(output, cpu, DEFAULT_N);
+  assertErrorInTolerance(maxAbsError);
+  const avgMs = times.reduce((sum, value) => sum + value, 0) / times.length;
+
+  return {
+    status: 'ORT_BENCH_DONE',
+    packUrl: pack.manifestUrl,
+    modelName: pack.manifest.model.name,
+    weightTensor: weightTensorName,
+    biasTensor: biasTensorName,
+    k: DEFAULT_K,
+    n: DEFAULT_N,
+    warmup,
+    iterations,
+    packLoadMs: pack.elapsedMs,
+    modelBuildMs,
+    sessionCreateMs,
+    avgMs,
+    minMs: Math.min(...times),
+    maxMs: Math.max(...times),
+    firstMs: times[0],
+    runsPerSecond: 1000 / avgMs,
+    maxAbsError,
+    rmsError,
+    outputSample: Array.from(output.slice(0, 8)),
+  };
 }
