@@ -1,8 +1,10 @@
 import { Chessground } from 'chessground';
+import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
 import { boardToFen, parseFen, squareName, START_FEN, type BoardState } from '../chess/board.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
+import { bestMoveShapes, searchShapes } from './boardArrows.ts';
 import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig, type OrtExecutionProviderPreference, type OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import type { GameResult, MatchSummary } from './engineBattle.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
@@ -88,6 +90,10 @@ function clampInt(raw: string, min: number, max: number, fallback: number): numb
   const value = Math.floor(Number(raw));
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value));
+}
+
+function setBoardShapes(shapes: DrawShape[]) {
+  ground?.setAutoShapes(shapes);
 }
 
 function htmlEscape(value: unknown): string {
@@ -226,6 +232,8 @@ function renderSearchResult(result: RenderableSearchResult) {
     const width = Math.max(2, (entry.visits / maxVisits) * 100).toFixed(1);
     return `<li class="${i === 0 ? 'best' : ''}"><span>${i + 1}</span><b>${htmlEscape(entry.uci)}</b><meter min="0" max="100" value="${width}"></meter><code>${entry.visits} · ${(entry.prior * 100).toFixed(1)}%</code></li>`;
   }).join('');
+  // Draw the chosen move (green) and other MultiPV candidates (blue) on the board.
+  setBoardShapes(searchShapes(result.move, result.multiPv));
 }
 
 function clearSearchResult() {
@@ -251,6 +259,8 @@ function renderEvaluation() {
       const width = Math.max(2, (entry.prior / max) * 100).toFixed(1);
       return `<li class="${i === 0 ? 'best' : ''}"><span>${i + 1}</span><b>${htmlEscape(entry.uci)}</b><meter min="0" max="100" value="${width}"></meter><code>${(entry.prior * 100).toFixed(2)}%</code></li>`;
     }).join('');
+    // Reflect the policy pick on the board so analysis is visible there.
+    setBoardShapes(bestMoveShapes(choice.move));
   }).catch((error) => {
     if (seq !== renderSeq) return;
     el('message').textContent = `Evaluation failed: ${(error as Error).message}`;
@@ -368,6 +378,9 @@ async function searchRootPosition() {
   if (!searchAvailable() || busy) return;
   beginSearch();
   setBusy(true, `LC0 fixed-visit PUCT search running (${searchModeLabel()})… press Stop to cancel.`);
+  // Tracks whether a result is on screen so the finally does not re-run the
+  // evaluator and overwrite the richer search arrows with the plain best move.
+  let rendered = false;
   try {
     const result = await executeSearchResult();
     if (result.cancelled) {
@@ -375,6 +388,7 @@ async function searchRootPosition() {
       el('message').textContent = `Search cancelled (${searchModeLabel()}).`;
     } else {
       renderSearchResult(result);
+      rendered = true;
       el('message').textContent = `Search selected ${result.move ?? '—'} (${result.visits} visits, batch ${searchBatchSize}, fixed PUCT via ${searchModeLabel()}).`;
     }
   } catch (error) {
@@ -387,7 +401,10 @@ async function searchRootPosition() {
   } finally {
     endSearch();
     setBusy(false);
-    renderEvaluation();
+    // Keep the search arrows when a result is shown; otherwise refresh the
+    // evaluation (which restores the plain best-move arrow).
+    if (rendered) renderStatic();
+    else renderEvaluation();
   }
 }
 
