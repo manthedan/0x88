@@ -69,6 +69,11 @@ const SMOKES = [
     doneText: 'ENCODER_STACK_BENCH_DONE',
   },
   {
+    name: 'encoder-stack-10-wasm',
+    query: 'encoderStackBench=1&encoderLayers=10&encoderStackWarmup=0&encoderStackOrt=1&ep=wasm&packVerify=0',
+    doneText: 'ENCODER_STACK_BENCH_DONE',
+  },
+  {
     name: 'kernel-bench-scalar',
     query: 'kernelBench=1&kernelBenchWarmup=1&kernelBenchIters=3&packVerify=0',
     doneText: 'KERNEL_BENCH_DONE',

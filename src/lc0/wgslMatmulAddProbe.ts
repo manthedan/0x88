@@ -3850,7 +3850,6 @@ export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStack
     let gpuInput = createStorageBuffer(device, cpuInput, usage.STORAGE | usage.COPY_DST);
     buffers.push(gpuInput);
     let lastGpuOutput = cpuInput;
-    const dispatchStarted = nowMs();
     for (let layer = 0; layer < layers; layer++) {
       const tensors = tensorsByLayer[layer];
       const reference = buildEncoder0BlockReference(tensors, cpuInput);
@@ -3958,7 +3957,7 @@ export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStack
       gpuInput = output;
       lastGpuOutput = gpuOutput;
     }
-    const dispatchSyncedMs = nowMs() - dispatchStarted;
+    const dispatchSyncedMs = blocks.reduce((sum, block) => sum + block.dispatchSyncedMs, 0);
     const maxBlock = blocks.reduce((max, block) => Math.max(max, block.maxAbsError), 0);
     const rmsBlock = Math.sqrt(blocks.reduce((sum, block) => sum + block.rmsError * block.rmsError, 0) / blocks.length);
     const ortMax = compareOrt ? blocks.reduce((max, block) => Math.max(max, block.ortMaxAbsError ?? 0), 0) : undefined;
