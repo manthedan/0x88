@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as ort from '../src/nn/ortRuntime.ts';
-import { createTinyAttentionOutputOnnxForTest, createTinyMatmulAddOnnxForTest, f16BitsToF32 } from '../src/lc0/wgslMatmulAddProbe.ts';
+import { createTinyAttentionOutputOnnxForTest, createTinyEncoder0FfnOnnxForTest, createTinyMatmulAddOnnxForTest, f16BitsToF32 } from '../src/lc0/wgslMatmulAddProbe.ts';
 
 test('f16BitsToF32 decodes representative IEEE half values used by lc0web kernels', () => {
   assert.equal(f16BitsToF32(0x0000), 0);
@@ -61,5 +61,37 @@ test('tiny attention-output ONNX bytes run projection residual and layernorm thr
   assert.ok(Math.abs(output[0] - expected) < 1e-5);
   assert.ok(Math.abs(output[1] + expected) < 1e-5);
   assert.equal(output[2], 0);
+  assert.equal(output[256], 0);
+});
+
+test('tiny encoder0 FFN ONNX bytes run sqrrelu residual and layernorm through ORT WASM', async () => {
+  ort.setRequestedOrtExecutionProviderForCurrentThread('wasm');
+  const dense1Weight = new Float32Array(256 * 1024);
+  const dense1Bias = new Float32Array(1024);
+  const dense2Weight = new Float32Array(1024 * 256);
+  const dense2Bias = new Float32Array(256);
+  const scale = new Float32Array(256).fill(1);
+  const lnBias = new Float32Array(256);
+  dense1Weight[0 * 1024 + 0] = 1;
+  dense1Weight[1 * 1024 + 1] = 1;
+  dense2Weight[0 * 256 + 0] = 1;
+  dense2Weight[1 * 256 + 1] = 1;
+  const model = createTinyEncoder0FfnOnnxForTest(dense1Weight, dense1Bias, dense2Weight, dense2Bias, 1, scale, lnBias);
+  const session = await ort.createOrtSession(model);
+  const input = new Float32Array(64 * 256);
+  input[0] = 2;
+  input[1] = -3;
+  const outputs = await session.run({ input: new ort.Tensor('float32', input, [64, 256]) });
+  const output = outputs.output.data;
+  assert.ok(output instanceof Float32Array);
+  assert.equal(output.length, 64 * 256);
+  const skip0 = 6;
+  const skip1 = -3;
+  const mean = (skip0 + skip1) / 256;
+  const variance = ((skip0 - mean) ** 2 + (skip1 - mean) ** 2 + 254 * mean ** 2) / 256;
+  const denom = Math.sqrt(variance + 9.999999974752427e-7);
+  assert.ok(Math.abs(output[0] - ((skip0 - mean) / denom)) < 1e-5);
+  assert.ok(Math.abs(output[1] - ((skip1 - mean) / denom)) < 1e-5);
+  assert.ok(Math.abs(output[2] - ((0 - mean) / denom)) < 1e-5);
   assert.equal(output[256], 0);
 });

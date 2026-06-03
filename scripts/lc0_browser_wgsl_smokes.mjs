@@ -44,6 +44,11 @@ const SMOKES = [
     doneText: 'FFN_BENCH_DONE',
   },
   {
+    name: 'encoder0-ffn-ort-wasm',
+    query: 'encoder0FfnOrtBench=1&encoder0FfnOrtWarmup=0&encoder0FfnOrtIters=1&ep=wasm&packVerify=0',
+    doneText: 'FFN_ORT_BENCH_DONE',
+  },
+  {
     name: 'encoder0-block',
     query: 'encoder0BlockBench=1&encoder0BlockWarmup=1&encoder0BlockIters=1&packVerify=0',
     doneText: 'ENCODER0_BLOCK_BENCH_DONE',

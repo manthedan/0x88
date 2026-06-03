@@ -2719,6 +2719,31 @@ export interface Lc0WebEncoder0FfnBenchmarkResult {
   outputSample: number[];
 }
 
+export interface Lc0WebEncoder0FfnOrtBenchmarkResult {
+  status: 'FFN_ORT_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  tokens: number;
+  channels: number;
+  hidden: number;
+  epsilon: number;
+  alpha: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  modelBuildMs: number;
+  sessionCreateMs: number;
+  avgMs: number;
+  minMs: number;
+  maxMs: number;
+  firstMs: number;
+  timesMs: number[];
+  runsPerSecond: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+}
+
 type Encoder0FfnTensors = ReturnType<typeof loadAttentionOutputInputs> & {
   ffnDense1Weight: Lc0WebTensorView;
   ffnDense1Bias: Lc0WebTensorView;
@@ -2774,6 +2799,43 @@ function buildEncoder0FfnReference(tensors: Encoder0FfnTensors): { input: Float3
   const input = buildAttentionOutputReference(tensors).output;
   const ffn = cpuEncoder0FfnFromLn1(input, tensors);
   return { input, output: ffn.output, alpha: ffn.alpha };
+}
+
+export function createTinyEncoder0FfnOnnxForTest(
+  dense1Weight: Float32Array<ArrayBufferLike>,
+  dense1Bias: Float32Array<ArrayBufferLike>,
+  dense2Weight: Float32Array<ArrayBufferLike>,
+  dense2Bias: Float32Array<ArrayBufferLike>,
+  alpha: number,
+  ln2Scale: Float32Array<ArrayBufferLike>,
+  ln2Bias: Float32Array<ArrayBufferLike>,
+): Uint8Array {
+  const writer = new ProtoWriter();
+  writer.int64(1, 8);
+  writer.string(2, 'lc0web');
+  writer.message(7, (graph) => {
+    graph.bytes(1, onnxNode('MatMul', ['input', 'dense1Weight'], ['dense1'], 'encoder0_ffn_dense1_matmul'));
+    graph.bytes(1, onnxNode('Add', ['dense1', 'dense1Bias'], ['dense1Biased'], 'encoder0_ffn_dense1_bias'));
+    graph.bytes(1, onnxNode('Relu', ['dense1Biased'], ['dense1Relu'], 'encoder0_ffn_relu'));
+    graph.bytes(1, onnxNode('Mul', ['dense1Relu', 'dense1Relu'], ['hidden'], 'encoder0_ffn_sqrrelu'));
+    graph.bytes(1, onnxNode('MatMul', ['hidden', 'dense2Weight'], ['dense2'], 'encoder0_ffn_dense2_matmul'));
+    graph.bytes(1, onnxNode('Add', ['dense2', 'dense2Bias'], ['dense2Biased'], 'encoder0_ffn_dense2_bias'));
+    graph.bytes(1, onnxNode('Mul', ['dense2Biased', 'alpha'], ['scaled'], 'encoder0_ffn_alpha'));
+    graph.bytes(1, onnxNode('Add', ['scaled', 'input'], ['skip'], 'encoder0_ffn_residual'));
+    graph.bytes(1, onnxNode('LayerNormalization', ['skip', 'ln2Scale', 'ln2Bias'], ['output'], 'encoder0_ffn_ln2', [onnxFloatAttribute('epsilon', DEFAULT_LN_EPSILON)]));
+    graph.string(2, 'lc0web_encoder0_ffn_sqrrelu_residual_ln2');
+    graph.bytes(5, onnxTensor('dense1Weight', [DEFAULT_N, DEFAULT_FFN_HIDDEN], dense1Weight));
+    graph.bytes(5, onnxTensor('dense1Bias', [DEFAULT_FFN_HIDDEN], dense1Bias));
+    graph.bytes(5, onnxTensor('dense2Weight', [DEFAULT_FFN_HIDDEN, DEFAULT_N], dense2Weight));
+    graph.bytes(5, onnxTensor('dense2Bias', [DEFAULT_N], dense2Bias));
+    graph.bytes(5, onnxTensor('alpha', [1], new Float32Array([alpha])));
+    graph.bytes(5, onnxTensor('ln2Scale', [DEFAULT_N], ln2Scale));
+    graph.bytes(5, onnxTensor('ln2Bias', [DEFAULT_N], ln2Bias));
+    graph.bytes(11, onnxValueInfo('input', 1, [DEFAULT_TOKENS, DEFAULT_N]));
+    graph.bytes(12, onnxValueInfo('output', 1, [DEFAULT_TOKENS, DEFAULT_N]));
+  });
+  writer.message(8, (opset) => opset.int64(2, 17));
+  return writer.finish();
 }
 
 const FFN_DENSE1_WGSL = `${WGSL_HEADER}
@@ -2943,6 +3005,77 @@ export async function runLc0WebEncoder0FfnBenchmark(options: Lc0WebEncoder0FfnBe
   } finally {
     for (const buffer of buffers) buffer.destroy?.();
   }
+}
+
+export async function runLc0WebEncoder0FfnOrtBenchmark(options: Lc0WebEncoder0FfnBenchmarkOptions): Promise<Lc0WebEncoder0FfnOrtBenchmarkResult> {
+  const warmup = clampInteger(options.warmup, 5, 0, 100);
+  const iterations = clampInteger(options.iterations, 25, 1, 1000);
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: [
+      ...Object.values(DEFAULT_QKV_TENSORS), DEFAULT_SCALE_TENSOR, ...Object.values(DEFAULT_SMOLGEN_TENSORS),
+      DEFAULT_OUT_DENSE_WEIGHT, DEFAULT_OUT_DENSE_BIAS, DEFAULT_OUT_ALPHA, DEFAULT_LN1_SCALE, DEFAULT_LN1_BIAS,
+      DEFAULT_FFN_DENSE1_WEIGHT, DEFAULT_FFN_DENSE1_BIAS, DEFAULT_FFN_DENSE2_WEIGHT, DEFAULT_FFN_DENSE2_BIAS,
+      DEFAULT_FFN_ALPHA, DEFAULT_LN2_SCALE, DEFAULT_LN2_BIAS,
+    ],
+  });
+  const tensors = loadEncoder0FfnInputs(pack);
+  const reference = buildEncoder0FfnReference(tensors);
+  const outputElements = DEFAULT_TOKENS * DEFAULT_N;
+  const modelBuildStarted = nowMs();
+  const tinyOnnx = createTinyEncoder0FfnOnnxForTest(
+    f16BytesToF32Array(tensors.ffnDense1Weight.bytes, DEFAULT_N * DEFAULT_FFN_HIDDEN),
+    f16BytesToF32Array(tensors.ffnDense1Bias.bytes, DEFAULT_FFN_HIDDEN),
+    f16BytesToF32Array(tensors.ffnDense2Weight.bytes, DEFAULT_FFN_HIDDEN * DEFAULT_N),
+    f16BytesToF32Array(tensors.ffnDense2Bias.bytes, DEFAULT_N),
+    reference.alpha,
+    f16BytesToF32Array(tensors.ln2Scale.bytes, DEFAULT_N),
+    f16BytesToF32Array(tensors.ln2Bias.bytes, DEFAULT_N),
+  );
+  const modelBuildMs = nowMs() - modelBuildStarted;
+  const sessionStarted = nowMs();
+  const session = await ort.createOrtSession(tinyOnnx);
+  const sessionCreateMs = nowMs() - sessionStarted;
+  const feeds = { input: new ort.Tensor('float32', reference.input, [DEFAULT_TOKENS, DEFAULT_N]) };
+  let output: Float32Array<ArrayBufferLike> = new Float32Array(outputElements);
+  for (let i = 0; i < warmup; i++) {
+    const outputs = await session.run(feeds);
+    output = outputs.output.data as Float32Array<ArrayBufferLike>;
+  }
+  const times: number[] = [];
+  for (let i = 0; i < iterations; i++) {
+    const started = nowMs();
+    const outputs = await session.run(feeds);
+    times.push(nowMs() - started);
+    output = outputs.output.data as Float32Array<ArrayBufferLike>;
+  }
+  const { maxAbsError, rmsError } = computeErrorStats(output, reference.output, outputElements);
+  assertErrorInTolerance(maxAbsError);
+  const avgMs = times.reduce((sum, value) => sum + value, 0) / times.length;
+  return {
+    status: 'FFN_ORT_BENCH_DONE',
+    packUrl: pack.manifestUrl,
+    modelName: pack.manifest.model.name,
+    tokens: DEFAULT_TOKENS,
+    channels: DEFAULT_N,
+    hidden: DEFAULT_FFN_HIDDEN,
+    epsilon: DEFAULT_LN_EPSILON,
+    alpha: reference.alpha,
+    warmup,
+    iterations,
+    packLoadMs: pack.elapsedMs,
+    modelBuildMs,
+    sessionCreateMs,
+    avgMs,
+    minMs: Math.min(...times),
+    maxMs: Math.max(...times),
+    firstMs: times[0],
+    timesMs: times,
+    runsPerSecond: 1000 / avgMs,
+    maxAbsError,
+    rmsError,
+    outputSample: Array.from(output.slice(0, 8)),
+  };
 }
 
 export interface Lc0WebEncoder0BlockBenchmarkOptions {
