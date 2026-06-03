@@ -54,12 +54,35 @@ type KernelProbeResult = {
   outputSample: number[];
 };
 
+type KernelBenchmarkResult = {
+  status: 'KERNEL_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  weightTensor: string;
+  biasTensor: string;
+  k: number;
+  n: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  uploadSetupMs: number;
+  dispatchLoopMs: number;
+  dispatchLoopAvgMs: number;
+  readbackSyncedMs: number;
+  endToEndMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+};
+
 type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
   | { type: 'packLoadResult'; id: number; result: PackLoadResult }
   | { type: 'kernelProbeResult'; id: number; result: KernelProbeResult }
+  | { type: 'kernelBenchmarkResult'; id: number; result: KernelBenchmarkResult }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
   | { type: 'error'; id: number; error: string };
 
@@ -91,7 +114,8 @@ const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.on
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
 const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
 const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
-const KERNEL_PROBE_REQUESTED = params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
+const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('kernelBenchmark') === '1' || params.get('wgslBench') === '1';
+const KERNEL_PROBE_REQUESTED = KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
 const PACK_PROBE_REQUESTED = KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null;
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const WORKER_ONLY_MODEL = PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
@@ -451,6 +475,47 @@ async function runPackProbe(): Promise<void> {
   } catch (error) {
     el('benchResult').textContent = `PACK_FAILED ${(error as Error).message}`;
     el('message').textContent = `Pack probe failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runKernelBenchmark(): Promise<void> {
+  if (!searchWorker) throw new Error('kernel benchmark requires LC0 worker');
+  const rawKernelIters = Number(params.get('kernelBenchIters') ?? params.get('kernelIters') ?? '1000');
+  const rawKernelWarmup = Number(params.get('kernelBenchWarmup') ?? params.get('kernelWarmup') ?? '10');
+  const iterations = Math.min(100_000, Math.max(1, Math.floor(Number.isFinite(rawKernelIters) ? rawKernelIters : 1000)));
+  const warmup = Math.min(1000, Math.max(0, Math.floor(Number.isFinite(rawKernelWarmup) ? rawKernelWarmup : 10)));
+  el('benchResult').textContent = 'KERNEL_BENCH_RUNNING';
+  setBusy(true, `Benchmarking lc0web WGSL MatMul+Add: ${warmup} warmup + ${iterations} queued dispatches, one final readback…`);
+  try {
+    const response = await postWorkerRequest<{ type: 'kernelBenchmarkResult'; result: KernelBenchmarkResult }>({
+      type: 'kernelBenchmark',
+      packUrl: PACK_URL,
+      iterations,
+      warmup,
+      verifyShards: params.get('packVerify') !== '0',
+      weightTensorName: params.get('weightTensor') ?? undefined,
+      biasTensorName: params.get('biasTensor') ?? undefined,
+    });
+    const rounded = {
+      ...response.result,
+      packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
+      uploadSetupMs: Number(response.result.uploadSetupMs.toFixed(3)),
+      dispatchLoopMs: Number(response.result.dispatchLoopMs.toFixed(4)),
+      dispatchLoopAvgMs: Number(response.result.dispatchLoopAvgMs.toExponential(6)),
+      readbackSyncedMs: Number(response.result.readbackSyncedMs.toFixed(4)),
+      endToEndMs: Number(response.result.endToEndMs.toFixed(3)),
+      maxAbsError: Number(response.result.maxAbsError.toExponential(6)),
+      rmsError: Number(response.result.rmsError.toExponential(6)),
+      outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
+    };
+    el('benchResult').textContent = JSON.stringify(rounded);
+    el('message').textContent = `KERNEL_BENCH_DONE ${rounded.iterations} queued dispatches · dispatch loop ${rounded.dispatchLoopMs.toFixed(3)} ms · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+  } catch (error) {
+    el('benchResult').textContent = `KERNEL_BENCH_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Kernel benchmark failed: ${(error as Error).message}`;
     throw error;
   } finally {
     setBusy(false);
@@ -1010,9 +1075,10 @@ async function init() {
       workerModelCacheStatus = 'pack shards worker-owned';
       useSearchWorker = true;
       await initSearchWorker({ initModel: false });
-      searchWorkerBackend = KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
+      searchWorkerBackend = KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
       renderStatic();
-      if (KERNEL_PROBE_REQUESTED) await runKernelProbe();
+      if (KERNEL_BENCH_REQUESTED) await runKernelBenchmark();
+      else if (KERNEL_PROBE_REQUESTED) await runKernelProbe();
       else await runPackProbe();
       return;
     }

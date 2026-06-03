@@ -14,6 +14,11 @@ export interface Lc0WebMatmulAddKernelProbeOptions {
   verifyShards?: boolean;
 }
 
+export interface Lc0WebMatmulAddKernelBenchmarkOptions extends Lc0WebMatmulAddKernelProbeOptions {
+  /** Optional extra dispatches submitted before timing, with no readback. */
+  warmup?: number;
+}
+
 export interface Lc0WebMatmulAddKernelProbeResult {
   status: 'KERNEL_DONE';
   packUrl: string;
@@ -30,6 +35,28 @@ export interface Lc0WebMatmulAddKernelProbeResult {
   minMs: number;
   maxMs: number;
   firstMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+}
+
+export interface Lc0WebMatmulAddKernelBenchmarkResult {
+  status: 'KERNEL_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  weightTensor: string;
+  biasTensor: string;
+  k: number;
+  n: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  uploadSetupMs: number;
+  dispatchLoopMs: number;
+  dispatchLoopAvgMs: number;
+  readbackSyncedMs: number;
+  endToEndMs: number;
   maxAbsError: number;
   rmsError: number;
   outputSample: number[];
@@ -55,6 +82,7 @@ type DeviceLike = {
   queue: {
     writeBuffer: (buffer: unknown, bufferOffset: number, data: unknown) => void;
     submit: (commandBuffers: unknown[]) => void;
+    onSubmittedWorkDone?: () => Promise<void>;
   };
   createBuffer: (descriptor: Record<string, unknown>) => BufferLike;
   createShaderModule: (descriptor: Record<string, unknown>) => unknown;
@@ -211,20 +239,64 @@ async function requestDevice(): Promise<{ device: DeviceLike; adapterInfo?: Reco
   return { device, adapterInfo: cloneableAdapterInfo(rawAdapterInfo) };
 }
 
-async function runKernelOnce(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, outputBuffer: BufferLike, readbackBuffer: BufferLike, n: number): Promise<Float32Array<ArrayBufferLike>> {
-  const globals = gpuGlobals();
+function encodeKernelDispatches(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, n: number, iterations: number): unknown {
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bindGroup);
-  pass.dispatchWorkgroups(Math.ceil(n / 64));
+  const workgroups = Math.ceil(n / 64);
+  for (let i = 0; i < iterations; i++) pass.dispatchWorkgroups(workgroups);
   pass.end();
+  return encoder.finish();
+}
+
+async function readOutputOnce(device: DeviceLike, outputBuffer: BufferLike, readbackBuffer: BufferLike, n: number): Promise<Float32Array<ArrayBufferLike>> {
+  const globals = gpuGlobals();
+  const encoder = device.createCommandEncoder();
   encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, n * 4);
   device.queue.submit([encoder.finish()]);
   await readbackBuffer.mapAsync(globals.GPUMapMode!.READ);
   const copy = new Float32Array(readbackBuffer.getMappedRange().slice(0));
   readbackBuffer.unmap();
   return copy;
+}
+
+async function runKernelOnce(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, outputBuffer: BufferLike, readbackBuffer: BufferLike, n: number): Promise<Float32Array<ArrayBufferLike>> {
+  device.queue.submit([encodeKernelDispatches(device, pipeline, bindGroup, n, 1)]);
+  return readOutputOnce(device, outputBuffer, readbackBuffer, n);
+}
+
+function computeErrorStats(gpuOutput: Float32Array<ArrayBufferLike>, cpu: Float32Array<ArrayBufferLike>, n: number): { maxAbsError: number; rmsError: number } {
+  let maxAbsError = 0;
+  let sq = 0;
+  for (let i = 0; i < n; i++) {
+    const error = Math.abs(gpuOutput[i] - cpu[i]);
+    maxAbsError = Math.max(maxAbsError, error);
+    sq += error * error;
+  }
+  return { maxAbsError, rmsError: Math.sqrt(sq / n) };
+}
+
+function assertErrorInTolerance(maxAbsError: number): void {
+  const tolerance = 1e-3;
+  if (!Number.isFinite(maxAbsError) || maxAbsError > tolerance) {
+    throw new Error(`lc0web MatMul+Add kernel verification failed: maxAbsError=${maxAbsError}, tolerance=${tolerance}`);
+  }
+}
+
+function createMatmulAddPipeline(device: DeviceLike, inputBuffer: BufferLike, weightBuffer: BufferLike, biasBuffer: BufferLike, outputBuffer: BufferLike): { pipeline: PipelineLike; bindGroup: unknown } {
+  const module = device.createShaderModule({ label: 'lc0web matmul+add probe', code: WGSL });
+  const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
+  const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: inputBuffer } },
+      { binding: 1, resource: { buffer: weightBuffer } },
+      { binding: 2, resource: { buffer: biasBuffer } },
+      { binding: 3, resource: { buffer: outputBuffer } },
+    ],
+  });
+  return { pipeline, bindGroup };
 }
 
 export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKernelProbeOptions): Promise<Lc0WebMatmulAddKernelProbeResult> {
@@ -262,17 +334,7 @@ export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKern
     const outputBuffer = device.createBuffer({ size: DEFAULT_N * 4, usage: usage.STORAGE | usage.COPY_SRC });
     const readbackBuffer = device.createBuffer({ size: DEFAULT_N * 4, usage: usage.MAP_READ | usage.COPY_DST });
     buffers.push(inputBuffer, weightBuffer, biasBuffer, outputBuffer, readbackBuffer);
-    const module = device.createShaderModule({ label: 'lc0web matmul+add probe', code: WGSL });
-    const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
-    const bindGroup = device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: inputBuffer } },
-        { binding: 1, resource: { buffer: weightBuffer } },
-        { binding: 2, resource: { buffer: biasBuffer } },
-        { binding: 3, resource: { buffer: outputBuffer } },
-      ],
-    });
+    const { pipeline, bindGroup } = createMatmulAddPipeline(device, inputBuffer, weightBuffer, biasBuffer, outputBuffer);
 
     let gpuOutput: Float32Array<ArrayBufferLike> = new Float32Array(DEFAULT_N);
     for (let i = 0; i < warmup; i++) gpuOutput = await runKernelOnce(device, pipeline, bindGroup, outputBuffer, readbackBuffer, DEFAULT_N);
@@ -283,18 +345,8 @@ export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKern
       times.push(nowMs() - started);
     }
 
-    let maxAbsError = 0;
-    let sq = 0;
-    for (let i = 0; i < DEFAULT_N; i++) {
-      const error = Math.abs(gpuOutput[i] - cpu[i]);
-      maxAbsError = Math.max(maxAbsError, error);
-      sq += error * error;
-    }
-    const rmsError = Math.sqrt(sq / DEFAULT_N);
-    const tolerance = 1e-3;
-    if (!Number.isFinite(maxAbsError) || maxAbsError > tolerance) {
-      throw new Error(`lc0web MatMul+Add kernel verification failed: maxAbsError=${maxAbsError}, tolerance=${tolerance}`);
-    }
+    const { maxAbsError, rmsError } = computeErrorStats(gpuOutput, cpu, DEFAULT_N);
+    assertErrorInTolerance(maxAbsError);
     const avgMs = times.reduce((sum, value) => sum + value, 0) / times.length;
 
     return {
@@ -313,6 +365,86 @@ export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKern
       minMs: Math.min(...times),
       maxMs: Math.max(...times),
       firstMs: times[0],
+      maxAbsError,
+      rmsError,
+      outputSample: Array.from(gpuOutput.slice(0, 8)),
+    };
+  } finally {
+    for (const buffer of buffers) buffer.destroy?.();
+  }
+}
+
+export async function runLc0WebMatmulAddKernelBenchmark(options: Lc0WebMatmulAddKernelBenchmarkOptions): Promise<Lc0WebMatmulAddKernelBenchmarkResult> {
+  const totalStarted = nowMs();
+  const weightTensorName = options.weightTensorName ?? DEFAULT_WEIGHT_TENSOR;
+  const biasTensorName = options.biasTensorName ?? DEFAULT_BIAS_TENSOR;
+  const warmup = clampInteger(options.warmup, 10, 0, 1000);
+  const iterations = clampInteger(options.iterations, 1000, 1, 100_000);
+  const { device, adapterInfo } = await requestDevice();
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: [weightTensorName, biasTensorName],
+  });
+  const weight = pack.tensors.get(weightTensorName);
+  const bias = pack.tensors.get(biasTensorName);
+  if (!weight || !bias) throw new Error('lc0web kernel benchmark tensors were not loaded');
+  assertTensorShapeAndBytes(weight, [DEFAULT_K, DEFAULT_N], 2, 'weight');
+  assertTensorShapeAndBytes(bias, [DEFAULT_N], 2, 'bias');
+  if (weight.info.dtype !== 'f16' || bias.info.dtype !== 'f16') {
+    throw new Error(`lc0web kernel benchmark expects f16 tensors, got ${weight.info.dtype}/${bias.info.dtype}`);
+  }
+
+  const globals = gpuGlobals();
+  const usage = globals.GPUBufferUsage!;
+  const input = makeInputVector(DEFAULT_K);
+  const cpu = cpuMatmulAdd(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N);
+  const buffers: BufferLike[] = [];
+  try {
+    const setupStarted = nowMs();
+    const inputBuffer = createStorageBuffer(device, input, usage.STORAGE | usage.COPY_DST);
+    const weightBuffer = createStorageBuffer(device, weight.bytes, usage.STORAGE | usage.COPY_DST);
+    const biasBuffer = createStorageBuffer(device, bias.bytes, usage.STORAGE | usage.COPY_DST);
+    const outputBuffer = device.createBuffer({ size: DEFAULT_N * 4, usage: usage.STORAGE | usage.COPY_SRC });
+    const readbackBuffer = device.createBuffer({ size: DEFAULT_N * 4, usage: usage.MAP_READ | usage.COPY_DST });
+    buffers.push(inputBuffer, weightBuffer, biasBuffer, outputBuffer, readbackBuffer);
+    const { pipeline, bindGroup } = createMatmulAddPipeline(device, inputBuffer, weightBuffer, biasBuffer, outputBuffer);
+    const uploadSetupMs = nowMs() - setupStarted;
+
+    if (warmup > 0) {
+      device.queue.submit([encodeKernelDispatches(device, pipeline, bindGroup, DEFAULT_N, warmup)]);
+      // Prefer a no-readback warmup barrier when supported so timed readback
+      // is not polluted by pending warmup dispatches. Some browsers omit it;
+      // correctness still holds, but readbackSyncedMs may include warmup work.
+      await device.queue.onSubmittedWorkDone?.();
+    }
+
+    const dispatchStarted = nowMs();
+    device.queue.submit([encodeKernelDispatches(device, pipeline, bindGroup, DEFAULT_N, iterations)]);
+    const dispatchLoopMs = nowMs() - dispatchStarted;
+
+    const readbackStarted = nowMs();
+    const gpuOutput = await readOutputOnce(device, outputBuffer, readbackBuffer, DEFAULT_N);
+    const readbackSyncedMs = nowMs() - readbackStarted;
+    const { maxAbsError, rmsError } = computeErrorStats(gpuOutput, cpu, DEFAULT_N);
+    assertErrorInTolerance(maxAbsError);
+
+    return {
+      status: 'KERNEL_BENCH_DONE',
+      packUrl: pack.manifestUrl,
+      modelName: pack.manifest.model.name,
+      adapterInfo,
+      weightTensor: weightTensorName,
+      biasTensor: biasTensorName,
+      k: DEFAULT_K,
+      n: DEFAULT_N,
+      warmup,
+      iterations,
+      packLoadMs: pack.elapsedMs,
+      uploadSetupMs,
+      dispatchLoopMs,
+      dispatchLoopAvgMs: dispatchLoopMs / iterations,
+      readbackSyncedMs,
+      endToEndMs: nowMs() - totalStarted,
       maxAbsError,
       rmsError,
       outputSample: Array.from(gpuOutput.slice(0, 8)),

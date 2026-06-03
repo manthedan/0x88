@@ -2,7 +2,12 @@ import { collectOrtRuntimeDiagnostics, setRequestedOrtExecutionProviderForCurren
 import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { loadLc0WebModelPack } from './modelPack.ts';
 import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
-import { runLc0WebMatmulAddKernelProbe, type Lc0WebMatmulAddKernelProbeResult } from './wgslMatmulAddProbe.ts';
+import {
+  runLc0WebMatmulAddKernelBenchmark,
+  runLc0WebMatmulAddKernelProbe,
+  type Lc0WebMatmulAddKernelBenchmarkResult,
+  type Lc0WebMatmulAddKernelProbeResult,
+} from './wgslMatmulAddProbe.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 
 type InitMessage = {
@@ -54,6 +59,17 @@ type KernelProbeMessage = {
   verifyShards?: boolean;
 };
 
+type KernelBenchmarkMessage = {
+  type: 'kernelBenchmark';
+  id: number;
+  packUrl: string;
+  weightTensorName?: string;
+  biasTensorName?: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+};
+
 type CancelMessage = {
   type: 'cancel';
   id: number;
@@ -61,7 +77,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -90,6 +106,7 @@ type WorkerResponse =
   | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
   | { type: 'packLoadResult'; id: number; result: PackLoadResult }
   | { type: 'kernelProbeResult'; id: number; result: Lc0WebMatmulAddKernelProbeResult }
+  | { type: 'kernelBenchmarkResult'; id: number; result: Lc0WebMatmulAddKernelBenchmarkResult }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'error'; id: number; error: string };
 
@@ -177,6 +194,18 @@ async function handleKernelProbe(message: KernelProbeMessage): Promise<void> {
   post({ type: 'kernelProbeResult', id: message.id, result });
 }
 
+async function handleKernelBenchmark(message: KernelBenchmarkMessage): Promise<void> {
+  const result = await runLc0WebMatmulAddKernelBenchmark({
+    packUrl: message.packUrl,
+    weightTensorName: message.weightTensorName,
+    biasTensorName: message.biasTensorName,
+    iterations: message.iterations,
+    warmup: message.warmup,
+    verifyShards: message.verifyShards,
+  });
+  post({ type: 'kernelBenchmarkResult', id: message.id, result });
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
@@ -244,6 +273,7 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       if (message.type === 'init') await handleInit(message);
       else if (message.type === 'loadPack') await handleLoadPack(message);
       else if (message.type === 'kernelProbe') await handleKernelProbe(message);
+      else if (message.type === 'kernelBenchmark') await handleKernelBenchmark(message);
       else if (message.type === 'evaluate') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleEvaluate(message);
