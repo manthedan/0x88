@@ -124,9 +124,30 @@ function selectedOpenings(): ArenaOpening[] {
   return [{ name: 'Start position', fen: START_FEN }];
 }
 
+function openingHistoryBoards(opening: ArenaOpening): BoardState[] {
+  if (opening.positions?.length) return [...opening.positions];
+  return [parseFen(opening.fen)];
+}
+
+function gameTreeFromOpening(opening: ArenaOpening): GameTree {
+  const tree = new GameTree(opening.startFen ?? opening.fen);
+  for (const uci of opening.moves ?? []) {
+    if (!tree.addUci(uci)) throw new Error(`Opening ${opening.name} contains illegal move ${uci}`);
+  }
+  return tree;
+}
+
+function openingPgnSetupTags(opening: ArenaOpening): Record<string, string> {
+  if (opening.moves?.length) {
+    const startFen = opening.startFen ?? START_FEN;
+    return startFen !== START_FEN ? { SetUp: '1', FEN: startFen } : {};
+  }
+  return opening.fen !== START_FEN ? { SetUp: '1', FEN: opening.fen } : {};
+}
+
 function setOpeningPreview(opening: ArenaOpening): void {
-  board = parseFen(opening.fen);
-  historyBoards = [board];
+  historyBoards = openingHistoryBoards(opening);
+  board = historyBoards[historyBoards.length - 1];
   lastUci = null;
   setBoardSideEngines(null, null);
   renderBoard();
@@ -178,13 +199,13 @@ function legalFromUci(current: BoardState, uci: string | null): Move | undefined
 }
 
 async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: ArenaOpening, signal: AbortSignal): Promise<{ result: GameResultCode; reason: string; tree: GameTree }> {
-  const tree = new GameTree(opening.fen);
-  board = parseFen(opening.fen);
-  historyBoards = [board];
+  const tree = gameTreeFromOpening(opening);
+  historyBoards = tree.historyBoards();
+  board = historyBoards[historyBoards.length - 1];
   lastUci = null;
   setBoardSideEngines(white.name, black.name);
   renderBoard();
-  const priorFens: string[] = [];
+  const priorFens: string[] = historyBoards.slice(0, -1).map(boardToFen);
   const delay = Math.max(0, Math.floor(Number(inputEl('delayInput').value) || 0));
   for (let ply = 0; ply < 300; ply++) {
     if (signal.aborted) return { result: '1/2-1/2', reason: 'cancelled', tree };
@@ -258,8 +279,7 @@ async function startTournament() {
       if (reason === 'cancelled') break;
       applyGameResult(standings, white, black, result);
       played += 1;
-      const tags: Record<string, string> = { Event: 'LC0 arena', White: whiteEngine.name, Black: blackEngine.name, Opening: opening.name };
-      if (opening.fen !== START_FEN) { tags.SetUp = '1'; tags.FEN = opening.fen; }
+      const tags: Record<string, string> = { Event: 'LC0 arena', White: whiteEngine.name, Black: blackEngine.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
       games.push({ pgn: gameTreeToPgn(tree, tags, result) });
       appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason})`);
       renderStandings(standings);

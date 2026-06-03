@@ -76,9 +76,9 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
     <h2>Starting positions</h2>
     <div class="row">
       <div class="field"><label for="startingPositionSelect">Suite</label>
-        <select id="startingPositionSelect"><option value="start">Start position</option><option value="built-in">Built-in opening suite</option><option value="custom">Custom FENs</option></select></div>
-      <div class="field wide"><label for="openingText">Custom positions (one per line: FEN, or Name | FEN)</label>
-        <textarea id="openingText" spellcheck="false" placeholder="Sicilian Open | rnbqkbnr/pp1ppppp/8/2p5/3PP3/8/PPP2PPP/RNBQKBNR b KQkq d3 0 2"></textarea></div>
+        <select id="startingPositionSelect"><option value="start">Start position</option><option value="built-in">Built-in opening suite</option><option value="custom">Custom positions / replays</option></select></div>
+      <div class="field wide"><label for="openingText">Custom openings (one per line: FEN, UCI moves, PGN/SAN, or Name | ...)</label>
+        <textarea id="openingText" spellcheck="false" placeholder="Ruy Lopez | e2e4 e7e5 g1f3 b8c6 f1b5&#10;Italian Game | 1. e4 e5 2. Nf3 Nc6 3. Bc4&#10;Sicilian FEN | rnbqkbnr/pp1ppppp/8/2p5/3PP3/8/PPP2PPP/RNBQKBNR b KQkq d3 0 2"></textarea></div>
     </div>
     <div id="openingInfo" class="small">Start position only.</div>
     <div class="row">

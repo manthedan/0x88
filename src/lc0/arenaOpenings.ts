@@ -1,50 +1,129 @@
-import { boardToFen, parseFen, START_FEN } from '../chess/board.ts';
+import { boardToFen, parseFen, START_FEN, type BoardState } from '../chess/board.ts';
+import { moveToUci } from '../chess/moveCodec.ts';
+import { parsePgnGame } from '../chess/pgn.ts';
+import { buildBoardHistoryFromMoves } from './history.ts';
 
 export interface ArenaOpening {
   name: string;
+  /** Final position where engine play begins. */
   fen: string;
+  /** Known replay start. Present when the opening was loaded from moves/PGN. */
+  startFen?: string;
+  /** UCI moves from startFen to fen. Present when true LC0 history is available. */
+  moves?: string[];
+  /** Board states from startFen through fen, for LC0 112-plane history input. */
+  positions?: BoardState[];
 }
 
-export const BUILTIN_ARENA_OPENINGS: ArenaOpening[] = [
-  { name: 'Start position', fen: START_FEN },
-  { name: 'Italian Game', fen: 'r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3' },
-  { name: 'Ruy Lopez', fen: 'r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3' },
-  { name: 'Sicilian Open', fen: 'rnbqkbnr/pp1ppppp/8/2p5/3PP3/8/PPP2PPP/RNBQKBNR b KQkq d3 0 2' },
-  { name: 'French Advance', fen: 'rnbqkbnr/ppp2ppp/4p3/3pP3/3P4/8/PPP2PPP/RNBQKBNR b KQkq - 0 3' },
-  { name: 'Caro-Kann Advance', fen: 'rnbqkbnr/pp2pppp/2p5/3pP3/3P4/8/PPP2PPP/RNBQKBNR b KQkq - 0 3' },
-  { name: "Queen's Gambit Declined", fen: 'rnbqkbnr/ppp1pppp/8/3p4/2PP4/8/PP2PPPP/RNBQKBNR b KQkq c3 0 2' },
-  { name: "King's Indian", fen: 'rnbqkb1r/pppppp1p/5np1/8/2PPP3/8/PP3PPP/RNBQKBNR b KQkq - 0 3' },
-  { name: 'English Opening', fen: 'rnbqkbnr/pppppppp/8/8/2P5/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 1' },
-  { name: 'Reti Opening', fen: 'rnbqkbnr/pppppppp/8/8/8/5N2/PPPPPPPP/RNBQKB1R b KQkq - 1 1' },
-  { name: 'Scandinavian Defense', fen: 'rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2' },
-  { name: 'Pirc Defense', fen: 'rnbqkbnr/ppp1pppp/3p4/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2' },
-  { name: 'Slav Defense', fen: 'rnbqkbnr/pp2pppp/2p5/3p4/2PP4/8/PP2PPPP/RNBQKBNR w KQkq - 0 3' },
-  { name: 'Benoni Defense', fen: 'rnbqkbnr/pp1ppppp/8/2pP4/8/8/PPP1PPPP/RNBQKBNR b KQkq - 0 2' },
-  { name: 'Dutch Defense', fen: 'rnbqkbnr/ppppp1pp/8/5p2/2PP4/8/PP2PPPP/RNBQKBNR b KQkq c3 0 2' },
-  { name: 'Four Knights', fen: 'r1bqkb1r/pppp1ppp/2n2n2/4p3/4P3/2N2N2/PPPP1PPP/R1BQKB1R w KQkq - 4 4' },
-].map((opening) => ({ ...opening, fen: normalizeFen(opening.fen) }));
+interface ArenaOpeningDefinition {
+  name: string;
+  fen?: string;
+  moves?: string[];
+  startFen?: string;
+}
+
+const BUILTIN_ARENA_OPENING_DEFS: ArenaOpeningDefinition[] = [
+  { name: 'Start position', moves: [] },
+  { name: 'Italian Game', moves: ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1c4'] },
+  { name: 'Ruy Lopez', moves: ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1b5'] },
+  { name: 'Sicilian Open', moves: ['e2e4', 'c7c5', 'd2d4'] },
+  { name: 'French Advance', moves: ['e2e4', 'e7e6', 'd2d4', 'd7d5', 'e4e5'] },
+  { name: 'Caro-Kann Advance', moves: ['e2e4', 'c7c6', 'd2d4', 'd7d5', 'e4e5'] },
+  { name: "Queen's Gambit Declined", moves: ['d2d4', 'd7d5', 'c2c4'] },
+  { name: "King's Indian", moves: ['d2d4', 'g8f6', 'c2c4', 'g7g6', 'e2e4'] },
+  { name: 'English Opening', moves: ['c2c4'] },
+  { name: 'Reti Opening', moves: ['g1f3'] },
+  { name: 'Scandinavian Defense', moves: ['e2e4', 'd7d5'] },
+  { name: 'Pirc Defense', moves: ['e2e4', 'd7d6'] },
+  { name: 'Slav Defense', moves: ['d2d4', 'd7d5', 'c2c4', 'c7c6'] },
+  { name: 'Benoni Defense', moves: ['d2d4', 'c7c5', 'd4d5'] },
+  { name: 'Dutch Defense', moves: ['d2d4', 'f7f5', 'c2c4'] },
+  { name: 'Four Knights', moves: ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'b1c3', 'g8f6'] },
+];
+
+export const BUILTIN_ARENA_OPENINGS: ArenaOpening[] = BUILTIN_ARENA_OPENING_DEFS.map((opening) => {
+  if (opening.moves) return openingFromUciMoves(opening.name, opening.moves, opening.startFen);
+  return { name: opening.name, fen: normalizeFen(opening.fen ?? START_FEN) };
+});
 
 export function normalizeFen(fen: string): string {
   return boardToFen(parseFen(fen));
+}
+
+export function openingFromUciMoves(name: string, moves: readonly string[], startFen = START_FEN): ArenaOpening {
+  const positions = buildBoardHistoryFromMoves(moves, startFen);
+  return {
+    name,
+    fen: boardToFen(positions[positions.length - 1]),
+    startFen: normalizeFen(startFen),
+    moves: [...moves],
+    positions,
+  };
 }
 
 function stripInlineComment(line: string): string {
   return line.replace(/(^|\s+)#.*$/, '').trim();
 }
 
-function parseOpeningLine(line: string, index: number): ArenaOpening {
+function splitOpeningLine(line: string): { name?: string; body: string } {
   const delimiter = line.includes('|') ? '|' : line.includes(';') ? ';' : null;
-  const parts = delimiter ? line.split(delimiter) : null;
-  const name = parts && parts.length >= 2 ? parts[0].trim() : `Position ${index}`;
-  const fen = parts && parts.length >= 2 ? parts.slice(1).join(delimiter!).trim() : line;
-  return { name: name || `Position ${index}`, fen: normalizeFen(fen) };
+  if (!delimiter) return { body: line };
+  const parts = line.split(delimiter);
+  const name = parts[0].trim();
+  return { name: name || undefined, body: parts.slice(1).join(delimiter).trim() };
+}
+
+function parseFenOpening(name: string, body: string): ArenaOpening | null {
+  try {
+    return { name, fen: normalizeFen(body) };
+  } catch {
+    return null;
+  }
+}
+
+function uciTokens(body: string): string[] | null {
+  const tokens = body.split(/[\s,]+/).map((token) => token.trim()).filter(Boolean);
+  if (!tokens.length) return null;
+  return tokens.every((token) => /^[a-h][1-8][a-h][1-8][qrbn]?$/i.test(token))
+    ? tokens.map((token) => token.toLowerCase())
+    : null;
+}
+
+function parseUciOpening(name: string, body: string): ArenaOpening | null {
+  const moves = uciTokens(body);
+  if (!moves) return null;
+  return openingFromUciMoves(name, moves);
+}
+
+function parsePgnOpening(name: string, body: string): ArenaOpening | null {
+  const game = parsePgnGame(body);
+  const line = game.tree.mainlineFrom(game.tree.root);
+  if (!line.length) return null;
+  const moves = line.map((node) => {
+    if (!node.move) throw new Error(`Missing move in parsed PGN opening ${name}`);
+    return moveToUci(node.move);
+  });
+  return openingFromUciMoves(name, moves, game.tree.root.fen);
+}
+
+function parseOpeningLine(line: string, index: number): ArenaOpening {
+  const { name: explicitName, body } = splitOpeningLine(line);
+  const name = explicitName || `Position ${index}`;
+  const fen = parseFenOpening(name, body);
+  if (fen) return fen;
+  const uci = parseUciOpening(name, body);
+  if (uci) return uci;
+  const pgn = parsePgnOpening(name, body);
+  if (pgn) return pgn;
+  throw new Error(`Opening ${name} is not a valid FEN, UCI move list, or PGN/SAN line`);
 }
 
 /**
  * Parse custom arena starting positions. Each non-empty line can be either:
- *   - a raw FEN / EPD-like position
- *   - "Name | FEN"
- *   - "Name; FEN"
+ *   - a raw FEN / EPD-like position (no known history)
+ *   - "Name | FEN" or "Name; FEN"
+ *   - a UCI replay from the normal start position, e.g. "e2e4 e7e5 g1f3"
+ *   - "Name | UCI..." or "Name | PGN/SAN movetext..." for true LC0 history planes
  */
 export function parseArenaOpenings(text: string): ArenaOpening[] {
   const openings: ArenaOpening[] = [];
