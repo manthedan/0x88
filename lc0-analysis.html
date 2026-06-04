@@ -25,7 +25,7 @@ button{border:1px solid var(--rule);border-radius:6px;background:white;color:var
 button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:700}button:disabled{opacity:.55;cursor:not-allowed}
 .nav button{flex:1 1 auto}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px}
-.engine-list{display:grid;gap:6px;margin-top:10px}.engine-row{display:flex;align-items:center;gap:6px}.engine-row select{flex:1 1 0;min-width:0;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;background:white}.engine-row .arrow{color:var(--muted);font-weight:700}.engine-row .row-rm{flex:0 0 auto;padding:4px 9px;line-height:1;color:var(--muted)}
+.engine-list{display:grid;gap:6px;margin-top:10px}.engine-row{display:flex;align-items:center;gap:6px}.engine-row select{flex:1 1 0;min-width:0;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;background:white}.engine-row .arrow{color:var(--muted);font-weight:700}.engine-row .row-strength{flex:0 0 72px;width:72px;font:inherit;font-size:13px;font-family:var(--mono);padding:6px 8px;border:1px solid var(--rule);border-radius:6px}.engine-row .row-unit{flex:0 0 auto;color:var(--muted);font-size:11px}.engine-row .row-rm{flex:0 0 auto;padding:4px 9px;line-height:1;color:var(--muted)}
 .field{display:grid;gap:3px}.field label{font-size:11px;color:var(--muted)}
 input,select{font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink)}
 input[type=number]{width:80px;font-family:var(--mono)}
@@ -103,12 +103,6 @@ table.opening .san{font-family:var(--mono);font-weight:700}
     <div id="engineList" class="engine-list"></div>
     <div class="row">
       <button id="addEngine" type="button">+ Add engine</button>
-      <div class="field"><label for="visitsInput">Lc0 visits</label>
-        <input id="visitsInput" type="number" min="1" max="100000" step="1" value="400" /></div>
-      <div class="field"><label for="sfDepthInput">SF depth</label>
-        <input id="sfDepthInput" type="number" min="1" max="30" step="1" value="14" /></div>
-      <div class="field"><label for="recklessDepthInput">Reckless depth</label>
-        <input id="recklessDepthInput" type="number" min="1" max="20" step="1" value="4" /></div>
     </div>
     <div id="recklessRuntimeInfo" class="small">Reckless: detecting runtime…</div>
     <h2>Engine lines</h2>
