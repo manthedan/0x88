@@ -580,8 +580,9 @@ function evaluatorMetrics(evaluator: Evaluator): EvaluatorMetricsSnapshot | null
   const maybe = evaluator as Evaluator & { metrics?: () => { hits?: number; misses?: number } };
   if (typeof maybe.metrics !== 'function') return null;
   const metrics = maybe.metrics();
-  const hits = Number(metrics?.hits ?? 0);
-  const misses = Number(metrics?.misses ?? 0);
+  if (!metrics) return null;
+  const hits = Number(metrics.hits ?? 0);
+  const misses = Number(metrics.misses ?? 0);
   if (!Number.isFinite(hits) || !Number.isFinite(misses)) return null;
   return { hits, misses };
 }

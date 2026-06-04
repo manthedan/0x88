@@ -7,7 +7,7 @@ const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 180_000;
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_search_bench.mjs [options]\n\nRuns a bounded browser benchmark for the hybrid WGSL encoder + ORT heads evaluator, including warm eval latency and fixed-visit PUCT search latency.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --visits N           Fixed PUCT visits per timed search (default 32)\n  --batch N            Search leaf batch size (default 1)\n  --layers N           Encoder layers for hybrid path (default 10)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --eval-iters N       Timed warm eval iterations (default 3, max 100)\n  --eval-warmup N      Warm eval warmup iterations (default 1, max 20)\n  --search-iters N     Timed fixed-visit searches (default 3, max 50)\n  --search-warmup N    Search warmup iterations (default 1, max 10)\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`);
+  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_search_bench.mjs [options]\n\nRuns a bounded browser benchmark for the hybrid WGSL encoder + ORT heads evaluator, including warm eval latency and fixed-visit PUCT search latency.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --visits N           Fixed PUCT visits per timed search (default 32)\n  --batch N            Search leaf batch size (default 1)\n  --layers N           Encoder layers for hybrid path (default 10)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --eval-iters N       Timed warm eval iterations (default 3, max 100; 0 for search-only)\n  --eval-warmup N      Warm eval warmup iterations (default 1, max 20)\n  --search-iters N     Timed fixed-visit searches (default 3, max 50)\n  --search-warmup N    Search warmup iterations (default 1, max 10)\n  --reuse-tree         Reuse the worker search tree across repeated searches\n  --reset-between-searches\n                       Reset the tree before every search even when reuse is enabled\n  --no-reset-between-searches\n                       Keep the tree between repeated searches\n  --eval-cache-entries N\n                       Enable worker-side LC0 eval cache with this many entries\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -25,6 +25,9 @@ function parseArgs(argv) {
     evalWarmup: 1,
     searchIters: 3,
     searchWarmup: 1,
+    reuseTree: false,
+    resetBetweenSearches: undefined,
+    evalCacheEntries: 0,
     packVerify: false,
     noServer: false,
     dryRun: false,
@@ -53,6 +56,11 @@ function parseArgs(argv) {
     else if (arg === '--eval-warmup') args.evalWarmup = Number(next());
     else if (arg === '--search-iters') args.searchIters = Number(next());
     else if (arg === '--search-warmup') args.searchWarmup = Number(next());
+    else if (arg === '--reuse-tree') args.reuseTree = true;
+    else if (arg === '--no-reuse-tree') args.reuseTree = false;
+    else if (arg === '--reset-between-searches') args.resetBetweenSearches = true;
+    else if (arg === '--no-reset-between-searches') args.resetBetweenSearches = false;
+    else if (arg === '--eval-cache-entries') args.evalCacheEntries = Number(next());
     else if (arg === '--pack-verify') args.packVerify = true;
     else if (arg === '--no-server') args.noServer = true;
     else if (arg === '--dry-run') args.dryRun = true;
@@ -64,9 +72,9 @@ function parseArgs(argv) {
   if (!['ort', 'wgsl'].includes(args.headBackend)) throw new Error(`Invalid --head-backend: ${args.headBackend}`);
   for (const [name, value] of [
     ['port', args.port], ['timeout', args.timeoutMs], ['visits', args.visits], ['batch', args.batch], ['layers', args.layers],
-    ['eval-iters', args.evalIters], ['eval-warmup', args.evalWarmup], ['search-iters', args.searchIters], ['search-warmup', args.searchWarmup],
+    ['eval-iters', args.evalIters], ['eval-warmup', args.evalWarmup], ['search-iters', args.searchIters], ['search-warmup', args.searchWarmup], ['eval-cache-entries', args.evalCacheEntries],
   ]) {
-    if (!Number.isFinite(value) || value < 0 || (name !== 'eval-warmup' && name !== 'search-warmup' && value <= 0)) throw new Error(`Invalid --${name}: ${value}`);
+    if (!Number.isFinite(value) || value < 0 || (!['eval-iters', 'eval-warmup', 'search-warmup', 'eval-cache-entries'].includes(name) && value <= 0)) throw new Error(`Invalid --${name}: ${value}`);
   }
   return args;
 }
@@ -83,6 +91,9 @@ function benchmarkUrl(args) {
   url.searchParams.set('hybridEvalBenchWarmup', String(args.evalWarmup));
   url.searchParams.set('hybridSearchIters', String(args.searchIters));
   url.searchParams.set('hybridSearchWarmup', String(args.searchWarmup));
+  url.searchParams.set('reuseTree', args.reuseTree ? '1' : '0');
+  if (args.resetBetweenSearches !== undefined) url.searchParams.set('resetBetweenSearches', args.resetBetweenSearches ? '1' : '0');
+  if (args.evalCacheEntries > 0) url.searchParams.set('evalCacheEntries', String(args.evalCacheEntries));
   url.searchParams.set('ep', 'wasm');
   if (!args.packVerify) url.searchParams.set('packVerify', '0');
   return String(url);

@@ -681,6 +681,7 @@ const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUES
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
 const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
+const HYBRID_EVAL_CACHE_ENTRIES = clampInt(params.get('evalCacheEntries') ?? (params.get('evalCache') === '1' ? '2048' : '0'), 0, 100000, 0);
 const BENCH_WARMUP = Math.min(100, Math.max(0, Math.floor(Number(params.get('benchWarmup') ?? '5') || 0)));
 const BENCH_ITERS = Math.min(1000, Math.max(1, Math.floor(Number(params.get('benchIters') ?? params.get('iters') ?? '25') || 25)));
 function requestedKernelVariant(): KernelVariant {
@@ -1024,6 +1025,7 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
       layers: Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10))),
       verifyShards: params.get('packVerify') !== '0',
       headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
+      evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
     } : {}),
   });
   searchWorkerInitMs = performance.now() - initStarted;
@@ -2150,6 +2152,53 @@ function boundedQueryInt(names: string[], fallback: number, min: number, max: nu
   return fallback;
 }
 
+function queryBool(names: string[], fallback = false): boolean {
+  for (const name of names) {
+    const raw = params.get(name);
+    if (raw === null) continue;
+    return !['0', 'false', 'no', 'off'].includes(raw.toLowerCase());
+  }
+  return fallback;
+}
+
+async function resetSearchTreeState(): Promise<void> {
+  searcher?.resetTree();
+  if (searchWorkerReady) await postWorkerRequest<{ type: 'searchReset' }>({ type: 'resetSearch' });
+}
+
+type SearchStatsSnapshot = NonNullable<RenderableSearchResult['stats']>;
+
+function aggregateSearchStats(samples: SearchStatsSnapshot[]) {
+  const sum = (key: keyof SearchStatsSnapshot) => samples.reduce((total, stats) => total + (Number(stats[key]) || 0), 0);
+  const rootReusedCount = samples.filter((stats) => stats.rootReused).length;
+  const cacheHits = sum('cacheHits');
+  const neuralEvalMisses = sum('neuralEvalMisses');
+  const evalCalls = sum('evalCalls');
+  const completedVisits = sum('completedVisits');
+  return {
+    samples: samples.length,
+    rootReusedCount,
+    completedVisits,
+    evalCalls,
+    batchEvalCalls: sum('batchEvalCalls'),
+    maxEvalBatch: samples.reduce((max, stats) => Math.max(max, stats.maxEvalBatch ?? 0), 0),
+    cacheHits,
+    neuralEvalMisses,
+    cacheHitRate: Number((cacheHits / Math.max(1, cacheHits + neuralEvalMisses)).toFixed(6)),
+    expansions: sum('expansions'),
+    terminalHits: sum('terminalHits'),
+    batchLeafCollisions: sum('batchLeafCollisions'),
+    batchLeafRetries: sum('batchLeafRetries'),
+    requestedVisits: sum('requestedVisits'),
+    stopReasons: samples.reduce<Record<string, number>>((counts, stats) => {
+      const reason = stats.stopReason ?? 'unknown';
+      counts[reason] = (counts[reason] ?? 0) + 1;
+      return counts;
+    }, {}),
+    effectiveVisitsPerSecondDenominator: completedVisits > 0 ? 'completedVisits' : 'requestedVisits',
+  };
+}
+
 async function runWorkerEvalBenchmark(): Promise<void> {
   if (!searchWorkerReady) throw new Error('benchmark requires ready LC0 worker');
   const input = currentEvaluationInput();
@@ -2198,12 +2247,15 @@ async function runHybridSearchBenchmark(): Promise<void> {
   if (!searchWorkerReady) throw new Error('hybrid search benchmark requires ready LC0 worker');
   const input = currentEvaluationInput();
   const evalWarmup = boundedQueryInt(['hybridEvalBenchWarmup', 'evalWarmup'], 1, 0, 20);
-  const evalIterations = boundedQueryInt(['hybridEvalBenchIters', 'evalIters'], 3, 1, 100);
+  const evalIterations = boundedQueryInt(['hybridEvalBenchIters', 'evalIters'], 3, 0, 100);
   const searchWarmup = boundedQueryInt(['hybridSearchWarmup', 'searchWarmup'], 1, 0, 10);
   const searchIterations = boundedQueryInt(['hybridSearchIters', 'searchIters'], 3, 1, 50);
+  const reuseTree = queryBool(['reuseTree', 'searchReuseTree', 'treeReuse'], false);
+  const resetBetweenSearches = queryBool(['resetBetweenSearches', 'resetSearchTree'], !reuseTree);
   const evalTimes: number[] = [];
   const evalTimingSamples: Record<string, number[]> = {};
   const searchTimes: number[] = [];
+  const searchStatsSamples: SearchStatsSnapshot[] = [];
   let lastEval: BrowserEvaluationChoice | undefined;
   let lastSearch: RenderableSearchResult | undefined;
   setBusy(true, `Benchmarking hybrid LC0 eval/search: ${evalIterations} evals + ${searchIterations} searches at ${searchVisits} visits…`);
@@ -2222,21 +2274,25 @@ async function runHybridSearchBenchmark(): Promise<void> {
       el('benchResult').textContent = `HYBRID_SEARCH_BENCH_EVAL_TIMED ${i + 1}/${evalIterations}`;
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
+    await resetSearchTreeState();
     for (let i = 0; i < searchWarmup; i++) {
+      if (resetBetweenSearches) await resetSearchTreeState();
       const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
-        type: 'search', input, visits: searchVisits, batchSize: searchBatchSize, multiPv: searchMultiPv,
+        type: 'search', input, visits: searchVisits, batchSize: searchBatchSize, multiPv: searchMultiPv, reuseTree,
       });
       lastSearch = response.result;
       el('benchResult').textContent = `HYBRID_SEARCH_BENCH_SEARCH_WARMUP ${i + 1}/${searchWarmup}`;
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
     for (let i = 0; i < searchIterations; i++) {
+      if (resetBetweenSearches) await resetSearchTreeState();
       const started = performance.now();
       const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
-        type: 'search', input, visits: searchVisits, batchSize: searchBatchSize, multiPv: searchMultiPv,
+        type: 'search', input, visits: searchVisits, batchSize: searchBatchSize, multiPv: searchMultiPv, reuseTree,
       });
       lastSearch = response.result;
       searchTimes.push(performance.now() - started);
+      if (lastSearch.stats) searchStatsSamples.push(lastSearch.stats);
       el('benchResult').textContent = `HYBRID_SEARCH_BENCH_SEARCH_TIMED ${i + 1}/${searchIterations}`;
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
@@ -2254,6 +2310,9 @@ async function runHybridSearchBenchmark(): Promise<void> {
       visits: searchVisits,
       batchSize: searchBatchSize,
       multiPv: searchMultiPv,
+      reuseTree,
+      resetBetweenSearches,
+      evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
       eval: {
         warmup: evalWarmup,
         iterations: evalIterations,
@@ -2271,6 +2330,9 @@ async function runHybridSearchBenchmark(): Promise<void> {
         timingStats: sampleTimingStats(searchTimes, 'hybrid fixed-visit search round trips'),
         timesMs: searchTimes.map((time) => roundReportMs(time)),
         visitsPerSecond: Number(((searchVisits * searchIterations) / Math.max(1e-9, totalSearchMs / 1000)).toFixed(3)),
+        completedVisitsPerSecond: Number((aggregateSearchStats(searchStatsSamples).completedVisits / Math.max(1e-9, totalSearchMs / 1000)).toFixed(3)),
+        aggregateStats: aggregateSearchStats(searchStatsSamples),
+        statsSamples: searchStatsSamples,
         bestMove: lastSearch?.move,
         value: lastSearch?.value === undefined ? undefined : Number(lastSearch.value.toFixed(8)),
         pv: lastSearch?.pv,

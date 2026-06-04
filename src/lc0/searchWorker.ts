@@ -1,7 +1,7 @@
 import { collectOrtRuntimeDiagnostics, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
 import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { loadLc0WebModelPack } from './modelPack.ts';
-import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationProvider, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationProvider, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import {
   runLc0WebAttentionBlockBenchmark,
   runLc0WebAttentionOutputBenchmark,
@@ -64,6 +64,7 @@ type InitMessage = {
   layers?: number;
   verifyShards?: boolean;
   headBackend?: 'ort' | 'wgsl';
+  evalCacheEntries?: number;
 };
 
 type SearchMessage = {
@@ -432,34 +433,43 @@ async function handleInit(message: InitMessage): Promise<void> {
     layers: message.layers,
     verifyShards: message.verifyShards,
     headBackend: message.headBackend,
+    evalCacheEntries: message.evalCacheEntries ?? 0,
   });
   if (evaluator && configuredInitKey === initKey) {
     post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: `${configuredModelCacheStatus} · reused existing worker session` });
     return;
   }
 
+  const evalCacheEntries = Math.max(0, Math.floor(message.evalCacheEntries ?? 0));
+  const cacheLabel = evalCacheEntries > 0 ? ` · eval-cache ${evalCacheEntries}` : '';
   setRequestedOrtExecutionProviderForCurrentThread(message.ep);
   if (message.runtime === 'hybrid') {
     if (!message.packUrl) throw new Error('hybrid LC0 worker init requires packUrl');
-    const nextEvaluator: WorkerEvaluator = new Lc0WebHybridEvaluator({
+    const baseEvaluator: WorkerEvaluator = new Lc0WebHybridEvaluator({
       packUrl: message.packUrl,
       layers: message.layers,
       verifyShards: message.verifyShards,
       headBackend: message.headBackend,
     });
+    const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0
+      ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries })
+      : baseEvaluator;
     const previousEvaluator = evaluator;
     evaluator = nextEvaluator;
     searcher = new Lc0PuctSearcher(nextEvaluator);
     configuredModelUrl = message.packUrl;
     configuredInitKey = initKey;
     configuredBackend = message.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
-    configuredModelCacheStatus = 'hybrid-pack-lazy';
+    configuredModelCacheStatus = `hybrid-pack-lazy${cacheLabel}`;
     await previousEvaluator?.dispose?.();
     post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
     return;
   }
   const modelLoad = await loadLc0ModelForOrt(message.modelUrl, { cache: message.cacheModel });
-  const nextEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+  const baseEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+  const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0
+    ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries })
+    : baseEvaluator;
   const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
   const diagnostics = await collectOrtRuntimeDiagnostics();
   const previousEvaluator = evaluator;
@@ -468,7 +478,7 @@ async function handleInit(message: InitMessage): Promise<void> {
   configuredModelUrl = message.modelUrl;
   configuredInitKey = initKey;
   configuredBackend = diagnostics.describe;
-  configuredModelCacheStatus = describeLc0ModelLoad(modelLoad);
+  configuredModelCacheStatus = `${describeLc0ModelLoad(modelLoad)}${cacheLabel}`;
   await previousEvaluator?.dispose?.();
   post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
 }
