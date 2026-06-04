@@ -5,11 +5,15 @@ export interface RecklessOptions {
   depth?: number;
   /** Alternative to depth: fixed think time in ms. */
   movetimeMs?: number;
-  /** Transposition-table size in MB. Kept small because the WASI build is one-shot. */
+  /** Transposition-table size in MB. */
   hashMb?: number;
 }
 
 export const DEFAULT_RECKLESS_WASM_URL = '/reckless/reckless.wasm';
+
+const SHARED_STDIN_HEADER_INTS = 4;
+const SHARED_STDIN_HEADER_BYTES = SHARED_STDIN_HEADER_INTS * Int32Array.BYTES_PER_ELEMENT;
+const PERSISTENT_STDIN_CAPACITY_BYTES = 64 * 1024;
 
 function goCommand(options: RecklessOptions): string {
   if (options.movetimeMs && options.movetimeMs > 0) return `go movetime ${Math.floor(options.movetimeMs)}`;
@@ -27,6 +31,14 @@ interface RunResult {
 }
 
 type Pending = { resolve: (result: RunResult) => void; reject: (error: Error) => void };
+type PersistentPending = Pending & { stdout: string[]; stderr: string[]; onAbort?: () => void };
+
+type SharedInput = {
+  buffer: SharedArrayBuffer;
+  control: Int32Array;
+  data: Uint8Array;
+  capacity: number;
+};
 
 function abortError(): Error {
   const error = new Error('Reckless search aborted');
@@ -34,20 +46,64 @@ function abortError(): Error {
   return error;
 }
 
+function createSharedInput(capacity = PERSISTENT_STDIN_CAPACITY_BYTES): SharedInput {
+  const buffer = new SharedArrayBuffer(SHARED_STDIN_HEADER_BYTES + capacity);
+  const control = new Int32Array(buffer, 0, SHARED_STDIN_HEADER_INTS);
+  const data = new Uint8Array(buffer, SHARED_STDIN_HEADER_BYTES);
+  Atomics.store(control, 3, capacity);
+  return { buffer, control, data, capacity };
+}
+
+function closeSharedInput(input: SharedInput): void {
+  Atomics.store(input.control, 2, 1);
+  Atomics.notify(input.control, 1);
+}
+
+function writeSharedInput(input: SharedInput, text: string): void {
+  const bytes = new TextEncoder().encode(text);
+  const readPos = Atomics.load(input.control, 0);
+  let writePos = Atomics.load(input.control, 1);
+  if (writePos - readPos + bytes.byteLength > input.capacity) {
+    // The command batches are tiny; if this ever happens the reader is wedged.
+    throw new Error('Reckless persistent stdin buffer is full');
+  }
+  let offset = 0;
+  while (offset < bytes.byteLength) {
+    const ringOffset = writePos % input.capacity;
+    const n = Math.min(bytes.byteLength - offset, input.capacity - ringOffset);
+    input.data.set(bytes.subarray(offset, offset + n), ringOffset);
+    offset += n;
+    writePos += n;
+  }
+  Atomics.store(input.control, 1, writePos);
+  // Wake the WASI fd_read loop if it is waiting for more bytes.
+  Atomics.notify(input.control, 1);
+}
+
+function canUsePersistentWasi(): boolean {
+  return typeof SharedArrayBuffer !== 'undefined' && (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
+}
+
 /**
  * Browser adapter for Reckless' Rust/WASI build.
  *
- * Reckless does not currently publish a browser UCI worker. The integration runs
- * a patched single-thread `wasm32-wasip1` binary in a dedicated Web Worker and
- * feeds each search as argv commands (`setoption`, `position`, `go`). That is
- * browser-safe and avoids interactive stdin, but it is one-shot: no hash/tree is
- * retained between calls and aborting terminates/recreates the worker.
+ * In an isolated browser runtime, this starts one persistent patched WASI UCI
+ * process and feeds commands through a tiny SharedArrayBuffer-backed stdin. That
+ * preserves Reckless' hash across searches and avoids repeated WASI process and
+ * NNUE initialization. Non-isolated browsers fall back to one-shot argv searches.
  */
 export class RecklessEngine {
   readonly name = 'reckless-wasi';
   private worker: Worker | null = null;
+  private workerMode: 'oneshot' | 'persistent' | null = null;
   private seq = 0;
   private pending = new Map<number, Pending>();
+  private persistentPending: PersistentPending | null = null;
+  private sharedInput: SharedInput | null = null;
+  private persistentDisabled = false;
+  private persistentHashCommand: string | null = null;
+  private persistentThreadsCommand: string | null = null;
+  private persistentMultipvCommand: string | null = null;
   private queueTail: Promise<void> = Promise.resolve();
   private options: RecklessOptions;
   private readonly wasmUrl: string;
@@ -62,8 +118,9 @@ export class RecklessEngine {
     this.options = { ...this.options, ...next };
   }
 
-  private ensureWorker(): Worker {
-    if (this.worker) return this.worker;
+  private ensureOneShotWorker(): Worker {
+    if (this.worker && this.workerMode === 'oneshot') return this.worker;
+    this.disposeWorker();
     const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'reckless-wasi' });
     worker.onmessage = (event: MessageEvent) => {
       const message = event.data as { type: string; id: number; stdout?: string[]; stderr?: string[]; exitCode?: number; error?: string };
@@ -73,19 +130,74 @@ export class RecklessEngine {
       if (message.type === 'error') pending.reject(new Error(message.error ?? 'Reckless WASI worker error'));
       else pending.resolve({ stdout: message.stdout ?? [], stderr: message.stderr ?? [], exitCode: message.exitCode ?? 0 });
     };
-    worker.onerror = (event) => {
-      const error = new Error(event.message || 'Reckless WASI worker error');
-      for (const pending of this.pending.values()) pending.reject(error);
-      this.pending.clear();
-      this.disposeWorker();
-    };
+    worker.onerror = (event) => this.rejectAllAndDispose(new Error(event.message || 'Reckless WASI worker error'));
     this.worker = worker;
+    this.workerMode = 'oneshot';
     return worker;
   }
 
+  private ensurePersistentWorker(): Worker {
+    if (this.worker && this.workerMode === 'persistent' && this.sharedInput) return this.worker;
+    this.disposeWorker();
+    const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'reckless-wasi-persistent' });
+    const sharedInput = createSharedInput();
+    worker.onmessage = (event: MessageEvent) => this.handlePersistentMessage(event.data as { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string });
+    worker.onerror = (event) => this.rejectAllAndDispose(new Error(event.message || 'Reckless persistent WASI worker error'));
+    this.worker = worker;
+    this.workerMode = 'persistent';
+    this.sharedInput = sharedInput;
+    worker.postMessage({ type: 'start-persistent', wasmUrl: this.wasmUrl, inputBuffer: sharedInput.buffer });
+    return worker;
+  }
+
+  private handlePersistentMessage(message: { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string }): void {
+    if (message.type === 'persistent-ready') return;
+    if (message.type === 'persistent-line') {
+      const active = this.persistentPending;
+      if (!active || !message.line) return;
+      if (message.stream === 'stderr') active.stderr.push(message.line);
+      else active.stdout.push(message.line);
+      if (message.stream === 'stdout' && message.line.startsWith('bestmove')) {
+        this.resolvePersistent({ stdout: active.stdout, stderr: active.stderr, exitCode: 0 });
+      }
+      return;
+    }
+    if (message.type === 'persistent-error') {
+      this.rejectAllAndDispose(new Error(message.error ?? 'Reckless persistent WASI worker error'));
+      return;
+    }
+    if (message.type === 'persistent-exit') {
+      const error = new Error(`Reckless persistent WASI process exited with ${message.exitCode ?? 0}`);
+      this.rejectAllAndDispose(error);
+    }
+  }
+
+  private resolvePersistent(result: RunResult): void {
+    const active = this.persistentPending;
+    if (!active) return;
+    this.persistentPending = null;
+    active.resolve(result);
+  }
+
+  private rejectAllAndDispose(error: Error): void {
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+    if (this.persistentPending) {
+      this.persistentPending.reject(error);
+      this.persistentPending = null;
+    }
+    this.disposeWorker();
+  }
+
   private disposeWorker(): void {
+    if (this.sharedInput) closeSharedInput(this.sharedInput);
     this.worker?.terminate();
     this.worker = null;
+    this.workerMode = null;
+    this.sharedInput = null;
+    this.persistentHashCommand = null;
+    this.persistentThreadsCommand = null;
+    this.persistentMultipvCommand = null;
   }
 
   private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -101,10 +213,10 @@ export class RecklessEngine {
     }
   }
 
-  private runCommands(commands: string[], signal?: AbortSignal): Promise<RunResult> {
+  private runOneShotCommands(commands: string[], signal?: AbortSignal): Promise<RunResult> {
     if (signal?.aborted) return Promise.reject(abortError());
     const id = ++this.seq;
-    const worker = this.ensureWorker();
+    const worker = this.ensureOneShotWorker();
     return new Promise<RunResult>((resolve, reject) => {
       const onAbort = () => {
         this.pending.delete(id);
@@ -124,6 +236,73 @@ export class RecklessEngine {
       signal?.addEventListener('abort', onAbort, { once: true });
       worker.postMessage({ type: 'run', id, wasmUrl: this.wasmUrl, commands });
     });
+  }
+
+  private optimizePersistentCommands(commands: string[]): string[] {
+    const out: string[] = [];
+    for (const command of commands) {
+      if (command.startsWith('setoption name Hash value ')) {
+        if (command === this.persistentHashCommand) continue;
+        this.persistentHashCommand = command;
+      } else if (command.startsWith('setoption name Threads value ')) {
+        if (command === this.persistentThreadsCommand) continue;
+        this.persistentThreadsCommand = command;
+      } else if (command.startsWith('setoption name MultiPV value ')) {
+        if (command === this.persistentMultipvCommand) continue;
+        this.persistentMultipvCommand = command;
+      }
+      out.push(command);
+    }
+    return out;
+  }
+
+  private runPersistentCommands(commands: string[], signal?: AbortSignal): Promise<RunResult> {
+    if (signal?.aborted) return Promise.reject(abortError());
+    this.ensurePersistentWorker();
+    const sharedInput = this.sharedInput;
+    if (!sharedInput) return Promise.reject(new Error('Reckless persistent stdin was not initialized'));
+    return new Promise<RunResult>((resolve, reject) => {
+      const onAbort = () => {
+        this.persistentPending = null;
+        this.disposeWorker();
+        reject(abortError());
+      };
+      this.persistentPending = {
+        stdout: [],
+        stderr: [],
+        resolve: (result) => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve(result);
+        },
+        reject: (error) => {
+          signal?.removeEventListener('abort', onAbort);
+          reject(error);
+        },
+        onAbort,
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      try {
+        writeSharedInput(sharedInput, `${this.optimizePersistentCommands(commands).join('\n')}\n`);
+      } catch (error) {
+        signal?.removeEventListener('abort', onAbort);
+        this.persistentPending = null;
+        reject(error as Error);
+      }
+    });
+  }
+
+  private async runCommands(commands: string[], signal?: AbortSignal): Promise<RunResult> {
+    if (!this.persistentDisabled && canUsePersistentWasi()) {
+      try {
+        return await this.runPersistentCommands(commands, signal);
+      } catch (error) {
+        if ((error as Error).name === 'AbortError') throw error;
+        this.persistentDisabled = true;
+        this.disposeWorker();
+        return this.runOneShotCommands(commands, signal);
+      }
+    }
+    return this.runOneShotCommands(commands, signal);
   }
 
   private searchCommands(fen: string, options: RecklessOptions, multipv = 1): string[] {
@@ -170,6 +349,10 @@ export class RecklessEngine {
   dispose(): void {
     for (const pending of this.pending.values()) pending.reject(abortError());
     this.pending.clear();
+    if (this.persistentPending) {
+      this.persistentPending.reject(abortError());
+      this.persistentPending = null;
+    }
     this.disposeWorker();
     this.lastInfoLines = [];
   }

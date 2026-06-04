@@ -6,7 +6,7 @@ This branch adds an optional browser path:
 
 - Build target: `wasm32-wasip1`, `--no-default-features` to skip Syzygy/Fathom.
 - Runtime: `@bjorn3/browser_wasi_shim` inside a dedicated Web Worker.
-- Protocol: one-shot UCI argv commands (`setoption`, `position`, `go`) per search. The adapter skips redundant `uci`/`isready`/`quit` commands because the patched CLI mode exits automatically after the final argv command.
+- Protocol: isolated browsers use a persistent UCI process fed through a small `SharedArrayBuffer` stdin ring; non-isolated browsers fall back to one-shot UCI argv commands (`setoption`, `position`, `go`) per search. The one-shot adapter skips redundant `uci`/`isready`/`quit` commands because the patched CLI mode exits automatically after the final argv command.
 - UI: optional Reckless engines in `lc0-arena.html` and `lc0-analysis.html`.
 
 ## Build
@@ -38,7 +38,8 @@ Use `?recklessWasm=/path/to/reckless.wasm` to point at another asset.
 ## Current limitations
 
 - No upstream browser artifact was found.
-- The adapter is one-shot, so Reckless does not retain hash between moves.
+- Persistent mode requires cross-origin isolation / `SharedArrayBuffer`; use the isolated dev/static server for this path.
+- Non-isolated browsers still use the one-shot fallback, so Reckless does not retain hash between moves there.
 - Aborting terminates the worker and recreates it for the next search.
 - Threads are forced to `1`; the WASI path avoids native Rust threads.
 - The WASM artifact is large because Reckless embeds its NNUE network.

@@ -23,12 +23,12 @@ function patchRecklessForWasi(root) {
   replace(
     `${root}/src/uci.rs`,
     `    let rx = spawn_listener(shared.clone());\n\n    let mut mode = if buffer.is_empty() { Mode::Uci } else { Mode::Cli };`,
-    `    let cli_mode = !buffer.is_empty();\n    let rx = if cli_mode { None } else { Some(spawn_listener(shared.clone())) };\n\n    let mut mode = if cli_mode { Mode::Cli } else { Mode::Uci };`,
+    `    let cli_mode = !buffer.is_empty();\n\n    #[cfg(target_arch = "wasm32")]\n    let rx: Option<std::sync::mpsc::Receiver<String>> = None;\n\n    #[cfg(not(target_arch = "wasm32"))]\n    let rx = if cli_mode { None } else { Some(spawn_listener(shared.clone())) };\n\n    let mut mode = if cli_mode { Mode::Cli } else { Mode::Uci };`,
   );
   replace(
     `${root}/src/uci.rs`,
     `        } else if mode == Mode::Uci {\n            match rx.recv() {\n                Ok(cmd) => cmd,\n                Err(_) => break,\n            }`,
-    `        } else if mode == Mode::Uci {\n            match rx.as_ref().and_then(|rx| rx.recv().ok()) {\n                Some(cmd) => cmd,\n                None => break,\n            }`,
+    `        } else if mode == Mode::Uci {\n            #[cfg(target_arch = "wasm32")]\n            {\n                let _ = &rx;\n                let mut message = String::new();\n                match std::io::stdin().read_line(&mut message) {\n                    Ok(0) => break,\n                    Ok(_) => message,\n                    Err(_) => break,\n                }\n            }\n\n            #[cfg(not(target_arch = "wasm32"))]\n            {\n                match rx.as_ref().and_then(|rx| rx.recv().ok()) {\n                    Some(cmd) => cmd,\n                    None => break,\n                }\n            }`,
   );
   replace(
     `${root}/src/numa.rs`,
