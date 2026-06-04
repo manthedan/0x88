@@ -55,6 +55,7 @@ interface EngineOutputSnapshot {
   fen: string;
   move?: string;
   summary: string;
+  shortEval: string;
   detail?: string;
   pv?: string[];
 }
@@ -67,6 +68,8 @@ let ground: Ground | null = null;
 let board: BoardState = parseFen(START_FEN);
 let historyBoards: BoardState[] = [board];
 let lastUci: string | null = null;
+let boardWhiteId: string | null = null;
+let boardBlackId: string | null = null;
 let boardWhiteName: string | null = null;
 let boardBlackName: string | null = null;
 let running = false;
@@ -83,6 +86,7 @@ const lastLc0SearchResults = new Map<string, Lc0SearchResult>();
 const pendingLc0ReplyProbes = new Map<string, PendingLc0ReplyProbe>();
 const lc0TreeTelemetry = new Map<string, Lc0TreeTelemetry>();
 const engineOutputs = new Map<string, EngineOutputSnapshot>();
+const thinkingEngineIds = new Set<string>();
 let activeEngineIds: string[] = [];
 const games: GameRecord[] = [];
 
@@ -99,6 +103,10 @@ function htmlEscape(value: unknown): string {
 
 function percent(value: number): string {
   return `${(100 * value).toFixed(1)}%`;
+}
+
+function percent0(value: number): string {
+  return `${Math.round(100 * value)}%`;
 }
 
 function signed(value: number, digits = 2): string {
@@ -118,8 +126,19 @@ function stockfishScoreText(info: StockfishInfoLine | undefined): string {
   return `score unavailable · d${info.depth}`;
 }
 
+function stockfishScoreCompact(info: StockfishInfoLine | undefined): string {
+  if (!info) return 'eval —';
+  if (info.mateIn !== undefined) return `M${signed(info.mateIn, 0)} · d${info.depth}`;
+  if (info.scoreCp !== undefined) return `${signed(info.scoreCp, 0)} cp · d${info.depth}`;
+  return `d${info.depth}`;
+}
+
 function lc0WdlText(evaluation: Lc0Evaluation): string {
   return `WDL ${percent(evaluation.wdl[0])}/${percent(evaluation.wdl[1])}/${percent(evaluation.wdl[2])} stm · Q ${signed(evaluation.q, 3)} · MLH ${evaluation.mlh.toFixed(1)}`;
+}
+
+function lc0WdlCompact(wdl: [number, number, number], q: number): string {
+  return `WDL ${percent0(wdl[0])}/${percent0(wdl[1])}/${percent0(wdl[2])} · Q ${signed(q, 2)}`;
 }
 
 function searchWdlText(wdl: [number, number, number], q: number): string {
@@ -127,7 +146,9 @@ function searchWdlText(wdl: [number, number, number], q: number): string {
 }
 
 function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
+  thinkingEngineIds.delete(snapshot.engineId);
   engineOutputs.set(snapshot.engineId, snapshot);
+  renderSideLabels();
   renderEngineOutputs();
 }
 
@@ -136,27 +157,35 @@ function renderEngineOutputs(): void {
   const cards = ids.map((id) => {
     const snapshot = engineOutputs.get(id);
     const name = snapshot?.engineName ?? engines.get(id)?.name ?? id;
-    if (!snapshot) return `<div class="eval-card"><strong>${htmlEscape(name)}</strong>waiting for output…</div>`;
     const active = activeEngineIds.length && id === (board.turn === 'w' ? activeEngineIds[0] : activeEngineIds[1]);
+    const thinking = thinkingEngineIds.has(id);
+    if (!snapshot) return `<div class="eval-card${active ? ' active' : ''}"><strong>${htmlEscape(name)}</strong>${thinking ? 'thinking on current position…' : 'waiting for output…'}</div>`;
+    const status = thinking ? '<span class="eval-status">thinking… keeping last eval</span>' : '';
     const detail = snapshot.detail ? `<br>${htmlEscape(snapshot.detail)}` : '';
     const pv = snapshot.pv?.length ? `<br>${htmlEscape(pvText(snapshot.pv))}` : '';
     const move = snapshot.move ? ` · move ${snapshot.move}` : '';
-    return `<div class="eval-card${active ? ' active' : ''}"><strong>${htmlEscape(name)}</strong>${htmlEscape(snapshot.summary)}${htmlEscape(move)}${detail}${pv}</div>`;
+    return `<div class="eval-card${active ? ' active' : ''}"><strong>${htmlEscape(name)}${status}</strong>${htmlEscape(snapshot.summary)}${htmlEscape(move)}${detail}${pv}</div>`;
   });
   el('engineEvalInfo').innerHTML = cards.length ? cards.join('') : '<div class="eval-card">Engine outputs: waiting for a move…</div>';
 }
 
 function renderSideLabels() {
-  const update = (id: string, color: 'White' | 'Black', engineName: string | null, active: boolean) => {
+  const update = (id: string, color: 'White' | 'Black', engineId: string | null, engineName: string | null, active: boolean) => {
     const node = el(id);
+    const output = engineId ? engineOutputs.get(engineId) : undefined;
+    const thinking = engineId ? thinkingEngineIds.has(engineId) : false;
+    const evalText = output?.shortEval ?? (thinking ? 'thinking…' : 'eval —');
+    const status = active ? (thinking && output ? 'thinking' : 'to move') : '';
     node.classList.toggle('active', active);
-    node.innerHTML = `<span><span class="color">${color}</span> <span class="engine">${htmlEscape(engineName ?? '—')}</span></span>${active ? '<span class="turn">to move</span>' : ''}`;
+    node.innerHTML = `<span class="side-main"><span class="color">${color}</span> <span class="engine">${htmlEscape(engineName ?? '—')}</span> <span class="side-eval">${htmlEscape(evalText)}</span></span>${status ? `<span class="turn">${status}</span>` : ''}`;
   };
-  update('blackSideLabel', 'Black', boardBlackName, board.turn === 'b');
-  update('whiteSideLabel', 'White', boardWhiteName, board.turn === 'w');
+  update('blackSideLabel', 'Black', boardBlackId, boardBlackName, board.turn === 'b');
+  update('whiteSideLabel', 'White', boardWhiteId, boardWhiteName, board.turn === 'w');
 }
 
-function setBoardSideEngines(whiteName: string | null, blackName: string | null): void {
+function setBoardSideEngines(whiteId: string | null, whiteName: string | null, blackId: string | null, blackName: string | null): void {
+  boardWhiteId = whiteId;
+  boardBlackId = blackId;
   boardWhiteName = whiteName;
   boardBlackName = blackName;
   renderSideLabels();
@@ -302,6 +331,7 @@ function recordLc0PolicyOutput(engineId: string, engineName: string, evaluation:
     fen: evaluation.fen,
     move,
     summary: lc0WdlText(evaluation),
+    shortEval: lc0WdlCompact(evaluation.wdl, evaluation.q),
     detail: `top policy ${evaluation.legalPriors.slice(0, 5).map((p) => `${p.uci} ${(100 * p.prior).toFixed(1)}%`).join(', ') || '—'}`,
   });
 }
@@ -316,6 +346,7 @@ function recordLc0SearchOutput(engineId: string, engineName: string, result: Lc0
     fen: result.fen,
     move: result.move,
     summary: rootWdl ? searchWdlText(rootWdl, result.value) : `search Q ${signed(result.value, 3)} stm`,
+    shortEval: rootWdl ? lc0WdlCompact(rootWdl, result.value) : `Q ${signed(result.value, 2)}`,
     detail: `visits ${result.visits} · evals ${stats?.evalCalls ?? 0} · cache hits ${stats?.cacheHits ?? 0}`,
     pv: result.pv,
   });
@@ -330,19 +361,16 @@ function recordStockfishOutput(engineId: string, engineName: string, fen: string
     fen,
     move: move ?? undefined,
     summary: `SF ${stockfishScoreText(best)}`,
+    shortEval: stockfishScoreCompact(best),
     detail: lines.length > 1 ? `MultiPV ${lines.slice(0, 3).map((line) => `#${line.multipv} ${stockfishScoreText(line)}`).join(' · ')}` : undefined,
     pv: best?.pvUci,
   });
 }
 
-function recordEngineThinking(engine: ArenaEngine, fen: string): void {
-  recordEngineOutput({
-    engineId: engine.id,
-    engineName: engine.name,
-    kind: engine.id.startsWith('sf-') ? 'stockfish' : 'lc0',
-    fen,
-    summary: 'thinking on current position…',
-  });
+function recordEngineThinking(engine: ArenaEngine): void {
+  thinkingEngineIds.add(engine.id);
+  renderSideLabels();
+  renderEngineOutputs();
 }
 
 function noteLc0MoveForReplyProbe(engine: ArenaEngine, move: Move, nextBoard: BoardState): void {
@@ -535,7 +563,7 @@ function setOpeningPreview(opening: ArenaOpening): void {
   historyBoards = openingHistoryBoards(opening);
   board = historyBoards[historyBoards.length - 1];
   lastUci = null;
-  setBoardSideEngines(null, null);
+  setBoardSideEngines(null, null, null, null);
   renderBoard();
 }
 
@@ -606,7 +634,9 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
   activeEngineIds = [white.id, black.id];
   engineOutputs.delete(white.id);
   engineOutputs.delete(black.id);
-  setBoardSideEngines(white.name, black.name);
+  thinkingEngineIds.delete(white.id);
+  thinkingEngineIds.delete(black.id);
+  setBoardSideEngines(white.id, white.name, black.id, black.name);
   renderBoard();
   renderEngineOutputs();
   const priorFens: string[] = historyBoards.slice(0, -1).map(boardToFen);
@@ -616,7 +646,7 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
     const outcome = gameOutcome(board, priorFens);
     if (outcome) return { ...outcome, tree };
     const engine = board.turn === 'w' ? white : black;
-    recordEngineThinking(engine, boardToFen(board));
+    recordEngineThinking(engine);
     let uci: string | null;
     try {
       uci = await engine.move(historyBoards, signal);
@@ -670,6 +700,7 @@ async function startTournament() {
   games.length = 0;
   activeEngineIds = [];
   engineOutputs.clear();
+  thinkingEngineIds.clear();
   lastLc0SearchResults.clear();
   pendingLc0ReplyProbes.clear();
   lc0TreeTelemetry.clear();
@@ -691,7 +722,7 @@ async function startTournament() {
       const whiteEngine = engines.get(white)!;
       const blackEngine = engines.get(black)!;
       resetLc0SearchTrees([white, black]);
-      setBoardSideEngines(whiteEngine.name, blackEngine.name);
+      setBoardSideEngines(whiteEngine.id, whiteEngine.name, blackEngine.id, blackEngine.name);
       el('pairing').textContent = `Game ${i + 1}/${pairings.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
       el('message').textContent = 'Playing…';
       const { result, reason, tree } = await playArenaGame(whiteEngine, blackEngine, opening, abort.signal);
@@ -722,6 +753,7 @@ async function startTournament() {
     abort = null;
     activeEngineIds = [];
     engineOutputs.clear();
+    thinkingEngineIds.clear();
     el('start').toggleAttribute('disabled', false);
     el('stop').toggleAttribute('disabled', true);
     refreshOpeningPreview();
@@ -745,6 +777,7 @@ function disposeRuntimeResources(): void {
   lastLc0SearchResults.clear();
   pendingLc0ReplyProbes.clear();
   engineOutputs.clear();
+  thinkingEngineIds.clear();
   activeEngineIds = [];
   stockfish?.dispose();
   stockfish = null;
