@@ -286,6 +286,8 @@ type AttentionOutputBenchmarkResult = {
   headDim: number;
   epsilon: number;
   alpha: number;
+  outProjKernelVariant?: 'hand' | 'tvm-packed-f16';
+  dispatchesPerIteration?: number;
   warmup: number;
   iterations: number;
   packLoadMs: number;
@@ -1322,6 +1324,7 @@ async function runAttentionOutputBenchmark(): Promise<void> {
   const rawWarmup = Number(params.get('attentionOutputWarmup') ?? params.get('attentionNormWarmup') ?? params.get('attnOutWarmup') ?? '3');
   const iterations = Math.min(10_000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 50)));
   const warmup = Math.min(1000, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 3)));
+  const attentionOutProjKernelVariant = params.get('attentionOutProjKernel') === 'tvm-packed-f16' || params.get('attnOutProjKernel') === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand';
   el('benchResult').textContent = 'ATTENTION_OUTPUT_BENCH_RUNNING';
   setBusy(true, `Benchmarking lc0web WGSL attention output projection/residual/norm: ${warmup} warmup + ${iterations} queued blocks, one final readback…`);
   try {
@@ -1332,6 +1335,7 @@ async function runAttentionOutputBenchmark(): Promise<void> {
       warmup,
       verifyShards: params.get('packVerify') !== '0',
       encoderPrefix: ENCODER_PREFIX,
+      attentionOutProjKernelVariant,
     });
     const rounded = {
       ...response.result,

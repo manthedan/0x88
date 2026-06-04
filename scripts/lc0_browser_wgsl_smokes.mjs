@@ -40,6 +40,12 @@ const SMOKES = [
     doneText: 'ATTENTION_OUTPUT_BENCH_DONE',
   },
   {
+    name: 'attention-output-tvm-proj-packed-f16',
+    query: 'attentionOutputBench=1&attentionOutProjKernel=tvm-packed-f16&attentionOutputWarmup=1&attentionOutputIters=1&packVerify=0',
+    doneText: 'ATTENTION_OUTPUT_BENCH_DONE',
+    default: false,
+  },
+  {
     name: 'attention-output-ort-wasm',
     query: 'attentionOutputOrtBench=1&attentionOutputOrtWarmup=0&attentionOutputOrtIters=1&ep=wasm&packVerify=0',
     doneText: 'ATTENTION_OUTPUT_ORT_BENCH_DONE',

@@ -30,6 +30,7 @@ import {
   type Lc0WebAttentionBlockBenchmarkResult,
   type Lc0WebAttentionQkvKernelVariant,
   type Lc0WebAttentionOutputBenchmarkResult,
+  type Lc0WebAttentionOutProjKernelVariant,
   type Lc0WebAttentionOutputOrtBenchmarkResult,
   type Lc0WebAttentionScoreBenchmarkResult,
   type Lc0WebAttentionScoreOrtBenchmarkResult,
@@ -250,6 +251,7 @@ type AttentionOutputBenchmarkMessage = {
   warmup?: number;
   verifyShards?: boolean;
   encoderPrefix?: string;
+  attentionOutProjKernelVariant?: Lc0WebAttentionOutProjKernelVariant;
 };
 
 type AttentionOutputOrtBenchmarkMessage = {
@@ -667,6 +669,7 @@ async function handleAttentionOutputBenchmark(message: AttentionOutputBenchmarkM
     warmup: message.warmup,
     verifyShards: message.verifyShards,
     encoderPrefix: message.encoderPrefix,
+    attentionOutProjKernelVariant: message.attentionOutProjKernelVariant,
   });
   post({ type: 'attentionOutputBenchmarkResult', id: message.id, result });
 }
