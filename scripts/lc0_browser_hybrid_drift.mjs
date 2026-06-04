@@ -191,7 +191,7 @@ async function f32Baselines(args, records) {
 }
 
 async function browserHybrid(args) {
-  const url = new URL('/lc0-policy-only.html', args.baseUrl);
+  const url = new URL(`${args.baseUrl.replace(/\/$/, '')}/lc0-policy-only.html`);
   url.searchParams.set('hybridDrift', '1');
   url.searchParams.set('encoderLayers', String(args.layers));
   url.searchParams.set('hybridDriftLimit', String(args.limit));
