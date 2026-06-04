@@ -146,6 +146,14 @@ function strengthMeta(family: EngineFamily): { unit: string; min: number; max: n
 }
 function defaultStrength(family: EngineFamily): number { return strengthMeta(family).def; }
 
+// "Add engine" fills the next missing family by priority (Lc0 → SF → Reckless),
+// falling back to the top priority when all families are already present.
+const FAMILY_PRIORITY: EngineFamily[] = ['lc0', 'sf', 'reckless'];
+function nextEngineFamily(): EngineFamily {
+  const present = new Set(engineRows.map((row) => row.family));
+  return FAMILY_PRIORITY.find((family) => !present.has(family)) ?? FAMILY_PRIORITY[0];
+}
+
 let engineRows: EngineRow[] = [{ family: 'lc0', variant: 'small', strength: 400 }];
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
@@ -613,7 +621,8 @@ function wireEvents() {
     void analyzeCurrent();
   });
   el('addEngine').addEventListener('click', () => {
-    engineRows.push({ family: 'lc0', variant: 'small', strength: defaultStrength('lc0') });
+    const family = nextEngineFamily();
+    engineRows.push({ family, variant: defaultVariant(family), strength: defaultStrength(family) });
     renderEngineList();
     lineCache.delete(tree.current.fen);
     void analyzeCurrent();
