@@ -10,10 +10,11 @@ import { BUILTIN_ARENA_OPENINGS, parseArenaOpenings, scheduleOpenings, type Aren
 import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { GameTree } from './gameTree.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
+import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher } from './search.ts';
-import { StockfishEngine } from './stockfishEngine.ts';
+import { DEFAULT_STOCKFISH_FLAVOR, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorLabel, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, type StockfishFlavor } from './stockfishEngine.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 interface ArenaEngine {
@@ -27,6 +28,7 @@ interface ScheduledArenaGame extends ArenaPairing { opening: ArenaOpening; }
 
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
+const REQUESTED_STOCKFISH_FLAVOR = normalizeStockfishFlavor(params.get('sfFlavor') ?? params.get('stockfish'));
 
 let ground: Ground | null = null;
 let board: BoardState = parseFen(START_FEN);
@@ -40,6 +42,8 @@ let player: Lc0PolicyOnlyPlayer | null = null;
 let searcher: Lc0PuctSearcher | null = null;
 let lc0Cache: CachedLc0Evaluator | null = null;
 let stockfish: StockfishEngine | null = null;
+let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
+let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
 const engines = new Map<string, ArenaEngine>();
 const lc0Searchers = new Map<string, Lc0PuctSearcher>();
 const games: GameRecord[] = [];
@@ -93,6 +97,14 @@ function selectedEngineIds(): string[] {
   return [...el('engines').querySelectorAll('input:checked')].map((node) => (node as HTMLInputElement).value);
 }
 
+function setEngineCheckboxLabel(engineId: string, labelText: string): void {
+  const input = el('engines').querySelector(`input[value="${engineId}"]`) as HTMLInputElement | null;
+  const label = input?.closest('label');
+  if (!input || !label) return;
+  const text = [...label.childNodes].find((node) => node.nodeType === Node.TEXT_NODE);
+  if (text) text.textContent = ` ${labelText}`;
+}
+
 function arenaBudgetMode(): 'fixed' | 'movetime' {
   return selectEl('budgetModeSelect').value === 'movetime' ? 'movetime' : 'fixed';
 }
@@ -105,6 +117,11 @@ function arenaCacheEntries(): number {
   return Math.max(0, Math.min(100000, Math.floor(Number(inputEl('cacheEntriesInput').value) || 0)));
 }
 
+function stockfishThreads(): number {
+  const requested = Math.max(1, Math.min(32, Math.floor(Number(inputEl('stockfishThreadsInput').value) || 1)));
+  return stockfishFlavorRequiresIsolation(selectedStockfishFlavor()) ? requested : 1;
+}
+
 function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): string {
   if (!metrics) return 'NN cache: unavailable';
   return `NN cache: ${metrics.entries}/${metrics.maxEntries} entries · ${metrics.hits} hit${metrics.hits === 1 ? '' : 's'} · ${metrics.misses} miss${metrics.misses === 1 ? '' : 'es'}`;
@@ -113,6 +130,54 @@ function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): strin
 function renderCacheInfo(): void {
   lc0Cache?.setMaxEntries(arenaCacheEntries());
   el('cacheInfo').textContent = cacheMetricsText(lc0Cache?.metrics());
+}
+
+function threadedStockfishAvailable(): boolean {
+  return runtimeIsolation && runtimeSharedArrayBuffer;
+}
+
+function selectedStockfishFlavor(): StockfishFlavor {
+  const selected = normalizeStockfishFlavor(selectEl('stockfishFlavorSelect').value);
+  return stockfishFlavorRequiresIsolation(selected) && !threadedStockfishAvailable() ? DEFAULT_STOCKFISH_FLAVOR : selected;
+}
+
+function stockfishName(depth: number): string {
+  return `${stockfishFlavorLabel(selectedStockfishFlavor())} d${depth}`;
+}
+
+function refreshStockfishFlavorAvailability(): void {
+  const select = selectEl('stockfishFlavorSelect');
+  for (const option of [...select.options]) {
+    const flavor = normalizeStockfishFlavor(option.value);
+    option.disabled = stockfishFlavorRequiresIsolation(flavor) && !threadedStockfishAvailable();
+    if (option.disabled) option.textContent = option.textContent.replace(/ \(needs isolation\)$/, '') + ' (needs isolation)';
+    else option.textContent = option.textContent.replace(/ \(needs isolation\)$/, '');
+  }
+  if (stockfishFlavorRequiresIsolation(normalizeStockfishFlavor(select.value)) && !threadedStockfishAvailable()) select.value = DEFAULT_STOCKFISH_FLAVOR;
+  select.disabled = running;
+  inputEl('stockfishThreadsInput').disabled = running || !stockfishFlavorRequiresIsolation(selectedStockfishFlavor());
+  inputEl('stockfishThreadsInput').value = String(stockfishThreads());
+}
+
+async function renderRuntimeBadge(): Promise<void> {
+  const badge = el('runtimeBadge');
+  try {
+    const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
+    runtimeIsolation = diag.crossOriginIsolated === true;
+    runtimeSharedArrayBuffer = diag.wasm.sharedArrayBuffer === true;
+    refreshStockfishFlavorAvailability();
+    const webgpu = diag.webgpuAvailable ? (diag.adapter?.ok === false ? 'WebGPU unavailable/blocked' : 'WebGPU available') : 'WebGPU unavailable';
+    const isolated = runtimeIsolation ? 'isolated' : 'not isolated';
+    const sab = runtimeSharedArrayBuffer ? 'SAB yes' : 'SAB no';
+    const sfThreads = threadedStockfishAvailable() ? 'SF threaded yes' : 'SF threaded no';
+    const ortThreads = `ORT wasm threads ${diag.wasm.numThreads ?? '?'}`;
+    badge.textContent = `Runtime: ${isolated} · ${sab} · ${webgpu} · ${diag.describe} · ${ortThreads} · ${sfThreads}`;
+    badge.classList.toggle('ready', runtimeIsolation && (diag.webgpuAvailable || runtimeSharedArrayBuffer));
+    badge.classList.toggle('warn', !runtimeIsolation || !diag.webgpuAvailable);
+  } catch (error) {
+    badge.textContent = `Runtime detection failed: ${(error as Error).message}`;
+    badge.classList.add('warn');
+  }
 }
 
 function lc0SearcherFor(engineId: string): Lc0PuctSearcher {
@@ -143,8 +208,8 @@ function buildEngines() {
     })).move ?? null;
   };
   const sf = (depth: number): ArenaEngine['move'] => async (positions, signal) => {
-    if (arenaBudgetMode() === 'movetime') stockfish!.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
-    else stockfish!.setOptions({ depth, movetimeMs: undefined });
+    if (arenaBudgetMode() === 'movetime') stockfish!.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: stockfishThreads() });
+    else stockfish!.setOptions({ depth, movetimeMs: undefined, threads: stockfishThreads() });
     return stockfish!.bestMove(boardToFen(positions[positions.length - 1]), signal);
   };
   const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {
@@ -154,7 +219,7 @@ function buildEngines() {
     renderCacheInfo();
   };
   const stockfishWarmup = async (signal: AbortSignal) => {
-    stockfish!.setOptions({ depth: 1, movetimeMs: undefined });
+    stockfish!.setOptions({ depth: 1, movetimeMs: undefined, threads: stockfishThreads() });
     await stockfish!.bestMove(START_FEN, signal);
   };
   engines.set('lc0-policy', {
@@ -165,8 +230,10 @@ function buildEngines() {
   });
   engines.set('lc0-s100', { id: 'lc0-s100', name: 'LC0 search 100', move: lc0Search('lc0-s100', 100), warmup: lc0SearchWarmup('lc0-s100') });
   engines.set('lc0-s400', { id: 'lc0-s400', name: 'LC0 search 400', move: lc0Search('lc0-s400', 400), warmup: lc0SearchWarmup('lc0-s400') });
-  engines.set('sf-d4', { id: 'sf-d4', name: 'SF lite d4', move: sf(4), warmup: stockfishWarmup });
-  engines.set('sf-d8', { id: 'sf-d8', name: 'SF lite d8', move: sf(8), warmup: stockfishWarmup });
+  engines.set('sf-d4', { id: 'sf-d4', name: stockfishName(4), move: sf(4), warmup: stockfishWarmup });
+  engines.set('sf-d8', { id: 'sf-d8', name: stockfishName(8), move: sf(8), warmup: stockfishWarmup });
+  setEngineCheckboxLabel('sf-d4', stockfishName(4));
+  setEngineCheckboxLabel('sf-d8', stockfishName(8));
 }
 
 function refreshChampionOptions() {
@@ -336,6 +403,7 @@ async function startTournament() {
   running = true;
   abort = new AbortController();
   refreshOpeningPreview();
+  refreshStockfishFlavorAvailability();
   games.length = 0;
   el('log').innerHTML = '';
   el('start').toggleAttribute('disabled', true);
@@ -385,6 +453,7 @@ async function startTournament() {
     el('start').toggleAttribute('disabled', false);
     el('stop').toggleAttribute('disabled', true);
     refreshOpeningPreview();
+    refreshStockfishFlavorAvailability();
   }
 }
 
@@ -403,10 +472,27 @@ function wireEvents() {
   el('cacheEntriesInput').addEventListener('input', () => { renderCacheInfo(); resetLc0SearchTrees(); });
   el('budgetModeSelect').addEventListener('change', () => resetLc0SearchTrees());
   el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
+  el('stockfishFlavorSelect').addEventListener('change', () => {
+    if (running) return;
+    refreshStockfishFlavorAvailability();
+    stockfish?.dispose();
+    stockfish = new StockfishEngine({ depth: 4, threads: stockfishThreads() }, stockfishFlavorUrl(selectedStockfishFlavor()));
+    buildEngines();
+    refreshChampionOptions();
+  });
+  el('stockfishThreadsInput').addEventListener('input', () => {
+    if (running) return;
+    inputEl('stockfishThreadsInput').value = String(stockfishThreads());
+    stockfish?.setOptions({ threads: stockfishThreads() });
+  });
 }
 
 async function init() {
   renderBoard();
+  selectEl('stockfishFlavorSelect').value = REQUESTED_STOCKFISH_FLAVOR;
+  inputEl('stockfishThreadsInput').value = String(Math.max(1, Math.min(32, Math.floor(Number(params.get('sfThreads') ?? '1') || 1))));
+  refreshStockfishFlavorAvailability();
+  void renderRuntimeBadge();
   buildEngines();
   refreshChampionOptions();
   wireEvents();
@@ -418,8 +504,9 @@ async function init() {
     lc0Searchers.clear();
     player = new Lc0PolicyOnlyPlayer(lc0Cache);
     searcher = new Lc0PuctSearcher(lc0Cache);
-    stockfish = new StockfishEngine({ depth: 4 });
+    stockfish = new StockfishEngine({ depth: 4, threads: stockfishThreads() }, stockfishFlavorUrl(selectedStockfishFlavor()));
     renderCacheInfo();
+    void renderRuntimeBadge();
     el('start').toggleAttribute('disabled', false);
     el('message').textContent = 'Ready. Pick engines and start a tournament.';
   } catch (error) {

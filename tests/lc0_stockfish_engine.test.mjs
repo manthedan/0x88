@@ -1,12 +1,24 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseBestMove, StockfishEngine, stockfishGoCommand } from '../src/lc0/stockfishEngine.ts';
+import { parseBestMove, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, stockfishGoCommand } from '../src/lc0/stockfishEngine.ts';
 
 test('parseBestMove extracts the UCI move and handles (none)', () => {
   assert.equal(parseBestMove('bestmove e2e4 ponder e7e5'), 'e2e4');
   assert.equal(parseBestMove('bestmove a7a8q'), 'a7a8q');
   assert.equal(parseBestMove('bestmove (none)'), null);
   assert.equal(parseBestMove('info depth 12 score cp 31'), null);
+});
+
+test('stockfish flavor helpers map browser Stockfish builds', () => {
+  assert.equal(normalizeStockfishFlavor(null), 'lite-single');
+  assert.equal(normalizeStockfishFlavor('full'), 'single');
+  assert.equal(normalizeStockfishFlavor('full-threaded'), 'threaded');
+  assert.equal(stockfishFlavorRequiresIsolation('single'), false);
+  assert.equal(stockfishFlavorRequiresIsolation('threaded'), true);
+  assert.equal(stockfishFlavorUrl('lite-single'), '/stockfish/stockfish-18-lite-single.js');
+  assert.equal(stockfishFlavorUrl('single'), '/stockfish/stockfish-18-single.js');
+  assert.equal(stockfishFlavorUrl('lite-threaded'), '/stockfish/stockfish-18-lite.js');
+  assert.equal(stockfishFlavorUrl('threaded'), '/stockfish/stockfish-18.js');
 });
 
 test('stockfishGoCommand prefers movetime over depth and clamps depth', () => {

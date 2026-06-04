@@ -44,6 +44,7 @@
     "play:student": "node --experimental-strip-types scripts/play_student.mjs",
     "web:student": "node --experimental-strip-types scripts/serve_student_web.mjs",
     "web:client": "vite --host 0.0.0.0",
+    "web:isolated:static": "node scripts/serve_isolated_static.mjs dist-client 5181",
     "build:client": "vite build --outDir dist-client",
     "distill:check": "python3 scripts/check_lc0_teacher.py",
     "distill:seed": "python3 scripts/export_seed_fens.py",

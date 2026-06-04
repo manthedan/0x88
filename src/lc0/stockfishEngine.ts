@@ -14,9 +14,44 @@ export interface StockfishOptions {
   movetimeMs?: number;
   /** UCI Skill Level 0-20; lower handicaps Stockfish with weaker/blundering play. */
   skillLevel?: number;
+  /** UCI Threads. Threaded WASM builds require cross-origin isolation. */
+  threads?: number;
 }
 
+export type StockfishFlavor = 'lite-single' | 'single' | 'lite-threaded' | 'threaded';
+
+export const DEFAULT_STOCKFISH_FLAVOR: StockfishFlavor = 'lite-single';
 export const DEFAULT_STOCKFISH_URL = '/stockfish/stockfish-18-lite-single.js';
+
+export function normalizeStockfishFlavor(raw: string | null | undefined): StockfishFlavor {
+  const value = String(raw ?? '').toLowerCase().replace(/[ _]/g, '-');
+  if (value === 'single' || value === 'full-single' || value === 'full') return 'single';
+  if (value === 'lite-threaded' || value === 'lite-threads' || value === 'lite-multi') return 'lite-threaded';
+  if (value === 'threaded' || value === 'full-threaded' || value === 'threads' || value === 'multi') return 'threaded';
+  return 'lite-single';
+}
+
+export function stockfishFlavorRequiresIsolation(flavor: StockfishFlavor): boolean {
+  return flavor === 'lite-threaded' || flavor === 'threaded';
+}
+
+export function stockfishFlavorLabel(flavor: StockfishFlavor): string {
+  switch (flavor) {
+    case 'single': return 'Stockfish full single';
+    case 'lite-threaded': return 'Stockfish lite threaded';
+    case 'threaded': return 'Stockfish full threaded';
+    default: return 'Stockfish lite single';
+  }
+}
+
+export function stockfishFlavorUrl(flavor: StockfishFlavor): string {
+  switch (flavor) {
+    case 'single': return '/stockfish/stockfish-18-single.js';
+    case 'lite-threaded': return '/stockfish/stockfish-18-lite.js';
+    case 'threaded': return '/stockfish/stockfish-18.js';
+    default: return DEFAULT_STOCKFISH_URL;
+  }
+}
 
 /** Parse a UCI `bestmove` line into a UCI move, or null for `(none)`/no match. */
 export function parseBestMove(line: string): string | null {
@@ -33,6 +68,10 @@ export function stockfishGoCommand(options: StockfishOptions): string {
 
 function skillLevelCommand(skillLevel: number): string {
   return `setoption name Skill Level value ${Math.max(0, Math.min(20, Math.floor(skillLevel)))}`;
+}
+
+function threadsCommand(threads: number): string {
+  return `setoption name Threads value ${Math.max(1, Math.min(32, Math.floor(threads)))}`;
 }
 
 export interface StockfishInfoLine {
@@ -81,10 +120,12 @@ export class StockfishEngine {
   setOptions(next: StockfishOptions): void {
     this.options = { ...this.options, ...next };
     if (this.worker && next.skillLevel !== undefined) this.worker.postMessage(skillLevelCommand(next.skillLevel));
+    if (this.worker && next.threads !== undefined) this.worker.postMessage(threadsCommand(next.threads));
   }
 
   private applyOptions(): void {
     if (this.options.skillLevel !== undefined) this.worker?.postMessage(skillLevelCommand(this.options.skillLevel));
+    if (this.options.threads !== undefined) this.worker?.postMessage(threadsCommand(this.options.threads));
   }
 
   private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
