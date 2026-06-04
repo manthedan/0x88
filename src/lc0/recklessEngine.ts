@@ -124,6 +124,7 @@ export class RecklessEngine {
   private persistentHashCommand: string | null = null;
   private persistentThreadsCommand: string | null = null;
   private persistentMultipvCommand: string | null = null;
+  private persistentMinimalCommand: string | null = null;
   private persistentPositionCommand: string | null = null;
   private queueTail: Promise<void> = Promise.resolve();
   private options: RecklessOptions;
@@ -221,6 +222,7 @@ export class RecklessEngine {
     this.persistentHashCommand = null;
     this.persistentThreadsCommand = null;
     this.persistentMultipvCommand = null;
+    this.persistentMinimalCommand = null;
     this.persistentPositionCommand = null;
   }
 
@@ -274,6 +276,9 @@ export class RecklessEngine {
       } else if (command.startsWith('setoption name MultiPV value ')) {
         if (command === this.persistentMultipvCommand) continue;
         this.persistentMultipvCommand = command;
+      } else if (command.startsWith('setoption name Minimal value ')) {
+        if (command === this.persistentMinimalCommand) continue;
+        this.persistentMinimalCommand = command;
       } else if (command.startsWith('position ')) {
         if (command === this.persistentPositionCommand) continue;
         this.persistentPositionCommand = command;
@@ -352,6 +357,7 @@ export class RecklessEngine {
       hashCommand(options.hashMb ?? this.options.hashMb ?? 16),
       'setoption name Threads value 1',
       `setoption name MultiPV value ${Math.max(1, Math.floor(multipv))}`,
+      'setoption name Minimal value true',
       `position fen ${fen}`,
       goCommand(options),
     ];
