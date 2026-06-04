@@ -185,7 +185,8 @@ function prewarmReckless(): void {
 
 function getReckless(): RecklessEngine {
   if (!reckless) {
-    reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+    const variant = selectedRecklessVariant();
+    reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi' });
     prewarmReckless();
   }
   return reckless;
@@ -547,7 +548,8 @@ function wireEvents() {
     reckless?.dispose();
     reckless = null;
     if (useReckless()) {
-      reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+      const variant = selectedRecklessVariant();
+      reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi' });
       prewarmReckless();
     }
     lineCache.delete(tree.current.fen);

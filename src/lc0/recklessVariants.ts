@@ -1,12 +1,13 @@
 import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
 
-export type RecklessVariantKey = 'full' | 'simd' | 'lite' | 'custom';
+export type RecklessVariantKey = 'full' | 'simd' | 'lite' | 'browser-api' | 'custom';
 
 export interface RecklessVariant {
   key: RecklessVariantKey;
   label: string;
   wasmUrl: string;
   note: string;
+  backend?: 'wasi' | 'browser-api';
 }
 
 export type RecklessAssetStatus = 'unknown' | 'checking' | 'present' | 'missing';
@@ -35,11 +36,20 @@ export const RECKLESS_LITE_VARIANT: RecklessVariant = {
   note: 'v53 L1=512 candidate; smaller/faster prototype, weaker and not shipped by default.',
 };
 
-export const RECKLESS_VARIANTS = [RECKLESS_FULL_VARIANT, RECKLESS_SIMD_VARIANT, RECKLESS_LITE_VARIANT] as const;
+export const RECKLESS_BROWSER_API_VARIANT: RecklessVariant = {
+  key: 'browser-api',
+  label: 'Reckless Full browser API experimental',
+  wasmUrl: '/reckless/reckless-browser-api.wasm',
+  note: 'Full-size NNUE with direct WASM exports; bypasses WASI/UCI text for lower adapter overhead.',
+  backend: 'browser-api',
+};
+
+export const RECKLESS_VARIANTS = [RECKLESS_FULL_VARIANT, RECKLESS_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_LITE_VARIANT] as const;
 
 export function normalizeRecklessVariant(raw: string | null | undefined): RecklessVariantKey {
   const value = String(raw ?? '').toLowerCase().replace(/[ _]/g, '-');
   if (value === 'lite' || value === 'small' || value === 'v53') return 'lite';
+  if (value === 'api' || value === 'browser-api' || value === 'direct' || value === 'native') return 'browser-api';
   if (value === 'simd' || value === 'simd128' || value === 'full-simd') return 'simd';
   if (value === 'custom') return 'custom';
   return 'full';
@@ -47,6 +57,7 @@ export function normalizeRecklessVariant(raw: string | null | undefined): Reckle
 
 export function recklessVariantByKey(key: RecklessVariantKey): RecklessVariant {
   if (key === 'lite') return RECKLESS_LITE_VARIANT;
+  if (key === 'browser-api') return RECKLESS_BROWSER_API_VARIANT;
   if (key === 'simd') return RECKLESS_SIMD_VARIANT;
   if (key === 'custom') return { key: 'custom', label: 'Reckless Custom', wasmUrl: DEFAULT_RECKLESS_WASM_URL, note: 'Custom Reckless WASM URL.' };
   return RECKLESS_FULL_VARIANT;

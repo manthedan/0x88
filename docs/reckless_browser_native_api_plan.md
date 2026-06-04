@@ -29,7 +29,7 @@ A browser-native API should expose engine operations directly and return structu
 
 ### Stage 1: internal Rust facade
 
-Status: native probe scripted in [`reckless_browser_api_probe.md`](./reckless_browser_api_probe.md). It confirms a direct Rust facade can reproduce UCI bestmove/score/nodes/PV for a smoke position without using UCI as the primary data path.
+Status: implemented for the local browser build path in `scripts/build_reckless_browser_api.mjs`, following the earlier native probe in [`reckless_browser_api_probe.md`](./reckless_browser_api_probe.md). The build script patches a temporary Reckless library facade and emits ignored artifact `/reckless/reckless-browser-api.wasm`.
 
 Add a `browser_api` module behind a feature flag in the local Reckless patch/build path:
 
@@ -63,6 +63,8 @@ Expose methods that mirror the current adapter needs:
 
 ### Stage 2: WASM export ABI
 
+Status: implemented experimentally. The artifact still targets `wasm32-wasip1` because `std::time::Instant` panics on `wasm32-unknown-unknown`; the browser worker uses WASI imports for clocks but bypasses `_start`, argv/stdin/stdout, UCI parsing, and UCI output formatting.
+
 Use a small C-style/string-buffer ABI first, avoiding a new JS dependency:
 
 - Export `reckless_api_new(hash_mb) -> u32` engine handle.
@@ -75,14 +77,20 @@ This can initially still target `wasm32-wasip1` if needed, but it bypasses argv/
 
 ### Stage 3: browser adapter replacement
 
-Add a new worker next to `recklessWasiWorker.ts` that:
+Status: implemented experimentally in `src/lc0/recklessBrowserApiWorker.ts` and selected through the `Reckless Full browser API experimental` variant. The worker:
 
 1. compiles/instantiates the direct API module,
-2. owns one engine handle,
-3. sends compact request/response messages,
-4. returns structured search results directly to `RecklessEngine`.
+2. initializes WASI imports for clocks without starting the UCI binary,
+3. owns one engine handle,
+4. sends compact request/response messages,
+5. returns structured search results directly to `RecklessEngine`.
 
-Keep the existing WASI/UCI adapter as fallback until parity and performance are proven.
+The existing WASI/UCI adapter remains the default and fallback until parity and performance are proven.
+
+Smoke evidence:
+
+- Node direct-ABI smoke: `startpos depth 4` returned `bestmove=c2c4`, `scoreCp=55`, `nodes=210`, PV `c2c4 g8f6`.
+- Browser benchmark smoke on isolated static server: browser API variant, persistent mode label, `startpos depth 1`, one warm repeat completed 2 rows; cold wall `4.70ms`, warm wall `1.74ms`, runtime label `browser API`.
 
 ## Verification requirements
 

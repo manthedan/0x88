@@ -965,7 +965,8 @@ function wireEvents() {
   el('recklessVariantSelect').addEventListener('change', () => {
     if (running) return;
     reckless?.dispose();
-    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+    const variant = selectedRecklessVariant();
+    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi' });
     prewarmReckless();
     buildEngines();
     refreshChampionOptions();
@@ -997,7 +998,8 @@ async function init() {
     player = new Lc0PolicyOnlyPlayer(lc0Cache);
     searcher = new Lc0PuctSearcher(lc0Cache);
     stockfish = new StockfishEngine({ depth: 4, threads: stockfishThreads() }, stockfishFlavorUrl(selectedStockfishFlavor()));
-    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+    const variant = selectedRecklessVariant();
+    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi' });
     prewarmReckless();
     renderRecklessRuntimeInfo();
     renderCacheInfo();

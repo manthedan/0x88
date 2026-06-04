@@ -10,6 +10,8 @@ export interface RecklessOptions {
 }
 
 export interface RecklessRuntimeOptions {
+  /** Runtime backend. WASI/UCI is the stable default; browser-api is an experimental direct-call path. */
+  backend?: 'wasi' | 'browser-api';
   /** Benchmark/debug knob: force the old one-shot WASI path even when SAB persistence is available. */
   forceOneShot?: boolean;
   /** Benchmark/debug knob: fail instead of silently falling back when persistent startup/search errors. */
@@ -17,7 +19,7 @@ export interface RecklessRuntimeOptions {
 }
 
 export interface RecklessRuntimeStatus {
-  mode: 'idle' | 'oneshot' | 'persistent';
+  mode: 'idle' | 'oneshot' | 'persistent' | 'browser-api';
   persistentAvailable: boolean;
   persistentDisabled: boolean;
   forceOneShot: boolean;
@@ -46,7 +48,24 @@ interface RunResult {
   exitCode: number;
 }
 
+interface BrowserApiSearchLine {
+  multipv: number;
+  depth: number;
+  scoreCp: number | null;
+  mateIn: number | null;
+  nodes: number;
+  nps: number;
+  pv: string[];
+}
+
+interface BrowserApiSearchResult {
+  bestmove: string | null;
+  elapsedMs: number;
+  lines: BrowserApiSearchLine[];
+}
+
 type Pending = { resolve: (result: RunResult) => void; reject: (error: Error) => void };
+type BrowserApiPending = { resolve: (result: BrowserApiSearchResult | null) => void; reject: (error: Error) => void };
 type PersistentPending = Pending & {
   stdout: string[];
   stderr: string[];
@@ -117,9 +136,10 @@ export function canUsePersistentRecklessWasi(): boolean {
 export class RecklessEngine {
   readonly name = 'reckless-wasi';
   private worker: Worker | null = null;
-  private workerMode: 'oneshot' | 'persistent' | null = null;
+  private workerMode: 'oneshot' | 'persistent' | 'browser-api' | null = null;
   private seq = 0;
   private pending = new Map<number, Pending>();
+  private browserApiPending = new Map<number, BrowserApiPending>();
   private persistentPending: PersistentPending | null = null;
   private sharedInput: SharedInput | null = null;
   private persistentDisabled = false;
@@ -159,6 +179,24 @@ export class RecklessEngine {
     worker.onerror = (event) => this.rejectAllAndDispose(new Error(event.message || 'Reckless WASI worker error'));
     this.worker = worker;
     this.workerMode = 'oneshot';
+    return worker;
+  }
+
+  private ensureBrowserApiWorker(): Worker {
+    if (this.worker && this.workerMode === 'browser-api') return this.worker;
+    this.disposeWorker();
+    const worker = new Worker(new URL('./recklessBrowserApiWorker.ts', import.meta.url), { type: 'module', name: 'reckless-browser-api' });
+    worker.onmessage = (event: MessageEvent) => {
+      const message = event.data as { type: string; id: number; result?: BrowserApiSearchResult; error?: string };
+      const pending = this.browserApiPending.get(message.id);
+      if (!pending) return;
+      this.browserApiPending.delete(message.id);
+      if (message.type === 'error') pending.reject(new Error(message.error ?? 'Reckless browser API worker error'));
+      else pending.resolve(message.result ?? null);
+    };
+    worker.onerror = (event) => this.rejectAllAndDispose(new Error(event.message || 'Reckless browser API worker error'));
+    this.worker = worker;
+    this.workerMode = 'browser-api';
     return worker;
   }
 
@@ -210,6 +248,8 @@ export class RecklessEngine {
   private rejectAllAndDispose(error: Error): void {
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
+    for (const pending of this.browserApiPending.values()) pending.reject(error);
+    this.browserApiPending.clear();
     if (this.persistentPending) {
       if (this.persistentPending.abortTimer) clearTimeout(this.persistentPending.abortTimer);
       this.persistentPending.reject(error);
@@ -220,6 +260,7 @@ export class RecklessEngine {
 
   private disposeWorker(): void {
     if (this.sharedInput) closeSharedInput(this.sharedInput);
+    if (this.workerMode === 'browser-api') this.worker?.postMessage({ type: 'dispose' });
     this.worker?.terminate();
     this.worker = null;
     this.workerMode = null;
@@ -349,6 +390,46 @@ export class RecklessEngine {
     });
   }
 
+  private runBrowserApiMessage(
+    message: Omit<{ type: 'prewarm' | 'new-game' | 'search'; id: number; wasmUrl: string; hashMb?: number; fen?: string; depth?: number; movetimeMs?: number; multipv?: number }, 'id' | 'wasmUrl'>,
+    signal?: AbortSignal,
+  ): Promise<BrowserApiSearchResult | null> {
+    if (signal?.aborted) return Promise.reject(abortError());
+    const id = ++this.seq;
+    const worker = this.ensureBrowserApiWorker();
+    return new Promise<BrowserApiSearchResult | null>((resolve, reject) => {
+      const onAbort = () => {
+        this.browserApiPending.delete(id);
+        this.disposeWorker();
+        reject(abortError());
+      };
+      this.browserApiPending.set(id, {
+        resolve: (result) => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve(result);
+        },
+        reject: (error) => {
+          signal?.removeEventListener('abort', onAbort);
+          reject(error);
+        },
+      });
+      signal?.addEventListener('abort', onAbort, { once: true });
+      worker.postMessage({ ...message, id, wasmUrl: this.wasmUrl, hashMb: this.options.hashMb ?? 16 });
+    });
+  }
+
+  private browserApiResultToInfo(result: BrowserApiSearchResult | null): StockfishInfoLine[] {
+    return (result?.lines ?? []).map((line) => ({
+      multipv: line.multipv,
+      depth: line.depth,
+      ...(line.scoreCp === null ? {} : { scoreCp: line.scoreCp }),
+      ...(line.mateIn === null ? {} : { mateIn: line.mateIn }),
+      nodes: line.nodes,
+      nps: line.nps,
+      pvUci: [...line.pv],
+    }));
+  }
+
   private async runCommandsUntil(
     commands: string[],
     signal?: AbortSignal,
@@ -402,6 +483,10 @@ export class RecklessEngine {
    */
   async prewarm(signal?: AbortSignal): Promise<void> {
     return this.runExclusive(async () => {
+      if (this.runtimeOptions.backend === 'browser-api') {
+        await this.runBrowserApiMessage({ type: 'prewarm' }, signal);
+        return;
+      }
       if (this.runtimeOptions.forceOneShot || this.persistentDisabled || !canUsePersistentRecklessWasi()) return;
       try {
         const result = await this.runCommandsUntil(['uci', 'isready'], signal, (line, stream) => stream === 'stdout' && line === 'readyok');
@@ -421,6 +506,11 @@ export class RecklessEngine {
    */
   async newGame(signal?: AbortSignal): Promise<void> {
     return this.runExclusive(async () => {
+      if (this.runtimeOptions.backend === 'browser-api') {
+        await this.runBrowserApiMessage({ type: 'new-game' }, signal);
+        this.lastInfoLines = [];
+        return;
+      }
       const result = await this.runCommandsUntil(['ucinewgame', 'isready'], signal, (line, stream) => stream === 'stdout' && line === 'readyok');
       if (result.exitCode !== 0) throw new Error(`Reckless new game exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = [];
@@ -439,6 +529,8 @@ export class RecklessEngine {
 
   runtimeLabel(): string {
     const status = this.runtimeStatus();
+    if (status.mode === 'browser-api') return 'browser API';
+    if (this.runtimeOptions.backend === 'browser-api') return 'browser API available';
     if (status.forceOneShot) return 'one-shot forced';
     if (status.mode === 'persistent') return 'persistent';
     if (status.mode === 'oneshot') return status.persistentAvailable && status.persistentDisabled ? 'one-shot fallback' : 'one-shot';
@@ -447,6 +539,11 @@ export class RecklessEngine {
 
   async bestMove(fen: string, signal?: AbortSignal): Promise<string | null> {
     return this.runExclusive(async () => {
+      if (this.runtimeOptions.backend === 'browser-api') {
+        const result = await this.runBrowserApiMessage({ type: 'search', fen, depth: this.options.depth, movetimeMs: this.options.movetimeMs, multipv: 1 }, signal);
+        this.lastInfoLines = this.browserApiResultToInfo(result);
+        return result?.bestmove ?? this.lastInfoLines[0]?.pvUci[0] ?? null;
+      }
       const result = await this.runCommands(this.searchCommands(fen, this.options, 1), signal);
       if (result.exitCode !== 0) throw new Error(`Reckless exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = this.parseInfo(result.stdout);
@@ -456,6 +553,14 @@ export class RecklessEngine {
 
   async analyze(fen: string, opts: { multipv?: number; depth?: number; movetimeMs?: number; signal?: AbortSignal } = {}): Promise<StockfishInfoLine[]> {
     return this.runExclusive(async () => {
+      if (this.runtimeOptions.backend === 'browser-api') {
+        const result = await this.runBrowserApiMessage(
+          { type: 'search', fen, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs ?? this.options.movetimeMs, multipv: opts.multipv ?? 1 },
+          opts.signal,
+        );
+        this.lastInfoLines = this.browserApiResultToInfo(result);
+        return this.lastInfo();
+      }
       const result = await this.runCommands(this.searchCommands(fen, { ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs ?? this.options.movetimeMs }, opts.multipv ?? 1), opts.signal);
       if (result.exitCode !== 0) throw new Error(`Reckless exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = this.parseInfo(result.stdout);
@@ -466,6 +571,8 @@ export class RecklessEngine {
   dispose(): void {
     for (const pending of this.pending.values()) pending.reject(abortError());
     this.pending.clear();
+    for (const pending of this.browserApiPending.values()) pending.reject(abortError());
+    this.browserApiPending.clear();
     if (this.persistentPending) {
       this.persistentPending.reject(abortError());
       this.persistentPending = null;
