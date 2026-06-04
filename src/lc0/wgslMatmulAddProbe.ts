@@ -4834,6 +4834,9 @@ async function runCachedPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>
 
 type Lc0WebHybridHeadBackend = 'ort' | 'wgsl';
 
+const WGSL_HEADS_READBACK_FLOATS = DEFAULT_POLICY_MAPPED_OUTPUTS + 3;
+const WGSL_HEADS_READBACK_BYTES = WGSL_HEADS_READBACK_FLOATS * 4;
+
 type WgslPolicyValueHeadRuntime = {
   densePipeline: PipelineLike;
   policyLogitsPipeline: PipelineLike;
@@ -4851,8 +4854,7 @@ type WgslPolicyValueHeadRuntime = {
   valueSoftmaxBindGroup: unknown;
   mappedPolicyBuffer: BufferLike;
   valueWdlBuffer: BufferLike;
-  mappedPolicyReadbackBuffer: BufferLike;
-  valueWdlReadbackBuffer: BufferLike;
+  headsReadbackBuffer: BufferLike;
   buffers: BufferLike[];
 };
 
@@ -4893,14 +4895,13 @@ function createWgslPolicyValueHeadRuntime(device: DeviceLike, tensors: Lc0WebPol
   const valueHiddenBuffer = device.createBuffer({ size: DEFAULT_VALUE_HIDDEN * 4, usage: usage.STORAGE }) as BufferLike;
   const valueLogitsBuffer = device.createBuffer({ size: 3 * 4, usage: usage.STORAGE }) as BufferLike;
   const valueWdlBuffer = device.createBuffer({ size: 3 * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
-  const mappedPolicyReadbackBuffer = device.createBuffer({ size: DEFAULT_POLICY_MAPPED_OUTPUTS * 4, usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
-  const valueWdlReadbackBuffer = device.createBuffer({ size: 3 * 4, usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
+  const headsReadbackBuffer = device.createBuffer({ size: WGSL_HEADS_READBACK_BYTES, usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
   const policyShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 1], usage.UNIFORM | usage.COPY_DST);
   const policyLinearShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 0], usage.UNIFORM | usage.COPY_DST);
   const valueShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_EMBED, 1], usage.UNIFORM | usage.COPY_DST);
   const valueDense1ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN, 1], usage.UNIFORM | usage.COPY_DST);
   const valueDense2ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_HIDDEN, 3, 0], usage.UNIFORM | usage.COPY_DST);
-  buffers.push(policyWeightBuffer, policyBiasBuffer, policyQWeightBuffer, policyQBiasBuffer, policyKWeightBuffer, policyKBiasBuffer, policyScaleBuffer, policyPromotionWeightBuffer, policyMappingBuffer, valueWeightBuffer, valueBiasBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, policyOutputBuffer, policyQBuffer, policyKBuffer, policyLogitsBuffer, mappedPolicyBuffer, valueOutputBuffer, valueHiddenBuffer, valueLogitsBuffer, valueWdlBuffer, mappedPolicyReadbackBuffer, valueWdlReadbackBuffer, policyShapeBuffer, policyLinearShapeBuffer, valueShapeBuffer, valueDense1ShapeBuffer, valueDense2ShapeBuffer);
+  buffers.push(policyWeightBuffer, policyBiasBuffer, policyQWeightBuffer, policyQBiasBuffer, policyKWeightBuffer, policyKBiasBuffer, policyScaleBuffer, policyPromotionWeightBuffer, policyMappingBuffer, valueWeightBuffer, valueBiasBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, policyOutputBuffer, policyQBuffer, policyKBuffer, policyLogitsBuffer, mappedPolicyBuffer, valueOutputBuffer, valueHiddenBuffer, valueLogitsBuffer, valueWdlBuffer, headsReadbackBuffer, policyShapeBuffer, policyLinearShapeBuffer, valueShapeBuffer, valueDense1ShapeBuffer, valueDense2ShapeBuffer);
 
   return {
     densePipeline,
@@ -4919,8 +4920,7 @@ function createWgslPolicyValueHeadRuntime(device: DeviceLike, tensors: Lc0WebPol
     valueSoftmaxBindGroup: createWgslHeadsSoftmaxBindGroup(device, softmaxPipeline, valueLogitsBuffer, valueWdlBuffer),
     mappedPolicyBuffer,
     valueWdlBuffer,
-    mappedPolicyReadbackBuffer,
-    valueWdlReadbackBuffer,
+    headsReadbackBuffer,
     buffers,
   };
 }
@@ -4952,8 +4952,8 @@ function encodeWgslPolicyValueHeads(pass: ComputePassLike, runtime: WgslPolicyVa
 }
 
 function copyWgslPolicyValueHeadOutputs(encoder: CommandEncoderLike, runtime: WgslPolicyValueHeadRuntime): void {
-  encoder.copyBufferToBuffer(runtime.mappedPolicyBuffer, 0, runtime.mappedPolicyReadbackBuffer, 0, DEFAULT_POLICY_MAPPED_OUTPUTS * 4);
-  encoder.copyBufferToBuffer(runtime.valueWdlBuffer, 0, runtime.valueWdlReadbackBuffer, 0, 3 * 4);
+  encoder.copyBufferToBuffer(runtime.mappedPolicyBuffer, 0, runtime.headsReadbackBuffer, 0, DEFAULT_POLICY_MAPPED_OUTPUTS * 4);
+  encoder.copyBufferToBuffer(runtime.valueWdlBuffer, 0, runtime.headsReadbackBuffer, DEFAULT_POLICY_MAPPED_OUTPUTS * 4, 3 * 4);
 }
 
 async function mapWgslPolicyValueHeadOutputs(runtime: WgslPolicyValueHeadRuntime): Promise<{
@@ -4963,14 +4963,13 @@ async function mapWgslPolicyValueHeadOutputs(runtime: WgslPolicyValueHeadRuntime
 }> {
   const globals = gpuGlobals();
   const started = nowMs();
-  await Promise.all([
-    runtime.mappedPolicyReadbackBuffer.mapAsync(globals.GPUMapMode!.READ),
-    runtime.valueWdlReadbackBuffer.mapAsync(globals.GPUMapMode!.READ),
-  ]);
-  const mappedPolicy = new Float32Array(runtime.mappedPolicyReadbackBuffer.getMappedRange().slice(0));
-  const wdl = new Float32Array(runtime.valueWdlReadbackBuffer.getMappedRange().slice(0));
-  runtime.mappedPolicyReadbackBuffer.unmap();
-  runtime.valueWdlReadbackBuffer.unmap();
+  await runtime.headsReadbackBuffer.mapAsync(globals.GPUMapMode!.READ);
+  const range = runtime.headsReadbackBuffer.getMappedRange();
+  const mappedPolicy = new Float32Array(DEFAULT_POLICY_MAPPED_OUTPUTS);
+  mappedPolicy.set(new Float32Array(range, 0, DEFAULT_POLICY_MAPPED_OUTPUTS));
+  const wdl = new Float32Array(3);
+  wdl.set(new Float32Array(range, DEFAULT_POLICY_MAPPED_OUTPUTS * 4, 3));
+  runtime.headsReadbackBuffer.unmap();
   return { mappedPolicy, wdl, readbackSyncedMs: nowMs() - started };
 }
 
@@ -5035,6 +5034,7 @@ export interface Lc0WebHybridTimingBreakdown {
   headRunMs: number;
   legalPriorsMs: number;
   readbackBytes: number;
+  readbackMapCount: number;
 }
 
 export interface Lc0WebHybridEvaluationResult extends Lc0Evaluation {
@@ -5300,7 +5300,7 @@ class Lc0WebHybridRuntime {
     fen: string;
     output: Float32Array<ArrayBufferLike>;
     encoderDispatchSyncedMs: number;
-    timing: Pick<Lc0WebHybridTimingBreakdown, 'inputBuildMs' | 'inputUploadMs' | 'commandEncodeMs' | 'queueSubmitMs' | 'readbackSyncedMs' | 'readbackBytes'>;
+    timing: Pick<Lc0WebHybridTimingBreakdown, 'inputBuildMs' | 'inputUploadMs' | 'commandEncodeMs' | 'queueSubmitMs' | 'readbackSyncedMs' | 'readbackBytes' | 'readbackMapCount'>;
   }> {
     const { board, fen } = currentBoardAndFen(input);
     const inputBuildStarted = nowMs();
@@ -5331,7 +5331,7 @@ class Lc0WebHybridRuntime {
       fen,
       output,
       encoderDispatchSyncedMs: nowMs() - blockStarted,
-      timing: { inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, readbackSyncedMs, readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4 },
+      timing: { inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, readbackSyncedMs, readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4, readbackMapCount: 1 },
     };
   }
 
@@ -5399,7 +5399,8 @@ class Lc0WebHybridRuntime {
           readbackSyncedMs,
           headRunMs,
           legalPriorsMs,
-          readbackBytes: (DEFAULT_POLICY_MAPPED_OUTPUTS + 3) * 4,
+          readbackBytes: WGSL_HEADS_READBACK_BYTES,
+          readbackMapCount: 1,
         },
       };
     }
@@ -5435,6 +5436,7 @@ class Lc0WebHybridRuntime {
         headRunMs: heads.runMs,
         legalPriorsMs,
         readbackBytes: encoded.timing.readbackBytes,
+        readbackMapCount: encoded.timing.readbackMapCount,
       },
     };
   }

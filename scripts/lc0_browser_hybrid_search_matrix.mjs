@@ -149,6 +149,7 @@ function compactCell(result, combo) {
     headRunMs: timing.headRunMs,
     legalPriorsMs: timing.legalPriorsMs,
     readbackBytes: timing.readbackBytes,
+    readbackMapCount: timing.readbackMapCount,
   };
 }
 
