@@ -6,6 +6,27 @@ Use `/reckless-benchmark.html` from the isolated static server after `npm run bu
 
 The harness also has a `Load 20-position rotated FEN suite` preset. Its run order keeps one engine alive per variant/mode/budget, measures a first pass over every listed position, then rotates each warm pass across the entire suite before repeating any one FEN. Raw and summary outputs track wall-clock ms, engine-reported depth, score/mate, nodes, NPS, best move, PV, runtime label, and cold/first-pass vs warm-pass rows separately. Keep score/PV fields in the JSON/CSV exports when using the page for scalar-vs-SIMD parity validation.
 
+## 2026-06-04 scalar-vs-SIMD parity validation
+
+Command surface: `/reckless-benchmark.html` on the isolated static server after `npm run build:client`, with Full scalar WASI/UCI and Full integrated wasm NNUE SIMD WASI/UCI. Persistent mode only, 20-position rotated Ruy Lopez suite, depth budgets 7/8/9, movetime budgets 100/250/500ms, one warm rotated pass, and default-on clear-hash reset.
+
+Raw report: [`reckless_simd_parity_validation_2026-06-04_depth7-9_movetime100-500.json`](./reckless_simd_parity_validation_2026-06-04_depth7-9_movetime100-500.json).
+
+Validation notes:
+
+- Fixed-depth parity passed exactly: 120/120 scalar-vs-SIMD pairs matched best move, score/mate fields, and full PV (`20 positions × 3 depths × cold/warm`).
+- Fixed-movetime exact parity is not expected because the faster SIMD artifact searches different node/depth frontiers under the same clock budget. The movetime run was used as a crash/sanity check and completed 120/120 scalar-vs-SIMD pairs. Same-best-move counts were 36/40 at 100ms, 38/40 at 250ms, and 38/40 at 500ms.
+- This validation used one warm pass, so the wall-time aggregates are sanity numbers rather than the deeper 20-warm-pass performance benchmark. It still showed the expected depth 8/9 SIMD speedup and movetime NPS gains while preserving fixed-depth output parity.
+
+| Budget | Warm scalar ms | Warm SIMD ms | Wall speedup | NPS speedup |
+| --- | ---: | ---: | ---: | ---: |
+| depth 7 | 15.56 | 18.45 | 0.84x | 2.50x |
+| depth 8 | 32.23 | 15.84 | 2.03x | 2.59x |
+| depth 9 | 57.81 | 20.65 | 2.80x | 2.80x |
+| movetime 100ms | 89.33 | 87.26 | 1.02x | 2.50x |
+| movetime 250ms | 239.10 | 236.84 | 1.01x | 2.70x |
+| movetime 500ms | 489.43 | 486.69 | 1.01x | 2.64x |
+
 ## 2026-06-04 rotated-FEN harness smoke
 
 Command surface: isolated static server, Full scalar artifact, persistent mode, 20-position Ruy Lopez suite, depth 1, one warm rotated pass, default-on clear-hash reset. This is a harness-validation smoke, not a final performance comparison.
