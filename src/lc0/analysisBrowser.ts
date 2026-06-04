@@ -141,7 +141,8 @@ const DEFAULT_RECKLESS_VARIANT = REQUESTED_RECKLESS_VARIANT.key;
 function strengthMeta(family: EngineFamily): { unit: string; min: number; max: number; def: number } {
   if (family === 'lc0') return { unit: 'visits', min: 1, max: 100000, def: 400 };
   if (family === 'sf') return { unit: 'depth', min: 1, max: 30, def: 14 };
-  return { unit: 'depth', min: 1, max: 20, def: 4 };
+  // Reckless is alpha-beta like Stockfish, so default to the same depth (14).
+  return { unit: 'depth', min: 1, max: 30, def: 14 };
 }
 function defaultStrength(family: EngineFamily): number { return strengthMeta(family).def; }
 
