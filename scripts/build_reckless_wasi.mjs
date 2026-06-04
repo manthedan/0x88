@@ -7,6 +7,9 @@ const repo = process.env.RECKLESS_REPO ?? 'https://github.com/codedeliveryservic
 const ref = process.env.RECKLESS_REF ?? 'main';
 const workdir = resolve(process.env.RECKLESS_BUILD_DIR ?? '.local_engines/reckless-wasi-src');
 const out = resolve(process.env.RECKLESS_WASM_OUT ?? 'public/reckless/reckless.wasm');
+const evalfile = process.env.RECKLESS_EVALFILE ? resolve(process.env.RECKLESS_EVALFILE) : '';
+const l1Size = process.env.RECKLESS_L1_SIZE ?? '';
+if (l1Size && !/^\d+$/.test(l1Size)) throw new Error(`RECKLESS_L1_SIZE must be an integer, got ${l1Size}`);
 
 function run(cmd, args, options = {}) {
   console.log(`$ ${cmd} ${args.join(' ')}`);
@@ -20,6 +23,14 @@ function replace(path, oldText, newText) {
 }
 
 function patchRecklessForWasi(root) {
+  if (l1Size) {
+    replace(
+      `${root}/src/nnue.rs`,
+      `const L1_SIZE: usize = 768;`,
+      `const L1_SIZE: usize = ${Number.parseInt(l1Size, 10)};`,
+    );
+  }
+
   replace(
     `${root}/src/uci.rs`,
     `    let rx = spawn_listener(shared.clone());\n\n    let mut mode = if buffer.is_empty() { Mode::Uci } else { Mode::Cli };`,
@@ -67,7 +78,10 @@ mkdirSync(dirname(workdir), { recursive: true });
 run('git', ['clone', '--depth=1', '--branch', ref, repo, workdir]);
 patchRecklessForWasi(workdir);
 run('rustup', ['target', 'add', 'wasm32-wasip1']);
-run('cargo', ['build', '--release', '--no-default-features', '--target', 'wasm32-wasip1'], { cwd: workdir });
+run('cargo', ['build', '--release', '--no-default-features', '--target', 'wasm32-wasip1'], {
+  cwd: workdir,
+  env: evalfile ? { ...process.env, EVALFILE: evalfile } : process.env,
+});
 mkdirSync(dirname(out), { recursive: true });
 const built = `${workdir}/target/wasm32-wasip1/release/reckless.wasm`;
 if (!existsSync(built)) throw new Error(`expected build artifact missing: ${built}`);

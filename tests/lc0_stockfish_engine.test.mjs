@@ -29,11 +29,12 @@ test('stockfishGoCommand prefers movetime over depth and clamps depth', () => {
 });
 
 test('parseStockfishInfo extracts score and PV fields', () => {
-  assert.deepEqual(parseStockfishInfo('info depth 9 multipv 2 score cp -34 nodes 1200 pv e7e5 g1f3'), {
+  assert.deepEqual(parseStockfishInfo('info depth 9 multipv 2 score cp -34 nodes 1200 nps 240000 pv e7e5 g1f3'), {
     multipv: 2,
     depth: 9,
     scoreCp: -34,
     mateIn: undefined,
+    nps: 240000,
     pvUci: ['e7e5', 'g1f3'],
   });
   assert.deepEqual(parseStockfishInfo('info depth 12 score mate 3 pv e2e4'), {

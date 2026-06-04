@@ -9,6 +9,21 @@ export interface RecklessOptions {
   hashMb?: number;
 }
 
+export interface RecklessRuntimeOptions {
+  /** Benchmark/debug knob: force the old one-shot WASI path even when SAB persistence is available. */
+  forceOneShot?: boolean;
+  /** Benchmark/debug knob: fail instead of silently falling back when persistent startup/search errors. */
+  disablePersistentFallback?: boolean;
+}
+
+export interface RecklessRuntimeStatus {
+  mode: 'idle' | 'oneshot' | 'persistent';
+  persistentAvailable: boolean;
+  persistentDisabled: boolean;
+  forceOneShot: boolean;
+  wasmUrl: string;
+}
+
 export const DEFAULT_RECKLESS_WASM_URL = '/reckless/reckless.wasm';
 
 const SHARED_STDIN_HEADER_INTS = 4;
@@ -80,7 +95,7 @@ function writeSharedInput(input: SharedInput, text: string): void {
   Atomics.notify(input.control, 1);
 }
 
-function canUsePersistentWasi(): boolean {
+export function canUsePersistentRecklessWasi(): boolean {
   return typeof SharedArrayBuffer !== 'undefined' && (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
 }
 
@@ -107,11 +122,13 @@ export class RecklessEngine {
   private queueTail: Promise<void> = Promise.resolve();
   private options: RecklessOptions;
   private readonly wasmUrl: string;
+  private readonly runtimeOptions: RecklessRuntimeOptions;
   private lastInfoLines: StockfishInfoLine[] = [];
 
-  constructor(options: RecklessOptions = {}, wasmUrl = DEFAULT_RECKLESS_WASM_URL) {
+  constructor(options: RecklessOptions = {}, wasmUrl = DEFAULT_RECKLESS_WASM_URL, runtimeOptions: RecklessRuntimeOptions = {}) {
     this.options = options;
     this.wasmUrl = wasmUrl;
+    this.runtimeOptions = runtimeOptions;
   }
 
   setOptions(next: RecklessOptions): void {
@@ -292,11 +309,11 @@ export class RecklessEngine {
   }
 
   private async runCommands(commands: string[], signal?: AbortSignal): Promise<RunResult> {
-    if (!this.persistentDisabled && canUsePersistentWasi()) {
+    if (!this.runtimeOptions.forceOneShot && !this.persistentDisabled && canUsePersistentRecklessWasi()) {
       try {
         return await this.runPersistentCommands(commands, signal);
       } catch (error) {
-        if ((error as Error).name === 'AbortError') throw error;
+        if ((error as Error).name === 'AbortError' || this.runtimeOptions.disablePersistentFallback) throw error;
         this.persistentDisabled = true;
         this.disposeWorker();
         return this.runOneShotCommands(commands, signal);
@@ -326,6 +343,24 @@ export class RecklessEngine {
 
   lastInfo(): StockfishInfoLine[] {
     return this.lastInfoLines.map((entry) => ({ ...entry, pvUci: [...entry.pvUci] }));
+  }
+
+  runtimeStatus(): RecklessRuntimeStatus {
+    return {
+      mode: this.workerMode ?? 'idle',
+      persistentAvailable: canUsePersistentRecklessWasi(),
+      persistentDisabled: this.persistentDisabled,
+      forceOneShot: this.runtimeOptions.forceOneShot === true,
+      wasmUrl: this.wasmUrl,
+    };
+  }
+
+  runtimeLabel(): string {
+    const status = this.runtimeStatus();
+    if (status.forceOneShot) return 'one-shot forced';
+    if (status.mode === 'persistent') return 'persistent';
+    if (status.mode === 'oneshot') return status.persistentAvailable && status.persistentDisabled ? 'one-shot fallback' : 'one-shot';
+    return status.persistentAvailable ? 'persistent available' : 'one-shot fallback';
   }
 
   async bestMove(fen: string, signal?: AbortSignal): Promise<string | null> {
