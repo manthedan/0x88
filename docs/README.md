@@ -1,6 +1,6 @@
-# tiny_leela docs map
+# lc0_webgpu docs map
 
-This directory is intentionally treated as a **living research notebook plus stable project docs**. Many older notes are still useful, but not all of them are canonical. The current source of truth for planning is now the Markdown knowledge graph under `knowledge/`, especially `knowledge/09_agent_context/active_roadmap.md` and `knowledge/07_roadmaps/active/roadmap.current_tiny_leela_portfolio.md`. This index keeps existing file paths stable while making it clear what to read first, what is active, and what is historical/reference material.
+This directory is intentionally treated as a **living research notebook plus stable project docs**. The repository is now `lc0_webgpu`; many older notes still use the inherited `tiny_leela` name and remain useful historical/reference material until they are retired or renamed. The current source of truth for planning is now the Markdown knowledge graph under `knowledge/`, especially `knowledge/09_agent_context/active_roadmap.md` and `knowledge/07_roadmaps/active/roadmap.current_tiny_leela_portfolio.md`. This index keeps existing file paths stable while making it clear what to read first, what is active, and what is historical/reference material.
 
 ## Status labels
 

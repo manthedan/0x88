@@ -1,5 +1,5 @@
-export const PROJECT_NAME = 'tiny-leela';
+export const PROJECT_NAME = 'lc0-webgpu';
 
 export function describeTarget(): string {
-  return 'Tiny in-browser Leela-like engine: legal chess, PUCT, policy/WDL evaluator, ONNX Runtime Web deployment.';
+  return 'Browser LC0/WebGPU chess engine: legal chess, PUCT, policy/WDL evaluator, ONNX Runtime Web deployment.';
 }
