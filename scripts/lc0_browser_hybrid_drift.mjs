@@ -67,6 +67,14 @@ function runAgent(args, commandArgs, timeoutMs = 30_000) {
   return parsed;
 }
 
+function closeAgentSession(args) {
+  try {
+    runAgent(args, ['close'], 5_000);
+  } catch (error) {
+    process.stderr.write(`[lc0-hybrid-drift] warning: failed to close agent-browser session ${args.session}: ${error.message ?? error}\n`);
+  }
+}
+
 async function waitForServer(baseUrl, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
@@ -150,19 +158,23 @@ async function f32Baselines(args, records) {
 async function browserHybrid(args) {
   const url = `${args.baseUrl.replace(/\/$/, '')}/lc0-policy-only.html?hybridDrift=1&encoderLayers=${args.layers}&hybridDriftLimit=${args.limit}&ep=wasm&packVerify=0`;
   process.stderr.write(`[lc0-hybrid-drift] ${url}\n`);
-  runAgent(args, ['open', url], 30_000);
-  const deadline = Date.now() + args.timeoutMs;
-  while (Date.now() < deadline) {
-    const chunk = Math.min(25_000, Math.max(1000, deadline - Date.now()));
-    try {
-      runAgent(args, ['wait', '--text', 'HYBRID_DRIFT_DONE', '--timeout', String(chunk)], chunk + 5_000);
-      const text = runAgent(args, ['get', 'text', '#benchResult'], 30_000).text;
-      return JSON.parse(text);
-    } catch (error) {
-      if (Date.now() >= deadline) throw error;
+  try {
+    runAgent(args, ['open', url], 30_000);
+    const deadline = Date.now() + args.timeoutMs;
+    while (Date.now() < deadline) {
+      const chunk = Math.min(25_000, Math.max(1000, deadline - Date.now()));
+      try {
+        runAgent(args, ['wait', '--text', 'HYBRID_DRIFT_DONE', '--timeout', String(chunk)], chunk + 5_000);
+        const text = runAgent(args, ['get', 'text', '#benchResult'], 30_000).text;
+        return JSON.parse(text);
+      } catch (error) {
+        if (Date.now() >= deadline) throw error;
+      }
     }
+    throw new Error(`Timed out waiting for HYBRID_DRIFT_DONE after ${args.timeoutMs}ms`);
+  } finally {
+    closeAgentSession(args);
   }
-  throw new Error(`Timed out waiting for HYBRID_DRIFT_DONE after ${args.timeoutMs}ms`);
 }
 
 async function main() {
@@ -175,10 +187,11 @@ async function main() {
       ...readJsonl('fixtures/lc0/native_fen_only_blas.jsonl'),
       ...readJsonl('fixtures/lc0/native_history_blas.jsonl'),
     ].slice(0, args.limit);
-    const [f32, hybrid] = await Promise.all([
-      f32Baselines(args, nativeRecords),
-      browserHybrid(args),
-    ]);
+    // Keep the heavy browser/WebGPU hybrid runtime and the f32 ORT baseline out
+    // of memory at the same time. Running these in parallel saved wall-clock time
+    // but could accumulate model/session/GPU allocations during repeated sweeps.
+    const hybrid = await browserHybrid(args);
+    const f32 = await f32Baselines(args, nativeRecords);
     const comparisons = hybrid.evaluations.map((hybridEval) => {
       const f32Eval = f32.find((entry) => entry.id === hybridEval.id);
       const native = nativeRecords.find((entry) => entry.id === hybridEval.id);
