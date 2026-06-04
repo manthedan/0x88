@@ -44,6 +44,12 @@ const SMOKES = [
     doneText: 'FFN_BENCH_DONE',
   },
   {
+    name: 'encoder0-ffn-tvm-packed-f16',
+    query: 'encoder0FfnBench=1&encoder0FfnKernel=tvm-packed-f16&encoder0FfnWarmup=1&encoder0FfnIters=1&packVerify=0',
+    doneText: 'FFN_BENCH_DONE',
+    default: false,
+  },
+  {
     name: 'encoder0-ffn-ort-wasm',
     query: 'encoder0FfnOrtBench=1&encoder0FfnOrtWarmup=0&encoder0FfnOrtIters=1&ep=wasm&packVerify=0',
     doneText: 'FFN_ORT_BENCH_DONE',

@@ -38,6 +38,7 @@ import {
   type Lc0WebEncoder0BlockOrtBenchmarkResult,
   type Lc0WebEncoder0FfnBenchmarkResult,
   type Lc0WebEncoderStackBenchmarkResult,
+  type Lc0WebFfnKernelVariant,
   type Lc0WebEncoder0FfnOrtBenchmarkResult,
   type Lc0WebHybridEvaluationResult,
   type Lc0WebWgslDeferredReadbackBenchResult,
@@ -268,6 +269,7 @@ type Encoder0FfnBenchmarkMessage = {
   warmup?: number;
   verifyShards?: boolean;
   encoderPrefix?: string;
+  ffnKernelVariant?: Lc0WebFfnKernelVariant;
 };
 
 type Encoder0FfnOrtBenchmarkMessage = {
@@ -685,6 +687,7 @@ async function handleEncoder0FfnBenchmark(message: Encoder0FfnBenchmarkMessage):
     warmup: message.warmup,
     verifyShards: message.verifyShards,
     encoderPrefix: message.encoderPrefix,
+    ffnKernelVariant: message.ffnKernelVariant,
   });
   post({ type: 'encoder0FfnBenchmarkResult', id: message.id, result });
 }

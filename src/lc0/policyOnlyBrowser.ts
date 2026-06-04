@@ -547,6 +547,7 @@ type Encoder0FfnBenchmarkResult = {
   hidden: number;
   epsilon: number;
   alpha: number;
+  ffnKernelVariant: 'hand' | 'tvm-packed-f16';
   warmup: number;
   iterations: number;
   packLoadMs: number;
@@ -1712,6 +1713,7 @@ async function runEncoder0FfnBenchmark(): Promise<void> {
   const rawWarmup = Number(params.get('encoder0FfnWarmup') ?? params.get('ffnWarmup') ?? '2');
   const iterations = Math.min(10_000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 10)));
   const warmup = Math.min(1000, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 2)));
+  const ffnKernelVariant = params.get('ffnKernel') === 'tvm-packed-f16' || params.get('encoder0FfnKernel') === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand';
   el('benchResult').textContent = 'FFN_BENCH_RUNNING';
   setBusy(true, `Benchmarking lc0web WGSL encoder0 FFN dense1/sqrrelu/dense2/residual/ln2: ${warmup} warmup + ${iterations} queued blocks, one final readback…`);
   try {
@@ -1722,6 +1724,7 @@ async function runEncoder0FfnBenchmark(): Promise<void> {
       warmup,
       verifyShards: params.get('packVerify') !== '0',
       encoderPrefix: ENCODER_PREFIX,
+      ffnKernelVariant,
     });
     const rounded = {
       ...response.result,
