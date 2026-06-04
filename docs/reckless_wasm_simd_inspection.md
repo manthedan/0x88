@@ -1,6 +1,6 @@
 # Reckless WASM SIMD inspection
 
-## 2026-06-04 scalar vs `+simd128` artifacts
+## 2026-06-04 scalar vs integrated wasm NNUE SIMD artifacts
 
 The repo includes a lightweight code-section SIMD opcode inspector:
 
@@ -24,7 +24,7 @@ public/reckless/reckless.wasm simd_mnemonic_lines=0
 public/reckless/reckless-simd128.wasm simd_mnemonic_lines=1181
 ```
 
-Result on the current local artifacts:
+Result after enabling the dedicated wasm NNUE SIMD backend in `npm run reckless:build-simd-wasi`:
 
 ```text
 public/reckless/reckless.wasm
@@ -32,14 +32,14 @@ public/reckless/reckless.wasm
   families=none
   topOps=none
 public/reckless/reckless-simd128.wasm
-  bytes=64578423 codeBytes=283932 simdOpcodeCount=1161
-  families=v128:601, i64x2:129, i8x16:108, i32x4:86, f32x4:76, i32x4/i64x2/integer:45, i16x8:36, i16x8/integer:35, f64x2:25, float compare:20
-  topOps=v128.store:225, v128.load:156, v128.const:92, i8x16.shuffle:72, i64x2.extract_lane:64, i32x4.extract_lane:54, v128.and:39, f32x4.add:36, i64x2.replace_lane:33, i64x2.splat:32, i8x16.replace_lane:32, i16x8.add:25, simd.184:20, simd.230:20, simd.67:20, v128.andnot:20, simd.234:20, i32x4.add:17, v128.load32_lane:17, simd.173:13, simd.185:9, f64x2.splat:9, v128.or:8, v128.bitselect:8
+  bytes=64579258 codeBytes=284933 simdOpcodeCount=1580
+  families=v128:706, i32x4:163, f32x4:144, i64x2:129, i16x8/integer:116, i8x16:112, i16x8:100, i32x4/i64x2/integer:85, f64x2:25
 ```
 
 Interpretation:
 
 - The scalar `reckless.wasm` contains no SIMD opcodes in the code section.
-- The `reckless-simd128.wasm` artifact definitely contains Wasm SIMD (`v128`, `i8x16`, `i16x8`, `i32x4`, etc.).
-- This does **not** mean Reckless' handwritten native NNUE vector modules are active for wasm: upstream `nnue.rs` still selects scalar NNUE source modules for `wasm32-wasip1` because the vectorized modules are gated on `avx2`/`neon`/`avx512f`.
-- Therefore the current win is from LLVM/rustc auto-vectorization and SIMD lowerings, not from a dedicated wasm NNUE backend. A handwritten wasm NNUE kernel still has plausible upside.
+- The SIMD artifact now contains more SIMD instructions than the previous auto-vectorized-only build (`1580` vs earlier `1161` opcode count locally).
+- `scripts/build_reckless_wasi.mjs` now patches Reckless' NNUE module selection for `wasm32 + simd128`, adds `src/nnue/simd/wasm32.rs`, and routes `nnue::forward::vectorized` through `core::arch::wasm32` intrinsics.
+- The wasm backend covers accumulator add/sub, `activate_ft`, sparse `propagate_l1` dot products, `propagate_l2`, and `propagate_l3`; `find_nnz` remains a simple scalar wasm implementation for now.
+- Browser smoke on the rebuilt artifact completed `startpos depth 1` persistent with the expected best move `d2d4`, 42 nodes, and runtime label `persistent`.

@@ -9,6 +9,7 @@ const workdir = resolve(process.env.RECKLESS_BUILD_DIR ?? '.local_engines/reckle
 const out = resolve(process.env.RECKLESS_WASM_OUT ?? 'public/reckless/reckless.wasm');
 const evalfile = process.env.RECKLESS_EVALFILE ? resolve(process.env.RECKLESS_EVALFILE) : '';
 const l1Size = process.env.RECKLESS_L1_SIZE ?? '';
+const enableWasmSimdNnue = process.env.RECKLESS_WASM_SIMD_NNUE === '1';
 if (l1Size && !/^\d+$/.test(l1Size)) throw new Error(`RECKLESS_L1_SIZE must be an integer, got ${l1Size}`);
 
 function run(cmd, args, options = {}) {
@@ -20,6 +21,108 @@ function replace(path, oldText, newText) {
   const before = readFileSync(path, 'utf8');
   if (!before.includes(oldText)) throw new Error(`patch anchor not found in ${path}`);
   writeFileSync(path, before.replace(oldText, newText));
+}
+
+function patchRecklessForWasmSimdNnue(root) {
+  replace(
+    `${root}/src/nnue.rs`,
+    `mod forward {\n    #[cfg(any(target_feature = "avx2", target_feature = "neon"))]\n    mod vectorized;\n    #[cfg(any(target_feature = "avx2", target_feature = "neon"))]\n    pub use vectorized::*;\n\n    #[cfg(not(any(target_feature = "avx2", target_feature = "neon")))]\n    mod scalar;\n    #[cfg(not(any(target_feature = "avx2", target_feature = "neon")))]\n    pub use scalar::*;\n}\n`,
+    `mod forward {\n    #[cfg(any(target_feature = "avx2", target_feature = "neon", all(target_arch = "wasm32", target_feature = "simd128")))]\n    mod vectorized;\n    #[cfg(any(target_feature = "avx2", target_feature = "neon", all(target_arch = "wasm32", target_feature = "simd128")))]\n    pub use vectorized::*;\n\n    #[cfg(not(any(target_feature = "avx2", target_feature = "neon", all(target_arch = "wasm32", target_feature = "simd128"))))]\n    mod scalar;\n    #[cfg(not(any(target_feature = "avx2", target_feature = "neon", all(target_arch = "wasm32", target_feature = "simd128"))))]\n    pub use scalar::*;\n}\n`,
+  );
+  replace(
+    `${root}/src/nnue.rs`,
+    `    #[cfg(all(target_feature = "neon", not(any(target_feature = "avx2", target_feature = "avx512f"))))]\n    mod neon;\n    #[cfg(all(target_feature = "neon", not(any(target_feature = "avx2", target_feature = "avx512f"))))]\n    pub use neon::*;\n\n    #[cfg(not(any(target_feature = "avx512f", target_feature = "avx2", target_feature = "neon")))]\n    mod scalar;\n    #[cfg(not(any(target_feature = "avx512f", target_feature = "avx2", target_feature = "neon")))]\n    pub use scalar::*;\n}\n`,
+    `    #[cfg(all(target_feature = "neon", not(any(target_feature = "avx2", target_feature = "avx512f"))))]\n    mod neon;\n    #[cfg(all(target_feature = "neon", not(any(target_feature = "avx2", target_feature = "avx512f"))))]\n    pub use neon::*;\n\n    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]\n    mod wasm32;\n    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]\n    pub use wasm32::*;\n\n    #[cfg(not(any(target_feature = "avx512f", target_feature = "avx2", target_feature = "neon", all(target_arch = "wasm32", target_feature = "simd128"))))]\n    mod scalar;\n    #[cfg(not(any(target_feature = "avx512f", target_feature = "avx2", target_feature = "neon", all(target_arch = "wasm32", target_feature = "simd128"))))]\n    pub use scalar::*;\n}\n`,
+  );
+  replace(
+    `${root}/src/nnue/forward/vectorized.rs`,
+    `#[cfg(all(not(target_feature = "neon"), not(target_feature = "avx512vbmi2")))]\npub unsafe fn find_nnz(\n`,
+    `#[cfg(all(not(target_arch = "wasm32"), not(target_feature = "neon"), not(target_feature = "avx512vbmi2")))]\npub unsafe fn find_nnz(\n`,
+  );
+  writeFileSync(`${root}/src/nnue/simd/wasm32.rs`, String.raw`use std::{arch::wasm32::*, mem::size_of};
+
+pub const F32_LANES: usize = size_of::<v128>() / size_of::<f32>();
+pub const I32_LANES: usize = size_of::<v128>() / size_of::<i32>();
+pub const I16_LANES: usize = size_of::<v128>() / size_of::<i16>();
+pub const MUL_HI_SHIFT: i32 = 0;
+
+pub fn add_i16(a: v128, b: v128) -> v128 { i16x8_add(a, b) }
+pub fn sub_i16(a: v128, b: v128) -> v128 { i16x8_sub(a, b) }
+
+pub unsafe fn zeroed() -> v128 { i32x4_splat(0) }
+pub unsafe fn splat_i16(a: i16) -> v128 { i16x8_splat(a) }
+pub unsafe fn clamp_i16(x: v128, min: v128, max: v128) -> v128 { i16x8_max(i16x8_min(x, max), min) }
+pub unsafe fn min_i16(a: v128, b: v128) -> v128 { i16x8_min(a, b) }
+pub unsafe fn shift_left_i16<const SHIFT: i32>(a: v128) -> v128 { i16x8_shl(a, SHIFT as u32) }
+
+pub unsafe fn mul_high_i16(a: v128, b: v128) -> v128 {
+    let lo = i32x4_shr(i32x4_extmul_low_i16x8(a, b), 16);
+    let hi = i32x4_shr(i32x4_extmul_high_i16x8(a, b), 16);
+    i16x8_narrow_i32x4(lo, hi)
+}
+
+pub unsafe fn convert_i8_i16(a: i64) -> v128 { i16x8_extend_low_i8x16(i64x2(a, 0)) }
+pub unsafe fn packus(a: v128, b: v128) -> v128 { u8x16_narrow_i16x8(a, b) }
+pub unsafe fn permute(a: v128) -> v128 { a }
+pub unsafe fn splat_i32(a: i32) -> v128 { i32x4_splat(a) }
+pub unsafe fn zero_f32() -> v128 { f32x4_splat(0.0) }
+pub unsafe fn splat_f32(a: f32) -> v128 { f32x4_splat(a) }
+pub unsafe fn mul_add_f32(a: v128, b: v128, c: v128) -> v128 { f32x4_add(f32x4_mul(a, b), c) }
+pub unsafe fn convert_to_f32(a: v128) -> v128 { f32x4_convert_i32x4(a) }
+pub unsafe fn clamp_f32(x: v128, min: v128, max: v128) -> v128 { f32x4_max(f32x4_min(x, max), min) }
+
+unsafe fn dpbusd_once(i32s: v128, u8s: v128, i8s: v128) -> v128 {
+    let prod_lo = i16x8_mul(u16x8_extend_low_u8x16(u8s), i16x8_extend_low_i8x16(i8s));
+    let prod_hi = i16x8_mul(u16x8_extend_high_u8x16(u8s), i16x8_extend_high_i8x16(i8s));
+    let pair_lo = i32x4_extadd_pairwise_i16x8(prod_lo);
+    let pair_hi = i32x4_extadd_pairwise_i16x8(prod_hi);
+    let sums = i32x4(
+        i32x4_extract_lane::<0>(pair_lo) + i32x4_extract_lane::<1>(pair_lo),
+        i32x4_extract_lane::<2>(pair_lo) + i32x4_extract_lane::<3>(pair_lo),
+        i32x4_extract_lane::<0>(pair_hi) + i32x4_extract_lane::<1>(pair_hi),
+        i32x4_extract_lane::<2>(pair_hi) + i32x4_extract_lane::<3>(pair_hi),
+    );
+    i32x4_add(i32s, sums)
+}
+
+pub unsafe fn dpbusd(i32s: v128, u8s: v128, i8s: v128) -> v128 { dpbusd_once(i32s, u8s, i8s) }
+pub unsafe fn double_dpbusd(i32s: v128, u8s1: v128, i8s1: v128, u8s2: v128, i8s2: v128) -> v128 {
+    dpbusd_once(dpbusd_once(i32s, u8s1, i8s1), u8s2, i8s2)
+}
+
+pub unsafe fn horizontal_sum(x: [v128; 4]) -> f32 {
+    let mut sum = 0.0;
+    for vector in x {
+        sum += f32x4_extract_lane::<0>(vector);
+        sum += f32x4_extract_lane::<1>(vector);
+        sum += f32x4_extract_lane::<2>(vector);
+        sum += f32x4_extract_lane::<3>(vector);
+    }
+    sum
+}
+
+pub unsafe fn nnz_bitmask(x: v128) -> u16 { u8x16_bitmask(i32x4_gt(x, i32x4_splat(0))) }
+`);
+  const vectorized = readFileSync(`${root}/src/nnue/forward/vectorized.rs`, 'utf8');
+  writeFileSync(`${root}/src/nnue/forward/vectorized.rs`, `${vectorized}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+pub unsafe fn find_nnz(ft_out: &Aligned<[u8; L1_SIZE]>, _: &[SparseEntry]) -> (Aligned<[u16; L1_SIZE / 4]>, usize) {
+    let mut indexes = Aligned::new([0; L1_SIZE / 4]);
+    let mut count = 0;
+    for i in 0..L1_SIZE / 4 {
+        let mut nonzero = 0;
+        for j in 0..4 {
+            nonzero |= ft_out[i * 4 + j];
+        }
+        if nonzero != 0 {
+            indexes[count] = i as u16;
+            count += 1;
+        }
+    }
+    (indexes, count)
+}
+`);
 }
 
 function patchRecklessForWasi(root) {
@@ -77,6 +180,7 @@ rmSync(workdir, { recursive: true, force: true });
 mkdirSync(dirname(workdir), { recursive: true });
 run('git', ['clone', '--depth=1', '--branch', ref, repo, workdir]);
 patchRecklessForWasi(workdir);
+if (enableWasmSimdNnue) patchRecklessForWasmSimdNnue(workdir);
 run('rustup', ['target', 'add', 'wasm32-wasip1']);
 run('cargo', ['build', '--release', '--no-default-features', '--target', 'wasm32-wasip1'], {
   cwd: workdir,
