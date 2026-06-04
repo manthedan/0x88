@@ -677,7 +677,9 @@ const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('
 const HYBRID_SEARCH_BENCH_REQUESTED = params.get('hybridSearchBench') === '1' || params.get('hybridSearchBenchmark') === '1';
 const HYBRID_WGSL_HEADS_REQUESTED = params.get('headBackend') === 'wgsl' || params.get('hybridHeads') === 'wgsl' || params.get('runtime') === 'hybrid-wgsl-heads' || params.get('runtime') === 'wgsl-heads';
 const HYBRID_WGSL_BATCH_MODE = params.get('wgslBatchMode') === 'serial' || params.get('wgslBatch') === 'serial' ? 'serial' : 'physical';
-const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
+const HYBRID_INPUT_BACKEND_REQUESTED = params.get('inputBackend') === 'wgsl' || params.get('hybridInput') === 'wgsl';
+const HYBRID_INPUT_BACKEND = HYBRID_INPUT_BACKEND_REQUESTED ? 'wgsl' : 'js';
+const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
@@ -1027,6 +1029,7 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
       verifyShards: params.get('packVerify') !== '0',
       headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
       wgslBatchMode: HYBRID_WGSL_BATCH_MODE,
+      inputBackend: HYBRID_INPUT_BACKEND,
       evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
     } : {}),
   });
@@ -2365,6 +2368,7 @@ async function runHybridSearchBenchmark(): Promise<void> {
       visits: searchVisits,
       batchSize: searchBatchSize,
       wgslBatchMode: HYBRID_WGSL_HEADS_REQUESTED ? HYBRID_WGSL_BATCH_MODE : undefined,
+      inputBackend: HYBRID_INPUT_BACKEND,
       multiPv: searchMultiPv,
       reuseTree,
       resetBetweenSearches,

@@ -65,6 +65,7 @@ type InitMessage = {
   verifyShards?: boolean;
   headBackend?: 'ort' | 'wgsl';
   wgslBatchMode?: 'physical' | 'serial';
+  inputBackend?: 'js' | 'wgsl';
   evalCacheEntries?: number;
 };
 
@@ -112,6 +113,7 @@ type HybridEvaluateMessage = {
   verifyShards?: boolean;
   headBackend?: 'ort' | 'wgsl';
   wgslBatchMode?: 'physical' | 'serial';
+  inputBackend?: 'js' | 'wgsl';
 };
 
 type LoadPackMessage = {
@@ -436,6 +438,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     verifyShards: message.verifyShards,
     headBackend: message.headBackend,
     wgslBatchMode: message.wgslBatchMode,
+    inputBackend: message.inputBackend,
     evalCacheEntries: message.evalCacheEntries ?? 0,
   });
   if (evaluator && configuredInitKey === initKey) {
@@ -454,6 +457,7 @@ async function handleInit(message: InitMessage): Promise<void> {
       verifyShards: message.verifyShards,
       headBackend: message.headBackend,
       wgslBatchMode: message.wgslBatchMode,
+      inputBackend: message.inputBackend,
     });
     const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0
       ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries })
@@ -820,6 +824,7 @@ async function handleHybridEvaluate(message: HybridEvaluateMessage): Promise<voi
     verifyShards: message.verifyShards,
     headBackend: message.headBackend,
     wgslBatchMode: message.wgslBatchMode,
+    inputBackend: message.inputBackend,
   });
   post({ type: 'hybridEvaluationResult', id: message.id, result });
 }
