@@ -22,6 +22,7 @@ const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-24
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
+let mainEvaluator: Lc0OnnxEvaluator | null = null;
 let stockfish: StockfishEngine | null = null;
 let ground: Ground | null = null;
 let orientation: 'white' | 'black' = 'white';
@@ -47,6 +48,7 @@ function currentBookStats(): OpeningMoveStat[] {
 // UI; a new position cancels the in-flight worker search by id.
 let searchWorker: Worker | null = null;
 let workerReady = false;
+let workerBackend = '';
 let workerSeq = 0;
 const workerPending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 let activeWorkerSearchId: number | null = null;
@@ -79,7 +81,8 @@ function postWorker<T>(message: Record<string, unknown>, onId?: (id: number) => 
 }
 
 async function initWorker(): Promise<string> {
-  searchWorker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
+  if (searchWorker && workerReady) return workerBackend;
+  if (!searchWorker) searchWorker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
   searchWorker.addEventListener('message', (event: MessageEvent) => {
     const message = event.data as { id: number; type: string; error?: string };
     const pending = workerPending.get(message.id);
@@ -94,7 +97,8 @@ async function initWorker(): Promise<string> {
   });
   const ready = await postWorker<{ backend: string }>({ type: 'init', modelUrl: MODEL_URL, ep: requestedEp(), cacheModel: false });
   workerReady = true;
-  return ready.backend;
+  workerBackend = ready.backend;
+  return workerBackend;
 }
 
 async function workerLc0Lines(fen: string): Promise<AnalysisLine[]> {
@@ -502,7 +506,27 @@ function wireEvents() {
   });
 }
 
+function disposeRuntimeResources(): void {
+  analysisAbort?.abort();
+  if (activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
+  activeWorkerSearchId = null;
+  searchWorker?.terminate();
+  searchWorker = null;
+  workerReady = false;
+  workerBackend = '';
+  for (const pending of workerPending.values()) pending.reject(new Error('LC0 worker disposed'));
+  workerPending.clear();
+  stockfish?.dispose();
+  stockfish = null;
+  void mainEvaluator?.dispose();
+  mainEvaluator = null;
+  searcher = null;
+}
+
 async function init() {
+  window.addEventListener('pagehide', (event) => {
+    if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
+  });
   renderAll();
   wireEvents();
   el('message').textContent = 'Loading LC0 model in a worker…';
@@ -516,7 +540,8 @@ async function init() {
     console.warn('LC0 worker init failed; falling back to the main thread.', workerError);
     try {
       const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
-      searcher = new Lc0PuctSearcher(await Lc0OnnxEvaluator.create(modelLoad.model));
+      mainEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+      searcher = new Lc0PuctSearcher(mainEvaluator);
       const diagnostics = await collectOrtRuntimeDiagnostics();
       el('backend').textContent = `${diagnostics.describe} (main thread)`;
       el('analyze').toggleAttribute('disabled', false);

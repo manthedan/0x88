@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
-import { CachedLc0Evaluator } from '../src/lc0/onnxEvaluator.ts';
+import { CachedLc0Evaluator, Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 
 function evaluation(fen, bestMove = 'e2e4') {
   return {
@@ -70,4 +70,36 @@ test('CachedLc0Evaluator evicts least-recently-used entries when resized', async
 
   cached.setMaxEntries(0);
   assert.equal(cached.metrics().entries, 0, 'resizing to zero clears cached entries');
+});
+
+test('CachedLc0Evaluator clears entries and forwards dispose to the wrapped evaluator', async () => {
+  let disposed = 0;
+  const inner = {
+    async evaluate(input) { return evaluation(String(input)); },
+    async dispose() { disposed += 1; },
+  };
+  const cached = new CachedLc0Evaluator(inner, { maxEntries: 8 });
+  await cached.evaluate(START_FEN);
+  assert.equal(cached.metrics().entries, 1);
+
+  await cached.dispose();
+
+  assert.equal(disposed, 1);
+  assert.deepEqual(cached.metrics(), { hits: 0, misses: 0, entries: 0, maxEntries: 8 });
+});
+
+test('Lc0OnnxEvaluator releases its ORT session at most once', async () => {
+  let releases = 0;
+  const session = {
+    inputMetadata: [{ name: '/input/planes', type: 'float32', shape: [1, 112, 8, 8] }],
+    async run() { throw new Error('not used'); },
+    async release() { releases += 1; },
+  };
+  const evaluator = new Lc0OnnxEvaluator(session);
+
+  await evaluator.dispose();
+  await evaluator.dispose();
+
+  assert.equal(releases, 1);
+  await assert.rejects(() => evaluator.evaluate(START_FEN), /disposed/);
 });

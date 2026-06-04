@@ -31,6 +31,7 @@ export type OrtRuntimeDiagnostics = {
   wasm: { numThreads?: number; proxy?: boolean; sharedArrayBuffer?: boolean; threadedAvailable?: boolean };
   webgpuEnv?: { powerPreference?: string };
   adapter?: OrtWebGpuAdapterDiagnostics;
+  sessions: { created: number; released: number; active: number };
   sessionAttempts: OrtSessionAttempt[];
 };
 
@@ -122,6 +123,8 @@ export function resolvedOrtExecutionProviders(): string[] {
 
 let lastOrtExecutionProviders: string[] | null = null;
 const sessionAttempts: OrtSessionAttempt[] = [];
+let createdOrtSessions = 0;
+let releasedOrtSessions = 0;
 
 export function describeOrtBackendConfig(): string {
   const requested = requestedOrtExecutionProvider();
@@ -290,6 +293,7 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
       threadedAvailable: browserThreadedWasmAvailable(),
     },
     ...(webgpu ? { webgpuEnv: { powerPreference: webgpu.powerPreference } } : {}),
+    sessions: { created: createdOrtSessions, released: releasedOrtSessions, active: Math.max(0, createdOrtSessions - releasedOrtSessions) },
     sessionAttempts: sessionAttempts.map((x) => ({ ...x, providers: [...x.providers] })),
   };
   if (options.probeAdapter && webgpuAvailable()) {
@@ -324,6 +328,7 @@ export async function createOrtSession(modelPath: string | Uint8Array | ArrayBuf
   try {
     const session = await ort.InferenceSession.create(modelPath as never, sessionOptions(providers));
     const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
+    createdOrtSessions += 1;
     recordSessionAttempt(providers, true, t1 - t0);
     lastOrtExecutionProviders = providers;
     logOrtSessionReady(providers, t1 - t0);
@@ -337,9 +342,16 @@ export async function createOrtSession(modelPath: string | Uint8Array | ArrayBuf
     const fallbackT0 = typeof performance === 'undefined' ? Date.now() : performance.now();
     const session = await ort.InferenceSession.create(modelPath as never, sessionOptions(['wasm']));
     const fallbackT1 = typeof performance === 'undefined' ? Date.now() : performance.now();
+    createdOrtSessions += 1;
     recordSessionAttempt(['wasm'], true, fallbackT1 - fallbackT0);
     lastOrtExecutionProviders = ['wasm'];
     logOrtSessionReady(['wasm'], fallbackT1 - fallbackT0, `fallback after WebGPU failure: ${message}`);
     return session;
   }
+}
+
+export async function releaseOrtSession(session: ort.InferenceSession): Promise<void> {
+  const maybe = session as ort.InferenceSession & { release?: () => Promise<void> | void };
+  if (typeof maybe.release === 'function') await maybe.release();
+  releasedOrtSessions += 1;
 }

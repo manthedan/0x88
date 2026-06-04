@@ -300,7 +300,8 @@ async function renderRuntimeBadge(): Promise<void> {
     const sab = runtimeSharedArrayBuffer ? 'SAB yes' : 'SAB no';
     const sfThreads = threadedStockfishAvailable() ? 'SF threaded yes' : 'SF threaded no';
     const ortThreads = `ORT wasm threads ${diag.wasm.numThreads ?? '?'}`;
-    badge.textContent = `Runtime: ${isolated} · ${sab} · ${webgpu} · ${diag.describe} · ${ortThreads} · ${sfThreads}`;
+    const ortSessions = `ORT sessions ${diag.sessions.active} active`;
+    badge.textContent = `Runtime: ${isolated} · ${sab} · ${webgpu} · ${diag.describe} · ${ortThreads} · ${ortSessions} · ${sfThreads}`;
     badge.classList.toggle('ready', runtimeIsolation && (diag.webgpuAvailable || runtimeSharedArrayBuffer));
     badge.classList.toggle('warn', !runtimeIsolation || !diag.webgpuAvailable);
   } catch (error) {
@@ -600,6 +601,20 @@ function exportPgn() {
   el('message').textContent = games.length ? `Exported ${games.length} game(s) as PGN.` : 'No games to export yet.';
 }
 
+function disposeRuntimeResources(): void {
+  abort?.abort();
+  abort = null;
+  void lc0Cache?.dispose();
+  lc0Cache = null;
+  player = null;
+  searcher = null;
+  lc0Searchers.clear();
+  lastLc0SearchResults.clear();
+  pendingLc0ReplyProbes.clear();
+  stockfish?.dispose();
+  stockfish = null;
+}
+
 function wireEvents() {
   el('start').addEventListener('click', () => { void startTournament(); });
   el('stop').addEventListener('click', () => { abort?.abort(); el('message').textContent = 'Stopping…'; });
@@ -622,6 +637,9 @@ function wireEvents() {
     if (running) return;
     inputEl('stockfishThreadsInput').value = String(stockfishThreads());
     stockfish?.setOptions({ threads: stockfishThreads() });
+  });
+  window.addEventListener('pagehide', (event) => {
+    if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
   });
 }
 

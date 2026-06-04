@@ -243,6 +243,9 @@ type WorkerResponse =
 let evaluator: Lc0OnnxEvaluator | null = null;
 let searcher: Lc0PuctSearcher | null = null;
 let configuredModelUrl: string | null = null;
+let configuredInitKey: string | null = null;
+let configuredBackend = '';
+let configuredModelCacheStatus = '';
 /** In-flight search abort controllers keyed by request id, so cancel messages can stop them. */
 const activeSearches = new Map<number, AbortController>();
 // This worker owns exactly one ORT session. Queue all model operations so the
@@ -265,13 +268,26 @@ function enqueueModelOperation(work: () => Promise<void>): Promise<void> {
 }
 
 async function handleInit(message: InitMessage): Promise<void> {
+  const initKey = JSON.stringify({ modelUrl: message.modelUrl, ep: message.ep, cacheModel: message.cacheModel });
+  if (evaluator && configuredInitKey === initKey) {
+    post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: `${configuredModelCacheStatus} · reused existing worker session` });
+    return;
+  }
+
   setRequestedOrtExecutionProviderForCurrentThread(message.ep);
   const modelLoad = await loadLc0ModelForOrt(message.modelUrl, { cache: message.cacheModel });
-  evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
-  searcher = new Lc0PuctSearcher(evaluator);
-  configuredModelUrl = message.modelUrl;
+  const nextEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+  const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
   const diagnostics = await collectOrtRuntimeDiagnostics();
-  post({ type: 'ready', id: message.id, backend: diagnostics.describe, modelCache: describeLc0ModelLoad(modelLoad) });
+  const previousEvaluator = evaluator;
+  evaluator = nextEvaluator;
+  searcher = nextSearcher;
+  configuredModelUrl = message.modelUrl;
+  configuredInitKey = initKey;
+  configuredBackend = diagnostics.describe;
+  configuredModelCacheStatus = describeLc0ModelLoad(modelLoad);
+  await previousEvaluator?.dispose();
+  post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
 }
 
 async function handleEvaluate(message: EvaluateMessage): Promise<void> {

@@ -41,6 +41,7 @@ export type Lc0EvaluatorInput = BoardState | string | Lc0PositionHistoryInput;
 export interface Lc0EvaluationProvider {
   evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> | Lc0Evaluation;
   evaluateBatch?(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> | Lc0Evaluation[];
+  dispose?(): Promise<void> | void;
 }
 
 export interface Lc0EvaluationCacheMetrics {
@@ -197,6 +198,11 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
     this.misses = 0;
   }
 
+  async dispose(): Promise<void> {
+    this.clearCache();
+    await this.inner.dispose?.();
+  }
+
   metrics(): Lc0EvaluationCacheMetrics {
     return { hits: this.hits, misses: this.misses, entries: this.cache.size, maxEntries: this.maxEntries };
   }
@@ -258,6 +264,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   readonly policyTemperature: number;
   readonly historyFill: Lc0HistoryFill;
   private readonly session: ort.InferenceSession;
+  private disposed = false;
 
   constructor(session: ort.InferenceSession, options: Lc0OnnxEvaluatorOptions = {}) {
     this.session = session;
@@ -269,11 +276,22 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     return new Lc0OnnxEvaluator(await ort.createOrtSession(modelPath), options);
   }
 
+  async dispose(): Promise<void> {
+    if (this.disposed) return;
+    this.disposed = true;
+    await ort.releaseOrtSession(this.session);
+  }
+
+  private assertNotDisposed(): void {
+    if (this.disposed) throw new Error('LC0 ONNX evaluator has been disposed');
+  }
+
   async evaluate(boardOrFen: Lc0EvaluatorInput): Promise<Lc0Evaluation> {
     return (await this.evaluateBatch([boardOrFen]))[0];
   }
 
   private async runPhysicalBatch(inputs: Lc0EvaluatorInput[], physicalBatchSize: number): Promise<Lc0Evaluation[]> {
+    this.assertNotDisposed();
     if (!inputs.length) return [];
     const encodedPlanes = new Float32Array(physicalBatchSize * LC0_INPUT_PLANES_SIZE);
     const boards: BoardState[] = [];
@@ -317,6 +335,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   }
 
   async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
+    this.assertNotDisposed();
     if (!inputs.length) return [];
     const physicalBatchSize = sessionFixedInputBatchSize(this.session);
     const out: Lc0Evaluation[] = [];

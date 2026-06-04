@@ -399,6 +399,7 @@ let historyBoards: BoardState[] = [board];
 let ground: Ground | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
 let searcher: Lc0PuctSearcher | null = null;
+let mainEvaluator: Lc0OnnxEvaluator | null = null;
 let searchWorker: Worker | null = null;
 let useSearchWorker = SEARCH_WORKER_REQUESTED;
 let searchWorkerReady = false;
@@ -658,20 +659,22 @@ function postWorkerRequest<T>(message: Record<string, unknown>, onId?: (id: numb
 
 async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<void> {
   const initModel = options.initModel ?? true;
-  searchWorker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
-  searchWorker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
-    const message = event.data;
-    const pending = workerPending.get(message.id);
-    if (!pending) return;
-    workerPending.delete(message.id);
-    if (message.type === 'error') pending.reject(new Error(message.error));
-    else pending.resolve(message);
-  });
-  searchWorker.addEventListener('error', (event) => {
-    for (const pending of workerPending.values()) pending.reject(new Error(event.message || 'LC0 search worker error'));
-    workerPending.clear();
-  });
-  if (!initModel) return;
+  if (!searchWorker) {
+    searchWorker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
+    searchWorker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
+      const message = event.data;
+      const pending = workerPending.get(message.id);
+      if (!pending) return;
+      workerPending.delete(message.id);
+      if (message.type === 'error') pending.reject(new Error(message.error));
+      else pending.resolve(message);
+    });
+    searchWorker.addEventListener('error', (event) => {
+      for (const pending of workerPending.values()) pending.reject(new Error(event.message || 'LC0 search worker error'));
+      workerPending.clear();
+    });
+  }
+  if (!initModel || searchWorkerReady) return;
   const initStarted = performance.now();
   const ready = await postWorkerRequest<{ type: 'ready'; backend: string; modelCache: string }>({ type: 'init', modelUrl: MODEL_URL, ep: requestedWorkerEp(), cacheModel: CACHE_MODEL });
   searchWorkerInitMs = performance.now() - initStarted;
@@ -1791,7 +1794,28 @@ function renderWorkerGpuStatus(backend: string) {
   node.classList.toggle('warn', requestedGpu && !usingGpu);
 }
 
+function disposeRuntimeResources(): void {
+  mainSearchAbort?.abort();
+  battleAbort?.abort();
+  if (activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
+  activeWorkerSearchId = null;
+  searchWorker?.terminate();
+  searchWorker = null;
+  searchWorkerReady = false;
+  for (const pending of workerPending.values()) pending.reject(new Error('LC0 worker disposed'));
+  workerPending.clear();
+  stockfish?.dispose();
+  stockfish = null;
+  void mainEvaluator?.dispose();
+  mainEvaluator = null;
+  player = null;
+  searcher = null;
+}
+
 async function init() {
+  window.addEventListener('pagehide', (event) => {
+    if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
+  });
   el('message').textContent = PACK_PROBE_REQUESTED ? 'Preparing dedicated worker for lc0web pack probe…' : WORKER_ONLY_MODEL ? 'Loading LC0 model in dedicated worker…' : 'Loading LC0 ONNX model…';
   renderStatic();
   try {
@@ -1825,6 +1849,7 @@ async function init() {
       const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: CACHE_MODEL });
       mainModelCacheStatus = describeLc0ModelLoad(modelLoad);
       const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+      mainEvaluator = evaluator;
       player = new Lc0PolicyOnlyPlayer(evaluator);
       searcher = new Lc0PuctSearcher(evaluator);
       const diagnostics = await collectOrtRuntimeDiagnostics();
