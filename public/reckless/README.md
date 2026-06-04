@@ -6,6 +6,14 @@ Generated `*.wasm` artifacts are intentionally not committed. Build the full/cur
 npm run reckless:build-wasi
 ```
 
+Build the SIMD candidate locally with:
+
+```sh
+npm run reckless:build-simd-wasi
+```
+
+This writes `public/reckless/reckless-simd128.wasm` using `-C target-feature=+simd128`.
+
 Build the Lite candidate locally with:
 
 ```sh

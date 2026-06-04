@@ -18,6 +18,14 @@ npm run reckless:build-wasi
 
 This writes `public/reckless/reckless.wasm`. The WASM is ignored by git because it is large and AGPL-licensed upstream.
 
+SIMD candidate build:
+
+```sh
+npm run reckless:build-simd-wasi
+```
+
+This writes `public/reckless/reckless-simd128.wasm` with `-C target-feature=+simd128`. It still uses Reckless' scalar Rust NNUE source paths, but allows LLVM/rustc to emit WebAssembly SIMD operations where it can. A quick Node/browser-wasi-shim depth-5 startpos smoke on this machine measured warm one-shot average time improving from about 10.5 ms to 8.8 ms (~16%). Treat this as benchmark-first and experimental until browser matrix results are saved.
+
 Lite candidate build:
 
 ```sh
@@ -44,7 +52,7 @@ npm run web:client
 # open /lc0-arena.html or /lc0-analysis.html
 ```
 
-Use `?recklessVariant=lite` for the local Lite candidate, or `?recklessWasm=/path/to/reckless.wasm` to point at another asset. Arena and Analysis show the selected Reckless asset URL and warn when the selected WASM is missing.
+Use `?recklessVariant=simd` for the local SIMD candidate, `?recklessVariant=lite` for the local Lite candidate, or `?recklessWasm=/path/to/reckless.wasm` to point at another asset. Arena and Analysis show the selected Reckless asset URL and warn when the selected WASM is missing.
 
 ## Current limitations
 
@@ -53,4 +61,5 @@ Use `?recklessVariant=lite` for the local Lite candidate, or `?recklessWasm=/pat
 - Non-isolated browsers still use the one-shot fallback, so Reckless does not retain hash between moves there.
 - Aborting terminates the worker and recreates it for the next search. Sending `stop` cannot currently preserve the persistent process because patched wasm32 UCI mode is single-threaded and cannot read stdin while the search is executing.
 - Threads are forced to `1`; the WASI path avoids native Rust threads.
+- The SIMD candidate is only a `simd128` target-feature build, not a dedicated `core::arch::wasm32` NNUE backend.
 - The WASM artifact is large because Reckless embeds its NNUE network.

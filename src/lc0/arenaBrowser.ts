@@ -525,7 +525,7 @@ function renderRecklessRuntimeInfo(): void {
   const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
   info.textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${variant.wasmUrl}`;
   if (status?.persistentDisabled) info.textContent += ' · persistent disabled after fallback';
-  if (asset === 'missing') info.textContent += ' · build locally with npm run reckless:build-wasi or reckless:build-lite-wasi';
+  if (asset === 'missing') info.textContent += ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, or reckless:build-lite-wasi';
 }
 
 function refreshRecklessVariantUi(): void {

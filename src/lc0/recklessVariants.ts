@@ -1,6 +1,6 @@
 import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
 
-export type RecklessVariantKey = 'full' | 'lite' | 'custom';
+export type RecklessVariantKey = 'full' | 'simd' | 'lite' | 'custom';
 
 export interface RecklessVariant {
   key: RecklessVariantKey;
@@ -21,6 +21,13 @@ export const RECKLESS_FULL_VARIANT: RecklessVariant = {
   note: 'v60 full-size NNUE; strongest/current default, largest download.',
 };
 
+export const RECKLESS_SIMD_VARIANT: RecklessVariant = {
+  key: 'simd',
+  label: 'Reckless Full SIMD experimental',
+  wasmUrl: '/reckless/reckless-simd128.wasm',
+  note: 'Full-size NNUE built with wasm simd128 enabled; experimental opt-in benchmark target.',
+};
+
 export const RECKLESS_LITE_VARIANT: RecklessVariant = {
   key: 'lite',
   label: 'Reckless Lite experimental',
@@ -28,17 +35,19 @@ export const RECKLESS_LITE_VARIANT: RecklessVariant = {
   note: 'v53 L1=512 candidate; smaller/faster prototype, weaker and not shipped by default.',
 };
 
-export const RECKLESS_VARIANTS = [RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT] as const;
+export const RECKLESS_VARIANTS = [RECKLESS_FULL_VARIANT, RECKLESS_SIMD_VARIANT, RECKLESS_LITE_VARIANT] as const;
 
 export function normalizeRecklessVariant(raw: string | null | undefined): RecklessVariantKey {
   const value = String(raw ?? '').toLowerCase().replace(/[ _]/g, '-');
   if (value === 'lite' || value === 'small' || value === 'v53') return 'lite';
+  if (value === 'simd' || value === 'simd128' || value === 'full-simd') return 'simd';
   if (value === 'custom') return 'custom';
   return 'full';
 }
 
 export function recklessVariantByKey(key: RecklessVariantKey): RecklessVariant {
   if (key === 'lite') return RECKLESS_LITE_VARIANT;
+  if (key === 'simd') return RECKLESS_SIMD_VARIANT;
   if (key === 'custom') return { key: 'custom', label: 'Reckless Custom', wasmUrl: DEFAULT_RECKLESS_WASM_URL, note: 'Custom Reckless WASM URL.' };
   return RECKLESS_FULL_VARIANT;
 }

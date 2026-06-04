@@ -154,7 +154,7 @@ function renderRecklessRuntimeInfo(): void {
   if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
   const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
   const targetUrl = status?.wasmUrl ?? variant.wasmUrl;
-  el('recklessRuntimeInfo').textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${targetUrl}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi or reckless:build-lite-wasi' : ''}`;
+  el('recklessRuntimeInfo').textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${targetUrl}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, or reckless:build-lite-wasi' : ''}`;
 }
 
 function refreshRecklessVariantUi(): void {
