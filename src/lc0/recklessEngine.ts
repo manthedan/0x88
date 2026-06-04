@@ -29,6 +29,7 @@ export const DEFAULT_RECKLESS_WASM_URL = '/reckless/reckless.wasm';
 const SHARED_STDIN_HEADER_INTS = 4;
 const SHARED_STDIN_HEADER_BYTES = SHARED_STDIN_HEADER_INTS * Int32Array.BYTES_PER_ELEMENT;
 const PERSISTENT_STDIN_CAPACITY_BYTES = 64 * 1024;
+const PERSISTENT_ABORT_GRACE_MS = 100;
 
 function goCommand(options: RecklessOptions): string {
   if (options.movetimeMs && options.movetimeMs > 0) return `go movetime ${Math.floor(options.movetimeMs)}`;
@@ -50,7 +51,8 @@ type PersistentPending = Pending & {
   stdout: string[];
   stderr: string[];
   resolveWhenLine: (line: string, stream: 'stdout' | 'stderr') => boolean;
-  onAbort?: () => void;
+  aborted?: boolean;
+  abortTimer?: ReturnType<typeof setTimeout>;
 };
 
 type SharedInput = {
@@ -200,13 +202,16 @@ export class RecklessEngine {
     const active = this.persistentPending;
     if (!active) return;
     this.persistentPending = null;
-    active.resolve(result);
+    if (active.abortTimer) clearTimeout(active.abortTimer);
+    if (active.aborted) active.reject(abortError());
+    else active.resolve(result);
   }
 
   private rejectAllAndDispose(error: Error): void {
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
     if (this.persistentPending) {
+      if (this.persistentPending.abortTimer) clearTimeout(this.persistentPending.abortTimer);
       this.persistentPending.reject(error);
       this.persistentPending = null;
     }
@@ -300,12 +305,26 @@ export class RecklessEngine {
     const sharedInput = this.sharedInput;
     if (!sharedInput) return Promise.reject(new Error('Reckless persistent stdin was not initialized'));
     return new Promise<RunResult>((resolve, reject) => {
+      let active: PersistentPending;
       const onAbort = () => {
-        this.persistentPending = null;
-        this.disposeWorker();
-        reject(abortError());
+        if (this.persistentPending !== active) return;
+        active.aborted = true;
+        try {
+          writeSharedInput(sharedInput, 'stop\n');
+        } catch {
+          this.persistentPending = null;
+          this.disposeWorker();
+          reject(abortError());
+          return;
+        }
+        active.abortTimer = setTimeout(() => {
+          if (this.persistentPending !== active) return;
+          this.persistentPending = null;
+          this.disposeWorker();
+          reject(abortError());
+        }, PERSISTENT_ABORT_GRACE_MS);
       };
-      this.persistentPending = {
+      active = {
         stdout: [],
         stderr: [],
         resolve: (result) => {
@@ -317,8 +336,8 @@ export class RecklessEngine {
           reject(error);
         },
         resolveWhenLine,
-        onAbort,
       };
+      this.persistentPending = active;
       signal?.addEventListener('abort', onAbort, { once: true });
       try {
         writeSharedInput(sharedInput, `${this.optimizePersistentCommands(commands).join('\n')}\n`);
