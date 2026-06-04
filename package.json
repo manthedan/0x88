@@ -72,6 +72,7 @@
     "lc0:search": "node --experimental-strip-types scripts/lc0_search.mjs",
     "lc0:drift-sweep": "node --experimental-strip-types scripts/lc0_drift_sweep.mjs",
     "lc0:browser-wgsl-smokes": "node --experimental-strip-types scripts/lc0_browser_wgsl_smokes.mjs",
+    "reckless:build-wasi": "node scripts/build_reckless_wasi.mjs",
     "lc0:battle": "node --experimental-strip-types scripts/lc0_engine_battle.mjs",
     "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs"
   },
@@ -80,6 +81,7 @@
     "vite": "^8.0.10"
   },
   "dependencies": {
+    "@bjorn3/browser_wasi_shim": "^0.4.2",
     "@tanstack/query-core": "^5.101.0",
     "@tanstack/store": "^0.11.0",
     "chessground": "^9.2.1",
