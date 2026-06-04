@@ -106,7 +106,13 @@ table.opening .san{font-family:var(--mono);font-weight:700}
       <label class="small"><input type="checkbox" id="useStockfish" /> Stockfish</label>
       <div class="field"><label for="sfDepthInput">SF depth</label>
         <input id="sfDepthInput" type="number" min="1" max="30" step="1" value="14" /></div>
+      <label class="small"><input type="checkbox" id="useReckless" /> Reckless</label>
+      <div class="field"><label for="recklessDepthInput">Reckless depth</label>
+        <input id="recklessDepthInput" type="number" min="1" max="20" step="1" value="4" /></div>
+      <div class="field"><label for="recklessVariantSelect">Reckless variant</label>
+        <select id="recklessVariantSelect"></select></div>
     </div>
+    <div id="recklessRuntimeInfo" class="small">Reckless: detecting runtime…</div>
     <h2>Engine lines</h2>
     <div id="engineLegend" class="legend"></div>
     <ol id="lines" class="lines"></ol>

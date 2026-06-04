@@ -14,16 +14,20 @@ import { loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
+import { RecklessEngine } from './recklessEngine.ts';
+import { RECKLESS_VARIANTS, checkRecklessVariantAsset, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, type RecklessVariant } from './recklessVariants.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
+const REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
 let mainEvaluator: Lc0OnnxEvaluator | null = null;
 let stockfish: StockfishEngine | null = null;
+let reckless: RecklessEngine | null = null;
 let ground: Ground | null = null;
 let orientation: 'white' | 'black' = 'white';
 let analysisAbort: AbortController | null = null;
@@ -126,12 +130,51 @@ function uciShape(uci: string, brush: string): DrawShape | null {
 function visits(): number { return Math.max(1, Math.floor(Number(inputEl('visitsInput').value) || 400)); }
 function multiPv(): number { return Math.max(1, Math.floor(Number(inputEl('multiPvInput').value) || 3)); }
 function sfDepth(): number { return Math.max(1, Math.floor(Number(inputEl('sfDepthInput').value) || 14)); }
+function recklessDepth(): number { return Math.max(1, Math.floor(Number(inputEl('recklessDepthInput').value) || 4)); }
 function useLc0(): boolean { return inputEl('useLc0').checked; }
 function useStockfish(): boolean { return inputEl('useStockfish').checked; }
+function useReckless(): boolean { return inputEl('useReckless').checked; }
+
+function selectedRecklessVariant(): RecklessVariant {
+  const key = normalizeRecklessVariant(selectEl('recklessVariantSelect').value);
+  if (key === 'custom' && REQUESTED_RECKLESS_VARIANT.key === 'custom') return REQUESTED_RECKLESS_VARIANT;
+  return recklessVariantByKey(key);
+}
+
+function recklessLabel(): string {
+  return selectedRecklessVariant().label;
+}
+
+function renderRecklessRuntimeInfo(): void {
+  const variant = selectedRecklessVariant();
+  const status = reckless?.runtimeStatus();
+  const mode = reckless?.runtimeLabel() ?? (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated ? 'persistent available' : 'one-shot fallback');
+  const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
+  const asset = recklessVariantAssetStatus(variant);
+  if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
+  const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+  const targetUrl = status?.wasmUrl ?? variant.wasmUrl;
+  el('recklessRuntimeInfo').textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${targetUrl}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi or reckless:build-lite-wasi' : ''}`;
+}
+
+function refreshRecklessVariantUi(): void {
+  const select = selectEl('recklessVariantSelect');
+  if (!select.options.length) {
+    const variants = REQUESTED_RECKLESS_VARIANT.key === 'custom' ? [...RECKLESS_VARIANTS, REQUESTED_RECKLESS_VARIANT] : [...RECKLESS_VARIANTS];
+    select.innerHTML = variants.map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
+  }
+  select.disabled = analyzing;
+  renderRecklessRuntimeInfo();
+}
 
 function getStockfish(): StockfishEngine {
   if (!stockfish) stockfish = new StockfishEngine({ depth: sfDepth() });
   return stockfish;
+}
+
+function getReckless(): RecklessEngine {
+  if (!reckless) reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+  return reckless;
 }
 
 function legalDests(board: BoardState) {
@@ -351,7 +394,7 @@ function renderAll() {
 }
 
 async function analyzeCurrent() {
-  if (!useLc0() && !useStockfish()) { el('message').textContent = 'Enable LC0 or Stockfish to analyze.'; return; }
+  if (!useLc0() && !useStockfish() && !useReckless()) { el('message').textContent = 'Enable LC0, Stockfish, or Reckless to analyze.'; return; }
   // Interrupt any in-flight analysis: abort the Stockfish signal and cancel the
   // worker's LC0 search by id, so a new position takes over immediately.
   analysisAbort?.abort();
@@ -359,12 +402,20 @@ async function analyzeCurrent() {
   const controller = new AbortController();
   analysisAbort = controller;
   analyzing = true;
+  refreshRecklessVariantUi();
   el('stop').toggleAttribute('disabled', false);
   el('analyze').toggleAttribute('disabled', true);
   const fen = tree.current.fen;
   const board = parseFen(fen);
-  if (legalMoves(board).length === 0) { analyzing = false; el('stop').toggleAttribute('disabled', true); el('analyze').toggleAttribute('disabled', false); return; }
-  el('message').textContent = `Analyzing (${useLc0() ? `LC0 ${visits()}v` : ''}${useLc0() && useStockfish() ? ' + ' : ''}${useStockfish() ? `SF d${sfDepth()}` : ''}, ${multiPv()} lines)…`;
+  if (legalMoves(board).length === 0) {
+    analyzing = false;
+    el('stop').toggleAttribute('disabled', true);
+    el('analyze').toggleAttribute('disabled', false);
+    refreshRecklessVariantUi();
+    return;
+  }
+  const selectedLabels = [useLc0() ? `LC0 ${visits()}v` : '', useStockfish() ? `SF d${sfDepth()}` : '', useReckless() ? `${recklessLabel()} d${recklessDepth()}` : ''].filter(Boolean).join(' + ');
+  el('message').textContent = `Analyzing (${selectedLabels}, ${multiPv()} lines)…`;
   try {
     const tasks: Promise<AnalysisLine[]>[] = [];
     if (useLc0()) {
@@ -375,6 +426,14 @@ async function analyzeCurrent() {
     if (useStockfish()) {
       tasks.push(getStockfish().analyze(fen, { multipv: multiPv(), depth: sfDepth(), signal: controller.signal })
         .then((infos) => stockfishAnalysisLines(infos, fen, `SF d${sfDepth()}`)));
+    }
+    if (useReckless()) {
+      const label = `${recklessLabel()} d${recklessDepth()}`;
+      tasks.push(getReckless().analyze(fen, { multipv: multiPv(), depth: recklessDepth(), signal: controller.signal })
+        .then((infos) => {
+          renderRecklessRuntimeInfo();
+          return stockfishAnalysisLines(infos, fen, label);
+        }));
     }
     const grouped = await Promise.all(tasks);
     if (controller.signal.aborted) return;
@@ -389,6 +448,7 @@ async function analyzeCurrent() {
       analysisAbort = null;
       el('stop').toggleAttribute('disabled', true);
       el('analyze').toggleAttribute('disabled', false);
+      refreshRecklessVariantUi();
     }
   }
 }
@@ -466,9 +526,16 @@ function wireEvents() {
     analysisAbort?.abort();
     if (activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
   });
-  for (const id of ['useLc0', 'useStockfish', 'sfDepthInput', 'visitsInput', 'multiPvInput']) {
+  for (const id of ['useLc0', 'useStockfish', 'useReckless', 'sfDepthInput', 'recklessDepthInput', 'visitsInput', 'multiPvInput']) {
     el(id).addEventListener('change', () => { lineCache.delete(tree.current.fen); void analyzeCurrent(); });
   }
+  el('recklessVariantSelect').addEventListener('change', () => {
+    reckless?.dispose();
+    reckless = null;
+    lineCache.delete(tree.current.fen);
+    refreshRecklessVariantUi();
+    if (useReckless()) void analyzeCurrent();
+  });
   el('movelist').addEventListener('click', (event) => {
     const target = (event.target as HTMLElement).closest('[data-node]');
     if (!target) return;
@@ -518,6 +585,8 @@ function disposeRuntimeResources(): void {
   workerPending.clear();
   stockfish?.dispose();
   stockfish = null;
+  reckless?.dispose();
+  reckless = null;
   void mainEvaluator?.dispose();
   mainEvaluator = null;
   searcher = null;
@@ -528,6 +597,9 @@ async function init() {
     if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
   });
   renderAll();
+  refreshRecklessVariantUi();
+  selectEl('recklessVariantSelect').value = REQUESTED_RECKLESS_VARIANT.key;
+  renderRecklessRuntimeInfo();
   wireEvents();
   el('message').textContent = 'Loading LC0 model in a worker…';
   try {

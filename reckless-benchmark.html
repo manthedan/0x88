@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reckless WASI benchmark</title>
+<style>
+:root{--bg:#f3eee4;--panel:#fbf8f0;--ink:#1f1c17;--muted:#6e665c;--rule:#d8cfbe;--accent:#5a6e2a;--soft:#e8efd3;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;--sans:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans)}
+header{padding:12px 20px;border-bottom:1px solid var(--rule);background:var(--panel);display:flex;align-items:baseline;gap:16px}header h1{margin:0;font-size:19px}header nav a{color:var(--muted);text-decoration:none;font-size:13px;margin-right:12px}header nav a.active{color:var(--accent);font-weight:700}
+main{display:grid;gap:14px;padding:18px}.panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:12px}.row{display:flex;flex-wrap:wrap;gap:10px;align-items:end}.field{display:grid;gap:3px}.field label{font-size:11px;color:var(--muted)}
+input,select,textarea{font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink)}input[type=text],textarea{font-family:var(--mono)}input[type=number]{width:88px;font-family:var(--mono)}textarea{width:100%;min-height:78px}
+button{border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink);padding:8px 10px;font:inherit;font-size:13px;cursor:pointer}button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:700}button:disabled{opacity:.55;cursor:not-allowed}
+.small{font-size:12px;color:var(--muted)}.status{padding:8px;border:1px solid var(--rule);border-radius:6px;background:var(--soft);font-family:var(--mono);font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--rule)}th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase}td.num,th.num{text-align:right;font-family:var(--mono)}
+pre{font-family:var(--mono);font-size:12px;white-space:pre-wrap;overflow:auto;max-height:320px;background:white;border:1px solid var(--rule);border-radius:6px;padding:8px}.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}.actions{margin-top:8px;display:flex;flex-wrap:wrap;gap:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Reckless WASI benchmark</h1>
+  <nav><a href="/lc0-arena.html">Arena</a><a href="/lc0-analysis.html">Analysis</a><a class="active" href="/reckless-benchmark.html">Reckless bench</a></nav>
+</header>
+<main>
+  <section class="panel">
+    <div class="row">
+      <label class="small"><input id="benchFull" type="checkbox" checked /> Reckless Full</label>
+      <label class="small"><input id="benchLite" type="checkbox" checked /> Reckless Lite experimental</label>
+      <label class="small"><input id="benchPersistent" type="checkbox" checked /> Persistent</label>
+      <label class="small"><input id="benchOneShot" type="checkbox" checked /> One-shot</label>
+      <div class="field"><label for="depthsInput">Depths</label><input id="depthsInput" type="text" value="4" /></div>
+      <div class="field"><label for="movetimesInput">Movetimes ms</label><input id="movetimesInput" type="text" placeholder="100,250,500" /></div>
+      <div class="field"><label for="repeatsInput">Warm repeats</label><input id="repeatsInput" type="number" min="1" max="50" step="1" value="5" /></div>
+      <div class="field"><label for="hashInput">Hash MB</label><input id="hashInput" type="number" min="1" max="1024" step="1" value="16" /></div>
+      <button id="run" class="primary" type="button">Run benchmark</button>
+      <button id="stop" type="button" disabled>Stop</button>
+    </div>
+    <div class="grid2" style="margin-top:10px">
+      <div class="field"><label for="fenInput">Positions, one per line. Use <code>Name | FEN</code>; <code>startpos</code> is accepted.</label><textarea id="fenInput" spellcheck="false">startpos</textarea></div>
+      <div class="field"><label>Notes</label><p class="small">Run from the isolated static/dev server for the persistent path. Lite requires the ignored local artifact <code>/reckless/reckless-v53-l1-512.wasm</code>. Add movetimes to run a second budget axis in the same matrix.</p><div id="status" class="status">Ready.</div></div>
+    </div>
+  </section>
+  <section class="panel">
+    <h2 class="small">Warm-run summary</h2>
+    <table id="summary"><thead><tr><th>Variant</th><th>Mode</th><th>Position</th><th>Budget</th><th class="num">Cold ms</th><th class="num">Warm avg</th><th class="num">Min</th><th class="num">Max</th><th class="num">Avg NPS</th></tr></thead><tbody></tbody></table>
+  </section>
+  <section class="panel">
+    <h2 class="small">Raw runs</h2>
+    <table id="results"><thead><tr><th>Variant</th><th>Mode</th><th>Position</th><th>Budget</th><th>Run</th><th class="num">Wall ms</th><th class="num">Depth</th><th class="num">NPS</th><th>Best</th><th>Runtime</th></tr></thead><tbody></tbody></table>
+    <div class="actions">
+      <button id="copyJson" type="button">Copy JSON report</button>
+      <button id="copyCsv" type="button">Copy CSV</button>
+      <button id="downloadJson" type="button">Download JSON</button>
+      <button id="downloadCsv" type="button">Download CSV</button>
+    </div>
+    <h2 class="small">Report JSON</h2>
+    <pre id="jsonOut">[]</pre>
+  </section>
+</main>
+<script type="module" src="/src/lc0/recklessBenchmark.ts"></script>
+</body>
+</html>

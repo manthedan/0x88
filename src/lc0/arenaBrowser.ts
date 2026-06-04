@@ -16,6 +16,8 @@ import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { DEFAULT_STOCKFISH_FLAVOR, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorLabel, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
+import { RecklessEngine } from './recklessEngine.ts';
+import { RECKLESS_VARIANTS, checkRecklessVariantAsset, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, type RecklessVariant } from './recklessVariants.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 interface ArenaEngine {
@@ -56,7 +58,7 @@ interface EngineEvalBar {
 interface EngineOutputSnapshot {
   engineId: string;
   engineName: string;
-  kind: 'lc0' | 'stockfish';
+  kind: 'lc0' | 'uci';
   fen: string;
   move?: string;
   summary: string;
@@ -69,6 +71,7 @@ interface EngineOutputSnapshot {
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const REQUESTED_STOCKFISH_FLAVOR = normalizeStockfishFlavor(params.get('sfFlavor') ?? params.get('stockfish'));
+const REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 
 let ground: Ground | null = null;
 let board: BoardState = parseFen(START_FEN);
@@ -84,6 +87,7 @@ let player: Lc0PolicyOnlyPlayer | null = null;
 let searcher: Lc0PuctSearcher | null = null;
 let lc0Cache: CachedLc0Evaluator | null = null;
 let stockfish: StockfishEngine | null = null;
+let reckless: RecklessEngine | null = null;
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
 let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
 const engines = new Map<string, ArenaEngine>();
@@ -428,20 +432,28 @@ function recordLc0SearchOutput(engineId: string, engineName: string, result: Lc0
   });
 }
 
-function recordStockfishOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[]): void {
+function recordUciOutput(engineId: string, engineName: string, label: string, fen: string, move: string | null, lines: StockfishInfoLine[]): void {
   const best = lines[0];
   recordEngineOutput({
     engineId,
     engineName,
-    kind: 'stockfish',
+    kind: 'uci',
     fen,
     move: move ?? undefined,
-    summary: `SF ${stockfishScoreText(best)}`,
+    summary: `${label} ${stockfishScoreText(best)}`,
     shortEval: stockfishScoreCompact(best),
     evalBar: stockfishEvalBar(fen, best),
     detail: lines.length > 1 ? `MultiPV ${lines.slice(0, 3).map((line) => `#${line.multipv} ${stockfishScoreText(line)}`).join(' · ')}` : undefined,
     pv: best?.pvUci,
   });
+}
+
+function recordStockfishOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[]): void {
+  recordUciOutput(engineId, engineName, 'SF', fen, move, lines);
+}
+
+function recordRecklessOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[]): void {
+  recordUciOutput(engineId, engineName, 'Reckless', fen, move, lines);
 }
 
 function recordEngineThinking(engine: ArenaEngine): void {
@@ -490,6 +502,40 @@ function selectedStockfishFlavor(): StockfishFlavor {
 
 function stockfishName(depth: number): string {
   return `${stockfishFlavorLabel(selectedStockfishFlavor())} d${depth}`;
+}
+
+function selectedRecklessVariant(): RecklessVariant {
+  const key = normalizeRecklessVariant(selectEl('recklessVariantSelect').value);
+  if (key === 'custom' && REQUESTED_RECKLESS_VARIANT.key === 'custom') return REQUESTED_RECKLESS_VARIANT;
+  return recklessVariantByKey(key);
+}
+
+function recklessName(depth: number): string {
+  return `${selectedRecklessVariant().label} d${depth}`;
+}
+
+function renderRecklessRuntimeInfo(): void {
+  const info = el('recklessRuntimeInfo');
+  const variant = selectedRecklessVariant();
+  const status = reckless?.runtimeStatus();
+  const mode = reckless?.runtimeLabel() ?? (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated ? 'persistent available' : 'one-shot fallback');
+  const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
+  const asset = recklessVariantAssetStatus(variant);
+  if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
+  const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+  info.textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${variant.wasmUrl}`;
+  if (status?.persistentDisabled) info.textContent += ' · persistent disabled after fallback';
+  if (asset === 'missing') info.textContent += ' · build locally with npm run reckless:build-wasi or reckless:build-lite-wasi';
+}
+
+function refreshRecklessVariantUi(): void {
+  const select = selectEl('recklessVariantSelect');
+  if (!select.options.length) {
+    const variants = REQUESTED_RECKLESS_VARIANT.key === 'custom' ? [...RECKLESS_VARIANTS, REQUESTED_RECKLESS_VARIANT] : [...RECKLESS_VARIANTS];
+    select.innerHTML = variants.map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
+  }
+  select.disabled = running;
+  renderRecklessRuntimeInfo();
 }
 
 function refreshStockfishFlavorAvailability(): void {
@@ -568,6 +614,15 @@ function buildEngines() {
     recordStockfishOutput(engineId, engines.get(engineId)?.name ?? `Stockfish d${depth}`, fen, move, stockfish!.lastInfo());
     return move;
   };
+  const recklessMove = (engineId: string, depth: number): ArenaEngine['move'] => async (positions, signal) => {
+    if (arenaBudgetMode() === 'movetime') reckless!.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
+    else reckless!.setOptions({ depth, movetimeMs: undefined });
+    const fen = boardToFen(positions[positions.length - 1]);
+    const move = await reckless!.bestMove(fen, signal);
+    recordRecklessOutput(engineId, engines.get(engineId)?.name ?? recklessName(depth), fen, move, reckless!.lastInfo());
+    renderRecklessRuntimeInfo();
+    return move;
+  };
   const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {
     const search = lc0SearcherFor(engineId);
     await search.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
@@ -577,6 +632,11 @@ function buildEngines() {
   const stockfishWarmup = async (signal: AbortSignal) => {
     stockfish!.setOptions({ depth: 1, movetimeMs: undefined, threads: stockfishThreads() });
     await stockfish!.bestMove(START_FEN, signal);
+  };
+  const recklessWarmup = async (signal: AbortSignal) => {
+    reckless!.setOptions({ depth: 1, movetimeMs: undefined });
+    await reckless!.bestMove(START_FEN, signal);
+    renderRecklessRuntimeInfo();
   };
   engines.set('lc0-policy', {
     id: 'lc0-policy',
@@ -592,8 +652,12 @@ function buildEngines() {
   engines.set('lc0-s400', { id: 'lc0-s400', name: 'LC0 search 400', move: lc0Search('lc0-s400', 400), warmup: lc0SearchWarmup('lc0-s400') });
   engines.set('sf-d4', { id: 'sf-d4', name: stockfishName(4), move: sf('sf-d4', 4), warmup: stockfishWarmup });
   engines.set('sf-d8', { id: 'sf-d8', name: stockfishName(8), move: sf('sf-d8', 8), warmup: stockfishWarmup });
+  engines.set('reckless-d4', { id: 'reckless-d4', name: recklessName(4), move: recklessMove('reckless-d4', 4), warmup: recklessWarmup });
+  engines.set('reckless-d8', { id: 'reckless-d8', name: recklessName(8), move: recklessMove('reckless-d8', 8), warmup: recklessWarmup });
   setEngineCheckboxLabel('sf-d4', stockfishName(4));
   setEngineCheckboxLabel('sf-d8', stockfishName(8));
+  setEngineCheckboxLabel('reckless-d4', recklessName(4));
+  setEngineCheckboxLabel('reckless-d8', recklessName(8));
 }
 
 function refreshChampionOptions() {
@@ -774,6 +838,7 @@ async function startTournament() {
   abort = new AbortController();
   refreshOpeningPreview();
   refreshStockfishFlavorAvailability();
+  refreshRecklessVariantUi();
   games.length = 0;
   activeEngineIds = [];
   engineOutputs.clear();
@@ -835,6 +900,7 @@ async function startTournament() {
     el('stop').toggleAttribute('disabled', true);
     refreshOpeningPreview();
     refreshStockfishFlavorAvailability();
+    refreshRecklessVariantUi();
   }
 }
 
@@ -858,6 +924,8 @@ function disposeRuntimeResources(): void {
   activeEngineIds = [];
   stockfish?.dispose();
   stockfish = null;
+  reckless?.dispose();
+  reckless = null;
 }
 
 function wireEvents() {
@@ -883,6 +951,14 @@ function wireEvents() {
     inputEl('stockfishThreadsInput').value = String(stockfishThreads());
     stockfish?.setOptions({ threads: stockfishThreads() });
   });
+  el('recklessVariantSelect').addEventListener('change', () => {
+    if (running) return;
+    reckless?.dispose();
+    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+    buildEngines();
+    refreshChampionOptions();
+    refreshRecklessVariantUi();
+  });
   window.addEventListener('pagehide', (event) => {
     if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
   });
@@ -891,6 +967,9 @@ function wireEvents() {
 async function init() {
   renderBoard();
   selectEl('stockfishFlavorSelect').value = REQUESTED_STOCKFISH_FLAVOR;
+  refreshRecklessVariantUi();
+  selectEl('recklessVariantSelect').value = REQUESTED_RECKLESS_VARIANT.key;
+  renderRecklessRuntimeInfo();
   inputEl('stockfishThreadsInput').value = String(Math.max(1, Math.min(32, Math.floor(Number(params.get('sfThreads') ?? '1') || 1))));
   refreshStockfishFlavorAvailability();
   void renderRuntimeBadge();
@@ -906,6 +985,8 @@ async function init() {
     player = new Lc0PolicyOnlyPlayer(lc0Cache);
     searcher = new Lc0PuctSearcher(lc0Cache);
     stockfish = new StockfishEngine({ depth: 4, threads: stockfishThreads() }, stockfishFlavorUrl(selectedStockfishFlavor()));
+    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+    renderRecklessRuntimeInfo();
     renderCacheInfo();
     void renderRuntimeBadge();
     el('start').toggleAttribute('disabled', false);

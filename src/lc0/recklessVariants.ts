@@ -1,0 +1,73 @@
+import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
+
+export type RecklessVariantKey = 'full' | 'lite' | 'custom';
+
+export interface RecklessVariant {
+  key: RecklessVariantKey;
+  label: string;
+  wasmUrl: string;
+  note: string;
+}
+
+export type RecklessAssetStatus = 'unknown' | 'checking' | 'present' | 'missing';
+
+const assetStatuses = new Map<string, RecklessAssetStatus>();
+const assetChecks = new Map<string, Promise<RecklessAssetStatus>>();
+
+export const RECKLESS_FULL_VARIANT: RecklessVariant = {
+  key: 'full',
+  label: 'Reckless Full',
+  wasmUrl: DEFAULT_RECKLESS_WASM_URL,
+  note: 'v60 full-size NNUE; strongest/current default, largest download.',
+};
+
+export const RECKLESS_LITE_VARIANT: RecklessVariant = {
+  key: 'lite',
+  label: 'Reckless Lite experimental',
+  wasmUrl: '/reckless/reckless-v53-l1-512.wasm',
+  note: 'v53 L1=512 candidate; smaller/faster prototype, weaker and not shipped by default.',
+};
+
+export const RECKLESS_VARIANTS = [RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT] as const;
+
+export function normalizeRecklessVariant(raw: string | null | undefined): RecklessVariantKey {
+  const value = String(raw ?? '').toLowerCase().replace(/[ _]/g, '-');
+  if (value === 'lite' || value === 'small' || value === 'v53') return 'lite';
+  if (value === 'custom') return 'custom';
+  return 'full';
+}
+
+export function recklessVariantByKey(key: RecklessVariantKey): RecklessVariant {
+  if (key === 'lite') return RECKLESS_LITE_VARIANT;
+  if (key === 'custom') return { key: 'custom', label: 'Reckless Custom', wasmUrl: DEFAULT_RECKLESS_WASM_URL, note: 'Custom Reckless WASM URL.' };
+  return RECKLESS_FULL_VARIANT;
+}
+
+export function recklessVariantFromParams(params: URLSearchParams): RecklessVariant {
+  const customUrl = params.get('recklessWasm');
+  if (customUrl) return { key: 'custom', label: 'Reckless Custom', wasmUrl: customUrl, note: 'Custom Reckless WASM URL from ?recklessWasm=…' };
+  return recklessVariantByKey(normalizeRecklessVariant(params.get('recklessVariant') ?? params.get('reckless')));
+}
+
+export function recklessVariantAssetStatus(variant: RecklessVariant): RecklessAssetStatus {
+  return assetStatuses.get(variant.wasmUrl) ?? 'unknown';
+}
+
+export function checkRecklessVariantAsset(variant: RecklessVariant, onChange?: () => void): Promise<RecklessAssetStatus> {
+  const current = assetStatuses.get(variant.wasmUrl);
+  if (current === 'present' || current === 'missing') return Promise.resolve(current);
+  const existing = assetChecks.get(variant.wasmUrl);
+  if (existing) return existing;
+  assetStatuses.set(variant.wasmUrl, 'checking');
+  const promise = fetch(variant.wasmUrl, { method: 'HEAD', cache: 'no-store' })
+    .then((response) => (response.ok ? 'present' : 'missing') as RecklessAssetStatus)
+    .catch(() => 'missing' as RecklessAssetStatus)
+    .then((status) => {
+      assetStatuses.set(variant.wasmUrl, status);
+      assetChecks.delete(variant.wasmUrl);
+      onChange?.();
+      return status;
+    });
+  assetChecks.set(variant.wasmUrl, promise);
+  return promise;
+}

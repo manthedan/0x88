@@ -80,6 +80,8 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
       <label><input type="checkbox" value="lc0-s400" /> LC0 search · 400 visits</label>
       <label><input type="checkbox" value="sf-d4" checked /> Stockfish lite · depth 4</label>
       <label><input type="checkbox" value="sf-d8" /> Stockfish lite · depth 8</label>
+      <label><input type="checkbox" value="reckless-d4" /> Reckless WASI · depth 4</label>
+      <label><input type="checkbox" value="reckless-d8" /> Reckless WASI · depth 8</label>
     </div>
     <div class="row">
       <div class="field"><label for="formatSelect">Format</label>
@@ -100,7 +102,10 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
         <select id="stockfishFlavorSelect"><option value="lite-single">Lite single</option><option value="single">Full single</option><option value="lite-threaded">Lite threaded</option><option value="threaded">Full threaded</option></select></div>
       <div class="field"><label for="stockfishThreadsInput">SF threads</label>
         <input id="stockfishThreadsInput" type="number" min="1" max="32" step="1" value="1" /></div>
+      <div class="field"><label for="recklessVariantSelect">Reckless</label>
+        <select id="recklessVariantSelect"></select></div>
     </div>
+    <div id="recklessRuntimeInfo" class="small">Reckless: detecting runtime…</div>
     <div id="cacheInfo" class="small">NN cache: loading…</div>
     <div id="searchTelemetryInfo" class="small">LC0 tree: waiting for searches…</div>
     <h2>Starting positions</h2>
