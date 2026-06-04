@@ -404,15 +404,18 @@ type WgslHeadsProbeResult = {
   readbackSyncedMs: number;
   policyDenseMaxAbsError: number;
   policyDenseRmsError: number;
+  policyLogitsMaxAbsError: number;
+  policyLogitsRmsError: number;
   valueEmbedMaxAbsError: number;
   valueEmbedRmsError: number;
   wgslWdlMaxAbsError: number;
   wgslWdlRmsError: number;
   policyDenseSample: number[];
+  policyLogitsSample: number[];
   valueEmbedSample: number[];
   wgslWdl: number[];
-  nonzero: { policyDense: boolean; valueEmbed: boolean; wgslWdl: boolean };
-  nonuniform: { policyDense: boolean; valueEmbed: boolean; wgslWdl: boolean };
+  nonzero: { policyDense: boolean; policyLogits: boolean; valueEmbed: boolean; wgslWdl: boolean };
+  nonuniform: { policyDense: boolean; policyLogits: boolean; valueEmbed: boolean; wgslWdl: boolean };
   ortHeads: {
     mode: 'ort-policy-value';
     runMs: number;
@@ -1298,11 +1301,14 @@ async function runWgslHeadsProbe(): Promise<void> {
       readbackSyncedMs: Number(response.result.readbackSyncedMs.toFixed(4)),
       policyDenseMaxAbsError: Number(response.result.policyDenseMaxAbsError.toExponential(6)),
       policyDenseRmsError: Number(response.result.policyDenseRmsError.toExponential(6)),
+      policyLogitsMaxAbsError: Number(response.result.policyLogitsMaxAbsError.toExponential(6)),
+      policyLogitsRmsError: Number(response.result.policyLogitsRmsError.toExponential(6)),
       valueEmbedMaxAbsError: Number(response.result.valueEmbedMaxAbsError.toExponential(6)),
       valueEmbedRmsError: Number(response.result.valueEmbedRmsError.toExponential(6)),
       wgslWdlMaxAbsError: Number(response.result.wgslWdlMaxAbsError.toExponential(6)),
       wgslWdlRmsError: Number(response.result.wgslWdlRmsError.toExponential(6)),
       policyDenseSample: response.result.policyDenseSample.map((value) => Number(value.toFixed(8))),
+      policyLogitsSample: response.result.policyLogitsSample.map((value) => Number(value.toFixed(8))),
       valueEmbedSample: response.result.valueEmbedSample.map((value) => Number(value.toFixed(8))),
       wgslWdl: response.result.wgslWdl.map((value) => Number(value.toFixed(8))),
       ortHeads: {
@@ -1314,7 +1320,7 @@ async function runWgslHeadsProbe(): Promise<void> {
       },
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `WGSL_HEADS_PROBE_DONE policy dense |err| ${rounded.policyDenseMaxAbsError.toExponential(2)} · value embed |err| ${rounded.valueEmbedMaxAbsError.toExponential(2)} · WGSL WDL |err| ${rounded.wgslWdlMaxAbsError.toExponential(2)} · nonzero/nonuniform ${rounded.nonzero.policyDense && rounded.nonzero.valueEmbed && rounded.nonzero.wgslWdl && rounded.nonuniform.policyDense && rounded.nonuniform.valueEmbed && rounded.nonuniform.wgslWdl ? 'yes' : 'no'}`;
+    el('message').textContent = `WGSL_HEADS_PROBE_DONE policy dense |err| ${rounded.policyDenseMaxAbsError.toExponential(2)} · policy logits |err| ${rounded.policyLogitsMaxAbsError.toExponential(2)} · value embed |err| ${rounded.valueEmbedMaxAbsError.toExponential(2)} · WGSL WDL |err| ${rounded.wgslWdlMaxAbsError.toExponential(2)} · nonzero/nonuniform ${rounded.nonzero.policyDense && rounded.nonzero.policyLogits && rounded.nonzero.valueEmbed && rounded.nonzero.wgslWdl && rounded.nonuniform.policyDense && rounded.nonuniform.policyLogits && rounded.nonuniform.valueEmbed && rounded.nonuniform.wgslWdl ? 'yes' : 'no'}`;
   } catch (error) {
     el('benchResult').textContent = `WGSL_HEADS_PROBE_FAILED ${(error as Error).message}`;
     el('message').textContent = `WGSL heads probe failed: ${(error as Error).message}`;
