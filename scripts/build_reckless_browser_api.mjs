@@ -189,7 +189,7 @@ use crate::{
     threadpool::ThreadPool,
     time::{Limits, TimeManager},
     transposition::DEFAULT_TT_SIZE,
-    types::{Move, Score, normalize_to_cp},
+    types::{Color, Move, Score, normalize_to_cp},
 };
 
 #[derive(Clone, Debug)]
@@ -279,6 +279,12 @@ impl BrowserEngine {
     pub fn new_game(&mut self) {
         self.threads.clear();
         self.shared.tt.clear(self.threads.len());
+
+        for corrhist in self.shared.history.all() {
+            corrhist.pawn.clear();
+            corrhist.non_pawn[Color::White].clear();
+            corrhist.non_pawn[Color::Black].clear();
+        }
     }
 
     pub fn search_depth(&mut self, depth: i32) -> SearchResult {

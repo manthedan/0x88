@@ -85,13 +85,14 @@ Status: implemented experimentally in `src/lc0/recklessBrowserApiWorker.ts` and 
 4. sends compact request/response messages,
 5. returns structured search results directly to `RecklessEngine`.
 
-The existing WASI/UCI adapter remains the default and fallback until parity and performance are proven.
+The existing WASI/UCI adapter remains the default and fallback until parity and performance are proven. The direct API reset path must keep mirroring UCI `ucinewgame`; it now clears thread state, TT, and correction-history tables.
 
 Smoke/performance evidence:
 
 - Node direct-ABI smoke: `startpos depth 4` returned `bestmove=c2c4`, `scoreCp=55`, `nodes=210`, PV `c2c4 g8f6`.
 - Browser benchmark smoke on isolated static server: browser API variant, persistent mode label, `startpos depth 1`, one warm repeat completed 2 rows; cold wall `4.70ms`, warm wall `1.74ms`, runtime label `browser API`.
 - Rotated-FEN browser benchmark, persistent depth 7/8/9, 20 positions × 20 warm passes: browser API was slower than persistent WASI/UCI (`0.88x`, `0.81x`, and `0.80x` as fast by wall-clock for depths 7/8/9). See [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md).
+- Browser API history-reset smoke after fixing correction-history clearing: scalar WASI/UCI, SIMD WASI/UCI, browser API scalar, and browser API SIMD all matched exactly across the 20-position suite at depths 7/8/9 with one warm rotated pass. Browser API SIMD was comparable but slightly slower than SIMD WASI/UCI in that corrected clear-hash smoke.
 
 ## Verification requirements
 

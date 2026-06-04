@@ -6,6 +6,24 @@ Use `/reckless-benchmark.html` from the isolated static server after `npm run bu
 
 The harness also has a `Load 20-position rotated FEN suite` preset. Its run order keeps one engine alive per variant/mode/budget, measures a first pass over every listed position, then rotates each warm pass across the entire suite before repeating any one FEN. Raw and summary outputs track wall-clock ms, engine-reported depth, score/mate, nodes, NPS, best move, PV, runtime label, and cold/first-pass vs warm-pass rows separately. Keep score/PV fields in the JSON/CSV exports when using the page for scalar-vs-SIMD parity validation.
 
+## 2026-06-04 browser API history-reset parity smoke
+
+Command surface: `/reckless-benchmark.html` after rebuilding scalar and SIMD browser API artifacts with the corrected direct-API `new_game` implementation. Full scalar WASI/UCI, Full SIMD WASI/UCI, browser API scalar, and browser API SIMD variants; persistent mode only; 20-position rotated suite; depths 7/8/9; one warm rotated pass; clear-hash reset enabled.
+
+Raw report: [`reckless_browser_api_history_reset_smoke_2026-06-04.json`](./reckless_browser_api_history_reset_smoke_2026-06-04.json).
+
+Validation notes:
+
+- The browser API `new_game` path now mirrors UCI reset more closely by clearing correction-history tables in addition to thread state and TT. Before this fix, browser API scalar/SIMD matched on the first pass but diverged on warm clear-hash runs, because history tables persisted between positions.
+- Fixed-depth parity passed exactly for all checked pairs in this smoke: scalar WASI/UCI vs SIMD WASI/UCI, scalar WASI/UCI vs browser API scalar, and browser API scalar vs browser API SIMD each matched best move, score/mate fields, and full PV in 120/120 cold/warm pairs.
+- With clear-hash correctness restored, browser API SIMD was roughly comparable but slightly slower than SIMD WASI/UCI in this one-warm-pass smoke; keep the browser API variants experimental pending a full corrected 20-warm-pass benchmark.
+
+| Budget | SIMD WASI warm ms | Browser API SIMD warm ms |
+| --- | ---: | ---: |
+| depth 7 | 5.41 | 5.71 |
+| depth 8 | 11.06 | 11.38 |
+| depth 9 | 18.79 | 19.20 |
+
 ## 2026-06-04 scalar-vs-SIMD parity validation
 
 Command surface: `/reckless-benchmark.html` on the isolated static server after `npm run build:client`, with Full scalar WASI/UCI and Full integrated wasm NNUE SIMD WASI/UCI. Persistent mode only, 20-position rotated Ruy Lopez suite, depth budgets 7/8/9, movetime budgets 100/250/500ms, one warm rotated pass, and default-on clear-hash reset.
