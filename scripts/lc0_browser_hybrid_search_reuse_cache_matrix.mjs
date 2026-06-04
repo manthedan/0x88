@@ -141,6 +141,8 @@ function compactCell(result, combo) {
     evalCalls: stats.evalCalls,
     batchEvalCalls: stats.batchEvalCalls,
     maxEvalBatch: stats.maxEvalBatch,
+    evalBatchSizeHistogram: stats.evalBatchSizeHistogram,
+    averageEvalBatchSize: stats.averageEvalBatchSize,
     cacheHits: stats.cacheHits,
     neuralEvalMisses: stats.neuralEvalMisses,
     cacheHitRate: stats.cacheHitRate,

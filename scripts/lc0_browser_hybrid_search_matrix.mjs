@@ -116,6 +116,13 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
   throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
 }
 
+function histogramAverage(histogram = {}) {
+  const entries = Object.entries(histogram);
+  const calls = entries.reduce((sum, [, count]) => sum + Number(count), 0);
+  const items = entries.reduce((sum, [size, count]) => sum + Number(size) * Number(count), 0);
+  return calls > 0 ? Number((items / calls).toFixed(4)) : undefined;
+}
+
 function compactCell(result, combo) {
   const timing = result.eval?.lastBackendTiming ?? {};
   const stats = result.search?.stats ?? {};
@@ -130,6 +137,8 @@ function compactCell(result, combo) {
     evalCalls: stats.evalCalls,
     batchEvalCalls: stats.batchEvalCalls,
     maxEvalBatch: stats.maxEvalBatch,
+    evalBatchSizeHistogram: stats.evalBatchSizeHistogram,
+    averageEvalBatchSize: histogramAverage(stats.evalBatchSizeHistogram),
     cacheHits: stats.cacheHits,
     neuralEvalMisses: stats.neuralEvalMisses,
     rootReused: stats.rootReused,

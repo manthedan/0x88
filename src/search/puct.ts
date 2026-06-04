@@ -123,6 +123,8 @@ export interface SearchStats {
   evalCalls: number;
   batchEvalCalls: number;
   maxEvalBatch: number;
+  /** Histogram of leaf-evaluation batch sizes, keyed by the number of leaves sent to evaluateBatch. */
+  evalBatchSizeHistogram?: Record<string, number>;
   /** Duplicate in-flight leaves encountered while collecting a search batch. */
   batchLeafCollisions?: number;
   /** Extra selection attempts spent to avoid duplicate in-flight leaves. */
@@ -1020,6 +1022,8 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
       const contexts = evalNodes.map((node, i) => ({ historyFens: node.historyFens, legalMoves: evalMoves[i] }));
       stats.evalCalls += evalNodes.length;
       stats.maxEvalBatch = Math.max(stats.maxEvalBatch, evalNodes.length);
+      const batchKey = String(evalNodes.length);
+      stats.evalBatchSizeHistogram = { ...(stats.evalBatchSizeHistogram ?? {}), [batchKey]: (stats.evalBatchSizeHistogram?.[batchKey] ?? 0) + 1 };
       const beforeMetrics = evaluatorMetrics(evaluator);
       if (evaluator.evaluateBatch) {
         stats.batchEvalCalls += 1;
@@ -1244,6 +1248,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     evalCalls: stats.evalCalls,
     batchEvalCalls: stats.batchEvalCalls,
     maxEvalBatch: stats.maxEvalBatch,
+    evalBatchSizeHistogram: stats.evalBatchSizeHistogram ?? {},
     expansions: stats.expansions,
     terminalHits: stats.terminalHits,
     cacheHits: stats.cacheHits,

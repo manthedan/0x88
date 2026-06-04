@@ -68,6 +68,7 @@ test('LC0 batched PUCT groups leaf evaluations through the LC0 adapter', async (
   assert.equal(result.search.stats?.completedVisits, 8);
   assert.equal(result.search.stats?.batchEvalCalls, 2);
   assert.equal(result.search.stats?.maxEvalBatch, 4);
+  assert.deepEqual(result.search.stats?.evalBatchSizeHistogram, { 4: 2 });
   assert.ok(batchSizes.includes(4), `expected a batch of 4, got ${batchSizes.join(',')}`);
 });
 

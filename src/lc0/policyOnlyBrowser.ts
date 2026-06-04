@@ -2175,6 +2175,12 @@ function aggregateSearchStats(samples: SearchStatsSnapshot[]) {
   const neuralEvalMisses = sum('neuralEvalMisses');
   const evalCalls = sum('evalCalls');
   const completedVisits = sum('completedVisits');
+  const evalBatchSizeHistogram = samples.reduce<Record<string, number>>((histogram, stats) => {
+    for (const [size, count] of Object.entries(stats.evalBatchSizeHistogram ?? {})) histogram[size] = (histogram[size] ?? 0) + count;
+    return histogram;
+  }, {});
+  const evalBatchItems = Object.entries(evalBatchSizeHistogram).reduce((total, [size, count]) => total + Number(size) * count, 0);
+  const evalBatchCalls = Object.values(evalBatchSizeHistogram).reduce((total, count) => total + count, 0);
   return {
     samples: samples.length,
     rootReusedCount,
@@ -2182,6 +2188,8 @@ function aggregateSearchStats(samples: SearchStatsSnapshot[]) {
     evalCalls,
     batchEvalCalls: sum('batchEvalCalls'),
     maxEvalBatch: samples.reduce((max, stats) => Math.max(max, stats.maxEvalBatch ?? 0), 0),
+    evalBatchSizeHistogram,
+    averageEvalBatchSize: Number((evalBatchItems / Math.max(1, evalBatchCalls)).toFixed(4)),
     cacheHits,
     neuralEvalMisses,
     cacheHitRate: Number((cacheHits / Math.max(1, cacheHits + neuralEvalMisses)).toFixed(6)),
