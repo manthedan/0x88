@@ -211,14 +211,29 @@ function shortEngineTag(name: string): string {
   return name.split(/[\s·|]+/)[0] || name;
 }
 
-// Optional favicon-sized engine logo. Files live in public/engine-logos/ and are
-// not bundled by default; when absent the <img> removes itself, leaving the text.
-function engineLogoHtml(name: string): string {
+// Optional favicon-sized engine logos (public/engine-logos/, not bundled by
+// default). We probe once which files exist and only emit an <img> for those, so
+// when a logo is absent the markup is unchanged — no per-render insert/remove jitter.
+const availableEngineLogos = new Set<string>();
+
+function engineLogoFamily(name: string): string {
   const n = name.toLowerCase();
-  const family = (n.includes('bt4') || n.includes('lc0') || n.includes('leela')) ? 'lc0'
-    : n.includes('reckless') ? 'reckless'
-    : (n.includes('stockfish') || /\bsf\b/.test(n)) ? 'stockfish' : '';
-  return family ? `<img class="engine-logo" src="/engine-logos/${family}.png" alt="" onerror="this.remove()">` : '';
+  if (n.includes('bt4') || n.includes('lc0') || n.includes('leela')) return 'lc0';
+  if (n.includes('reckless')) return 'reckless';
+  if (n.includes('stockfish') || /\bsf\b/.test(n)) return 'stockfish';
+  return '';
+}
+
+function engineLogoHtml(name: string): string {
+  const family = engineLogoFamily(name);
+  return family && availableEngineLogos.has(family) ? `<img class="engine-logo" src="/engine-logos/${family}.png" alt="">` : '';
+}
+
+async function probeEngineLogos(): Promise<void> {
+  await Promise.all(['lc0', 'stockfish', 'reckless'].map(async (family) => {
+    try { if ((await fetch(`/engine-logos/${family}.png`, { method: 'HEAD', cache: 'no-store' })).ok) availableEngineLogos.add(family); } catch { /* absent */ }
+  }));
+  if (availableEngineLogos.size) renderSideLabels();
 }
 
 function renderEvalBars(): void {
@@ -1084,6 +1099,7 @@ async function init() {
   buildEngines();
   populateSeats();
   void refreshBt4Availability();
+  void probeEngineLogos();
   wireEvents();
   refreshOpeningPreview();
   try {
