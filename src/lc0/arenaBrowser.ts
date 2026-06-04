@@ -13,7 +13,8 @@ import { loadLc0ModelForOrt } from './modelCache.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
-import { Lc0PuctSearcher } from './search.ts';
+import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
+import type { Node as PuctNode } from '../search/puct.ts';
 import { DEFAULT_STOCKFISH_FLAVOR, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorLabel, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, type StockfishFlavor } from './stockfishEngine.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -25,6 +26,28 @@ interface ArenaEngine {
 }
 interface GameRecord { pgn: string; }
 interface ScheduledArenaGame extends ArenaPairing { opening: ArenaOpening; }
+interface Lc0TreeTelemetry {
+  engineName: string;
+  searches: number;
+  rootReused: number;
+  completedVisits: number;
+  reusedRootVisits: number;
+  evalCalls: number;
+  cacheHits: number;
+  neuralEvalMisses: number;
+  transpositionHits: number;
+  replyChecks: number;
+  replyParentsExpanded: number;
+  replyVisited: number;
+  replyTopPolicy5: number;
+  replyTopVisits5: number;
+}
+interface PendingLc0ReplyProbe {
+  engineId: string;
+  engineName: string;
+  afterMoveFen: string;
+  child: PuctNode | null;
+}
 
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
@@ -46,6 +69,9 @@ let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOrigin
 let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
 const engines = new Map<string, ArenaEngine>();
 const lc0Searchers = new Map<string, Lc0PuctSearcher>();
+const lastLc0SearchResults = new Map<string, Lc0SearchResult>();
+const pendingLc0ReplyProbes = new Map<string, PendingLc0ReplyProbe>();
+const lc0TreeTelemetry = new Map<string, Lc0TreeTelemetry>();
 const games: GameRecord[] = [];
 
 function el(id: string): HTMLElement {
@@ -130,6 +156,109 @@ function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): strin
 function renderCacheInfo(): void {
   lc0Cache?.setMaxEntries(arenaCacheEntries());
   el('cacheInfo').textContent = cacheMetricsText(lc0Cache?.metrics());
+  renderSearchTelemetryInfo();
+}
+
+function emptyTreeTelemetry(engineName: string): Lc0TreeTelemetry {
+  return {
+    engineName,
+    searches: 0,
+    rootReused: 0,
+    completedVisits: 0,
+    reusedRootVisits: 0,
+    evalCalls: 0,
+    cacheHits: 0,
+    neuralEvalMisses: 0,
+    transpositionHits: 0,
+    replyChecks: 0,
+    replyParentsExpanded: 0,
+    replyVisited: 0,
+    replyTopPolicy5: 0,
+    replyTopVisits5: 0,
+  };
+}
+
+function telemetryFor(engineId: string, engineName: string): Lc0TreeTelemetry {
+  const existing = lc0TreeTelemetry.get(engineId);
+  if (existing) {
+    existing.engineName = engineName;
+    return existing;
+  }
+  const created = emptyTreeTelemetry(engineName);
+  lc0TreeTelemetry.set(engineId, created);
+  return created;
+}
+
+function ratioText(numerator: number, denominator: number): string {
+  return denominator > 0 ? `${numerator}/${denominator}` : '0/0';
+}
+
+function searchTelemetryText(): string {
+  const entries = [...lc0TreeTelemetry.values()].filter((t) => t.searches || t.replyChecks);
+  if (!entries.length) return 'LC0 tree: waiting for searches…';
+  return `LC0 tree: ${entries.map((t) => {
+    const fresh = Math.max(0, t.searches - t.rootReused);
+    return `${t.engineName}: reuse ${ratioText(t.rootReused, t.searches)} (${fresh} fresh) · reused visits ${t.reusedRootVisits} · reply parent ${ratioText(t.replyParentsExpanded, t.replyChecks)} · reply visited ${ratioText(t.replyVisited, t.replyChecks)} · opp reply top-policy≤5 ${ratioText(t.replyTopPolicy5, t.replyChecks)} · top-visits≤5 ${ratioText(t.replyTopVisits5, t.replyChecks)} · evals ${t.evalCalls} · cache hits ${t.cacheHits} · trans ${t.transpositionHits}`;
+  }).join(' | ')}`;
+}
+
+function renderSearchTelemetryInfo(): void {
+  el('searchTelemetryInfo').textContent = searchTelemetryText();
+}
+
+function isLc0SearchEngine(engineId: string): boolean {
+  return engineId.startsWith('lc0-s');
+}
+
+function childForRootMove(result: Lc0SearchResult | undefined, uci: string): PuctNode | null {
+  const root = result?.search.root;
+  if (!root?.expanded) return null;
+  return root.edges.find((edge) => moveToUci(edge.move) === uci)?.child ?? null;
+}
+
+function recordLc0SearchTelemetry(engineId: string, engineName: string, result: Lc0SearchResult): void {
+  const stats = result.search.stats;
+  const t = telemetryFor(engineId, engineName);
+  const completed = stats?.completedVisits ?? 0;
+  t.searches += 1;
+  if (stats?.rootReused) t.rootReused += 1;
+  t.completedVisits += completed;
+  t.reusedRootVisits += Math.max(0, result.visits - completed);
+  t.evalCalls += stats?.evalCalls ?? 0;
+  t.cacheHits += stats?.cacheHits ?? 0;
+  t.neuralEvalMisses += stats?.neuralEvalMisses ?? 0;
+  t.transpositionHits += stats?.transpositionHits ?? 0;
+  lastLc0SearchResults.set(engineId, result);
+  renderSearchTelemetryInfo();
+}
+
+function noteLc0MoveForReplyProbe(engine: ArenaEngine, move: Move, nextBoard: BoardState): void {
+  if (!isLc0SearchEngine(engine.id)) return;
+  const result = lastLc0SearchResults.get(engine.id);
+  const child = childForRootMove(result, moveToUci(move));
+  pendingLc0ReplyProbes.set(engine.id, { engineId: engine.id, engineName: engine.name, afterMoveFen: boardToFen(nextBoard), child });
+}
+
+function recordPendingLc0ReplyProbes(replyEngine: ArenaEngine, replyBoard: BoardState, replyMove: Move): void {
+  const replyFen = boardToFen(replyBoard);
+  const replyUci = moveToUci(replyMove);
+  for (const [engineId, pending] of [...pendingLc0ReplyProbes]) {
+    if (engineId === replyEngine.id || pending.afterMoveFen !== replyFen) continue;
+    const t = telemetryFor(pending.engineId, pending.engineName);
+    t.replyChecks += 1;
+    const child = pending.child;
+    if (child?.expanded) {
+      t.replyParentsExpanded += 1;
+      const policyRank = child.edges.slice().sort((a, b) => b.prior - a.prior).findIndex((edge) => moveToUci(edge.move) === replyUci);
+      const visitsRank = child.edges.slice().sort((a, b) => b.visits - a.visits || b.prior - a.prior).findIndex((edge) => moveToUci(edge.move) === replyUci);
+      const replyEdge = child.edges.find((edge) => moveToUci(edge.move) === replyUci);
+      if (replyEdge && replyEdge.visits > 0) t.replyVisited += 1;
+      if (policyRank >= 0 && policyRank < 5) t.replyTopPolicy5 += 1;
+      if (visitsRank >= 0 && visitsRank < 5) t.replyTopVisits5 += 1;
+    }
+    pendingLc0ReplyProbes.delete(engineId);
+  }
+  renderSearchTelemetryInfo();
 }
 
 function threadedStockfishAvailable(): boolean {
@@ -199,13 +328,15 @@ function buildEngines() {
   const warmupPositions = [parseFen(START_FEN)];
   const lc0Search = (engineId: string, visits: number): ArenaEngine['move'] => async (positions, signal) => {
     const timed = arenaBudgetMode() === 'movetime';
-    return (await lc0SearcherFor(engineId).search({ positions }, {
+    const result = await lc0SearcherFor(engineId).search({ positions }, {
       visits: timed ? undefined : visits,
       movetimeMs: timed ? arenaMovetimeMs() : undefined,
       signal,
       yieldEveryMs: 16,
       reuseTree: true,
-    })).move ?? null;
+    });
+    recordLc0SearchTelemetry(engineId, engines.get(engineId)?.name ?? engineId, result);
+    return result.move ?? null;
   };
   const sf = (depth: number): ArenaEngine['move'] => async (positions, signal) => {
     if (arenaBudgetMode() === 'movetime') stockfish!.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: stockfishThreads() });
@@ -343,6 +474,7 @@ function legalFromUci(current: BoardState, uci: string | null): Move | undefined
 }
 
 async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: ArenaOpening, signal: AbortSignal): Promise<{ result: GameResultCode; reason: string; tree: GameTree }> {
+  pendingLc0ReplyProbes.clear();
   const tree = gameTreeFromOpening(opening);
   historyBoards = tree.historyBoards();
   board = historyBoards[historyBoards.length - 1];
@@ -366,8 +498,10 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
     if (signal.aborted) return { result: '1/2-1/2', reason: 'cancelled', tree };
     const move = legalFromUci(board, uci);
     if (!move) return { result: board.turn === 'w' ? '0-1' : '1-0', reason: uci ? `illegal ${uci}` : 'resigned', tree };
+    recordPendingLc0ReplyProbes(engine, board, move);
     priorFens.push(boardToFen(board));
     board = makeMove(board, move);
+    noteLc0MoveForReplyProbe(engine, move, board);
     historyBoards.push(board);
     lastUci = moveToUci(move);
     tree.addUci(lastUci);
@@ -405,7 +539,11 @@ async function startTournament() {
   refreshOpeningPreview();
   refreshStockfishFlavorAvailability();
   games.length = 0;
+  lastLc0SearchResults.clear();
+  pendingLc0ReplyProbes.clear();
+  lc0TreeTelemetry.clear();
   el('log').innerHTML = '';
+  renderSearchTelemetryInfo();
   el('start').toggleAttribute('disabled', true);
   el('stop').toggleAttribute('disabled', false);
   const standings = initStandings(participants);
@@ -431,7 +569,7 @@ async function startTournament() {
       const tags: Record<string, string> = { Event: 'LC0 arena', White: whiteEngine.name, Black: blackEngine.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
       games.push({ pgn: gameTreeToPgn(tree, tags, result) });
       renderCacheInfo();
-      appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason}) · ${cacheMetricsText(lc0Cache?.metrics())}`);
+      appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason}) · ${cacheMetricsText(lc0Cache?.metrics())} · ${searchTelemetryText()}`);
       renderStandings(standings);
     }
     const leader = rankedStandings(standings)[0];
