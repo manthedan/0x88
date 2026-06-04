@@ -33,6 +33,7 @@ function parseArgs(argv) {
     timeoutMs: 180_000,
     agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
     dryRun: false,
+    explicitBaseUrl: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -43,7 +44,10 @@ function parseArgs(argv) {
     if (arg === '--out') args.out = next();
     else if (arg === '--host') args.host = next();
     else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--base-url') args.baseUrl = next();
+    else if (arg === '--base-url') {
+      args.baseUrl = next();
+      args.explicitBaseUrl = true;
+    }
     else if (arg === '--visits') args.visits = parseList(next(), Number, 'visits');
     else if (arg === '--batches') args.batches = parseList(next(), Number, 'batches');
     else if (arg === '--head-backends') args.headBackends = parseList(next(), (value) => value, 'head-backends');
@@ -89,7 +93,7 @@ function spawnCapture(command, commandArgs, options = {}) {
 }
 
 function startServer(args) {
-  if (args.baseUrl !== `http://${args.host}:${args.port}`) return null;
+  if (args.explicitBaseUrl) return null;
   const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
   server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
