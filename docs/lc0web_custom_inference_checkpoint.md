@@ -233,9 +233,29 @@ The custom path now validates a complete encoder0 block in staged WGSL form, inc
 - The per-stage encoder0 timing breakdown now covers tiled projection/FFN kernels and the parallel ln1/ln2 reduction; stage timings still include queue-completion overhead and remain bottleneck hints rather than promotion evidence.
 - ORT tiny comparisons are same-value subgraph checks, not full deployment performance proof.
 
+## TVM/WebGPU fixed-shape feasibility spike, 2026-06-04
+
+A bounded local Apache TVM source-build spike generated browser-valid WGSL for three LC0-like hot shapes before attempting any whole-model lowering. The working setup lives outside the repo under `/tmp/tvm-webgpu-src` with Python env `/tmp/lc0-tvm-spike-py311`; importing TVM requires `DYLD_LIBRARY_PATH=/tmp/tvm-webgpu-src/build/lib` and `PYTHONPATH=/tmp/tvm-webgpu-src/python`. Yukon is reachable and has an RTX 3090, but it did not have TVM/PyTorch or `nvcc` available during the spike, so local Chromium/WebGPU stayed the lower-friction path for browser conclusions.
+
+Generated fixed-shape artifacts:
+
+- `/tmp/lc0_tvm_wgsl_shapes/proj_64x256x256.{matmul_kernel,add_kernel}.wgsl`
+- `/tmp/lc0_tvm_wgsl_shapes/ffn_dense1_64x256x1024.{matmul_kernel,add_kernel}.wgsl`
+- `/tmp/lc0_tvm_wgsl_shapes/ffn_dense2_64x1024x256.{matmul_kernel,add_kernel}.wgsl`
+- `/tmp/lc0_tvm_wgsl_shapes/ffn_dense1_64x256x1024.matmul_kernel.patched_sqrrelu.wgsl`
+- `/tmp/lc0_tvm_webgpu_spike_report.md`
+
+The per-kernel WGSL chunks compiled cleanly in Chromium/WebGPU with zero shader compilation errors or warnings. The aggregate TVM source dump is not directly loadable as one shader because TVM repeats per-kernel `PODArgs`/`podArgs`; use the split kernel chunks.
+
+Initial browser microbench artifact: `/tmp/lc0_tvm_vs_hand_bench_result.json`. This compared TVM's generated f32 `matmul_kernel + add_kernel` against a simple LC0-style one-dispatch f32 tiled matmul+bias kernel on the same shapes. TVM's tiled schedule was faster even with two dispatches: `64x256x256` was `0.054 ms` vs hand `0.078 ms` (`1.44x`), `64x256x1024` was `0.0735 ms` vs hand `0.198 ms` (`2.69x`), and `64x1024x256` was `0.135 ms` vs hand `0.1935 ms` (`1.43x`). Errors vs hand f32 accumulation were about `8e-8` to `2.6e-7` max absolute.
+
+Patched epilogue experiment artifact: `/tmp/lc0_tvm_fused_epilogue_bench_result.json`. The TVM `ffn_dense1_64x256x1024` matmul kernel epilogue was manually patched to add bias and apply sqrReLU before the final store, eliminating the separate epilogue dispatch while preserving TVM's tiled matmul schedule. The patched shader compiled cleanly and matched the hand fused f32 kernel with max absolute error `1.26e-8`. Timings: hand fused `0.181 ms` avg, TVM split matmul+manual sqrReLU epilogue `0.0643 ms`, patched TVM fused epilogue `0.0566 ms`. The patched TVM kernel was `3.20x` faster than the hand fused f32 kernel and `1.14x` faster than the split TVM path in this local browser run.
+
+Interpretation: TVM's raw matmul schedule is useful and likely better than the current simple hand-written LC0 f32 tiled kernels for these fixed dense shapes. It is still not a drop-in runtime replacement because the current LC0 path uses packed f16 weights, LC0-specific layouts, fused activation/residual epilogues, and existing model-pack/search integration. The promising near-term direction is a TVM-inspired or TVM-generated kernel lane: preserve TVM's stronger tiling, patch or generate LC0-specific fused epilogues, then reintroduce f16 packed-weight loading and compare end-to-end encoder/search latency. WebLLM/MLC is a precedent for compiler-generated backend kernels and profitable op fusion, but it is not a single whole-model super-kernel; it uses many optimized WebGPU/WGSL kernels plus fusion where dispatch/intermediate-memory savings justify it. For LC0, promotion should depend on browser dispatch count, synchronization count, readback bytes, parity fixtures, and search-level latency, not only isolated matmul time.
+
 ## Performance optimization backlog
 
-The next custom-runtime performance work should prioritize reducing CPU/GPU synchronization and removing remaining CPU-bound hot paths before doing more isolated kernel micro-tuning. After the 2026-06-04 closure pass, the most promising next work is to turn the deferred/double-buffered readback proof into search-scheduler overlap, then replace the serial attention score+softmax fusion with a parallel row-softmax design. The SIMD WASM input path is also worth repeating across hosts because the final local fixture bench showed a full-eval win, but it is not yet promoted.
+The next custom-runtime performance work should prioritize reducing CPU/GPU synchronization and removing remaining CPU-bound hot paths before doing more isolated kernel micro-tuning. After the 2026-06-04 closure pass and the TVM fixed-shape spike, the most promising next work is to carry TVM's stronger dense-kernel tiling into LC0-specific fused/f16 kernels, then turn the deferred/double-buffered readback proof into search-scheduler overlap. The SIMD WASM input path is also worth repeating across hosts because the final local fixture bench showed a full-eval win, but it is not yet promoted.
 
 1. **Extend true batched WGSL-head evaluation.** The experimental WGSL-head backend now has a physical batch path, but it still needs larger-visit repeat runs, wider host coverage, and follow-up work to reduce one-off setup/readback cost. Continue targeting one upload, one command buffer, and one combined result map per physical search batch. Keep static batch-1 ORT-head sessions non-concurrent.
 2. **Finish moving the initial input-body projection off JS.** The experimental `inputBackend=wgsl` path covers positional concat, input projection, Mish, and mul/add gates after CPU 112-plane encoding. Repeat against cached JS over larger search workloads, then promote only if parity and latency hold across hosts.
