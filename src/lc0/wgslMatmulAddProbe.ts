@@ -3939,6 +3939,34 @@ async function runPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>, tens
   };
 }
 
+type CachedPolicyValueHeadSession = {
+  session: ort.InferenceSession;
+  modelBuildMs: number;
+  sessionCreateMs: number;
+};
+
+async function createCachedPolicyValueHeadSession(tensors: Lc0WebPolicyValueHeadTensors): Promise<CachedPolicyValueHeadSession> {
+  const modelBuildStarted = nowMs();
+  const tinyOnnx = createTinyPolicyValueHeadsOnnxForTest(tensors);
+  const modelBuildMs = nowMs() - modelBuildStarted;
+  const sessionStarted = nowMs();
+  const session = await ort.createOrtSession(tinyOnnx);
+  return { session, modelBuildMs, sessionCreateMs: nowMs() - sessionStarted };
+}
+
+async function runCachedPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>, cached: CachedPolicyValueHeadSession): Promise<{
+  runMs: number;
+  mappedPolicy: number[];
+  wdl: number[];
+}> {
+  const runStarted = nowMs();
+  const outputs = await cached.session.run({ input: new ort.Tensor('float32', input, [DEFAULT_TOKENS, DEFAULT_N]) });
+  const runMs = nowMs() - runStarted;
+  const mappedPolicy = outputs.mappedPolicy.data as Float32Array<ArrayBufferLike>;
+  const wdl = outputs.wdl.data as Float32Array<ArrayBufferLike>;
+  return { runMs, mappedPolicy: Array.from(mappedPolicy), wdl: Array.from(wdl) };
+}
+
 const DEFAULT_INPUT_BODY_TENSORS = {
   posEncoding: '/const/pos_encoding',
   inputWeight: '/attn_body/matmul/w',
@@ -4021,45 +4049,188 @@ function buildInitialEncoderActivation(input: Lc0EvaluatorInput, tensors: Lc0Web
   return out;
 }
 
+type HybridEncoderLayerRuntime = {
+  tensors: Encoder0FfnTensors;
+  smolgenBias: BufferLike;
+  output: BufferLike;
+  attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>;
+  ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>;
+};
+
+class Lc0WebHybridRuntime {
+  private readonly device: DeviceLike;
+  private readonly inputTensors: Lc0WebInitialInputTensors;
+  private readonly headSession: CachedPolicyValueHeadSession;
+  private readonly inputBuffer: BufferLike;
+  private readonly readbackBuffer: BufferLike;
+  private readonly layerRuntimes: HybridEncoderLayerRuntime[];
+  private readonly buffers: BufferLike[];
+
+  private constructor(options: {
+    device: DeviceLike;
+    inputTensors: Lc0WebInitialInputTensors;
+    headSession: CachedPolicyValueHeadSession;
+    inputBuffer: BufferLike;
+    readbackBuffer: BufferLike;
+    layerRuntimes: HybridEncoderLayerRuntime[];
+    buffers: BufferLike[];
+    packUrl: string;
+    packLoadMs: number;
+    layers: number;
+  }) {
+    this.device = options.device;
+    this.inputTensors = options.inputTensors;
+    this.headSession = options.headSession;
+    this.inputBuffer = options.inputBuffer;
+    this.readbackBuffer = options.readbackBuffer;
+    this.layerRuntimes = options.layerRuntimes;
+    this.buffers = options.buffers;
+    this.packUrl = options.packUrl;
+    this.packLoadMs = options.packLoadMs;
+    this.layers = options.layers;
+  }
+
+  readonly packUrl: string;
+  readonly packLoadMs: number;
+  readonly layers: number;
+
+  static async create(options: Omit<Lc0WebHybridEvaluationOptions, 'input'>): Promise<Lc0WebHybridRuntime> {
+    const layers = clampInteger(options.layers, 10, 1, 32);
+    const prefixes = Array.from({ length: layers }, (_, layer) => `/encoder${layer}`);
+    const layerTensorNames = prefixes.map((prefix) => lc0WebEncoderBlockTensorNames(prefix));
+    const pack = await loadLc0WebModelPack(options.packUrl, {
+      verifyShards: options.verifyShards ?? true,
+      tensorNames: Array.from(new Set([
+        ...inputBodyTensorNameList(),
+        ...layerTensorNames.flatMap((names) => encoderBlockTensorNameList(names)),
+        ...policyValueHeadTensorNameList(),
+      ])),
+    });
+    const inputTensors = loadInitialInputTensors(pack);
+    const tensorsByLayer = layerTensorNames.map((names) => loadEncoder0FfnInputs(pack, names));
+    const headSession = await createCachedPolicyValueHeadSession(loadPolicyValueHeadTensors(pack));
+    const { device } = await requestDevice();
+    const usage = gpuGlobals().GPUBufferUsage!;
+    const outputElements = DEFAULT_TOKENS * DEFAULT_N;
+    const buffers: BufferLike[] = [];
+    const inputBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
+    const readbackBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
+    buffers.push(inputBuffer, readbackBuffer);
+    const layerRuntimes: HybridEncoderLayerRuntime[] = [];
+    let layerInput = inputBuffer;
+    for (const tensors of tensorsByLayer) {
+      const qWeight = createTransposedF16StorageBuffer(device, tensors.qWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
+      const qBias = createStorageBuffer(device, tensors.qBias.bytes, usage.STORAGE | usage.COPY_DST);
+      const kWeight = createTransposedF16StorageBuffer(device, tensors.kWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
+      const kBias = createStorageBuffer(device, tensors.kBias.bytes, usage.STORAGE | usage.COPY_DST);
+      const vWeight = createTransposedF16StorageBuffer(device, tensors.vWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
+      const vBias = createStorageBuffer(device, tensors.vBias.bytes, usage.STORAGE | usage.COPY_DST);
+      const scale = createStorageBuffer(device, paddedF16ScalarBytes(tensors.scale.bytes), usage.STORAGE | usage.COPY_DST);
+      const smolgenBias = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_DST });
+      const outWeight = createTransposedF16StorageBuffer(device, tensors.outWeight.bytes, DEFAULT_N, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
+      const outBias = createStorageBuffer(device, tensors.outBias.bytes, usage.STORAGE | usage.COPY_DST);
+      const attentionAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.alpha.bytes), usage.STORAGE | usage.COPY_DST);
+      const ln1Scale = createStorageBuffer(device, tensors.lnScale.bytes, usage.STORAGE | usage.COPY_DST);
+      const ln1Bias = createStorageBuffer(device, tensors.lnBias.bytes, usage.STORAGE | usage.COPY_DST);
+      const ffnDense1Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense1Weight.bytes, DEFAULT_N, DEFAULT_FFN_HIDDEN, usage.STORAGE | usage.COPY_DST);
+      const ffnDense1Bias = createStorageBuffer(device, tensors.ffnDense1Bias.bytes, usage.STORAGE | usage.COPY_DST);
+      const ffnDense2Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense2Weight.bytes, DEFAULT_FFN_HIDDEN, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
+      const ffnDense2Bias = createStorageBuffer(device, tensors.ffnDense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
+      const ffnAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.ffnAlpha.bytes), usage.STORAGE | usage.COPY_DST);
+      const ln2Scale = createStorageBuffer(device, tensors.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
+      const ln2Bias = createStorageBuffer(device, tensors.ln2Bias.bytes, usage.STORAGE | usage.COPY_DST);
+      const qkv = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 3 * 4, usage: usage.STORAGE | usage.COPY_DST });
+      const scores = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_DST });
+      const probs = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_DST });
+      const attn = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
+      const attentionSkip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
+      const attentionOutput = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
+      const ffnHidden = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN * 4, usage: usage.STORAGE | usage.COPY_DST });
+      const ffnSkip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
+      const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC | usage.COPY_DST });
+      buffers.push(qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, outWeight, outBias, attentionAlpha, ln1Scale, ln1Bias, ffnDense1Weight, ffnDense1Bias, ffnDense2Weight, ffnDense2Bias, ffnAlpha, ln2Scale, ln2Bias, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, output);
+      const attentionPipelines = createAttentionOutputPipelines(device, {
+        input: layerInput, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv, scores, probs, attn,
+        outWeight, outBias, alpha: attentionAlpha, skip: attentionSkip, lnScale: ln1Scale, lnBias: ln1Bias, output: attentionOutput,
+      });
+      const ffnPipelines = createEncoder0FfnPipelines(device, {
+        input: attentionOutput,
+        dense1Weight: ffnDense1Weight,
+        dense1Bias: ffnDense1Bias,
+        hidden: ffnHidden,
+        dense2Weight: ffnDense2Weight,
+        dense2Bias: ffnDense2Bias,
+        alpha: ffnAlpha,
+        skip: ffnSkip,
+        ln2Scale,
+        ln2Bias,
+        output,
+      });
+      layerRuntimes.push({ tensors, smolgenBias, output, attentionPipelines, ffnPipelines });
+      layerInput = output;
+    }
+    return new Lc0WebHybridRuntime({
+      device,
+      inputTensors,
+      headSession,
+      inputBuffer,
+      readbackBuffer,
+      layerRuntimes,
+      buffers,
+      packUrl: pack.manifestUrl,
+      packLoadMs: pack.elapsedMs,
+      layers,
+    });
+  }
+
+  async evaluate(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult> {
+    const { board, fen } = currentBoardAndFen(input);
+    let cpuInput = buildInitialEncoderActivation(input, this.inputTensors, options.historyFill);
+    this.device.queue.writeBuffer(this.inputBuffer, 0, cpuInput);
+    let encoderDispatchSyncedMs = 0;
+    for (const layer of this.layerRuntimes) {
+      this.device.queue.writeBuffer(layer.smolgenBias, 0, cpuEncoder0SmolgenBias(cpuInput, layer.tensors.smolgen));
+      const blockStarted = nowMs();
+      this.device.queue.submit([encodeLc0WebEncoderBlockDispatches(this.device, layer.attentionPipelines, layer.ffnPipelines, 1)]);
+      cpuInput = await readF32OutputOnce(this.device, layer.output, this.readbackBuffer, DEFAULT_TOKENS * DEFAULT_N);
+      encoderDispatchSyncedMs += nowMs() - blockStarted;
+    }
+    const heads = await runCachedPolicyValueHeadsOrt(cpuInput, this.headSession);
+    const wdl: [number, number, number] = [Number(heads.wdl[0]), Number(heads.wdl[1]), Number(heads.wdl[2])];
+    const legalPriors = legalPolicyPriors(board, heads.mappedPolicy, options.policyTemperature);
+    return {
+      status: 'LC0WEB_HYBRID_EVALUATION_DONE',
+      backend: 'lc0web-wgsl-encoder-ort-heads',
+      packUrl: this.packUrl,
+      layers: this.layers,
+      packLoadMs: this.packLoadMs,
+      encoderDispatchSyncedMs,
+      headRunMs: heads.runMs,
+      fen,
+      wdl,
+      q: wdl[0] - wdl[2],
+      mlh: 0,
+      legalPriors,
+      bestMove: legalPriors[0]?.uci,
+      mappedPolicy: heads.mappedPolicy,
+    };
+  }
+
+  destroy(): void {
+    for (const buffer of this.buffers) buffer.destroy?.();
+  }
+}
+
 export async function runLc0WebHybridEvaluation(options: Lc0WebHybridEvaluationOptions): Promise<Lc0WebHybridEvaluationResult> {
-  const layers = clampInteger(options.layers, 10, 1, 32);
-  const historyFill = options.historyFill ?? 'fen_only';
-  const { board, fen } = currentBoardAndFen(options.input);
-  const inputPack = await loadLc0WebModelPack(options.packUrl, {
-    verifyShards: options.verifyShards ?? true,
-    tensorNames: inputBodyTensorNameList(),
-  });
-  const encoderInput = buildInitialEncoderActivation(options.input, loadInitialInputTensors(inputPack), historyFill);
-  const stack = await runLc0WebEncoderStackBenchmark({
-    packUrl: options.packUrl,
-    layers,
-    warmup: 0,
-    verifyShards: options.verifyShards,
-    compareOrt: false,
-    compareHeads: true,
-    input: encoderInput,
-    includeHeadOutputs: true,
-  });
-  const heads = stack.policyValueHeads;
-  if (!heads?.mappedPolicy) throw new Error('lc0web hybrid evaluation did not produce mapped policy logits');
-  const wdl: [number, number, number] = [Number(heads.wdl[0]), Number(heads.wdl[1]), Number(heads.wdl[2])];
-  const legalPriors = legalPolicyPriors(board, heads.mappedPolicy, options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE);
-  return {
-    status: 'LC0WEB_HYBRID_EVALUATION_DONE',
-    backend: 'lc0web-wgsl-encoder-ort-heads',
-    packUrl: stack.packUrl,
-    layers,
-    packLoadMs: inputPack.elapsedMs + stack.packLoadMs,
-    encoderDispatchSyncedMs: stack.dispatchSyncedMs,
-    headRunMs: heads.runMs,
-    fen,
-    wdl,
-    q: wdl[0] - wdl[2],
-    mlh: 0,
-    legalPriors,
-    bestMove: legalPriors[0]?.uci,
-    mappedPolicy: heads.mappedPolicy,
-  };
+  const runtime = await Lc0WebHybridRuntime.create(options);
+  try {
+    return await runtime.evaluate(options.input, {
+      historyFill: options.historyFill ?? 'fen_only',
+      policyTemperature: options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE,
+    });
+  } finally {
+    runtime.destroy();
+  }
 }
 
 export class Lc0WebHybridEvaluator {
@@ -4068,6 +4239,8 @@ export class Lc0WebHybridEvaluator {
   readonly historyFill: Lc0HistoryFill;
   readonly policyTemperature: number;
   readonly verifyShards: boolean;
+  private runtimePromise?: Promise<Lc0WebHybridRuntime>;
+  private evaluationQueue: Promise<void> = Promise.resolve();
 
   constructor(options: Omit<Lc0WebHybridEvaluationOptions, 'input'>) {
     this.packUrl = options.packUrl;
@@ -4077,21 +4250,46 @@ export class Lc0WebHybridEvaluator {
     this.verifyShards = options.verifyShards ?? true;
   }
 
+  private runtime(): Promise<Lc0WebHybridRuntime> {
+    if (!this.runtimePromise) {
+      const runtimePromise = Lc0WebHybridRuntime.create({
+        packUrl: this.packUrl,
+        layers: this.layers,
+        historyFill: this.historyFill,
+        policyTemperature: this.policyTemperature,
+        verifyShards: this.verifyShards,
+      });
+      runtimePromise.catch(() => {
+        if (this.runtimePromise === runtimePromise) this.runtimePromise = undefined;
+      });
+      this.runtimePromise = runtimePromise;
+    }
+    return this.runtimePromise;
+  }
+
+  private enqueueEvaluation<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.evaluationQueue.then(work, work);
+    this.evaluationQueue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
   async evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> {
-    return runLc0WebHybridEvaluation({
-      packUrl: this.packUrl,
-      input,
-      layers: this.layers,
+    return this.enqueueEvaluation(async () => (await this.runtime()).evaluate(input, {
       historyFill: this.historyFill,
       policyTemperature: this.policyTemperature,
-      verifyShards: this.verifyShards,
-    });
+    }));
   }
 
   async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
-    const out: Lc0Evaluation[] = [];
-    for (const input of inputs) out.push(await this.evaluate(input));
-    return out;
+    return this.enqueueEvaluation(async () => {
+      const runtime = await this.runtime();
+      const out: Lc0Evaluation[] = [];
+      for (const input of inputs) out.push(await runtime.evaluate(input, {
+        historyFill: this.historyFill,
+        policyTemperature: this.policyTemperature,
+      }));
+      return out;
+    });
   }
 }
 

@@ -21,7 +21,7 @@ This checkpoint records the current custom-kernel path for the batch-8 f16 `lc0w
 - `?encoder0BlockOrtBench=1`: tiny ORT comparison for attention-value output through attention output projection/ln1 plus FFN/ln2.
 - `?encoderStackBench=1&encoderLayers=N`: reusable WGSL encoder-block primitive loop over `/encoder0..N-1`, with per-block CPU f32 reference checks and optional per-block tiny f32 ONNX/ORT comparison for attention-output+FFN (`encoderStackOrt=1`, default).
 - `?encoderStackHeadsBench=1&encoderLayers=N&encoderStackHeads=1`: hybrid end-to-end probe that feeds the custom WGSL encoder-stack output into tiny f32 ONNX/ORT policy and WDL value heads. The policy head covers the main 64×64 move-logit matmul path plus the promotion slice/add/remap path to the final 1858 LC0 policy logits.
-- `?runtime=hybrid` / `?hybridEvaluator=1`: worker-owned production evaluator wiring for the lc0web pack. It builds the real `/input/planes` → `/attn_body` activation from LC0 112-plane input, runs the full custom WGSL encoder stack, then runs the tiny f32 ONNX/ORT mapped-policy + WDL heads and feeds the resulting 1858 logits through the normal legal-prior adapter.
+- `?runtime=hybrid` / `?hybridEvaluator=1`: worker-owned production evaluator wiring for the lc0web pack. It builds the real `/input/planes` → `/attn_body` activation from LC0 112-plane input, runs the full custom WGSL encoder stack, then runs the tiny f32 ONNX/ORT mapped-policy + WDL heads and feeds the resulting 1858 logits through the normal legal-prior adapter. A persistent evaluator caches the loaded pack tensor views, encoder GPU buffers/bind groups/pipelines, and ORT head session across evaluations.
 - `?hybridDrift=1&encoderLayers=10&hybridDriftLimit=N`: browser fixture route used by `npm run lc0:browser-hybrid-drift` to dump hybrid evaluations for native BLAS fixtures so policy/WDL drift can be compared against f32 ONNX and native LC0 BLAS.
 - `?encoderPrefix=/encoderN`: experimental tensor-prefix override for attention-output/FFN/full-block routes so the same plumbing can target later encoder layers.
 
@@ -98,7 +98,7 @@ npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 10 --timeout 25000 --wgsl-it
 
 The custom path now validates a complete encoder0 block in staged WGSL form, including smolgen score bias and FFN. This is a stronger milestone than the earlier attention-core-only checkpoint, but it is still not an end-to-end LC0 evaluator:
 
-- The reusable encoder-block loop now covers `/encoder0` → `/encoder9` with GPU-buffer handoff. The browser worker can now run a hybrid evaluator path that builds real LC0 112-plane inputs, feeds the full WGSL encoder stack, and uses tiny f32 ONNX/ORT mapped-policy + WDL heads. This is wired for policy/search evaluation and drift fixtures, but it is still correctness-first and reloads/rebuilds more than a promoted low-latency runtime should.
+- The reusable encoder-block loop now covers `/encoder0` → `/encoder9` with GPU-buffer handoff. The browser worker can now run a hybrid evaluator path that builds real LC0 112-plane inputs, feeds the full WGSL encoder stack, and uses tiny f32 ONNX/ORT mapped-policy + WDL heads. Persistent evaluator instances now reuse loaded pack tensor views, encoder GPU buffers/bind groups/pipelines, and the ORT head session across evaluations; the path is still correctness-first because smolgen bias generation and per-layer handoff readback remain CPU-side.
 - Timing reports both command submission/readback synchronization and, when Chromium exposes WebGPU `timestamp-query`, a GPU timestamp duration for the encoder0 attention+FFN command sequence.
 - The full encoder0 benchmark no longer forces an explicit queue-completion boundary between attention-output and FFN; both command buffers are submitted together and rely on WebGPU queue ordering for the ln1-output → FFN-dense1 dependency.
 - The per-stage encoder0 timing breakdown now covers tiled projection/FFN kernels and the parallel ln1/ln2 reduction; stage timings still include queue-completion overhead and remain bottleneck hints rather than promotion evidence.
@@ -112,7 +112,7 @@ Next gates before an end-to-end custom runtime:
 
 1. Add ORT comparisons for the remaining full attention block if practical.
 2. Repeat and broaden alternating browser runs against ORT WebGPU after validating the full encoder stack.
-3. Optimize the hybrid evaluator so pack tensors, GPU buffers/pipelines, and the ORT head session are cached across evaluations before considering promotion.
+3. Remove the remaining correctness-first hybrid bottlenecks before considering promotion: CPU-side smolgen bias generation and per-layer encoder readback.
 4. Broaden `lc0:browser-hybrid-drift` beyond the current smoke limit and repeat Chromium/WebGPU runs before comparing promotion candidates.
 5. Continue replacing remaining correctness-first kernels (for example attention score/value and any profitable fusion points) with tiled/fused variants without loosening the parity gate.
 5. Preserve f32 ONNX/native parity as the correctness ladder while using f16/WebGPU as deployment target.
