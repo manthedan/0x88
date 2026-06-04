@@ -61,7 +61,7 @@
         "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3"
       },
       {
-        "label": "Queenless middlegame",
+        "label": "Middlegame",
         "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9"
       }
     ],
@@ -101,7 +101,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "coldMs": 28.474999964237213,
@@ -143,7 +143,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "coldMs": 57.2950000166893,
@@ -185,7 +185,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "coldMs": 79.38000005483627,
@@ -227,7 +227,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "coldMs": 186.12999999523163,
@@ -269,7 +269,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "coldMs": 146.87999999523163,
@@ -311,7 +311,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "coldMs": 147.39500004053116,
@@ -353,7 +353,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "coldMs": 15.625,
@@ -395,7 +395,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "coldMs": 28.665000021457672,
@@ -437,7 +437,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "coldMs": 42.0100000500679,
@@ -479,7 +479,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "coldMs": 133.11500000953674,
@@ -521,7 +521,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "coldMs": 143.66500002145767,
@@ -563,7 +563,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "coldMs": 158.34500002861023,
@@ -1167,7 +1167,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "cold",
@@ -1181,7 +1181,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-1",
@@ -1195,7 +1195,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-2",
@@ -1209,7 +1209,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-3",
@@ -1223,7 +1223,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-4",
@@ -1237,7 +1237,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-5",
@@ -1251,7 +1251,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-6",
@@ -1265,7 +1265,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-7",
@@ -1279,7 +1279,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-8",
@@ -1293,7 +1293,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-9",
@@ -1307,7 +1307,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-10",
@@ -1321,7 +1321,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-11",
@@ -1335,7 +1335,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-12",
@@ -1349,7 +1349,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-13",
@@ -1363,7 +1363,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-14",
@@ -1377,7 +1377,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-15",
@@ -1391,7 +1391,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-16",
@@ -1405,7 +1405,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-17",
@@ -1419,7 +1419,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-18",
@@ -1433,7 +1433,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-19",
@@ -1447,7 +1447,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-20",
@@ -2049,7 +2049,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "cold",
@@ -2063,7 +2063,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-1",
@@ -2077,7 +2077,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-2",
@@ -2091,7 +2091,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-3",
@@ -2105,7 +2105,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-4",
@@ -2119,7 +2119,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-5",
@@ -2133,7 +2133,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-6",
@@ -2147,7 +2147,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-7",
@@ -2161,7 +2161,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-8",
@@ -2175,7 +2175,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-9",
@@ -2189,7 +2189,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-10",
@@ -2203,7 +2203,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-11",
@@ -2217,7 +2217,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-12",
@@ -2231,7 +2231,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-13",
@@ -2245,7 +2245,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-14",
@@ -2259,7 +2259,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-15",
@@ -2273,7 +2273,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-16",
@@ -2287,7 +2287,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-17",
@@ -2301,7 +2301,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-18",
@@ -2315,7 +2315,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-19",
@@ -2329,7 +2329,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-20",
@@ -2931,7 +2931,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "cold",
@@ -2945,7 +2945,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-1",
@@ -2959,7 +2959,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-2",
@@ -2973,7 +2973,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-3",
@@ -2987,7 +2987,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-4",
@@ -3001,7 +3001,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-5",
@@ -3015,7 +3015,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-6",
@@ -3029,7 +3029,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-7",
@@ -3043,7 +3043,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-8",
@@ -3057,7 +3057,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-9",
@@ -3071,7 +3071,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-10",
@@ -3085,7 +3085,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-11",
@@ -3099,7 +3099,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-12",
@@ -3113,7 +3113,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-13",
@@ -3127,7 +3127,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-14",
@@ -3141,7 +3141,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-15",
@@ -3155,7 +3155,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-16",
@@ -3169,7 +3169,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-17",
@@ -3183,7 +3183,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-18",
@@ -3197,7 +3197,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-19",
@@ -3211,7 +3211,7 @@
     {
       "variant": "Reckless Full",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-20",
@@ -3813,7 +3813,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "cold",
@@ -3827,7 +3827,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-1",
@@ -3841,7 +3841,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-2",
@@ -3855,7 +3855,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-3",
@@ -3869,7 +3869,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-4",
@@ -3883,7 +3883,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-5",
@@ -3897,7 +3897,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-6",
@@ -3911,7 +3911,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-7",
@@ -3925,7 +3925,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-8",
@@ -3939,7 +3939,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-9",
@@ -3953,7 +3953,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-10",
@@ -3967,7 +3967,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-11",
@@ -3981,7 +3981,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-12",
@@ -3995,7 +3995,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-13",
@@ -4009,7 +4009,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-14",
@@ -4023,7 +4023,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-15",
@@ -4037,7 +4037,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-16",
@@ -4051,7 +4051,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-17",
@@ -4065,7 +4065,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-18",
@@ -4079,7 +4079,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-19",
@@ -4093,7 +4093,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-20",
@@ -4695,7 +4695,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "cold",
@@ -4709,7 +4709,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-1",
@@ -4723,7 +4723,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-2",
@@ -4737,7 +4737,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-3",
@@ -4751,7 +4751,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-4",
@@ -4765,7 +4765,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-5",
@@ -4779,7 +4779,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-6",
@@ -4793,7 +4793,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-7",
@@ -4807,7 +4807,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-8",
@@ -4821,7 +4821,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-9",
@@ -4835,7 +4835,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-10",
@@ -4849,7 +4849,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-11",
@@ -4863,7 +4863,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-12",
@@ -4877,7 +4877,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-13",
@@ -4891,7 +4891,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-14",
@@ -4905,7 +4905,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-15",
@@ -4919,7 +4919,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-16",
@@ -4933,7 +4933,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-17",
@@ -4947,7 +4947,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-18",
@@ -4961,7 +4961,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-19",
@@ -4975,7 +4975,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-20",
@@ -5577,7 +5577,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "cold",
@@ -5591,7 +5591,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-1",
@@ -5605,7 +5605,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-2",
@@ -5619,7 +5619,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-3",
@@ -5633,7 +5633,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-4",
@@ -5647,7 +5647,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-5",
@@ -5661,7 +5661,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-6",
@@ -5675,7 +5675,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-7",
@@ -5689,7 +5689,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-8",
@@ -5703,7 +5703,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-9",
@@ -5717,7 +5717,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-10",
@@ -5731,7 +5731,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-11",
@@ -5745,7 +5745,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-12",
@@ -5759,7 +5759,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-13",
@@ -5773,7 +5773,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-14",
@@ -5787,7 +5787,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-15",
@@ -5801,7 +5801,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-16",
@@ -5815,7 +5815,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-17",
@@ -5829,7 +5829,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-18",
@@ -5843,7 +5843,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-19",
@@ -5857,7 +5857,7 @@
     {
       "variant": "Reckless Full",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-20",
@@ -6459,7 +6459,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "cold",
@@ -6473,7 +6473,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-1",
@@ -6487,7 +6487,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-2",
@@ -6501,7 +6501,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-3",
@@ -6515,7 +6515,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-4",
@@ -6529,7 +6529,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-5",
@@ -6543,7 +6543,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-6",
@@ -6557,7 +6557,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-7",
@@ -6571,7 +6571,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-8",
@@ -6585,7 +6585,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-9",
@@ -6599,7 +6599,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-10",
@@ -6613,7 +6613,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-11",
@@ -6627,7 +6627,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-12",
@@ -6641,7 +6641,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-13",
@@ -6655,7 +6655,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-14",
@@ -6669,7 +6669,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-15",
@@ -6683,7 +6683,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-16",
@@ -6697,7 +6697,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-17",
@@ -6711,7 +6711,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-18",
@@ -6725,7 +6725,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-19",
@@ -6739,7 +6739,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-20",
@@ -7341,7 +7341,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "cold",
@@ -7355,7 +7355,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-1",
@@ -7369,7 +7369,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-2",
@@ -7383,7 +7383,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-3",
@@ -7397,7 +7397,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-4",
@@ -7411,7 +7411,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-5",
@@ -7425,7 +7425,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-6",
@@ -7439,7 +7439,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-7",
@@ -7453,7 +7453,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-8",
@@ -7467,7 +7467,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-9",
@@ -7481,7 +7481,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-10",
@@ -7495,7 +7495,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-11",
@@ -7509,7 +7509,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-12",
@@ -7523,7 +7523,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-13",
@@ -7537,7 +7537,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-14",
@@ -7551,7 +7551,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-15",
@@ -7565,7 +7565,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-16",
@@ -7579,7 +7579,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-17",
@@ -7593,7 +7593,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-18",
@@ -7607,7 +7607,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-19",
@@ -7621,7 +7621,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-20",
@@ -8223,7 +8223,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "cold",
@@ -8237,7 +8237,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-1",
@@ -8251,7 +8251,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-2",
@@ -8265,7 +8265,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-3",
@@ -8279,7 +8279,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-4",
@@ -8293,7 +8293,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-5",
@@ -8307,7 +8307,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-6",
@@ -8321,7 +8321,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-7",
@@ -8335,7 +8335,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-8",
@@ -8349,7 +8349,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-9",
@@ -8363,7 +8363,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-10",
@@ -8377,7 +8377,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-11",
@@ -8391,7 +8391,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-12",
@@ -8405,7 +8405,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-13",
@@ -8419,7 +8419,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-14",
@@ -8433,7 +8433,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-15",
@@ -8447,7 +8447,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-16",
@@ -8461,7 +8461,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-17",
@@ -8475,7 +8475,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-18",
@@ -8489,7 +8489,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-19",
@@ -8503,7 +8503,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "persistent",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-20",
@@ -9105,7 +9105,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "cold",
@@ -9119,7 +9119,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-1",
@@ -9133,7 +9133,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-2",
@@ -9147,7 +9147,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-3",
@@ -9161,7 +9161,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-4",
@@ -9175,7 +9175,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-5",
@@ -9189,7 +9189,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-6",
@@ -9203,7 +9203,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-7",
@@ -9217,7 +9217,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-8",
@@ -9231,7 +9231,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-9",
@@ -9245,7 +9245,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-10",
@@ -9259,7 +9259,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-11",
@@ -9273,7 +9273,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-12",
@@ -9287,7 +9287,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-13",
@@ -9301,7 +9301,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-14",
@@ -9315,7 +9315,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-15",
@@ -9329,7 +9329,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-16",
@@ -9343,7 +9343,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-17",
@@ -9357,7 +9357,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-18",
@@ -9371,7 +9371,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-19",
@@ -9385,7 +9385,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 7",
       "run": "warm-20",
@@ -9987,7 +9987,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "cold",
@@ -10001,7 +10001,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-1",
@@ -10015,7 +10015,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-2",
@@ -10029,7 +10029,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-3",
@@ -10043,7 +10043,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-4",
@@ -10057,7 +10057,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-5",
@@ -10071,7 +10071,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-6",
@@ -10085,7 +10085,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-7",
@@ -10099,7 +10099,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-8",
@@ -10113,7 +10113,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-9",
@@ -10127,7 +10127,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-10",
@@ -10141,7 +10141,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-11",
@@ -10155,7 +10155,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-12",
@@ -10169,7 +10169,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-13",
@@ -10183,7 +10183,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-14",
@@ -10197,7 +10197,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-15",
@@ -10211,7 +10211,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-16",
@@ -10225,7 +10225,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-17",
@@ -10239,7 +10239,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-18",
@@ -10253,7 +10253,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-19",
@@ -10267,7 +10267,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 8",
       "run": "warm-20",
@@ -10869,7 +10869,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "cold",
@@ -10883,7 +10883,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-1",
@@ -10897,7 +10897,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-2",
@@ -10911,7 +10911,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-3",
@@ -10925,7 +10925,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-4",
@@ -10939,7 +10939,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-5",
@@ -10953,7 +10953,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-6",
@@ -10967,7 +10967,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-7",
@@ -10981,7 +10981,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-8",
@@ -10995,7 +10995,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-9",
@@ -11009,7 +11009,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-10",
@@ -11023,7 +11023,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-11",
@@ -11037,7 +11037,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-12",
@@ -11051,7 +11051,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-13",
@@ -11065,7 +11065,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-14",
@@ -11079,7 +11079,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-15",
@@ -11093,7 +11093,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-16",
@@ -11107,7 +11107,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-17",
@@ -11121,7 +11121,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-18",
@@ -11135,7 +11135,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-19",
@@ -11149,7 +11149,7 @@
     {
       "variant": "Reckless Full SIMD experimental",
       "mode": "one-shot",
-      "position": "Queenless middlegame",
+      "position": "Middlegame",
       "fen": "r1b2rk1/pp3ppp/2n1pn2/q2p4/3P4/2P1PN2/PB1N1PPP/R2QKB1R w KQ - 2 9",
       "budget": "depth 9",
       "run": "warm-20",

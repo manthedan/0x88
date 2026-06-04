@@ -15,11 +15,11 @@ Raw report: [`reckless_browser_benchmark_2026-06-04_clean_depth7-9.json`](./reck
 | depth 7 | persistent | Reckless Full | 15.80 | 339,016 | 1.00x | 1.00x |
 | depth 7 | persistent | Reckless Full SIMD experimental | 9.92 | 706,881 | 1.59x faster | 2.09x |
 | depth 7 | one-shot | Reckless Full | 29.16 | 291,694 | 1.00x | 1.00x |
-| depth 7 | one-shot | Reckless Full SIMD experimental | 45.66 | 611,455 | 0.64x slower | 2.10x |
+| depth 7 | one-shot | Reckless Full SIMD experimental | 45.66 | 611,455 | 0.64x as fast | 2.10x |
 | depth 8 | persistent | Reckless Full | 29.49 | 326,822 | 1.00x | 1.00x |
 | depth 8 | persistent | Reckless Full SIMD experimental | 21.28 | 673,483 | 1.39x faster | 2.06x |
 | depth 8 | one-shot | Reckless Full | 40.33 | 306,242 | 1.00x | 1.00x |
-| depth 8 | one-shot | Reckless Full SIMD experimental | 49.67 | 651,880 | 0.81x slower | 2.13x |
+| depth 8 | one-shot | Reckless Full SIMD experimental | 49.67 | 651,880 | 0.81x as fast | 2.13x |
 | depth 9 | persistent | Reckless Full | 48.23 | 310,949 | 1.00x | 1.00x |
 | depth 9 | persistent | Reckless Full SIMD experimental | 33.74 | 653,842 | 1.43x faster | 2.10x |
 | depth 9 | one-shot | Reckless Full | 56.76 | 299,956 | 1.00x | 1.00x |
