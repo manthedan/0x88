@@ -62,6 +62,7 @@ type InitMessage = {
   packUrl?: string;
   layers?: number;
   verifyShards?: boolean;
+  headBackend?: 'ort' | 'wgsl';
 };
 
 type SearchMessage = {
@@ -92,6 +93,7 @@ type HybridEvaluateMessage = {
   input: Lc0EvaluatorInput;
   layers?: number;
   verifyShards?: boolean;
+  headBackend?: 'ort' | 'wgsl';
 };
 
 type LoadPackMessage = {
@@ -405,10 +407,11 @@ async function handleInit(message: InitMessage): Promise<void> {
       packUrl: message.packUrl,
       layers: message.layers,
       verifyShards: message.verifyShards,
+      headBackend: message.headBackend,
     });
     searcher = new Lc0PuctSearcher(evaluator);
     configuredModelUrl = message.packUrl;
-    post({ type: 'ready', id: message.id, backend: 'lc0web-wgsl-encoder-ort-heads', modelCache: 'hybrid-pack-lazy' });
+    post({ type: 'ready', id: message.id, backend: message.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads', modelCache: 'hybrid-pack-lazy' });
     return;
   }
   const modelLoad = await loadLc0ModelForOrt(message.modelUrl, { cache: message.cacheModel });
@@ -740,6 +743,7 @@ async function handleHybridEvaluate(message: HybridEvaluateMessage): Promise<voi
     input: message.input,
     layers: message.layers,
     verifyShards: message.verifyShards,
+    headBackend: message.headBackend,
   });
   post({ type: 'hybridEvaluationResult', id: message.id, result });
 }

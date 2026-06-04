@@ -4832,6 +4832,139 @@ async function runCachedPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>
   return { runMs, mappedPolicy: Array.from(mappedPolicy), wdl: Array.from(wdl) };
 }
 
+type Lc0WebHybridHeadBackend = 'ort' | 'wgsl';
+
+type WgslPolicyValueHeadRuntime = {
+  densePipeline: PipelineLike;
+  policyLogitsPipeline: PipelineLike;
+  mappedPolicyPipeline: PipelineLike;
+  vectorPipeline: PipelineLike;
+  softmaxPipeline: PipelineLike;
+  policyBindGroup: unknown;
+  policyQBindGroup: unknown;
+  policyKBindGroup: unknown;
+  policyLogitsBindGroup: unknown;
+  mappedPolicyBindGroup: unknown;
+  valueBindGroup: unknown;
+  valueDense1BindGroup: unknown;
+  valueDense2BindGroup: unknown;
+  valueSoftmaxBindGroup: unknown;
+  mappedPolicyBuffer: BufferLike;
+  valueWdlBuffer: BufferLike;
+  mappedPolicyReadbackBuffer: BufferLike;
+  valueWdlReadbackBuffer: BufferLike;
+  buffers: BufferLike[];
+};
+
+function createWgslPolicyValueHeadRuntime(device: DeviceLike, tensors: Lc0WebPolicyValueHeadTensors, inputBuffer: BufferLike, usage: Record<string, number>): WgslPolicyValueHeadRuntime {
+  const denseModule = device.createShaderModule({ label: 'lc0web hybrid WGSL policy/value head dense', code: WGSL_HEADS_DENSE_PROBE });
+  const densePipeline = device.createComputePipeline({ layout: 'auto', compute: { module: denseModule, entryPoint: 'main' } }) as PipelineLike;
+  const policyLogitsModule = device.createShaderModule({ label: 'lc0web hybrid WGSL policy logits', code: WGSL_HEADS_POLICY_LOGITS_PROBE });
+  const policyLogitsPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: policyLogitsModule, entryPoint: 'main' } }) as PipelineLike;
+  const mappedPolicyModule = device.createShaderModule({ label: 'lc0web hybrid WGSL mapped policy', code: WGSL_MAPPED_POLICY_PROBE });
+  const mappedPolicyPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: mappedPolicyModule, entryPoint: 'main' } }) as PipelineLike;
+  const vectorModule = device.createShaderModule({ label: 'lc0web hybrid WGSL value vector dense', code: WGSL_HEADS_VECTOR_DENSE_PROBE });
+  const vectorPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: vectorModule, entryPoint: 'main' } }) as PipelineLike;
+  const softmaxModule = device.createShaderModule({ label: 'lc0web hybrid WGSL WDL softmax', code: WGSL_HEADS_SOFTMAX3_PROBE });
+  const softmaxPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: softmaxModule, entryPoint: 'main' } }) as PipelineLike;
+
+  const buffers: BufferLike[] = [];
+  const policyWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyDense1Weight.bytes, DEFAULT_N * DEFAULT_N), usage.STORAGE | usage.COPY_DST);
+  const policyBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyDense1Bias.bytes, DEFAULT_N), usage.STORAGE | usage.COPY_DST);
+  const policyQWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyQWeight.bytes, DEFAULT_N * DEFAULT_N), usage.STORAGE | usage.COPY_DST);
+  const policyQBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyQBias.bytes, DEFAULT_N), usage.STORAGE | usage.COPY_DST);
+  const policyKWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyKWeight.bytes, DEFAULT_N * DEFAULT_N), usage.STORAGE | usage.COPY_DST);
+  const policyKBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyKBias.bytes, DEFAULT_N), usage.STORAGE | usage.COPY_DST);
+  const policyScaleBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyScale.bytes, 1), usage.STORAGE | usage.COPY_DST);
+  const policyPromotionWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyPromotionWeight.bytes, DEFAULT_N * 4), usage.STORAGE | usage.COPY_DST);
+  const policyMappingBuffer = createStorageBuffer(device, readI32Array(tensors.policyMappingTable.bytes, DEFAULT_POLICY_MAPPED_OUTPUTS), usage.STORAGE | usage.COPY_DST);
+  const valueWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueEmbedWeight.bytes, DEFAULT_N * DEFAULT_VALUE_EMBED), usage.STORAGE | usage.COPY_DST);
+  const valueBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueEmbedBias.bytes, DEFAULT_VALUE_EMBED), usage.STORAGE | usage.COPY_DST);
+  const valueDense1WeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense1Weight.bytes, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * DEFAULT_VALUE_HIDDEN), usage.STORAGE | usage.COPY_DST);
+  const valueDense1BiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense1Bias.bytes, DEFAULT_VALUE_HIDDEN), usage.STORAGE | usage.COPY_DST);
+  const valueDense2WeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense2Weight.bytes, DEFAULT_VALUE_HIDDEN * 3), usage.STORAGE | usage.COPY_DST);
+  const valueDense2BiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense2Bias.bytes, 3), usage.STORAGE | usage.COPY_DST);
+  const policyOutputBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 4, usage: usage.STORAGE }) as BufferLike;
+  const policyQBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 4, usage: usage.STORAGE }) as BufferLike;
+  const policyKBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 4, usage: usage.STORAGE }) as BufferLike;
+  const policyLogitsBuffer = device.createBuffer({ size: DEFAULT_POLICY_OUTPUTS * 4, usage: usage.STORAGE }) as BufferLike;
+  const mappedPolicyBuffer = device.createBuffer({ size: DEFAULT_POLICY_MAPPED_OUTPUTS * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
+  const valueOutputBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * 4, usage: usage.STORAGE }) as BufferLike;
+  const valueHiddenBuffer = device.createBuffer({ size: DEFAULT_VALUE_HIDDEN * 4, usage: usage.STORAGE }) as BufferLike;
+  const valueLogitsBuffer = device.createBuffer({ size: 3 * 4, usage: usage.STORAGE }) as BufferLike;
+  const valueWdlBuffer = device.createBuffer({ size: 3 * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
+  const mappedPolicyReadbackBuffer = device.createBuffer({ size: DEFAULT_POLICY_MAPPED_OUTPUTS * 4, usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
+  const valueWdlReadbackBuffer = device.createBuffer({ size: 3 * 4, usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
+  const policyShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 1], usage.UNIFORM | usage.COPY_DST);
+  const policyLinearShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 0], usage.UNIFORM | usage.COPY_DST);
+  const valueShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_EMBED, 1], usage.UNIFORM | usage.COPY_DST);
+  const valueDense1ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN, 1], usage.UNIFORM | usage.COPY_DST);
+  const valueDense2ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_HIDDEN, 3, 0], usage.UNIFORM | usage.COPY_DST);
+  buffers.push(policyWeightBuffer, policyBiasBuffer, policyQWeightBuffer, policyQBiasBuffer, policyKWeightBuffer, policyKBiasBuffer, policyScaleBuffer, policyPromotionWeightBuffer, policyMappingBuffer, valueWeightBuffer, valueBiasBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, policyOutputBuffer, policyQBuffer, policyKBuffer, policyLogitsBuffer, mappedPolicyBuffer, valueOutputBuffer, valueHiddenBuffer, valueLogitsBuffer, valueWdlBuffer, mappedPolicyReadbackBuffer, valueWdlReadbackBuffer, policyShapeBuffer, policyLinearShapeBuffer, valueShapeBuffer, valueDense1ShapeBuffer, valueDense2ShapeBuffer);
+
+  return {
+    densePipeline,
+    policyLogitsPipeline,
+    mappedPolicyPipeline,
+    vectorPipeline,
+    softmaxPipeline,
+    policyBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, inputBuffer, policyWeightBuffer, policyBiasBuffer, policyOutputBuffer, policyShapeBuffer),
+    policyQBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, policyOutputBuffer, policyQWeightBuffer, policyQBiasBuffer, policyQBuffer, policyLinearShapeBuffer),
+    policyKBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, policyOutputBuffer, policyKWeightBuffer, policyKBiasBuffer, policyKBuffer, policyLinearShapeBuffer),
+    policyLogitsBindGroup: createWgslHeadsPolicyLogitsBindGroup(device, policyLogitsPipeline, policyQBuffer, policyKBuffer, policyScaleBuffer, policyLogitsBuffer),
+    mappedPolicyBindGroup: createMappedPolicyBindGroup(device, mappedPolicyPipeline, policyLogitsBuffer, policyKBuffer, policyPromotionWeightBuffer, policyMappingBuffer, mappedPolicyBuffer),
+    valueBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, inputBuffer, valueWeightBuffer, valueBiasBuffer, valueOutputBuffer, valueShapeBuffer),
+    valueDense1BindGroup: createWgslHeadsDenseBindGroup(device, vectorPipeline, valueOutputBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueHiddenBuffer, valueDense1ShapeBuffer),
+    valueDense2BindGroup: createWgslHeadsDenseBindGroup(device, vectorPipeline, valueHiddenBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, valueLogitsBuffer, valueDense2ShapeBuffer),
+    valueSoftmaxBindGroup: createWgslHeadsSoftmaxBindGroup(device, softmaxPipeline, valueLogitsBuffer, valueWdlBuffer),
+    mappedPolicyBuffer,
+    valueWdlBuffer,
+    mappedPolicyReadbackBuffer,
+    valueWdlReadbackBuffer,
+    buffers,
+  };
+}
+
+function encodeWgslPolicyValueHeads(pass: ComputePassLike, runtime: WgslPolicyValueHeadRuntime): void {
+  pass.setPipeline(runtime.densePipeline);
+  pass.setBindGroup(0, runtime.policyBindGroup);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 16), DEFAULT_TOKENS);
+  pass.setBindGroup(0, runtime.valueBindGroup);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_VALUE_EMBED / 16), DEFAULT_TOKENS);
+  pass.setBindGroup(0, runtime.policyQBindGroup);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 16), DEFAULT_TOKENS);
+  pass.setBindGroup(0, runtime.policyKBindGroup);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 16), DEFAULT_TOKENS);
+  pass.setPipeline(runtime.policyLogitsPipeline);
+  pass.setBindGroup(0, runtime.policyLogitsBindGroup);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8));
+  pass.setPipeline(runtime.mappedPolicyPipeline);
+  pass.setBindGroup(0, runtime.mappedPolicyBindGroup);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_POLICY_MAPPED_OUTPUTS / 64));
+  pass.setPipeline(runtime.vectorPipeline);
+  pass.setBindGroup(0, runtime.valueDense1BindGroup);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_VALUE_HIDDEN / 64));
+  pass.setBindGroup(0, runtime.valueDense2BindGroup);
+  pass.dispatchWorkgroups(1);
+  pass.setPipeline(runtime.softmaxPipeline);
+  pass.setBindGroup(0, runtime.valueSoftmaxBindGroup);
+  pass.dispatchWorkgroups(1);
+}
+
+async function runCachedWgslPolicyValueHeads(device: DeviceLike, runtime: WgslPolicyValueHeadRuntime): Promise<{ runMs: number; mappedPolicy: number[]; wdl: number[] }> {
+  const started = nowMs();
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  encodeWgslPolicyValueHeads(pass, runtime);
+  pass.end();
+  device.queue.submit([encoder.finish()]);
+  await device.queue.onSubmittedWorkDone?.();
+  const mappedPolicy = await readF32OutputOnce(device, runtime.mappedPolicyBuffer, runtime.mappedPolicyReadbackBuffer, DEFAULT_POLICY_MAPPED_OUTPUTS);
+  const wdl = await readF32OutputOnce(device, runtime.valueWdlBuffer, runtime.valueWdlReadbackBuffer, 3);
+  if (!arrayHasNonzero(mappedPolicy) || !arrayHasVariation(mappedPolicy) || !arrayHasNonzero(wdl) || !arrayHasVariation(wdl)) throw new Error('WGSL hybrid heads produced zero or uniform mapped policy/WDL');
+  return { runMs: nowMs() - started, mappedPolicy: Array.from(mappedPolicy), wdl: Array.from(wdl) };
+}
+
 const DEFAULT_INPUT_BODY_TENSORS = {
   posEncoding: '/const/pos_encoding',
   inputWeight: '/attn_body/matmul/w',
@@ -4858,11 +4991,12 @@ export interface Lc0WebHybridEvaluationOptions {
   verifyShards?: boolean;
   historyFill?: Lc0HistoryFill;
   policyTemperature?: number;
+  headBackend?: Lc0WebHybridHeadBackend;
 }
 
 export interface Lc0WebHybridEvaluationResult extends Lc0Evaluation {
   status: 'LC0WEB_HYBRID_EVALUATION_DONE';
-  backend: 'lc0web-wgsl-encoder-ort-heads';
+  backend: 'lc0web-wgsl-encoder-ort-heads' | 'lc0web-wgsl-encoder-wgsl-heads';
   packUrl: string;
   layers: number;
   packLoadMs: number;
@@ -4924,7 +5058,9 @@ type HybridEncoderLayerRuntime = {
 class Lc0WebHybridRuntime {
   private readonly device: DeviceLike;
   private readonly inputTensors: Lc0WebInitialInputTensors;
-  private readonly headSession: CachedPolicyValueHeadSession;
+  private readonly headBackend: Lc0WebHybridHeadBackend;
+  private readonly headSession?: CachedPolicyValueHeadSession;
+  private readonly wgslHeads?: WgslPolicyValueHeadRuntime;
   private readonly inputBuffer: BufferLike;
   private readonly readbackBuffer: BufferLike;
   private readonly layerRuntimes: HybridEncoderLayerRuntime[];
@@ -4933,7 +5069,9 @@ class Lc0WebHybridRuntime {
   private constructor(options: {
     device: DeviceLike;
     inputTensors: Lc0WebInitialInputTensors;
-    headSession: CachedPolicyValueHeadSession;
+    headBackend: Lc0WebHybridHeadBackend;
+    headSession?: CachedPolicyValueHeadSession;
+    wgslHeads?: WgslPolicyValueHeadRuntime;
     inputBuffer: BufferLike;
     readbackBuffer: BufferLike;
     layerRuntimes: HybridEncoderLayerRuntime[];
@@ -4944,7 +5082,9 @@ class Lc0WebHybridRuntime {
   }) {
     this.device = options.device;
     this.inputTensors = options.inputTensors;
+    this.headBackend = options.headBackend;
     this.headSession = options.headSession;
+    this.wgslHeads = options.wgslHeads;
     this.inputBuffer = options.inputBuffer;
     this.readbackBuffer = options.readbackBuffer;
     this.layerRuntimes = options.layerRuntimes;
@@ -4972,7 +5112,9 @@ class Lc0WebHybridRuntime {
     });
     const inputTensors = loadInitialInputTensors(pack);
     const tensorsByLayer = layerTensorNames.map((names) => loadEncoder0FfnInputs(pack, names));
-    const headSession = await createCachedPolicyValueHeadSession(loadPolicyValueHeadTensors(pack));
+    const headTensors = loadPolicyValueHeadTensors(pack);
+    const headBackend = options.headBackend ?? 'ort';
+    const headSession = headBackend === 'ort' ? await createCachedPolicyValueHeadSession(headTensors) : undefined;
     const { device } = await requestDevice();
     const usage = gpuGlobals().GPUBufferUsage!;
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
@@ -5067,10 +5209,14 @@ class Lc0WebHybridRuntime {
       layerRuntimes.push({ output, smolgenPipelines, attentionPipelines, ffnPipelines });
       layerInput = output;
     }
+    const wgslHeads = headBackend === 'wgsl' ? createWgslPolicyValueHeadRuntime(device, headTensors, layerRuntimes[layerRuntimes.length - 1].output, usage) : undefined;
+    if (wgslHeads) buffers.push(...wgslHeads.buffers);
     return new Lc0WebHybridRuntime({
       device,
       inputTensors,
+      headBackend,
       headSession,
+      wgslHeads,
       inputBuffer,
       readbackBuffer,
       layerRuntimes,
@@ -5099,6 +5245,51 @@ class Lc0WebHybridRuntime {
   }
 
   async evaluate(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult> {
+    if (this.headBackend === 'wgsl') {
+      if (!this.wgslHeads) throw new Error('WGSL hybrid heads runtime is not initialized');
+      const { board, fen } = currentBoardAndFen(input);
+      const encoderInput = buildInitialEncoderActivation(input, this.inputTensors, options.historyFill);
+      this.device.queue.writeBuffer(this.inputBuffer, 0, encoderInput);
+      const encoderStarted = nowMs();
+      const encoder = this.device.createCommandEncoder();
+      for (const layer of this.layerRuntimes) {
+        const pass = encoder.beginComputePass();
+        encodeSmolgenPass(pass, layer.smolgenPipelines);
+        encodeLc0WebEncoderBlockPass(pass, layer.attentionPipelines, layer.ffnPipelines);
+        pass.end();
+      }
+      const headPass = encoder.beginComputePass();
+      encodeWgslPolicyValueHeads(headPass, this.wgslHeads);
+      headPass.end();
+      this.device.queue.submit([encoder.finish()]);
+      await this.device.queue.onSubmittedWorkDone?.();
+      const encoderDispatchSyncedMs = nowMs() - encoderStarted;
+      const headStarted = nowMs();
+      const mappedPolicyF32 = await readF32OutputOnce(this.device, this.wgslHeads.mappedPolicyBuffer, this.wgslHeads.mappedPolicyReadbackBuffer, DEFAULT_POLICY_MAPPED_OUTPUTS);
+      const wdlF32 = await readF32OutputOnce(this.device, this.wgslHeads.valueWdlBuffer, this.wgslHeads.valueWdlReadbackBuffer, 3);
+      if (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32) || !arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error('WGSL hybrid heads produced zero or uniform mapped policy/WDL');
+      const mappedPolicy = Array.from(mappedPolicyF32);
+      const wdlValues = Array.from(wdlF32);
+      const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
+      const legalPriors = legalPolicyPriors(board, mappedPolicy, options.policyTemperature);
+      return {
+        status: 'LC0WEB_HYBRID_EVALUATION_DONE',
+        backend: 'lc0web-wgsl-encoder-wgsl-heads',
+        packUrl: this.packUrl,
+        layers: this.layers,
+        packLoadMs: this.packLoadMs,
+        encoderDispatchSyncedMs,
+        headRunMs: nowMs() - headStarted,
+        fen,
+        wdl,
+        q: wdl[0] - wdl[2],
+        mlh: 0,
+        legalPriors,
+        bestMove: legalPriors[0]?.uci,
+        mappedPolicy,
+      };
+    }
+    if (!this.headSession) throw new Error('ORT hybrid heads session is not initialized');
     const encoded = await this.encode(input, { historyFill: options.historyFill });
     const heads = await runCachedPolicyValueHeadsOrt(encoded.output, this.headSession);
     const wdl: [number, number, number] = [Number(heads.wdl[0]), Number(heads.wdl[1]), Number(heads.wdl[2])];
@@ -5144,6 +5335,7 @@ export class Lc0WebHybridEvaluator {
   readonly historyFill: Lc0HistoryFill;
   readonly policyTemperature: number;
   readonly verifyShards: boolean;
+  readonly headBackend: Lc0WebHybridHeadBackend;
   private runtimePromise?: Promise<Lc0WebHybridRuntime>;
   private evaluationQueue: Promise<void> = Promise.resolve();
 
@@ -5153,6 +5345,7 @@ export class Lc0WebHybridEvaluator {
     this.historyFill = options.historyFill ?? 'fen_only';
     this.policyTemperature = options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE;
     this.verifyShards = options.verifyShards ?? true;
+    this.headBackend = options.headBackend ?? 'ort';
   }
 
   private runtime(): Promise<Lc0WebHybridRuntime> {
@@ -5163,6 +5356,7 @@ export class Lc0WebHybridEvaluator {
         historyFill: this.historyFill,
         policyTemperature: this.policyTemperature,
         verifyShards: this.verifyShards,
+        headBackend: this.headBackend,
       });
       runtimePromise.catch(() => {
         if (this.runtimePromise === runtimePromise) this.runtimePromise = undefined;
