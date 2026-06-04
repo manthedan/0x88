@@ -89,6 +89,12 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
   - The probe uses the full real LC0 112-plane input path and full 10-layer hybrid WGSL encoder stack, then compares experimental WGSL heads against the stable ORT heads on the actual encoder output. Best moves matched ORT heads on `9/9`; max mapped-policy abs diff was about `3.10e-6`, max WDL abs diff about `1.19e-7`, and all WGSL mapped-policy/WDL outputs were nonzero and nonuniform under the route's gates.
 - Experimental WGSL-heads evaluator smoke: `?hybridDrift=1&headBackend=wgsl&encoderLayers=10&hybridDriftLimit=1&ep=wasm&packVerify=0`
   - `HYBRID_DRIFT_DONE` with backend `lc0web-wgsl-encoder-wgsl-heads` on the startpos fixture, best move `d2d4`, and final WDL/policy readbacks nonzero/nonuniform via runtime gates. This validates the separate backend string and worker route while preserving stable `lc0web-wgsl-encoder-ort-heads` as the default.
+- Post-WGSL-heads local + Mac mini matrix for experimental `lc0web-wgsl-encoder-wgsl-heads`:
+  - Drift parity, local Chromium/WebGPU: `npm run lc0:browser-hybrid-drift -- --head-backend wgsl --limit 9 --timeout 300000 --baseline-mode serial` and `--limit 16` both completed. The available fixture set still contains 9 fixtures, so both evaluated 9. Best moves matched f32 ONNX and native BLAS on `9/9`; representative max drift ranges were f32 WDL `0.000156–0.000689`, native WDL `0.00189–0.00234`, f32 top-prior `0.000737–0.01665`, native top-prior `0.000824–0.01620`.
+  - Drift parity, Mac mini Chromium/WebGPU: the same `--head-backend wgsl --limit 9` and `--limit 16` serial runs completed, again evaluating 9 fixtures. Best moves matched f32 ONNX and native BLAS on `9/9`; max drift was f32 WDL `0.000156`, native WDL `0.00189`, f32 top-prior `0.000737`, native top-prior `0.000824`.
+  - Search latency, local Chromium/WebGPU with `requestedEp=wasm`, `packVerification=disabled`, batch `1`, 3 timed iterations per row: visits `1` => warm eval mean `39.13 ms`, search mean `84.93 ms`, `11.77 visits/s`; visits `32` => warm eval mean `40.10 ms`, search mean `1388.97 ms`, `23.04 visits/s`; visits `128` => warm eval mean `40.83 ms`, search mean `5554.80 ms`, `23.04 visits/s`. All rows returned best move `d2d4`.
+  - Search latency, Mac mini Chromium/WebGPU with `requestedEp=wasm`, `packVerification=disabled`, batch `1`, 3 timed iterations per row: visits `1` => warm eval mean `36.33 ms`, search mean `72.63 ms`, `13.77 visits/s`; visits `32` => warm eval mean `36.13 ms`, search mean `1160.80 ms`, `27.57 visits/s`; visits `128` => warm eval mean `35.77 ms`, search mean `4545.73 ms`, `28.16 visits/s`. All rows returned best move `d2d4`.
+  - Cleanup check after the repeated matrix found no local or remote Chrome for Testing, `agent-browser`, Vite on port 5179, or lc0 browser Node processes left.
 - Pre-WGSL-heads local + Mac mini baseline matrix for `lc0web-wgsl-encoder-ort-heads`:
   - Drift parity, local Chromium 149: `npm run lc0:browser-hybrid-drift -- --limit 9 --timeout 300000 --baseline-mode serial` and `--limit 16` both completed. The available fixture set currently contains 9 fixtures, so the `--limit 16` run also evaluated 9. Best moves matched f32 ONNX and native BLAS on `9/9`; local max drift ranges across the two runs were f32 WDL `0.00113–0.00205`, native WDL `0.00239–0.00283`, f32 top-prior `0.00172–0.00349`, native top-prior `0.00128–0.00324`.
   - Drift parity, Mac mini Chromium 148: the same `--limit 9` and `--limit 16` serial runs completed, again evaluating the 9 available fixtures. Best moves matched f32 ONNX and native BLAS on `9/9`; max drift ranges were f32 WDL `0.000156–0.000315`, native WDL `0.00189`, f32 top-prior `0.000737–0.00271`, native top-prior `0.000824–0.00238`.
@@ -122,10 +128,15 @@ npm run lc0:browser-hybrid-drift -- --no-server --limit 3 --timeout 180000
 npm run lc0:browser-hybrid-drift -- --limit 9 --timeout 300000
 npm run lc0:browser-hybrid-drift -- --limit 9 --timeout 300000 --baseline-mode serial
 npm run lc0:browser-hybrid-drift -- --limit 16 --timeout 300000 --baseline-mode serial
+npm run lc0:browser-hybrid-drift -- --head-backend wgsl --limit 9 --timeout 300000 --baseline-mode serial
+npm run lc0:browser-hybrid-drift -- --head-backend wgsl --limit 16 --timeout 300000 --baseline-mode serial
 npm run lc0:browser-hybrid-search-bench -- --dry-run --visits 8 --eval-iters 1 --search-iters 1
 npm run lc0:browser-hybrid-search-bench -- --visits 1 --eval-iters 3 --eval-warmup 1 --search-iters 3 --search-warmup 1 --timeout 300000
 npm run lc0:browser-hybrid-search-bench -- --visits 32 --eval-iters 3 --eval-warmup 1 --search-iters 3 --search-warmup 1 --timeout 300000
 npm run lc0:browser-hybrid-search-bench -- --visits 128 --eval-iters 3 --eval-warmup 1 --search-iters 3 --search-warmup 1 --timeout 300000
+npm run lc0:browser-hybrid-search-bench -- --head-backend wgsl --visits 1 --eval-iters 3 --eval-warmup 1 --search-iters 3 --search-warmup 1 --timeout 300000
+npm run lc0:browser-hybrid-search-bench -- --head-backend wgsl --visits 32 --eval-iters 3 --eval-warmup 1 --search-iters 3 --search-warmup 1 --timeout 300000
+npm run lc0:browser-hybrid-search-bench -- --head-backend wgsl --visits 128 --eval-iters 3 --eval-warmup 1 --search-iters 3 --search-warmup 1 --timeout 300000
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --dry-run --samples 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 10 --timeout 25000 --wgsl-iters 3 --ort-iters 3
