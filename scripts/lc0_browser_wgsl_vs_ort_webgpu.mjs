@@ -168,6 +168,20 @@ function runUrl(baseUrl, args, kind) {
   return `${baseUrl.replace(/\/$/, '')}/lc0-policy-only.html?${variant.query(args)}`;
 }
 
+function waitForText(args, session, text) {
+  const deadline = Date.now() + args.timeoutMs;
+  while (Date.now() < deadline) {
+    const chunk = Math.min(25_000, Math.max(1000, deadline - Date.now()));
+    try {
+      runJsonCommand(args.agentBrowser, ['wait', '--text', text, '--timeout', String(chunk)], chunk + 5_000, session);
+      return;
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+    }
+  }
+  throw new Error(`Timed out waiting for ${text} after ${args.timeoutMs}ms`);
+}
+
 function metricFor(kind, result) {
   if (kind === 'wgsl') return result.readbackSyncedMs / Math.max(1, result.iterations ?? 1);
   return result.avgMs;
@@ -214,7 +228,7 @@ async function runOne(args, baseUrl, stepIndex, step) {
   process.stderr.write(`[lc0-wgsl-vs-ort] ${stepIndex + 1}/${args.samples * 2} ${step.variant.label} fresh-session=${session}\n`);
   try {
     runJsonCommand(args.agentBrowser, ['open', url], args.timeoutMs, session);
-    runJsonCommand(args.agentBrowser, ['wait', '--text', step.variant.doneText, '--timeout', String(args.timeoutMs)], args.timeoutMs + 5_000, session);
+    waitForText(args, session, step.variant.doneText);
     const bench = runJsonCommand(args.agentBrowser, ['get', 'text', '#benchResult'], args.timeoutMs, session);
     const result = parseBenchResult(textFromGetResult(bench), step.variant);
     if (result.maxAbsError > args.maxError) throw new Error(`${step.variant.label}: maxAbsError ${result.maxAbsError} exceeded ${args.maxError}`);

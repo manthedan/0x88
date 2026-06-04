@@ -69,6 +69,9 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
   - Alternated 20 fresh browser sessions in order `wgsl, ort, ort, wgsl, ...`.
   - ORT reported `webgpu->webgpu` with WebGPU provider accepted in all ORT samples.
   - After the softmax and queue-boundary updates, sample medians were WGSL synchronized readback/block about `1.17 ms` and ORT WebGPU average/run about `2.27 ms` (`ratioWgslOverOrt ≈ 0.51`); still measurement-only, not promotion evidence.
+- `npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 4 --timeout 60000 --wgsl-iters 3 --ort-iters 3`
+  - Repeated fresh Chromium/WebGPU alternating run after hybrid runtime caching; ORT reported WebGPU provider present in all 4 ORT rows.
+  - Representative sample medians were WGSL synchronized readback/block about `1.10 ms` and ORT WebGPU average/run about `1.30 ms` (`ratioWgslOverOrt ≈ 0.85`); still measurement-only, not promotion evidence.
 
 Validation commands used during this checkpoint:
 
@@ -93,6 +96,7 @@ npm run lc0:browser-hybrid-drift -- --limit 9 --timeout 300000
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --dry-run --samples 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 10 --timeout 25000 --wgsl-iters 3 --ort-iters 3
+npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 4 --timeout 60000 --wgsl-iters 3 --ort-iters 3
 ```
 
 ## Current interpretation
