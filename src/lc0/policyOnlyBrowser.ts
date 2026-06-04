@@ -59,6 +59,19 @@ type KernelProbeResult = {
   outputSample: number[];
 };
 
+type WgslDeferredReadbackBenchmarkResult = {
+  status: 'WGSL_DEFERRED_READBACK_BENCH_DONE';
+  backend: string;
+  stableBackend: string;
+  batchSize: number;
+  iterations: number;
+  warmup: number;
+  inputCount: number;
+  allBestMovesMatch: boolean;
+  immediate: { wallMs: number; evalsPerSecond: number; timingMeans: Record<string, number>; bestMoves: Array<string | undefined> };
+  deferred: { wallMs: number; evalsPerSecond: number; timingMeans: Record<string, number>; bestMoves: Array<string | undefined> };
+};
+
 type KernelBenchmarkResult = {
   status: 'KERNEL_BENCH_DONE';
   packUrl: string;
@@ -676,12 +689,13 @@ const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === 
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
 const HYBRID_SEARCH_BENCH_REQUESTED = params.get('hybridSearchBench') === '1' || params.get('hybridSearchBenchmark') === '1';
 const HYBRID_INPUT_BENCH_REQUESTED = params.get('hybridInputBench') === '1' || params.get('hybridInputBenchmark') === '1' || params.get('wasmInputBench') === '1';
+const HYBRID_DEFERRED_READBACK_BENCH_REQUESTED = params.get('wgslDeferredReadbackBench') === '1' || params.get('deferredReadbackBench') === '1';
 const HYBRID_WGSL_HEADS_REQUESTED = params.get('headBackend') === 'wgsl' || params.get('hybridHeads') === 'wgsl' || params.get('runtime') === 'hybrid-wgsl-heads' || params.get('runtime') === 'wgsl-heads';
 const HYBRID_WGSL_BATCH_MODE = params.get('wgslBatchMode') === 'serial' || params.get('wgslBatch') === 'serial' ? 'serial' : 'physical';
 const HYBRID_INPUT_BACKEND_PARAM = params.get('inputBackend') ?? params.get('hybridInput');
 const HYBRID_INPUT_BACKEND_REQUESTED = HYBRID_INPUT_BACKEND_PARAM === 'wgsl' || HYBRID_INPUT_BACKEND_PARAM === 'wasm';
 const HYBRID_INPUT_BACKEND = HYBRID_INPUT_BACKEND_PARAM === 'wasm' ? 'wasm' : (HYBRID_INPUT_BACKEND_PARAM === 'wgsl' ? 'wgsl' : 'js');
-const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
+const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
@@ -2467,6 +2481,39 @@ async function loadRepresentativeInputFixtures(): Promise<HybridInputBenchFixtur
   ];
 }
 
+async function runHybridDeferredReadbackBenchmark(): Promise<void> {
+  const fixtures = await loadRepresentativeInputFixtures();
+  const iterations = boundedQueryInt(['deferredReadbackIters', 'iters'], 4, 1, 50);
+  const warmup = boundedQueryInt(['deferredReadbackWarmup', 'warmup'], 1, 0, 10);
+  const batchSize = boundedQueryInt(['deferredReadbackBatch', 'batch', 'batchSize'], 4, 1, 32);
+  const fixtureLimit = boundedQueryInt(['fixtureLimit', 'fixtures'], Math.min(4, fixtures.length), 1, fixtures.length);
+  const inputs = fixtures.slice(0, fixtureLimit).map((fixture) => fixture.input);
+  setBusy(true, `Benchmarking deferred WGSL-head readback over ${fixtureLimit} fixtures…`);
+  el('benchResult').textContent = 'WGSL_DEFERRED_READBACK_BENCH_RUNNING';
+  try {
+    const response = await postWorkerRequest<{ type: 'wgslDeferredReadbackBenchmarkResult'; result: WgslDeferredReadbackBenchmarkResult }>({
+      type: 'wgslDeferredReadbackBenchmark',
+      packUrl: PACK_URL,
+      inputs,
+      layers: boundedQueryInt(['encoderLayers', 'layers'], 10, 1, 32),
+      verifyShards: params.get('packVerify') !== '0',
+      inputBackend: HYBRID_INPUT_BACKEND,
+      batchSize,
+      iterations,
+      warmup,
+    });
+    const result = response.result;
+    el('benchResult').textContent = JSON.stringify(result);
+    el('message').textContent = `WGSL_DEFERRED_READBACK_BENCH_DONE immediate ${result.immediate.evalsPerSecond.toFixed(1)} eval/s · deferred ${result.deferred.evalsPerSecond.toFixed(1)} eval/s · best moves match ${result.allBestMovesMatch ? 'yes' : 'no'}`;
+  } catch (error) {
+    el('benchResult').textContent = `WGSL_DEFERRED_READBACK_BENCH_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Deferred readback benchmark failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function runHybridInputBenchmark(): Promise<void> {
   const fixtures = await loadRepresentativeInputFixtures();
   const iterations = boundedQueryInt(['hybridInputBenchIters', 'inputBenchIters', 'iters'], 1, 1, 20);
@@ -3152,6 +3199,10 @@ async function init() {
       : 'Ready. Drag a legal move or ask the engine to move.';
     if (HYBRID_DRIFT_REQUESTED) {
       await runHybridDriftFixtures();
+      return;
+    }
+    if (HYBRID_DEFERRED_READBACK_BENCH_REQUESTED) {
+      await runHybridDeferredReadbackBenchmark();
       return;
     }
     if (HYBRID_SEARCH_BENCH_REQUESTED) {

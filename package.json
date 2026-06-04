@@ -79,6 +79,7 @@
     "lc0:browser-hybrid-search-bench": "node --experimental-strip-types scripts/lc0_browser_hybrid_search_bench.mjs",
     "lc0:browser-hybrid-input-bench": "node --experimental-strip-types scripts/lc0_browser_hybrid_input_bench.mjs",
     "lc0:browser-hybrid-wgsl-batch-bench": "node --experimental-strip-types scripts/lc0_browser_hybrid_wgsl_batch_bench.mjs",
+    "lc0:browser-wgsl-deferred-readback-bench": "node --experimental-strip-types scripts/lc0_browser_wgsl_deferred_readback_bench.mjs",
     "lc0:browser-hybrid-search-matrix": "node --experimental-strip-types scripts/lc0_browser_hybrid_search_matrix.mjs",
     "lc0:browser-hybrid-search-reuse-cache-matrix": "node --experimental-strip-types scripts/lc0_browser_hybrid_search_reuse_cache_matrix.mjs",
     "lc0:browser-ci-smoke": "node --experimental-strip-types scripts/lc0_browser_ci_smoke.mjs",

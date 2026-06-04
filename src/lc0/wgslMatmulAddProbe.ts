@@ -5045,6 +5045,7 @@ export interface Lc0WebHybridTimingBreakdown {
   legalPriorsMs: number;
   readbackBytes: number;
   readbackMapCount: number;
+  readbackMode?: 'immediate' | 'deferred-double-buffered';
   physicalBatchSize?: number;
   batchPosition?: number;
   inputBackend?: Lc0WebHybridInputBackend;
@@ -5360,6 +5361,21 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
   return { runtime: { output, smolgenPipelines, attentionPipelines, ffnPipelines }, buffers };
 }
 
+interface SubmittedWgslHybridBatch {
+  inputs: Lc0EvaluatorInput[];
+  boardsAndFens: Array<ReturnType<typeof currentBoardAndFen>>;
+  readbackBuffer: BufferLike;
+  totalStarted: number;
+  encoderStarted: number;
+  inputBuildMs: number;
+  inputUploadMs: number;
+  commandEncodeMs: number;
+  queueSubmitMs: number;
+  inputBridgeCopyMs: number;
+  wasmEncodeMs: number;
+  wasmTotalMs: number;
+}
+
 class Lc0WebHybridRuntime {
   private readonly device: DeviceLike;
   private readonly inputTensors: Lc0WebPreparedInitialInputTensors;
@@ -5381,6 +5397,8 @@ class Lc0WebHybridRuntime {
   private wgslBatchUploadCapacity = 0;
   private wgslBatchReadbackBuffer?: BufferLike;
   private wgslBatchReadbackCapacity = 0;
+  private wgslDeferredReadbackBuffers: BufferLike[] = [];
+  private wgslDeferredReadbackCapacity = 0;
 
   private constructor(options: {
     device: DeviceLike;
@@ -5536,6 +5554,20 @@ class Lc0WebHybridRuntime {
       this.buffers.push(this.wgslBatchReadbackBuffer);
     }
     return this.wgslBatchReadbackBuffer;
+  }
+
+  private ensureWgslDeferredReadbackBuffer(count: number, slot: number): BufferLike {
+    if (this.wgslDeferredReadbackCapacity < count) {
+      for (const buffer of this.wgslDeferredReadbackBuffers) buffer.destroy?.();
+      this.wgslDeferredReadbackBuffers = [];
+      this.wgslDeferredReadbackCapacity = count;
+    }
+    while (this.wgslDeferredReadbackBuffers.length <= slot) {
+      const buffer = this.device.createBuffer({ size: count * WGSL_HEADS_READBACK_BYTES, usage: this.usage.MAP_READ | this.usage.COPY_DST });
+      this.wgslDeferredReadbackBuffers.push(buffer);
+      this.buffers.push(buffer);
+    }
+    return this.wgslDeferredReadbackBuffers[slot];
   }
 
   private buildInputPayload(input: Lc0EvaluatorInput, historyFill: Lc0HistoryFill): { payload: Float32Array<ArrayBufferLike>; wasmTiming?: Lc0WasmInputEncoderTiming } {
@@ -5726,17 +5758,10 @@ class Lc0WebHybridRuntime {
     };
   }
 
-  async evaluateBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult[]> {
-    if (inputs.length === 0) return [];
-    if (this.headBackend !== 'wgsl' || this.wgslBatchMode === 'serial') {
-      const out: Lc0WebHybridEvaluationResult[] = [];
-      for (const input of inputs) out.push(await this.evaluate(input, options));
-      return out;
-    }
+  private submitWgslBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill }, readbackBuffer: BufferLike): SubmittedWgslHybridBatch {
     const totalStarted = nowMs();
     const slots = this.ensureWgslBatchSlots(inputs.length);
     const uploadBuffer = this.ensureWgslBatchUploadBuffer(inputs.length);
-    const readbackBuffer = this.ensureWgslBatchReadbackBuffer(inputs.length);
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
     const inputElements = this.inputBackend !== 'js' ? DEFAULT_INPUT_PLANES * DEFAULT_TOKENS : outputElements;
     const boardsAndFens = inputs.map((input) => currentBoardAndFen(input));
@@ -5789,18 +5814,22 @@ class Lc0WebHybridRuntime {
     const queueSubmitStarted = nowMs();
     this.device.queue.submit([commandBuffer]);
     const queueSubmitMs = nowMs() - queueSubmitStarted;
+    return { inputs, boardsAndFens, readbackBuffer, totalStarted, encoderStarted, inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, inputBridgeCopyMs, wasmEncodeMs, wasmTotalMs };
+  }
+
+  private async finishWgslBatch(submitted: SubmittedWgslHybridBatch, options: { policyTemperature: number }, readbackMode: 'immediate' | 'deferred-double-buffered'): Promise<Lc0WebHybridEvaluationResult[]> {
     const headStarted = nowMs();
     const readbackStarted = nowMs();
-    await readbackBuffer.mapAsync(gpuGlobals().GPUMapMode!.READ);
-    const readbackRange = readbackBuffer.getMappedRange().slice(0, inputs.length * WGSL_HEADS_READBACK_BYTES);
-    readbackBuffer.unmap();
+    await submitted.readbackBuffer.mapAsync(gpuGlobals().GPUMapMode!.READ);
+    const readbackRange = submitted.readbackBuffer.getMappedRange().slice(0, submitted.inputs.length * WGSL_HEADS_READBACK_BYTES);
+    submitted.readbackBuffer.unmap();
     const readbackSyncedMs = nowMs() - readbackStarted;
     const headRunMs = nowMs() - headStarted;
-    const encoderDispatchSyncedMs = nowMs() - encoderStarted;
-    const totalEvalMs = nowMs() - totalStarted;
+    const encoderDispatchSyncedMs = nowMs() - submitted.encoderStarted;
+    const totalEvalMs = nowMs() - submitted.totalStarted;
     const readbackFloats = new Float32Array(readbackRange);
     const out: Lc0WebHybridEvaluationResult[] = [];
-    for (let i = 0; i < inputs.length; i++) {
+    for (let i = 0; i < submitted.inputs.length; i++) {
       const base = i * WGSL_HEADS_READBACK_FLOATS;
       const mappedPolicyF32 = readbackFloats.slice(base, base + DEFAULT_POLICY_MAPPED_OUTPUTS);
       const wdlF32 = readbackFloats.slice(base + DEFAULT_POLICY_MAPPED_OUTPUTS, base + DEFAULT_POLICY_MAPPED_OUTPUTS + 3);
@@ -5809,7 +5838,7 @@ class Lc0WebHybridRuntime {
       const wdlValues = Array.from(wdlF32);
       const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
       const legalPriorsStarted = nowMs();
-      const legalPriors = legalPolicyPriors(boardsAndFens[i].board, mappedPolicy, options.policyTemperature);
+      const legalPriors = legalPolicyPriors(submitted.boardsAndFens[i].board, mappedPolicy, options.policyTemperature);
       const legalPriorsMs = nowMs() - legalPriorsStarted;
       out.push({
         status: 'LC0WEB_HYBRID_EVALUATION_DONE',
@@ -5819,7 +5848,7 @@ class Lc0WebHybridRuntime {
         packLoadMs: this.packLoadMs,
         encoderDispatchSyncedMs,
         headRunMs,
-        fen: boardsAndFens[i].fen,
+        fen: submitted.boardsAndFens[i].fen,
         wdl,
         q: wdl[0] - wdl[2],
         mlh: 0,
@@ -5828,22 +5857,50 @@ class Lc0WebHybridRuntime {
         mappedPolicy,
         timing: {
           totalEvalMs,
-          inputBuildMs,
-          inputUploadMs,
-          commandEncodeMs,
-          queueSubmitMs,
+          inputBuildMs: submitted.inputBuildMs,
+          inputUploadMs: submitted.inputUploadMs,
+          commandEncodeMs: submitted.commandEncodeMs,
+          queueSubmitMs: submitted.queueSubmitMs,
           readbackSyncedMs,
           headRunMs,
           legalPriorsMs,
-          readbackBytes: inputs.length * WGSL_HEADS_READBACK_BYTES,
+          readbackBytes: submitted.inputs.length * WGSL_HEADS_READBACK_BYTES,
           readbackMapCount: 1,
-          physicalBatchSize: inputs.length,
+          readbackMode,
+          physicalBatchSize: submitted.inputs.length,
           batchPosition: i,
           inputBackend: this.inputBackend,
-          ...(this.inputBackend === 'wasm' ? { inputBridgeCopyMs, wasmEncodeMs, wasmTotalMs } : {}),
+          ...(this.inputBackend === 'wasm' ? { inputBridgeCopyMs: submitted.inputBridgeCopyMs, wasmEncodeMs: submitted.wasmEncodeMs, wasmTotalMs: submitted.wasmTotalMs } : {}),
         },
       });
     }
+    return out;
+  }
+
+  async evaluateBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult[]> {
+    if (inputs.length === 0) return [];
+    if (this.headBackend !== 'wgsl' || this.wgslBatchMode === 'serial') {
+      const out: Lc0WebHybridEvaluationResult[] = [];
+      for (const input of inputs) out.push(await this.evaluate(input, options));
+      return out;
+    }
+    const readbackBuffer = this.ensureWgslBatchReadbackBuffer(inputs.length);
+    return this.finishWgslBatch(this.submitWgslBatch(inputs, options, readbackBuffer), options, 'immediate');
+  }
+
+  async evaluateWgslBatchesDeferredReadback(batches: Lc0EvaluatorInput[][], options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult[][]> {
+    if (this.headBackend !== 'wgsl') throw new Error('deferred readback benchmark requires the WGSL-head backend');
+    const out: Lc0WebHybridEvaluationResult[][] = [];
+    let pending: SubmittedWgslHybridBatch | undefined;
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      if (!batch.length) continue;
+      const readbackBuffer = this.ensureWgslDeferredReadbackBuffer(batch.length, i % 2);
+      const submitted = this.submitWgslBatch(batch, options, readbackBuffer);
+      if (pending) out.push(await this.finishWgslBatch(pending, options, 'deferred-double-buffered'));
+      pending = submitted;
+    }
+    if (pending) out.push(await this.finishWgslBatch(pending, options, 'deferred-double-buffered'));
     return out;
   }
 
@@ -5859,6 +5916,123 @@ export async function runLc0WebHybridEvaluation(options: Lc0WebHybridEvaluationO
       historyFill: options.historyFill ?? 'fen_only',
       policyTemperature: options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE,
     });
+  } finally {
+    runtime.destroy();
+  }
+}
+
+export interface Lc0WebWgslDeferredReadbackBenchModeResult {
+  mode: 'immediate' | 'deferred-double-buffered';
+  wallMs: number;
+  batches: number;
+  evaluations: number;
+  evalsPerSecond: number;
+  timingMeans: Partial<Record<keyof Lc0WebHybridTimingBreakdown, number>>;
+  bestMoves: Array<string | undefined>;
+}
+
+export interface Lc0WebWgslDeferredReadbackBenchResult {
+  status: 'WGSL_DEFERRED_READBACK_BENCH_DONE';
+  backend: 'lc0web-wgsl-encoder-wgsl-heads';
+  stableBackend: 'lc0web-wgsl-encoder-ort-heads';
+  packUrl: string;
+  layers: number;
+  inputBackend: Lc0WebHybridInputBackend;
+  batchSize: number;
+  iterations: number;
+  warmup: number;
+  inputCount: number;
+  immediate: Lc0WebWgslDeferredReadbackBenchModeResult;
+  deferred: Lc0WebWgslDeferredReadbackBenchModeResult;
+  allBestMovesMatch: boolean;
+}
+
+function mean(values: number[]): number {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+}
+
+function summarizeHybridEvaluations(mode: 'immediate' | 'deferred-double-buffered', wallMs: number, batches: Lc0WebHybridEvaluationResult[][]): Lc0WebWgslDeferredReadbackBenchModeResult {
+  const flat = batches.flat();
+  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'headRunMs', 'legalPriorsMs', 'readbackBytes', 'readbackMapCount'];
+  const timingMeans: Partial<Record<keyof Lc0WebHybridTimingBreakdown, number>> = {};
+  for (const key of timingKeys) {
+    const values = flat.map((entry) => entry.timing[key]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    if (values.length) timingMeans[key] = mean(values);
+  }
+  return {
+    mode,
+    wallMs,
+    batches: batches.length,
+    evaluations: flat.length,
+    evalsPerSecond: flat.length / Math.max(1e-9, wallMs / 1000),
+    timingMeans,
+    bestMoves: flat.map((entry) => entry.bestMove),
+  };
+}
+
+function buildRoundRobinBatches(inputs: Lc0EvaluatorInput[], batchSize: number, batches: number): Lc0EvaluatorInput[][] {
+  if (!inputs.length) throw new Error('deferred readback benchmark requires at least one input');
+  return Array.from({ length: batches }, (_, batchIndex) => Array.from({ length: batchSize }, (_, slot) => inputs[(batchIndex * batchSize + slot) % inputs.length]));
+}
+
+export async function runLc0WebWgslDeferredReadbackBenchmark(options: {
+  packUrl: string;
+  inputs: Lc0EvaluatorInput[];
+  layers?: number;
+  verifyShards?: boolean;
+  historyFill?: Lc0HistoryFill;
+  policyTemperature?: number;
+  inputBackend?: Lc0WebHybridInputBackend;
+  batchSize?: number;
+  iterations?: number;
+  warmup?: number;
+}): Promise<Lc0WebWgslDeferredReadbackBenchResult> {
+  const batchSize = clampInteger(options.batchSize, 4, 1, 64);
+  const iterations = clampInteger(options.iterations, 4, 1, 100);
+  const warmup = clampInteger(options.warmup, 1, 0, 20);
+  const runtime = await Lc0WebHybridRuntime.create({
+    packUrl: options.packUrl,
+    layers: options.layers,
+    verifyShards: options.verifyShards,
+    historyFill: options.historyFill,
+    policyTemperature: options.policyTemperature,
+    headBackend: 'wgsl',
+    wgslBatchMode: 'physical',
+    inputBackend: options.inputBackend ?? 'js',
+  });
+  try {
+    const runImmediate = async (batches: Lc0EvaluatorInput[][]): Promise<Lc0WebHybridEvaluationResult[][]> => {
+      const out: Lc0WebHybridEvaluationResult[][] = [];
+      for (const batch of batches) out.push(await runtime.evaluateBatch(batch, { historyFill: options.historyFill ?? 'fen_only', policyTemperature: options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE }));
+      return out;
+    };
+    if (warmup) await runImmediate(buildRoundRobinBatches(options.inputs, batchSize, warmup));
+    const immediateBatches = buildRoundRobinBatches(options.inputs, batchSize, iterations);
+    let started = nowMs();
+    const immediateResults = await runImmediate(immediateBatches);
+    const immediate = summarizeHybridEvaluations('immediate', nowMs() - started, immediateResults);
+
+    if (warmup) await runtime.evaluateWgslBatchesDeferredReadback(buildRoundRobinBatches(options.inputs, batchSize, warmup), { historyFill: options.historyFill ?? 'fen_only', policyTemperature: options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE });
+    const deferredBatches = buildRoundRobinBatches(options.inputs, batchSize, iterations);
+    started = nowMs();
+    const deferredResults = await runtime.evaluateWgslBatchesDeferredReadback(deferredBatches, { historyFill: options.historyFill ?? 'fen_only', policyTemperature: options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE });
+    const deferred = summarizeHybridEvaluations('deferred-double-buffered', nowMs() - started, deferredResults);
+
+    return {
+      status: 'WGSL_DEFERRED_READBACK_BENCH_DONE',
+      backend: 'lc0web-wgsl-encoder-wgsl-heads',
+      stableBackend: 'lc0web-wgsl-encoder-ort-heads',
+      packUrl: runtime.packUrl,
+      layers: runtime.layers,
+      inputBackend: options.inputBackend ?? 'js',
+      batchSize,
+      iterations,
+      warmup,
+      inputCount: options.inputs.length,
+      immediate,
+      deferred,
+      allBestMovesMatch: immediate.bestMoves.length === deferred.bestMoves.length && immediate.bestMoves.every((move, i) => move === deferred.bestMoves[i]),
+    };
   } finally {
     runtime.destroy();
   }
