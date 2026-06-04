@@ -39,3 +39,14 @@ test('lc0web hybrid evaluator allows explicit mixed TVM FFN opt-in', () => {
   assert.equal(evaluator.inputBackend, 'js');
   assert.equal(evaluator.encoderKernelVariant, 'mixed-tvm-ffn');
 });
+
+test('lc0web hybrid evaluator allows explicit mixed TVM FFN plus out-projection opt-in', () => {
+  const evaluator = new Lc0WebHybridEvaluator({
+    packUrl: '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json',
+    verifyShards: false,
+    encoderKernelVariant: 'mixed-tvm-ffn-outproj',
+  });
+  assert.equal(evaluator.headBackend, 'ort');
+  assert.equal(evaluator.inputBackend, 'js');
+  assert.equal(evaluator.encoderKernelVariant, 'mixed-tvm-ffn-outproj');
+});
