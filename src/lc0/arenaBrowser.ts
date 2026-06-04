@@ -17,7 +17,7 @@ import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { DEFAULT_STOCKFISH_FLAVOR, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorLabel, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
 import { RecklessEngine } from './recklessEngine.ts';
-import { RECKLESS_VARIANTS, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, type RecklessVariant } from './recklessVariants.ts';
+import { RECKLESS_VARIANTS, checkRecklessVariantAsset, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, type RecklessVariant } from './recklessVariants.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 interface ArenaEngine {
@@ -507,8 +507,12 @@ function renderRecklessRuntimeInfo(): void {
   const status = reckless?.runtimeStatus();
   const mode = reckless?.runtimeLabel() ?? (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated ? 'persistent available' : 'one-shot fallback');
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
-  info.textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${variant.wasmUrl}`;
+  const asset = recklessVariantAssetStatus(variant);
+  if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
+  const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+  info.textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${variant.wasmUrl}`;
   if (status?.persistentDisabled) info.textContent += ' · persistent disabled after fallback';
+  if (asset === 'missing') info.textContent += ' · build locally with npm run reckless:build-wasi or reckless:build-lite-wasi';
 }
 
 function refreshRecklessVariantUi(): void {

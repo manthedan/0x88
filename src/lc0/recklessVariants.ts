@@ -9,6 +9,11 @@ export interface RecklessVariant {
   note: string;
 }
 
+export type RecklessAssetStatus = 'unknown' | 'checking' | 'present' | 'missing';
+
+const assetStatuses = new Map<string, RecklessAssetStatus>();
+const assetChecks = new Map<string, Promise<RecklessAssetStatus>>();
+
 export const RECKLESS_FULL_VARIANT: RecklessVariant = {
   key: 'full',
   label: 'Reckless Full',
@@ -18,7 +23,7 @@ export const RECKLESS_FULL_VARIANT: RecklessVariant = {
 
 export const RECKLESS_LITE_VARIANT: RecklessVariant = {
   key: 'lite',
-  label: 'Reckless Lite',
+  label: 'Reckless Lite experimental',
   wasmUrl: '/reckless/reckless-v53-l1-512.wasm',
   note: 'v53 L1=512 candidate; smaller/faster prototype, weaker and not shipped by default.',
 };
@@ -42,4 +47,27 @@ export function recklessVariantFromParams(params: URLSearchParams): RecklessVari
   const customUrl = params.get('recklessWasm');
   if (customUrl) return { key: 'custom', label: 'Reckless Custom', wasmUrl: customUrl, note: 'Custom Reckless WASM URL from ?recklessWasm=…' };
   return recklessVariantByKey(normalizeRecklessVariant(params.get('recklessVariant') ?? params.get('reckless')));
+}
+
+export function recklessVariantAssetStatus(variant: RecklessVariant): RecklessAssetStatus {
+  return assetStatuses.get(variant.wasmUrl) ?? 'unknown';
+}
+
+export function checkRecklessVariantAsset(variant: RecklessVariant, onChange?: () => void): Promise<RecklessAssetStatus> {
+  const current = assetStatuses.get(variant.wasmUrl);
+  if (current === 'present' || current === 'missing') return Promise.resolve(current);
+  const existing = assetChecks.get(variant.wasmUrl);
+  if (existing) return existing;
+  assetStatuses.set(variant.wasmUrl, 'checking');
+  const promise = fetch(variant.wasmUrl, { method: 'HEAD', cache: 'no-store' })
+    .then((response) => (response.ok ? 'present' : 'missing') as RecklessAssetStatus)
+    .catch(() => 'missing' as RecklessAssetStatus)
+    .then((status) => {
+      assetStatuses.set(variant.wasmUrl, status);
+      assetChecks.delete(variant.wasmUrl);
+      onChange?.();
+      return status;
+    });
+  assetChecks.set(variant.wasmUrl, promise);
+  return promise;
 }

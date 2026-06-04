@@ -15,7 +15,7 @@ import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
 import { RecklessEngine } from './recklessEngine.ts';
-import { RECKLESS_VARIANTS, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, type RecklessVariant } from './recklessVariants.ts';
+import { RECKLESS_VARIANTS, checkRecklessVariantAsset, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, type RecklessVariant } from './recklessVariants.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
@@ -150,7 +150,11 @@ function renderRecklessRuntimeInfo(): void {
   const status = reckless?.runtimeStatus();
   const mode = reckless?.runtimeLabel() ?? (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated ? 'persistent available' : 'one-shot fallback');
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
-  el('recklessRuntimeInfo').textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${status?.wasmUrl ?? variant.wasmUrl}`;
+  const asset = recklessVariantAssetStatus(variant);
+  if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
+  const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+  const targetUrl = status?.wasmUrl ?? variant.wasmUrl;
+  el('recklessRuntimeInfo').textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${targetUrl}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi or reckless:build-lite-wasi' : ''}`;
 }
 
 function refreshRecklessVariantUi(): void {

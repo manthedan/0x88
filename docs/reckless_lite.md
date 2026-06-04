@@ -78,7 +78,7 @@ A quick Node WASI `go movetime 500` benchmark, excluding network download and mo
 | Quiet development | 268k / d13 | 349k / d12 |
 | Endgame sample | 516k / d14 | 733k / d16 |
 
-Treat this as preliminary. We still need a real browser benchmark because the current adapter is one-shot WASI and browser compile/instantiate behavior matters.
+Treat this as preliminary. The browser benchmark now has enough matrix/reporting support to replace these ad-hoc Node numbers with browser measurements: enter multiple `Name | FEN` rows, depth budgets, and/or movetime budgets on `/reckless-benchmark.html`, then export the JSON/CSV report.
 
 ## Stockfish Lite comparison
 
@@ -91,18 +91,22 @@ An ad-hoc browser test on the isolated static server compared Stockfish single-t
 
 In this setup, Stockfish Lite is both much smaller and faster in nodes/sec, but weaker/different in evaluation because it uses a smaller NNUE. That is the kind of tradeoff worth measuring for Reckless Lite as well.
 
-## Suggested next evaluation matrix
+## Evaluation matrix
 
 For each candidate engine/net combination, record:
 
 - `.wasm` size
-- compile/instantiate/load time in browser
-- one-shot WASI search wall time
-- nodes/sec at fixed depth
+- browser runtime metadata: isolation, `SharedArrayBuffer`, user agent
+- persistent cold search wall time
+- persistent warm average/min/max wall time
+- one-shot cold/warm wall time
+- nodes/sec at fixed depth and fixed movetime
 - move agreement with current v60 full build
 - tactical sanity positions
 - short gauntlet vs Stockfish Lite single-thread
 - short gauntlet vs full Reckless WASI
+
+The in-browser `/reckless-benchmark.html` page now captures the runtime metadata, raw rows, warm-run summary, CSV, and JSON report. It also checks whether the selected Full/Lite WASM assets exist before starting the benchmark.
 
 Recommended candidates:
 
