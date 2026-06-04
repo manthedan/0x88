@@ -4,6 +4,33 @@
 
 Use `/reckless-benchmark.html` from the isolated static server after `npm run build:client`. The page now defaults to `ucinewgame` + `isready` before every timed run. This reset happens outside the timed interval, so the wall-clock measurement remains search-only while persistent-mode repeats avoid repeated-position transposition-table reuse. Disable the checkbox only when intentionally measuring warm TT reuse.
 
+## 2026-06-04 isolated headless browser clean depth 7/8/9 smoke
+
+Command surface: `/reckless-benchmark.html` on the isolated static server (`crossOriginIsolated=true`, `SharedArrayBuffer=true`) after `npm run build:client`, with Full scalar and Full `+simd128` artifacts, persistent and one-shot modes, depth budgets 7/8/9, 20 warm repeats plus one cold run, and the default-on persistent clear-hash reset enabled. Positions: `startpos`, an early Italian-like position, and a middlegame position. The table below aggregates warm averages across all three positions; the raw report has per-position rows.
+
+Raw report: [`reckless_browser_benchmark_2026-06-04_clean_depth7-9.json`](./reckless_browser_benchmark_2026-06-04_clean_depth7-9.json).
+
+| Budget | Mode | Variant | Warm avg ms | Avg NPS | Wall ratio vs scalar | NPS ratio vs scalar |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| depth 7 | persistent | Reckless Full | 15.80 | 339,016 | 1.00x | 1.00x |
+| depth 7 | persistent | Reckless Full SIMD experimental | 9.92 | 706,881 | 1.59x faster | 2.09x |
+| depth 7 | one-shot | Reckless Full | 29.16 | 291,694 | 1.00x | 1.00x |
+| depth 7 | one-shot | Reckless Full SIMD experimental | 45.66 | 611,455 | 0.64x slower | 2.10x |
+| depth 8 | persistent | Reckless Full | 29.49 | 326,822 | 1.00x | 1.00x |
+| depth 8 | persistent | Reckless Full SIMD experimental | 21.28 | 673,483 | 1.39x faster | 2.06x |
+| depth 8 | one-shot | Reckless Full | 40.33 | 306,242 | 1.00x | 1.00x |
+| depth 8 | one-shot | Reckless Full SIMD experimental | 49.67 | 651,880 | 0.81x slower | 2.13x |
+| depth 9 | persistent | Reckless Full | 48.23 | 310,949 | 1.00x | 1.00x |
+| depth 9 | persistent | Reckless Full SIMD experimental | 33.74 | 653,842 | 1.43x faster | 2.10x |
+| depth 9 | one-shot | Reckless Full | 56.76 | 299,956 | 1.00x | 1.00x |
+| depth 9 | one-shot | Reckless Full SIMD experimental | 53.82 | 684,750 | 1.05x faster | 2.28x |
+
+Notes:
+
+- With persistent hash clearing enabled, the previous repeated-startpos TT artifact is gone. Persistent SIMD wall-clock improves by roughly 1.4-1.6x across these depth budgets, while engine-reported NPS improves by roughly 2.1x.
+- One-shot wall-clock remains noisy and overhead-heavy. SIMD still reports about 2.1-2.3x higher NPS, but the larger/fresh SIMD module and one-shot WASI startup path can hide or reverse the wall-clock gain at shallower budgets.
+- Persistent wall-clock is now a better browser compute comparison than the earlier repeated-position run, but NPS is still the cleaner scalar-vs-SIMD compute metric.
+
 ## 2026-06-04 isolated headless browser depth 7/8/9 smoke
 
 Command surface: `/reckless-benchmark.html` on the isolated static server (`crossOriginIsolated=true`, `SharedArrayBuffer=true`) with Full scalar and Full `+simd128` artifacts, persistent and one-shot modes, `startpos`, depth budgets 7/8/9, 20 warm repeats plus one cold run.
