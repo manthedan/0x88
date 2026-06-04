@@ -41,4 +41,6 @@ The SIMD flag is therefore worth keeping as an experimental build/benchmark targ
 
 The persistent WASI adapter already keeps one process alive and skips repeated stable `setoption` commands. It now also skips a repeated identical `position ...` command in persistent mode. This is a small UCI parsing/stdin reduction for analysis refreshes and benchmark loops that re-search the same FEN with a different budget; it does not address the larger one-shot costs from WASI process startup, worker messaging, and stdout parsing.
 
+Arena and analysis pages now call `RecklessEngine.prewarm()` after creating a Reckless instance. In cross-origin-isolated browsers, this starts the persistent worker/process and runs `uci`/`isready` before the first real search, hiding the 80-115 ms cold worker/wasm/UCI startup penalty when the user later asks for a move or analysis. Non-isolated browsers still fall back to one-shot mode.
+
 The next major adapter-overhead reduction remains a browser-native API with direct calls for initialize, set FEN, search, and result retrieval.

@@ -514,6 +514,17 @@ function recklessName(depth: number): string {
   return `${selectedRecklessVariant().label} d${depth}`;
 }
 
+function prewarmReckless(): void {
+  const engine = reckless;
+  if (!engine) return;
+  void engine.prewarm()
+    .then(() => { if (reckless === engine) renderRecklessRuntimeInfo(); })
+    .catch((error) => {
+      if ((error as Error).name !== 'AbortError') console.warn('Reckless prewarm failed', error);
+      if (reckless === engine) renderRecklessRuntimeInfo();
+    });
+}
+
 function renderRecklessRuntimeInfo(): void {
   const info = el('recklessRuntimeInfo');
   const variant = selectedRecklessVariant();
@@ -955,6 +966,7 @@ function wireEvents() {
     if (running) return;
     reckless?.dispose();
     reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+    prewarmReckless();
     buildEngines();
     refreshChampionOptions();
     refreshRecklessVariantUi();
@@ -986,6 +998,7 @@ async function init() {
     searcher = new Lc0PuctSearcher(lc0Cache);
     stockfish = new StockfishEngine({ depth: 4, threads: stockfishThreads() }, stockfishFlavorUrl(selectedStockfishFlavor()));
     reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+    prewarmReckless();
     renderRecklessRuntimeInfo();
     renderCacheInfo();
     void renderRuntimeBadge();

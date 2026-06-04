@@ -46,7 +46,12 @@ interface RunResult {
 }
 
 type Pending = { resolve: (result: RunResult) => void; reject: (error: Error) => void };
-type PersistentPending = Pending & { stdout: string[]; stderr: string[]; onAbort?: () => void };
+type PersistentPending = Pending & {
+  stdout: string[];
+  stderr: string[];
+  resolveWhenLine: (line: string, stream: 'stdout' | 'stderr') => boolean;
+  onAbort?: () => void;
+};
 
 type SharedInput = {
   buffer: SharedArrayBuffer;
@@ -175,7 +180,7 @@ export class RecklessEngine {
       if (!active || !message.line) return;
       if (message.stream === 'stderr') active.stderr.push(message.line);
       else active.stdout.push(message.line);
-      if (message.stream === 'stdout' && message.line.startsWith('bestmove')) {
+      if (active.resolveWhenLine(message.line, message.stream ?? 'stdout')) {
         this.resolvePersistent({ stdout: active.stdout, stderr: active.stderr, exitCode: 0 });
       }
       return;
@@ -280,7 +285,11 @@ export class RecklessEngine {
     return out;
   }
 
-  private runPersistentCommands(commands: string[], signal?: AbortSignal): Promise<RunResult> {
+  private runPersistentCommands(
+    commands: string[],
+    signal?: AbortSignal,
+    resolveWhenLine: (line: string, stream: 'stdout' | 'stderr') => boolean = (line, stream) => stream === 'stdout' && line.startsWith('bestmove'),
+  ): Promise<RunResult> {
     if (signal?.aborted) return Promise.reject(abortError());
     this.ensurePersistentWorker();
     const sharedInput = this.sharedInput;
@@ -302,6 +311,7 @@ export class RecklessEngine {
           signal?.removeEventListener('abort', onAbort);
           reject(error);
         },
+        resolveWhenLine,
         onAbort,
       };
       signal?.addEventListener('abort', onAbort, { once: true });
@@ -350,6 +360,25 @@ export class RecklessEngine {
 
   lastInfo(): StockfishInfoLine[] {
     return this.lastInfoLines.map((entry) => ({ ...entry, pvUci: [...entry.pvUci] }));
+  }
+
+  /**
+   * Start and initialize the persistent WASI/UCI process before the first real
+   * search. This hides worker creation, wasm instantiation, and UCI `isready`
+   * latency when cross-origin isolation allows the SharedArrayBuffer path.
+   */
+  async prewarm(signal?: AbortSignal): Promise<void> {
+    return this.runExclusive(async () => {
+      if (this.runtimeOptions.forceOneShot || this.persistentDisabled || !canUsePersistentRecklessWasi()) return;
+      try {
+        const result = await this.runPersistentCommands(['uci', 'isready'], signal, (line, stream) => stream === 'stdout' && line === 'readyok');
+        if (result.exitCode !== 0) throw new Error(`Reckless prewarm exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
+      } catch (error) {
+        if ((error as Error).name === 'AbortError' || this.runtimeOptions.disablePersistentFallback) throw error;
+        this.persistentDisabled = true;
+        this.disposeWorker();
+      }
+    });
   }
 
   runtimeStatus(): RecklessRuntimeStatus {

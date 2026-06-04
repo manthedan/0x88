@@ -172,8 +172,22 @@ function getStockfish(): StockfishEngine {
   return stockfish;
 }
 
+function prewarmReckless(): void {
+  const engine = reckless;
+  if (!engine) return;
+  void engine.prewarm()
+    .then(() => { if (reckless === engine) renderRecklessRuntimeInfo(); })
+    .catch((error) => {
+      if ((error as Error).name !== 'AbortError') console.warn('Reckless prewarm failed', error);
+      if (reckless === engine) renderRecklessRuntimeInfo();
+    });
+}
+
 function getReckless(): RecklessEngine {
-  if (!reckless) reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+  if (!reckless) {
+    reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+    prewarmReckless();
+  }
   return reckless;
 }
 
@@ -532,6 +546,10 @@ function wireEvents() {
   el('recklessVariantSelect').addEventListener('change', () => {
     reckless?.dispose();
     reckless = null;
+    if (useReckless()) {
+      reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+      prewarmReckless();
+    }
     lineCache.delete(tree.current.fen);
     refreshRecklessVariantUi();
     if (useReckless()) void analyzeCurrent();
