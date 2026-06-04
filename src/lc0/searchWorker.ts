@@ -65,7 +65,7 @@ type InitMessage = {
   verifyShards?: boolean;
   headBackend?: 'ort' | 'wgsl';
   wgslBatchMode?: 'physical' | 'serial';
-  inputBackend?: 'js' | 'wgsl';
+  inputBackend?: 'js' | 'wgsl' | 'wasm';
   evalCacheEntries?: number;
 };
 
@@ -113,7 +113,7 @@ type HybridEvaluateMessage = {
   verifyShards?: boolean;
   headBackend?: 'ort' | 'wgsl';
   wgslBatchMode?: 'physical' | 'serial';
-  inputBackend?: 'js' | 'wgsl';
+  inputBackend?: 'js' | 'wgsl' | 'wasm';
 };
 
 type LoadPackMessage = {

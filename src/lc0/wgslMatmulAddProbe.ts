@@ -1,7 +1,9 @@
 import * as ort from '../nn/ortRuntime.ts';
+import { boardToFen, type BoardState } from '../chess/board.ts';
 import { encodeLc0Classical112, type Lc0HistoryFill } from './encoder112.ts';
 import { currentBoardAndFen, LC0_DEFAULT_POLICY_TEMPERATURE, legalPolicyPriors, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { loadLc0WebModelPack, type Lc0WebTensorView } from './modelPack.ts';
+import { createLc0WasmInputEncoder, type Lc0WasmInputEncoder, type Lc0WasmInputEncoderTiming } from './wasmInputEncoder.ts';
 
 const DEFAULT_WEIGHT_TENSOR = '/encoder0/mha/Q/w/w';
 const DEFAULT_BIAS_TENSOR = '/encoder0/mha/Q/b/w';
@@ -4834,7 +4836,7 @@ async function runCachedPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>
 
 type Lc0WebHybridHeadBackend = 'ort' | 'wgsl';
 type Lc0WebHybridWgslBatchMode = 'physical' | 'serial';
-type Lc0WebHybridInputBackend = 'js' | 'wgsl';
+type Lc0WebHybridInputBackend = 'js' | 'wgsl' | 'wasm';
 
 const WGSL_HEADS_READBACK_FLOATS = DEFAULT_POLICY_MAPPED_OUTPUTS + 3;
 const WGSL_HEADS_READBACK_BYTES = WGSL_HEADS_READBACK_FLOATS * 4;
@@ -5045,7 +5047,10 @@ export interface Lc0WebHybridTimingBreakdown {
   readbackMapCount: number;
   physicalBatchSize?: number;
   batchPosition?: number;
-  inputBackend?: 0 | 1;
+  inputBackend?: Lc0WebHybridInputBackend;
+  inputBridgeCopyMs?: number;
+  wasmEncodeMs?: number;
+  wasmTotalMs?: number;
 }
 
 export interface Lc0WebHybridEvaluationResult extends Lc0Evaluation {
@@ -5111,6 +5116,20 @@ function cpuProjectTokensF32(input: Float32Array<ArrayBufferLike>, weight: Float
 
 function buildInitialEncoderPlanes(input: Lc0EvaluatorInput, historyFill: Lc0HistoryFill): Float32Array<ArrayBufferLike> {
   return encodeLc0Classical112(input, { historyFill }).planes;
+}
+
+function boardStateToFen(board: BoardState | string): string {
+  return typeof board === 'string' ? board : boardToFen(board);
+}
+
+function buildInitialEncoderPlanesWasm(input: Lc0EvaluatorInput, historyFill: Lc0HistoryFill, encoder: Lc0WasmInputEncoder): { planes: Float32Array<ArrayBufferLike>; timing: Lc0WasmInputEncoderTiming } {
+  if (typeof input === 'object' && input !== null && 'positions' in input) {
+    const fens = input.positions.map(boardStateToFen);
+    const result = encoder.encodeFenHistoryTimed(fens);
+    return { planes: result.encoded.planes, timing: result.timing };
+  }
+  const result = encoder.encodeFenTimed(boardStateToFen(input), { historyFill: historyFill !== 'no' });
+  return { planes: result.encoded.planes, timing: result.timing };
 }
 
 function buildInitialEncoderActivation(input: Lc0EvaluatorInput, tensors: Lc0WebPreparedInitialInputTensors, historyFill: Lc0HistoryFill): Float32Array<ArrayBufferLike> {
@@ -5346,6 +5365,7 @@ class Lc0WebHybridRuntime {
   private readonly inputTensors: Lc0WebPreparedInitialInputTensors;
   private readonly inputBackend: Lc0WebHybridInputBackend;
   private readonly inputBodyGpu?: InputBodyGpuRuntime;
+  private readonly wasmInputEncoder?: Lc0WasmInputEncoder;
   private readonly headBackend: Lc0WebHybridHeadBackend;
   private readonly wgslBatchMode: Lc0WebHybridWgslBatchMode;
   private readonly headSession?: CachedPolicyValueHeadSession;
@@ -5367,6 +5387,7 @@ class Lc0WebHybridRuntime {
     inputTensors: Lc0WebPreparedInitialInputTensors;
     inputBackend: Lc0WebHybridInputBackend;
     inputBodyGpu?: InputBodyGpuRuntime;
+    wasmInputEncoder?: Lc0WasmInputEncoder;
     headBackend: Lc0WebHybridHeadBackend;
     wgslBatchMode: Lc0WebHybridWgslBatchMode;
     headSession?: CachedPolicyValueHeadSession;
@@ -5385,6 +5406,7 @@ class Lc0WebHybridRuntime {
     this.inputTensors = options.inputTensors;
     this.inputBackend = options.inputBackend;
     this.inputBodyGpu = options.inputBodyGpu;
+    this.wasmInputEncoder = options.wasmInputEncoder;
     this.headBackend = options.headBackend;
     this.wgslBatchMode = options.wgslBatchMode;
     this.headSession = options.headSession;
@@ -5430,7 +5452,9 @@ class Lc0WebHybridRuntime {
     const inputBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
     const readbackBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
     buffers.push(inputBuffer, readbackBuffer);
-    const inputBodyGpu = inputBackend === 'wgsl' ? createInputBodyGpuRuntime(device, inputTensors, inputBuffer, usage) : undefined;
+    const usesGpuInputBody = inputBackend === 'wgsl' || inputBackend === 'wasm';
+    const wasmInputEncoder = inputBackend === 'wasm' ? await createLc0WasmInputEncoder() : undefined;
+    const inputBodyGpu = usesGpuInputBody ? createInputBodyGpuRuntime(device, inputTensors, inputBuffer, usage) : undefined;
     if (inputBodyGpu) buffers.push(...inputBodyGpu.buffers);
     const layerRuntimes: HybridEncoderLayerRuntime[] = [];
     let layerInput = inputBuffer;
@@ -5449,6 +5473,7 @@ class Lc0WebHybridRuntime {
       inputTensors,
       inputBackend,
       inputBodyGpu,
+      wasmInputEncoder,
       headBackend,
       wgslBatchMode,
       headSession,
@@ -5470,7 +5495,7 @@ class Lc0WebHybridRuntime {
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
     const inputBuffer = this.device.createBuffer({ size: outputElements * 4, usage: this.usage.STORAGE | this.usage.COPY_DST });
     this.buffers.push(inputBuffer);
-    const inputBodyGpu = this.inputBackend === 'wgsl' ? createInputBodyGpuRuntime(this.device, this.inputTensors, inputBuffer, this.usage) : undefined;
+    const inputBodyGpu = this.inputBackend === 'wgsl' || this.inputBackend === 'wasm' ? createInputBodyGpuRuntime(this.device, this.inputTensors, inputBuffer, this.usage) : undefined;
     if (inputBodyGpu) this.buffers.push(...inputBodyGpu.buffers);
     const layerRuntimes: HybridEncoderLayerSlotRuntime[] = [];
     let layerInput = inputBuffer;
@@ -5513,22 +5538,34 @@ class Lc0WebHybridRuntime {
     return this.wgslBatchReadbackBuffer;
   }
 
+  private buildInputPayload(input: Lc0EvaluatorInput, historyFill: Lc0HistoryFill): { payload: Float32Array<ArrayBufferLike>; wasmTiming?: Lc0WasmInputEncoderTiming } {
+    if (this.inputBackend === 'js') return { payload: buildInitialEncoderActivation(input, this.inputTensors, historyFill) };
+    if (this.inputBackend === 'wasm') {
+      if (!this.wasmInputEncoder) throw new Error('WASM input encoder is not initialized');
+      const wasm = buildInitialEncoderPlanesWasm(input, historyFill, this.wasmInputEncoder);
+      return { payload: wasm.planes, wasmTiming: wasm.timing };
+    }
+    return { payload: buildInitialEncoderPlanes(input, historyFill) };
+  }
+
+  private timingWasmFields(wasmTiming: Lc0WasmInputEncoderTiming | undefined): Pick<Lc0WebHybridTimingBreakdown, 'inputBridgeCopyMs' | 'wasmEncodeMs' | 'wasmTotalMs'> {
+    return wasmTiming ? { inputBridgeCopyMs: wasmTiming.bridgeCopyMs, wasmEncodeMs: wasmTiming.wasmEncodeMs, wasmTotalMs: wasmTiming.totalMs } : {};
+  }
+
   async encode(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill }): Promise<{
     board: ReturnType<typeof currentBoardAndFen>['board'];
     fen: string;
     output: Float32Array<ArrayBufferLike>;
     encoderDispatchSyncedMs: number;
-    timing: Pick<Lc0WebHybridTimingBreakdown, 'inputBuildMs' | 'inputUploadMs' | 'commandEncodeMs' | 'queueSubmitMs' | 'readbackSyncedMs' | 'readbackBytes' | 'readbackMapCount'>;
+    timing: Pick<Lc0WebHybridTimingBreakdown, 'inputBuildMs' | 'inputUploadMs' | 'commandEncodeMs' | 'queueSubmitMs' | 'readbackSyncedMs' | 'readbackBytes' | 'readbackMapCount' | 'inputBackend' | 'inputBridgeCopyMs' | 'wasmEncodeMs' | 'wasmTotalMs'>;
   }> {
     const { board, fen } = currentBoardAndFen(input);
     const inputBuildStarted = nowMs();
-    const inputPayload = this.inputBackend === 'wgsl'
-      ? buildInitialEncoderPlanes(input, options.historyFill)
-      : buildInitialEncoderActivation(input, this.inputTensors, options.historyFill);
+    const { payload: inputPayload, wasmTiming } = this.buildInputPayload(input, options.historyFill);
     const inputBuildMs = nowMs() - inputBuildStarted;
     const inputUploadStarted = nowMs();
-    if (this.inputBackend === 'wgsl') {
-      if (!this.inputBodyGpu) throw new Error('WGSL input backend is not initialized');
+    if (this.inputBackend !== 'js') {
+      if (!this.inputBodyGpu) throw new Error('WGSL/WASM input backend is not initialized');
       this.device.queue.writeBuffer(this.inputBodyGpu.planesBuffer, 0, inputPayload);
     } else {
       this.device.queue.writeBuffer(this.inputBuffer, 0, inputPayload);
@@ -5537,8 +5574,8 @@ class Lc0WebHybridRuntime {
     const blockStarted = nowMs();
     const commandEncodeStarted = nowMs();
     const encoder = this.device.createCommandEncoder();
-    if (this.inputBackend === 'wgsl') {
-      if (!this.inputBodyGpu) throw new Error('WGSL input backend is not initialized');
+    if (this.inputBackend !== 'js') {
+      if (!this.inputBodyGpu) throw new Error('WGSL/WASM input backend is not initialized');
       const inputPass = encoder.beginComputePass();
       encodeInputBodyPass(inputPass, this.inputBodyGpu);
       inputPass.end();
@@ -5562,7 +5599,7 @@ class Lc0WebHybridRuntime {
       fen,
       output,
       encoderDispatchSyncedMs: nowMs() - blockStarted,
-      timing: { inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, readbackSyncedMs, readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4, readbackMapCount: 1 },
+      timing: { inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, readbackSyncedMs, readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4, readbackMapCount: 1, inputBackend: this.inputBackend, ...this.timingWasmFields(wasmTiming) },
     };
   }
 
@@ -5572,13 +5609,11 @@ class Lc0WebHybridRuntime {
       if (!this.wgslHeads) throw new Error('WGSL hybrid heads runtime is not initialized');
       const { board, fen } = currentBoardAndFen(input);
       const inputBuildStarted = nowMs();
-      const inputPayload = this.inputBackend === 'wgsl'
-        ? buildInitialEncoderPlanes(input, options.historyFill)
-        : buildInitialEncoderActivation(input, this.inputTensors, options.historyFill);
+      const { payload: inputPayload, wasmTiming } = this.buildInputPayload(input, options.historyFill);
       const inputBuildMs = nowMs() - inputBuildStarted;
       const inputUploadStarted = nowMs();
-      if (this.inputBackend === 'wgsl') {
-        if (!this.inputBodyGpu) throw new Error('WGSL input backend is not initialized');
+      if (this.inputBackend !== 'js') {
+        if (!this.inputBodyGpu) throw new Error('WGSL/WASM input backend is not initialized');
         this.device.queue.writeBuffer(this.inputBodyGpu.planesBuffer, 0, inputPayload);
       } else {
         this.device.queue.writeBuffer(this.inputBuffer, 0, inputPayload);
@@ -5587,8 +5622,8 @@ class Lc0WebHybridRuntime {
       const encoderStarted = nowMs();
       const commandEncodeStarted = nowMs();
       const encoder = this.device.createCommandEncoder();
-      if (this.inputBackend === 'wgsl') {
-        if (!this.inputBodyGpu) throw new Error('WGSL input backend is not initialized');
+      if (this.inputBackend !== 'js') {
+        if (!this.inputBodyGpu) throw new Error('WGSL/WASM input backend is not initialized');
         const inputPass = encoder.beginComputePass();
         encodeInputBodyPass(inputPass, this.inputBodyGpu);
         inputPass.end();
@@ -5645,6 +5680,8 @@ class Lc0WebHybridRuntime {
           legalPriorsMs,
           readbackBytes: WGSL_HEADS_READBACK_BYTES,
           readbackMapCount: 1,
+          inputBackend: this.inputBackend,
+          ...this.timingWasmFields(wasmTiming),
         },
       };
     }
@@ -5681,6 +5718,10 @@ class Lc0WebHybridRuntime {
         legalPriorsMs,
         readbackBytes: encoded.timing.readbackBytes,
         readbackMapCount: encoded.timing.readbackMapCount,
+        inputBackend: this.inputBackend,
+        inputBridgeCopyMs: encoded.timing.inputBridgeCopyMs,
+        wasmEncodeMs: encoded.timing.wasmEncodeMs,
+        wasmTotalMs: encoded.timing.wasmTotalMs,
       },
     };
   }
@@ -5697,14 +5738,20 @@ class Lc0WebHybridRuntime {
     const uploadBuffer = this.ensureWgslBatchUploadBuffer(inputs.length);
     const readbackBuffer = this.ensureWgslBatchReadbackBuffer(inputs.length);
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
-    const inputElements = this.inputBackend === 'wgsl' ? DEFAULT_INPUT_PLANES * DEFAULT_TOKENS : outputElements;
+    const inputElements = this.inputBackend !== 'js' ? DEFAULT_INPUT_PLANES * DEFAULT_TOKENS : outputElements;
     const boardsAndFens = inputs.map((input) => currentBoardAndFen(input));
     const inputBuildStarted = nowMs();
     const combinedInput = new Float32Array(inputs.length * inputElements);
+    let inputBridgeCopyMs = 0;
+    let wasmEncodeMs = 0;
+    let wasmTotalMs = 0;
     for (let i = 0; i < inputs.length; i++) {
-      const payload = this.inputBackend === 'wgsl'
-        ? buildInitialEncoderPlanes(inputs[i], options.historyFill)
-        : buildInitialEncoderActivation(inputs[i], this.inputTensors, options.historyFill);
+      const { payload, wasmTiming } = this.buildInputPayload(inputs[i], options.historyFill);
+      if (wasmTiming) {
+        inputBridgeCopyMs += wasmTiming.bridgeCopyMs;
+        wasmEncodeMs += wasmTiming.wasmEncodeMs;
+        wasmTotalMs += wasmTiming.totalMs;
+      }
       combinedInput.set(payload, i * inputElements);
     }
     const inputBuildMs = nowMs() - inputBuildStarted;
@@ -5716,9 +5763,9 @@ class Lc0WebHybridRuntime {
     const encoder = this.device.createCommandEncoder();
     for (let slotIndex = 0; slotIndex < slots.length; slotIndex++) {
       const slot = slots[slotIndex];
-      if (this.inputBackend === 'wgsl') {
+      if (this.inputBackend !== 'js') {
         const inputBodyGpu = slot.inputBodyGpu;
-        if (!inputBodyGpu) throw new Error('WGSL input backend batch slot is not initialized');
+        if (!inputBodyGpu) throw new Error('WGSL/WASM input backend batch slot is not initialized');
         encoder.copyBufferToBuffer(uploadBuffer, slotIndex * inputElements * 4, inputBodyGpu.planesBuffer, 0, inputElements * 4);
         const inputPass = encoder.beginComputePass();
         encodeInputBodyPass(inputPass, inputBodyGpu);
@@ -5792,6 +5839,8 @@ class Lc0WebHybridRuntime {
           readbackMapCount: 1,
           physicalBatchSize: inputs.length,
           batchPosition: i,
+          inputBackend: this.inputBackend,
+          ...(this.inputBackend === 'wasm' ? { inputBridgeCopyMs, wasmEncodeMs, wasmTotalMs } : {}),
         },
       });
     }

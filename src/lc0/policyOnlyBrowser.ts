@@ -675,11 +675,13 @@ const KERNEL_PROBE_REQUESTED = MAPPED_POLICY_PROBE_REQUESTED || WGSL_HEADS_PROBE
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
 const HYBRID_SEARCH_BENCH_REQUESTED = params.get('hybridSearchBench') === '1' || params.get('hybridSearchBenchmark') === '1';
+const HYBRID_INPUT_BENCH_REQUESTED = params.get('hybridInputBench') === '1' || params.get('hybridInputBenchmark') === '1' || params.get('wasmInputBench') === '1';
 const HYBRID_WGSL_HEADS_REQUESTED = params.get('headBackend') === 'wgsl' || params.get('hybridHeads') === 'wgsl' || params.get('runtime') === 'hybrid-wgsl-heads' || params.get('runtime') === 'wgsl-heads';
 const HYBRID_WGSL_BATCH_MODE = params.get('wgslBatchMode') === 'serial' || params.get('wgslBatch') === 'serial' ? 'serial' : 'physical';
-const HYBRID_INPUT_BACKEND_REQUESTED = params.get('inputBackend') === 'wgsl' || params.get('hybridInput') === 'wgsl';
-const HYBRID_INPUT_BACKEND = HYBRID_INPUT_BACKEND_REQUESTED ? 'wgsl' : 'js';
-const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
+const HYBRID_INPUT_BACKEND_PARAM = params.get('inputBackend') ?? params.get('hybridInput');
+const HYBRID_INPUT_BACKEND_REQUESTED = HYBRID_INPUT_BACKEND_PARAM === 'wgsl' || HYBRID_INPUT_BACKEND_PARAM === 'wasm';
+const HYBRID_INPUT_BACKEND = HYBRID_INPUT_BACKEND_PARAM === 'wasm' ? 'wasm' : (HYBRID_INPUT_BACKEND_PARAM === 'wgsl' ? 'wgsl' : 'js');
+const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
@@ -1038,6 +1040,29 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
   searchWorkerBackend = ready.backend;
   workerModelCacheStatus = ready.modelCache;
   renderStatic();
+}
+
+async function initHybridWorkerWithInputBackend(inputBackend: 'js' | 'wgsl' | 'wasm'): Promise<void> {
+  if (!searchWorker) await initSearchWorker({ initModel: false });
+  const initStarted = performance.now();
+  const ready = await postWorkerRequest<{ type: 'ready'; backend: string; modelCache: string }>({
+    type: 'init',
+    modelUrl: MODEL_URL,
+    ep: requestedWorkerEp(),
+    cacheModel: CACHE_MODEL,
+    runtime: 'hybrid',
+    packUrl: PACK_URL,
+    layers: Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10))),
+    verifyShards: params.get('packVerify') !== '0',
+    headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
+    wgslBatchMode: HYBRID_WGSL_BATCH_MODE,
+    inputBackend,
+    evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
+  });
+  searchWorkerInitMs = performance.now() - initStarted;
+  searchWorkerReady = true;
+  searchWorkerBackend = ready.backend;
+  workerModelCacheStatus = ready.modelCache;
 }
 
 async function evaluateWithWorker(input: Lc0EvaluatorInput): Promise<BrowserEvaluationChoice> {
@@ -2423,6 +2448,110 @@ async function runHybridSearchBenchmark(): Promise<void> {
   }
 }
 
+type HybridInputBenchFixture = { id: string; kind: 'fen' | 'history'; input: Lc0EvaluatorInput };
+
+async function loadRepresentativeInputFixtures(): Promise<HybridInputBenchFixture[]> {
+  const [fenFixtures, historyFixtures] = await Promise.all([
+    fetch('/fixtures/lc0/fen_only.json', { cache: 'no-store' }).then((response) => {
+      if (!response.ok) throw new Error(`failed to load FEN fixtures: HTTP ${response.status}`);
+      return response.json() as Promise<Array<{ id: string; fen: string }>>;
+    }),
+    fetch('/fixtures/lc0/history.json', { cache: 'no-store' }).then((response) => {
+      if (!response.ok) throw new Error(`failed to load history fixtures: HTTP ${response.status}`);
+      return response.json() as Promise<Array<{ id: string; startFen?: string; moves: string[] }>>;
+    }),
+  ]);
+  return [
+    ...fenFixtures.map((fixture) => ({ id: fixture.id, kind: 'fen' as const, input: fixture.fen })),
+    ...historyFixtures.map((fixture) => ({ id: fixture.id, kind: 'history' as const, input: { positions: buildBoardHistoryFromMoves(fixture.moves, fixture.startFen ?? START_FEN) } })),
+  ];
+}
+
+async function runHybridInputBenchmark(): Promise<void> {
+  const fixtures = await loadRepresentativeInputFixtures();
+  const iterations = boundedQueryInt(['hybridInputBenchIters', 'inputBenchIters', 'iters'], 1, 1, 20);
+  const warmup = boundedQueryInt(['hybridInputBenchWarmup', 'inputBenchWarmup', 'warmup'], 1, 0, 10);
+  const backendParam = params.get('inputBenchBackends') ?? params.get('hybridInputBackends') ?? 'js,wasm';
+  const requestedBackends = backendParam.split(',').map((entry) => entry.trim()).filter(Boolean).map((entry) => {
+    if (entry !== 'js' && entry !== 'wgsl' && entry !== 'wasm') throw new Error(`invalid hybrid input benchmark backend: ${entry}`);
+    return entry;
+  }) as Array<'js' | 'wgsl' | 'wasm'>;
+  const backends: Array<'js' | 'wgsl' | 'wasm'> = requestedBackends.includes('js')
+    ? ['js', ...requestedBackends.filter((backend) => backend !== 'js')]
+    : requestedBackends;
+  if (fixtures.length !== 16) throw new Error(`expected 16 representative fixtures, loaded ${fixtures.length}`);
+  setBusy(true, `Benchmarking LC0 hybrid input backends over ${fixtures.length} fixtures…`);
+  el('benchResult').textContent = 'HYBRID_INPUT_BENCH_RUNNING';
+  try {
+    const byBackend: Record<string, unknown> = {};
+    const baselineBestMoves = new Map<string, string | undefined>();
+    for (const backend of backends) {
+      await initHybridWorkerWithInputBackend(backend);
+      const roundTripSamples: number[] = [];
+      const backendTimingSamples: Record<string, number[]> = {};
+      const fixtureResults = [];
+      for (let i = 0; i < warmup; i++) {
+        await evaluateWithWorker(fixtures[i % fixtures.length].input);
+        el('benchResult').textContent = `HYBRID_INPUT_BENCH_${backend.toUpperCase()}_WARMUP ${i + 1}/${warmup}`;
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      for (let fixtureIndex = 0; fixtureIndex < fixtures.length; fixtureIndex++) {
+        const fixture = fixtures[fixtureIndex];
+        const fixtureTimes: number[] = [];
+        let last: BrowserEvaluationChoice | undefined;
+        for (let iter = 0; iter < iterations; iter++) {
+          const started = performance.now();
+          last = await evaluateWithWorker(fixture.input);
+          const elapsed = performance.now() - started;
+          fixtureTimes.push(elapsed);
+          roundTripSamples.push(elapsed);
+          recordNumericTimingSamples(backendTimingSamples, (last.evaluation as { timing?: unknown }).timing);
+          el('benchResult').textContent = `HYBRID_INPUT_BENCH_${backend.toUpperCase()} ${fixtureIndex + 1}/${fixtures.length} iter ${iter + 1}/${iterations}`;
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+        if (backend === 'js') baselineBestMoves.set(fixture.id, last?.move);
+        fixtureResults.push({
+          id: fixture.id,
+          kind: fixture.kind,
+          timingStats: sampleTimingStats(fixtureTimes, `${backend} ${fixture.id} input eval round trips`),
+          lastBackendTiming: roundedNumericRecord((last?.evaluation as { timing?: unknown } | undefined)?.timing),
+          bestMove: last?.move,
+          bestMoveMatchesJs: backend === 'js' ? true : (baselineBestMoves.has(fixture.id) ? last?.move === baselineBestMoves.get(fixture.id) : undefined),
+        });
+      }
+      byBackend[backend] = {
+        workerBackend: searchWorkerBackend,
+        workerInitMs: roundReportMs(searchWorkerInitMs),
+        modelCache: workerModelCacheStatus,
+        timingStats: sampleTimingStats(roundTripSamples, `${backend} input eval round trips over representative fixtures`),
+        phaseTimingStats: summarizeNumericTimingSamples(backendTimingSamples, `${backend} backend input timing over representative fixtures`),
+        fixtures: fixtureResults,
+      };
+    }
+    const result = {
+      status: 'HYBRID_INPUT_BENCH_DONE',
+      packUrl: PACK_URL,
+      layers: boundedQueryInt(['encoderLayers', 'layers'], 10, 1, 32),
+      headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
+      backends,
+      fixtureCount: fixtures.length,
+      iterations,
+      warmup,
+      browserInfo: browserReportInfo(),
+      packVerification: params.get('packVerify') === '0' ? 'disabled' : 'enabled',
+      byBackend,
+    };
+    el('benchResult').textContent = JSON.stringify(result);
+    el('message').textContent = `HYBRID_INPUT_BENCH_DONE ${fixtures.length} fixtures · ${backends.join(' vs ')}`;
+  } catch (error) {
+    el('benchResult').textContent = `HYBRID_INPUT_BENCH_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Hybrid input benchmark failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function searchWithWorker(): Promise<RenderableSearchResult> {
   const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
     type: 'search',
@@ -3027,6 +3156,10 @@ async function init() {
     }
     if (HYBRID_SEARCH_BENCH_REQUESTED) {
       await runHybridSearchBenchmark();
+      return;
+    }
+    if (HYBRID_INPUT_BENCH_REQUESTED) {
+      await runHybridInputBenchmark();
       return;
     }
     if (BENCH_REQUESTED) await runWorkerEvalBenchmark();

@@ -2,6 +2,25 @@ import { LC0_BOARD_SQUARES, LC0_CLASSICAL_112_PLANES, type Lc0EncodedPlanes112 }
 
 export type Lc0WasmInputEncoderSource = string | URL | ArrayBuffer | Uint8Array | WebAssembly.Module;
 
+export interface Lc0WasmInputEncoderTiming {
+  textEncodeMs: number;
+  writeMs: number;
+  wasmEncodeMs: number;
+  readMs: number;
+  totalMs: number;
+  /** JS↔WASM bridge copy time, excluding the Rust encoder call itself. */
+  bridgeCopyMs: number;
+}
+
+export interface Lc0WasmInputEncoderTimedResult {
+  encoded: Lc0EncodedPlanes112;
+  timing: Lc0WasmInputEncoderTiming;
+}
+
+function nowMs(): number {
+  return typeof performance === 'undefined' ? Date.now() : performance.now();
+}
+
 type Lc0InputEncoderExports = WebAssembly.Exports & {
   memory: WebAssembly.Memory;
   lc0_input_buffer_ptr: () => number;
@@ -25,19 +44,49 @@ export class Lc0WasmInputEncoder {
   }
 
   encodeFen(fen: string, options: { historyFill?: boolean } = {}): Lc0EncodedPlanes112 {
+    return this.encodeFenTimed(fen, options).encoded;
+  }
+
+  encodeFenTimed(fen: string, options: { historyFill?: boolean } = {}): Lc0WasmInputEncoderTimedResult {
+    const totalStarted = nowMs();
+    const textEncodeStarted = nowMs();
     const bytes = this.textEncoder.encode(fen);
+    const textEncodeMs = nowMs() - textEncodeStarted;
+    const writeStarted = nowMs();
     this.writeInput(bytes);
+    const writeMs = nowMs() - writeStarted;
+    const wasmEncodeStarted = nowMs();
     const status = this.exports.lc0_encode_fen(bytes.byteLength, options.historyFill === false ? 0 : 1);
+    const wasmEncodeMs = nowMs() - wasmEncodeStarted;
     this.assertOk(status);
-    return this.readPlanes();
+    const readStarted = nowMs();
+    const encoded = this.readPlanes();
+    const readMs = nowMs() - readStarted;
+    const totalMs = nowMs() - totalStarted;
+    return { encoded, timing: { textEncodeMs, writeMs, wasmEncodeMs, readMs, totalMs, bridgeCopyMs: textEncodeMs + writeMs + readMs } };
   }
 
   encodeFenHistory(fens: readonly string[]): Lc0EncodedPlanes112 {
+    return this.encodeFenHistoryTimed(fens).encoded;
+  }
+
+  encodeFenHistoryTimed(fens: readonly string[]): Lc0WasmInputEncoderTimedResult {
+    const totalStarted = nowMs();
+    const textEncodeStarted = nowMs();
     const bytes = this.textEncoder.encode(fens.join('\n'));
+    const textEncodeMs = nowMs() - textEncodeStarted;
+    const writeStarted = nowMs();
     this.writeInput(bytes);
+    const writeMs = nowMs() - writeStarted;
+    const wasmEncodeStarted = nowMs();
     const status = this.exports.lc0_encode_fen_history(bytes.byteLength);
+    const wasmEncodeMs = nowMs() - wasmEncodeStarted;
     this.assertOk(status);
-    return this.readPlanes();
+    const readStarted = nowMs();
+    const encoded = this.readPlanes();
+    const readMs = nowMs() - readStarted;
+    const totalMs = nowMs() - totalStarted;
+    return { encoded, timing: { textEncodeMs, writeMs, wasmEncodeMs, readMs, totalMs, bridgeCopyMs: textEncodeMs + writeMs + readMs } };
   }
 
   private writeInput(bytes: Uint8Array): void {
