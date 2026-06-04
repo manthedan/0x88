@@ -676,6 +676,7 @@ const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === 
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
 const HYBRID_SEARCH_BENCH_REQUESTED = params.get('hybridSearchBench') === '1' || params.get('hybridSearchBenchmark') === '1';
 const HYBRID_WGSL_HEADS_REQUESTED = params.get('headBackend') === 'wgsl' || params.get('hybridHeads') === 'wgsl' || params.get('runtime') === 'hybrid-wgsl-heads' || params.get('runtime') === 'wgsl-heads';
+const HYBRID_WGSL_BATCH_MODE = params.get('wgslBatchMode') === 'serial' || params.get('wgslBatch') === 'serial' ? 'serial' : 'physical';
 const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
@@ -1025,6 +1026,7 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
       layers: Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10))),
       verifyShards: params.get('packVerify') !== '0',
       headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
+      wgslBatchMode: HYBRID_WGSL_BATCH_MODE,
       evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
     } : {}),
   });
@@ -1041,6 +1043,14 @@ async function evaluateWithWorker(input: Lc0EvaluatorInput): Promise<BrowserEval
     input,
   });
   return { move: response.result.bestMove, evaluation: response.result };
+}
+
+async function evaluateBatchWithWorker(inputs: Lc0EvaluatorInput[]): Promise<BrowserEvaluationChoice[]> {
+  const response = await postWorkerRequest<{ type: 'evaluationBatchResult'; result: Lc0Evaluation[] }>({
+    type: 'evaluateBatch',
+    inputs,
+  });
+  return response.result.map((evaluation) => ({ move: evaluation.bestMove, evaluation }));
 }
 
 async function choosePolicyMove(input: Lc0EvaluatorInput): Promise<BrowserEvaluationChoice> {
@@ -1122,6 +1132,22 @@ function recordNumericTimingSamples(samples: Record<string, number[]>, value: un
   for (const [key, numberValue] of Object.entries(rounded)) {
     (samples[key] ??= []).push(numberValue);
   }
+}
+
+function aggregateBatchEvaluationTiming(evaluations: BrowserEvaluationChoice[] | undefined): Record<string, number> | undefined {
+  const records = evaluations
+    ?.map((entry) => roundedNumericRecord((entry.evaluation as { timing?: unknown }).timing, 8))
+    .filter((record): record is Record<string, number> => record !== undefined) ?? [];
+  if (!records.length) return undefined;
+  if (records[0].physicalBatchSize === records.length) return records[0];
+  const totals: Record<string, number> = {};
+  for (const record of records) {
+    for (const [key, value] of Object.entries(record)) {
+      if (key === 'batchPosition' || key === 'physicalBatchSize') continue;
+      totals[key] = (totals[key] ?? 0) + value;
+    }
+  }
+  return Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, Number(value.toFixed(8))]));
 }
 
 function summarizeNumericTimingSamples(samples: Record<string, number[]>, sourcePrefix: string): Record<string, unknown> | undefined {
@@ -2256,12 +2282,18 @@ async function runHybridSearchBenchmark(): Promise<void> {
   const input = currentEvaluationInput();
   const evalWarmup = boundedQueryInt(['hybridEvalBenchWarmup', 'evalWarmup'], 1, 0, 20);
   const evalIterations = boundedQueryInt(['hybridEvalBenchIters', 'evalIters'], 3, 0, 100);
+  const batchEvalWarmup = boundedQueryInt(['hybridBatchEvalWarmup', 'batchEvalWarmup'], 0, 0, 20);
+  const batchEvalIterations = boundedQueryInt(['hybridBatchEvalIters', 'batchEvalIters'], 0, 0, 100);
   const searchWarmup = boundedQueryInt(['hybridSearchWarmup', 'searchWarmup'], 1, 0, 10);
   const searchIterations = boundedQueryInt(['hybridSearchIters', 'searchIters'], 3, 1, 50);
   const reuseTree = queryBool(['reuseTree', 'searchReuseTree', 'treeReuse'], false);
   const resetBetweenSearches = queryBool(['resetBetweenSearches', 'resetSearchTree'], !reuseTree);
   const evalTimes: number[] = [];
   const evalTimingSamples: Record<string, number[]> = {};
+  const batchEvalTimes: number[] = [];
+  const batchEvalTimingSamples: Record<string, number[]> = {};
+  let lastBatchEval: BrowserEvaluationChoice[] | undefined;
+  let lastBatchEvalTiming: Record<string, number> | undefined;
   const searchTimes: number[] = [];
   const searchStatsSamples: SearchStatsSnapshot[] = [];
   let lastEval: BrowserEvaluationChoice | undefined;
@@ -2280,6 +2312,21 @@ async function runHybridSearchBenchmark(): Promise<void> {
       evalTimes.push(performance.now() - started);
       recordNumericTimingSamples(evalTimingSamples, (lastEval.evaluation as { timing?: unknown }).timing);
       el('benchResult').textContent = `HYBRID_SEARCH_BENCH_EVAL_TIMED ${i + 1}/${evalIterations}`;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    const batchInputs = Array.from({ length: searchBatchSize }, () => input);
+    for (let i = 0; i < batchEvalWarmup; i++) {
+      lastBatchEval = await evaluateBatchWithWorker(batchInputs);
+      el('benchResult').textContent = `HYBRID_SEARCH_BENCH_BATCH_EVAL_WARMUP ${i + 1}/${batchEvalWarmup}`;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    for (let i = 0; i < batchEvalIterations; i++) {
+      const started = performance.now();
+      lastBatchEval = await evaluateBatchWithWorker(batchInputs);
+      batchEvalTimes.push(performance.now() - started);
+      lastBatchEvalTiming = aggregateBatchEvaluationTiming(lastBatchEval);
+      recordNumericTimingSamples(batchEvalTimingSamples, lastBatchEvalTiming);
+      el('benchResult').textContent = `HYBRID_SEARCH_BENCH_BATCH_EVAL_TIMED ${i + 1}/${batchEvalIterations}`;
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
     await resetSearchTreeState();
@@ -2317,6 +2364,7 @@ async function runHybridSearchBenchmark(): Promise<void> {
       packVerification: params.get('packVerify') === '0' ? 'disabled' : 'enabled',
       visits: searchVisits,
       batchSize: searchBatchSize,
+      wgslBatchMode: HYBRID_WGSL_HEADS_REQUESTED ? HYBRID_WGSL_BATCH_MODE : undefined,
       multiPv: searchMultiPv,
       reuseTree,
       resetBetweenSearches,
@@ -2331,6 +2379,17 @@ async function runHybridSearchBenchmark(): Promise<void> {
         bestMove: lastEval?.move,
         q: lastEval?.evaluation.q === undefined ? undefined : Number(lastEval.evaluation.q.toFixed(8)),
         mlh: lastEval?.evaluation.mlh === undefined ? undefined : Number(lastEval.evaluation.mlh.toFixed(3)),
+      },
+      batchEval: {
+        warmup: batchEvalWarmup,
+        iterations: batchEvalIterations,
+        batchSize: searchBatchSize,
+        timingStats: sampleTimingStats(batchEvalTimes, 'hybrid physical batch eval round trips'),
+        phaseTimingStats: summarizeNumericTimingSamples(batchEvalTimingSamples, 'hybrid physical batch eval backend timing'),
+        lastBackendTiming: roundedNumericRecord(lastBatchEvalTiming),
+        timesMs: batchEvalTimes.map((time) => roundReportMs(time)),
+        bestMoves: lastBatchEval?.map((entry) => entry.move),
+        allBestMovesMatch: lastBatchEval ? lastBatchEval.every((entry) => entry.move === lastBatchEval?.[0]?.move) : undefined,
       },
       search: {
         warmup: searchWarmup,

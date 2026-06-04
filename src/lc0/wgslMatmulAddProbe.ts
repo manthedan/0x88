@@ -4833,6 +4833,7 @@ async function runCachedPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>
 }
 
 type Lc0WebHybridHeadBackend = 'ort' | 'wgsl';
+type Lc0WebHybridWgslBatchMode = 'physical' | 'serial';
 
 const WGSL_HEADS_READBACK_FLOATS = DEFAULT_POLICY_MAPPED_OUTPUTS + 3;
 const WGSL_HEADS_READBACK_BYTES = WGSL_HEADS_READBACK_FLOATS * 4;
@@ -5025,6 +5026,7 @@ export interface Lc0WebHybridEvaluationOptions {
   historyFill?: Lc0HistoryFill;
   policyTemperature?: number;
   headBackend?: Lc0WebHybridHeadBackend;
+  wgslBatchMode?: Lc0WebHybridWgslBatchMode;
 }
 
 export interface Lc0WebHybridTimingBreakdown {
@@ -5266,6 +5268,7 @@ class Lc0WebHybridRuntime {
   private readonly device: DeviceLike;
   private readonly inputTensors: Lc0WebPreparedInitialInputTensors;
   private readonly headBackend: Lc0WebHybridHeadBackend;
+  private readonly wgslBatchMode: Lc0WebHybridWgslBatchMode;
   private readonly headSession?: CachedPolicyValueHeadSession;
   private readonly wgslHeads?: WgslPolicyValueHeadRuntime;
   private readonly headTensors: Lc0WebPolicyValueHeadTensors;
@@ -5284,6 +5287,7 @@ class Lc0WebHybridRuntime {
     device: DeviceLike;
     inputTensors: Lc0WebPreparedInitialInputTensors;
     headBackend: Lc0WebHybridHeadBackend;
+    wgslBatchMode: Lc0WebHybridWgslBatchMode;
     headSession?: CachedPolicyValueHeadSession;
     wgslHeads?: WgslPolicyValueHeadRuntime;
     headTensors: Lc0WebPolicyValueHeadTensors;
@@ -5299,6 +5303,7 @@ class Lc0WebHybridRuntime {
     this.device = options.device;
     this.inputTensors = options.inputTensors;
     this.headBackend = options.headBackend;
+    this.wgslBatchMode = options.wgslBatchMode;
     this.headSession = options.headSession;
     this.wgslHeads = options.wgslHeads;
     this.headTensors = options.headTensors;
@@ -5332,6 +5337,7 @@ class Lc0WebHybridRuntime {
     const tensorsByLayer = layerTensorNames.map((names) => loadEncoder0FfnInputs(pack, names));
     const headTensors = loadPolicyValueHeadTensors(pack);
     const headBackend = options.headBackend ?? 'ort';
+    const wgslBatchMode = options.wgslBatchMode ?? 'physical';
     const headSession = headBackend === 'ort' ? await createCachedPolicyValueHeadSession(headTensors) : undefined;
     const { device } = await requestDevice();
     const usage = gpuGlobals().GPUBufferUsage!;
@@ -5356,6 +5362,7 @@ class Lc0WebHybridRuntime {
       device,
       inputTensors,
       headBackend,
+      wgslBatchMode,
       headSession,
       wgslHeads,
       headTensors,
@@ -5564,7 +5571,7 @@ class Lc0WebHybridRuntime {
 
   async evaluateBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult[]> {
     if (inputs.length === 0) return [];
-    if (this.headBackend !== 'wgsl') {
+    if (this.headBackend !== 'wgsl' || this.wgslBatchMode === 'serial') {
       const out: Lc0WebHybridEvaluationResult[] = [];
       for (const input of inputs) out.push(await this.evaluate(input, options));
       return out;
@@ -5685,6 +5692,7 @@ export class Lc0WebHybridEvaluator {
   readonly policyTemperature: number;
   readonly verifyShards: boolean;
   readonly headBackend: Lc0WebHybridHeadBackend;
+  readonly wgslBatchMode: Lc0WebHybridWgslBatchMode;
   private runtimePromise?: Promise<Lc0WebHybridRuntime>;
   private evaluationQueue: Promise<void> = Promise.resolve();
 
@@ -5695,6 +5703,7 @@ export class Lc0WebHybridEvaluator {
     this.policyTemperature = options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE;
     this.verifyShards = options.verifyShards ?? true;
     this.headBackend = options.headBackend ?? 'ort';
+    this.wgslBatchMode = options.wgslBatchMode ?? 'physical';
   }
 
   private runtime(): Promise<Lc0WebHybridRuntime> {
@@ -5706,6 +5715,7 @@ export class Lc0WebHybridEvaluator {
         policyTemperature: this.policyTemperature,
         verifyShards: this.verifyShards,
         headBackend: this.headBackend,
+        wgslBatchMode: this.wgslBatchMode,
       });
       runtimePromise.catch(() => {
         if (this.runtimePromise === runtimePromise) this.runtimePromise = undefined;
