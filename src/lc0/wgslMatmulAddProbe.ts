@@ -4120,16 +4120,19 @@ export interface Lc0WebWgslHeadsProbeResult {
   policyDenseRmsError: number;
   policyLogitsMaxAbsError: number;
   policyLogitsRmsError: number;
+  mappedPolicyMaxAbsError: number;
+  mappedPolicyRmsError: number;
   valueEmbedMaxAbsError: number;
   valueEmbedRmsError: number;
   wgslWdlMaxAbsError: number;
   wgslWdlRmsError: number;
   policyDenseSample: number[];
   policyLogitsSample: number[];
+  mappedPolicySample: number[];
   valueEmbedSample: number[];
   wgslWdl: number[];
-  nonzero: { policyDense: boolean; policyLogits: boolean; valueEmbed: boolean; wgslWdl: boolean };
-  nonuniform: { policyDense: boolean; policyLogits: boolean; valueEmbed: boolean; wgslWdl: boolean };
+  nonzero: { policyDense: boolean; policyLogits: boolean; mappedPolicy: boolean; valueEmbed: boolean; wgslWdl: boolean };
+  nonuniform: { policyDense: boolean; policyLogits: boolean; mappedPolicy: boolean; valueEmbed: boolean; wgslWdl: boolean };
   ortHeads: {
     mode: 'ort-policy-value';
     runMs: number;
@@ -4486,6 +4489,8 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
     const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
     const policyLogitsModule = device.createShaderModule({ label: 'lc0web WGSL policy head logits probe', code: WGSL_HEADS_POLICY_LOGITS_PROBE });
     const policyLogitsPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: policyLogitsModule, entryPoint: 'main' } }) as PipelineLike;
+    const mappedPolicyModule = device.createShaderModule({ label: 'lc0web WGSL mapped policy probe', code: WGSL_MAPPED_POLICY_PROBE });
+    const mappedPolicyPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: mappedPolicyModule, entryPoint: 'main' } }) as PipelineLike;
     const vectorModule = device.createShaderModule({ label: 'lc0web WGSL value head vector dense probe', code: WGSL_HEADS_VECTOR_DENSE_PROBE });
     const vectorPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: vectorModule, entryPoint: 'main' } }) as PipelineLike;
     const softmaxModule = device.createShaderModule({ label: 'lc0web WGSL value head softmax probe', code: WGSL_HEADS_SOFTMAX3_PROBE });
@@ -4500,6 +4505,8 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
     const policyKWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyKWeight.bytes, DEFAULT_N * DEFAULT_N), usage.STORAGE | usage.COPY_DST);
     const policyKBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyKBias.bytes, DEFAULT_N), usage.STORAGE | usage.COPY_DST);
     const policyScaleBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyScale.bytes, 1), usage.STORAGE | usage.COPY_DST);
+    const policyPromotionWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyPromotionWeight.bytes, DEFAULT_N * 4), usage.STORAGE | usage.COPY_DST);
+    const policyMappingBuffer = createStorageBuffer(device, readI32Array(tensors.policyMappingTable.bytes, DEFAULT_POLICY_MAPPED_OUTPUTS), usage.STORAGE | usage.COPY_DST);
     const valueWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueEmbedWeight.bytes, DEFAULT_N * DEFAULT_VALUE_EMBED), usage.STORAGE | usage.COPY_DST);
     const valueBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueEmbedBias.bytes, DEFAULT_VALUE_EMBED), usage.STORAGE | usage.COPY_DST);
     const valueDense1WeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense1Weight.bytes, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * DEFAULT_VALUE_HIDDEN), usage.STORAGE | usage.COPY_DST);
@@ -4510,12 +4517,14 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
     const policyQBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
     const policyKBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
     const policyLogitsBuffer = device.createBuffer({ size: DEFAULT_POLICY_OUTPUTS * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
+    const mappedPolicyBuffer = device.createBuffer({ size: DEFAULT_POLICY_MAPPED_OUTPUTS * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
     const valueOutputBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
     const valueHiddenBuffer = device.createBuffer({ size: DEFAULT_VALUE_HIDDEN * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
     const valueLogitsBuffer = device.createBuffer({ size: 3 * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
     const valueWdlBuffer = device.createBuffer({ size: 3 * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
     const policyReadbackBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 4, usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
     const policyLogitsReadbackBuffer = device.createBuffer({ size: DEFAULT_POLICY_OUTPUTS * 4, usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
+    const mappedPolicyReadbackBuffer = device.createBuffer({ size: DEFAULT_POLICY_MAPPED_OUTPUTS * 4, usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
     const valueReadbackBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * 4, usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
     const valueWdlReadbackBuffer = device.createBuffer({ size: 3 * 4, usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
     const policyShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 1], usage.UNIFORM | usage.COPY_DST);
@@ -4523,12 +4532,13 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
     const valueShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_EMBED, 1], usage.UNIFORM | usage.COPY_DST);
     const valueDense1ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN, 1], usage.UNIFORM | usage.COPY_DST);
     const valueDense2ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_HIDDEN, 3, 0], usage.UNIFORM | usage.COPY_DST);
-    buffers.push(inputBuffer, policyWeightBuffer, policyBiasBuffer, policyQWeightBuffer, policyQBiasBuffer, policyKWeightBuffer, policyKBiasBuffer, policyScaleBuffer, valueWeightBuffer, valueBiasBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, policyOutputBuffer, policyQBuffer, policyKBuffer, policyLogitsBuffer, valueOutputBuffer, valueHiddenBuffer, valueLogitsBuffer, valueWdlBuffer, policyReadbackBuffer, policyLogitsReadbackBuffer, valueReadbackBuffer, valueWdlReadbackBuffer, policyShapeBuffer, policyLinearShapeBuffer, valueShapeBuffer, valueDense1ShapeBuffer, valueDense2ShapeBuffer);
+    buffers.push(inputBuffer, policyWeightBuffer, policyBiasBuffer, policyQWeightBuffer, policyQBiasBuffer, policyKWeightBuffer, policyKBiasBuffer, policyScaleBuffer, policyPromotionWeightBuffer, policyMappingBuffer, valueWeightBuffer, valueBiasBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, policyOutputBuffer, policyQBuffer, policyKBuffer, policyLogitsBuffer, mappedPolicyBuffer, valueOutputBuffer, valueHiddenBuffer, valueLogitsBuffer, valueWdlBuffer, policyReadbackBuffer, policyLogitsReadbackBuffer, mappedPolicyReadbackBuffer, valueReadbackBuffer, valueWdlReadbackBuffer, policyShapeBuffer, policyLinearShapeBuffer, valueShapeBuffer, valueDense1ShapeBuffer, valueDense2ShapeBuffer);
 
     const policyBindGroup = createWgslHeadsDenseBindGroup(device, pipeline, inputBuffer, policyWeightBuffer, policyBiasBuffer, policyOutputBuffer, policyShapeBuffer);
     const policyQBindGroup = createWgslHeadsDenseBindGroup(device, pipeline, policyOutputBuffer, policyQWeightBuffer, policyQBiasBuffer, policyQBuffer, policyLinearShapeBuffer);
     const policyKBindGroup = createWgslHeadsDenseBindGroup(device, pipeline, policyOutputBuffer, policyKWeightBuffer, policyKBiasBuffer, policyKBuffer, policyLinearShapeBuffer);
     const policyLogitsBindGroup = createWgslHeadsPolicyLogitsBindGroup(device, policyLogitsPipeline, policyQBuffer, policyKBuffer, policyScaleBuffer, policyLogitsBuffer);
+    const mappedPolicyBindGroup = createMappedPolicyBindGroup(device, mappedPolicyPipeline, policyLogitsBuffer, policyKBuffer, policyPromotionWeightBuffer, policyMappingBuffer, mappedPolicyBuffer);
     const valueBindGroup = createWgslHeadsDenseBindGroup(device, pipeline, inputBuffer, valueWeightBuffer, valueBiasBuffer, valueOutputBuffer, valueShapeBuffer);
     const valueDense1BindGroup = createWgslHeadsDenseBindGroup(device, vectorPipeline, valueOutputBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueHiddenBuffer, valueDense1ShapeBuffer);
     const valueDense2BindGroup = createWgslHeadsDenseBindGroup(device, vectorPipeline, valueHiddenBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, valueLogitsBuffer, valueDense2ShapeBuffer);
@@ -4554,6 +4564,11 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
     policyLogitsPass.setBindGroup(0, policyLogitsBindGroup);
     policyLogitsPass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8));
     policyLogitsPass.end();
+    const mappedPolicyPass = encoder.beginComputePass();
+    mappedPolicyPass.setPipeline(mappedPolicyPipeline);
+    mappedPolicyPass.setBindGroup(0, mappedPolicyBindGroup);
+    mappedPolicyPass.dispatchWorkgroups(Math.ceil(DEFAULT_POLICY_MAPPED_OUTPUTS / 64));
+    mappedPolicyPass.end();
     const valueDense1Pass = encoder.beginComputePass();
     valueDense1Pass.setPipeline(vectorPipeline);
     valueDense1Pass.setBindGroup(0, valueDense1BindGroup);
@@ -4576,15 +4591,17 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
     const readbackStarted = nowMs();
     const policyDense = await readF32OutputOnce(device, policyOutputBuffer, policyReadbackBuffer, DEFAULT_TOKENS * DEFAULT_N);
     const policyLogits = await readF32OutputOnce(device, policyLogitsBuffer, policyLogitsReadbackBuffer, DEFAULT_POLICY_OUTPUTS);
+    const mappedPolicy = await readF32OutputOnce(device, mappedPolicyBuffer, mappedPolicyReadbackBuffer, DEFAULT_POLICY_MAPPED_OUTPUTS);
     const valueEmbed = await readF32OutputOnce(device, valueOutputBuffer, valueReadbackBuffer, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED);
     const wgslWdl = await readF32OutputOnce(device, valueWdlBuffer, valueWdlReadbackBuffer, 3);
     const readbackSyncedMs = nowMs() - readbackStarted;
     const policyErr = computeErrorStats(policyDense, policyDenseRef, DEFAULT_TOKENS * DEFAULT_N);
     const policyLogitsErr = computeErrorStats(policyLogits, policyRef.policy, DEFAULT_POLICY_OUTPUTS);
+    const mappedPolicyErr = computeErrorStats(mappedPolicy, policyRef.mappedPolicy, DEFAULT_POLICY_MAPPED_OUTPUTS);
     const valueErr = computeErrorStats(valueEmbed, valueEmbedRef, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED);
     const wdlErr = computeErrorStats(wgslWdl, valueWdlRef, 3);
-    assertErrorInTolerance(Math.max(policyErr.maxAbsError, policyLogitsErr.maxAbsError, valueErr.maxAbsError, wdlErr.maxAbsError));
-    if (!arrayHasNonzero(policyDense) || !arrayHasNonzero(policyLogits) || !arrayHasNonzero(valueEmbed) || !arrayHasNonzero(wgslWdl) || !arrayHasVariation(policyDense) || !arrayHasVariation(policyLogits) || !arrayHasVariation(valueEmbed) || !arrayHasVariation(wgslWdl)) {
+    assertErrorInTolerance(Math.max(policyErr.maxAbsError, policyLogitsErr.maxAbsError, mappedPolicyErr.maxAbsError, valueErr.maxAbsError, wdlErr.maxAbsError));
+    if (!arrayHasNonzero(policyDense) || !arrayHasNonzero(policyLogits) || !arrayHasNonzero(mappedPolicy) || !arrayHasNonzero(valueEmbed) || !arrayHasNonzero(wgslWdl) || !arrayHasVariation(policyDense) || !arrayHasVariation(policyLogits) || !arrayHasVariation(mappedPolicy) || !arrayHasVariation(valueEmbed) || !arrayHasVariation(wgslWdl)) {
       throw new Error('WGSL heads probe produced zero or uniform intermediate output');
     }
     const ortHeads = await runPolicyValueHeadsOrt(input, tensors);
@@ -4604,16 +4621,19 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
       policyDenseRmsError: policyErr.rmsError,
       policyLogitsMaxAbsError: policyLogitsErr.maxAbsError,
       policyLogitsRmsError: policyLogitsErr.rmsError,
+      mappedPolicyMaxAbsError: mappedPolicyErr.maxAbsError,
+      mappedPolicyRmsError: mappedPolicyErr.rmsError,
       valueEmbedMaxAbsError: valueErr.maxAbsError,
       valueEmbedRmsError: valueErr.rmsError,
       wgslWdlMaxAbsError: wdlErr.maxAbsError,
       wgslWdlRmsError: wdlErr.rmsError,
       policyDenseSample: Array.from(policyDense.slice(0, 8)),
       policyLogitsSample: Array.from(policyLogits.slice(0, 8)),
+      mappedPolicySample: Array.from(mappedPolicy.slice(0, 8)),
       valueEmbedSample: Array.from(valueEmbed.slice(0, 8)),
       wgslWdl: Array.from(wgslWdl),
-      nonzero: { policyDense: arrayHasNonzero(policyDense), policyLogits: arrayHasNonzero(policyLogits), valueEmbed: arrayHasNonzero(valueEmbed), wgslWdl: arrayHasNonzero(wgslWdl) },
-      nonuniform: { policyDense: arrayHasVariation(policyDense), policyLogits: arrayHasVariation(policyLogits), valueEmbed: arrayHasVariation(valueEmbed), wgslWdl: arrayHasVariation(wgslWdl) },
+      nonzero: { policyDense: arrayHasNonzero(policyDense), policyLogits: arrayHasNonzero(policyLogits), mappedPolicy: arrayHasNonzero(mappedPolicy), valueEmbed: arrayHasNonzero(valueEmbed), wgslWdl: arrayHasNonzero(wgslWdl) },
+      nonuniform: { policyDense: arrayHasVariation(policyDense), policyLogits: arrayHasVariation(policyLogits), mappedPolicy: arrayHasVariation(mappedPolicy), valueEmbed: arrayHasVariation(valueEmbed), wgslWdl: arrayHasVariation(wgslWdl) },
       ortHeads: {
         mode: ortHeads.mode,
         runMs: ortHeads.runMs,
