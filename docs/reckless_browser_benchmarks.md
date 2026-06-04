@@ -24,6 +24,33 @@ Validation notes:
 | depth 8 | 48.08 | 23.59 | 40.48 | 27.08 | 0.87x |
 | depth 9 | 64.82 | 41.82 | 56.33 | 42.75 | 0.98x |
 
+## 2026-06-04 external NNUE browser API SIMD validation
+
+Command surface: `/reckless-benchmark.html?external-nnue-api-simd-validation=1` on the isolated static server after `npm run build:client`, with embedded browser API SIMD and external-NNUE browser API SIMD variants. Persistent/browser-API mode only, 20-position rotated suite, depths 7/8/9, 20 warm rotated passes, and clear-hash reset enabled.
+
+Raw report: [`reckless_external_nnue_benchmark_2026-06-04_api_simd_depth7-9.json`](./reckless_external_nnue_benchmark_2026-06-04_api_simd_depth7-9.json). Summary metrics: [`reckless_external_nnue_benchmark_summary_2026-06-04.json`](./reckless_external_nnue_benchmark_summary_2026-06-04.json).
+
+Validation notes:
+
+- Fixed-depth parity passed exactly between embedded browser API SIMD and external-NNUE browser API SIMD: 1260/1260 pairs matched best move, score/mate fields, and full PV.
+- External NNUE preserves the same node counts. It is a delivery/cache improvement, not a compute improvement.
+- This headless run had a few large wall-clock outliers, especially at depth 7, so median and 95%-trimmed averages are more representative than raw warm average for delivery-performance posture.
+
+| Budget | Variant | Cold avg ms | Warm avg ms | Warm median ms | 95%-trimmed warm avg ms | Warm p95 ms | Avg nodes | Avg NPS |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| depth 7 | Embedded browser API SIMD | 7.05 | 14.23 | 6.75 | 11.37 | 63.25 | 4,536 | 798,664 |
+| depth 7 | External-NNUE browser API SIMD | 15.96 | 26.70 | 15.69 | 16.05 | 32.55 | 4,536 | 420,247 |
+| depth 8 | Embedded browser API SIMD | 12.67 | 14.31 | 14.26 | 13.31 | 25.37 | 9,230 | 781,586 |
+| depth 8 | External-NNUE browser API SIMD | 15.19 | 17.21 | 15.36 | 16.15 | 30.70 | 9,230 | 662,908 |
+| depth 9 | Embedded browser API SIMD | 24.90 | 27.79 | 25.49 | 25.68 | 46.87 | 15,614 | 676,950 |
+| depth 9 | External-NNUE browser API SIMD | 23.58 | 28.17 | 25.39 | 26.35 | 52.33 | 15,614 | 633,179 |
+
+| Budget | External / embedded warm avg | External / embedded median | External / embedded 95%-trimmed avg |
+| --- | ---: | ---: | ---: |
+| depth 7 | 1.88x | 2.32x | 1.41x |
+| depth 8 | 1.20x | 1.08x | 1.21x |
+| depth 9 | 1.01x | 1.00x | 1.03x |
+
 ## 2026-06-04 browser API history-reset parity smoke
 
 Command surface: `/reckless-benchmark.html` after rebuilding scalar and SIMD browser API artifacts with the corrected direct-API `new_game` implementation. Full scalar WASI/UCI, Full SIMD WASI/UCI, browser API scalar, and browser API SIMD variants; persistent mode only; 20-position rotated suite; depths 7/8/9; one warm rotated pass; clear-hash reset enabled.

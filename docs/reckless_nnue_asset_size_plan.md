@@ -45,7 +45,7 @@ The local WASI build script can already swap the model and `L1_SIZE` at build ti
 2. Add a Rust `Parameters::from_bytes(bytes: &[u8]) -> Result<Arc<Parameters>, Error>` helper gated to browser/native API builds. ✅ initial browser API patch added behind `RECKLESS_BROWSER_API_EXTERNAL_NNUE=1`.
 3. Expose browser API initialization that accepts a network buffer or a URL-fetched buffer in the worker. ✅ `reckless_api_new_with_network` plus worker `nnueUrl` support.
 4. Cache the fetched `ArrayBuffer` and `WebAssembly.Module` per variant URL; create lightweight engine handles against the shared parameters. ✅ module and NNUE `force-cache` maps are in the browser API worker.
-5. Verify parity against embedded full NNUE for the same bytes before making external NNUE a default option. ⏳ external variant remains experimental until smoke/parity results are recorded.
+5. Verify parity against embedded full NNUE for the same bytes before making external NNUE a default option. ✅ fixed-depth embedded-vs-external browser API SIMD parity matched exactly in 1260/1260 depth 7/8/9 pairs.
 6. Harden delivery UX. ✅ the browser API worker now reports WASM/NNUE load phases and byte progress to Arena/Analysis runtime text; the isolated static server serves `.nnue` as `application/octet-stream` with long-lived immutable caching for hash-named network files.
 
 Initial local build commands:
@@ -65,11 +65,11 @@ Initial smoke/build evidence: [`reckless_external_nnue_smoke_2026-06-04.json`](.
 | `reckless-browser-api-simd128-external.wasm` | 1,260,734 | External-NNUE browser API SIMD artifact; `simdOpcodeCount=1279`, `codeBytes=238,447`. |
 | `reckless-v60-7f587dfb.nnue` | 63,266,880 | Separate cacheable full NNUE payload. |
 
-Depth-4 browser smoke on startpos loaded the external NNUE artifact successfully and returned `c2c4` with 210 nodes for both cold and warm runs. This is only a loading/parity smoke; deeper rotated-FEN parity should come before promoting the external option beyond experimental.
+Depth-4 browser smoke on startpos loaded the external NNUE artifact successfully and returned `c2c4` with 210 nodes for both cold and warm runs. A deeper rotated-FEN validation then matched embedded browser API SIMD exactly for best move, score/mate fields, and full PV across 1260/1260 fixed-depth pairs at depths 7/8/9; see [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md) and raw report [`reckless_external_nnue_benchmark_2026-06-04_api_simd_depth7-9.json`](./reckless_external_nnue_benchmark_2026-06-04_api_simd_depth7-9.json). The external path remains experimental because it is a delivery/cache improvement for the browser API path, not a reason to replace the faster default SIMD WASI/UCI path.
 
 ## Delivery notes
 
-- Use stable, content- or network-hash-named `.nnue` URLs. The current `reckless-v60-7f587dfb.nnue` filename is suitable for long-lived immutable cache headers because replacing the network should change the URL.
+- Use stable, content- or network-hash-named `.nnue` URLs. The current `reckless-v60-7f587dfb.nnue` filename is suitable for long-lived immutable cache headers because replacing the network should change the URL. A local `PORT=5199 node scripts/serve_isolated_static.mjs dist-client` check returned `Content-Type: application/octet-stream` and `Cache-Control: public, max-age=31536000, immutable` for the `.nnue` asset.
 - Keep generated `.wasm` URLs versioned before using very long cache lifetimes; the local isolated static server uses a shorter cache lifetime for non-`assets/` `.wasm` files to avoid stale rebuilds during experiments.
 - The external variant reduces repeat-update download pressure: a browser that already has the full NNUE cached only needs the ~1.26 MB WASM when browser-API code changes.
 - First-use download bytes remain roughly unchanged versus embedded full artifacts unless the page lazy-loads Reckless only after the user selects it, or serves a smaller model.
