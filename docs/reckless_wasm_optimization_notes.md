@@ -1,16 +1,16 @@
 # Reckless WASM optimization notes
 
-## Quick SIMD candidate
+## SIMD build status
 
-A first-pass SIMD candidate was built with:
+The current SIMD candidate is built with:
 
 ```sh
 npm run reckless:build-simd-wasi
 ```
 
-This sets `RUSTFLAGS='-C target-feature=+simd128'` and writes the ignored artifact `public/reckless/reckless-simd128.wasm`.
+This sets `RUSTFLAGS='-C target-feature=+simd128'`, enables the local `RECKLESS_WASM_SIMD_NNUE=1` patch, and writes the ignored artifact `public/reckless/reckless-simd128.wasm`.
 
-This is **not** a dedicated `core::arch::wasm32` NNUE backend. Upstream Reckless still selects its scalar Rust NNUE source paths for `wasm32-wasip1`; the flag only lets rustc/LLVM emit WebAssembly SIMD where auto-vectorization or library lowering can use it.
+Earlier measurements used a first-pass auto-vectorized-only `+simd128` artifact where upstream Reckless still selected scalar NNUE source paths for `wasm32-wasip1`. The current build now patches Reckless to select its vectorized NNUE path for `wasm32 + simd128` and adds a wasm32 SIMD module using `core::arch::wasm32` intrinsics.
 
 ### Smoke results
 
@@ -32,11 +32,11 @@ The SIMD flag is therefore worth keeping as an experimental build/benchmark targ
 
 ## Remaining optimization tracks
 
-- **Dedicated WASM SIMD NNUE backend**: now implemented experimentally in `npm run reckless:build-simd-wasi`. The build script patches Reckless' NNUE module selection for `wasm32 + simd128` and adds a `core::arch::wasm32` SIMD module covering accumulator add/sub, `activate_ft`, sparse `propagate_l1`, `propagate_l2`, and `propagate_l3`; see [`reckless_wasm_simd_inspection.md`](./reckless_wasm_simd_inspection.md). `find_nnz` is still scalar, and deeper rotated-FEN parity/performance runs are still needed before making this the default.
+- **Dedicated WASM SIMD NNUE backend**: now implemented experimentally in `npm run reckless:build-simd-wasi`. The build script patches Reckless' NNUE module selection for `wasm32 + simd128` and adds a `core::arch::wasm32` SIMD module covering accumulator add/sub, `activate_ft`, sparse `propagate_l1`, `propagate_l2`, and `propagate_l3`; see [`reckless_wasm_simd_inspection.md`](./reckless_wasm_simd_inspection.md). `find_nnz` is still scalar. A rotated-FEN browser benchmark showed clear persistent depth 8/9 wins versus scalar WASI/UCI; see [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md).
 - **Threaded search**: still not implemented. The current browser/WASI path forces `Threads=1`. `@bjorn3/browser_wasi_shim` does not provide native Rust pthread-style browser execution for this build, so practical browser threading likely needs either a custom Worker search-split design or a different WASM runtime strategy. Feasibility notes are in [`reckless_threaded_wasm_feasibility.md`](./reckless_threaded_wasm_feasibility.md).
 - **wasm-opt**: tried on scalar and SIMD artifacts; see [`reckless_wasm_opt_experiment.md`](./reckless_wasm_opt_experiment.md). Binaryen `-O3`/`-O4` trims only ~0.15% raw size and ~0.01% gzip size because embedded NNUE data dominates, and a shallow browser cold one-shot smoke did not show a clear NPS win.
 - **Graceful persistent cancellation**: partially improved. The persistent adapter now sends `stop` and waits briefly before terminating the worker, so near-complete searches can return `bestmove` and keep the process reusable while the caller still receives `AbortError`. This is still not a true engine-side cancellation path: the patched wasm32 UCI loop is single-threaded and cannot reliably read `stop` while search is executing. A robust path still needs an engine-side shared abort/control flag checked from the search, or a browser-native API that exposes cancellation directly.
-- **Browser-native API**: now implemented experimentally behind `Reckless Full browser API experimental` and `npm run reckless:build-browser-api`; see [`reckless_browser_native_api_plan.md`](./reckless_browser_native_api_plan.md). It still uses `wasm32-wasip1` imports for clocks because `wasm32-unknown-unknown` panics in `std::time::Instant`, but it bypasses `_start`, argv/stdin/stdout, UCI parsing, and UCI output formatting. Keep WASI/UCI as the default until parity and deeper rotated-FEN benchmarks are complete.
+- **Browser-native API**: now implemented experimentally behind `Reckless Full browser API experimental` and `npm run reckless:build-browser-api`; see [`reckless_browser_native_api_plan.md`](./reckless_browser_native_api_plan.md). It still uses `wasm32-wasip1` imports for clocks because `wasm32-unknown-unknown` panics in `std::time::Instant`, but it bypasses `_start`, argv/stdin/stdout, UCI parsing, and UCI output formatting. A rotated-FEN browser benchmark did not show a speedup yet; keep WASI/UCI as the default and treat the browser API mainly as a control/cancellation/structured-result path until the facade is faster.
 - **Smaller/lazier NNUE asset path**: full Reckless artifacts are ~99.5% data payload; see [`reckless_nnue_asset_size_plan.md`](./reckless_nnue_asset_size_plan.md). Smaller first-use UX needs Lite/smaller nets or external NNUE loading rather than code-only optimization.
 
 ## Adapter overhead notes

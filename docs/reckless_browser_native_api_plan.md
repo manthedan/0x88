@@ -87,10 +87,11 @@ Status: implemented experimentally in `src/lc0/recklessBrowserApiWorker.ts` and 
 
 The existing WASI/UCI adapter remains the default and fallback until parity and performance are proven.
 
-Smoke evidence:
+Smoke/performance evidence:
 
 - Node direct-ABI smoke: `startpos depth 4` returned `bestmove=c2c4`, `scoreCp=55`, `nodes=210`, PV `c2c4 g8f6`.
 - Browser benchmark smoke on isolated static server: browser API variant, persistent mode label, `startpos depth 1`, one warm repeat completed 2 rows; cold wall `4.70ms`, warm wall `1.74ms`, runtime label `browser API`.
+- Rotated-FEN browser benchmark, persistent depth 7/8/9, 20 positions × 20 warm passes: browser API was slower than persistent WASI/UCI (`0.88x`, `0.81x`, and `0.80x` as fast by wall-clock for depths 7/8/9). See [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md).
 
 ## Verification requirements
 
@@ -104,6 +105,8 @@ Before switching UI defaults:
    - direct API persistent.
 4. Abort/cancel behavior test; if direct `stop()` is not ready, document that it still falls back to worker termination.
 
-## Expected payoff
+## Expected payoff / current result
 
-This path attacks the user-visible shallow-search latency that SIMD cannot fix: no UCI command formatting/parsing, no stdout capture/filtering, fewer worker messages, and a clearer route to graceful stop/reuse. It should be benchmarked separately from engine NPS because it mostly improves wall-clock adapter overhead.
+This path attacks the user-visible shallow-search latency that SIMD cannot fix: no UCI command formatting/parsing, no stdout capture/filtering, fewer worker messages, and a clearer route to graceful stop/reuse. It should be benchmarked separately from engine NPS because it mostly targets wall-clock adapter overhead.
+
+Current result: the first integrated browser API does **not** realize that payoff yet. It is useful as a structured-result/control-path prototype, but persistent WASI/UCI remains faster on the current rotated-FEN benchmark. Future browser API work should focus on removing the remaining WASI shim/clock dependency, reducing facade overhead, and adding true engine-side cancellation before considering it as the default.

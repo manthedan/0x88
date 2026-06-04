@@ -12,6 +12,30 @@ Command surface: isolated static server, Full scalar artifact, persistent mode, 
 
 Raw report: [`reckless_browser_benchmark_2026-06-04_rotated_fen_smoke.json`](./reckless_browser_benchmark_2026-06-04_rotated_fen_smoke.json). The report has 40 raw rows and 20 summary rows, with nodes and NPS captured for every position.
 
+## 2026-06-04 rotated-FEN browser API + integrated SIMD NNUE depth 7/8/9
+
+Command surface: `/reckless-benchmark.html` on the isolated static server (`crossOriginIsolated=true`, `SharedArrayBuffer=true`) after `npm run build:client`, with Full scalar WASI/UCI, Full integrated wasm NNUE SIMD WASI/UCI, and Full browser API artifacts. Persistent mode only, 20-position rotated Ruy Lopez suite, depth budgets 7/8/9, 20 warm rotated passes, and default-on clear-hash reset. The table aggregates all warm rows for each variant/budget: 20 positions × 20 warm passes = 400 warm rows per line.
+
+Raw report: [`reckless_browser_benchmark_2026-06-04_rotated_fen_depth7-9_api_simd.json`](./reckless_browser_benchmark_2026-06-04_rotated_fen_depth7-9_api_simd.json).
+
+| Budget | Variant | Runtime | Warm avg ms | Warm median ms | Avg nodes | Avg NPS | Wall ratio vs scalar | NPS ratio vs scalar |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| depth 7 | Reckless Full | persistent | 21.24 | 17.63 | 4,536 | 298,118 | 1.00x | 1.00x |
+| depth 7 | Reckless Full SIMD experimental | persistent | 18.41 | 14.67 | 4,536 | 435,738 | 1.15x faster | 1.46x |
+| depth 7 | Reckless Full browser API experimental | browser API | 24.26 | 20.29 | 5,396 | 251,531 | 0.88x as fast | 0.84x |
+| depth 8 | Reckless Full | persistent | 35.59 | 33.01 | 9,230 | 279,838 | 1.00x | 1.00x |
+| depth 8 | Reckless Full SIMD experimental | persistent | 15.16 | 15.17 | 9,230 | 722,707 | 2.35x faster | 2.58x |
+| depth 8 | Reckless Full browser API experimental | browser API | 43.73 | 38.38 | 9,432 | 234,427 | 0.81x as fast | 0.84x |
+| depth 9 | Reckless Full | persistent | 66.22 | 57.59 | 15,614 | 266,728 | 1.00x | 1.00x |
+| depth 9 | Reckless Full SIMD experimental | persistent | 23.40 | 21.18 | 15,614 | 724,185 | 2.83x faster | 2.72x |
+| depth 9 | Reckless Full browser API experimental | browser API | 82.50 | 70.63 | 15,069 | 206,863 | 0.80x as fast | 0.78x |
+
+Notes:
+
+- Integrated wasm NNUE SIMD is a real browser benefit in this run. It is modest/noisy at depth 7, then clearly faster at depth 8/9, with matching scalar node counts and about 2.6-2.7x higher engine-reported NPS at the deeper budgets.
+- The experimental browser API did **not** produce a speedup in this implementation. It bypasses UCI text formatting/parsing, but the current direct facade still runs through the same single-threaded search/NNUE code and `wasm32-wasip1` clock imports, and its measured wall/NPS are slower than persistent WASI/UCI on this suite. Keep it experimental; its main value remains as a cleaner path to future cancellation/control and non-UCI structured results, not a proven latency win yet.
+- Keep wall-clock and engine-reported NPS separate. SIMD improves both here, while browser API currently improves neither.
+
 ## 2026-06-04 isolated headless browser clean depth 7/8/9 smoke
 
 Command surface: `/reckless-benchmark.html` on the isolated static server (`crossOriginIsolated=true`, `SharedArrayBuffer=true`) after `npm run build:client`, with Full scalar and Full `+simd128` artifacts, persistent and one-shot modes, depth budgets 7/8/9, 20 warm repeats plus one cold run, and the default-on persistent clear-hash reset enabled. Positions: `startpos`, an early Italian-like position, and a middlegame position. The table below aggregates warm averages across all three positions; the raw report has per-position rows.

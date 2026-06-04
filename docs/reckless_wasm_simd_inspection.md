@@ -43,3 +43,4 @@ Interpretation:
 - `scripts/build_reckless_wasi.mjs` now patches Reckless' NNUE module selection for `wasm32 + simd128`, adds `src/nnue/simd/wasm32.rs`, and routes `nnue::forward::vectorized` through `core::arch::wasm32` intrinsics.
 - The wasm backend covers accumulator add/sub, `activate_ft`, sparse `propagate_l1` dot products, `propagate_l2`, and `propagate_l3`; `find_nnz` remains a simple scalar wasm implementation for now.
 - Browser smoke on the rebuilt artifact completed `startpos depth 1` persistent with the expected best move `d2d4`, 42 nodes, and runtime label `persistent`.
+- Rotated-FEN browser benchmark evidence is recorded in [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md): versus scalar WASI/UCI, integrated wasm NNUE SIMD was 1.15x faster at depth 7, 2.35x faster at depth 8, and 2.83x faster at depth 9 by warm wall-clock average, with about 1.46x/2.58x/2.72x higher engine-reported NPS.
