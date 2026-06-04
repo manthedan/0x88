@@ -1,5 +1,9 @@
 # Reckless browser benchmark notes
 
+## Harness notes
+
+Use `/reckless-benchmark.html` from the isolated static server after `npm run build:client`. The page now defaults to `ucinewgame` + `isready` before every timed run. This reset happens outside the timed interval, so the wall-clock measurement remains search-only while persistent-mode repeats avoid repeated-position transposition-table reuse. Disable the checkbox only when intentionally measuring warm TT reuse.
+
 ## 2026-06-04 isolated headless browser depth 7/8/9 smoke
 
 Command surface: `/reckless-benchmark.html` on the isolated static server (`crossOriginIsolated=true`, `SharedArrayBuffer=true`) with Full scalar and Full `+simd128` artifacts, persistent and one-shot modes, `startpos`, depth budgets 7/8/9, 20 warm repeats plus one cold run.
@@ -26,4 +30,4 @@ Notes:
 - This run explicitly separates persistent from one-shot in the browser runtime and records both wall-clock and engine-reported NPS.
 - One-shot is still dominated by WASI process instantiation plus worker/UCI/stdout overhead at these depths, but NPS shows the `+simd128` artifact doing materially more engine work per second.
 - Persistent warm repeats of the exact same FEN/depth are not pure compute measurements: Reckless keeps hash state, so repeated searches can become transposition-table hits. Treat persistent wall time here as adapter/hash-reuse UX posture, not scalar-vs-SIMD compute truth.
-- Better follow-up benchmark design: either rotate many positions per warm loop, issue an explicit hash clear/`ucinewgame` between persistent repeats, or use fixed movetime budgets when comparing persistent compute throughput.
+- This run predates the harness-level clear-hash checkbox. Current follow-up benchmark design should keep that reset enabled, rotate many positions per warm loop, or use fixed movetime budgets when comparing persistent compute throughput.

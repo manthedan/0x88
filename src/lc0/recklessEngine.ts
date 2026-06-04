@@ -325,10 +325,14 @@ export class RecklessEngine {
     });
   }
 
-  private async runCommands(commands: string[], signal?: AbortSignal): Promise<RunResult> {
+  private async runCommandsUntil(
+    commands: string[],
+    signal?: AbortSignal,
+    resolveWhenLine?: (line: string, stream: 'stdout' | 'stderr') => boolean,
+  ): Promise<RunResult> {
     if (!this.runtimeOptions.forceOneShot && !this.persistentDisabled && canUsePersistentRecklessWasi()) {
       try {
-        return await this.runPersistentCommands(commands, signal);
+        return await this.runPersistentCommands(commands, signal, resolveWhenLine);
       } catch (error) {
         if ((error as Error).name === 'AbortError' || this.runtimeOptions.disablePersistentFallback) throw error;
         this.persistentDisabled = true;
@@ -337,6 +341,10 @@ export class RecklessEngine {
       }
     }
     return this.runOneShotCommands(commands, signal);
+  }
+
+  private runCommands(commands: string[], signal?: AbortSignal): Promise<RunResult> {
+    return this.runCommandsUntil(commands, signal);
   }
 
   private searchCommands(fen: string, options: RecklessOptions, multipv = 1): string[] {
@@ -371,13 +379,26 @@ export class RecklessEngine {
     return this.runExclusive(async () => {
       if (this.runtimeOptions.forceOneShot || this.persistentDisabled || !canUsePersistentRecklessWasi()) return;
       try {
-        const result = await this.runPersistentCommands(['uci', 'isready'], signal, (line, stream) => stream === 'stdout' && line === 'readyok');
+        const result = await this.runCommandsUntil(['uci', 'isready'], signal, (line, stream) => stream === 'stdout' && line === 'readyok');
         if (result.exitCode !== 0) throw new Error(`Reckless prewarm exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       } catch (error) {
         if ((error as Error).name === 'AbortError' || this.runtimeOptions.disablePersistentFallback) throw error;
         this.persistentDisabled = true;
         this.disposeWorker();
       }
+    });
+  }
+
+  /**
+   * Reset Reckless' game/search state and wait for readiness. Useful for
+   * benchmarks that should avoid persistent transposition-table reuse between
+   * timed searches.
+   */
+  async newGame(signal?: AbortSignal): Promise<void> {
+    return this.runExclusive(async () => {
+      const result = await this.runCommandsUntil(['ucinewgame', 'isready'], signal, (line, stream) => stream === 'stdout' && line === 'readyok');
+      if (result.exitCode !== 0) throw new Error(`Reckless new game exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
+      this.lastInfoLines = [];
     });
   }
 

@@ -49,6 +49,7 @@ interface BenchConfig {
   positions: BenchPosition[];
   repeats: number;
   hashMb: number;
+  clearHashBetweenRuns: boolean;
 }
 
 interface BenchReportSnapshot {
@@ -72,6 +73,7 @@ function htmlEscape(value: unknown): string {
 }
 function repeats(): number { return Math.max(1, Math.floor(Number(inputEl('repeatsInput').value) || 5)); }
 function hashMb(): number { return Math.max(1, Math.floor(Number(inputEl('hashInput').value) || 16)); }
+function clearHashBetweenRuns(): boolean { return inputEl('clearHashInput').checked; }
 
 function parsePositiveIntegers(raw: string): number[] {
   return raw.split(/[\s,]+/).map((part) => Math.floor(Number(part))).filter((value) => Number.isFinite(value) && value > 0);
@@ -177,6 +179,7 @@ function readConfig(): BenchConfig {
     positions: selectedPositions(),
     repeats: repeats(),
     hashMb: hashMb(),
+    clearHashBetweenRuns: clearHashBetweenRuns(),
   };
 }
 
@@ -188,6 +191,7 @@ function reportConfig(config: BenchConfig) {
     positions: config.positions,
     repeats: config.repeats,
     hashMb: config.hashMb,
+    clearHashBetweenRuns: config.clearHashBetweenRuns,
   };
 }
 
@@ -237,7 +241,8 @@ function render(): void {
   el('jsonOut').textContent = JSON.stringify(report(), null, 2);
 }
 
-async function timeSearch(engine: RecklessEngine, variant: RecklessVariant, mode: 'persistent' | 'one-shot', position: BenchPosition, budget: BenchBudget, run: string, signal: AbortSignal): Promise<void> {
+async function timeSearch(engine: RecklessEngine, variant: RecklessVariant, mode: 'persistent' | 'one-shot', position: BenchPosition, budget: BenchBudget, run: string, signal: AbortSignal, clearPersistentHash: boolean): Promise<void> {
+  if (mode === 'persistent' && clearPersistentHash) await engine.newGame(signal);
   const start = performance.now();
   const bestMove = await engine.bestMove(position.fen, signal);
   const wallMs = performance.now() - start;
@@ -296,11 +301,11 @@ async function runBench(): Promise<void> {
             try {
               if (abort.signal.aborted) return;
               setStatus(`Running ${variant.label} ${mode} ${budget.label} ${position.label} cold…`);
-              await timeSearch(engine, variant, mode, position, budget, 'cold', abort.signal);
+              await timeSearch(engine, variant, mode, position, budget, 'cold', abort.signal, config.clearHashBetweenRuns);
               for (let i = 1; i <= config.repeats; i += 1) {
                 if (abort.signal.aborted) return;
                 setStatus(`Running ${variant.label} ${mode} ${budget.label} ${position.label} warm ${i}/${config.repeats}…`);
-                await timeSearch(engine, variant, mode, position, budget, `warm-${i}`, abort.signal);
+                await timeSearch(engine, variant, mode, position, budget, `warm-${i}`, abort.signal, config.clearHashBetweenRuns);
               }
             } finally {
               engine.dispose();

@@ -29,6 +29,7 @@ pre{font-family:var(--mono);font-size:12px;white-space:pre-wrap;overflow:auto;ma
       <label class="small"><input id="benchLite" type="checkbox" checked /> Reckless Lite experimental</label>
       <label class="small"><input id="benchPersistent" type="checkbox" checked /> Persistent</label>
       <label class="small"><input id="benchOneShot" type="checkbox" checked /> One-shot</label>
+      <label class="small"><input id="clearHashInput" type="checkbox" checked /> Persistent: clear hash before each timed run</label>
       <div class="field"><label for="depthsInput">Depths</label><input id="depthsInput" type="text" value="4" /></div>
       <div class="field"><label for="movetimesInput">Movetimes ms</label><input id="movetimesInput" type="text" placeholder="100,250,500" /></div>
       <div class="field"><label for="repeatsInput">Warm repeats</label><input id="repeatsInput" type="number" min="1" max="50" step="1" value="5" /></div>
@@ -38,7 +39,7 @@ pre{font-family:var(--mono);font-size:12px;white-space:pre-wrap;overflow:auto;ma
     </div>
     <div class="grid2" style="margin-top:10px">
       <div class="field"><label for="fenInput">Positions, one per line. Use <code>Name | FEN</code>; <code>startpos</code> is accepted.</label><textarea id="fenInput" spellcheck="false">startpos</textarea></div>
-      <div class="field"><label>Notes</label><p class="small">Run from the isolated static/dev server for the persistent path. SIMD and Lite require ignored local artifacts <code>/reckless/reckless-simd128.wasm</code> and <code>/reckless/reckless-v53-l1-512.wasm</code>. Add movetimes to run a second budget axis in the same matrix.</p><div id="status" class="status">Ready.</div></div>
+      <div class="field"><label>Notes</label><p class="small">Run from the isolated static/dev server for the persistent path. SIMD and Lite require ignored local artifacts <code>/reckless/reckless-simd128.wasm</code> and <code>/reckless/reckless-v53-l1-512.wasm</code>. Add movetimes to run a second budget axis in the same matrix. Keep hash clearing enabled for cleaner persistent timing that is not dominated by repeated-position TT reuse.</p><div id="status" class="status">Ready.</div></div>
     </div>
   </section>
   <section class="panel">

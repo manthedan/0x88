@@ -47,4 +47,6 @@ The worker caches one `WebAssembly.Module` promise per artifact URL. It now atte
 
 The worker now filters stdout before storing or posting it back to the main thread: it keeps only `uciok`, `readyok`, `bestmove`, and `info ... pv ...` lines. Stderr remains unfiltered. This preserves the data needed for readiness, bestmove, PV, score, nodes, and NPS while avoiding a high-volume stream of option/current-move diagnostics during browser searches.
 
+The benchmark harness now has a default-on clear-hash reset. It sends `ucinewgame` + `isready` before each timed run and starts the timer afterward, avoiding persistent repeated-position TT pollution without mixing reset latency into the search wall-clock metric.
+
 The next major adapter-overhead reduction remains a browser-native API with direct calls for initialize, set FEN, search, and result retrieval.
