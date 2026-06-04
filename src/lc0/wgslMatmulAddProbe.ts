@@ -4951,18 +4951,40 @@ function encodeWgslPolicyValueHeads(pass: ComputePassLike, runtime: WgslPolicyVa
   pass.dispatchWorkgroups(1);
 }
 
-async function runCachedWgslPolicyValueHeads(device: DeviceLike, runtime: WgslPolicyValueHeadRuntime): Promise<{ runMs: number; mappedPolicy: number[]; wdl: number[] }> {
+function copyWgslPolicyValueHeadOutputs(encoder: CommandEncoderLike, runtime: WgslPolicyValueHeadRuntime): void {
+  encoder.copyBufferToBuffer(runtime.mappedPolicyBuffer, 0, runtime.mappedPolicyReadbackBuffer, 0, DEFAULT_POLICY_MAPPED_OUTPUTS * 4);
+  encoder.copyBufferToBuffer(runtime.valueWdlBuffer, 0, runtime.valueWdlReadbackBuffer, 0, 3 * 4);
+}
+
+async function mapWgslPolicyValueHeadOutputs(runtime: WgslPolicyValueHeadRuntime): Promise<{
+  mappedPolicy: Float32Array<ArrayBufferLike>;
+  wdl: Float32Array<ArrayBufferLike>;
+  readbackSyncedMs: number;
+}> {
+  const globals = gpuGlobals();
+  const started = nowMs();
+  await Promise.all([
+    runtime.mappedPolicyReadbackBuffer.mapAsync(globals.GPUMapMode!.READ),
+    runtime.valueWdlReadbackBuffer.mapAsync(globals.GPUMapMode!.READ),
+  ]);
+  const mappedPolicy = new Float32Array(runtime.mappedPolicyReadbackBuffer.getMappedRange().slice(0));
+  const wdl = new Float32Array(runtime.valueWdlReadbackBuffer.getMappedRange().slice(0));
+  runtime.mappedPolicyReadbackBuffer.unmap();
+  runtime.valueWdlReadbackBuffer.unmap();
+  return { mappedPolicy, wdl, readbackSyncedMs: nowMs() - started };
+}
+
+async function runCachedWgslPolicyValueHeads(device: DeviceLike, runtime: WgslPolicyValueHeadRuntime): Promise<{ runMs: number; mappedPolicy: number[]; wdl: number[]; readbackSyncedMs: number }> {
   const started = nowMs();
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   encodeWgslPolicyValueHeads(pass, runtime);
   pass.end();
+  copyWgslPolicyValueHeadOutputs(encoder, runtime);
   device.queue.submit([encoder.finish()]);
-  await device.queue.onSubmittedWorkDone?.();
-  const mappedPolicy = await readF32OutputOnce(device, runtime.mappedPolicyBuffer, runtime.mappedPolicyReadbackBuffer, DEFAULT_POLICY_MAPPED_OUTPUTS);
-  const wdl = await readF32OutputOnce(device, runtime.valueWdlBuffer, runtime.valueWdlReadbackBuffer, 3);
+  const { mappedPolicy, wdl, readbackSyncedMs } = await mapWgslPolicyValueHeadOutputs(runtime);
   if (!arrayHasNonzero(mappedPolicy) || !arrayHasVariation(mappedPolicy) || !arrayHasNonzero(wdl) || !arrayHasVariation(wdl)) throw new Error('WGSL hybrid heads produced zero or uniform mapped policy/WDL');
-  return { runMs: nowMs() - started, mappedPolicy: Array.from(mappedPolicy), wdl: Array.from(wdl) };
+  return { runMs: nowMs() - started, mappedPolicy: Array.from(mappedPolicy), wdl: Array.from(wdl), readbackSyncedMs };
 }
 
 const DEFAULT_INPUT_BODY_TENSORS = {
@@ -4984,6 +5006,14 @@ interface Lc0WebInitialInputTensors {
   addGate: Lc0WebTensorView;
 }
 
+interface Lc0WebPreparedInitialInputTensors {
+  posEncoding: Float32Array<ArrayBufferLike>;
+  inputWeight: Float32Array<ArrayBufferLike>;
+  inputBias: Float32Array<ArrayBufferLike>;
+  mulGate: Float32Array<ArrayBufferLike>;
+  addGate: Float32Array<ArrayBufferLike>;
+}
+
 export interface Lc0WebHybridEvaluationOptions {
   packUrl: string;
   input: Lc0EvaluatorInput;
@@ -4992,6 +5022,19 @@ export interface Lc0WebHybridEvaluationOptions {
   historyFill?: Lc0HistoryFill;
   policyTemperature?: number;
   headBackend?: Lc0WebHybridHeadBackend;
+}
+
+export interface Lc0WebHybridTimingBreakdown {
+  totalEvalMs: number;
+  inputBuildMs: number;
+  inputUploadMs: number;
+  commandEncodeMs: number;
+  queueSubmitMs: number;
+  /** Queue drain plus copy/map time for the backend's required readback(s). */
+  readbackSyncedMs: number;
+  headRunMs: number;
+  legalPriorsMs: number;
+  readbackBytes: number;
 }
 
 export interface Lc0WebHybridEvaluationResult extends Lc0Evaluation {
@@ -5003,6 +5046,7 @@ export interface Lc0WebHybridEvaluationResult extends Lc0Evaluation {
   encoderDispatchSyncedMs: number;
   headRunMs: number;
   mappedPolicy: number[];
+  timing: Lc0WebHybridTimingBreakdown;
 }
 
 function inputBodyTensorNameList(): string[] {
@@ -5030,20 +5074,44 @@ function loadInitialInputTensors(pack: Awaited<ReturnType<typeof loadLc0WebModel
   return tensors;
 }
 
-function buildInitialEncoderActivation(input: Lc0EvaluatorInput, tensors: Lc0WebInitialInputTensors, historyFill: Lc0HistoryFill): Float32Array<ArrayBufferLike> {
+function prepareInitialInputTensors(tensors: Lc0WebInitialInputTensors): Lc0WebPreparedInitialInputTensors {
+  return {
+    posEncoding: f16BytesToF32Array(tensors.posEncoding.bytes, DEFAULT_TOKENS * DEFAULT_POSITIONAL_CHANNELS),
+    inputWeight: f16BytesToF32Array(tensors.inputWeight.bytes, DEFAULT_PADDED_INPUT_CHANNELS * DEFAULT_N),
+    inputBias: f16BytesToF32Array(tensors.inputBias.bytes, DEFAULT_N),
+    mulGate: f16BytesToF32Array(tensors.mulGate.bytes, DEFAULT_TOKENS * DEFAULT_N),
+    addGate: f16BytesToF32Array(tensors.addGate.bytes, DEFAULT_TOKENS * DEFAULT_N),
+  };
+}
+
+function cpuProjectTokensF32(input: Float32Array<ArrayBufferLike>, weight: Float32Array<ArrayBufferLike>, bias: Float32Array<ArrayBufferLike>, tokens: number, k: number, n: number): Float32Array<ArrayBufferLike> {
+  const output = new Float32Array(tokens * n);
+  for (let token = 0; token < tokens; token++) {
+    const inputBase = token * k;
+    const outputBase = token * n;
+    for (let col = 0; col < n; col++) {
+      let sum = bias[col];
+      for (let row = 0; row < k; row++) sum += input[inputBase + row] * weight[row * n + col];
+      output[outputBase + col] = sum;
+    }
+  }
+  return output;
+}
+
+function buildInitialEncoderActivation(input: Lc0EvaluatorInput, tensors: Lc0WebPreparedInitialInputTensors, historyFill: Lc0HistoryFill): Float32Array<ArrayBufferLike> {
   const encoded = encodeLc0Classical112(input, { historyFill }).planes;
   const padded = new Float32Array(DEFAULT_TOKENS * DEFAULT_PADDED_INPUT_CHANNELS);
   for (let token = 0; token < DEFAULT_TOKENS; token++) {
     const base = token * DEFAULT_PADDED_INPUT_CHANNELS;
     for (let plane = 0; plane < DEFAULT_INPUT_PLANES; plane++) padded[base + plane] = encoded[plane * DEFAULT_TOKENS + token];
-    for (let channel = 0; channel < DEFAULT_POSITIONAL_CHANNELS; channel++) padded[base + DEFAULT_INPUT_PLANES + channel] = readF16At(tensors.posEncoding.bytes, token * DEFAULT_POSITIONAL_CHANNELS + channel);
+    padded.set(tensors.posEncoding.subarray(token * DEFAULT_POSITIONAL_CHANNELS, (token + 1) * DEFAULT_POSITIONAL_CHANNELS), base + DEFAULT_INPUT_PLANES);
   }
-  const projected = cpuProjectTokens(padded, tensors.inputWeight.bytes, tensors.inputBias.bytes, DEFAULT_TOKENS, DEFAULT_PADDED_INPUT_CHANNELS, DEFAULT_N);
+  const projected = cpuProjectTokensF32(padded, tensors.inputWeight, tensors.inputBias, DEFAULT_TOKENS, DEFAULT_PADDED_INPUT_CHANNELS, DEFAULT_N);
   const out = new Float32Array(DEFAULT_TOKENS * DEFAULT_N);
   for (let i = 0; i < projected.length; i++) {
     const x = projected[i];
     const mish = x * Math.tanh(Math.log1p(Math.exp(x)));
-    out[i] = mish * readF16At(tensors.mulGate.bytes, i) + readF16At(tensors.addGate.bytes, i);
+    out[i] = mish * tensors.mulGate[i] + tensors.addGate[i];
   }
   return out;
 }
@@ -5057,7 +5125,7 @@ type HybridEncoderLayerRuntime = {
 
 class Lc0WebHybridRuntime {
   private readonly device: DeviceLike;
-  private readonly inputTensors: Lc0WebInitialInputTensors;
+  private readonly inputTensors: Lc0WebPreparedInitialInputTensors;
   private readonly headBackend: Lc0WebHybridHeadBackend;
   private readonly headSession?: CachedPolicyValueHeadSession;
   private readonly wgslHeads?: WgslPolicyValueHeadRuntime;
@@ -5068,7 +5136,7 @@ class Lc0WebHybridRuntime {
 
   private constructor(options: {
     device: DeviceLike;
-    inputTensors: Lc0WebInitialInputTensors;
+    inputTensors: Lc0WebPreparedInitialInputTensors;
     headBackend: Lc0WebHybridHeadBackend;
     headSession?: CachedPolicyValueHeadSession;
     wgslHeads?: WgslPolicyValueHeadRuntime;
@@ -5110,7 +5178,7 @@ class Lc0WebHybridRuntime {
         ...policyValueHeadTensorNameList(),
       ])),
     });
-    const inputTensors = loadInitialInputTensors(pack);
+    const inputTensors = prepareInitialInputTensors(loadInitialInputTensors(pack));
     const tensorsByLayer = layerTensorNames.map((names) => loadEncoder0FfnInputs(pack, names));
     const headTensors = loadPolicyValueHeadTensors(pack);
     const headBackend = options.headBackend ?? 'ort';
@@ -5227,11 +5295,22 @@ class Lc0WebHybridRuntime {
     });
   }
 
-  async encode(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill }): Promise<{ board: ReturnType<typeof currentBoardAndFen>['board']; fen: string; output: Float32Array<ArrayBufferLike>; encoderDispatchSyncedMs: number }> {
+  async encode(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill }): Promise<{
+    board: ReturnType<typeof currentBoardAndFen>['board'];
+    fen: string;
+    output: Float32Array<ArrayBufferLike>;
+    encoderDispatchSyncedMs: number;
+    timing: Pick<Lc0WebHybridTimingBreakdown, 'inputBuildMs' | 'inputUploadMs' | 'commandEncodeMs' | 'queueSubmitMs' | 'readbackSyncedMs' | 'readbackBytes'>;
+  }> {
     const { board, fen } = currentBoardAndFen(input);
+    const inputBuildStarted = nowMs();
     const encoderInput = buildInitialEncoderActivation(input, this.inputTensors, options.historyFill);
+    const inputBuildMs = nowMs() - inputBuildStarted;
+    const inputUploadStarted = nowMs();
     this.device.queue.writeBuffer(this.inputBuffer, 0, encoderInput);
+    const inputUploadMs = nowMs() - inputUploadStarted;
     const blockStarted = nowMs();
+    const commandEncodeStarted = nowMs();
     const encoder = this.device.createCommandEncoder();
     for (const layer of this.layerRuntimes) {
       const pass = encoder.beginComputePass();
@@ -5239,18 +5318,36 @@ class Lc0WebHybridRuntime {
       encodeLc0WebEncoderBlockPass(pass, layer.attentionPipelines, layer.ffnPipelines);
       pass.end();
     }
-    this.device.queue.submit([encoder.finish()]);
+    const commandBuffer = encoder.finish();
+    const commandEncodeMs = nowMs() - commandEncodeStarted;
+    const queueSubmitStarted = nowMs();
+    this.device.queue.submit([commandBuffer]);
+    const queueSubmitMs = nowMs() - queueSubmitStarted;
+    const readbackStarted = nowMs();
     const output = await readF32OutputOnce(this.device, this.layerRuntimes[this.layerRuntimes.length - 1].output, this.readbackBuffer, DEFAULT_TOKENS * DEFAULT_N);
-    return { board, fen, output, encoderDispatchSyncedMs: nowMs() - blockStarted };
+    const readbackSyncedMs = nowMs() - readbackStarted;
+    return {
+      board,
+      fen,
+      output,
+      encoderDispatchSyncedMs: nowMs() - blockStarted,
+      timing: { inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, readbackSyncedMs, readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4 },
+    };
   }
 
   async evaluate(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult> {
+    const totalStarted = nowMs();
     if (this.headBackend === 'wgsl') {
       if (!this.wgslHeads) throw new Error('WGSL hybrid heads runtime is not initialized');
       const { board, fen } = currentBoardAndFen(input);
+      const inputBuildStarted = nowMs();
       const encoderInput = buildInitialEncoderActivation(input, this.inputTensors, options.historyFill);
+      const inputBuildMs = nowMs() - inputBuildStarted;
+      const inputUploadStarted = nowMs();
       this.device.queue.writeBuffer(this.inputBuffer, 0, encoderInput);
+      const inputUploadMs = nowMs() - inputUploadStarted;
       const encoderStarted = nowMs();
+      const commandEncodeStarted = nowMs();
       const encoder = this.device.createCommandEncoder();
       for (const layer of this.layerRuntimes) {
         const pass = encoder.beginComputePass();
@@ -5261,17 +5358,23 @@ class Lc0WebHybridRuntime {
       const headPass = encoder.beginComputePass();
       encodeWgslPolicyValueHeads(headPass, this.wgslHeads);
       headPass.end();
-      this.device.queue.submit([encoder.finish()]);
-      await this.device.queue.onSubmittedWorkDone?.();
-      const encoderDispatchSyncedMs = nowMs() - encoderStarted;
+      copyWgslPolicyValueHeadOutputs(encoder, this.wgslHeads);
+      const commandBuffer = encoder.finish();
+      const commandEncodeMs = nowMs() - commandEncodeStarted;
+      const queueSubmitStarted = nowMs();
+      this.device.queue.submit([commandBuffer]);
+      const queueSubmitMs = nowMs() - queueSubmitStarted;
       const headStarted = nowMs();
-      const mappedPolicyF32 = await readF32OutputOnce(this.device, this.wgslHeads.mappedPolicyBuffer, this.wgslHeads.mappedPolicyReadbackBuffer, DEFAULT_POLICY_MAPPED_OUTPUTS);
-      const wdlF32 = await readF32OutputOnce(this.device, this.wgslHeads.valueWdlBuffer, this.wgslHeads.valueWdlReadbackBuffer, 3);
+      const { mappedPolicy: mappedPolicyF32, wdl: wdlF32, readbackSyncedMs } = await mapWgslPolicyValueHeadOutputs(this.wgslHeads);
+      const headRunMs = nowMs() - headStarted;
+      const encoderDispatchSyncedMs = nowMs() - encoderStarted;
       if (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32) || !arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error('WGSL hybrid heads produced zero or uniform mapped policy/WDL');
       const mappedPolicy = Array.from(mappedPolicyF32);
       const wdlValues = Array.from(wdlF32);
       const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
+      const legalPriorsStarted = nowMs();
       const legalPriors = legalPolicyPriors(board, mappedPolicy, options.policyTemperature);
+      const legalPriorsMs = nowMs() - legalPriorsStarted;
       return {
         status: 'LC0WEB_HYBRID_EVALUATION_DONE',
         backend: 'lc0web-wgsl-encoder-wgsl-heads',
@@ -5279,7 +5382,7 @@ class Lc0WebHybridRuntime {
         layers: this.layers,
         packLoadMs: this.packLoadMs,
         encoderDispatchSyncedMs,
-        headRunMs: nowMs() - headStarted,
+        headRunMs,
         fen,
         wdl,
         q: wdl[0] - wdl[2],
@@ -5287,13 +5390,26 @@ class Lc0WebHybridRuntime {
         legalPriors,
         bestMove: legalPriors[0]?.uci,
         mappedPolicy,
+        timing: {
+          totalEvalMs: nowMs() - totalStarted,
+          inputBuildMs,
+          inputUploadMs,
+          commandEncodeMs,
+          queueSubmitMs,
+          readbackSyncedMs,
+          headRunMs,
+          legalPriorsMs,
+          readbackBytes: (DEFAULT_POLICY_MAPPED_OUTPUTS + 3) * 4,
+        },
       };
     }
     if (!this.headSession) throw new Error('ORT hybrid heads session is not initialized');
     const encoded = await this.encode(input, { historyFill: options.historyFill });
     const heads = await runCachedPolicyValueHeadsOrt(encoded.output, this.headSession);
     const wdl: [number, number, number] = [Number(heads.wdl[0]), Number(heads.wdl[1]), Number(heads.wdl[2])];
+    const legalPriorsStarted = nowMs();
     const legalPriors = legalPolicyPriors(encoded.board, heads.mappedPolicy, options.policyTemperature);
+    const legalPriorsMs = nowMs() - legalPriorsStarted;
     return {
       status: 'LC0WEB_HYBRID_EVALUATION_DONE',
       backend: 'lc0web-wgsl-encoder-ort-heads',
@@ -5309,6 +5425,17 @@ class Lc0WebHybridRuntime {
       legalPriors,
       bestMove: legalPriors[0]?.uci,
       mappedPolicy: heads.mappedPolicy,
+      timing: {
+        totalEvalMs: nowMs() - totalStarted,
+        inputBuildMs: encoded.timing.inputBuildMs,
+        inputUploadMs: encoded.timing.inputUploadMs,
+        commandEncodeMs: encoded.timing.commandEncodeMs,
+        queueSubmitMs: encoded.timing.queueSubmitMs,
+        readbackSyncedMs: encoded.timing.readbackSyncedMs,
+        headRunMs: heads.runMs,
+        legalPriorsMs,
+        readbackBytes: encoded.timing.readbackBytes,
+      },
     };
   }
 

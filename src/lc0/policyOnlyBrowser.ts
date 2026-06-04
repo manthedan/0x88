@@ -1049,6 +1049,27 @@ function sampleTimingStats(samples: number[], source: string): Record<string, un
   };
 }
 
+function roundedNumericRecord(value: unknown, digits = 4): Record<string, number> | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]))
+    .map(([key, numberValue]) => [key, Number(numberValue.toFixed(digits))] as const);
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function recordNumericTimingSamples(samples: Record<string, number[]>, value: unknown): void {
+  const rounded = roundedNumericRecord(value, 8);
+  if (!rounded) return;
+  for (const [key, numberValue] of Object.entries(rounded)) {
+    (samples[key] ??= []).push(numberValue);
+  }
+}
+
+function summarizeNumericTimingSamples(samples: Record<string, number[]>, sourcePrefix: string): Record<string, unknown> | undefined {
+  const entries = Object.entries(samples).map(([key, values]) => [key, sampleTimingStats(values, `${sourcePrefix}.${key}`)] as const).filter(([, stats]) => stats !== undefined);
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
 function buildBenchmarkReport(result: BenchmarkReportInput): Record<string, unknown> {
   const perDispatchSyncedMs = result.readbackSyncedMs !== undefined && result.iterations ? result.readbackSyncedMs / result.iterations : undefined;
   const sampleStats = result.timesMs ? sampleTimingStats(result.timesMs, 'timed samples') : undefined;
@@ -2124,6 +2145,7 @@ async function runHybridSearchBenchmark(): Promise<void> {
   const searchWarmup = boundedQueryInt(['hybridSearchWarmup', 'searchWarmup'], 1, 0, 10);
   const searchIterations = boundedQueryInt(['hybridSearchIters', 'searchIters'], 3, 1, 50);
   const evalTimes: number[] = [];
+  const evalTimingSamples: Record<string, number[]> = {};
   const searchTimes: number[] = [];
   let lastEval: BrowserEvaluationChoice | undefined;
   let lastSearch: RenderableSearchResult | undefined;
@@ -2139,6 +2161,7 @@ async function runHybridSearchBenchmark(): Promise<void> {
       const started = performance.now();
       lastEval = await evaluateWithWorker(input);
       evalTimes.push(performance.now() - started);
+      recordNumericTimingSamples(evalTimingSamples, (lastEval.evaluation as { timing?: unknown }).timing);
       el('benchResult').textContent = `HYBRID_SEARCH_BENCH_EVAL_TIMED ${i + 1}/${evalIterations}`;
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
@@ -2178,6 +2201,8 @@ async function runHybridSearchBenchmark(): Promise<void> {
         warmup: evalWarmup,
         iterations: evalIterations,
         timingStats: sampleTimingStats(evalTimes, 'hybrid warm eval round trips'),
+        phaseTimingStats: summarizeNumericTimingSamples(evalTimingSamples, 'hybrid warm eval backend timing'),
+        lastBackendTiming: roundedNumericRecord((lastEval?.evaluation as { timing?: unknown } | undefined)?.timing),
         timesMs: evalTimes.map((time) => roundReportMs(time)),
         bestMove: lastEval?.move,
         q: lastEval?.evaluation.q === undefined ? undefined : Number(lastEval.evaluation.q.toFixed(8)),
