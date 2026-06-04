@@ -14,6 +14,7 @@ import {
   runLc0WebEncoder0FfnOrtBenchmark,
   runLc0WebWgslHeadsProbe,
   runLc0WebMappedPolicyProbe,
+  runLc0WebWgslHeadsVsOrtFixtures,
   Lc0WebHybridEvaluator,
   runLc0WebHybridEvaluation,
   runLc0WebAttentionScoreOrtBenchmark,
@@ -40,6 +41,8 @@ import {
   type Lc0WebHybridEvaluationResult,
   type Lc0WebWgslHeadsProbeResult,
   type Lc0WebMappedPolicyProbeResult,
+  type Lc0WebWgslHeadsVsOrtFixturesResult,
+  type Lc0WebWgslHeadsVsOrtFixtureInput,
   type Lc0WebMatmulAddKernelBenchmarkResult,
   type Lc0WebMatmulAddKernelProbeResult,
   type Lc0WebMatmulAddOrtBenchmarkResult,
@@ -281,6 +284,18 @@ type WgslHeadsProbeMessage = {
   verifyShards?: boolean;
 };
 
+type WgslHeadsVsOrtFixturesMessage = {
+  type: 'wgslHeadsVsOrtFixtures';
+  id: number;
+  packUrl: string;
+  ep: OrtExecutionProviderPreference;
+  fixtures: Lc0WebWgslHeadsVsOrtFixtureInput[];
+  layers?: number;
+  verifyShards?: boolean;
+  mappedPolicyTolerance?: number;
+  wdlTolerance?: number;
+};
+
 type MappedPolicyProbeMessage = {
   type: 'mappedPolicyProbe';
   id: number;
@@ -305,7 +320,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | HybridEvaluateMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | WgslHeadsProbeMessage | MappedPolicyProbeMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionValueOrtBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | AttentionOutputOrtBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0FfnOrtBenchmarkMessage | Encoder0BlockBenchmarkMessage | Encoder0BlockOrtBenchmarkMessage | EncoderStackBenchmarkMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | HybridEvaluateMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | WgslHeadsProbeMessage | WgslHeadsVsOrtFixturesMessage | MappedPolicyProbeMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionValueOrtBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | AttentionOutputOrtBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0FfnOrtBenchmarkMessage | Encoder0BlockBenchmarkMessage | EncoderStackBenchmarkMessage | Encoder0BlockOrtBenchmarkMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -353,6 +368,7 @@ type WorkerResponse =
   | { type: 'encoder0BlockOrtBenchmarkResult'; id: number; result: Lc0WebEncoder0BlockOrtBenchmarkResult }
   | { type: 'encoderStackBenchmarkResult'; id: number; result: Lc0WebEncoderStackBenchmarkResult }
   | { type: 'wgslHeadsProbeResult'; id: number; result: Lc0WebWgslHeadsProbeResult }
+  | { type: 'wgslHeadsVsOrtFixturesResult'; id: number; result: Lc0WebWgslHeadsVsOrtFixturesResult }
   | { type: 'mappedPolicyProbeResult'; id: number; result: Lc0WebMappedPolicyProbeResult }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'error'; id: number; error: string };
@@ -640,6 +656,19 @@ async function handleWgslHeadsProbe(message: WgslHeadsProbeMessage): Promise<voi
   post({ type: 'wgslHeadsProbeResult', id: message.id, result });
 }
 
+async function handleWgslHeadsVsOrtFixtures(message: WgslHeadsVsOrtFixturesMessage): Promise<void> {
+  setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  const result = await runLc0WebWgslHeadsVsOrtFixtures({
+    packUrl: message.packUrl,
+    fixtures: message.fixtures,
+    layers: message.layers,
+    verifyShards: message.verifyShards,
+    mappedPolicyTolerance: message.mappedPolicyTolerance,
+    wdlTolerance: message.wdlTolerance,
+  });
+  post({ type: 'wgslHeadsVsOrtFixturesResult', id: message.id, result });
+}
+
 async function handleMappedPolicyProbe(message: MappedPolicyProbeMessage): Promise<void> {
   const result = await runLc0WebMappedPolicyProbe();
   post({ type: 'mappedPolicyProbeResult', id: message.id, result });
@@ -754,6 +783,7 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       else if (message.type === 'encoder0BlockOrtBenchmark') await handleEncoder0BlockOrtBenchmark(message);
       else if (message.type === 'encoderStackBenchmark') await handleEncoderStackBenchmark(message);
       else if (message.type === 'wgslHeadsProbe') await handleWgslHeadsProbe(message);
+      else if (message.type === 'wgslHeadsVsOrtFixtures') await handleWgslHeadsVsOrtFixtures(message);
       else if (message.type === 'mappedPolicyProbe') await handleMappedPolicyProbe(message);
       else if (message.type === 'hybridEvaluate') await handleHybridEvaluate(message);
       else if (message.type === 'evaluate') {

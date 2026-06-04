@@ -4131,6 +4131,10 @@ export interface Lc0WebWgslHeadsProbeResult {
   mappedPolicySample: number[];
   valueEmbedSample: number[];
   wgslWdl: number[];
+  /** Optional full 64x64 policy logits for WGSL-vs-ORT real-encoder comparisons. */
+  policyLogits?: number[];
+  /** Optional full final 1858 LC0 policy logits for WGSL-vs-ORT real-encoder comparisons. */
+  mappedPolicy?: number[];
   nonzero: { policyDense: boolean; policyLogits: boolean; mappedPolicy: boolean; valueEmbed: boolean; wgslWdl: boolean };
   nonuniform: { policyDense: boolean; policyLogits: boolean; mappedPolicy: boolean; valueEmbed: boolean; wgslWdl: boolean };
   ortHeads: {
@@ -4139,6 +4143,8 @@ export interface Lc0WebWgslHeadsProbeResult {
     mappedPolicySample: number[];
     wdl: number[];
     wdlMaxAbsError: number;
+    /** Optional full final 1858 LC0 policy logits from ORT. */
+    mappedPolicy?: number[];
   };
 }
 
@@ -4467,7 +4473,7 @@ export async function runLc0WebMappedPolicyProbe(): Promise<Lc0WebMappedPolicyPr
   }
 }
 
-export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verifyShards?: boolean }): Promise<Lc0WebWgslHeadsProbeResult> {
+export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verifyShards?: boolean; input?: Float32Array<ArrayBufferLike>; includeOutputs?: boolean }): Promise<Lc0WebWgslHeadsProbeResult> {
   const packLoadStarted = nowMs();
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards,
@@ -4475,7 +4481,8 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
   });
   const packLoadMs = nowMs() - packLoadStarted;
   const tensors = loadPolicyValueHeadTensors(pack);
-  const input = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_N);
+  const input = options.input ?? makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_N);
+  if (input.length !== DEFAULT_TOKENS * DEFAULT_N) throw new Error(`WGSL heads input length ${input.length} != ${DEFAULT_TOKENS * DEFAULT_N}`);
   const policyRef = cpuPolicyHead(input, tensors);
   const policyDenseRef = cpuMish(cpuProjectTokens(input, tensors.policyDense1Weight.bytes, tensors.policyDense1Bias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N));
   const valueEmbedRef = cpuMish(cpuProjectTokens(input, tensors.valueEmbedWeight.bytes, tensors.valueEmbedBias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_VALUE_EMBED));
@@ -4604,7 +4611,7 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
     if (!arrayHasNonzero(policyDense) || !arrayHasNonzero(policyLogits) || !arrayHasNonzero(mappedPolicy) || !arrayHasNonzero(valueEmbed) || !arrayHasNonzero(wgslWdl) || !arrayHasVariation(policyDense) || !arrayHasVariation(policyLogits) || !arrayHasVariation(mappedPolicy) || !arrayHasVariation(valueEmbed) || !arrayHasVariation(wgslWdl)) {
       throw new Error('WGSL heads probe produced zero or uniform intermediate output');
     }
-    const ortHeads = await runPolicyValueHeadsOrt(input, tensors);
+    const ortHeads = await runPolicyValueHeadsOrt(input, tensors, { includeOutputs: options.includeOutputs });
     return {
       status: 'WGSL_HEADS_PROBE_DONE',
       packUrl: pack.manifestUrl,
@@ -4632,6 +4639,7 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
       mappedPolicySample: Array.from(mappedPolicy.slice(0, 8)),
       valueEmbedSample: Array.from(valueEmbed.slice(0, 8)),
       wgslWdl: Array.from(wgslWdl),
+      ...(options.includeOutputs ? { policyLogits: Array.from(policyLogits), mappedPolicy: Array.from(mappedPolicy) } : {}),
       nonzero: { policyDense: arrayHasNonzero(policyDense), policyLogits: arrayHasNonzero(policyLogits), mappedPolicy: arrayHasNonzero(mappedPolicy), valueEmbed: arrayHasNonzero(valueEmbed), wgslWdl: arrayHasNonzero(wgslWdl) },
       nonuniform: { policyDense: arrayHasVariation(policyDense), policyLogits: arrayHasVariation(policyLogits), mappedPolicy: arrayHasVariation(mappedPolicy), valueEmbed: arrayHasVariation(valueEmbed), wgslWdl: arrayHasVariation(wgslWdl) },
       ortHeads: {
@@ -4640,6 +4648,7 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
         mappedPolicySample: ortHeads.mappedPolicySample,
         wdl: ortHeads.wdl,
         wdlMaxAbsError: ortHeads.wdlMaxAbsError,
+        ...(options.includeOutputs && ortHeads.mappedPolicy ? { mappedPolicy: ortHeads.mappedPolicy } : {}),
       },
     };
   } finally {
@@ -5072,7 +5081,7 @@ class Lc0WebHybridRuntime {
     });
   }
 
-  async evaluate(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult> {
+  async encode(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill }): Promise<{ board: ReturnType<typeof currentBoardAndFen>['board']; fen: string; output: Float32Array<ArrayBufferLike>; encoderDispatchSyncedMs: number }> {
     const { board, fen } = currentBoardAndFen(input);
     const encoderInput = buildInitialEncoderActivation(input, this.inputTensors, options.historyFill);
     this.device.queue.writeBuffer(this.inputBuffer, 0, encoderInput);
@@ -5085,20 +5094,24 @@ class Lc0WebHybridRuntime {
       pass.end();
     }
     this.device.queue.submit([encoder.finish()]);
-    const finalOutput = await readF32OutputOnce(this.device, this.layerRuntimes[this.layerRuntimes.length - 1].output, this.readbackBuffer, DEFAULT_TOKENS * DEFAULT_N);
-    const encoderDispatchSyncedMs = nowMs() - blockStarted;
-    const heads = await runCachedPolicyValueHeadsOrt(finalOutput, this.headSession);
+    const output = await readF32OutputOnce(this.device, this.layerRuntimes[this.layerRuntimes.length - 1].output, this.readbackBuffer, DEFAULT_TOKENS * DEFAULT_N);
+    return { board, fen, output, encoderDispatchSyncedMs: nowMs() - blockStarted };
+  }
+
+  async evaluate(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult> {
+    const encoded = await this.encode(input, { historyFill: options.historyFill });
+    const heads = await runCachedPolicyValueHeadsOrt(encoded.output, this.headSession);
     const wdl: [number, number, number] = [Number(heads.wdl[0]), Number(heads.wdl[1]), Number(heads.wdl[2])];
-    const legalPriors = legalPolicyPriors(board, heads.mappedPolicy, options.policyTemperature);
+    const legalPriors = legalPolicyPriors(encoded.board, heads.mappedPolicy, options.policyTemperature);
     return {
       status: 'LC0WEB_HYBRID_EVALUATION_DONE',
       backend: 'lc0web-wgsl-encoder-ort-heads',
       packUrl: this.packUrl,
       layers: this.layers,
       packLoadMs: this.packLoadMs,
-      encoderDispatchSyncedMs,
+      encoderDispatchSyncedMs: encoded.encoderDispatchSyncedMs,
       headRunMs: heads.runMs,
-      fen,
+      fen: encoded.fen,
       wdl,
       q: wdl[0] - wdl[2],
       mlh: 0,
@@ -5182,6 +5195,132 @@ export class Lc0WebHybridEvaluator {
       }));
       return out;
     });
+  }
+}
+
+export interface Lc0WebWgslHeadsVsOrtFixtureInput {
+  id: string;
+  input: Lc0EvaluatorInput;
+}
+
+export interface Lc0WebWgslHeadsVsOrtFixtureResult {
+  id: string;
+  fen: string;
+  encoderDispatchSyncedMs: number;
+  wgslDispatchSyncedMs: number;
+  wgslReadbackSyncedMs: number;
+  ortRunMs: number;
+  mappedPolicyMaxAbsDiff: number;
+  mappedPolicyRmsDiff: number;
+  wdlMaxAbsDiff: number;
+  wdlRmsDiff: number;
+  wgslBestMove?: string;
+  ortBestMove?: string;
+  bestMoveMatch: boolean;
+  wgslWdl: number[];
+  ortWdl: number[];
+  wgslMappedPolicySample: number[];
+  ortMappedPolicySample: number[];
+}
+
+export interface Lc0WebWgslHeadsVsOrtFixturesResult {
+  status: 'WGSL_HEADS_VS_ORT_FIXTURES_DONE';
+  backend: 'lc0web-wgsl-encoder-wgsl-heads-probe';
+  stableBackend: 'lc0web-wgsl-encoder-ort-heads';
+  packUrl: string;
+  layers: number;
+  fixtures: number;
+  mappedPolicyTolerance: number;
+  wdlTolerance: number;
+  bestMoveMatches: number;
+  maxMappedPolicyAbsDiff: number;
+  maxWdlAbsDiff: number;
+  evaluations: Lc0WebWgslHeadsVsOrtFixtureResult[];
+}
+
+export async function runLc0WebWgslHeadsVsOrtFixtures(options: {
+  packUrl: string;
+  fixtures: Lc0WebWgslHeadsVsOrtFixtureInput[];
+  layers?: number;
+  verifyShards?: boolean;
+  historyFill?: Lc0HistoryFill;
+  policyTemperature?: number;
+  mappedPolicyTolerance?: number;
+  wdlTolerance?: number;
+}): Promise<Lc0WebWgslHeadsVsOrtFixturesResult> {
+  const layers = clampInteger(options.layers, 10, 1, 32);
+  const mappedPolicyTolerance = options.mappedPolicyTolerance ?? 1e-3;
+  const wdlTolerance = options.wdlTolerance ?? 1e-3;
+  const policyTemperature = options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE;
+  const runtime = await Lc0WebHybridRuntime.create({
+    packUrl: options.packUrl,
+    layers,
+    verifyShards: options.verifyShards,
+    historyFill: options.historyFill,
+    policyTemperature,
+  });
+  try {
+    const evaluations: Lc0WebWgslHeadsVsOrtFixtureResult[] = [];
+    for (const fixture of options.fixtures) {
+      const encoded = await runtime.encode(fixture.input, { historyFill: options.historyFill ?? 'fen_only' });
+      const heads = await runLc0WebWgslHeadsProbe({
+        packUrl: options.packUrl,
+        verifyShards: options.verifyShards,
+        input: encoded.output,
+        includeOutputs: true,
+      });
+      if (!heads.mappedPolicy || !heads.ortHeads.mappedPolicy) throw new Error('WGSL heads fixture comparison missing full mapped-policy outputs');
+      const wgslMappedPolicy = new Float32Array(heads.mappedPolicy);
+      const ortMappedPolicy = new Float32Array(heads.ortHeads.mappedPolicy);
+      const wgslWdl = new Float32Array(heads.wgslWdl);
+      const ortWdl = new Float32Array(heads.ortHeads.wdl);
+      if (!arrayHasNonzero(wgslMappedPolicy) || !arrayHasVariation(wgslMappedPolicy) || !arrayHasNonzero(wgslWdl) || !arrayHasVariation(wgslWdl)) {
+        throw new Error(`WGSL heads fixture ${fixture.id} produced zero or uniform mapped policy/WDL`);
+      }
+      const mappedPolicyDiff = computeErrorStats(wgslMappedPolicy, ortMappedPolicy, DEFAULT_POLICY_MAPPED_OUTPUTS);
+      const wdlDiff = computeErrorStats(wgslWdl, ortWdl, 3);
+      const wgslPriors = legalPolicyPriors(encoded.board, heads.mappedPolicy, policyTemperature);
+      const ortPriors = legalPolicyPriors(encoded.board, heads.ortHeads.mappedPolicy, policyTemperature);
+      const result: Lc0WebWgslHeadsVsOrtFixtureResult = {
+        id: fixture.id,
+        fen: encoded.fen,
+        encoderDispatchSyncedMs: encoded.encoderDispatchSyncedMs,
+        wgslDispatchSyncedMs: heads.dispatchSyncedMs,
+        wgslReadbackSyncedMs: heads.readbackSyncedMs,
+        ortRunMs: heads.ortHeads.runMs,
+        mappedPolicyMaxAbsDiff: mappedPolicyDiff.maxAbsError,
+        mappedPolicyRmsDiff: mappedPolicyDiff.rmsError,
+        wdlMaxAbsDiff: wdlDiff.maxAbsError,
+        wdlRmsDiff: wdlDiff.rmsError,
+        wgslBestMove: wgslPriors[0]?.uci,
+        ortBestMove: ortPriors[0]?.uci,
+        bestMoveMatch: wgslPriors[0]?.uci === ortPriors[0]?.uci,
+        wgslWdl: heads.wgslWdl,
+        ortWdl: heads.ortHeads.wdl,
+        wgslMappedPolicySample: heads.mappedPolicySample,
+        ortMappedPolicySample: heads.ortHeads.mappedPolicySample,
+      };
+      if (mappedPolicyDiff.maxAbsError > mappedPolicyTolerance) throw new Error(`WGSL heads fixture ${fixture.id} mapped-policy maxAbsDiff=${mappedPolicyDiff.maxAbsError}, tolerance=${mappedPolicyTolerance}`);
+      if (wdlDiff.maxAbsError > wdlTolerance) throw new Error(`WGSL heads fixture ${fixture.id} WDL maxAbsDiff=${wdlDiff.maxAbsError}, tolerance=${wdlTolerance}`);
+      if (!result.bestMoveMatch) throw new Error(`WGSL heads fixture ${fixture.id} best move ${result.wgslBestMove} != ORT ${result.ortBestMove}`);
+      evaluations.push(result);
+    }
+    return {
+      status: 'WGSL_HEADS_VS_ORT_FIXTURES_DONE',
+      backend: 'lc0web-wgsl-encoder-wgsl-heads-probe',
+      stableBackend: 'lc0web-wgsl-encoder-ort-heads',
+      packUrl: options.packUrl,
+      layers,
+      fixtures: evaluations.length,
+      mappedPolicyTolerance,
+      wdlTolerance,
+      bestMoveMatches: evaluations.filter((entry) => entry.bestMoveMatch).length,
+      maxMappedPolicyAbsDiff: evaluations.reduce((max, entry) => Math.max(max, entry.mappedPolicyMaxAbsDiff), 0),
+      maxWdlAbsDiff: evaluations.reduce((max, entry) => Math.max(max, entry.wdlMaxAbsDiff), 0),
+      evaluations,
+    };
+  } finally {
+    runtime.destroy();
   }
 }
 

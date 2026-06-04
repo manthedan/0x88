@@ -448,6 +448,39 @@ type WgslHeadsProbeResult = {
   };
 };
 
+type WgslHeadsVsOrtFixturesResult = {
+  status: 'WGSL_HEADS_VS_ORT_FIXTURES_DONE';
+  backend: 'lc0web-wgsl-encoder-wgsl-heads-probe';
+  stableBackend: 'lc0web-wgsl-encoder-ort-heads';
+  packUrl: string;
+  layers: number;
+  fixtures: number;
+  mappedPolicyTolerance: number;
+  wdlTolerance: number;
+  bestMoveMatches: number;
+  maxMappedPolicyAbsDiff: number;
+  maxWdlAbsDiff: number;
+  evaluations: Array<{
+    id: string;
+    fen: string;
+    encoderDispatchSyncedMs: number;
+    wgslDispatchSyncedMs: number;
+    wgslReadbackSyncedMs: number;
+    ortRunMs: number;
+    mappedPolicyMaxAbsDiff: number;
+    mappedPolicyRmsDiff: number;
+    wdlMaxAbsDiff: number;
+    wdlRmsDiff: number;
+    wgslBestMove?: string;
+    ortBestMove?: string;
+    bestMoveMatch: boolean;
+    wgslWdl: number[];
+    ortWdl: number[];
+    wgslMappedPolicySample: number[];
+    ortMappedPolicySample: number[];
+  }>;
+};
+
 type EncoderStackBenchmarkResult = {
   status: 'ENCODER_STACK_BENCH_DONE';
   packUrl: string;
@@ -581,6 +614,7 @@ type WorkerResponse =
   | { type: 'encoder0BlockBenchmarkResult'; id: number; result: Encoder0BlockBenchmarkResult }
   | { type: 'encoder0BlockOrtBenchmarkResult'; id: number; result: Encoder0BlockOrtBenchmarkResult }
   | { type: 'encoderStackBenchmarkResult'; id: number; result: EncoderStackBenchmarkResult }
+  | { type: 'wgslHeadsVsOrtFixturesResult'; id: number; result: WgslHeadsVsOrtFixturesResult }
   | { type: 'mappedPolicyProbeResult'; id: number; result: MappedPolicyProbeResult }
   | { type: 'encoder0FfnBenchmarkResult'; id: number; result: Encoder0FfnBenchmarkResult }
   | { type: 'encoder0FfnOrtBenchmarkResult'; id: number; result: Encoder0FfnOrtBenchmarkResult }
@@ -627,6 +661,7 @@ const ENCODER0_BLOCK_ORT_BENCH_REQUESTED = params.get('encoder0BlockOrtBench') =
 const ENCODER_STACK_BENCH_REQUESTED = params.get('encoderStackBench') === '1' || params.get('encoderBlocksBench') === '1' || params.get('encoderStackHeadsBench') === '1';
 const MAPPED_POLICY_PROBE_REQUESTED = params.get('mappedPolicyProbe') === '1' || params.get('policyMappingProbe') === '1';
 const WGSL_HEADS_PROBE_REQUESTED = params.get('wgslHeadsProbe') === '1' || params.get('policyValueHeadsProbe') === '1';
+const WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED = params.get('wgslHeadsVsOrt') === '1' || params.get('wgslHeadsFixtures') === '1';
 const ENCODER0_FFN_BENCH_REQUESTED = params.get('encoder0FfnBench') === '1' || params.get('ffnBench') === '1';
 const ENCODER0_FFN_ORT_BENCH_REQUESTED = params.get('encoder0FfnOrtBench') === '1' || params.get('ffnOrtBench') === '1';
 const ATTENTION_SCORE_BENCH_REQUESTED = params.get('attentionScoreBench') === '1' || params.get('scoreBench') === '1';
@@ -635,7 +670,7 @@ const QKV_BENCH_REQUESTED = params.get('qkvBench') === '1' || params.get('qkvBen
 const QKV_PROBE_REQUESTED = params.get('qkvProbe') === '1';
 const ORT_OP_BENCH_REQUESTED = params.get('ortOpBench') === '1' || params.get('ortBench') === '1';
 const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('kernelBenchmark') === '1' || params.get('wgslBench') === '1';
-const KERNEL_PROBE_REQUESTED = MAPPED_POLICY_PROBE_REQUESTED || WGSL_HEADS_PROBE_REQUESTED || ENCODER_STACK_BENCH_REQUESTED || ENCODER0_BLOCK_ORT_BENCH_REQUESTED || ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_ORT_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_ORT_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
+const KERNEL_PROBE_REQUESTED = MAPPED_POLICY_PROBE_REQUESTED || WGSL_HEADS_PROBE_REQUESTED || WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED || ENCODER_STACK_BENCH_REQUESTED || ENCODER0_BLOCK_ORT_BENCH_REQUESTED || ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_ORT_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_ORT_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
 const HYBRID_SEARCH_BENCH_REQUESTED = params.get('hybridSearchBench') === '1' || params.get('hybridSearchBenchmark') === '1';
@@ -1385,6 +1420,62 @@ async function runWgslHeadsProbe(): Promise<void> {
   } catch (error) {
     el('benchResult').textContent = `WGSL_HEADS_PROBE_FAILED ${(error as Error).message}`;
     el('message').textContent = `WGSL heads probe failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runWgslHeadsVsOrtFixtures(): Promise<void> {
+  if (!searchWorker) throw new Error('WGSL heads vs ORT fixture comparison requires LC0 worker');
+  const limit = Math.min(16, Math.max(1, Math.floor(Number(params.get('fixtureLimit') ?? params.get('wgslHeadsLimit') ?? '9') || 9)));
+  const layers = Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10)));
+  el('benchResult').textContent = 'WGSL_HEADS_VS_ORT_FIXTURES_RUNNING';
+  setBusy(true, `Comparing WGSL heads against ORT heads on ${limit} real hybrid encoder fixture output(s)…`);
+  try {
+    const records = [
+      ...await fetchNativeRecords('/lc0/native_fen_only_blas.jsonl'),
+      ...await fetchNativeRecords('/lc0/native_history_blas.jsonl'),
+    ].slice(0, limit);
+    const fixtures = records.map((native) => ({
+      id: native.id,
+      input: native.moves ? { positions: buildBoardHistoryFromMoves(native.moves, native.startFen) } : native.fen,
+    }));
+    const response = await postWorkerRequest<{ type: 'wgslHeadsVsOrtFixturesResult'; result: WgslHeadsVsOrtFixturesResult }>({
+      type: 'wgslHeadsVsOrtFixtures',
+      packUrl: PACK_URL,
+      ep: requestedWorkerEp(),
+      fixtures,
+      layers,
+      verifyShards: params.get('packVerify') !== '0',
+      mappedPolicyTolerance: Number(params.get('mappedPolicyTolerance') ?? '0.001'),
+      wdlTolerance: Number(params.get('wdlTolerance') ?? '0.001'),
+    });
+    const rounded = {
+      ...response.result,
+      maxMappedPolicyAbsDiff: Number(response.result.maxMappedPolicyAbsDiff.toExponential(6)),
+      maxWdlAbsDiff: Number(response.result.maxWdlAbsDiff.toExponential(6)),
+      evaluations: response.result.evaluations.map((entry) => ({
+        ...entry,
+        encoderDispatchSyncedMs: Number(entry.encoderDispatchSyncedMs.toFixed(3)),
+        wgslDispatchSyncedMs: Number(entry.wgslDispatchSyncedMs.toFixed(3)),
+        wgslReadbackSyncedMs: Number(entry.wgslReadbackSyncedMs.toFixed(3)),
+        ortRunMs: Number(entry.ortRunMs.toFixed(3)),
+        mappedPolicyMaxAbsDiff: Number(entry.mappedPolicyMaxAbsDiff.toExponential(6)),
+        mappedPolicyRmsDiff: Number(entry.mappedPolicyRmsDiff.toExponential(6)),
+        wdlMaxAbsDiff: Number(entry.wdlMaxAbsDiff.toExponential(6)),
+        wdlRmsDiff: Number(entry.wdlRmsDiff.toExponential(6)),
+        wgslWdl: entry.wgslWdl.map((value) => Number(value.toFixed(8))),
+        ortWdl: entry.ortWdl.map((value) => Number(value.toFixed(8))),
+        wgslMappedPolicySample: entry.wgslMappedPolicySample.map((value) => Number(value.toFixed(8))),
+        ortMappedPolicySample: entry.ortMappedPolicySample.map((value) => Number(value.toFixed(8))),
+      })),
+    };
+    el('benchResult').textContent = JSON.stringify(rounded);
+    el('message').textContent = `WGSL_HEADS_VS_ORT_FIXTURES_DONE ${rounded.bestMoveMatches}/${rounded.fixtures} best moves · mapped max |diff| ${rounded.maxMappedPolicyAbsDiff.toExponential(2)} · WDL max |diff| ${rounded.maxWdlAbsDiff.toExponential(2)}`;
+  } catch (error) {
+    el('benchResult').textContent = `WGSL_HEADS_VS_ORT_FIXTURES_FAILED ${(error as Error).message}`;
+    el('message').textContent = `WGSL heads vs ORT fixture comparison failed: ${(error as Error).message}`;
     throw error;
   } finally {
     setBusy(false);
@@ -2631,9 +2722,10 @@ async function init() {
       workerModelCacheStatus = 'pack shards worker-owned';
       useSearchWorker = true;
       await initSearchWorker({ initModel: false });
-      searchWorkerBackend = MAPPED_POLICY_PROBE_REQUESTED ? 'lc0web-wgsl-mapped-policy-probe' : WGSL_HEADS_PROBE_REQUESTED ? 'lc0web-wgsl-heads-probe' : ENCODER_STACK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder-stack-bench' : ENCODER0_BLOCK_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-block-bench' : ENCODER0_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-block-bench' : ENCODER0_FFN_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-ffn-bench' : ENCODER0_FFN_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-ffn-bench' : ATTENTION_OUTPUT_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-output-bench' : ATTENTION_OUTPUT_BENCH_REQUESTED ? 'lc0web-wgsl-attention-output-bench' : ATTENTION_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-attention-block-bench' : ATTENTION_VALUE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-value-bench' : ATTENTION_VALUE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-value-bench' : SOFTMAX_BENCH_REQUESTED ? 'lc0web-wgsl-softmax-bench' : ATTENTION_SCORE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-score-bench' : ATTENTION_SCORE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-score-bench' : QKV_BENCH_REQUESTED ? 'lc0web-wgsl-qkv-bench' : QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
+      searchWorkerBackend = MAPPED_POLICY_PROBE_REQUESTED ? 'lc0web-wgsl-mapped-policy-probe' : WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED ? 'lc0web-wgsl-encoder-wgsl-heads-probe' : WGSL_HEADS_PROBE_REQUESTED ? 'lc0web-wgsl-heads-probe' : ENCODER_STACK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder-stack-bench' : ENCODER0_BLOCK_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-block-bench' : ENCODER0_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-block-bench' : ENCODER0_FFN_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-ffn-bench' : ENCODER0_FFN_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-ffn-bench' : ATTENTION_OUTPUT_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-output-bench' : ATTENTION_OUTPUT_BENCH_REQUESTED ? 'lc0web-wgsl-attention-output-bench' : ATTENTION_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-attention-block-bench' : ATTENTION_VALUE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-value-bench' : ATTENTION_VALUE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-value-bench' : SOFTMAX_BENCH_REQUESTED ? 'lc0web-wgsl-softmax-bench' : ATTENTION_SCORE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-score-bench' : ATTENTION_SCORE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-score-bench' : QKV_BENCH_REQUESTED ? 'lc0web-wgsl-qkv-bench' : QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
       renderStatic();
       if (MAPPED_POLICY_PROBE_REQUESTED) await runMappedPolicyProbe();
+      else if (WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED) await runWgslHeadsVsOrtFixtures();
       else if (WGSL_HEADS_PROBE_REQUESTED) await runWgslHeadsProbe();
       else if (ENCODER_STACK_BENCH_REQUESTED) await runEncoderStackBenchmark();
       else if (ENCODER0_BLOCK_ORT_BENCH_REQUESTED) await runEncoder0BlockOrtBenchmark();
