@@ -68,6 +68,7 @@
     "eval:onnx-parity": "node --experimental-strip-types eval/onnx_parity_check.mjs",
     "lc0:prepare-model-assets": "node scripts/lc0_prepare_model_assets.mjs",
     "lc0:pack-model": ".venv-onnx/bin/python scripts/convert_onnx_to_lc0web_pack.py",
+    "lc0:generate-tvm-wgsl": "node scripts/generate_lc0_tvm_wgsl_kernels.mjs",
     "lc0:eval-fixtures": "node --experimental-strip-types scripts/lc0_eval_fixtures.mjs",
     "lc0:eval-history": "node --experimental-strip-types scripts/lc0_eval_fixtures.mjs ../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx fixtures/lc0/history.json",
     "lc0:eval-f16-fixtures": "node --experimental-strip-types scripts/lc0_eval_fixtures.mjs ../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.onnx fixtures/lc0/fen_only.json",
