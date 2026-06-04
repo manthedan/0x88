@@ -6,7 +6,7 @@ This branch adds an optional browser path:
 
 - Build target: `wasm32-wasip1`, `--no-default-features` to skip Syzygy/Fathom.
 - Runtime: `@bjorn3/browser_wasi_shim` inside a dedicated Web Worker.
-- Protocol: one-shot UCI argv commands (`uci`, `isready`, `setoption`, `position`, `go`, `quit`) per search.
+- Protocol: one-shot UCI argv commands (`setoption`, `position`, `go`) per search. The adapter skips redundant `uci`/`isready`/`quit` commands because the patched CLI mode exits automatically after the final argv command.
 - UI: optional Reckless engines in `lc0-arena.html` and `lc0-analysis.html`.
 
 ## Build

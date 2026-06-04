@@ -39,7 +39,7 @@ function abortError(): Error {
  *
  * Reckless does not currently publish a browser UCI worker. The integration runs
  * a patched single-thread `wasm32-wasip1` binary in a dedicated Web Worker and
- * feeds each search as argv commands (`uci`, `position`, `go`, `quit`). That is
+ * feeds each search as argv commands (`setoption`, `position`, `go`). That is
  * browser-safe and avoids interactive stdin, but it is one-shot: no hash/tree is
  * retained between calls and aborting terminates/recreates the worker.
  */
@@ -128,14 +128,11 @@ export class RecklessEngine {
 
   private searchCommands(fen: string, options: RecklessOptions, multipv = 1): string[] {
     return [
-      'uci',
-      'isready',
       hashCommand(options.hashMb ?? this.options.hashMb ?? 16),
       'setoption name Threads value 1',
       `setoption name MultiPV value ${Math.max(1, Math.floor(multipv))}`,
       `position fen ${fen}`,
       goCommand(options),
-      'quit',
     ];
   }
 
