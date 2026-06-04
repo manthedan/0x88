@@ -260,6 +260,7 @@ type AttentionBlockBenchmarkResult = {
   heads: number;
   headDim: number;
   fusedScoreSoftmax?: boolean;
+  qkvKernelVariant?: 'hand' | 'tvm-packed-f16';
   dispatchesPerIteration?: number;
   warmup: number;
   iterations: number;
@@ -1801,6 +1802,7 @@ async function runAttentionBlockBenchmark(): Promise<void> {
   const iterations = Math.min(10_000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 100)));
   const warmup = Math.min(1000, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 5)));
   const fusedScoreSoftmax = params.get('attentionFusion') === 'score-softmax' || params.get('fusedScoreSoftmax') === '1';
+  const attentionQkvKernelVariant = params.get('attentionQkvKernel') === 'tvm-packed-f16' || params.get('attnQkvKernel') === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand';
   el('benchResult').textContent = 'ATTENTION_BLOCK_BENCH_RUNNING';
   setBusy(true, `Benchmarking lc0web WGSL attention block: ${warmup} warmup + ${iterations} queued QKV/QK/softmax/value blocks, one final readback…`);
   try {
@@ -1811,6 +1813,7 @@ async function runAttentionBlockBenchmark(): Promise<void> {
       warmup,
       verifyShards: params.get('packVerify') !== '0',
       fusedScoreSoftmax,
+      attentionQkvKernelVariant,
     });
     const rounded = {
       ...response.result,

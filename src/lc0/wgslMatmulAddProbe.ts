@@ -2066,12 +2066,15 @@ export async function runLc0WebAttentionValueBenchmark(options: Lc0WebAttentionV
   }
 }
 
+export type Lc0WebAttentionQkvKernelVariant = 'hand' | 'tvm-packed-f16';
+
 export interface Lc0WebAttentionBlockBenchmarkOptions {
   packUrl: string;
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
   fusedScoreSoftmax?: boolean;
+  attentionQkvKernelVariant?: Lc0WebAttentionQkvKernelVariant;
 }
 
 export interface Lc0WebAttentionBlockBenchmarkResult {
@@ -2084,6 +2087,7 @@ export interface Lc0WebAttentionBlockBenchmarkResult {
   heads: number;
   headDim: number;
   fusedScoreSoftmax?: boolean;
+  qkvKernelVariant?: Lc0WebAttentionQkvKernelVariant;
   dispatchesPerIteration?: number;
   warmup: number;
   iterations: number;
@@ -2097,6 +2101,308 @@ export interface Lc0WebAttentionBlockBenchmarkResult {
   rmsError: number;
   outputSample: number[];
 }
+
+const ATTENTION_BLOCK_QKV_TVM_PACKED_F16_WGSL = `// Function: matmul_kernel
+//----------------------------------------
+fn pick_lane(packed : u32, idx : u32) -> f32 {
+  let v = unpack2x16float(packed);
+  if ((idx & 1u) == 0u) { return v.x; }
+  return v.y;
+}
+
+// Function: matmul_kernel
+//----------------------------------------
+@group(0) @binding(0) var<storage, read_write> matmul : array<f32>;
+@group(0) @binding(1) var<storage, read> weightsF16 : array<u32>;
+@group(0) @binding(2) var<storage, read> x : array<f32>;
+@group(0) @binding(4) var<storage, read> biasF16 : array<u32>;
+
+struct PODArgs {
+  packGridDimX: u32
+}
+@group(0) @binding(3) var<uniform> podArgs : PODArgs;
+
+var<workgroup> x_reindex_shared : array<f32, 256>;
+var<workgroup> w_reindex_shared : array<f32, 256>;
+@compute @workgroup_size(8, 8, 1)
+fn matmul_kernel(
+  @builtin(workgroup_id) blockIdx : vec3<u32>,
+  @builtin(num_workgroups) gridDim : vec3<u32>,
+  @builtin(local_invocation_id) threadIdx : vec3<u32>
+) {
+  if (blockIdx.z * gridDim.x + blockIdx.x > podArgs.packGridDimX) { return; }
+  var matmul_reindex_local : array<f32, 16>;
+  let v__1 : i32 = i32(blockIdx.z * gridDim.x + blockIdx.x);
+  for (var var_1 : i32 = 0i; var_1 < 1i; var_1++) {
+    matmul_reindex_local[0i] = 0.000000e+00f;
+    matmul_reindex_local[1i] = 0.000000e+00f;
+    matmul_reindex_local[2i] = 0.000000e+00f;
+    matmul_reindex_local[3i] = 0.000000e+00f;
+    matmul_reindex_local[4i] = 0.000000e+00f;
+    matmul_reindex_local[5i] = 0.000000e+00f;
+    matmul_reindex_local[6i] = 0.000000e+00f;
+    matmul_reindex_local[7i] = 0.000000e+00f;
+    matmul_reindex_local[8i] = 0.000000e+00f;
+    matmul_reindex_local[9i] = 0.000000e+00f;
+    matmul_reindex_local[10i] = 0.000000e+00f;
+    matmul_reindex_local[11i] = 0.000000e+00f;
+    matmul_reindex_local[12i] = 0.000000e+00f;
+    matmul_reindex_local[13i] = 0.000000e+00f;
+    matmul_reindex_local[14i] = 0.000000e+00f;
+    matmul_reindex_local[15i] = 0.000000e+00f;
+    let cse_v3 : i32 = (i32(threadIdx.y) * 4i);
+    let cse_v4 : i32 = (i32(blockIdx.y) * 32i);
+    for (var ax3_0 : i32 = 0i; ax3_0 < 32i; ax3_0++) {
+      let cse_v2 : i32 = (i32(threadIdx.y) * 32i);
+      let cse_v5 : i32 = (i32(threadIdx.x) & 1i);
+      let cse_v6 : i32 = (i32(threadIdx.x)>>1u);
+      let cse_v38 : i32 = ((i32(threadIdx.y) * 32i) + (i32(threadIdx.x) * 4i));
+      let cse_v74 : i32 = (((((v__1 * 8192i) + (i32(threadIdx.y) * 1024i)) + ((i32(threadIdx.x)>>1u) * 256i)) + (ax3_0 * 8i)) + ((i32(threadIdx.x) & 1i) * 4i));
+      workgroupBarrier();
+      x_reindex_shared[((i32(threadIdx.y) * 32i) + (i32(threadIdx.x) * 4i))] = x[(((((v__1 * 8192i) + (i32(threadIdx.y) * 1024i)) + ((i32(threadIdx.x)>>1u) * 256i)) + (ax3_0 * 8i)) + ((i32(threadIdx.x) & 1i) * 4i))];
+      let cse_v70 : i32 = (((i32(threadIdx.y) * 32i) + (i32(threadIdx.x) * 4i)) + 1i);
+      x_reindex_shared[(((i32(threadIdx.y) * 32i) + (i32(threadIdx.x) * 4i)) + 1i)] = x[((((((v__1 * 8192i) + (i32(threadIdx.y) * 1024i)) + ((i32(threadIdx.x)>>1u) * 256i)) + (ax3_0 * 8i)) + ((i32(threadIdx.x) & 1i) * 4i)) + 1i)];
+      let cse_v72 : i32 = (((i32(threadIdx.y) * 32i) + (i32(threadIdx.x) * 4i)) + 2i);
+      x_reindex_shared[(((i32(threadIdx.y) * 32i) + (i32(threadIdx.x) * 4i)) + 2i)] = x[((((((v__1 * 8192i) + (i32(threadIdx.y) * 1024i)) + ((i32(threadIdx.x)>>1u) * 256i)) + (ax3_0 * 8i)) + ((i32(threadIdx.x) & 1i) * 4i)) + 2i)];
+      let cse_v71 : i32 = (((i32(threadIdx.y) * 32i) + (i32(threadIdx.x) * 4i)) + 3i);
+      x_reindex_shared[(((i32(threadIdx.y) * 32i) + (i32(threadIdx.x) * 4i)) + 3i)] = x[((((((v__1 * 8192i) + (i32(threadIdx.y) * 1024i)) + ((i32(threadIdx.x)>>1u) * 256i)) + (ax3_0 * 8i)) + ((i32(threadIdx.x) & 1i) * 4i)) + 3i)];
+      let cse_v75 : i32 = (((((ax3_0 * 8192i) + ((i32(threadIdx.x) & 1i) * 4096i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + (i32(threadIdx.x)>>1u));
+      let weight_f16_index_0 : i32 = (((((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + (i32(threadIdx.x)>>1u)) * 256i) + (((ax3_0 * 8i) + ((i32(threadIdx.x) & 1i) * 4i)) + 0i));
+      w_reindex_shared[((i32(threadIdx.y) * 32i) + (i32(threadIdx.x) * 4i))] = pick_lane(weightsF16[(u32(weight_f16_index_0) >> 1u)], u32(weight_f16_index_0));
+      let weight_f16_index_1 : i32 = (((((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + (i32(threadIdx.x)>>1u)) * 256i) + (((ax3_0 * 8i) + ((i32(threadIdx.x) & 1i) * 4i)) + 1i));
+      w_reindex_shared[(((i32(threadIdx.y) * 32i) + (i32(threadIdx.x) * 4i)) + 1i)] = pick_lane(weightsF16[(u32(weight_f16_index_1) >> 1u)], u32(weight_f16_index_1));
+      let weight_f16_index_2 : i32 = (((((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + (i32(threadIdx.x)>>1u)) * 256i) + (((ax3_0 * 8i) + ((i32(threadIdx.x) & 1i) * 4i)) + 2i));
+      w_reindex_shared[(((i32(threadIdx.y) * 32i) + (i32(threadIdx.x) * 4i)) + 2i)] = pick_lane(weightsF16[(u32(weight_f16_index_2) >> 1u)], u32(weight_f16_index_2));
+      let weight_f16_index_3 : i32 = (((((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + (i32(threadIdx.x)>>1u)) * 256i) + (((ax3_0 * 8i) + ((i32(threadIdx.x) & 1i) * 4i)) + 3i));
+      w_reindex_shared[(((i32(threadIdx.y) * 32i) + (i32(threadIdx.x) * 4i)) + 3i)] = pick_lane(weightsF16[(u32(weight_f16_index_3) >> 1u)], u32(weight_f16_index_3));
+      let cse_v1 : i32 = (i32(threadIdx.x) * 32i);
+      workgroupBarrier();
+      matmul_reindex_local[0i] = fma(x_reindex_shared[(i32(threadIdx.x) * 32i)], w_reindex_shared[(i32(threadIdx.y) * 32i)], matmul_reindex_local[0i]);
+      let cse_v67 : i32 = ((i32(threadIdx.y) * 32i) + 8i);
+      matmul_reindex_local[1i] = fma(x_reindex_shared[(i32(threadIdx.x) * 32i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 8i)], matmul_reindex_local[1i]);
+      let cse_v49 : i32 = ((i32(threadIdx.y) * 32i) + 16i);
+      matmul_reindex_local[2i] = fma(x_reindex_shared[(i32(threadIdx.x) * 32i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 16i)], matmul_reindex_local[2i]);
+      let cse_v57 : i32 = ((i32(threadIdx.y) * 32i) + 24i);
+      matmul_reindex_local[3i] = fma(x_reindex_shared[(i32(threadIdx.x) * 32i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 24i)], matmul_reindex_local[3i]);
+      let cse_v29 : i32 = ((i32(threadIdx.x) * 32i) + 8i);
+      matmul_reindex_local[4i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 8i)], w_reindex_shared[(i32(threadIdx.y) * 32i)], matmul_reindex_local[4i]);
+      matmul_reindex_local[5i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 8i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 8i)], matmul_reindex_local[5i]);
+      matmul_reindex_local[6i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 8i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 16i)], matmul_reindex_local[6i]);
+      matmul_reindex_local[7i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 8i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 24i)], matmul_reindex_local[7i]);
+      let cse_v37 : i32 = ((i32(threadIdx.x) * 32i) + 16i);
+      matmul_reindex_local[8i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 16i)], w_reindex_shared[(i32(threadIdx.y) * 32i)], matmul_reindex_local[8i]);
+      matmul_reindex_local[9i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 16i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 8i)], matmul_reindex_local[9i]);
+      matmul_reindex_local[10i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 16i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 16i)], matmul_reindex_local[10i]);
+      matmul_reindex_local[11i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 16i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 24i)], matmul_reindex_local[11i]);
+      let cse_v14 : i32 = ((i32(threadIdx.x) * 32i) + 24i);
+      matmul_reindex_local[12i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 24i)], w_reindex_shared[(i32(threadIdx.y) * 32i)], matmul_reindex_local[12i]);
+      matmul_reindex_local[13i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 24i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 8i)], matmul_reindex_local[13i]);
+      matmul_reindex_local[14i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 24i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 16i)], matmul_reindex_local[14i]);
+      matmul_reindex_local[15i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 24i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 24i)], matmul_reindex_local[15i]);
+      let cse_v19 : i32 = ((i32(threadIdx.x) * 32i) + 1i);
+      let cse_v60 : i32 = ((i32(threadIdx.y) * 32i) + 1i);
+      matmul_reindex_local[0i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 1i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 1i)], matmul_reindex_local[0i]);
+      let cse_v68 : i32 = ((i32(threadIdx.y) * 32i) + 9i);
+      matmul_reindex_local[1i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 1i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 9i)], matmul_reindex_local[1i]);
+      let cse_v50 : i32 = ((i32(threadIdx.y) * 32i) + 17i);
+      matmul_reindex_local[2i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 1i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 17i)], matmul_reindex_local[2i]);
+      let cse_v58 : i32 = ((i32(threadIdx.y) * 32i) + 25i);
+      matmul_reindex_local[3i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 1i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 25i)], matmul_reindex_local[3i]);
+      let cse_v24 : i32 = ((i32(threadIdx.x) * 32i) + 9i);
+      matmul_reindex_local[4i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 9i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 1i)], matmul_reindex_local[4i]);
+      matmul_reindex_local[5i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 9i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 9i)], matmul_reindex_local[5i]);
+      matmul_reindex_local[6i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 9i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 17i)], matmul_reindex_local[6i]);
+      matmul_reindex_local[7i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 9i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 25i)], matmul_reindex_local[7i]);
+      let cse_v32 : i32 = ((i32(threadIdx.x) * 32i) + 17i);
+      matmul_reindex_local[8i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 17i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 1i)], matmul_reindex_local[8i]);
+      matmul_reindex_local[9i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 17i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 9i)], matmul_reindex_local[9i]);
+      matmul_reindex_local[10i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 17i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 17i)], matmul_reindex_local[10i]);
+      matmul_reindex_local[11i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 17i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 25i)], matmul_reindex_local[11i]);
+      let cse_v9 : i32 = ((i32(threadIdx.x) * 32i) + 25i);
+      matmul_reindex_local[12i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 25i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 1i)], matmul_reindex_local[12i]);
+      matmul_reindex_local[13i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 25i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 9i)], matmul_reindex_local[13i]);
+      matmul_reindex_local[14i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 25i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 17i)], matmul_reindex_local[14i]);
+      matmul_reindex_local[15i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 25i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 25i)], matmul_reindex_local[15i]);
+      let cse_v21 : i32 = ((i32(threadIdx.x) * 32i) + 2i);
+      let cse_v61 : i32 = ((i32(threadIdx.y) * 32i) + 2i);
+      matmul_reindex_local[0i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 2i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 2i)], matmul_reindex_local[0i]);
+      let cse_v69 : i32 = ((i32(threadIdx.y) * 32i) + 10i);
+      matmul_reindex_local[1i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 2i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 10i)], matmul_reindex_local[1i]);
+      let cse_v51 : i32 = ((i32(threadIdx.y) * 32i) + 18i);
+      matmul_reindex_local[2i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 2i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 18i)], matmul_reindex_local[2i]);
+      let cse_v59 : i32 = ((i32(threadIdx.y) * 32i) + 26i);
+      matmul_reindex_local[3i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 2i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 26i)], matmul_reindex_local[3i]);
+      let cse_v27 : i32 = ((i32(threadIdx.x) * 32i) + 10i);
+      matmul_reindex_local[4i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 10i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 2i)], matmul_reindex_local[4i]);
+      matmul_reindex_local[5i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 10i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 10i)], matmul_reindex_local[5i]);
+      matmul_reindex_local[6i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 10i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 18i)], matmul_reindex_local[6i]);
+      matmul_reindex_local[7i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 10i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 26i)], matmul_reindex_local[7i]);
+      let cse_v35 : i32 = ((i32(threadIdx.x) * 32i) + 18i);
+      matmul_reindex_local[8i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 18i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 2i)], matmul_reindex_local[8i]);
+      matmul_reindex_local[9i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 18i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 10i)], matmul_reindex_local[9i]);
+      matmul_reindex_local[10i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 18i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 18i)], matmul_reindex_local[10i]);
+      matmul_reindex_local[11i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 18i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 26i)], matmul_reindex_local[11i]);
+      let cse_v12 : i32 = ((i32(threadIdx.x) * 32i) + 26i);
+      matmul_reindex_local[12i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 26i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 2i)], matmul_reindex_local[12i]);
+      matmul_reindex_local[13i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 26i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 10i)], matmul_reindex_local[13i]);
+      matmul_reindex_local[14i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 26i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 18i)], matmul_reindex_local[14i]);
+      matmul_reindex_local[15i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 26i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 26i)], matmul_reindex_local[15i]);
+      let cse_v17 : i32 = ((i32(threadIdx.x) * 32i) + 3i);
+      let cse_v62 : i32 = ((i32(threadIdx.y) * 32i) + 3i);
+      matmul_reindex_local[0i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 3i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 3i)], matmul_reindex_local[0i]);
+      let cse_v44 : i32 = ((i32(threadIdx.y) * 32i) + 11i);
+      matmul_reindex_local[1i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 3i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 11i)], matmul_reindex_local[1i]);
+      let cse_v52 : i32 = ((i32(threadIdx.y) * 32i) + 19i);
+      matmul_reindex_local[2i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 3i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 19i)], matmul_reindex_local[2i]);
+      let cse_v39 : i32 = ((i32(threadIdx.y) * 32i) + 27i);
+      matmul_reindex_local[3i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 3i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 27i)], matmul_reindex_local[3i]);
+      let cse_v22 : i32 = ((i32(threadIdx.x) * 32i) + 11i);
+      matmul_reindex_local[4i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 11i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 3i)], matmul_reindex_local[4i]);
+      matmul_reindex_local[5i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 11i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 11i)], matmul_reindex_local[5i]);
+      matmul_reindex_local[6i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 11i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 19i)], matmul_reindex_local[6i]);
+      matmul_reindex_local[7i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 11i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 27i)], matmul_reindex_local[7i]);
+      let cse_v30 : i32 = ((i32(threadIdx.x) * 32i) + 19i);
+      matmul_reindex_local[8i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 19i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 3i)], matmul_reindex_local[8i]);
+      matmul_reindex_local[9i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 19i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 11i)], matmul_reindex_local[9i]);
+      matmul_reindex_local[10i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 19i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 19i)], matmul_reindex_local[10i]);
+      matmul_reindex_local[11i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 19i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 27i)], matmul_reindex_local[11i]);
+      let cse_v7 : i32 = ((i32(threadIdx.x) * 32i) + 27i);
+      matmul_reindex_local[12i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 27i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 3i)], matmul_reindex_local[12i]);
+      matmul_reindex_local[13i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 27i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 11i)], matmul_reindex_local[13i]);
+      matmul_reindex_local[14i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 27i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 19i)], matmul_reindex_local[14i]);
+      matmul_reindex_local[15i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 27i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 27i)], matmul_reindex_local[15i]);
+      let cse_v20 : i32 = ((i32(threadIdx.x) * 32i) + 4i);
+      let cse_v63 : i32 = ((i32(threadIdx.y) * 32i) + 4i);
+      matmul_reindex_local[0i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 4i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 4i)], matmul_reindex_local[0i]);
+      let cse_v45 : i32 = ((i32(threadIdx.y) * 32i) + 12i);
+      matmul_reindex_local[1i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 4i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 12i)], matmul_reindex_local[1i]);
+      let cse_v53 : i32 = ((i32(threadIdx.y) * 32i) + 20i);
+      matmul_reindex_local[2i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 4i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 20i)], matmul_reindex_local[2i]);
+      let cse_v40 : i32 = ((i32(threadIdx.y) * 32i) + 28i);
+      matmul_reindex_local[3i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 4i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 28i)], matmul_reindex_local[3i]);
+      let cse_v25 : i32 = ((i32(threadIdx.x) * 32i) + 12i);
+      matmul_reindex_local[4i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 12i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 4i)], matmul_reindex_local[4i]);
+      matmul_reindex_local[5i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 12i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 12i)], matmul_reindex_local[5i]);
+      matmul_reindex_local[6i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 12i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 20i)], matmul_reindex_local[6i]);
+      matmul_reindex_local[7i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 12i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 28i)], matmul_reindex_local[7i]);
+      let cse_v33 : i32 = ((i32(threadIdx.x) * 32i) + 20i);
+      matmul_reindex_local[8i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 20i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 4i)], matmul_reindex_local[8i]);
+      matmul_reindex_local[9i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 20i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 12i)], matmul_reindex_local[9i]);
+      matmul_reindex_local[10i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 20i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 20i)], matmul_reindex_local[10i]);
+      matmul_reindex_local[11i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 20i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 28i)], matmul_reindex_local[11i]);
+      let cse_v10 : i32 = ((i32(threadIdx.x) * 32i) + 28i);
+      matmul_reindex_local[12i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 28i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 4i)], matmul_reindex_local[12i]);
+      matmul_reindex_local[13i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 28i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 12i)], matmul_reindex_local[13i]);
+      matmul_reindex_local[14i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 28i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 20i)], matmul_reindex_local[14i]);
+      matmul_reindex_local[15i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 28i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 28i)], matmul_reindex_local[15i]);
+      let cse_v28 : i32 = ((i32(threadIdx.x) * 32i) + 5i);
+      let cse_v64 : i32 = ((i32(threadIdx.y) * 32i) + 5i);
+      matmul_reindex_local[0i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 5i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 5i)], matmul_reindex_local[0i]);
+      let cse_v46 : i32 = ((i32(threadIdx.y) * 32i) + 13i);
+      matmul_reindex_local[1i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 5i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 13i)], matmul_reindex_local[1i]);
+      let cse_v54 : i32 = ((i32(threadIdx.y) * 32i) + 21i);
+      matmul_reindex_local[2i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 5i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 21i)], matmul_reindex_local[2i]);
+      let cse_v41 : i32 = ((i32(threadIdx.y) * 32i) + 29i);
+      matmul_reindex_local[3i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 5i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 29i)], matmul_reindex_local[3i]);
+      let cse_v36 : i32 = ((i32(threadIdx.x) * 32i) + 13i);
+      matmul_reindex_local[4i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 13i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 5i)], matmul_reindex_local[4i]);
+      matmul_reindex_local[5i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 13i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 13i)], matmul_reindex_local[5i]);
+      matmul_reindex_local[6i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 13i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 21i)], matmul_reindex_local[6i]);
+      matmul_reindex_local[7i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 13i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 29i)], matmul_reindex_local[7i]);
+      let cse_v13 : i32 = ((i32(threadIdx.x) * 32i) + 21i);
+      matmul_reindex_local[8i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 21i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 5i)], matmul_reindex_local[8i]);
+      matmul_reindex_local[9i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 21i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 13i)], matmul_reindex_local[9i]);
+      matmul_reindex_local[10i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 21i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 21i)], matmul_reindex_local[10i]);
+      matmul_reindex_local[11i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 21i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 29i)], matmul_reindex_local[11i]);
+      let cse_v16 : i32 = ((i32(threadIdx.x) * 32i) + 29i);
+      matmul_reindex_local[12i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 29i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 5i)], matmul_reindex_local[12i]);
+      matmul_reindex_local[13i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 29i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 13i)], matmul_reindex_local[13i]);
+      matmul_reindex_local[14i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 29i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 21i)], matmul_reindex_local[14i]);
+      matmul_reindex_local[15i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 29i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 29i)], matmul_reindex_local[15i]);
+      let cse_v18 : i32 = ((i32(threadIdx.x) * 32i) + 6i);
+      let cse_v65 : i32 = ((i32(threadIdx.y) * 32i) + 6i);
+      matmul_reindex_local[0i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 6i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 6i)], matmul_reindex_local[0i]);
+      let cse_v47 : i32 = ((i32(threadIdx.y) * 32i) + 14i);
+      matmul_reindex_local[1i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 6i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 14i)], matmul_reindex_local[1i]);
+      let cse_v55 : i32 = ((i32(threadIdx.y) * 32i) + 22i);
+      matmul_reindex_local[2i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 6i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 22i)], matmul_reindex_local[2i]);
+      let cse_v42 : i32 = ((i32(threadIdx.y) * 32i) + 30i);
+      matmul_reindex_local[3i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 6i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 30i)], matmul_reindex_local[3i]);
+      let cse_v23 : i32 = ((i32(threadIdx.x) * 32i) + 14i);
+      matmul_reindex_local[4i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 14i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 6i)], matmul_reindex_local[4i]);
+      matmul_reindex_local[5i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 14i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 14i)], matmul_reindex_local[5i]);
+      matmul_reindex_local[6i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 14i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 22i)], matmul_reindex_local[6i]);
+      matmul_reindex_local[7i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 14i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 30i)], matmul_reindex_local[7i]);
+      let cse_v31 : i32 = ((i32(threadIdx.x) * 32i) + 22i);
+      matmul_reindex_local[8i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 22i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 6i)], matmul_reindex_local[8i]);
+      matmul_reindex_local[9i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 22i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 14i)], matmul_reindex_local[9i]);
+      matmul_reindex_local[10i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 22i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 22i)], matmul_reindex_local[10i]);
+      matmul_reindex_local[11i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 22i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 30i)], matmul_reindex_local[11i]);
+      let cse_v8 : i32 = ((i32(threadIdx.x) * 32i) + 30i);
+      matmul_reindex_local[12i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 30i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 6i)], matmul_reindex_local[12i]);
+      matmul_reindex_local[13i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 30i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 14i)], matmul_reindex_local[13i]);
+      matmul_reindex_local[14i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 30i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 22i)], matmul_reindex_local[14i]);
+      matmul_reindex_local[15i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 30i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 30i)], matmul_reindex_local[15i]);
+      let cse_v26 : i32 = ((i32(threadIdx.x) * 32i) + 7i);
+      let cse_v66 : i32 = ((i32(threadIdx.y) * 32i) + 7i);
+      matmul_reindex_local[0i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 7i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 7i)], matmul_reindex_local[0i]);
+      let cse_v48 : i32 = ((i32(threadIdx.y) * 32i) + 15i);
+      matmul_reindex_local[1i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 7i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 15i)], matmul_reindex_local[1i]);
+      let cse_v56 : i32 = ((i32(threadIdx.y) * 32i) + 23i);
+      matmul_reindex_local[2i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 7i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 23i)], matmul_reindex_local[2i]);
+      let cse_v43 : i32 = ((i32(threadIdx.y) * 32i) + 31i);
+      matmul_reindex_local[3i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 7i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 31i)], matmul_reindex_local[3i]);
+      let cse_v34 : i32 = ((i32(threadIdx.x) * 32i) + 15i);
+      matmul_reindex_local[4i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 15i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 7i)], matmul_reindex_local[4i]);
+      matmul_reindex_local[5i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 15i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 15i)], matmul_reindex_local[5i]);
+      matmul_reindex_local[6i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 15i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 23i)], matmul_reindex_local[6i]);
+      matmul_reindex_local[7i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 15i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 31i)], matmul_reindex_local[7i]);
+      let cse_v11 : i32 = ((i32(threadIdx.x) * 32i) + 23i);
+      matmul_reindex_local[8i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 23i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 7i)], matmul_reindex_local[8i]);
+      matmul_reindex_local[9i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 23i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 15i)], matmul_reindex_local[9i]);
+      matmul_reindex_local[10i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 23i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 23i)], matmul_reindex_local[10i]);
+      matmul_reindex_local[11i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 23i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 31i)], matmul_reindex_local[11i]);
+      let cse_v15 : i32 = ((i32(threadIdx.x) * 32i) + 31i);
+      matmul_reindex_local[12i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 31i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 7i)], matmul_reindex_local[12i]);
+      matmul_reindex_local[13i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 31i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 15i)], matmul_reindex_local[13i]);
+      matmul_reindex_local[14i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 31i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 23i)], matmul_reindex_local[14i]);
+      matmul_reindex_local[15i] = fma(x_reindex_shared[((i32(threadIdx.x) * 32i) + 31i)], w_reindex_shared[((i32(threadIdx.y) * 32i) + 31i)], matmul_reindex_local[15i]);
+    }
+    let cse_v73 : i32 = ((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i));
+    let out_col_0 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 0i);
+    matmul[((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i))] = (matmul_reindex_local[0i] + pick_lane(biasF16[(u32(out_col_0) >> 1u)], u32(out_col_0)));
+    let out_col_1 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 1i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 1i)] = (matmul_reindex_local[1i] + pick_lane(biasF16[(u32(out_col_1) >> 1u)], u32(out_col_1)));
+    let out_col_2 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 2i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 2i)] = (matmul_reindex_local[2i] + pick_lane(biasF16[(u32(out_col_2) >> 1u)], u32(out_col_2)));
+    let out_col_3 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 3i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 3i)] = (matmul_reindex_local[3i] + pick_lane(biasF16[(u32(out_col_3) >> 1u)], u32(out_col_3)));
+    let out_col_4 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 0i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 256i)] = (matmul_reindex_local[4i] + pick_lane(biasF16[(u32(out_col_4) >> 1u)], u32(out_col_4)));
+    let out_col_5 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 1i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 257i)] = (matmul_reindex_local[5i] + pick_lane(biasF16[(u32(out_col_5) >> 1u)], u32(out_col_5)));
+    let out_col_6 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 2i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 258i)] = (matmul_reindex_local[6i] + pick_lane(biasF16[(u32(out_col_6) >> 1u)], u32(out_col_6)));
+    let out_col_7 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 3i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 259i)] = (matmul_reindex_local[7i] + pick_lane(biasF16[(u32(out_col_7) >> 1u)], u32(out_col_7)));
+    let out_col_8 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 0i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 512i)] = (matmul_reindex_local[8i] + pick_lane(biasF16[(u32(out_col_8) >> 1u)], u32(out_col_8)));
+    let out_col_9 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 1i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 513i)] = (matmul_reindex_local[9i] + pick_lane(biasF16[(u32(out_col_9) >> 1u)], u32(out_col_9)));
+    let out_col_10 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 2i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 514i)] = (matmul_reindex_local[10i] + pick_lane(biasF16[(u32(out_col_10) >> 1u)], u32(out_col_10)));
+    let out_col_11 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 3i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 515i)] = (matmul_reindex_local[11i] + pick_lane(biasF16[(u32(out_col_11) >> 1u)], u32(out_col_11)));
+    let out_col_12 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 0i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 768i)] = (matmul_reindex_local[12i] + pick_lane(biasF16[(u32(out_col_12) >> 1u)], u32(out_col_12)));
+    let out_col_13 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 1i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 769i)] = (matmul_reindex_local[13i] + pick_lane(biasF16[(u32(out_col_13) >> 1u)], u32(out_col_13)));
+    let out_col_14 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 2i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 770i)] = (matmul_reindex_local[14i] + pick_lane(biasF16[(u32(out_col_14) >> 1u)], u32(out_col_14)));
+    let out_col_15 : i32 = (((i32(blockIdx.y) * 32i) + (i32(threadIdx.y) * 4i)) + 3i);
+    matmul[(((((v__1 * 8192i) + (i32(threadIdx.x) * 1024i)) + (i32(blockIdx.y) * 32i)) + (i32(threadIdx.y) * 4i)) + 771i)] = (matmul_reindex_local[15i] + pick_lane(biasF16[(u32(out_col_15) >> 1u)], u32(out_col_15)));
+  }
+}`;
 
 const ATTENTION_BLOCK_QKV_WGSL = `
 @group(0) @binding(0) var<storage, read> inputMat: array<f32>;
@@ -2257,7 +2563,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
-function createAttentionBlockPipelines(device: DeviceLike, buffers: {
+function createAttentionQkvStage(device: DeviceLike, buffers: {
   input: BufferLike;
   qWeight: BufferLike;
   qBias: BufferLike;
@@ -2265,13 +2571,30 @@ function createAttentionBlockPipelines(device: DeviceLike, buffers: {
   kBias: BufferLike;
   vWeight: BufferLike;
   vBias: BufferLike;
-  scale: BufferLike;
-  smolgenBias: BufferLike;
   qkv: BufferLike;
-  scores: BufferLike;
-  probs: BufferLike;
-  output: BufferLike;
-}): { qkv: PipelineLike; qkvBind: unknown; score: PipelineLike; scoreBind: unknown; softmax: PipelineLike; softmaxBind: unknown; value: PipelineLike; valueBind: unknown } {
+  podArgs?: BufferLike;
+}, qkvKernelVariant: Lc0WebAttentionQkvKernelVariant): { qkv: PipelineLike; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant } {
+  if (qkvKernelVariant === 'tvm-packed-f16') {
+    if (!buffers.podArgs) throw new Error('TVM packed-f16 attention QKV kernels require a POD args uniform buffer');
+    const qkvModule = device.createShaderModule({ label: 'lc0web attention block QKV TVM packed-f16 projection', code: ATTENTION_BLOCK_QKV_TVM_PACKED_F16_WGSL });
+    const qkv = device.createComputePipeline({ layout: 'auto', compute: { module: qkvModule, entryPoint: 'matmul_kernel' } }) as PipelineLike;
+    const outputBytes = DEFAULT_TOKENS * DEFAULT_N * 4;
+    const qkvBindFor = (weight: BufferLike, bias: BufferLike, outputOffset: number) => device.createBindGroup({
+      layout: qkv.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: buffers.qkv, offset: outputOffset, size: outputBytes } },
+        { binding: 1, resource: { buffer: weight } },
+        { binding: 2, resource: { buffer: buffers.input } },
+        { binding: 3, resource: { buffer: buffers.podArgs! } },
+        { binding: 4, resource: { buffer: bias } },
+      ],
+    });
+    return { qkv, qkvKernelVariant, qkvBinds: [
+      qkvBindFor(buffers.qWeight, buffers.qBias, 0),
+      qkvBindFor(buffers.kWeight, buffers.kBias, outputBytes),
+      qkvBindFor(buffers.vWeight, buffers.vBias, outputBytes * 2),
+    ] };
+  }
   const qkvModule = device.createShaderModule({ label: 'lc0web attention block qkv', code: ATTENTION_BLOCK_QKV_WGSL });
   const qkv = device.createComputePipeline({ layout: 'auto', compute: { module: qkvModule, entryPoint: 'main' } }) as PipelineLike;
   const qkvBind = device.createBindGroup({
@@ -2287,6 +2610,27 @@ function createAttentionBlockPipelines(device: DeviceLike, buffers: {
       { binding: 7, resource: { buffer: buffers.qkv } },
     ],
   });
+  return { qkv, qkvKernelVariant, qkvBinds: [qkvBind] };
+}
+
+function createAttentionBlockPipelines(device: DeviceLike, buffers: {
+  input: BufferLike;
+  qWeight: BufferLike;
+  qBias: BufferLike;
+  kWeight: BufferLike;
+  kBias: BufferLike;
+  vWeight: BufferLike;
+  vBias: BufferLike;
+  scale: BufferLike;
+  smolgenBias: BufferLike;
+  qkv: BufferLike;
+  scores: BufferLike;
+  probs: BufferLike;
+  output: BufferLike;
+  podArgs?: BufferLike;
+}, qkvKernelVariant: Lc0WebAttentionQkvKernelVariant = 'hand'): { qkv: PipelineLike; qkvBind: unknown; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant; score: PipelineLike; scoreBind: unknown; softmax: PipelineLike; softmaxBind: unknown; value: PipelineLike; valueBind: unknown } {
+  const qkvStage = createAttentionQkvStage(device, buffers, qkvKernelVariant);
+  const { qkv, qkvBinds } = qkvStage;
   const scoreModule = device.createShaderModule({ label: 'lc0web attention block score', code: ATTENTION_BLOCK_SCORE_WGSL });
   const score = device.createComputePipeline({ layout: 'auto', compute: { module: scoreModule, entryPoint: 'main' } }) as PipelineLike;
   const scoreBind = device.createBindGroup({
@@ -2309,7 +2653,7 @@ function createAttentionBlockPipelines(device: DeviceLike, buffers: {
       { binding: 2, resource: { buffer: buffers.output } },
     ],
   });
-  return { qkv, qkvBind, score, scoreBind, softmax, softmaxBind, value, valueBind };
+  return { qkv, qkvBind: qkvBinds[0], qkvBinds, qkvKernelVariant: qkvStage.qkvKernelVariant, score, scoreBind, softmax, softmaxBind, value, valueBind };
 }
 
 function createAttentionBlockFusedPipelines(device: DeviceLike, buffers: {
@@ -2325,22 +2669,10 @@ function createAttentionBlockFusedPipelines(device: DeviceLike, buffers: {
   qkv: BufferLike;
   probs: BufferLike;
   output: BufferLike;
-}): { qkv: PipelineLike; qkvBind: unknown; scoreSoftmax: PipelineLike; scoreSoftmaxBind: unknown; value: PipelineLike; valueBind: unknown } {
-  const qkvModule = device.createShaderModule({ label: 'lc0web attention block fused qkv', code: ATTENTION_BLOCK_QKV_WGSL });
-  const qkv = device.createComputePipeline({ layout: 'auto', compute: { module: qkvModule, entryPoint: 'main' } }) as PipelineLike;
-  const qkvBind = device.createBindGroup({
-    layout: qkv.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: buffers.input } },
-      { binding: 1, resource: { buffer: buffers.qWeight } },
-      { binding: 2, resource: { buffer: buffers.qBias } },
-      { binding: 3, resource: { buffer: buffers.kWeight } },
-      { binding: 4, resource: { buffer: buffers.kBias } },
-      { binding: 5, resource: { buffer: buffers.vWeight } },
-      { binding: 6, resource: { buffer: buffers.vBias } },
-      { binding: 7, resource: { buffer: buffers.qkv } },
-    ],
-  });
+  podArgs?: BufferLike;
+}, qkvKernelVariant: Lc0WebAttentionQkvKernelVariant = 'hand'): { qkv: PipelineLike; qkvBind: unknown; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant; scoreSoftmax: PipelineLike; scoreSoftmaxBind: unknown; value: PipelineLike; valueBind: unknown } {
+  const qkvStage = createAttentionQkvStage(device, buffers, qkvKernelVariant);
+  const { qkv, qkvBinds } = qkvStage;
   const scoreSoftmaxModule = device.createShaderModule({ label: 'lc0web attention block fused score+softmax', code: ATTENTION_BLOCK_SCORE_SOFTMAX_WGSL });
   const scoreSoftmax = device.createComputePipeline({ layout: 'auto', compute: { module: scoreSoftmaxModule, entryPoint: 'main' } }) as PipelineLike;
   const scoreSoftmaxBind = device.createBindGroup({
@@ -2362,16 +2694,23 @@ function createAttentionBlockFusedPipelines(device: DeviceLike, buffers: {
       { binding: 2, resource: { buffer: buffers.output } },
     ],
   });
-  return { qkv, qkvBind, scoreSoftmax, scoreSoftmaxBind, value, valueBind };
+  return { qkv, qkvBind: qkvBinds[0], qkvBinds, qkvKernelVariant: qkvStage.qkvKernelVariant, scoreSoftmax, scoreSoftmaxBind, value, valueBind };
+}
+
+function encodeAttentionQkvPass(pass: ComputePassLike, pipelines: { qkv: PipelineLike; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant }): void {
+  pass.setPipeline(pipelines.qkv);
+  for (const qkvBind of pipelines.qkvBinds) {
+    pass.setBindGroup(0, qkvBind);
+    if (pipelines.qkvKernelVariant === 'tvm-packed-f16') pass.dispatchWorkgroups(2, 8, 1);
+    else pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+  }
 }
 
 function encodeAttentionBlockDispatches(device: DeviceLike, pipelines: ReturnType<typeof createAttentionBlockPipelines>, iterations: number): unknown {
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   for (let i = 0; i < iterations; i++) {
-    pass.setPipeline(pipelines.qkv);
-    pass.setBindGroup(0, pipelines.qkvBind);
-    pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+    encodeAttentionQkvPass(pass, pipelines);
     pass.setPipeline(pipelines.score);
     pass.setBindGroup(0, pipelines.scoreBind);
     pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
@@ -2390,9 +2729,7 @@ function encodeAttentionBlockFusedDispatches(device: DeviceLike, pipelines: Retu
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   for (let i = 0; i < iterations; i++) {
-    pass.setPipeline(pipelines.qkv);
-    pass.setBindGroup(0, pipelines.qkvBind);
-    pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+    encodeAttentionQkvPass(pass, pipelines);
     pass.setPipeline(pipelines.scoreSoftmax);
     pass.setBindGroup(0, pipelines.scoreSoftmaxBind);
     pass.dispatchWorkgroups(DEFAULT_TOKENS, DEFAULT_HEADS);
@@ -2409,6 +2746,7 @@ export async function runLc0WebAttentionBlockBenchmark(options: Lc0WebAttentionB
   const warmup = clampInteger(options.warmup, 5, 0, 1000);
   const iterations = clampInteger(options.iterations, 100, 1, 10_000);
   const fusedScoreSoftmax = options.fusedScoreSoftmax ?? false;
+  const qkvKernelVariant = options.attentionQkvKernelVariant ?? 'hand';
   const { device, adapterInfo } = await requestDevice();
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
@@ -2437,10 +2775,12 @@ export async function runLc0WebAttentionBlockBenchmark(options: Lc0WebAttentionB
     const probBuffer = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE });
     const outputBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC });
     const readbackBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
+    const podArgs = qkvKernelVariant === 'tvm-packed-f16' ? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
     buffers.push(inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkvBuffer, scoreBuffer, probBuffer, outputBuffer, readbackBuffer);
+    if (podArgs) buffers.push(podArgs);
     const pipelines = fusedScoreSoftmax
-      ? createAttentionBlockFusedPipelines(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv: qkvBuffer, probs: probBuffer, output: outputBuffer })
-      : createAttentionBlockPipelines(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv: qkvBuffer, scores: scoreBuffer, probs: probBuffer, output: outputBuffer });
+      ? createAttentionBlockFusedPipelines(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv: qkvBuffer, probs: probBuffer, output: outputBuffer, podArgs }, qkvKernelVariant)
+      : createAttentionBlockPipelines(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv: qkvBuffer, scores: scoreBuffer, probs: probBuffer, output: outputBuffer, podArgs }, qkvKernelVariant);
     const encode = fusedScoreSoftmax
       ? (count: number) => encodeAttentionBlockFusedDispatches(device, pipelines as ReturnType<typeof createAttentionBlockFusedPipelines>, count)
       : (count: number) => encodeAttentionBlockDispatches(device, pipelines as ReturnType<typeof createAttentionBlockPipelines>, count);
@@ -2468,7 +2808,8 @@ export async function runLc0WebAttentionBlockBenchmark(options: Lc0WebAttentionB
       heads: DEFAULT_HEADS,
       headDim: DEFAULT_HEAD_DIM,
       fusedScoreSoftmax,
-      dispatchesPerIteration: fusedScoreSoftmax ? 3 : 4,
+      qkvKernelVariant,
+      dispatchesPerIteration: (fusedScoreSoftmax ? 2 : 3) + (qkvKernelVariant === 'tvm-packed-f16' ? 3 : 1),
       warmup,
       iterations,
       packLoadMs: pack.elapsedMs,
@@ -3062,9 +3403,7 @@ function encodeAttentionOutputDispatches(device: DeviceLike, pipelines: ReturnTy
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   for (let i = 0; i < iterations; i++) {
-    pass.setPipeline(pipelines.qkv);
-    pass.setBindGroup(0, pipelines.qkvBind);
-    pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+    encodeAttentionQkvPass(pass, pipelines);
     pass.setPipeline(pipelines.score);
     pass.setBindGroup(0, pipelines.scoreBind);
     pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);

@@ -28,6 +28,7 @@ import {
   runLc0WebQkvProjectionProbe,
   runLc0WebSoftmaxBenchmark,
   type Lc0WebAttentionBlockBenchmarkResult,
+  type Lc0WebAttentionQkvKernelVariant,
   type Lc0WebAttentionOutputBenchmarkResult,
   type Lc0WebAttentionOutputOrtBenchmarkResult,
   type Lc0WebAttentionScoreBenchmarkResult,
@@ -238,6 +239,7 @@ type AttentionBlockBenchmarkMessage = {
   warmup?: number;
   verifyShards?: boolean;
   fusedScoreSoftmax?: boolean;
+  attentionQkvKernelVariant?: Lc0WebAttentionQkvKernelVariant;
 };
 
 type AttentionOutputBenchmarkMessage = {
@@ -653,6 +655,7 @@ async function handleAttentionBlockBenchmark(message: AttentionBlockBenchmarkMes
     warmup: message.warmup,
     verifyShards: message.verifyShards,
     fusedScoreSoftmax: message.fusedScoreSoftmax,
+    attentionQkvKernelVariant: message.attentionQkvKernelVariant,
   });
   post({ type: 'attentionBlockBenchmarkResult', id: message.id, result });
 }

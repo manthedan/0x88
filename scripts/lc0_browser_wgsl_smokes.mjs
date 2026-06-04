@@ -29,6 +29,12 @@ const SMOKES = [
     doneText: 'ATTENTION_BLOCK_BENCH_DONE',
   },
   {
+    name: 'attention-block-tvm-qkv-packed-f16',
+    query: 'attentionBlockBench=1&attentionQkvKernel=tvm-packed-f16&attentionBlockWarmup=1&attentionBlockIters=1&packVerify=0',
+    doneText: 'ATTENTION_BLOCK_BENCH_DONE',
+    default: false,
+  },
+  {
     name: 'attention-output',
     query: 'attentionOutputBench=1&attentionOutputWarmup=1&attentionOutputIters=1&packVerify=0',
     doneText: 'ATTENTION_OUTPUT_BENCH_DONE',
