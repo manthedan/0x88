@@ -5517,6 +5517,14 @@ export class Lc0WebHybridEvaluator {
       return out;
     });
   }
+
+  async dispose(): Promise<void> {
+    const runtimePromise = this.runtimePromise;
+    this.runtimePromise = undefined;
+    if (!runtimePromise) return;
+    const runtime = await runtimePromise.catch(() => undefined);
+    runtime?.destroy();
+  }
 }
 
 export interface Lc0WebWgslHeadsVsOrtFixtureInput {

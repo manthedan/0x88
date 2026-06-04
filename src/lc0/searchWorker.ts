@@ -1,7 +1,7 @@
 import { collectOrtRuntimeDiagnostics, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
 import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { loadLc0WebModelPack } from './modelPack.ts';
-import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationProvider, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import {
   runLc0WebAttentionBlockBenchmark,
   runLc0WebAttentionOutputBenchmark,
@@ -50,7 +50,8 @@ import {
   type Lc0WebQkvProjectionProbeResult,
   type Lc0WebSoftmaxBenchmarkResult,
 } from './wgslMatmulAddProbe.ts';
-import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
+import { Lc0PuctSearcher, type Lc0SearchOptions, type Lc0SearchResult } from './search.ts';
+import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 
 type InitMessage = {
   type: 'init';
@@ -69,9 +70,23 @@ type SearchMessage = {
   type: 'search';
   id: number;
   input: Lc0EvaluatorInput;
-  visits: number;
+  visits?: number;
+  movetimeMs?: number;
   batchSize?: number;
+  batchCollisionMode?: SearchBatchCollisionMode;
   multiPv?: number;
+  reuseTree?: boolean;
+  earlyStop?: SearchEarlyStop;
+  cpuct?: number;
+  cpuctSchedule?: CpuctSchedule;
+  fpuStrategy?: FpuStrategy;
+  fpuReduction?: number;
+  temperature?: number;
+};
+
+type ResetSearchMessage = {
+  type: 'resetSearch';
+  id: number;
 };
 
 type EvaluateMessage = {
@@ -322,7 +337,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | HybridEvaluateMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | WgslHeadsProbeMessage | WgslHeadsVsOrtFixturesMessage | MappedPolicyProbeMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionValueOrtBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | AttentionOutputOrtBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0FfnOrtBenchmarkMessage | Encoder0BlockBenchmarkMessage | EncoderStackBenchmarkMessage | Encoder0BlockOrtBenchmarkMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | ResetSearchMessage | EvaluateMessage | EvaluateBatchMessage | HybridEvaluateMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | WgslHeadsProbeMessage | WgslHeadsVsOrtFixturesMessage | MappedPolicyProbeMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionValueOrtBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | AttentionOutputOrtBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0FfnOrtBenchmarkMessage | Encoder0BlockBenchmarkMessage | EncoderStackBenchmarkMessage | Encoder0BlockOrtBenchmarkMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -373,11 +388,19 @@ type WorkerResponse =
   | { type: 'wgslHeadsVsOrtFixturesResult'; id: number; result: Lc0WebWgslHeadsVsOrtFixturesResult }
   | { type: 'mappedPolicyProbeResult'; id: number; result: Lc0WebMappedPolicyProbeResult }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
+  | { type: 'searchReset'; id: number }
   | { type: 'error'; id: number; error: string };
 
-let evaluator: { evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation>; evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> } | null = null;
+type WorkerEvaluator = Lc0EvaluationProvider & {
+  evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> | Lc0Evaluation[];
+};
+
+let evaluator: WorkerEvaluator | null = null;
 let searcher: Lc0PuctSearcher | null = null;
 let configuredModelUrl: string | null = null;
+let configuredInitKey: string | null = null;
+let configuredBackend = '';
+let configuredModelCacheStatus = '';
 /** In-flight search abort controllers keyed by request id, so cancel messages can stop them. */
 const activeSearches = new Map<number, AbortController>();
 // This worker owns exactly one ORT session. Queue all model operations so the
@@ -400,26 +423,54 @@ function enqueueModelOperation(work: () => Promise<void>): Promise<void> {
 }
 
 async function handleInit(message: InitMessage): Promise<void> {
+  const initKey = JSON.stringify({
+    runtime: message.runtime ?? 'onnx',
+    modelUrl: message.modelUrl,
+    ep: message.ep,
+    cacheModel: message.cacheModel,
+    packUrl: message.packUrl,
+    layers: message.layers,
+    verifyShards: message.verifyShards,
+    headBackend: message.headBackend,
+  });
+  if (evaluator && configuredInitKey === initKey) {
+    post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: `${configuredModelCacheStatus} · reused existing worker session` });
+    return;
+  }
+
   setRequestedOrtExecutionProviderForCurrentThread(message.ep);
   if (message.runtime === 'hybrid') {
     if (!message.packUrl) throw new Error('hybrid LC0 worker init requires packUrl');
-    evaluator = new Lc0WebHybridEvaluator({
+    const nextEvaluator: WorkerEvaluator = new Lc0WebHybridEvaluator({
       packUrl: message.packUrl,
       layers: message.layers,
       verifyShards: message.verifyShards,
       headBackend: message.headBackend,
     });
-    searcher = new Lc0PuctSearcher(evaluator);
+    const previousEvaluator = evaluator;
+    evaluator = nextEvaluator;
+    searcher = new Lc0PuctSearcher(nextEvaluator);
     configuredModelUrl = message.packUrl;
-    post({ type: 'ready', id: message.id, backend: message.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads', modelCache: 'hybrid-pack-lazy' });
+    configuredInitKey = initKey;
+    configuredBackend = message.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
+    configuredModelCacheStatus = 'hybrid-pack-lazy';
+    await previousEvaluator?.dispose?.();
+    post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
     return;
   }
   const modelLoad = await loadLc0ModelForOrt(message.modelUrl, { cache: message.cacheModel });
-  evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
-  searcher = new Lc0PuctSearcher(evaluator);
-  configuredModelUrl = message.modelUrl;
+  const nextEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+  const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
   const diagnostics = await collectOrtRuntimeDiagnostics();
-  post({ type: 'ready', id: message.id, backend: diagnostics.describe, modelCache: describeLc0ModelLoad(modelLoad) });
+  const previousEvaluator = evaluator;
+  evaluator = nextEvaluator;
+  searcher = nextSearcher;
+  configuredModelUrl = message.modelUrl;
+  configuredInitKey = initKey;
+  configuredBackend = diagnostics.describe;
+  configuredModelCacheStatus = describeLc0ModelLoad(modelLoad);
+  await previousEvaluator?.dispose?.();
+  post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
 }
 
 async function handleEvaluate(message: EvaluateMessage): Promise<void> {
@@ -700,13 +751,23 @@ async function handleSearch(message: SearchMessage): Promise<void> {
   const controller = new AbortController();
   activeSearches.set(message.id, controller);
   try {
-    const result = await searcher.search(message.input, {
+    const searchOptions: Lc0SearchOptions = {
       visits: message.visits,
+      movetimeMs: message.movetimeMs,
       batchSize: message.batchSize ?? 1,
+      batchCollisionMode: message.batchCollisionMode,
       multiPv: message.multiPv,
+      reuseTree: message.reuseTree,
+      earlyStop: message.earlyStop,
+      cpuct: message.cpuct,
+      cpuctSchedule: message.cpuctSchedule,
+      fpuStrategy: message.fpuStrategy,
+      fpuReduction: message.fpuReduction,
+      temperature: message.temperature,
       signal: controller.signal,
       yieldEveryMs: 16,
-    });
+    };
+    const result = await searcher.search(message.input, searchOptions);
     post({
       type: 'searchResult',
       id: message.id,
@@ -796,6 +857,9 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       } else if (message.type === 'evaluateBatch') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleEvaluateBatch(message);
+      } else if (message.type === 'resetSearch') {
+        searcher?.resetTree();
+        post({ type: 'searchReset', id: message.id });
       } else if (message.type === 'search') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleSearch(message);

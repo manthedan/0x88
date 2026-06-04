@@ -28,9 +28,10 @@ export type OrtRuntimeDiagnostics = {
   secureContext?: boolean;
   crossOriginIsolated?: boolean;
   userAgent?: string;
-  wasm: { numThreads?: number; proxy?: boolean };
+  wasm: { numThreads?: number; proxy?: boolean; sharedArrayBuffer?: boolean; threadedAvailable?: boolean };
   webgpuEnv?: { powerPreference?: string };
   adapter?: OrtWebGpuAdapterDiagnostics;
+  sessions: { created: number; released: number; active: number };
   sessionAttempts: OrtSessionAttempt[];
 };
 
@@ -122,6 +123,8 @@ export function resolvedOrtExecutionProviders(): string[] {
 
 let lastOrtExecutionProviders: string[] | null = null;
 const sessionAttempts: OrtSessionAttempt[] = [];
+let createdOrtSessions = 0;
+let releasedOrtSessions = 0;
 
 export function describeOrtBackendConfig(): string {
   const requested = requestedOrtExecutionProvider();
@@ -142,18 +145,41 @@ function configureNodeOrtWasmBinary(wasm: { wasmBinary?: ArrayBufferLike | Uint8
   }
 }
 
+function browserThreadedWasmAvailable(): boolean {
+  const isNode = typeof globalThis.process?.versions?.node === 'string';
+  if (isNode) return true;
+  return typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined';
+}
+
+function defaultAutoThreads(): number {
+  const hc = typeof navigator === 'undefined' ? 2 : Number(navigator.hardwareConcurrency ?? 2);
+  return Math.max(2, Math.min(4, Math.floor(Number.isFinite(hc) ? hc - 1 : 2)));
+}
+
+function requestedOrtWasmThreads(isBrowserMainThread: boolean, isNode: boolean): number {
+  const raw = browserParam('ortThreads')
+    ?? browserParam('wasmThreads')
+    ?? envValue('ORT_INTRA_OP_NUM_THREADS')
+    ?? envValue('ORT_NUM_THREADS')
+    ?? (isBrowserMainThread || isNode ? '1' : '0');
+  if (String(raw).toLowerCase() === 'auto') return browserThreadedWasmAvailable() ? defaultAutoThreads() : 1;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  const requested = Math.floor(parsed);
+  return isBrowserMainThread && requested > 1 && !browserThreadedWasmAvailable() ? 1 : requested;
+}
+
 function configureOrtRuntime() {
-  const wasm = ort.env.wasm as unknown as { numThreads?: number; proxy?: boolean; wasmBinary?: ArrayBufferLike | Uint8Array };
+  const wasm = ort.env.wasm as unknown as { numThreads?: number; proxy?: boolean; wasmBinary?: ArrayBufferLike | Uint8Array; wasmPaths?: string | Record<string, string> };
   configureNodeOrtWasmBinary(wasm);
+  if (typeof document !== 'undefined') wasm.wasmPaths = browserParam('ortWasmPath') ?? '/ort/';
   const isBrowserMainThread = typeof document !== 'undefined';
   const isNode = typeof document === 'undefined' && !!globalThis.process?.versions?.node;
-  const threads = Number(envValue('ORT_INTRA_OP_NUM_THREADS') ?? envValue('ORT_NUM_THREADS') ?? (isBrowserMainThread || isNode ? '1' : '0'));
-  if (Number.isFinite(threads) && threads > 0) wasm.numThreads = Math.floor(threads);
+  const threads = requestedOrtWasmThreads(isBrowserMainThread, isNode);
+  if (threads > 0) wasm.numThreads = threads;
   if (isBrowserMainThread) {
-    // ORT's threaded WASM path starts Emscripten pthread workers from import.meta.url.
-    // In a Vite single-bundle deploy that URL is the app bundle, which touches
-    // `document` at top level and crashes inside workers on Netlify.
-    wasm.numThreads = Number.isFinite(threads) && threads > 0 ? Math.floor(threads) : 1;
+    // Threaded ORT WASM requires cross-origin isolation / SharedArrayBuffer.
+    // Keep proxy disabled; users can opt into pthread workers with ?ortThreads=auto or ?ortThreads=N.
     wasm.proxy = false;
   }
   const webgpu = ort.env.webgpu as unknown as { powerPreference?: 'low-power' | 'high-performance' } | undefined;
@@ -162,10 +188,10 @@ function configureOrtRuntime() {
 
 export function sessionOptions(executionProviders = resolvedOrtExecutionProviders()): ort.InferenceSession.SessionOptions {
   configureOrtRuntime();
-  const threads = Number(envValue('ORT_INTRA_OP_NUM_THREADS') ?? envValue('ORT_NUM_THREADS') ?? '0');
+  const threads = requestedOrtWasmThreads(typeof document !== 'undefined', typeof document === 'undefined' && !!globalThis.process?.versions?.node);
   const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all', executionProviders };
-  if (Number.isFinite(threads) && threads > 0) {
-    opts.intraOpNumThreads = Math.floor(threads);
+  if (threads > 0) {
+    opts.intraOpNumThreads = threads;
     opts.interOpNumThreads = 1;
   }
   return opts;
@@ -260,8 +286,14 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
     secureContext: typeof isSecureContext === 'undefined' ? undefined : isSecureContext,
     crossOriginIsolated: typeof crossOriginIsolated === 'undefined' ? undefined : crossOriginIsolated,
     userAgent: typeof navigator === 'undefined' ? undefined : navigator.userAgent,
-    wasm: { numThreads: wasm.numThreads, proxy: wasm.proxy },
+    wasm: {
+      numThreads: wasm.numThreads,
+      proxy: wasm.proxy,
+      sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
+      threadedAvailable: browserThreadedWasmAvailable(),
+    },
     ...(webgpu ? { webgpuEnv: { powerPreference: webgpu.powerPreference } } : {}),
+    sessions: { created: createdOrtSessions, released: releasedOrtSessions, active: Math.max(0, createdOrtSessions - releasedOrtSessions) },
     sessionAttempts: sessionAttempts.map((x) => ({ ...x, providers: [...x.providers] })),
   };
   if (options.probeAdapter && webgpuAvailable()) {
@@ -296,6 +328,7 @@ export async function createOrtSession(modelPath: string | Uint8Array | ArrayBuf
   try {
     const session = await ort.InferenceSession.create(modelPath as never, sessionOptions(providers));
     const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
+    createdOrtSessions += 1;
     recordSessionAttempt(providers, true, t1 - t0);
     lastOrtExecutionProviders = providers;
     logOrtSessionReady(providers, t1 - t0);
@@ -309,9 +342,16 @@ export async function createOrtSession(modelPath: string | Uint8Array | ArrayBuf
     const fallbackT0 = typeof performance === 'undefined' ? Date.now() : performance.now();
     const session = await ort.InferenceSession.create(modelPath as never, sessionOptions(['wasm']));
     const fallbackT1 = typeof performance === 'undefined' ? Date.now() : performance.now();
+    createdOrtSessions += 1;
     recordSessionAttempt(['wasm'], true, fallbackT1 - fallbackT0);
     lastOrtExecutionProviders = ['wasm'];
     logOrtSessionReady(['wasm'], fallbackT1 - fallbackT0, `fallback after WebGPU failure: ${message}`);
     return session;
   }
+}
+
+export async function releaseOrtSession(session: ort.InferenceSession): Promise<void> {
+  const maybe = session as ort.InferenceSession & { release?: () => Promise<void> | void };
+  if (typeof maybe.release === 'function') await maybe.release();
+  releasedOrtSessions += 1;
 }

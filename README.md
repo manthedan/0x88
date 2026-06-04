@@ -1,0 +1,38 @@
+# lc0_webgpu
+
+Browser-first LC0/WebGPU chess-engine research prototype.
+
+The current trunk is `main` and is intentionally based on the browser LC0 arena/UI work. The `lc0-webgpu-pivot` branch is a separate active WebGPU research branch and should only be changed with explicit approval.
+
+## Browser entry points
+
+- `lc0-arena.html` — LC0 vs Stockfish arena UI.
+- `lc0-policy-only.html` — LC0 policy/eval browser playground.
+- `lc0-analysis.html` — LC0 analysis UI.
+
+## Local development
+
+```sh
+npm install
+npm run web:client
+```
+
+For SharedArrayBuffer/threaded WASM experiments, build and serve with isolation headers:
+
+```sh
+npm run build:client
+npm run web:isolated:static
+```
+
+Then open `http://localhost:5181/lc0-arena.html`.
+
+## Validation
+
+Common frontend checks:
+
+```sh
+npm run typecheck
+npm run build:client
+```
+
+Some older scripts, Rust crates, schemas, and research notes still use inherited `tiny_leela` names. Treat those as legacy/stability paths unless a cleanup pass explicitly renames and validates them.

@@ -87,6 +87,38 @@ function uniformEvaluator() {
   };
 }
 
+test('LC0 search can reuse the previous subtree after a played move', async () => {
+  const searcher = new Lc0PuctSearcher(uniformEvaluator());
+  const first = await searcher.search(START_FEN, { visits: 12, reuseTree: true });
+  assert.equal(first.search.stats?.rootReused, false, 'first search starts from a fresh root');
+  assert.ok(first.move, 'first search chooses a move');
+
+  const positions = buildBoardHistoryFromMoves([first.move]);
+  const second = await searcher.search({ positions }, { visits: 16, reuseTree: true });
+  assert.equal(second.search.stats?.rootReused, true, 'second search reuses the subtree for the played move');
+  assert.equal(second.visits, 16, 'reused subtree is topped up to the requested visit budget');
+  assert.ok((second.search.stats?.completedVisits ?? 16) < 16, 'reuse avoids rerunning the full target budget');
+
+  searcher.resetTree();
+  const fresh = await searcher.search({ positions }, { visits: 16, reuseTree: true });
+  assert.equal(fresh.search.stats?.rootReused, false, 'resetTree clears cached search state');
+});
+
+test('LC0 search can reuse a deeper subtree after an opponent reply', async () => {
+  const searcher = new Lc0PuctSearcher(uniformEvaluator());
+  const first = await searcher.search(START_FEN, { visits: 80, reuseTree: true });
+  const root = first.search.root;
+  const playedEdge = root?.edges.find((edge) => moveToUci(edge.move) === first.move);
+  const replyEdge = playedEdge?.child?.edges.find((edge) => edge.child);
+  assert.ok(first.move && replyEdge, 'initial search explored at least one reply subtree');
+
+  const reply = moveToUci(replyEdge.move);
+  const positions = buildBoardHistoryFromMoves([first.move, reply]);
+  const second = await searcher.search({ positions }, { visits: 88, reuseTree: true });
+  assert.equal(second.search.stats?.rootReused, true, `reused subtree after ${first.move} ${reply}`);
+  assert.equal(second.visits, 88, 'reused reply subtree is topped up to requested visits');
+});
+
 test('LC0 search exposes a principal variation of legal UCI moves', async () => {
   const result = await new Lc0PuctSearcher(uniformEvaluator()).search(START_FEN, { visits: 24 });
   assert.ok(Array.isArray(result.pv), 'pv is an array');
@@ -117,6 +149,23 @@ test('LC0 search omits multiPv when multiPv <= 1', async () => {
   const result = await new Lc0PuctSearcher(uniformEvaluator()).search(START_FEN, { visits: 16, multiPv: 1 });
   assert.equal(result.multiPv, undefined, 'no multiPv lines for multiPv=1');
   assert.ok(result.pv.length >= 1, 'single pv is still present');
+});
+
+test('LC0 movetime search returns best-so-far instead of aborting on soft timeout', async () => {
+  const slowEvaluator = {
+    async evaluate(input) {
+      await new Promise((resolve) => setTimeout(resolve, 8));
+      const board = typeof input === 'object' && input !== null && 'positions' in input ? input.positions[input.positions.length - 1] : input;
+      const parsed = typeof board === 'string' ? parseFen(board) : board;
+      const priors = legalMoves(parsed).map((move) => ({ uci: moveToUci(move), index: 0, logit: 0, prior: 1 }));
+      return { fen: boardToFen(parsed), wdl: [0.34, 0.32, 0.34], q: 0, mlh: 80, legalPriors: priors };
+    },
+  };
+  const result = await new Lc0PuctSearcher(slowEvaluator).search(START_FEN, { movetimeMs: 25 });
+  assert.ok(result.move, 'soft timeout still returns a move');
+  assert.equal(result.search.stats?.stopReason, 'movetime');
+  assert.equal(result.search.stats?.requestedVisits, Number.MAX_SAFE_INTEGER, 'movetime-only search uses deadline rather than a reachable visit cap');
+  assert.ok((result.search.stats?.completedVisits ?? Number.MAX_SAFE_INTEGER) < 200, `completed only best-so-far visits, got ${result.search.stats?.completedVisits}`);
 });
 
 test('LC0 search throws AbortError when given an already-aborted signal', async () => {
