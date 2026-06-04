@@ -31,6 +31,7 @@
     "eval:onnx-native-bench": ".venv-onnx/bin/python eval/onnx_native_inference_benchmark.py",
     "rust:wasm": "cargo build --release --target wasm32-unknown-unknown --manifest-path rust/tiny_leela_core/Cargo.toml",
     "lc0:wasm-input-encoder:build": "RUSTFLAGS='-C target-feature=+simd128' cargo build --release --target wasm32-wasip1 --manifest-path wasm/lc0_input_encoder/Cargo.toml && cp wasm/lc0_input_encoder/target/wasm32-wasip1/release/lc0_input_encoder_wasm.wasm public/lc0/lc0_input_encoder.wasm",
+    "lc0:wasm-legal-priors:build": "RUSTFLAGS='-C target-feature=+simd128' cargo build --release --target wasm32-wasip1 --manifest-path wasm/lc0_legal_priors/Cargo.toml && cp wasm/lc0_legal_priors/target/wasm32-wasip1/release/lc0_legal_priors_wasm.wasm public/lc0/lc0_legal_priors.wasm",
     "eval:architecture": "node --experimental-strip-types eval/architecture_suite.mjs",
     "eval:playable": "node --experimental-strip-types eval/playable_suite.mjs",
     "eval:arena": "node --experimental-strip-types eval/arena_suite.mjs",
