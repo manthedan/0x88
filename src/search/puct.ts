@@ -161,6 +161,8 @@ export interface Node {
   expanded: boolean;
   terminalValue: number | null;
   edges: Edge[];
+  /** Non-terminal model evaluation used to expand this node, retained for diagnostics/UI only. */
+  evaluation?: Evaluation;
   /** Number of completed simulations that reached this node. For reused roots,
    * this preserves the inbound edge visit count so a target-visit search does
    * not add a full fresh budget on top of already-reached nodes. */
@@ -933,6 +935,7 @@ function finishExpansion(node: Node, moves: Move[], evaln: Evaluation, context: 
   const raw = moves.map((move) => Math.max(0, evaln.policy.get(moveToActionId(move)) ?? 0));
   const total = raw.reduce((a, b) => a + b, 0);
   const fallback = 1 / moves.length;
+  node.evaluation = evaln;
   node.edges = moves.map((move, i) => {
     const actionId = moveToActionId(move);
     return {

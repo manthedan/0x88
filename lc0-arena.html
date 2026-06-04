@@ -36,6 +36,7 @@ h2{font-size:13px;margin:14px 0 0;text-transform:uppercase;letter-spacing:.04em;
 .log div{padding:2px 0;border-top:1px solid var(--rule)}
 #pairing{font-family:var(--mono);font-size:13px;margin-top:10px;font-weight:600}
 #message{margin-top:10px;padding:8px;border:1px solid var(--rule);border-radius:6px;background:var(--soft);font-family:var(--mono);font-size:12px}
+.eval-grid{display:grid;gap:8px;margin-top:8px}.eval-card{padding:8px;border:1px solid var(--rule);border-radius:6px;background:white;font-family:var(--mono);font-size:11px;color:var(--muted);overflow-wrap:anywhere}.eval-card strong{display:block;color:var(--ink);font-family:var(--sans);font-size:12px;margin-bottom:3px}.eval-card.active{border-color:#cbd8a6;background:var(--soft)}
 .runtime-badge{margin-top:8px;padding:7px 8px;border:1px solid var(--rule);border-radius:6px;background:white;font-family:var(--mono);font-size:11px;color:var(--muted);overflow-wrap:anywhere}.runtime-badge.ready{color:var(--accent);border-color:#cbd8a6;background:var(--soft)}.runtime-badge.warn{color:#a5461b;border-color:#e5b38d;background:#fff4e8}
 textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;border:1px solid var(--rule);border-radius:6px;padding:8px;margin-top:8px;resize:vertical}
 .small{font-size:12px;color:var(--muted)}
@@ -54,6 +55,7 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
     <div id="whiteSideLabel" class="side-label" aria-label="White side"></div>
     <div id="pairing">Select engines and start a tournament.</div>
     <div id="message">Loading model…</div>
+    <div id="engineEvalInfo" class="eval-grid" aria-label="Engine evaluation outputs"><div class="eval-card">Engine outputs: waiting for a move…</div></div>
     <div id="runtimeBadge" class="runtime-badge">Runtime: detecting browser isolation and GPU…</div>
   </section>
   <section class="panel" aria-label="Tournament">

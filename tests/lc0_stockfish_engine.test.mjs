@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseBestMove, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, stockfishGoCommand } from '../src/lc0/stockfishEngine.ts';
+import { parseBestMove, parseStockfishInfo, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, stockfishGoCommand } from '../src/lc0/stockfishEngine.ts';
 
 test('parseBestMove extracts the UCI move and handles (none)', () => {
   assert.equal(parseBestMove('bestmove e2e4 ponder e7e5'), 'e2e4');
@@ -26,6 +26,24 @@ test('stockfishGoCommand prefers movetime over depth and clamps depth', () => {
   assert.equal(stockfishGoCommand({}), 'go depth 4');
   assert.equal(stockfishGoCommand({ depth: 0 }), 'go depth 1');
   assert.equal(stockfishGoCommand({ depth: 6, movetimeMs: 200 }), 'go movetime 200');
+});
+
+test('parseStockfishInfo extracts score and PV fields', () => {
+  assert.deepEqual(parseStockfishInfo('info depth 9 multipv 2 score cp -34 nodes 1200 pv e7e5 g1f3'), {
+    multipv: 2,
+    depth: 9,
+    scoreCp: -34,
+    mateIn: undefined,
+    pvUci: ['e7e5', 'g1f3'],
+  });
+  assert.deepEqual(parseStockfishInfo('info depth 12 score mate 3 pv e2e4'), {
+    multipv: 1,
+    depth: 12,
+    scoreCp: undefined,
+    mateIn: 3,
+    pvUci: ['e2e4'],
+  });
+  assert.equal(parseStockfishInfo('info depth 12 score cp 31'), null);
 });
 
 function sleep(ms) {

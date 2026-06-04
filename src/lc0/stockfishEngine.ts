@@ -108,6 +108,7 @@ export class StockfishEngine {
   private resolveAnalyze: ((lines: StockfishInfoLine[]) => void) | null = null;
   private rejectAnalyze: ((error: Error) => void) | null = null;
   private analyzeLines: Map<number, StockfishInfoLine> | null = null;
+  private lastInfoLines: StockfishInfoLine[] = [];
   private queueTail: Promise<void> = Promise.resolve();
   private options: StockfishOptions;
   private readonly url: string;
@@ -149,6 +150,7 @@ export class StockfishEngine {
     this.resolveAnalyze = null;
     this.rejectAnalyze = null;
     this.analyzeLines = null;
+    this.lastInfoLines = [];
     this.worker?.terminate();
     this.worker = null;
     this.readyPromise = null;
@@ -175,6 +177,7 @@ export class StockfishEngine {
             if (this.resolveAnalyze) {
               const resolveAnalyze = this.resolveAnalyze;
               const lines = [...(this.analyzeLines?.values() ?? [])].sort((a, b) => a.multipv - b.multipv);
+              this.lastInfoLines = lines.map((entry) => ({ ...entry, pvUci: [...entry.pvUci] }));
               this.resolveAnalyze = null;
               this.rejectAnalyze = null;
               this.analyzeLines = null;
@@ -183,8 +186,11 @@ export class StockfishEngine {
             }
             if (this.resolveMove) {
               const resolveMove = this.resolveMove;
+              const lines = [...(this.analyzeLines?.values() ?? [])].sort((a, b) => a.multipv - b.multipv);
+              this.lastInfoLines = lines.map((entry) => ({ ...entry, pvUci: [...entry.pvUci] }));
               this.resolveMove = null;
               this.rejectMove = null;
+              this.analyzeLines = null;
               resolveMove(parseBestMove(line));
             }
           }
@@ -202,11 +208,19 @@ export class StockfishEngine {
     return this.readyPromise;
   }
 
+  /** Last parsed UCI info/PV lines from `bestMove` or `analyze`, sorted by MultiPV rank. */
+  lastInfo(): StockfishInfoLine[] {
+    return this.lastInfoLines.map((entry) => ({ ...entry, pvUci: [...entry.pvUci] }));
+  }
+
   /** Best move for a FEN. Aborting sends `stop`, so Stockfish returns its current best. */
   async bestMove(fen: string, signal?: AbortSignal): Promise<string | null> {
     return this.runExclusive(async () => {
       await this.init();
       if (!this.worker || signal?.aborted) return null;
+      this.lastInfoLines = [];
+      this.analyzeLines = new Map();
+      this.worker.postMessage('setoption name MultiPV value 1');
       return new Promise<string | null>((resolve, reject) => {
         const onAbort = () => this.worker?.postMessage('stop');
         // Clean up the abort listener whether the move completes or is aborted, so
@@ -218,6 +232,7 @@ export class StockfishEngine {
         };
         this.rejectMove = (error) => {
           signal?.removeEventListener('abort', onAbort);
+          this.analyzeLines = null;
           reject(error);
         };
         signal?.addEventListener('abort', onAbort);
@@ -233,6 +248,7 @@ export class StockfishEngine {
       await this.init();
       if (!this.worker || opts.signal?.aborted) return [];
       const multipv = Math.max(1, Math.floor(opts.multipv ?? 1));
+      this.lastInfoLines = [];
       this.worker.postMessage(`setoption name MultiPV value ${multipv}`);
       return new Promise<StockfishInfoLine[]>((resolve, reject) => {
         this.analyzeLines = new Map();
@@ -244,6 +260,7 @@ export class StockfishEngine {
         };
         this.rejectAnalyze = (error) => {
           opts.signal?.removeEventListener('abort', onAbort);
+          this.analyzeLines = null;
           reject(error);
         };
         opts.signal?.addEventListener('abort', onAbort);
@@ -262,5 +279,6 @@ export class StockfishEngine {
     this.resolveAnalyze = null;
     this.rejectAnalyze = null;
     this.analyzeLines = null;
+    this.lastInfoLines = [];
   }
 }

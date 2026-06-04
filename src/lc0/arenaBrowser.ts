@@ -11,11 +11,11 @@ import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { GameTree } from './gameTree.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
+import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
-import { DEFAULT_STOCKFISH_FLAVOR, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorLabel, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, type StockfishFlavor } from './stockfishEngine.ts';
+import { DEFAULT_STOCKFISH_FLAVOR, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorLabel, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 interface ArenaEngine {
@@ -48,6 +48,16 @@ interface PendingLc0ReplyProbe {
   afterMoveFen: string;
   child: PuctNode | null;
 }
+interface EngineOutputSnapshot {
+  engineId: string;
+  engineName: string;
+  kind: 'lc0' | 'stockfish';
+  fen: string;
+  move?: string;
+  summary: string;
+  detail?: string;
+  pv?: string[];
+}
 
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
@@ -72,6 +82,8 @@ const lc0Searchers = new Map<string, Lc0PuctSearcher>();
 const lastLc0SearchResults = new Map<string, Lc0SearchResult>();
 const pendingLc0ReplyProbes = new Map<string, PendingLc0ReplyProbe>();
 const lc0TreeTelemetry = new Map<string, Lc0TreeTelemetry>();
+const engineOutputs = new Map<string, EngineOutputSnapshot>();
+let activeEngineIds: string[] = [];
 const games: GameRecord[] = [];
 
 function el(id: string): HTMLElement {
@@ -83,6 +95,55 @@ function inputEl(id: string): HTMLInputElement { return el(id) as HTMLInputEleme
 function selectEl(id: string): HTMLSelectElement { return el(id) as HTMLSelectElement; }
 function htmlEscape(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+function percent(value: number): string {
+  return `${(100 * value).toFixed(1)}%`;
+}
+
+function signed(value: number, digits = 2): string {
+  return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`;
+}
+
+function pvText(pv: string[] | undefined, maxMoves = 8): string {
+  if (!pv?.length) return 'PV —';
+  const shown = pv.slice(0, maxMoves).join(' ');
+  return `PV ${shown}${pv.length > maxMoves ? ' …' : ''}`;
+}
+
+function stockfishScoreText(info: StockfishInfoLine | undefined): string {
+  if (!info) return 'score unavailable';
+  if (info.mateIn !== undefined) return `mate ${signed(info.mateIn, 0)} stm · d${info.depth}`;
+  if (info.scoreCp !== undefined) return `${signed(info.scoreCp, 0)} cp stm · d${info.depth}`;
+  return `score unavailable · d${info.depth}`;
+}
+
+function lc0WdlText(evaluation: Lc0Evaluation): string {
+  return `WDL ${percent(evaluation.wdl[0])}/${percent(evaluation.wdl[1])}/${percent(evaluation.wdl[2])} stm · Q ${signed(evaluation.q, 3)} · MLH ${evaluation.mlh.toFixed(1)}`;
+}
+
+function searchWdlText(wdl: [number, number, number], q: number): string {
+  return `WDL ${percent(wdl[0])}/${percent(wdl[1])}/${percent(wdl[2])} stm · search Q ${signed(q, 3)}`;
+}
+
+function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
+  engineOutputs.set(snapshot.engineId, snapshot);
+  renderEngineOutputs();
+}
+
+function renderEngineOutputs(): void {
+  const ids = activeEngineIds.length ? activeEngineIds : selectedEngineIds();
+  const cards = ids.map((id) => {
+    const snapshot = engineOutputs.get(id);
+    const name = snapshot?.engineName ?? engines.get(id)?.name ?? id;
+    if (!snapshot) return `<div class="eval-card"><strong>${htmlEscape(name)}</strong>waiting for output…</div>`;
+    const active = activeEngineIds.length && id === (board.turn === 'w' ? activeEngineIds[0] : activeEngineIds[1]);
+    const detail = snapshot.detail ? `<br>${htmlEscape(snapshot.detail)}` : '';
+    const pv = snapshot.pv?.length ? `<br>${htmlEscape(pvText(snapshot.pv))}` : '';
+    const move = snapshot.move ? ` · move ${snapshot.move}` : '';
+    return `<div class="eval-card${active ? ' active' : ''}"><strong>${htmlEscape(name)}</strong>${htmlEscape(snapshot.summary)}${htmlEscape(move)}${detail}${pv}</div>`;
+  });
+  el('engineEvalInfo').innerHTML = cards.length ? cards.join('') : '<div class="eval-card">Engine outputs: waiting for a move…</div>';
 }
 
 function renderSideLabels() {
@@ -117,6 +178,7 @@ function renderBoard() {
     ? [{ orig: lastUci.slice(0, 2) as Key, dest: lastUci.slice(2, 4) as Key, brush: 'green' }] : [];
   ground.setAutoShapes(shapes);
   renderSideLabels();
+  renderEngineOutputs();
 }
 
 function selectedEngineIds(): string[] {
@@ -232,6 +294,57 @@ function recordLc0SearchTelemetry(engineId: string, engineName: string, result: 
   renderSearchTelemetryInfo();
 }
 
+function recordLc0PolicyOutput(engineId: string, engineName: string, evaluation: Lc0Evaluation, move?: string): void {
+  recordEngineOutput({
+    engineId,
+    engineName,
+    kind: 'lc0',
+    fen: evaluation.fen,
+    move,
+    summary: lc0WdlText(evaluation),
+    detail: `top policy ${evaluation.legalPriors.slice(0, 5).map((p) => `${p.uci} ${(100 * p.prior).toFixed(1)}%`).join(', ') || '—'}`,
+  });
+}
+
+function recordLc0SearchOutput(engineId: string, engineName: string, result: Lc0SearchResult): void {
+  const stats = result.search.stats;
+  const rootWdl = result.search.root?.evaluation?.wdl;
+  recordEngineOutput({
+    engineId,
+    engineName,
+    kind: 'lc0',
+    fen: result.fen,
+    move: result.move,
+    summary: rootWdl ? searchWdlText(rootWdl, result.value) : `search Q ${signed(result.value, 3)} stm`,
+    detail: `visits ${result.visits} · evals ${stats?.evalCalls ?? 0} · cache hits ${stats?.cacheHits ?? 0}`,
+    pv: result.pv,
+  });
+}
+
+function recordStockfishOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[]): void {
+  const best = lines[0];
+  recordEngineOutput({
+    engineId,
+    engineName,
+    kind: 'stockfish',
+    fen,
+    move: move ?? undefined,
+    summary: `SF ${stockfishScoreText(best)}`,
+    detail: lines.length > 1 ? `MultiPV ${lines.slice(0, 3).map((line) => `#${line.multipv} ${stockfishScoreText(line)}`).join(' · ')}` : undefined,
+    pv: best?.pvUci,
+  });
+}
+
+function recordEngineThinking(engine: ArenaEngine, fen: string): void {
+  recordEngineOutput({
+    engineId: engine.id,
+    engineName: engine.name,
+    kind: engine.id.startsWith('sf-') ? 'stockfish' : 'lc0',
+    fen,
+    summary: 'thinking on current position…',
+  });
+}
+
 function noteLc0MoveForReplyProbe(engine: ArenaEngine, move: Move, nextBoard: BoardState): void {
   if (!isLc0SearchEngine(engine.id)) return;
   const result = lastLc0SearchResults.get(engine.id);
@@ -329,20 +442,26 @@ function buildEngines() {
   const warmupPositions = [parseFen(START_FEN)];
   const lc0Search = (engineId: string, visits: number): ArenaEngine['move'] => async (positions, signal) => {
     const timed = arenaBudgetMode() === 'movetime';
-    const result = await lc0SearcherFor(engineId).search({ positions }, {
+    const input = { positions };
+    const result = await lc0SearcherFor(engineId).search(input, {
       visits: timed ? undefined : visits,
       movetimeMs: timed ? arenaMovetimeMs() : undefined,
       signal,
       yieldEveryMs: 16,
       reuseTree: true,
     });
-    recordLc0SearchTelemetry(engineId, engines.get(engineId)?.name ?? engineId, result);
+    const engineName = engines.get(engineId)?.name ?? engineId;
+    recordLc0SearchTelemetry(engineId, engineName, result);
+    recordLc0SearchOutput(engineId, engineName, result);
     return result.move ?? null;
   };
-  const sf = (depth: number): ArenaEngine['move'] => async (positions, signal) => {
+  const sf = (engineId: string, depth: number): ArenaEngine['move'] => async (positions, signal) => {
     if (arenaBudgetMode() === 'movetime') stockfish!.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: stockfishThreads() });
     else stockfish!.setOptions({ depth, movetimeMs: undefined, threads: stockfishThreads() });
-    return stockfish!.bestMove(boardToFen(positions[positions.length - 1]), signal);
+    const fen = boardToFen(positions[positions.length - 1]);
+    const move = await stockfish!.bestMove(fen, signal);
+    recordStockfishOutput(engineId, engines.get(engineId)?.name ?? `Stockfish d${depth}`, fen, move, stockfish!.lastInfo());
+    return move;
   };
   const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {
     const search = lc0SearcherFor(engineId);
@@ -357,13 +476,17 @@ function buildEngines() {
   engines.set('lc0-policy', {
     id: 'lc0-policy',
     name: 'LC0 policy',
-    move: async (positions) => (await player!.chooseMove({ positions })).move ?? null,
+    move: async (positions) => {
+      const choice = await player!.chooseMove({ positions });
+      recordLc0PolicyOutput('lc0-policy', engines.get('lc0-policy')?.name ?? 'LC0 policy', choice.evaluation, choice.move);
+      return choice.move ?? null;
+    },
     warmup: async () => { await player!.chooseMove({ positions: warmupPositions }); },
   });
   engines.set('lc0-s100', { id: 'lc0-s100', name: 'LC0 search 100', move: lc0Search('lc0-s100', 100), warmup: lc0SearchWarmup('lc0-s100') });
   engines.set('lc0-s400', { id: 'lc0-s400', name: 'LC0 search 400', move: lc0Search('lc0-s400', 400), warmup: lc0SearchWarmup('lc0-s400') });
-  engines.set('sf-d4', { id: 'sf-d4', name: stockfishName(4), move: sf(4), warmup: stockfishWarmup });
-  engines.set('sf-d8', { id: 'sf-d8', name: stockfishName(8), move: sf(8), warmup: stockfishWarmup });
+  engines.set('sf-d4', { id: 'sf-d4', name: stockfishName(4), move: sf('sf-d4', 4), warmup: stockfishWarmup });
+  engines.set('sf-d8', { id: 'sf-d8', name: stockfishName(8), move: sf('sf-d8', 8), warmup: stockfishWarmup });
   setEngineCheckboxLabel('sf-d4', stockfishName(4));
   setEngineCheckboxLabel('sf-d8', stockfishName(8));
 }
@@ -480,8 +603,12 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
   historyBoards = tree.historyBoards();
   board = historyBoards[historyBoards.length - 1];
   lastUci = null;
+  activeEngineIds = [white.id, black.id];
+  engineOutputs.delete(white.id);
+  engineOutputs.delete(black.id);
   setBoardSideEngines(white.name, black.name);
   renderBoard();
+  renderEngineOutputs();
   const priorFens: string[] = historyBoards.slice(0, -1).map(boardToFen);
   const delay = Math.max(0, Math.floor(Number(inputEl('delayInput').value) || 0));
   for (let ply = 0; ply < 300; ply++) {
@@ -489,6 +616,7 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
     const outcome = gameOutcome(board, priorFens);
     if (outcome) return { ...outcome, tree };
     const engine = board.turn === 'w' ? white : black;
+    recordEngineThinking(engine, boardToFen(board));
     let uci: string | null;
     try {
       uci = await engine.move(historyBoards, signal);
@@ -540,10 +668,13 @@ async function startTournament() {
   refreshOpeningPreview();
   refreshStockfishFlavorAvailability();
   games.length = 0;
+  activeEngineIds = [];
+  engineOutputs.clear();
   lastLc0SearchResults.clear();
   pendingLc0ReplyProbes.clear();
   lc0TreeTelemetry.clear();
   el('log').innerHTML = '';
+  renderEngineOutputs();
   renderSearchTelemetryInfo();
   el('start').toggleAttribute('disabled', true);
   el('stop').toggleAttribute('disabled', false);
@@ -589,6 +720,8 @@ async function startTournament() {
   } finally {
     running = false;
     abort = null;
+    activeEngineIds = [];
+    engineOutputs.clear();
     el('start').toggleAttribute('disabled', false);
     el('stop').toggleAttribute('disabled', true);
     refreshOpeningPreview();
@@ -611,6 +744,8 @@ function disposeRuntimeResources(): void {
   lc0Searchers.clear();
   lastLc0SearchResults.clear();
   pendingLc0ReplyProbes.clear();
+  engineOutputs.clear();
+  activeEngineIds = [];
   stockfish?.dispose();
   stockfish = null;
 }
