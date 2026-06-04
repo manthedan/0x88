@@ -169,12 +169,22 @@ function requestedOrtWasmThreads(isBrowserMainThread: boolean, isNode: boolean):
   return isBrowserMainThread && requested > 1 && !browserThreadedWasmAvailable() ? 1 : requested;
 }
 
+function browserOrtWasmPaths(): string | Record<string, string> {
+  const override = browserParam('ortWasmPath');
+  if (override) return override;
+  // Give ORT a public .wasm sidecar while letting its JS glue resolve from the
+  // bundled onnxruntime-web module. A plain '/ort/' prefix makes ORT dynamically
+  // import '/ort/*.mjs' from Vite public/, which dev-server blocks for source imports.
+  return { wasm: '/ort/ort-wasm-simd-threaded.asyncify.wasm' };
+}
+
 function configureOrtRuntime() {
   const wasm = ort.env.wasm as unknown as { numThreads?: number; proxy?: boolean; wasmBinary?: ArrayBufferLike | Uint8Array; wasmPaths?: string | Record<string, string> };
   configureNodeOrtWasmBinary(wasm);
-  if (typeof document !== 'undefined') wasm.wasmPaths = browserParam('ortWasmPath') ?? '/ort/';
   const isBrowserMainThread = typeof document !== 'undefined';
   const isNode = typeof document === 'undefined' && !!globalThis.process?.versions?.node;
+  const isBrowserRuntime = !isNode && typeof location !== 'undefined';
+  if (isBrowserRuntime) wasm.wasmPaths = browserOrtWasmPaths();
   const threads = requestedOrtWasmThreads(isBrowserMainThread, isNode);
   if (threads > 0) wasm.numThreads = threads;
   if (isBrowserMainThread) {
