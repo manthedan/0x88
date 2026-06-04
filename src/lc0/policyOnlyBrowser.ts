@@ -390,6 +390,35 @@ type EncoderStackHeadsResult = {
   wdl: number[];
 };
 
+type WgslHeadsProbeResult = {
+  status: 'WGSL_HEADS_PROBE_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  tokens: number;
+  channels: number;
+  valueEmbedChannels: number;
+  packLoadMs: number;
+  pipelineCompileMs: number;
+  dispatchSyncedMs: number;
+  readbackSyncedMs: number;
+  policyDenseMaxAbsError: number;
+  policyDenseRmsError: number;
+  valueEmbedMaxAbsError: number;
+  valueEmbedRmsError: number;
+  policyDenseSample: number[];
+  valueEmbedSample: number[];
+  nonzero: { policyDense: boolean; valueEmbed: boolean };
+  nonuniform: { policyDense: boolean; valueEmbed: boolean };
+  ortHeads: {
+    mode: 'ort-policy-value';
+    runMs: number;
+    mappedPolicySample: number[];
+    wdl: number[];
+    wdlMaxAbsError: number;
+  };
+};
+
 type EncoderStackBenchmarkResult = {
   status: 'ENCODER_STACK_BENCH_DONE';
   packUrl: string;
@@ -566,6 +595,7 @@ const ATTENTION_OUTPUT_ORT_BENCH_REQUESTED = params.get('attentionOutputOrtBench
 const ENCODER0_BLOCK_BENCH_REQUESTED = params.get('encoder0BlockBench') === '1' || params.get('fullEncoder0Bench') === '1';
 const ENCODER0_BLOCK_ORT_BENCH_REQUESTED = params.get('encoder0BlockOrtBench') === '1' || params.get('fullEncoder0OrtBench') === '1';
 const ENCODER_STACK_BENCH_REQUESTED = params.get('encoderStackBench') === '1' || params.get('encoderBlocksBench') === '1' || params.get('encoderStackHeadsBench') === '1';
+const WGSL_HEADS_PROBE_REQUESTED = params.get('wgslHeadsProbe') === '1' || params.get('policyValueHeadsProbe') === '1';
 const ENCODER0_FFN_BENCH_REQUESTED = params.get('encoder0FfnBench') === '1' || params.get('ffnBench') === '1';
 const ENCODER0_FFN_ORT_BENCH_REQUESTED = params.get('encoder0FfnOrtBench') === '1' || params.get('ffnOrtBench') === '1';
 const ATTENTION_SCORE_BENCH_REQUESTED = params.get('attentionScoreBench') === '1' || params.get('scoreBench') === '1';
@@ -574,7 +604,7 @@ const QKV_BENCH_REQUESTED = params.get('qkvBench') === '1' || params.get('qkvBen
 const QKV_PROBE_REQUESTED = params.get('qkvProbe') === '1';
 const ORT_OP_BENCH_REQUESTED = params.get('ortOpBench') === '1' || params.get('ortBench') === '1';
 const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('kernelBenchmark') === '1' || params.get('wgslBench') === '1';
-const KERNEL_PROBE_REQUESTED = ENCODER_STACK_BENCH_REQUESTED || ENCODER0_BLOCK_ORT_BENCH_REQUESTED || ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_ORT_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_ORT_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
+const KERNEL_PROBE_REQUESTED = WGSL_HEADS_PROBE_REQUESTED || ENCODER_STACK_BENCH_REQUESTED || ENCODER0_BLOCK_ORT_BENCH_REQUESTED || ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_ORT_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_ORT_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
 const HYBRID_SEARCH_BENCH_REQUESTED = params.get('hybridSearchBench') === '1' || params.get('hybridSearchBenchmark') === '1';
@@ -1239,6 +1269,49 @@ async function runEncoder0BlockBenchmark(): Promise<void> {
   } catch (error) {
     el('benchResult').textContent = `ENCODER0_BLOCK_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Encoder0 block benchmark failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runWgslHeadsProbe(): Promise<void> {
+  if (!searchWorker) throw new Error('WGSL heads probe requires LC0 worker');
+  el('benchResult').textContent = 'WGSL_HEADS_PROBE_RUNNING';
+  setBusy(true, 'Running isolated WGSL policy/value head dense probes against a deterministic encoder-shaped input…');
+  try {
+    const response = await postWorkerRequest<{ type: 'wgslHeadsProbeResult'; result: WgslHeadsProbeResult }>({
+      type: 'wgslHeadsProbe',
+      packUrl: PACK_URL,
+      ep: requestedWorkerEp(),
+      verifyShards: params.get('packVerify') !== '0',
+    });
+    const rounded = {
+      ...response.result,
+      benchmarkReport: buildBenchmarkReport(response.result),
+      packLoadMs: Number(response.result.packLoadMs.toFixed(3)),
+      pipelineCompileMs: Number(response.result.pipelineCompileMs.toFixed(3)),
+      dispatchSyncedMs: Number(response.result.dispatchSyncedMs.toFixed(4)),
+      readbackSyncedMs: Number(response.result.readbackSyncedMs.toFixed(4)),
+      policyDenseMaxAbsError: Number(response.result.policyDenseMaxAbsError.toExponential(6)),
+      policyDenseRmsError: Number(response.result.policyDenseRmsError.toExponential(6)),
+      valueEmbedMaxAbsError: Number(response.result.valueEmbedMaxAbsError.toExponential(6)),
+      valueEmbedRmsError: Number(response.result.valueEmbedRmsError.toExponential(6)),
+      policyDenseSample: response.result.policyDenseSample.map((value) => Number(value.toFixed(8))),
+      valueEmbedSample: response.result.valueEmbedSample.map((value) => Number(value.toFixed(8))),
+      ortHeads: {
+        ...response.result.ortHeads,
+        runMs: Number(response.result.ortHeads.runMs.toFixed(3)),
+        mappedPolicySample: response.result.ortHeads.mappedPolicySample.map((value) => Number(value.toFixed(8))),
+        wdl: response.result.ortHeads.wdl.map((value) => Number(value.toFixed(8))),
+        wdlMaxAbsError: Number(response.result.ortHeads.wdlMaxAbsError.toExponential(6)),
+      },
+    };
+    el('benchResult').textContent = JSON.stringify(rounded);
+    el('message').textContent = `WGSL_HEADS_PROBE_DONE policy dense |err| ${rounded.policyDenseMaxAbsError.toExponential(2)} · value embed |err| ${rounded.valueEmbedMaxAbsError.toExponential(2)} · nonzero/nonuniform ${rounded.nonzero.policyDense && rounded.nonzero.valueEmbed && rounded.nonuniform.policyDense && rounded.nonuniform.valueEmbed ? 'yes' : 'no'}`;
+  } catch (error) {
+    el('benchResult').textContent = `WGSL_HEADS_PROBE_FAILED ${(error as Error).message}`;
+    el('message').textContent = `WGSL heads probe failed: ${(error as Error).message}`;
     throw error;
   } finally {
     setBusy(false);
@@ -2485,9 +2558,10 @@ async function init() {
       workerModelCacheStatus = 'pack shards worker-owned';
       useSearchWorker = true;
       await initSearchWorker({ initModel: false });
-      searchWorkerBackend = ENCODER_STACK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder-stack-bench' : ENCODER0_BLOCK_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-block-bench' : ENCODER0_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-block-bench' : ENCODER0_FFN_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-ffn-bench' : ENCODER0_FFN_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-ffn-bench' : ATTENTION_OUTPUT_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-output-bench' : ATTENTION_OUTPUT_BENCH_REQUESTED ? 'lc0web-wgsl-attention-output-bench' : ATTENTION_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-attention-block-bench' : ATTENTION_VALUE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-value-bench' : ATTENTION_VALUE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-value-bench' : SOFTMAX_BENCH_REQUESTED ? 'lc0web-wgsl-softmax-bench' : ATTENTION_SCORE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-score-bench' : ATTENTION_SCORE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-score-bench' : QKV_BENCH_REQUESTED ? 'lc0web-wgsl-qkv-bench' : QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
+      searchWorkerBackend = WGSL_HEADS_PROBE_REQUESTED ? 'lc0web-wgsl-heads-probe' : ENCODER_STACK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder-stack-bench' : ENCODER0_BLOCK_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-block-bench' : ENCODER0_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-block-bench' : ENCODER0_FFN_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-ffn-bench' : ENCODER0_FFN_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-ffn-bench' : ATTENTION_OUTPUT_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-output-bench' : ATTENTION_OUTPUT_BENCH_REQUESTED ? 'lc0web-wgsl-attention-output-bench' : ATTENTION_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-attention-block-bench' : ATTENTION_VALUE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-value-bench' : ATTENTION_VALUE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-value-bench' : SOFTMAX_BENCH_REQUESTED ? 'lc0web-wgsl-softmax-bench' : ATTENTION_SCORE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-score-bench' : ATTENTION_SCORE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-score-bench' : QKV_BENCH_REQUESTED ? 'lc0web-wgsl-qkv-bench' : QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
       renderStatic();
-      if (ENCODER_STACK_BENCH_REQUESTED) await runEncoderStackBenchmark();
+      if (WGSL_HEADS_PROBE_REQUESTED) await runWgslHeadsProbe();
+      else if (ENCODER_STACK_BENCH_REQUESTED) await runEncoderStackBenchmark();
       else if (ENCODER0_BLOCK_ORT_BENCH_REQUESTED) await runEncoder0BlockOrtBenchmark();
       else if (ENCODER0_BLOCK_BENCH_REQUESTED) await runEncoder0BlockBenchmark();
       else if (ENCODER0_FFN_ORT_BENCH_REQUESTED) await runEncoder0FfnOrtBenchmark();
