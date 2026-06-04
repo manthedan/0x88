@@ -716,6 +716,7 @@ const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('
 const KERNEL_PROBE_REQUESTED = MAPPED_POLICY_PROBE_REQUESTED || WGSL_HEADS_PROBE_REQUESTED || WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED || ENCODER_STACK_BENCH_REQUESTED || ENCODER0_BLOCK_ORT_BENCH_REQUESTED || ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_ORT_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_ORT_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
+const HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED = params.get('hybridSearchFixtureParity') === '1' || params.get('searchFixtureParity') === '1';
 const HYBRID_SEARCH_BENCH_REQUESTED = params.get('hybridSearchBench') === '1' || params.get('hybridSearchBenchmark') === '1';
 const HYBRID_ENCODER_PROFILE_REQUESTED = params.get('hybridEncoderProfile') === '1' || params.get('encoderProfile') === '1' || params.get('hybridProfile') === '1';
 const HYBRID_INPUT_BENCH_REQUESTED = params.get('hybridInputBench') === '1' || params.get('hybridInputBenchmark') === '1' || params.get('wasmInputBench') === '1';
@@ -727,7 +728,7 @@ const HYBRID_INPUT_BACKEND_REQUESTED = HYBRID_INPUT_BACKEND_PARAM === 'wgsl' || 
 const HYBRID_INPUT_BACKEND = HYBRID_INPUT_BACKEND_PARAM === 'wasm' ? 'wasm' : (HYBRID_INPUT_BACKEND_PARAM === 'wgsl' ? 'wgsl' : 'js');
 const HYBRID_ENCODER_KERNEL_PARAM = params.get('encoderKernel') ?? params.get('hybridEncoderKernel') ?? params.get('encoderKernelVariant');
 const HYBRID_ENCODER_KERNEL_VARIANT = HYBRID_ENCODER_KERNEL_PARAM === 'tvm-packed-f16' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-outproj' ? HYBRID_ENCODER_KERNEL_PARAM : 'hand';
-const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
+const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
@@ -2274,6 +2275,19 @@ function queryBool(names: string[], fallback = false): boolean {
   return fallback;
 }
 
+function queryIntList(names: string[], fallback: number[], min: number, max: number): number[] {
+  for (const name of names) {
+    const raw = params.get(name);
+    if (raw === null) continue;
+    const values = raw.split(',')
+      .map((entry) => Math.floor(Number(entry.trim())))
+      .filter((value) => Number.isFinite(value))
+      .map((value) => Math.min(max, Math.max(min, value)));
+    if (values.length > 0) return [...new Set(values)];
+  }
+  return fallback;
+}
+
 async function resetSearchTreeState(): Promise<void> {
   searcher?.resetTree();
   if (searchWorkerReady) await postWorkerRequest<{ type: 'searchReset' }>({ type: 'resetSearch' });
@@ -2630,6 +2644,123 @@ async function runHybridDeferredReadbackBenchmark(): Promise<void> {
   } catch (error) {
     el('benchResult').textContent = `WGSL_DEFERRED_READBACK_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Deferred readback benchmark failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
+function parseJsonlRecords<T>(text: string): T[] {
+  return text.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as T);
+}
+
+async function loadNativeSearchRecords(visits: number, limit: number): Promise<NativeRecord[]> {
+  const [fenResponse, historyResponse] = await Promise.all([
+    fetch(`/lc0/native_search_fen_only_blas_nodes${visits}.jsonl`, { cache: 'no-store' }),
+    fetch(`/lc0/native_search_history_blas_nodes${visits}.jsonl`, { cache: 'no-store' }),
+  ]);
+  if (!fenResponse.ok) throw new Error(`failed to load native FEN search fixtures for nodes${visits}: HTTP ${fenResponse.status}`);
+  if (!historyResponse.ok) throw new Error(`failed to load native history search fixtures for nodes${visits}: HTTP ${historyResponse.status}`);
+  const records = [
+    ...parseJsonlRecords<NativeRecord>(await fenResponse.text()),
+    ...parseJsonlRecords<NativeRecord>(await historyResponse.text()),
+  ];
+  return records.slice(0, Math.min(limit, records.length));
+}
+
+function nativeSearchInput(record: NativeRecord): Lc0EvaluatorInput {
+  if (record.moves) return { positions: buildBoardHistoryFromMoves(record.moves, record.startFen ?? START_FEN) };
+  return record.fen;
+}
+
+async function runHybridSearchFixtureParity(): Promise<void> {
+  if (!searchWorkerReady) throw new Error('hybrid search fixture parity requires ready LC0 worker');
+  const visitsList = queryIntList(['searchFixtureVisits', 'fixtureVisits', 'visitsList', 'visits'], [32], 1, 100000);
+  const requestedDepths = queryIntList(['batchPipelineDepths', 'pipelineDepths'], [1], 1, 16);
+  const depths = [1, ...requestedDepths.filter((depth) => depth !== 1)];
+  const repeats = boundedQueryInt(['searchFixtureRepeats', 'fixtureRepeats', 'repeats'], 1, 1, 10);
+  const fixtureLimit = boundedQueryInt(['fixtureLimit', 'fixtures'], 16, 1, 16);
+  const batchSize = searchBatchSize;
+  const cells = [];
+  const depthBaselines = new Map<string, string | undefined>();
+  setBusy(true, `Running hybrid search fixture parity: visits ${visitsList.join(',')} · depths ${depths.join(',')} · ${fixtureLimit} fixtures…`);
+  el('benchResult').textContent = 'HYBRID_SEARCH_FIXTURE_PARITY_RUNNING';
+  try {
+    for (const visits of visitsList) {
+      const records = await loadNativeSearchRecords(visits, fixtureLimit);
+      for (const record of records) {
+        const input = nativeSearchInput(record);
+        const expectedNativeBestMove = nativeCastlingToStandard(record.bestmove);
+        for (const depth of depths) {
+          for (let repeat = 1; repeat <= repeats; repeat++) {
+            await resetSearchTreeState();
+            const started = performance.now();
+            const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
+              type: 'search',
+              input,
+              visits,
+              batchSize,
+              batchPipelineDepth: depth,
+              multiPv: 1,
+              reuseTree: false,
+            });
+            const result = response.result;
+            const baselineKey = `${visits}\t${record.id}\t${repeat}`;
+            if (depth === 1) depthBaselines.set(baselineKey, result.move);
+            const depthBaselineBestMove = depthBaselines.get(baselineKey);
+            cells.push({
+              visits,
+              batchSize,
+              batchPipelineDepth: depth,
+              repeat,
+              id: record.id,
+              kind: record.moves ? 'history' : 'fen',
+              expectedNativeBestMove,
+              bestMove: result.move,
+              matchesNative: result.move === expectedNativeBestMove,
+              depthBaselineBestMove,
+              matchesDepthBaseline: result.move === depthBaselineBestMove,
+              completedVisits: result.stats?.completedVisits,
+              stopReason: result.stats?.stopReason,
+              elapsedMs: roundReportMs(performance.now() - started),
+              searchElapsedMs: roundReportMs(result.elapsedMs),
+              evalCalls: result.stats?.evalCalls,
+              batchEvalCalls: result.stats?.batchEvalCalls,
+              maxEvalBatch: result.stats?.maxEvalBatch,
+              evalBatchSizeHistogram: result.stats?.evalBatchSizeHistogram,
+              batchPipelineFlushes: result.stats?.batchPipelineFlushes,
+              maxBatchPipelineBatches: result.stats?.maxBatchPipelineBatches,
+              readbackSyncedMs: result.stats?.evalBackendTimingMeans?.readbackSyncedMs,
+              readbackSyncedMsPerPosition: result.stats?.evalBackendTimingPerPositionMeans?.readbackSyncedMs,
+            });
+            el('benchResult').textContent = `HYBRID_SEARCH_FIXTURE_PARITY ${cells.length}/${visitsList.length * records.length * depths.length * repeats}`;
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          }
+        }
+      }
+    }
+    const mismatches = cells.filter((cell) => !cell.matchesNative || !cell.matchesDepthBaseline);
+    const result = {
+      status: 'HYBRID_SEARCH_FIXTURE_PARITY_DONE',
+      backend: searchWorkerBackend,
+      headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
+      encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
+      visitsList,
+      batchSize,
+      batchPipelineDepths: depths,
+      repeats,
+      fixtureLimit,
+      cells: cells.length,
+      nativeMatches: cells.filter((cell) => cell.matchesNative).length,
+      depthBaselineMatches: cells.filter((cell) => cell.matchesDepthBaseline).length,
+      mismatches,
+      results: cells,
+    };
+    el('benchResult').textContent = JSON.stringify(result);
+    el('message').textContent = `HYBRID_SEARCH_FIXTURE_PARITY_DONE native ${result.nativeMatches}/${result.cells} · depth baseline ${result.depthBaselineMatches}/${result.cells}`;
+  } catch (error) {
+    el('benchResult').textContent = `HYBRID_SEARCH_FIXTURE_PARITY_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Hybrid search fixture parity failed: ${(error as Error).message}`;
     throw error;
   } finally {
     setBusy(false);
@@ -3330,6 +3461,10 @@ async function init() {
     }
     if (HYBRID_ENCODER_PROFILE_REQUESTED) {
       await runHybridEncoderProfile();
+      return;
+    }
+    if (HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED) {
+      await runHybridSearchFixtureParity();
       return;
     }
     if (HYBRID_SEARCH_BENCH_REQUESTED) {
