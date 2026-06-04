@@ -31,7 +31,11 @@ function post(message: WorkerResponse): void {
   self.postMessage(message);
 }
 
-function lineCollector(lines: string[] | null, onLine?: (line: string) => void): ConsoleStdout {
+function isUsefulUciStdoutLine(line: string): boolean {
+  return line === 'uciok' || line === 'readyok' || line.startsWith('bestmove') || (line.startsWith('info ') && line.includes(' pv '));
+}
+
+function lineCollector(lines: string[] | null, onLine?: (line: string) => void, keepLine: (line: string) => boolean = () => true): ConsoleStdout {
   const decoder = new TextDecoder('utf-8', { fatal: false });
   let pending = '';
   return new ConsoleStdout((chunk) => {
@@ -39,6 +43,7 @@ function lineCollector(lines: string[] | null, onLine?: (line: string) => void):
     const split = pending.split(/\r?\n/);
     pending = split.pop() ?? '';
     for (const line of split) {
+      if (!keepLine(line)) continue;
       lines?.push(line);
       onLine?.(line);
     }
@@ -121,7 +126,7 @@ async function runReckless(wasmUrl: string, commands: string[]): Promise<{ stdou
     [],
     [
       new OpenFile(new File([])),
-      lineCollector(stdout),
+      lineCollector(stdout, undefined, isUsefulUciStdoutLine),
       lineCollector(stderr),
       new PreopenDirectory('.', new Map()),
     ],
@@ -140,7 +145,7 @@ async function runPersistentReckless(wasmUrl: string, inputBuffer: SharedArrayBu
     [],
     [
       new SharedStdin(inputBuffer),
-      lineCollector(null, (line) => post({ type: 'persistent-line', stream: 'stdout', line })),
+      lineCollector(null, (line) => post({ type: 'persistent-line', stream: 'stdout', line }), isUsefulUciStdoutLine),
       lineCollector(null, (line) => post({ type: 'persistent-line', stream: 'stderr', line })),
       new PreopenDirectory('.', new Map()),
     ],
