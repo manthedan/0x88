@@ -2,7 +2,7 @@
   "runtime": {
     "generatedAt": "2026-06-04T20:58:32.759Z",
     "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.0.0 Safari/537.36",
-    "url": "http://localhost:5181/reckless-benchmark.html?chunk=wasi-scalar3",
+    "url": "http://localhost:5181/reckless-benchmark.html?chunked=corrected-api-simd",
     "crossOriginIsolated": true,
     "sharedArrayBuffer": true,
     "persistentAvailable": true
@@ -15,6 +15,30 @@
         "wasmUrl": "/reckless/reckless.wasm",
         "note": "v60 full-size NNUE scalar WASI/UCI fallback for browsers without WebAssembly SIMD.",
         "backend": "wasi",
+        "asset": "present"
+      },
+      {
+        "key": "simd",
+        "label": "Reckless Full SIMD",
+        "wasmUrl": "/reckless/reckless-simd128.wasm",
+        "note": "v60 full-size NNUE with integrated wasm simd128 backend; preferred default when supported.",
+        "backend": "wasi",
+        "asset": "present"
+      },
+      {
+        "key": "browser-api",
+        "label": "Reckless Full browser API experimental",
+        "wasmUrl": "/reckless/reckless-browser-api.wasm",
+        "note": "Full-size NNUE with direct WASM exports; bypasses WASI/UCI text for lower adapter overhead.",
+        "backend": "browser-api",
+        "asset": "present"
+      },
+      {
+        "key": "browser-api-simd",
+        "label": "Reckless Full browser API SIMD experimental",
+        "wasmUrl": "/reckless/reckless-browser-api-simd128.wasm",
+        "note": "Direct browser API artifact combined with the integrated wasm simd128 NNUE backend.",
+        "backend": "browser-api",
         "asset": "present"
       }
     ],
