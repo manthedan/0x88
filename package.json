@@ -75,6 +75,7 @@
     "reckless:build-wasi": "node scripts/build_reckless_wasi.mjs",
     "reckless:build-simd-wasi": "RUSTFLAGS='-C target-feature=+simd128' RECKLESS_WASM_OUT=public/reckless/reckless-simd128.wasm node scripts/build_reckless_wasi.mjs",
     "reckless:inspect-simd": "node scripts/inspect_wasm_simd.mjs public/reckless/reckless.wasm public/reckless/reckless-simd128.wasm",
+    "reckless:inspect-sections": "node scripts/inspect_wasm_sections.mjs public/reckless/reckless.wasm public/reckless/reckless-simd128.wasm --out docs/reckless_wasm_section_breakdown_2026-06-04.json",
     "reckless:probe-nnue-accum-simd": "node scripts/reckless_wasm_nnue_accum_probe.mjs",
     "reckless:probe-nnue-activate-simd": "node scripts/reckless_wasm_nnue_activate_probe.mjs",
     "reckless:probe-browser-api": "node scripts/probe_reckless_browser_api_facade.mjs",
