@@ -613,6 +613,8 @@ type OrtBenchmarkResult = {
   outputSample: number[];
 };
 
+type HybridEncoderProfileMode = 'sync-staged' | 'gpu-timestamp';
+
 type HybridEncoderProfileResult = {
   status: 'HYBRID_ENCODER_PROFILE_DONE';
   packUrl: string;
@@ -622,6 +624,9 @@ type HybridEncoderProfileResult = {
   warmup: number;
   iterations: number;
   packLoadMs: number;
+  profileMode: HybridEncoderProfileMode;
+  requestedProfileMode: HybridEncoderProfileMode;
+  gpuTimestampSupported: boolean;
   profiledStageTotalMs: number;
   readbackSyncedMs: number;
   outputSample: number[];
@@ -2361,7 +2366,9 @@ async function runHybridEncoderProfile(): Promise<void> {
   const input = currentEvaluationInput();
   const iterations = boundedQueryInt(['hybridEncoderProfileIters', 'profileIters'], 1, 1, 20);
   const warmup = boundedQueryInt(['hybridEncoderProfileWarmup', 'profileWarmup'], 1, 0, 10);
-  setBusy(true, `Profiling hybrid encoder stages: ${iterations} staged pass(es)…`);
+  const profileModeParam = params.get('hybridEncoderProfileMode') ?? params.get('encoderProfileMode') ?? params.get('profileMode');
+  const profileMode: HybridEncoderProfileMode = profileModeParam === 'sync-staged' || profileModeParam === 'sync' ? 'sync-staged' : 'gpu-timestamp';
+  setBusy(true, `Profiling hybrid encoder stages: ${iterations} ${profileMode} pass(es)…`);
   el('benchResult').textContent = 'HYBRID_ENCODER_PROFILE_RUNNING';
   try {
     const response = await postWorkerRequest<{ type: 'hybridEncoderProfileResult'; result: HybridEncoderProfileResult }>({
@@ -2374,6 +2381,7 @@ async function runHybridEncoderProfile(): Promise<void> {
       verifyShards: params.get('packVerify') !== '0',
       inputBackend: HYBRID_INPUT_BACKEND,
       encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
+      profileMode,
     });
     const result = {
       ...response.result,

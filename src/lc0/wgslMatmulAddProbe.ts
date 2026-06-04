@@ -5298,6 +5298,7 @@ export interface Lc0WebHybridEvaluationOptions {
   wgslBatchMode?: Lc0WebHybridWgslBatchMode;
   inputBackend?: Lc0WebHybridInputBackend;
   encoderKernelVariant?: Lc0WebEncoderKernelVariant;
+  timestampQuery?: boolean;
 }
 
 export interface Lc0WebHybridTimingBreakdown {
@@ -5363,6 +5364,8 @@ export interface Lc0WebHybridEncoderProfileLayerTiming {
   stages: Lc0WebHybridEncoderProfileStageTiming[];
 }
 
+export type Lc0WebHybridEncoderProfileMode = 'sync-staged' | 'gpu-timestamp';
+
 export interface Lc0WebHybridEncoderProfileOptions {
   packUrl: string;
   input: Lc0EvaluatorInput;
@@ -5373,6 +5376,7 @@ export interface Lc0WebHybridEncoderProfileOptions {
   inputBackend?: Lc0WebHybridInputBackend;
   encoderKernelVariant?: Lc0WebEncoderKernelVariant;
   historyFill?: Lc0HistoryFill;
+  profileMode?: Lc0WebHybridEncoderProfileMode;
 }
 
 export interface Lc0WebHybridEncoderProfileResult {
@@ -5384,6 +5388,9 @@ export interface Lc0WebHybridEncoderProfileResult {
   warmup: number;
   iterations: number;
   packLoadMs: number;
+  profileMode: Lc0WebHybridEncoderProfileMode;
+  requestedProfileMode: Lc0WebHybridEncoderProfileMode;
+  gpuTimestampSupported: boolean;
   profiledStageTotalMs: number;
   readbackSyncedMs: number;
   outputSample: number[];
@@ -5707,6 +5714,7 @@ interface SubmittedWgslHybridBatch {
 
 class Lc0WebHybridRuntime {
   private readonly device: DeviceLike;
+  private readonly gpuTimestampSupported: boolean;
   private readonly inputTensors: Lc0WebPreparedInitialInputTensors;
   private readonly inputBackend: Lc0WebHybridInputBackend;
   private readonly encoderKernelVariant: Lc0WebEncoderKernelVariant;
@@ -5732,6 +5740,7 @@ class Lc0WebHybridRuntime {
 
   private constructor(options: {
     device: DeviceLike;
+    gpuTimestampSupported: boolean;
     inputTensors: Lc0WebPreparedInitialInputTensors;
     inputBackend: Lc0WebHybridInputBackend;
     encoderKernelVariant: Lc0WebEncoderKernelVariant;
@@ -5752,6 +5761,7 @@ class Lc0WebHybridRuntime {
     layers: number;
   }) {
     this.device = options.device;
+    this.gpuTimestampSupported = options.gpuTimestampSupported;
     this.inputTensors = options.inputTensors;
     this.inputBackend = options.inputBackend;
     this.encoderKernelVariant = options.encoderKernelVariant;
@@ -5796,7 +5806,7 @@ class Lc0WebHybridRuntime {
     const inputBackend = options.inputBackend ?? 'js';
     const encoderKernelVariant = options.encoderKernelVariant ?? 'hand';
     const headSession = headBackend === 'ort' ? await createCachedPolicyValueHeadSession(headTensors) : undefined;
-    const { device } = await requestDevice();
+    const { device, timestampQuerySupported } = await requestDevice({ timestampQuery: options.timestampQuery });
     const usage = gpuGlobals().GPUBufferUsage!;
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
     const buffers: BufferLike[] = [];
@@ -5821,6 +5831,7 @@ class Lc0WebHybridRuntime {
     if (wgslHeads) buffers.push(...wgslHeads.buffers);
     return new Lc0WebHybridRuntime({
       device,
+      gpuTimestampSupported: timestampQuerySupported,
       inputTensors,
       inputBackend,
       encoderKernelVariant,
@@ -5969,9 +5980,15 @@ class Lc0WebHybridRuntime {
     };
   }
 
-  async profileEncoder(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill; iterations: number; warmup: number }): Promise<Lc0WebHybridEncoderProfileResult> {
+  async profileEncoder(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill; iterations: number; warmup: number; profileMode?: Lc0WebHybridEncoderProfileMode }): Promise<Lc0WebHybridEncoderProfileResult> {
     const iterations = clampInteger(options.iterations, 1, 1, 100);
     const warmup = clampInteger(options.warmup, 1, 0, 20);
+    const requestedProfileMode = options.profileMode ?? 'gpu-timestamp';
+    const timestampReady = requestedProfileMode === 'gpu-timestamp'
+      && this.gpuTimestampSupported
+      && !!this.device.createQuerySet
+      && !!this.usage.QUERY_RESOLVE;
+    const profileMode: Lc0WebHybridEncoderProfileMode = timestampReady ? 'gpu-timestamp' : 'sync-staged';
     for (let i = 0; i < warmup; i++) await this.encode(input, { historyFill: options.historyFill });
     const aggregate = new Map<Lc0WebHybridEncoderProfileStageName, { label: string; totalMs: number; iterations: number }>();
     const byLayer = Array.from({ length: this.layerRuntimes.length }, (_, layer) => ({ layer, totalMs: 0, stages: new Map<Lc0WebHybridEncoderProfileStageName, { label: string; totalMs: number; iterations: number }>() }));
@@ -5990,6 +6007,109 @@ class Lc0WebHybridRuntime {
       layer.stages.set(stage, entry);
       addAggregate(stage, label, elapsedMs);
     };
+    const toResult = (profiledStageTotalMs: number, readbackSyncedMs: number, output: Float32Array<ArrayBufferLike>, note: string): Lc0WebHybridEncoderProfileResult => {
+      const toStageTiming = (stage: Lc0WebHybridEncoderProfileStageName, entry: { label: string; totalMs: number; iterations: number }): Lc0WebHybridEncoderProfileStageTiming => ({
+        stage,
+        label: entry.label,
+        iterations: entry.iterations,
+        totalMs: entry.totalMs,
+        avgMs: entry.totalMs / Math.max(1, entry.iterations),
+        percentOfProfiledStageMs: profiledStageTotalMs > 0 ? (entry.totalMs / profiledStageTotalMs) * 100 : 0,
+      });
+      return {
+        status: 'HYBRID_ENCODER_PROFILE_DONE',
+        packUrl: this.packUrl,
+        layers: this.layers,
+        encoderKernelVariant: this.encoderKernelVariant,
+        inputBackend: this.inputBackend,
+        warmup,
+        iterations,
+        packLoadMs: this.packLoadMs,
+        profileMode,
+        requestedProfileMode,
+        gpuTimestampSupported: this.gpuTimestampSupported,
+        profiledStageTotalMs,
+        readbackSyncedMs,
+        outputSample: Array.from(output.slice(0, 8)),
+        aggregateStageTimings: Array.from(aggregate.entries()).map(([stage, entry]) => toStageTiming(stage, entry)).sort((a, b) => b.totalMs - a.totalMs),
+        layerTimings: byLayer.map((layer) => ({
+          layer: layer.layer,
+          totalMs: layer.totalMs,
+          stages: Array.from(layer.stages.entries()).map(([stage, entry]) => toStageTiming(stage, entry)).sort((a, b) => b.totalMs - a.totalMs),
+        })),
+        note,
+      };
+    };
+
+    if (profileMode === 'gpu-timestamp') {
+      const globals = gpuGlobals();
+      const timestampStageCount = (this.inputBackend !== 'js' ? 1 : 0) + this.layerRuntimes.length * 10;
+      const timestampCount = timestampStageCount * 2;
+      const timestampBytes = timestampCount * 8;
+      let output: Float32Array<ArrayBufferLike> = new Float32Array(DEFAULT_TOKENS * DEFAULT_N);
+      for (let iteration = 0; iteration < iterations; iteration++) {
+        const { payload: inputPayload } = this.buildInputPayload(input, options.historyFill);
+        if (this.inputBackend !== 'js') {
+          if (!this.inputBodyGpu) throw new Error('WGSL/WASM input backend is not initialized');
+          this.device.queue.writeBuffer(this.inputBodyGpu.planesBuffer, 0, inputPayload);
+        } else {
+          this.device.queue.writeBuffer(this.inputBuffer, 0, inputPayload);
+        }
+        const querySet = this.device.createQuerySet!({ type: 'timestamp', count: timestampCount });
+        const resolveBuffer = this.device.createBuffer({ size: timestampBytes, usage: this.usage.QUERY_RESOLVE | this.usage.COPY_SRC });
+        const timestampReadback = this.device.createBuffer({ size: timestampBytes, usage: this.usage.MAP_READ | this.usage.COPY_DST });
+        const records: Array<{ stage: Lc0WebHybridEncoderProfileStageName; label: string; layerIndex?: number; begin: number; end: number }> = [];
+        let queryIndex = 0;
+        try {
+          const encoder = this.device.createCommandEncoder();
+          const encodeTimestampStage = (stage: Lc0WebHybridEncoderProfileStageName, label: string, layerIndex: number | undefined, encode: (pass: ComputePassLike) => void): void => {
+            const begin = queryIndex++;
+            const end = queryIndex++;
+            records.push({ stage, label, layerIndex, begin, end });
+            const pass = encoder.beginComputePass({ timestampWrites: { querySet, beginningOfPassWriteIndex: begin, endOfPassWriteIndex: end } });
+            encode(pass);
+            pass.end();
+          };
+          if (this.inputBackend !== 'js') encodeTimestampStage('inputBody', 'input body projection', undefined, (pass) => encodeInputBodyPass(pass, this.inputBodyGpu!));
+          for (let layerIndex = 0; layerIndex < this.layerRuntimes.length; layerIndex++) {
+            const layer = this.layerRuntimes[layerIndex];
+            encodeTimestampStage('smolgen', 'smolgen', layerIndex, (pass) => encodeSmolgenPass(pass, layer.smolgenPipelines));
+            encodeTimestampStage('qkvProjection', 'QKV projection', layerIndex, (pass) => encodeAttentionQkvPass(pass, layer.attentionPipelines));
+            encodeTimestampStage('attentionScores', 'attention scores', layerIndex, (pass) => encodeAttentionScoresPass(pass, layer.attentionPipelines));
+            encodeTimestampStage('softmax', 'softmax', layerIndex, (pass) => encodeAttentionSoftmaxPass(pass, layer.attentionPipelines));
+            encodeTimestampStage('attentionValue', 'attention value', layerIndex, (pass) => encodeAttentionValuePass(pass, layer.attentionPipelines));
+            encodeTimestampStage('outputProjection', 'attention output projection', layerIndex, (pass) => encodeAttentionOutputProjectionPass(pass, layer.attentionPipelines));
+            encodeTimestampStage('ln1', 'attention ln1', layerIndex, (pass) => encodeAttentionNormPass(pass, layer.attentionPipelines));
+            encodeTimestampStage('ffnDense1', 'FFN dense1', layerIndex, (pass) => encodeFfnDense1Pass(pass, layer.ffnPipelines));
+            encodeTimestampStage('ffnDense2Residual', 'FFN dense2 + residual', layerIndex, (pass) => encodeFfnDense2ResidualPass(pass, layer.ffnPipelines));
+            encodeTimestampStage('ln2', 'FFN ln2', layerIndex, (pass) => encodeFfnLn2Pass(pass, layer.ffnPipelines));
+          }
+          if (!encoder.resolveQuerySet) throw new Error('WebGPU timestamp query resolve is unavailable');
+          encoder.resolveQuerySet(querySet, 0, queryIndex, resolveBuffer, 0);
+          encoder.copyBufferToBuffer(resolveBuffer, 0, timestampReadback, 0, timestampBytes);
+          this.device.queue.submit([encoder.finish()]);
+          await timestampReadback.mapAsync(globals.GPUMapMode!.READ);
+          const timestamps = new BigUint64Array(timestampReadback.getMappedRange().slice(0));
+          timestampReadback.unmap();
+          for (const record of records) {
+            const elapsedNs = timestamps[record.end] > timestamps[record.begin] ? timestamps[record.end] - timestamps[record.begin] : 0n;
+            const elapsedMs = Number(elapsedNs) / 1_000_000;
+            if (record.layerIndex === undefined) addAggregate(record.stage, record.label, elapsedMs);
+            else addLayer(record.layerIndex, record.stage, record.label, elapsedMs);
+          }
+        } finally {
+          querySet.destroy?.();
+          resolveBuffer.destroy?.();
+          timestampReadback.destroy?.();
+        }
+      }
+      const readbackStarted = nowMs();
+      output = await readF32OutputOnce(this.device, this.layerRuntimes[this.layerRuntimes.length - 1].output, this.readbackBuffer, DEFAULT_TOKENS * DEFAULT_N);
+      const readbackSyncedMs = nowMs() - readbackStarted;
+      const profiledStageTotalMs = Array.from(aggregate.values()).reduce((sum, entry) => sum + entry.totalMs, 0);
+      return toResult(profiledStageTotalMs, readbackSyncedMs, output, 'GPU timestamp profile encodes the full encoder as one command buffer per iteration and reads timestamp queries once, avoiding per-stage queue waits. Pass boundaries are still inserted around stages, so use this for lower-perturbation attribution rather than exact route latency.');
+    }
+
     const submitAndMeasure = async (encode: (pass: ComputePassLike) => void): Promise<number> => {
       const encoder = this.device.createCommandEncoder();
       const pass = encoder.beginComputePass();
@@ -6053,34 +6173,7 @@ class Lc0WebHybridRuntime {
       readbackSyncedMs += nowMs() - readbackStarted;
     }
     const profiledStageTotalMs = Array.from(aggregate.values()).reduce((sum, entry) => sum + entry.totalMs, 0);
-    const toStageTiming = (stage: Lc0WebHybridEncoderProfileStageName, entry: { label: string; totalMs: number; iterations: number }): Lc0WebHybridEncoderProfileStageTiming => ({
-      stage,
-      label: entry.label,
-      iterations: entry.iterations,
-      totalMs: entry.totalMs,
-      avgMs: entry.totalMs / Math.max(1, entry.iterations),
-      percentOfProfiledStageMs: profiledStageTotalMs > 0 ? (entry.totalMs / profiledStageTotalMs) * 100 : 0,
-    });
-    return {
-      status: 'HYBRID_ENCODER_PROFILE_DONE',
-      packUrl: this.packUrl,
-      layers: this.layers,
-      encoderKernelVariant: this.encoderKernelVariant,
-      inputBackend: this.inputBackend,
-      warmup,
-      iterations,
-      packLoadMs: this.packLoadMs,
-      profiledStageTotalMs,
-      readbackSyncedMs,
-      outputSample: Array.from(output.slice(0, 8)),
-      aggregateStageTimings: Array.from(aggregate.entries()).map(([stage, entry]) => toStageTiming(stage, entry)).sort((a, b) => b.totalMs - a.totalMs),
-      layerTimings: byLayer.map((layer) => ({
-        layer: layer.layer,
-        totalMs: layer.totalMs,
-        stages: Array.from(layer.stages.entries()).map(([stage, entry]) => toStageTiming(stage, entry)).sort((a, b) => b.totalMs - a.totalMs),
-      })),
-      note: 'Profiling intentionally submits and waits after each stage, so totals are sync-perturbed and should be used for relative attribution rather than direct route latency.',
-    };
+    return toResult(profiledStageTotalMs, readbackSyncedMs, output, 'Sync-staged profiling intentionally submits and waits after each stage, so totals are sync-perturbed and should be used for relative attribution rather than direct route latency.');
   }
 
   async evaluate(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult> {
@@ -6383,12 +6476,14 @@ export async function runLc0WebHybridEncoderProfile(options: Lc0WebHybridEncoder
     inputBackend: options.inputBackend,
     encoderKernelVariant: options.encoderKernelVariant,
     headBackend: 'ort',
+    timestampQuery: options.profileMode !== 'sync-staged',
   });
   try {
     return await runtime.profileEncoder(options.input, {
       historyFill: options.historyFill ?? 'fen_only',
       iterations: options.iterations ?? 1,
       warmup: options.warmup ?? 1,
+      profileMode: options.profileMode ?? 'gpu-timestamp',
     });
   } finally {
     runtime.destroy();

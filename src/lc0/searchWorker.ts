@@ -46,6 +46,7 @@ import {
   type Lc0WebEncoder0FfnOrtBenchmarkResult,
   type Lc0WebHybridEvaluationResult,
   type Lc0WebHybridEncoderProfileResult,
+  type Lc0WebHybridEncoderProfileMode,
   type Lc0WebWgslDeferredReadbackBenchResult,
   type Lc0WebWgslHeadsProbeResult,
   type Lc0WebMappedPolicyProbeResult,
@@ -136,6 +137,7 @@ type HybridEncoderProfileMessage = {
   verifyShards?: boolean;
   inputBackend?: 'js' | 'wgsl' | 'wasm';
   encoderKernelVariant?: Lc0WebEncoderKernelVariant;
+  profileMode?: Lc0WebHybridEncoderProfileMode;
 };
 
 type WgslDeferredReadbackBenchmarkMessage = {
@@ -887,6 +889,7 @@ async function handleHybridEncoderProfile(message: HybridEncoderProfileMessage):
     verifyShards: message.verifyShards,
     inputBackend: message.inputBackend,
     encoderKernelVariant: message.encoderKernelVariant,
+    profileMode: message.profileMode,
   });
   post({ type: 'hybridEncoderProfileResult', id: message.id, result });
 }
