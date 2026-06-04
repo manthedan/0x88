@@ -92,7 +92,8 @@ Smoke/performance evidence:
 - Node direct-ABI smoke: `startpos depth 4` returned `bestmove=c2c4`, `scoreCp=55`, `nodes=210`, PV `c2c4 g8f6`.
 - Browser benchmark smoke on isolated static server: browser API variant, persistent mode label, `startpos depth 1`, one warm repeat completed 2 rows; cold wall `4.70ms`, warm wall `1.74ms`, runtime label `browser API`.
 - Rotated-FEN browser benchmark, persistent depth 7/8/9, 20 positions × 20 warm passes: browser API was slower than persistent WASI/UCI (`0.88x`, `0.81x`, and `0.80x` as fast by wall-clock for depths 7/8/9). See [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md).
-- Browser API history-reset smoke after fixing correction-history clearing: scalar WASI/UCI, SIMD WASI/UCI, browser API scalar, and browser API SIMD all matched exactly across the 20-position suite at depths 7/8/9 with one warm rotated pass. Browser API SIMD was comparable but slightly slower than SIMD WASI/UCI in that corrected clear-hash smoke.
+- Browser API history-reset smoke after fixing correction-history clearing: scalar WASI/UCI, SIMD WASI/UCI, browser API scalar, and browser API SIMD all matched exactly across the 20-position suite at depths 7/8/9 with one warm rotated pass.
+- Corrected full browser benchmark, persistent depth 7/8/9, 20 positions × 20 warm passes: browser API SIMD remained slower than SIMD WASI/UCI (`0.88x`, `0.87x`, and `0.98x` as fast by wall-clock for depths 7/8/9), while preserving exact fixed-depth parity. Browser API scalar was modestly faster than scalar WASI/UCI but still slower than SIMD WASI/UCI.
 
 ## Verification requirements
 
@@ -110,4 +111,4 @@ Before switching UI defaults:
 
 This path attacks the user-visible shallow-search latency that SIMD cannot fix: no UCI command formatting/parsing, no stdout capture/filtering, fewer worker messages, and a clearer route to graceful stop/reuse. It should be benchmarked separately from engine NPS because it mostly targets wall-clock adapter overhead.
 
-Current result: the first integrated browser API does **not** realize that payoff yet. It is useful as a structured-result/control-path prototype, but persistent WASI/UCI remains faster on the current rotated-FEN benchmark. Future browser API work should focus on removing the remaining WASI shim/clock dependency, reducing facade overhead, and adding true engine-side cancellation before considering it as the default.
+Current result: the integrated browser API does **not** beat the SIMD WASI/UCI path yet. It is useful as a structured-result/control-path prototype, and the corrected reset path now has exact fixed-depth parity, but SIMD WASI/UCI remains the faster production default. Future browser API work should focus on removing the remaining WASI shim/clock dependency, reducing facade overhead, and adding true engine-side cancellation before considering it as the default.
