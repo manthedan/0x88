@@ -6,6 +6,13 @@ Use `/reckless-benchmark.html` from the isolated static server after `npm run bu
 
 The harness also has a `Load 20-position rotated FEN suite` preset. Its run order keeps one engine alive per variant/mode/budget, measures a first pass over every listed position, then rotates each warm pass across the entire suite before repeating any one FEN. Raw and summary outputs track wall-clock ms, engine-reported depth, score/mate, nodes, NPS, best move, PV, runtime label, and cold/first-pass vs warm-pass rows separately. Keep score/PV fields in the JSON/CSV exports when using the page for scalar-vs-SIMD parity validation.
 
+## Current production posture
+
+- `Reckless Full SIMD` (`/reckless/reckless-simd128.wasm`) is the default Reckless variant when WebAssembly SIMD validates successfully.
+- `Reckless Full scalar fallback` (`/reckless/reckless.wasm`) remains available for browsers without SIMD support and as an implicit fallback if the default SIMD asset is missing.
+- Browser API and external-NNUE variants remain explicit experimental options; they are useful for structured-result/control and cache-lifecycle work, but do not replace SIMD WASI/UCI for production performance yet.
+- Merge/deploy readiness depends on the release pipeline publishing the ignored generated assets (`reckless.wasm` and `reckless-simd128.wasm`) and serving `.wasm` as `application/wasm` behind COOP/COEP headers for persistent isolated-worker mode.
+
 ## 2026-06-04 corrected browser API SIMD full benchmark
 
 Command surface: `/reckless-benchmark.html` after rebuilding browser API artifacts with corrected `new_game` history reset. Full scalar WASI/UCI, Full SIMD WASI/UCI, browser API scalar, and browser API SIMD variants; persistent mode only; 20-position rotated suite; depths 7/8/9; 20 warm rotated passes; clear-hash reset enabled. To avoid long-session browser tab loss, each variant was run in a fresh browser session and the extracted rows were combined.

@@ -1,18 +1,13 @@
 # Reckless WASI asset
 
-Generated `*.wasm` artifacts are intentionally not committed. Build the full/current asset locally with:
+Generated `*.wasm` and `.nnue` artifacts are intentionally not committed. Production/deploy builds that offer Reckless should generate and publish both the scalar fallback and the default SIMD artifact:
 
 ```sh
 npm run reckless:build-wasi
-```
-
-Build the SIMD candidate locally with:
-
-```sh
 npm run reckless:build-simd-wasi
 ```
 
-This writes `public/reckless/reckless-simd128.wasm` using `-C target-feature=+simd128`.
+`reckless:build-wasi` writes the scalar fallback `public/reckless/reckless.wasm`. `reckless:build-simd-wasi` writes the default `public/reckless/reckless-simd128.wasm` using `-C target-feature=+simd128` plus the wasm NNUE SIMD patch. Browser UI code selects SIMD by default when `WebAssembly.validate` confirms SIMD support and falls back to scalar when SIMD is unsupported or the implicit SIMD asset is missing.
 
 Build the browser-native API SIMD artifact with an external/cacheable NNUE asset:
 

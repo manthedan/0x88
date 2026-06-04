@@ -2,13 +2,13 @@
 
 ## SIMD build status
 
-The current SIMD candidate is built with:
+The promoted default SIMD WASI/UCI artifact is built with:
 
 ```sh
 npm run reckless:build-simd-wasi
 ```
 
-This sets `RUSTFLAGS='-C target-feature=+simd128'`, enables the local `RECKLESS_WASM_SIMD_NNUE=1` patch, and writes the ignored artifact `public/reckless/reckless-simd128.wasm`.
+This sets `RUSTFLAGS='-C target-feature=+simd128'`, enables the local `RECKLESS_WASM_SIMD_NNUE=1` patch, and writes the ignored artifact `public/reckless/reckless-simd128.wasm`. Arena and Analysis select this variant by default when the browser validates WebAssembly SIMD support; the scalar `public/reckless/reckless.wasm` remains the fallback for unsupported browsers or missing implicit SIMD assets.
 
 Earlier measurements used a first-pass auto-vectorized-only `+simd128` artifact where upstream Reckless still selected scalar NNUE source paths for `wasm32-wasip1`. The current build now patches Reckless to select its vectorized NNUE path for `wasm32 + simd128` and adds a wasm32 SIMD module using `core::arch::wasm32` intrinsics.
 
@@ -28,11 +28,11 @@ Headless browser one-shot depth-5 startpos smoke, 1 cold + 3 warm runs:
 | `reckless.wasm` | 113.4 ms | 13.7 ms | 241,415 |
 | `reckless-simd128.wasm` | 83.1 ms | 12.4 ms | 422,768 |
 
-The SIMD flag is therefore worth keeping as an experimental build/benchmark target, but the browser smoke is short and noisy; do not treat this as final product posture.
+These shallow smokes were only early sanity checks. The later rotated-FEN depth 7/8/9 benchmark and fixed-depth parity validation are the basis for promoting SIMD WASI/UCI as the production default.
 
 ## Remaining optimization tracks
 
-- **Dedicated WASM SIMD NNUE backend**: now implemented in `npm run reckless:build-simd-wasi`. The build script patches Reckless' NNUE module selection for `wasm32 + simd128` and adds a `core::arch::wasm32` SIMD module covering accumulator add/sub, `activate_ft`, sparse `propagate_l1`, `propagate_l2`, and `propagate_l3`; see [`reckless_wasm_simd_inspection.md`](./reckless_wasm_simd_inspection.md). `find_nnz` is still scalar. A rotated-FEN browser benchmark showed clear persistent depth 8/9 wins versus scalar WASI/UCI, and a follow-up fixed-depth parity validation matched scalar exactly across the 20-position suite at depths 7/8/9; see [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md).
+- **Dedicated WASM SIMD NNUE backend**: now implemented and promoted as the default production Reckless variant when WebAssembly SIMD is supported. The build script patches Reckless' NNUE module selection for `wasm32 + simd128` and adds a `core::arch::wasm32` SIMD module covering accumulator add/sub, `activate_ft`, sparse `propagate_l1`, `propagate_l2`, and `propagate_l3`; see [`reckless_wasm_simd_inspection.md`](./reckless_wasm_simd_inspection.md). `find_nnz` is still scalar. A rotated-FEN browser benchmark showed clear persistent depth 8/9 wins versus scalar WASI/UCI, and a follow-up fixed-depth parity validation matched scalar exactly across the 20-position suite at depths 7/8/9; see [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md).
 - **Threaded search**: still not implemented. The current browser/WASI path forces `Threads=1`. `@bjorn3/browser_wasi_shim` does not provide native Rust pthread-style browser execution for this build, so practical browser threading likely needs either a custom Worker search-split design or a different WASM runtime strategy. Feasibility notes are in [`reckless_threaded_wasm_feasibility.md`](./reckless_threaded_wasm_feasibility.md).
 - **wasm-opt**: tried on scalar and SIMD artifacts; see [`reckless_wasm_opt_experiment.md`](./reckless_wasm_opt_experiment.md). Binaryen `-O3`/`-O4` trims only ~0.15% raw size and ~0.01% gzip size because embedded NNUE data dominates, and a shallow browser cold one-shot smoke did not show a clear NPS win.
 - **Graceful persistent cancellation**: partially improved. The persistent adapter now sends `stop` and waits briefly before terminating the worker, so near-complete searches can return `bestmove` and keep the process reusable while the caller still receives `AbortError`. This is still not a true engine-side cancellation path: the patched wasm32 UCI loop is single-threaded and cannot reliably read `stop` while search is executing. A robust path still needs an engine-side shared abort/control flag checked from the search, or a browser-native API that exposes cancellation directly.
