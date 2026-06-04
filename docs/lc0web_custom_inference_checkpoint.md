@@ -23,6 +23,7 @@ This checkpoint records the current custom-kernel path for the batch-8 f16 `lc0w
 - `?encoderStackHeadsBench=1&encoderLayers=N&encoderStackHeads=1`: hybrid end-to-end probe that feeds the custom WGSL encoder-stack output into tiny f32 ONNX/ORT policy and WDL value heads. The policy head covers the main 64×64 move-logit matmul path plus the promotion slice/add/remap path to the final 1858 LC0 policy logits.
 - `?runtime=hybrid` / `?hybridEvaluator=1`: worker-owned production evaluator wiring for the lc0web pack. It builds the real `/input/planes` → `/attn_body` activation from LC0 112-plane input, runs the full custom WGSL encoder stack, then runs the tiny f32 ONNX/ORT mapped-policy + WDL heads and feeds the resulting 1858 logits through the normal legal-prior adapter. A persistent evaluator caches the loaded pack tensor views, encoder GPU buffers/bind groups/pipelines, ORT head session, and a WGSL smolgen-bias subgraph across evaluations.
 - `?hybridDrift=1&encoderLayers=10&hybridDriftLimit=N`: browser fixture route used by `npm run lc0:browser-hybrid-drift` to dump hybrid evaluations for native BLAS fixtures so policy/WDL drift can be compared against f32 ONNX and native LC0 BLAS.
+- `?hybridSearchBench=1&runtime=hybrid&visits=N`: bounded browser route used by `npm run lc0:browser-hybrid-search-bench` to measure cached hybrid warm-eval latency plus fixed-visit PUCT latency/visits-per-second without promoting the backend.
 - `?encoderPrefix=/encoderN`: experimental tensor-prefix override for attention-output/FFN/full-block routes so the same plumbing can target later encoder layers.
 
 The browser page now emits a `benchmarkReport` object with browser metadata, GPU adapter info where available, pack verification mode, and timing summaries. Full encoder0 WGSL block results also include per-stage diagnostic timings for QKV projection, attention scores, softmax, attention value, output projection + ln1, FFN dense1, FFN dense2 + residual, and ln2. Matmul-style block kernels now upload QKV/output/FFN weights transposed and use small tiled workgroups for QKV, output projection, and both FFN dense layers so each block reuses activation/weight tiles instead of every output invocation walking the full K dimension alone. The shared ln1/ln2 WGSL now uses one token workgroup with a 64-lane parallel mean/variance reduction instead of one serial invocation per token. When Chromium exposes WebGPU `timestamp-query`, the encoder0 block route also reports a GPU timestamp duration for the attention+FFN command sequence. `scripts/lc0_browser_wgsl_smokes.mjs` automates the main browser smokes, parses `maxAbsError`, and surfaces encoder-block stage/timestamp timings when present. `scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs` runs fresh-session, alternating encoder0-block WGSL vs ORT WebGPU measurements and marks results as non-promotional diagnostics.
@@ -72,6 +73,10 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
 - `npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 4 --timeout 60000 --wgsl-iters 3 --ort-iters 3`
   - Repeated fresh Chromium/WebGPU alternating run after hybrid runtime caching; ORT reported WebGPU provider present in all 4 ORT rows.
   - Representative sample medians were WGSL synchronized readback/block about `1.10 ms` and ORT WebGPU average/run about `1.30 ms` (`ratioWgslOverOrt ≈ 0.85`); still measurement-only, not promotion evidence.
+- Remote Mac mini bounded harness check: `npm run lc0:browser-hybrid-search-bench -- --visits 32 --eval-iters 3 --eval-warmup 1 --search-iters 3 --search-warmup 1 --timeout 300000`
+  - `HYBRID_SEARCH_BENCH_DONE` via `lc0web-wgsl-encoder-ort-heads`; best move `d2d4`.
+  - Warm cached eval mean about `36.4 ms`; fixed 32-visit PUCT search mean about `1150.4 ms` (`27.8 visits/s`). This is a harness/bottleneck baseline, not promotion evidence.
+  - Post-run process check showed no Chrome/Vite process left; only the small agent-browser helper remained and was killed manually.
 
 Validation commands used during this checkpoint:
 
@@ -93,6 +98,8 @@ npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-10-wasm --ti
 npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-heads-2-wasm --timeout 120000
 npm run lc0:browser-hybrid-drift -- --no-server --limit 3 --timeout 180000
 npm run lc0:browser-hybrid-drift -- --limit 9 --timeout 300000
+npm run lc0:browser-hybrid-search-bench -- --dry-run --visits 8 --eval-iters 1 --search-iters 1
+npm run lc0:browser-hybrid-search-bench -- --visits 32 --eval-iters 3 --eval-warmup 1 --search-iters 3 --search-warmup 1 --timeout 300000
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --dry-run --samples 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 10 --timeout 25000 --wgsl-iters 3 --ort-iters 3

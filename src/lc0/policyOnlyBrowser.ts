@@ -577,7 +577,8 @@ const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('
 const KERNEL_PROBE_REQUESTED = ENCODER_STACK_BENCH_REQUESTED || ENCODER0_BLOCK_ORT_BENCH_REQUESTED || ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_ORT_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_ORT_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
-const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
+const HYBRID_SEARCH_BENCH_REQUESTED = params.get('hybridSearchBench') === '1' || params.get('hybridSearchBenchmark') === '1';
+const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
@@ -935,15 +936,18 @@ function sampleTimingStats(samples: number[], source: string): Record<string, un
   const trimmed = finite.slice(trim, finite.length - trim || finite.length);
   const mean = finite.reduce((sum, value) => sum + value, 0) / finite.length;
   const trimmedMean = trimmed.reduce((sum, value) => sum + value, 0) / trimmed.length;
+  const p50 = percentile(0.5);
+  const p95 = percentile(0.95);
   return {
     source,
     sampleCount: finite.length,
     meanMs: roundReportMs(mean),
     trimmedMeanMs: roundReportMs(trimmedMean),
-    p50Ms: roundReportMs(percentile(0.5)),
-    p95Ms: roundReportMs(percentile(0.95)),
+    p50Ms: roundReportMs(p50),
+    p95Ms: roundReportMs(p95),
     minMs: roundReportMs(finite[0]),
     maxMs: roundReportMs(finite[finite.length - 1]),
+    outlierCount: finite.filter((value) => value > p95).length,
   };
 }
 
@@ -1819,6 +1823,16 @@ async function runKernelProbe(): Promise<void> {
   }
 }
 
+function boundedQueryInt(names: string[], fallback: number, min: number, max: number): number {
+  for (const name of names) {
+    const raw = params.get(name);
+    if (raw === null) continue;
+    const value = Math.floor(Number(raw));
+    if (Number.isFinite(value)) return Math.min(max, Math.max(min, value));
+  }
+  return fallback;
+}
+
 async function runWorkerEvalBenchmark(): Promise<void> {
   if (!searchWorkerReady) throw new Error('benchmark requires ready LC0 worker');
   const input = currentEvaluationInput();
@@ -1857,6 +1871,98 @@ async function runWorkerEvalBenchmark(): Promise<void> {
   } catch (error) {
     el('benchResult').textContent = `BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Benchmark failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runHybridSearchBenchmark(): Promise<void> {
+  if (!searchWorkerReady) throw new Error('hybrid search benchmark requires ready LC0 worker');
+  const input = currentEvaluationInput();
+  const evalWarmup = boundedQueryInt(['hybridEvalBenchWarmup', 'evalWarmup'], 1, 0, 20);
+  const evalIterations = boundedQueryInt(['hybridEvalBenchIters', 'evalIters'], 3, 1, 100);
+  const searchWarmup = boundedQueryInt(['hybridSearchWarmup', 'searchWarmup'], 1, 0, 10);
+  const searchIterations = boundedQueryInt(['hybridSearchIters', 'searchIters'], 3, 1, 50);
+  const evalTimes: number[] = [];
+  const searchTimes: number[] = [];
+  let lastEval: BrowserEvaluationChoice | undefined;
+  let lastSearch: RenderableSearchResult | undefined;
+  setBusy(true, `Benchmarking hybrid LC0 eval/search: ${evalIterations} evals + ${searchIterations} searches at ${searchVisits} visits…`);
+  el('benchResult').textContent = 'HYBRID_SEARCH_BENCH_RUNNING';
+  try {
+    for (let i = 0; i < evalWarmup; i++) {
+      lastEval = await evaluateWithWorker(input);
+      el('benchResult').textContent = `HYBRID_SEARCH_BENCH_EVAL_WARMUP ${i + 1}/${evalWarmup}`;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    for (let i = 0; i < evalIterations; i++) {
+      const started = performance.now();
+      lastEval = await evaluateWithWorker(input);
+      evalTimes.push(performance.now() - started);
+      el('benchResult').textContent = `HYBRID_SEARCH_BENCH_EVAL_TIMED ${i + 1}/${evalIterations}`;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    for (let i = 0; i < searchWarmup; i++) {
+      const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
+        type: 'search', input, visits: searchVisits, batchSize: searchBatchSize, multiPv: searchMultiPv,
+      });
+      lastSearch = response.result;
+      el('benchResult').textContent = `HYBRID_SEARCH_BENCH_SEARCH_WARMUP ${i + 1}/${searchWarmup}`;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    for (let i = 0; i < searchIterations; i++) {
+      const started = performance.now();
+      const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
+        type: 'search', input, visits: searchVisits, batchSize: searchBatchSize, multiPv: searchMultiPv,
+      });
+      lastSearch = response.result;
+      searchTimes.push(performance.now() - started);
+      el('benchResult').textContent = `HYBRID_SEARCH_BENCH_SEARCH_TIMED ${i + 1}/${searchIterations}`;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    const totalSearchMs = searchTimes.reduce((sum, value) => sum + value, 0);
+    const result = {
+      status: 'HYBRID_SEARCH_BENCH_DONE',
+      backend: searchWorkerBackend,
+      packUrl: PACK_URL,
+      model: MODEL_URL,
+      layers: boundedQueryInt(['encoderLayers', 'layers'], 10, 1, 32),
+      browserInfo: browserReportInfo(),
+      workerInitMs: roundReportMs(searchWorkerInitMs),
+      requestedEp: requestedWorkerEp(),
+      packVerification: params.get('packVerify') === '0' ? 'disabled' : 'enabled',
+      visits: searchVisits,
+      batchSize: searchBatchSize,
+      multiPv: searchMultiPv,
+      eval: {
+        warmup: evalWarmup,
+        iterations: evalIterations,
+        timingStats: sampleTimingStats(evalTimes, 'hybrid warm eval round trips'),
+        timesMs: evalTimes.map((time) => roundReportMs(time)),
+        bestMove: lastEval?.move,
+        q: lastEval?.evaluation.q === undefined ? undefined : Number(lastEval.evaluation.q.toFixed(8)),
+        mlh: lastEval?.evaluation.mlh === undefined ? undefined : Number(lastEval.evaluation.mlh.toFixed(3)),
+      },
+      search: {
+        warmup: searchWarmup,
+        iterations: searchIterations,
+        timingStats: sampleTimingStats(searchTimes, 'hybrid fixed-visit search round trips'),
+        timesMs: searchTimes.map((time) => roundReportMs(time)),
+        visitsPerSecond: Number(((searchVisits * searchIterations) / Math.max(1e-9, totalSearchMs / 1000)).toFixed(3)),
+        bestMove: lastSearch?.move,
+        value: lastSearch?.value === undefined ? undefined : Number(lastSearch.value.toFixed(8)),
+        pv: lastSearch?.pv,
+        stats: lastSearch?.stats,
+      },
+    };
+    el('benchResult').textContent = JSON.stringify(result);
+    const evalMean = (result.eval.timingStats?.meanMs as number | undefined) ?? 0;
+    const searchMean = (result.search.timingStats?.meanMs as number | undefined) ?? 0;
+    el('message').textContent = `HYBRID_SEARCH_BENCH_DONE eval ${evalMean.toFixed(1)} ms · search ${searchMean.toFixed(1)} ms · ${result.search.visitsPerSecond.toFixed(1)} visits/s · ${searchWorkerBackend}`;
+  } catch (error) {
+    el('benchResult').textContent = `HYBRID_SEARCH_BENCH_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Hybrid search benchmark failed: ${(error as Error).message}`;
     throw error;
   } finally {
     setBusy(false);
@@ -2435,6 +2541,10 @@ async function init() {
       : 'Ready. Drag a legal move or ask the engine to move.';
     if (HYBRID_DRIFT_REQUESTED) {
       await runHybridDriftFixtures();
+      return;
+    }
+    if (HYBRID_SEARCH_BENCH_REQUESTED) {
+      await runHybridSearchBenchmark();
       return;
     }
     if (BENCH_REQUESTED) await runWorkerEvalBenchmark();

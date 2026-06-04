@@ -72,6 +72,7 @@
     "lc0:drift-sweep": "node --experimental-strip-types scripts/lc0_drift_sweep.mjs",
     "lc0:browser-wgsl-smokes": "node --experimental-strip-types scripts/lc0_browser_wgsl_smokes.mjs",
     "lc0:browser-hybrid-drift": "node --experimental-strip-types scripts/lc0_browser_hybrid_drift.mjs",
+    "lc0:browser-hybrid-search-bench": "node --experimental-strip-types scripts/lc0_browser_hybrid_search_bench.mjs",
     "lc0:browser-wgsl-vs-ort-webgpu": "node --experimental-strip-types scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs",
     "lc0:battle": "node --experimental-strip-types scripts/lc0_engine_battle.mjs",
     "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs"
