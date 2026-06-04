@@ -14,7 +14,7 @@ import { loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
-import { RecklessEngine } from './recklessEngine.ts';
+import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
 import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -156,7 +156,8 @@ function renderRecklessRuntimeInfo(): void {
   const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
   const targetUrl = status?.wasmUrl ?? variant.wasmUrl;
   const assetUrlText = variant.nnueUrl ? `${targetUrl} + ${variant.nnueUrl}` : targetUrl;
-  el('recklessRuntimeInfo').textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${assetUrlText}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, reckless:build-browser-api-simd-external, or reckless:build-lite-wasi' : ''}`;
+  const loadText = formatRecklessBrowserApiLoadStatus(status?.browserApiLoad);
+  el('recklessRuntimeInfo').textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${assetUrlText}${loadText ? ` · ${loadText}` : ''}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, reckless:build-browser-api-simd-external, or reckless:build-lite-wasi' : ''}`;
 }
 
 function refreshRecklessVariantUi(): void {
@@ -188,7 +189,7 @@ function prewarmReckless(): void {
 function getReckless(): RecklessEngine {
   if (!reckless) {
     const variant = selectedRecklessVariant();
-    reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl });
+    reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, onStatus: renderRecklessRuntimeInfo });
     prewarmReckless();
   }
   return reckless;
@@ -551,7 +552,7 @@ function wireEvents() {
     reckless = null;
     if (useReckless()) {
       const variant = selectedRecklessVariant();
-      reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl });
+      reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, onStatus: renderRecklessRuntimeInfo });
       prewarmReckless();
     }
     lineCache.delete(tree.current.fen);

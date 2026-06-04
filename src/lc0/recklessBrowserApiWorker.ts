@@ -57,6 +57,10 @@ const nnueCache = new Map<string, Promise<ArrayBuffer>>();
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+function nowMs(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
 function postOk(id: number, payload: Record<string, unknown> = {}): void {
   postMessage({ type: 'ok', id, ...payload });
 }
@@ -65,17 +69,31 @@ function postError(id: number, error: unknown): void {
   postMessage({ type: 'error', id, error: error instanceof Error ? error.message : String(error) });
 }
 
-async function compileModule(wasmUrl: string): Promise<WebAssembly.Module> {
+function postStatus(id: number, phase: string, details: Record<string, unknown> = {}): void {
+  postMessage({ type: 'status', id, phase, ...details });
+}
+
+async function compileModule(wasmUrl: string, id: number): Promise<WebAssembly.Module> {
   const existing = moduleCache.get(wasmUrl);
-  if (existing) return existing;
+  if (existing) {
+    postStatus(id, 'wasm-module-cache-hit', { url: wasmUrl });
+    return existing;
+  }
+  const started = nowMs();
+  postStatus(id, 'wasm-fetch', { url: wasmUrl });
   const promise = fetch(wasmUrl, { cache: 'force-cache' })
     .then(async (response) => {
       if (!response.ok) throw new Error(`failed to fetch Reckless browser API module ${wasmUrl}: HTTP ${response.status}`);
+      postStatus(id, 'wasm-compile', { url: wasmUrl, elapsedMs: nowMs() - started });
       try {
         return await WebAssembly.compileStreaming(response.clone());
       } catch {
         return WebAssembly.compile(await response.arrayBuffer());
       }
+    })
+    .then((module) => {
+      postStatus(id, 'wasm-ready', { url: wasmUrl, elapsedMs: nowMs() - started });
+      return module;
     })
     .catch((error) => {
       moduleCache.delete(wasmUrl);
@@ -85,13 +103,51 @@ async function compileModule(wasmUrl: string): Promise<WebAssembly.Module> {
   return promise;
 }
 
-async function fetchNnue(nnueUrl: string): Promise<ArrayBuffer> {
+async function readResponseWithProgress(response: Response, id: number, phase: string, url: string, started: number): Promise<ArrayBuffer> {
+  const totalBytes = Number(response.headers.get('content-length')) || undefined;
+  if (!response.body) {
+    const bytes = await response.arrayBuffer();
+    postStatus(id, `${phase}-ready`, { url, loadedBytes: bytes.byteLength, totalBytes: totalBytes ?? bytes.byteLength, elapsedMs: nowMs() - started });
+    return bytes;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let loadedBytes = 0;
+  let lastProgressMs = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    chunks.push(value);
+    loadedBytes += value.byteLength;
+    const current = nowMs();
+    if (current - lastProgressMs > 250 || (totalBytes && loadedBytes >= totalBytes)) {
+      lastProgressMs = current;
+      postStatus(id, phase, { url, loadedBytes, totalBytes, elapsedMs: current - started });
+    }
+  }
+  const out = new Uint8Array(loadedBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  postStatus(id, `${phase}-ready`, { url, loadedBytes, totalBytes: totalBytes ?? loadedBytes, elapsedMs: nowMs() - started });
+  return out.buffer;
+}
+
+async function fetchNnue(nnueUrl: string, id: number): Promise<ArrayBuffer> {
   const existing = nnueCache.get(nnueUrl);
-  if (existing) return existing;
+  if (existing) {
+    postStatus(id, 'nnue-memory-cache-hit', { url: nnueUrl });
+    return existing;
+  }
+  const started = nowMs();
+  postStatus(id, 'nnue-fetch', { url: nnueUrl });
   const promise = fetch(nnueUrl, { cache: 'force-cache' })
     .then(async (response) => {
       if (!response.ok) throw new Error(`failed to fetch Reckless NNUE asset ${nnueUrl}: HTTP ${response.status}`);
-      return response.arrayBuffer();
+      return readResponseWithProgress(response, id, 'nnue-fetch', nnueUrl, started);
     })
     .catch((error) => {
       nnueCache.delete(nnueUrl);
@@ -127,22 +183,24 @@ function nullStdout(): ConsoleStdout {
   return new ConsoleStdout(() => undefined);
 }
 
-async function ensureState(wasmUrl: string, hashMb = 16, nnueUrl?: string): Promise<ApiState> {
+async function ensureState(wasmUrl: string, hashMb = 16, nnueUrl: string | undefined, id: number): Promise<ApiState> {
   if (state && state.wasmUrl === wasmUrl && state.nnueUrl === nnueUrl) {
     if (state.hashMb !== hashMb) {
       check(state.exports, state.exports.reckless_api_resize_hash(state.handle, hashMb));
       state.hashMb = hashMb;
     }
+    postStatus(id, 'engine-state-cache-hit', { url: wasmUrl, nnueUrl });
     return state;
   }
   if (state) state.exports.reckless_api_free(state.handle);
-  const module = await compileModule(wasmUrl);
+  const module = await compileModule(wasmUrl, id);
   const wasiInstance = new WASI(
     ['reckless-browser-api'],
     [],
     [new OpenFile(new File([])), nullStdout(), nullStdout(), new PreopenDirectory('.', new Map())],
     { debug: false },
   );
+  postStatus(id, 'wasm-instantiate', { url: wasmUrl });
   const instance = await WebAssembly.instantiate(module, { wasi_snapshot_preview1: wasiInstance.wasiImport });
   wasiInstance.initialize(instance as WebAssembly.Instance & { exports: { memory: WebAssembly.Memory; _initialize?: () => unknown } });
   assertApiExports(instance.exports);
@@ -150,12 +208,14 @@ async function ensureState(wasmUrl: string, hashMb = 16, nnueUrl?: string): Prom
   const handle = nnueUrl
     ? await (async () => {
       if (!exports.reckless_api_new_with_network) throw new Error('Reckless browser API external-NNUE export missing: reckless_api_new_with_network');
-      const bytes = new Uint8Array(await fetchNnue(nnueUrl));
+      const bytes = new Uint8Array(await fetchNnue(nnueUrl, id));
+      postStatus(id, 'nnue-copy', { url: nnueUrl, loadedBytes: bytes.byteLength, totalBytes: bytes.byteLength });
       return withBytes(exports, bytes, (ptr, len) => exports.reckless_api_new_with_network!(hashMb, ptr, len));
     })()
     : exports.reckless_api_new(hashMb);
   if (!handle) throw new Error(globalErrorString(exports) || 'Reckless browser API returned a null engine handle');
   state = { wasmUrl, nnueUrl, exports, handle, hashMb };
+  postStatus(id, 'ready', { url: wasmUrl, nnueUrl });
   return state;
 }
 
@@ -211,7 +271,7 @@ async function handleMessage(message: ApiMessage): Promise<void> {
     state = null;
     return;
   }
-  const api = await ensureState(message.wasmUrl, message.hashMb ?? 16, message.nnueUrl);
+  const api = await ensureState(message.wasmUrl, message.hashMb ?? 16, message.nnueUrl, message.id);
   if (message.type === 'prewarm') {
     postOk(message.id);
     return;

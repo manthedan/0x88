@@ -46,6 +46,7 @@ The local WASI build script can already swap the model and `L1_SIZE` at build ti
 3. Expose browser API initialization that accepts a network buffer or a URL-fetched buffer in the worker. ✅ `reckless_api_new_with_network` plus worker `nnueUrl` support.
 4. Cache the fetched `ArrayBuffer` and `WebAssembly.Module` per variant URL; create lightweight engine handles against the shared parameters. ✅ module and NNUE `force-cache` maps are in the browser API worker.
 5. Verify parity against embedded full NNUE for the same bytes before making external NNUE a default option. ⏳ external variant remains experimental until smoke/parity results are recorded.
+6. Harden delivery UX. ✅ the browser API worker now reports WASM/NNUE load phases and byte progress to Arena/Analysis runtime text; the isolated static server serves `.nnue` as `application/octet-stream` with long-lived immutable caching for hash-named network files.
 
 Initial local build commands:
 
@@ -65,3 +66,10 @@ Initial smoke/build evidence: [`reckless_external_nnue_smoke_2026-06-04.json`](.
 | `reckless-v60-7f587dfb.nnue` | 63,266,880 | Separate cacheable full NNUE payload. |
 
 Depth-4 browser smoke on startpos loaded the external NNUE artifact successfully and returned `c2c4` with 210 nodes for both cold and warm runs. This is only a loading/parity smoke; deeper rotated-FEN parity should come before promoting the external option beyond experimental.
+
+## Delivery notes
+
+- Use stable, content- or network-hash-named `.nnue` URLs. The current `reckless-v60-7f587dfb.nnue` filename is suitable for long-lived immutable cache headers because replacing the network should change the URL.
+- Keep generated `.wasm` URLs versioned before using very long cache lifetimes; the local isolated static server uses a shorter cache lifetime for non-`assets/` `.wasm` files to avoid stale rebuilds during experiments.
+- The external variant reduces repeat-update download pressure: a browser that already has the full NNUE cached only needs the ~1.26 MB WASM when browser-API code changes.
+- First-use download bytes remain roughly unchanged versus embedded full artifacts unless the page lazy-loads Reckless only after the user selects it, or serves a smaller model.

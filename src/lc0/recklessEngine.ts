@@ -9,6 +9,15 @@ export interface RecklessOptions {
   hashMb?: number;
 }
 
+export interface RecklessBrowserApiLoadStatus {
+  phase: string;
+  url?: string;
+  nnueUrl?: string;
+  loadedBytes?: number;
+  totalBytes?: number;
+  elapsedMs?: number;
+}
+
 export interface RecklessRuntimeOptions {
   /** Runtime backend. WASI/UCI is the stable default; browser-api is an experimental direct-call path. */
   backend?: 'wasi' | 'browser-api';
@@ -18,6 +27,8 @@ export interface RecklessRuntimeOptions {
   disablePersistentFallback?: boolean;
   /** Optional external NNUE asset URL for browser-api builds that do not embed network data. */
   nnueUrl?: string;
+  /** Called when the browser API worker reports load/progress status. */
+  onStatus?: () => void;
 }
 
 export interface RecklessRuntimeStatus {
@@ -26,6 +37,8 @@ export interface RecklessRuntimeStatus {
   persistentDisabled: boolean;
   forceOneShot: boolean;
   wasmUrl: string;
+  nnueUrl?: string;
+  browserApiLoad?: RecklessBrowserApiLoadStatus;
 }
 
 export const DEFAULT_RECKLESS_WASM_URL = '/reckless/reckless.wasm';
@@ -68,6 +81,7 @@ interface BrowserApiSearchResult {
 
 type Pending = { resolve: (result: RunResult) => void; reject: (error: Error) => void };
 type BrowserApiPending = { resolve: (result: BrowserApiSearchResult | null) => void; reject: (error: Error) => void };
+type BrowserApiWorkerMessage = { type: string; id: number; result?: BrowserApiSearchResult; error?: string } & Partial<RecklessBrowserApiLoadStatus>;
 type PersistentPending = Pending & {
   stdout: string[];
   stderr: string[];
@@ -127,6 +141,24 @@ export function canUsePersistentRecklessWasi(): boolean {
   return typeof SharedArrayBuffer !== 'undefined' && (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+export function formatRecklessBrowserApiLoadStatus(status: RecklessBrowserApiLoadStatus | undefined): string {
+  if (!status) return '';
+  const parts = [`load ${status.phase}`];
+  if (status.loadedBytes !== undefined && status.totalBytes !== undefined && status.totalBytes > 0) {
+    const pct = Math.min(100, Math.max(0, (status.loadedBytes / status.totalBytes) * 100));
+    parts.push(`${formatBytes(status.loadedBytes)}/${formatBytes(status.totalBytes)} ${pct.toFixed(0)}%`);
+  } else if (status.loadedBytes !== undefined) {
+    parts.push(formatBytes(status.loadedBytes));
+  }
+  if (status.elapsedMs !== undefined) parts.push(`${status.elapsedMs.toFixed(0)}ms`);
+  return parts.join(' · ');
+}
+
 /**
  * Browser adapter for Reckless' Rust/WASI build.
  *
@@ -154,6 +186,7 @@ export class RecklessEngine {
   private options: RecklessOptions;
   private readonly wasmUrl: string;
   private readonly runtimeOptions: RecklessRuntimeOptions;
+  private browserApiLoadStatus: RecklessBrowserApiLoadStatus | null = null;
   private lastInfoLines: StockfishInfoLine[] = [];
 
   constructor(options: RecklessOptions = {}, wasmUrl = DEFAULT_RECKLESS_WASM_URL, runtimeOptions: RecklessRuntimeOptions = {}) {
@@ -188,8 +221,21 @@ export class RecklessEngine {
     if (this.worker && this.workerMode === 'browser-api') return this.worker;
     this.disposeWorker();
     const worker = new Worker(new URL('./recklessBrowserApiWorker.ts', import.meta.url), { type: 'module', name: 'reckless-browser-api' });
+    this.browserApiLoadStatus = null;
     worker.onmessage = (event: MessageEvent) => {
-      const message = event.data as { type: string; id: number; result?: BrowserApiSearchResult; error?: string };
+      const message = event.data as BrowserApiWorkerMessage;
+      if (message.type === 'status') {
+        this.browserApiLoadStatus = {
+          phase: message.phase ?? 'unknown',
+          url: message.url,
+          nnueUrl: message.nnueUrl,
+          loadedBytes: message.loadedBytes,
+          totalBytes: message.totalBytes,
+          elapsedMs: message.elapsedMs,
+        };
+        this.runtimeOptions.onStatus?.();
+        return;
+      }
       const pending = this.browserApiPending.get(message.id);
       if (!pending) return;
       this.browserApiPending.delete(message.id);
@@ -272,6 +318,7 @@ export class RecklessEngine {
     this.persistentMultipvCommand = null;
     this.persistentMinimalCommand = null;
     this.persistentPositionCommand = null;
+    if (this.workerMode !== 'browser-api') this.browserApiLoadStatus = null;
   }
 
   private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -526,6 +573,8 @@ export class RecklessEngine {
       persistentDisabled: this.persistentDisabled,
       forceOneShot: this.runtimeOptions.forceOneShot === true,
       wasmUrl: this.wasmUrl,
+      nnueUrl: this.runtimeOptions.nnueUrl,
+      browserApiLoad: this.browserApiLoadStatus ?? undefined,
     };
   }
 
