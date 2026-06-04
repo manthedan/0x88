@@ -87,6 +87,7 @@ type SearchMessage = {
   movetimeMs?: number;
   batchSize?: number;
   batchCollisionMode?: SearchBatchCollisionMode;
+  batchPipelineDepth?: number;
   multiPv?: number;
   reuseTree?: boolean;
   earlyStop?: SearchEarlyStop;
@@ -823,6 +824,7 @@ async function handleSearch(message: SearchMessage): Promise<void> {
       movetimeMs: message.movetimeMs,
       batchSize: message.batchSize ?? 1,
       batchCollisionMode: message.batchCollisionMode,
+      batchPipelineDepth: message.batchPipelineDepth,
       multiPv: message.multiPv,
       reuseTree: message.reuseTree,
       earlyStop: message.earlyStop,

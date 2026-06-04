@@ -6449,18 +6449,25 @@ class Lc0WebHybridRuntime {
 
   async evaluateWgslBatchesDeferredReadback(batches: Lc0EvaluatorInput[][], options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult[][]> {
     if (this.headBackend !== 'wgsl') throw new Error('deferred readback benchmark requires the WGSL-head backend');
-    const out: Lc0WebHybridEvaluationResult[][] = [];
-    let pending: SubmittedWgslHybridBatch | undefined;
+    const out: Lc0WebHybridEvaluationResult[][] = new Array(batches.length);
+    let pending: { index: number; submitted: SubmittedWgslHybridBatch } | undefined;
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
-      if (!batch.length) continue;
+      if (!batch.length) {
+        if (pending) {
+          out[pending.index] = await this.finishWgslBatch(pending.submitted, options, 'deferred-double-buffered');
+          pending = undefined;
+        }
+        out[i] = [];
+        continue;
+      }
       const readbackBuffer = this.ensureWgslDeferredReadbackBuffer(batch.length, i % 2);
       const submitted = this.submitWgslBatch(batch, options, readbackBuffer);
-      if (pending) out.push(await this.finishWgslBatch(pending, options, 'deferred-double-buffered'));
-      pending = submitted;
+      if (pending) out[pending.index] = await this.finishWgslBatch(pending.submitted, options, 'deferred-double-buffered');
+      pending = { index: i, submitted };
     }
-    if (pending) out.push(await this.finishWgslBatch(pending, options, 'deferred-double-buffered'));
-    return out;
+    if (pending) out[pending.index] = await this.finishWgslBatch(pending.submitted, options, 'deferred-double-buffered');
+    return out.map((batch) => batch ?? []);
   }
 
   destroy(): void {
@@ -6685,6 +6692,17 @@ export class Lc0WebHybridEvaluator {
         historyFill: this.historyFill,
         policyTemperature: this.policyTemperature,
       });
+    });
+  }
+
+  async evaluateBatchSequence(batches: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> {
+    return this.enqueueEvaluation(async () => {
+      const runtime = await this.runtime();
+      const options = { historyFill: this.historyFill, policyTemperature: this.policyTemperature };
+      if (this.headBackend === 'wgsl' && this.wgslBatchMode === 'physical' && batches.length > 1) return runtime.evaluateWgslBatchesDeferredReadback(batches, options);
+      const out: Lc0Evaluation[][] = [];
+      for (const batch of batches) out.push(await runtime.evaluateBatch(batch, options));
+      return out;
     });
   }
 

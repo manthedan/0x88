@@ -772,6 +772,7 @@ function clampFloat(value: string | null, min: number, max: number, fallback: nu
 let playerSide: 'white' | 'black' = params.get('side') === 'black' ? 'black' : 'white';
 let searchVisits = clampInt(params.get('visits') ?? '32', 1, 100000, 32);
 let searchBatchSize = clampInt(params.get('batch') ?? params.get('batchSize') ?? '1', 1, 512, 1);
+let searchBatchPipelineDepth = clampInt(params.get('batchPipelineDepth') ?? params.get('pipelineDepth') ?? '1', 1, 16, 1);
 let searchBatchCollisionMode: SearchBatchCollisionMode = parseBatchCollisionMode(params.get('collision') ?? params.get('batchCollisionMode'));
 let searchMultiPv = clampInt(params.get('multipv') ?? params.get('multiPv') ?? '1', 1, 20, 1);
 let searchEarlyStop: SearchEarlyStop = parseEarlyStop(params.get('earlyStop') ?? params.get('stop'));
@@ -933,6 +934,7 @@ function currentSearchOptions(extra: Partial<Lc0SearchOptions> = {}): Lc0SearchO
   return {
     ...(searchMovetimeMs > 0 ? { movetimeMs: searchMovetimeMs } : { visits: searchVisits }),
     batchSize: searchBatchSize,
+    batchPipelineDepth: searchBatchPipelineDepth,
     batchCollisionMode: searchBatchCollisionMode,
     multiPv: searchMultiPv,
     earlyStop: searchEarlyStop,
@@ -954,7 +956,8 @@ function renderStatic() {
   el('backend').textContent = WORKER_ONLY_MODEL && searchWorkerReady ? searchWorkerBackend : describeOrtBackendConfig();
   el('status').textContent = PACK_PROBE_REQUESTED ? 'pack probe' : evaluationAvailable() ? 'ready' : 'loading';
   el('searchMode').textContent = searchModeLabel();
-  el('searchBatch').textContent = searchEarlyStop === 'none' ? `${searchBatchSize} · ${searchBatchCollisionMode} · ${searchCpuctSchedule}` : `${searchBatchSize} · ${searchBatchCollisionMode} · ${searchCpuctSchedule} · ${searchEarlyStop}`;
+  const pipelineText = searchBatchPipelineDepth > 1 ? ` · pipe${searchBatchPipelineDepth}` : '';
+  el('searchBatch').textContent = searchEarlyStop === 'none' ? `${searchBatchSize}${pipelineText} · ${searchBatchCollisionMode} · ${searchCpuctSchedule}` : `${searchBatchSize}${pipelineText} · ${searchBatchCollisionMode} · ${searchCpuctSchedule} · ${searchEarlyStop}`;
   el('searchMove').textContent = `Search ${currentSearchLimitLabel()}`;
   el('engineMove').toggleAttribute('disabled', busy || !evaluationAvailable());
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
@@ -2291,6 +2294,20 @@ function aggregateSearchStats(samples: SearchStatsSnapshot[]) {
   }, {});
   const evalBatchItems = Object.entries(evalBatchSizeHistogram).reduce((total, [size, count]) => total + Number(size) * count, 0);
   const evalBatchCalls = Object.values(evalBatchSizeHistogram).reduce((total, count) => total + count, 0);
+  const evalBackendTimingSamples = sum('evalBackendTimingSamples');
+  const evalBackendTimingPositions = sum('evalBackendTimingPositions');
+  const evalBackendTimingTotals = samples.reduce<Record<string, number>>((totals, stats) => {
+    for (const [key, value] of Object.entries(stats.evalBackendTimingTotals ?? {})) {
+      if (typeof value === 'number' && Number.isFinite(value)) totals[key] = (totals[key] ?? 0) + value;
+    }
+    return totals;
+  }, {});
+  const evalBackendTimingMeans = evalBackendTimingSamples > 0
+    ? Object.fromEntries(Object.entries(evalBackendTimingTotals).map(([key, value]) => [key, roundReportMs(value / evalBackendTimingSamples)]))
+    : undefined;
+  const evalBackendTimingPerPositionMeans = evalBackendTimingPositions > 0
+    ? Object.fromEntries(Object.entries(evalBackendTimingTotals).map(([key, value]) => [key, roundReportMs(value / evalBackendTimingPositions)]))
+    : undefined;
   return {
     samples: samples.length,
     rootReusedCount,
@@ -2307,6 +2324,11 @@ function aggregateSearchStats(samples: SearchStatsSnapshot[]) {
     terminalHits: sum('terminalHits'),
     batchLeafCollisions: sum('batchLeafCollisions'),
     batchLeafRetries: sum('batchLeafRetries'),
+    evalBackendTimingSamples,
+    evalBackendTimingPositions,
+    evalBackendTimingTotals: roundedNumericRecord(evalBackendTimingTotals),
+    evalBackendTimingMeans,
+    evalBackendTimingPerPositionMeans,
     requestedVisits: sum('requestedVisits'),
     stopReasons: samples.reduce<Record<string, number>>((counts, stats) => {
       const reason = stats.stopReason ?? 'unknown';
@@ -2473,7 +2495,7 @@ async function runHybridSearchBenchmark(): Promise<void> {
     for (let i = 0; i < searchWarmup; i++) {
       if (resetBetweenSearches) await resetSearchTreeState();
       const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
-        type: 'search', input, visits: searchVisits, batchSize: searchBatchSize, multiPv: searchMultiPv, reuseTree,
+        type: 'search', input, visits: searchVisits, batchSize: searchBatchSize, batchPipelineDepth: searchBatchPipelineDepth, multiPv: searchMultiPv, reuseTree,
       });
       lastSearch = response.result;
       el('benchResult').textContent = `HYBRID_SEARCH_BENCH_SEARCH_WARMUP ${i + 1}/${searchWarmup}`;
@@ -2483,7 +2505,7 @@ async function runHybridSearchBenchmark(): Promise<void> {
       if (resetBetweenSearches) await resetSearchTreeState();
       const started = performance.now();
       const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
-        type: 'search', input, visits: searchVisits, batchSize: searchBatchSize, multiPv: searchMultiPv, reuseTree,
+        type: 'search', input, visits: searchVisits, batchSize: searchBatchSize, batchPipelineDepth: searchBatchPipelineDepth, multiPv: searchMultiPv, reuseTree,
       });
       lastSearch = response.result;
       searchTimes.push(performance.now() - started);
@@ -2504,6 +2526,7 @@ async function runHybridSearchBenchmark(): Promise<void> {
       packVerification: params.get('packVerify') === '0' ? 'disabled' : 'enabled',
       visits: searchVisits,
       batchSize: searchBatchSize,
+      batchPipelineDepth: searchBatchPipelineDepth,
       wgslBatchMode: HYBRID_WGSL_HEADS_REQUESTED ? HYBRID_WGSL_BATCH_MODE : undefined,
       inputBackend: HYBRID_INPUT_BACKEND,
       encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,

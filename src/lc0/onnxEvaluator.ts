@@ -41,6 +41,8 @@ export type Lc0EvaluatorInput = BoardState | string | Lc0PositionHistoryInput;
 export interface Lc0EvaluationProvider {
   evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> | Lc0Evaluation;
   evaluateBatch?(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> | Lc0Evaluation[];
+  /** Optional ordered multi-batch API used by deferred/double-buffered browser paths. */
+  evaluateBatchSequence?(batches: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> | Lc0Evaluation[][];
   dispose?(): Promise<void> | void;
 }
 
@@ -245,6 +247,55 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
     return results;
   }
 
+  async evaluateBatchSequence(batches: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> {
+    const out = batches.map((batch) => new Array<Lc0Evaluation>(batch.length));
+    const missBatches: Lc0EvaluatorInput[][] = [];
+    const missBatchSlots: Array<{ batchIndex: number; slots: number[]; keys: string[] }> = [];
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const missInputs: Lc0EvaluatorInput[] = [];
+      const slots: number[] = [];
+      const keys: string[] = [];
+      for (let i = 0; i < batches[batchIndex].length; i++) {
+        const key = inputHistoryKey(batches[batchIndex][i]);
+        const cached = this.cache.get(key);
+        if (cached) {
+          this.hits += 1;
+          this.cache.delete(key);
+          this.cache.set(key, cached);
+          out[batchIndex][i] = cloneEvaluation(cached);
+        } else {
+          this.misses += 1;
+          missInputs.push(batches[batchIndex][i]);
+          slots.push(i);
+          keys.push(key);
+        }
+      }
+      if (missInputs.length) {
+        missBatches.push(missInputs);
+        missBatchSlots.push({ batchIndex, slots, keys });
+      }
+    }
+    if (missBatches.length) {
+      const missResults = this.inner.evaluateBatchSequence ? await this.inner.evaluateBatchSequence(missBatches) : [];
+      if (!this.inner.evaluateBatchSequence) {
+        for (const batch of missBatches) {
+          missResults.push(this.inner.evaluateBatch
+            ? await this.inner.evaluateBatch(batch)
+            : await Promise.all(batch.map((input) => this.inner.evaluate(input))));
+        }
+      }
+      for (let batchIndex = 0; batchIndex < missResults.length; batchIndex++) {
+        const placement = missBatchSlots[batchIndex];
+        for (let i = 0; i < missResults[batchIndex].length; i++) {
+          const value = cloneEvaluation(missResults[batchIndex][i]);
+          this.store(placement.keys[i], value);
+          out[placement.batchIndex][placement.slots[i]] = cloneEvaluation(value);
+        }
+      }
+    }
+    return out;
+  }
+
   private store(key: string, value: Lc0Evaluation): void {
     if (this.maxEntries <= 0) return;
     this.cache.set(key, cloneEvaluation(value));
@@ -342,6 +393,12 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     for (let offset = 0; offset < inputs.length; offset += physicalBatchSize) {
       out.push(...await this.runPhysicalBatch(inputs.slice(offset, offset + physicalBatchSize), physicalBatchSize));
     }
+    return out;
+  }
+
+  async evaluateBatchSequence(batches: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> {
+    const out: Lc0Evaluation[][] = [];
+    for (const batch of batches) out.push(await this.evaluateBatch(batch));
     return out;
   }
 }

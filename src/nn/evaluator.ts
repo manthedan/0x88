@@ -25,9 +25,20 @@ export interface EvaluationContext {
   attackSummaryChannelMask?: ArrayLike<number>;
 }
 
+export interface EvaluationBatchRequest {
+  boards: BoardState[];
+  contexts?: EvaluationContext[];
+}
+
 export interface Evaluator {
   evaluate(board: BoardState, context?: EvaluationContext): Promise<Evaluation> | Evaluation;
   evaluateBatch?(boards: BoardState[], contexts?: EvaluationContext[]): Promise<Evaluation[]> | Evaluation[];
+  /**
+   * Optional sequence API for evaluators that can submit/read back multiple
+   * physical batches more efficiently than separate awaited evaluateBatch calls.
+   * Search still consumes results in request order.
+   */
+  evaluateBatchSequence?(batches: EvaluationBatchRequest[]): Promise<Evaluation[][]> | Evaluation[][];
 }
 
 export class UniformEvaluator implements Evaluator {
