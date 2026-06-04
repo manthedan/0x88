@@ -51,6 +51,6 @@ Search command batches now set Reckless' `Minimal` UCI option to `true`. Reckles
 
 Persistent aborts now attempt a short graceful reuse path: enqueue `stop`, wait up to 100 ms for the current search to naturally emit `bestmove`, reject the caller with `AbortError`, and keep the worker alive if that happens. If no completion arrives during the grace window, the adapter falls back to worker termination as before.
 
-The benchmark harness now has a default-on clear-hash reset. It sends `ucinewgame` + `isready` before each timed run and starts the timer afterward, avoiding persistent repeated-position TT pollution without mixing reset latency into the search wall-clock metric.
+The benchmark harness now has a default-on clear-hash reset. It sends `ucinewgame` + `isready` before each timed run and starts the timer afterward, avoiding persistent repeated-position TT pollution without mixing reset latency into the search wall-clock metric. It also includes a 20-position rotated-FEN suite preset, rotates warm passes across the full suite before repeating a FEN, and now records engine-reported nodes alongside wall ms and NPS.
 
 The next major adapter-overhead reduction remains a browser-native API with direct calls for initialize, set FEN, search, and result retrieval. The staged feasibility plan is in [`reckless_browser_native_api_plan.md`](./reckless_browser_native_api_plan.md).

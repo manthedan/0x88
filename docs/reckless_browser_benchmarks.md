@@ -4,6 +4,14 @@
 
 Use `/reckless-benchmark.html` from the isolated static server after `npm run build:client`. The page now defaults to `ucinewgame` + `isready` before every timed run. This reset happens outside the timed interval, so the wall-clock measurement remains search-only while persistent-mode repeats avoid repeated-position transposition-table reuse. Disable the checkbox only when intentionally measuring warm TT reuse.
 
+The harness also has a `Load 20-position rotated FEN suite` preset. Its run order keeps one engine alive per variant/mode/budget, measures a first pass over every listed position, then rotates each warm pass across the entire suite before repeating any one FEN. Raw and summary outputs track wall-clock ms, engine-reported depth, nodes, NPS, best move, runtime label, and cold/first-pass vs warm-pass rows separately.
+
+## 2026-06-04 rotated-FEN harness smoke
+
+Command surface: isolated static server, Full scalar artifact, persistent mode, 20-position Ruy Lopez suite, depth 1, one warm rotated pass, default-on clear-hash reset. This is a harness-validation smoke, not a final performance comparison.
+
+Raw report: [`reckless_browser_benchmark_2026-06-04_rotated_fen_smoke.json`](./reckless_browser_benchmark_2026-06-04_rotated_fen_smoke.json). The report has 40 raw rows and 20 summary rows, with nodes and NPS captured for every position.
+
 ## 2026-06-04 isolated headless browser clean depth 7/8/9 smoke
 
 Command surface: `/reckless-benchmark.html` on the isolated static server (`crossOriginIsolated=true`, `SharedArrayBuffer=true`) after `npm run build:client`, with Full scalar and Full `+simd128` artifacts, persistent and one-shot modes, depth budgets 7/8/9, 20 warm repeats plus one cold run, and the default-on persistent clear-hash reset enabled. Positions: `startpos`, an early Italian-like position, and a middlegame position. The table below aggregates warm averages across all three positions; the raw report has per-position rows.

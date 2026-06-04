@@ -79,6 +79,7 @@ export interface StockfishInfoLine {
   depth: number;
   scoreCp?: number;
   mateIn?: number;
+  nodes?: number;
   nps?: number;
   pvUci: string[];
 }
@@ -90,6 +91,7 @@ export function parseStockfishInfo(line: string): StockfishInfoLine | null {
   const depth = Number(line.match(/\bdepth (\d+)/)?.[1] ?? '0');
   const cp = line.match(/\bscore cp (-?\d+)/);
   const mate = line.match(/\bscore mate (-?\d+)/);
+  const nodes = line.match(/\bnodes (\d+)/);
   const nps = line.match(/\bnps (\d+)/);
   const pv = line.match(/ pv (.+)$/)?.[1].trim().split(/\s+/) ?? [];
   return {
@@ -97,6 +99,7 @@ export function parseStockfishInfo(line: string): StockfishInfoLine | null {
     depth,
     scoreCp: cp ? Number(cp[1]) : undefined,
     mateIn: mate ? Number(mate[1]) : undefined,
+    ...(nodes ? { nodes: Number(nodes[1]) } : {}),
     ...(nps ? { nps: Number(nps[1]) } : {}),
     pvUci: pv,
   };
