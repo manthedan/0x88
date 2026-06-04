@@ -24,6 +24,7 @@ This checkpoint records the current custom-kernel path for the batch-8 f16 `lc0w
 - `?runtime=hybrid` / `?hybridEvaluator=1`: worker-owned production evaluator wiring for the lc0web pack. It builds the real `/input/planes` → `/attn_body` activation from LC0 112-plane input, runs the full custom WGSL encoder stack, then runs the tiny f32 ONNX/ORT mapped-policy + WDL heads and feeds the resulting 1858 logits through the normal legal-prior adapter. A persistent evaluator caches the loaded pack tensor views, encoder GPU buffers/bind groups/pipelines, ORT head session, and a WGSL smolgen-bias subgraph across evaluations.
 - `?hybridDrift=1&encoderLayers=10&hybridDriftLimit=N`: browser fixture route used by `npm run lc0:browser-hybrid-drift` to dump hybrid evaluations for native BLAS fixtures so policy/WDL drift can be compared against f32 ONNX and native LC0 BLAS.
 - `?hybridSearchBench=1&runtime=hybrid&visits=N`: bounded browser route used by `npm run lc0:browser-hybrid-search-bench` to measure cached hybrid warm-eval latency plus fixed-visit PUCT latency/visits-per-second without promoting the backend.
+- `?mappedPolicyProbe=1`: tiny synthetic WGSL mapped-policy probe. It feeds known `policy[4096]`, `K[64×256]`, promotion weights, and a 1858-entry mapping table; then it reads only the mapped-policy output and verifies both normal move copies and promotion-bias additions against a CPU f32 reference.
 - `?wgslHeadsProbe=1`: isolated experimental WGSL policy/value-head dense probe. It dispatches the main policy-logit path (policy dense+mish, Q/K projections, Q×Kᵀ scale) plus the full value-head path (value embed+mish, dense1+mish, dense2, softmax) on a deterministic encoder-shaped input, reads intermediate/final buffers back, compares them to the CPU f32 head reference, and runs the existing ORT tiny-head path for final mapped-policy/WDL context. This is not wired into the hybrid evaluator.
 - `?encoderPrefix=/encoderN`: experimental tensor-prefix override for attention-output/FFN/full-block routes so the same plumbing can target later encoder layers.
 
@@ -74,6 +75,9 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
 - `npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 4 --timeout 60000 --wgsl-iters 3 --ort-iters 3`
   - Repeated fresh Chromium/WebGPU alternating run after hybrid runtime caching; ORT reported WebGPU provider present in all 4 ORT rows.
   - Representative sample medians were WGSL synchronized readback/block about `1.10 ms` and ORT WebGPU average/run about `1.30 ms` (`ratioWgslOverOrt ≈ 0.85`); still measurement-only, not promotion evidence.
+- Tiny WGSL mapped-policy probe: `?mappedPolicyProbe=1`
+  - `MAPPED_POLICY_PROBE_DONE` on local Chromium 149/Apple Metal with `isFallbackAdapter=false`.
+  - Synthetic normal-copy and promotion-bias mapping validates in isolation: representative max abs error `2.98e-8`, normal-copy max abs error `0`, promotion max abs error `2.98e-8`, with 1792 normal outputs and 66 promotion outputs nonzero/nonuniform.
 - Isolated WGSL policy/value-head probe: `?wgslHeadsProbe=1&ep=wasm&packVerify=0`
   - `WGSL_HEADS_PROBE_DONE` on local Chromium 149/Apple Metal with `isFallbackAdapter=false`.
   - The probe is intentionally not wired into the evaluator: it dispatches the main policy-logit path plus the full value-head path on a deterministic encoder-shaped input, reads those buffers back, and compares them to the CPU f32 head reference.
@@ -103,7 +107,9 @@ npm run lc0:browser-wgsl-smokes -- --no-server --only attention-output,encoder0-
 npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-2-wasm,encoder-stack-heads-2-wasm --timeout 80000
 npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-10-wasm --timeout 80000
 npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-heads-2-wasm --timeout 120000
-# Manual browser route: /lc0-policy-only.html?wgslHeadsProbe=1&ep=wasm&packVerify=0
+# Manual browser routes:
+#   /lc0-policy-only.html?mappedPolicyProbe=1
+#   /lc0-policy-only.html?wgslHeadsProbe=1&ep=wasm&packVerify=0
 npm run lc0:browser-hybrid-drift -- --no-server --limit 3 --timeout 180000
 npm run lc0:browser-hybrid-drift -- --limit 9 --timeout 300000
 npm run lc0:browser-hybrid-drift -- --limit 9 --timeout 300000 --baseline-mode serial

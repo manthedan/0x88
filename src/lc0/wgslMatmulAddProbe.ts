@@ -4084,6 +4084,26 @@ function buildPolicyValueHeadReference(input: Float32Array<ArrayBufferLike>, ten
   return { policy: policy.policy, mappedPolicy: policy.mappedPolicy, wdl: cpuValueHead(input, tensors) };
 }
 
+export interface Lc0WebMappedPolicyProbeResult {
+  status: 'MAPPED_POLICY_PROBE_DONE';
+  adapterInfo?: Record<string, unknown>;
+  outputs: number;
+  normalOutputs: number;
+  promotionOutputs: number;
+  pipelineCompileMs: number;
+  dispatchSyncedMs: number;
+  readbackSyncedMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  normalMaxAbsError: number;
+  promotionMaxAbsError: number;
+  normalSample: number[];
+  promotionSample: number[];
+  outputSample: number[];
+  nonzero: boolean;
+  nonuniform: boolean;
+}
+
 export interface Lc0WebWgslHeadsProbeResult {
   status: 'WGSL_HEADS_PROBE_DONE';
   packUrl: string;
@@ -4160,6 +4180,42 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     sum = sum + q[row * 256u + channel] * k[col * 256u + channel];
   }
   output[row * 64u + col] = sum * scale[0];
+}
+`;
+
+const WGSL_MAPPED_POLICY_PROBE = `
+@group(0) @binding(0) var<storage, read> policy: array<f32>;
+@group(0) @binding(1) var<storage, read> k: array<f32>;
+@group(0) @binding(2) var<storage, read> promotionWeight: array<f32>;
+@group(0) @binding(3) var<storage, read> mapping: array<i32>;
+@group(0) @binding(4) var<storage, read_write> output: array<f32>;
+
+fn promotion_value(flat_index: u32) -> f32 {
+  let promotion_index = flat_index - 4096u;
+  let move_flat = promotion_index / 3u;
+  let under = promotion_index % 3u;
+  let from_file = move_flat / 8u;
+  let to_file = move_flat % 8u;
+  let base = policy[(48u + from_file) * 64u + 56u + to_file];
+  let bias_token = (promotion_index % 24u) / 3u;
+  var bias = 0.0;
+  for (var channel = 0u; channel < 256u; channel = channel + 1u) {
+    let offset = channel * 4u;
+    bias = bias + k[(56u + bias_token) * 256u + channel] * (promotionWeight[offset + under] + promotionWeight[offset + 3u]);
+  }
+  return base + bias;
+}
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let out_index = gid.x;
+  if (out_index >= 1858u) { return; }
+  let flat_index = u32(mapping[out_index]);
+  if (flat_index < 4096u) {
+    output[out_index] = policy[flat_index];
+  } else {
+    output[out_index] = promotion_value(flat_index);
+  }
 }
 `;
 
@@ -4251,6 +4307,19 @@ function createWgslHeadsPolicyLogitsBindGroup(device: DeviceLike, pipeline: Pipe
   });
 }
 
+function createMappedPolicyBindGroup(device: DeviceLike, pipeline: PipelineLike, policyBuffer: BufferLike, kBuffer: BufferLike, promotionWeightBuffer: BufferLike, mappingBuffer: BufferLike, outputBuffer: BufferLike): unknown {
+  return device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: policyBuffer } },
+      { binding: 1, resource: { buffer: kBuffer } },
+      { binding: 2, resource: { buffer: promotionWeightBuffer } },
+      { binding: 3, resource: { buffer: mappingBuffer } },
+      { binding: 4, resource: { buffer: outputBuffer } },
+    ],
+  });
+}
+
 function createWgslHeadsSoftmaxBindGroup(device: DeviceLike, pipeline: PipelineLike, logitsBuffer: BufferLike, outputBuffer: BufferLike): unknown {
   return device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
@@ -4259,6 +4328,140 @@ function createWgslHeadsSoftmaxBindGroup(device: DeviceLike, pipeline: PipelineL
       { binding: 1, resource: { buffer: outputBuffer } },
     ],
   });
+}
+
+function makeSyntheticMappedPolicyInputs(): { policy: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; promotionWeight: Float32Array<ArrayBufferLike>; mapping: Int32Array<ArrayBufferLike> } {
+  const policy = new Float32Array(DEFAULT_POLICY_OUTPUTS);
+  for (let i = 0; i < policy.length; i++) policy[i] = Math.sin(i * 0.013) * 0.5 + (i % 97) * 0.001;
+  const k = new Float32Array(DEFAULT_TOKENS * DEFAULT_N);
+  for (let token = 0; token < DEFAULT_TOKENS; token++) {
+    for (let channel = 0; channel < DEFAULT_N; channel++) {
+      k[token * DEFAULT_N + channel] = Math.cos(token * 0.17 + channel * 0.019) * 0.02 + ((token + channel) % 11) * 0.0007;
+    }
+  }
+  const promotionWeight = new Float32Array(DEFAULT_N * 4);
+  for (let channel = 0; channel < DEFAULT_N; channel++) {
+    for (let col = 0; col < 4; col++) {
+      promotionWeight[channel * 4 + col] = Math.sin(channel * 0.023 + col * 0.37) * 0.015 + (col + 1) * 0.0009;
+    }
+  }
+  const mapping = new Int32Array(DEFAULT_POLICY_MAPPED_OUTPUTS);
+  for (let i = 0; i < 1792; i++) mapping[i] = (i * 37 + 1) % DEFAULT_POLICY_OUTPUTS;
+  for (let i = 1792; i < DEFAULT_POLICY_MAPPED_OUTPUTS; i++) mapping[i] = DEFAULT_POLICY_OUTPUTS + ((i - 1792) * 17) % (3 * DEFAULT_TOKENS);
+  return { policy, k, promotionWeight, mapping };
+}
+
+function cpuMappedPolicyFromSyntheticInputs(policy: Float32Array<ArrayBufferLike>, k: Float32Array<ArrayBufferLike>, promotionWeight: Float32Array<ArrayBufferLike>, mapping: Int32Array<ArrayBufferLike>): Float32Array<ArrayBufferLike> {
+  const output = new Float32Array(DEFAULT_POLICY_MAPPED_OUTPUTS);
+  for (let out = 0; out < output.length; out++) {
+    const flat = mapping[out];
+    if (flat < DEFAULT_POLICY_OUTPUTS) {
+      output[out] = policy[flat];
+      continue;
+    }
+    const promotionIndex = flat - DEFAULT_POLICY_OUTPUTS;
+    const moveFlat = Math.floor(promotionIndex / 3);
+    const under = promotionIndex % 3;
+    const from = Math.floor(moveFlat / 8);
+    const to = moveFlat % 8;
+    const base = policy[(48 + from) * DEFAULT_TOKENS + 56 + to];
+    const biasToken = Math.floor((promotionIndex % 24) / 3);
+    let bias = 0;
+    for (let channel = 0; channel < DEFAULT_N; channel++) {
+      const offset = channel * 4;
+      bias += k[(56 + biasToken) * DEFAULT_N + channel] * (promotionWeight[offset + under] + promotionWeight[offset + 3]);
+    }
+    output[out] = base + bias;
+  }
+  return output;
+}
+
+export async function runLc0WebMappedPolicyProbe(): Promise<Lc0WebMappedPolicyProbeResult> {
+  const { policy, k, promotionWeight, mapping } = makeSyntheticMappedPolicyInputs();
+  const expected = cpuMappedPolicyFromSyntheticInputs(policy, k, promotionWeight, mapping);
+  const { device, adapterInfo } = await requestDevice();
+  const usage = gpuGlobals().GPUBufferUsage!;
+  const buffers: BufferLike[] = [];
+  try {
+    const compileStarted = nowMs();
+    const module = device.createShaderModule({ label: 'lc0web WGSL mapped policy synthetic probe', code: WGSL_MAPPED_POLICY_PROBE });
+    const compilationInfo = await (module as { getCompilationInfo?: () => Promise<{ messages: Array<{ type: string; message: string; lineNum?: number; linePos?: number }> }> }).getCompilationInfo?.();
+    const compilationErrors = compilationInfo?.messages.filter((message) => message.type === 'error') ?? [];
+    if (compilationErrors.length) throw new Error(`mapped-policy probe shader compilation failed: ${compilationErrors.map((message) => `${message.lineNum}:${message.linePos} ${message.message}`).join('; ')}`);
+    const scopedCompileDevice = device as DeviceLike & { pushErrorScope?: (filter: string) => void; popErrorScope?: () => Promise<unknown> };
+    scopedCompileDevice.pushErrorScope?.('validation');
+    const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
+    const pipelineError = await scopedCompileDevice.popErrorScope?.();
+    if (pipelineError) throw new Error(`mapped-policy probe pipeline validation error: ${String((pipelineError as { message?: unknown }).message ?? pipelineError)}`);
+    const pipelineCompileMs = nowMs() - compileStarted;
+    const policyBuffer = createStorageBuffer(device, policy, usage.STORAGE | usage.COPY_DST);
+    const kBuffer = createStorageBuffer(device, k, usage.STORAGE | usage.COPY_DST);
+    const promotionWeightBuffer = createStorageBuffer(device, promotionWeight, usage.STORAGE | usage.COPY_DST);
+    const mappingBuffer = createStorageBuffer(device, mapping, usage.STORAGE | usage.COPY_DST);
+    const outputBuffer = device.createBuffer({ size: DEFAULT_POLICY_MAPPED_OUTPUTS * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
+    const readbackBuffer = device.createBuffer({ size: DEFAULT_POLICY_MAPPED_OUTPUTS * 4, usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
+    buffers.push(policyBuffer, kBuffer, promotionWeightBuffer, mappingBuffer, outputBuffer, readbackBuffer);
+    const bindGroup = createMappedPolicyBindGroup(device, pipeline, policyBuffer, kBuffer, promotionWeightBuffer, mappingBuffer, outputBuffer);
+    const scopedDevice = device as DeviceLike & { pushErrorScope?: (filter: string) => void; popErrorScope?: () => Promise<unknown> };
+    scopedDevice.pushErrorScope?.('validation');
+    const dispatchStarted = nowMs();
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(Math.ceil(DEFAULT_POLICY_MAPPED_OUTPUTS / 64));
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+    await device.queue.onSubmittedWorkDone?.();
+    const validationError = await scopedDevice.popErrorScope?.();
+    if (validationError) throw new Error(`mapped-policy probe WebGPU validation error: ${String((validationError as { message?: unknown }).message ?? validationError)}`);
+    const dispatchSyncedMs = nowMs() - dispatchStarted;
+    const readbackStarted = nowMs();
+    const output = await readF32OutputOnce(device, outputBuffer, readbackBuffer, DEFAULT_POLICY_MAPPED_OUTPUTS);
+    const readbackSyncedMs = nowMs() - readbackStarted;
+    const error = computeErrorStats(output, expected, DEFAULT_POLICY_MAPPED_OUTPUTS);
+    let normalMaxAbsError = 0;
+    let promotionMaxAbsError = 0;
+    let normalOutputs = 0;
+    let promotionOutputs = 0;
+    const normalSample: number[] = [];
+    const promotionSample: number[] = [];
+    for (let i = 0; i < DEFAULT_POLICY_MAPPED_OUTPUTS; i++) {
+      const absError = Math.abs(output[i] - expected[i]);
+      if (mapping[i] < DEFAULT_POLICY_OUTPUTS) {
+        normalOutputs++;
+        normalMaxAbsError = Math.max(normalMaxAbsError, absError);
+        if (normalSample.length < 8) normalSample.push(output[i]);
+      } else {
+        promotionOutputs++;
+        promotionMaxAbsError = Math.max(promotionMaxAbsError, absError);
+        if (promotionSample.length < 8) promotionSample.push(output[i]);
+      }
+    }
+    if (error.maxAbsError > 1e-5) throw new Error(`mapped-policy probe maxAbsError=${error.maxAbsError}, normalMaxAbsError=${normalMaxAbsError}, promotionMaxAbsError=${promotionMaxAbsError}, normalSample=${normalSample.slice(0, 3).join('/')}, promotionSample=${promotionSample.slice(0, 3).join('/')}, tolerance=0.00001`);
+    if (!arrayHasNonzero(output) || !arrayHasVariation(output)) throw new Error('mapped-policy probe produced zero or uniform output');
+    return {
+      status: 'MAPPED_POLICY_PROBE_DONE',
+      adapterInfo,
+      outputs: DEFAULT_POLICY_MAPPED_OUTPUTS,
+      normalOutputs,
+      promotionOutputs,
+      pipelineCompileMs,
+      dispatchSyncedMs,
+      readbackSyncedMs,
+      maxAbsError: error.maxAbsError,
+      rmsError: error.rmsError,
+      normalMaxAbsError,
+      promotionMaxAbsError,
+      normalSample,
+      promotionSample,
+      outputSample: Array.from(output.slice(0, 8)),
+      nonzero: arrayHasNonzero(output),
+      nonuniform: arrayHasVariation(output),
+    };
+  } finally {
+    for (const buffer of buffers) buffer.destroy?.();
+  }
 }
 
 export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verifyShards?: boolean }): Promise<Lc0WebWgslHeadsProbeResult> {
