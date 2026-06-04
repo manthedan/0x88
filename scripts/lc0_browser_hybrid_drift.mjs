@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { totalmem } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { boardToFen } from '../src/chess/board.ts';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
@@ -11,9 +12,11 @@ const DEFAULT_PORT = 5179;
 const DEFAULT_LIMIT = 3;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_F32_MODEL = '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
+const PARALLEL_BASELINE_MIN_MEMORY_GIB = 24;
+const PARALLEL_BASELINE_MAX_FIXTURES = 16;
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_drift.mjs [options]\n\nCompares browser hybrid lc0web WGSL encoder + ORT heads output against f32 ONNX and native BLAS fixture priors.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --limit N            Number of native fixtures to evaluate (default ${DEFAULT_LIMIT})\n  --layers N           Encoder layers for hybrid path (default 10)\n  --f32-model PATH     f32 ONNX baseline (default ${DEFAULT_F32_MODEL})\n  --no-server          Do not auto-start Vite\n  -h, --help           Show this help\n`);
+  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_drift.mjs [options]\n\nCompares browser hybrid lc0web WGSL encoder + ORT heads output against f32 ONNX and native BLAS fixture priors.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --limit N            Number of native fixtures to evaluate (default ${DEFAULT_LIMIT})\n  --layers N           Encoder layers for hybrid path (default 10)\n  --f32-model PATH     f32 ONNX baseline (default ${DEFAULT_F32_MODEL})\n  --baseline-mode MODE Run browser hybrid and f32 baseline as auto|parallel|serial (default auto)\n  --parallel-baseline  Alias for --baseline-mode parallel\n  --serial-baseline    Alias for --baseline-mode serial\n  --no-server          Do not auto-start Vite\n  -h, --help           Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -26,6 +29,7 @@ function parseArgs(argv) {
     agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
     session: process.env.AGENT_BROWSER_SESSION ?? `lc0-hybrid-drift-${process.pid}`,
     f32Model: DEFAULT_F32_MODEL,
+    baselineMode: 'auto',
     noServer: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -43,11 +47,15 @@ function parseArgs(argv) {
     else if (arg === '--limit') args.limit = Number(next());
     else if (arg === '--layers') args.layers = Number(next());
     else if (arg === '--f32-model') args.f32Model = next();
+    else if (arg === '--baseline-mode') args.baselineMode = next();
+    else if (arg === '--parallel-baseline') args.baselineMode = 'parallel';
+    else if (arg === '--serial-baseline') args.baselineMode = 'serial';
     else if (arg === '--no-server') args.noServer = true;
     else if (arg === '-h' || arg === '--help') args.help = true;
     else throw new Error(`Unknown option: ${arg}`);
   }
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
+  if (!['auto', 'parallel', 'serial'].includes(args.baselineMode)) throw new Error(`Invalid --baseline-mode: ${args.baselineMode}`);
   for (const [name, value] of [['port', args.port], ['limit', args.limit], ['layers', args.layers], ['timeout', args.timeoutMs]]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
@@ -56,20 +64,44 @@ function parseArgs(argv) {
 
 function runAgent(args, commandArgs, timeoutMs = 30_000) {
   const fullArgs = ['--json', '--session', args.session, ...commandArgs];
-  const result = spawnSync(args.agentBrowser, fullArgs, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${result.stderr || result.stdout}`);
-  const parsed = result.stdout ? JSON.parse(result.stdout.trim()) : null;
-  if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-    if (parsed.success === false) throw new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? result.stdout}`);
-    return parsed.data ?? parsed;
-  }
-  return parsed;
+  return new Promise((resolve, reject) => {
+    const child = spawn(args.agentBrowser, fullArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const chunks = { stdout: [], stderr: [] };
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    child.stdout.on('data', (chunk) => chunks.stdout.push(chunk));
+    child.stderr.on('data', (chunk) => chunks.stderr.push(chunk));
+    child.on('error', (error) => finish(reject, error));
+    child.on('close', (status) => {
+      const stdout = Buffer.concat(chunks.stdout).toString('utf8');
+      const stderr = Buffer.concat(chunks.stderr).toString('utf8');
+      if (status !== 0) return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${stderr || stdout}`));
+      try {
+        const parsed = stdout ? JSON.parse(stdout.trim()) : null;
+        if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+          if (parsed.success === false) return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
+          return finish(resolve, parsed.data ?? parsed);
+        }
+        return finish(resolve, parsed);
+      } catch (error) {
+        return finish(reject, error);
+      }
+    });
+  });
 }
 
-function closeAgentSession(args) {
+async function closeAgentSession(args) {
   try {
-    runAgent(args, ['close'], 5_000);
+    await runAgent(args, ['close'], 5_000);
   } catch (error) {
     process.stderr.write(`[lc0-hybrid-drift] warning: failed to close agent-browser session ${args.session}: ${error.message ?? error}\n`);
   }
@@ -159,13 +191,13 @@ async function browserHybrid(args) {
   const url = `${args.baseUrl.replace(/\/$/, '')}/lc0-policy-only.html?hybridDrift=1&encoderLayers=${args.layers}&hybridDriftLimit=${args.limit}&ep=wasm&packVerify=0`;
   process.stderr.write(`[lc0-hybrid-drift] ${url}\n`);
   try {
-    runAgent(args, ['open', url], 30_000);
+    await runAgent(args, ['open', url], 30_000);
     const deadline = Date.now() + args.timeoutMs;
     while (Date.now() < deadline) {
       const chunk = Math.min(25_000, Math.max(1000, deadline - Date.now()));
       try {
-        runAgent(args, ['wait', '--text', 'HYBRID_DRIFT_DONE', '--timeout', String(chunk)], chunk + 5_000);
-        const text = runAgent(args, ['get', 'text', '#benchResult'], 30_000).text;
+        await runAgent(args, ['wait', '--text', 'HYBRID_DRIFT_DONE', '--timeout', String(chunk)], chunk + 5_000);
+        const text = (await runAgent(args, ['get', 'text', '#benchResult'], 30_000)).text;
         return JSON.parse(text);
       } catch (error) {
         if (Date.now() >= deadline) throw error;
@@ -173,8 +205,59 @@ async function browserHybrid(args) {
     }
     throw new Error(`Timed out waiting for HYBRID_DRIFT_DONE after ${args.timeoutMs}ms`);
   } finally {
-    closeAgentSession(args);
+    await closeAgentSession(args);
   }
+}
+
+function readCgroupMemoryLimitBytes() {
+  for (const path of ['/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory/memory.limit_in_bytes']) {
+    try {
+      if (!existsSync(path)) continue;
+      const raw = readFileSync(path, 'utf8').trim();
+      if (!raw || raw === 'max') continue;
+      const bytes = Number(raw);
+      if (Number.isFinite(bytes) && bytes > 0 && bytes < Number.MAX_SAFE_INTEGER) return bytes;
+    } catch {
+      // Optional container metadata; ignore and fall back below.
+    }
+  }
+  return null;
+}
+
+function effectiveMemoryInfo() {
+  const hostBytes = totalmem();
+  const cgroupBytes = readCgroupMemoryLimitBytes();
+  if (cgroupBytes !== null && cgroupBytes < hostBytes) return { bytes: cgroupBytes, source: 'cgroup' };
+  return { bytes: hostBytes, source: 'host' };
+}
+
+function resolvedBaselineMode(args) {
+  if (args.baselineMode !== 'auto') return args.baselineMode;
+  const memoryGiB = effectiveMemoryInfo().bytes / (1024 ** 3);
+  return memoryGiB >= PARALLEL_BASELINE_MIN_MEMORY_GIB && args.limit <= PARALLEL_BASELINE_MAX_FIXTURES ? 'parallel' : 'serial';
+}
+
+async function runBrowserAndF32(args, nativeRecords) {
+  const baselineMode = resolvedBaselineMode(args);
+  const memory = effectiveMemoryInfo();
+  const memoryGiB = memory.bytes / (1024 ** 3);
+  process.stderr.write(`[lc0-hybrid-drift] baseline-mode=${baselineMode} requested=${args.baselineMode} memoryGiB=${memoryGiB.toFixed(1)} memorySource=${memory.source} limit=${args.limit}\n`);
+  if (baselineMode === 'parallel') {
+    const [f32Result, hybridResult] = await Promise.allSettled([
+      f32Baselines(args, nativeRecords),
+      browserHybrid(args),
+    ]);
+    if (f32Result.status === 'fulfilled' && hybridResult.status === 'fulfilled') {
+      return { f32: f32Result.value, hybrid: hybridResult.value, baselineMode };
+    }
+    // Wait for both branches before throwing so browserHybrid reaches its
+    // finally block and closes the agent-browser session on baseline failures.
+    if (hybridResult.status === 'rejected') throw hybridResult.reason;
+    throw f32Result.reason;
+  }
+  const hybrid = await browserHybrid(args);
+  const f32 = await f32Baselines(args, nativeRecords);
+  return { f32, hybrid, baselineMode };
 }
 
 async function main() {
@@ -187,11 +270,7 @@ async function main() {
       ...readJsonl('fixtures/lc0/native_fen_only_blas.jsonl'),
       ...readJsonl('fixtures/lc0/native_history_blas.jsonl'),
     ].slice(0, args.limit);
-    // Keep the heavy browser/WebGPU hybrid runtime and the f32 ORT baseline out
-    // of memory at the same time. Running these in parallel saved wall-clock time
-    // but could accumulate model/session/GPU allocations during repeated sweeps.
-    const hybrid = await browserHybrid(args);
-    const f32 = await f32Baselines(args, nativeRecords);
+    const { f32, hybrid, baselineMode } = await runBrowserAndF32(args, nativeRecords);
     const comparisons = hybrid.evaluations.map((hybridEval) => {
       const f32Eval = f32.find((entry) => entry.id === hybridEval.id);
       const native = nativeRecords.find((entry) => entry.id === hybridEval.id);
@@ -215,6 +294,7 @@ async function main() {
       status: 'LC0_HYBRID_DRIFT_DONE',
       fixtures: comparisons.length,
       browser: { backend: hybrid.backend, layers: hybrid.layers, elapsedMs: hybrid.elapsedMs },
+      baselineMode,
       summary: {
         f32BestMoveMatches: comparisons.filter((c) => c.hybridBestMove === c.f32BestMove).length,
         nativeBestMoveMatches: comparisons.filter((c) => c.hybridBestMove === c.nativeBestMove).length,
