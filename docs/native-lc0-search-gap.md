@@ -40,7 +40,7 @@ We currently mostly use fixed visits. A time-parity arena mode would add fixed `
 
 Native LC0 performs multi-threaded search with virtual loss/collision handling and batched neural-network evaluation.
 
-Our browser path now improves batch leaf collection with virtual in-flight visits and duplicate-leaf retries, but full shared-tree multi-worker MCTS is still intentionally not wired into the user-facing browser UI. That keeps cancellation, ONNX/WebGPU session ownership, and UI responsiveness predictable.
+Our browser path now improves batch leaf collection with virtual in-flight visits and duplicate-leaf retries. The single-engine UI exposes this as `Batch / lanes` plus a leaf-collision mode: `retry` keeps virtual lane visits during batch collection to avoid duplicate in-flight leaves, while `backup` preserves the old shared-backup behavior. Full shared-tree multi-worker MCTS is still intentionally not wired into the user-facing browser UI. That keeps cancellation, ONNX/WebGPU session ownership, and UI responsiveness predictable.
 
 Our browser search is still mostly single-threaded JavaScript tree traversal. This means:
 
@@ -130,7 +130,7 @@ We currently rely on chess rules plus network/search only.
 
 Native LC0 exposes many UCI options for search behavior and backend performance.
 
-The single-engine UI now exposes a broader but still curated subset: visits, soft movetime, batch size, MultiPV, early-stop mode, CPuct, CPuct schedule, FPU strategy, FPU reduction, and final-move temperature. These settings are plumbed through both main-thread and dedicated-worker search paths.
+The single-engine UI now exposes a broader but still curated subset: visits, soft movetime, batch size/lanes, leaf-collision mode, MultiPV, early-stop mode, CPuct, CPuct schedule, FPU strategy, FPU reduction, and final-move temperature. These settings are plumbed through both main-thread and dedicated-worker search paths.
 
 ### Missing option families
 

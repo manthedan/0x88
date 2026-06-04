@@ -13,7 +13,7 @@ import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchOptions, type Lc0SearchResult } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
-import type { CpuctSchedule, FpuStrategy, SearchEarlyStop } from '../search/puct.ts';
+import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
@@ -369,6 +369,10 @@ function parseFpuStrategy(raw: string | null): FpuStrategy {
   return raw === 'constant' ? 'constant' : 'lc0-reduction';
 }
 
+function parseBatchCollisionMode(raw: string | null): SearchBatchCollisionMode {
+  return raw === 'backup' ? 'backup' : 'retry';
+}
+
 function clampFloat(value: string | null, min: number, max: number, fallback: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
@@ -379,6 +383,7 @@ function clampFloat(value: string | null, min: number, max: number, fallback: nu
 let playerSide: 'white' | 'black' = params.get('side') === 'black' ? 'black' : 'white';
 let searchVisits = clampInt(params.get('visits') ?? '32', 1, 100000, 32);
 let searchBatchSize = clampInt(params.get('batch') ?? params.get('batchSize') ?? '1', 1, 512, 1);
+let searchBatchCollisionMode: SearchBatchCollisionMode = parseBatchCollisionMode(params.get('collision') ?? params.get('batchCollisionMode'));
 let searchMultiPv = clampInt(params.get('multipv') ?? params.get('multiPv') ?? '1', 1, 20, 1);
 let searchEarlyStop: SearchEarlyStop = parseEarlyStop(params.get('earlyStop') ?? params.get('stop'));
 let searchMovetimeMs = clampInt(params.get('movetime') ?? params.get('movetimeMs') ?? '0', 0, 600000, 0);
@@ -538,6 +543,7 @@ function currentSearchOptions(extra: Partial<Lc0SearchOptions> = {}): Lc0SearchO
   return {
     ...(searchMovetimeMs > 0 ? { movetimeMs: searchMovetimeMs } : { visits: searchVisits }),
     batchSize: searchBatchSize,
+    batchCollisionMode: searchBatchCollisionMode,
     multiPv: searchMultiPv,
     earlyStop: searchEarlyStop,
     cpuct: searchCpuct,
@@ -558,7 +564,7 @@ function renderStatic() {
   el('backend').textContent = WORKER_ONLY_MODEL && searchWorkerReady ? searchWorkerBackend : describeOrtBackendConfig();
   el('status').textContent = PACK_PROBE_REQUESTED ? 'pack probe' : evaluationAvailable() ? 'ready' : 'loading';
   el('searchMode').textContent = searchModeLabel();
-  el('searchBatch').textContent = searchEarlyStop === 'none' ? `${searchBatchSize} · ${searchCpuctSchedule}` : `${searchBatchSize} · ${searchCpuctSchedule} · ${searchEarlyStop}`;
+  el('searchBatch').textContent = searchEarlyStop === 'none' ? `${searchBatchSize} · ${searchBatchCollisionMode} · ${searchCpuctSchedule}` : `${searchBatchSize} · ${searchBatchCollisionMode} · ${searchCpuctSchedule} · ${searchEarlyStop}`;
   el('searchMove').textContent = `Search ${currentSearchLimitLabel()}`;
   el('engineMove').toggleAttribute('disabled', busy || !evaluationAvailable());
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
@@ -1855,6 +1861,7 @@ async function init() {
 function seedSettingsInputs() {
   inputEl('visitsInput').value = String(searchVisits);
   inputEl('batchInput').value = String(searchBatchSize);
+  selectEl('collisionSelect').value = searchBatchCollisionMode;
   inputEl('multiPvInput').value = String(searchMultiPv);
   selectEl('earlyStopSelect').value = searchEarlyStop;
   inputEl('movetimeInput').value = String(searchMovetimeMs);
@@ -1890,6 +1897,11 @@ inputEl('visitsInput').addEventListener('change', () => {
 inputEl('batchInput').addEventListener('change', () => {
   searchBatchSize = clampInt(inputEl('batchInput').value, 1, 512, searchBatchSize);
   inputEl('batchInput').value = String(searchBatchSize);
+  renderStatic();
+});
+selectEl('collisionSelect').addEventListener('change', () => {
+  searchBatchCollisionMode = parseBatchCollisionMode(selectEl('collisionSelect').value);
+  selectEl('collisionSelect').value = searchBatchCollisionMode;
   renderStatic();
 });
 inputEl('multiPvInput').addEventListener('change', () => {
