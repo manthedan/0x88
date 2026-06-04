@@ -19,5 +19,26 @@
     "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     "moves": ["e2e4", "a7a6", "e4e5", "d7d5"],
     "finalFen": "rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3"
+  },
+  {
+    "id": "queens-gambit-castled-history",
+    "description": "Longer opening history with black castled and a richer middlegame-like legal move set.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "moves": ["d2d4", "d7d5", "c2c4", "e7e6", "b1c3", "g8f6", "g1f3", "f8e7", "e2e3", "e8g8", "f1d3"],
+    "finalFen": "rnbq1rk1/ppp1bppp/4pn2/3p4/2PP4/2NBPN2/PP3PPP/R1BQK2R b KQ - 2 6"
+  },
+  {
+    "id": "queen-capture-retreat-history",
+    "description": "Explicit capture and queen retreat history, returning to a sparse current board with nontrivial prior planes.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "moves": ["e2e4", "d7d5", "e4d5", "d8d5", "b1c3", "d5d8"],
+    "finalFen": "rnbqkbnr/ppp1pppp/8/8/8/2N5/PPPP1PPP/R1BQKBNR w KQkq - 2 4"
+  },
+  {
+    "id": "history-black-en-passant",
+    "description": "Move history ending with a black en-passant target on g3.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "moves": ["a2a3", "h7h5", "a3a4", "h5h4", "g2g4"],
+    "finalFen": "rnbqkbnr/ppppppp1/8/8/P5Pp/8/1PPPPP1P/RNBQKBNR b KQkq g3 0 3"
   }
 ]

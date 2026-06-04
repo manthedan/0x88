@@ -13,9 +13,15 @@
   },
   {
     "id": "castling-rights",
-    "description": "Both sides retain standard castling rights with open files.",
+    "description": "Both sides retain standard castling rights with open files, white to move.",
     "fen": "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
     "expectedLegalMoves": ["e1g1", "e1c1"]
+  },
+  {
+    "id": "black-castling-rights",
+    "description": "Black-to-move castling fixture for side-relative castling policy slots.",
+    "fen": "r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1",
+    "expectedLegalMoves": ["e8g8", "e8c8"]
   },
   {
     "id": "en-passant-available",
@@ -24,10 +30,28 @@
     "expectedLegalMoves": ["e5d6"]
   },
   {
+    "id": "black-en-passant-available",
+    "description": "Black can capture en passant on e3 from a minimal legal board.",
+    "fen": "4k3/8/8/8/3pP3/8/8/4K3 b - e3 0 1",
+    "expectedLegalMoves": ["d4e3"]
+  },
+  {
     "id": "promotion-near",
     "description": "White has promotion choices, including LC0's implicit knight-promotion slot.",
     "fen": "4k3/P6p/8/8/8/8/7P/4K3 w - - 0 1",
     "expectedLegalMoves": ["a7a8q", "a7a8r", "a7a8b", "a7a8n"]
+  },
+  {
+    "id": "black-promotion-near",
+    "description": "Black has promotion choices from the second rank, exercising side-relative promotion mapping.",
+    "fen": "4k3/8/8/8/8/8/p6p/4K3 b - - 0 1",
+    "expectedLegalMoves": ["a2a1q", "a2a1r", "a2a1b", "a2a1n"]
+  },
+  {
+    "id": "in-check-king-evasion",
+    "description": "White is in rook check and must choose a legal king evasion.",
+    "fen": "k3r3/8/8/8/8/8/4K3/8 w - - 0 1",
+    "expectedLegalMoves": ["e2d1", "e2f1", "e2d2"]
   },
   {
     "id": "rule50-nonzero",
