@@ -48,6 +48,11 @@ interface PendingLc0ReplyProbe {
   afterMoveFen: string;
   child: PuctNode | null;
 }
+interface EngineEvalBar {
+  /** White expected score, with 0.5 as equal. Displayed board-oriented: black at top, white at bottom. */
+  whiteScore: number;
+  label: string;
+}
 interface EngineOutputSnapshot {
   engineId: string;
   engineName: string;
@@ -56,6 +61,7 @@ interface EngineOutputSnapshot {
   move?: string;
   summary: string;
   shortEval: string;
+  evalBar?: EngineEvalBar;
   detail?: string;
   pv?: string[];
 }
@@ -113,6 +119,19 @@ function signed(value: number, digits = 2): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`;
 }
 
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function fenTurn(fen: string): 'w' | 'b' {
+  return fen.split(/\s+/)[1] === 'b' ? 'b' : 'w';
+}
+
+function stmScoreToWhiteScore(fen: string, stmScore: number): number {
+  const score = clamp01(stmScore);
+  return fenTurn(fen) === 'w' ? score : 1 - score;
+}
+
 function pvText(pv: string[] | undefined, maxMoves = 8): string {
   if (!pv?.length) return 'PV —';
   const shown = pv.slice(0, maxMoves).join(' ');
@@ -141,6 +160,30 @@ function lc0WdlCompact(wdl: [number, number, number], q: number): string {
   return `WDL ${percent0(wdl[0])}/${percent0(wdl[1])}/${percent0(wdl[2])} · Q ${signed(q, 2)}`;
 }
 
+function lc0EvalBar(fen: string, wdl: [number, number, number]): EngineEvalBar {
+  const stmExpectedScore = clamp01(wdl[0] + 0.5 * wdl[1]);
+  const whiteScore = stmScoreToWhiteScore(fen, stmExpectedScore);
+  return { whiteScore, label: `W ${percent0(whiteScore)}` };
+}
+
+function qEvalBar(fen: string, q: number): EngineEvalBar {
+  const whiteScore = stmScoreToWhiteScore(fen, (clamp01((q + 1) / 2)));
+  return { whiteScore, label: `W ${percent0(whiteScore)}` };
+}
+
+function stockfishEvalBar(fen: string, info: StockfishInfoLine | undefined): EngineEvalBar | undefined {
+  if (!info) return undefined;
+  const turn = fenTurn(fen);
+  if (info.mateIn !== undefined) {
+    const whiteMateSign = turn === 'w' ? info.mateIn : -info.mateIn;
+    return { whiteScore: whiteMateSign > 0 ? 1 : 0, label: `W M${signed(whiteMateSign, 0)}` };
+  }
+  if (info.scoreCp === undefined) return undefined;
+  const whiteCp = turn === 'w' ? info.scoreCp : -info.scoreCp;
+  const whiteScore = 1 / (1 + Math.exp(-whiteCp / 320));
+  return { whiteScore: clamp01(whiteScore), label: `${signed(whiteCp, 0)} cp` };
+}
+
 function searchWdlText(wdl: [number, number, number], q: number): string {
   return `WDL ${percent(wdl[0])}/${percent(wdl[1])}/${percent(wdl[2])} stm · search Q ${signed(q, 3)}`;
 }
@@ -150,6 +193,23 @@ function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
   engineOutputs.set(snapshot.engineId, snapshot);
   renderSideLabels();
   renderEngineOutputs();
+}
+
+function renderEvalBars(): void {
+  const render = (id: string, color: 'White' | 'Black', engineId: string | null, engineName: string | null) => {
+    const node = el(id);
+    const output = engineId ? engineOutputs.get(engineId) : undefined;
+    const bar = output?.evalBar;
+    const thinking = engineId ? thinkingEngineIds.has(engineId) : false;
+    const whiteScore = clamp01(bar?.whiteScore ?? 0.5);
+    const label = bar?.label ?? (thinking ? 'thinking…' : 'eval —');
+    node.classList.toggle('empty', !bar);
+    node.classList.toggle('thinking', thinking);
+    node.title = `${color} engine: ${engineName ?? '—'}${bar ? ` · ${bar.label}` : ''}`;
+    node.innerHTML = `<div class="eval-fill" style="height:${(100 * whiteScore).toFixed(1)}%"></div><div class="eval-midline"></div><div class="eval-bar-caption">${color[0]}</div><div class="eval-bar-value">${htmlEscape(label)}</div>`;
+  };
+  render('whiteEngineEvalBar', 'White', boardWhiteId, boardWhiteName);
+  render('blackEngineEvalBar', 'Black', boardBlackId, boardBlackName);
 }
 
 function renderEngineOutputs(): void {
@@ -181,6 +241,7 @@ function renderSideLabels() {
   };
   update('blackSideLabel', 'Black', boardBlackId, boardBlackName, board.turn === 'b');
   update('whiteSideLabel', 'White', boardWhiteId, boardWhiteName, board.turn === 'w');
+  renderEvalBars();
 }
 
 function setBoardSideEngines(whiteId: string | null, whiteName: string | null, blackId: string | null, blackName: string | null): void {
@@ -332,6 +393,7 @@ function recordLc0PolicyOutput(engineId: string, engineName: string, evaluation:
     move,
     summary: lc0WdlText(evaluation),
     shortEval: lc0WdlCompact(evaluation.wdl, evaluation.q),
+    evalBar: lc0EvalBar(evaluation.fen, evaluation.wdl),
     detail: `top policy ${evaluation.legalPriors.slice(0, 5).map((p) => `${p.uci} ${(100 * p.prior).toFixed(1)}%`).join(', ') || '—'}`,
   });
 }
@@ -347,6 +409,7 @@ function recordLc0SearchOutput(engineId: string, engineName: string, result: Lc0
     move: result.move,
     summary: rootWdl ? searchWdlText(rootWdl, result.value) : `search Q ${signed(result.value, 3)} stm`,
     shortEval: rootWdl ? lc0WdlCompact(rootWdl, result.value) : `Q ${signed(result.value, 2)}`,
+    evalBar: rootWdl ? lc0EvalBar(result.fen, rootWdl) : qEvalBar(result.fen, result.value),
     detail: `visits ${result.visits} · evals ${stats?.evalCalls ?? 0} · cache hits ${stats?.cacheHits ?? 0}`,
     pv: result.pv,
   });
@@ -362,6 +425,7 @@ function recordStockfishOutput(engineId: string, engineName: string, fen: string
     move: move ?? undefined,
     summary: `SF ${stockfishScoreText(best)}`,
     shortEval: stockfishScoreCompact(best),
+    evalBar: stockfishEvalBar(fen, best),
     detail: lines.length > 1 ? `MultiPV ${lines.slice(0, 3).map((line) => `#${line.multipv} ${stockfishScoreText(line)}`).join(' · ')}` : undefined,
     pv: best?.pvUci,
   });

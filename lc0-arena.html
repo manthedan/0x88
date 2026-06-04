@@ -14,7 +14,8 @@ header{padding:12px 20px;border-bottom:1px solid var(--rule);background:var(--pa
 header h1{margin:0;font-size:19px}header nav a{color:var(--muted);text-decoration:none;font-size:13px;margin-right:12px}header nav a.active{color:var(--accent);font-weight:700}
 main{display:grid;grid-template-columns:minmax(300px,460px) minmax(340px,1fr);gap:20px;align-items:start;padding:18px}
 .panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:12px}
-.board-shell{width:100%;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 14px 38px -26px #000}
+.board-with-evals{display:grid;grid-template-columns:28px minmax(0,1fr) 28px;gap:8px;align-items:stretch}.board-shell{width:100%;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 14px 38px -26px #000}
+.engine-eval-bar{position:relative;min-height:100%;border:1px solid var(--rule);border-radius:7px;background:#27231e;overflow:hidden;box-shadow:0 12px 30px -28px #000}.engine-eval-bar .eval-fill{position:absolute;left:0;right:0;bottom:0;height:50%;background:#faf7ef;transition:height .18s ease}.engine-eval-bar .eval-midline{position:absolute;left:0;right:0;top:50%;border-top:1px solid rgba(90,110,42,.5)}.engine-eval-bar .eval-bar-caption{position:absolute;left:50%;top:6px;transform:translateX(-50%);font-family:var(--mono);font-size:9px;font-weight:700;color:#faf7ef;text-shadow:0 1px 2px #000;text-transform:uppercase}.engine-eval-bar .eval-bar-value{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) rotate(-90deg);padding:2px 5px;border-radius:999px;background:rgba(251,248,240,.86);color:var(--ink);font-family:var(--mono);font-size:10px;font-weight:700;white-space:nowrap;box-shadow:0 2px 9px -7px #000}.engine-eval-bar.thinking .eval-bar-value{outline:1px solid #cbd8a6}.engine-eval-bar.empty{background:#eee6d8}.engine-eval-bar.empty .eval-fill{height:50%;opacity:.4}.engine-eval-bar.empty .eval-bar-caption{color:var(--muted);text-shadow:none}
 .side-label{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:6px 0;padding:7px 9px;border:1px solid var(--rule);border-radius:6px;background:white;font-size:13px}
 .side-label .side-main{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px}.side-label .color{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700}.side-label .engine{font-weight:700}.side-label .side-eval{font-family:var(--mono);font-size:11px;color:var(--accent);font-weight:700}.side-label .turn{font-family:var(--mono);font-size:11px;color:var(--accent);font-weight:700;white-space:nowrap}
 .side-label.active{background:var(--soft);border-color:#cbd8a6}
@@ -51,7 +52,11 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
 <main>
   <section class="panel" aria-label="Board">
     <div id="blackSideLabel" class="side-label" aria-label="Black side"></div>
-    <div class="board-shell"><div id="ground"></div></div>
+    <div class="board-with-evals">
+      <div id="whiteEngineEvalBar" class="engine-eval-bar empty" aria-label="White engine evaluation bar"></div>
+      <div class="board-shell"><div id="ground"></div></div>
+      <div id="blackEngineEvalBar" class="engine-eval-bar empty" aria-label="Black engine evaluation bar"></div>
+    </div>
     <div id="whiteSideLabel" class="side-label" aria-label="White side"></div>
     <div id="pairing">Select engines and start a tournament.</div>
     <div id="message">Loading model…</div>
