@@ -2535,7 +2535,15 @@ const DEFAULT_LN1_BIAS = '/encoder0/ln1/w/bias';
 const DEFAULT_LN_EPSILON = 9.999999974752427e-7;
 
 export type Lc0WebAttentionOutProjKernelVariant = 'hand' | 'tvm-packed-f16';
-export type Lc0WebEncoderKernelVariant = 'hand' | 'tvm-packed-f16';
+export type Lc0WebEncoderKernelVariant = 'hand' | 'tvm-packed-f16' | 'mixed-tvm-ffn';
+
+function encoderUsesTvmPackedF16Ffn(variant: Lc0WebEncoderKernelVariant): boolean {
+  return variant === 'tvm-packed-f16' || variant === 'mixed-tvm-ffn';
+}
+
+function encoderUsesTvmPackedF16Attention(variant: Lc0WebEncoderKernelVariant): boolean {
+  return variant === 'tvm-packed-f16';
+}
 
 export interface Lc0WebAttentionOutputBenchmarkOptions {
   packUrl: string;
@@ -5654,7 +5662,7 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
   const ffnHidden = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN * 4, usage: usage.STORAGE | usage.COPY_DST });
   const ffnSkip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
   const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC | usage.COPY_DST });
-  const podArgs = encoderKernelVariant === 'tvm-packed-f16' ? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
+  const podArgs = encoderUsesTvmPackedF16Attention(encoderKernelVariant) || encoderUsesTvmPackedF16Ffn(encoderKernelVariant) ? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
   const buffers = [smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, output];
   if (podArgs) buffers.push(podArgs);
   const smolgenPipelines = createSmolgenPipelines(device, {
@@ -5679,7 +5687,7 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
   const attentionPipelines = createAttentionOutputPipelines(device, {
     input: layerInput, qWeight: weights.qWeight, qBias: weights.qBias, kWeight: weights.kWeight, kBias: weights.kBias, vWeight: weights.vWeight, vBias: weights.vBias, scale: weights.scale, smolgenBias, qkv, scores, probs, attn,
     outWeight: weights.outWeight, outBias: weights.outBias, alpha: weights.attentionAlpha, skip: attentionSkip, lnScale: weights.ln1Scale, lnBias: weights.ln1Bias, output: attentionOutput, podArgs,
-  }, encoderKernelVariant === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand', encoderKernelVariant === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand');
+  }, encoderUsesTvmPackedF16Attention(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand', encoderUsesTvmPackedF16Attention(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand');
   const ffnPipelines = createEncoder0FfnPipelines(device, {
     input: attentionOutput,
     dense1Weight: weights.ffnDense1Weight,
@@ -5693,7 +5701,7 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
     ln2Bias: weights.ln2Bias,
     output,
     podArgs,
-  }, encoderKernelVariant === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand');
+  }, encoderUsesTvmPackedF16Ffn(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand');
   return { runtime: { output, smolgenPipelines, attentionPipelines, ffnPipelines }, buffers };
 }
 

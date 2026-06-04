@@ -28,3 +28,14 @@ test('lc0web hybrid evaluator requires explicit opt-in for experimental WGSL/WAS
   assert.equal(evaluator.encoderKernelVariant, 'tvm-packed-f16');
   assert.equal(evaluator.wgslBatchMode, 'serial');
 });
+
+test('lc0web hybrid evaluator allows explicit mixed TVM FFN opt-in', () => {
+  const evaluator = new Lc0WebHybridEvaluator({
+    packUrl: '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json',
+    verifyShards: false,
+    encoderKernelVariant: 'mixed-tvm-ffn',
+  });
+  assert.equal(evaluator.headBackend, 'ort');
+  assert.equal(evaluator.inputBackend, 'js');
+  assert.equal(evaluator.encoderKernelVariant, 'mixed-tvm-ffn');
+});
