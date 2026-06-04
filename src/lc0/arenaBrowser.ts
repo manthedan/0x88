@@ -145,26 +145,41 @@ function pvText(pv: string[] | undefined, maxMoves = 8): string {
   return `PV ${shown}${pv.length > maxMoves ? ' …' : ''}`;
 }
 
-function stockfishScoreText(info: StockfishInfoLine | undefined): string {
+// All engine scores are displayed from White's perspective (positive = good for
+// White), matching the eval bar and standard chess GUIs, so the sign no longer
+// flips with the side to move. Engines report from the side-to-move POV, so flip
+// when Black is to move (WDL swaps win/loss; Q and cp negate).
+function toWhiteWdl(wdl: [number, number, number], fen: string): [number, number, number] {
+  return fenTurn(fen) === 'w' ? wdl : [wdl[2], wdl[1], wdl[0]];
+}
+function toWhiteQ(q: number, fen: string): number {
+  return fenTurn(fen) === 'w' ? q : -q;
+}
+
+function stockfishScoreText(info: StockfishInfoLine | undefined, fen: string): string {
   if (!info) return 'score unavailable';
-  if (info.mateIn !== undefined) return `mate ${signed(info.mateIn, 0)} stm · d${info.depth}`;
-  if (info.scoreCp !== undefined) return `${signed(info.scoreCp, 0)} cp stm · d${info.depth}`;
+  const w = fenTurn(fen) === 'w' ? 1 : -1;
+  if (info.mateIn !== undefined) return `mate ${signed(w * info.mateIn, 0)} · d${info.depth}`;
+  if (info.scoreCp !== undefined) return `${signed(w * info.scoreCp / 100, 2)} · d${info.depth}`;
   return `score unavailable · d${info.depth}`;
 }
 
-function stockfishScoreCompact(info: StockfishInfoLine | undefined): string {
+function stockfishScoreCompact(info: StockfishInfoLine | undefined, fen: string): string {
   if (!info) return 'eval —';
-  if (info.mateIn !== undefined) return `M${signed(info.mateIn, 0)} · d${info.depth}`;
-  if (info.scoreCp !== undefined) return `${signed(info.scoreCp, 0)} cp · d${info.depth}`;
+  const w = fenTurn(fen) === 'w' ? 1 : -1;
+  if (info.mateIn !== undefined) return `M${signed(w * info.mateIn, 0)} · d${info.depth}`;
+  if (info.scoreCp !== undefined) return `${signed(w * info.scoreCp / 100, 2)} · d${info.depth}`;
   return `d${info.depth}`;
 }
 
 function lc0WdlText(evaluation: Lc0Evaluation): string {
-  return `WDL ${percent(evaluation.wdl[0])}/${percent(evaluation.wdl[1])}/${percent(evaluation.wdl[2])} stm · Q ${signed(evaluation.q, 3)} · MLH ${evaluation.mlh.toFixed(1)}`;
+  const wdl = toWhiteWdl(evaluation.wdl, evaluation.fen);
+  return `WDL ${percent(wdl[0])}/${percent(wdl[1])}/${percent(wdl[2])} · Q ${signed(toWhiteQ(evaluation.q, evaluation.fen), 3)} · MLH ${evaluation.mlh.toFixed(1)}`;
 }
 
-function lc0WdlCompact(wdl: [number, number, number], q: number): string {
-  return `WDL ${percent0(wdl[0])}/${percent0(wdl[1])}/${percent0(wdl[2])} · Q ${signed(q, 2)}`;
+function lc0WdlCompact(wdl: [number, number, number], q: number, fen: string): string {
+  const w = toWhiteWdl(wdl, fen);
+  return `WDL ${percent0(w[0])}/${percent0(w[1])}/${percent0(w[2])} · Q ${signed(toWhiteQ(q, fen), 2)}`;
 }
 
 function lc0EvalBar(fen: string, wdl: [number, number, number]): EngineEvalBar {
@@ -191,8 +206,9 @@ function stockfishEvalBar(fen: string, info: StockfishInfoLine | undefined): Eng
   return { whiteScore: clamp01(whiteScore), label: signed(whiteCp / 100, 1) };
 }
 
-function searchWdlText(wdl: [number, number, number], q: number): string {
-  return `WDL ${percent(wdl[0])}/${percent(wdl[1])}/${percent(wdl[2])} stm · search Q ${signed(q, 3)}`;
+function searchWdlText(wdl: [number, number, number], q: number, fen: string): string {
+  const w = toWhiteWdl(wdl, fen);
+  return `WDL ${percent(w[0])}/${percent(w[1])}/${percent(w[2])} · search Q ${signed(toWhiteQ(q, fen), 3)}`;
 }
 
 function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
@@ -211,14 +227,29 @@ function shortEngineTag(name: string): string {
   return name.split(/[\s·|]+/)[0] || name;
 }
 
-// Optional favicon-sized engine logo. Files live in public/engine-logos/ and are
-// not bundled by default; when absent the <img> removes itself, leaving the text.
-function engineLogoHtml(name: string): string {
+// Optional favicon-sized engine logos (public/engine-logos/, not bundled by
+// default). We probe once which files exist and only emit an <img> for those, so
+// when a logo is absent the markup is unchanged — no per-render insert/remove jitter.
+const availableEngineLogos = new Set<string>();
+
+function engineLogoFamily(name: string): string {
   const n = name.toLowerCase();
-  const family = (n.includes('bt4') || n.includes('lc0') || n.includes('leela')) ? 'lc0'
-    : n.includes('reckless') ? 'reckless'
-    : (n.includes('stockfish') || /\bsf\b/.test(n)) ? 'stockfish' : '';
-  return family ? `<img class="engine-logo" src="/engine-logos/${family}.png" alt="" onerror="this.remove()">` : '';
+  if (n.includes('bt4') || n.includes('lc0') || n.includes('leela')) return 'lc0';
+  if (n.includes('reckless')) return 'reckless';
+  if (n.includes('stockfish') || /\bsf\b/.test(n)) return 'stockfish';
+  return '';
+}
+
+function engineLogoHtml(name: string): string {
+  const family = engineLogoFamily(name);
+  return family && availableEngineLogos.has(family) ? `<img class="engine-logo" src="/engine-logos/${family}.png" alt="">` : '';
+}
+
+async function probeEngineLogos(): Promise<void> {
+  await Promise.all(['lc0', 'stockfish', 'reckless'].map(async (family) => {
+    try { if ((await fetch(`/engine-logos/${family}.png`, { method: 'HEAD', cache: 'no-store' })).ok) availableEngineLogos.add(family); } catch { /* absent */ }
+  }));
+  if (availableEngineLogos.size) renderSideLabels();
 }
 
 function renderEvalBars(): void {
@@ -249,30 +280,33 @@ function renderEngineOutputs(): void {
   const cards = ids.map((id) => {
     const snapshot = engineOutputs.get(id);
     const name = snapshot?.engineName ?? engines.get(id)?.name ?? id;
-    const active = activeEngineIds.length && id === (board.turn === 'w' ? activeEngineIds[0] : activeEngineIds[1]);
     const thinking = thinkingEngineIds.has(id);
-    if (!snapshot) return `<div class="eval-card${active ? ' active' : ''}"><strong>${htmlEscape(name)}</strong>${thinking ? 'thinking on current position…' : 'waiting for output…'}</div>`;
+    // No per-ply "active" highlight here: at fast movetimes it strobes. Whose turn
+    // it is is shown calmly by the last-move arrow on the board instead.
+    if (!snapshot) return `<div class="eval-card"><strong>${htmlEscape(name)}</strong>${thinking ? 'thinking on current position…' : 'waiting for output…'}</div>`;
     const status = thinking ? '<span class="eval-status">thinking… keeping last eval</span>' : '';
     const detail = snapshot.detail ? `<br>${htmlEscape(snapshot.detail)}` : '';
     const pv = snapshot.pv?.length ? `<br>${htmlEscape(pvText(snapshot.pv))}` : '';
     const move = snapshot.move ? ` · move ${snapshot.move}` : '';
-    return `<div class="eval-card${active ? ' active' : ''}"><strong>${htmlEscape(name)}${status}</strong>${htmlEscape(snapshot.summary)}${htmlEscape(move)}${detail}${pv}</div>`;
+    return `<div class="eval-card"><strong>${htmlEscape(name)}${status}</strong>${htmlEscape(snapshot.summary)}${htmlEscape(move)}${detail}${pv}</div>`;
   });
   el('engineEvalInfo').innerHTML = cards.length ? cards.join('') : '<div class="eval-card">Engine outputs: waiting for a move…</div>';
 }
 
 function renderSideLabels() {
-  const update = (id: string, color: 'White' | 'Black', engineId: string | null, engineName: string | null, active: boolean) => {
+  // Side labels are static identity rows (chip + logo + engine + eval). Whose turn
+  // it is is conveyed by the board's last-move arrow, not a per-ply highlight that
+  // would strobe at fast movetimes.
+  const update = (id: string, color: 'White' | 'Black', engineId: string | null, engineName: string | null) => {
     const node = el(id);
     const output = engineId ? engineOutputs.get(engineId) : undefined;
     const thinking = engineId ? thinkingEngineIds.has(engineId) : false;
     const evalText = output?.shortEval ?? (thinking ? 'thinking…' : 'eval —');
-    const status = active ? (thinking && output ? 'thinking' : 'to move') : '';
-    node.classList.toggle('active', active);
-    node.innerHTML = `<span class="side-main"><span class="color">${color}</span> ${engineName ? engineLogoHtml(engineName) : ''}<span class="engine">${htmlEscape(engineName ?? '—')}</span>${status ? ` <span class="turn">${status}</span>` : ''} <span class="side-eval">${htmlEscape(evalText)}</span></span>`;
+    node.classList.remove('active');
+    node.innerHTML = `<span class="side-main"><span class="color">${color}</span> ${engineName ? engineLogoHtml(engineName) : ''}<span class="engine">${htmlEscape(engineName ?? '—')}</span> <span class="side-eval">${htmlEscape(evalText)}</span></span>`;
   };
-  update('blackSideLabel', 'Black', boardBlackId, boardBlackName, board.turn === 'b');
-  update('whiteSideLabel', 'White', boardWhiteId, boardWhiteName, board.turn === 'w');
+  update('blackSideLabel', 'Black', boardBlackId, boardBlackName);
+  update('whiteSideLabel', 'White', boardWhiteId, boardWhiteName);
   renderEvalBars();
 }
 
@@ -293,11 +327,22 @@ function renderBoard() {
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 140 },
     lastMove: lastUci ? [lastUci.slice(0, 2) as Key, lastUci.slice(2, 4) as Key] : undefined,
+    // Custom brushes in the two side identity colors so the last-move arrow also
+    // shows which side just moved — a calm alternative to per-ply "to move" flashing.
+    drawable: { enabled: false, brushes: {
+      moveWhite: { key: 'moveWhite', color: '#2f6e7d', opacity: 0.9, lineWidth: 14 },
+      moveBlack: { key: 'moveBlack', color: '#b15c2b', opacity: 0.9, lineWidth: 14 },
+    } },
   };
-  if (!ground) ground = Chessground(el('ground'), config);
-  else ground.set(config);
+  // Cast: chessground's DrawBrushes type has fixed keys, but custom brush keys
+  // merge fine at runtime.
+  const cfg = config as unknown as NonNullable<Parameters<typeof Chessground>[1]>;
+  if (!ground) ground = Chessground(el('ground'), cfg);
+  else ground.set(cfg);
+  // The mover is the side NOT to move now; tint the arrow with their identity hue.
+  const moverBrush = board.turn === 'w' ? 'moveBlack' : 'moveWhite';
   const shapes: DrawShape[] = lastUci && lastUci.length >= 4
-    ? [{ orig: lastUci.slice(0, 2) as Key, dest: lastUci.slice(2, 4) as Key, brush: 'green' }] : [];
+    ? [{ orig: lastUci.slice(0, 2) as Key, dest: lastUci.slice(2, 4) as Key, brush: moverBrush }] : [];
   ground.setAutoShapes(shapes);
   renderSideLabels();
   renderEngineOutputs();
@@ -447,7 +492,7 @@ function recordLc0PolicyOutput(engineId: string, engineName: string, evaluation:
     fen: evaluation.fen,
     move,
     summary: lc0WdlText(evaluation),
-    shortEval: lc0WdlCompact(evaluation.wdl, evaluation.q),
+    shortEval: lc0WdlCompact(evaluation.wdl, evaluation.q, evaluation.fen),
     evalBar: lc0EvalBar(evaluation.fen, evaluation.wdl),
     detail: `top policy ${evaluation.legalPriors.slice(0, 5).map((p) => `${p.uci} ${(100 * p.prior).toFixed(1)}%`).join(', ') || '—'}`,
   });
@@ -462,8 +507,8 @@ function recordLc0SearchOutput(engineId: string, engineName: string, result: Lc0
     kind: 'lc0',
     fen: result.fen,
     move: result.move,
-    summary: rootWdl ? searchWdlText(rootWdl, result.value) : `search Q ${signed(result.value, 3)} stm`,
-    shortEval: rootWdl ? lc0WdlCompact(rootWdl, result.value) : `Q ${signed(result.value, 2)}`,
+    summary: rootWdl ? searchWdlText(rootWdl, result.value, result.fen) : `search Q ${signed(toWhiteQ(result.value, result.fen), 3)}`,
+    shortEval: rootWdl ? lc0WdlCompact(rootWdl, result.value, result.fen) : `Q ${signed(toWhiteQ(result.value, result.fen), 2)}`,
     evalBar: rootWdl ? lc0EvalBar(result.fen, rootWdl) : qEvalBar(result.fen, result.value),
     detail: `visits ${result.visits} · evals ${stats?.evalCalls ?? 0} · cache hits ${stats?.cacheHits ?? 0}`,
     pv: result.pv,
@@ -477,8 +522,8 @@ function recordBt4SearchOutput(engineId: string, engineName: string, result: Bt4
     kind: 'lc0',
     fen: result.fen,
     move: result.move ?? undefined,
-    summary: `search Q ${signed(result.value, 3)} stm`,
-    shortEval: `Q ${signed(result.value, 2)}`,
+    summary: `search Q ${signed(toWhiteQ(result.value, result.fen), 3)}`,
+    shortEval: `Q ${signed(toWhiteQ(result.value, result.fen), 2)}`,
     evalBar: qEvalBar(result.fen, result.value),
     detail: `visits ${result.visits} · evals ${result.stats?.evalCalls ?? 0} · cache hits ${result.stats?.cacheHits ?? 0}`,
     pv: result.pv,
@@ -493,10 +538,10 @@ function recordUciOutput(engineId: string, engineName: string, label: string, fe
     kind: 'uci',
     fen,
     move: move ?? undefined,
-    summary: `${label} ${stockfishScoreText(best)}`,
-    shortEval: stockfishScoreCompact(best),
+    summary: `${label} ${stockfishScoreText(best, fen)}`,
+    shortEval: stockfishScoreCompact(best, fen),
     evalBar: stockfishEvalBar(fen, best),
-    detail: lines.length > 1 ? `MultiPV ${lines.slice(0, 3).map((line) => `#${line.multipv} ${stockfishScoreText(line)}`).join(' · ')}` : undefined,
+    detail: lines.length > 1 ? `MultiPV ${lines.slice(0, 3).map((line) => `#${line.multipv} ${stockfishScoreText(line, fen)}`).join(' · ')}` : undefined,
     pv: best?.pvUci,
   });
 }
@@ -1070,6 +1115,7 @@ async function init() {
   buildEngines();
   populateSeats();
   void refreshBt4Availability();
+  void probeEngineLogos();
   wireEvents();
   refreshOpeningPreview();
   try {

@@ -108,9 +108,9 @@ async function initWorker(): Promise<string> {
   return workerBackend;
 }
 
-async function workerLc0Lines(fen: string): Promise<AnalysisLine[]> {
+async function workerLc0Lines(fen: string, visits: number): Promise<AnalysisLine[]> {
   const response = await postWorker<{ result: WorkerSearchResult }>(
-    { type: 'search', input: { positions: tree.historyBoards() }, visits: visits(), batchSize: 1, multiPv: multiPv() },
+    { type: 'search', input: { positions: tree.historyBoards() }, visits, batchSize: 1, multiPv: multiPv() },
     (id) => { activeWorkerSearchId = id; },
   );
   return response.result.cancelled ? [] : lc0AnalysisLines(response.result, fen, 'Lc0');
@@ -130,17 +130,23 @@ function setShapes(shapes: DrawShape[]) { ground?.setAutoShapes(shapes); }
 function uciShape(uci: string, brush: string): DrawShape | null {
   return uci.length >= 4 ? { orig: uci.slice(0, 2) as Key, dest: uci.slice(2, 4) as Key, brush } : null;
 }
-function visits(): number { return Math.max(1, Math.floor(Number(inputEl('visitsInput').value) || 400)); }
 function multiPv(): number { return Math.max(1, Math.floor(Number(inputEl('multiPvInput').value) || 3)); }
-function sfDepth(): number { return Math.max(1, Math.floor(Number(inputEl('sfDepthInput').value) || 14)); }
-function recklessDepth(): number { return Math.max(1, Math.floor(Number(inputEl('recklessDepthInput').value) || 4)); }
 // Engines to analyze are chosen as an add/remove list of cascading selects:
 // family (Lc0/Stockfish/Reckless) -> variant (Lc0: Small|BT4; SF: Lite|Full;
-// Reckless: variant). Each maps to a single shared, lazily-created instance.
+// Reckless: variant) -> strength (Lc0 visits, SF/Reckless depth), all per row.
 type EngineFamily = 'lc0' | 'sf' | 'reckless';
-interface EngineRow { family: EngineFamily; variant: string; }
+interface EngineRow { family: EngineFamily; variant: string; strength: number; }
 const DEFAULT_RECKLESS_VARIANT = REQUESTED_RECKLESS_VARIANT.key;
-let engineRows: EngineRow[] = [{ family: 'lc0', variant: 'small' }];
+
+function strengthMeta(family: EngineFamily): { unit: string; min: number; max: number; def: number } {
+  if (family === 'lc0') return { unit: 'visits', min: 1, max: 100000, def: 400 };
+  if (family === 'sf') return { unit: 'depth', min: 1, max: 30, def: 14 };
+  // Reckless is alpha-beta like Stockfish, so default to the same depth (14).
+  return { unit: 'depth', min: 1, max: 30, def: 14 };
+}
+function defaultStrength(family: EngineFamily): number { return strengthMeta(family).def; }
+
+let engineRows: EngineRow[] = [{ family: 'lc0', variant: 'small', strength: 400 }];
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
   if (family === 'lc0') return [{ value: 'small', label: 'Small' }, { value: 'bt4', label: 'BT4', disabled: !bt4SupportedSync() }];
@@ -172,13 +178,14 @@ function renderEngineList(): void {
   el('engineList').innerHTML = engineRows.map((row, i) => {
     const famSel = families.map(([v, l]) => `<option value="${v}"${row.family === v ? ' selected' : ''}>${l}</option>`).join('');
     const varSel = variantOptions(row.family).map((o) => `<option value="${o.value}"${row.variant === o.value ? ' selected' : ''}${o.disabled ? ' disabled' : ''}>${htmlEscape(o.label)}</option>`).join('');
+    const meta = strengthMeta(row.family);
     const remove = engineRows.length > 1 ? `<button class="row-rm" data-i="${i}" type="button" title="Remove engine">×</button>` : '';
-    return `<div class="engine-row"><select class="row-fam" data-i="${i}">${famSel}</select><span class="arrow">→</span><select class="row-var" data-i="${i}">${varSel}</select>${remove}</div>`;
+    return `<div class="engine-row"><select class="row-fam" data-i="${i}">${famSel}</select><span class="arrow">→</span><select class="row-var" data-i="${i}">${varSel}</select><span class="arrow">→</span><input class="row-strength" data-i="${i}" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
   }).join('');
 }
 
-async function workerBt4Lines(fen: string): Promise<AnalysisLine[]> {
-  const result = await bt4.search({ positions: tree.historyBoards() }, { visits: visits(), multiPv: multiPv() });
+async function workerBt4Lines(fen: string, visits: number): Promise<AnalysisLine[]> {
+  const result = await bt4.search({ positions: tree.historyBoards() }, { visits, multiPv: multiPv() });
   return result.cancelled ? [] : lc0AnalysisLines(result, fen, 'Lc0 BT4');
 }
 
@@ -198,11 +205,12 @@ function renderRecklessRuntimeInfo(): void {
 }
 
 function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
+  // Constructor depth is just a default; each analyze() call passes the row depth.
   if (kind === 'lite') {
-    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: sfDepth() }, stockfishFlavorUrl('lite-single'));
+    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: 14 }, stockfishFlavorUrl('lite-single'));
     return stockfishLite;
   }
-  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: sfDepth() }, stockfishFlavorUrl('single'));
+  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: 14 }, stockfishFlavorUrl('single'));
   return stockfishFull;
 }
 
@@ -210,7 +218,7 @@ const recklessByVariant = new Map<string, RecklessEngine>();
 function getRecklessFor(variantKey: string): RecklessEngine {
   let engine = recklessByVariant.get(variantKey);
   if (!engine) {
-    engine = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, recklessVariantByKey(normalizeRecklessVariant(variantKey)).wasmUrl);
+    engine = new RecklessEngine({ depth: 4, hashMb: 16 }, recklessVariantByKey(normalizeRecklessVariant(variantKey)).wasmUrl);
     recklessByVariant.set(variantKey, engine);
   }
   return engine;
@@ -293,8 +301,7 @@ function renderBoard() {
 
 function renderEvalBar() {
   const line = (lineCache.get(tree.current.fen) ?? [])[0];
-  const board = parseFen(tree.current.fen);
-  const pct = line ? evalBarWhitePercent(line.scoreCp, line.mateIn, board.turn) : 50;
+  const pct = line ? evalBarWhitePercent(line.scoreCp, line.mateIn) : 50;
   (el('evalWhite') as HTMLElement).style.height = `${pct}%`;
   el('posEval').textContent = line ? `${line.scoreText} (${line.engine})` : '—';
 }
@@ -457,29 +464,25 @@ async function analyzeCurrent() {
     el('analyze').toggleAttribute('disabled', false);
     return;
   }
-  const selectedLabels = rows.map((row) => {
-    if (row.family === 'reckless') return `${rowLabel(row)} d${recklessDepth()}`;
-    if (row.family === 'sf') return `${rowLabel(row)} d${sfDepth()}`;
-    return `${rowLabel(row)} ${visits()}v`;
-  }).join(' + ');
+  const selectedLabels = rows.map((row) => row.family === 'lc0' ? `${rowLabel(row)} ${row.strength}v` : `${rowLabel(row)} d${row.strength}`).join(' + ');
   el('message').textContent = `Analyzing (${selectedLabels}, ${multiPv()} lines)…`;
   try {
     const tasks: Promise<AnalysisLine[]>[] = [];
     for (const row of rows) {
       if (row.family === 'lc0' && row.variant === 'bt4') {
-        tasks.push(workerBt4Lines(fen));
+        tasks.push(workerBt4Lines(fen, row.strength));
       } else if (row.family === 'lc0') {
-        if (workerReady) tasks.push(workerLc0Lines(fen));
-        else if (searcher) tasks.push(searcher.search({ positions: tree.historyBoards() }, { visits: visits(), multiPv: multiPv(), signal: controller.signal, yieldEveryMs: 16 })
+        if (workerReady) tasks.push(workerLc0Lines(fen, row.strength));
+        else if (searcher) tasks.push(searcher.search({ positions: tree.historyBoards() }, { visits: row.strength, multiPv: multiPv(), signal: controller.signal, yieldEveryMs: 16 })
           .then((result) => lc0AnalysisLines(result, fen, 'Lc0')));
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
-        const label = kind === 'lite' ? `SF Lite d${sfDepth()}` : `SF d${sfDepth()}`;
-        tasks.push(getStockfish(kind).analyze(fen, { multipv: multiPv(), depth: sfDepth(), signal: controller.signal })
+        const label = kind === 'lite' ? `SF Lite d${row.strength}` : `SF d${row.strength}`;
+        tasks.push(getStockfish(kind).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
           .then((infos) => stockfishAnalysisLines(infos, fen, label)));
       } else {
-        const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label} d${recklessDepth()}`;
-        tasks.push(getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: recklessDepth(), signal: controller.signal })
+        const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label} d${row.strength}`;
+        tasks.push(getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       }
     }
@@ -575,19 +578,24 @@ function wireEvents() {
     bt4.cancel();
   });
   el('engineList').addEventListener('change', (event) => {
-    const select = event.target as HTMLSelectElement;
-    const i = Number(select.dataset.i);
+    const target = event.target as HTMLInputElement | HTMLSelectElement;
+    const i = Number(target.dataset.i);
     if (Number.isNaN(i) || !engineRows[i]) return;
-    if (select.classList.contains('row-fam')) {
-      engineRows[i].family = select.value as EngineFamily;
-      engineRows[i].variant = defaultVariant(select.value as EngineFamily);
+    if (target.classList.contains('row-fam')) {
+      const family = target.value as EngineFamily;
+      engineRows[i].family = family;
+      engineRows[i].variant = defaultVariant(family);
+      engineRows[i].strength = defaultStrength(family);
       renderEngineList();
-    } else if (select.classList.contains('row-var')) {
-      if (engineRows[i].family === 'lc0' && select.value === 'bt4') {
+    } else if (target.classList.contains('row-var')) {
+      if (engineRows[i].family === 'lc0' && target.value === 'bt4') {
         // One-time gate before the ~353MB lazy load.
-        if (!window.confirm(`${bt4LoadWarning()}\n\nUse Lc0 BT4?`)) { select.value = engineRows[i].variant; return; }
+        if (!window.confirm(`${bt4LoadWarning()}\n\nUse Lc0 BT4?`)) { target.value = engineRows[i].variant; return; }
       }
-      engineRows[i].variant = select.value;
+      engineRows[i].variant = target.value;
+    } else if (target.classList.contains('row-strength')) {
+      const meta = strengthMeta(engineRows[i].family);
+      engineRows[i].strength = Math.max(meta.min, Math.min(meta.max, Math.floor(Number(target.value) || meta.def)));
     }
     disposeUnusedEngines();
     lineCache.delete(tree.current.fen);
@@ -605,14 +613,12 @@ function wireEvents() {
     void analyzeCurrent();
   });
   el('addEngine').addEventListener('click', () => {
-    engineRows.push({ family: 'lc0', variant: 'small' });
+    engineRows.push({ family: 'lc0', variant: 'small', strength: defaultStrength('lc0') });
     renderEngineList();
     lineCache.delete(tree.current.fen);
     void analyzeCurrent();
   });
-  for (const id of ['sfDepthInput', 'recklessDepthInput', 'visitsInput', 'multiPvInput']) {
-    el(id).addEventListener('change', () => { lineCache.delete(tree.current.fen); void analyzeCurrent(); });
-  }
+  el('multiPvInput').addEventListener('change', () => { lineCache.delete(tree.current.fen); void analyzeCurrent(); });
   el('movelist').addEventListener('click', (event) => {
     const target = (event.target as HTMLElement).closest('[data-node]');
     if (!target) return;

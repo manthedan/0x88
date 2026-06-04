@@ -29,14 +29,13 @@ test('formatScore renders mate and centipawns', () => {
   assert.equal(formatScore(undefined, undefined), '—');
 });
 
-test('evalBarWhitePercent flips with side to move and clamps to [0,100]', () => {
-  assert.equal(evalBarWhitePercent(0, undefined, 'w'), 50);
-  assert.ok(evalBarWhitePercent(300, undefined, 'w') > 50, 'white ahead, white to move');
-  // Same side-to-move score but black to move means white is behind.
-  assert.ok(evalBarWhitePercent(300, undefined, 'b') < 50);
-  assert.equal(evalBarWhitePercent(undefined, 5, 'w'), 100, 'white mating');
-  assert.equal(evalBarWhitePercent(undefined, 5, 'b'), 0, 'black mating');
-  const p = evalBarWhitePercent(100000, undefined, 'w');
+test('evalBarWhitePercent maps a White-perspective score to [0,100]', () => {
+  assert.equal(evalBarWhitePercent(0, undefined), 50);
+  assert.ok(evalBarWhitePercent(300, undefined) > 50, 'white ahead');
+  assert.ok(evalBarWhitePercent(-300, undefined) < 50, 'black ahead');
+  assert.equal(evalBarWhitePercent(undefined, 5), 100, 'white mating');
+  assert.equal(evalBarWhitePercent(undefined, -5), 0, 'black mating');
+  const p = evalBarWhitePercent(100000, undefined);
   assert.ok(p <= 100 && p >= 0);
 });
 
@@ -96,6 +95,19 @@ test('stockfishAnalysisLines converts info lines to SAN-rendered analysis lines'
   assert.match(lines[0].pvSan, /^e4 e5/);
   assert.equal(lines[1].scoreText, '#4');
   assert.equal(lines[1].detail, 'depth 18');
+});
+
+test('stockfishAnalysisLines reports scores from White perspective when Black is to move', () => {
+  const blackToMove = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
+  const lines = stockfishAnalysisLines(
+    [{ multipv: 1, depth: 18, scoreCp: 35, pvUci: ['e7e5'] }, { multipv: 2, depth: 18, mateIn: 4, pvUci: ['d7d5'] }],
+    blackToMove,
+    'SF',
+  );
+  assert.equal(lines[0].scoreCp, -35, 'side-to-move +35 (Black) negates to White perspective');
+  assert.equal(lines[0].scoreText, '-0.35');
+  assert.equal(lines[1].mateIn, -4);
+  assert.equal(lines[1].scoreText, '#-4', 'Black mating shows as negative from White view');
 });
 
 test('lc0AnalysisLines falls back to the single PV when multiPv is absent', () => {
