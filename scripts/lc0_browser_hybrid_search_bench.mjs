@@ -7,7 +7,7 @@ const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 180_000;
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_search_bench.mjs [options]\n\nRuns a bounded browser benchmark for the hybrid WGSL encoder + ORT heads evaluator, including warm eval latency and fixed-visit PUCT search latency.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --visits N           Fixed PUCT visits per timed search (default 32)\n  --batch N            Search leaf batch size (default 1)\n  --layers N           Encoder layers for hybrid path (default 10)\n  --eval-iters N       Timed warm eval iterations (default 3, max 100)\n  --eval-warmup N      Warm eval warmup iterations (default 1, max 20)\n  --search-iters N     Timed fixed-visit searches (default 3, max 50)\n  --search-warmup N    Search warmup iterations (default 1, max 10)\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`);
+  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_search_bench.mjs [options]\n\nRuns a bounded browser benchmark for the hybrid WGSL encoder + ORT heads evaluator, including warm eval latency and fixed-visit PUCT search latency.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --visits N           Fixed PUCT visits per timed search (default 32)\n  --batch N            Search leaf batch size (default 1)\n  --layers N           Encoder layers for hybrid path (default 10)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --eval-iters N       Timed warm eval iterations (default 3, max 100)\n  --eval-warmup N      Warm eval warmup iterations (default 1, max 20)\n  --search-iters N     Timed fixed-visit searches (default 3, max 50)\n  --search-warmup N    Search warmup iterations (default 1, max 10)\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -20,6 +20,7 @@ function parseArgs(argv) {
     visits: 32,
     batch: 1,
     layers: 10,
+    headBackend: 'ort',
     evalIters: 3,
     evalWarmup: 1,
     searchIters: 3,
@@ -47,6 +48,7 @@ function parseArgs(argv) {
     else if (arg === '--visits') args.visits = Number(next());
     else if (arg === '--batch') args.batch = Number(next());
     else if (arg === '--layers') args.layers = Number(next());
+    else if (arg === '--head-backend') args.headBackend = next();
     else if (arg === '--eval-iters') args.evalIters = Number(next());
     else if (arg === '--eval-warmup') args.evalWarmup = Number(next());
     else if (arg === '--search-iters') args.searchIters = Number(next());
@@ -59,6 +61,7 @@ function parseArgs(argv) {
   }
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
+  if (!['ort', 'wgsl'].includes(args.headBackend)) throw new Error(`Invalid --head-backend: ${args.headBackend}`);
   for (const [name, value] of [
     ['port', args.port], ['timeout', args.timeoutMs], ['visits', args.visits], ['batch', args.batch], ['layers', args.layers],
     ['eval-iters', args.evalIters], ['eval-warmup', args.evalWarmup], ['search-iters', args.searchIters], ['search-warmup', args.searchWarmup],
@@ -72,6 +75,7 @@ function benchmarkUrl(args) {
   const url = new URL('/lc0-policy-only.html', args.baseUrl);
   url.searchParams.set('hybridSearchBench', '1');
   url.searchParams.set('runtime', 'hybrid');
+  if (args.headBackend !== 'ort') url.searchParams.set('headBackend', args.headBackend);
   url.searchParams.set('encoderLayers', String(args.layers));
   url.searchParams.set('visits', String(args.visits));
   url.searchParams.set('batch', String(args.batch));
@@ -172,7 +176,8 @@ async function runBrowserBenchmark(args) {
         const text = textFromGetResult(await runAgent(args, ['get', 'text', '#benchResult'], 30_000));
         const result = JSON.parse(text);
         if (result.status !== 'HYBRID_SEARCH_BENCH_DONE') throw new Error(`unexpected benchmark status: ${result.status}`);
-        if (result.backend !== 'lc0web-wgsl-encoder-ort-heads') throw new Error(`unexpected hybrid backend: ${result.backend}`);
+        const expectedBackend = args.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
+        if (result.backend !== expectedBackend) throw new Error(`unexpected hybrid backend: ${result.backend}`);
         return result;
       } catch (error) {
         if (Date.now() >= deadline) throw error;

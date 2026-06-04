@@ -16,7 +16,7 @@ const PARALLEL_BASELINE_MIN_MEMORY_GIB = 24;
 const PARALLEL_BASELINE_MAX_FIXTURES = 16;
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_drift.mjs [options]\n\nCompares browser hybrid lc0web WGSL encoder + ORT heads output against f32 ONNX and native BLAS fixture priors.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --limit N            Number of native fixtures to evaluate (default ${DEFAULT_LIMIT})\n  --layers N           Encoder layers for hybrid path (default 10)\n  --f32-model PATH     f32 ONNX baseline (default ${DEFAULT_F32_MODEL})\n  --baseline-mode MODE Run browser hybrid and f32 baseline as auto|parallel|serial (default auto)\n  --parallel-baseline  Alias for --baseline-mode parallel\n  --serial-baseline    Alias for --baseline-mode serial\n  --no-server          Do not auto-start Vite\n  -h, --help           Show this help\n`);
+  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_drift.mjs [options]\n\nCompares browser hybrid lc0web WGSL encoder + ORT heads output against f32 ONNX and native BLAS fixture priors.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --limit N            Number of native fixtures to evaluate (default ${DEFAULT_LIMIT})\n  --layers N           Encoder layers for hybrid path (default 10)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --f32-model PATH     f32 ONNX baseline (default ${DEFAULT_F32_MODEL})\n  --baseline-mode MODE Run browser hybrid and f32 baseline as auto|parallel|serial (default auto)\n  --parallel-baseline  Alias for --baseline-mode parallel\n  --serial-baseline    Alias for --baseline-mode serial\n  --no-server          Do not auto-start Vite\n  -h, --help           Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -29,6 +29,7 @@ function parseArgs(argv) {
     agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
     session: process.env.AGENT_BROWSER_SESSION ?? `lc0-hybrid-drift-${process.pid}`,
     f32Model: DEFAULT_F32_MODEL,
+    headBackend: 'ort',
     baselineMode: 'auto',
     noServer: false,
   };
@@ -46,6 +47,7 @@ function parseArgs(argv) {
     else if (arg === '--timeout') args.timeoutMs = Number(next());
     else if (arg === '--limit') args.limit = Number(next());
     else if (arg === '--layers') args.layers = Number(next());
+    else if (arg === '--head-backend') args.headBackend = next();
     else if (arg === '--f32-model') args.f32Model = next();
     else if (arg === '--baseline-mode') args.baselineMode = next();
     else if (arg === '--parallel-baseline') args.baselineMode = 'parallel';
@@ -56,6 +58,7 @@ function parseArgs(argv) {
   }
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (!['auto', 'parallel', 'serial'].includes(args.baselineMode)) throw new Error(`Invalid --baseline-mode: ${args.baselineMode}`);
+  if (!['ort', 'wgsl'].includes(args.headBackend)) throw new Error(`Invalid --head-backend: ${args.headBackend}`);
   for (const [name, value] of [['port', args.port], ['limit', args.limit], ['layers', args.layers], ['timeout', args.timeoutMs]]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
@@ -188,10 +191,16 @@ async function f32Baselines(args, records) {
 }
 
 async function browserHybrid(args) {
-  const url = `${args.baseUrl.replace(/\/$/, '')}/lc0-policy-only.html?hybridDrift=1&encoderLayers=${args.layers}&hybridDriftLimit=${args.limit}&ep=wasm&packVerify=0`;
+  const url = new URL('/lc0-policy-only.html', args.baseUrl);
+  url.searchParams.set('hybridDrift', '1');
+  url.searchParams.set('encoderLayers', String(args.layers));
+  url.searchParams.set('hybridDriftLimit', String(args.limit));
+  url.searchParams.set('ep', 'wasm');
+  url.searchParams.set('packVerify', '0');
+  if (args.headBackend !== 'ort') url.searchParams.set('headBackend', args.headBackend);
   process.stderr.write(`[lc0-hybrid-drift] ${url}\n`);
   try {
-    await runAgent(args, ['open', url], 30_000);
+    await runAgent(args, ['open', String(url)], 30_000);
     const deadline = Date.now() + args.timeoutMs;
     while (Date.now() < deadline) {
       const chunk = Math.min(25_000, Math.max(1000, deadline - Date.now()));
