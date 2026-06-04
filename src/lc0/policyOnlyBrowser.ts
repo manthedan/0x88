@@ -613,6 +613,23 @@ type OrtBenchmarkResult = {
   outputSample: number[];
 };
 
+type HybridEncoderProfileResult = {
+  status: 'HYBRID_ENCODER_PROFILE_DONE';
+  packUrl: string;
+  layers: number;
+  encoderKernelVariant: 'hand' | 'tvm-packed-f16';
+  inputBackend: 'js' | 'wgsl' | 'wasm';
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  profiledStageTotalMs: number;
+  readbackSyncedMs: number;
+  outputSample: number[];
+  aggregateStageTimings: Array<{ stage: string; label: string; iterations: number; totalMs: number; avgMs: number; percentOfProfiledStageMs: number }>;
+  layerTimings: Array<{ layer: number; totalMs: number; stages: Array<{ stage: string; label: string; iterations: number; totalMs: number; avgMs: number; percentOfProfiledStageMs: number }> }>;
+  note: string;
+};
+
 type WorkerResponse =
   | { type: 'ready'; id: number; backend: string; modelCache: string }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
@@ -638,6 +655,7 @@ type WorkerResponse =
   | { type: 'mappedPolicyProbeResult'; id: number; result: MappedPolicyProbeResult }
   | { type: 'encoder0FfnBenchmarkResult'; id: number; result: Encoder0FfnBenchmarkResult }
   | { type: 'encoder0FfnOrtBenchmarkResult'; id: number; result: Encoder0FfnOrtBenchmarkResult }
+  | { type: 'hybridEncoderProfileResult'; id: number; result: HybridEncoderProfileResult }
   | { type: 'searchResult'; id: number; result: RenderableSearchResult }
   | { type: 'error'; id: number; error: string };
 
@@ -694,6 +712,7 @@ const KERNEL_PROBE_REQUESTED = MAPPED_POLICY_PROBE_REQUESTED || WGSL_HEADS_PROBE
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
 const HYBRID_SEARCH_BENCH_REQUESTED = params.get('hybridSearchBench') === '1' || params.get('hybridSearchBenchmark') === '1';
+const HYBRID_ENCODER_PROFILE_REQUESTED = params.get('hybridEncoderProfile') === '1' || params.get('encoderProfile') === '1' || params.get('hybridProfile') === '1';
 const HYBRID_INPUT_BENCH_REQUESTED = params.get('hybridInputBench') === '1' || params.get('hybridInputBenchmark') === '1' || params.get('wasmInputBench') === '1';
 const HYBRID_DEFERRED_READBACK_BENCH_REQUESTED = params.get('wgslDeferredReadbackBench') === '1' || params.get('deferredReadbackBench') === '1';
 const HYBRID_WGSL_HEADS_REQUESTED = params.get('headBackend') === 'wgsl' || params.get('hybridHeads') === 'wgsl' || params.get('runtime') === 'hybrid-wgsl-heads' || params.get('runtime') === 'wgsl-heads';
@@ -703,7 +722,7 @@ const HYBRID_INPUT_BACKEND_REQUESTED = HYBRID_INPUT_BACKEND_PARAM === 'wgsl' || 
 const HYBRID_INPUT_BACKEND = HYBRID_INPUT_BACKEND_PARAM === 'wasm' ? 'wasm' : (HYBRID_INPUT_BACKEND_PARAM === 'wgsl' ? 'wgsl' : 'js');
 const HYBRID_ENCODER_KERNEL_PARAM = params.get('encoderKernel') ?? params.get('hybridEncoderKernel') ?? params.get('encoderKernelVariant');
 const HYBRID_ENCODER_KERNEL_VARIANT = HYBRID_ENCODER_KERNEL_PARAM === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand';
-const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
+const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
@@ -2337,6 +2356,59 @@ async function runWorkerEvalBenchmark(): Promise<void> {
   }
 }
 
+async function runHybridEncoderProfile(): Promise<void> {
+  if (!searchWorkerReady) throw new Error('hybrid encoder profile requires ready LC0 worker');
+  const input = currentEvaluationInput();
+  const iterations = boundedQueryInt(['hybridEncoderProfileIters', 'profileIters'], 1, 1, 20);
+  const warmup = boundedQueryInt(['hybridEncoderProfileWarmup', 'profileWarmup'], 1, 0, 10);
+  setBusy(true, `Profiling hybrid encoder stages: ${iterations} staged pass(es)…`);
+  el('benchResult').textContent = 'HYBRID_ENCODER_PROFILE_RUNNING';
+  try {
+    const response = await postWorkerRequest<{ type: 'hybridEncoderProfileResult'; result: HybridEncoderProfileResult }>({
+      type: 'hybridEncoderProfile',
+      packUrl: PACK_URL,
+      input,
+      layers: boundedQueryInt(['encoderLayers', 'layers'], 10, 1, 32),
+      iterations,
+      warmup,
+      verifyShards: params.get('packVerify') !== '0',
+      inputBackend: HYBRID_INPUT_BACKEND,
+      encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
+    });
+    const result = {
+      ...response.result,
+      packLoadMs: roundReportMs(response.result.packLoadMs),
+      profiledStageTotalMs: roundReportMs(response.result.profiledStageTotalMs),
+      readbackSyncedMs: roundReportMs(response.result.readbackSyncedMs),
+      aggregateStageTimings: response.result.aggregateStageTimings.map((timing) => ({
+        ...timing,
+        totalMs: Number(timing.totalMs.toFixed(4)),
+        avgMs: Number(timing.avgMs.toFixed(4)),
+        percentOfProfiledStageMs: Number(timing.percentOfProfiledStageMs.toFixed(2)),
+      })),
+      layerTimings: response.result.layerTimings.map((layer) => ({
+        ...layer,
+        totalMs: Number(layer.totalMs.toFixed(4)),
+        stages: layer.stages.map((timing) => ({
+          ...timing,
+          totalMs: Number(timing.totalMs.toFixed(4)),
+          avgMs: Number(timing.avgMs.toFixed(4)),
+          percentOfProfiledStageMs: Number(timing.percentOfProfiledStageMs.toFixed(2)),
+        })),
+      })),
+    };
+    el('benchResult').textContent = JSON.stringify(result);
+    const top = result.aggregateStageTimings.slice(0, 3).map((timing) => `${timing.stage} ${timing.avgMs.toFixed(2)} ms`).join(' · ');
+    el('message').textContent = `HYBRID_ENCODER_PROFILE_DONE ${result.encoderKernelVariant} · top stages ${top}`;
+  } catch (error) {
+    el('benchResult').textContent = `HYBRID_ENCODER_PROFILE_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Hybrid encoder profile failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function runHybridSearchBenchmark(): Promise<void> {
   if (!searchWorkerReady) throw new Error('hybrid search benchmark requires ready LC0 worker');
   const input = currentEvaluationInput();
@@ -3223,6 +3295,10 @@ async function init() {
     }
     if (HYBRID_DEFERRED_READBACK_BENCH_REQUESTED) {
       await runHybridDeferredReadbackBenchmark();
+      return;
+    }
+    if (HYBRID_ENCODER_PROFILE_REQUESTED) {
+      await runHybridEncoderProfile();
       return;
     }
     if (HYBRID_SEARCH_BENCH_REQUESTED) {

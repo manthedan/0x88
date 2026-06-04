@@ -3735,24 +3735,64 @@ function encodeEncoder0FfnDispatches(device: DeviceLike, pipelines: ReturnType<t
   return encoder.finish();
 }
 
-function encodeLc0WebEncoderBlockPass(pass: ComputePassLike, attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>, ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>): void {
-  encodeAttentionQkvPass(pass, attentionPipelines);
+function encodeAttentionScoresPass(pass: ComputePassLike, attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>): void {
   pass.setPipeline(attentionPipelines.score);
   pass.setBindGroup(0, attentionPipelines.scoreBind);
   pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+}
+
+function encodeAttentionSoftmaxPass(pass: ComputePassLike, attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>): void {
   pass.setPipeline(attentionPipelines.softmax);
   pass.setBindGroup(0, attentionPipelines.softmaxBind);
   pass.dispatchWorkgroups(DEFAULT_HEADS * DEFAULT_TOKENS);
+}
+
+function encodeAttentionValuePass(pass: ComputePassLike, attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>): void {
   pass.setPipeline(attentionPipelines.value);
   pass.setBindGroup(0, attentionPipelines.valueBind);
   pass.dispatchWorkgroups(Math.ceil(DEFAULT_HEAD_DIM / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+}
+
+function encodeAttentionOutputProjectionPass(pass: ComputePassLike, attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>): void {
   pass.setPipeline(attentionPipelines.outProj);
   pass.setBindGroup(0, attentionPipelines.outProjBind);
   if (attentionPipelines.outProjKernelVariant === 'tvm-packed-f16') pass.dispatchWorkgroups(2, 8, 1);
   else pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+}
+
+function encodeAttentionNormPass(pass: ComputePassLike, attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>): void {
   pass.setPipeline(attentionPipelines.norm);
   pass.setBindGroup(0, attentionPipelines.normBind);
   pass.dispatchWorkgroups(DEFAULT_TOKENS);
+}
+
+function encodeFfnDense1Pass(pass: ComputePassLike, ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>): void {
+  pass.setPipeline(ffnPipelines.dense1);
+  pass.setBindGroup(0, ffnPipelines.dense1Bind);
+  if (ffnPipelines.ffnKernelVariant === 'tvm-packed-f16') pass.dispatchWorkgroups(2, 32, 1);
+  else pass.dispatchWorkgroups(Math.ceil(DEFAULT_FFN_HIDDEN / 8), Math.ceil(DEFAULT_TOKENS / 8));
+}
+
+function encodeFfnDense2ResidualPass(pass: ComputePassLike, ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>): void {
+  pass.setPipeline(ffnPipelines.dense2);
+  pass.setBindGroup(0, ffnPipelines.dense2Bind);
+  if (ffnPipelines.ffnKernelVariant === 'tvm-packed-f16') pass.dispatchWorkgroups(2, 8, 1);
+  else pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+}
+
+function encodeFfnLn2Pass(pass: ComputePassLike, ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>): void {
+  pass.setPipeline(ffnPipelines.ln2);
+  pass.setBindGroup(0, ffnPipelines.ln2Bind);
+  pass.dispatchWorkgroups(DEFAULT_TOKENS);
+}
+
+function encodeLc0WebEncoderBlockPass(pass: ComputePassLike, attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>, ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>): void {
+  encodeAttentionQkvPass(pass, attentionPipelines);
+  encodeAttentionScoresPass(pass, attentionPipelines);
+  encodeAttentionSoftmaxPass(pass, attentionPipelines);
+  encodeAttentionValuePass(pass, attentionPipelines);
+  encodeAttentionOutputProjectionPass(pass, attentionPipelines);
+  encodeAttentionNormPass(pass, attentionPipelines);
   encodeEncoder0FfnPass(pass, ffnPipelines);
 }
 
@@ -5295,6 +5335,63 @@ export interface Lc0WebHybridEvaluationResult extends Lc0Evaluation {
   timing: Lc0WebHybridTimingBreakdown;
 }
 
+export type Lc0WebHybridEncoderProfileStageName =
+  | 'inputBody'
+  | 'smolgen'
+  | 'qkvProjection'
+  | 'attentionScores'
+  | 'softmax'
+  | 'attentionValue'
+  | 'outputProjection'
+  | 'ln1'
+  | 'ffnDense1'
+  | 'ffnDense2Residual'
+  | 'ln2';
+
+export interface Lc0WebHybridEncoderProfileStageTiming {
+  stage: Lc0WebHybridEncoderProfileStageName;
+  label: string;
+  iterations: number;
+  totalMs: number;
+  avgMs: number;
+  percentOfProfiledStageMs: number;
+}
+
+export interface Lc0WebHybridEncoderProfileLayerTiming {
+  layer: number;
+  totalMs: number;
+  stages: Lc0WebHybridEncoderProfileStageTiming[];
+}
+
+export interface Lc0WebHybridEncoderProfileOptions {
+  packUrl: string;
+  input: Lc0EvaluatorInput;
+  layers?: number;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+  inputBackend?: Lc0WebHybridInputBackend;
+  encoderKernelVariant?: Lc0WebEncoderKernelVariant;
+  historyFill?: Lc0HistoryFill;
+}
+
+export interface Lc0WebHybridEncoderProfileResult {
+  status: 'HYBRID_ENCODER_PROFILE_DONE';
+  packUrl: string;
+  layers: number;
+  encoderKernelVariant: Lc0WebEncoderKernelVariant;
+  inputBackend: Lc0WebHybridInputBackend;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  profiledStageTotalMs: number;
+  readbackSyncedMs: number;
+  outputSample: number[];
+  aggregateStageTimings: Lc0WebHybridEncoderProfileStageTiming[];
+  layerTimings: Lc0WebHybridEncoderProfileLayerTiming[];
+  note: string;
+}
+
 function inputBodyTensorNameList(): string[] {
   return Object.values(DEFAULT_INPUT_BODY_TENSORS);
 }
@@ -5872,6 +5969,120 @@ class Lc0WebHybridRuntime {
     };
   }
 
+  async profileEncoder(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill; iterations: number; warmup: number }): Promise<Lc0WebHybridEncoderProfileResult> {
+    const iterations = clampInteger(options.iterations, 1, 1, 100);
+    const warmup = clampInteger(options.warmup, 1, 0, 20);
+    for (let i = 0; i < warmup; i++) await this.encode(input, { historyFill: options.historyFill });
+    const aggregate = new Map<Lc0WebHybridEncoderProfileStageName, { label: string; totalMs: number; iterations: number }>();
+    const byLayer = Array.from({ length: this.layerRuntimes.length }, (_, layer) => ({ layer, totalMs: 0, stages: new Map<Lc0WebHybridEncoderProfileStageName, { label: string; totalMs: number; iterations: number }>() }));
+    const addAggregate = (stage: Lc0WebHybridEncoderProfileStageName, label: string, elapsedMs: number): void => {
+      const entry = aggregate.get(stage) ?? { label, totalMs: 0, iterations: 0 };
+      entry.totalMs += elapsedMs;
+      entry.iterations += 1;
+      aggregate.set(stage, entry);
+    };
+    const addLayer = (layerIndex: number, stage: Lc0WebHybridEncoderProfileStageName, label: string, elapsedMs: number): void => {
+      const layer = byLayer[layerIndex];
+      layer.totalMs += elapsedMs;
+      const entry = layer.stages.get(stage) ?? { label, totalMs: 0, iterations: 0 };
+      entry.totalMs += elapsedMs;
+      entry.iterations += 1;
+      layer.stages.set(stage, entry);
+      addAggregate(stage, label, elapsedMs);
+    };
+    const submitAndMeasure = async (encode: (pass: ComputePassLike) => void): Promise<number> => {
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      encode(pass);
+      pass.end();
+      const started = nowMs();
+      this.device.queue.submit([encoder.finish()]);
+      await this.device.queue.onSubmittedWorkDone?.();
+      return nowMs() - started;
+    };
+    if (warmup > 0) {
+      const { payload: inputPayload } = this.buildInputPayload(input, options.historyFill);
+      if (this.inputBackend !== 'js') {
+        if (!this.inputBodyGpu) throw new Error('WGSL/WASM input backend is not initialized');
+        this.device.queue.writeBuffer(this.inputBodyGpu.planesBuffer, 0, inputPayload);
+        await submitAndMeasure((pass) => encodeInputBodyPass(pass, this.inputBodyGpu!));
+      } else {
+        this.device.queue.writeBuffer(this.inputBuffer, 0, inputPayload);
+      }
+      for (const layer of this.layerRuntimes) {
+        await submitAndMeasure((pass) => encodeSmolgenPass(pass, layer.smolgenPipelines));
+        await submitAndMeasure((pass) => encodeAttentionQkvPass(pass, layer.attentionPipelines));
+        await submitAndMeasure((pass) => encodeAttentionScoresPass(pass, layer.attentionPipelines));
+        await submitAndMeasure((pass) => encodeAttentionSoftmaxPass(pass, layer.attentionPipelines));
+        await submitAndMeasure((pass) => encodeAttentionValuePass(pass, layer.attentionPipelines));
+        await submitAndMeasure((pass) => encodeAttentionOutputProjectionPass(pass, layer.attentionPipelines));
+        await submitAndMeasure((pass) => encodeAttentionNormPass(pass, layer.attentionPipelines));
+        await submitAndMeasure((pass) => encodeFfnDense1Pass(pass, layer.ffnPipelines));
+        await submitAndMeasure((pass) => encodeFfnDense2ResidualPass(pass, layer.ffnPipelines));
+        await submitAndMeasure((pass) => encodeFfnLn2Pass(pass, layer.ffnPipelines));
+      }
+      await readF32OutputOnce(this.device, this.layerRuntimes[this.layerRuntimes.length - 1].output, this.readbackBuffer, DEFAULT_TOKENS * DEFAULT_N);
+    }
+    let readbackSyncedMs = 0;
+    let output: Float32Array<ArrayBufferLike> = new Float32Array(DEFAULT_TOKENS * DEFAULT_N);
+    for (let iteration = 0; iteration < iterations; iteration++) {
+      const { payload: inputPayload } = this.buildInputPayload(input, options.historyFill);
+      if (this.inputBackend !== 'js') {
+        if (!this.inputBodyGpu) throw new Error('WGSL/WASM input backend is not initialized');
+        this.device.queue.writeBuffer(this.inputBodyGpu.planesBuffer, 0, inputPayload);
+        const elapsedMs = await submitAndMeasure((pass) => encodeInputBodyPass(pass, this.inputBodyGpu!));
+        addAggregate('inputBody', 'input body projection', elapsedMs);
+      } else {
+        this.device.queue.writeBuffer(this.inputBuffer, 0, inputPayload);
+      }
+      for (let layerIndex = 0; layerIndex < this.layerRuntimes.length; layerIndex++) {
+        const layer = this.layerRuntimes[layerIndex];
+        addLayer(layerIndex, 'smolgen', 'smolgen', await submitAndMeasure((pass) => encodeSmolgenPass(pass, layer.smolgenPipelines)));
+        addLayer(layerIndex, 'qkvProjection', 'QKV projection', await submitAndMeasure((pass) => encodeAttentionQkvPass(pass, layer.attentionPipelines)));
+        addLayer(layerIndex, 'attentionScores', 'attention scores', await submitAndMeasure((pass) => encodeAttentionScoresPass(pass, layer.attentionPipelines)));
+        addLayer(layerIndex, 'softmax', 'softmax', await submitAndMeasure((pass) => encodeAttentionSoftmaxPass(pass, layer.attentionPipelines)));
+        addLayer(layerIndex, 'attentionValue', 'attention value', await submitAndMeasure((pass) => encodeAttentionValuePass(pass, layer.attentionPipelines)));
+        addLayer(layerIndex, 'outputProjection', 'attention output projection', await submitAndMeasure((pass) => encodeAttentionOutputProjectionPass(pass, layer.attentionPipelines)));
+        addLayer(layerIndex, 'ln1', 'attention ln1', await submitAndMeasure((pass) => encodeAttentionNormPass(pass, layer.attentionPipelines)));
+        addLayer(layerIndex, 'ffnDense1', 'FFN dense1', await submitAndMeasure((pass) => encodeFfnDense1Pass(pass, layer.ffnPipelines)));
+        addLayer(layerIndex, 'ffnDense2Residual', 'FFN dense2 + residual', await submitAndMeasure((pass) => encodeFfnDense2ResidualPass(pass, layer.ffnPipelines)));
+        addLayer(layerIndex, 'ln2', 'FFN ln2', await submitAndMeasure((pass) => encodeFfnLn2Pass(pass, layer.ffnPipelines)));
+      }
+      const readbackStarted = nowMs();
+      output = await readF32OutputOnce(this.device, this.layerRuntimes[this.layerRuntimes.length - 1].output, this.readbackBuffer, DEFAULT_TOKENS * DEFAULT_N);
+      readbackSyncedMs += nowMs() - readbackStarted;
+    }
+    const profiledStageTotalMs = Array.from(aggregate.values()).reduce((sum, entry) => sum + entry.totalMs, 0);
+    const toStageTiming = (stage: Lc0WebHybridEncoderProfileStageName, entry: { label: string; totalMs: number; iterations: number }): Lc0WebHybridEncoderProfileStageTiming => ({
+      stage,
+      label: entry.label,
+      iterations: entry.iterations,
+      totalMs: entry.totalMs,
+      avgMs: entry.totalMs / Math.max(1, entry.iterations),
+      percentOfProfiledStageMs: profiledStageTotalMs > 0 ? (entry.totalMs / profiledStageTotalMs) * 100 : 0,
+    });
+    return {
+      status: 'HYBRID_ENCODER_PROFILE_DONE',
+      packUrl: this.packUrl,
+      layers: this.layers,
+      encoderKernelVariant: this.encoderKernelVariant,
+      inputBackend: this.inputBackend,
+      warmup,
+      iterations,
+      packLoadMs: this.packLoadMs,
+      profiledStageTotalMs,
+      readbackSyncedMs,
+      outputSample: Array.from(output.slice(0, 8)),
+      aggregateStageTimings: Array.from(aggregate.entries()).map(([stage, entry]) => toStageTiming(stage, entry)).sort((a, b) => b.totalMs - a.totalMs),
+      layerTimings: byLayer.map((layer) => ({
+        layer: layer.layer,
+        totalMs: layer.totalMs,
+        stages: Array.from(layer.stages.entries()).map(([stage, entry]) => toStageTiming(stage, entry)).sort((a, b) => b.totalMs - a.totalMs),
+      })),
+      note: 'Profiling intentionally submits and waits after each stage, so totals are sync-perturbed and should be used for relative attribution rather than direct route latency.',
+    };
+  }
+
   async evaluate(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult> {
     const totalStarted = nowMs();
     if (this.headBackend === 'wgsl') {
@@ -6158,6 +6369,26 @@ export async function runLc0WebHybridEvaluation(options: Lc0WebHybridEvaluationO
     return await runtime.evaluate(options.input, {
       historyFill: options.historyFill ?? 'fen_only',
       policyTemperature: options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE,
+    });
+  } finally {
+    runtime.destroy();
+  }
+}
+
+export async function runLc0WebHybridEncoderProfile(options: Lc0WebHybridEncoderProfileOptions): Promise<Lc0WebHybridEncoderProfileResult> {
+  const runtime = await Lc0WebHybridRuntime.create({
+    packUrl: options.packUrl,
+    layers: options.layers,
+    verifyShards: options.verifyShards,
+    inputBackend: options.inputBackend,
+    encoderKernelVariant: options.encoderKernelVariant,
+    headBackend: 'ort',
+  });
+  try {
+    return await runtime.profileEncoder(options.input, {
+      historyFill: options.historyFill ?? 'fen_only',
+      iterations: options.iterations ?? 1,
+      warmup: options.warmup ?? 1,
     });
   } finally {
     runtime.destroy();

@@ -17,6 +17,7 @@ import {
   runLc0WebWgslHeadsVsOrtFixtures,
   Lc0WebHybridEvaluator,
   runLc0WebHybridEvaluation,
+  runLc0WebHybridEncoderProfile,
   runLc0WebWgslDeferredReadbackBenchmark,
   runLc0WebAttentionScoreOrtBenchmark,
   runLc0WebAttentionValueBenchmark,
@@ -44,6 +45,7 @@ import {
   type Lc0WebFfnKernelVariant,
   type Lc0WebEncoder0FfnOrtBenchmarkResult,
   type Lc0WebHybridEvaluationResult,
+  type Lc0WebHybridEncoderProfileResult,
   type Lc0WebWgslDeferredReadbackBenchResult,
   type Lc0WebWgslHeadsProbeResult,
   type Lc0WebMappedPolicyProbeResult,
@@ -121,6 +123,19 @@ type HybridEvaluateMessage = {
   headBackend?: 'ort' | 'wgsl';
   wgslBatchMode?: 'physical' | 'serial';
   inputBackend?: 'js' | 'wgsl' | 'wasm';
+};
+
+type HybridEncoderProfileMessage = {
+  type: 'hybridEncoderProfile';
+  id: number;
+  packUrl: string;
+  input: Lc0EvaluatorInput;
+  layers?: number;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+  inputBackend?: 'js' | 'wgsl' | 'wasm';
+  encoderKernelVariant?: Lc0WebEncoderKernelVariant;
 };
 
 type WgslDeferredReadbackBenchmarkMessage = {
@@ -366,7 +381,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | ResetSearchMessage | EvaluateMessage | EvaluateBatchMessage | HybridEvaluateMessage | WgslDeferredReadbackBenchmarkMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | WgslHeadsProbeMessage | WgslHeadsVsOrtFixturesMessage | MappedPolicyProbeMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionValueOrtBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | AttentionOutputOrtBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0FfnOrtBenchmarkMessage | Encoder0BlockBenchmarkMessage | EncoderStackBenchmarkMessage | Encoder0BlockOrtBenchmarkMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | ResetSearchMessage | EvaluateMessage | EvaluateBatchMessage | HybridEvaluateMessage | HybridEncoderProfileMessage | WgslDeferredReadbackBenchmarkMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | WgslHeadsProbeMessage | WgslHeadsVsOrtFixturesMessage | MappedPolicyProbeMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionValueOrtBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | AttentionOutputOrtBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0FfnOrtBenchmarkMessage | Encoder0BlockBenchmarkMessage | EncoderStackBenchmarkMessage | Encoder0BlockOrtBenchmarkMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -394,6 +409,7 @@ type WorkerResponse =
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
   | { type: 'hybridEvaluationResult'; id: number; result: Lc0WebHybridEvaluationResult }
+  | { type: 'hybridEncoderProfileResult'; id: number; result: Lc0WebHybridEncoderProfileResult }
   | { type: 'wgslDeferredReadbackBenchmarkResult'; id: number; result: Lc0WebWgslDeferredReadbackBenchResult }
   | { type: 'packLoadResult'; id: number; result: PackLoadResult }
   | { type: 'kernelProbeResult'; id: number; result: Lc0WebMatmulAddKernelProbeResult }
@@ -860,6 +876,21 @@ async function handleHybridEvaluate(message: HybridEvaluateMessage): Promise<voi
   post({ type: 'hybridEvaluationResult', id: message.id, result });
 }
 
+async function handleHybridEncoderProfile(message: HybridEncoderProfileMessage): Promise<void> {
+  setRequestedOrtExecutionProviderForCurrentThread('wasm');
+  const result = await runLc0WebHybridEncoderProfile({
+    packUrl: message.packUrl,
+    input: message.input,
+    layers: message.layers,
+    iterations: message.iterations,
+    warmup: message.warmup,
+    verifyShards: message.verifyShards,
+    inputBackend: message.inputBackend,
+    encoderKernelVariant: message.encoderKernelVariant,
+  });
+  post({ type: 'hybridEncoderProfileResult', id: message.id, result });
+}
+
 async function handleWgslDeferredReadbackBenchmark(message: WgslDeferredReadbackBenchmarkMessage): Promise<void> {
   setRequestedOrtExecutionProviderForCurrentThread('wasm');
   const result = await runLc0WebWgslDeferredReadbackBenchmark({
@@ -917,6 +948,7 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       else if (message.type === 'wgslHeadsVsOrtFixtures') await handleWgslHeadsVsOrtFixtures(message);
       else if (message.type === 'mappedPolicyProbe') await handleMappedPolicyProbe(message);
       else if (message.type === 'hybridEvaluate') await handleHybridEvaluate(message);
+      else if (message.type === 'hybridEncoderProfile') await handleHybridEncoderProfile(message);
       else if (message.type === 'wgslDeferredReadbackBenchmark') await handleWgslDeferredReadbackBenchmark(message);
       else if (message.type === 'evaluate') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
