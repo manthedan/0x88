@@ -9,6 +9,7 @@ test('lc0web hybrid evaluator keeps stable ORT-head defaults protected', () => {
   });
   assert.equal(evaluator.headBackend, 'ort');
   assert.equal(evaluator.inputBackend, 'js');
+  assert.equal(evaluator.encoderKernelVariant, 'hand');
   assert.equal(evaluator.wgslBatchMode, 'physical');
   assert.equal(evaluator.layers, 10);
 });
@@ -19,9 +20,11 @@ test('lc0web hybrid evaluator requires explicit opt-in for experimental WGSL/WAS
     verifyShards: false,
     headBackend: 'wgsl',
     inputBackend: 'wasm',
+    encoderKernelVariant: 'tvm-packed-f16',
     wgslBatchMode: 'serial',
   });
   assert.equal(evaluator.headBackend, 'wgsl');
   assert.equal(evaluator.inputBackend, 'wasm');
+  assert.equal(evaluator.encoderKernelVariant, 'tvm-packed-f16');
   assert.equal(evaluator.wgslBatchMode, 'serial');
 });

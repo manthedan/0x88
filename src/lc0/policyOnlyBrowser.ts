@@ -701,7 +701,9 @@ const HYBRID_WGSL_BATCH_MODE = params.get('wgslBatchMode') === 'serial' || param
 const HYBRID_INPUT_BACKEND_PARAM = params.get('inputBackend') ?? params.get('hybridInput');
 const HYBRID_INPUT_BACKEND_REQUESTED = HYBRID_INPUT_BACKEND_PARAM === 'wgsl' || HYBRID_INPUT_BACKEND_PARAM === 'wasm';
 const HYBRID_INPUT_BACKEND = HYBRID_INPUT_BACKEND_PARAM === 'wasm' ? 'wasm' : (HYBRID_INPUT_BACKEND_PARAM === 'wgsl' ? 'wgsl' : 'js');
-const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
+const HYBRID_ENCODER_KERNEL_PARAM = params.get('encoderKernel') ?? params.get('hybridEncoderKernel') ?? params.get('encoderKernelVariant');
+const HYBRID_ENCODER_KERNEL_VARIANT = HYBRID_ENCODER_KERNEL_PARAM === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand';
+const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
@@ -1052,6 +1054,7 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
       headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
       wgslBatchMode: HYBRID_WGSL_BATCH_MODE,
       inputBackend: HYBRID_INPUT_BACKEND,
+      encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
       evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
     } : {}),
   });
@@ -1077,6 +1080,7 @@ async function initHybridWorkerWithInputBackend(inputBackend: 'js' | 'wgsl' | 'w
     headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
     wgslBatchMode: HYBRID_WGSL_BATCH_MODE,
     inputBackend,
+    encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
     evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
   });
   searchWorkerInitMs = performance.now() - initStarted;
@@ -2422,6 +2426,7 @@ async function runHybridSearchBenchmark(): Promise<void> {
       batchSize: searchBatchSize,
       wgslBatchMode: HYBRID_WGSL_HEADS_REQUESTED ? HYBRID_WGSL_BATCH_MODE : undefined,
       inputBackend: HYBRID_INPUT_BACKEND,
+      encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
       multiPv: searchMultiPv,
       reuseTree,
       resetBetweenSearches,
@@ -2815,6 +2820,7 @@ async function runHybridDriftFixtures() {
       backend: searchWorkerBackend,
       packUrl: PACK_URL,
       layers: Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10))),
+      encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
       fixtures: evaluations.length,
       elapsedMs: Number(elapsedMs.toFixed(3)),
       evaluations,

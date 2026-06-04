@@ -40,6 +40,7 @@ import {
   type Lc0WebEncoder0BlockOrtBenchmarkResult,
   type Lc0WebEncoder0FfnBenchmarkResult,
   type Lc0WebEncoderStackBenchmarkResult,
+  type Lc0WebEncoderKernelVariant,
   type Lc0WebFfnKernelVariant,
   type Lc0WebEncoder0FfnOrtBenchmarkResult,
   type Lc0WebHybridEvaluationResult,
@@ -71,6 +72,7 @@ type InitMessage = {
   headBackend?: 'ort' | 'wgsl';
   wgslBatchMode?: 'physical' | 'serial';
   inputBackend?: 'js' | 'wgsl' | 'wasm';
+  encoderKernelVariant?: Lc0WebEncoderKernelVariant;
   evalCacheEntries?: number;
 };
 
@@ -462,6 +464,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     headBackend: message.headBackend,
     wgslBatchMode: message.wgslBatchMode,
     inputBackend: message.inputBackend,
+    encoderKernelVariant: message.encoderKernelVariant,
     evalCacheEntries: message.evalCacheEntries ?? 0,
   });
   if (evaluator && configuredInitKey === initKey) {
@@ -481,6 +484,7 @@ async function handleInit(message: InitMessage): Promise<void> {
       headBackend: message.headBackend,
       wgslBatchMode: message.wgslBatchMode,
       inputBackend: message.inputBackend,
+      encoderKernelVariant: message.encoderKernelVariant,
     });
     const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0
       ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries })

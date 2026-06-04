@@ -2835,6 +2835,7 @@ const DEFAULT_LN1_BIAS = '/encoder0/ln1/w/bias';
 const DEFAULT_LN_EPSILON = 9.999999974752427e-7;
 
 export type Lc0WebAttentionOutProjKernelVariant = 'hand' | 'tvm-packed-f16';
+export type Lc0WebEncoderKernelVariant = 'hand' | 'tvm-packed-f16';
 
 export interface Lc0WebAttentionOutputBenchmarkOptions {
   packUrl: string;
@@ -3680,8 +3681,8 @@ function createAttentionOutputPipelines(device: DeviceLike, buffers: {
   lnBias: BufferLike;
   output: BufferLike;
   podArgs?: BufferLike;
-}, outProjKernelVariant: Lc0WebAttentionOutProjKernelVariant = 'hand'): ReturnType<typeof createAttentionBlockPipelines> & { outProjKernelVariant: Lc0WebAttentionOutProjKernelVariant; outProj: PipelineLike; outProjBind: unknown; norm: PipelineLike; normBind: unknown } {
-  const base = createAttentionBlockPipelines(device, { ...buffers, output: buffers.attn });
+}, outProjKernelVariant: Lc0WebAttentionOutProjKernelVariant = 'hand', qkvKernelVariant: Lc0WebAttentionQkvKernelVariant = 'hand'): ReturnType<typeof createAttentionBlockPipelines> & { outProjKernelVariant: Lc0WebAttentionOutProjKernelVariant; outProj: PipelineLike; outProjBind: unknown; norm: PipelineLike; normBind: unknown } {
+  const base = createAttentionBlockPipelines(device, { ...buffers, output: buffers.attn }, qkvKernelVariant);
   let outProj: PipelineLike;
   let outProjBind: unknown;
   if (outProjKernelVariant === 'tvm-packed-f16') {
@@ -4960,9 +4961,7 @@ function encodeEncoder0FfnDispatches(device: DeviceLike, pipelines: ReturnType<t
 }
 
 function encodeLc0WebEncoderBlockPass(pass: ComputePassLike, attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>, ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>): void {
-  pass.setPipeline(attentionPipelines.qkv);
-  pass.setBindGroup(0, attentionPipelines.qkvBind);
-  pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+  encodeAttentionQkvPass(pass, attentionPipelines);
   pass.setPipeline(attentionPipelines.score);
   pass.setBindGroup(0, attentionPipelines.scoreBind);
   pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
@@ -4974,7 +4973,8 @@ function encodeLc0WebEncoderBlockPass(pass: ComputePassLike, attentionPipelines:
   pass.dispatchWorkgroups(Math.ceil(DEFAULT_HEAD_DIM / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
   pass.setPipeline(attentionPipelines.outProj);
   pass.setBindGroup(0, attentionPipelines.outProjBind);
-  pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+  if (attentionPipelines.outProjKernelVariant === 'tvm-packed-f16') pass.dispatchWorkgroups(2, 8, 1);
+  else pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
   pass.setPipeline(attentionPipelines.norm);
   pass.setBindGroup(0, attentionPipelines.normBind);
   pass.dispatchWorkgroups(DEFAULT_TOKENS);
@@ -6482,6 +6482,7 @@ export interface Lc0WebHybridEvaluationOptions {
   headBackend?: Lc0WebHybridHeadBackend;
   wgslBatchMode?: Lc0WebHybridWgslBatchMode;
   inputBackend?: Lc0WebHybridInputBackend;
+  encoderKernelVariant?: Lc0WebEncoderKernelVariant;
 }
 
 export interface Lc0WebHybridTimingBreakdown {
@@ -6500,6 +6501,7 @@ export interface Lc0WebHybridTimingBreakdown {
   physicalBatchSize?: number;
   batchPosition?: number;
   inputBackend?: Lc0WebHybridInputBackend;
+  encoderKernelVariant?: Lc0WebEncoderKernelVariant;
   inputBridgeCopyMs?: number;
   wasmEncodeMs?: number;
   wasmTotalMs?: number;
@@ -6510,6 +6512,7 @@ export interface Lc0WebHybridEvaluationResult extends Lc0Evaluation {
   backend: 'lc0web-wgsl-encoder-ort-heads' | 'lc0web-wgsl-encoder-wgsl-heads';
   packUrl: string;
   layers: number;
+  encoderKernelVariant?: Lc0WebEncoderKernelVariant;
   packLoadMs: number;
   encoderDispatchSyncedMs: number;
   headRunMs: number;
@@ -6755,7 +6758,7 @@ function createHybridEncoderLayerWeights(device: DeviceLike, tensors: ReturnType
   return { weights, buffers: Object.values(weights) };
 }
 
-function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<string, number>, weights: HybridEncoderLayerWeights, layerInput: BufferLike): { runtime: HybridEncoderLayerSlotRuntime; buffers: BufferLike[] } {
+function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<string, number>, weights: HybridEncoderLayerWeights, layerInput: BufferLike, encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand'): { runtime: HybridEncoderLayerSlotRuntime; buffers: BufferLike[] } {
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
   const smolgenBias = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_DST });
   const smolgenCompressed = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
@@ -6772,7 +6775,9 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
   const ffnHidden = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN * 4, usage: usage.STORAGE | usage.COPY_DST });
   const ffnSkip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
   const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC | usage.COPY_DST });
+  const podArgs = encoderKernelVariant === 'tvm-packed-f16' ? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
   const buffers = [smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, output];
+  if (podArgs) buffers.push(podArgs);
   const smolgenPipelines = createSmolgenPipelines(device, {
     input: layerInput,
     compressWeight: weights.smolgenCompressWeight,
@@ -6794,8 +6799,8 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
   });
   const attentionPipelines = createAttentionOutputPipelines(device, {
     input: layerInput, qWeight: weights.qWeight, qBias: weights.qBias, kWeight: weights.kWeight, kBias: weights.kBias, vWeight: weights.vWeight, vBias: weights.vBias, scale: weights.scale, smolgenBias, qkv, scores, probs, attn,
-    outWeight: weights.outWeight, outBias: weights.outBias, alpha: weights.attentionAlpha, skip: attentionSkip, lnScale: weights.ln1Scale, lnBias: weights.ln1Bias, output: attentionOutput,
-  });
+    outWeight: weights.outWeight, outBias: weights.outBias, alpha: weights.attentionAlpha, skip: attentionSkip, lnScale: weights.ln1Scale, lnBias: weights.ln1Bias, output: attentionOutput, podArgs,
+  }, encoderKernelVariant === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand', encoderKernelVariant === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand');
   const ffnPipelines = createEncoder0FfnPipelines(device, {
     input: attentionOutput,
     dense1Weight: weights.ffnDense1Weight,
@@ -6808,7 +6813,8 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
     ln2Scale: weights.ln2Scale,
     ln2Bias: weights.ln2Bias,
     output,
-  });
+    podArgs,
+  }, encoderKernelVariant === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand');
   return { runtime: { output, smolgenPipelines, attentionPipelines, ffnPipelines }, buffers };
 }
 
@@ -6831,6 +6837,7 @@ class Lc0WebHybridRuntime {
   private readonly device: DeviceLike;
   private readonly inputTensors: Lc0WebPreparedInitialInputTensors;
   private readonly inputBackend: Lc0WebHybridInputBackend;
+  private readonly encoderKernelVariant: Lc0WebEncoderKernelVariant;
   private readonly inputBodyGpu?: InputBodyGpuRuntime;
   private readonly wasmInputEncoder?: Lc0WasmInputEncoder;
   private readonly headBackend: Lc0WebHybridHeadBackend;
@@ -6855,6 +6862,7 @@ class Lc0WebHybridRuntime {
     device: DeviceLike;
     inputTensors: Lc0WebPreparedInitialInputTensors;
     inputBackend: Lc0WebHybridInputBackend;
+    encoderKernelVariant: Lc0WebEncoderKernelVariant;
     inputBodyGpu?: InputBodyGpuRuntime;
     wasmInputEncoder?: Lc0WasmInputEncoder;
     headBackend: Lc0WebHybridHeadBackend;
@@ -6874,6 +6882,7 @@ class Lc0WebHybridRuntime {
     this.device = options.device;
     this.inputTensors = options.inputTensors;
     this.inputBackend = options.inputBackend;
+    this.encoderKernelVariant = options.encoderKernelVariant;
     this.inputBodyGpu = options.inputBodyGpu;
     this.wasmInputEncoder = options.wasmInputEncoder;
     this.headBackend = options.headBackend;
@@ -6913,6 +6922,7 @@ class Lc0WebHybridRuntime {
     const headBackend = options.headBackend ?? 'ort';
     const wgslBatchMode = options.wgslBatchMode ?? 'physical';
     const inputBackend = options.inputBackend ?? 'js';
+    const encoderKernelVariant = options.encoderKernelVariant ?? 'hand';
     const headSession = headBackend === 'ort' ? await createCachedPolicyValueHeadSession(headTensors) : undefined;
     const { device } = await requestDevice();
     const usage = gpuGlobals().GPUBufferUsage!;
@@ -6930,7 +6940,7 @@ class Lc0WebHybridRuntime {
     for (const tensors of tensorsByLayer) {
       const { weights, buffers: weightBuffers } = createHybridEncoderLayerWeights(device, tensors, usage);
       buffers.push(...weightBuffers);
-      const { runtime, buffers: slotBuffers } = createHybridEncoderLayerSlotRuntime(device, usage, weights, layerInput);
+      const { runtime, buffers: slotBuffers } = createHybridEncoderLayerSlotRuntime(device, usage, weights, layerInput, encoderKernelVariant);
       buffers.push(...slotBuffers);
       layerRuntimes.push({ ...runtime, weights });
       layerInput = runtime.output;
@@ -6941,6 +6951,7 @@ class Lc0WebHybridRuntime {
       device,
       inputTensors,
       inputBackend,
+      encoderKernelVariant,
       inputBodyGpu,
       wasmInputEncoder,
       headBackend,
@@ -6969,7 +6980,7 @@ class Lc0WebHybridRuntime {
     const layerRuntimes: HybridEncoderLayerSlotRuntime[] = [];
     let layerInput = inputBuffer;
     for (const layer of this.layerRuntimes) {
-      const { runtime, buffers } = createHybridEncoderLayerSlotRuntime(this.device, this.usage, layer.weights, layerInput);
+      const { runtime, buffers } = createHybridEncoderLayerSlotRuntime(this.device, this.usage, layer.weights, layerInput, this.encoderKernelVariant);
       this.buffers.push(...buffers);
       layerRuntimes.push(runtime);
       layerInput = runtime.output;
@@ -7040,7 +7051,7 @@ class Lc0WebHybridRuntime {
     fen: string;
     output: Float32Array<ArrayBufferLike>;
     encoderDispatchSyncedMs: number;
-    timing: Pick<Lc0WebHybridTimingBreakdown, 'inputBuildMs' | 'inputUploadMs' | 'commandEncodeMs' | 'queueSubmitMs' | 'readbackSyncedMs' | 'readbackBytes' | 'readbackMapCount' | 'inputBackend' | 'inputBridgeCopyMs' | 'wasmEncodeMs' | 'wasmTotalMs'>;
+    timing: Pick<Lc0WebHybridTimingBreakdown, 'inputBuildMs' | 'inputUploadMs' | 'commandEncodeMs' | 'queueSubmitMs' | 'readbackSyncedMs' | 'readbackBytes' | 'readbackMapCount' | 'inputBackend' | 'encoderKernelVariant' | 'inputBridgeCopyMs' | 'wasmEncodeMs' | 'wasmTotalMs'>;
   }> {
     const { board, fen } = currentBoardAndFen(input);
     const inputBuildStarted = nowMs();
@@ -7082,7 +7093,7 @@ class Lc0WebHybridRuntime {
       fen,
       output,
       encoderDispatchSyncedMs: nowMs() - blockStarted,
-      timing: { inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, readbackSyncedMs, readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4, readbackMapCount: 1, inputBackend: this.inputBackend, ...this.timingWasmFields(wasmTiming) },
+      timing: { inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, readbackSyncedMs, readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4, readbackMapCount: 1, inputBackend: this.inputBackend, encoderKernelVariant: this.encoderKernelVariant, ...this.timingWasmFields(wasmTiming) },
     };
   }
 
@@ -7142,6 +7153,7 @@ class Lc0WebHybridRuntime {
         backend: 'lc0web-wgsl-encoder-wgsl-heads',
         packUrl: this.packUrl,
         layers: this.layers,
+        encoderKernelVariant: this.encoderKernelVariant,
         packLoadMs: this.packLoadMs,
         encoderDispatchSyncedMs,
         headRunMs,
@@ -7164,6 +7176,7 @@ class Lc0WebHybridRuntime {
           readbackBytes: WGSL_HEADS_READBACK_BYTES,
           readbackMapCount: 1,
           inputBackend: this.inputBackend,
+          encoderKernelVariant: this.encoderKernelVariant,
           ...this.timingWasmFields(wasmTiming),
         },
       };
@@ -7180,6 +7193,7 @@ class Lc0WebHybridRuntime {
       backend: 'lc0web-wgsl-encoder-ort-heads',
       packUrl: this.packUrl,
       layers: this.layers,
+      encoderKernelVariant: this.encoderKernelVariant,
       packLoadMs: this.packLoadMs,
       encoderDispatchSyncedMs: encoded.encoderDispatchSyncedMs,
       headRunMs: heads.runMs,
@@ -7202,6 +7216,7 @@ class Lc0WebHybridRuntime {
         readbackBytes: encoded.timing.readbackBytes,
         readbackMapCount: encoded.timing.readbackMapCount,
         inputBackend: this.inputBackend,
+        encoderKernelVariant: this.encoderKernelVariant,
         inputBridgeCopyMs: encoded.timing.inputBridgeCopyMs,
         wasmEncodeMs: encoded.timing.wasmEncodeMs,
         wasmTotalMs: encoded.timing.wasmTotalMs,
@@ -7296,6 +7311,7 @@ class Lc0WebHybridRuntime {
         backend: 'lc0web-wgsl-encoder-wgsl-heads',
         packUrl: this.packUrl,
         layers: this.layers,
+        encoderKernelVariant: this.encoderKernelVariant,
         packLoadMs: this.packLoadMs,
         encoderDispatchSyncedMs,
         headRunMs,
@@ -7321,6 +7337,7 @@ class Lc0WebHybridRuntime {
           physicalBatchSize: submitted.inputs.length,
           batchPosition: i,
           inputBackend: this.inputBackend,
+          encoderKernelVariant: this.encoderKernelVariant,
           ...(this.inputBackend === 'wasm' ? { inputBridgeCopyMs: submitted.inputBridgeCopyMs, wasmEncodeMs: submitted.wasmEncodeMs, wasmTotalMs: submitted.wasmTotalMs } : {}),
         },
       });
@@ -7498,6 +7515,7 @@ export class Lc0WebHybridEvaluator {
   readonly headBackend: Lc0WebHybridHeadBackend;
   readonly wgslBatchMode: Lc0WebHybridWgslBatchMode;
   readonly inputBackend: Lc0WebHybridInputBackend;
+  readonly encoderKernelVariant: Lc0WebEncoderKernelVariant;
   private runtimePromise?: Promise<Lc0WebHybridRuntime>;
   private evaluationQueue: Promise<void> = Promise.resolve();
 
@@ -7510,6 +7528,7 @@ export class Lc0WebHybridEvaluator {
     this.headBackend = options.headBackend ?? 'ort';
     this.wgslBatchMode = options.wgslBatchMode ?? 'physical';
     this.inputBackend = options.inputBackend ?? 'js';
+    this.encoderKernelVariant = options.encoderKernelVariant ?? 'hand';
   }
 
   private runtime(): Promise<Lc0WebHybridRuntime> {
@@ -7523,6 +7542,7 @@ export class Lc0WebHybridEvaluator {
         headBackend: this.headBackend,
         wgslBatchMode: this.wgslBatchMode,
         inputBackend: this.inputBackend,
+        encoderKernelVariant: this.encoderKernelVariant,
       });
       runtimePromise.catch(() => {
         if (this.runtimePromise === runtimePromise) this.runtimePromise = undefined;
