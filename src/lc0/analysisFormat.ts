@@ -11,7 +11,7 @@ export interface AnalysisLine {
   engine: string;
   /** 1-based MultiPV rank. */
   multipv: number;
-  /** Score from the side-to-move perspective, in centipawns (mate encoded separately). */
+  /** Score from White's perspective, in centipawns (mate encoded separately). */
   scoreCp?: number;
   mateIn?: number;
   scoreText: string;
@@ -47,14 +47,13 @@ export function formatScore(scoreCp: number | undefined, mateIn: number | undefi
 
 /**
  * White-advantage percentage [0, 100] for a vertical eval bar, from a
- * side-to-move score. Mate maps to the extreme for the mating side.
+ * White-perspective score. Mate maps to the extreme for the mating side.
  */
-export function evalBarWhitePercent(scoreCp: number | undefined, mateIn: number | undefined, sideToMove: BoardState['turn']): number {
-  let stmAdvantage: number;
-  if (mateIn !== undefined) stmAdvantage = mateIn >= 0 ? 1 : -1;
-  else if (scoreCp === undefined) stmAdvantage = 0;
-  else stmAdvantage = (2 / (1 + Math.exp(-0.004 * scoreCp))) - 1; // logistic squash to [-1, 1]
-  const whiteAdvantage = sideToMove === 'w' ? stmAdvantage : -stmAdvantage;
+export function evalBarWhitePercent(scoreCp: number | undefined, mateIn: number | undefined): number {
+  let whiteAdvantage: number;
+  if (mateIn !== undefined) whiteAdvantage = mateIn >= 0 ? 1 : -1;
+  else if (scoreCp === undefined) whiteAdvantage = 0;
+  else whiteAdvantage = (2 / (1 + Math.exp(-0.004 * scoreCp))) - 1; // logistic squash to [-1, 1]
   return Math.max(0, Math.min(100, 50 + 50 * whiteAdvantage));
 }
 
@@ -100,18 +99,24 @@ export interface StockfishInfoLineLike {
 /** Build analysis lines from Stockfish MultiPV info for the given FEN. */
 export function stockfishAnalysisLines(infos: StockfishInfoLineLike[], fen: string, engine = 'Stockfish'): AnalysisLine[] {
   const board = parseFen(fen);
+  // UCI reports from the side-to-move POV; display from White's perspective.
+  const w = board.turn === 'w' ? 1 : -1;
   return infos
     .filter((info) => info.pvUci.length)
-    .map((info) => ({
-      engine,
-      multipv: info.multipv,
-      scoreCp: info.scoreCp,
-      mateIn: info.mateIn,
-      scoreText: formatScore(info.scoreCp, info.mateIn),
-      detail: `depth ${info.depth}`,
-      pvUci: info.pvUci,
-      pvSan: uciLineToSan(board, info.pvUci, 12),
-    }));
+    .map((info) => {
+      const scoreCp = info.scoreCp === undefined ? undefined : w * info.scoreCp;
+      const mateIn = info.mateIn === undefined ? undefined : w * info.mateIn;
+      return {
+        engine,
+        multipv: info.multipv,
+        scoreCp,
+        mateIn,
+        scoreText: formatScore(scoreCp, mateIn),
+        detail: `depth ${info.depth}`,
+        pvUci: info.pvUci,
+        pvSan: uciLineToSan(board, info.pvUci, 12),
+      };
+    });
 }
 
 export interface Lc0SearchLike {
@@ -124,17 +129,19 @@ export interface Lc0SearchLike {
 
 /**
  * Build analysis lines from an LC0 search result for the given root FEN. Each
- * MultiPV line is scored from its root child's Q (side-to-move), with SAN PV.
+ * MultiPV line is scored from its root child's Q, displayed from White's view.
  */
 export function lc0AnalysisLines(result: Lc0SearchLike, fen: string, engine = 'LC0'): AnalysisLine[] {
   const board = parseFen(fen);
+  const w = board.turn === 'w' ? 1 : -1;
   const lines = (result.multiPv && result.multiPv.length ? result.multiPv : [result.pv]).filter((line) => line.length);
   return lines.map((pvUci, index) => {
     const rootUci = pvUci[0];
     const child = result.children.find((entry) => entry.uci === rootUci);
-    // children[].q is already the move's value from the root mover's perspective
+    // children[].q is the move's value from the root mover's perspective
     // (edgeQForParentInNode), matching result.value; positive favors the mover.
-    const q = child ? child.q : result.value;
+    // Negate for Black so the displayed cp is from White's perspective.
+    const q = (child ? child.q : result.value) * w;
     const visits = child?.visits ?? result.visits;
     const scoreCp = qToCentipawns(q);
     return {

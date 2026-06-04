@@ -293,8 +293,7 @@ function renderBoard() {
 
 function renderEvalBar() {
   const line = (lineCache.get(tree.current.fen) ?? [])[0];
-  const board = parseFen(tree.current.fen);
-  const pct = line ? evalBarWhitePercent(line.scoreCp, line.mateIn, board.turn) : 50;
+  const pct = line ? evalBarWhitePercent(line.scoreCp, line.mateIn) : 50;
   (el('evalWhite') as HTMLElement).style.height = `${pct}%`;
   el('posEval').textContent = line ? `${line.scoreText} (${line.engine})` : '—';
 }

@@ -145,26 +145,41 @@ function pvText(pv: string[] | undefined, maxMoves = 8): string {
   return `PV ${shown}${pv.length > maxMoves ? ' …' : ''}`;
 }
 
-function stockfishScoreText(info: StockfishInfoLine | undefined): string {
+// All engine scores are displayed from White's perspective (positive = good for
+// White), matching the eval bar and standard chess GUIs, so the sign no longer
+// flips with the side to move. Engines report from the side-to-move POV, so flip
+// when Black is to move (WDL swaps win/loss; Q and cp negate).
+function toWhiteWdl(wdl: [number, number, number], fen: string): [number, number, number] {
+  return fenTurn(fen) === 'w' ? wdl : [wdl[2], wdl[1], wdl[0]];
+}
+function toWhiteQ(q: number, fen: string): number {
+  return fenTurn(fen) === 'w' ? q : -q;
+}
+
+function stockfishScoreText(info: StockfishInfoLine | undefined, fen: string): string {
   if (!info) return 'score unavailable';
-  if (info.mateIn !== undefined) return `mate ${signed(info.mateIn, 0)} stm · d${info.depth}`;
-  if (info.scoreCp !== undefined) return `${signed(info.scoreCp, 0)} cp stm · d${info.depth}`;
+  const w = fenTurn(fen) === 'w' ? 1 : -1;
+  if (info.mateIn !== undefined) return `mate ${signed(w * info.mateIn, 0)} · d${info.depth}`;
+  if (info.scoreCp !== undefined) return `${signed(w * info.scoreCp / 100, 2)} · d${info.depth}`;
   return `score unavailable · d${info.depth}`;
 }
 
-function stockfishScoreCompact(info: StockfishInfoLine | undefined): string {
+function stockfishScoreCompact(info: StockfishInfoLine | undefined, fen: string): string {
   if (!info) return 'eval —';
-  if (info.mateIn !== undefined) return `M${signed(info.mateIn, 0)} · d${info.depth}`;
-  if (info.scoreCp !== undefined) return `${signed(info.scoreCp, 0)} cp · d${info.depth}`;
+  const w = fenTurn(fen) === 'w' ? 1 : -1;
+  if (info.mateIn !== undefined) return `M${signed(w * info.mateIn, 0)} · d${info.depth}`;
+  if (info.scoreCp !== undefined) return `${signed(w * info.scoreCp / 100, 2)} · d${info.depth}`;
   return `d${info.depth}`;
 }
 
 function lc0WdlText(evaluation: Lc0Evaluation): string {
-  return `WDL ${percent(evaluation.wdl[0])}/${percent(evaluation.wdl[1])}/${percent(evaluation.wdl[2])} stm · Q ${signed(evaluation.q, 3)} · MLH ${evaluation.mlh.toFixed(1)}`;
+  const wdl = toWhiteWdl(evaluation.wdl, evaluation.fen);
+  return `WDL ${percent(wdl[0])}/${percent(wdl[1])}/${percent(wdl[2])} · Q ${signed(toWhiteQ(evaluation.q, evaluation.fen), 3)} · MLH ${evaluation.mlh.toFixed(1)}`;
 }
 
-function lc0WdlCompact(wdl: [number, number, number], q: number): string {
-  return `WDL ${percent0(wdl[0])}/${percent0(wdl[1])}/${percent0(wdl[2])} · Q ${signed(q, 2)}`;
+function lc0WdlCompact(wdl: [number, number, number], q: number, fen: string): string {
+  const w = toWhiteWdl(wdl, fen);
+  return `WDL ${percent0(w[0])}/${percent0(w[1])}/${percent0(w[2])} · Q ${signed(toWhiteQ(q, fen), 2)}`;
 }
 
 function lc0EvalBar(fen: string, wdl: [number, number, number]): EngineEvalBar {
@@ -191,8 +206,9 @@ function stockfishEvalBar(fen: string, info: StockfishInfoLine | undefined): Eng
   return { whiteScore: clamp01(whiteScore), label: signed(whiteCp / 100, 1) };
 }
 
-function searchWdlText(wdl: [number, number, number], q: number): string {
-  return `WDL ${percent(wdl[0])}/${percent(wdl[1])}/${percent(wdl[2])} stm · search Q ${signed(q, 3)}`;
+function searchWdlText(wdl: [number, number, number], q: number, fen: string): string {
+  const w = toWhiteWdl(wdl, fen);
+  return `WDL ${percent(w[0])}/${percent(w[1])}/${percent(w[2])} · search Q ${signed(toWhiteQ(q, fen), 3)}`;
 }
 
 function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
@@ -476,7 +492,7 @@ function recordLc0PolicyOutput(engineId: string, engineName: string, evaluation:
     fen: evaluation.fen,
     move,
     summary: lc0WdlText(evaluation),
-    shortEval: lc0WdlCompact(evaluation.wdl, evaluation.q),
+    shortEval: lc0WdlCompact(evaluation.wdl, evaluation.q, evaluation.fen),
     evalBar: lc0EvalBar(evaluation.fen, evaluation.wdl),
     detail: `top policy ${evaluation.legalPriors.slice(0, 5).map((p) => `${p.uci} ${(100 * p.prior).toFixed(1)}%`).join(', ') || '—'}`,
   });
@@ -491,8 +507,8 @@ function recordLc0SearchOutput(engineId: string, engineName: string, result: Lc0
     kind: 'lc0',
     fen: result.fen,
     move: result.move,
-    summary: rootWdl ? searchWdlText(rootWdl, result.value) : `search Q ${signed(result.value, 3)} stm`,
-    shortEval: rootWdl ? lc0WdlCompact(rootWdl, result.value) : `Q ${signed(result.value, 2)}`,
+    summary: rootWdl ? searchWdlText(rootWdl, result.value, result.fen) : `search Q ${signed(toWhiteQ(result.value, result.fen), 3)}`,
+    shortEval: rootWdl ? lc0WdlCompact(rootWdl, result.value, result.fen) : `Q ${signed(toWhiteQ(result.value, result.fen), 2)}`,
     evalBar: rootWdl ? lc0EvalBar(result.fen, rootWdl) : qEvalBar(result.fen, result.value),
     detail: `visits ${result.visits} · evals ${stats?.evalCalls ?? 0} · cache hits ${stats?.cacheHits ?? 0}`,
     pv: result.pv,
@@ -506,8 +522,8 @@ function recordBt4SearchOutput(engineId: string, engineName: string, result: Bt4
     kind: 'lc0',
     fen: result.fen,
     move: result.move ?? undefined,
-    summary: `search Q ${signed(result.value, 3)} stm`,
-    shortEval: `Q ${signed(result.value, 2)}`,
+    summary: `search Q ${signed(toWhiteQ(result.value, result.fen), 3)}`,
+    shortEval: `Q ${signed(toWhiteQ(result.value, result.fen), 2)}`,
     evalBar: qEvalBar(result.fen, result.value),
     detail: `visits ${result.visits} · evals ${result.stats?.evalCalls ?? 0} · cache hits ${result.stats?.cacheHits ?? 0}`,
     pv: result.pv,
@@ -522,10 +538,10 @@ function recordUciOutput(engineId: string, engineName: string, label: string, fe
     kind: 'uci',
     fen,
     move: move ?? undefined,
-    summary: `${label} ${stockfishScoreText(best)}`,
-    shortEval: stockfishScoreCompact(best),
+    summary: `${label} ${stockfishScoreText(best, fen)}`,
+    shortEval: stockfishScoreCompact(best, fen),
     evalBar: stockfishEvalBar(fen, best),
-    detail: lines.length > 1 ? `MultiPV ${lines.slice(0, 3).map((line) => `#${line.multipv} ${stockfishScoreText(line)}`).join(' · ')}` : undefined,
+    detail: lines.length > 1 ? `MultiPV ${lines.slice(0, 3).map((line) => `#${line.multipv} ${stockfishScoreText(line, fen)}`).join(' · ')}` : undefined,
     pv: best?.pvUci,
   });
 }
