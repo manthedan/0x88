@@ -72,6 +72,14 @@ type WgslDeferredReadbackBenchmarkResult = {
   deferred: { wallMs: number; evalsPerSecond: number; timingMeans: Record<string, number>; bestMoves: Array<string | undefined> };
 };
 
+type BrowserMemorySample = {
+  usedJSHeapSize?: number;
+  totalJSHeapSize?: number;
+  jsHeapSizeLimit?: number;
+  userAgentSpecificBytes?: number;
+  unavailableReason?: string;
+};
+
 type KernelBenchmarkResult = {
   status: 'KERNEL_BENCH_DONE';
   packUrl: string;
@@ -721,6 +729,7 @@ const HYBRID_SEARCH_BENCH_REQUESTED = params.get('hybridSearchBench') === '1' ||
 const HYBRID_ENCODER_PROFILE_REQUESTED = params.get('hybridEncoderProfile') === '1' || params.get('encoderProfile') === '1' || params.get('hybridProfile') === '1';
 const HYBRID_INPUT_BENCH_REQUESTED = params.get('hybridInputBench') === '1' || params.get('hybridInputBenchmark') === '1' || params.get('wasmInputBench') === '1';
 const HYBRID_DEFERRED_READBACK_BENCH_REQUESTED = params.get('wgslDeferredReadbackBench') === '1' || params.get('deferredReadbackBench') === '1';
+const HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED = params.get('wgslDeferredReadbackLifecycle') === '1' || params.get('deferredReadbackLifecycle') === '1' || params.get('wgslLifecycleSmoke') === '1';
 const HYBRID_WGSL_HEADS_REQUESTED = params.get('headBackend') === 'wgsl' || params.get('hybridHeads') === 'wgsl' || params.get('runtime') === 'hybrid-wgsl-heads' || params.get('runtime') === 'wgsl-heads';
 const HYBRID_WGSL_BATCH_MODE = params.get('wgslBatchMode') === 'serial' || params.get('wgslBatch') === 'serial' ? 'serial' : 'physical';
 const HYBRID_INPUT_BACKEND_PARAM = params.get('inputBackend') ?? params.get('hybridInput');
@@ -728,7 +737,7 @@ const HYBRID_INPUT_BACKEND_REQUESTED = HYBRID_INPUT_BACKEND_PARAM === 'wgsl' || 
 const HYBRID_INPUT_BACKEND = HYBRID_INPUT_BACKEND_PARAM === 'wasm' ? 'wasm' : (HYBRID_INPUT_BACKEND_PARAM === 'wgsl' ? 'wgsl' : 'js');
 const HYBRID_ENCODER_KERNEL_PARAM = params.get('encoderKernel') ?? params.get('hybridEncoderKernel') ?? params.get('encoderKernelVariant');
 const HYBRID_ENCODER_KERNEL_VARIANT = HYBRID_ENCODER_KERNEL_PARAM === 'tvm-packed-f16' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-outproj' ? HYBRID_ENCODER_KERNEL_PARAM : 'hand';
-const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
+const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
@@ -2650,6 +2659,96 @@ async function runHybridDeferredReadbackBenchmark(): Promise<void> {
   }
 }
 
+async function browserMemorySample(): Promise<BrowserMemorySample> {
+  const perf = performance as Performance & {
+    memory?: { usedJSHeapSize?: number; totalJSHeapSize?: number; jsHeapSizeLimit?: number };
+    measureUserAgentSpecificMemory?: () => Promise<{ bytes?: number }>;
+  };
+  const sample: BrowserMemorySample = {};
+  if (perf.memory) {
+    sample.usedJSHeapSize = perf.memory.usedJSHeapSize;
+    sample.totalJSHeapSize = perf.memory.totalJSHeapSize;
+    sample.jsHeapSizeLimit = perf.memory.jsHeapSizeLimit;
+  }
+  if (perf.measureUserAgentSpecificMemory) {
+    try {
+      const measured = await perf.measureUserAgentSpecificMemory();
+      if (typeof measured.bytes === 'number') sample.userAgentSpecificBytes = measured.bytes;
+    } catch (error) {
+      sample.unavailableReason = (error as Error).message;
+    }
+  }
+  if (!perf.memory && !perf.measureUserAgentSpecificMemory) sample.unavailableReason = 'browser memory APIs unavailable';
+  return sample;
+}
+
+async function runHybridDeferredReadbackLifecycleSmoke(): Promise<void> {
+  const fixtures = await loadRepresentativeInputFixtures();
+  const cycles = boundedQueryInt(['lifecycleCycles', 'cycles'], 3, 1, 20);
+  const iterations = boundedQueryInt(['deferredReadbackIters', 'iters'], 4, 1, 50);
+  const warmup = boundedQueryInt(['deferredReadbackWarmup', 'warmup'], 1, 0, 10);
+  const batchSize = boundedQueryInt(['deferredReadbackBatch', 'batch', 'batchSize'], 4, 1, 32);
+  const fixtureLimit = boundedQueryInt(['fixtureLimit', 'fixtures'], Math.min(4, fixtures.length), 1, fixtures.length);
+  const pauseMs = boundedQueryInt(['lifecyclePauseMs', 'pauseMs'], 0, 0, 5000);
+  const inputs = fixtures.slice(0, fixtureLimit).map((fixture) => fixture.input);
+  const cycleResults = [];
+  const memorySamples: Array<{ cycle: number; phase: 'before' | 'after'; sample: BrowserMemorySample }> = [];
+  setBusy(true, `Running WGSL deferred-readback lifecycle smoke: ${cycles} cycle(s), ${fixtureLimit} fixture(s)…`);
+  el('benchResult').textContent = 'WGSL_DEFERRED_READBACK_LIFECYCLE_RUNNING';
+  try {
+    for (let cycle = 1; cycle <= cycles; cycle++) {
+      memorySamples.push({ cycle, phase: 'before', sample: await browserMemorySample() });
+      const response = await postWorkerRequest<{ type: 'wgslDeferredReadbackBenchmarkResult'; result: WgslDeferredReadbackBenchmarkResult }>({
+        type: 'wgslDeferredReadbackBenchmark',
+        packUrl: PACK_URL,
+        inputs,
+        layers: boundedQueryInt(['encoderLayers', 'layers'], 10, 1, 32),
+        verifyShards: params.get('packVerify') !== '0',
+        inputBackend: HYBRID_INPUT_BACKEND,
+        batchSize,
+        iterations,
+        warmup,
+      });
+      const result = response.result;
+      memorySamples.push({ cycle, phase: 'after', sample: await browserMemorySample() });
+      cycleResults.push({
+        cycle,
+        allBestMovesMatch: result.allBestMovesMatch,
+        immediate: result.immediate,
+        deferred: result.deferred,
+      });
+      el('benchResult').textContent = `WGSL_DEFERRED_READBACK_LIFECYCLE ${cycle}/${cycles}`;
+      if (pauseMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, pauseMs));
+    }
+    const allCyclesBestMovesMatch = cycleResults.every((entry) => entry.allBestMovesMatch);
+    const result = {
+      status: 'WGSL_DEFERRED_READBACK_LIFECYCLE_DONE',
+      backend: searchWorkerBackend,
+      stableBackend: 'lc0web-wgsl-encoder-ort-heads',
+      packUrl: PACK_URL,
+      layers: boundedQueryInt(['encoderLayers', 'layers'], 10, 1, 32),
+      inputBackend: HYBRID_INPUT_BACKEND,
+      cycles,
+      batchSize,
+      iterations,
+      warmup,
+      inputCount: inputs.length,
+      allCyclesBestMovesMatch,
+      failedCycles: cycleResults.filter((entry) => !entry.allBestMovesMatch).map((entry) => entry.cycle),
+      memorySamples,
+      cycleResults,
+    };
+    el('benchResult').textContent = JSON.stringify(result);
+    el('message').textContent = `WGSL_DEFERRED_READBACK_LIFECYCLE_DONE cycles ${cycles} · best moves match ${allCyclesBestMovesMatch ? 'yes' : 'no'}`;
+  } catch (error) {
+    el('benchResult').textContent = `WGSL_DEFERRED_READBACK_LIFECYCLE_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Deferred readback lifecycle smoke failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
 function parseJsonlRecords<T>(text: string): T[] {
   return text.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as T);
 }
@@ -3453,6 +3552,10 @@ async function init() {
       : 'Ready. Drag a legal move or ask the engine to move.';
     if (HYBRID_DRIFT_REQUESTED) {
       await runHybridDriftFixtures();
+      return;
+    }
+    if (HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED) {
+      await runHybridDeferredReadbackLifecycleSmoke();
       return;
     }
     if (HYBRID_DEFERRED_READBACK_BENCH_REQUESTED) {
