@@ -8,7 +8,7 @@ const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_hybrid_search_matrix.mjs [options]\n\nRuns the browser hybrid search benchmark over head-backend/visits/batch combinations and writes a JSON matrix artifact.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_search_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --visits LIST         Comma-separated visits list (default 1,32,128)\n  --batches LIST        Comma-separated batch sizes (default 1,2,4,8)\n  --head-backends LIST  Comma-separated head backends: ort,wgsl (default ort,wgsl)\n  --layers N            Encoder layers (default 10)\n  --eval-iters N        Warm eval timed iterations per cell (default 3)\n  --eval-warmup N       Warm eval warmup iterations per cell (default 1)\n  --search-iters N      Search timed iterations per cell (default 3)\n  --search-warmup N     Search warmup iterations per cell (default 1)\n  --timeout MS          Per-cell browser timeout (default 180000)\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`);
+  console.log(`Usage: node scripts/lc0_browser_hybrid_search_matrix.mjs [options]\n\nRuns the browser hybrid search benchmark over encoder-kernel/head-backend/visits/batch combinations and writes a JSON matrix artifact.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_search_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --visits LIST         Comma-separated visits list (default 1,32,128)\n  --batches LIST        Comma-separated batch sizes (default 1,2,4,8)\n  --head-backends LIST  Comma-separated head backends: ort,wgsl (default ort,wgsl)\n  --encoder-kernels LIST\n                       Comma-separated encoder kernels: hand,tvm-packed-f16,mixed-tvm-ffn,mixed-tvm-ffn-outproj (default hand)\n  --repeats N           Repeat each cell, alternating variants in repeat order (default 1)\n  --layers N            Encoder layers (default 10)\n  --eval-iters N        Warm eval timed iterations per cell (default 3)\n  --eval-warmup N       Warm eval warmup iterations per cell (default 1)\n  --search-iters N      Search timed iterations per cell (default 3)\n  --search-warmup N     Search warmup iterations per cell (default 1)\n  --timeout MS          Per-cell browser timeout (default 180000)\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`);
 }
 
 function parseList(raw, parse, name) {
@@ -25,6 +25,8 @@ function parseArgs(argv) {
     visits: [1, 32, 128],
     batches: [1, 2, 4, 8],
     headBackends: ['ort', 'wgsl'],
+    encoderKernels: ['hand'],
+    repeats: 1,
     layers: 10,
     evalIters: 3,
     evalWarmup: 1,
@@ -51,6 +53,8 @@ function parseArgs(argv) {
     else if (arg === '--visits') args.visits = parseList(next(), Number, 'visits');
     else if (arg === '--batches') args.batches = parseList(next(), Number, 'batches');
     else if (arg === '--head-backends') args.headBackends = parseList(next(), (value) => value, 'head-backends');
+    else if (arg === '--encoder-kernels') args.encoderKernels = parseList(next(), (value) => value, 'encoder-kernels');
+    else if (arg === '--repeats') args.repeats = Number(next());
     else if (arg === '--layers') args.layers = Number(next());
     else if (arg === '--eval-iters') args.evalIters = Number(next());
     else if (arg === '--eval-warmup') args.evalWarmup = Number(next());
@@ -64,7 +68,8 @@ function parseArgs(argv) {
   }
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   for (const backend of args.headBackends) if (!['ort', 'wgsl'].includes(backend)) throw new Error(`Invalid backend: ${backend}`);
-  for (const [name, value] of [['port', args.port], ['layers', args.layers], ['eval-iters', args.evalIters], ['search-iters', args.searchIters], ['timeout', args.timeoutMs]]) {
+  for (const kernel of args.encoderKernels) if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj'].includes(kernel)) throw new Error(`Invalid encoder kernel: ${kernel}`);
+  for (const [name, value] of [['port', args.port], ['layers', args.layers], ['repeats', args.repeats], ['eval-iters', args.evalIters], ['search-iters', args.searchIters], ['timeout', args.timeoutMs]]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
   for (const [name, values] of [['visits', args.visits], ['batches', args.batches]]) {
@@ -129,7 +134,9 @@ function compactCell(result, combo) {
   return {
     ...combo,
     backend: result.backend,
-    bestMove: result.search?.bestMove,
+    encoderKernelVariant: result.encoderKernelVariant ?? combo.encoderKernel,
+    evalBestMove: result.eval?.bestMove,
+    searchBestMove: result.search?.bestMove,
     evalMeanMs: result.eval?.timingStats?.meanMs,
     searchMeanMs: result.search?.timingStats?.meanMs,
     visitsPerSecond: result.search?.visitsPerSecond,
@@ -161,6 +168,7 @@ async function runCell(args, combo, index, total) {
     '--agent-browser', args.agentBrowser,
     '--session', session,
     '--head-backend', combo.headBackend,
+    '--encoder-kernel', combo.encoderKernel,
     '--visits', String(combo.visits),
     '--batch', String(combo.batch),
     '--layers', String(args.layers),
@@ -170,7 +178,7 @@ async function runCell(args, combo, index, total) {
     '--search-warmup', String(args.searchWarmup),
     '--timeout', String(args.timeoutMs),
   ];
-  process.stderr.write(`[matrix] ${index}/${total} backend=${combo.headBackend} visits=${combo.visits} batch=${combo.batch}\n`);
+  process.stderr.write(`[matrix] ${index}/${total} repeat=${combo.repeat} kernel=${combo.encoderKernel} backend=${combo.headBackend} visits=${combo.visits} batch=${combo.batch}\n`);
   const started = Date.now();
   const { stdout } = await spawnCapture('npm', commandArgs, { echoStderr: true });
   const result = JSON.parse(stdout.slice(stdout.indexOf('{')));
@@ -181,9 +189,13 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) return usage();
   const combos = [];
-  for (const headBackend of args.headBackends) {
-    for (const visits of args.visits) {
-      for (const batch of args.batches) combos.push({ headBackend, visits, batch });
+  for (let repeat = 1; repeat <= args.repeats; repeat++) {
+    for (const encoderKernel of args.encoderKernels) {
+      for (const headBackend of args.headBackends) {
+        for (const visits of args.visits) {
+          for (const batch of args.batches) combos.push({ repeat, encoderKernel, headBackend, visits, batch });
+        }
+      }
     }
   }
   if (args.dryRun) {
@@ -202,6 +214,8 @@ async function main() {
       finishedAt: new Date().toISOString(),
       baseUrl: args.baseUrl,
       layers: args.layers,
+      encoderKernels: args.encoderKernels,
+      repeats: args.repeats,
       eval: { warmup: args.evalWarmup, iterations: args.evalIters },
       search: { warmup: args.searchWarmup, iterations: args.searchIters },
       cells,
