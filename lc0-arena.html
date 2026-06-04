@@ -21,7 +21,8 @@ main{display:grid;grid-template-columns:minmax(0,1fr) minmax(330px,400px);gap:20
 .engine-eval-bar .eval-bar-caption,.engine-eval-bar .eval-bar-value{display:none}
 .engine-eval-bar.empty .eval-fill{height:50%}
 #whiteEngineEvalBar{border:2px solid var(--acc-w)}#blackEngineEvalBar{border:2px solid var(--acc-b)}
-.eval-chip-row{display:flex;align-items:flex-end;max-width:680px;margin:0 auto 5px;gap:8px;min-height:18px}.eval-chip{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.02em;color:#fff;border-radius:5px;padding:2px 8px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:44%}#whiteEngineChip{background:var(--acc-w)}#blackEngineChip{background:var(--acc-b);margin-left:auto}
+.eval-chip-row{display:flex;align-items:flex-end;max-width:680px;margin:0 auto 5px;gap:8px;min-height:18px}.eval-chip{display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.02em;color:#fff;border-radius:5px;padding:2px 8px;line-height:1.35;white-space:nowrap;overflow:hidden;max-width:44%}.eval-chip span{overflow:hidden;text-overflow:ellipsis}#whiteEngineChip{background:var(--acc-w)}#blackEngineChip{background:var(--acc-b);margin-left:auto}
+.engine-logo{width:14px;height:14px;object-fit:contain;border-radius:3px;vertical-align:middle;flex:0 0 auto}.eval-chip .engine-logo{width:11px;height:11px;border-radius:2px;background:rgba(255,255,255,.9)}.side-label .engine-logo{width:16px;height:16px}
 .engine-eval-bar.thinking{box-shadow:0 0 0 2px rgba(159,174,111,.6)}
 .side-label{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:6px 0;min-height:40px;padding:8px 12px;border:1px solid var(--rule);border-left:3px solid var(--rule);border-radius:7px;background:white;font-size:13px}
 .side-label .side-main{display:flex;flex:1;min-width:0;flex-wrap:nowrap;align-items:center;gap:8px}.side-label .color{flex:0 0 auto;font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:700;border:1px solid var(--rule);border-radius:4px;padding:2px 5px;background:var(--bg)}.side-label .engine{flex:0 0 auto;font-weight:700;font-size:14px}.side-label .side-eval{margin-left:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:600}.side-label .turn{flex:0 0 auto;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--accent);white-space:nowrap;text-transform:uppercase;letter-spacing:.04em;background:var(--soft);border:1px solid #cbd8a6;border-radius:999px;padding:2px 8px}
@@ -31,6 +32,8 @@ main{display:grid;grid-template-columns:minmax(0,1fr) minmax(330px,400px);gap:20
 button{border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink);padding:8px 10px;font:inherit;font-size:13px;cursor:pointer}
 button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:700}button:disabled{opacity:.55;cursor:not-allowed}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px}
+.row.matchup{align-items:end}.row.matchup .field{flex:1 1 0;min-width:120px}.row.matchup select{width:100%}.row.matchup .vs{font-weight:700;color:var(--muted);padding-bottom:7px}.matchup-note{align-self:end;padding-bottom:8px;color:var(--muted)}
+#matchScore{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--ink);padding:8px 10px;border:1px solid var(--rule);border-radius:7px;background:var(--soft)}
 .field{display:grid;gap:3px}.field label{font-size:11px;color:var(--muted)}
 input[type=number]{width:70px;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;font-family:var(--mono)}
 select{font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;background:white}
@@ -73,21 +76,16 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
     <div id="runtimeBadge" class="runtime-badge">Runtime: detecting browser isolation and GPU…</div>
   </section>
   <section class="panel" aria-label="Tournament">
-    <h2>Engines</h2>
-    <div class="engines" id="engines">
-      <label><input type="checkbox" value="lc0-policy" /> LC0 policy (no search)</label>
-      <label><input type="checkbox" value="lc0-s100" checked /> LC0 search · 100 visits</label>
-      <label><input type="checkbox" value="lc0-s400" /> LC0 search · 400 visits</label>
-      <label><input type="checkbox" value="sf-d4" checked /> Stockfish lite · depth 4</label>
-      <label><input type="checkbox" value="sf-d8" /> Stockfish lite · depth 8</label>
-      <label><input type="checkbox" value="reckless-d4" /> Reckless WASI · depth 4</label>
-      <label><input type="checkbox" value="reckless-d8" /> Reckless WASI · depth 8</label>
+    <h2>Matchup</h2>
+    <div class="row matchup">
+      <div class="field"><label for="seatA">Engine 1</label>
+        <select id="seatA"></select></div>
+      <span class="vs">vs</span>
+      <div class="field"><label for="seatB">Engine 2</label>
+        <select id="seatB"></select></div>
+      <span class="matchup-note small">colors alternate each game</span>
     </div>
     <div class="row">
-      <div class="field"><label for="formatSelect">Format</label>
-        <select id="formatSelect"><option value="round-robin">Round robin</option><option value="gauntlet">Gauntlet</option></select></div>
-      <div class="field"><label for="championSelect">Gauntlet champion</label>
-        <select id="championSelect"></select></div>
       <div class="field"><label for="gamesInput">Games/opening</label>
         <input id="gamesInput" type="number" min="1" max="20" step="1" value="2" /></div>
       <div class="field"><label for="delayInput">Delay ms</label>
@@ -98,11 +96,15 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
         <input id="movetimeInput" type="number" min="10" max="60000" step="50" value="500" /></div>
       <div class="field"><label for="cacheEntriesInput">NN cache entries</label>
         <input id="cacheEntriesInput" type="number" min="0" max="100000" step="128" value="2048" /></div>
-      <div class="field"><label for="stockfishFlavorSelect">Stockfish</label>
-        <select id="stockfishFlavorSelect"><option value="lite-single">Lite single</option><option value="single">Full single</option><option value="lite-threaded">Lite threaded</option><option value="threaded">Full threaded</option></select></div>
+      <div class="field"><label for="lc0VisitsInput">Lc0 visits</label>
+        <input id="lc0VisitsInput" type="number" min="1" max="100000" step="1" value="100" /></div>
+      <div class="field"><label for="sfDepthInput">SF depth</label>
+        <input id="sfDepthInput" type="number" min="1" max="40" step="1" value="8" /></div>
       <div class="field"><label for="stockfishThreadsInput">SF threads</label>
         <input id="stockfishThreadsInput" type="number" min="1" max="32" step="1" value="1" /></div>
-      <div class="field"><label for="recklessVariantSelect">Reckless</label>
+      <div class="field"><label for="recklessDepthInput">Reckless depth</label>
+        <input id="recklessDepthInput" type="number" min="1" max="20" step="1" value="4" /></div>
+      <div class="field"><label for="recklessVariantSelect">Reckless variant</label>
         <select id="recklessVariantSelect"></select></div>
     </div>
     <div id="recklessRuntimeInfo" class="small">Reckless: detecting runtime…</div>
@@ -117,11 +119,11 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
     </div>
     <div id="openingInfo" class="small">Start position only.</div>
     <div class="row">
-      <button id="start" class="primary" type="button" disabled>Start tournament</button>
+      <button id="start" class="primary" type="button" disabled>Start match</button>
       <button id="stop" type="button" disabled>Stop</button>
     </div>
-    <h2>Standings</h2>
-    <table id="standings"><thead><tr><th>#</th><th>Engine</th><th class="num">Pts</th><th class="num">W</th><th class="num">L</th><th class="num">D</th><th class="num">G</th></tr></thead><tbody></tbody></table>
+    <h2>Result</h2>
+    <div id="matchScore" class="small">No games played yet.</div>
     <h2>Games</h2>
     <div class="log" id="log"></div>
     <div class="row"><button id="exportPgn" type="button">Export PGN</button></div>

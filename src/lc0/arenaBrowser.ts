@@ -5,8 +5,7 @@ import { boardToFen, parseFen, START_FEN, type BoardState } from '../chess/board
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
-import { applyGameResult, gauntletPairings, initStandings, rankedStandings, roundRobinPairings, type ArenaPairing, type Standing } from './arena.ts';
-import { BUILTIN_ARENA_OPENINGS, parseArenaOpenings, scheduleOpenings, type ArenaOpening } from './arenaOpenings.ts';
+import { BUILTIN_ARENA_OPENINGS, parseArenaOpenings, type ArenaOpening } from './arenaOpenings.ts';
 import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { GameTree } from './gameTree.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
@@ -15,9 +14,10 @@ import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0Evalu
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
-import { DEFAULT_STOCKFISH_FLAVOR, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorLabel, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
+import { StockfishEngine, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
 import { RecklessEngine } from './recklessEngine.ts';
 import { RECKLESS_VARIANTS, checkRecklessVariantAsset, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, type RecklessVariant } from './recklessVariants.ts';
+import { Bt4WorkerSearcher, bt4LoadWarning, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 interface ArenaEngine {
@@ -27,7 +27,8 @@ interface ArenaEngine {
   warmup?(signal: AbortSignal): Promise<void>;
 }
 interface GameRecord { pgn: string; }
-interface ScheduledArenaGame extends ArenaPairing { opening: ArenaOpening; }
+interface MatchGame { whiteSeat: 'A' | 'B'; opening: ArenaOpening; }
+interface MatchScore { a: number; b: number; aWins: number; bWins: number; draws: number; games: number; }
 interface Lc0TreeTelemetry {
   engineName: string;
   searches: number;
@@ -70,7 +71,6 @@ interface EngineOutputSnapshot {
 
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
-const REQUESTED_STOCKFISH_FLAVOR = normalizeStockfishFlavor(params.get('sfFlavor') ?? params.get('stockfish'));
 const REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 
 let ground: Ground | null = null;
@@ -86,8 +86,11 @@ let abort: AbortController | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
 let searcher: Lc0PuctSearcher | null = null;
 let lc0Cache: CachedLc0Evaluator | null = null;
-let stockfish: StockfishEngine | null = null;
+let stockfishLite: StockfishEngine | null = null;
+let stockfishFull: StockfishEngine | null = null;
 let reckless: RecklessEngine | null = null;
+// Lc0 BT4 runs in its own worker (lazy, WebGPU-gated, disposable). See bt4Engine.ts.
+const bt4 = new Bt4WorkerSearcher();
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
 let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
 const engines = new Map<string, ArenaEngine>();
@@ -201,9 +204,21 @@ function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
 
 function shortEngineTag(name: string): string {
   const n = name.toLowerCase();
+  if (n.includes('bt4')) return 'BT4';
   if (n.includes('lc0') || n.includes('leela')) return 'Lc0';
-  if (n.includes('stockfish') || /\bsf\b/.test(n)) return 'SF18';
+  if (n.includes('reckless')) return 'Reck';
+  if (n.includes('stockfish') || /\bsf\b/.test(n)) return n.includes('lite') ? 'SF-L' : 'SF';
   return name.split(/[\s·|]+/)[0] || name;
+}
+
+// Optional favicon-sized engine logo. Files live in public/engine-logos/ and are
+// not bundled by default; when absent the <img> removes itself, leaving the text.
+function engineLogoHtml(name: string): string {
+  const n = name.toLowerCase();
+  const family = (n.includes('bt4') || n.includes('lc0') || n.includes('leela')) ? 'lc0'
+    : n.includes('reckless') ? 'reckless'
+    : (n.includes('stockfish') || /\bsf\b/.test(n)) ? 'stockfish' : '';
+  return family ? `<img class="engine-logo" src="/engine-logos/${family}.png" alt="" onerror="this.remove()">` : '';
 }
 
 function renderEvalBars(): void {
@@ -220,7 +235,7 @@ function renderEvalBars(): void {
     node.innerHTML = `<div class="eval-fill" style="height:${(100 * whiteScore).toFixed(1)}%"></div><div class="eval-midline"></div><div class="eval-bar-caption">${color[0]}</div><div class="eval-bar-value">${htmlEscape(label)}</div>`;
     const chip = document.getElementById(id.replace('EvalBar', 'Chip'));
     if (chip) {
-      chip.textContent = engineName ? shortEngineTag(engineName) : '';
+      chip.innerHTML = engineName ? `${engineLogoHtml(engineName)}<span>${htmlEscape(shortEngineTag(engineName))}</span>` : '';
       chip.title = engineName ? `${color} engine: ${engineName}` : '';
       chip.style.display = engineName ? '' : 'none';
     }
@@ -230,7 +245,7 @@ function renderEvalBars(): void {
 }
 
 function renderEngineOutputs(): void {
-  const ids = activeEngineIds.length ? activeEngineIds : selectedEngineIds();
+  const ids = activeEngineIds.length ? activeEngineIds : [...new Set([seatEngineId('A'), seatEngineId('B')])].filter((id) => engines.has(id));
   const cards = ids.map((id) => {
     const snapshot = engineOutputs.get(id);
     const name = snapshot?.engineName ?? engines.get(id)?.name ?? id;
@@ -254,7 +269,7 @@ function renderSideLabels() {
     const evalText = output?.shortEval ?? (thinking ? 'thinking…' : 'eval —');
     const status = active ? (thinking && output ? 'thinking' : 'to move') : '';
     node.classList.toggle('active', active);
-    node.innerHTML = `<span class="side-main"><span class="color">${color}</span> <span class="engine">${htmlEscape(engineName ?? '—')}</span>${status ? ` <span class="turn">${status}</span>` : ''} <span class="side-eval">${htmlEscape(evalText)}</span></span>`;
+    node.innerHTML = `<span class="side-main"><span class="color">${color}</span> ${engineName ? engineLogoHtml(engineName) : ''}<span class="engine">${htmlEscape(engineName ?? '—')}</span>${status ? ` <span class="turn">${status}</span>` : ''} <span class="side-eval">${htmlEscape(evalText)}</span></span>`;
   };
   update('blackSideLabel', 'Black', boardBlackId, boardBlackName, board.turn === 'b');
   update('whiteSideLabel', 'White', boardWhiteId, boardWhiteName, board.turn === 'w');
@@ -288,16 +303,27 @@ function renderBoard() {
   renderEngineOutputs();
 }
 
-function selectedEngineIds(): string[] {
-  return [...el('engines').querySelectorAll('input:checked')].map((node) => (node as HTMLInputElement).value);
+// The arena is a two-seat head-to-head (same engine in both seats is allowed and
+// behaves as Lc0-style self-play: one shared model + one shared, reused search
+// tree). A multi-engine tournament mode (round-robin/gauntlet/standings) is a
+// planned follow-up — see the git history for the prior implementation.
+function seatEngineId(seat: 'A' | 'B'): string {
+  return selectEl(seat === 'A' ? 'seatA' : 'seatB').value;
 }
 
-function setEngineCheckboxLabel(engineId: string, labelText: string): void {
-  const input = el('engines').querySelector(`input[value="${engineId}"]`) as HTMLInputElement | null;
-  const label = input?.closest('label');
-  if (!input || !label) return;
-  const text = [...label.childNodes].find((node) => node.nodeType === Node.TEXT_NODE);
-  if (text) text.textContent = ` ${labelText}`;
+function populateSeats(): void {
+  const options = [...engines.values()].map((engine) => `<option value="${htmlEscape(engine.id)}">${htmlEscape(engine.name)}</option>`).join('');
+  for (const id of ['seatA', 'seatB'] as const) {
+    const select = selectEl(id);
+    const prev = select.value;
+    select.innerHTML = options;
+    select.value = engines.has(prev) ? prev : id === 'seatB' ? 'sf-lite' : 'lc0';
+  }
+}
+
+function refreshSeatControls(): void {
+  selectEl('seatA').disabled = running;
+  selectEl('seatB').disabled = running;
 }
 
 function arenaBudgetMode(): 'fixed' | 'movetime' {
@@ -314,7 +340,19 @@ function arenaCacheEntries(): number {
 
 function stockfishThreads(): number {
   const requested = Math.max(1, Math.min(32, Math.floor(Number(inputEl('stockfishThreadsInput').value) || 1)));
-  return stockfishFlavorRequiresIsolation(selectedStockfishFlavor()) ? requested : 1;
+  return threadedStockfishAvailable() ? requested : 1;
+}
+
+function arenaLc0Visits(): number {
+  return Math.max(1, Math.min(100000, Math.floor(Number(inputEl('lc0VisitsInput').value) || 100)));
+}
+
+function arenaSfDepth(): number {
+  return Math.max(1, Math.min(40, Math.floor(Number(inputEl('sfDepthInput').value) || 8)));
+}
+
+function arenaRecklessDepth(): number {
+  return Math.max(1, Math.min(20, Math.floor(Number(inputEl('recklessDepthInput').value) || 4)));
 }
 
 function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): string {
@@ -432,6 +470,21 @@ function recordLc0SearchOutput(engineId: string, engineName: string, result: Lc0
   });
 }
 
+function recordBt4SearchOutput(engineId: string, engineName: string, result: Bt4SearchResult): void {
+  recordEngineOutput({
+    engineId,
+    engineName,
+    kind: 'lc0',
+    fen: result.fen,
+    move: result.move ?? undefined,
+    summary: `search Q ${signed(result.value, 3)} stm`,
+    shortEval: `Q ${signed(result.value, 2)}`,
+    evalBar: qEvalBar(result.fen, result.value),
+    detail: `visits ${result.visits} · evals ${result.stats?.evalCalls ?? 0} · cache hits ${result.stats?.cacheHits ?? 0}`,
+    pv: result.pv,
+  });
+}
+
 function recordUciOutput(engineId: string, engineName: string, label: string, fen: string, move: string | null, lines: StockfishInfoLine[]): void {
   const best = lines[0];
   recordEngineOutput({
@@ -495,13 +548,28 @@ function threadedStockfishAvailable(): boolean {
   return runtimeIsolation && runtimeSharedArrayBuffer;
 }
 
-function selectedStockfishFlavor(): StockfishFlavor {
-  const selected = normalizeStockfishFlavor(selectEl('stockfishFlavorSelect').value);
-  return stockfishFlavorRequiresIsolation(selected) && !threadedStockfishAvailable() ? DEFAULT_STOCKFISH_FLAVOR : selected;
+function stockfishFlavorFor(kind: 'lite' | 'full'): StockfishFlavor {
+  const threaded = threadedStockfishAvailable() && stockfishThreads() > 1;
+  if (kind === 'lite') return threaded ? 'lite-threaded' : 'lite-single';
+  return threaded ? 'threaded' : 'single';
 }
 
-function stockfishName(depth: number): string {
-  return `${stockfishFlavorLabel(selectedStockfishFlavor())} d${depth}`;
+// Stockfish Lite and full are independent engines (they may face each other), so
+// each has its own lazily-created instance.
+function stockfishEngineFor(kind: 'lite' | 'full'): StockfishEngine {
+  if (kind === 'lite') {
+    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: 4, threads: stockfishThreads() }, stockfishFlavorUrl(stockfishFlavorFor('lite')));
+    return stockfishLite;
+  }
+  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: 4, threads: stockfishThreads() }, stockfishFlavorUrl(stockfishFlavorFor('full')));
+  return stockfishFull;
+}
+
+function disposeStockfish(): void {
+  stockfishLite?.dispose();
+  stockfishLite = null;
+  stockfishFull?.dispose();
+  stockfishFull = null;
 }
 
 function selectedRecklessVariant(): RecklessVariant {
@@ -538,18 +606,23 @@ function refreshRecklessVariantUi(): void {
   renderRecklessRuntimeInfo();
 }
 
-function refreshStockfishFlavorAvailability(): void {
-  const select = selectEl('stockfishFlavorSelect');
-  for (const option of [...select.options]) {
-    const flavor = normalizeStockfishFlavor(option.value);
-    option.disabled = stockfishFlavorRequiresIsolation(flavor) && !threadedStockfishAvailable();
-    if (option.disabled) option.textContent = option.textContent.replace(/ \(needs isolation\)$/, '') + ' (needs isolation)';
-    else option.textContent = option.textContent.replace(/ \(needs isolation\)$/, '');
-  }
-  if (stockfishFlavorRequiresIsolation(normalizeStockfishFlavor(select.value)) && !threadedStockfishAvailable()) select.value = DEFAULT_STOCKFISH_FLAVOR;
-  select.disabled = running;
-  inputEl('stockfishThreadsInput').disabled = running || !stockfishFlavorRequiresIsolation(selectedStockfishFlavor());
+function refreshStockfishControls(): void {
+  inputEl('stockfishThreadsInput').disabled = running || !threadedStockfishAvailable();
   inputEl('stockfishThreadsInput').value = String(stockfishThreads());
+}
+
+// Lc0 BT4 is WebGPU-only; disable the checkbox (with reason) when WebGPU is unusable.
+async function refreshBt4Availability(): Promise<void> {
+  const ok = await probeBt4Support();
+  for (const id of ['seatA', 'seatB'] as const) {
+    const select = selectEl(id);
+    const option = select.querySelector('option[value="lc0-bt4"]') as HTMLOptionElement | null;
+    if (option) {
+      option.disabled = !ok;
+      option.title = ok ? 'Lc0 BT4 — large net (~353MB), runs on WebGPU in a worker' : 'needs WebGPU (unavailable here)';
+    }
+    if (!ok && select.value === 'lc0-bt4') select.value = id === 'seatB' ? 'sf-lite' : 'lc0';
+  }
 }
 
 async function renderRuntimeBadge(): Promise<void> {
@@ -558,7 +631,7 @@ async function renderRuntimeBadge(): Promise<void> {
     const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
     runtimeIsolation = diag.crossOriginIsolated === true;
     runtimeSharedArrayBuffer = diag.wasm.sharedArrayBuffer === true;
-    refreshStockfishFlavorAvailability();
+    refreshStockfishControls();
     const webgpu = diag.webgpuAvailable ? (diag.adapter?.ok === false ? 'WebGPU unavailable/blocked' : 'WebGPU available') : 'WebGPU unavailable';
     const isolated = runtimeIsolation ? 'isolated' : 'not isolated';
     const sab = runtimeSharedArrayBuffer ? 'SAB yes' : 'SAB no';
@@ -591,11 +664,10 @@ function resetLc0SearchTrees(ids?: string[]): void {
 function buildEngines() {
   engines.clear();
   const warmupPositions = [parseFen(START_FEN)];
-  const lc0Search = (engineId: string, visits: number): ArenaEngine['move'] => async (positions, signal) => {
+  const lc0Search = (engineId: string): ArenaEngine['move'] => async (positions, signal) => {
     const timed = arenaBudgetMode() === 'movetime';
-    const input = { positions };
-    const result = await lc0SearcherFor(engineId).search(input, {
-      visits: timed ? undefined : visits,
+    const result = await lc0SearcherFor(engineId).search({ positions }, {
+      visits: timed ? undefined : arenaLc0Visits(),
       movetimeMs: timed ? arenaMovetimeMs() : undefined,
       signal,
       yieldEveryMs: 16,
@@ -606,20 +678,39 @@ function buildEngines() {
     recordLc0SearchOutput(engineId, engineName, result);
     return result.move ?? null;
   };
-  const sf = (engineId: string, depth: number): ArenaEngine['move'] => async (positions, signal) => {
-    if (arenaBudgetMode() === 'movetime') stockfish!.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: stockfishThreads() });
-    else stockfish!.setOptions({ depth, movetimeMs: undefined, threads: stockfishThreads() });
+  const lc0Bt4Move = (engineId: string): ArenaEngine['move'] => async (positions, signal) => {
+    const onAbort = () => bt4.cancel();
+    signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      const timed = arenaBudgetMode() === 'movetime';
+      const result = await bt4.search({ positions }, {
+        visits: timed ? undefined : arenaLc0Visits(),
+        movetimeMs: timed ? arenaMovetimeMs() : undefined,
+        reuseTree: true,
+      });
+      if (result.cancelled) return null;
+      recordBt4SearchOutput(engineId, engines.get(engineId)?.name ?? 'Lc0 BT4', result);
+      return result.move ?? null;
+    } finally {
+      signal.removeEventListener('abort', onAbort);
+    }
+  };
+  const sf = (engineId: string, kind: 'lite' | 'full'): ArenaEngine['move'] => async (positions, signal) => {
+    const engine = stockfishEngineFor(kind);
+    if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: stockfishThreads() });
+    else engine.setOptions({ depth: arenaSfDepth(), movetimeMs: undefined, threads: stockfishThreads() });
     const fen = boardToFen(positions[positions.length - 1]);
-    const move = await stockfish!.bestMove(fen, signal);
-    recordStockfishOutput(engineId, engines.get(engineId)?.name ?? `Stockfish d${depth}`, fen, move, stockfish!.lastInfo());
+    const move = await engine.bestMove(fen, signal);
+    recordStockfishOutput(engineId, engines.get(engineId)?.name ?? (kind === 'lite' ? 'Stockfish Lite' : 'Stockfish'), fen, move, engine.lastInfo());
     return move;
   };
-  const recklessMove = (engineId: string, depth: number): ArenaEngine['move'] => async (positions, signal) => {
+  const recklessMove = (engineId: string): ArenaEngine['move'] => async (positions, signal) => {
+    const depth = arenaRecklessDepth();
     if (arenaBudgetMode() === 'movetime') reckless!.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
     else reckless!.setOptions({ depth, movetimeMs: undefined });
     const fen = boardToFen(positions[positions.length - 1]);
     const move = await reckless!.bestMove(fen, signal);
-    recordRecklessOutput(engineId, engines.get(engineId)?.name ?? recklessName(depth), fen, move, reckless!.lastInfo());
+    recordRecklessOutput(engineId, engines.get(engineId)?.name ?? 'Reckless', fen, move, reckless!.lastInfo());
     renderRecklessRuntimeInfo();
     return move;
   };
@@ -629,43 +720,31 @@ function buildEngines() {
     search.resetTree();
     renderCacheInfo();
   };
-  const stockfishWarmup = async (signal: AbortSignal) => {
-    stockfish!.setOptions({ depth: 1, movetimeMs: undefined, threads: stockfishThreads() });
-    await stockfish!.bestMove(START_FEN, signal);
+  const lc0Bt4Warmup = async (signal: AbortSignal) => {
+    const onAbort = () => bt4.cancel();
+    signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      await bt4.search({ positions: warmupPositions }, { visits: 1 });
+      await bt4.resetTree();
+    } finally {
+      signal.removeEventListener('abort', onAbort);
+    }
+  };
+  const stockfishWarmup = (kind: 'lite' | 'full') => async (signal: AbortSignal) => {
+    const engine = stockfishEngineFor(kind);
+    engine.setOptions({ depth: 1, movetimeMs: undefined, threads: stockfishThreads() });
+    await engine.bestMove(START_FEN, signal);
   };
   const recklessWarmup = async (signal: AbortSignal) => {
     reckless!.setOptions({ depth: 1, movetimeMs: undefined });
     await reckless!.bestMove(START_FEN, signal);
     renderRecklessRuntimeInfo();
   };
-  engines.set('lc0-policy', {
-    id: 'lc0-policy',
-    name: 'LC0 policy',
-    move: async (positions) => {
-      const choice = await player!.chooseMove({ positions });
-      recordLc0PolicyOutput('lc0-policy', engines.get('lc0-policy')?.name ?? 'LC0 policy', choice.evaluation, choice.move);
-      return choice.move ?? null;
-    },
-    warmup: async () => { await player!.chooseMove({ positions: warmupPositions }); },
-  });
-  engines.set('lc0-s100', { id: 'lc0-s100', name: 'LC0 search 100', move: lc0Search('lc0-s100', 100), warmup: lc0SearchWarmup('lc0-s100') });
-  engines.set('lc0-s400', { id: 'lc0-s400', name: 'LC0 search 400', move: lc0Search('lc0-s400', 400), warmup: lc0SearchWarmup('lc0-s400') });
-  engines.set('sf-d4', { id: 'sf-d4', name: stockfishName(4), move: sf('sf-d4', 4), warmup: stockfishWarmup });
-  engines.set('sf-d8', { id: 'sf-d8', name: stockfishName(8), move: sf('sf-d8', 8), warmup: stockfishWarmup });
-  engines.set('reckless-d4', { id: 'reckless-d4', name: recklessName(4), move: recklessMove('reckless-d4', 4), warmup: recklessWarmup });
-  engines.set('reckless-d8', { id: 'reckless-d8', name: recklessName(8), move: recklessMove('reckless-d8', 8), warmup: recklessWarmup });
-  setEngineCheckboxLabel('sf-d4', stockfishName(4));
-  setEngineCheckboxLabel('sf-d8', stockfishName(8));
-  setEngineCheckboxLabel('reckless-d4', recklessName(4));
-  setEngineCheckboxLabel('reckless-d8', recklessName(8));
-}
-
-function refreshChampionOptions() {
-  const ids = selectedEngineIds();
-  const select = selectEl('championSelect');
-  const prev = select.value;
-  select.innerHTML = ids.map((id) => `<option value="${id}">${htmlEscape(engines.get(id)?.name ?? id)}</option>`).join('');
-  if (ids.includes(prev)) select.value = prev;
+  engines.set('lc0', { id: 'lc0', name: 'Lc0', move: lc0Search('lc0'), warmup: lc0SearchWarmup('lc0') });
+  engines.set('lc0-bt4', { id: 'lc0-bt4', name: 'Lc0 BT4', move: lc0Bt4Move('lc0-bt4'), warmup: lc0Bt4Warmup });
+  engines.set('sf-lite', { id: 'sf-lite', name: 'Stockfish Lite', move: sf('sf-lite', 'lite'), warmup: stockfishWarmup('lite') });
+  engines.set('sf', { id: 'sf', name: 'Stockfish', move: sf('sf', 'full'), warmup: stockfishWarmup('full') });
+  engines.set('reckless', { id: 'reckless', name: 'Reckless', move: recklessMove('reckless'), warmup: recklessWarmup });
 }
 
 function selectedOpenings(): ArenaOpening[] {
@@ -724,11 +803,16 @@ function refreshOpeningPreview(): void {
   }
 }
 
-function renderStandings(standings: Map<string, Standing>) {
-  const ranked = rankedStandings(standings);
-  el('standings').querySelector('tbody')!.innerHTML = ranked.map((s, i) =>
-    `<tr class="${i === 0 && s.games > 0 ? 'leader' : ''}"><td>${i + 1}</td><td>${htmlEscape(s.name)}</td>`
-    + `<td class="num">${s.score}</td><td class="num">${s.wins}</td><td class="num">${s.losses}</td><td class="num">${s.draws}</td><td class="num">${s.games}</td></tr>`).join('');
+function formatScoreHalf(value: number): string {
+  return value % 1 ? `${Math.floor(value) || ''}½` : String(value);
+}
+
+function renderMatchScore(nameA: string, nameB: string, sameEngine: boolean, score: MatchScore): void {
+  if (score.games === 0) { el('matchScore').textContent = 'No games played yet.'; return; }
+  const games = `${score.games} game${score.games === 1 ? '' : 's'}`;
+  el('matchScore').textContent = sameEngine
+    ? `${nameA} mirror · ${score.aWins}–${score.bWins}–${score.draws} (W–L–D, Engine 1 seat) over ${games}`
+    : `${nameA} ${formatScoreHalf(score.a)} – ${formatScoreHalf(score.b)} ${nameB} · ${score.aWins}W ${score.draws}D ${score.bWins}L over ${games}`;
 }
 
 function appendLog(text: string) {
@@ -811,34 +895,41 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
   return { result: '1/2-1/2', reason: 'max plies', tree };
 }
 
-async function startTournament() {
+async function startMatch() {
   if (running) return;
-  const ids = selectedEngineIds();
-  if (ids.length < 2) { el('message').textContent = 'Select at least two engines.'; return; }
-  const participants = ids.map((id) => ({ id, name: engines.get(id)!.name }));
-  const gamesPerPair = Math.max(1, Math.floor(Number(inputEl('gamesInput').value) || 2));
-  const format = selectEl('formatSelect').value;
-  let basePairings: ArenaPairing[];
-  if (format === 'gauntlet') {
-    const champion = selectEl('championSelect').value || ids[0];
-    basePairings = gauntletPairings([champion], ids.filter((id) => id !== champion), gamesPerPair);
-  } else {
-    basePairings = roundRobinPairings(ids, gamesPerPair);
+  const idA = seatEngineId('A');
+  const idB = seatEngineId('B');
+  const engineA = engines.get(idA);
+  const engineB = engines.get(idB);
+  if (!engineA || !engineB) { el('message').textContent = 'Pick two engines.'; return; }
+  if ((idA === 'lc0-bt4' || idB === 'lc0-bt4') && !(await probeBt4Support())) {
+    el('message').textContent = 'Lc0 BT4 needs WebGPU, which is unavailable in this browser.';
+    return;
   }
-  let pairings: ScheduledArenaGame[];
+  const sameEngine = idA === idB;
+  const seatIds = sameEngine ? [idA] : [idA, idB];
+  const usesBt4 = idA === 'lc0-bt4' || idB === 'lc0-bt4';
+  const gamesPerOpening = Math.max(1, Math.floor(Number(inputEl('gamesInput').value) || 2));
+  let schedule: MatchGame[];
   try {
-    pairings = scheduleOpenings(basePairings, selectedOpenings());
+    const openings = selectedOpenings();
+    schedule = [];
+    // Alternate colors each game so a full set is color-balanced.
+    for (let g = 0; g < gamesPerOpening; g++) {
+      for (const opening of openings) schedule.push({ whiteSeat: g % 2 === 0 ? 'A' : 'B', opening });
+    }
   } catch (error) {
     el('message').textContent = `Opening setup error: ${(error as Error).message}`;
     return;
   }
-  if (!pairings.length) { el('message').textContent = 'No pairings to play.'; return; }
+  if (!schedule.length) { el('message').textContent = 'No games to play.'; return; }
 
   running = true;
   abort = new AbortController();
   refreshOpeningPreview();
-  refreshStockfishFlavorAvailability();
+  refreshStockfishControls();
   refreshRecklessVariantUi();
+  refreshSeatControls();
   games.length = 0;
   activeEngineIds = [];
   engineOutputs.clear();
@@ -851,44 +942,46 @@ async function startTournament() {
   renderSearchTelemetryInfo();
   el('start').toggleAttribute('disabled', true);
   el('stop').toggleAttribute('disabled', false);
-  const standings = initStandings(participants);
-  renderStandings(standings);
-  let played = 0;
+  const score: MatchScore = { a: 0, b: 0, aWins: 0, bWins: 0, draws: 0, games: 0 };
+  renderMatchScore(engineA.name, engineB.name, sameEngine, score);
   try {
-    resetLc0SearchTrees(ids);
-    await warmUpSelectedEngines(ids, abort.signal);
+    resetLc0SearchTrees(seatIds);
+    await warmUpSelectedEngines(seatIds, abort.signal);
     if (abort.signal.aborted) return;
-    for (let i = 0; i < pairings.length; i++) {
+    for (let i = 0; i < schedule.length; i++) {
       if (abort.signal.aborted) break;
-      const { white, black, opening } = pairings[i];
-      const whiteEngine = engines.get(white)!;
-      const blackEngine = engines.get(black)!;
-      resetLc0SearchTrees([white, black]);
+      const { whiteSeat, opening } = schedule[i];
+      const whiteEngine = whiteSeat === 'A' ? engineA : engineB;
+      const blackEngine = whiteSeat === 'A' ? engineB : engineA;
+      // Reset trees per game (fresh game tree); within a game the shared tree is
+      // reused across both sides' plies — i.e. self-play when both seats match.
+      resetLc0SearchTrees(seatIds);
+      if (usesBt4 && bt4.loaded) await bt4.resetTree();
       setBoardSideEngines(whiteEngine.id, whiteEngine.name, blackEngine.id, blackEngine.name);
-      el('pairing').textContent = `Game ${i + 1}/${pairings.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
+      el('pairing').textContent = `Game ${i + 1}/${schedule.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
       el('message').textContent = 'Playing…';
       const { result, reason, tree } = await playArenaGame(whiteEngine, blackEngine, opening, abort.signal);
       if (reason === 'cancelled') break;
-      applyGameResult(standings, white, black, result);
-      played += 1;
+      score.games += 1;
+      if (result === '1/2-1/2') { score.draws += 1; score.a += 0.5; score.b += 0.5; }
+      else {
+        const winnerIsA = (whiteSeat === 'A') === (result === '1-0');
+        if (winnerIsA) { score.a += 1; score.aWins += 1; } else { score.b += 1; score.bWins += 1; }
+      }
       const tags: Record<string, string> = { Event: 'LC0 arena', White: whiteEngine.name, Black: blackEngine.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
       games.push({ pgn: gameTreeToPgn(tree, tags, result) });
       renderCacheInfo();
       appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason}) · ${cacheMetricsText(lc0Cache?.metrics())} · ${searchTelemetryText()}`);
-      renderStandings(standings);
+      renderMatchScore(engineA.name, engineB.name, sameEngine, score);
     }
-    const leader = rankedStandings(standings)[0];
-    el('message').textContent = abort.signal.aborted
-      ? `Stopped after ${played} game(s). Leader: ${leader?.name ?? '—'}.`
-      : `Tournament done (${played} games). Winner: ${leader?.name ?? '—'} with ${leader?.score ?? 0}.`;
-    el('pairing').textContent = 'Tournament finished.';
+    el('message').textContent = abort.signal.aborted ? `Stopped after ${score.games} game(s).` : `Match done (${score.games} game${score.games === 1 ? '' : 's'}).`;
+    el('pairing').textContent = abort.signal.aborted ? 'Match stopped.' : 'Match finished.';
   } catch (error) {
     if (isAbortError(error) || abort?.signal.aborted) {
-      const leader = rankedStandings(standings)[0];
-      el('message').textContent = `Stopped after ${played} game(s). Leader: ${leader?.name ?? '—'}.`;
-      el('pairing').textContent = 'Tournament stopped.';
+      el('message').textContent = `Stopped after ${score.games} game(s).`;
+      el('pairing').textContent = 'Match stopped.';
     } else {
-      el('message').textContent = `Tournament failed: ${(error as Error).message}`;
+      el('message').textContent = `Match failed: ${(error as Error).message}`;
     }
   } finally {
     running = false;
@@ -899,8 +992,9 @@ async function startTournament() {
     el('start').toggleAttribute('disabled', false);
     el('stop').toggleAttribute('disabled', true);
     refreshOpeningPreview();
-    refreshStockfishFlavorAvailability();
+    refreshStockfishControls();
     refreshRecklessVariantUi();
+    refreshSeatControls();
   }
 }
 
@@ -922,41 +1016,42 @@ function disposeRuntimeResources(): void {
   engineOutputs.clear();
   thinkingEngineIds.clear();
   activeEngineIds = [];
-  stockfish?.dispose();
-  stockfish = null;
+  disposeStockfish();
   reckless?.dispose();
   reckless = null;
+  bt4.dispose();
 }
 
 function wireEvents() {
-  el('start').addEventListener('click', () => { void startTournament(); });
+  el('start').addEventListener('click', () => { void startMatch(); });
   el('stop').addEventListener('click', () => { abort?.abort(); el('message').textContent = 'Stopping…'; });
   el('exportPgn').addEventListener('click', exportPgn);
-  el('engines').addEventListener('change', refreshChampionOptions);
+  for (const id of ['seatA', 'seatB'] as const) {
+    selectEl(id).addEventListener('change', (event) => {
+      const select = event.target as HTMLSelectElement;
+      if (select.value === 'lc0-bt4') {
+        // One-time gate before the ~353MB lazy load.
+        if (!window.confirm(`${bt4LoadWarning()}\n\nUse Lc0 BT4?`)) { select.value = id === 'seatB' ? 'sf-lite' : 'lc0'; }
+      }
+      // Free the resident BT4 net once neither seat uses it.
+      if (seatEngineId('A') !== 'lc0-bt4' && seatEngineId('B') !== 'lc0-bt4') bt4.dispose();
+    });
+  }
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
   el('openingText').addEventListener('input', refreshOpeningPreview);
   el('cacheEntriesInput').addEventListener('input', () => { renderCacheInfo(); resetLc0SearchTrees(); });
   el('budgetModeSelect').addEventListener('change', () => resetLc0SearchTrees());
   el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
-  el('stockfishFlavorSelect').addEventListener('change', () => {
-    if (running) return;
-    refreshStockfishFlavorAvailability();
-    stockfish?.dispose();
-    stockfish = new StockfishEngine({ depth: 4, threads: stockfishThreads() }, stockfishFlavorUrl(selectedStockfishFlavor()));
-    buildEngines();
-    refreshChampionOptions();
-  });
   el('stockfishThreadsInput').addEventListener('input', () => {
     if (running) return;
     inputEl('stockfishThreadsInput').value = String(stockfishThreads());
-    stockfish?.setOptions({ threads: stockfishThreads() });
+    // Threads flips single<->threaded flavor (different wasm); rebuild on next use.
+    disposeStockfish();
   });
   el('recklessVariantSelect').addEventListener('change', () => {
     if (running) return;
     reckless?.dispose();
     reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, selectedRecklessVariant().wasmUrl);
-    buildEngines();
-    refreshChampionOptions();
     refreshRecklessVariantUi();
   });
   window.addEventListener('pagehide', (event) => {
@@ -966,15 +1061,15 @@ function wireEvents() {
 
 async function init() {
   renderBoard();
-  selectEl('stockfishFlavorSelect').value = REQUESTED_STOCKFISH_FLAVOR;
   refreshRecklessVariantUi();
   selectEl('recklessVariantSelect').value = REQUESTED_RECKLESS_VARIANT.key;
   renderRecklessRuntimeInfo();
   inputEl('stockfishThreadsInput').value = String(Math.max(1, Math.min(32, Math.floor(Number(params.get('sfThreads') ?? '1') || 1))));
-  refreshStockfishFlavorAvailability();
+  refreshStockfishControls();
   void renderRuntimeBadge();
   buildEngines();
-  refreshChampionOptions();
+  populateSeats();
+  void refreshBt4Availability();
   wireEvents();
   refreshOpeningPreview();
   try {
@@ -984,7 +1079,8 @@ async function init() {
     lc0Searchers.clear();
     player = new Lc0PolicyOnlyPlayer(lc0Cache);
     searcher = new Lc0PuctSearcher(lc0Cache);
-    stockfish = new StockfishEngine({ depth: 4, threads: stockfishThreads() }, stockfishFlavorUrl(selectedStockfishFlavor()));
+    // Stockfish (lite/full) instances are created lazily on first use; Lc0 BT4 is
+    // created lazily in its worker only when selected and WebGPU-gated.
     reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, selectedRecklessVariant().wasmUrl);
     renderRecklessRuntimeInfo();
     renderCacheInfo();
