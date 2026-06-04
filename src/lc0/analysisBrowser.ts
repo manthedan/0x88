@@ -15,13 +15,14 @@ import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
 import { RecklessEngine } from './recklessEngine.ts';
-import { RECKLESS_VARIANTS, checkRecklessVariantAsset, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, type RecklessVariant } from './recklessVariants.ts';
+import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
-const REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
+const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
+let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
@@ -154,7 +155,7 @@ function renderRecklessRuntimeInfo(): void {
   if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
   const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
   const targetUrl = status?.wasmUrl ?? variant.wasmUrl;
-  el('recklessRuntimeInfo').textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${targetUrl}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, or reckless:build-lite-wasi' : ''}`;
+  el('recklessRuntimeInfo').textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${targetUrl}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, or reckless:build-lite-wasi' : ''}`;
 }
 
 function refreshRecklessVariantUi(): void {
@@ -613,6 +614,7 @@ function disposeRuntimeResources(): void {
 }
 
 async function init() {
+  REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
   window.addEventListener('pagehide', (event) => {
     if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
   });

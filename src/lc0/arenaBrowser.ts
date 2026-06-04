@@ -17,7 +17,7 @@ import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { DEFAULT_STOCKFISH_FLAVOR, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorLabel, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
 import { RecklessEngine } from './recklessEngine.ts';
-import { RECKLESS_VARIANTS, checkRecklessVariantAsset, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, type RecklessVariant } from './recklessVariants.ts';
+import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 interface ArenaEngine {
@@ -71,7 +71,8 @@ interface EngineOutputSnapshot {
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const REQUESTED_STOCKFISH_FLAVOR = normalizeStockfishFlavor(params.get('sfFlavor') ?? params.get('stockfish'));
-const REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
+const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
+let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 
 let ground: Ground | null = null;
 let board: BoardState = parseFen(START_FEN);
@@ -536,7 +537,7 @@ function renderRecklessRuntimeInfo(): void {
   const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
   info.textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${variant.wasmUrl}`;
   if (status?.persistentDisabled) info.textContent += ' · persistent disabled after fallback';
-  if (asset === 'missing') info.textContent += ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, or reckless:build-lite-wasi';
+  if (asset === 'missing') info.textContent += ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, or reckless:build-lite-wasi';
 }
 
 function refreshRecklessVariantUi(): void {
@@ -978,6 +979,7 @@ function wireEvents() {
 }
 
 async function init() {
+  REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
   renderBoard();
   selectEl('stockfishFlavorSelect').value = REQUESTED_STOCKFISH_FLAVOR;
   refreshRecklessVariantUi();

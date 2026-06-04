@@ -1,6 +1,6 @@
 import { START_FEN } from '../chess/board.ts';
 import { RecklessEngine, canUsePersistentRecklessWasi, type RecklessOptions } from './recklessEngine.ts';
-import { RECKLESS_BROWSER_API_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT, RECKLESS_SIMD_VARIANT, checkRecklessVariantAsset, recklessVariantAssetStatus, type RecklessVariant } from './recklessVariants.ts';
+import { RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT, RECKLESS_SIMD_VARIANT, checkRecklessVariantAsset, recklessVariantAssetStatus, type RecklessVariant } from './recklessVariants.ts';
 
 interface BenchPosition {
   label: string;
@@ -135,6 +135,7 @@ function selectedVariants(): RecklessVariant[] {
   if (inputEl('benchFull').checked) variants.push(RECKLESS_FULL_VARIANT);
   if (inputEl('benchSimd').checked) variants.push(RECKLESS_SIMD_VARIANT);
   if (inputEl('benchBrowserApi').checked) variants.push(RECKLESS_BROWSER_API_VARIANT);
+  if (inputEl('benchBrowserApiSimd').checked) variants.push(RECKLESS_BROWSER_API_SIMD_VARIANT);
   if (inputEl('benchLite').checked) variants.push(RECKLESS_LITE_VARIANT);
   return variants;
 }
@@ -380,6 +381,6 @@ el('copyJson').addEventListener('click', () => { void copyText(JSON.stringify(re
 el('copyCsv').addEventListener('click', () => { void copyText(csvReport(), 'CSV'); });
 el('downloadJson').addEventListener('click', () => downloadText(JSON.stringify(report(), null, 2), 'reckless-benchmark-report.json', 'application/json'));
 el('downloadCsv').addEventListener('click', () => downloadText(csvReport(), 'reckless-benchmark-runs.csv', 'text/csv'));
-for (const variant of [RECKLESS_FULL_VARIANT, RECKLESS_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_LITE_VARIANT]) void checkRecklessVariantAsset(variant, render);
+for (const variant of [RECKLESS_FULL_VARIANT, RECKLESS_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_LITE_VARIANT]) void checkRecklessVariantAsset(variant, render);
 setStatus(`Ready. persistentAvailable=${canUsePersistentRecklessWasi()} · SAB=${typeof SharedArrayBuffer !== 'undefined'}`);
 render();
