@@ -2071,6 +2071,7 @@ export interface Lc0WebAttentionBlockBenchmarkOptions {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  fusedScoreSoftmax?: boolean;
 }
 
 export interface Lc0WebAttentionBlockBenchmarkResult {
@@ -2082,6 +2083,8 @@ export interface Lc0WebAttentionBlockBenchmarkResult {
   channels: number;
   heads: number;
   headDim: number;
+  fusedScoreSoftmax?: boolean;
+  dispatchesPerIteration?: number;
   warmup: number;
   iterations: number;
   packLoadMs: number;
@@ -2211,6 +2214,49 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const ATTENTION_BLOCK_SCORE_SOFTMAX_WGSL = `
+@group(0) @binding(0) var<storage, read> qkvVec: array<f32>;
+@group(0) @binding(1) var<storage, read> scaleF16: array<u32>;
+@group(0) @binding(2) var<storage, read> smolgenBiasVec: array<f32>;
+@group(0) @binding(3) var<storage, read_write> probsVec: array<f32>;
+
+fn pick_lane(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+
+fn score_for(head: u32, row: u32, col: u32) -> f32 {
+  let channel_offset = head * 32u;
+  var sum = 0.0;
+  for (var channel = 0u; channel < 32u; channel = channel + 1u) {
+    let q = qkvVec[row * 256u + channel_offset + channel];
+    let k = qkvVec[16384u + col * 256u + channel_offset + channel];
+    sum = sum + q * k;
+  }
+  let index = (head * 64u + row) * 64u + col;
+  return sum * pick_lane(scaleF16[0], 0u) + smolgenBiasVec[index];
+}
+
+@compute @workgroup_size(1, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let row = gid.x;
+  let head = gid.y;
+  if (row >= 64u || head >= 8u) { return; }
+  var max_value = score_for(head, row, 0u);
+  for (var col = 1u; col < 64u; col = col + 1u) {
+    max_value = max(max_value, score_for(head, row, col));
+  }
+  var sum_exp = 0.0;
+  for (var col = 0u; col < 64u; col = col + 1u) {
+    sum_exp = sum_exp + exp(score_for(head, row, col) - max_value);
+  }
+  for (var col = 0u; col < 64u; col = col + 1u) {
+    let index = (head * 64u + row) * 64u + col;
+    probsVec[index] = exp(score_for(head, row, col) - max_value) / sum_exp;
+  }
+}
+`;
+
 function createAttentionBlockPipelines(device: DeviceLike, buffers: {
   input: BufferLike;
   qWeight: BufferLike;
@@ -2266,6 +2312,59 @@ function createAttentionBlockPipelines(device: DeviceLike, buffers: {
   return { qkv, qkvBind, score, scoreBind, softmax, softmaxBind, value, valueBind };
 }
 
+function createAttentionBlockFusedPipelines(device: DeviceLike, buffers: {
+  input: BufferLike;
+  qWeight: BufferLike;
+  qBias: BufferLike;
+  kWeight: BufferLike;
+  kBias: BufferLike;
+  vWeight: BufferLike;
+  vBias: BufferLike;
+  scale: BufferLike;
+  smolgenBias: BufferLike;
+  qkv: BufferLike;
+  probs: BufferLike;
+  output: BufferLike;
+}): { qkv: PipelineLike; qkvBind: unknown; scoreSoftmax: PipelineLike; scoreSoftmaxBind: unknown; value: PipelineLike; valueBind: unknown } {
+  const qkvModule = device.createShaderModule({ label: 'lc0web attention block fused qkv', code: ATTENTION_BLOCK_QKV_WGSL });
+  const qkv = device.createComputePipeline({ layout: 'auto', compute: { module: qkvModule, entryPoint: 'main' } }) as PipelineLike;
+  const qkvBind = device.createBindGroup({
+    layout: qkv.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.input } },
+      { binding: 1, resource: { buffer: buffers.qWeight } },
+      { binding: 2, resource: { buffer: buffers.qBias } },
+      { binding: 3, resource: { buffer: buffers.kWeight } },
+      { binding: 4, resource: { buffer: buffers.kBias } },
+      { binding: 5, resource: { buffer: buffers.vWeight } },
+      { binding: 6, resource: { buffer: buffers.vBias } },
+      { binding: 7, resource: { buffer: buffers.qkv } },
+    ],
+  });
+  const scoreSoftmaxModule = device.createShaderModule({ label: 'lc0web attention block fused score+softmax', code: ATTENTION_BLOCK_SCORE_SOFTMAX_WGSL });
+  const scoreSoftmax = device.createComputePipeline({ layout: 'auto', compute: { module: scoreSoftmaxModule, entryPoint: 'main' } }) as PipelineLike;
+  const scoreSoftmaxBind = device.createBindGroup({
+    layout: scoreSoftmax.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.qkv } },
+      { binding: 1, resource: { buffer: buffers.scale } },
+      { binding: 2, resource: { buffer: buffers.smolgenBias } },
+      { binding: 3, resource: { buffer: buffers.probs } },
+    ],
+  });
+  const valueModule = device.createShaderModule({ label: 'lc0web attention block fused value', code: ATTENTION_BLOCK_VALUE_WGSL });
+  const value = device.createComputePipeline({ layout: 'auto', compute: { module: valueModule, entryPoint: 'main' } }) as PipelineLike;
+  const valueBind = device.createBindGroup({
+    layout: value.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.probs } },
+      { binding: 1, resource: { buffer: buffers.qkv } },
+      { binding: 2, resource: { buffer: buffers.output } },
+    ],
+  });
+  return { qkv, qkvBind, scoreSoftmax, scoreSoftmaxBind, value, valueBind };
+}
+
 function encodeAttentionBlockDispatches(device: DeviceLike, pipelines: ReturnType<typeof createAttentionBlockPipelines>, iterations: number): unknown {
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
@@ -2287,10 +2386,29 @@ function encodeAttentionBlockDispatches(device: DeviceLike, pipelines: ReturnTyp
   return encoder.finish();
 }
 
+function encodeAttentionBlockFusedDispatches(device: DeviceLike, pipelines: ReturnType<typeof createAttentionBlockFusedPipelines>, iterations: number): unknown {
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  for (let i = 0; i < iterations; i++) {
+    pass.setPipeline(pipelines.qkv);
+    pass.setBindGroup(0, pipelines.qkvBind);
+    pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8));
+    pass.setPipeline(pipelines.scoreSoftmax);
+    pass.setBindGroup(0, pipelines.scoreSoftmaxBind);
+    pass.dispatchWorkgroups(DEFAULT_TOKENS, DEFAULT_HEADS);
+    pass.setPipeline(pipelines.value);
+    pass.setBindGroup(0, pipelines.valueBind);
+    pass.dispatchWorkgroups(Math.ceil(DEFAULT_HEAD_DIM / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+  }
+  pass.end();
+  return encoder.finish();
+}
+
 export async function runLc0WebAttentionBlockBenchmark(options: Lc0WebAttentionBlockBenchmarkOptions): Promise<Lc0WebAttentionBlockBenchmarkResult> {
   const totalStarted = nowMs();
   const warmup = clampInteger(options.warmup, 5, 0, 1000);
   const iterations = clampInteger(options.iterations, 100, 1, 10_000);
+  const fusedScoreSoftmax = options.fusedScoreSoftmax ?? false;
   const { device, adapterInfo } = await requestDevice();
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
@@ -2320,15 +2438,20 @@ export async function runLc0WebAttentionBlockBenchmark(options: Lc0WebAttentionB
     const outputBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC });
     const readbackBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
     buffers.push(inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkvBuffer, scoreBuffer, probBuffer, outputBuffer, readbackBuffer);
-    const pipelines = createAttentionBlockPipelines(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv: qkvBuffer, scores: scoreBuffer, probs: probBuffer, output: outputBuffer });
+    const pipelines = fusedScoreSoftmax
+      ? createAttentionBlockFusedPipelines(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv: qkvBuffer, probs: probBuffer, output: outputBuffer })
+      : createAttentionBlockPipelines(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv: qkvBuffer, scores: scoreBuffer, probs: probBuffer, output: outputBuffer });
+    const encode = fusedScoreSoftmax
+      ? (count: number) => encodeAttentionBlockFusedDispatches(device, pipelines as ReturnType<typeof createAttentionBlockFusedPipelines>, count)
+      : (count: number) => encodeAttentionBlockDispatches(device, pipelines as ReturnType<typeof createAttentionBlockPipelines>, count);
     const uploadSetupMs = nowMs() - setupStarted;
 
     if (warmup > 0) {
-      device.queue.submit([encodeAttentionBlockDispatches(device, pipelines, warmup)]);
+      device.queue.submit([encode(warmup)]);
       await device.queue.onSubmittedWorkDone?.();
     }
     const dispatchStarted = nowMs();
-    device.queue.submit([encodeAttentionBlockDispatches(device, pipelines, iterations)]);
+    device.queue.submit([encode(iterations)]);
     const dispatchLoopMs = nowMs() - dispatchStarted;
     const readbackStarted = nowMs();
     const output = await readF32OutputOnce(device, outputBuffer, readbackBuffer, outputElements);
@@ -2344,6 +2467,8 @@ export async function runLc0WebAttentionBlockBenchmark(options: Lc0WebAttentionB
       channels: DEFAULT_N,
       heads: DEFAULT_HEADS,
       headDim: DEFAULT_HEAD_DIM,
+      fusedScoreSoftmax,
+      dispatchesPerIteration: fusedScoreSoftmax ? 3 : 4,
       warmup,
       iterations,
       packLoadMs: pack.elapsedMs,

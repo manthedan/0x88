@@ -236,6 +236,7 @@ type AttentionBlockBenchmarkMessage = {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
+  fusedScoreSoftmax?: boolean;
 };
 
 type AttentionOutputBenchmarkMessage = {
@@ -649,6 +650,7 @@ async function handleAttentionBlockBenchmark(message: AttentionBlockBenchmarkMes
     iterations: message.iterations,
     warmup: message.warmup,
     verifyShards: message.verifyShards,
+    fusedScoreSoftmax: message.fusedScoreSoftmax,
   });
   post({ type: 'attentionBlockBenchmarkResult', id: message.id, result });
 }
