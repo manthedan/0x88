@@ -22,8 +22,11 @@ interface BenchRow {
   wallMs: number;
   bestMove: string | null;
   depth: number | null;
+  scoreCp: number | null;
+  mateIn: number | null;
   nodes: number | null;
   nps: number | null;
+  pvUci: string[];
   runtime: string;
   wasmUrl: string;
 }
@@ -239,7 +242,7 @@ function csvEscape(value: unknown): string {
 }
 
 function csvReport(): string {
-  const headers = ['variant', 'mode', 'position', 'budget', 'run', 'wall_ms', 'depth', 'nodes', 'nps', 'best_move', 'runtime', 'wasm_url', 'fen'];
+  const headers = ['variant', 'mode', 'position', 'budget', 'run', 'wall_ms', 'depth', 'score_cp', 'mate_in', 'nodes', 'nps', 'best_move', 'pv_uci', 'runtime', 'wasm_url', 'fen'];
   const lines = [headers.join(',')];
   for (const row of rows) {
     lines.push([
@@ -250,9 +253,12 @@ function csvReport(): string {
       row.run,
       row.wallMs.toFixed(3),
       row.depth ?? '',
+      row.scoreCp ?? '',
+      row.mateIn ?? '',
       row.nodes ?? '',
       row.nps ?? '',
       row.bestMove ?? '',
+      row.pvUci.join(' '),
       row.runtime,
       row.wasmUrl,
       row.fen,
@@ -285,8 +291,11 @@ async function timeSearch(engine: RecklessEngine, variant: RecklessVariant, mode
     wallMs,
     bestMove,
     depth: info?.depth ?? null,
+    scoreCp: info?.scoreCp ?? null,
+    mateIn: info?.mateIn ?? null,
     nodes: info?.nodes ?? null,
     nps: info?.nps ?? null,
+    pvUci: info?.pvUci ?? [],
     runtime: engine.runtimeLabel(),
     wasmUrl: variant.wasmUrl,
   });
@@ -309,14 +318,14 @@ async function runBench(): Promise<void> {
     for (const variant of config.variants) {
       const assetStatus = await checkRecklessVariantAsset(variant, render);
       if (assetStatus === 'missing') {
-        rows.push({ variant: variant.label, mode: config.modes[0] ?? 'one-shot', position: 'asset', fen: '', budget: 'asset check', run: 'skipped', wallMs: 0, bestMove: null, depth: null, nodes: null, nps: null, runtime: 'asset missing', wasmUrl: variant.wasmUrl });
+        rows.push({ variant: variant.label, mode: config.modes[0] ?? 'one-shot', position: 'asset', fen: '', budget: 'asset check', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'asset missing', wasmUrl: variant.wasmUrl });
         render();
         continue;
       }
       for (const mode of config.modes) {
         if (abort.signal.aborted) return;
         if (mode === 'persistent' && !persistentAvailable && variant.backend !== 'browser-api') {
-          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, nodes: null, nps: null, runtime: 'persistent unavailable', wasmUrl: variant.wasmUrl });
+          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'persistent unavailable', wasmUrl: variant.wasmUrl });
           render();
           continue;
         }
