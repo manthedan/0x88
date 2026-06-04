@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -7,6 +7,7 @@ const source = resolve(process.env.RECKLESS_SOURCE_DIR ?? '.local_engines/reckle
 const workdir = resolve(process.env.RECKLESS_API_PROBE_DIR ?? '.local_engines/reckless-browser-api-probe');
 const fen = process.argv[2] ?? 'startpos';
 const depth = Number.parseInt(process.argv[3] ?? '7', 10);
+const evalfile = process.env.RECKLESS_EVALFILE ? resolve(process.env.RECKLESS_EVALFILE) : '';
 if (!Number.isFinite(depth) || depth < 1) throw new Error(`depth must be a positive integer, got ${process.argv[3]}`);
 
 function run(cmd, args, options = {}) {
@@ -16,6 +17,11 @@ function run(cmd, args, options = {}) {
 
 if (!existsSync(`${source}/Cargo.toml`)) {
   throw new Error(`Reckless source missing at ${source}; run npm run reckless:build-wasi first or set RECKLESS_SOURCE_DIR`);
+}
+const nnueSource = readFileSync(`${source}/src/nnue.rs`, 'utf8');
+const l1Size = Number(nnueSource.match(/const L1_SIZE: usize = (\d+);/)?.[1] ?? '768');
+if (l1Size !== 768 && !evalfile) {
+  throw new Error(`Reckless source has custom L1_SIZE=${l1Size}; set RECKLESS_EVALFILE so the probe builds against the matching NNUE file`);
 }
 
 rmSync(workdir, { recursive: true, force: true });
@@ -56,7 +62,7 @@ pub mod tb;
 pub mod bindings;
 `);
 
-writeFileSync(`${workdir}/src/browser_api.rs`, `use std::{sync::Arc, time::Duration};
+writeFileSync(`${workdir}/src/browser_api.rs`, `use std::{sync::{Arc, Once}, time::Duration};
 
 use crate::{
     board::{Board, NullBoardObserver},
@@ -86,6 +92,8 @@ pub struct SearchResult {
     pub lines: Vec<SearchLine>,
 }
 
+static INIT: Once = Once::new();
+
 pub struct BrowserEngine {
     shared: Arc<SharedContext>,
     threads: ThreadPool,
@@ -97,8 +105,10 @@ pub struct BrowserEngine {
 
 impl BrowserEngine {
     pub fn new(hash_mb: usize) -> Self {
-        crate::lookup::initialize();
-        crate::nnue::initialize();
+        INIT.call_once(|| {
+            crate::lookup::initialize();
+            crate::nnue::initialize();
+        });
         let shared = Arc::new(SharedContext::default());
         let threads = ThreadPool::new(shared.clone());
         let mut engine = Self {
@@ -269,4 +279,7 @@ fn main() {
 }
 `);
 
-run('cargo', ['run', '--release', '--no-default-features', '--bin', 'browser_api_probe', '--', fen, String(depth)], { cwd: workdir });
+run('cargo', ['run', '--release', '--no-default-features', '--bin', 'browser_api_probe', '--', fen, String(depth)], {
+  cwd: workdir,
+  env: evalfile ? { ...process.env, EVALFILE: evalfile } : process.env,
+});
