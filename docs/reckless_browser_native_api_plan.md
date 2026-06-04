@@ -29,6 +29,8 @@ A browser-native API should expose engine operations directly and return structu
 
 ### Stage 1: internal Rust facade
 
+Status: native probe scripted in [`reckless_browser_api_probe.md`](./reckless_browser_api_probe.md). It confirms a direct Rust facade can reproduce UCI bestmove/score/nodes/PV for a smoke position without using UCI as the primary data path.
+
 Add a `browser_api` module behind a feature flag in the local Reckless patch/build path:
 
 ```rust
