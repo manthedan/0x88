@@ -21,6 +21,9 @@ type ApiExports = WebAssembly.Exports & {
   reckless_api_alloc(len: number): number;
   reckless_api_free_bytes(ptr: number, len: number, capacity: number): void;
   reckless_api_new(hashMb: number): number;
+  reckless_api_new_with_network?: (hashMb: number, ptr: number, len: number) => number;
+  reckless_api_global_error_ptr?: () => number;
+  reckless_api_global_error_len?: () => number;
   reckless_api_free(handle: number): void;
   reckless_api_set_fen(handle: number, ptr: number, len: number): number;
   reckless_api_set_multipv(handle: number, multiPv: number): number;
@@ -35,13 +38,14 @@ type ApiExports = WebAssembly.Exports & {
 };
 
 type ApiMessage =
-  | { type: 'prewarm'; id: number; wasmUrl: string; hashMb?: number }
-  | { type: 'new-game'; id: number; wasmUrl: string; hashMb?: number }
-  | { type: 'search'; id: number; wasmUrl: string; hashMb?: number; fen: string; depth?: number; movetimeMs?: number; multipv?: number }
+  | { type: 'prewarm'; id: number; wasmUrl: string; nnueUrl?: string; hashMb?: number }
+  | { type: 'new-game'; id: number; wasmUrl: string; nnueUrl?: string; hashMb?: number }
+  | { type: 'search'; id: number; wasmUrl: string; nnueUrl?: string; hashMb?: number; fen: string; depth?: number; movetimeMs?: number; multipv?: number }
   | { type: 'dispose' };
 
 type ApiState = {
   wasmUrl: string;
+  nnueUrl?: string;
   exports: ApiExports;
   handle: number;
   hashMb: number;
@@ -49,6 +53,7 @@ type ApiState = {
 
 let state: ApiState | null = null;
 const moduleCache = new Map<string, Promise<WebAssembly.Module>>();
+const nnueCache = new Map<string, Promise<ArrayBuffer>>();
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -80,6 +85,22 @@ async function compileModule(wasmUrl: string): Promise<WebAssembly.Module> {
   return promise;
 }
 
+async function fetchNnue(nnueUrl: string): Promise<ArrayBuffer> {
+  const existing = nnueCache.get(nnueUrl);
+  if (existing) return existing;
+  const promise = fetch(nnueUrl, { cache: 'force-cache' })
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`failed to fetch Reckless NNUE asset ${nnueUrl}: HTTP ${response.status}`);
+      return response.arrayBuffer();
+    })
+    .catch((error) => {
+      nnueCache.delete(nnueUrl);
+      throw error;
+    });
+  nnueCache.set(nnueUrl, promise);
+  return promise;
+}
+
 function assertApiExports(exports: WebAssembly.Exports): asserts exports is ApiExports {
   for (const name of [
     'memory',
@@ -106,8 +127,8 @@ function nullStdout(): ConsoleStdout {
   return new ConsoleStdout(() => undefined);
 }
 
-async function ensureState(wasmUrl: string, hashMb = 16): Promise<ApiState> {
-  if (state && state.wasmUrl === wasmUrl) {
+async function ensureState(wasmUrl: string, hashMb = 16, nnueUrl?: string): Promise<ApiState> {
+  if (state && state.wasmUrl === wasmUrl && state.nnueUrl === nnueUrl) {
     if (state.hashMb !== hashMb) {
       check(state.exports, state.exports.reckless_api_resize_hash(state.handle, hashMb));
       state.hashMb = hashMb;
@@ -126,9 +147,15 @@ async function ensureState(wasmUrl: string, hashMb = 16): Promise<ApiState> {
   wasiInstance.initialize(instance as WebAssembly.Instance & { exports: { memory: WebAssembly.Memory; _initialize?: () => unknown } });
   assertApiExports(instance.exports);
   const exports = instance.exports;
-  const handle = exports.reckless_api_new(hashMb);
-  if (!handle) throw new Error('Reckless browser API returned a null engine handle');
-  state = { wasmUrl, exports, handle, hashMb };
+  const handle = nnueUrl
+    ? await (async () => {
+      if (!exports.reckless_api_new_with_network) throw new Error('Reckless browser API external-NNUE export missing: reckless_api_new_with_network');
+      const bytes = new Uint8Array(await fetchNnue(nnueUrl));
+      return withBytes(exports, bytes, (ptr, len) => exports.reckless_api_new_with_network!(hashMb, ptr, len));
+    })()
+    : exports.reckless_api_new(hashMb);
+  if (!handle) throw new Error(globalErrorString(exports) || 'Reckless browser API returned a null engine handle');
+  state = { wasmUrl, nnueUrl, exports, handle, hashMb };
   return state;
 }
 
@@ -143,6 +170,22 @@ function errorString(exports: ApiExports, handle: number): string {
 
 function check(exports: ApiExports, code: number): void {
   if (code !== 0) throw new Error(errorString(exports, state?.handle ?? 0));
+}
+
+function globalErrorString(exports: ApiExports): string {
+  if (!exports.reckless_api_global_error_ptr || !exports.reckless_api_global_error_len) return '';
+  return readBytes(exports, exports.reckless_api_global_error_ptr(), exports.reckless_api_global_error_len());
+}
+
+function withBytes<T>(exports: ApiExports, bytes: Uint8Array, fn: (ptr: number, len: number) => T): T {
+  const ptr = exports.reckless_api_alloc(bytes.byteLength);
+  if (!ptr) throw new Error('Reckless browser API allocation failed');
+  new Uint8Array(exports.memory.buffer, ptr, bytes.byteLength).set(bytes);
+  try {
+    return fn(ptr, bytes.byteLength);
+  } finally {
+    exports.reckless_api_free_bytes(ptr, 0, bytes.byteLength);
+  }
 }
 
 function withEncodedString<T>(exports: ApiExports, value: string, fn: (ptr: number, len: number) => T): T {
@@ -168,7 +211,7 @@ async function handleMessage(message: ApiMessage): Promise<void> {
     state = null;
     return;
   }
-  const api = await ensureState(message.wasmUrl, message.hashMb ?? 16);
+  const api = await ensureState(message.wasmUrl, message.hashMb ?? 16, message.nnueUrl);
   if (message.type === 'prewarm') {
     postOk(message.id);
     return;

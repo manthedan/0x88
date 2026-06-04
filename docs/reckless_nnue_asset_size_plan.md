@@ -42,9 +42,26 @@ The local WASI build script can already swap the model and `L1_SIZE` at build ti
 ## Candidate staged path
 
 1. Keep the current embedded full and Lite artifacts as the stable fallback.
-2. Add a Rust `Parameters::from_bytes(bytes: &[u8]) -> Result<Arc<Parameters>, Error>` helper gated to browser/native API builds.
-3. Expose browser API initialization that accepts a network buffer or a URL-fetched buffer in the worker.
-4. Cache the fetched `ArrayBuffer` and `WebAssembly.Module` per variant URL; create lightweight engine handles against the shared parameters.
-5. Verify parity against embedded full NNUE for the same bytes before making external NNUE a UI option.
+2. Add a Rust `Parameters::from_bytes(bytes: &[u8]) -> Result<Arc<Parameters>, Error>` helper gated to browser/native API builds. ✅ initial browser API patch added behind `RECKLESS_BROWSER_API_EXTERNAL_NNUE=1`.
+3. Expose browser API initialization that accepts a network buffer or a URL-fetched buffer in the worker. ✅ `reckless_api_new_with_network` plus worker `nnueUrl` support.
+4. Cache the fetched `ArrayBuffer` and `WebAssembly.Module` per variant URL; create lightweight engine handles against the shared parameters. ✅ module and NNUE `force-cache` maps are in the browser API worker.
+5. Verify parity against embedded full NNUE for the same bytes before making external NNUE a default option. ⏳ external variant remains experimental until smoke/parity results are recorded.
 
-This should be pursued after the direct browser-native API facade, because direct handles make shared parameter lifetime and error reporting much simpler than forcing this through UCI text and WASI filesystem shims.
+Initial local build commands:
+
+```sh
+npm run reckless:extract-nnue
+npm run reckless:build-browser-api-simd-external
+```
+
+The first externalized option is `Reckless Full browser API SIMD external NNUE experimental`, using `/reckless/reckless-browser-api-simd128-external.wasm` plus `/reckless/reckless-v60-7f587dfb.nnue`. The embedded SIMD WASI/UCI artifact remains the default because it is faster in corrected benchmarks and is a simpler fallback.
+
+Initial smoke/build evidence: [`reckless_external_nnue_smoke_2026-06-04.json`](./reckless_external_nnue_smoke_2026-06-04.json).
+
+| Artifact | Bytes | Notes |
+| --- | ---: | --- |
+| `reckless-browser-api-simd128.wasm` | 64,527,528 | Embedded full NNUE browser API SIMD artifact. |
+| `reckless-browser-api-simd128-external.wasm` | 1,260,734 | External-NNUE browser API SIMD artifact; `simdOpcodeCount=1279`, `codeBytes=238,447`. |
+| `reckless-v60-7f587dfb.nnue` | 63,266,880 | Separate cacheable full NNUE payload. |
+
+Depth-4 browser smoke on startpos loaded the external NNUE artifact successfully and returned `c2c4` with 210 nodes for both cold and warm runs. This is only a loading/parity smoke; deeper rotated-FEN parity should come before promoting the external option beyond experimental.

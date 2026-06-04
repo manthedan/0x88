@@ -28,6 +28,7 @@ pre{font-family:var(--mono);font-size:12px;white-space:pre-wrap;overflow:auto;ma
       <label class="small"><input id="benchSimd" type="checkbox" /> Reckless Full SIMD</label>
       <label class="small"><input id="benchBrowserApi" type="checkbox" /> Reckless Full browser API experimental</label>
       <label class="small"><input id="benchBrowserApiSimd" type="checkbox" /> Reckless Full browser API SIMD experimental</label>
+      <label class="small"><input id="benchBrowserApiSimdExternal" type="checkbox" /> Reckless Full browser API SIMD external NNUE experimental</label>
       <label class="small"><input id="benchLite" type="checkbox" checked /> Reckless Lite experimental</label>
       <label class="small"><input id="benchPersistent" type="checkbox" checked /> Persistent</label>
       <label class="small"><input id="benchOneShot" type="checkbox" checked /> One-shot</label>
@@ -41,7 +42,7 @@ pre{font-family:var(--mono);font-size:12px;white-space:pre-wrap;overflow:auto;ma
     </div>
     <div class="grid2" style="margin-top:10px">
       <div class="field"><label for="fenInput">Positions, one per line. Use <code>Name | FEN</code>; <code>startpos</code> is accepted.</label><textarea id="fenInput" spellcheck="false">startpos</textarea><button id="loadFenSuite" type="button">Load 20-position rotated FEN suite</button></div>
-      <div class="field"><label>Notes</label><p class="small">Run from the isolated static/dev server for the persistent path. SIMD, browser API, browser API SIMD, and Lite require ignored local artifacts <code>/reckless/reckless-simd128.wasm</code>, <code>/reckless/reckless-browser-api.wasm</code>, <code>/reckless/reckless-browser-api-simd128.wasm</code>, and <code>/reckless/reckless-v53-l1-512.wasm</code>. Add movetimes to run a second budget axis in the same matrix. Warm passes rotate across all listed FENs before repeating any one FEN. Keep hash clearing enabled for cleaner persistent timing that is not dominated by repeated-position TT reuse.</p><div id="status" class="status">Ready.</div></div>
+      <div class="field"><label>Notes</label><p class="small">Run from the isolated static/dev server for the persistent path. SIMD, browser API, browser API SIMD, external-NNUE browser API SIMD, and Lite require ignored local artifacts <code>/reckless/reckless-simd128.wasm</code>, <code>/reckless/reckless-browser-api.wasm</code>, <code>/reckless/reckless-browser-api-simd128.wasm</code>, <code>/reckless/reckless-browser-api-simd128-external.wasm</code> plus <code>/reckless/reckless-v60-7f587dfb.nnue</code>, and <code>/reckless/reckless-v53-l1-512.wasm</code>. Add movetimes to run a second budget axis in the same matrix. Warm passes rotate across all listed FENs before repeating any one FEN. Keep hash clearing enabled for cleaner persistent timing that is not dominated by repeated-position TT reuse.</p><div id="status" class="status">Ready.</div></div>
     </div>
   </section>
   <section class="panel">

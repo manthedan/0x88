@@ -155,7 +155,8 @@ function renderRecklessRuntimeInfo(): void {
   if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
   const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
   const targetUrl = status?.wasmUrl ?? variant.wasmUrl;
-  el('recklessRuntimeInfo').textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${targetUrl}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, or reckless:build-lite-wasi' : ''}`;
+  const assetUrlText = variant.nnueUrl ? `${targetUrl} + ${variant.nnueUrl}` : targetUrl;
+  el('recklessRuntimeInfo').textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${assetUrlText}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, reckless:build-browser-api-simd-external, or reckless:build-lite-wasi' : ''}`;
 }
 
 function refreshRecklessVariantUi(): void {
@@ -187,7 +188,7 @@ function prewarmReckless(): void {
 function getReckless(): RecklessEngine {
   if (!reckless) {
     const variant = selectedRecklessVariant();
-    reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi' });
+    reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl });
     prewarmReckless();
   }
   return reckless;
@@ -550,7 +551,7 @@ function wireEvents() {
     reckless = null;
     if (useReckless()) {
       const variant = selectedRecklessVariant();
-      reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi' });
+      reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl });
       prewarmReckless();
     }
     lineCache.delete(tree.current.fen);

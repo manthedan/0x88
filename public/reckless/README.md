@@ -14,12 +14,20 @@ npm run reckless:build-simd-wasi
 
 This writes `public/reckless/reckless-simd128.wasm` using `-C target-feature=+simd128`.
 
+Build the browser-native API SIMD artifact with an external/cacheable NNUE asset:
+
+```sh
+npm run reckless:build-browser-api-simd-external
+```
+
+This writes `public/reckless/reckless-browser-api-simd128-external.wasm` plus `public/reckless/reckless-v60-7f587dfb.nnue`.
+
 Build the Lite candidate locally with:
 
 ```sh
 npm run reckless:build-lite-wasi
 ```
 
-The script clones `https://github.com/codedeliveryservice/Reckless`, applies browser/WASI patches for one-shot argv searches and isolated persistent-stdin searches, optionally applies a known-compatible NNUE shape override, builds `wasm32-wasip1` without Syzygy tablebases, and writes into `public/reckless/`.
+The scripts clone or reuse `https://github.com/codedeliveryservice/Reckless`, apply browser/WASI patches for one-shot argv searches, isolated persistent-stdin searches, direct browser API exports, optional SIMD NNUE, and optional external NNUE loading, then build `wasm32-wasip1` without Syzygy tablebases and write into `public/reckless/`.
 
 Reckless is licensed AGPL-3.0. If you distribute the WASM artifact, comply with Reckless' license and provide corresponding source for the patched build.

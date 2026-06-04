@@ -16,6 +16,8 @@ export interface RecklessRuntimeOptions {
   forceOneShot?: boolean;
   /** Benchmark/debug knob: fail instead of silently falling back when persistent startup/search errors. */
   disablePersistentFallback?: boolean;
+  /** Optional external NNUE asset URL for browser-api builds that do not embed network data. */
+  nnueUrl?: string;
 }
 
 export interface RecklessRuntimeStatus {
@@ -414,7 +416,7 @@ export class RecklessEngine {
         },
       });
       signal?.addEventListener('abort', onAbort, { once: true });
-      worker.postMessage({ ...message, id, wasmUrl: this.wasmUrl, hashMb: this.options.hashMb ?? 16 });
+      worker.postMessage({ ...message, id, wasmUrl: this.wasmUrl, nnueUrl: this.runtimeOptions.nnueUrl, hashMb: this.options.hashMb ?? 16 });
     });
   }
 

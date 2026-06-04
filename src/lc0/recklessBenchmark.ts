@@ -1,6 +1,6 @@
 import { START_FEN } from '../chess/board.ts';
 import { RecklessEngine, canUsePersistentRecklessWasi, type RecklessOptions } from './recklessEngine.ts';
-import { RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT, RECKLESS_SIMD_VARIANT, checkRecklessVariantAsset, recklessVariantAssetStatus, type RecklessVariant } from './recklessVariants.ts';
+import { RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT, RECKLESS_SIMD_VARIANT, checkRecklessVariantAsset, recklessVariantAssetStatus, type RecklessVariant } from './recklessVariants.ts';
 
 interface BenchPosition {
   label: string;
@@ -139,6 +139,7 @@ function selectedVariants(): RecklessVariant[] {
   if (inputEl('benchSimd').checked) variants.push(RECKLESS_SIMD_VARIANT);
   if (inputEl('benchBrowserApi').checked) variants.push(RECKLESS_BROWSER_API_VARIANT);
   if (inputEl('benchBrowserApiSimd').checked) variants.push(RECKLESS_BROWSER_API_SIMD_VARIANT);
+  if (inputEl('benchBrowserApiSimdExternal').checked) variants.push(RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT);
   if (inputEl('benchLite').checked) variants.push(RECKLESS_LITE_VARIANT);
   return variants;
 }
@@ -215,7 +216,7 @@ function readConfig(): BenchConfig {
 
 function reportConfig(config: BenchConfig) {
   return {
-    variants: config.variants.map((variant) => ({ key: variant.key, label: variant.label, wasmUrl: variant.wasmUrl, note: variant.note, backend: variant.backend ?? 'wasi', asset: recklessVariantAssetStatus(variant) })),
+    variants: config.variants.map((variant) => ({ key: variant.key, label: variant.label, wasmUrl: variant.wasmUrl, nnueUrl: variant.nnueUrl, note: variant.note, backend: variant.backend ?? 'wasi', asset: recklessVariantAssetStatus(variant) })),
     modes: config.modes,
     budgets: config.budgets.map((budget) => ({ label: budget.label, options: budget.options })),
     positions: config.positions,
@@ -333,7 +334,7 @@ async function runBench(): Promise<void> {
           const engine = new RecklessEngine(
             budget.options,
             variant.wasmUrl,
-            { backend: variant.backend ?? 'wasi', forceOneShot: mode === 'one-shot', disablePersistentFallback: mode === 'persistent' },
+            { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, forceOneShot: mode === 'one-shot', disablePersistentFallback: mode === 'persistent' },
           );
           try {
             for (const position of config.positions) {

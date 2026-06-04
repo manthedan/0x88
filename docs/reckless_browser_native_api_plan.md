@@ -68,6 +68,7 @@ Status: implemented experimentally. The artifact still targets `wasm32-wasip1` b
 Use a small C-style/string-buffer ABI first, avoiding a new JS dependency:
 
 - Export `reckless_api_new(hash_mb) -> u32` engine handle.
+- Export `reckless_api_new_with_network(hash_mb, ptr, len) -> u32` for external-NNUE browser API builds.
 - Export `reckless_api_set_fen(handle, ptr, len) -> i32`.
 - Export `reckless_api_search_depth(handle, depth) -> i32`.
 - Export `reckless_api_result_json_ptr(handle) -> *const u8` and `..._len(handle) -> usize`, or write JSON into a caller-provided output buffer.
@@ -81,9 +82,10 @@ Status: implemented experimentally in `src/lc0/recklessBrowserApiWorker.ts` and 
 
 1. compiles/instantiates the direct API module,
 2. initializes WASI imports for clocks without starting the UCI binary,
-3. owns one engine handle,
-4. sends compact request/response messages,
-5. returns structured search results directly to `RecklessEngine`.
+3. optionally fetches/cache the external NNUE `ArrayBuffer` and passes it to `reckless_api_new_with_network`,
+4. owns one engine handle,
+5. sends compact request/response messages,
+6. returns structured search results directly to `RecklessEngine`.
 
 The existing WASI/UCI adapter remains the default and fallback until parity and performance are proven. The direct API reset path must keep mirroring UCI `ucinewgame`; it now clears thread state, TT, and correction-history tables.
 
@@ -94,6 +96,7 @@ Smoke/performance evidence:
 - Rotated-FEN browser benchmark, persistent depth 7/8/9, 20 positions × 20 warm passes: browser API was slower than persistent WASI/UCI (`0.88x`, `0.81x`, and `0.80x` as fast by wall-clock for depths 7/8/9). See [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md).
 - Browser API history-reset smoke after fixing correction-history clearing: scalar WASI/UCI, SIMD WASI/UCI, browser API scalar, and browser API SIMD all matched exactly across the 20-position suite at depths 7/8/9 with one warm rotated pass.
 - Corrected full browser benchmark, persistent depth 7/8/9, 20 positions × 20 warm passes: browser API SIMD remained slower than SIMD WASI/UCI (`0.88x`, `0.87x`, and `0.98x` as fast by wall-clock for depths 7/8/9), while preserving exact fixed-depth parity. Browser API scalar was modestly faster than scalar WASI/UCI but still slower than SIMD WASI/UCI.
+- External-NNUE browser API SIMD loading smoke: `reckless-browser-api-simd128-external.wasm` is 1,260,734 bytes and loads `reckless-v60-7f587dfb.nnue` as a separate 63,266,880-byte asset; browser depth-4 startpos smoke returned the expected `c2c4`/210-node result. See [`reckless_nnue_asset_size_plan.md`](./reckless_nnue_asset_size_plan.md).
 
 ## Verification requirements
 

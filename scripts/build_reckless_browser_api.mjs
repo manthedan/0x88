@@ -8,6 +8,7 @@ const workdir = resolve(process.env.RECKLESS_BROWSER_API_BUILD_DIR ?? '.local_en
 const out = resolve(process.env.RECKLESS_BROWSER_API_WASM_OUT ?? 'public/reckless/reckless-browser-api.wasm');
 const evalfile = process.env.RECKLESS_EVALFILE ? resolve(process.env.RECKLESS_EVALFILE) : '';
 const enableWasmSimdNnue = process.env.RECKLESS_WASM_SIMD_NNUE === '1';
+const externalNnue = process.env.RECKLESS_BROWSER_API_EXTERNAL_NNUE === '1';
 
 function run(cmd, args, options = {}) {
   console.log(`$ ${cmd} ${args.join(' ')}`);
@@ -132,6 +133,92 @@ pub unsafe fn find_nnz(ft_out: &Aligned<[u8; L1_SIZE]>, _: &[SparseEntry]) -> (A
   }
 }
 
+function patchRecklessForBrowserApiNnue(root) {
+  replace(
+    `${root}/src/nnue.rs`,
+    `use std::sync::Arc;`,
+    `use std::sync::{Arc, OnceLock};`,
+  );
+  replace(
+    `${root}/src/nnue.rs`,
+    `const DEQUANT_MULTIPLIER: f32 = (1 << FT_SHIFT) as f32 / (FT_QUANT * FT_QUANT * L1_QUANT) as f32;
+`,
+    `const DEQUANT_MULTIPLIER: f32 = (1 << FT_SHIFT) as f32 / (FT_QUANT * FT_QUANT * L1_QUANT) as f32;
+
+static EXTERNAL_PARAMETERS: OnceLock<Arc<Parameters>> = OnceLock::new();
+`,
+  );
+  const embeddedBody = externalNnue
+    ? `        panic!("external NNUE parameters were not loaded");`
+    : `        static EMBEDDED: Parameters = unsafe { std::mem::transmute(*include_bytes!(env!("MODEL"))) };
+        &EMBEDDED`;
+  replace(
+    `${root}/src/nnue.rs`,
+    `impl Parameters {
+    fn embedded() -> &'static Self {
+        static EMBEDDED: Parameters = unsafe { std::mem::transmute(*include_bytes!(env!("MODEL"))) };
+        &EMBEDDED
+    }
+
+    fn allocate_owned() -> Arc<Self> {
+        let mut boxed = Box::<std::mem::MaybeUninit<Self>>::new(std::mem::MaybeUninit::uninit());
+        let ptr = boxed.as_mut_ptr();
+        std::mem::forget(boxed);
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(Self::embedded() as *const Self, ptr, 1);
+            Arc::from(Box::from_raw(ptr))
+        }
+    }
+}
+`,
+    `impl Parameters {
+    fn embedded() -> &'static Self {
+${embeddedBody}
+    }
+
+    fn active() -> &'static Self {
+        EXTERNAL_PARAMETERS.get().map(|parameters| parameters.as_ref()).unwrap_or_else(Self::embedded)
+    }
+
+    fn from_bytes_owned(bytes: &[u8]) -> Result<Arc<Self>, String> {
+        let expected = std::mem::size_of::<Self>();
+        if bytes.len() != expected {
+            return Err(format!("invalid Reckless NNUE byte length: got {}, expected {}", bytes.len(), expected));
+        }
+        let boxed = Box::<std::mem::MaybeUninit<Self>>::new(std::mem::MaybeUninit::uninit());
+        let ptr = Box::into_raw(boxed) as *mut Self;
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr.cast::<u8>(), bytes.len());
+            Ok(Arc::from(Box::from_raw(ptr)))
+        }
+    }
+
+    fn allocate_owned() -> Arc<Self> {
+        let mut boxed = Box::<std::mem::MaybeUninit<Self>>::new(std::mem::MaybeUninit::uninit());
+        let ptr = boxed.as_mut_ptr();
+        std::mem::forget(boxed);
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(Self::active() as *const Self, ptr, 1);
+            Arc::from(Box::from_raw(ptr))
+        }
+    }
+}
+
+pub fn set_external_parameters_from_bytes(bytes: &[u8]) -> Result<(), String> {
+    let parameters = Parameters::from_bytes_owned(bytes)?;
+    EXTERNAL_PARAMETERS.set(parameters).map_err(|_| "external Reckless NNUE parameters are already loaded".to_owned())
+}
+`,
+  );
+  replace(
+    `${root}/src/nnue.rs`,
+    `        Self { inner: ParametersStorage::Embedded(Parameters::embedded()) }`,
+    `        Self { inner: ParametersStorage::Embedded(Parameters::active()) }`,
+  );
+}
+
 if (!existsSync(`${source}/Cargo.toml`)) {
   throw new Error(`Reckless source missing at ${source}; run npm run reckless:build-wasi first or set RECKLESS_SOURCE_DIR`);
 }
@@ -227,6 +314,7 @@ struct Handle {
 
 static HANDLES: OnceLock<Mutex<Vec<Option<Handle>>>> = OnceLock::new();
 static INIT: OnceLock<()> = OnceLock::new();
+static GLOBAL_ERROR: OnceLock<Mutex<Vec<u8>>> = OnceLock::new();
 
 impl BrowserEngine {
     pub fn new(hash_mb: usize) -> Self {
@@ -399,6 +487,16 @@ fn handles() -> &'static Mutex<Vec<Option<Handle>>> {
     HANDLES.get_or_init(|| Mutex::new(Vec::new()))
 }
 
+fn global_error() -> &'static Mutex<Vec<u8>> {
+    GLOBAL_ERROR.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn set_global_error(error: impl AsRef<str>) {
+    if let Ok(mut global) = global_error().lock() {
+        *global = error.as_ref().as_bytes().to_vec();
+    }
+}
+
 fn with_handle<R>(handle: u32, f: impl FnOnce(&mut Handle) -> R) -> Option<R> {
     if handle == 0 { return None; }
     let mut guard = handles().lock().ok()?;
@@ -440,6 +538,26 @@ pub extern "C" fn reckless_api_new(hash_mb: usize) -> u32 {
         guard.push(Some(handle));
         guard.len() as u32
     }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn reckless_api_new_with_network(hash_mb: usize, ptr: *const u8, len: usize) -> u32 {
+    let bytes = std::slice::from_raw_parts(ptr, len);
+    if let Err(error) = crate::nnue::set_external_parameters_from_bytes(bytes) {
+        set_global_error(error);
+        return 0;
+    }
+    reckless_api_new(hash_mb)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn reckless_api_global_error_ptr() -> *const u8 {
+    global_error().lock().map(|error| error.as_ptr()).unwrap_or(std::ptr::null())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn reckless_api_global_error_len() -> usize {
+    global_error().lock().map(|error| error.len()).unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
@@ -529,6 +647,7 @@ pub extern "C" fn reckless_api_error_len(handle: u32) -> usize {
 `);
 
 if (enableWasmSimdNnue) patchRecklessForWasmSimdNnue(workdir);
+patchRecklessForBrowserApiNnue(workdir);
 
 run('rustup', ['target', 'add', 'wasm32-wasip1']);
 run('cargo', ['build', '--release', '--no-default-features', '--target', 'wasm32-wasip1', '--lib'], {

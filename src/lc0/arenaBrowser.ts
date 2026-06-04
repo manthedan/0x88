@@ -535,9 +535,10 @@ function renderRecklessRuntimeInfo(): void {
   const asset = recklessVariantAssetStatus(variant);
   if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
   const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
-  info.textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${variant.wasmUrl}`;
+  const assetUrlText = variant.nnueUrl ? `${variant.wasmUrl} + ${variant.nnueUrl}` : variant.wasmUrl;
+  info.textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${assetUrlText}`;
   if (status?.persistentDisabled) info.textContent += ' · persistent disabled after fallback';
-  if (asset === 'missing') info.textContent += ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, or reckless:build-lite-wasi';
+  if (asset === 'missing') info.textContent += ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, reckless:build-browser-api-simd-external, or reckless:build-lite-wasi';
 }
 
 function refreshRecklessVariantUi(): void {
@@ -967,7 +968,7 @@ function wireEvents() {
     if (running) return;
     reckless?.dispose();
     const variant = selectedRecklessVariant();
-    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi' });
+    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl });
     prewarmReckless();
     buildEngines();
     refreshChampionOptions();
@@ -1001,7 +1002,7 @@ async function init() {
     searcher = new Lc0PuctSearcher(lc0Cache);
     stockfish = new StockfishEngine({ depth: 4, threads: stockfishThreads() }, stockfishFlavorUrl(selectedStockfishFlavor()));
     const variant = selectedRecklessVariant();
-    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi' });
+    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl });
     prewarmReckless();
     renderRecklessRuntimeInfo();
     renderCacheInfo();
