@@ -87,14 +87,28 @@ class SharedStdin extends Fd {
   }
 }
 
+async function fetchAndCompileModule(wasmUrl: string): Promise<WebAssembly.Module> {
+  const response = await fetch(wasmUrl);
+  if (!response.ok) throw new Error(`failed to fetch Reckless WASI module ${wasmUrl}: HTTP ${response.status}`);
+
+  // Use streaming compilation when the server advertises an acceptable wasm MIME
+  // type, but keep an ArrayBuffer fallback for dev/static servers that do not.
+  if (typeof WebAssembly.compileStreaming === 'function') {
+    try {
+      return await WebAssembly.compileStreaming(response.clone());
+    } catch (error) {
+      console.warn('Reckless WASM compileStreaming failed; falling back to ArrayBuffer compile', error);
+    }
+  }
+  return WebAssembly.compile(await response.arrayBuffer());
+}
+
 async function compileModule(wasmUrl: string): Promise<WebAssembly.Module> {
   let cached = moduleCache.get(wasmUrl);
   if (!cached) {
-    cached = fetch(wasmUrl).then(async (response) => {
-      if (!response.ok) throw new Error(`failed to fetch Reckless WASI module ${wasmUrl}: HTTP ${response.status}`);
-      return WebAssembly.compile(await response.arrayBuffer());
-    });
+    cached = fetchAndCompileModule(wasmUrl);
     moduleCache.set(wasmUrl, cached);
+    cached.catch(() => moduleCache.delete(wasmUrl));
   }
   return cached;
 }

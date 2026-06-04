@@ -43,4 +43,6 @@ The persistent WASI adapter already keeps one process alive and skips repeated s
 
 Arena and analysis pages now call `RecklessEngine.prewarm()` after creating a Reckless instance. In cross-origin-isolated browsers, this starts the persistent worker/process and runs `uci`/`isready` before the first real search, hiding the 80-115 ms cold worker/wasm/UCI startup penalty when the user later asks for a move or analysis. Non-isolated browsers still fall back to one-shot mode.
 
+The worker caches one `WebAssembly.Module` promise per artifact URL. It now attempts `WebAssembly.compileStreaming(response.clone())` first and falls back to `arrayBuffer()` + `WebAssembly.compile()` for servers with an incompatible MIME type. Failed cache entries are evicted so transient fetch/compile failures do not poison the worker for the rest of the page lifetime.
+
 The next major adapter-overhead reduction remains a browser-native API with direct calls for initialize, set FEN, search, and result retrieval.
