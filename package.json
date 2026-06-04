@@ -74,6 +74,7 @@
     "lc0:browser-wgsl-smokes": "node --experimental-strip-types scripts/lc0_browser_wgsl_smokes.mjs",
     "reckless:build-wasi": "node scripts/build_reckless_wasi.mjs",
     "reckless:build-lite-wasi": "RECKLESS_EVALFILE=.local_engines/reckless-nets/v53-0ba42a8c.nnue RECKLESS_L1_SIZE=512 RECKLESS_WASM_OUT=public/reckless/reckless-v53-l1-512.wasm node scripts/build_reckless_wasi.mjs",
+    "viridithas:build-wasi": "node scripts/build_viridithas_wasi.mjs",
     "lc0:battle": "node --experimental-strip-types scripts/lc0_engine_battle.mjs",
     "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs"
   },

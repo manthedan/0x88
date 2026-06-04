@@ -27,6 +27,7 @@ public/models/*.onnx.data
 public/models/*.pt
 public/models/*.json
 public/reckless/*.wasm
+public/viridithas/*.wasm
 rust/**/target/
 node_modules/
 __pycache__/

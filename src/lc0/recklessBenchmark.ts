@@ -1,6 +1,8 @@
 import { START_FEN } from '../chess/board.ts';
 import { RecklessEngine, canUsePersistentRecklessWasi, type RecklessOptions } from './recklessEngine.ts';
 import { RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT, checkRecklessVariantAsset, recklessVariantAssetStatus, type RecklessVariant } from './recklessVariants.ts';
+import { ViridithasEngine } from './viridithasEngine.ts';
+import { VIRIDITHAS_DEFAULT_VARIANT, checkViridithasVariantAsset, viridithasVariantAssetStatus, type ViridithasVariant } from './viridithasVariants.ts';
 
 interface BenchPosition {
   label: string;
@@ -42,8 +44,11 @@ interface BenchSummaryRow {
   wasmUrl: string;
 }
 
+type BenchVariant = (RecklessVariant & { engine: 'reckless' }) | (ViridithasVariant & { engine: 'viridithas' });
+type BenchEngine = RecklessEngine | ViridithasEngine;
+
 interface BenchConfig {
-  variants: RecklessVariant[];
+  variants: BenchVariant[];
   modes: Array<'persistent' | 'one-shot'>;
   budgets: BenchBudget[];
   positions: BenchPosition[];
@@ -105,10 +110,11 @@ function selectedPositions(): BenchPosition[] {
   return positions.length ? positions : [{ label: 'startpos', fen: START_FEN }];
 }
 
-function selectedVariants(): RecklessVariant[] {
-  const variants: RecklessVariant[] = [];
-  if (inputEl('benchFull').checked) variants.push(RECKLESS_FULL_VARIANT);
-  if (inputEl('benchLite').checked) variants.push(RECKLESS_LITE_VARIANT);
+function selectedVariants(): BenchVariant[] {
+  const variants: BenchVariant[] = [];
+  if (inputEl('benchFull').checked) variants.push({ ...RECKLESS_FULL_VARIANT, engine: 'reckless' });
+  if (inputEl('benchLite').checked) variants.push({ ...RECKLESS_LITE_VARIANT, engine: 'reckless' });
+  if (inputEl('benchViridithas').checked) variants.push({ ...VIRIDITHAS_DEFAULT_VARIANT, engine: 'viridithas' });
   return variants;
 }
 function selectedModes(): Array<'persistent' | 'one-shot'> {
@@ -181,7 +187,14 @@ function readConfig(): BenchConfig {
 
 function reportConfig(config: BenchConfig) {
   return {
-    variants: config.variants.map((variant) => ({ key: variant.key, label: variant.label, wasmUrl: variant.wasmUrl, note: variant.note, asset: recklessVariantAssetStatus(variant) })),
+    variants: config.variants.map((variant) => ({
+      engine: variant.engine,
+      key: variant.key,
+      label: variant.label,
+      wasmUrl: variant.wasmUrl,
+      note: variant.note,
+      asset: variant.engine === 'viridithas' ? viridithasVariantAssetStatus(variant) : recklessVariantAssetStatus(variant),
+    })),
     modes: config.modes,
     budgets: config.budgets.map((budget) => ({ label: budget.label, options: budget.options })),
     positions: config.positions,
@@ -236,7 +249,7 @@ function render(): void {
   el('jsonOut').textContent = JSON.stringify(report(), null, 2);
 }
 
-async function timeSearch(engine: RecklessEngine, variant: RecklessVariant, mode: 'persistent' | 'one-shot', position: BenchPosition, budget: BenchBudget, run: string, signal: AbortSignal): Promise<void> {
+async function timeSearch(engine: BenchEngine, variant: BenchVariant, mode: 'persistent' | 'one-shot', position: BenchPosition, budget: BenchBudget, run: string, signal: AbortSignal): Promise<void> {
   const start = performance.now();
   const bestMove = await engine.bestMove(position.fen, signal);
   const wallMs = performance.now() - start;
@@ -272,7 +285,9 @@ async function runBench(): Promise<void> {
   setStatus(`Checking assets… isolation=${String((globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true)} persistentAvailable=${persistentAvailable}`);
   try {
     for (const variant of config.variants) {
-      const assetStatus = await checkRecklessVariantAsset(variant, render);
+      const assetStatus = variant.engine === 'viridithas'
+        ? await checkViridithasVariantAsset(variant, render)
+        : await checkRecklessVariantAsset(variant, render);
       if (assetStatus === 'missing') {
         rows.push({ variant: variant.label, mode: config.modes[0] ?? 'one-shot', position: 'asset', fen: '', budget: 'asset check', run: 'skipped', wallMs: 0, bestMove: null, depth: null, nps: null, runtime: 'asset missing', wasmUrl: variant.wasmUrl });
         render();
@@ -280,6 +295,11 @@ async function runBench(): Promise<void> {
       }
       for (const mode of config.modes) {
         if (abort.signal.aborted) return;
+        if (mode === 'persistent' && variant.engine === 'viridithas') {
+          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, nps: null, runtime: 'Viridithas one-shot only', wasmUrl: variant.wasmUrl });
+          render();
+          continue;
+        }
         if (mode === 'persistent' && !persistentAvailable) {
           rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, nps: null, runtime: 'persistent unavailable', wasmUrl: variant.wasmUrl });
           render();
@@ -287,11 +307,13 @@ async function runBench(): Promise<void> {
         }
         for (const budget of config.budgets) {
           for (const position of config.positions) {
-            const engine = new RecklessEngine(
-              budget.options,
-              variant.wasmUrl,
-              { forceOneShot: mode === 'one-shot', disablePersistentFallback: mode === 'persistent' },
-            );
+            const engine: BenchEngine = variant.engine === 'viridithas'
+              ? new ViridithasEngine(budget.options, variant.wasmUrl)
+              : new RecklessEngine(
+                budget.options,
+                variant.wasmUrl,
+                { forceOneShot: mode === 'one-shot', disablePersistentFallback: mode === 'persistent' },
+              );
             try {
               if (abort.signal.aborted) return;
               setStatus(`Running ${variant.label} ${mode} ${budget.label} ${position.label} cold…`);
@@ -340,5 +362,6 @@ el('copyCsv').addEventListener('click', () => { void copyText(csvReport(), 'CSV'
 el('downloadJson').addEventListener('click', () => downloadText(JSON.stringify(report(), null, 2), 'reckless-benchmark-report.json', 'application/json'));
 el('downloadCsv').addEventListener('click', () => downloadText(csvReport(), 'reckless-benchmark-runs.csv', 'text/csv'));
 for (const variant of [RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT]) void checkRecklessVariantAsset(variant, render);
+void checkViridithasVariantAsset(VIRIDITHAS_DEFAULT_VARIANT, render);
 setStatus(`Ready. persistentAvailable=${canUsePersistentRecklessWasi()} · SAB=${typeof SharedArrayBuffer !== 'undefined'}`);
 render();

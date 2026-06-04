@@ -1,0 +1,494 @@
+diff --git a/src/main.rs b/src/main.rs
+index 1f156ae..a273e7e 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -51,7 +51,7 @@ pub static NAME: &str = "Viridithas";
+ pub static VERSION: &str = env!("CARGO_PKG_VERSION");
+ 
+ fn main() -> anyhow::Result<()> {
+-    if std::env::args_os().len() == 1 {
++    if cfg!(target_arch = "wasm32") || std::env::args_os().len() == 1 {
+         // fast path to UCI:
+         return Ok(uci::main_loop()?);
+     }
+diff --git a/src/nnue/geometry.rs b/src/nnue/geometry.rs
+index faae968..54dc82d 100644
+--- a/src/nnue/geometry.rs
++++ b/src/nnue/geometry.rs
+@@ -6,9 +6,14 @@ mod vbmi;
+ #[cfg(target_feature = "avx512vbmi")]
+ pub use vbmi::*;
+ 
+-#[cfg(not(any(target_feature = "neon", target_feature = "avx512vbmi")))]
++#[cfg(target_arch = "wasm32")]
++mod scalar;
++#[cfg(target_arch = "wasm32")]
++pub use scalar::*;
++
++#[cfg(all(not(target_arch = "wasm32"), not(any(target_feature = "neon", target_feature = "avx512vbmi"))))]
+ mod avx2;
+-#[cfg(not(any(target_feature = "neon", target_feature = "avx512vbmi")))]
++#[cfg(all(not(target_arch = "wasm32"), not(any(target_feature = "neon", target_feature = "avx512vbmi"))))]
+ pub use avx2::*;
+ 
+ #[cfg(target_feature = "neon")]
+diff --git a/src/nnue/network.rs b/src/nnue/network.rs
+index aff6245..7000f53 100644
+--- a/src/nnue/network.rs
++++ b/src/nnue/network.rs
+@@ -775,6 +775,8 @@ impl NNUEParams {
+         static LOCK: Mutex<()> = Mutex::new(());
+         // additionally, we'd quite like to cache the results of this function.
+         static CACHED: OnceLock<Mmap> = OnceLock::new();
++        #[cfg(target_arch = "wasm32")]
++        static CACHED_WASM: OnceLock<&'static NNUEParams> = OnceLock::new();
+ 
+         // If we’re under MIRI, this function is way too slow.
+         if cfg!(miri) {
+@@ -811,6 +813,10 @@ impl NNUEParams {
+         }
+ 
+         let _guard = LOCK.lock().unwrap();
++        #[cfg(target_arch = "wasm32")]
++        if let Some(cached) = CACHED_WASM.get() {
++            return Ok(*cached);
++        }
+         // check if we've already loaded the weights
+         if let Some(cached) = CACHED.get() {
+             // cast the mmap to a NNUEParams
+@@ -821,6 +827,33 @@ impl NNUEParams {
+             return Ok(params);
+         }
+ 
++        #[cfg(target_arch = "wasm32")]
++        {
++            let mut net = QuantisedNetwork::zeroed();
++            let mut mem = unsafe {
++                std::slice::from_raw_parts_mut(
++                    std::ptr::from_mut(net.as_mut()).cast::<u8>(),
++                    size_of::<QuantisedNetwork>(),
++                )
++            };
++            let expected_bytes = mem.len() as u64;
++            let decoding_start = std::time::Instant::now();
++            let mut decoder = ZstdDecoder::new(EMBEDDED_NNUE)
++                .with_context(|| "Failed to construct zstd decoder for NNUE weights.")?;
++            let bytes_written = std::io::copy(&mut decoder, &mut mem)
++                .with_context(|| "Failed to decompress NNUE weights.")?;
++            let decoding_time = decoding_start.elapsed();
++            println!("info string decompressed NNUE weights in {}us", decoding_time.as_micros());
++            anyhow::ensure!(
++                bytes_written == expected_bytes,
++                "encountered issue while decompressing NNUE weights, expected {expected_bytes} bytes, but got {bytes_written}"
++            );
++            let net = net.permute(true);
++            let params = Box::leak(net);
++            let _ = CACHED_WASM.set(params);
++            return Ok(params);
++        }
++
+         let weights_file_name = format!(
+             "viridithas-shared-network-weights-{}-{}-{}-{:X}.bin",
+             std::env::consts::ARCH,
+diff --git a/src/nnue/simd.rs b/src/nnue/simd.rs
+index 2c23521..cb50de2 100644
+--- a/src/nnue/simd.rs
++++ b/src/nnue/simd.rs
+@@ -408,7 +408,11 @@ mod avx512 {
+     pub const F32_CHUNK: usize = std::mem::size_of::<VecF32>() / std::mem::size_of::<f32>();
+ }
+ 
+-#[cfg(not(any(target_feature = "neon", target_feature = "avx512f")))]
++#[cfg(target_arch = "wasm32")]
++#[path = "simd_scalar.rs"]
++mod scalar;
++
++#[cfg(all(not(target_arch = "wasm32"), not(any(target_feature = "neon", target_feature = "avx512f"))))]
+ mod avx2 {
+     #![allow(non_camel_case_types)]
+     use std::arch::x86_64::*;
+@@ -1163,7 +1167,10 @@ mod neon {
+ #[cfg(target_feature = "avx512f")]
+ pub use avx512::*;
+ 
+-#[cfg(not(any(target_feature = "neon", target_feature = "avx512f")))]
++#[cfg(target_arch = "wasm32")]
++pub use scalar::*;
++
++#[cfg(all(not(target_arch = "wasm32"), not(any(target_feature = "neon", target_feature = "avx512f"))))]
+ pub use avx2::*;
+ 
+ #[cfg(target_feature = "neon")]
+diff --git a/src/threadpool.rs b/src/threadpool.rs
+index c4a1398..fb14d90 100644
+--- a/src/threadpool.rs
++++ b/src/threadpool.rs
+@@ -1,3 +1,53 @@
++
++#[cfg(target_arch = "wasm32")]
++mod imp {
++    use std::thread::Scope;
++    use vec1::Vec1;
++
++    pub struct ReceiverHandle { received: bool }
++
++    impl ReceiverHandle {
++        pub fn join(mut self) { self.received = true; }
++    }
++
++    impl Drop for ReceiverHandle {
++        fn drop(&mut self) {
++            assert!(self.received, "ReceiverHandle was dropped without receiving a value");
++        }
++    }
++
++    pub trait ScopeExt<'scope, 'env> {
++        fn spawn_into<F>(&'scope self, f: F, comms: &'scope WorkerThread) -> ReceiverHandle
++        where
++            F: FnOnce() + Send + 'scope;
++    }
++
++    impl<'scope, 'env> ScopeExt<'scope, 'env> for Scope<'scope, 'env> {
++        fn spawn_into<F>(&'scope self, f: F, _thread: &'scope WorkerThread) -> ReceiverHandle
++        where
++            F: FnOnce() + Send + 'scope,
++        {
++            f();
++            ReceiverHandle { received: true }
++        }
++    }
++
++    pub fn make_worker_threads(num_threads: usize) -> Vec1<WorkerThread> {
++        (0..num_threads.max(1)).map(|_| WorkerThread).collect::<Vec<_>>().try_into().unwrap()
++    }
++
++    pub struct WorkerThread;
++
++    impl WorkerThread {
++        pub fn join(self) {}
++    }
++}
++
++#[cfg(target_arch = "wasm32")]
++pub use imp::*;
++
++#[cfg(not(target_arch = "wasm32"))]
++mod imp {
+ use std::sync::mpsc::{Receiver, SyncSender};
+ use std::sync::{Arc, Condvar, Mutex};
+ use std::thread::Scope;
+@@ -185,3 +235,8 @@ mod tests {
+         thread.join();
+     }
+ }
++
++}
++
++#[cfg(not(target_arch = "wasm32"))]
++pub use imp::*;
+diff --git a/src/uci.rs b/src/uci.rs
+index 45eefbd..1c63118 100644
+--- a/src/uci.rs
++++ b/src/uci.rs
+@@ -782,11 +782,25 @@ fn parse_setoption(
+     Ok(out)
+ }
+ 
++#[cfg(not(target_arch = "wasm32"))]
+ type StdinReader = (
+     mpsc::Receiver<String>,
+     std::thread::JoinHandle<Result<(), UciError>>,
+ );
+ 
++#[cfg(target_arch = "wasm32")]
++struct WasmStdinReaderHandle;
++
++#[cfg(target_arch = "wasm32")]
++impl WasmStdinReaderHandle {
++    fn is_finished(&self) -> bool { true }
++    fn join(self) -> Result<Result<(), UciError>, ()> { Ok(Ok(())) }
++}
++
++#[cfg(target_arch = "wasm32")]
++type StdinReader = (mpsc::Receiver<String>, WasmStdinReaderHandle);
++
++#[cfg(not(target_arch = "wasm32"))]
+ fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
+     let (sender, receiver) = mpsc::channel();
+     let handle = std::thread::Builder::new()
+@@ -795,6 +809,23 @@ fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
+     Ok((receiver, handle))
+ }
+ 
++#[cfg(target_arch = "wasm32")]
++fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
++    let (sender, receiver) = mpsc::channel();
++    let mut sent_arg_command = false;
++    for command in std::env::args().skip(1) {
++        if !command.trim().is_empty() {
++            let _ = sender.send(command);
++            sent_arg_command = true;
++        }
++    }
++    if !sent_arg_command {
++        let _ = stdin_reader_worker(sender.clone(), &control);
++    }
++    let _ = sender.send("quit".into());
++    Ok((receiver, WasmStdinReaderHandle))
++}
++
+ fn stdin_reader_worker(sender: mpsc::Sender<String>, control: &Control) -> Result<(), UciError> {
+     let mut linebuf = String::with_capacity(128);
+     while let Ok(bytes) = std::io::stdin().read_line(&mut linebuf) {
+diff --git a/src/nnue/geometry/scalar.rs b/src/nnue/geometry/scalar.rs
+new file mode 100644
+index 0000000..3612a5e
+--- /dev/null
++++ b/src/nnue/geometry/scalar.rs
+@@ -0,0 +1,118 @@
++use crate::{
++    chess::{piece::Piece, types::Square},
++    nnue::geometry::Bit,
++};
++
++use super::{BitRays, INCOMING_SLIDERS_MASK, INCOMING_THREATS_MASK, PERMUTATION, PIECE_TO_BIT};
++
++#[derive(Clone, Copy)]
++#[repr(transparent)]
++pub struct Vector {
++    pub raw: [u8; 64],
++}
++
++impl Vector {
++    #[expect(unused)]
++    pub fn flip(self) -> Self {
++        let mut raw = [0; 64];
++        raw[..32].copy_from_slice(&self.raw[32..]);
++        raw[32..].copy_from_slice(&self.raw[..32]);
++        Self { raw }
++    }
++
++    fn to_mask(&self) -> u64 {
++        let mut out = 0u64;
++        for (idx, &byte) in self.raw.iter().enumerate() {
++            if byte != 0 {
++                out |= 1u64 << idx;
++            }
++        }
++        out
++    }
++
++    unsafe fn load(ptr: *const u8) -> Self {
++        let mut raw = [0; 64];
++        unsafe { std::ptr::copy_nonoverlapping(ptr, raw.as_mut_ptr(), 64) };
++        Self { raw }
++    }
++
++    unsafe fn cast<T>(v: &T) -> Self {
++        unsafe { Self::load((v as *const T).cast::<u8>()) }
++    }
++}
++
++pub struct Permutation {
++    pub indexes: Vector,
++    pub valid: Vector,
++}
++
++pub fn permutation_for(focus: Square) -> Permutation {
++    let indexes = Vector { raw: PERMUTATION[focus.index()] };
++    let mut valid = [0; 64];
++    for (dst, &index) in valid.iter_mut().zip(indexes.raw.iter()) {
++        *dst = if index & 0x80 == 0 { 0xFF } else { 0 };
++    }
++    Permutation { indexes, valid: Vector { raw: valid } }
++}
++
++fn permute_mailbox_inner(permutation: &Permutation, mailbox: &Vector) -> (Vector, Vector) {
++    let mut permuted = [0; 64];
++    let mut bits = [0; 64];
++    for idx in 0..64 {
++        if permutation.valid.raw[idx] != 0 {
++            let src = usize::from(permutation.indexes.raw[idx]);
++            let piece = mailbox.raw[src];
++            permuted[idx] = piece;
++            bits[idx] = PIECE_TO_BIT[usize::from(piece)].0;
++        }
++    }
++    (Vector { raw: permuted }, Vector { raw: bits })
++}
++
++pub fn permute_mailbox(permutation: &Permutation, mailbox: &[Option<Piece>; 64]) -> (Vector, Vector) {
++    let mb = unsafe { Vector::load(mailbox.as_ptr().cast::<u8>()) };
++    permute_mailbox_inner(permutation, &mb)
++}
++
++pub fn permute_mailbox_ignoring(
++    permutation: &Permutation,
++    mailbox: &[Option<Piece>; 64],
++    ignore: Square,
++) -> (Vector, Vector) {
++    const NO_PIECE: u8 = unsafe { std::mem::transmute::<Option<Piece>, u8>(None) };
++    let mut mb = unsafe { Vector::load(mailbox.as_ptr().cast::<u8>()) };
++    mb.raw[usize::from(ignore.inner())] = NO_PIECE;
++    permute_mailbox_inner(permutation, &mb)
++}
++
++pub fn closest_occupied(bits: Vector) -> BitRays {
++    let occupied = bits.to_mask();
++    let o = occupied | 0x8181_8181_8181_8181;
++    BitRays((o ^ o.wrapping_sub(0x0303_0303_0303_0303)) & occupied)
++}
++
++pub fn incoming_attackers(bits: Vector, closest: BitRays) -> BitRays {
++    let mask = unsafe { Vector::cast(&INCOMING_THREATS_MASK) };
++    let mut raw = [0; 64];
++    for (idx, dst) in raw.iter_mut().enumerate() {
++        *dst = if bits.raw[idx] & mask.raw[idx] != 0 { 0xFF } else { 0 };
++    }
++    BitRays(Vector { raw }.to_mask()) & closest
++}
++
++pub fn incoming_sliders(bits: Vector, closest: BitRays) -> BitRays {
++    let mask = unsafe { Vector::cast(&INCOMING_SLIDERS_MASK) };
++    let mut raw = [0; 64];
++    for (idx, dst) in raw.iter_mut().enumerate() {
++        *dst = if bits.raw[idx] & mask.raw[idx] != 0 { 0xFF } else { 0 };
++    }
++    BitRays(Vector { raw }.to_mask()) & closest & BitRays::NON_KNIGHT
++}
++
++pub fn test_bit(bits: Vector, bit: Bit) -> BitRays {
++    let mut raw = [0; 64];
++    for (idx, dst) in raw.iter_mut().enumerate() {
++        *dst = if bits.raw[idx] & bit.0 != 0 { 0xFF } else { 0 };
++    }
++    BitRays(Vector { raw }.to_mask())
++}
+diff --git a/src/nnue/simd_scalar.rs b/src/nnue/simd_scalar.rs
+new file mode 100644
+index 0000000..a950628
+--- /dev/null
++++ b/src/nnue/simd_scalar.rs
+@@ -0,0 +1,122 @@
++#![allow(clippy::needless_range_loop)]
++
++pub const INNER_ARCH: &str = "wasm-scalar";
++
++#[derive(Clone, Copy)]
++#[repr(align(32))]
++pub struct VecI8(pub [i8; 32]);
++#[derive(Clone, Copy)]
++#[repr(align(32))]
++pub struct VecI16(pub [i16; 16]);
++#[derive(Clone, Copy)]
++#[repr(align(32))]
++pub struct VecI32(pub [i32; 8]);
++#[derive(Clone, Copy)]
++#[repr(align(32))]
++pub struct VecF32(pub [f32; 8]);
++#[derive(Clone, Copy)]
++#[repr(align(16))]
++pub struct Vec128U16(pub [u16; 8]);
++
++macro_rules! impl_vec {
++    ($name:ident, $inner:ty) => {
++        impl $name {
++            pub const fn from_raw(value: $inner) -> Self { Self(value) }
++            pub const fn inner(self) -> $inner { self.0 }
++        }
++    };
++}
++impl_vec!(VecI8, [i8; 32]);
++impl_vec!(VecI16, [i16; 16]);
++impl_vec!(VecI32, [i32; 8]);
++impl_vec!(VecF32, [f32; 8]);
++impl_vec!(Vec128U16, [u16; 8]);
++
++pub unsafe fn zero_i16() -> VecI16 { VecI16([0; 16]) }
++pub unsafe fn zero_i32() -> VecI32 { VecI32([0; 8]) }
++pub unsafe fn splat_i16(n: i16) -> VecI16 { VecI16([n; 16]) }
++pub unsafe fn splat_i32(n: i32) -> VecI32 { VecI32([n; 8]) }
++
++pub unsafe fn load_i8(src: *const i8) -> VecI8 { let mut v=[0;32]; unsafe{std::ptr::copy_nonoverlapping(src, v.as_mut_ptr(), 32)}; VecI8(v) }
++pub unsafe fn store_i8(dst: *mut i8, vec: VecI8) { unsafe{std::ptr::copy_nonoverlapping(vec.0.as_ptr(), dst, 32)} }
++pub unsafe fn load_u8(src: *const u8) -> VecI8 { let mut v=[0i8;32]; unsafe{std::ptr::copy_nonoverlapping(src.cast::<i8>(), v.as_mut_ptr(), 32)}; VecI8(v) }
++pub unsafe fn store_u8(dst: *mut u8, vec: VecI8) { unsafe{std::ptr::copy_nonoverlapping(vec.0.as_ptr().cast::<u8>(), dst, 32)} }
++pub unsafe fn load_i16(src: *const i16) -> VecI16 { let mut v=[0;16]; unsafe{std::ptr::copy_nonoverlapping(src, v.as_mut_ptr(), 16)}; VecI16(v) }
++pub unsafe fn store_i16(dst: *mut i16, vec: VecI16) { unsafe{std::ptr::copy_nonoverlapping(vec.0.as_ptr(), dst, 16)} }
++pub unsafe fn load_i32(src: *const i32) -> VecI32 { let mut v=[0;8]; unsafe{std::ptr::copy_nonoverlapping(src, v.as_mut_ptr(), 8)}; VecI32(v) }
++pub unsafe fn store_i32(dst: *mut i32, vec: VecI32) { unsafe{std::ptr::copy_nonoverlapping(vec.0.as_ptr(), dst, 8)} }
++pub unsafe fn store_u32(dst: *mut u32, vec: VecI32) { unsafe{std::ptr::copy_nonoverlapping(vec.0.as_ptr().cast::<u32>(), dst, 8)} }
++
++pub unsafe fn max_i16(a: VecI16, b: VecI16) -> VecI16 { let mut o=[0;16]; for i in 0..16{o[i]=a.0[i].max(b.0[i]);} VecI16(o) }
++pub unsafe fn min_i16(a: VecI16, b: VecI16) -> VecI16 { let mut o=[0;16]; for i in 0..16{o[i]=a.0[i].min(b.0[i]);} VecI16(o) }
++pub unsafe fn add_i16(a: VecI16, b: VecI16) -> VecI16 { let mut o=[0;16]; for i in 0..16{o[i]=a.0[i].wrapping_add(b.0[i]);} VecI16(o) }
++pub unsafe fn sub_i16(a: VecI16, b: VecI16) -> VecI16 { let mut o=[0;16]; for i in 0..16{o[i]=a.0[i].wrapping_sub(b.0[i]);} VecI16(o) }
++pub unsafe fn add_i32(a: VecI32, b: VecI32) -> VecI32 { let mut o=[0;8]; for i in 0..8{o[i]=a.0[i].wrapping_add(b.0[i]);} VecI32(o) }
++pub unsafe fn mul_high_i16(a: VecI16, b: VecI16) -> VecI16 { let mut o=[0;16]; for i in 0..16{o[i]=(((a.0[i] as i32)*(b.0[i] as i32)) >> 16) as i16;} VecI16(o) }
++
++pub type S = i32;
++pub unsafe fn shl_i16<const SHIFT: i32>(vec: VecI16) -> VecI16 { let mut o=[0;16]; for i in 0..16{o[i]=((vec.0[i] as i32) << SHIFT) as i16;} VecI16(o) }
++pub unsafe fn shift_mul_high_i16<const SHIFT: i32>(a: VecI16, b: VecI16) -> VecI16 { unsafe { mul_high_i16(shl_i16::<SHIFT>(a), b) } }
++pub unsafe fn nonzero_mask_i32(vec: VecI32) -> u16 { let mut m=0; for i in 0..8 { if vec.0[i] != 0 { m |= 1 << i; } } m }
++
++pub unsafe fn pack_i16_to_u8(a: VecI16, b: VecI16) -> VecI8 {
++    let mut o=[0i8;32];
++    for i in 0..16 { o[i] = a.0[i].clamp(0, u8::MAX as i16) as u8 as i8; }
++    for i in 0..16 { o[16+i] = b.0[i].clamp(0, u8::MAX as i16) as u8 as i8; }
++    VecI8(o)
++}
++
++pub unsafe fn madd_u8_to_i32(sum: VecI32, a: VecI8, b: VecI8) -> VecI32 {
++    let mut o=sum.0;
++    for lane in 0..8 {
++        let mut acc=0i32;
++        for j in 0..4 {
++            let k=lane*4+j;
++            acc += i32::from(a.0[k] as u8) * i32::from(b.0[k]);
++        }
++        o[lane]=o[lane].wrapping_add(acc);
++    }
++    VecI32(o)
++}
++
++pub unsafe fn madd_2xu8_to_i32(sum: VecI32, a: VecI8, b: VecI8, c: VecI8, d: VecI8) -> VecI32 {
++    let mut o=sum.0;
++    for lane in 0..8 {
++        let mut acc=0i32;
++        for j in 0..4 {
++            let k=lane*4+j;
++            acc += i32::from(a.0[k] as u8) * i32::from(b.0[k]);
++            acc += i32::from(c.0[k] as u8) * i32::from(d.0[k]);
++        }
++        o[lane]=o[lane].wrapping_add(acc);
++    }
++    VecI32(o)
++}
++
++pub unsafe fn i32_to_f32(vec: VecI32) -> VecF32 { let mut o=[0.0;8]; for i in 0..8{o[i]=vec.0[i] as f32;} VecF32(o) }
++pub unsafe fn zero_f32() -> VecF32 { VecF32([0.0; 8]) }
++pub unsafe fn splat_f32(n: f32) -> VecF32 { VecF32([n; 8]) }
++pub unsafe fn load_f32(src: *const f32) -> VecF32 { let mut v=[0.0;8]; unsafe{std::ptr::copy_nonoverlapping(src, v.as_mut_ptr(), 8)}; VecF32(v) }
++pub unsafe fn store_f32(dst: *mut f32, vec: VecF32) { unsafe{std::ptr::copy_nonoverlapping(vec.0.as_ptr(), dst, 8)} }
++pub unsafe fn add_f32(a: VecF32, b: VecF32) -> VecF32 { let mut o=[0.0;8]; for i in 0..8{o[i]=a.0[i]+b.0[i];} VecF32(o) }
++pub unsafe fn mul_f32(a: VecF32, b: VecF32) -> VecF32 { let mut o=[0.0;8]; for i in 0..8{o[i]=a.0[i]*b.0[i];} VecF32(o) }
++pub unsafe fn div_f32(a: VecF32, b: VecF32) -> VecF32 { let mut o=[0.0;8]; for i in 0..8{o[i]=a.0[i]/b.0[i];} VecF32(o) }
++pub unsafe fn max_f32(a: VecF32, b: VecF32) -> VecF32 { let mut o=[0.0;8]; for i in 0..8{o[i]=a.0[i].max(b.0[i]);} VecF32(o) }
++pub unsafe fn min_f32(a: VecF32, b: VecF32) -> VecF32 { let mut o=[0.0;8]; for i in 0..8{o[i]=a.0[i].min(b.0[i]);} VecF32(o) }
++pub unsafe fn madd_f32(a: VecF32, b: VecF32, c: VecF32) -> VecF32 { let mut o=[0.0;8]; for i in 0..8{o[i]=a.0[i].mul_add(b.0[i], c.0[i]);} VecF32(o) }
++pub unsafe fn sum_f32(vec: VecF32) -> f32 { vec.0.iter().sum() }
++pub unsafe fn reduce_add_f32s(vec: &[VecF32; 2]) -> f32 { vec[0].0.iter().chain(vec[1].0.iter()).sum() }
++
++pub unsafe fn load_extend_i8(src: *const i8) -> VecI16 { let mut o=[0;16]; for i in 0..16 { o[i]=unsafe{*src.add(i)} as i16; } VecI16(o) }
++pub unsafe fn v128_zero() -> Vec128U16 { Vec128U16([0;8]) }
++pub unsafe fn v128_splat(n: u16) -> Vec128U16 { Vec128U16([n;8]) }
++pub unsafe fn v128_load(src: *const u16) -> Vec128U16 { let mut v=[0;8]; unsafe{std::ptr::copy_nonoverlapping(src, v.as_mut_ptr(), 8)}; Vec128U16(v) }
++pub unsafe fn v128_store(dst: *mut u16, vec: Vec128U16) { unsafe{std::ptr::copy_nonoverlapping(vec.0.as_ptr(), dst, 8)} }
++pub unsafe fn v128_add(a: Vec128U16, b: Vec128U16) -> Vec128U16 { let mut o=[0;8]; for i in 0..8{o[i]=a.0[i].wrapping_add(b.0[i]);} Vec128U16(o) }
++
++pub const U8_CHUNK: usize = std::mem::size_of::<VecI8>() / std::mem::size_of::<u8>();
++pub const I8_CHUNK_I32: usize = std::mem::size_of::<i32>() / std::mem::size_of::<u8>();
++pub const I8_CHUNK: usize = std::mem::size_of::<VecI8>() / std::mem::size_of::<i8>();
++pub const I16_CHUNK: usize = std::mem::size_of::<VecI16>() / std::mem::size_of::<i16>();
++pub const I32_CHUNK: usize = std::mem::size_of::<VecI32>() / std::mem::size_of::<i32>();
++pub const F32_CHUNK: usize = std::mem::size_of::<VecF32>() / std::mem::size_of::<f32>();
