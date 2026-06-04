@@ -190,6 +190,22 @@ The custom path now validates a complete encoder0 block in staged WGSL form, inc
 - The per-stage encoder0 timing breakdown now covers tiled projection/FFN kernels and the parallel ln1/ln2 reduction; stage timings still include queue-completion overhead and remain bottleneck hints rather than promotion evidence.
 - ORT tiny comparisons are same-value subgraph checks, not full deployment performance proof.
 
+## Performance optimization backlog
+
+The next custom-runtime performance work should prioritize reducing CPU/GPU synchronization and removing remaining CPU-bound hot paths before doing more isolated kernel micro-tuning.
+
+1. **Implement true batched WGSL-head evaluation.** The search layer can now fill leaf batches cleanly, but `Lc0WebHybridEvaluator.evaluateBatch()` still runs inputs serially through `runtime.evaluate()`. A batch-native WGSL-head path should encode/upload multiple positions, dispatch one batched encoder+head workload, and map one combined result buffer. This should amortize the current queue/map synchronization cost across the physical search batch. Keep static batch-1 ORT-head sessions non-concurrent; target the experimental WGSL-head backend first.
+2. **Move the initial input-body projection off JS.** `buildInitialEncoderActivation()` still CPU-builds the `64×256` encoder activation from the 112-plane input, positional encoding, input projection, Mish, and gate tensors before uploading it to GPU. A WGSL input-body kernel, or a SIMD-WASM input builder feeding a smaller GPU upload, should be benchmarked against the current cached JS path.
+3. **Experiment with a SIMD WASM pre-GPU bridge.** For CPU-bound work that should stay outside WebGPU, prototype a C++ or Rust SIMD WASM module with a minimal JS bridge: board/history state in, compact encoded planes or packed feature buffers out, then `queue.writeBuffer()` into WebGPU. Candidate tasks are LC0 history/112-plane encoding, FEN/history replay helpers, legal-move generation, policy-index/legal-mask construction, and possibly PUCT bookkeeping. The goal is `SIMD WASM → minimal JS bridge → WebGPU`, not a second heavyweight runtime that duplicates model sessions or copies large buffers through JS unnecessarily.
+4. **Defer or overlap readback.** The WGSL-head backend already reads back only `(1858 + 3) * 4 = 7444` bytes with one `mapAsync`, but queue/map synchronization remains noisy and dominant. Batch-native evaluation, double-buffered readback buffers, or scheduling the next GPU eval while CPU search consumes the previous result are the likely paths to hide this cost.
+5. **Fuse WGSL kernels where parity-safe.** After batching/sync work, revisit attention fusion points: QK scale + smolgen bias + softmax, softmax + attention-value, and remaining correctness-first smolgen matmul paths. Keep the f32 ONNX/native BLAS parity ladder in place for every fusion.
+
+Remaining CPU work by backend:
+
+- Both hybrid backends: FEN/history reconstruction, LC0 112-plane encoding, current JS input-body projection, legal move generation, legal-prior softmax/sorting, PUCT tree/search bookkeeping, and CPU-side command encoding/readback waiting.
+- Stable `lc0web-wgsl-encoder-ort-heads`: additionally reads back the full encoder output (`64 * 256 * 4 = 65536` bytes) and runs the tiny ORT mapped-policy/WDL heads after the WGSL encoder.
+- Experimental `lc0web-wgsl-encoder-wgsl-heads`: keeps encoder+heads on GPU and reads back only final mapped policy/WDL, but still returns to CPU for legal priors and search.
+
 ## Decision on full custom inference
 
 Do **not** promote full custom LC0 inference yet.
