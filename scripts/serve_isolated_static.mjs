@@ -16,6 +16,7 @@ const mime = new Map([
   ['.nnue', 'application/octet-stream'],
   ['.onnx', 'application/octet-stream'],
   ['.bin', 'application/octet-stream'],
+  ['.gz', 'application/gzip'],
   ['.png', 'image/png'],
   ['.svg', 'image/svg+xml'],
 ]);
@@ -57,6 +58,8 @@ const server = createServer((req, res) => {
   if (ext === '.nnue') {
     // Full Reckless network filenames include the network hash, so they are safe
     // to cache aggressively and reuse across small WASM rebuilds.
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  } else if (rel.startsWith('reckless/') && rel.includes('corresponding-source') && ext === '.gz') {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   } else if (rel.startsWith('assets/')) {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');

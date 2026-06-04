@@ -11,7 +11,7 @@ The harness also has a `Load 20-position rotated FEN suite` preset. Its run orde
 - `Reckless Full SIMD` (`/reckless/reckless-simd128.wasm`) is the default Reckless variant when WebAssembly SIMD validates successfully.
 - `Reckless Full scalar fallback` (`/reckless/reckless.wasm`) remains available for browsers without SIMD support and as an implicit fallback if the default SIMD asset is missing.
 - Browser API and external-NNUE variants remain explicit experimental options; they are useful for structured-result/control and cache-lifecycle work, but do not replace SIMD WASI/UCI for production performance yet.
-- Merge/deploy readiness depends on the release pipeline publishing the ignored generated assets (`reckless.wasm` and `reckless-simd128.wasm`) and serving `.wasm` as `application/wasm` behind COOP/COEP headers for persistent isolated-worker mode.
+- Merge/deploy readiness depends on the release pipeline running `npm run reckless:build-production`, publishing the ignored generated assets (`reckless.wasm` and `reckless-simd128.wasm`) plus their `*corresponding-source*.tar.gz` archives, and serving `.wasm` as `application/wasm` behind COOP/COEP headers for persistent isolated-worker mode. The checked-in `public/_headers` covers static hosts that honor that file; custom hosts should mirror those headers.
 
 ## 2026-06-04 corrected browser API SIMD full benchmark
 

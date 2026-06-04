@@ -4,7 +4,10 @@ import { dirname, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const repo = process.env.RECKLESS_REPO ?? 'https://github.com/codedeliveryservice/Reckless.git';
-const ref = process.env.RECKLESS_REF ?? 'main';
+// Pin the default upstream revision so release WASM artifacts can be rebuilt
+// from a stable corresponding-source recipe. Override RECKLESS_REF to test a
+// newer upstream branch/tag/commit.
+const ref = process.env.RECKLESS_REF ?? '0010617448bdef4c8cd7d4f4825b7e42c8bc262a';
 const workdir = resolve(process.env.RECKLESS_BUILD_DIR ?? '.local_engines/reckless-wasi-src');
 const out = resolve(process.env.RECKLESS_WASM_OUT ?? 'public/reckless/reckless.wasm');
 const evalfile = process.env.RECKLESS_EVALFILE ? resolve(process.env.RECKLESS_EVALFILE) : '';
@@ -177,8 +180,11 @@ function patchRecklessForWasi(root) {
 }
 
 rmSync(workdir, { recursive: true, force: true });
-mkdirSync(dirname(workdir), { recursive: true });
-run('git', ['clone', '--depth=1', '--branch', ref, repo, workdir]);
+mkdirSync(workdir, { recursive: true });
+run('git', ['init'], { cwd: workdir });
+run('git', ['remote', 'add', 'origin', repo], { cwd: workdir });
+run('git', ['fetch', '--depth=1', 'origin', ref], { cwd: workdir });
+run('git', ['checkout', '--detach', 'FETCH_HEAD'], { cwd: workdir });
 patchRecklessForWasi(workdir);
 if (enableWasmSimdNnue) patchRecklessForWasmSimdNnue(workdir);
 run('rustup', ['target', 'add', 'wasm32-wasip1']);

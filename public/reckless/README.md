@@ -1,13 +1,19 @@
 # Reckless WASI asset
 
-Generated `*.wasm` and `.nnue` artifacts are intentionally not committed. Production/deploy builds that offer Reckless should generate and publish both the scalar fallback and the default SIMD artifact:
+Generated `*.wasm`, `.nnue`, and corresponding-source archives are intentionally not committed. Production/deploy builds that offer Reckless should generate and publish both the scalar fallback and the default SIMD artifact plus their patched source archives:
 
 ```sh
-npm run reckless:build-wasi
-npm run reckless:build-simd-wasi
+npm run reckless:build-production
 ```
 
-`reckless:build-wasi` writes the scalar fallback `public/reckless/reckless.wasm`. `reckless:build-simd-wasi` writes the default `public/reckless/reckless-simd128.wasm` using `-C target-feature=+simd128` plus the wasm NNUE SIMD patch. Browser UI code selects SIMD by default when `WebAssembly.validate` confirms SIMD support and falls back to scalar when SIMD is unsupported or the implicit SIMD asset is missing.
+This writes:
+
+- `public/reckless/reckless.wasm`
+- `public/reckless/reckless-simd128.wasm`
+- `public/reckless/reckless-scalar-corresponding-source.tar.gz`
+- `public/reckless/reckless-simd128-corresponding-source.tar.gz`
+
+`reckless.wasm` is the scalar fallback. `reckless-simd128.wasm` is the default artifact and uses `-C target-feature=+simd128` plus the wasm NNUE SIMD patch. Browser UI code selects SIMD by default when `WebAssembly.validate` confirms SIMD support and falls back to scalar when SIMD is unsupported or the implicit SIMD asset is missing.
 
 Build the browser-native API SIMD artifact with an external/cacheable NNUE asset:
 
@@ -25,4 +31,4 @@ npm run reckless:build-lite-wasi
 
 The scripts clone or reuse `https://github.com/codedeliveryservice/Reckless`, apply browser/WASI patches for one-shot argv searches, isolated persistent-stdin searches, direct browser API exports, optional SIMD NNUE, and optional external NNUE loading, then build `wasm32-wasip1` without Syzygy tablebases and write into `public/reckless/`.
 
-Reckless is licensed AGPL-3.0. If you distribute the WASM artifact, comply with Reckless' license and provide corresponding source for the patched build.
+Reckless is licensed AGPL-3.0 by its upstream authors. This project claims no ownership of Reckless. If you distribute the WASM artifacts, comply with Reckless' license and provide the generated corresponding source archives for the patched builds.

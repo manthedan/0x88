@@ -5,10 +5,10 @@
 The promoted default SIMD WASI/UCI artifact is built with:
 
 ```sh
-npm run reckless:build-simd-wasi
+npm run reckless:build-production
 ```
 
-This sets `RUSTFLAGS='-C target-feature=+simd128'`, enables the local `RECKLESS_WASM_SIMD_NNUE=1` patch, and writes the ignored artifact `public/reckless/reckless-simd128.wasm`. Arena and Analysis select this variant by default when the browser validates WebAssembly SIMD support; the scalar `public/reckless/reckless.wasm` remains the fallback for unsupported browsers or missing implicit SIMD assets.
+This builds the scalar fallback and the default SIMD artifact, then emits matching patched-source archives for license compliance. Internally, the SIMD build sets `RUSTFLAGS='-C target-feature=+simd128'`, enables the local `RECKLESS_WASM_SIMD_NNUE=1` patch, and writes the ignored artifact `public/reckless/reckless-simd128.wasm`. Arena and Analysis select this variant by default when the browser validates WebAssembly SIMD support; the scalar `public/reckless/reckless.wasm` remains the fallback for unsupported browsers or missing implicit SIMD assets.
 
 Earlier measurements used a first-pass auto-vectorized-only `+simd128` artifact where upstream Reckless still selected scalar NNUE source paths for `wasm32-wasip1`. The current build now patches Reckless to select its vectorized NNUE path for `wasm32 + simd128` and adds a wasm32 SIMD module using `core::arch::wasm32` intrinsics.
 
