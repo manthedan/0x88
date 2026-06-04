@@ -13,9 +13,10 @@ import { openingStatsForPosition, openingSummary, type ImportedGame, type Openin
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
-import { StockfishEngine } from './stockfishEngine.ts';
+import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { RecklessEngine } from './recklessEngine.ts';
 import { RECKLESS_VARIANTS, checkRecklessVariantAsset, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, type RecklessVariant } from './recklessVariants.ts';
+import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support } from './bt4Engine.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
@@ -26,8 +27,10 @@ const REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
 let mainEvaluator: Lc0OnnxEvaluator | null = null;
-let stockfish: StockfishEngine | null = null;
-let reckless: RecklessEngine | null = null;
+let stockfishLite: StockfishEngine | null = null;
+let stockfishFull: StockfishEngine | null = null;
+// Lc0 BT4 runs in its own worker (lazy, WebGPU-gated, disposable). See bt4Engine.ts.
+const bt4 = new Bt4WorkerSearcher();
 let ground: Ground | null = null;
 let orientation: 'white' | 'black' = 'white';
 let analysisAbort: AbortController | null = null;
@@ -110,7 +113,7 @@ async function workerLc0Lines(fen: string): Promise<AnalysisLine[]> {
     { type: 'search', input: { positions: tree.historyBoards() }, visits: visits(), batchSize: 1, multiPv: multiPv() },
     (id) => { activeWorkerSearchId = id; },
   );
-  return response.result.cancelled ? [] : lc0AnalysisLines(response.result, fen, 'LC0');
+  return response.result.cancelled ? [] : lc0AnalysisLines(response.result, fen, 'Lc0');
 }
 
 function el(id: string): HTMLElement {
@@ -131,50 +134,90 @@ function visits(): number { return Math.max(1, Math.floor(Number(inputEl('visits
 function multiPv(): number { return Math.max(1, Math.floor(Number(inputEl('multiPvInput').value) || 3)); }
 function sfDepth(): number { return Math.max(1, Math.floor(Number(inputEl('sfDepthInput').value) || 14)); }
 function recklessDepth(): number { return Math.max(1, Math.floor(Number(inputEl('recklessDepthInput').value) || 4)); }
-function useLc0(): boolean { return inputEl('useLc0').checked; }
-function useStockfish(): boolean { return inputEl('useStockfish').checked; }
-function useReckless(): boolean { return inputEl('useReckless').checked; }
+// Engines to analyze are chosen as an add/remove list of cascading selects:
+// family (Lc0/Stockfish/Reckless) -> variant (Lc0: Small|BT4; SF: Lite|Full;
+// Reckless: variant). Each maps to a single shared, lazily-created instance.
+type EngineFamily = 'lc0' | 'sf' | 'reckless';
+interface EngineRow { family: EngineFamily; variant: string; }
+const DEFAULT_RECKLESS_VARIANT = REQUESTED_RECKLESS_VARIANT.key;
+let engineRows: EngineRow[] = [{ family: 'lc0', variant: 'small' }];
 
-function selectedRecklessVariant(): RecklessVariant {
-  const key = normalizeRecklessVariant(selectEl('recklessVariantSelect').value);
-  if (key === 'custom' && REQUESTED_RECKLESS_VARIANT.key === 'custom') return REQUESTED_RECKLESS_VARIANT;
-  return recklessVariantByKey(key);
+function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
+  if (family === 'lc0') return [{ value: 'small', label: 'Small' }, { value: 'bt4', label: 'BT4', disabled: !bt4SupportedSync() }];
+  if (family === 'sf') return [{ value: 'lite', label: 'Lite' }, { value: 'full', label: 'Full' }];
+  return RECKLESS_VARIANTS.map((v) => ({ value: v.key, label: v.label }));
 }
 
-function recklessLabel(): string {
-  return selectedRecklessVariant().label;
+function defaultVariant(family: EngineFamily): string {
+  return family === 'reckless' ? DEFAULT_RECKLESS_VARIANT : variantOptions(family)[0].value;
+}
+
+function rowLabel(row: EngineRow): string {
+  if (row.family === 'lc0') return row.variant === 'bt4' ? 'Lc0 BT4' : 'Lc0';
+  if (row.family === 'sf') return row.variant === 'lite' ? 'SF Lite' : 'SF';
+  return recklessVariantByKey(normalizeRecklessVariant(row.variant)).label;
+}
+
+function activeEngineRows(): EngineRow[] {
+  const seen = new Set<string>();
+  return engineRows.filter((r) => { const k = `${r.family}:${r.variant}`; if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
+function usesBt4Row(): boolean {
+  return engineRows.some((r) => r.family === 'lc0' && r.variant === 'bt4');
+}
+
+function renderEngineList(): void {
+  const families: [EngineFamily, string][] = [['lc0', 'Lc0'], ['sf', 'Stockfish'], ['reckless', 'Reckless']];
+  el('engineList').innerHTML = engineRows.map((row, i) => {
+    const famSel = families.map(([v, l]) => `<option value="${v}"${row.family === v ? ' selected' : ''}>${l}</option>`).join('');
+    const varSel = variantOptions(row.family).map((o) => `<option value="${o.value}"${row.variant === o.value ? ' selected' : ''}${o.disabled ? ' disabled' : ''}>${htmlEscape(o.label)}</option>`).join('');
+    const remove = engineRows.length > 1 ? `<button class="row-rm" data-i="${i}" type="button" title="Remove engine">×</button>` : '';
+    return `<div class="engine-row"><select class="row-fam" data-i="${i}">${famSel}</select><span class="arrow">→</span><select class="row-var" data-i="${i}">${varSel}</select>${remove}</div>`;
+  }).join('');
+}
+
+async function workerBt4Lines(fen: string): Promise<AnalysisLine[]> {
+  const result = await bt4.search({ positions: tree.historyBoards() }, { visits: visits(), multiPv: multiPv() });
+  return result.cancelled ? [] : lc0AnalysisLines(result, fen, 'Lc0 BT4');
+}
+
+// Lc0 BT4 is WebGPU-only; its option is disabled in the list when WebGPU is unusable.
+async function refreshBt4Availability(): Promise<void> {
+  await probeBt4Support();
+  if (!bt4SupportedSync()) {
+    for (const row of engineRows) if (row.family === 'lc0' && row.variant === 'bt4') row.variant = 'small';
+  }
+  renderEngineList();
 }
 
 function renderRecklessRuntimeInfo(): void {
-  const variant = selectedRecklessVariant();
-  const status = reckless?.runtimeStatus();
-  const mode = reckless?.runtimeLabel() ?? (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated ? 'persistent available' : 'one-shot fallback');
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
-  const asset = recklessVariantAssetStatus(variant);
-  if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
-  const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
-  const targetUrl = status?.wasmUrl ?? variant.wasmUrl;
-  el('recklessRuntimeInfo').textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${targetUrl}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi or reckless:build-lite-wasi' : ''}`;
+  const mode = (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) ? 'persistent available' : 'one-shot fallback';
+  el('recklessRuntimeInfo').textContent = `Reckless: ${mode} · ${sab}`;
 }
 
-function refreshRecklessVariantUi(): void {
-  const select = selectEl('recklessVariantSelect');
-  if (!select.options.length) {
-    const variants = REQUESTED_RECKLESS_VARIANT.key === 'custom' ? [...RECKLESS_VARIANTS, REQUESTED_RECKLESS_VARIANT] : [...RECKLESS_VARIANTS];
-    select.innerHTML = variants.map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
+function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
+  if (kind === 'lite') {
+    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: sfDepth() }, stockfishFlavorUrl('lite-single'));
+    return stockfishLite;
   }
-  select.disabled = analyzing;
-  renderRecklessRuntimeInfo();
+  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: sfDepth() }, stockfishFlavorUrl('single'));
+  return stockfishFull;
 }
 
-function getStockfish(): StockfishEngine {
-  if (!stockfish) stockfish = new StockfishEngine({ depth: sfDepth() });
-  return stockfish;
+const recklessByVariant = new Map<string, RecklessEngine>();
+function getRecklessFor(variantKey: string): RecklessEngine {
+  let engine = recklessByVariant.get(variantKey);
+  if (!engine) {
+    engine = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, recklessVariantByKey(normalizeRecklessVariant(variantKey)).wasmUrl);
+    recklessByVariant.set(variantKey, engine);
+  }
+  return engine;
 }
 
-function getReckless(): RecklessEngine {
-  if (!reckless) reckless = new RecklessEngine({ depth: recklessDepth(), hashMb: 16 }, selectedRecklessVariant().wasmUrl);
-  return reckless;
+function disposeUnusedEngines(): void {
+  if (!usesBt4Row()) bt4.dispose();
 }
 
 function legalDests(board: BoardState) {
@@ -394,15 +437,16 @@ function renderAll() {
 }
 
 async function analyzeCurrent() {
-  if (!useLc0() && !useStockfish() && !useReckless()) { el('message').textContent = 'Enable LC0, Stockfish, or Reckless to analyze.'; return; }
+  const rows = activeEngineRows();
+  if (!rows.length) { el('message').textContent = 'Add an engine to analyze.'; return; }
   // Interrupt any in-flight analysis: abort the Stockfish signal and cancel the
-  // worker's LC0 search by id, so a new position takes over immediately.
+  // worker LC0 / BT4 searches, so a new position takes over immediately.
   analysisAbort?.abort();
   if (activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
+  bt4.cancel();
   const controller = new AbortController();
   analysisAbort = controller;
   analyzing = true;
-  refreshRecklessVariantUi();
   el('stop').toggleAttribute('disabled', false);
   el('analyze').toggleAttribute('disabled', true);
   const fen = tree.current.fen;
@@ -411,29 +455,33 @@ async function analyzeCurrent() {
     analyzing = false;
     el('stop').toggleAttribute('disabled', true);
     el('analyze').toggleAttribute('disabled', false);
-    refreshRecklessVariantUi();
     return;
   }
-  const selectedLabels = [useLc0() ? `LC0 ${visits()}v` : '', useStockfish() ? `SF d${sfDepth()}` : '', useReckless() ? `${recklessLabel()} d${recklessDepth()}` : ''].filter(Boolean).join(' + ');
+  const selectedLabels = rows.map((row) => {
+    if (row.family === 'reckless') return `${rowLabel(row)} d${recklessDepth()}`;
+    if (row.family === 'sf') return `${rowLabel(row)} d${sfDepth()}`;
+    return `${rowLabel(row)} ${visits()}v`;
+  }).join(' + ');
   el('message').textContent = `Analyzing (${selectedLabels}, ${multiPv()} lines)…`;
   try {
     const tasks: Promise<AnalysisLine[]>[] = [];
-    if (useLc0()) {
-      if (workerReady) tasks.push(workerLc0Lines(fen));
-      else if (searcher) tasks.push(searcher.search({ positions: tree.historyBoards() }, { visits: visits(), multiPv: multiPv(), signal: controller.signal, yieldEveryMs: 16 })
-        .then((result) => lc0AnalysisLines(result, fen, 'LC0')));
-    }
-    if (useStockfish()) {
-      tasks.push(getStockfish().analyze(fen, { multipv: multiPv(), depth: sfDepth(), signal: controller.signal })
-        .then((infos) => stockfishAnalysisLines(infos, fen, `SF d${sfDepth()}`)));
-    }
-    if (useReckless()) {
-      const label = `${recklessLabel()} d${recklessDepth()}`;
-      tasks.push(getReckless().analyze(fen, { multipv: multiPv(), depth: recklessDepth(), signal: controller.signal })
-        .then((infos) => {
-          renderRecklessRuntimeInfo();
-          return stockfishAnalysisLines(infos, fen, label);
-        }));
+    for (const row of rows) {
+      if (row.family === 'lc0' && row.variant === 'bt4') {
+        tasks.push(workerBt4Lines(fen));
+      } else if (row.family === 'lc0') {
+        if (workerReady) tasks.push(workerLc0Lines(fen));
+        else if (searcher) tasks.push(searcher.search({ positions: tree.historyBoards() }, { visits: visits(), multiPv: multiPv(), signal: controller.signal, yieldEveryMs: 16 })
+          .then((result) => lc0AnalysisLines(result, fen, 'Lc0')));
+      } else if (row.family === 'sf') {
+        const kind = row.variant === 'full' ? 'full' : 'lite';
+        const label = kind === 'lite' ? `SF Lite d${sfDepth()}` : `SF d${sfDepth()}`;
+        tasks.push(getStockfish(kind).analyze(fen, { multipv: multiPv(), depth: sfDepth(), signal: controller.signal })
+          .then((infos) => stockfishAnalysisLines(infos, fen, label)));
+      } else {
+        const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label} d${recklessDepth()}`;
+        tasks.push(getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: recklessDepth(), signal: controller.signal })
+          .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
+      }
     }
     const grouped = await Promise.all(tasks);
     if (controller.signal.aborted) return;
@@ -448,7 +496,6 @@ async function analyzeCurrent() {
       analysisAbort = null;
       el('stop').toggleAttribute('disabled', true);
       el('analyze').toggleAttribute('disabled', false);
-      refreshRecklessVariantUi();
     }
   }
 }
@@ -525,17 +572,47 @@ function wireEvents() {
   el('stop').addEventListener('click', () => {
     analysisAbort?.abort();
     if (activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
+    bt4.cancel();
   });
-  for (const id of ['useLc0', 'useStockfish', 'useReckless', 'sfDepthInput', 'recklessDepthInput', 'visitsInput', 'multiPvInput']) {
+  el('engineList').addEventListener('change', (event) => {
+    const select = event.target as HTMLSelectElement;
+    const i = Number(select.dataset.i);
+    if (Number.isNaN(i) || !engineRows[i]) return;
+    if (select.classList.contains('row-fam')) {
+      engineRows[i].family = select.value as EngineFamily;
+      engineRows[i].variant = defaultVariant(select.value as EngineFamily);
+      renderEngineList();
+    } else if (select.classList.contains('row-var')) {
+      if (engineRows[i].family === 'lc0' && select.value === 'bt4') {
+        // One-time gate before the ~353MB lazy load.
+        if (!window.confirm(`${bt4LoadWarning()}\n\nUse Lc0 BT4?`)) { select.value = engineRows[i].variant; return; }
+      }
+      engineRows[i].variant = select.value;
+    }
+    disposeUnusedEngines();
+    lineCache.delete(tree.current.fen);
+    void analyzeCurrent();
+  });
+  el('engineList').addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest('.row-rm') as HTMLElement | null;
+    if (!button) return;
+    const i = Number(button.dataset.i);
+    if (Number.isNaN(i) || engineRows.length <= 1) return;
+    engineRows.splice(i, 1);
+    renderEngineList();
+    disposeUnusedEngines();
+    lineCache.delete(tree.current.fen);
+    void analyzeCurrent();
+  });
+  el('addEngine').addEventListener('click', () => {
+    engineRows.push({ family: 'lc0', variant: 'small' });
+    renderEngineList();
+    lineCache.delete(tree.current.fen);
+    void analyzeCurrent();
+  });
+  for (const id of ['sfDepthInput', 'recklessDepthInput', 'visitsInput', 'multiPvInput']) {
     el(id).addEventListener('change', () => { lineCache.delete(tree.current.fen); void analyzeCurrent(); });
   }
-  el('recklessVariantSelect').addEventListener('change', () => {
-    reckless?.dispose();
-    reckless = null;
-    lineCache.delete(tree.current.fen);
-    refreshRecklessVariantUi();
-    if (useReckless()) void analyzeCurrent();
-  });
   el('movelist').addEventListener('click', (event) => {
     const target = (event.target as HTMLElement).closest('[data-node]');
     if (!target) return;
@@ -583,10 +660,13 @@ function disposeRuntimeResources(): void {
   workerBackend = '';
   for (const pending of workerPending.values()) pending.reject(new Error('LC0 worker disposed'));
   workerPending.clear();
-  stockfish?.dispose();
-  stockfish = null;
-  reckless?.dispose();
-  reckless = null;
+  bt4.dispose();
+  stockfishLite?.dispose();
+  stockfishLite = null;
+  stockfishFull?.dispose();
+  stockfishFull = null;
+  for (const engine of recklessByVariant.values()) engine.dispose();
+  recklessByVariant.clear();
   void mainEvaluator?.dispose();
   mainEvaluator = null;
   searcher = null;
@@ -597,10 +677,10 @@ async function init() {
     if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
   });
   renderAll();
-  refreshRecklessVariantUi();
-  selectEl('recklessVariantSelect').value = REQUESTED_RECKLESS_VARIANT.key;
+  renderEngineList();
   renderRecklessRuntimeInfo();
   wireEvents();
+  void refreshBt4Availability();
   el('message').textContent = 'Loading LC0 model in a worker…';
   try {
     el('backend').textContent = await initWorker();

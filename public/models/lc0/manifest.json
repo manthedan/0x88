@@ -33,6 +33,14 @@
       "source": "../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch8.f16.onnx",
       "bytes": 40491226,
       "sha256": "4a3d0b0ee3080c36d1f18c4a1acbdb0ef9751bb32fc33f28db032f4c230418eb"
+    },
+    {
+      "file": "BT4-1024x15x32h-swa-6147500.batch1.f16.onnx",
+      "url": "/models/lc0/BT4-1024x15x32h-swa-6147500.batch1.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/BT4-1024x15x32h-swa-6147500.batch1.f16.onnx",
+      "bytes": 370635179,
+      "sha256": "51ece3069ddd3e5c200a184f0dfca03d7b2a607398d704fec08d5d8a2f603da2"
     }
   ],
   "packs": [
