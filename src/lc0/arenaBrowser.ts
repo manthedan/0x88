@@ -163,12 +163,12 @@ function lc0WdlCompact(wdl: [number, number, number], q: number): string {
 function lc0EvalBar(fen: string, wdl: [number, number, number]): EngineEvalBar {
   const stmExpectedScore = clamp01(wdl[0] + 0.5 * wdl[1]);
   const whiteScore = stmScoreToWhiteScore(fen, stmExpectedScore);
-  return { whiteScore, label: `W ${percent0(whiteScore)}` };
+  return { whiteScore, label: percent0(whiteScore) };
 }
 
 function qEvalBar(fen: string, q: number): EngineEvalBar {
   const whiteScore = stmScoreToWhiteScore(fen, (clamp01((q + 1) / 2)));
-  return { whiteScore, label: `W ${percent0(whiteScore)}` };
+  return { whiteScore, label: percent0(whiteScore) };
 }
 
 function stockfishEvalBar(fen: string, info: StockfishInfoLine | undefined): EngineEvalBar | undefined {
@@ -176,12 +176,12 @@ function stockfishEvalBar(fen: string, info: StockfishInfoLine | undefined): Eng
   const turn = fenTurn(fen);
   if (info.mateIn !== undefined) {
     const whiteMateSign = turn === 'w' ? info.mateIn : -info.mateIn;
-    return { whiteScore: whiteMateSign > 0 ? 1 : 0, label: `W M${signed(whiteMateSign, 0)}` };
+    return { whiteScore: whiteMateSign > 0 ? 1 : 0, label: `M${Math.abs(whiteMateSign)}` };
   }
   if (info.scoreCp === undefined) return undefined;
   const whiteCp = turn === 'w' ? info.scoreCp : -info.scoreCp;
   const whiteScore = 1 / (1 + Math.exp(-whiteCp / 320));
-  return { whiteScore: clamp01(whiteScore), label: `${signed(whiteCp, 0)} cp` };
+  return { whiteScore: clamp01(whiteScore), label: signed(whiteCp / 100, 1) };
 }
 
 function searchWdlText(wdl: [number, number, number], q: number): string {
@@ -193,6 +193,13 @@ function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
   engineOutputs.set(snapshot.engineId, snapshot);
   renderSideLabels();
   renderEngineOutputs();
+}
+
+function shortEngineTag(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes('lc0') || n.includes('leela')) return 'Lc0';
+  if (n.includes('stockfish') || /\bsf\b/.test(n)) return 'SF18';
+  return name.split(/[\s·|]+/)[0] || name;
 }
 
 function renderEvalBars(): void {
@@ -207,6 +214,12 @@ function renderEvalBars(): void {
     node.classList.toggle('thinking', thinking);
     node.title = `${color} engine: ${engineName ?? '—'}${bar ? ` · ${bar.label}` : ''}`;
     node.innerHTML = `<div class="eval-fill" style="height:${(100 * whiteScore).toFixed(1)}%"></div><div class="eval-midline"></div><div class="eval-bar-caption">${color[0]}</div><div class="eval-bar-value">${htmlEscape(label)}</div>`;
+    const chip = document.getElementById(id.replace('EvalBar', 'Chip'));
+    if (chip) {
+      chip.textContent = engineName ? shortEngineTag(engineName) : '';
+      chip.title = engineName ? `${color} engine: ${engineName}` : '';
+      chip.style.display = engineName ? '' : 'none';
+    }
   };
   render('whiteEngineEvalBar', 'White', boardWhiteId, boardWhiteName);
   render('blackEngineEvalBar', 'Black', boardBlackId, boardBlackName);
@@ -237,7 +250,7 @@ function renderSideLabels() {
     const evalText = output?.shortEval ?? (thinking ? 'thinking…' : 'eval —');
     const status = active ? (thinking && output ? 'thinking' : 'to move') : '';
     node.classList.toggle('active', active);
-    node.innerHTML = `<span class="side-main"><span class="color">${color}</span> <span class="engine">${htmlEscape(engineName ?? '—')}</span> <span class="side-eval">${htmlEscape(evalText)}</span></span>${status ? `<span class="turn">${status}</span>` : ''}`;
+    node.innerHTML = `<span class="side-main"><span class="color">${color}</span> <span class="engine">${htmlEscape(engineName ?? '—')}</span>${status ? ` <span class="turn">${status}</span>` : ''} <span class="side-eval">${htmlEscape(evalText)}</span></span>`;
   };
   update('blackSideLabel', 'Black', boardBlackId, boardBlackName, board.turn === 'b');
   update('whiteSideLabel', 'White', boardWhiteId, boardWhiteName, board.turn === 'w');
