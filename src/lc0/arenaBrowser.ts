@@ -249,30 +249,33 @@ function renderEngineOutputs(): void {
   const cards = ids.map((id) => {
     const snapshot = engineOutputs.get(id);
     const name = snapshot?.engineName ?? engines.get(id)?.name ?? id;
-    const active = activeEngineIds.length && id === (board.turn === 'w' ? activeEngineIds[0] : activeEngineIds[1]);
     const thinking = thinkingEngineIds.has(id);
-    if (!snapshot) return `<div class="eval-card${active ? ' active' : ''}"><strong>${htmlEscape(name)}</strong>${thinking ? 'thinking on current position…' : 'waiting for output…'}</div>`;
+    // No per-ply "active" highlight here: at fast movetimes it strobes. Whose turn
+    // it is is shown calmly by the last-move arrow on the board instead.
+    if (!snapshot) return `<div class="eval-card"><strong>${htmlEscape(name)}</strong>${thinking ? 'thinking on current position…' : 'waiting for output…'}</div>`;
     const status = thinking ? '<span class="eval-status">thinking… keeping last eval</span>' : '';
     const detail = snapshot.detail ? `<br>${htmlEscape(snapshot.detail)}` : '';
     const pv = snapshot.pv?.length ? `<br>${htmlEscape(pvText(snapshot.pv))}` : '';
     const move = snapshot.move ? ` · move ${snapshot.move}` : '';
-    return `<div class="eval-card${active ? ' active' : ''}"><strong>${htmlEscape(name)}${status}</strong>${htmlEscape(snapshot.summary)}${htmlEscape(move)}${detail}${pv}</div>`;
+    return `<div class="eval-card"><strong>${htmlEscape(name)}${status}</strong>${htmlEscape(snapshot.summary)}${htmlEscape(move)}${detail}${pv}</div>`;
   });
   el('engineEvalInfo').innerHTML = cards.length ? cards.join('') : '<div class="eval-card">Engine outputs: waiting for a move…</div>';
 }
 
 function renderSideLabels() {
-  const update = (id: string, color: 'White' | 'Black', engineId: string | null, engineName: string | null, active: boolean) => {
+  // Side labels are static identity rows (chip + logo + engine + eval). Whose turn
+  // it is is conveyed by the board's last-move arrow, not a per-ply highlight that
+  // would strobe at fast movetimes.
+  const update = (id: string, color: 'White' | 'Black', engineId: string | null, engineName: string | null) => {
     const node = el(id);
     const output = engineId ? engineOutputs.get(engineId) : undefined;
     const thinking = engineId ? thinkingEngineIds.has(engineId) : false;
     const evalText = output?.shortEval ?? (thinking ? 'thinking…' : 'eval —');
-    const status = active ? (thinking && output ? 'thinking' : 'to move') : '';
-    node.classList.toggle('active', active);
-    node.innerHTML = `<span class="side-main"><span class="color">${color}</span> ${engineName ? engineLogoHtml(engineName) : ''}<span class="engine">${htmlEscape(engineName ?? '—')}</span>${status ? ` <span class="turn">${status}</span>` : ''} <span class="side-eval">${htmlEscape(evalText)}</span></span>`;
+    node.classList.remove('active');
+    node.innerHTML = `<span class="side-main"><span class="color">${color}</span> ${engineName ? engineLogoHtml(engineName) : ''}<span class="engine">${htmlEscape(engineName ?? '—')}</span> <span class="side-eval">${htmlEscape(evalText)}</span></span>`;
   };
-  update('blackSideLabel', 'Black', boardBlackId, boardBlackName, board.turn === 'b');
-  update('whiteSideLabel', 'White', boardWhiteId, boardWhiteName, board.turn === 'w');
+  update('blackSideLabel', 'Black', boardBlackId, boardBlackName);
+  update('whiteSideLabel', 'White', boardWhiteId, boardWhiteName);
   renderEvalBars();
 }
 
@@ -293,11 +296,22 @@ function renderBoard() {
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 140 },
     lastMove: lastUci ? [lastUci.slice(0, 2) as Key, lastUci.slice(2, 4) as Key] : undefined,
+    // Custom brushes in the two side identity colors so the last-move arrow also
+    // shows which side just moved — a calm alternative to per-ply "to move" flashing.
+    drawable: { enabled: false, brushes: {
+      moveWhite: { key: 'moveWhite', color: '#2f6e7d', opacity: 0.9, lineWidth: 14 },
+      moveBlack: { key: 'moveBlack', color: '#b15c2b', opacity: 0.9, lineWidth: 14 },
+    } },
   };
-  if (!ground) ground = Chessground(el('ground'), config);
-  else ground.set(config);
+  // Cast: chessground's DrawBrushes type has fixed keys, but custom brush keys
+  // merge fine at runtime.
+  const cfg = config as unknown as NonNullable<Parameters<typeof Chessground>[1]>;
+  if (!ground) ground = Chessground(el('ground'), cfg);
+  else ground.set(cfg);
+  // The mover is the side NOT to move now; tint the arrow with their identity hue.
+  const moverBrush = board.turn === 'w' ? 'moveBlack' : 'moveWhite';
   const shapes: DrawShape[] = lastUci && lastUci.length >= 4
-    ? [{ orig: lastUci.slice(0, 2) as Key, dest: lastUci.slice(2, 4) as Key, brush: 'green' }] : [];
+    ? [{ orig: lastUci.slice(0, 2) as Key, dest: lastUci.slice(2, 4) as Key, brush: moverBrush }] : [];
   ground.setAutoShapes(shapes);
   renderSideLabels();
   renderEngineOutputs();
