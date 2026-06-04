@@ -73,10 +73,12 @@ Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. 
 - `npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 4 --timeout 60000 --wgsl-iters 3 --ort-iters 3`
   - Repeated fresh Chromium/WebGPU alternating run after hybrid runtime caching; ORT reported WebGPU provider present in all 4 ORT rows.
   - Representative sample medians were WGSL synchronized readback/block about `1.10 ms` and ORT WebGPU average/run about `1.30 ms` (`ratioWgslOverOrt ≈ 0.85`); still measurement-only, not promotion evidence.
-- Remote Mac mini bounded harness check: `npm run lc0:browser-hybrid-search-bench -- --visits 32 --eval-iters 3 --eval-warmup 1 --search-iters 3 --search-warmup 1 --timeout 300000`
-  - `HYBRID_SEARCH_BENCH_DONE` via `lc0web-wgsl-encoder-ort-heads`; best move `d2d4`.
-  - Warm cached eval mean about `36.4 ms`; fixed 32-visit PUCT search mean about `1150.4 ms` (`27.8 visits/s`). This is a harness/bottleneck baseline, not promotion evidence.
-  - Post-run process check showed no Chrome/Vite process left; only the small agent-browser helper remained and was killed manually.
+- Pre-WGSL-heads local + Mac mini baseline matrix for `lc0web-wgsl-encoder-ort-heads`:
+  - Drift parity, local Chromium 149: `npm run lc0:browser-hybrid-drift -- --limit 9 --timeout 300000 --baseline-mode serial` and `--limit 16` both completed. The available fixture set currently contains 9 fixtures, so the `--limit 16` run also evaluated 9. Best moves matched f32 ONNX and native BLAS on `9/9`; local max drift ranges across the two runs were f32 WDL `0.00113–0.00205`, native WDL `0.00239–0.00283`, f32 top-prior `0.00172–0.00349`, native top-prior `0.00128–0.00324`.
+  - Drift parity, Mac mini Chromium 148: the same `--limit 9` and `--limit 16` serial runs completed, again evaluating the 9 available fixtures. Best moves matched f32 ONNX and native BLAS on `9/9`; max drift ranges were f32 WDL `0.000156–0.000315`, native WDL `0.00189`, f32 top-prior `0.000737–0.00271`, native top-prior `0.000824–0.00238`.
+  - Search latency, local Chromium 149 with `requestedEp=wasm`, `packVerification=disabled`, batch `1`, 3 timed iterations per row: visits `1` => warm eval mean `41.43 ms`, search mean `86.93 ms`, `11.50 visits/s`; visits `32` => warm eval mean `42.77 ms`, search mean `1351.37 ms`, `23.68 visits/s`; visits `128` => warm eval mean `42.30 ms`, search mean `5314.93 ms`, `24.08 visits/s`. All rows returned best move `d2d4`; search stats showed no cache hits within a fresh search and neural misses of visits+1.
+  - Search latency, Mac mini Chromium 148 with `requestedEp=wasm`, `packVerification=disabled`, batch `1`, 3 timed iterations per row: visits `1` => warm eval mean `37.23 ms`, search mean `73.13 ms`, `13.67 visits/s`; visits `32` => warm eval mean `40.17 ms`, search mean `1441.93 ms`, `22.19 visits/s`; visits `128` => warm eval mean `37.23 ms`, search mean `4607.00 ms`, `27.78 visits/s`. All rows returned best move `d2d4`; search stats showed no cache hits within a fresh search and neural misses of visits+1.
+  - Cleanup check after the repeated matrix found no local or remote Chrome for Testing, `agent-browser`, Vite, or lc0 browser Node processes left. This remains a baseline/bottleneck measurement, not promotion evidence.
 
 Validation commands used during this checkpoint:
 
@@ -98,8 +100,12 @@ npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-10-wasm --ti
 npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-heads-2-wasm --timeout 120000
 npm run lc0:browser-hybrid-drift -- --no-server --limit 3 --timeout 180000
 npm run lc0:browser-hybrid-drift -- --limit 9 --timeout 300000
+npm run lc0:browser-hybrid-drift -- --limit 9 --timeout 300000 --baseline-mode serial
+npm run lc0:browser-hybrid-drift -- --limit 16 --timeout 300000 --baseline-mode serial
 npm run lc0:browser-hybrid-search-bench -- --dry-run --visits 8 --eval-iters 1 --search-iters 1
+npm run lc0:browser-hybrid-search-bench -- --visits 1 --eval-iters 3 --eval-warmup 1 --search-iters 3 --search-warmup 1 --timeout 300000
 npm run lc0:browser-hybrid-search-bench -- --visits 32 --eval-iters 3 --eval-warmup 1 --search-iters 3 --search-warmup 1 --timeout 300000
+npm run lc0:browser-hybrid-search-bench -- --visits 128 --eval-iters 3 --eval-warmup 1 --search-iters 3 --search-warmup 1 --timeout 300000
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --dry-run --samples 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 10 --timeout 25000 --wgsl-iters 3 --ort-iters 3
