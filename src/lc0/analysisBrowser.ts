@@ -14,15 +14,16 @@ import { loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
-import { RecklessEngine } from './recklessEngine.ts';
-import { RECKLESS_VARIANTS, checkRecklessVariantAsset, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, type RecklessVariant } from './recklessVariants.ts';
+import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
+import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support } from './bt4Engine.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
-const REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
+const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
+let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
@@ -136,8 +137,6 @@ function multiPv(): number { return Math.max(1, Math.floor(Number(inputEl('multi
 // Reckless: variant) -> strength (Lc0 visits, SF/Reckless depth), all per row.
 type EngineFamily = 'lc0' | 'sf' | 'reckless';
 interface EngineRow { family: EngineFamily; variant: string; strength: number; }
-const DEFAULT_RECKLESS_VARIANT = REQUESTED_RECKLESS_VARIANT.key;
-
 function strengthMeta(family: EngineFamily): { unit: string; min: number; max: number; def: number } {
   if (family === 'lc0') return { unit: 'visits', min: 1, max: 100000, def: 400 };
   if (family === 'sf') return { unit: 'depth', min: 1, max: 30, def: 14 };
@@ -145,6 +144,20 @@ function strengthMeta(family: EngineFamily): { unit: string; min: number; max: n
   return { unit: 'depth', min: 1, max: 30, def: 14 };
 }
 function defaultStrength(family: EngineFamily): number { return strengthMeta(family).def; }
+
+function availableRecklessVariants(): RecklessVariant[] {
+  return REQUESTED_RECKLESS_VARIANT.key === 'custom' ? [...RECKLESS_VARIANTS, REQUESTED_RECKLESS_VARIANT] : [...RECKLESS_VARIANTS];
+}
+
+function recklessVariantForKey(variantKey: string): RecklessVariant {
+  const key = normalizeRecklessVariant(variantKey);
+  if (key === 'custom' && REQUESTED_RECKLESS_VARIANT.key === 'custom') return REQUESTED_RECKLESS_VARIANT;
+  return recklessVariantByKey(key);
+}
+
+function recklessCacheKey(variant: RecklessVariant): string {
+  return `${variant.key}:${variant.wasmUrl}:${variant.nnueUrl ?? ''}`;
+}
 
 // "Add engine" fills the next missing family by priority (Lc0 → SF → Reckless),
 // falling back to the top priority when all families are already present.
@@ -159,17 +172,17 @@ let engineRows: EngineRow[] = [{ family: 'lc0', variant: 'small', strength: 400 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
   if (family === 'lc0') return [{ value: 'small', label: 'Small' }, { value: 'bt4', label: 'BT4', disabled: !bt4SupportedSync() }];
   if (family === 'sf') return [{ value: 'lite', label: 'Lite' }, { value: 'full', label: 'Full' }];
-  return RECKLESS_VARIANTS.map((v) => ({ value: v.key, label: v.label }));
+  return availableRecklessVariants().map((v) => ({ value: v.key, label: v.label }));
 }
 
 function defaultVariant(family: EngineFamily): string {
-  return family === 'reckless' ? DEFAULT_RECKLESS_VARIANT : variantOptions(family)[0].value;
+  return family === 'reckless' ? REQUESTED_RECKLESS_VARIANT.key : variantOptions(family)[0].value;
 }
 
 function rowLabel(row: EngineRow): string {
   if (row.family === 'lc0') return row.variant === 'bt4' ? 'Lc0 BT4' : 'Lc0';
   if (row.family === 'sf') return row.variant === 'lite' ? 'SF Lite' : 'SF';
-  return recklessVariantByKey(normalizeRecklessVariant(row.variant)).label;
+  return recklessVariantForKey(row.variant).label;
 }
 
 function activeEngineRows(): EngineRow[] {
@@ -208,8 +221,22 @@ async function refreshBt4Availability(): Promise<void> {
 
 function renderRecklessRuntimeInfo(): void {
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
-  const mode = (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) ? 'persistent available' : 'one-shot fallback';
-  el('recklessRuntimeInfo').textContent = `Reckless: ${mode} · ${sab}`;
+  const fallbackMode = (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) ? 'persistent available' : 'one-shot fallback';
+  const rows = activeEngineRows().filter((row) => row.family === 'reckless');
+  const variants = rows.length ? rows.map((row) => recklessVariantForKey(row.variant)) : [REQUESTED_RECKLESS_VARIANT];
+  const parts = variants.map((variant) => {
+    const engine = recklessByVariant.get(recklessCacheKey(variant));
+    const status = engine?.runtimeStatus();
+    const mode = engine?.runtimeLabel() ?? fallbackMode;
+    const asset = recklessVariantAssetStatus(variant);
+    if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
+    const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+    const targetUrl = status?.wasmUrl ?? variant.wasmUrl;
+    const assetUrlText = variant.nnueUrl ? `${targetUrl} + ${variant.nnueUrl}` : targetUrl;
+    const loadText = formatRecklessBrowserApiLoadStatus(status?.browserApiLoad);
+    return `${variant.label} · ${mode} · ${sab} · ${assetText} · ${assetUrlText}${loadText ? ` · ${loadText}` : ''}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, reckless:build-browser-api-simd-external, or reckless:build-lite-wasi' : ''}`;
+  });
+  el('recklessRuntimeInfo').textContent = `Reckless: ${parts.join(' | ')}`;
 }
 
 function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
@@ -224,16 +251,32 @@ function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
 
 const recklessByVariant = new Map<string, RecklessEngine>();
 function getRecklessFor(variantKey: string): RecklessEngine {
-  let engine = recklessByVariant.get(variantKey);
+  const variant = recklessVariantForKey(variantKey);
+  const key = recklessCacheKey(variant);
+  let engine = recklessByVariant.get(key);
   if (!engine) {
-    engine = new RecklessEngine({ depth: 4, hashMb: 16 }, recklessVariantByKey(normalizeRecklessVariant(variantKey)).wasmUrl);
-    recklessByVariant.set(variantKey, engine);
+    engine = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, onStatus: renderRecklessRuntimeInfo });
+    recklessByVariant.set(key, engine);
+    void engine.prewarm()
+      .then(renderRecklessRuntimeInfo)
+      .catch((error) => {
+        if ((error as Error).name !== 'AbortError') console.warn('Reckless prewarm failed', error);
+        renderRecklessRuntimeInfo();
+      });
   }
   return engine;
 }
 
 function disposeUnusedEngines(): void {
   if (!usesBt4Row()) bt4.dispose();
+  const activeRecklessKeys = new Set(activeEngineRows().filter((row) => row.family === 'reckless').map((row) => recklessCacheKey(recklessVariantForKey(row.variant))));
+  for (const [key, engine] of [...recklessByVariant]) {
+    if (!activeRecklessKeys.has(key)) {
+      engine.dispose();
+      recklessByVariant.delete(key);
+    }
+  }
+  renderRecklessRuntimeInfo();
 }
 
 function legalDests(board: BoardState) {
@@ -688,6 +731,7 @@ function disposeRuntimeResources(): void {
 }
 
 async function init() {
+  REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
   window.addEventListener('pagehide', (event) => {
     if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
   });

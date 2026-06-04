@@ -74,7 +74,7 @@ test('engineColorKey assigns stable per-engine color families', () => {
 
 test('parseStockfishInfo extracts multipv, score, mate, and PV', () => {
   const a = parseStockfishInfo('info depth 18 seldepth 24 multipv 1 score cp 35 nodes 1000 nps 5 pv e2e4 e7e5 g1f3');
-  assert.deepEqual(a, { multipv: 1, depth: 18, scoreCp: 35, mateIn: undefined, nps: 5, pvUci: ['e2e4', 'e7e5', 'g1f3'] });
+  assert.deepEqual(a, { multipv: 1, depth: 18, scoreCp: 35, mateIn: undefined, nodes: 1000, nps: 5, pvUci: ['e2e4', 'e7e5', 'g1f3'] });
   const b = parseStockfishInfo('info depth 10 multipv 2 score mate -3 pv f1c4 d7d5');
   assert.equal(b.mateIn, -3);
   assert.equal(b.multipv, 2);

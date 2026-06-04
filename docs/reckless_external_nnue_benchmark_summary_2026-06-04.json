@@ -1,0 +1,112 @@
+{
+  "source": "docs/reckless_external_nnue_benchmark_2026-06-04_api_simd_depth7-9.json",
+  "rows": 2520,
+  "summaryRows": 120,
+  "aggregates": [
+    {
+      "variant": "Reckless Full browser API SIMD experimental",
+      "budget": "depth 7",
+      "warmRows": 400,
+      "warmAvgMs": 14.227237499207257,
+      "warmMedianMs": 6.752499997615814,
+      "warmP95Ms": 63.25,
+      "warmTrimmed95AvgMs": 11.373868420406392,
+      "warmMaxMs": 95.4749999642372,
+      "avgNodes": 4535.55,
+      "avgNps": 798663.605,
+      "coldAvgMs": 7.0474999964237215
+    },
+    {
+      "variant": "Reckless Full browser API SIMD experimental",
+      "budget": "depth 8",
+      "warmRows": 400,
+      "warmAvgMs": 14.314187498390675,
+      "warmMedianMs": 14.259999990463257,
+      "warmP95Ms": 25.365000009536743,
+      "warmTrimmed95AvgMs": 13.311302630054323,
+      "warmMaxMs": 80.80500000715256,
+      "avgNodes": 9229.55,
+      "avgNps": 781585.9025,
+      "coldAvgMs": 12.66649999320507
+    },
+    {
+      "variant": "Reckless Full browser API SIMD experimental",
+      "budget": "depth 9",
+      "warmRows": 400,
+      "warmAvgMs": 27.78971250027418,
+      "warmMedianMs": 25.492500007152557,
+      "warmP95Ms": 46.86999994516373,
+      "warmTrimmed95AvgMs": 25.67956578951133,
+      "warmMaxMs": 236.69999998807907,
+      "avgNodes": 15614.1,
+      "avgNps": 676949.9025,
+      "coldAvgMs": 24.901999998092652
+    },
+    {
+      "variant": "Reckless Full browser API SIMD external NNUE experimental",
+      "budget": "depth 7",
+      "warmRows": 400,
+      "warmAvgMs": 26.703524999916553,
+      "warmMedianMs": 15.694999992847444,
+      "warmP95Ms": 32.55000001192093,
+      "warmTrimmed95AvgMs": 16.052250000050194,
+      "warmMaxMs": 1964.574999988079,
+      "avgNodes": 4535.55,
+      "avgNps": 420247.1525,
+      "coldAvgMs": 15.959499990940094
+    },
+    {
+      "variant": "Reckless Full browser API SIMD external NNUE experimental",
+      "budget": "depth 8",
+      "warmRows": 400,
+      "warmAvgMs": 17.212337498366832,
+      "warmMedianMs": 15.357499986886978,
+      "warmP95Ms": 30.695000052452087,
+      "warmTrimmed95AvgMs": 16.149039472247424,
+      "warmMaxMs": 59.219999969005585,
+      "avgNodes": 9229.55,
+      "avgNps": 662907.5225,
+      "coldAvgMs": 15.185500004887581
+    },
+    {
+      "variant": "Reckless Full browser API SIMD external NNUE experimental",
+      "budget": "depth 9",
+      "warmRows": 400,
+      "warmAvgMs": 28.17136250182986,
+      "warmMedianMs": 25.389999985694885,
+      "warmP95Ms": 52.3299999833107,
+      "warmTrimmed95AvgMs": 26.35107894931969,
+      "warmMaxMs": 90.13999998569489,
+      "avgNodes": 15614.1,
+      "avgNps": 633178.7475,
+      "coldAvgMs": 23.581500008702278
+    }
+  ],
+  "ratios": [
+    {
+      "budget": "depth 7",
+      "externalVsEmbeddedAvg": 1.8769297273208854,
+      "externalVsEmbeddedMedian": 2.324324324085756,
+      "externalVsEmbeddedTrimmed95": 1.4113272113514252
+    },
+    {
+      "budget": "depth 8",
+      "externalVsEmbeddedAvg": 1.2024669580653455,
+      "externalVsEmbeddedMedian": 1.0769635341625317,
+      "externalVsEmbeddedTrimmed95": 1.2131825052032132
+    },
+    {
+      "budget": "depth 9",
+      "externalVsEmbeddedAvg": 1.0137334994578269,
+      "externalVsEmbeddedMedian": 0.9959792087308458,
+      "externalVsEmbeddedTrimmed95": 1.0261497085002362
+    }
+  ],
+  "parity": {
+    "checkedPairs": 1260,
+    "fullMatches": 1260,
+    "bestMoveMatches": 1260,
+    "scoreMateMatches": 1260,
+    "pvMatches": 1260
+  }
+}

@@ -34,6 +34,7 @@ test('parseStockfishInfo extracts score and PV fields', () => {
     depth: 9,
     scoreCp: -34,
     mateIn: undefined,
+    nodes: 1200,
     nps: 240000,
     pvUci: ['e7e5', 'g1f3'],
   });

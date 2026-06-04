@@ -1,12 +1,14 @@
 import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
 
-export type RecklessVariantKey = 'full' | 'lite' | 'custom';
+export type RecklessVariantKey = 'full' | 'simd' | 'lite' | 'browser-api' | 'browser-api-simd' | 'browser-api-simd-external' | 'custom';
 
 export interface RecklessVariant {
   key: RecklessVariantKey;
   label: string;
   wasmUrl: string;
   note: string;
+  backend?: 'wasi' | 'browser-api';
+  nnueUrl?: string;
 }
 
 export type RecklessAssetStatus = 'unknown' | 'checking' | 'present' | 'missing';
@@ -14,11 +16,33 @@ export type RecklessAssetStatus = 'unknown' | 'checking' | 'present' | 'missing'
 const assetStatuses = new Map<string, RecklessAssetStatus>();
 const assetChecks = new Map<string, Promise<RecklessAssetStatus>>();
 
+function assetKey(variant: RecklessVariant): string {
+  return variant.nnueUrl ? `${variant.wasmUrl}\n${variant.nnueUrl}` : variant.wasmUrl;
+}
+
+export function supportsWasmSimd(): boolean {
+  if (typeof WebAssembly === 'undefined' || typeof WebAssembly.validate !== 'function') return false;
+  // (module (func (result v128) i32.const 0 i8x16.splat))
+  return WebAssembly.validate(new Uint8Array([
+    0, 97, 115, 109, 1, 0, 0, 0, 1,
+    5, 1, 96, 0, 1, 123, 3, 2, 1,
+    0, 10, 8, 1, 6, 0, 65, 0, 253,
+    15, 11,
+  ]));
+}
+
 export const RECKLESS_FULL_VARIANT: RecklessVariant = {
   key: 'full',
-  label: 'Reckless Full',
+  label: 'Reckless Full scalar fallback',
   wasmUrl: DEFAULT_RECKLESS_WASM_URL,
-  note: 'v60 full-size NNUE; strongest/current default, largest download.',
+  note: 'v60 full-size NNUE scalar WASI/UCI fallback for browsers without WebAssembly SIMD.',
+};
+
+export const RECKLESS_SIMD_VARIANT: RecklessVariant = {
+  key: 'simd',
+  label: 'Reckless Full SIMD',
+  wasmUrl: '/reckless/reckless-simd128.wasm',
+  note: 'v60 full-size NNUE with integrated wasm simd128 backend; preferred default when supported.',
 };
 
 export const RECKLESS_LITE_VARIANT: RecklessVariant = {
@@ -28,46 +52,96 @@ export const RECKLESS_LITE_VARIANT: RecklessVariant = {
   note: 'v53 L1=512 candidate; smaller/faster prototype, weaker and not shipped by default.',
 };
 
-export const RECKLESS_VARIANTS = [RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT] as const;
+export const RECKLESS_BROWSER_API_VARIANT: RecklessVariant = {
+  key: 'browser-api',
+  label: 'Reckless Full browser API experimental',
+  wasmUrl: '/reckless/reckless-browser-api.wasm',
+  note: 'Full-size NNUE with direct WASM exports; bypasses WASI/UCI text for lower adapter overhead.',
+  backend: 'browser-api',
+};
+
+export const RECKLESS_BROWSER_API_SIMD_VARIANT: RecklessVariant = {
+  key: 'browser-api-simd',
+  label: 'Reckless Full browser API SIMD experimental',
+  wasmUrl: '/reckless/reckless-browser-api-simd128.wasm',
+  note: 'Direct browser API artifact combined with the integrated wasm simd128 NNUE backend.',
+  backend: 'browser-api',
+};
+
+export const RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT: RecklessVariant = {
+  key: 'browser-api-simd-external',
+  label: 'Reckless Full browser API SIMD external NNUE experimental',
+  wasmUrl: '/reckless/reckless-browser-api-simd128-external.wasm',
+  note: 'Direct browser API SIMD artifact with the full NNUE loaded as a separate cacheable asset.',
+  backend: 'browser-api',
+  nnueUrl: '/reckless/reckless-v60-7f587dfb.nnue',
+};
+
+export const RECKLESS_VARIANTS = [RECKLESS_SIMD_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_LITE_VARIANT] as const;
 
 export function normalizeRecklessVariant(raw: string | null | undefined): RecklessVariantKey {
   const value = String(raw ?? '').toLowerCase().replace(/[ _]/g, '-');
   if (value === 'lite' || value === 'small' || value === 'v53') return 'lite';
+  if (value === 'api-simd-external' || value === 'browser-api-simd-external' || value === 'direct-simd-external' || value === 'native-simd-external' || value === 'external-simd') return 'browser-api-simd-external';
+  if (value === 'api-simd' || value === 'browser-api-simd' || value === 'direct-simd' || value === 'native-simd') return 'browser-api-simd';
+  if (value === 'api' || value === 'browser-api' || value === 'direct' || value === 'native') return 'browser-api';
+  if (value === 'simd' || value === 'simd128' || value === 'full-simd') return 'simd';
   if (value === 'custom') return 'custom';
   return 'full';
 }
 
+export function defaultRecklessVariantKey(): RecklessVariantKey {
+  return supportsWasmSimd() ? 'simd' : 'full';
+}
+
 export function recklessVariantByKey(key: RecklessVariantKey): RecklessVariant {
   if (key === 'lite') return RECKLESS_LITE_VARIANT;
+  if (key === 'browser-api') return RECKLESS_BROWSER_API_VARIANT;
+  if (key === 'browser-api-simd') return RECKLESS_BROWSER_API_SIMD_VARIANT;
+  if (key === 'browser-api-simd-external') return RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT;
+  if (key === 'simd') return RECKLESS_SIMD_VARIANT;
   if (key === 'custom') return { key: 'custom', label: 'Reckless Custom', wasmUrl: DEFAULT_RECKLESS_WASM_URL, note: 'Custom Reckless WASM URL.' };
   return RECKLESS_FULL_VARIANT;
+}
+
+export function hasExplicitRecklessVariant(params: URLSearchParams): boolean {
+  return params.has('recklessWasm') || params.has('recklessVariant') || params.has('reckless');
 }
 
 export function recklessVariantFromParams(params: URLSearchParams): RecklessVariant {
   const customUrl = params.get('recklessWasm');
   if (customUrl) return { key: 'custom', label: 'Reckless Custom', wasmUrl: customUrl, note: 'Custom Reckless WASM URL from ?recklessWasm=…' };
-  return recklessVariantByKey(normalizeRecklessVariant(params.get('recklessVariant') ?? params.get('reckless')));
+  const explicit = params.get('recklessVariant') ?? params.get('reckless');
+  if (explicit) return recklessVariantByKey(normalizeRecklessVariant(explicit));
+  return recklessVariantByKey(defaultRecklessVariantKey());
+}
+
+export async function resolveDefaultRecklessVariantAssetFallback(variant: RecklessVariant, explicit: boolean, onChange?: () => void): Promise<RecklessVariant> {
+  if (explicit || variant.key !== 'simd') return variant;
+  const status = await checkRecklessVariantAsset(variant, onChange);
+  return status === 'missing' ? RECKLESS_FULL_VARIANT : variant;
 }
 
 export function recklessVariantAssetStatus(variant: RecklessVariant): RecklessAssetStatus {
-  return assetStatuses.get(variant.wasmUrl) ?? 'unknown';
+  return assetStatuses.get(assetKey(variant)) ?? 'unknown';
 }
 
 export function checkRecklessVariantAsset(variant: RecklessVariant, onChange?: () => void): Promise<RecklessAssetStatus> {
-  const current = assetStatuses.get(variant.wasmUrl);
+  const key = assetKey(variant);
+  const current = assetStatuses.get(key);
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
-  const existing = assetChecks.get(variant.wasmUrl);
+  const existing = assetChecks.get(key);
   if (existing) return existing;
-  assetStatuses.set(variant.wasmUrl, 'checking');
-  const promise = fetch(variant.wasmUrl, { method: 'HEAD', cache: 'no-store' })
-    .then((response) => (response.ok ? 'present' : 'missing') as RecklessAssetStatus)
-    .catch(() => 'missing' as RecklessAssetStatus)
+  assetStatuses.set(key, 'checking');
+  const urls = [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
+  const promise = Promise.all(urls.map((url) => fetch(url, { method: 'HEAD', cache: 'no-store' }).then((response) => response.ok).catch(() => false)))
+    .then((results) => (results.every(Boolean) ? 'present' : 'missing') as RecklessAssetStatus)
     .then((status) => {
-      assetStatuses.set(variant.wasmUrl, status);
-      assetChecks.delete(variant.wasmUrl);
+      assetStatuses.set(key, status);
+      assetChecks.delete(key);
       onChange?.();
       return status;
     });
-  assetChecks.set(variant.wasmUrl, promise);
+  assetChecks.set(key, promise);
   return promise;
 }

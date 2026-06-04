@@ -13,8 +13,10 @@ const mime = new Map([
   ['.css', 'text/css; charset=utf-8'],
   ['.json', 'application/json; charset=utf-8'],
   ['.wasm', 'application/wasm'],
+  ['.nnue', 'application/octet-stream'],
   ['.onnx', 'application/octet-stream'],
   ['.bin', 'application/octet-stream'],
+  ['.gz', 'application/gzip'],
   ['.png', 'image/png'],
   ['.svg', 'image/svg+xml'],
 ]);
@@ -48,7 +50,24 @@ const server = createServer((req, res) => {
     res.end('Not found');
     return;
   }
-  res.setHeader('Content-Type', mime.get(extname(file)) ?? 'application/octet-stream');
+  const stats = statSync(file);
+  const ext = extname(file);
+  res.setHeader('Content-Type', mime.get(ext) ?? 'application/octet-stream');
+  res.setHeader('Content-Length', String(stats.size));
+  const rel = file.slice(root.length + 1).replace(/\\/g, '/');
+  if (ext === '.nnue') {
+    // Full Reckless network filenames include the network hash, so they are safe
+    // to cache aggressively and reuse across small WASM rebuilds.
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  } else if (rel.startsWith('reckless/') && rel.includes('corresponding-source') && ext === '.gz') {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  } else if (rel.startsWith('assets/')) {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  } else if (ext === '.wasm' || ext === '.js' || ext === '.css') {
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+  } else {
+    res.setHeader('Cache-Control', 'no-cache');
+  }
   createReadStream(file).pipe(res);
 });
 

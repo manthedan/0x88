@@ -15,8 +15,8 @@ import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { StockfishEngine, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
-import { RecklessEngine } from './recklessEngine.ts';
-import { RECKLESS_VARIANTS, checkRecklessVariantAsset, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, type RecklessVariant } from './recklessVariants.ts';
+import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
+import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -71,7 +71,8 @@ interface EngineOutputSnapshot {
 
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
-const REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
+const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
+let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 
 let ground: Ground | null = null;
 let board: BoardState = parseFen(START_FEN);
@@ -627,6 +628,17 @@ function recklessName(depth: number): string {
   return `${selectedRecklessVariant().label} d${depth}`;
 }
 
+function prewarmReckless(): void {
+  const engine = reckless;
+  if (!engine) return;
+  void engine.prewarm()
+    .then(() => { if (reckless === engine) renderRecklessRuntimeInfo(); })
+    .catch((error) => {
+      if ((error as Error).name !== 'AbortError') console.warn('Reckless prewarm failed', error);
+      if (reckless === engine) renderRecklessRuntimeInfo();
+    });
+}
+
 function renderRecklessRuntimeInfo(): void {
   const info = el('recklessRuntimeInfo');
   const variant = selectedRecklessVariant();
@@ -636,9 +648,12 @@ function renderRecklessRuntimeInfo(): void {
   const asset = recklessVariantAssetStatus(variant);
   if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
   const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
-  info.textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${variant.wasmUrl}`;
+  const assetUrlText = variant.nnueUrl ? `${variant.wasmUrl} + ${variant.nnueUrl}` : variant.wasmUrl;
+  info.textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${assetUrlText}`;
+  const loadText = formatRecklessBrowserApiLoadStatus(status?.browserApiLoad);
+  if (loadText) info.textContent += ` · ${loadText}`;
   if (status?.persistentDisabled) info.textContent += ' · persistent disabled after fallback';
-  if (asset === 'missing') info.textContent += ' · build locally with npm run reckless:build-wasi or reckless:build-lite-wasi';
+  if (asset === 'missing') info.textContent += ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, reckless:build-browser-api-simd-external, or reckless:build-lite-wasi';
 }
 
 function refreshRecklessVariantUi(): void {
@@ -1096,7 +1111,11 @@ function wireEvents() {
   el('recklessVariantSelect').addEventListener('change', () => {
     if (running) return;
     reckless?.dispose();
-    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+    const variant = selectedRecklessVariant();
+    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, onStatus: renderRecklessRuntimeInfo });
+    prewarmReckless();
+    buildEngines();
+    populateSeats();
     refreshRecklessVariantUi();
   });
   window.addEventListener('pagehide', (event) => {
@@ -1105,6 +1124,7 @@ function wireEvents() {
 }
 
 async function init() {
+  REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
   renderBoard();
   refreshRecklessVariantUi();
   selectEl('recklessVariantSelect').value = REQUESTED_RECKLESS_VARIANT.key;
@@ -1127,7 +1147,9 @@ async function init() {
     searcher = new Lc0PuctSearcher(lc0Cache);
     // Stockfish (lite/full) instances are created lazily on first use; Lc0 BT4 is
     // created lazily in its worker only when selected and WebGPU-gated.
-    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, selectedRecklessVariant().wasmUrl);
+    const variant = selectedRecklessVariant();
+    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, onStatus: renderRecklessRuntimeInfo });
+    prewarmReckless();
     renderRecklessRuntimeInfo();
     renderCacheInfo();
     void renderRuntimeBadge();
