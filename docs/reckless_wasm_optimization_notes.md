@@ -51,4 +51,4 @@ Search command batches now set Reckless' `Minimal` UCI option to `true`. Reckles
 
 The benchmark harness now has a default-on clear-hash reset. It sends `ucinewgame` + `isready` before each timed run and starts the timer afterward, avoiding persistent repeated-position TT pollution without mixing reset latency into the search wall-clock metric.
 
-The next major adapter-overhead reduction remains a browser-native API with direct calls for initialize, set FEN, search, and result retrieval.
+The next major adapter-overhead reduction remains a browser-native API with direct calls for initialize, set FEN, search, and result retrieval. The staged feasibility plan is in [`reckless_browser_native_api_plan.md`](./reckless_browser_native_api_plan.md).
