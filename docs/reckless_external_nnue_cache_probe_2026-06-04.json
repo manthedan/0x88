@@ -1,0 +1,59 @@
+{
+  "generatedAt": "2026-06-04T22:10:28.864Z",
+  "url": "http://localhost:5199/reckless-benchmark.html?external-nnue-cache-probe=2",
+  "server": "PORT=5199 node scripts/serve_isolated_static.mjs dist-client",
+  "results": [
+    {
+      "url": "/reckless/reckless-browser-api-simd128-external.wasm",
+      "cache": "reload",
+      "ok": true,
+      "status": 200,
+      "bytes": 1260734,
+      "elapsedMs": 4.480000019073486,
+      "headers": {
+        "contentType": "application/wasm",
+        "cacheControl": "public, max-age=3600",
+        "contentLength": "1260734"
+      }
+    },
+    {
+      "url": "/reckless/reckless-browser-api-simd128-external.wasm",
+      "cache": "force-cache",
+      "ok": true,
+      "status": 200,
+      "bytes": 1260734,
+      "elapsedMs": 2.324999988079071,
+      "headers": {
+        "contentType": "application/wasm",
+        "cacheControl": "public, max-age=3600",
+        "contentLength": "1260734"
+      }
+    },
+    {
+      "url": "/reckless/reckless-v60-7f587dfb.nnue",
+      "cache": "reload",
+      "ok": true,
+      "status": 200,
+      "bytes": 63266880,
+      "elapsedMs": 67.5100000500679,
+      "headers": {
+        "contentType": "application/octet-stream",
+        "cacheControl": "public, max-age=31536000, immutable",
+        "contentLength": "63266880"
+      }
+    },
+    {
+      "url": "/reckless/reckless-v60-7f587dfb.nnue",
+      "cache": "force-cache",
+      "ok": true,
+      "status": 200,
+      "bytes": 63266880,
+      "elapsedMs": 49.27499997615814,
+      "headers": {
+        "contentType": "application/octet-stream",
+        "cacheControl": "public, max-age=31536000, immutable",
+        "contentLength": "63266880"
+      }
+    }
+  ]
+}

@@ -49,8 +49,10 @@ const server = createServer((req, res) => {
     res.end('Not found');
     return;
   }
+  const stats = statSync(file);
   const ext = extname(file);
   res.setHeader('Content-Type', mime.get(ext) ?? 'application/octet-stream');
+  res.setHeader('Content-Length', String(stats.size));
   const rel = file.slice(root.length + 1).replace(/\\/g, '/');
   if (ext === '.nnue') {
     // Full Reckless network filenames include the network hash, so they are safe
