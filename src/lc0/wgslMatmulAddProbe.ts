@@ -2588,6 +2588,299 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
 }
 `;
 
+const SMOLGEN_COMPRESS_WGSL = `
+@group(0) @binding(0) var<storage, read> inputVec: array<f32>;
+@group(0) @binding(1) var<storage, read> weightF16: array<u32>;
+@group(0) @binding(2) var<storage, read_write> outputVec: array<f32>;
+
+fn pick_lane(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+fn load_weight(index: u32) -> f32 { return pick_lane(weightF16[index >> 1u], index); }
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let col = gid.x;
+  let token = gid.y;
+  if (col >= 32u || token >= 64u) { return; }
+  var sum = 0.0;
+  for (var channel = 0u; channel < 256u; channel = channel + 1u) {
+    sum = sum + inputVec[token * 256u + channel] * load_weight(channel * 32u + col);
+  }
+  outputVec[token * 32u + col] = sum;
+}
+`;
+
+const SMOLGEN_DENSE1_WGSL = `
+@group(0) @binding(0) var<storage, read> inputVec: array<f32>;
+@group(0) @binding(1) var<storage, read> weightF16: array<u32>;
+@group(0) @binding(2) var<storage, read> biasF16: array<u32>;
+@group(0) @binding(3) var<storage, read_write> outputVec: array<f32>;
+
+fn pick_lane(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+fn load_weight(index: u32) -> f32 { return pick_lane(weightF16[index >> 1u], index); }
+fn load_bias(index: u32) -> f32 { return pick_lane(biasF16[index >> 1u], index); }
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let col = gid.x;
+  if (col >= 256u) { return; }
+  var sum = load_bias(col);
+  for (var row = 0u; row < 2048u; row = row + 1u) {
+    sum = sum + inputVec[row] * load_weight(row * 256u + col);
+  }
+  outputVec[col] = sum;
+}
+`;
+
+const SMOLGEN_SWISH_LN1_WGSL = `
+@group(0) @binding(0) var<storage, read> inputVec: array<f32>;
+@group(0) @binding(1) var<storage, read> scaleF16: array<u32>;
+@group(0) @binding(2) var<storage, read> biasF16: array<u32>;
+@group(0) @binding(3) var<storage, read_write> outputVec: array<f32>;
+var<workgroup> partial: array<f32, 256>;
+var<workgroup> meanValue: f32;
+var<workgroup> invStdValue: f32;
+
+fn pick_lane(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+fn load_scale(index: u32) -> f32 { return pick_lane(scaleF16[index >> 1u], index); }
+fn load_bias(index: u32) -> f32 { return pick_lane(biasF16[index >> 1u], index); }
+fn swish(x: f32) -> f32 { return x / (1.0 + exp(-x)); }
+
+@compute @workgroup_size(256)
+fn main(@builtin(local_invocation_id) lid: vec3<u32>) {
+  let lane = lid.x;
+  let value = swish(inputVec[lane]);
+  partial[lane] = value;
+  workgroupBarrier();
+  for (var stride = 128u; stride > 0u; stride = stride / 2u) {
+    if (lane < stride) { partial[lane] = partial[lane] + partial[lane + stride]; }
+    workgroupBarrier();
+  }
+  if (lane == 0u) { meanValue = partial[0] / 256.0; }
+  workgroupBarrier();
+  let centered = value - meanValue;
+  partial[lane] = centered * centered;
+  workgroupBarrier();
+  for (var stride = 128u; stride > 0u; stride = stride / 2u) {
+    if (lane < stride) { partial[lane] = partial[lane] + partial[lane + stride]; }
+    workgroupBarrier();
+  }
+  if (lane == 0u) { invStdValue = inverseSqrt(partial[0] / 256.0 + 0.001); }
+  workgroupBarrier();
+  outputVec[lane] = centered * invStdValue * load_scale(lane) + load_bias(lane);
+}
+`;
+
+const SMOLGEN_DENSE2_WGSL = `
+@group(0) @binding(0) var<storage, read> inputVec: array<f32>;
+@group(0) @binding(1) var<storage, read> weightF16: array<u32>;
+@group(0) @binding(2) var<storage, read> biasF16: array<u32>;
+@group(0) @binding(3) var<storage, read_write> outputVec: array<f32>;
+
+fn pick_lane(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+fn load_weight(index: u32) -> f32 { return pick_lane(weightF16[index >> 1u], index); }
+fn load_bias(index: u32) -> f32 { return pick_lane(biasF16[index >> 1u], index); }
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let col = gid.x;
+  if (col >= 2048u) { return; }
+  var sum = load_bias(col);
+  for (var row = 0u; row < 256u; row = row + 1u) {
+    sum = sum + inputVec[row] * load_weight(row * 2048u + col);
+  }
+  outputVec[col] = sum;
+}
+`;
+
+const SMOLGEN_SWISH_LN2_WGSL = `
+@group(0) @binding(0) var<storage, read> inputVec: array<f32>;
+@group(0) @binding(1) var<storage, read> scaleF16: array<u32>;
+@group(0) @binding(2) var<storage, read> biasF16: array<u32>;
+@group(0) @binding(3) var<storage, read_write> outputVec: array<f32>;
+var<workgroup> partial: array<f32, 256>;
+var<workgroup> meanValue: f32;
+var<workgroup> invStdValue: f32;
+
+fn pick_lane(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+fn load_scale(index: u32) -> f32 { return pick_lane(scaleF16[index >> 1u], index); }
+fn load_bias(index: u32) -> f32 { return pick_lane(biasF16[index >> 1u], index); }
+fn swish(x: f32) -> f32 { return x / (1.0 + exp(-x)); }
+
+@compute @workgroup_size(256)
+fn main(@builtin(local_invocation_id) lid: vec3<u32>) {
+  let lane = lid.x;
+  var sum = 0.0;
+  var sq = 0.0;
+  for (var i = lane; i < 2048u; i = i + 256u) {
+    let value = swish(inputVec[i]);
+    sum = sum + value;
+    sq = sq + value * value;
+  }
+  partial[lane] = sum;
+  workgroupBarrier();
+  for (var stride = 128u; stride > 0u; stride = stride / 2u) {
+    if (lane < stride) { partial[lane] = partial[lane] + partial[lane + stride]; }
+    workgroupBarrier();
+  }
+  if (lane == 0u) { meanValue = partial[0] / 2048.0; }
+  workgroupBarrier();
+  partial[lane] = sq;
+  workgroupBarrier();
+  for (var stride = 128u; stride > 0u; stride = stride / 2u) {
+    if (lane < stride) { partial[lane] = partial[lane] + partial[lane + stride]; }
+    workgroupBarrier();
+  }
+  if (lane == 0u) {
+    let variance = partial[0] / 2048.0 - meanValue * meanValue;
+    invStdValue = inverseSqrt(max(variance, 0.0) + 0.001);
+  }
+  workgroupBarrier();
+  for (var i = lane; i < 2048u; i = i + 256u) {
+    let centered = swish(inputVec[i]) - meanValue;
+    outputVec[i] = centered * invStdValue * load_scale(i) + load_bias(i);
+  }
+}
+`;
+
+const SMOLGEN_PROJECT_WGSL = `
+@group(0) @binding(0) var<storage, read> inputVec: array<f32>;
+@group(0) @binding(1) var<storage, read> weightF16: array<u32>;
+@group(0) @binding(2) var<storage, read_write> outputVec: array<f32>;
+
+fn pick_lane(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+fn load_weight(index: u32) -> f32 { return pick_lane(weightF16[index >> 1u], index); }
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let col = gid.x;
+  let token = gid.y;
+  let head = gid.z;
+  if (col >= 64u || token >= 64u || head >= 8u) { return; }
+  let outCol = token * 64u + col;
+  var sum = 0.0;
+  for (var row = 0u; row < 256u; row = row + 1u) {
+    sum = sum + inputVec[head * 256u + row] * load_weight(row * 4096u + outCol);
+  }
+  outputVec[head * 4096u + outCol] = sum;
+}
+`;
+
+type SmolgenPipelines = {
+  compress: PipelineLike;
+  compressBind: unknown;
+  dense1: PipelineLike;
+  dense1Bind: unknown;
+  ln1: PipelineLike;
+  ln1Bind: unknown;
+  dense2: PipelineLike;
+  dense2Bind: unknown;
+  ln2: PipelineLike;
+  ln2Bind: unknown;
+  project: PipelineLike;
+  projectBind: unknown;
+};
+
+function createSmolgenPipelines(device: DeviceLike, buffers: {
+  input: BufferLike;
+  compressWeight: BufferLike;
+  compressed: BufferLike;
+  dense1Weight: BufferLike;
+  dense1Bias: BufferLike;
+  dense1: BufferLike;
+  ln1Scale: BufferLike;
+  ln1Bias: BufferLike;
+  ln1: BufferLike;
+  dense2Weight: BufferLike;
+  dense2Bias: BufferLike;
+  dense2: BufferLike;
+  ln2Scale: BufferLike;
+  ln2Bias: BufferLike;
+  ln2: BufferLike;
+  smolgenWeight: BufferLike;
+  output: BufferLike;
+}): SmolgenPipelines {
+  const compress = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen compress', code: SMOLGEN_COMPRESS_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const compressBind = device.createBindGroup({ layout: compress.getBindGroupLayout(0), entries: [
+    { binding: 0, resource: { buffer: buffers.input } },
+    { binding: 1, resource: { buffer: buffers.compressWeight } },
+    { binding: 2, resource: { buffer: buffers.compressed } },
+  ] });
+  const dense1 = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen dense1', code: SMOLGEN_DENSE1_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const dense1Bind = device.createBindGroup({ layout: dense1.getBindGroupLayout(0), entries: [
+    { binding: 0, resource: { buffer: buffers.compressed } },
+    { binding: 1, resource: { buffer: buffers.dense1Weight } },
+    { binding: 2, resource: { buffer: buffers.dense1Bias } },
+    { binding: 3, resource: { buffer: buffers.dense1 } },
+  ] });
+  const ln1 = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen ln1', code: SMOLGEN_SWISH_LN1_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const ln1Bind = device.createBindGroup({ layout: ln1.getBindGroupLayout(0), entries: [
+    { binding: 0, resource: { buffer: buffers.dense1 } },
+    { binding: 1, resource: { buffer: buffers.ln1Scale } },
+    { binding: 2, resource: { buffer: buffers.ln1Bias } },
+    { binding: 3, resource: { buffer: buffers.ln1 } },
+  ] });
+  const dense2 = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen dense2', code: SMOLGEN_DENSE2_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const dense2Bind = device.createBindGroup({ layout: dense2.getBindGroupLayout(0), entries: [
+    { binding: 0, resource: { buffer: buffers.ln1 } },
+    { binding: 1, resource: { buffer: buffers.dense2Weight } },
+    { binding: 2, resource: { buffer: buffers.dense2Bias } },
+    { binding: 3, resource: { buffer: buffers.dense2 } },
+  ] });
+  const ln2 = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen ln2', code: SMOLGEN_SWISH_LN2_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const ln2Bind = device.createBindGroup({ layout: ln2.getBindGroupLayout(0), entries: [
+    { binding: 0, resource: { buffer: buffers.dense2 } },
+    { binding: 1, resource: { buffer: buffers.ln2Scale } },
+    { binding: 2, resource: { buffer: buffers.ln2Bias } },
+    { binding: 3, resource: { buffer: buffers.ln2 } },
+  ] });
+  const project = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen project', code: SMOLGEN_PROJECT_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const projectBind = device.createBindGroup({ layout: project.getBindGroupLayout(0), entries: [
+    { binding: 0, resource: { buffer: buffers.ln2 } },
+    { binding: 1, resource: { buffer: buffers.smolgenWeight } },
+    { binding: 2, resource: { buffer: buffers.output } },
+  ] });
+  return { compress, compressBind, dense1, dense1Bind, ln1, ln1Bind, dense2, dense2Bind, ln2, ln2Bind, project, projectBind };
+}
+
+function encodeSmolgenPass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
+  pass.setPipeline(pipelines.compress);
+  pass.setBindGroup(0, pipelines.compressBind);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_SMOLGEN_COMPRESSED / 8), Math.ceil(DEFAULT_TOKENS / 8));
+  pass.setPipeline(pipelines.dense1);
+  pass.setBindGroup(0, pipelines.dense1Bind);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_SMOLGEN_HIDDEN / 64));
+  pass.setPipeline(pipelines.ln1);
+  pass.setBindGroup(0, pipelines.ln1Bind);
+  pass.dispatchWorkgroups(1);
+  pass.setPipeline(pipelines.dense2);
+  pass.setBindGroup(0, pipelines.dense2Bind);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_SMOLGEN_FLAT / 64));
+  pass.setPipeline(pipelines.ln2);
+  pass.setBindGroup(0, pipelines.ln2Bind);
+  pass.dispatchWorkgroups(1);
+  pass.setPipeline(pipelines.project);
+  pass.setBindGroup(0, pipelines.projectBind);
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+}
+
 function createAttentionOutputPipelines(device: DeviceLike, buffers: {
   input: BufferLike;
   qWeight: BufferLike;
@@ -4050,9 +4343,8 @@ function buildInitialEncoderActivation(input: Lc0EvaluatorInput, tensors: Lc0Web
 }
 
 type HybridEncoderLayerRuntime = {
-  tensors: Encoder0FfnTensors;
-  smolgenBias: BufferLike;
   output: BufferLike;
+  smolgenPipelines: SmolgenPipelines;
   attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>;
   ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>;
 };
@@ -4139,6 +4431,21 @@ class Lc0WebHybridRuntime {
       const ffnAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.ffnAlpha.bytes), usage.STORAGE | usage.COPY_DST);
       const ln2Scale = createStorageBuffer(device, tensors.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
       const ln2Bias = createStorageBuffer(device, tensors.ln2Bias.bytes, usage.STORAGE | usage.COPY_DST);
+      const smolgenCompressWeight = createStorageBuffer(device, tensors.smolgen.compressWeight.bytes, usage.STORAGE | usage.COPY_DST);
+      const smolgenDense1Weight = createStorageBuffer(device, tensors.smolgen.dense1Weight.bytes, usage.STORAGE | usage.COPY_DST);
+      const smolgenDense1Bias = createStorageBuffer(device, tensors.smolgen.dense1Bias.bytes, usage.STORAGE | usage.COPY_DST);
+      const smolgenLn1Scale = createStorageBuffer(device, tensors.smolgen.ln1Scale.bytes, usage.STORAGE | usage.COPY_DST);
+      const smolgenLn1Bias = createStorageBuffer(device, tensors.smolgen.ln1Bias.bytes, usage.STORAGE | usage.COPY_DST);
+      const smolgenDense2Weight = createStorageBuffer(device, tensors.smolgen.dense2Weight.bytes, usage.STORAGE | usage.COPY_DST);
+      const smolgenDense2Bias = createStorageBuffer(device, tensors.smolgen.dense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
+      const smolgenLn2Scale = createStorageBuffer(device, tensors.smolgen.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
+      const smolgenLn2Bias = createStorageBuffer(device, tensors.smolgen.ln2Bias.bytes, usage.STORAGE | usage.COPY_DST);
+      const smolgenWeight = createStorageBuffer(device, tensors.smolgen.smolgenWeight.bytes, usage.STORAGE | usage.COPY_DST);
+      const smolgenCompressed = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
+      const smolgenDense1 = device.createBuffer({ size: DEFAULT_SMOLGEN_HIDDEN * 4, usage: usage.STORAGE });
+      const smolgenLn1 = device.createBuffer({ size: DEFAULT_SMOLGEN_HIDDEN * 4, usage: usage.STORAGE });
+      const smolgenDense2 = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
+      const smolgenLn2 = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
       const qkv = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 3 * 4, usage: usage.STORAGE | usage.COPY_DST });
       const scores = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_DST });
       const probs = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_DST });
@@ -4148,7 +4455,26 @@ class Lc0WebHybridRuntime {
       const ffnHidden = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN * 4, usage: usage.STORAGE | usage.COPY_DST });
       const ffnSkip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
       const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC | usage.COPY_DST });
-      buffers.push(qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, outWeight, outBias, attentionAlpha, ln1Scale, ln1Bias, ffnDense1Weight, ffnDense1Bias, ffnDense2Weight, ffnDense2Bias, ffnAlpha, ln2Scale, ln2Bias, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, output);
+      buffers.push(qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, outWeight, outBias, attentionAlpha, ln1Scale, ln1Bias, ffnDense1Weight, ffnDense1Bias, ffnDense2Weight, ffnDense2Bias, ffnAlpha, ln2Scale, ln2Bias, smolgenCompressWeight, smolgenDense1Weight, smolgenDense1Bias, smolgenLn1Scale, smolgenLn1Bias, smolgenDense2Weight, smolgenDense2Bias, smolgenLn2Scale, smolgenLn2Bias, smolgenWeight, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, output);
+      const smolgenPipelines = createSmolgenPipelines(device, {
+        input: layerInput,
+        compressWeight: smolgenCompressWeight,
+        compressed: smolgenCompressed,
+        dense1Weight: smolgenDense1Weight,
+        dense1Bias: smolgenDense1Bias,
+        dense1: smolgenDense1,
+        ln1Scale: smolgenLn1Scale,
+        ln1Bias: smolgenLn1Bias,
+        ln1: smolgenLn1,
+        dense2Weight: smolgenDense2Weight,
+        dense2Bias: smolgenDense2Bias,
+        dense2: smolgenDense2,
+        ln2Scale: smolgenLn2Scale,
+        ln2Bias: smolgenLn2Bias,
+        ln2: smolgenLn2,
+        smolgenWeight,
+        output: smolgenBias,
+      });
       const attentionPipelines = createAttentionOutputPipelines(device, {
         input: layerInput, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv, scores, probs, attn,
         outWeight, outBias, alpha: attentionAlpha, skip: attentionSkip, lnScale: ln1Scale, lnBias: ln1Bias, output: attentionOutput,
@@ -4166,7 +4492,7 @@ class Lc0WebHybridRuntime {
         ln2Bias,
         output,
       });
-      layerRuntimes.push({ tensors, smolgenBias, output, attentionPipelines, ffnPipelines });
+      layerRuntimes.push({ output, smolgenPipelines, attentionPipelines, ffnPipelines });
       layerInput = output;
     }
     return new Lc0WebHybridRuntime({
@@ -4185,17 +4511,20 @@ class Lc0WebHybridRuntime {
 
   async evaluate(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult> {
     const { board, fen } = currentBoardAndFen(input);
-    let cpuInput = buildInitialEncoderActivation(input, this.inputTensors, options.historyFill);
-    this.device.queue.writeBuffer(this.inputBuffer, 0, cpuInput);
-    let encoderDispatchSyncedMs = 0;
+    const encoderInput = buildInitialEncoderActivation(input, this.inputTensors, options.historyFill);
+    this.device.queue.writeBuffer(this.inputBuffer, 0, encoderInput);
+    const blockStarted = nowMs();
+    const encoder = this.device.createCommandEncoder();
     for (const layer of this.layerRuntimes) {
-      this.device.queue.writeBuffer(layer.smolgenBias, 0, cpuEncoder0SmolgenBias(cpuInput, layer.tensors.smolgen));
-      const blockStarted = nowMs();
-      this.device.queue.submit([encodeLc0WebEncoderBlockDispatches(this.device, layer.attentionPipelines, layer.ffnPipelines, 1)]);
-      cpuInput = await readF32OutputOnce(this.device, layer.output, this.readbackBuffer, DEFAULT_TOKENS * DEFAULT_N);
-      encoderDispatchSyncedMs += nowMs() - blockStarted;
+      const pass = encoder.beginComputePass();
+      encodeSmolgenPass(pass, layer.smolgenPipelines);
+      encodeLc0WebEncoderBlockPass(pass, layer.attentionPipelines, layer.ffnPipelines);
+      pass.end();
     }
-    const heads = await runCachedPolicyValueHeadsOrt(cpuInput, this.headSession);
+    this.device.queue.submit([encoder.finish()]);
+    const finalOutput = await readF32OutputOnce(this.device, this.layerRuntimes[this.layerRuntimes.length - 1].output, this.readbackBuffer, DEFAULT_TOKENS * DEFAULT_N);
+    const encoderDispatchSyncedMs = nowMs() - blockStarted;
+    const heads = await runCachedPolicyValueHeadsOrt(finalOutput, this.headSession);
     const wdl: [number, number, number] = [Number(heads.wdl[0]), Number(heads.wdl[1]), Number(heads.wdl[2])];
     const legalPriors = legalPolicyPriors(board, heads.mappedPolicy, options.policyTemperature);
     return {
