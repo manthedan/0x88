@@ -36,3 +36,9 @@ The SIMD flag is therefore worth keeping as an experimental build/benchmark targ
 - **Threaded search**: still not implemented. The current browser/WASI path forces `Threads=1`. `@bjorn3/browser_wasi_shim` does not provide native Rust pthread-style browser execution for this build, so practical browser threading likely needs either a custom Worker search-split design or a different WASM runtime strategy.
 - **Graceful persistent cancellation**: still not implemented. The persistent process cannot currently receive `stop` while search is running because the patched wasm32 UCI loop is single-threaded. A robust path needs an engine-side shared abort/control flag checked from the search, or a browser-native API that exposes cancellation directly.
 - **Browser-native API**: still not implemented. A lower-overhead path would avoid argv/stdin/stdout and WASI process startup by exposing direct WASM functions for engine initialization, option setting, position loading, search, bestmove, and cancellation. This likely means a separate `cdylib`/`wasm32-unknown-unknown` style target or a Reckless library facade rather than the current UCI binary shim.
+
+## Adapter overhead notes
+
+The persistent WASI adapter already keeps one process alive and skips repeated stable `setoption` commands. It now also skips a repeated identical `position ...` command in persistent mode. This is a small UCI parsing/stdin reduction for analysis refreshes and benchmark loops that re-search the same FEN with a different budget; it does not address the larger one-shot costs from WASI process startup, worker messaging, and stdout parsing.
+
+The next major adapter-overhead reduction remains a browser-native API with direct calls for initialize, set FEN, search, and result retrieval.

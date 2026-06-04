@@ -119,6 +119,7 @@ export class RecklessEngine {
   private persistentHashCommand: string | null = null;
   private persistentThreadsCommand: string | null = null;
   private persistentMultipvCommand: string | null = null;
+  private persistentPositionCommand: string | null = null;
   private queueTail: Promise<void> = Promise.resolve();
   private options: RecklessOptions;
   private readonly wasmUrl: string;
@@ -215,6 +216,7 @@ export class RecklessEngine {
     this.persistentHashCommand = null;
     this.persistentThreadsCommand = null;
     this.persistentMultipvCommand = null;
+    this.persistentPositionCommand = null;
   }
 
   private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -267,6 +269,11 @@ export class RecklessEngine {
       } else if (command.startsWith('setoption name MultiPV value ')) {
         if (command === this.persistentMultipvCommand) continue;
         this.persistentMultipvCommand = command;
+      } else if (command.startsWith('position ')) {
+        if (command === this.persistentPositionCommand) continue;
+        this.persistentPositionCommand = command;
+      } else if (command === 'ucinewgame') {
+        this.persistentPositionCommand = null;
       }
       out.push(command);
     }
