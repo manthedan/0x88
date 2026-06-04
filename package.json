@@ -78,11 +78,13 @@
     "reckless:probe-nnue-accum-simd": "node scripts/reckless_wasm_nnue_accum_probe.mjs",
     "reckless:probe-nnue-activate-simd": "node scripts/reckless_wasm_nnue_activate_probe.mjs",
     "reckless:probe-browser-api": "node scripts/probe_reckless_browser_api_facade.mjs",
+    "reckless:wasm-opt-experiment": "node scripts/reckless_wasm_opt_experiment.mjs",
     "reckless:build-lite-wasi": "RECKLESS_EVALFILE=.local_engines/reckless-nets/v53-0ba42a8c.nnue RECKLESS_L1_SIZE=512 RECKLESS_WASM_OUT=public/reckless/reckless-v53-l1-512.wasm node scripts/build_reckless_wasi.mjs",
     "lc0:battle": "node --experimental-strip-types scripts/lc0_engine_battle.mjs",
     "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs"
   },
   "devDependencies": {
+    "binaryen": "^130.0.0",
     "typescript": "^5.4.0",
     "vite": "^8.0.10"
   },
