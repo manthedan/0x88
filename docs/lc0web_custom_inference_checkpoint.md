@@ -89,6 +89,7 @@ npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-2-wasm,encod
 npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-10-wasm --timeout 80000
 npm run lc0:browser-wgsl-smokes -- --no-server --only encoder-stack-heads-2-wasm --timeout 120000
 npm run lc0:browser-hybrid-drift -- --no-server --limit 3 --timeout 180000
+npm run lc0:browser-hybrid-drift -- --limit 9 --timeout 300000
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --dry-run --samples 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 10 --timeout 25000 --wgsl-iters 3 --ort-iters 3
@@ -98,7 +99,7 @@ npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 10 --timeout 25000 --wgsl-it
 
 The custom path now validates a complete encoder0 block in staged WGSL form, including smolgen score bias and FFN. This is a stronger milestone than the earlier attention-core-only checkpoint, but it is still not an end-to-end LC0 evaluator:
 
-- The reusable encoder-block loop now covers `/encoder0` → `/encoder9` with GPU-buffer handoff. The browser worker can now run a hybrid evaluator path that builds real LC0 112-plane inputs, feeds the full WGSL encoder stack, and uses tiny f32 ONNX/ORT mapped-policy + WDL heads. Persistent evaluator instances now reuse loaded pack tensor views, encoder GPU buffers/bind groups/pipelines, and the ORT head session across evaluations; the path is still correctness-first because smolgen bias generation and per-layer handoff readback remain CPU-side.
+- The reusable encoder-block loop now covers `/encoder0` → `/encoder9` with GPU-buffer handoff. The browser worker can now run a hybrid evaluator path that builds real LC0 112-plane inputs, feeds the full WGSL encoder stack, and uses tiny f32 ONNX/ORT mapped-policy + WDL heads. Persistent evaluator instances now reuse loaded pack tensor views, encoder GPU buffers/bind groups/pipelines, and the ORT head session across evaluations; the path is still correctness-first because smolgen bias generation and per-layer handoff readback remain CPU-side. A 9-fixture browser drift sweep matched f32 ONNX and native BLAS best moves on all fixtures, with max WDL/top-prior drift vs f32 ONNX of about `0.00387`/`0.01094`.
 - Timing reports both command submission/readback synchronization and, when Chromium exposes WebGPU `timestamp-query`, a GPU timestamp duration for the encoder0 attention+FFN command sequence.
 - The full encoder0 benchmark no longer forces an explicit queue-completion boundary between attention-output and FFN; both command buffers are submitted together and rely on WebGPU queue ordering for the ln1-output → FFN-dense1 dependency.
 - The per-stage encoder0 timing breakdown now covers tiled projection/FFN kernels and the parallel ln1/ln2 reduction; stage timings still include queue-completion overhead and remain bottleneck hints rather than promotion evidence.
