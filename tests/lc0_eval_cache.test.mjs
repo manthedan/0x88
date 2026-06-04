@@ -1,0 +1,73 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { START_FEN } from '../src/chess/board.ts';
+import { CachedLc0Evaluator } from '../src/lc0/onnxEvaluator.ts';
+
+function evaluation(fen, bestMove = 'e2e4') {
+  return {
+    fen,
+    wdl: [0.4, 0.3, 0.3],
+    q: 0.1,
+    mlh: 80,
+    legalPriors: [{ uci: bestMove, index: 0, logit: 1, prior: 1 }],
+    bestMove,
+  };
+}
+
+test('CachedLc0Evaluator reuses evaluations and exposes hit/miss metrics', async () => {
+  const calls = [];
+  const inner = {
+    async evaluateBatch(inputs) {
+      calls.push(inputs.map(String));
+      return inputs.map((input) => evaluation(String(input)));
+    },
+  };
+  const cached = new CachedLc0Evaluator(inner, { maxEntries: 8 });
+
+  const first = await cached.evaluate(START_FEN);
+  const second = await cached.evaluate(START_FEN);
+
+  assert.equal(first.bestMove, 'e2e4');
+  assert.equal(second.bestMove, 'e2e4');
+  assert.equal(calls.length, 1, 'second evaluation is served from cache');
+  assert.deepEqual(cached.metrics(), { hits: 1, misses: 1, entries: 1, maxEntries: 8 });
+});
+
+test('CachedLc0Evaluator keeps bare FEN and explicit one-position history separate', async () => {
+  let calls = 0;
+  const fen = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2';
+  const inner = {
+    async evaluate(input) {
+      calls += 1;
+      const explicit = typeof input === 'object' && input !== null && 'positions' in input;
+      return evaluation(fen, explicit ? 'g1f3' : 'd2d4');
+    },
+  };
+  const cached = new CachedLc0Evaluator(inner, { maxEntries: 8 });
+
+  assert.equal((await cached.evaluate(fen)).bestMove, 'd2d4');
+  assert.equal((await cached.evaluate({ positions: [fen] })).bestMove, 'g1f3');
+  assert.equal(calls, 2, 'explicit history uses a distinct cache key from bare FEN input');
+});
+
+test('CachedLc0Evaluator evicts least-recently-used entries when resized', async () => {
+  let calls = 0;
+  const inner = {
+    async evaluate(input) {
+      calls += 1;
+      return evaluation(String(input));
+    },
+  };
+  const cached = new CachedLc0Evaluator(inner, { maxEntries: 2 });
+
+  await cached.evaluate('8/8/8/8/8/8/8/K6k w - - 0 1');
+  await cached.evaluate('8/8/8/8/8/8/8/K5k1 w - - 0 1');
+  await cached.evaluate('8/8/8/8/8/8/8/K4k2 w - - 0 1');
+  assert.equal(cached.metrics().entries, 2, 'cache is capped');
+
+  await cached.evaluate('8/8/8/8/8/8/8/K6k w - - 0 1');
+  assert.equal(calls, 4, 'oldest entry was evicted and recomputed');
+
+  cached.setMaxEntries(0);
+  assert.equal(cached.metrics().entries, 0, 'resizing to zero clears cached entries');
+});

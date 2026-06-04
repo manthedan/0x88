@@ -72,7 +72,14 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
         <input id="gamesInput" type="number" min="1" max="20" step="1" value="2" /></div>
       <div class="field"><label for="delayInput">Delay ms</label>
         <input id="delayInput" type="number" min="0" max="3000" step="50" value="250" /></div>
+      <div class="field"><label for="budgetModeSelect">Budget</label>
+        <select id="budgetModeSelect"><option value="fixed">Fixed visits/depth</option><option value="movetime">Equal movetime</option></select></div>
+      <div class="field"><label for="movetimeInput">Movetime ms</label>
+        <input id="movetimeInput" type="number" min="10" max="60000" step="50" value="500" /></div>
+      <div class="field"><label for="cacheEntriesInput">NN cache entries</label>
+        <input id="cacheEntriesInput" type="number" min="0" max="100000" step="128" value="2048" /></div>
     </div>
+    <div id="cacheInfo" class="small">NN cache: loading…</div>
     <h2>Starting positions</h2>
     <div class="row">
       <div class="field"><label for="startingPositionSelect">Suite</label>

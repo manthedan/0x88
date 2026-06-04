@@ -38,6 +38,22 @@ export interface Lc0OnnxEvaluatorOptions {
 
 export type Lc0EvaluatorInput = BoardState | string | Lc0PositionHistoryInput;
 
+export interface Lc0EvaluationProvider {
+  evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> | Lc0Evaluation;
+  evaluateBatch?(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> | Lc0Evaluation[];
+}
+
+export interface Lc0EvaluationCacheMetrics {
+  hits: number;
+  misses: number;
+  entries: number;
+  maxEntries: number;
+}
+
+export interface Lc0EvaluationCacheOptions {
+  maxEntries?: number;
+}
+
 function fileOf(square: number): number {
   return square % 8;
 }
@@ -118,6 +134,19 @@ function arraySlice<T extends ArrayLike<number>>(values: T, start: number, lengt
   return Array.from({ length }, (_, i) => Number(values[start + i]));
 }
 
+function inputHistoryKey(input: Lc0EvaluatorInput): string {
+  if (typeof input === 'object' && input !== null && 'positions' in input) {
+    const positions = input.positions.map((position) => typeof position === 'string' ? boardToFen(parseFen(position)) : boardToFen(position));
+    return `history:${positions.length}\n${positions.join('\n')}`;
+  }
+  const fen = typeof input === 'string' ? boardToFen(parseFen(input)) : boardToFen(input);
+  return `single\n${fen}`;
+}
+
+function cloneEvaluation(evaluation: Lc0Evaluation): Lc0Evaluation {
+  return { ...evaluation, wdl: [...evaluation.wdl] as [number, number, number], legalPriors: evaluation.legalPriors.map((prior) => ({ ...prior })) };
+}
+
 function currentBoardAndFen(input: Lc0EvaluatorInput): { board: BoardState; fen: string } {
   if (typeof input === 'object' && input !== null && 'positions' in input) {
     if (input.positions.length === 0) throw new Error('LC0 evaluator history input requires at least one position');
@@ -145,7 +174,87 @@ function legalPolicyPriors(board: BoardState, logits: ArrayLike<number>, policyT
     .sort((a, b) => b.prior - a.prior);
 }
 
-export class Lc0OnnxEvaluator {
+export class CachedLc0Evaluator implements Lc0EvaluationProvider {
+  readonly inner: Lc0EvaluationProvider;
+  private maxEntries: number;
+  private hits = 0;
+  private misses = 0;
+  private readonly cache = new Map<string, Lc0Evaluation>();
+
+  constructor(inner: Lc0EvaluationProvider, options: Lc0EvaluationCacheOptions = {}) {
+    this.inner = inner;
+    this.maxEntries = Math.max(0, Math.floor(options.maxEntries ?? 2048));
+  }
+
+  setMaxEntries(maxEntries: number): void {
+    this.maxEntries = Math.max(0, Math.floor(maxEntries));
+    this.evictIfNeeded();
+  }
+
+  clearCache(): void {
+    this.cache.clear();
+    this.hits = 0;
+    this.misses = 0;
+  }
+
+  metrics(): Lc0EvaluationCacheMetrics {
+    return { hits: this.hits, misses: this.misses, entries: this.cache.size, maxEntries: this.maxEntries };
+  }
+
+  async evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> {
+    return (await this.evaluateBatch([input]))[0];
+  }
+
+  async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
+    if (!inputs.length) return [];
+    const results = new Array<Lc0Evaluation>(inputs.length);
+    const missInputs: Lc0EvaluatorInput[] = [];
+    const missSlots: number[] = [];
+    const missKeys: string[] = [];
+    for (let i = 0; i < inputs.length; i++) {
+      const key = inputHistoryKey(inputs[i]);
+      const cached = this.cache.get(key);
+      if (cached) {
+        this.hits += 1;
+        this.cache.delete(key);
+        this.cache.set(key, cached);
+        results[i] = cloneEvaluation(cached);
+      } else {
+        this.misses += 1;
+        missInputs.push(inputs[i]);
+        missSlots.push(i);
+        missKeys.push(key);
+      }
+    }
+    if (missInputs.length) {
+      const evals = this.inner.evaluateBatch
+        ? await this.inner.evaluateBatch(missInputs)
+        : await Promise.all(missInputs.map((input) => this.inner.evaluate(input)));
+      for (let i = 0; i < evals.length; i++) {
+        const value = cloneEvaluation(evals[i]);
+        this.store(missKeys[i], value);
+        results[missSlots[i]] = cloneEvaluation(value);
+      }
+    }
+    return results;
+  }
+
+  private store(key: string, value: Lc0Evaluation): void {
+    if (this.maxEntries <= 0) return;
+    this.cache.set(key, cloneEvaluation(value));
+    this.evictIfNeeded();
+  }
+
+  private evictIfNeeded(): void {
+    while (this.cache.size > this.maxEntries) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest === undefined) break;
+      this.cache.delete(oldest);
+    }
+  }
+}
+
+export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   readonly policyTemperature: number;
   readonly historyFill: Lc0HistoryFill;
   private readonly session: ort.InferenceSession;

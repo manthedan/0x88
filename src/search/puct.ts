@@ -33,7 +33,8 @@ export interface SearchResult { move: Move | null; visits: number; value: number
 export type CpuctSchedule = 'constant' | 'lc0-log';
 export type FpuStrategy = 'constant' | 'lc0-reduction';
 export type SearchBudgetMode = 'visits' | 'neural';
-export type SearchEarlyStop = 'none' | 'root-dominance' | 'kld-stable';
+export type SearchBatchCollisionMode = 'retry' | 'backup';
+export type SearchEarlyStop = 'none' | 'root-dominance' | 'kld-stable' | 'best-stable';
 export type ValueWdlBlendMode = 'constant' | 'confidence';
 export interface SearchOptions {
   visits?: number;
@@ -49,6 +50,15 @@ export interface SearchOptions {
   fpuReduction?: number;
   historyFens?: string[];
   batchSize?: number;
+  /**
+   * Batched MCTS leaf collisions. `retry` keeps temporary virtual visits on
+   * already-selected in-flight leaves and tries to fill the batch with distinct
+   * leaves; `backup` preserves the older behavior of backing up duplicate leaf
+   * hits after one shared evaluation.
+   */
+  batchCollisionMode?: SearchBatchCollisionMode;
+  /** Max retry selections per desired batch slot when avoiding in-flight leaves. */
+  batchCollisionRetryLimit?: number;
   searchPolicy?: SearchPolicy;
   avWeight?: number;
   rankWeight?: number;
@@ -70,6 +80,8 @@ export interface SearchOptions {
   multiPv?: number;
   rootMoves?: Move[];
   signal?: AbortSignal;
+  /** Soft wall-clock budget. When elapsed, search returns best-so-far instead of throwing. */
+  movetimeMs?: number;
   yieldEveryMs?: number;
   /** Reusable root from a previous search at the same position. Ignored when rootMoves restricts the root. */
   root?: Node | null;
@@ -86,6 +98,12 @@ export interface SearchOptions {
   kldCheckInterval?: number;
   kldThreshold?: number;
   kldStableChecks?: number;
+  /** Best-move stability early-stop guardrails for play/search UX. */
+  bestStableMinVisits?: number;
+  bestStableCheckInterval?: number;
+  bestStableChecks?: number;
+  bestStableMinVisitLead?: number;
+  bestStableMaxQDelta?: number;
   /** Experimental variance-aware exploration multiplier. 0 disables. */
   cpuctVarianceWeight?: number;
   cpuctVarianceMaxScale?: number;
@@ -105,12 +123,16 @@ export interface SearchStats {
   evalCalls: number;
   batchEvalCalls: number;
   maxEvalBatch: number;
+  /** Duplicate in-flight leaves encountered while collecting a search batch. */
+  batchLeafCollisions?: number;
+  /** Extra selection attempts spent to avoid duplicate in-flight leaves. */
+  batchLeafRetries?: number;
   budgetMode?: SearchBudgetMode;
   requestedNeuralEvals?: number;
   neuralEvalMisses?: number;
   cacheHits?: number;
   maxRootVisits?: number;
-  stopReason?: 'visit-budget' | 'neural-budget' | 'max-visits' | 'root-dominance' | 'kld-stable' | 'no-cache-metrics-fixed-visits';
+  stopReason?: 'visit-budget' | 'movetime' | 'neural-budget' | 'max-visits' | 'root-dominance' | 'kld-stable' | 'best-stable' | 'no-cache-metrics-fixed-visits';
   rootReused?: boolean;
   transpositionHits?: number;
 }
@@ -586,6 +608,7 @@ function rootVisitDominanceStop(root: Node, maxRootVisits: number): boolean {
 }
 
 interface KldEarlyStopState { lastDistribution?: number[]; lastBest?: number; stableChecks: number; }
+interface BestStableEarlyStopState { lastBest?: number; lastBestQ?: number; stableChecks: number; }
 
 function rootVisitDistribution(root: Node): number[] {
   const total = Math.max(1, rootVisitCount(root));
@@ -635,6 +658,40 @@ function rootKldEarlyStop(root: Node, options: SearchOptions, state: KldEarlySto
   return state.stableChecks >= Math.max(1, Math.floor(options.kldStableChecks ?? 2));
 }
 
+function rootBestStableEarlyStop(root: Node, context: SearchPolicyContext, options: SearchOptions, state: BestStableEarlyStopState): boolean {
+  if (options.earlyStop !== 'best-stable') return false;
+  const visits = rootVisitCount(root);
+  const minVisits = Math.max(1, Math.floor(options.bestStableMinVisits ?? 32));
+  const interval = Math.max(1, Math.floor(options.bestStableCheckInterval ?? 8));
+  if (visits < minVisits || visits % interval !== 0) return false;
+  const best = rootBestEdgeIndex(root);
+  if (best === undefined) return false;
+  const sorted = root.edges
+    .map((edge, index) => ({ index, visits: edge.visits, q: edgeQForParentInNode(edge, root, context) }))
+    .sort((a, b) => b.visits - a.visits || b.q - a.q);
+  const bestEntry = sorted[0];
+  const secondVisits = sorted[1]?.visits ?? 0;
+  const minLead = Math.max(0, Math.floor(options.bestStableMinVisitLead ?? interval));
+  const maxQDelta = Math.max(0, options.bestStableMaxQDelta ?? 0.05);
+  const sameBest = bestEntry.index === state.lastBest;
+  const stableQ = state.lastBestQ === undefined || Math.abs(bestEntry.q - state.lastBestQ) <= maxQDelta;
+  const stable = sameBest && bestEntry.visits >= secondVisits + minLead && stableQ;
+  state.lastBest = bestEntry.index;
+  state.lastBestQ = bestEntry.q;
+  state.stableChecks = stable ? state.stableChecks + 1 : 0;
+  return state.stableChecks >= Math.max(1, Math.floor(options.bestStableChecks ?? 2));
+}
+
+function rootEarlyStopReason(root: Node, context: SearchPolicyContext, options: SearchOptions, visitTarget: number, kldState: KldEarlyStopState, bestState: BestStableEarlyStopState): SearchStats['stopReason'] | undefined {
+  // Early-stop telemetry should only report a real early exit, not completion
+  // exactly at the scheduled visit cap.
+  if (rootVisitCount(root) >= visitTarget) return undefined;
+  if (options.earlyStop === 'root-dominance' && rootVisitDominanceStop(root, visitTarget)) return 'root-dominance';
+  if (rootBestStableEarlyStop(root, context, options, bestState)) return 'best-stable';
+  if (rootKldEarlyStop(root, options, kldState)) return 'kld-stable';
+  return undefined;
+}
+
 function searchAbortError(): Error {
   if (typeof DOMException !== 'undefined') return new DOMException('Search cancelled', 'AbortError');
   const err = new Error('Search cancelled');
@@ -677,6 +734,14 @@ function logSearchLatency(label: string, payload: Record<string, unknown>): void
 
 function yieldToUi(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function deadlineFromMovetime(startMs: number, movetimeMs?: number): number | undefined {
+  return movetimeMs && Number.isFinite(movetimeMs) && movetimeMs > 0 ? startMs + Math.floor(movetimeMs) : undefined;
+}
+
+function deadlineExpired(deadlineMs?: number): boolean {
+  return deadlineMs !== undefined && nowMs() >= deadlineMs;
 }
 
 function sameHistory(a: string[], b: string[]): boolean {
@@ -890,14 +955,37 @@ function finishExpansion(node: Node, moves: Move[], evaln: Evaluation, context: 
   return valueFromEvaluation(evaln, context);
 }
 
-async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>) {
+async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>, deadlineMs?: number, collisionMode: SearchBatchCollisionMode = 'retry', collisionRetryLimit = batchSize * 4) {
   let done = 0;
   let lastYield = nowMs();
-  while (done < visits) {
+  while (done < visits && !deadlineExpired(deadlineMs)) {
     throwIfAborted(signal);
     const want = Math.min(batchSize, visits - done);
     const selected: SelectedLeaf[] = [];
-    for (let i = 0; i < want; i++) selected.push(selectLeaf(root, searchPolicy, context, [], transpositionTable, stats));
+    const inFlightEvalLeaves = new Set<Node>();
+    const retryVirtualPaths: Edge[][] = [];
+    let attempts = 0;
+    const maxAttempts = collisionMode === 'retry'
+      ? Math.max(want, want + Math.max(0, Math.floor(collisionRetryLimit)))
+      : want;
+    while (selected.length < want && attempts < maxAttempts) {
+      attempts += 1;
+      const sel = selectLeaf(root, searchPolicy, context, [], transpositionTable, stats);
+      if (collisionMode === 'retry' && !sel.node.expanded && sel.node.terminalValue === null) {
+        if (inFlightEvalLeaves.has(sel.node)) {
+          stats.batchLeafCollisions = (stats.batchLeafCollisions ?? 0) + 1;
+          stats.batchLeafRetries = (stats.batchLeafRetries ?? 0) + 1;
+          // Keep this temporary virtual path until batch collection finishes so
+          // subsequent selections see the leaf as in flight and can diversify.
+          retryVirtualPaths.push(sel.path);
+          continue;
+        }
+        inFlightEvalLeaves.add(sel.node);
+      }
+      selected.push(sel);
+    }
+    while (selected.length < want) selected.push(selectLeaf(root, searchPolicy, context, [], transpositionTable, stats));
+    for (const path of retryVirtualPaths) unwindVirtualVisits(path);
 
     const evalNodes: Node[] = [];
     const evalMoves: Move[][] = [];
@@ -950,6 +1038,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
     }
     done += want;
     throwIfAborted(signal);
+    if (deadlineExpired(deadlineMs)) break;
     if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
       await yieldToUi();
       lastYield = nowMs();
@@ -960,7 +1049,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
 
 export async function searchRoot(board: BoardState, evaluator: Evaluator, options: SearchOptions = {}): Promise<SearchResult> {
   const tSearch0 = nowMs();
-  const visits = Math.max(1, Math.floor(options.visits ?? 8));
+  const visits = Math.max(1, Math.floor(options.visits ?? (options.movetimeMs && options.movetimeMs > 0 ? Number.MAX_SAFE_INTEGER : 8)));
   const context: SearchPolicyContext = {
     cpuct: options.cpuct ?? 1.5,
     fpu: options.fpu ?? 0,
@@ -1030,12 +1119,15 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   }
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? 1));
   const signal = options.signal;
+  const deadlineMs = deadlineFromMovetime(tSearch0, options.movetimeMs);
   const yieldEveryMs = Math.max(0, Math.floor(options.yieldEveryMs ?? 0));
   const priorRootVisits = reusableRoot ? (root.visits ?? root.edges.reduce((sum, edge) => sum + edge.visits, 0)) : 0;
   const visitsToRun = reusableRoot ? Math.max(0, visits - priorRootVisits) : visits;
   const budgetMode = options.budgetMode ?? 'visits';
   stats.budgetMode = budgetMode;
   const kldState: KldEarlyStopState = { stableChecks: 0 };
+  const bestStableState: BestStableEarlyStopState = { stableChecks: 0 };
+  const fixedVisitTarget = Math.max(visits, rootVisitCount(root));
   throwIfAborted(signal);
   if (budgetMode === 'neural') {
     stats.requestedNeuralEvals = visits;
@@ -1044,13 +1136,14 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     stats.maxRootVisits = maxRootVisits;
     if (!cacheAware) {
       stats.stopReason = 'no-cache-metrics-fixed-visits';
-      if (batchSize > 1) await runBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable);
+      if (batchSize > 1) await runBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
       else {
         let lastYield = nowMs();
-        for (let i = 0; i < visitsToRun; i++) {
+        for (let i = 0; i < visitsToRun && !deadlineExpired(deadlineMs); i++) {
           throwIfAborted(signal);
           await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
           stats.completedVisits += 1;
+          if (deadlineExpired(deadlineMs)) break;
           if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
             await yieldToUi();
             lastYield = nowMs();
@@ -1058,26 +1151,28 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
           }
         }
       }
+      if (deadlineExpired(deadlineMs) && stats.completedVisits < visitsToRun) stats.stopReason = 'movetime';
     } else {
       const startMisses = stats.neuralEvalMisses ?? 0;
       let lastYield = nowMs();
-      while (((stats.neuralEvalMisses ?? 0) - startMisses) < visits && rootVisitCount(root) < maxRootVisits) {
+      while (((stats.neuralEvalMisses ?? 0) - startMisses) < visits && rootVisitCount(root) < maxRootVisits && !deadlineExpired(deadlineMs)) {
         throwIfAborted(signal);
         const room = Math.max(0, maxRootVisits - rootVisitCount(root));
         const chunk = Math.max(1, Math.min(batchSize, room));
         const beforeCompleted = stats.completedVisits;
-        if (batchSize > 1) await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable);
+        if (batchSize > 1) await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
         else {
           await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
           stats.completedVisits += 1;
         }
-        if (stats.completedVisits === beforeCompleted) break;
-        if (options.earlyStop === 'root-dominance' && rootVisitDominanceStop(root, maxRootVisits)) {
-          stats.stopReason = 'root-dominance';
+        if (deadlineExpired(deadlineMs)) {
+          stats.stopReason = 'movetime';
           break;
         }
-        if (rootKldEarlyStop(root, options, kldState)) {
-          stats.stopReason = 'kld-stable';
+        if (stats.completedVisits === beforeCompleted) break;
+        const earlyStop = rootEarlyStopReason(root, context, options, maxRootVisits, kldState, bestStableState);
+        if (earlyStop) {
+          stats.stopReason = earlyStop;
           break;
         }
         if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
@@ -1086,28 +1181,32 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
           throwIfAborted(signal);
         }
       }
-      if (!stats.stopReason) stats.stopReason = ((stats.neuralEvalMisses ?? 0) - startMisses) >= visits ? 'neural-budget' : 'max-visits';
+      if (!stats.stopReason) stats.stopReason = deadlineExpired(deadlineMs) ? 'movetime' : ((stats.neuralEvalMisses ?? 0) - startMisses) >= visits ? 'neural-budget' : 'max-visits';
     }
   } else if (batchSize > 1) {
     let done = 0;
-    while (done < visitsToRun) {
+    while (done < visitsToRun && !deadlineExpired(deadlineMs)) {
       const chunk = Math.min(batchSize, visitsToRun - done);
-      await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable);
+      await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
       done += chunk;
-      if (rootKldEarlyStop(root, options, kldState)) {
-        stats.stopReason = 'kld-stable';
+      if (deadlineExpired(deadlineMs)) break;
+      const earlyStop = rootEarlyStopReason(root, context, options, fixedVisitTarget, kldState, bestStableState);
+      if (earlyStop) {
+        stats.stopReason = earlyStop;
         break;
       }
     }
-    if (!stats.stopReason) stats.stopReason = 'visit-budget';
+    if (!stats.stopReason) stats.stopReason = deadlineExpired(deadlineMs) && done < visitsToRun ? 'movetime' : 'visit-budget';
   } else {
     let lastYield = nowMs();
-    for (let i = 0; i < visitsToRun; i++) {
+    for (let i = 0; i < visitsToRun && !deadlineExpired(deadlineMs); i++) {
       throwIfAborted(signal);
       await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
       stats.completedVisits += 1;
-      if (rootKldEarlyStop(root, options, kldState)) {
-        stats.stopReason = 'kld-stable';
+      if (deadlineExpired(deadlineMs)) break;
+      const earlyStop = rootEarlyStopReason(root, context, options, fixedVisitTarget, kldState, bestStableState);
+      if (earlyStop) {
+        stats.stopReason = earlyStop;
         break;
       }
       if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
@@ -1116,7 +1215,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
         throwIfAborted(signal);
       }
     }
-    if (!stats.stopReason) stats.stopReason = 'visit-budget';
+    if (!stats.stopReason) stats.stopReason = deadlineExpired(deadlineMs) && stats.completedVisits < visitsToRun ? 'movetime' : 'visit-budget';
   }
   root.visits = priorRootVisits + stats.completedVisits;
   const policy = searchPolicy.rootPolicy(root.edges, context, root);
@@ -1146,6 +1245,8 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     cacheHits: stats.cacheHits,
     neuralEvalMisses: stats.neuralEvalMisses,
     transpositionHits: stats.transpositionHits ?? 0,
+    batchLeafCollisions: stats.batchLeafCollisions ?? 0,
+    batchLeafRetries: stats.batchLeafRetries ?? 0,
   });
   return { move: bestEntry?.move ?? null, visits: realizedVisits, value: bestEntry?.q ?? rootValue, policy, ...(principalVariation ? { principalVariation } : {}), ...(multiPvLines ? { multiPvLines } : {}), stats, root };
 }

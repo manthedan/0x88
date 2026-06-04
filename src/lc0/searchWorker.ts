@@ -26,7 +26,8 @@ import {
   type Lc0WebQkvProjectionProbeResult,
   type Lc0WebSoftmaxBenchmarkResult,
 } from './wgslMatmulAddProbe.ts';
-import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
+import { Lc0PuctSearcher, type Lc0SearchOptions, type Lc0SearchResult } from './search.ts';
+import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 
 type InitMessage = {
   type: 'init';
@@ -40,9 +41,23 @@ type SearchMessage = {
   type: 'search';
   id: number;
   input: Lc0EvaluatorInput;
-  visits: number;
+  visits?: number;
+  movetimeMs?: number;
   batchSize?: number;
+  batchCollisionMode?: SearchBatchCollisionMode;
   multiPv?: number;
+  reuseTree?: boolean;
+  earlyStop?: SearchEarlyStop;
+  cpuct?: number;
+  cpuctSchedule?: CpuctSchedule;
+  fpuStrategy?: FpuStrategy;
+  fpuReduction?: number;
+  temperature?: number;
+};
+
+type ResetSearchMessage = {
+  type: 'resetSearch';
+  id: number;
 };
 
 type EvaluateMessage = {
@@ -182,7 +197,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | ResetSearchMessage | EvaluateMessage | EvaluateBatchMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -222,6 +237,7 @@ type WorkerResponse =
   | { type: 'attentionBlockBenchmarkResult'; id: number; result: Lc0WebAttentionBlockBenchmarkResult }
   | { type: 'attentionOutputBenchmarkResult'; id: number; result: Lc0WebAttentionOutputBenchmarkResult }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
+  | { type: 'searchReset'; id: number }
   | { type: 'error'; id: number; error: string };
 
 let evaluator: Lc0OnnxEvaluator | null = null;
@@ -426,13 +442,23 @@ async function handleSearch(message: SearchMessage): Promise<void> {
   const controller = new AbortController();
   activeSearches.set(message.id, controller);
   try {
-    const result = await searcher.search(message.input, {
+    const searchOptions: Lc0SearchOptions = {
       visits: message.visits,
+      movetimeMs: message.movetimeMs,
       batchSize: message.batchSize ?? 1,
+      batchCollisionMode: message.batchCollisionMode,
       multiPv: message.multiPv,
+      reuseTree: message.reuseTree,
+      earlyStop: message.earlyStop,
+      cpuct: message.cpuct,
+      cpuctSchedule: message.cpuctSchedule,
+      fpuStrategy: message.fpuStrategy,
+      fpuReduction: message.fpuReduction,
+      temperature: message.temperature,
       signal: controller.signal,
       yieldEveryMs: 16,
-    });
+    };
+    const result = await searcher.search(message.input, searchOptions);
     post({
       type: 'searchResult',
       id: message.id,
@@ -499,6 +525,9 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       } else if (message.type === 'evaluateBatch') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleEvaluateBatch(message);
+      } else if (message.type === 'resetSearch') {
+        searcher?.resetTree();
+        post({ type: 'searchReset', id: message.id });
       } else if (message.type === 'search') {
         if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
         await handleSearch(message);

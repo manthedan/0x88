@@ -10,7 +10,7 @@ import { BUILTIN_ARENA_OPENINGS, parseArenaOpenings, scheduleOpenings, type Aren
 import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { GameTree } from './gameTree.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
-import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
@@ -20,6 +20,7 @@ interface ArenaEngine {
   id: string;
   name: string;
   move(positions: BoardState[], signal: AbortSignal): Promise<string | null>;
+  warmup?(signal: AbortSignal): Promise<void>;
 }
 interface GameRecord { pgn: string; }
 interface ScheduledArenaGame extends ArenaPairing { opening: ArenaOpening; }
@@ -37,8 +38,10 @@ let running = false;
 let abort: AbortController | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
 let searcher: Lc0PuctSearcher | null = null;
+let lc0Cache: CachedLc0Evaluator | null = null;
 let stockfish: StockfishEngine | null = null;
 const engines = new Map<string, ArenaEngine>();
+const lc0Searchers = new Map<string, Lc0PuctSearcher>();
 const games: GameRecord[] = [];
 
 function el(id: string): HTMLElement {
@@ -90,19 +93,80 @@ function selectedEngineIds(): string[] {
   return [...el('engines').querySelectorAll('input:checked')].map((node) => (node as HTMLInputElement).value);
 }
 
+function arenaBudgetMode(): 'fixed' | 'movetime' {
+  return selectEl('budgetModeSelect').value === 'movetime' ? 'movetime' : 'fixed';
+}
+
+function arenaMovetimeMs(): number {
+  return Math.max(10, Math.min(60000, Math.floor(Number(inputEl('movetimeInput').value) || 500)));
+}
+
+function arenaCacheEntries(): number {
+  return Math.max(0, Math.min(100000, Math.floor(Number(inputEl('cacheEntriesInput').value) || 0)));
+}
+
+function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): string {
+  if (!metrics) return 'NN cache: unavailable';
+  return `NN cache: ${metrics.entries}/${metrics.maxEntries} entries · ${metrics.hits} hit${metrics.hits === 1 ? '' : 's'} · ${metrics.misses} miss${metrics.misses === 1 ? '' : 'es'}`;
+}
+
+function renderCacheInfo(): void {
+  lc0Cache?.setMaxEntries(arenaCacheEntries());
+  el('cacheInfo').textContent = cacheMetricsText(lc0Cache?.metrics());
+}
+
+function lc0SearcherFor(engineId: string): Lc0PuctSearcher {
+  const existing = lc0Searchers.get(engineId);
+  if (existing) return existing;
+  if (!lc0Cache) throw new Error('LC0 evaluator is not initialized');
+  const created = new Lc0PuctSearcher(lc0Cache);
+  lc0Searchers.set(engineId, created);
+  return created;
+}
+
+function resetLc0SearchTrees(ids?: string[]): void {
+  const targets = ids ? ids.map((id) => lc0Searchers.get(id)).filter((entry): entry is Lc0PuctSearcher => !!entry) : [...lc0Searchers.values()];
+  for (const search of targets) search.resetTree();
+}
+
 function buildEngines() {
   engines.clear();
-  const lc0Search = (visits: number): ArenaEngine['move'] => async (positions, signal) =>
-    (await searcher!.search({ positions }, { visits, signal, yieldEveryMs: 16 })).move ?? null;
+  const warmupPositions = [parseFen(START_FEN)];
+  const lc0Search = (engineId: string, visits: number): ArenaEngine['move'] => async (positions, signal) => {
+    const timed = arenaBudgetMode() === 'movetime';
+    return (await lc0SearcherFor(engineId).search({ positions }, {
+      visits: timed ? undefined : visits,
+      movetimeMs: timed ? arenaMovetimeMs() : undefined,
+      signal,
+      yieldEveryMs: 16,
+      reuseTree: true,
+    })).move ?? null;
+  };
   const sf = (depth: number): ArenaEngine['move'] => async (positions, signal) => {
-    stockfish!.setOptions({ depth });
+    if (arenaBudgetMode() === 'movetime') stockfish!.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
+    else stockfish!.setOptions({ depth, movetimeMs: undefined });
     return stockfish!.bestMove(boardToFen(positions[positions.length - 1]), signal);
   };
-  engines.set('lc0-policy', { id: 'lc0-policy', name: 'LC0 policy', move: async (positions) => (await player!.chooseMove({ positions })).move ?? null });
-  engines.set('lc0-s100', { id: 'lc0-s100', name: 'LC0 search 100', move: lc0Search(100) });
-  engines.set('lc0-s400', { id: 'lc0-s400', name: 'LC0 search 400', move: lc0Search(400) });
-  engines.set('sf-d4', { id: 'sf-d4', name: 'SF lite d4', move: sf(4) });
-  engines.set('sf-d8', { id: 'sf-d8', name: 'SF lite d8', move: sf(8) });
+  const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {
+    const search = lc0SearcherFor(engineId);
+    await search.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
+    search.resetTree();
+    renderCacheInfo();
+  };
+  const stockfishWarmup = async (signal: AbortSignal) => {
+    stockfish!.setOptions({ depth: 1, movetimeMs: undefined });
+    await stockfish!.bestMove(START_FEN, signal);
+  };
+  engines.set('lc0-policy', {
+    id: 'lc0-policy',
+    name: 'LC0 policy',
+    move: async (positions) => (await player!.chooseMove({ positions })).move ?? null,
+    warmup: async () => { await player!.chooseMove({ positions: warmupPositions }); },
+  });
+  engines.set('lc0-s100', { id: 'lc0-s100', name: 'LC0 search 100', move: lc0Search('lc0-s100', 100), warmup: lc0SearchWarmup('lc0-s100') });
+  engines.set('lc0-s400', { id: 'lc0-s400', name: 'LC0 search 400', move: lc0Search('lc0-s400', 400), warmup: lc0SearchWarmup('lc0-s400') });
+  engines.set('sf-d4', { id: 'sf-d4', name: 'SF lite d4', move: sf(4), warmup: stockfishWarmup });
+  engines.set('sf-d8', { id: 'sf-d8', name: 'SF lite d8', move: sf(8), warmup: stockfishWarmup });
 }
 
 function refreshChampionOptions() {
@@ -194,6 +258,19 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
+async function warmUpSelectedEngines(ids: string[], signal: AbortSignal): Promise<void> {
+  const warmed = new Set<string>();
+  for (const id of ids) {
+    if (signal.aborted) return;
+    const engine = engines.get(id);
+    if (!engine?.warmup || warmed.has(id)) continue;
+    el('message').textContent = `Warming up ${engine.name}…`;
+    await engine.warmup(signal);
+    warmed.add(id);
+    renderCacheInfo();
+  }
+}
+
 function legalFromUci(current: BoardState, uci: string | null): Move | undefined {
   return uci ? legalMoves(current).find((m) => moveToUci(m) === uci) : undefined;
 }
@@ -267,11 +344,15 @@ async function startTournament() {
   renderStandings(standings);
   let played = 0;
   try {
+    resetLc0SearchTrees(ids);
+    await warmUpSelectedEngines(ids, abort.signal);
+    if (abort.signal.aborted) return;
     for (let i = 0; i < pairings.length; i++) {
       if (abort.signal.aborted) break;
       const { white, black, opening } = pairings[i];
       const whiteEngine = engines.get(white)!;
       const blackEngine = engines.get(black)!;
+      resetLc0SearchTrees([white, black]);
       setBoardSideEngines(whiteEngine.name, blackEngine.name);
       el('pairing').textContent = `Game ${i + 1}/${pairings.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
       el('message').textContent = 'Playing…';
@@ -281,7 +362,8 @@ async function startTournament() {
       played += 1;
       const tags: Record<string, string> = { Event: 'LC0 arena', White: whiteEngine.name, Black: blackEngine.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
       games.push({ pgn: gameTreeToPgn(tree, tags, result) });
-      appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason})`);
+      renderCacheInfo();
+      appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason}) · ${cacheMetricsText(lc0Cache?.metrics())}`);
       renderStandings(standings);
     }
     const leader = rankedStandings(standings)[0];
@@ -290,7 +372,13 @@ async function startTournament() {
       : `Tournament done (${played} games). Winner: ${leader?.name ?? '—'} with ${leader?.score ?? 0}.`;
     el('pairing').textContent = 'Tournament finished.';
   } catch (error) {
-    el('message').textContent = `Tournament failed: ${(error as Error).message}`;
+    if (isAbortError(error) || abort?.signal.aborted) {
+      const leader = rankedStandings(standings)[0];
+      el('message').textContent = `Stopped after ${played} game(s). Leader: ${leader?.name ?? '—'}.`;
+      el('pairing').textContent = 'Tournament stopped.';
+    } else {
+      el('message').textContent = `Tournament failed: ${(error as Error).message}`;
+    }
   } finally {
     running = false;
     abort = null;
@@ -312,6 +400,9 @@ function wireEvents() {
   el('engines').addEventListener('change', refreshChampionOptions);
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
   el('openingText').addEventListener('input', refreshOpeningPreview);
+  el('cacheEntriesInput').addEventListener('input', () => { renderCacheInfo(); resetLc0SearchTrees(); });
+  el('budgetModeSelect').addEventListener('change', () => resetLc0SearchTrees());
+  el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
 }
 
 async function init() {
@@ -323,9 +414,12 @@ async function init() {
   try {
     const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
     const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
-    player = new Lc0PolicyOnlyPlayer(evaluator);
-    searcher = new Lc0PuctSearcher(evaluator);
+    lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
+    lc0Searchers.clear();
+    player = new Lc0PolicyOnlyPlayer(lc0Cache);
+    searcher = new Lc0PuctSearcher(lc0Cache);
     stockfish = new StockfishEngine({ depth: 4 });
+    renderCacheInfo();
     el('start').toggleAttribute('disabled', false);
     el('message').textContent = 'Ready. Pick engines and start a tournament.';
   } catch (error) {

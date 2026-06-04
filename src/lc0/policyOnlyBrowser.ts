@@ -11,8 +11,9 @@ import { buildBoardHistoryFromMoves } from './history.ts';
 import { clearLc0ModelCache, describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
-import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchResult } from './search.ts';
+import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchOptions, type Lc0SearchResult } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
+import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
@@ -354,11 +355,43 @@ function requestedKernelVariant(): KernelVariant {
 const SW_ENABLED = params.get('sw') === '1'
   || (params.get('sw') !== '0' && (import.meta as { env?: { PROD?: boolean } }).env?.PROD === true);
 
+function parseEarlyStop(raw: string | null): SearchEarlyStop {
+  const normalized = (raw ?? 'none').toLowerCase().replace(/[ _]/g, '-');
+  if (normalized === 'root-dominance' || normalized === 'best-stable' || normalized === 'kld-stable') return normalized;
+  return 'none';
+}
+
+function parseCpuctSchedule(raw: string | null): CpuctSchedule {
+  return raw === 'constant' ? 'constant' : 'lc0-log';
+}
+
+function parseFpuStrategy(raw: string | null): FpuStrategy {
+  return raw === 'constant' ? 'constant' : 'lc0-reduction';
+}
+
+function parseBatchCollisionMode(raw: string | null): SearchBatchCollisionMode {
+  return raw === 'backup' ? 'backup' : 'retry';
+}
+
+function clampFloat(value: string | null, min: number, max: number, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
 // Runtime-adjustable settings: seeded from query params, then driven by the UI.
 let playerSide: 'white' | 'black' = params.get('side') === 'black' ? 'black' : 'white';
-let searchVisits = Math.max(1, Math.floor(Number(params.get('visits') ?? '32') || 32));
-let searchBatchSize = Math.max(1, Math.floor(Number(params.get('batch') ?? params.get('batchSize') ?? '1') || 1));
-let searchMultiPv = Math.max(1, Math.floor(Number(params.get('multipv') ?? params.get('multiPv') ?? '1') || 1));
+let searchVisits = clampInt(params.get('visits') ?? '32', 1, 100000, 32);
+let searchBatchSize = clampInt(params.get('batch') ?? params.get('batchSize') ?? '1', 1, 512, 1);
+let searchBatchCollisionMode: SearchBatchCollisionMode = parseBatchCollisionMode(params.get('collision') ?? params.get('batchCollisionMode'));
+let searchMultiPv = clampInt(params.get('multipv') ?? params.get('multiPv') ?? '1', 1, 20, 1);
+let searchEarlyStop: SearchEarlyStop = parseEarlyStop(params.get('earlyStop') ?? params.get('stop'));
+let searchMovetimeMs = clampInt(params.get('movetime') ?? params.get('movetimeMs') ?? '0', 0, 600000, 0);
+let searchCpuct = clampFloat(params.get('cpuct'), 0, 100, 1.5);
+let searchCpuctSchedule: CpuctSchedule = parseCpuctSchedule(params.get('cpuctSchedule'));
+let searchFpuStrategy: FpuStrategy = parseFpuStrategy(params.get('fpuStrategy'));
+let searchFpuReduction = clampFloat(params.get('fpuReduction'), 0, 5, 0.330);
+let searchTemperature = clampFloat(params.get('temperature'), 0, 10, 0);
 let engineReplyMode: EngineReplyMode = params.get('mode') === 'search' ? 'search' : 'policy';
 
 let board: BoardState = parseFen(params.get('fen') ?? START_FEN);
@@ -502,6 +535,26 @@ function setBusy(next: boolean, message?: string) {
   el('battleStart').toggleAttribute('disabled', busy || battleRunning || !evaluationAvailable());
 }
 
+function currentSearchLimitLabel(): string {
+  return searchMovetimeMs > 0 ? `${searchMovetimeMs}ms` : `${searchVisits}`;
+}
+
+function currentSearchOptions(extra: Partial<Lc0SearchOptions> = {}): Lc0SearchOptions {
+  return {
+    ...(searchMovetimeMs > 0 ? { movetimeMs: searchMovetimeMs } : { visits: searchVisits }),
+    batchSize: searchBatchSize,
+    batchCollisionMode: searchBatchCollisionMode,
+    multiPv: searchMultiPv,
+    earlyStop: searchEarlyStop,
+    cpuct: searchCpuct,
+    cpuctSchedule: searchCpuctSchedule,
+    fpuStrategy: searchFpuStrategy,
+    fpuReduction: searchFpuReduction,
+    temperature: searchTemperature,
+    ...extra,
+  };
+}
+
 function renderStatic() {
   el('fen').textContent = boardToFen(board);
   el('sideToMove').textContent = sideToMoveName();
@@ -511,8 +564,8 @@ function renderStatic() {
   el('backend').textContent = WORKER_ONLY_MODEL && searchWorkerReady ? searchWorkerBackend : describeOrtBackendConfig();
   el('status').textContent = PACK_PROBE_REQUESTED ? 'pack probe' : evaluationAvailable() ? 'ready' : 'loading';
   el('searchMode').textContent = searchModeLabel();
-  el('searchBatch').textContent = `${searchBatchSize}`;
-  el('searchMove').textContent = `Search ${searchVisits}`;
+  el('searchBatch').textContent = searchEarlyStop === 'none' ? `${searchBatchSize} · ${searchBatchCollisionMode} · ${searchCpuctSchedule}` : `${searchBatchSize} · ${searchBatchCollisionMode} · ${searchCpuctSchedule} · ${searchEarlyStop}`;
+  el('searchMove').textContent = `Search ${currentSearchLimitLabel()}`;
   el('engineMove').toggleAttribute('disabled', busy || !evaluationAvailable());
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
   el('analyze').toggleAttribute('disabled', busy || !searchAvailable());
@@ -540,7 +593,8 @@ function renderStatic() {
 }
 
 function renderSearchResult(result: RenderableSearchResult) {
-  el('searchSummary').textContent = `${result.move ?? '—'} · ${result.visits} visits · Q ${result.value.toFixed(5)}`;
+  const stop = result.stats?.stopReason ? ` · ${result.stats.stopReason}` : '';
+  el('searchSummary').textContent = `${result.move ?? '—'} · ${result.visits} visits${stop} · Q ${result.value.toFixed(5)}`;
   const visitsPerSecond = result.elapsedMs && result.elapsedMs > 0 ? result.visits / (result.elapsedMs / 1000) : undefined;
   const stats = result.stats;
   const batchStats = stats ? ` · eval batches ${stats.batchEvalCalls}/${stats.maxEvalBatch}` : '';
@@ -1278,9 +1332,7 @@ async function searchWithWorker(): Promise<RenderableSearchResult> {
   const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
     type: 'search',
     input: currentEvaluationInput(),
-    visits: searchVisits,
-    batchSize: searchBatchSize,
-    multiPv: searchMultiPv,
+    ...currentSearchOptions(),
   }, (id) => { activeWorkerSearchId = id; });
   return response.result;
 }
@@ -1326,20 +1378,17 @@ async function executeSearchResult(): Promise<RenderableSearchResult> {
   const started = performance.now();
   // yieldEveryMs lets the main-thread search relinquish the event loop so the
   // Stop button stays responsive and the page never feels frozen.
-  const search = await searcher!.search(currentEvaluationInput(), {
-    visits: searchVisits,
-    batchSize: searchBatchSize,
-    multiPv: searchMultiPv,
+  const search = await searcher!.search(currentEvaluationInput(), currentSearchOptions({
     signal: mainSearchAbort!.signal,
     yieldEveryMs: 16,
-  });
+  }));
   return { ...search, stats: search.search.stats, elapsedMs: performance.now() - started };
 }
 
 async function searchRootPosition() {
   if (!searchAvailable() || busy) return;
   beginSearch();
-  setBusy(true, `LC0 fixed-visit PUCT search running (${searchModeLabel()})… press Stop to cancel.`);
+  setBusy(true, `LC0 PUCT search running (${currentSearchLimitLabel()}, ${searchModeLabel()})… press Stop to cancel.`);
   // Tracks whether a result is on screen so the finally does not re-run the
   // evaluator and overwrite the richer search arrows with the plain best move.
   let rendered = false;
@@ -1351,7 +1400,7 @@ async function searchRootPosition() {
     } else {
       renderSearchResult(result);
       rendered = true;
-      el('message').textContent = `Search selected ${result.move ?? '—'} (${result.visits} visits, batch ${searchBatchSize}, fixed PUCT via ${searchModeLabel()}).`;
+      el('message').textContent = `Search selected ${result.move ?? '—'} (${result.visits} visits, batch ${searchBatchSize}, PUCT via ${searchModeLabel()}).`;
     }
   } catch (error) {
     if (isAbortError(error)) {
@@ -1397,7 +1446,7 @@ async function engineMove() {
   const replyWithSearch = engineReplyMode === 'search' && searchAvailable();
   if (replyWithSearch) beginSearch();
   setBusy(true, replyWithSearch
-    ? `LC0 engine replying with ${searchVisits}-visit search (${searchModeLabel()})… press Stop to cancel.`
+    ? `LC0 engine replying with ${currentSearchLimitLabel()} search (${searchModeLabel()})… press Stop to cancel.`
     : 'LC0 policy-only engine thinking…');
   renderStatic();
   try {
@@ -1522,17 +1571,24 @@ function battleSleep(ms: number, signal: AbortSignal): Promise<void> {
 
 type MoveProvider = (positions: BoardState[]) => Promise<string | null>;
 
-// LC0 fixed-visit search move, run in the worker when available so the board
-// keeps animating; falls back to a cancellable main-thread search otherwise.
+async function resetBattleSearchTree(): Promise<void> {
+  searcher?.resetTree();
+  if (searchWorkerReady) {
+    await postWorkerRequest<{ type: 'searchReset' }>({ type: 'resetSearch' });
+  }
+}
+
+// LC0 search move, run in the worker when available so the board keeps
+// animating; falls back to a cancellable main-thread search otherwise.
 async function battleSearchMove(positions: BoardState[]): Promise<string | null> {
   if (searchWorkerReady) {
     const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>(
-      { type: 'search', input: { positions }, visits: searchVisits, batchSize: searchBatchSize },
+      { type: 'search', input: { positions }, ...currentSearchOptions({ reuseTree: true }) },
       (id) => { activeWorkerSearchId = id; },
     );
     return response.result.cancelled ? null : (response.result.move ?? null);
   }
-  const result = await searcher!.search({ positions }, { visits: searchVisits, batchSize: searchBatchSize, signal: battleAbort!.signal, yieldEveryMs: 16 });
+  const result = await searcher!.search({ positions }, currentSearchOptions({ signal: battleAbort!.signal, yieldEveryMs: 16, reuseTree: true }));
   return result.move ?? null;
 }
 
@@ -1561,6 +1617,7 @@ function opponentProvider(): { provider: MoveProvider; label: string } {
 // moves are watchable. Reuses the page board/history/move-list state.
 async function playGameOnBoard(white: MoveProvider, black: MoveProvider, signal: AbortSignal): Promise<{ result: GameResultCode; reason: string }> {
   loadPosition(parseFen(START_FEN));
+  await resetBattleSearchTree();
   // Show the start position without kicking off an evaluation: that eval shares
   // the main ORT session with the policy/search move providers, and concurrent
   // session.run() on one session is unsafe. The eval panel refreshes when the
@@ -1607,7 +1664,7 @@ async function startBattle() {
   activeWorkerSearchId = null;
   const mode = searchWorkerReady ? 'worker' : 'main thread';
   const { provider: opponentMove, label: opponentLabel } = opponentProvider();
-  const lc0Label = `LC0 search ${searchVisits}`;
+  const lc0Label = `LC0 search ${currentSearchLimitLabel()}`;
   setBusy(true, `Watching ${lc0Label} vs ${opponentLabel} (${mode})… press Stop to end.`);
   el('battleResults').innerHTML = '';
   let aWins = 0, bWins = 0, draws = 0, played = 0, cancelled = false;
@@ -1804,7 +1861,15 @@ async function init() {
 function seedSettingsInputs() {
   inputEl('visitsInput').value = String(searchVisits);
   inputEl('batchInput').value = String(searchBatchSize);
+  selectEl('collisionSelect').value = searchBatchCollisionMode;
   inputEl('multiPvInput').value = String(searchMultiPv);
+  selectEl('earlyStopSelect').value = searchEarlyStop;
+  inputEl('movetimeInput').value = String(searchMovetimeMs);
+  inputEl('cpuctInput').value = String(searchCpuct);
+  selectEl('cpuctScheduleSelect').value = searchCpuctSchedule;
+  selectEl('fpuStrategySelect').value = searchFpuStrategy;
+  inputEl('fpuReductionInput').value = String(searchFpuReduction);
+  inputEl('temperatureInput').value = String(searchTemperature);
   inputEl('battleGamesInput').value = String(battleGames);
   inputEl('sfDepthInput').value = String(stockfishDepth);
   selectEl('opponentSelect').value = battleOpponent;
@@ -1834,9 +1899,49 @@ inputEl('batchInput').addEventListener('change', () => {
   inputEl('batchInput').value = String(searchBatchSize);
   renderStatic();
 });
+selectEl('collisionSelect').addEventListener('change', () => {
+  searchBatchCollisionMode = parseBatchCollisionMode(selectEl('collisionSelect').value);
+  selectEl('collisionSelect').value = searchBatchCollisionMode;
+  renderStatic();
+});
 inputEl('multiPvInput').addEventListener('change', () => {
   searchMultiPv = clampInt(inputEl('multiPvInput').value, 1, 20, searchMultiPv);
   inputEl('multiPvInput').value = String(searchMultiPv);
+  renderStatic();
+});
+selectEl('earlyStopSelect').addEventListener('change', () => {
+  searchEarlyStop = parseEarlyStop(selectEl('earlyStopSelect').value);
+  selectEl('earlyStopSelect').value = searchEarlyStop;
+  renderStatic();
+});
+inputEl('movetimeInput').addEventListener('change', () => {
+  searchMovetimeMs = clampInt(inputEl('movetimeInput').value, 0, 600000, searchMovetimeMs);
+  inputEl('movetimeInput').value = String(searchMovetimeMs);
+  renderStatic();
+});
+inputEl('cpuctInput').addEventListener('change', () => {
+  searchCpuct = clampFloat(inputEl('cpuctInput').value, 0, 100, searchCpuct);
+  inputEl('cpuctInput').value = String(searchCpuct);
+  renderStatic();
+});
+selectEl('cpuctScheduleSelect').addEventListener('change', () => {
+  searchCpuctSchedule = parseCpuctSchedule(selectEl('cpuctScheduleSelect').value);
+  selectEl('cpuctScheduleSelect').value = searchCpuctSchedule;
+  renderStatic();
+});
+selectEl('fpuStrategySelect').addEventListener('change', () => {
+  searchFpuStrategy = parseFpuStrategy(selectEl('fpuStrategySelect').value);
+  selectEl('fpuStrategySelect').value = searchFpuStrategy;
+  renderStatic();
+});
+inputEl('fpuReductionInput').addEventListener('change', () => {
+  searchFpuReduction = clampFloat(inputEl('fpuReductionInput').value, 0, 5, searchFpuReduction);
+  inputEl('fpuReductionInput').value = String(searchFpuReduction);
+  renderStatic();
+});
+inputEl('temperatureInput').addEventListener('change', () => {
+  searchTemperature = clampFloat(inputEl('temperatureInput').value, 0, 10, searchTemperature);
+  inputEl('temperatureInput').value = String(searchTemperature);
   renderStatic();
 });
 inputEl('battleGamesInput').addEventListener('change', () => {
@@ -1856,7 +1961,7 @@ selectEl('sideSelect').addEventListener('change', () => {
 });
 selectEl('modeSelect').addEventListener('change', () => {
   engineReplyMode = selectEl('modeSelect').value === 'search' ? 'search' : 'policy';
-  el('message').textContent = `Engine reply mode: ${engineReplyMode === 'search' ? 'fixed-visit search' : 'policy-only'}.`;
+  el('message').textContent = `Engine reply mode: ${engineReplyMode === 'search' ? 'PUCT search' : 'policy-only'}.`;
 });
 
 function registerAppServiceWorker() {
