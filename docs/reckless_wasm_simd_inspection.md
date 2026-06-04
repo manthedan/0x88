@@ -2,13 +2,27 @@
 
 ## 2026-06-04 scalar vs `+simd128` artifacts
 
-The local machine did not have `wasm-objdump`/`wasm-tools` on `PATH`, so the repo now includes a lightweight code-section SIMD opcode inspector:
+The repo includes a lightweight code-section SIMD opcode inspector:
 
 ```sh
 npm run reckless:inspect-simd
 ```
 
 The command is safe on a clean checkout: generated `public/reckless/*.wasm` files are ignored, so missing artifacts are reported with build-command hints instead of failing. When artifacts are present, it parses the Wasm code section, walks function bodies enough to skip known immediates, and counts real `0xfd` SIMD-prefixed opcodes rather than scanning data/custom sections.
+
+A follow-up `wasm-tools print` check agreed with the custom inspector at the mnemonic level:
+
+```sh
+for f in public/reckless/reckless.wasm public/reckless/reckless-simd128.wasm; do
+  count=$(wasm-tools print "$f" | rg -c 'v128|i8x16|i16x8|i32x4|i64x2|f32x4|f64x2' || printf 0)
+  echo "$f simd_mnemonic_lines=$count"
+done
+```
+
+```text
+public/reckless/reckless.wasm simd_mnemonic_lines=0
+public/reckless/reckless-simd128.wasm simd_mnemonic_lines=1181
+```
 
 Result on the current local artifacts:
 
