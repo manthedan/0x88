@@ -229,6 +229,7 @@ It compares:
 - `wgsl-pipe1` — custom WGSL encoder + WGSL heads with physical batching and normal search scheduling.
 - `wgsl-gpu-legal` — same path with GPU legal-prior filtering, reducing per-position readback bytes from full mapped policy to legal-move triples + WDL.
 - `wgsl-pipe2` — same custom WGSL path with `batchPipelineDepth=2`. The matrix also exposes `--pipe2-batch` as an override/cap for overlap experiments; the default now matches `--batch 4` after deferred resources are preallocated before submitting pipelined work.
+- `wgsl-gpu-legal-pipe2` — combined interaction test: GPU legal-prior compact readback plus `batchPipelineDepth=2`, using the same `--pipe2-batch` cap.
 
 A short local two-FEN smoke was run:
 
@@ -325,7 +326,43 @@ wgsl-pipe2 search readbackMs  35.92
 wgsl-pipe2 search bytes       23200
 ```
 
-Immediate implication: batch=4/depth=2 is now a valid matrix cell again, but this short local smoke did not show an end-to-end win. The earlier batch=2/depth=2 signal still suggests readback/fence overlap can matter, but the scheduler/resource path needs repeated fixed-suite runs before any promotion. GPU legal-prior byte reduction also still needs to be combined with a stable overlap path before it should be promoted.
+Immediate implication: batch=4/depth=2 is now a valid matrix cell again, but this short local smoke did not show an end-to-end win. The earlier batch=2/depth=2 signal still suggests readback/fence overlap can matter, but the scheduler/resource path needs repeated fixed-suite runs before any promotion. GPU legal-prior byte reduction can now be tested directly with overlap via `wgsl-gpu-legal-pipe2` before any promotion decision.
+
+Combined GPU-legal + pipe2 smoke results:
+
+```bash
+npm run lc0:browser-readback-strategy-matrix -- \
+  --out /tmp/lc0_local_combined_readback_pipe2b2_smoke.json \
+  --max-positions 2 --repeats 1 \
+  --strategies wgsl-pipe1,wgsl-gpu-legal,wgsl-pipe2,wgsl-gpu-legal-pipe2 \
+  --wgsl-eval-iters 1 --wgsl-search-iters 1 --wgsl-search-warmup 0 \
+  --visits 16 --batch 4 --pipe2-batch 2
+
+npm run lc0:browser-readback-strategy-matrix -- \
+  --out /tmp/lc0_local_combined_readback_pipe2b4_smoke_rerun.json \
+  --max-positions 2 --repeats 1 \
+  --strategies wgsl-pipe1,wgsl-gpu-legal,wgsl-pipe2,wgsl-gpu-legal-pipe2 \
+  --wgsl-eval-iters 1 --wgsl-search-iters 1 --wgsl-search-warmup 0 \
+  --visits 16 --batch 4 --pipe2-batch 4
+```
+
+Median smoke summary:
+
+```text
+pipe2-batch 2:
+  wgsl-pipe1              visits/s 60.64  searchMs 267.01  readbackMs 34.79  bytes 25310
+  wgsl-gpu-legal          visits/s 45.88  searchMs 370.82  readbackMs 41.16  bytes 10486
+  wgsl-pipe2              visits/s 47.92  searchMs 389.40  readbackMs 28.83  bytes 14061
+  wgsl-gpu-legal-pipe2    visits/s 44.09  searchMs 374.32  readbackMs 24.76  bytes  5825
+
+pipe2-batch 4:
+  wgsl-pipe1              visits/s 41.96  searchMs 384.65  readbackMs 40.91  bytes 25310
+  wgsl-gpu-legal          visits/s 27.38  searchMs 585.09  readbackMs 78.86  bytes 10486
+  wgsl-pipe2              visits/s 22.53  searchMs 720.51  readbackMs 86.53  bytes 23200
+  wgsl-gpu-legal-pipe2    visits/s 48.71  searchMs 331.53  readbackMs 38.00  bytes  9612
+```
+
+The combined strategy is therefore worth keeping in the matrix: with `pipe2-batch=2` it reduced bytes/readback wait but did not beat pipe1 E2E; with `pipe2-batch=4` it was the best cell in this noisy two-FEN smoke. Treat this only as a hypothesis for repeated fixed-suite/autoresearch validation, not as promotion evidence.
 
 ## Guardrails
 
