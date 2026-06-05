@@ -230,6 +230,8 @@ It compares:
 - `wgsl-gpu-legal` — same path with GPU legal-prior filtering, reducing per-position readback bytes from full mapped policy to legal-move triples + WDL.
 - `wgsl-pipe2` — same custom WGSL path with `batchPipelineDepth=2`. The matrix also exposes `--pipe2-batch` as an override/cap for overlap experiments; the default now matches `--batch 4` after deferred resources are preallocated before submitting pipelined work.
 
+For autoresearch-sourced lanes, the WGSL strategies also accept `--input-backend js|wgsl|wasm` and `--encoder-kernel hand|tvm-packed-f16|mixed-tvm-ffn|mixed-tvm-ffn-outproj`, so the same readback attribution matrix can be run against WASM-input/mixed-kernel candidates without changing stable defaults.
+
 A short local two-FEN smoke was run:
 
 ```bash
