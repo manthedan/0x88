@@ -22,6 +22,8 @@ ATTR_FIXTURE_LIMIT="${LC0_AR_ATTR_FIXTURE_LIMIT:-$MAX_POSITIONS}"
 INPUT_BACKEND="${LC0_AR_INPUT_BACKEND:-wasm}"
 ENCODER_KERNEL="${LC0_AR_ENCODER_KERNEL:-hand}"
 LEGAL_PRIORS_BACKEND="${LC0_AR_LEGAL_PRIORS_BACKEND:-js}"
+CLEAN_BROWSER_HARNESS="${LC0_AR_CLEAN_BROWSER_HARNESS:-1}"
+CLEAN_BROWSER_WAIT_SECONDS="${LC0_AR_CLEAN_BROWSER_WAIT_SECONDS:-20}"
 
 if [[ ! -f "$FENS" ]]; then
   echo "missing FEN corpus: $FENS" >&2
@@ -29,6 +31,17 @@ if [[ ! -f "$FENS" ]]; then
 fi
 
 mkdir -p "$OUT_DIR"
+
+if [[ "$CLEAN_BROWSER_HARNESS" == "1" ]]; then
+  # Browser/WebGPU state can persist across agent-browser sessions and inflate
+  # readback/fence timings. Before each autoresearch run, clear only the
+  # wrapper-owned agent-browser harness and this benchmark's default Vite ports;
+  # the measured metric still covers only the fixed-suite workload below.
+  pkill -f '/node_modules/agent-browser/bin/agent-browser-darwin-arm64' >/dev/null 2>&1 || true
+  pkill -f '/\.agent-browser/browsers/.*/Google Chrome for Testing' >/dev/null 2>&1 || true
+  (lsof -tiTCP:5179 -sTCP:LISTEN 2>/dev/null; lsof -tiTCP:5180 -sTCP:LISTEN 2>/dev/null) | sort -u | xargs -r kill >/dev/null 2>&1 || true
+  sleep "$CLEAN_BROWSER_WAIT_SECONDS"
+fi
 
 if [[ "$ATTRIBUTION_MODE" == "deferred-readback" ]]; then
   attr_out="$OUT_DIR/${RUN_ID}_deferred_readback_attr.json"
