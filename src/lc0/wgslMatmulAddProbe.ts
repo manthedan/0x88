@@ -1,9 +1,13 @@
 import * as ort from '../nn/ortRuntime.ts';
 import { boardToFen, type BoardState } from '../chess/board.ts';
+import { legalMoves } from '../chess/movegen.ts';
+import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { encodeLc0Classical112, type Lc0HistoryFill } from './encoder112.ts';
 import { currentBoardAndFen, LC0_DEFAULT_POLICY_TEMPERATURE, legalPolicyPriors, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from './policyMap.ts';
 import { loadLc0WebModelPack, type Lc0WebTensorView } from './modelPack.ts';
 import { createLc0WasmInputEncoder, type Lc0WasmInputEncoder, type Lc0WasmInputEncoderTiming } from './wasmInputEncoder.ts';
+import { createLc0WasmLegalPriors, type Lc0WasmLegalPriors, type Lc0WasmLegalPriorTiming } from './wasmLegalPriors.ts';
 import { ATTENTION_BLOCK_QKV_TVM_PACKED_F16_WGSL, ATTENTION_OUTPUT_PROJ_TVM_PACKED_F16_WGSL, FFN_DENSE1_TVM_PACKED_F16_WGSL, FFN_DENSE2_TVM_PACKED_F16_WGSL } from './generated/tvmPackedF16Wgsl.ts';
 
 const DEFAULT_WEIGHT_TENSOR = '/encoder0/mha/Q/w/w';
@@ -4532,6 +4536,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const WGSL_GPU_LEGAL_MAX_MOVES = 256;
+const WGSL_GPU_LEGAL_OUTPUT_FLOATS = WGSL_GPU_LEGAL_MAX_MOVES * 3;
+const WGSL_GPU_LEGAL_READBACK_FLOATS = WGSL_GPU_LEGAL_OUTPUT_FLOATS + 3;
+const WGSL_GPU_LEGAL_READBACK_BYTES = WGSL_GPU_LEGAL_READBACK_FLOATS * 4;
+
 const WGSL_HEADS_SOFTMAX3_PROBE = `
 @group(0) @binding(0) var<storage, read> logits: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
@@ -4546,6 +4555,54 @@ fn main() {
   output[0] = e0 / denom;
   output[1] = e1 / denom;
   output[2] = e2 / denom;
+}
+`;
+
+const WGSL_LEGAL_PRIORS_PROBE = `
+@group(0) @binding(0) var<storage, read> mappedPolicy: array<f32>;
+@group(0) @binding(1) var<storage, read> legalIndices: array<u32>;
+@group(0) @binding(2) var<storage, read_write> output: array<f32>;
+@group(0) @binding(3) var<uniform> args: vec4<f32>;
+
+@compute @workgroup_size(1, 1, 1)
+fn main() {
+  let count = min(u32(args.x), ${WGSL_GPU_LEGAL_MAX_MOVES}u);
+  let temperature = max(args.y, 0.000001);
+  if (count == 0u) { return; }
+  var maxLogit = -3.402823e38;
+  for (var i = 0u; i < count; i = i + 1u) {
+    let policyIndex = legalIndices[i];
+    let logit = mappedPolicy[policyIndex] / temperature;
+    output[i * 3u] = f32(i);
+    output[i * 3u + 1u] = logit;
+    output[i * 3u + 2u] = 0.0;
+    maxLogit = max(maxLogit, logit);
+  }
+  var sum = 0.0;
+  for (var i = 0u; i < count; i = i + 1u) {
+    let prior = exp(output[i * 3u + 1u] - maxLogit);
+    output[i * 3u + 2u] = prior;
+    sum = sum + prior;
+  }
+  let invSum = 1.0 / sum;
+  for (var i = 0u; i < count; i = i + 1u) {
+    output[i * 3u + 2u] = output[i * 3u + 2u] * invSum;
+  }
+  for (var i = 0u; i < count; i = i + 1u) {
+    for (var j = i + 1u; j < count; j = j + 1u) {
+      if (output[j * 3u + 2u] > output[i * 3u + 2u]) {
+        let slot = output[i * 3u];
+        let logit = output[i * 3u + 1u];
+        let prior = output[i * 3u + 2u];
+        output[i * 3u] = output[j * 3u];
+        output[i * 3u + 1u] = output[j * 3u + 1u];
+        output[i * 3u + 2u] = output[j * 3u + 2u];
+        output[j * 3u] = slot;
+        output[j * 3u + 1u] = logit;
+        output[j * 3u + 2u] = prior;
+      }
+    }
+  }
 }
 `;
 
@@ -4615,6 +4672,18 @@ function createWgslHeadsSoftmaxBindGroup(device: DeviceLike, pipeline: PipelineL
     entries: [
       { binding: 0, resource: { buffer: logitsBuffer } },
       { binding: 1, resource: { buffer: outputBuffer } },
+    ],
+  });
+}
+
+function createWgslLegalPriorsBindGroup(device: DeviceLike, pipeline: PipelineLike, mappedPolicyBuffer: BufferLike, legalIndicesBuffer: BufferLike, outputBuffer: BufferLike, argsBuffer: BufferLike): unknown {
+  return device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: mappedPolicyBuffer } },
+      { binding: 1, resource: { buffer: legalIndicesBuffer } },
+      { binding: 2, resource: { buffer: outputBuffer } },
+      { binding: 3, resource: { buffer: argsBuffer } },
     ],
   });
 }
@@ -5115,9 +5184,34 @@ async function runCachedPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>
 type Lc0WebHybridHeadBackend = 'ort' | 'wgsl';
 type Lc0WebHybridWgslBatchMode = 'physical' | 'serial';
 type Lc0WebHybridInputBackend = 'js' | 'wgsl' | 'wasm';
+export type Lc0WebHybridLegalPriorsBackend = 'js' | 'wasm' | 'gpu';
 
 const WGSL_HEADS_READBACK_FLOATS = DEFAULT_POLICY_MAPPED_OUTPUTS + 3;
 const WGSL_HEADS_READBACK_BYTES = WGSL_HEADS_READBACK_FLOATS * 4;
+
+interface LegalPolicyCandidate {
+  uci: string;
+  index: number;
+}
+
+function lc0SquareFile(square: number): number {
+  return square % 8;
+}
+
+function isLc0StandardCastlingMove(board: BoardState, move: Move): boolean {
+  const piece = board.squares[move.from];
+  return piece?.[1] === 'k' && Math.abs(lc0SquareFile(move.to) - lc0SquareFile(move.from)) === 2;
+}
+
+function legalPolicyCandidates(board: BoardState): LegalPolicyCandidate[] {
+  const moveTransform = board.turn === 'b' ? LC0_MIRROR_TRANSFORM : 0;
+  return legalMoves(board).map((move) => {
+    const uci = moveToUci(move);
+    const index = uciToLc0PolicyIndex(uci, moveTransform, { standardCastling: isLc0StandardCastlingMove(board, move) });
+    if (index === undefined) throw new Error(`No LC0 policy index for legal move ${uci}`);
+    return { uci, index };
+  });
+}
 
 type WgslPolicyValueHeadRuntime = {
   densePipeline: PipelineLike;
@@ -5125,6 +5219,7 @@ type WgslPolicyValueHeadRuntime = {
   mappedPolicyPipeline: PipelineLike;
   vectorPipeline: PipelineLike;
   softmaxPipeline: PipelineLike;
+  legalPriorsPipeline: PipelineLike;
   policyBindGroup: unknown;
   policyQBindGroup: unknown;
   policyKBindGroup: unknown;
@@ -5134,8 +5229,12 @@ type WgslPolicyValueHeadRuntime = {
   valueDense1BindGroup: unknown;
   valueDense2BindGroup: unknown;
   valueSoftmaxBindGroup: unknown;
+  legalPriorsBindGroup: unknown;
   mappedPolicyBuffer: BufferLike;
   valueWdlBuffer: BufferLike;
+  legalIndicesBuffer: BufferLike;
+  legalArgsBuffer: BufferLike;
+  legalOutputBuffer: BufferLike;
   headsReadbackBuffer: BufferLike;
   buffers: BufferLike[];
 };
@@ -5151,6 +5250,8 @@ function createWgslPolicyValueHeadRuntime(device: DeviceLike, tensors: Lc0WebPol
   const vectorPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: vectorModule, entryPoint: 'main' } }) as PipelineLike;
   const softmaxModule = device.createShaderModule({ label: 'lc0web hybrid WGSL WDL softmax', code: WGSL_HEADS_SOFTMAX3_PROBE });
   const softmaxPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: softmaxModule, entryPoint: 'main' } }) as PipelineLike;
+  const legalPriorsModule = device.createShaderModule({ label: 'lc0web hybrid WGSL legal priors', code: WGSL_LEGAL_PRIORS_PROBE });
+  const legalPriorsPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: legalPriorsModule, entryPoint: 'main' } }) as PipelineLike;
 
   const buffers: BufferLike[] = [];
   const policyWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyDense1Weight.bytes, DEFAULT_N * DEFAULT_N), usage.STORAGE | usage.COPY_DST);
@@ -5177,13 +5278,16 @@ function createWgslPolicyValueHeadRuntime(device: DeviceLike, tensors: Lc0WebPol
   const valueHiddenBuffer = device.createBuffer({ size: DEFAULT_VALUE_HIDDEN * 4, usage: usage.STORAGE }) as BufferLike;
   const valueLogitsBuffer = device.createBuffer({ size: 3 * 4, usage: usage.STORAGE }) as BufferLike;
   const valueWdlBuffer = device.createBuffer({ size: 3 * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
-  const headsReadbackBuffer = device.createBuffer({ size: WGSL_HEADS_READBACK_BYTES, usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
+  const legalIndicesBuffer = device.createBuffer({ size: WGSL_GPU_LEGAL_MAX_MOVES * 4, usage: usage.STORAGE | usage.COPY_DST }) as BufferLike;
+  const legalArgsBuffer = device.createBuffer({ size: 4 * 4, usage: usage.UNIFORM | usage.COPY_DST }) as BufferLike;
+  const legalOutputBuffer = device.createBuffer({ size: WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
+  const headsReadbackBuffer = device.createBuffer({ size: Math.max(WGSL_HEADS_READBACK_BYTES, WGSL_GPU_LEGAL_READBACK_BYTES), usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
   const policyShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 1], usage.UNIFORM | usage.COPY_DST);
   const policyLinearShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 0], usage.UNIFORM | usage.COPY_DST);
   const valueShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_EMBED, 1], usage.UNIFORM | usage.COPY_DST);
   const valueDense1ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN, 1], usage.UNIFORM | usage.COPY_DST);
   const valueDense2ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_HIDDEN, 3, 0], usage.UNIFORM | usage.COPY_DST);
-  buffers.push(policyWeightBuffer, policyBiasBuffer, policyQWeightBuffer, policyQBiasBuffer, policyKWeightBuffer, policyKBiasBuffer, policyScaleBuffer, policyPromotionWeightBuffer, policyMappingBuffer, valueWeightBuffer, valueBiasBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, policyOutputBuffer, policyQBuffer, policyKBuffer, policyLogitsBuffer, mappedPolicyBuffer, valueOutputBuffer, valueHiddenBuffer, valueLogitsBuffer, valueWdlBuffer, headsReadbackBuffer, policyShapeBuffer, policyLinearShapeBuffer, valueShapeBuffer, valueDense1ShapeBuffer, valueDense2ShapeBuffer);
+  buffers.push(policyWeightBuffer, policyBiasBuffer, policyQWeightBuffer, policyQBiasBuffer, policyKWeightBuffer, policyKBiasBuffer, policyScaleBuffer, policyPromotionWeightBuffer, policyMappingBuffer, valueWeightBuffer, valueBiasBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, policyOutputBuffer, policyQBuffer, policyKBuffer, policyLogitsBuffer, mappedPolicyBuffer, valueOutputBuffer, valueHiddenBuffer, valueLogitsBuffer, valueWdlBuffer, legalIndicesBuffer, legalArgsBuffer, legalOutputBuffer, headsReadbackBuffer, policyShapeBuffer, policyLinearShapeBuffer, valueShapeBuffer, valueDense1ShapeBuffer, valueDense2ShapeBuffer);
 
   return {
     densePipeline,
@@ -5191,6 +5295,7 @@ function createWgslPolicyValueHeadRuntime(device: DeviceLike, tensors: Lc0WebPol
     mappedPolicyPipeline,
     vectorPipeline,
     softmaxPipeline,
+    legalPriorsPipeline,
     policyBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, inputBuffer, policyWeightBuffer, policyBiasBuffer, policyOutputBuffer, policyShapeBuffer),
     policyQBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, policyOutputBuffer, policyQWeightBuffer, policyQBiasBuffer, policyQBuffer, policyLinearShapeBuffer),
     policyKBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, policyOutputBuffer, policyKWeightBuffer, policyKBiasBuffer, policyKBuffer, policyLinearShapeBuffer),
@@ -5200,8 +5305,12 @@ function createWgslPolicyValueHeadRuntime(device: DeviceLike, tensors: Lc0WebPol
     valueDense1BindGroup: createWgslHeadsDenseBindGroup(device, vectorPipeline, valueOutputBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueHiddenBuffer, valueDense1ShapeBuffer),
     valueDense2BindGroup: createWgslHeadsDenseBindGroup(device, vectorPipeline, valueHiddenBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, valueLogitsBuffer, valueDense2ShapeBuffer),
     valueSoftmaxBindGroup: createWgslHeadsSoftmaxBindGroup(device, softmaxPipeline, valueLogitsBuffer, valueWdlBuffer),
+    legalPriorsBindGroup: createWgslLegalPriorsBindGroup(device, legalPriorsPipeline, mappedPolicyBuffer, legalIndicesBuffer, legalOutputBuffer, legalArgsBuffer),
     mappedPolicyBuffer,
     valueWdlBuffer,
+    legalIndicesBuffer,
+    legalArgsBuffer,
+    legalOutputBuffer,
     headsReadbackBuffer,
     buffers,
   };
@@ -5242,6 +5351,29 @@ function copyWgslPolicyValueHeadOutputs(encoder: CommandEncoderLike, runtime: Wg
   copyWgslPolicyValueHeadOutputsTo(encoder, runtime, runtime.headsReadbackBuffer, 0);
 }
 
+function uploadWgslLegalPriorsInputs(device: DeviceLike, runtime: WgslPolicyValueHeadRuntime, legalCandidates: LegalPolicyCandidate[], policyTemperature: number): void {
+  if (legalCandidates.length > WGSL_GPU_LEGAL_MAX_MOVES) throw new Error(`WGSL legal-prior path supports at most ${WGSL_GPU_LEGAL_MAX_MOVES} legal moves, got ${legalCandidates.length}`);
+  const indices = new Uint32Array(WGSL_GPU_LEGAL_MAX_MOVES);
+  for (let i = 0; i < legalCandidates.length; i++) indices[i] = legalCandidates[i].index;
+  device.queue.writeBuffer(runtime.legalIndicesBuffer, 0, indices);
+  device.queue.writeBuffer(runtime.legalArgsBuffer, 0, new Float32Array([legalCandidates.length, policyTemperature, 0, 0]));
+}
+
+function encodeWgslLegalPriors(pass: ComputePassLike, runtime: WgslPolicyValueHeadRuntime): void {
+  pass.setPipeline(runtime.legalPriorsPipeline);
+  pass.setBindGroup(0, runtime.legalPriorsBindGroup);
+  pass.dispatchWorkgroups(1);
+}
+
+function copyWgslLegalPriorsOutputsTo(encoder: CommandEncoderLike, runtime: WgslPolicyValueHeadRuntime, readbackBuffer: BufferLike, destinationOffset: number): void {
+  encoder.copyBufferToBuffer(runtime.legalOutputBuffer, 0, readbackBuffer, destinationOffset, WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4);
+  encoder.copyBufferToBuffer(runtime.valueWdlBuffer, 0, readbackBuffer, destinationOffset + WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4, 3 * 4);
+}
+
+function copyWgslLegalPriorsOutputs(encoder: CommandEncoderLike, runtime: WgslPolicyValueHeadRuntime): void {
+  copyWgslLegalPriorsOutputsTo(encoder, runtime, runtime.headsReadbackBuffer, 0);
+}
+
 async function mapWgslPolicyValueHeadOutputs(runtime: WgslPolicyValueHeadRuntime): Promise<{
   mappedPolicy: Float32Array<ArrayBufferLike>;
   wdl: Float32Array<ArrayBufferLike>;
@@ -5257,6 +5389,35 @@ async function mapWgslPolicyValueHeadOutputs(runtime: WgslPolicyValueHeadRuntime
   wdl.set(new Float32Array(range, DEFAULT_POLICY_MAPPED_OUTPUTS * 4, 3));
   runtime.headsReadbackBuffer.unmap();
   return { mappedPolicy, wdl, readbackSyncedMs: nowMs() - started };
+}
+
+function legalPriorsFromGpuOutput(legalCandidates: LegalPolicyCandidate[], output: Float32Array<ArrayBufferLike>): Lc0Evaluation['legalPriors'] {
+  const priors: Lc0Evaluation['legalPriors'] = [];
+  for (let i = 0; i < legalCandidates.length; i++) {
+    const base = i * 3;
+    const slot = Math.round(output[base]);
+    const candidate = legalCandidates[slot];
+    if (!candidate) throw new Error(`WGSL legal-prior output referenced invalid legal slot ${slot}`);
+    priors.push({ uci: candidate.uci, index: candidate.index, logit: Number(output[base + 1]), prior: Number(output[base + 2]) });
+  }
+  return priors;
+}
+
+async function mapWgslLegalPriorsOutputs(runtime: WgslPolicyValueHeadRuntime, legalCandidates: LegalPolicyCandidate[]): Promise<{
+  legalPriors: Lc0Evaluation['legalPriors'];
+  wdl: Float32Array<ArrayBufferLike>;
+  readbackSyncedMs: number;
+}> {
+  const globals = gpuGlobals();
+  const started = nowMs();
+  await runtime.headsReadbackBuffer.mapAsync(globals.GPUMapMode!.READ);
+  const range = runtime.headsReadbackBuffer.getMappedRange();
+  const legalOutput = new Float32Array(WGSL_GPU_LEGAL_OUTPUT_FLOATS);
+  legalOutput.set(new Float32Array(range, 0, WGSL_GPU_LEGAL_OUTPUT_FLOATS));
+  const wdl = new Float32Array(3);
+  wdl.set(new Float32Array(range, WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4, 3));
+  runtime.headsReadbackBuffer.unmap();
+  return { legalPriors: legalPriorsFromGpuOutput(legalCandidates, legalOutput), wdl, readbackSyncedMs: nowMs() - started };
 }
 
 async function runCachedWgslPolicyValueHeads(device: DeviceLike, runtime: WgslPolicyValueHeadRuntime): Promise<{ runMs: number; mappedPolicy: number[]; wdl: number[]; readbackSyncedMs: number }> {
@@ -5309,6 +5470,7 @@ export interface Lc0WebHybridEvaluationOptions {
   headBackend?: Lc0WebHybridHeadBackend;
   wgslBatchMode?: Lc0WebHybridWgslBatchMode;
   inputBackend?: Lc0WebHybridInputBackend;
+  legalPriorsBackend?: Lc0WebHybridLegalPriorsBackend;
   encoderKernelVariant?: Lc0WebEncoderKernelVariant;
   timestampQuery?: boolean;
 }
@@ -5329,10 +5491,14 @@ export interface Lc0WebHybridTimingBreakdown {
   physicalBatchSize?: number;
   batchPosition?: number;
   inputBackend?: Lc0WebHybridInputBackend;
+  legalPriorsBackend?: Lc0WebHybridLegalPriorsBackend;
   encoderKernelVariant?: Lc0WebEncoderKernelVariant;
   inputBridgeCopyMs?: number;
   wasmEncodeMs?: number;
   wasmTotalMs?: number;
+  legalPriorsBridgeCopyMs?: number;
+  legalPriorsWasmRunMs?: number;
+  legalPriorsWasmTotalMs?: number;
 }
 
 export interface Lc0WebHybridEvaluationResult extends Lc0Evaluation {
@@ -5712,6 +5878,8 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
 interface SubmittedWgslHybridBatch {
   inputs: Lc0EvaluatorInput[];
   boardsAndFens: Array<ReturnType<typeof currentBoardAndFen>>;
+  legalCandidates?: LegalPolicyCandidate[][];
+  legalPriorsSetupMs?: number;
   readbackBuffer: BufferLike;
   totalStarted: number;
   encoderStarted: number;
@@ -5729,9 +5897,11 @@ class Lc0WebHybridRuntime {
   private readonly gpuTimestampSupported: boolean;
   private readonly inputTensors: Lc0WebPreparedInitialInputTensors;
   private readonly inputBackend: Lc0WebHybridInputBackend;
+  private readonly legalPriorsBackend: Lc0WebHybridLegalPriorsBackend;
   private readonly encoderKernelVariant: Lc0WebEncoderKernelVariant;
   private readonly inputBodyGpu?: InputBodyGpuRuntime;
   private readonly wasmInputEncoder?: Lc0WasmInputEncoder;
+  private readonly wasmLegalPriors?: Lc0WasmLegalPriors;
   private readonly headBackend: Lc0WebHybridHeadBackend;
   private readonly wgslBatchMode: Lc0WebHybridWgslBatchMode;
   private readonly headSession?: CachedPolicyValueHeadSession;
@@ -5755,9 +5925,11 @@ class Lc0WebHybridRuntime {
     gpuTimestampSupported: boolean;
     inputTensors: Lc0WebPreparedInitialInputTensors;
     inputBackend: Lc0WebHybridInputBackend;
+    legalPriorsBackend: Lc0WebHybridLegalPriorsBackend;
     encoderKernelVariant: Lc0WebEncoderKernelVariant;
     inputBodyGpu?: InputBodyGpuRuntime;
     wasmInputEncoder?: Lc0WasmInputEncoder;
+    wasmLegalPriors?: Lc0WasmLegalPriors;
     headBackend: Lc0WebHybridHeadBackend;
     wgslBatchMode: Lc0WebHybridWgslBatchMode;
     headSession?: CachedPolicyValueHeadSession;
@@ -5776,9 +5948,11 @@ class Lc0WebHybridRuntime {
     this.gpuTimestampSupported = options.gpuTimestampSupported;
     this.inputTensors = options.inputTensors;
     this.inputBackend = options.inputBackend;
+    this.legalPriorsBackend = options.legalPriorsBackend;
     this.encoderKernelVariant = options.encoderKernelVariant;
     this.inputBodyGpu = options.inputBodyGpu;
     this.wasmInputEncoder = options.wasmInputEncoder;
+    this.wasmLegalPriors = options.wasmLegalPriors;
     this.headBackend = options.headBackend;
     this.wgslBatchMode = options.wgslBatchMode;
     this.headSession = options.headSession;
@@ -5816,6 +5990,8 @@ class Lc0WebHybridRuntime {
     const headBackend = options.headBackend ?? 'ort';
     const wgslBatchMode = options.wgslBatchMode ?? 'physical';
     const inputBackend = options.inputBackend ?? 'js';
+    const legalPriorsBackend = options.legalPriorsBackend ?? 'js';
+    if (legalPriorsBackend === 'gpu' && headBackend !== 'wgsl') throw new Error('GPU legal-prior backend requires WGSL heads');
     const encoderKernelVariant = options.encoderKernelVariant ?? 'hand';
     const headSession = headBackend === 'ort' ? await createCachedPolicyValueHeadSession(headTensors) : undefined;
     const { device, timestampQuerySupported } = await requestDevice({ timestampQuery: options.timestampQuery });
@@ -5827,6 +6003,7 @@ class Lc0WebHybridRuntime {
     buffers.push(inputBuffer, readbackBuffer);
     const usesGpuInputBody = inputBackend === 'wgsl' || inputBackend === 'wasm';
     const wasmInputEncoder = inputBackend === 'wasm' ? await createLc0WasmInputEncoder() : undefined;
+    const wasmLegalPriors = legalPriorsBackend === 'wasm' ? await createLc0WasmLegalPriors() : undefined;
     const inputBodyGpu = usesGpuInputBody ? createInputBodyGpuRuntime(device, inputTensors, inputBuffer, usage) : undefined;
     if (inputBodyGpu) buffers.push(...inputBodyGpu.buffers);
     const layerRuntimes: HybridEncoderLayerRuntime[] = [];
@@ -5846,9 +6023,11 @@ class Lc0WebHybridRuntime {
       gpuTimestampSupported: timestampQuerySupported,
       inputTensors,
       inputBackend,
+      legalPriorsBackend,
       encoderKernelVariant,
       inputBodyGpu,
       wasmInputEncoder,
+      wasmLegalPriors,
       headBackend,
       wgslBatchMode,
       headSession,
@@ -5906,7 +6085,7 @@ class Lc0WebHybridRuntime {
 
   private ensureWgslBatchReadbackBuffer(count: number): BufferLike {
     if (!this.wgslBatchReadbackBuffer || this.wgslBatchReadbackCapacity < count) {
-      this.wgslBatchReadbackBuffer = this.device.createBuffer({ size: count * WGSL_HEADS_READBACK_BYTES, usage: this.usage.MAP_READ | this.usage.COPY_DST });
+      this.wgslBatchReadbackBuffer = this.device.createBuffer({ size: count * this.wgslHeadReadbackBytes(), usage: this.usage.MAP_READ | this.usage.COPY_DST });
       this.wgslBatchReadbackCapacity = count;
       this.buffers.push(this.wgslBatchReadbackBuffer);
     }
@@ -5920,7 +6099,7 @@ class Lc0WebHybridRuntime {
       this.wgslDeferredReadbackCapacity = count;
     }
     while (this.wgslDeferredReadbackBuffers.length <= slot) {
-      const buffer = this.device.createBuffer({ size: count * WGSL_HEADS_READBACK_BYTES, usage: this.usage.MAP_READ | this.usage.COPY_DST });
+      const buffer = this.device.createBuffer({ size: count * this.wgslHeadReadbackBytes(), usage: this.usage.MAP_READ | this.usage.COPY_DST });
       this.wgslDeferredReadbackBuffers.push(buffer);
       this.buffers.push(buffer);
     }
@@ -5939,6 +6118,25 @@ class Lc0WebHybridRuntime {
 
   private timingWasmFields(wasmTiming: Lc0WasmInputEncoderTiming | undefined): Pick<Lc0WebHybridTimingBreakdown, 'inputBridgeCopyMs' | 'wasmEncodeMs' | 'wasmTotalMs'> {
     return wasmTiming ? { inputBridgeCopyMs: wasmTiming.bridgeCopyMs, wasmEncodeMs: wasmTiming.wasmEncodeMs, wasmTotalMs: wasmTiming.totalMs } : {};
+  }
+
+  private timingWasmLegalPriorsFields(wasmTiming: Lc0WasmLegalPriorTiming | undefined): Pick<Lc0WebHybridTimingBreakdown, 'legalPriorsBridgeCopyMs' | 'legalPriorsWasmRunMs' | 'legalPriorsWasmTotalMs'> {
+    return wasmTiming ? { legalPriorsBridgeCopyMs: wasmTiming.bridgeCopyMs, legalPriorsWasmRunMs: wasmTiming.wasmRunMs, legalPriorsWasmTotalMs: wasmTiming.totalMs } : {};
+  }
+
+  private wgslHeadReadbackBytes(): number {
+    return this.legalPriorsBackend === 'gpu' ? WGSL_GPU_LEGAL_READBACK_BYTES : WGSL_HEADS_READBACK_BYTES;
+  }
+
+  private computeLegalPriors(board: ReturnType<typeof currentBoardAndFen>['board'], fen: string, mappedPolicy: ArrayLike<number>, policyTemperature: number): { legalPriors: Lc0Evaluation['legalPriors']; bestMove?: string; legalPriorsMs: number; wasmTiming?: Lc0WasmLegalPriorTiming } {
+    const legalPriorsStarted = nowMs();
+    if (this.legalPriorsBackend === 'wasm') {
+      if (!this.wasmLegalPriors) throw new Error('WASM legal-prior backend is not initialized');
+      const result = this.wasmLegalPriors.evaluateFen(fen, mappedPolicy, { temperature: policyTemperature });
+      return { legalPriors: result.legalPriors, bestMove: result.bestMove, legalPriorsMs: nowMs() - legalPriorsStarted, wasmTiming: result.timing };
+    }
+    const legalPriors = legalPolicyPriors(board, mappedPolicy, policyTemperature);
+    return { legalPriors, bestMove: legalPriors[0]?.uci, legalPriorsMs: nowMs() - legalPriorsStarted };
   }
 
   async encode(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill }): Promise<{
@@ -6204,6 +6402,10 @@ class Lc0WebHybridRuntime {
         this.device.queue.writeBuffer(this.inputBuffer, 0, inputPayload);
       }
       const inputUploadMs = nowMs() - inputUploadStarted;
+      const gpuLegalSetupStarted = nowMs();
+      const gpuLegalCandidates = this.legalPriorsBackend === 'gpu' ? legalPolicyCandidates(board) : undefined;
+      if (gpuLegalCandidates) uploadWgslLegalPriorsInputs(this.device, this.wgslHeads, gpuLegalCandidates, options.policyTemperature);
+      const legalPriorsGpuSetupMs = gpuLegalCandidates ? nowMs() - gpuLegalSetupStarted : undefined;
       const encoderStarted = nowMs();
       const commandEncodeStarted = nowMs();
       const encoder = this.device.createCommandEncoder();
@@ -6221,24 +6423,32 @@ class Lc0WebHybridRuntime {
       }
       const headPass = encoder.beginComputePass();
       encodeWgslPolicyValueHeads(headPass, this.wgslHeads);
+      if (gpuLegalCandidates) encodeWgslLegalPriors(headPass, this.wgslHeads);
       headPass.end();
-      copyWgslPolicyValueHeadOutputs(encoder, this.wgslHeads);
+      if (gpuLegalCandidates) copyWgslLegalPriorsOutputs(encoder, this.wgslHeads);
+      else copyWgslPolicyValueHeadOutputs(encoder, this.wgslHeads);
       const commandBuffer = encoder.finish();
       const commandEncodeMs = nowMs() - commandEncodeStarted;
       const queueSubmitStarted = nowMs();
       this.device.queue.submit([commandBuffer]);
       const queueSubmitMs = nowMs() - queueSubmitStarted;
       const headStarted = nowMs();
-      const { mappedPolicy: mappedPolicyF32, wdl: wdlF32, readbackSyncedMs } = await mapWgslPolicyValueHeadOutputs(this.wgslHeads);
+      const gpuLegalOutput = gpuLegalCandidates ? await mapWgslLegalPriorsOutputs(this.wgslHeads, gpuLegalCandidates) : undefined;
+      const fullHeadOutput = gpuLegalOutput ? undefined : await mapWgslPolicyValueHeadOutputs(this.wgslHeads);
       const headRunMs = nowMs() - headStarted;
       const encoderDispatchSyncedMs = nowMs() - encoderStarted;
-      if (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32) || !arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error('WGSL hybrid heads produced zero or uniform mapped policy/WDL');
-      const mappedPolicy = Array.from(mappedPolicyF32);
+      const mappedPolicyF32 = fullHeadOutput?.mappedPolicy;
+      const wdlF32 = gpuLegalOutput?.wdl ?? fullHeadOutput!.wdl;
+      if (mappedPolicyF32 && (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32))) throw new Error('WGSL hybrid heads produced zero or uniform mapped policy');
+      if (!arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error('WGSL hybrid heads produced zero or uniform WDL');
+      const mappedPolicy = mappedPolicyF32 ? Array.from(mappedPolicyF32) : [];
       const wdlValues = Array.from(wdlF32);
       const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
       const legalPriorsStarted = nowMs();
-      const legalPriors = legalPolicyPriors(board, mappedPolicy, options.policyTemperature);
-      const legalPriorsMs = nowMs() - legalPriorsStarted;
+      const legalPriorsResult = gpuLegalOutput
+        ? { legalPriors: gpuLegalOutput.legalPriors, bestMove: gpuLegalOutput.legalPriors[0]?.uci, legalPriorsMs: (legalPriorsGpuSetupMs ?? 0) + (nowMs() - legalPriorsStarted), wasmTiming: undefined }
+        : this.computeLegalPriors(board, fen, mappedPolicy, options.policyTemperature);
+      const { legalPriors, bestMove, legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = legalPriorsResult;
       return {
         status: 'LC0WEB_HYBRID_EVALUATION_DONE',
         backend: 'lc0web-wgsl-encoder-wgsl-heads',
@@ -6253,7 +6463,7 @@ class Lc0WebHybridRuntime {
         q: wdl[0] - wdl[2],
         mlh: 0,
         legalPriors,
-        bestMove: legalPriors[0]?.uci,
+        bestMove,
         mappedPolicy,
         timing: {
           totalEvalMs: nowMs() - totalStarted,
@@ -6261,14 +6471,16 @@ class Lc0WebHybridRuntime {
           inputUploadMs,
           commandEncodeMs,
           queueSubmitMs,
-          readbackSyncedMs,
+          readbackSyncedMs: gpuLegalOutput?.readbackSyncedMs ?? fullHeadOutput!.readbackSyncedMs,
           headRunMs,
           legalPriorsMs,
-          readbackBytes: WGSL_HEADS_READBACK_BYTES,
+          readbackBytes: gpuLegalOutput ? WGSL_GPU_LEGAL_READBACK_BYTES : WGSL_HEADS_READBACK_BYTES,
           readbackMapCount: 1,
           inputBackend: this.inputBackend,
+          legalPriorsBackend: this.legalPriorsBackend,
           encoderKernelVariant: this.encoderKernelVariant,
           ...this.timingWasmFields(wasmTiming),
+          ...this.timingWasmLegalPriorsFields(legalPriorsWasmTiming),
         },
       };
     }
@@ -6276,9 +6488,7 @@ class Lc0WebHybridRuntime {
     const encoded = await this.encode(input, { historyFill: options.historyFill });
     const heads = await runCachedPolicyValueHeadsOrt(encoded.output, this.headSession);
     const wdl: [number, number, number] = [Number(heads.wdl[0]), Number(heads.wdl[1]), Number(heads.wdl[2])];
-    const legalPriorsStarted = nowMs();
-    const legalPriors = legalPolicyPriors(encoded.board, heads.mappedPolicy, options.policyTemperature);
-    const legalPriorsMs = nowMs() - legalPriorsStarted;
+    const { legalPriors, bestMove, legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = this.computeLegalPriors(encoded.board, encoded.fen, heads.mappedPolicy, options.policyTemperature);
     return {
       status: 'LC0WEB_HYBRID_EVALUATION_DONE',
       backend: 'lc0web-wgsl-encoder-ort-heads',
@@ -6293,7 +6503,7 @@ class Lc0WebHybridRuntime {
       q: wdl[0] - wdl[2],
       mlh: 0,
       legalPriors,
-      bestMove: legalPriors[0]?.uci,
+      bestMove,
       mappedPolicy: heads.mappedPolicy,
       timing: {
         totalEvalMs: nowMs() - totalStarted,
@@ -6307,21 +6517,26 @@ class Lc0WebHybridRuntime {
         readbackBytes: encoded.timing.readbackBytes,
         readbackMapCount: encoded.timing.readbackMapCount,
         inputBackend: this.inputBackend,
+        legalPriorsBackend: this.legalPriorsBackend,
         encoderKernelVariant: this.encoderKernelVariant,
         inputBridgeCopyMs: encoded.timing.inputBridgeCopyMs,
         wasmEncodeMs: encoded.timing.wasmEncodeMs,
         wasmTotalMs: encoded.timing.wasmTotalMs,
+        ...this.timingWasmLegalPriorsFields(legalPriorsWasmTiming),
       },
     };
   }
 
-  private submitWgslBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill }, readbackBuffer: BufferLike): SubmittedWgslHybridBatch {
+  private submitWgslBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }, readbackBuffer: BufferLike): SubmittedWgslHybridBatch {
     const totalStarted = nowMs();
     const slots = this.ensureWgslBatchSlots(inputs.length);
     const uploadBuffer = this.ensureWgslBatchUploadBuffer(inputs.length);
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
     const inputElements = this.inputBackend !== 'js' ? DEFAULT_INPUT_PLANES * DEFAULT_TOKENS : outputElements;
     const boardsAndFens = inputs.map((input) => currentBoardAndFen(input));
+    const legalPriorsSetupStarted = nowMs();
+    const legalCandidates = this.legalPriorsBackend === 'gpu' ? boardsAndFens.map(({ board }) => legalPolicyCandidates(board)) : undefined;
+    let legalPriorsSetupMs = legalCandidates ? nowMs() - legalPriorsSetupStarted : undefined;
     const inputBuildStarted = nowMs();
     const combinedInput = new Float32Array(inputs.length * inputElements);
     let inputBridgeCopyMs = 0;
@@ -6361,24 +6576,33 @@ class Lc0WebHybridRuntime {
         encodeLc0WebEncoderBlockPass(pass, layer.attentionPipelines, layer.ffnPipelines);
         pass.end();
       }
+      if (legalCandidates) {
+        const legalUploadStarted = nowMs();
+        uploadWgslLegalPriorsInputs(this.device, slots[slotIndex].wgslHeads, legalCandidates[slotIndex], options.policyTemperature);
+        legalPriorsSetupMs = (legalPriorsSetupMs ?? 0) + (nowMs() - legalUploadStarted);
+      }
       const headPass = encoder.beginComputePass();
       encodeWgslPolicyValueHeads(headPass, slots[slotIndex].wgslHeads);
+      if (legalCandidates) encodeWgslLegalPriors(headPass, slots[slotIndex].wgslHeads);
       headPass.end();
-      copyWgslPolicyValueHeadOutputsTo(encoder, slots[slotIndex].wgslHeads, readbackBuffer, slotIndex * WGSL_HEADS_READBACK_BYTES);
+      const readbackOffset = slotIndex * this.wgslHeadReadbackBytes();
+      if (legalCandidates) copyWgslLegalPriorsOutputsTo(encoder, slots[slotIndex].wgslHeads, readbackBuffer, readbackOffset);
+      else copyWgslPolicyValueHeadOutputsTo(encoder, slots[slotIndex].wgslHeads, readbackBuffer, readbackOffset);
     }
     const commandBuffer = encoder.finish();
     const commandEncodeMs = nowMs() - commandEncodeStarted;
     const queueSubmitStarted = nowMs();
     this.device.queue.submit([commandBuffer]);
     const queueSubmitMs = nowMs() - queueSubmitStarted;
-    return { inputs, boardsAndFens, readbackBuffer, totalStarted, encoderStarted, inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, inputBridgeCopyMs, wasmEncodeMs, wasmTotalMs };
+    return { inputs, boardsAndFens, legalCandidates, legalPriorsSetupMs, readbackBuffer, totalStarted, encoderStarted, inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, inputBridgeCopyMs, wasmEncodeMs, wasmTotalMs };
   }
 
   private async finishWgslBatch(submitted: SubmittedWgslHybridBatch, options: { policyTemperature: number }, readbackMode: 'immediate' | 'deferred-double-buffered'): Promise<Lc0WebHybridEvaluationResult[]> {
     const headStarted = nowMs();
     const readbackStarted = nowMs();
     await submitted.readbackBuffer.mapAsync(gpuGlobals().GPUMapMode!.READ);
-    const readbackRange = submitted.readbackBuffer.getMappedRange().slice(0, submitted.inputs.length * WGSL_HEADS_READBACK_BYTES);
+    const readbackBytesPerSlot = this.wgslHeadReadbackBytes();
+    const readbackRange = submitted.readbackBuffer.getMappedRange().slice(0, submitted.inputs.length * readbackBytesPerSlot);
     submitted.readbackBuffer.unmap();
     const readbackSyncedMs = nowMs() - readbackStarted;
     const headRunMs = nowMs() - headStarted;
@@ -6387,16 +6611,25 @@ class Lc0WebHybridRuntime {
     const readbackFloats = new Float32Array(readbackRange);
     const out: Lc0WebHybridEvaluationResult[] = [];
     for (let i = 0; i < submitted.inputs.length; i++) {
-      const base = i * WGSL_HEADS_READBACK_FLOATS;
-      const mappedPolicyF32 = readbackFloats.slice(base, base + DEFAULT_POLICY_MAPPED_OUTPUTS);
-      const wdlF32 = readbackFloats.slice(base + DEFAULT_POLICY_MAPPED_OUTPUTS, base + DEFAULT_POLICY_MAPPED_OUTPUTS + 3);
-      if (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32) || !arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy/WDL for slot ${i}`);
-      const mappedPolicy = Array.from(mappedPolicyF32);
+      const base = i * (readbackBytesPerSlot / 4);
+      const gpuLegalCandidates = submitted.legalCandidates?.[i];
+      const mappedPolicyF32 = gpuLegalCandidates ? undefined : readbackFloats.slice(base, base + DEFAULT_POLICY_MAPPED_OUTPUTS);
+      const wdlF32 = gpuLegalCandidates
+        ? readbackFloats.slice(base + WGSL_GPU_LEGAL_OUTPUT_FLOATS, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS + 3)
+        : readbackFloats.slice(base + DEFAULT_POLICY_MAPPED_OUTPUTS, base + DEFAULT_POLICY_MAPPED_OUTPUTS + 3);
+      if (mappedPolicyF32 && (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32))) throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy for slot ${i}`);
+      if (!arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform WDL for slot ${i}`);
+      const mappedPolicy = mappedPolicyF32 ? Array.from(mappedPolicyF32) : [];
       const wdlValues = Array.from(wdlF32);
       const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
       const legalPriorsStarted = nowMs();
-      const legalPriors = legalPolicyPriors(submitted.boardsAndFens[i].board, mappedPolicy, options.policyTemperature);
-      const legalPriorsMs = nowMs() - legalPriorsStarted;
+      const legalPriorsSetupMs = gpuLegalCandidates ? (submitted.legalPriorsSetupMs ?? 0) / submitted.inputs.length : 0;
+      const legalPriorsResult = gpuLegalCandidates
+        ? { legalPriors: legalPriorsFromGpuOutput(gpuLegalCandidates, readbackFloats.slice(base, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS)), bestMove: undefined as string | undefined, legalPriorsMs: legalPriorsSetupMs + (nowMs() - legalPriorsStarted), wasmTiming: undefined }
+        : this.computeLegalPriors(submitted.boardsAndFens[i].board, submitted.boardsAndFens[i].fen, mappedPolicy, options.policyTemperature);
+      const legalPriors = legalPriorsResult.legalPriors;
+      const bestMove = gpuLegalCandidates ? legalPriors[0]?.uci : legalPriorsResult.bestMove;
+      const { legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = legalPriorsResult;
       out.push({
         status: 'LC0WEB_HYBRID_EVALUATION_DONE',
         backend: 'lc0web-wgsl-encoder-wgsl-heads',
@@ -6411,7 +6644,7 @@ class Lc0WebHybridRuntime {
         q: wdl[0] - wdl[2],
         mlh: 0,
         legalPriors,
-        bestMove: legalPriors[0]?.uci,
+        bestMove,
         mappedPolicy,
         timing: {
           totalEvalMs,
@@ -6422,14 +6655,16 @@ class Lc0WebHybridRuntime {
           readbackSyncedMs,
           headRunMs,
           legalPriorsMs,
-          readbackBytes: submitted.inputs.length * WGSL_HEADS_READBACK_BYTES,
+          readbackBytes: submitted.inputs.length * readbackBytesPerSlot,
           readbackMapCount: 1,
           readbackMode,
           physicalBatchSize: submitted.inputs.length,
           batchPosition: i,
           inputBackend: this.inputBackend,
+          legalPriorsBackend: this.legalPriorsBackend,
           encoderKernelVariant: this.encoderKernelVariant,
           ...(this.inputBackend === 'wasm' ? { inputBridgeCopyMs: submitted.inputBridgeCopyMs, wasmEncodeMs: submitted.wasmEncodeMs, wasmTotalMs: submitted.wasmTotalMs } : {}),
+          ...this.timingWasmLegalPriorsFields(legalPriorsWasmTiming),
         },
       });
     }
@@ -6526,6 +6761,7 @@ export interface Lc0WebWgslDeferredReadbackBenchResult {
   packUrl: string;
   layers: number;
   inputBackend: Lc0WebHybridInputBackend;
+  legalPriorsBackend: Lc0WebHybridLegalPriorsBackend;
   batchSize: number;
   iterations: number;
   warmup: number;
@@ -6541,7 +6777,7 @@ function mean(values: number[]): number {
 
 function summarizeHybridEvaluations(mode: 'immediate' | 'deferred-double-buffered', wallMs: number, batches: Lc0WebHybridEvaluationResult[][]): Lc0WebWgslDeferredReadbackBenchModeResult {
   const flat = batches.flat();
-  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'headRunMs', 'legalPriorsMs', 'readbackBytes', 'readbackMapCount'];
+  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount'];
   const timingMeans: Partial<Record<keyof Lc0WebHybridTimingBreakdown, number>> = {};
   for (const key of timingKeys) {
     const values = flat.map((entry) => entry.timing[key]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
@@ -6571,6 +6807,7 @@ export async function runLc0WebWgslDeferredReadbackBenchmark(options: {
   historyFill?: Lc0HistoryFill;
   policyTemperature?: number;
   inputBackend?: Lc0WebHybridInputBackend;
+  legalPriorsBackend?: Lc0WebHybridLegalPriorsBackend;
   batchSize?: number;
   iterations?: number;
   warmup?: number;
@@ -6587,6 +6824,7 @@ export async function runLc0WebWgslDeferredReadbackBenchmark(options: {
     headBackend: 'wgsl',
     wgslBatchMode: 'physical',
     inputBackend: options.inputBackend ?? 'js',
+    legalPriorsBackend: options.legalPriorsBackend ?? 'js',
   });
   try {
     const runImmediate = async (batches: Lc0EvaluatorInput[][]): Promise<Lc0WebHybridEvaluationResult[][]> => {
@@ -6613,6 +6851,7 @@ export async function runLc0WebWgslDeferredReadbackBenchmark(options: {
       packUrl: runtime.packUrl,
       layers: runtime.layers,
       inputBackend: options.inputBackend ?? 'js',
+      legalPriorsBackend: options.legalPriorsBackend ?? 'js',
       batchSize,
       iterations,
       warmup,
@@ -6635,6 +6874,7 @@ export class Lc0WebHybridEvaluator {
   readonly headBackend: Lc0WebHybridHeadBackend;
   readonly wgslBatchMode: Lc0WebHybridWgslBatchMode;
   readonly inputBackend: Lc0WebHybridInputBackend;
+  readonly legalPriorsBackend: Lc0WebHybridLegalPriorsBackend;
   readonly encoderKernelVariant: Lc0WebEncoderKernelVariant;
   private runtimePromise?: Promise<Lc0WebHybridRuntime>;
   private evaluationQueue: Promise<void> = Promise.resolve();
@@ -6648,6 +6888,7 @@ export class Lc0WebHybridEvaluator {
     this.headBackend = options.headBackend ?? 'ort';
     this.wgslBatchMode = options.wgslBatchMode ?? 'physical';
     this.inputBackend = options.inputBackend ?? 'js';
+    this.legalPriorsBackend = options.legalPriorsBackend ?? 'js';
     this.encoderKernelVariant = options.encoderKernelVariant ?? 'hand';
   }
 
@@ -6662,6 +6903,7 @@ export class Lc0WebHybridEvaluator {
         headBackend: this.headBackend,
         wgslBatchMode: this.wgslBatchMode,
         inputBackend: this.inputBackend,
+        legalPriorsBackend: this.legalPriorsBackend,
         encoderKernelVariant: this.encoderKernelVariant,
       });
       runtimePromise.catch(() => {

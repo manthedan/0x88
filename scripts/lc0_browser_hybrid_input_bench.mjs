@@ -7,7 +7,7 @@ const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 240_000;
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_input_bench.mjs [options]\n\nRuns the browser LC0 hybrid input-path benchmark over all 16 representative fixtures.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --layers N           Encoder layers for hybrid path (default 10)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --backends LIST      Input backends to compare (default js,wasm; choices js,wgsl,wasm)\n  --iters N            Timed iterations per fixture/backend (default 1)\n  --warmup N           Warmup evals per backend (default 1)\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`);
+  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_input_bench.mjs [options]\n\nRuns the browser LC0 hybrid input-path benchmark over all 16 representative fixtures.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --layers N           Encoder layers for hybrid path (default 10)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --backends LIST      Input backends to compare (default js,wasm; choices js,wgsl,wasm)\n  --legal-priors-backend MODE\n                       Legal-prior backend used for all input-backend cells: js, wasm, or gpu (default js; gpu requires WGSL heads)\n  --iters N            Timed iterations per fixture/backend (default 1)\n  --warmup N           Warmup evals per backend (default 1)\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -20,6 +20,7 @@ function parseArgs(argv) {
     layers: 10,
     headBackend: 'ort',
     backends: 'js,wasm',
+    legalPriorsBackend: 'js',
     iters: 1,
     warmup: 1,
     packVerify: false,
@@ -44,6 +45,7 @@ function parseArgs(argv) {
     else if (arg === '--layers') args.layers = Number(next());
     else if (arg === '--head-backend') args.headBackend = next();
     else if (arg === '--backends') args.backends = next();
+    else if (arg === '--legal-priors-backend' || arg === '--hybrid-legal-priors') args.legalPriorsBackend = next();
     else if (arg === '--iters') args.iters = Number(next());
     else if (arg === '--warmup') args.warmup = Number(next());
     else if (arg === '--pack-verify') args.packVerify = true;
@@ -58,6 +60,8 @@ function parseArgs(argv) {
   for (const backend of args.backends.split(',').map((entry) => entry.trim()).filter(Boolean)) {
     if (!['js', 'wgsl', 'wasm'].includes(backend)) throw new Error(`Invalid input backend in --backends: ${backend}`);
   }
+  if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid --legal-priors-backend: ${args.legalPriorsBackend}`);
+  if (args.legalPriorsBackend === 'gpu' && args.headBackend !== 'wgsl') throw new Error('--legal-priors-backend gpu requires --head-backend wgsl');
   for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs], ['layers', args.layers], ['iters', args.iters], ['warmup', args.warmup]]) {
     if (!Number.isFinite(value) || value < 0 || (name !== 'warmup' && value <= 0)) throw new Error(`Invalid --${name}: ${value}`);
   }
@@ -69,6 +73,7 @@ function benchmarkUrl(args) {
   url.searchParams.set('hybridInputBench', '1');
   url.searchParams.set('runtime', 'hybrid');
   if (args.headBackend !== 'ort') url.searchParams.set('headBackend', args.headBackend);
+  if (args.legalPriorsBackend !== 'js') url.searchParams.set('legalPriorsBackend', args.legalPriorsBackend);
   url.searchParams.set('inputBenchBackends', args.backends);
   url.searchParams.set('encoderLayers', String(args.layers));
   url.searchParams.set('hybridInputBenchIters', String(args.iters));

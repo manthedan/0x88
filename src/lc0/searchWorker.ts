@@ -47,6 +47,7 @@ import {
   type Lc0WebHybridEvaluationResult,
   type Lc0WebHybridEncoderProfileResult,
   type Lc0WebHybridEncoderProfileMode,
+  type Lc0WebHybridLegalPriorsBackend,
   type Lc0WebWgslDeferredReadbackBenchResult,
   type Lc0WebWgslHeadsProbeResult,
   type Lc0WebMappedPolicyProbeResult,
@@ -75,6 +76,7 @@ type InitMessage = {
   headBackend?: 'ort' | 'wgsl';
   wgslBatchMode?: 'physical' | 'serial';
   inputBackend?: 'js' | 'wgsl' | 'wasm';
+  legalPriorsBackend?: Lc0WebHybridLegalPriorsBackend;
   encoderKernelVariant?: Lc0WebEncoderKernelVariant;
   evalCacheEntries?: number;
 };
@@ -125,6 +127,7 @@ type HybridEvaluateMessage = {
   headBackend?: 'ort' | 'wgsl';
   wgslBatchMode?: 'physical' | 'serial';
   inputBackend?: 'js' | 'wgsl' | 'wasm';
+  legalPriorsBackend?: Lc0WebHybridLegalPriorsBackend;
 };
 
 type HybridEncoderProfileMessage = {
@@ -149,6 +152,7 @@ type WgslDeferredReadbackBenchmarkMessage = {
   layers?: number;
   verifyShards?: boolean;
   inputBackend?: 'js' | 'wgsl' | 'wasm';
+  legalPriorsBackend?: Lc0WebHybridLegalPriorsBackend;
   batchSize?: number;
   iterations?: number;
   warmup?: number;
@@ -483,6 +487,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     headBackend: message.headBackend,
     wgslBatchMode: message.wgslBatchMode,
     inputBackend: message.inputBackend,
+    legalPriorsBackend: message.legalPriorsBackend,
     encoderKernelVariant: message.encoderKernelVariant,
     evalCacheEntries: message.evalCacheEntries ?? 0,
   });
@@ -503,6 +508,7 @@ async function handleInit(message: InitMessage): Promise<void> {
       headBackend: message.headBackend,
       wgslBatchMode: message.wgslBatchMode,
       inputBackend: message.inputBackend,
+      legalPriorsBackend: message.legalPriorsBackend,
       encoderKernelVariant: message.encoderKernelVariant,
     });
     const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0
@@ -876,6 +882,7 @@ async function handleHybridEvaluate(message: HybridEvaluateMessage): Promise<voi
     headBackend: message.headBackend,
     wgslBatchMode: message.wgslBatchMode,
     inputBackend: message.inputBackend,
+    legalPriorsBackend: message.legalPriorsBackend,
   });
   post({ type: 'hybridEvaluationResult', id: message.id, result });
 }
@@ -904,6 +911,7 @@ async function handleWgslDeferredReadbackBenchmark(message: WgslDeferredReadback
     layers: message.layers,
     verifyShards: message.verifyShards,
     inputBackend: message.inputBackend,
+    legalPriorsBackend: message.legalPriorsBackend,
     batchSize: message.batchSize,
     iterations: message.iterations,
     warmup: message.warmup,

@@ -9,7 +9,7 @@ const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 300_000;
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_hybrid_search_fixture_parity.mjs [options]\n\nRuns browser/WebGPU LC0 fixed-search fixture parity for hybrid search across batch pipeline depths.\n\nOptions:\n  --out PATH                 Write JSON artifact (default stdout only)\n  --base-url URL             Use an existing dev server\n  --host HOST                Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N                   Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN        Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --session NAME             agent-browser session name\n  --timeout MS               Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --visits LIST              Comma-separated fixed-visit fixture sets, e.g. 32,64 (default 32)\n  --batch N                  Search leaf batch size (default 4)\n  --batch-pipeline-depths L  Comma-separated depths (default 1; use 1,2,4 with --allow-mismatches for exploratory pipeline matrices)\n  --repeats N                Repeats per fixture/depth (default 1)\n  --fixture-limit N          Fixtures per visit set (max currently 16, default 16)\n  --layers N                 Encoder layers (default 10)\n  --head-backend MODE        ort or wgsl (default wgsl)\n  --encoder-kernel MODE      hand, mixed-tvm-ffn, mixed-tvm-ffn-outproj, tvm-packed-f16 (default hand)\n  --input-backend MODE       js, wgsl, or wasm (default js)\n  --no-server                Do not auto-start Vite\n  --allow-mismatches         Exit 0 and write/report artifacts even when parity mismatches are found\n  --dry-run                  Print URL and exit\n  -h, --help                 Show this help\n`);
+  console.log(`Usage: node scripts/lc0_browser_hybrid_search_fixture_parity.mjs [options]\n\nRuns browser/WebGPU LC0 fixed-search fixture parity for hybrid search across batch pipeline depths.\n\nOptions:\n  --out PATH                 Write JSON artifact (default stdout only)\n  --base-url URL             Use an existing dev server\n  --host HOST                Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N                   Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN        Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --session NAME             agent-browser session name\n  --timeout MS               Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --visits LIST              Comma-separated fixed-visit fixture sets, e.g. 32,64 (default 32)\n  --batch N                  Search leaf batch size (default 4)\n  --batch-pipeline-depths L  Comma-separated depths (default 1; use 1,2,4 with --allow-mismatches for exploratory pipeline matrices)\n  --repeats N                Repeats per fixture/depth (default 1)\n  --fixture-limit N          Fixtures per visit set (max currently 16, default 16)\n  --layers N                 Encoder layers (default 10)\n  --head-backend MODE        ort or wgsl (default wgsl)\n  --encoder-kernel MODE      hand, mixed-tvm-ffn, mixed-tvm-ffn-outproj, tvm-packed-f16 (default hand)\n  --input-backend MODE       js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                            Legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads; opt-in)\n  --no-server                Do not auto-start Vite\n  --allow-mismatches         Exit 0 and write/report artifacts even when parity mismatches are found\n  --dry-run                  Print URL and exit\n  -h, --help                 Show this help\n`);
 }
 
 function parseList(raw, mapper = Number, label = 'list') {
@@ -34,6 +34,7 @@ function parseArgs(argv) {
     headBackend: 'wgsl',
     encoderKernel: 'hand',
     inputBackend: 'js',
+    legalPriorsBackend: 'js',
     packVerify: false,
     allowMismatches: false,
     noServer: false,
@@ -62,6 +63,7 @@ function parseArgs(argv) {
     else if (arg === '--head-backend') args.headBackend = next();
     else if (arg === '--encoder-kernel') args.encoderKernel = next();
     else if (arg === '--input-backend') args.inputBackend = next();
+    else if (arg === '--legal-priors-backend' || arg === '--hybrid-legal-priors') args.legalPriorsBackend = next();
     else if (arg === '--pack-verify') args.packVerify = true;
     else if (arg === '--allow-mismatches') args.allowMismatches = true;
     else if (arg === '--no-server') args.noServer = true;
@@ -73,6 +75,8 @@ function parseArgs(argv) {
   if (args.explicitBaseUrl) args.noServer = true;
   if (!['ort', 'wgsl'].includes(args.headBackend)) throw new Error(`Invalid --head-backend: ${args.headBackend}`);
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
+  if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid --legal-priors-backend: ${args.legalPriorsBackend}`);
+  if (args.legalPriorsBackend === 'gpu' && args.headBackend !== 'wgsl') throw new Error('--legal-priors-backend gpu requires --head-backend wgsl');
   if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj'].includes(args.encoderKernel)) throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
   for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs], ['batch', args.batch], ['repeats', args.repeats], ['fixture-limit', args.fixtureLimit], ['layers', args.layers]]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
@@ -91,6 +95,7 @@ function parityUrl(args) {
   url.searchParams.set('headBackend', args.headBackend);
   if (args.headBackend === 'wgsl') url.searchParams.set('wgslBatchMode', 'physical');
   if (args.inputBackend !== 'js') url.searchParams.set('inputBackend', args.inputBackend);
+  if (args.legalPriorsBackend !== 'js') url.searchParams.set('legalPriorsBackend', args.legalPriorsBackend);
   if (args.encoderKernel !== 'hand') url.searchParams.set('encoderKernel', args.encoderKernel);
   url.searchParams.set('encoderLayers', String(args.layers));
   url.searchParams.set('visits', args.visits.join(','));

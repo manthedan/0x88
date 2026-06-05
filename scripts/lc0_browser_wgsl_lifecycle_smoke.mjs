@@ -9,7 +9,7 @@ const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 480_000;
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_lifecycle_smoke.mjs [options]\n\nRuns repeated browser/WebGPU WGSL-head deferred-readback lifecycle cycles. Each cycle asks the worker to create a fresh hybrid runtime, exercise physical WGSL batch buffers plus deferred double-buffer readback, destroy the runtime, and report browser memory samples when available.\n\nOptions:\n  --out PATH            Write full JSON artifact\n  --base-url URL        Use an existing dev server\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST           Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --session NAME        agent-browser session name\n  --timeout MS          Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --cycles N            Runtime create/exercise/destroy cycles (default 3)\n  --layers N            Encoder layers for hybrid path (default 10)\n  --input-backend MODE  js, wgsl, or wasm input path (default js)\n  --batch N             Physical WGSL batch size (default 4)\n  --iters N             Timed batches per immediate/deferred mode and cycle (default 4)\n  --warmup N            Warmup batches per mode and cycle (default 1)\n  --fixture-limit N     Representative fixtures per cycle (default 4)\n  --pause-ms N          Pause between cycles (default 0)\n  --pack-verify         Enable shard sha256 verification (default skipped for smoke speed)\n  --allow-mismatches    Exit 0 even if any immediate/deferred best moves differ\n  --no-server           Do not auto-start Vite\n  --dry-run             Print URL and exit\n  -h, --help            Show this help\n`);
+  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_lifecycle_smoke.mjs [options]\n\nRuns repeated browser/WebGPU WGSL-head deferred-readback lifecycle cycles. Each cycle asks the worker to create a fresh hybrid runtime, exercise physical WGSL batch buffers plus deferred double-buffer readback, destroy the runtime, and report browser memory samples when available.\n\nOptions:\n  --out PATH            Write full JSON artifact\n  --base-url URL        Use an existing dev server\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST           Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --session NAME        agent-browser session name\n  --timeout MS          Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --cycles N            Runtime create/exercise/destroy cycles (default 3)\n  --layers N            Encoder layers for hybrid path (default 10)\n  --input-backend MODE  js, wgsl, or wasm input path (default js)\n  --legal-priors-backend MODE\n                       Legal-prior backend: js, wasm, or gpu (default js; gpu is opt-in)\n  --batch N             Physical WGSL batch size (default 4)\n  --iters N             Timed batches per immediate/deferred mode and cycle (default 4)\n  --warmup N            Warmup batches per mode and cycle (default 1)\n  --fixture-limit N     Representative fixtures per cycle (default 4)\n  --pause-ms N          Pause between cycles (default 0)\n  --pack-verify         Enable shard sha256 verification (default skipped for smoke speed)\n  --allow-mismatches    Exit 0 even if any immediate/deferred best moves differ\n  --no-server           Do not auto-start Vite\n  --dry-run             Print URL and exit\n  -h, --help            Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -22,6 +22,7 @@ function parseArgs(argv) {
     cycles: 3,
     layers: 10,
     inputBackend: 'js',
+    legalPriorsBackend: 'js',
     batch: 4,
     iters: 4,
     warmup: 1,
@@ -49,6 +50,7 @@ function parseArgs(argv) {
     else if (arg === '--cycles') args.cycles = Number(next());
     else if (arg === '--layers') args.layers = Number(next());
     else if (arg === '--input-backend') args.inputBackend = next();
+    else if (arg === '--legal-priors-backend' || arg === '--hybrid-legal-priors') args.legalPriorsBackend = next();
     else if (arg === '--batch') args.batch = Number(next());
     else if (arg === '--iters') args.iters = Number(next());
     else if (arg === '--warmup') args.warmup = Number(next());
@@ -64,6 +66,7 @@ function parseArgs(argv) {
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
+  if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid --legal-priors-backend: ${args.legalPriorsBackend}`);
   for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs], ['cycles', args.cycles], ['layers', args.layers], ['batch', args.batch], ['iters', args.iters], ['warmup', args.warmup], ['fixture-limit', args.fixtureLimit], ['pause-ms', args.pauseMs]]) {
     if (!Number.isFinite(value) || value < 0 || (!['warmup', 'pause-ms'].includes(name) && value <= 0)) throw new Error(`Invalid --${name}: ${value}`);
   }
@@ -77,6 +80,7 @@ function lifecycleUrl(args) {
   url.searchParams.set('headBackend', 'wgsl');
   url.searchParams.set('wgslBatchMode', 'physical');
   url.searchParams.set('inputBackend', args.inputBackend);
+  if (args.legalPriorsBackend !== 'js') url.searchParams.set('legalPriorsBackend', args.legalPriorsBackend);
   url.searchParams.set('encoderLayers', String(args.layers));
   url.searchParams.set('lifecycleCycles', String(args.cycles));
   url.searchParams.set('deferredReadbackBatch', String(args.batch));

@@ -63,6 +63,7 @@ type WgslDeferredReadbackBenchmarkResult = {
   status: 'WGSL_DEFERRED_READBACK_BENCH_DONE';
   backend: string;
   stableBackend: string;
+  legalPriorsBackend?: 'js' | 'wasm' | 'gpu';
   batchSize: number;
   iterations: number;
   warmup: number;
@@ -735,9 +736,12 @@ const HYBRID_WGSL_BATCH_MODE = params.get('wgslBatchMode') === 'serial' || param
 const HYBRID_INPUT_BACKEND_PARAM = params.get('inputBackend') ?? params.get('hybridInput');
 const HYBRID_INPUT_BACKEND_REQUESTED = HYBRID_INPUT_BACKEND_PARAM === 'wgsl' || HYBRID_INPUT_BACKEND_PARAM === 'wasm';
 const HYBRID_INPUT_BACKEND = HYBRID_INPUT_BACKEND_PARAM === 'wasm' ? 'wasm' : (HYBRID_INPUT_BACKEND_PARAM === 'wgsl' ? 'wgsl' : 'js');
+const HYBRID_LEGAL_PRIORS_BACKEND_PARAM = params.get('legalPriorsBackend') ?? params.get('hybridLegalPriors');
+const HYBRID_LEGAL_PRIORS_BACKEND_REQUESTED = HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'wasm' || HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'gpu';
+const HYBRID_LEGAL_PRIORS_BACKEND = HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'gpu' ? 'gpu' : (HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'wasm' ? 'wasm' : 'js');
 const HYBRID_ENCODER_KERNEL_PARAM = params.get('encoderKernel') ?? params.get('hybridEncoderKernel') ?? params.get('encoderKernelVariant');
 const HYBRID_ENCODER_KERNEL_VARIANT = HYBRID_ENCODER_KERNEL_PARAM === 'tvm-packed-f16' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-outproj' ? HYBRID_ENCODER_KERNEL_PARAM : 'hand';
-const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
+const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_LEGAL_PRIORS_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
@@ -1091,6 +1095,7 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
       headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
       wgslBatchMode: HYBRID_WGSL_BATCH_MODE,
       inputBackend: HYBRID_INPUT_BACKEND,
+      legalPriorsBackend: HYBRID_LEGAL_PRIORS_BACKEND,
       encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
       evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
     } : {}),
@@ -1117,6 +1122,7 @@ async function initHybridWorkerWithInputBackend(inputBackend: 'js' | 'wgsl' | 'w
     headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
     wgslBatchMode: HYBRID_WGSL_BATCH_MODE,
     inputBackend,
+    legalPriorsBackend: HYBRID_LEGAL_PRIORS_BACKEND,
     encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
     evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
   });
@@ -2552,6 +2558,7 @@ async function runHybridSearchBenchmark(): Promise<void> {
       batchPipelineDepth: searchBatchPipelineDepth,
       wgslBatchMode: HYBRID_WGSL_HEADS_REQUESTED ? HYBRID_WGSL_BATCH_MODE : undefined,
       inputBackend: HYBRID_INPUT_BACKEND,
+      legalPriorsBackend: HYBRID_LEGAL_PRIORS_BACKEND,
       encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
       multiPv: searchMultiPv,
       reuseTree,
@@ -2643,6 +2650,7 @@ async function runHybridDeferredReadbackBenchmark(): Promise<void> {
       layers: boundedQueryInt(['encoderLayers', 'layers'], 10, 1, 32),
       verifyShards: params.get('packVerify') !== '0',
       inputBackend: HYBRID_INPUT_BACKEND,
+      legalPriorsBackend: HYBRID_LEGAL_PRIORS_BACKEND,
       batchSize,
       iterations,
       warmup,
@@ -2705,6 +2713,7 @@ async function runHybridDeferredReadbackLifecycleSmoke(): Promise<void> {
         layers: boundedQueryInt(['encoderLayers', 'layers'], 10, 1, 32),
         verifyShards: params.get('packVerify') !== '0',
         inputBackend: HYBRID_INPUT_BACKEND,
+        legalPriorsBackend: HYBRID_LEGAL_PRIORS_BACKEND,
         batchSize,
         iterations,
         warmup,
@@ -2728,6 +2737,7 @@ async function runHybridDeferredReadbackLifecycleSmoke(): Promise<void> {
       packUrl: PACK_URL,
       layers: boundedQueryInt(['encoderLayers', 'layers'], 10, 1, 32),
       inputBackend: HYBRID_INPUT_BACKEND,
+      legalPriorsBackend: HYBRID_LEGAL_PRIORS_BACKEND,
       cycles,
       batchSize,
       iterations,
@@ -2829,6 +2839,13 @@ async function runHybridSearchFixtureParity(): Promise<void> {
               evalBatchSizeHistogram: result.stats?.evalBatchSizeHistogram,
               batchPipelineFlushes: result.stats?.batchPipelineFlushes,
               maxBatchPipelineBatches: result.stats?.maxBatchPipelineBatches,
+              totalEvalMs: result.stats?.evalBackendTimingMeans?.totalEvalMs,
+              totalEvalMsPerPosition: result.stats?.evalBackendTimingPerPositionMeans?.totalEvalMs,
+              legalPriorsMs: result.stats?.evalBackendTimingMeans?.legalPriorsMs,
+              legalPriorsMsPerPosition: result.stats?.evalBackendTimingPerPositionMeans?.legalPriorsMs,
+              legalPriorsBridgeCopyMs: result.stats?.evalBackendTimingMeans?.legalPriorsBridgeCopyMs,
+              legalPriorsWasmRunMs: result.stats?.evalBackendTimingMeans?.legalPriorsWasmRunMs,
+              legalPriorsWasmTotalMs: result.stats?.evalBackendTimingMeans?.legalPriorsWasmTotalMs,
               readbackSyncedMs: result.stats?.evalBackendTimingMeans?.readbackSyncedMs,
               readbackSyncedMsPerPosition: result.stats?.evalBackendTimingPerPositionMeans?.readbackSyncedMs,
             });
@@ -2843,6 +2860,8 @@ async function runHybridSearchFixtureParity(): Promise<void> {
       status: 'HYBRID_SEARCH_FIXTURE_PARITY_DONE',
       backend: searchWorkerBackend,
       headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
+      inputBackend: HYBRID_INPUT_BACKEND,
+      legalPriorsBackend: HYBRID_LEGAL_PRIORS_BACKEND,
       encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
       visitsList,
       batchSize,
@@ -2932,6 +2951,7 @@ async function runHybridInputBenchmark(): Promise<void> {
       packUrl: PACK_URL,
       layers: boundedQueryInt(['encoderLayers', 'layers'], 10, 1, 32),
       headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
+      legalPriorsBackend: HYBRID_LEGAL_PRIORS_BACKEND,
       backends,
       fixtureCount: fixtures.length,
       iterations,
