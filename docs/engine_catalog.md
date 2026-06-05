@@ -38,6 +38,7 @@ Every engine family should have one card with these fields:
 | Stockfish | `lite`, `full` | Lite single-thread default opponent | NPM `stockfish` JS/WASM UCI worker | `stockfish@18.0.7` | Lite WASM ~7 MB; full WASM ~108 MB | Mature UCI baseline; strongest/large full variant is optional. |
 | Reckless | `simd`, `full`, `browser-api`, `browser-api-simd`, `browser-api-simd-external`, `lite` | SIMD if available; scalar fallback | Patched Rust `wasm32-wasip1` UCI; optional direct browser API | Upstream `codedeliveryservice/Reckless` commit `0010617448bd` + local patches | Integrated full WASM ~62 MB; external API WASM ~1.2 MB + NNUE ~60 MB | Best current non-Stockfish browser engine candidate; SIMD WASI/UCI is fastest proven path. |
 | Viridithas | `default`, `simd` | Experimental opt-in | Patched Rust `wasm32-wasip1` UCI, one-shot/persistent/batch | Upstream `cosmobobak/viridithas` commit `20d7402065ca` + v106 `atlantis-b800.nnue.zst` + local patches | WASM ~55 MB with compressed NNUE embedded | Integration works for shallow arena/analysis, but stop/abort and throughput remain experimental. |
+| Berserk | not in UI yet; planned `default`, `simd`, `custom` | Experimental intake only | Planned C-to-WASI UCI smoke before UI wiring | Upstream `jhonnold/berserk` tag `14` commit `8ae895a6151695be4a50d4fb65b0c131659c513a` + network `berserk-9b84c340af7e.nn` | Unknown until first WASI build; upstream NNUE is a separate download candidate | Strong GPL C UCI candidate; first tasks are build portability, asset policy, UCI smoke, and lifecycle characterization. |
 
 ## Family cards
 
@@ -134,6 +135,32 @@ Every engine family should have one card with these fields:
   - Browser API SIMD did not beat SIMD WASI/UCI in corrected runs; keep as experimental/control-plane groundwork.
 - **Validation:** `reckless-benchmark.html`, Reckless variant tests, one-shot/persistent browser benchmark JSON artifacts, asset HEAD checks in UI.
 - **Open work:** improve graceful stop/persistent process control; keep browser API only if it earns latency or control-plane wins; finish deployment packaging for generated artifacts/source archives.
+
+### Berserk family
+
+- **Family id / UI label:** proposed `berserk` / `Berserk`. Do not add to staged selectors until the first browser UCI smoke passes.
+- **Integration status:** experimental intake only. No arena/analysis UI promise yet.
+- **Source/version anchor:** upstream `jhonnold/berserk` release tag `14`, commit `8ae895a6151695be4a50d4fb65b0c131659c513a`; default branch HEAD observed at `27212a24c16d9e5f9bc9180a75264c1c632808bb` during intake. The first browser port should pin tag `14` unless a newer release is deliberately selected.
+- **License/distribution:** GPL-3.0. Generated WASM and copied NNUE assets must be treated as redistributable GPL engine artifacts with corresponding source/build instructions. Do not commit generated blobs until the project has an explicit release/source-archive policy for Berserk.
+- **Runtime adapter:** planned patched C `wasm32-wasip1` UCI path, starting with one-shot smoke. Persistent WASI should only follow if startup/NNUE loading dominates and the one-shot UCI path is correct.
+- **Expected UI variants:**
+  - `default`: scalar WASI/UCI candidate, expected URL `/berserk/berserk.wasm` after a build script exists.
+  - `simd`: optional SIMD candidate, expected URL `/berserk/berserk-simd128.wasm` only after wasm SIMD codegen validates.
+  - `custom`: URL param escape hatch for local experiments, likely `?berserkWasm=`.
+- **Expected NNUE assets:** upstream makefile uses `MAIN_NETWORK = berserk-9b84c340af7e.nn` from `https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn`. First smoke should decide whether to embed it with `incbin` or load it externally through a WASI preopen/fetch bridge; external loading is preferred if it keeps WASM rebuilds small and cacheable.
+- **Strength knob:** depth in staged UI if promoted; movetime should be available in benchmarks once UCI `go movetime` is verified. Tentative defaults should mirror other alpha-beta engines until measured (`arena` shallow depth, `analysis` deeper depth).
+- **Artifact footprint:** unknown. Record scalar/SIMD WASM size and NNUE size after the first reproducible build. Expected policy is `public/berserk/*.wasm` and downloaded NNUE blobs are generated/local assets, not source-controlled defaults.
+- **Feature parity to verify:**
+  - UCI handshake: `uci` / `uciok`, `isready` / `readyok`.
+  - Move search: `position startpos` and one non-startpos FEN with `go depth N`.
+  - Analysis/MultiPV: upstream exposes `MultiPV`; verify info-line parsing before enabling analysis UI.
+  - New game/hash reset: verify `ucinewgame`, `setoption name Hash`, and clear-hash behavior or document the fallback.
+  - Stop/abort: upstream has UCI `stop` support natively, but browser/WASI behavior is unknown; first adapter may terminate/recreate the worker on abort until graceful stop is proven.
+  - Threads/tablebases: upstream exposes `Threads` and `SyzygyPath`; browser intake should begin single-threaded and tablebases disabled.
+  - NNUE/model loading: decide embedded vs external; missing asset path must be visible in UI before promotion.
+- **Speed snapshot:** none yet. Use the Reckless/Viridithas rotated-FEN protocol after smoke, with cold/warm separation and engine-reported nodes/NPS.
+- **Validation plan:** create a build script, add a Node/browser UCI smoke, capture raw JSON artifacts, then run one shallow arena game and one analysis run only after MultiPV parsing is verified.
+- **Open risks:** C/pthreads/WASI portability, SIMD flags, external NNUE loading, GPL source/archive obligations, graceful in-search stop, and whether Berserk offers a browser-speed advantage over Stockfish/Reckless after startup is amortized.
 
 ### Viridithas family
 
