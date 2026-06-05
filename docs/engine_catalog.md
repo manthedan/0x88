@@ -9,6 +9,7 @@ Status labels:
 - **Stable default**: used by default for normal UI flows.
 - **Experimental**: selectable, useful for smoke/benchmark work, but not a default or release promise.
 - **Benchmark-only**: exists to measure a hypothesis, not for interactive play/analysis.
+- **Intake candidate**: documented upstream target, not yet built or exposed in UI.
 - **Local asset**: generated or symlinked locally; do not assume the blob is committed.
 
 ## Engine card schema
@@ -39,6 +40,7 @@ Every engine family should have one card with these fields:
 | Reckless | `simd`, `full`, `browser-api`, `browser-api-simd`, `browser-api-simd-external`, `lite` | SIMD if available; scalar fallback | Patched Rust `wasm32-wasip1` UCI; optional direct browser API | Upstream `codedeliveryservice/Reckless` commit `0010617448bd` + local patches | Integrated full WASM ~62 MB; external API WASM ~1.2 MB + NNUE ~60 MB | Best current non-Stockfish browser engine candidate; SIMD WASI/UCI is fastest proven path. |
 | Viridithas | `default`, `simd` | Experimental opt-in | Patched Rust `wasm32-wasip1` UCI, one-shot/persistent/batch | Upstream `cosmobobak/viridithas` commit `20d7402065ca` + v106 `atlantis-b800.nnue.zst` + local patches | WASM ~55 MB with compressed NNUE embedded | Integration works for shallow arena/analysis, but stop/abort and throughput remain experimental. |
 | Berserk | `emscripten` (WASI `default`/`simd` planned only) | Experimental opt-in | Patched single-thread Emscripten UCI worker; WASI still unpromoted | Upstream `jhonnold/berserk` tag `14` commit `8ae895a6151695be4a50d4fb65b0c131659c513a` + network `berserk-9b84c340af7e.nn` | Emscripten emits JS glue + ~128 KB WASM + ~24 MB preload data; generated/local only | Strong GPL C UCI candidate; staged UI integration is experimental while lifecycle/benchmark data accumulates. |
+| PlentyChess | none yet | Intake candidate | Expected patched single-thread Emscripten UCI worker | `Yoshie2000/PlentyChess` candidate commit `58d8ba2505ae2b49f48dd410d214a457d15c12c6` + network `0134-2r24-s0.bin` | Raw NNUE 57.6 MB; processed embedded net observed at ~60 MB | Very strong GPL C++ UCI candidate, but likely a harder port than Berserk due to threadpool/TT-clear threads, Fathom, and SIMD abstraction assumptions. |
 
 ## Family cards
 
@@ -162,6 +164,25 @@ Every engine family should have one card with these fields:
 - **Speed snapshot:** none yet. Use the Reckless/Viridithas rotated-FEN protocol after smoke, with cold/warm separation and engine-reported nodes/NPS.
 - **Validation:** `npm run berserk:build-emscripten` then `npm run berserk:smoke-emscripten` verifies `uci`, `isready`, `ucinewgame`, startpos search, and one non-startpos FEN search in Node. `berserk-smoke.html` exercises the reusable `BerserkEngine` worker adapter in the browser; lifecycle smoke now covers repeated searches, MultiPV parsing, abort-by-worker-restart recovery, and missing-asset failure. Arena/analysis selector smokes and first sanity comparisons against Stockfish full single/Reckless SIMD are recorded in `docs/berserk_browser_benchmarks.md`. The reusable C/C++ intake process is captured in `docs/browser_c_engine_porting.md`.
 - **Open risks:** graceful in-search stop without losing the resident worker, pthread/SIMD follow-up, GPL source/archive obligations, deeper benchmark comparison against Stockfish/Reckless/Viridithas, and whether Berserk offers a browser-speed advantage after startup is amortized.
+
+### PlentyChess family
+
+- **Family id / UI label:** proposed `plentychess` / `PlentyChess`.
+- **Integration status:** intake candidate only; not built, benchmarked, or exposed in staged selectors yet.
+- **Source/version anchor:** initial reconnaissance used `https://github.com/Yoshie2000/PlentyChess.git` at commit `58d8ba2505ae2b49f48dd410d214a457d15c12c6` on the default branch. Current source reports `VERSION = "7.0.66"` and `network.txt = 0134-2r24-s0`. Latest GitHub release observed during intake was `b-v7.0.0` at commit `e2060ab4b3021babb7d74af3cbe908154c03b2fd`, but its `network.txt` value `0119` did not correspond to an immediately available `PlentyNetworks` asset under the Makefile's expected URL during this reconnaissance.
+- **License/distribution:** GPL-3.0. Generated JS/WASM and embedded/processed NNUE assets must stay ignored until corresponding-source/archive policy covers PlentyChess as well as Berserk.
+- **Runtime adapter:** expected first path should be the standard C/C++ recipe in `docs/browser_c_engine_porting.md`: Emscripten, modular JS, exported `command(const char*)`, worker UCI adapter, single-thread synchronous search first, tablebases disabled or inert.
+- **Expected NNUE assets:** default-branch Makefile downloads `https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/0134-2r24-s0.bin`. Reconnaissance observed a 57,557,991-byte raw net with sha256 `550a0b664b68113fd228f501524b25e0cea1be500a608bb0f26d42a6255c8061`; upstream `tools/process_net` produced a local `processed.bin` of about 60 MB with sha256 `691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4`.
+- **Porting notes:**
+  - Native UCI loop blocks on `std::getline(std::cin, ...)`; browser build needs an Emscripten `command()` entry point like Berserk/Stockfish.js.
+  - `ThreadPool::resize(1)` creates a `std::thread`, and `TT.clear()` also spawns `std::thread`s. A first browser build should add a `PLENTY_SYNC_SEARCH`-style path that creates the single worker directly, runs `Worker::startSearching()` inline, makes `waitForSearchFinished()` trivial, and clears TT with one `memset`.
+  - Fathom/Syzygy is included. Since browser intake should not ship tablebases, either compile Fathom with threadless settings and rely on empty `TB_LARGEST`, or guard tablebase probes behind a browser `PLENTY_NO_TB` define.
+  - SIMD assumptions are stronger than Berserk. Current source has `src/simd.h` with x86/ARM abstractions, while the Makefile selects host arch flags. First Emscripten proof should avoid trying to preserve all native SIMD variants; add a wasm/scalar-compatible path first, then try `-msimd128` only after smoke passes.
+  - On this ARM macOS host, `make arch=generic` fails because the tools build includes x86 intrinsics, and `make arch=arm64` got as far as engine compilation but hit `std::aligned_alloc` namespace portability. This does not block a Docker/Emscripten proof, but confirms a small patch will be needed.
+- **Strength knob:** depth first; movetime later once UCI smoke is stable. Keep experimental even if fast because lifecycle and artifact policy are unknown.
+- **Artifact footprint:** expect a large integrated WASM if `processed.bin` is embedded via `incbin` (roughly Reckless-sized or larger). An external processed-net split may be useful later, but do not make that a first-smoke requirement.
+- **Validation plan:** build script + patch, Node smoke (`uci`, `isready`, `ucinewgame`, startpos/FEN bestmove), browser worker smoke, lifecycle smoke, then rotated-FEN benchmark against Stockfish/Reckless/Berserk. Add selectors only after the reusable adapter passes.
+- **Open risks:** source pin choice (`main` vs release), missing/stale release-network mapping, single-thread Emscripten patch size, tablebase guards, SIMD/scalar fallback correctness, large GPL artifact packaging, and whether the engine is meaningfully distinct from the existing Stockfish/Reckless speed-strength lane in browser form.
 
 ### Viridithas family
 
