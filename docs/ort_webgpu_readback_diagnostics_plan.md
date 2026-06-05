@@ -165,6 +165,53 @@ Interpret results as follows:
 - If ORT uses fewer submits/maps, prioritize command-buffer consolidation and batch/evaluate sequence changes.
 - If ORT's advantage disappears when outputs are GPU-backed and downloads are isolated, readback is the main shared bottleneck.
 
+## First local smoke observations
+
+These are sanity checks, not promotion evidence. They used short 3-iteration browser runs on the current development host.
+
+With explicit GPU-backed outputs:
+
+```bash
+node scripts/lc0_browser_ort_readback_profile.mjs --iters 3 --warmup 1
+```
+
+observed roughly:
+
+```text
+avgMs                         30.96
+mean ortRunMs                  7.45
+mean ortAllGetDataMs          22.99
+webgpuSubmitCount             28 per eval
+webgpuMapAsyncCount            3 per eval
+webgpuCopyBufferToBufferCount  4 per eval
+webgpuMapReadBufferBytes    7472 per eval
+```
+
+With default CPU-visible outputs, but still instrumented:
+
+```bash
+node scripts/lc0_browser_ort_readback_profile.mjs --iters 3 --warmup 1 --no-gpu-outputs
+```
+
+observed roughly:
+
+```text
+avgMs                         19.36
+mean ortRunMs                 18.79
+mean ortAllGetDataMs           0.02
+webgpuSubmitCount             27 per eval
+webgpuMapAsyncCount            3 per eval
+webgpuCopyBufferToBufferCount  4 per eval
+webgpuMapReadBufferBytes    7472 per eval
+```
+
+Interpretation:
+
+- `preferredOutputLocation=gpu-buffer` appears to move download/fence cost from `session.run()` into explicit `tensor.getData()`, as intended.
+- In this short noisy run, forcing GPU-backed outputs was slower end-to-end because downstream JS still immediately downloads all three outputs.
+- ORT still maps three output tensors and copies about 36 KB through `copyBufferToBuffer` per eval, even though the CPU-visible model outputs are only about 7.3 KB.
+- ORT timestamp kernel profiling remained unavailable on this browser/device (`ortKernelCount=0`), so WebGPU API counters are the reliable attribution signal here.
+
 ## Guardrails
 
 - Do not use browser diagnostic numbers from one noisy run as promotion evidence.
