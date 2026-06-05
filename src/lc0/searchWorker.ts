@@ -176,7 +176,7 @@ type KernelProbeMessage = {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
-  variant?: 'scalar' | 'tiled16' | 'scalar-transposed';
+  variant?: 'scalar' | 'tiled16' | 'scalar-transposed' | 'scalar-shader-f16-accum-f32';
 };
 
 type KernelBenchmarkMessage = {
@@ -188,7 +188,7 @@ type KernelBenchmarkMessage = {
   iterations?: number;
   warmup?: number;
   verifyShards?: boolean;
-  variant?: 'scalar' | 'tiled16' | 'scalar-transposed';
+  variant?: 'scalar' | 'tiled16' | 'scalar-transposed' | 'scalar-shader-f16-accum-f32';
 };
 
 type QkvProbeMessage = {

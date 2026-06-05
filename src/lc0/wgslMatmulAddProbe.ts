@@ -43,7 +43,7 @@ const DEFAULT_SMOLGEN_HIDDEN = 256;
 const DEFAULT_SMOLGEN_FLAT = DEFAULT_TOKENS * DEFAULT_SMOLGEN_COMPRESSED;
 const DEFAULT_SMOLGEN_EPSILON = 1e-3;
 
-export type Lc0WebMatmulAddKernelVariant = 'scalar' | 'tiled16' | 'scalar-transposed';
+export type Lc0WebMatmulAddKernelVariant = 'scalar' | 'tiled16' | 'scalar-transposed' | 'scalar-shader-f16-accum-f32';
 
 export interface Lc0WebMatmulAddKernelProbeOptions {
   packUrl: string;
@@ -77,6 +77,7 @@ export interface Lc0WebMatmulAddKernelProbeResult {
   packUrl: string;
   modelName: string;
   adapterInfo?: Record<string, unknown>;
+  shaderF16Supported?: boolean;
   weightTensor: string;
   biasTensor: string;
   variant: Lc0WebMatmulAddKernelVariant;
@@ -100,6 +101,7 @@ export interface Lc0WebMatmulAddKernelBenchmarkResult {
   packUrl: string;
   modelName: string;
   adapterInfo?: Record<string, unknown>;
+  shaderF16Supported?: boolean;
   weightTensor: string;
   biasTensor: string;
   variant: Lc0WebMatmulAddKernelVariant;
@@ -273,6 +275,7 @@ type DeviceLike = {
   createComputePipeline: (descriptor: Record<string, unknown>) => PipelineLike;
   createBindGroup: (descriptor: Record<string, unknown>) => unknown;
   createCommandEncoder: () => CommandEncoderLike;
+  destroy?: () => void;
 };
 
 type QuerySetLike = {
@@ -320,7 +323,11 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
 }
 
 function normalizeKernelVariant(value: unknown): Lc0WebMatmulAddKernelVariant {
-  return value === 'tiled16' || value === 'scalar-transposed' ? value : 'scalar';
+  return value === 'tiled16' || value === 'scalar-transposed' || value === 'scalar-shader-f16-accum-f32' ? value : 'scalar';
+}
+
+function kernelVariantRequiresShaderF16(variant: Lc0WebMatmulAddKernelVariant): boolean {
+  return variant === 'scalar-shader-f16-accum-f32';
 }
 
 export function f16BitsToF32(bits: number): number {
@@ -330,6 +337,32 @@ export function f16BitsToF32(bits: number): number {
   if (exp === 0) return sign * (frac === 0 ? 0 : Math.pow(2, -14) * (frac / 1024));
   if (exp === 0x1f) return frac === 0 ? sign * Infinity : NaN;
   return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
+}
+
+function f32ToF16Bits(value: number): number {
+  if (Number.isNaN(value)) return 0x7e00;
+  if (value === Infinity) return 0x7c00;
+  if (value === -Infinity) return 0xfc00;
+  const sign = value < 0 || Object.is(value, -0) ? 0x8000 : 0;
+  const abs = Math.abs(value);
+  if (abs === 0) return sign;
+  if (abs >= 65504) return sign | 0x7bff;
+  if (abs < 2 ** -24) return sign;
+  if (abs < 2 ** -14) return sign | Math.round(abs / 2 ** -24);
+  const exponent = Math.floor(Math.log2(abs));
+  const fraction = abs / 2 ** exponent - 1;
+  let halfExponent = exponent + 15;
+  let halfFraction = Math.round(fraction * 1024);
+  if (halfFraction === 1024) {
+    halfExponent += 1;
+    halfFraction = 0;
+  }
+  if (halfExponent >= 31) return sign | 0x7bff;
+  return sign | (halfExponent << 10) | (halfFraction & 0x03ff);
+}
+
+function f32ToF16RoundedF32(value: number): number {
+  return f16BitsToF32(f32ToF16Bits(value));
 }
 
 function readF16At(bytes: Uint8Array, index: number): number {
@@ -362,6 +395,19 @@ function cpuMatmulAdd(input: Float32Array<ArrayBufferLike>, weight: Uint8Array, 
   for (let col = 0; col < n; col++) {
     let sum = readF16At(bias, col);
     for (let row = 0; row < k; row++) sum += input[row] * readF16At(weight, row * n + col);
+    output[col] = sum;
+  }
+  return output;
+}
+
+function cpuMatmulAddShaderF16AccumF32(input: Float32Array<ArrayBufferLike>, weight: Uint8Array, bias: Uint8Array, k: number, n: number): Float32Array<ArrayBufferLike> {
+  const output = new Float32Array(n);
+  for (let col = 0; col < n; col++) {
+    let sum = readF16At(bias, col);
+    for (let row = 0; row < k; row++) {
+      const product = f32ToF16RoundedF32(f32ToF16RoundedF32(input[row]) * readF16At(weight, row * n + col));
+      sum += product;
+    }
     output[col] = sum;
   }
   return output;
@@ -796,9 +842,42 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
 }
 `;
 
+const SCALAR_SHADER_F16_ACCUM_F32_WGSL = `enable f16;
+@group(0) @binding(0) var<storage, read> inputVec: array<f32>;
+@group(0) @binding(1) var<storage, read> weightsF16: array<u32>;
+@group(0) @binding(2) var<storage, read> biasF16: array<u32>;
+@group(0) @binding(3) var<storage, read_write> outputVec: array<f32>;
+
+fn pick_lane_f32(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+
+fn load_weight_f16(index: u32) -> f16 {
+  return f16(pick_lane_f32(weightsF16[index >> 1u], index));
+}
+
+fn load_bias_f16(index: u32) -> f16 {
+  return f16(pick_lane_f32(biasF16[index >> 1u], index));
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let col = gid.x;
+  if (col >= 256u) { return; }
+  var sum = f32(load_bias_f16(col));
+  for (var row = 0u; row < 256u; row = row + 1u) {
+    let product = f16(inputVec[row]) * load_weight_f16(row * 256u + col);
+    sum = sum + f32(product);
+  }
+  outputVec[col] = sum;
+}
+`;
+
 function wgslForVariant(variant: Lc0WebMatmulAddKernelVariant): string {
   if (variant === 'tiled16') return TILED16_WGSL;
   if (variant === 'scalar-transposed') return SCALAR_TRANSPOSED_WGSL;
+  if (variant === 'scalar-shader-f16-accum-f32') return SCALAR_SHADER_F16_ACCUM_F32_WGSL;
   return SCALAR_WGSL;
 }
 
@@ -814,7 +893,7 @@ function cloneableAdapterInfo(info: unknown): Record<string, unknown> | undefine
   return Object.keys(out).length ? out : undefined;
 }
 
-async function requestDevice(options: { timestampQuery?: boolean } = {}): Promise<{ device: DeviceLike; adapterInfo?: Record<string, unknown>; timestampQuerySupported: boolean }> {
+async function requestDevice(options: { timestampQuery?: boolean; shaderF16?: boolean } = {}): Promise<{ device: DeviceLike; adapterInfo?: Record<string, unknown>; timestampQuerySupported: boolean; shaderF16Supported: boolean }> {
   const globals = gpuGlobals();
   const gpu = globals.navigator?.gpu as GpuLike | undefined;
   if (!gpu) throw new Error('WebGPU unavailable for lc0web kernel probe');
@@ -822,8 +901,14 @@ async function requestDevice(options: { timestampQuery?: boolean } = {}): Promis
   if (!adapter) throw new Error('WebGPU adapter unavailable for lc0web kernel probe');
   const rawAdapterInfo = adapter.requestAdapterInfo ? await adapter.requestAdapterInfo() : adapter.info;
   const timestampQuerySupported = adapter.features?.has('timestamp-query') === true;
-  const device = await adapter.requestDevice(options.timestampQuery && timestampQuerySupported ? { requiredFeatures: ['timestamp-query'] } : undefined);
-  return { device, adapterInfo: cloneableAdapterInfo(rawAdapterInfo), timestampQuerySupported };
+  const shaderF16Supported = adapter.features?.has('shader-f16') === true;
+  if (options.shaderF16 && !shaderF16Supported) throw new Error('WebGPU adapter does not support required shader-f16 feature');
+  const requiredFeatures = [
+    ...(options.timestampQuery && timestampQuerySupported ? ['timestamp-query'] : []),
+    ...(options.shaderF16 ? ['shader-f16'] : []),
+  ];
+  const device = await adapter.requestDevice(requiredFeatures.length ? { requiredFeatures } : undefined);
+  return { device, adapterInfo: cloneableAdapterInfo(rawAdapterInfo), timestampQuerySupported, shaderF16Supported };
 }
 
 function dispatchKernel(pass: ComputePassLike, variant: Lc0WebMatmulAddKernelVariant, n: number): void {
@@ -898,7 +983,7 @@ export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKern
   const iterations = clampInteger(options.iterations, 10, 1, 1000);
   // Request WebGPU before fetching pack shards so unsupported browsers fail
   // without downloading/verifying model weights.
-  const { device, adapterInfo } = await requestDevice();
+  const { device, adapterInfo, shaderF16Supported } = await requestDevice({ shaderF16: kernelVariantRequiresShaderF16(variant) });
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
     tensorNames: [weightTensorName, biasTensorName],
@@ -916,7 +1001,9 @@ export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKern
   const globals = gpuGlobals();
   const usage = globals.GPUBufferUsage!;
   const input = makeInputVector(DEFAULT_K);
-  const cpu = cpuMatmulAdd(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N);
+  const cpu = kernelVariantRequiresShaderF16(variant)
+    ? cpuMatmulAddShaderF16AccumF32(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N)
+    : cpuMatmulAdd(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N);
 
   const buffers: BufferLike[] = [];
   try {
@@ -947,6 +1034,7 @@ export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKern
       packUrl: pack.manifestUrl,
       modelName: pack.manifest.model.name,
       adapterInfo,
+      shaderF16Supported,
       weightTensor: weightTensorName,
       biasTensor: biasTensorName,
       variant,
@@ -976,7 +1064,7 @@ export async function runLc0WebMatmulAddKernelBenchmark(options: Lc0WebMatmulAdd
   const variant = normalizeKernelVariant(options.variant);
   const warmup = clampInteger(options.warmup, 10, 0, 1000);
   const iterations = clampInteger(options.iterations, 1000, 1, 100_000);
-  const { device, adapterInfo } = await requestDevice();
+  const { device, adapterInfo, shaderF16Supported } = await requestDevice({ shaderF16: kernelVariantRequiresShaderF16(variant) });
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
     tensorNames: [weightTensorName, biasTensorName],
@@ -993,7 +1081,9 @@ export async function runLc0WebMatmulAddKernelBenchmark(options: Lc0WebMatmulAdd
   const globals = gpuGlobals();
   const usage = globals.GPUBufferUsage!;
   const input = makeInputVector(DEFAULT_K);
-  const cpu = cpuMatmulAdd(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N);
+  const cpu = kernelVariantRequiresShaderF16(variant)
+    ? cpuMatmulAddShaderF16AccumF32(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N)
+    : cpuMatmulAdd(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N);
   const buffers: BufferLike[] = [];
   try {
     const setupStarted = nowMs();
@@ -1030,6 +1120,7 @@ export async function runLc0WebMatmulAddKernelBenchmark(options: Lc0WebMatmulAdd
       packUrl: pack.manifestUrl,
       modelName: pack.manifest.model.name,
       adapterInfo,
+      shaderF16Supported,
       weightTensor: weightTensorName,
       biasTensor: biasTensorName,
       variant,

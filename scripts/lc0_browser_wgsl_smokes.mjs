@@ -120,6 +120,12 @@ const SMOKES = [
     doneText: 'KERNEL_BENCH_DONE',
   },
   {
+    name: 'kernel-bench-shader-f16-accum-f32',
+    query: 'kernelBench=1&kernelVariant=scalar-shader-f16-accum-f32&kernelBenchWarmup=1&kernelBenchIters=3&packVerify=0',
+    doneText: 'KERNEL_BENCH_DONE',
+    default: false,
+  },
+  {
     name: 'qkv-probe',
     query: 'qkvProbe=1&qkvWarmup=1&qkvIters=1&packVerify=0',
     doneText: 'QKV_DONE',

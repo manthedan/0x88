@@ -34,13 +34,14 @@ type PackLoadResult = {
   elapsedMs: number;
 };
 
-type KernelVariant = 'scalar' | 'tiled16' | 'scalar-transposed';
+type KernelVariant = 'scalar' | 'tiled16' | 'scalar-transposed' | 'scalar-shader-f16-accum-f32';
 
 type KernelProbeResult = {
   status: 'KERNEL_DONE';
   packUrl: string;
   modelName: string;
   adapterInfo?: Record<string, unknown>;
+  shaderF16Supported?: boolean;
   weightTensor: string;
   biasTensor: string;
   variant: KernelVariant;
@@ -86,6 +87,7 @@ type KernelBenchmarkResult = {
   packUrl: string;
   modelName: string;
   adapterInfo?: Record<string, unknown>;
+  shaderF16Supported?: boolean;
   weightTensor: string;
   biasTensor: string;
   variant: KernelVariant;
@@ -752,7 +754,7 @@ const BENCH_WARMUP = Math.min(100, Math.max(0, Math.floor(Number(params.get('ben
 const BENCH_ITERS = Math.min(1000, Math.max(1, Math.floor(Number(params.get('benchIters') ?? params.get('iters') ?? '25') || 25)));
 function requestedKernelVariant(): KernelVariant {
   const value = params.get('kernelVariant') ?? params.get('variant');
-  return value === 'tiled16' || value === 'scalar-transposed' ? value : 'scalar';
+  return value === 'tiled16' || value === 'scalar-transposed' || value === 'scalar-shader-f16-accum-f32' ? value : 'scalar';
 }
 // Register the offline app-shell SW in production builds, or opt in with ?sw=1.
 // Disabled in dev by default so it never serves stale HMR modules.
