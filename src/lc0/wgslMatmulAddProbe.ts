@@ -5518,16 +5518,20 @@ export interface Lc0WebHybridTimingBreakdown {
   batchSequenceIndex?: number;
   /** Readback-buffer ring slot used by deferred/double-buffered WGSL-head evaluation. */
   deferredReadbackSlot?: number;
-  /** Wall time between queue submission and starting mapAsync; >0 in deferred modes means useful overlap was attempted. */
+  /** Wall time between queue submission and starting mapAsync; near-zero when readback mapping is requested eagerly. */
   deferredReadbackDelayMs?: number;
-  /** Awaited mapAsync time, separated from CPU copy/postprocess. */
+  /** Total mapAsync pending time from request to resolution, separated from CPU copy/postprocess. */
   readbackMapAsyncMs?: number;
+  /** Wall time spent awaiting an already-started mapAsync promise during result finalization. */
+  readbackMapAsyncWaitMs?: number;
   /** CPU time to copy the mapped readback range and unmap it. */
   readbackMapCopyMs?: number;
-  /** CPU legal-move/index preparation run after queue submission and before mapAsync, so GPU work can overlap it. */
+  /** CPU legal-move/index preparation run after queue submission while mapAsync is already pending. */
   legalPriorsPrepMs?: number;
-  /** CPU work intentionally scheduled between queue submission and mapAsync to hide under GPU/readback latency. */
+  /** CPU work intentionally scheduled while mapAsync is pending to hide under GPU/readback latency. */
   readbackOverlapCpuMs?: number;
+  /** Portion of readbackOverlapCpuMs estimated to be hidden by the pending mapAsync interval. */
+  readbackOverlapHiddenMs?: number;
   physicalBatchSize?: number;
   batchPosition?: number;
   inputBackend?: Lc0WebHybridInputBackend;
@@ -5915,6 +5919,12 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
   return { runtime: { output, smolgenPipelines, attentionPipelines, ffnPipelines }, buffers };
 }
 
+interface SubmittedWgslHybridBatchReadbackMapState {
+  startedAt: number;
+  settledAt?: number;
+  promise: Promise<void>;
+}
+
 interface SubmittedWgslHybridBatch {
   inputs: Lc0EvaluatorInput[];
   boardsAndFens: Array<ReturnType<typeof currentBoardAndFen>>;
@@ -5923,6 +5933,7 @@ interface SubmittedWgslHybridBatch {
   legalPriorsSetupMs?: number;
   legalPriorsPrepMs?: number;
   readbackBuffer: BufferLike;
+  readbackMapState: SubmittedWgslHybridBatchReadbackMapState;
   sequenceId: number;
   batchSequenceIndex?: number;
   deferredReadbackSlot?: number;
@@ -6581,7 +6592,7 @@ class Lc0WebHybridRuntime {
     };
   }
 
-  private submitWgslBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }, readbackBuffer: BufferLike, sequenceOptions: { batchSequenceIndex?: number; deferredReadbackSlot?: number } = {}): SubmittedWgslHybridBatch {
+  private async submitWgslBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }, readbackBuffer: BufferLike, sequenceOptions: { batchSequenceIndex?: number; deferredReadbackSlot?: number } = {}): Promise<SubmittedWgslHybridBatch> {
     const totalStarted = nowMs();
     const slots = this.ensureWgslBatchSlots(inputs.length);
     const uploadBuffer = this.ensureWgslBatchUploadBuffer(inputs.length);
@@ -6650,12 +6661,19 @@ class Lc0WebHybridRuntime {
     this.device.queue.submit([commandBuffer]);
     const queueSubmitMs = nowMs() - queueSubmitStarted;
     const submittedAt = nowMs();
+    const readbackMapState: SubmittedWgslHybridBatchReadbackMapState = { startedAt: nowMs(), promise: Promise.resolve() };
+    readbackMapState.promise = readbackBuffer.mapAsync(gpuGlobals().GPUMapMode!.READ).then(() => { readbackMapState.settledAt = nowMs(); });
     let jsLegalCandidates: LegalPolicyCandidate[][] | undefined;
     let legalPriorsPrepMs: number | undefined;
-    if (this.legalPriorsBackend === 'js') {
-      const legalPriorsPrepStarted = nowMs();
-      jsLegalCandidates = boardsAndFens.map(({ board }) => legalPolicyCandidates(board));
-      legalPriorsPrepMs = nowMs() - legalPriorsPrepStarted;
+    try {
+      if (this.legalPriorsBackend === 'js') {
+        const legalPriorsPrepStarted = nowMs();
+        jsLegalCandidates = boardsAndFens.map(({ board }) => legalPolicyCandidates(board));
+        legalPriorsPrepMs = nowMs() - legalPriorsPrepStarted;
+      }
+    } catch (error) {
+      await this.cleanupStartedReadbackMap(readbackBuffer, readbackMapState);
+      throw error;
     }
     return {
       inputs,
@@ -6665,6 +6683,7 @@ class Lc0WebHybridRuntime {
       legalPriorsSetupMs,
       legalPriorsPrepMs,
       readbackBuffer,
+      readbackMapState,
       sequenceId: this.nextWgslSequenceId++,
       batchSequenceIndex: sequenceOptions.batchSequenceIndex,
       deferredReadbackSlot: sequenceOptions.deferredReadbackSlot,
@@ -6682,16 +6701,27 @@ class Lc0WebHybridRuntime {
     };
   }
 
+  private async cleanupStartedReadbackMap(readbackBuffer: BufferLike, readbackMapState: SubmittedWgslHybridBatchReadbackMapState): Promise<void> {
+    try {
+      await readbackMapState.promise;
+      readbackBuffer.unmap();
+    } catch {
+      // The caller is already propagating the primary error. If mapAsync also
+      // fails, there is no mapped range to release.
+    }
+  }
+
   private async finishWgslBatch(submitted: SubmittedWgslHybridBatch, options: { policyTemperature: number }, readbackMode: 'immediate' | 'deferred-double-buffered'): Promise<Lc0WebHybridEvaluationResult[]> {
     let readbackMapped = false;
     try {
       const headStarted = nowMs();
       const readbackStarted = nowMs();
-      const deferredReadbackDelayMs = Math.max(0, readbackStarted - submitted.submittedAt);
-      const mapAsyncStarted = nowMs();
-      await submitted.readbackBuffer.mapAsync(gpuGlobals().GPUMapMode!.READ);
+      const deferredReadbackDelayMs = Math.max(0, submitted.readbackMapState.startedAt - submitted.submittedAt);
+      const mapAsyncAwaitStarted = nowMs();
+      await submitted.readbackMapState.promise;
       readbackMapped = true;
-      const readbackMapAsyncMs = nowMs() - mapAsyncStarted;
+      const readbackMapAsyncWaitMs = nowMs() - mapAsyncAwaitStarted;
+      const readbackMapAsyncMs = Math.max(0, (submitted.readbackMapState.settledAt ?? nowMs()) - submitted.readbackMapState.startedAt);
       const readbackBytesPerSlot = this.wgslHeadReadbackBytes();
       const mapCopyStarted = nowMs();
       const readbackRange = submitted.readbackBuffer.getMappedRange().slice(0, submitted.inputs.length * readbackBytesPerSlot);
@@ -6719,6 +6749,7 @@ class Lc0WebHybridRuntime {
         const legalPriorsStarted = nowMs();
         const legalPriorsSetupMs = gpuLegalCandidates ? (submitted.legalPriorsSetupMs ?? 0) / submitted.inputs.length : 0;
         const legalPriorsPrepMs = submitted.jsLegalCandidates ? (submitted.legalPriorsPrepMs ?? 0) / submitted.inputs.length : 0;
+        const readbackOverlapHiddenMs = submitted.jsLegalCandidates ? Math.min(submitted.legalPriorsPrepMs ?? 0, readbackMapAsyncMs) / submitted.inputs.length : 0;
         const jsLegalCandidates = submitted.jsLegalCandidates?.[i];
         const legalPriorsResult = gpuLegalCandidates
           ? { legalPriors: legalPriorsFromGpuOutput(gpuLegalCandidates, readbackFloats.slice(base, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS)), bestMove: undefined as string | undefined, legalPriorsMs: legalPriorsSetupMs + (nowMs() - legalPriorsStarted), wasmTiming: undefined }
@@ -6765,8 +6796,9 @@ class Lc0WebHybridRuntime {
             deferredReadbackSlot: submitted.deferredReadbackSlot,
             deferredReadbackDelayMs,
             readbackMapAsyncMs,
+            readbackMapAsyncWaitMs,
             readbackMapCopyMs,
-            ...(submitted.legalPriorsPrepMs !== undefined ? { legalPriorsPrepMs, readbackOverlapCpuMs: legalPriorsPrepMs } : {}),
+            ...(submitted.legalPriorsPrepMs !== undefined ? { legalPriorsPrepMs, readbackOverlapCpuMs: legalPriorsPrepMs, readbackOverlapHiddenMs } : {}),
             physicalBatchSize: submitted.inputs.length,
             batchPosition: i,
             inputBackend: this.inputBackend,
@@ -6795,7 +6827,8 @@ class Lc0WebHybridRuntime {
       return out;
     }
     const readbackBuffer = this.ensureWgslBatchReadbackBuffer(inputs.length);
-    return this.finishWgslBatch(this.submitWgslBatch(inputs, options, readbackBuffer), options, 'immediate');
+    const submitted = await this.submitWgslBatch(inputs, options, readbackBuffer);
+    return this.finishWgslBatch(submitted, options, 'immediate');
   }
 
   async evaluateWgslBatchesDeferredReadback(batches: Lc0EvaluatorInput[][], options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult[][]> {
@@ -6824,12 +6857,20 @@ class Lc0WebHybridRuntime {
       this.wgslDeferredReadbackInUse.add(deferredReadbackSlot);
       let submitted: SubmittedWgslHybridBatch;
       try {
-        submitted = this.submitWgslBatch(batch, options, readbackBuffer, { batchSequenceIndex: i, deferredReadbackSlot });
+        submitted = await this.submitWgslBatch(batch, options, readbackBuffer, { batchSequenceIndex: i, deferredReadbackSlot });
       } catch (error) {
         this.wgslDeferredReadbackInUse.delete(deferredReadbackSlot);
         throw error;
       }
-      if (pending) out[pending.index] = await this.finishWgslBatch(pending.submitted, options, 'deferred-double-buffered');
+      if (pending) {
+        try {
+          out[pending.index] = await this.finishWgslBatch(pending.submitted, options, 'deferred-double-buffered');
+        } catch (error) {
+          this.wgslDeferredReadbackInUse.delete(deferredReadbackSlot);
+          await this.cleanupStartedReadbackMap(readbackBuffer, submitted.readbackMapState);
+          throw error;
+        }
+      }
       pending = { index: i, submitted };
     }
     if (pending) out[pending.index] = await this.finishWgslBatch(pending.submitted, options, 'deferred-double-buffered');
@@ -6908,8 +6949,8 @@ function mean(values: number[]): number {
 
 function summarizeHybridEvaluations(mode: 'immediate' | 'deferred-double-buffered', wallMs: number, batches: Lc0WebHybridEvaluationResult[][]): Lc0WebWgslDeferredReadbackBenchModeResult {
   const flat = batches.flat();
-  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsPrepMs', 'readbackOverlapCpuMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount'];
-  const physicalBatchScopedKeys = new Set<keyof Lc0WebHybridTimingBreakdown>(['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount']);
+  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsPrepMs', 'readbackOverlapCpuMs', 'readbackOverlapHiddenMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount'];
+  const physicalBatchScopedKeys = new Set<keyof Lc0WebHybridTimingBreakdown>(['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount']);
   const timingMeans: Partial<Record<keyof Lc0WebHybridTimingBreakdown, number>> = {};
   for (const key of timingKeys) {
     const values = flat.map((entry) => {
