@@ -72,6 +72,24 @@ Results:
 
 Interpretation: the x86_64 browser probe supports parity, but not promotion. Relaxed SIMD remains useful as an explicit experimental artifact; the current measured speed signal is mixed/noisy and not a reliable improvement over standard SIMD128.
 
+## Apple Silicon Chromium probe
+
+A local Apple Silicon run used HeadlessChrome 149 on macOS. `navigator.userAgentData` reported `architecture: "arm"`, `bitness: "64"`; the legacy UA string still says `Macintosh; Intel Mac OS X`, which is Chromium compatibility text.
+
+Summary: [`reckless_relaxed_simd_mchip_chromium_2026-06-05_depth7-8_warm10_summary.json`](./reckless_relaxed_simd_mchip_chromium_2026-06-05_depth7-8_warm10_summary.json).
+
+Configuration matched the Yukon reduced run: persistent mode only, 20-position rotated FEN suite, depths 7 and 8, 10 warm repeats, hash clearing enabled.
+
+Results:
+
+- Parity: 440/440 exact pairs for best move, depth, score, nodes, and PV.
+- Relaxed SIMD was slower by both weighted warm wall-clock and paired robust timing.
+- Weighted warm wall-clock: depth 7 was 11.59 ms relaxed vs 8.02 ms SIMD; depth 8 was 22.44 ms relaxed vs 17.92 ms SIMD.
+- Paired median wall ratio: 1.367 at depth 7 and 1.523 at depth 8; relaxed was slower in 155/200 and 177/200 paired warm comparisons respectively.
+- Engine-reported NPS was lower for relaxed SIMD at both depths.
+
+Interpretation: on the local M-chip Mac, the conclusion is stronger than Yukon: Relaxed SIMD validates and preserves parity, but it is slower than regular SIMD128 for this benchmark shape.
+
 ## Validation requirements before promotion
 
 1. Build standard SIMD and relaxed SIMD artifacts from the same source ref.

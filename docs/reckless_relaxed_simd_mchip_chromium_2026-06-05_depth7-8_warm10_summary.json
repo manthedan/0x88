@@ -1,0 +1,87 @@
+{
+  "runtime": {
+    "generatedAt": "2026-06-05T08:49:40.130Z",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.0.0 Safari/537.36",
+    "userAgentData": {
+      "architecture": "arm",
+      "bitness": "64",
+      "platform": "macOS",
+      "platformVersion": "26.4.1",
+      "wow64": false
+    },
+    "url": "http://localhost:5205/reckless-benchmark.html",
+    "crossOriginIsolated": true,
+    "sharedArrayBuffer": true,
+    "persistentAvailable": true,
+    "relaxedSimdSupported": true
+  },
+  "config": {
+    "variants": [
+      "Reckless Full SIMD",
+      "Reckless Full Relaxed SIMD experimental"
+    ],
+    "modes": [
+      "persistent"
+    ],
+    "budgets": [
+      "depth 7",
+      "depth 8"
+    ],
+    "positions": 20,
+    "repeats": 10,
+    "hashMb": 16,
+    "clearHashBetweenRuns": true
+  },
+  "rows": 880,
+  "summaryRows": 80,
+  "aggregate": {
+    "Reckless Full SIMD|depth 7": {
+      "warmRuns": 200,
+      "weightedWarmAvgMs": 8.024325000047684,
+      "weightedAvgNps": 769774.28
+    },
+    "Reckless Full SIMD|depth 8": {
+      "warmRuns": 200,
+      "weightedWarmAvgMs": 17.919975000023843,
+      "weightedAvgNps": 789331.985
+    },
+    "Reckless Full Relaxed SIMD experimental|depth 7": {
+      "warmRuns": 200,
+      "weightedWarmAvgMs": 11.591275000572203,
+      "weightedAvgNps": 682312.38
+    },
+    "Reckless Full Relaxed SIMD experimental|depth 8": {
+      "warmRuns": 200,
+      "weightedWarmAvgMs": 22.439574999213217,
+      "weightedAvgNps": 578694.83
+    }
+  },
+  "parity": {
+    "pairs": 440,
+    "mismatch": 0
+  },
+  "pairedWall": {
+    "depth 7": {
+      "pairs": 200,
+      "avgRatio": 2.0965723001453633,
+      "medianRatio": 1.3667692257807804,
+      "p10Ratio": 0.5187905709695706,
+      "p90Ratio": 2.0828282883259464,
+      "avgDeltaMs": 3.5669500005245207,
+      "medianDeltaMs": 1.774999976158142,
+      "relaxedFasterCount": 45,
+      "relaxedSlowerCount": 155
+    },
+    "depth 8": {
+      "pairs": 200,
+      "avgRatio": 1.6094825127829575,
+      "medianRatio": 1.5233644841728735,
+      "p10Ratio": 0.6689853455772765,
+      "p90Ratio": 2.263319677762633,
+      "avgDeltaMs": 4.519599999189377,
+      "medianDeltaMs": 5.820000052452087,
+      "relaxedFasterCount": 23,
+      "relaxedSlowerCount": 177
+    }
+  }
+}
