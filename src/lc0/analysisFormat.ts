@@ -17,6 +17,8 @@ export interface AnalysisLine {
   scoreText: string;
   /** Depth (Stockfish) or visit count (LC0) summary. */
   detail: string;
+  nodes?: number;
+  nps?: number;
   pvUci: string[];
   pvSan: string;
 }
@@ -94,7 +96,22 @@ export interface StockfishInfoLineLike {
   depth: number;
   scoreCp?: number;
   mateIn?: number;
+  nodes?: number;
+  nps?: number;
   pvUci: string[];
+}
+
+function formatCompactNumber(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k`;
+  return String(Math.round(value));
+}
+
+function stockfishDetail(info: StockfishInfoLineLike): string {
+  const parts = [`depth ${info.depth}`];
+  if (info.nodes !== undefined) parts.push(`${formatCompactNumber(info.nodes)} nodes`);
+  if (info.nps !== undefined) parts.push(`${formatCompactNumber(info.nps)} nps`);
+  return parts.join(' · ');
 }
 
 /** Build analysis lines from Stockfish MultiPV info for the given FEN. */
@@ -113,7 +130,9 @@ export function stockfishAnalysisLines(infos: StockfishInfoLineLike[], fen: stri
         scoreCp,
         mateIn,
         scoreText: formatScore(scoreCp, mateIn),
-        detail: `depth ${info.depth}`,
+        detail: stockfishDetail(info),
+        ...(info.nodes !== undefined ? { nodes: info.nodes } : {}),
+        ...(info.nps !== undefined ? { nps: info.nps } : {}),
         pvUci: info.pvUci,
         pvSan: uciLineToSan(board, info.pvUci, 12),
       };
@@ -151,6 +170,7 @@ export function lc0AnalysisLines(result: Lc0SearchLike, fen: string, engine = 'L
       scoreCp,
       scoreText: formatCentipawns(scoreCp),
       detail: `${visits} visits`,
+      nodes: visits,
       pvUci,
       pvSan: uciLineToSan(board, pvUci, 12),
     };

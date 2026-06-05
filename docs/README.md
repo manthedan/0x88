@@ -25,6 +25,7 @@ For current planning, start in `knowledge/` first. Use `docs/` as stable referen
 | [`browser_c_engine_porting.md`](browser_c_engine_porting.md) | Current | Standard low-effort Emscripten-first intake recipe for C/C++ browser UCI engines. |
 | [`engine_artifact_distribution.md`](engine_artifact_distribution.md) | Current | GPL/corresponding-source release policy for generated browser engine JS/WASM/data/NNUE artifacts. |
 | [`netlify_engine_artifacts.md`](netlify_engine_artifacts.md) | Current | Netlify build/deploy path for precompressed generated engine sidecars. |
+| [`en_croissant_feature_ideas.md`](en_croissant_feature_ideas.md) | Active | En Croissant-inspired product ideas for multi-engine analysis UX, profiles, reports, repertoire, and asset management. |
 | [`berserk_browser_benchmarks.md`](berserk_browser_benchmarks.md) | Active | Berserk Emscripten worker lifecycle and first rotated-FEN benchmark captures. |
 | [`plentychess_browser_port.md`](plentychess_browser_port.md) | Active | PlentyChess Emscripten proof-build plus Node/browser worker smoke notes. |
 | [`model_efficiency_metrics.md`](model_efficiency_metrics.md) | Current | How we compare strength/bytes/params/latency/search usefulness. |
