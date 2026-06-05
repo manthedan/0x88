@@ -228,7 +228,7 @@ It compares:
 - `ort-gpu` — ORT WebGPU with `preferredOutputLocation=gpu-buffer` and explicit `tensor.getData()` timing.
 - `wgsl-pipe1` — custom WGSL encoder + WGSL heads with physical batching and normal search scheduling.
 - `wgsl-gpu-legal` — same path with GPU legal-prior filtering, reducing per-position readback bytes from full mapped policy to legal-move triples + WDL.
-- `wgsl-pipe2` — same custom WGSL path with `batchPipelineDepth=2`. The matrix bounds this strategy with `--pipe2-batch` (default 2) because local batch=4/depth=2 search produced stale/zero WGSL-head readbacks; failures are still preserved in the artifact instead of aborting the full matrix.
+- `wgsl-pipe2` — same custom WGSL path with `batchPipelineDepth=2`. The matrix also exposes `--pipe2-batch` as an override/cap for overlap experiments; the default now matches `--batch 4` after deferred resources are preallocated before submitting pipelined work.
 
 A short local two-FEN smoke was run:
 
@@ -286,46 +286,46 @@ mode deferred-double-buffered, batch 1,
 fen rnbqkbnr/p4ppp/1pp1p3/3pP3/3P3P/2N2N2/PPP2PP1/R1BQKB1R b KQkq h3 0 5
 ```
 
-The runtime now uses separate compute/upload resource banks for deferred readback slots, but local batch=4/depth=2 search still hit the slot-3 validation failure. The matrix therefore bounds `wgsl-pipe2` to `--pipe2-batch 2` by default while preserving a clear failure if larger values are tested directly.
+The first attempted fix split deferred compute/upload resource banks per readback ring slot, but local batch=4/depth=2 search still hit the slot-3 validation failure. The stabilizing fix was to preallocate both deferred ring slots' compute, upload, and readback resources to the maximum batch length before any pipelined command buffer is submitted. That avoids lazy creation/growth of the second ring slot while the first deferred batch is already in flight.
 
-A bounded two-FEN smoke including ORT, GPU legal-prior readback, and pipe2 was run:
+A two-FEN smoke including ORT, GPU legal-prior readback, and restored batch=4/depth=2 pipe2 was run:
 
 ```bash
 npm run lc0:browser-readback-strategy-matrix -- \
-  --out /tmp/lc0_readback_matrix_all_bound_pipe2.json \
+  --out /tmp/lc0_readback_matrix_all_pipe2_fixed.json \
   --max-positions 2 --repeats 1 \
   --strategies ort-cpu,ort-gpu,wgsl-pipe1,wgsl-gpu-legal,wgsl-pipe2 \
   --ort-iters 2 --ort-warmup 1 \
   --wgsl-eval-iters 1 --wgsl-search-iters 1 --wgsl-search-warmup 0 \
-  --visits 16 --batch 4 --pipe2-batch 2
+  --visits 16 --batch 4 --pipe2-batch 4
 ```
 
 Median smoke summary:
 
 ```text
-ort-cpu avgMs                 15.39
-ort-gpu avgMs                 11.93  // still diagnostic-only; short/noisy run
+ort-cpu avgMs                 16.06
+ort-gpu avgMs                 12.26  // diagnostic-only; short/noisy run
 
 wgsl-pipe1 batch/depth         4 / 1
-wgsl-pipe1 searchMeanMs      234.13
-wgsl-pipe1 visits/s           68.35
-wgsl-pipe1 search readbackMs  34.33
+wgsl-pipe1 searchMeanMs      257.76
+wgsl-pipe1 visits/s           62.13
+wgsl-pipe1 search readbackMs  35.16
 wgsl-pipe1 search bytes       25310
 
 wgsl-gpu-legal batch/depth     4 / 1
-wgsl-gpu-legal searchMeanMs  245.91
-wgsl-gpu-legal visits/s       65.09
-wgsl-gpu-legal search readbackMs 34.52
+wgsl-gpu-legal searchMeanMs  244.45
+wgsl-gpu-legal visits/s       65.47
+wgsl-gpu-legal search readbackMs 35.88
 wgsl-gpu-legal search bytes   10486
 
-wgsl-pipe2 batch/depth         2 / 2
-wgsl-pipe2 searchMeanMs      206.49
-wgsl-pipe2 visits/s           78.90
-wgsl-pipe2 search readbackMs  15.21
-wgsl-pipe2 search bytes       14061
+wgsl-pipe2 batch/depth         4 / 2
+wgsl-pipe2 searchMeanMs      299.73
+wgsl-pipe2 visits/s           54.04
+wgsl-pipe2 search readbackMs  35.92
+wgsl-pipe2 search bytes       23200
 ```
 
-Immediate implication: the best next implementation bet is not making ORT GPU-backed outputs the default, and it is not byte reduction alone. Bounded readback/fence overlap (`batchPipelineDepth=2` with smaller physical batches) is the most promising local signal, while GPU legal-prior byte reduction needs to be combined with a stable overlap path before it should be promoted.
+Immediate implication: batch=4/depth=2 is now a valid matrix cell again, but this short local smoke did not show an end-to-end win. The earlier batch=2/depth=2 signal still suggests readback/fence overlap can matter, but the scheduler/resource path needs repeated fixed-suite runs before any promotion. GPU legal-prior byte reduction also still needs to be combined with a stable overlap path before it should be promoted.
 
 ## Guardrails
 

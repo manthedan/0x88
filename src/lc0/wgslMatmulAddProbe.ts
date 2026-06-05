@@ -6876,6 +6876,14 @@ class Lc0WebHybridRuntime {
   async evaluateWgslBatchesDeferredReadback(batches: Lc0EvaluatorInput[][], options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult[][]> {
     if (this.headBackend !== 'wgsl') throw new Error('deferred readback benchmark requires the WGSL-head backend');
     const out: Lc0WebHybridEvaluationResult[][] = new Array(batches.length);
+    const maxBatchLength = Math.max(0, ...batches.map((batch) => batch.length));
+    if (maxBatchLength > 0) {
+      for (const slot of [0, 1]) {
+        this.ensureWgslDeferredBatchSlots(maxBatchLength, slot);
+        this.ensureWgslDeferredBatchUploadBuffer(maxBatchLength, slot);
+        this.ensureWgslDeferredReadbackBuffer(maxBatchLength, slot);
+      }
+    }
     let pending: { index: number; submitted: SubmittedWgslHybridBatch } | undefined;
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
