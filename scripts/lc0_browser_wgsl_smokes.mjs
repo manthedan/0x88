@@ -68,6 +68,13 @@ const SMOKES = [
     default: false,
   },
   {
+    name: 'encoder0-ffn-shader-f16-accum-f32',
+    query: 'encoder0FfnBench=1&encoder0FfnKernel=hand-shader-f16-accum-f32&encoder0FfnWarmup=1&encoder0FfnIters=1&packVerify=0',
+    doneText: 'FFN_BENCH_DONE',
+    maxError: 0.002,
+    default: false,
+  },
+  {
     name: 'encoder0-ffn-ort-wasm',
     query: 'encoder0FfnOrtBench=1&encoder0FfnOrtWarmup=0&encoder0FfnOrtIters=1&ep=wasm&packVerify=0',
     doneText: 'FFN_ORT_BENCH_DONE',
@@ -148,6 +155,7 @@ function parseArgs(argv) {
     port: DEFAULT_PORT,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     maxError: DEFAULT_MAX_ERROR,
+    maxErrorExplicit: false,
     agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
     session: process.env.AGENT_BROWSER_SESSION ?? `lc0-wgsl-smokes-${process.pid}`,
     noServer: false,
@@ -165,7 +173,10 @@ function parseArgs(argv) {
     else if (arg === '--agent-browser') args.agentBrowser = next();
     else if (arg === '--session') args.session = next();
     else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--max-error') args.maxError = Number(next());
+    else if (arg === '--max-error') {
+      args.maxError = Number(next());
+      args.maxErrorExplicit = true;
+    }
     else if (arg === '--only') args.only = new Set(next().split(',').map((s) => s.trim()).filter(Boolean));
     else if (arg === '--list') args.list = true;
     else if (arg === '--no-server') args.noServer = true;
@@ -308,8 +319,9 @@ async function runSmoke(args, baseUrl, smoke) {
   const bench = runJsonCommand(args.agentBrowser, ['get', 'text', '#benchResult'], args.timeoutMs, args.session);
   const result = parseBenchResult(textFromGetResult(bench), smoke);
   const error = maxAbsError(result);
-  if (error > args.maxError) {
-    throw new Error(`${smoke.name}: maxAbsError ${error} exceeded threshold ${args.maxError}`);
+  const maxError = args.maxErrorExplicit ? args.maxError : (smoke.maxError ?? args.maxError);
+  if (error > maxError) {
+    throw new Error(`${smoke.name}: maxAbsError ${error} exceeded threshold ${maxError}`);
   }
   const slowestStage = Array.isArray(result.stageTimings) && result.stageTimings.length
     ? result.stageTimings.reduce((best, timing) => timing.avgMs > best.avgMs ? timing : best, result.stageTimings[0])
@@ -318,6 +330,7 @@ async function runSmoke(args, baseUrl, smoke) {
     smoke: smoke.name,
     status: result.status,
     maxAbsError: error,
+    maxError,
     shaderF16Supported: result.shaderF16Supported ?? null,
     reason: result.reason ?? null,
     iterations: result.iterations ?? null,
