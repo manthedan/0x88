@@ -38,7 +38,7 @@ Every engine family should have one card with these fields:
 | Stockfish | `lite`, `full` | Lite single-thread default opponent | NPM `stockfish` JS/WASM UCI worker | `stockfish@18.0.7` | Lite WASM ~7 MB; full WASM ~108 MB | Mature UCI baseline; strongest/large full variant is optional. |
 | Reckless | `simd`, `full`, `browser-api`, `browser-api-simd`, `browser-api-simd-external`, `lite` | SIMD if available; scalar fallback | Patched Rust `wasm32-wasip1` UCI; optional direct browser API | Upstream `codedeliveryservice/Reckless` commit `0010617448bd` + local patches | Integrated full WASM ~62 MB; external API WASM ~1.2 MB + NNUE ~60 MB | Best current non-Stockfish browser engine candidate; SIMD WASI/UCI is fastest proven path. |
 | Viridithas | `default`, `simd` | Experimental opt-in | Patched Rust `wasm32-wasip1` UCI, one-shot/persistent/batch | Upstream `cosmobobak/viridithas` commit `20d7402065ca` + v106 `atlantis-b800.nnue.zst` + local patches | WASM ~55 MB with compressed NNUE embedded | Integration works for shallow arena/analysis, but stop/abort and throughput remain experimental. |
-| Berserk | not in UI yet; planned `default`, `simd`, `custom` | Experimental intake only | Planned C-to-WASI UCI smoke before UI wiring | Upstream `jhonnold/berserk` tag `14` commit `8ae895a6151695be4a50d4fb65b0c131659c513a` + network `berserk-9b84c340af7e.nn` | Unknown until first WASI build; upstream NNUE is a separate download candidate | Strong GPL C UCI candidate; first tasks are build portability, asset policy, UCI smoke, and lifecycle characterization. |
+| Berserk | not in UI yet; planned `default`, `simd`, `custom` | Experimental intake only | Patched single-thread Emscripten UCI smoke; WASI still unpromoted | Upstream `jhonnold/berserk` tag `14` commit `8ae895a6151695be4a50d4fb65b0c131659c513a` + network `berserk-9b84c340af7e.nn` | Emscripten smoke emits JS glue + small WASM + ~24 MB preload data; generated/local only | Strong GPL C UCI candidate; first smoke path exists, but UI promotion waits for browser adapter/lifecycle characterization. |
 
 ## Family cards
 
@@ -138,18 +138,18 @@ Every engine family should have one card with these fields:
 
 ### Berserk family
 
-- **Family id / UI label:** proposed `berserk` / `Berserk`. Do not add to staged selectors until the first browser UCI smoke passes.
-- **Integration status:** experimental intake only. No arena/analysis UI promise yet.
-- **Source/version anchor:** upstream `jhonnold/berserk` release tag `14`, commit `8ae895a6151695be4a50d4fb65b0c131659c513a`; default branch HEAD observed at `27212a24c16d9e5f9bc9180a75264c1c632808bb` during intake. The first browser port should pin tag `14` unless a newer release is deliberately selected.
-- **License/distribution:** GPL-3.0. Generated WASM and copied NNUE assets must be treated as redistributable GPL engine artifacts with corresponding source/build instructions. Do not commit generated blobs until the project has an explicit release/source-archive policy for Berserk.
-- **Runtime adapter:** planned patched C `wasm32-wasip1` UCI path, starting with one-shot smoke. Persistent WASI should only follow if startup/NNUE loading dominates and the one-shot UCI path is correct.
+- **Family id / UI label:** proposed `berserk` / `Berserk`. Do not add to staged selectors until a real browser UCI adapter smoke passes.
+- **Integration status:** experimental intake only. A Node Emscripten UCI smoke path exists; no arena/analysis UI promise yet.
+- **Source/version anchor:** upstream `jhonnold/berserk` release tag `14`, commit `8ae895a6151695be4a50d4fb65b0c131659c513a`; default branch HEAD observed at `27212a24c16d9e5f9bc9180a75264c1c632808bb` during intake. The browser port pins tag `14` unless a newer release is deliberately selected.
+- **License/distribution:** GPL-3.0. Generated JS/WASM/data and copied NNUE assets must be treated as redistributable GPL engine artifacts with corresponding source/build instructions. Do not commit generated blobs until the project has an explicit release/source-archive policy for Berserk.
+- **Runtime adapter:** current first smoke is `patches/berserk-emscripten.patch` + `npm run berserk:build-emscripten`, exporting `command()`, `isReady()`, and `isSearching()` like Stockfish.js. It disables tablebases and uses synchronous single-thread search to avoid pthread/SAB requirements. WASI remains unpromoted unless it becomes useful later.
 - **Expected UI variants:** defined in `src/lc0/berserkVariants.ts` but not wired into selectors yet.
   - `default`: scalar WASI/UCI candidate, expected URL `/berserk/berserk.wasm` after a build script exists.
   - `simd`: optional SIMD candidate, expected URL `/berserk/berserk-simd128.wasm` only after wasm SIMD codegen validates.
   - `custom`: URL param escape hatch for local experiments via `?berserkWasm=` and optional `?berserkNnue=`.
-- **Expected NNUE assets:** upstream makefile uses `MAIN_NETWORK = berserk-9b84c340af7e.nn` from `https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn`. `berserkVariants.ts` currently models it as external `/berserk/berserk-9b84c340af7e.nn`; first smoke can still switch to embedded `incbin` if that proves simpler, but external loading is preferred if it keeps WASM rebuilds small and cacheable.
+- **Expected NNUE assets:** upstream makefile uses `MAIN_NETWORK = berserk-9b84c340af7e.nn` from `https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn`. The Emscripten smoke preloads this network into `berserk-emscripten.data`; `berserkVariants.ts` still models external `/berserk/berserk-9b84c340af7e.nn` for any future WASI/custom path.
 - **Strength knob:** depth in staged UI if promoted; movetime should be available in benchmarks once UCI `go movetime` is verified. Tentative defaults should mirror other alpha-beta engines until measured (`arena` shallow depth, `analysis` deeper depth).
-- **Artifact footprint:** unknown. Record scalar/SIMD WASM size and NNUE size after the first reproducible build. Expected policy is `public/berserk/*.wasm` and downloaded NNUE blobs are generated/local assets, not source-controlled defaults.
+- **Artifact footprint:** current local Emscripten smoke build is small JS glue + small WASM + ~24 MB `.data` NNUE preload. Record exact bytes from `npm run berserk:build-emscripten`/smoke reports and keep all generated `public/berserk/*.{js,wasm,data,nn,nnue}` assets ignored.
 - **Feature parity to verify:**
   - UCI handshake: `uci` / `uciok`, `isready` / `readyok`.
   - Move search: `position startpos` and one non-startpos FEN with `go depth N`.
@@ -159,8 +159,8 @@ Every engine family should have one card with these fields:
   - Threads/tablebases: upstream exposes `Threads` and `SyzygyPath`; browser intake should begin single-threaded and tablebases disabled.
   - NNUE/model loading: decide embedded vs external; missing asset path must be visible in UI before promotion.
 - **Speed snapshot:** none yet. Use the Reckless/Viridithas rotated-FEN protocol after smoke, with cold/warm separation and engine-reported nodes/NPS.
-- **Validation plan:** create a build script, add a Node/browser UCI smoke, capture raw JSON artifacts, then run one shallow arena game and one analysis run only after MultiPV parsing is verified.
-- **Open risks:** C/pthreads/WASI portability, SIMD flags, external NNUE loading, GPL source/archive obligations, graceful in-search stop, and whether Berserk offers a browser-speed advantage over Stockfish/Reckless after startup is amortized.
+- **Validation:** `npm run berserk:build-emscripten` then `npm run berserk:smoke-emscripten` verifies `uci`, `isready`, `ucinewgame`, startpos search, and one non-startpos FEN search in Node. A local browser eval smoke against the same artifacts also passed; a reusable browser worker/adapter smoke is still required before UI selector promotion.
+- **Open risks:** browser adapter lifecycle, MultiPV parsing, graceful in-search stop, pthread/SIMD follow-up, GPL source/archive obligations, and whether Berserk offers a browser-speed advantage over Stockfish/Reckless after startup is amortized.
 
 ### Viridithas family
 

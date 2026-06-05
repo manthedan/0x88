@@ -30,6 +30,10 @@ public/reckless/*.wasm
 public/reckless/*.nnue
 public/reckless/*corresponding-source*.tar.gz
 public/viridithas/*.wasm
+public/berserk/*.js
+public/berserk/*.cjs
+public/berserk/*.data
+public/berserk/*.worker.js
 public/berserk/*.wasm
 public/berserk/*.nn
 public/berserk/*.nnue

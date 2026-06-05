@@ -1,0 +1,534 @@
+diff --git a/src/berserk.c b/src/berserk.c
+index 53af2de..a6e9901 100644
+--- a/src/berserk.c
++++ b/src/berserk.c
+@@ -16,6 +16,10 @@
+ 
+ #include <string.h>
+ 
++#ifdef __EMSCRIPTEN__
++#include <emscripten/emscripten.h>
++#endif
++
+ #include "attacks.h"
+ #include "bench.h"
+ #include "bits.h"
+@@ -51,8 +55,29 @@ int main(int argc, char** argv) {
+ 
+     Bench(depth);
+   } else {
++#ifdef __EMSCRIPTEN__
++    UCIInit();
++#else
+     UCILoop();
++#endif
+   }
+ 
+   return 0;
+ }
++
++#ifdef __EMSCRIPTEN__
++EMSCRIPTEN_KEEPALIVE
++void command(const char* cmd) {
++  UCICommand(cmd);
++}
++
++EMSCRIPTEN_KEEPALIVE
++int isReady(void) {
++  return 1;
++}
++
++EMSCRIPTEN_KEEPALIVE
++int isSearching(void) {
++  return Threads.searching;
++}
++#endif
+diff --git a/src/nn/evaluate.c b/src/nn/evaluate.c
+index 35a2d7e..9df5a37 100644
+--- a/src/nn/evaluate.c
++++ b/src/nn/evaluate.c
+@@ -29,11 +29,13 @@
+ #include "../util.h"
+ #include "accumulator.h"
+ 
++#ifndef __EMSCRIPTEN__
+ #define INCBIN_PREFIX
+ #define INCBIN_STYLE INCBIN_STYLE_CAMEL
+ #include "../incbin.h"
+ 
+ INCBIN(Embed, EVALFILE);
++#endif
+ 
+ #define QUANT1_BITS 5
+ #define QUANT2_BITS 12
+@@ -960,7 +962,13 @@ INLINE void InitLookupIndices() {
+ void LoadDefaultNN() {
+   InitLookupIndices();
+ 
++#ifdef __EMSCRIPTEN__
++  if (!LoadNetwork(EVALFILE)) {
++    printf("info string Failed to load default network %s\n", EVALFILE);
++  }
++#else
+   CopyData(EmbedData);
++#endif
+ }
+ 
+ int LoadNetwork(char* path) {
+diff --git a/src/search.c b/src/search.c
+index 8fd10db..978ee94 100644
+--- a/src/search.c
++++ b/src/search.c
+@@ -31,7 +31,9 @@
+ #include "movegen.h"
+ #include "movepick.h"
+ #include "nn/accumulator.h"
++#ifndef BERSERK_NO_TB
+ #include "pyrrhic/tbprobe.h"
++#endif
+ #include "see.h"
+ #include "tb.h"
+ #include "thread.h"
+@@ -99,7 +101,12 @@ void StartSearch(Board* board, uint8_t ponder) {
+   SetupOtherThreads(board);
+ 
+   Threads.searching = 1;
++#ifdef BERSERK_SYNC_SEARCH
++  MainSearch();
++  Threads.searching = 0;
++#else
+   ThreadWake(Threads.threads[0], THREAD_SEARCH);
++#endif
+ }
+ 
+ void MainSearch() {
+diff --git a/src/tb.c b/src/tb.c
+index 1832707..96d8a8b 100644
+--- a/src/tb.c
++++ b/src/tb.c
+@@ -22,10 +22,32 @@
+ #include "board.h"
+ #include "move.h"
+ #include "movegen.h"
++#ifndef BERSERK_NO_TB
+ #include "pyrrhic/tbprobe.h"
++#endif
+ 
+ #define ByteSwap(bb) __builtin_bswap64((bb))
+ 
++#ifdef BERSERK_NO_TB
++int TB_LARGEST = 0;
++
++void TBRootMoves(SimpleMoveList* moves, Board* board) {
++  (void) board;
++  moves->count = 0;
++}
++
++unsigned TBRootProbe(Board* board, unsigned* results) {
++  (void) board;
++  (void) results;
++  return TB_RESULT_FAILED;
++}
++
++unsigned TBProbe(Board* board) {
++  (void) board;
++  return TB_RESULT_FAILED;
++}
++#else
++
+ void TBRootMoves(SimpleMoveList* moves, Board* board) {
+   moves->count = 0;
+ 
+@@ -75,3 +97,5 @@ unsigned TBProbe(Board* board) {
+                       board->epSquare ? (board->epSquare ^ 56) : 0,
+                       board->stm == WHITE ? 1 : 0);
+ }
++
++#endif
+diff --git a/src/tb.h b/src/tb.h
+index 7dcd664..1c810f7 100644
+--- a/src/tb.h
++++ b/src/tb.h
+@@ -19,7 +19,22 @@
+ 
+ #include "move.h"
+ #include "movegen.h"
++#ifdef BERSERK_NO_TB
++#define TB_LOSS 0
++#define TB_DRAW 2
++#define TB_WIN 4
++#define TB_RESULT_FAILED 0xFFFFFFFF
++#define TB_RESULT_CHECKMATE 4
++#define TB_RESULT_STALEMATE 2
++#define TB_GET_WDL(_res) (0)
++#define TB_GET_FROM(_res) (0)
++#define TB_GET_TO(_res) (0)
++#define TB_GET_EP(_res) (0)
++#define TB_GET_PROMOTES(_res) (0)
++extern int TB_LARGEST;
++#else
+ #include "pyrrhic/tbprobe.h"
++#endif
+ #include "types.h"
+ #include "util.h"
+ 
+diff --git a/src/thread.c b/src/thread.c
+index b8f2e6a..d91b287 100644
+--- a/src/thread.c
++++ b/src/thread.c
+@@ -37,6 +37,11 @@ ThreadPool Threads;
+ 
+ // Block until requested thread is sleeping
+ void ThreadWaitUntilSleep(ThreadData* thread) {
++#ifdef BERSERK_SYNC_SEARCH
++  thread->action = THREAD_SLEEP;
++  if (thread->idx == 0)
++    Threads.searching = 0;
++#else
+   pthread_mutex_lock(&thread->mutex);
+ 
+   while (thread->action != THREAD_SLEEP)
+@@ -46,20 +51,39 @@ void ThreadWaitUntilSleep(ThreadData* thread) {
+ 
+   if (thread->idx == 0)
+     Threads.searching = 0;
++#endif
+ }
+ 
+ // Block thread until on condition
+ void ThreadWait(ThreadData* thread, atomic_uchar* cond) {
++#ifdef BERSERK_SYNC_SEARCH
++  (void) thread;
++  (void) cond;
++#else
+   pthread_mutex_lock(&thread->mutex);
+ 
+   while (!atomic_load(cond))
+     pthread_cond_wait(&thread->sleep, &thread->mutex);
+ 
+   pthread_mutex_unlock(&thread->mutex);
++#endif
+ }
+ 
+ // Wake a thread up with an action
+ void ThreadWake(ThreadData* thread, int action) {
++#ifdef BERSERK_SYNC_SEARCH
++  if (action == THREAD_TT_CLEAR)
++    TTClearPart(thread->idx);
++  else if (action == THREAD_SEARCH_CLEAR)
++    SearchClearThread(thread);
++  else if (action == THREAD_SEARCH) {
++    if (thread->idx)
++      Search(thread);
++    else
++      MainSearch();
++  }
++  thread->action = THREAD_SLEEP;
++#else
+   pthread_mutex_lock(&thread->mutex);
+ 
+   if (action != THREAD_RESUME)
+@@ -67,6 +91,7 @@ void ThreadWake(ThreadData* thread, int action) {
+ 
+   pthread_cond_signal(&thread->sleep);
+   pthread_mutex_unlock(&thread->mutex);
++#endif
+ }
+ 
+ // Idle loop that wakes into an action
+@@ -138,6 +163,30 @@ void* ThreadInit(void* arg) {
+ 
+ // Create a thread with idx i
+ void ThreadCreate(int i) {
++#ifdef BERSERK_SYNC_SEARCH
++  ThreadData* thread = calloc(1, sizeof(ThreadData));
++  thread->idx        = i;
++
++#if defined(__linux__)
++  const size_t alignment = MEGABYTE * 2;
++#else
++  const size_t alignment = 4096;
++#endif
++
++  thread->accumulators = (Accumulator*) AlignedMalloc(sizeof(Accumulator) * (MAX_SEARCH_PLY + 1), alignment);
++  thread->refreshTable =
++    (AccumulatorKingState*) AlignedMalloc(sizeof(AccumulatorKingState) * 2 * 2 * N_KING_BUCKETS, alignment);
++  ResetRefreshTable(thread->refreshTable);
++
++  thread->board.accumulators = thread->accumulators;
++  thread->board.refreshTable = thread->refreshTable;
++  thread->action             = THREAD_SLEEP;
++
++  pthread_mutex_init(&thread->mutex, NULL);
++  pthread_cond_init(&thread->sleep, NULL);
++
++  Threads.threads[i] = thread;
++#else
+   pthread_t thread;
+ 
+   Threads.init = 1;
+@@ -149,16 +198,19 @@ void ThreadCreate(int i) {
+   pthread_mutex_unlock(&Threads.mutex);
+ 
+   Threads.threads[i]->nativeThread = thread;
++#endif
+ }
+ 
+ // Teardown and free a thread
+ void ThreadDestroy(ThreadData* thread) {
++#ifndef BERSERK_SYNC_SEARCH
+   pthread_mutex_lock(&thread->mutex);
+   thread->action = THREAD_EXIT;
+   pthread_cond_signal(&thread->sleep);
+   pthread_mutex_unlock(&thread->mutex);
+ 
+   pthread_join(thread->nativeThread, NULL);
++#endif
+   pthread_cond_destroy(&thread->sleep);
+   pthread_mutex_destroy(&thread->mutex);
+ 
+@@ -170,6 +222,9 @@ void ThreadDestroy(ThreadData* thread) {
+ 
+ // Build the pool to a certain amnt
+ void ThreadsSetNumber(int n) {
++#ifdef BERSERK_SYNC_SEARCH
++  n = n > 0 ? 1 : 0;
++#endif
+   while (Threads.count < n)
+     ThreadCreate(Threads.count++);
+   while (Threads.count > n)
+diff --git a/src/uci.c b/src/uci.c
+index 8d254f1..d736321 100644
+--- a/src/uci.c
++++ b/src/uci.c
+@@ -32,7 +32,9 @@
+ #include "nn/accumulator.h"
+ #include "nn/evaluate.h"
+ #include "perft.h"
++#ifndef BERSERK_NO_TB
+ #include "pyrrhic/tbprobe.h"
++#endif
+ #include "search.h"
+ #include "see.h"
+ #include "thread.h"
+@@ -277,30 +279,38 @@ int ReadLine(char* in) {
+   return 1;
+ }
+ 
+-void UCILoop() {
+-  static char in[8192];
++static Board UCI_BOARD;
++static int UCI_INITIALIZED = 0;
+ 
+-  Board board;
+-  ParseFen(START_FEN, &board);
++void UCIInit() {
++  if (UCI_INITIALIZED)
++    return;
+ 
++  ParseFen(START_FEN, &UCI_BOARD);
+   setbuf(stdout, NULL);
+-
+   Threads.searching = Threads.sleeping = 0;
++  UCI_INITIALIZED = 1;
++}
+ 
+-  while (ReadLine(in)) {
+-    if (in[0] == '\n')
+-      continue;
+-
+-    if (!strncmp(in, "isready", 7)) {
+-      printf("readyok\n");
+-    } else if (!strncmp(in, "position", 8)) {
+-      ParsePosition(in, &board);
+-    } else if (!strncmp(in, "ucinewgame", 10)) {
+-      ParsePosition("position startpos\n", &board);
+-      TTClear();
+-      SearchClear();
+-    } else if (!strncmp(in, "go", 2)) {
+-      ParseGo(in, &board);
++int UCICommand(const char* command) {
++  static char in[8192];
++
++  UCIInit();
++  snprintf(in, sizeof(in), "%s", command ? command : "");
++
++  if (in[0] == '\0' || in[0] == '\n')
++    return 1;
++
++  if (!strncmp(in, "isready", 7)) {
++    printf("readyok\n");
++  } else if (!strncmp(in, "position", 8)) {
++    ParsePosition(in, &UCI_BOARD);
++  } else if (!strncmp(in, "ucinewgame", 10)) {
++    ParsePosition("position startpos\n", &UCI_BOARD);
++    TTClear();
++    SearchClear();
++  } else if (!strncmp(in, "go", 2)) {
++    ParseGo(in, &UCI_BOARD);
+     } else if (!strncmp(in, "stop", 4)) {
+       if (Threads.searching) {
+         Threads.stop = 1;
+@@ -310,17 +320,17 @@ void UCILoop() {
+         Threads.sleeping = 0;
+         pthread_mutex_unlock(&Threads.lock);
+       }
+-    } else if (!strncmp(in, "quit", 4)) {
+-      if (Threads.searching) {
+-        Threads.stop = 1;
+-        pthread_mutex_lock(&Threads.lock);
+-        if (Threads.sleeping)
+-          ThreadWake(Threads.threads[0], THREAD_RESUME);
+-        Threads.sleeping = 0;
+-        pthread_mutex_unlock(&Threads.lock);
+-      }
+-      break;
+-    } else if (!strncmp(in, "uci", 3)) {
++  } else if (!strncmp(in, "quit", 4)) {
++    if (Threads.searching) {
++      Threads.stop = 1;
++      pthread_mutex_lock(&Threads.lock);
++      if (Threads.sleeping)
++        ThreadWake(Threads.threads[0], THREAD_RESUME);
++      Threads.sleeping = 0;
++      pthread_mutex_unlock(&Threads.lock);
++    }
++    return 0;
++  } else if (!strncmp(in, "uci", 3)) {
+       PrintUCIOptions();
+     } else if (!strncmp(in, "ponderhit", 9)) {
+       Threads.ponder = 0;
+@@ -333,10 +343,10 @@ void UCILoop() {
+         Threads.sleeping = 0;
+       }
+       pthread_mutex_unlock(&Threads.lock);
+-    } else if (!strncmp(in, "board", 5)) {
+-      PrintBoard(&board);
++  } else if (!strncmp(in, "board", 5)) {
++    PrintBoard(&UCI_BOARD);
+     } else if (!strncmp(in, "cycle", 5)) {
+-      int cycle = HasCycle(&board, MAX_SEARCH_PLY);
++      int cycle = HasCycle(&UCI_BOARD, MAX_SEARCH_PLY);
+       printf(cycle ? "yes\n" : "no\n");
+     } else if (!strncmp(in, "perft", 5)) {
+       strtok(in, " ");
+@@ -344,9 +354,9 @@ void UCILoop() {
+       char* fen = strtok(NULL, "\0") ?: START_FEN;
+ 
+       int depth = atoi(d);
+-      ParseFen(fen, &board);
++      ParseFen(fen, &UCI_BOARD);
+ 
+-      PerftTest(depth, &board);
++      PerftTest(depth, &UCI_BOARD);
+     } else if (!strncmp(in, "bench", 5)) {
+       strtok(in, " ");
+       char* d = strtok(NULL, " ") ?: "13";
+@@ -354,20 +364,20 @@ void UCILoop() {
+       int depth = atoi(d);
+       Bench(depth);
+     } else if (!strncmp(in, "threats", 7)) {
+-      PrintBB(board.threatened);
++      PrintBB(UCI_BOARD.threatened);
+     } else if (!strncmp(in, "eval", 4)) {
+-      EvaluateTrace(&board);
++      EvaluateTrace(&UCI_BOARD);
+     } else if (!strncmp(in, "see ", 4)) {
+-      Move m = ParseMove(in + 4, &board);
++      Move m = ParseMove(in + 4, &UCI_BOARD);
+       if (m)
+-        printf("info string SEE result: %d\n", SEE(&board, m, 0));
++        printf("info string SEE result: %d\n", SEE(&UCI_BOARD, m, 0));
+       else
+         printf("info string Invalid move!\n");
+     } else if (!strncmp(in, "apply ", 6)) {
+-      Move m = ParseMove(in + 6, &board);
++      Move m = ParseMove(in + 6, &UCI_BOARD);
+       if (m) {
+-        MakeMoveUpdate(m, &board, 0);
+-        PrintBoard(&board);
++        MakeMoveUpdate(m, &UCI_BOARD, 0);
++        PrintBoard(&UCI_BOARD);
+       } else
+         printf("info string Invalid move!\n");
+     } else if (!strncmp(in, "setoption name Hash value ", 26)) {
+@@ -384,11 +394,15 @@ void UCILoop() {
+       ThreadsSetNumber(Max(1, Min(2048, n)));
+       printf("info string set Threads to value %d\n", Threads.count);
+     } else if (!strncmp(in, "setoption name SyzygyPath value ", 32)) {
++#ifdef BERSERK_NO_TB
++      printf("info string Syzygy disabled in this build\n");
++#else
+       int success = tb_init(in + 32);
+       if (success)
+         printf("info string set SyzygyPath to value %s\n", in + 32);
+       else
+         printf("info string FAILED!\n");
++#endif
+     } else if (!strncmp(in, "setoption name MultiPV value ", 29)) {
+       int n = GetOptionIntValue(in);
+ 
+@@ -414,7 +428,7 @@ void UCILoop() {
+       printf("info string set UCI_Chess960 to value %s\n", CHESS_960 ? "true" : "false");
+       printf("info string Resetting board...\n");
+ 
+-      ParsePosition("position startpos\n", &board);
++      ParsePosition("position startpos\n", &UCI_BOARD);
+       TTClear();
+       SearchClear();
+     } else if (!strncmp(in, "setoption name MoveOverhead value ", 34)) {
+@@ -434,8 +448,19 @@ void UCILoop() {
+ 
+       if (success)
+         printf("info string set EvalFile to value %s\n", path);
+-    } else
+-      printf("Unknown command: %s \n", in);
++  } else
++    printf("Unknown command: %s \n", in);
++
++  return 1;
++}
++
++void UCILoop() {
++  static char in[8192];
++
++  UCIInit();
++  while (ReadLine(in)) {
++    if (!UCICommand(in))
++      break;
+   }
+ 
+   if (Threads.searching)
+diff --git a/src/uci.h b/src/uci.h
+index eea0e06..e6812db 100644
+--- a/src/uci.h
++++ b/src/uci.h
+@@ -36,6 +36,8 @@ void ParsePosition(char* in, Board* board);
+ void PrintUCIOptions();
+ 
+ int ReadLine(char* in);
++void UCIInit();
++int UCICommand(const char* command);
+ void UCILoop();
+ 
+ int GetOptionIntValue(char* in);
+diff --git a/src/util.c b/src/util.c
+index de70d1b..9485628 100644
+--- a/src/util.c
++++ b/src/util.c
+@@ -16,7 +16,14 @@
+ 
+ #include "types.h"
+ 
+-#ifdef WIN32
++#ifdef __EMSCRIPTEN__
++#include <emscripten/emscripten.h>
++
++long GetTimeMS() {
++  return (long) emscripten_get_now();
++}
++
++#elif defined(WIN32)
+ #include <windows.h>
+ 
+ long GetTimeMS() {
