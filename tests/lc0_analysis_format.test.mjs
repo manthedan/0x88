@@ -65,7 +65,11 @@ test('engineColorKey assigns stable per-engine color families', () => {
   assert.equal(engineColorKey('LC0 search 400'), 'green');
   assert.equal(engineColorKey('SF d14'), 'blue');
   assert.equal(engineColorKey('Stockfish lite'), 'blue');
-  assert.equal(engineColorKey('Komodo'), 'yellow');
+  assert.equal(engineColorKey('Reckless Full SIMD'), 'red');
+  assert.equal(engineColorKey('Viridithas SIMD'), 'purple');
+  assert.equal(engineColorKey('Berserk'), 'orange');
+  assert.equal(engineColorKey('PlentyChess'), 'cyan');
+  assert.equal(engineColorKey('Komodo'), 'pink');
   const lc0 = engineBrushes('LC0');
   assert.equal(lc0.primary, 'green');
   assert.equal(lc0.alt, 'paleGreen');

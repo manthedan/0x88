@@ -197,8 +197,8 @@ Every engine family should have one card with these fields:
   - Benchmark-only batch one-process mode.
   - Persistent shared-stdin WASI worker in isolated browsers.
 - **UI variants:**
-  - `default`: `Viridithas scalar experimental`, `/viridithas/viridithas.wasm`.
-  - `simd`: `Viridithas SIMD experimental`, `/viridithas/viridithas-simd128.wasm`.
+  - `simd`: `Viridithas SIMD experimental`, `/viridithas/viridithas-simd128.wasm` (default when no variant is requested).
+  - `default`: `Viridithas scalar experimental`, `/viridithas/viridithas.wasm` (explicit compatibility fallback via `?viridithas=default`).
   - `custom`: URL param escape hatch via `?viridithasWasm=`.
 - **Strength knob:** depth in UI and benchmarks; movetime benchmark plumbing exists.
 - **Artifact footprint:** scalar and SIMD WASM artifacts are ~55 MB each with compressed network embedded.

@@ -6,7 +6,7 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import { engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
+import { ANALYSIS_DRAWABLE_BRUSHES, engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { openingStatsForPosition, openingSummary, type ImportedGame, type OpeningMoveStat } from './openingStats.ts';
@@ -674,9 +674,13 @@ function renderBoard() {
       events: { after: onUserMove },
     },
     lastMove: lastUci ? [lastUci.slice(0, 2) as Key, lastUci.slice(2, 4) as Key] : undefined,
+    drawable: { brushes: ANALYSIS_DRAWABLE_BRUSHES },
   };
-  if (!ground) ground = Chessground(el('ground'), config);
-  else ground.set(config);
+  // Cast: chessground's DrawBrushes type exposes the built-in keys, but custom
+  // brush keys are supported at runtime and are needed to distinguish 3+ engines.
+  const cfg = config as unknown as NonNullable<Parameters<typeof Chessground>[1]>;
+  if (!ground) ground = Chessground(el('ground'), cfg);
+  else ground.set(cfg);
   el('sideToMove').textContent = board.turn === 'w' ? 'White to move' : 'Black to move';
   renderEvalBar();
   setShapes(bestShapes());

@@ -25,8 +25,8 @@ export const VIRIDITHAS_SIMD_VARIANT: ViridithasVariant = {
 };
 
 export const VIRIDITHAS_VARIANTS: readonly ViridithasVariant[] = [
-  VIRIDITHAS_DEFAULT_VARIANT,
   VIRIDITHAS_SIMD_VARIANT,
+  VIRIDITHAS_DEFAULT_VARIANT,
 ];
 
 export function normalizeViridithasVariant(raw: string | null | undefined): ViridithasVariant['key'] {
@@ -45,7 +45,9 @@ export function viridithasVariantByKey(key: string): ViridithasVariant {
 export function viridithasVariantFromParams(params: URLSearchParams): ViridithasVariant {
   const customUrl = params.get('viridithasWasm');
   if (customUrl) return { key: 'custom', label: 'Viridithas Custom', wasmUrl: customUrl, note: 'Custom Viridithas WASM URL from ?viridithasWasm=…' };
-  return viridithasVariantByKey(params.get('viridithas') ?? params.get('viridithasVariant') ?? 'default');
+  // SIMD has the strongest/current smoke and benchmark evidence; scalar remains
+  // available as an explicit compatibility fallback via ?viridithas=default.
+  return viridithasVariantByKey(params.get('viridithas') ?? params.get('viridithasVariant') ?? 'simd');
 }
 
 export function viridithasVariantAssetStatus(variant: ViridithasVariant): ViridithasAssetStatus {
