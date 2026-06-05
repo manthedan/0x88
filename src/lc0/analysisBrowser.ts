@@ -10,6 +10,7 @@ import { engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysis
 import { GameTree, type GameNode } from './gameTree.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { openingStatsForPosition, openingSummary, type ImportedGame, type OpeningMoveStat } from './openingStats.ts';
+import { defaultPgnCollectionName, deletePgnCollection, formatPgnCollectionSummary, listPgnCollections, loadPgnCollection, pgnDatabaseAvailable, savePgnCollection, type PgnCollectionSource, type PgnCollectionSummary } from './pgnDatabase.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
@@ -63,6 +64,11 @@ interface EngineAnalysisProfile {
 }
 let engineProfiles: EngineAnalysisProfile[] = [];
 let importedGames: ImportedGame[] = [];
+let pgnCollections: PgnCollectionSummary[] = [];
+let activePgnCollectionId = '';
+let lastImportSource: PgnCollectionSource = 'manual';
+let lastImportUsername = '';
+let lastImportColor = '';
 const bookCache = new Map<string, OpeningMoveStat[]>();
 // Distinct brush for the opening-book most-played move (not LC0 green / SF blue).
 const BOOK_BRUSH = 'yellow';
@@ -813,16 +819,74 @@ function renderOpening() {
   }).join('');
 }
 
+function setImportedPgn(raw: string, messagePrefix = 'imported'): number {
+  const games = parsePgnGames(raw).map((game) => ({ tree: game.tree, result: game.result }));
+  importedGames = games;
+  bookCache.clear();
+  el('importInfo').textContent = `${messagePrefix} ${games.length} games`;
+  renderOpening();
+  renderLines(); // refresh the legend so the Book key appears
+  setShapes(bestShapes());
+  return games.length;
+}
+
+function selectedPgnCollectionId(): string {
+  return selectEl('pgnDbSelect').value;
+}
+
+function renderPgnDatabaseCollections(selected = activePgnCollectionId): void {
+  const select = selectEl('pgnDbSelect');
+  if (!pgnDatabaseAvailable()) {
+    select.innerHTML = '<option value="">IndexedDB unavailable</option>';
+    select.disabled = true;
+    el('savePgnDb').toggleAttribute('disabled', true);
+    el('loadPgnDb').toggleAttribute('disabled', true);
+    el('deletePgnDb').toggleAttribute('disabled', true);
+    el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.';
+    return;
+  }
+  select.disabled = false;
+  el('savePgnDb').toggleAttribute('disabled', false);
+  const current = pgnCollections.some((entry) => entry.id === selected) ? selected : '';
+  select.innerHTML = ['<option value="">new collection</option>', ...pgnCollections.map((entry) => `<option value="${htmlEscape(entry.id)}"${entry.id === current ? ' selected' : ''}>${htmlEscape(entry.name)} (${entry.gameCount})</option>`)].join('');
+  el('loadPgnDb').toggleAttribute('disabled', !current);
+  el('deletePgnDb').toggleAttribute('disabled', !current);
+  if (current) {
+    const summary = pgnCollections.find((entry) => entry.id === current)!;
+    inputEl('pgnDbName').value = summary.name;
+    el('pgnDbInfo').textContent = formatPgnCollectionSummary(summary);
+  } else {
+    el('pgnDbInfo').textContent = pgnCollections.length ? `${pgnCollections.length} saved PGN collections` : 'No saved PGN collections yet.';
+  }
+}
+
+async function refreshPgnDatabaseCollections(selected = activePgnCollectionId): Promise<void> {
+  if (!pgnDatabaseAvailable()) { renderPgnDatabaseCollections(''); return; }
+  try {
+    pgnCollections = await listPgnCollections();
+    activePgnCollectionId = pgnCollections.some((entry) => entry.id === selected) ? selected : '';
+    renderPgnDatabaseCollections(activePgnCollectionId);
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Local PGN database failed: ${(error as Error).message}`;
+  }
+}
+
+function suggestPgnDatabaseName(): void {
+  if (inputEl('pgnDbName').value.trim()) return;
+  inputEl('pgnDbName').value = defaultPgnCollectionName(lastImportSource, lastImportUsername);
+}
+
 function importGames() {
   const raw = inputEl('importGamesInput').value.trim();
   if (!raw) { el('importInfo').textContent = 'paste or fetch PGN first'; return; }
   try {
-    importedGames = parsePgnGames(raw).map((game) => ({ tree: game.tree, result: game.result }));
-    bookCache.clear();
-    el('importInfo').textContent = `imported ${importedGames.length} games`;
-    renderOpening();
-    renderLines(); // refresh the legend so the Book key appears
-    setShapes(bestShapes());
+    lastImportSource = 'manual';
+    lastImportUsername = '';
+    lastImportColor = '';
+    activePgnCollectionId = '';
+    setImportedPgn(raw);
+    suggestPgnDatabaseName();
+    renderPgnDatabaseCollections('');
   } catch (error) {
     el('importInfo').textContent = `import failed: ${(error as Error).message}`;
   }
@@ -839,7 +903,13 @@ async function fetchGames() {
     const pgn = await fetchGameHistoryPgn(site, username, opts, fetch);
     inputEl('importGamesInput').value = pgn;
     if (!pgn.trim()) { el('importInfo').textContent = 'no games found'; return; }
-    importGames();
+    lastImportSource = site;
+    lastImportUsername = username;
+    lastImportColor = opts.color;
+    activePgnCollectionId = '';
+    inputEl('pgnDbName').value = defaultPgnCollectionName(site, username);
+    setImportedPgn(pgn, `fetched ${username}:`);
+    renderPgnDatabaseCollections('');
   } catch (error) {
     // A network/CORS failure surfaces as a TypeError with no status.
     const message = (error as Error).message || 'fetch failed';
@@ -863,6 +933,74 @@ function downloadPgn() {
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   el('importInfo').textContent = `downloaded ${name}.pgn`;
+}
+
+async function saveCurrentPgnCollection(): Promise<void> {
+  const raw = inputEl('importGamesInput').value.trim();
+  if (!raw) { el('pgnDbInfo').textContent = 'Paste, fetch, or load PGN before saving to the local database.'; return; }
+  let gameCount = 0;
+  try {
+    // Always parse the textarea at save time: users can edit PGN after an
+    // import/load, and the persisted metadata must describe the saved text.
+    gameCount = setImportedPgn(raw);
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Cannot save invalid PGN: ${(error as Error).message}`;
+    return;
+  }
+  el('savePgnDb').toggleAttribute('disabled', true);
+  try {
+    const record = await savePgnCollection({
+      id: selectedPgnCollectionId() || activePgnCollectionId || undefined,
+      name: inputEl('pgnDbName').value || defaultPgnCollectionName(lastImportSource, lastImportUsername),
+      pgn: raw,
+      gameCount,
+      source: lastImportSource,
+      username: lastImportUsername,
+      color: lastImportColor,
+    });
+    activePgnCollectionId = record.id;
+    inputEl('pgnDbName').value = record.name;
+    await refreshPgnDatabaseCollections(record.id);
+    el('pgnDbInfo').textContent = `Saved “${record.name}” (${record.gameCount} games) to local IndexedDB.`;
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Save failed: ${(error as Error).message}`;
+  } finally {
+    el('savePgnDb').toggleAttribute('disabled', false);
+  }
+}
+
+async function loadSelectedPgnCollection(): Promise<void> {
+  const id = selectedPgnCollectionId();
+  if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to load.'; return; }
+  try {
+    const record = await loadPgnCollection(id);
+    if (!record) { el('pgnDbInfo').textContent = 'Saved PGN collection not found.'; await refreshPgnDatabaseCollections(''); return; }
+    activePgnCollectionId = record.id;
+    lastImportSource = record.source;
+    lastImportUsername = record.username ?? '';
+    lastImportColor = record.color ?? '';
+    inputEl('pgnDbName').value = record.name;
+    inputEl('importGamesInput').value = record.pgn;
+    setImportedPgn(record.pgn, `loaded “${record.name}”:`);
+    renderPgnDatabaseCollections(record.id);
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Load failed: ${(error as Error).message}`;
+  }
+}
+
+async function deleteSelectedPgnCollection(): Promise<void> {
+  const id = selectedPgnCollectionId();
+  if (!id) return;
+  const summary = pgnCollections.find((entry) => entry.id === id);
+  if (summary && !window.confirm(`Delete local PGN collection “${summary.name}”?`)) return;
+  try {
+    await deletePgnCollection(id);
+    if (activePgnCollectionId === id) activePgnCollectionId = '';
+    await refreshPgnDatabaseCollections('');
+    el('pgnDbInfo').textContent = summary ? `Deleted “${summary.name}”.` : 'Deleted PGN collection.';
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Delete failed: ${(error as Error).message}`;
+  }
 }
 
 function renderAll() {
@@ -1098,6 +1236,18 @@ function wireEvents() {
   el('importGames').addEventListener('click', importGames);
   el('fetchGames').addEventListener('click', () => { void fetchGames(); });
   el('downloadPgn').addEventListener('click', downloadPgn);
+  el('pgnDbSelect').addEventListener('change', () => { activePgnCollectionId = selectedPgnCollectionId(); renderPgnDatabaseCollections(activePgnCollectionId); });
+  el('savePgnDb').addEventListener('click', () => { void saveCurrentPgnCollection(); });
+  el('loadPgnDb').addEventListener('click', () => { void loadSelectedPgnCollection(); });
+  el('deletePgnDb').addEventListener('click', () => { void deleteSelectedPgnCollection(); });
+  inputEl('pgnDbName').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') void saveCurrentPgnCollection(); });
+  inputEl('importGamesInput').addEventListener('input', () => {
+    activePgnCollectionId = '';
+    lastImportSource = 'manual';
+    lastImportUsername = '';
+    lastImportColor = '';
+    renderPgnDatabaseCollections('');
+  });
   inputEl('importUser').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') void fetchGames(); });
   el('opening').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest('tr[data-uci]');
@@ -1212,6 +1362,7 @@ async function init() {
   renderEngineList();
   renderRecklessRuntimeInfo();
   wireEvents();
+  void refreshPgnDatabaseCollections();
   void refreshBt4Availability();
   await loadLc0Backend();
 }

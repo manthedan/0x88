@@ -148,6 +148,16 @@ table.opening .san{font-family:var(--mono);font-weight:700}
       <button id="downloadPgn" type="button">Download PGN</button>
       <span id="importInfo" class="small"></span>
     </div>
+    <div class="row database-row">
+      <div class="field"><label for="pgnDbSelect">Local database</label>
+        <select id="pgnDbSelect"><option value="">no saved collections</option></select></div>
+      <div class="field" style="flex:1 1 180px"><label for="pgnDbName">Collection name</label>
+        <input id="pgnDbName" type="text" spellcheck="false" autocomplete="off" placeholder="saved PGN collection" /></div>
+      <button id="savePgnDb" type="button">Save to DB</button>
+      <button id="loadPgnDb" type="button">Load</button>
+      <button id="deletePgnDb" type="button">Delete</button>
+    </div>
+    <div id="pgnDbInfo" class="small">Local PGN database: checking IndexedDB…</div>
     <table id="opening" class="opening"><thead><tr><th>Move</th><th class="num">Games</th><th>White / Draw / Black</th></tr></thead><tbody></tbody></table>
   </section>
 </main>

@@ -41,6 +41,7 @@ Sources:
 6. **Database/search/opening explorer**
    - En Croissant uses SQLite; browser equivalent could use IndexedDB or OPFS.
    - Useful workflows: import PGNs, absolute/partial position search, opening tree stats, and local reference databases.
+   - Current first step: analysis-page PGN batches can be saved to and loaded from an IndexedDB-backed local collection store, then reused by the existing opening explorer.
 
 7. **Asset and engine management**
    - Turn our engine artifact manifests into a UI: installed/missing assets, size, license, source link, runtime capability, and local build instructions.
