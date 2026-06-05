@@ -6,6 +6,7 @@ Viridithas is an experimental browser/WASI UCI engine candidate. This branch add
 
 ```bash
 npm run viridithas:build-wasi
+npm run viridithas:build-simd-wasi
 ```
 
 The script:
@@ -16,20 +17,22 @@ The script:
 4. builds `wasm32-wasip1` with Rust;
 5. writes `public/viridithas/viridithas.wasm`.
 
+The SIMD script sets `VIRIDITHAS_WASM_SIMD=1`, enables wasm `simd128`, and writes `public/viridithas/viridithas-simd128.wasm`.
+
 Generated `public/viridithas/*.wasm` artifacts are ignored and not committed.
 
 ## Patch summary
 
 The WASI patch is intentionally narrow and prototype-oriented:
 
-- uses scalar wasm-safe NNUE geometry/SIMD shims where Viridithas normally assumes x86/NEON intrinsics;
+- uses wasm-safe NNUE geometry/SIMD shims where Viridithas normally assumes x86/NEON intrinsics, with both scalar and wasm `simd128` NNUE backends;
 - replaces worker-thread dispatch with inline execution on `wasm32`, because browser WASI has no native thread spawning;
 - bypasses temp-file/mmap NNUE caching on `wasm32`, leaking one decompressed network for the process lifetime instead;
 - treats argv entries as queued UCI commands in `wasm32` builds, then closes the command channel after those commands so one-shot browser searches run to their requested limit instead of being interrupted by an immediate `quit`.
 
 ## Browser status
 
-`/reckless-benchmark.html` is now a small WASI UCI benchmark page and includes an opt-in **Viridithas experimental** checkbox. Viridithas is one-shot only for now; persistent SAB stdin is skipped because upstream Viridithas expects a separate stdin reader thread for full interactive UCI.
+`/reckless-benchmark.html` is now a small WASI UCI benchmark page and includes opt-in **Viridithas scalar experimental** and **Viridithas SIMD experimental** checkboxes. Viridithas is one-shot only for now; persistent SAB stdin is skipped because upstream Viridithas expects a separate stdin reader thread for full interactive UCI.
 
 Local Node and browser smokes from the patched WASI artifact succeeded for:
 
@@ -46,6 +49,6 @@ and returned `bestmove g1f3` with depth/nodes/NPS info from the v20.0.0-dev/v106
 ## Caveats
 
 - This is a compatibility spike, not a tuned browser engine.
-- The scalar NNUE path is expected to be slower than native Viridithas.
+- The scalar NNUE path is expected to be slower than native Viridithas; the wasm SIMD path improves engine NPS substantially but still pays one-shot startup/decompression overhead.
 - The WASM artifact is about 55 MiB raw with the compressed network embedded.
 - Strength/eval correctness should be treated as provisional until a larger benchmark and gauntlet run.

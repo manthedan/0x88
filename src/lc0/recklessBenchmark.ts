@@ -2,7 +2,7 @@ import { START_FEN } from '../chess/board.ts';
 import { RecklessEngine, canUsePersistentRecklessWasi, type RecklessOptions } from './recklessEngine.ts';
 import { RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT, RECKLESS_SIMD_VARIANT, checkRecklessVariantAsset, recklessVariantAssetStatus, type RecklessVariant } from './recklessVariants.ts';
 import { ViridithasEngine } from './viridithasEngine.ts';
-import { VIRIDITHAS_DEFAULT_VARIANT, checkViridithasVariantAsset, viridithasVariantAssetStatus, type ViridithasVariant } from './viridithasVariants.ts';
+import { VIRIDITHAS_DEFAULT_VARIANT, VIRIDITHAS_SIMD_VARIANT, checkViridithasVariantAsset, viridithasVariantAssetStatus, type ViridithasVariant } from './viridithasVariants.ts';
 
 interface BenchPosition {
   label: string;
@@ -147,6 +147,7 @@ function selectedVariants(): BenchVariant[] {
   if (inputEl('benchBrowserApiSimdExternal').checked) variants.push({ ...RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, engine: 'reckless' });
   if (inputEl('benchLite').checked) variants.push({ ...RECKLESS_LITE_VARIANT, engine: 'reckless' });
   if (inputEl('benchViridithas').checked) variants.push({ ...VIRIDITHAS_DEFAULT_VARIANT, engine: 'viridithas' });
+  if (inputEl('benchViridithasSimd').checked) variants.push({ ...VIRIDITHAS_SIMD_VARIANT, engine: 'viridithas' });
   return variants;
 }
 function selectedModes(): Array<'persistent' | 'one-shot'> {
@@ -421,5 +422,6 @@ el('downloadJson').addEventListener('click', () => downloadText(JSON.stringify(r
 el('downloadCsv').addEventListener('click', () => downloadText(csvReport(), 'reckless-benchmark-runs.csv', 'text/csv'));
 for (const variant of [RECKLESS_FULL_VARIANT, RECKLESS_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_LITE_VARIANT]) void checkRecklessVariantAsset(variant, render);
 void checkViridithasVariantAsset(VIRIDITHAS_DEFAULT_VARIANT, render);
+void checkViridithasVariantAsset(VIRIDITHAS_SIMD_VARIANT, render);
 setStatus(`Ready. persistentAvailable=${canUsePersistentRecklessWasi()} · SAB=${typeof SharedArrayBuffer !== 'undefined'}`);
 render();

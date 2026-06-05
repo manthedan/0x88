@@ -55,3 +55,32 @@ Takeaways:
 - Viridithas engine-reported NPS is also much lower than Reckless: about 0.27-0.34x scalar one-shot NPS and about 0.10-0.16x SIMD one-shot NPS on this run.
 - As movetime grows, fixed one-shot overhead is amortized: Viridithas is ~1.9x slower than Reckless one-shot/browser-API SIMD at movetime 500ms by wall time, but still only ~10-26% of the Reckless NPS depending on baseline.
 - This confirms the next likely Viridithas performance target is the NNUE/search hot path (wasm SIMD) plus, separately, avoiding repeated one-shot startup/decompression if Viridithas becomes a production candidate.
+
+## 2026-06-04 Viridithas scalar vs SIMD experiment
+
+Raw report: [`viridithas_simd_browser_benchmark_2026-06-04_rotated_depth6-10_movetime100-500.json`](./viridithas_simd_browser_benchmark_2026-06-04_rotated_depth6-10_movetime100-500.json)
+
+This run used the same 20-FEN suite, budgets, warm repeats, and one-shot mode, comparing only:
+
+- Viridithas scalar experimental: `/viridithas/viridithas.wasm`
+- Viridithas SIMD experimental: `/viridithas/viridithas-simd128.wasm`
+
+The SIMD artifact contains wasm SIMD instructions (`simdOpcodeCount=3362`), while the scalar artifact contains none.
+
+Aggregate warm-run means across the 20 FENs:
+
+| Budget | Scalar warm ms | SIMD warm ms | Wall speedup | Scalar NPS | SIMD NPS | NPS speedup |
+|---|---:|---:|---:|---:|---:|---:|
+| depth 6 | 398.1 | 674.3 | 0.59x | 97,916 | 331,967 | 3.39x |
+| depth 8 | 442.0 | 432.0 | 1.02x | 85,742 | 475,274 | 5.54x |
+| depth 10 | 662.8 | 433.9 | 1.53x | 74,426 | 490,226 | 6.59x |
+| movetime 100ms | 553.4 | 504.8 | 1.10x | 69,775 | 480,390 | 6.88x |
+| movetime 250ms | 1063.3 | 659.4 | 1.61x | 38,445 | 462,755 | 12.04x |
+| movetime 500ms | 1323.5 | 965.0 | 1.37x | 36,736 | 413,015 | 11.24x |
+
+Takeaways:
+
+- The wasm SIMD NNUE kernels are effective: engine-reported NPS improved about 3.4x-12.0x in this focused run.
+- Fixed one-shot overhead still dominates short searches. The depth-6 SIMD artifact reports much higher NPS but worse wall time because startup/decompression/instantiation cost overwhelms the tiny search.
+- At deeper or timed budgets, SIMD also improves wall time, with the largest wall gain here at movetime 250ms (~1.6x faster).
+- Even with SIMD, Viridithas remains one-shot-only and still pays a large startup cost on every search; persistent/direct API work would be needed before treating it as a delivery candidate.

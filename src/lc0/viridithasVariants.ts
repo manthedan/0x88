@@ -3,7 +3,7 @@ import { DEFAULT_VIRIDITHAS_WASM_URL } from './viridithasEngine.ts';
 export type ViridithasAssetStatus = 'unknown' | 'checking' | 'ok' | 'missing';
 
 export interface ViridithasVariant {
-  key: 'default' | 'custom';
+  key: 'default' | 'simd' | 'custom';
   label: string;
   wasmUrl: string;
   note: string;
@@ -12,9 +12,16 @@ export interface ViridithasVariant {
 
 export const VIRIDITHAS_DEFAULT_VARIANT: ViridithasVariant = {
   key: 'default',
-  label: 'Viridithas experimental',
+  label: 'Viridithas scalar experimental',
   wasmUrl: DEFAULT_VIRIDITHAS_WASM_URL,
-  note: 'Experimental patched Viridithas wasm32-wasip1 build; one-shot only.',
+  note: 'Experimental patched Viridithas wasm32-wasip1 scalar build; one-shot only.',
+};
+
+export const VIRIDITHAS_SIMD_VARIANT: ViridithasVariant = {
+  key: 'simd',
+  label: 'Viridithas SIMD experimental',
+  wasmUrl: '/viridithas/viridithas-simd128.wasm',
+  note: 'Experimental patched Viridithas wasm32-wasip1 build with wasm simd128 NNUE kernels; one-shot only.',
 };
 
 export function viridithasVariantFromParams(params: URLSearchParams): ViridithasVariant {

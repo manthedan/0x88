@@ -4,7 +4,7 @@ index 1f156ae..a273e7e 100644
 +++ b/src/main.rs
 @@ -51,7 +51,7 @@ pub static NAME: &str = "Viridithas";
  pub static VERSION: &str = env!("CARGO_PKG_VERSION");
- 
+
  fn main() -> anyhow::Result<()> {
 -    if std::env::args_os().len() == 1 {
 +    if cfg!(target_arch = "wasm32") || std::env::args_os().len() == 1 {
@@ -18,7 +18,7 @@ index faae968..54dc82d 100644
 @@ -6,9 +6,14 @@ mod vbmi;
  #[cfg(target_feature = "avx512vbmi")]
  pub use vbmi::*;
- 
+
 -#[cfg(not(any(target_feature = "neon", target_feature = "avx512vbmi")))]
 +#[cfg(target_arch = "wasm32")]
 +mod scalar;
@@ -30,215 +30,8 @@ index faae968..54dc82d 100644
 -#[cfg(not(any(target_feature = "neon", target_feature = "avx512vbmi")))]
 +#[cfg(all(not(target_arch = "wasm32"), not(any(target_feature = "neon", target_feature = "avx512vbmi"))))]
  pub use avx2::*;
- 
+
  #[cfg(target_feature = "neon")]
-diff --git a/src/nnue/network.rs b/src/nnue/network.rs
-index aff6245..7000f53 100644
---- a/src/nnue/network.rs
-+++ b/src/nnue/network.rs
-@@ -775,6 +775,8 @@ impl NNUEParams {
-         static LOCK: Mutex<()> = Mutex::new(());
-         // additionally, we'd quite like to cache the results of this function.
-         static CACHED: OnceLock<Mmap> = OnceLock::new();
-+        #[cfg(target_arch = "wasm32")]
-+        static CACHED_WASM: OnceLock<&'static NNUEParams> = OnceLock::new();
- 
-         // If we’re under MIRI, this function is way too slow.
-         if cfg!(miri) {
-@@ -811,6 +813,10 @@ impl NNUEParams {
-         }
- 
-         let _guard = LOCK.lock().unwrap();
-+        #[cfg(target_arch = "wasm32")]
-+        if let Some(cached) = CACHED_WASM.get() {
-+            return Ok(*cached);
-+        }
-         // check if we've already loaded the weights
-         if let Some(cached) = CACHED.get() {
-             // cast the mmap to a NNUEParams
-@@ -821,6 +827,33 @@ impl NNUEParams {
-             return Ok(params);
-         }
- 
-+        #[cfg(target_arch = "wasm32")]
-+        {
-+            let mut net = QuantisedNetwork::zeroed();
-+            let mut mem = unsafe {
-+                std::slice::from_raw_parts_mut(
-+                    std::ptr::from_mut(net.as_mut()).cast::<u8>(),
-+                    size_of::<QuantisedNetwork>(),
-+                )
-+            };
-+            let expected_bytes = mem.len() as u64;
-+            let decoding_start = std::time::Instant::now();
-+            let mut decoder = ZstdDecoder::new(EMBEDDED_NNUE)
-+                .with_context(|| "Failed to construct zstd decoder for NNUE weights.")?;
-+            let bytes_written = std::io::copy(&mut decoder, &mut mem)
-+                .with_context(|| "Failed to decompress NNUE weights.")?;
-+            let decoding_time = decoding_start.elapsed();
-+            println!("info string decompressed NNUE weights in {}us", decoding_time.as_micros());
-+            anyhow::ensure!(
-+                bytes_written == expected_bytes,
-+                "encountered issue while decompressing NNUE weights, expected {expected_bytes} bytes, but got {bytes_written}"
-+            );
-+            let net = net.permute(true);
-+            let params = Box::leak(net);
-+            let _ = CACHED_WASM.set(params);
-+            return Ok(params);
-+        }
-+
-         let weights_file_name = format!(
-             "viridithas-shared-network-weights-{}-{}-{}-{:X}.bin",
-             std::env::consts::ARCH,
-diff --git a/src/nnue/simd.rs b/src/nnue/simd.rs
-index 2c23521..cb50de2 100644
---- a/src/nnue/simd.rs
-+++ b/src/nnue/simd.rs
-@@ -408,7 +408,11 @@ mod avx512 {
-     pub const F32_CHUNK: usize = std::mem::size_of::<VecF32>() / std::mem::size_of::<f32>();
- }
- 
--#[cfg(not(any(target_feature = "neon", target_feature = "avx512f")))]
-+#[cfg(target_arch = "wasm32")]
-+#[path = "simd_scalar.rs"]
-+mod scalar;
-+
-+#[cfg(all(not(target_arch = "wasm32"), not(any(target_feature = "neon", target_feature = "avx512f"))))]
- mod avx2 {
-     #![allow(non_camel_case_types)]
-     use std::arch::x86_64::*;
-@@ -1163,7 +1167,10 @@ mod neon {
- #[cfg(target_feature = "avx512f")]
- pub use avx512::*;
- 
--#[cfg(not(any(target_feature = "neon", target_feature = "avx512f")))]
-+#[cfg(target_arch = "wasm32")]
-+pub use scalar::*;
-+
-+#[cfg(all(not(target_arch = "wasm32"), not(any(target_feature = "neon", target_feature = "avx512f"))))]
- pub use avx2::*;
- 
- #[cfg(target_feature = "neon")]
-diff --git a/src/threadpool.rs b/src/threadpool.rs
-index c4a1398..fb14d90 100644
---- a/src/threadpool.rs
-+++ b/src/threadpool.rs
-@@ -1,3 +1,53 @@
-+
-+#[cfg(target_arch = "wasm32")]
-+mod imp {
-+    use std::thread::Scope;
-+    use vec1::Vec1;
-+
-+    pub struct ReceiverHandle { received: bool }
-+
-+    impl ReceiverHandle {
-+        pub fn join(mut self) { self.received = true; }
-+    }
-+
-+    impl Drop for ReceiverHandle {
-+        fn drop(&mut self) {
-+            assert!(self.received, "ReceiverHandle was dropped without receiving a value");
-+        }
-+    }
-+
-+    pub trait ScopeExt<'scope, 'env> {
-+        fn spawn_into<F>(&'scope self, f: F, comms: &'scope WorkerThread) -> ReceiverHandle
-+        where
-+            F: FnOnce() + Send + 'scope;
-+    }
-+
-+    impl<'scope, 'env> ScopeExt<'scope, 'env> for Scope<'scope, 'env> {
-+        fn spawn_into<F>(&'scope self, f: F, _thread: &'scope WorkerThread) -> ReceiverHandle
-+        where
-+            F: FnOnce() + Send + 'scope,
-+        {
-+            f();
-+            ReceiverHandle { received: true }
-+        }
-+    }
-+
-+    pub fn make_worker_threads(num_threads: usize) -> Vec1<WorkerThread> {
-+        (0..num_threads.max(1)).map(|_| WorkerThread).collect::<Vec<_>>().try_into().unwrap()
-+    }
-+
-+    pub struct WorkerThread;
-+
-+    impl WorkerThread {
-+        pub fn join(self) {}
-+    }
-+}
-+
-+#[cfg(target_arch = "wasm32")]
-+pub use imp::*;
-+
-+#[cfg(not(target_arch = "wasm32"))]
-+mod imp {
- use std::sync::mpsc::{Receiver, SyncSender};
- use std::sync::{Arc, Condvar, Mutex};
- use std::thread::Scope;
-@@ -185,3 +235,8 @@ mod tests {
-         thread.join();
-     }
- }
-+
-+}
-+
-+#[cfg(not(target_arch = "wasm32"))]
-+pub use imp::*;
-diff --git a/src/uci.rs b/src/uci.rs
-index 45eefbd..1c63118 100644
---- a/src/uci.rs
-+++ b/src/uci.rs
-@@ -782,11 +782,25 @@ fn parse_setoption(
-     Ok(out)
- }
- 
-+#[cfg(not(target_arch = "wasm32"))]
- type StdinReader = (
-     mpsc::Receiver<String>,
-     std::thread::JoinHandle<Result<(), UciError>>,
- );
- 
-+#[cfg(target_arch = "wasm32")]
-+struct WasmStdinReaderHandle;
-+
-+#[cfg(target_arch = "wasm32")]
-+impl WasmStdinReaderHandle {
-+    fn is_finished(&self) -> bool { true }
-+    fn join(self) -> Result<Result<(), UciError>, ()> { Ok(Ok(())) }
-+}
-+
-+#[cfg(target_arch = "wasm32")]
-+type StdinReader = (mpsc::Receiver<String>, WasmStdinReaderHandle);
-+
-+#[cfg(not(target_arch = "wasm32"))]
- fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
-     let (sender, receiver) = mpsc::channel();
-     let handle = std::thread::Builder::new()
-@@ -795,6 +809,22 @@ fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
-     Ok((receiver, handle))
- }
- 
-+#[cfg(target_arch = "wasm32")]
-+fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
-+    let (sender, receiver) = mpsc::channel();
-+    let mut sent_arg_command = false;
-+    for command in std::env::args().skip(1) {
-+        if !command.trim().is_empty() {
-+            let _ = sender.send(command);
-+            sent_arg_command = true;
-+        }
-+    }
-+    if !sent_arg_command {
-+        let _ = stdin_reader_worker(sender.clone(), &control);
-+    }
-+    Ok((receiver, WasmStdinReaderHandle))
-+}
-+
- fn stdin_reader_worker(sender: mpsc::Sender<String>, control: &Control) -> Result<(), UciError> {
-     let mut linebuf = String::with_capacity(128);
-     while let Ok(bytes) = std::io::stdin().read_line(&mut linebuf) {
 diff --git a/src/nnue/geometry/scalar.rs b/src/nnue/geometry/scalar.rs
 new file mode 100644
 index 0000000..3612a5e
@@ -363,9 +156,103 @@ index 0000000..3612a5e
 +    }
 +    BitRays(Vector { raw }.to_mask())
 +}
+diff --git a/src/nnue/network.rs b/src/nnue/network.rs
+index aff6245..4559b62 100644
+--- a/src/nnue/network.rs
++++ b/src/nnue/network.rs
+@@ -775,6 +775,8 @@ impl NNUEParams {
+         static LOCK: Mutex<()> = Mutex::new(());
+         // additionally, we'd quite like to cache the results of this function.
+         static CACHED: OnceLock<Mmap> = OnceLock::new();
++        #[cfg(target_arch = "wasm32")]
++        static CACHED_WASM: OnceLock<&'static NNUEParams> = OnceLock::new();
+
+         // If we’re under MIRI, this function is way too slow.
+         if cfg!(miri) {
+@@ -811,6 +813,10 @@ impl NNUEParams {
+         }
+
+         let _guard = LOCK.lock().unwrap();
++        #[cfg(target_arch = "wasm32")]
++        if let Some(cached) = CACHED_WASM.get() {
++            return Ok(*cached);
++        }
+         // check if we've already loaded the weights
+         if let Some(cached) = CACHED.get() {
+             // cast the mmap to a NNUEParams
+@@ -821,6 +827,33 @@ impl NNUEParams {
+             return Ok(params);
+         }
+
++        #[cfg(target_arch = "wasm32")]
++        {
++            let mut net = QuantisedNetwork::zeroed();
++            let mut mem = unsafe {
++                std::slice::from_raw_parts_mut(
++                    std::ptr::from_mut(net.as_mut()).cast::<u8>(),
++                    size_of::<QuantisedNetwork>(),
++                )
++            };
++            let expected_bytes = mem.len() as u64;
++            let decoding_start = std::time::Instant::now();
++            let mut decoder = ZstdDecoder::new(EMBEDDED_NNUE)
++                .with_context(|| "Failed to construct zstd decoder for NNUE weights.")?;
++            let bytes_written = std::io::copy(&mut decoder, &mut mem)
++                .with_context(|| "Failed to decompress NNUE weights.")?;
++            let decoding_time = decoding_start.elapsed();
++            println!("info string decompressed NNUE weights in {}us", decoding_time.as_micros());
++            anyhow::ensure!(
++                bytes_written == expected_bytes,
++                "encountered issue while decompressing NNUE weights, expected {expected_bytes} bytes, but got {bytes_written}"
++            );
++            let net = net.permute(true);
++            let params = Box::leak(net);
++            let _ = CACHED_WASM.set(params);
++            return Ok(params);
++        }
++
+         let weights_file_name = format!(
+             "viridithas-shared-network-weights-{}-{}-{}-{:X}.bin",
+             std::env::consts::ARCH,
+diff --git a/src/nnue/simd.rs b/src/nnue/simd.rs
+index 2c23521..3b8da09 100644
+--- a/src/nnue/simd.rs
++++ b/src/nnue/simd.rs
+@@ -408,7 +408,15 @@ mod avx512 {
+     pub const F32_CHUNK: usize = std::mem::size_of::<VecF32>() / std::mem::size_of::<f32>();
+ }
+
+-#[cfg(not(any(target_feature = "neon", target_feature = "avx512f")))]
++#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
++#[path = "simd_wasm.rs"]
++mod wasm;
++
++#[cfg(all(target_arch = "wasm32", not(target_feature = "simd128")))]
++#[path = "simd_scalar.rs"]
++mod scalar;
++
++#[cfg(all(not(target_arch = "wasm32"), not(any(target_feature = "neon", target_feature = "avx512f"))))]
+ mod avx2 {
+     #![allow(non_camel_case_types)]
+     use std::arch::x86_64::*;
+@@ -1163,7 +1171,13 @@ mod neon {
+ #[cfg(target_feature = "avx512f")]
+ pub use avx512::*;
+
+-#[cfg(not(any(target_feature = "neon", target_feature = "avx512f")))]
++#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
++pub use wasm::*;
++
++#[cfg(all(target_arch = "wasm32", not(target_feature = "simd128")))]
++pub use scalar::*;
++
++#[cfg(all(not(target_arch = "wasm32"), not(any(target_feature = "neon", target_feature = "avx512f"))))]
+ pub use avx2::*;
+
+ #[cfg(target_feature = "neon")]
 diff --git a/src/nnue/simd_scalar.rs b/src/nnue/simd_scalar.rs
 new file mode 100644
-index 0000000..a950628
+index 0000000..a7b7999
 --- /dev/null
 +++ b/src/nnue/simd_scalar.rs
 @@ -0,0 +1,122 @@
@@ -491,3 +378,344 @@ index 0000000..a950628
 +pub const I16_CHUNK: usize = std::mem::size_of::<VecI16>() / std::mem::size_of::<i16>();
 +pub const I32_CHUNK: usize = std::mem::size_of::<VecI32>() / std::mem::size_of::<i32>();
 +pub const F32_CHUNK: usize = std::mem::size_of::<VecF32>() / std::mem::size_of::<f32>();
+diff --git a/src/nnue/simd_wasm.rs b/src/nnue/simd_wasm.rs
+new file mode 100644
+index 0000000..07d6db7
+--- /dev/null
++++ b/src/nnue/simd_wasm.rs
+@@ -0,0 +1,215 @@
++#![allow(clippy::all, clippy::nursery, clippy::pedantic, dead_code)]
++#![allow(clippy::undocumented_unsafe_blocks)]
++#![allow(unsafe_op_in_unsafe_fn)]
++
++use std::arch::wasm32::*;
++
++pub const INNER_ARCH: &str = "wasm-simd128";
++
++#[derive(Clone, Copy)]
++#[repr(C, align(16))]
++pub struct VecI8(pub v128, pub v128);
++#[derive(Clone, Copy)]
++#[repr(C, align(16))]
++pub struct VecI16(pub v128, pub v128);
++#[derive(Clone, Copy)]
++#[repr(C, align(16))]
++pub struct VecI32(pub v128, pub v128);
++#[derive(Clone, Copy)]
++#[repr(C, align(16))]
++pub struct VecF32(pub v128, pub v128);
++#[derive(Clone, Copy)]
++#[repr(transparent)]
++pub struct Vec128U16(pub v128);
++
++macro_rules! impl_vec2 {
++    ($name:ident) => {
++        impl $name {
++            #[inline(always)]
++            pub const fn from_raw(value: (v128, v128)) -> Self { Self(value.0, value.1) }
++            #[inline(always)]
++            pub const fn inner(self) -> (v128, v128) { (self.0, self.1) }
++        }
++    };
++}
++impl_vec2!(VecI8);
++impl_vec2!(VecI16);
++impl_vec2!(VecI32);
++impl_vec2!(VecF32);
++
++impl Vec128U16 {
++    #[inline(always)]
++    pub const fn from_raw(value: v128) -> Self { Self(value) }
++    #[inline(always)]
++    pub const fn inner(self) -> v128 { self.0 }
++}
++
++#[inline(always)]
++pub unsafe fn zero_i16() -> VecI16 { VecI16(i16x8_splat(0), i16x8_splat(0)) }
++#[inline(always)]
++pub unsafe fn zero_i32() -> VecI32 { VecI32(i32x4_splat(0), i32x4_splat(0)) }
++#[inline(always)]
++pub unsafe fn splat_i16(n: i16) -> VecI16 { VecI16(i16x8_splat(n), i16x8_splat(n)) }
++#[inline(always)]
++pub unsafe fn splat_i32(n: i32) -> VecI32 { VecI32(i32x4_splat(n), i32x4_splat(n)) }
++
++#[inline(always)]
++pub unsafe fn load_i8(src: *const i8) -> VecI8 {
++    VecI8(std::arch::wasm32::v128_load(src.cast()), std::arch::wasm32::v128_load(src.add(16).cast()))
++}
++#[inline(always)]
++pub unsafe fn store_i8(dst: *mut i8, vec: VecI8) {
++    std::arch::wasm32::v128_store(dst.cast(), vec.0);
++    std::arch::wasm32::v128_store(dst.add(16).cast(), vec.1);
++}
++#[inline(always)]
++pub unsafe fn load_u8(src: *const u8) -> VecI8 {
++    VecI8(std::arch::wasm32::v128_load(src.cast()), std::arch::wasm32::v128_load(src.add(16).cast()))
++}
++#[inline(always)]
++pub unsafe fn store_u8(dst: *mut u8, vec: VecI8) {
++    std::arch::wasm32::v128_store(dst.cast(), vec.0);
++    std::arch::wasm32::v128_store(dst.add(16).cast(), vec.1);
++}
++#[inline(always)]
++pub unsafe fn load_i16(src: *const i16) -> VecI16 {
++    VecI16(std::arch::wasm32::v128_load(src.cast()), std::arch::wasm32::v128_load(src.add(8).cast()))
++}
++#[inline(always)]
++pub unsafe fn store_i16(dst: *mut i16, vec: VecI16) {
++    std::arch::wasm32::v128_store(dst.cast(), vec.0);
++    std::arch::wasm32::v128_store(dst.add(8).cast(), vec.1);
++}
++#[inline(always)]
++pub unsafe fn load_i32(src: *const i32) -> VecI32 {
++    VecI32(std::arch::wasm32::v128_load(src.cast()), std::arch::wasm32::v128_load(src.add(4).cast()))
++}
++#[inline(always)]
++pub unsafe fn store_i32(dst: *mut i32, vec: VecI32) {
++    std::arch::wasm32::v128_store(dst.cast(), vec.0);
++    std::arch::wasm32::v128_store(dst.add(4).cast(), vec.1);
++}
++#[inline(always)]
++pub unsafe fn store_u32(dst: *mut u32, vec: VecI32) {
++    std::arch::wasm32::v128_store(dst.cast(), vec.0);
++    std::arch::wasm32::v128_store(dst.add(4).cast(), vec.1);
++}
++
++#[inline(always)]
++pub unsafe fn max_i16(a: VecI16, b: VecI16) -> VecI16 { VecI16(i16x8_max(a.0, b.0), i16x8_max(a.1, b.1)) }
++#[inline(always)]
++pub unsafe fn min_i16(a: VecI16, b: VecI16) -> VecI16 { VecI16(i16x8_min(a.0, b.0), i16x8_min(a.1, b.1)) }
++#[inline(always)]
++pub unsafe fn add_i16(a: VecI16, b: VecI16) -> VecI16 { VecI16(i16x8_add(a.0, b.0), i16x8_add(a.1, b.1)) }
++#[inline(always)]
++pub unsafe fn sub_i16(a: VecI16, b: VecI16) -> VecI16 { VecI16(i16x8_sub(a.0, b.0), i16x8_sub(a.1, b.1)) }
++#[inline(always)]
++pub unsafe fn add_i32(a: VecI32, b: VecI32) -> VecI32 { VecI32(i32x4_add(a.0, b.0), i32x4_add(a.1, b.1)) }
++
++#[inline(always)]
++unsafe fn mul_high_i16x8(a: v128, b: v128) -> v128 {
++    let lo = i32x4_shr(i32x4_extmul_low_i16x8(a, b), 16);
++    let hi = i32x4_shr(i32x4_extmul_high_i16x8(a, b), 16);
++    i16x8_narrow_i32x4(lo, hi)
++}
++#[inline(always)]
++pub unsafe fn mul_high_i16(a: VecI16, b: VecI16) -> VecI16 {
++    VecI16(mul_high_i16x8(a.0, b.0), mul_high_i16x8(a.1, b.1))
++}
++
++pub type S = u32;
++#[inline(always)]
++pub unsafe fn shl_i16<const SHIFT: u32>(vec: VecI16) -> VecI16 { VecI16(i16x8_shl(vec.0, SHIFT), i16x8_shl(vec.1, SHIFT)) }
++#[inline(always)]
++pub unsafe fn shift_mul_high_i16<const SHIFT: u32>(a: VecI16, b: VecI16) -> VecI16 {
++    mul_high_i16(shl_i16::<SHIFT>(a), b)
++}
++#[inline(always)]
++pub unsafe fn nonzero_mask_i32(vec: VecI32) -> u16 {
++    let zero = i32x4_splat(0);
++    u16::from(i32x4_bitmask(i32x4_ne(vec.0, zero))) | (u16::from(i32x4_bitmask(i32x4_ne(vec.1, zero))) << 4)
++}
++
++#[inline(always)]
++pub unsafe fn pack_i16_to_u8(a: VecI16, b: VecI16) -> VecI8 {
++    VecI8(u8x16_narrow_i16x8(a.0, a.1), u8x16_narrow_i16x8(b.0, b.1))
++}
++
++#[inline(always)]
++unsafe fn dot_u8_i8_to_i32x4(a: v128, b: v128) -> v128 {
++    let lo = i32x4_dot_i16x8(i16x8_extend_low_u8x16(a), i16x8_extend_low_i8x16(b));
++    let hi = i32x4_dot_i16x8(i16x8_extend_high_u8x16(a), i16x8_extend_high_i8x16(b));
++    let even = i32x4_shuffle::<0, 2, 4, 6>(lo, hi);
++    let odd = i32x4_shuffle::<1, 3, 5, 7>(lo, hi);
++    i32x4_add(even, odd)
++}
++
++#[inline(always)]
++pub unsafe fn madd_u8_to_i32(sum: VecI32, a: VecI8, b: VecI8) -> VecI32 {
++    VecI32(
++        i32x4_add(sum.0, dot_u8_i8_to_i32x4(a.0, b.0)),
++        i32x4_add(sum.1, dot_u8_i8_to_i32x4(a.1, b.1)),
++    )
++}
++
++#[inline(always)]
++pub unsafe fn madd_2xu8_to_i32(sum: VecI32, a: VecI8, b: VecI8, c: VecI8, d: VecI8) -> VecI32 {
++    let first = madd_u8_to_i32(sum, a, b);
++    madd_u8_to_i32(first, c, d)
++}
++
++#[inline(always)]
++pub unsafe fn i32_to_f32(vec: VecI32) -> VecF32 { VecF32(f32x4_convert_i32x4(vec.0), f32x4_convert_i32x4(vec.1)) }
++#[inline(always)]
++pub unsafe fn zero_f32() -> VecF32 { VecF32(f32x4_splat(0.0), f32x4_splat(0.0)) }
++#[inline(always)]
++pub unsafe fn splat_f32(n: f32) -> VecF32 { VecF32(f32x4_splat(n), f32x4_splat(n)) }
++#[inline(always)]
++pub unsafe fn load_f32(src: *const f32) -> VecF32 { VecF32(std::arch::wasm32::v128_load(src.cast()), std::arch::wasm32::v128_load(src.add(4).cast())) }
++#[inline(always)]
++pub unsafe fn store_f32(dst: *mut f32, vec: VecF32) {
++    std::arch::wasm32::v128_store(dst.cast(), vec.0);
++    std::arch::wasm32::v128_store(dst.add(4).cast(), vec.1);
++}
++#[inline(always)]
++pub unsafe fn add_f32(a: VecF32, b: VecF32) -> VecF32 { VecF32(f32x4_add(a.0, b.0), f32x4_add(a.1, b.1)) }
++#[inline(always)]
++pub unsafe fn mul_f32(a: VecF32, b: VecF32) -> VecF32 { VecF32(f32x4_mul(a.0, b.0), f32x4_mul(a.1, b.1)) }
++#[inline(always)]
++pub unsafe fn div_f32(a: VecF32, b: VecF32) -> VecF32 { VecF32(f32x4_div(a.0, b.0), f32x4_div(a.1, b.1)) }
++#[inline(always)]
++pub unsafe fn max_f32(a: VecF32, b: VecF32) -> VecF32 { VecF32(f32x4_max(a.0, b.0), f32x4_max(a.1, b.1)) }
++#[inline(always)]
++pub unsafe fn min_f32(a: VecF32, b: VecF32) -> VecF32 { VecF32(f32x4_min(a.0, b.0), f32x4_min(a.1, b.1)) }
++#[inline(always)]
++pub unsafe fn madd_f32(a: VecF32, b: VecF32, c: VecF32) -> VecF32 { VecF32(f32x4_add(f32x4_mul(a.0, b.0), c.0), f32x4_add(f32x4_mul(a.1, b.1), c.1)) }
++#[inline(always)]
++pub unsafe fn sum_f32(vec: VecF32) -> f32 {
++    f32x4_extract_lane::<0>(vec.0) + f32x4_extract_lane::<1>(vec.0) + f32x4_extract_lane::<2>(vec.0) + f32x4_extract_lane::<3>(vec.0)
++        + f32x4_extract_lane::<0>(vec.1) + f32x4_extract_lane::<1>(vec.1) + f32x4_extract_lane::<2>(vec.1) + f32x4_extract_lane::<3>(vec.1)
++}
++#[inline(always)]
++pub unsafe fn reduce_add_f32s(vec: &[VecF32; 2]) -> f32 { sum_f32(vec[0]) + sum_f32(vec[1]) }
++
++#[inline(always)]
++pub unsafe fn load_extend_i8(src: *const i8) -> VecI16 {
++    let bytes = std::arch::wasm32::v128_load(src.cast());
++    VecI16(i16x8_extend_low_i8x16(bytes), i16x8_extend_high_i8x16(bytes))
++}
++#[inline(always)]
++pub unsafe fn v128_zero() -> Vec128U16 { Vec128U16(u16x8_splat(0)) }
++#[inline(always)]
++pub unsafe fn v128_splat(n: u16) -> Vec128U16 { Vec128U16(u16x8_splat(n)) }
++#[inline(always)]
++pub unsafe fn v128_load(src: *const u16) -> Vec128U16 { Vec128U16(std::arch::wasm32::v128_load(src.cast())) }
++#[inline(always)]
++pub unsafe fn v128_store(dst: *mut u16, vec: Vec128U16) { std::arch::wasm32::v128_store(dst.cast(), vec.0); }
++#[inline(always)]
++pub unsafe fn v128_add(a: Vec128U16, b: Vec128U16) -> Vec128U16 { Vec128U16(u16x8_add(a.0, b.0)) }
++
++pub const U8_CHUNK: usize = std::mem::size_of::<VecI8>() / std::mem::size_of::<u8>();
++pub const I8_CHUNK_I32: usize = std::mem::size_of::<i32>() / std::mem::size_of::<u8>();
++pub const I8_CHUNK: usize = std::mem::size_of::<VecI8>() / std::mem::size_of::<i8>();
++pub const I16_CHUNK: usize = std::mem::size_of::<VecI16>() / std::mem::size_of::<i16>();
++pub const I32_CHUNK: usize = std::mem::size_of::<VecI32>() / std::mem::size_of::<i32>();
++pub const F32_CHUNK: usize = std::mem::size_of::<VecF32>() / std::mem::size_of::<f32>();
+diff --git a/src/threadpool.rs b/src/threadpool.rs
+index c4a1398..fb14d90 100644
+--- a/src/threadpool.rs
++++ b/src/threadpool.rs
+@@ -1,3 +1,53 @@
++
++#[cfg(target_arch = "wasm32")]
++mod imp {
++    use std::thread::Scope;
++    use vec1::Vec1;
++
++    pub struct ReceiverHandle { received: bool }
++
++    impl ReceiverHandle {
++        pub fn join(mut self) { self.received = true; }
++    }
++
++    impl Drop for ReceiverHandle {
++        fn drop(&mut self) {
++            assert!(self.received, "ReceiverHandle was dropped without receiving a value");
++        }
++    }
++
++    pub trait ScopeExt<'scope, 'env> {
++        fn spawn_into<F>(&'scope self, f: F, comms: &'scope WorkerThread) -> ReceiverHandle
++        where
++            F: FnOnce() + Send + 'scope;
++    }
++
++    impl<'scope, 'env> ScopeExt<'scope, 'env> for Scope<'scope, 'env> {
++        fn spawn_into<F>(&'scope self, f: F, _thread: &'scope WorkerThread) -> ReceiverHandle
++        where
++            F: FnOnce() + Send + 'scope,
++        {
++            f();
++            ReceiverHandle { received: true }
++        }
++    }
++
++    pub fn make_worker_threads(num_threads: usize) -> Vec1<WorkerThread> {
++        (0..num_threads.max(1)).map(|_| WorkerThread).collect::<Vec<_>>().try_into().unwrap()
++    }
++
++    pub struct WorkerThread;
++
++    impl WorkerThread {
++        pub fn join(self) {}
++    }
++}
++
++#[cfg(target_arch = "wasm32")]
++pub use imp::*;
++
++#[cfg(not(target_arch = "wasm32"))]
++mod imp {
+ use std::sync::mpsc::{Receiver, SyncSender};
+ use std::sync::{Arc, Condvar, Mutex};
+ use std::thread::Scope;
+@@ -185,3 +235,8 @@ mod tests {
+         thread.join();
+     }
+ }
++
++}
++
++#[cfg(not(target_arch = "wasm32"))]
++pub use imp::*;
+diff --git a/src/uci.rs b/src/uci.rs
+index 45eefbd..ab322f7 100644
+--- a/src/uci.rs
++++ b/src/uci.rs
+@@ -782,11 +782,25 @@ fn parse_setoption(
+     Ok(out)
+ }
+
++#[cfg(not(target_arch = "wasm32"))]
+ type StdinReader = (
+     mpsc::Receiver<String>,
+     std::thread::JoinHandle<Result<(), UciError>>,
+ );
+
++#[cfg(target_arch = "wasm32")]
++struct WasmStdinReaderHandle;
++
++#[cfg(target_arch = "wasm32")]
++impl WasmStdinReaderHandle {
++    fn is_finished(&self) -> bool { true }
++    fn join(self) -> Result<Result<(), UciError>, ()> { Ok(Ok(())) }
++}
++
++#[cfg(target_arch = "wasm32")]
++type StdinReader = (mpsc::Receiver<String>, WasmStdinReaderHandle);
++
++#[cfg(not(target_arch = "wasm32"))]
+ fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
+     let (sender, receiver) = mpsc::channel();
+     let handle = std::thread::Builder::new()
+@@ -795,6 +809,22 @@ fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
+     Ok((receiver, handle))
+ }
+
++#[cfg(target_arch = "wasm32")]
++fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
++    let (sender, receiver) = mpsc::channel();
++    let mut sent_arg_command = false;
++    for command in std::env::args().skip(1) {
++        if !command.trim().is_empty() {
++            let _ = sender.send(command);
++            sent_arg_command = true;
++        }
++    }
++    if !sent_arg_command {
++        let _ = stdin_reader_worker(sender.clone(), &control);
++    }
++    Ok((receiver, WasmStdinReaderHandle))
++}
++
+ fn stdin_reader_worker(sender: mpsc::Sender<String>, control: &Control) -> Result<(), UciError> {
+     let mut linebuf = String::with_capacity(128);
+     while let Ok(bytes) = std::io::stdin().read_line(&mut linebuf) {
