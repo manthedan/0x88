@@ -6724,15 +6724,13 @@ class Lc0WebHybridRuntime {
       const readbackMapAsyncMs = Math.max(0, (submitted.readbackMapState.settledAt ?? nowMs()) - submitted.readbackMapState.startedAt);
       const readbackBytesPerSlot = this.wgslHeadReadbackBytes();
       const mapCopyStarted = nowMs();
-      const readbackRange = submitted.readbackBuffer.getMappedRange().slice(0, submitted.inputs.length * readbackBytesPerSlot);
-      submitted.readbackBuffer.unmap();
-      readbackMapped = false;
+      const readbackRange = submitted.readbackBuffer.getMappedRange();
+      const readbackFloats = new Float32Array(readbackRange, 0, submitted.inputs.length * (readbackBytesPerSlot / 4));
       const readbackMapCopyMs = nowMs() - mapCopyStarted;
       const readbackSyncedMs = nowMs() - readbackStarted;
       const headRunMs = nowMs() - headStarted;
       const encoderDispatchSyncedMs = nowMs() - submitted.encoderStarted;
       const totalEvalMs = nowMs() - submitted.totalStarted;
-      const readbackFloats = new Float32Array(readbackRange);
       const out: Lc0WebHybridEvaluationResult[] = [];
       for (let i = 0; i < submitted.inputs.length; i++) {
         const base = i * (readbackBytesPerSlot / 4);

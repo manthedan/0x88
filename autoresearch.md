@@ -111,5 +111,9 @@ Prefer small, isolated experiments in this order:
 - Physical batching at `batchPipelineDepth=1` reduces map pressure and makes b4 the current custom-WGSL target.
 - Batch 8 is not clearly better and regressed on a prior 32-position corpus.
 - Starting mapAsync before JS legal-prior prep improves telemetry and is lifecycle-hardened, but CPU prep is too small to materially move E2E throughput.
+- Discarded: omitting `mappedPolicy` result arrays in the evaluator search path. It did not improve the fast-loop primary metric and readback wait still dominated.
+- Discarded: replacing batched readback `Float32Array.slice` copies with `subarray` views. The fast-loop metric regressed; do not revisit without a focused CPU-copy microbench.
+- Discarded: opt-in GPU legal priors reduced readback bytes (`7444` -> `3084`) but worsened E2E timing and added a dispatch (`159` -> `160`). Byte reduction alone is not enough if extra GPU work/fence time grows.
+- Noise note: an unchanged rerun regressed by ~2.4%, so tiny single-run improvements need confirmation before keeping.
 
 Update this section after every few experiments, especially for discarded ideas and benchmark-noise observations.
