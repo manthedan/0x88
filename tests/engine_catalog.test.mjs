@@ -15,7 +15,7 @@ import {
 } from '../src/lc0/engineCatalog.ts';
 
 test('engine family catalog covers the staged selector families in UI order', () => {
-  assert.deepEqual(ENGINE_FAMILY_PRIORITY, ['lc0', 'sf', 'reckless', 'viridithas']);
+  assert.deepEqual(ENGINE_FAMILY_PRIORITY, ['lc0', 'sf', 'reckless', 'viridithas', 'berserk']);
   assert.deepEqual(engineFamilyOptions().map((option) => option.value), ENGINE_FAMILY_PRIORITY);
   for (const family of ENGINE_FAMILY_PRIORITY) {
     assert.equal(ENGINE_FAMILY_CATALOG[family].id, family);
@@ -31,11 +31,14 @@ test('engine strength metadata captures arena vs analysis defaults', () => {
   assert.deepEqual(engineStrengthMeta('sf', 'analysis'), { unit: 'depth', min: 1, max: 30, def: 14 });
   assert.equal(engineStrengthMeta('viridithas', 'arena').def, 6);
   assert.equal(engineStrengthMeta('viridithas', 'analysis').def, 8);
+  assert.equal(engineStrengthMeta('berserk', 'arena').def, 4);
+  assert.equal(engineStrengthMeta('berserk', 'analysis').def, 8);
 });
 
 test('static LC0 and Stockfish variants expose labels and gating metadata', () => {
   assert.equal(defaultStaticEngineVariant('lc0'), 'small');
   assert.equal(defaultStaticEngineVariant('sf'), 'lite');
+  assert.equal(defaultStaticEngineVariant('berserk'), 'emscripten');
   assert.equal(lc0EngineLabel('small'), 'Lc0');
   assert.equal(lc0EngineLabel('bt4'), 'Lc0 BT4');
   assert.equal(stockfishEngineLabel('lite', 'arena'), 'Stockfish Lite');
@@ -47,6 +50,7 @@ test('static LC0 and Stockfish variants expose labels and gating metadata', () =
 
 test('engine family guard rejects unknown selector values', () => {
   assert.equal(isEngineFamily('lc0'), true);
+  assert.equal(isEngineFamily('berserk'), true);
   assert.equal(isEngineFamily('stockfish'), false);
   assert.equal(isEngineFamily(''), false);
 });

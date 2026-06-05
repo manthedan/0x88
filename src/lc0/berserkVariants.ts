@@ -1,15 +1,24 @@
-export type BerserkVariantKey = 'default' | 'simd' | 'custom';
+export type BerserkVariantKey = 'emscripten' | 'default' | 'simd' | 'custom';
 export type BerserkAssetStatus = 'unknown' | 'checking' | 'present' | 'missing';
 
 export interface BerserkVariant {
   key: BerserkVariantKey;
   label: string;
+  /** WASI/SIMD candidate URL, or Emscripten sidecar WASM when jsUrl is set. */
   wasmUrl: string;
   note: string;
+  /** Emscripten JS glue URL for the currently-smoked browser worker path. */
+  jsUrl?: string;
+  /** Emscripten preload data URL containing the NNUE. */
+  dataUrl?: string;
+  /** External NNUE URL for future WASI/custom paths. */
   nnueUrl?: string;
   sourceNetworkUrl?: string;
 }
 
+export const BERSERK_EMSCRIPTEN_JS_URL = '/berserk/berserk-emscripten.js';
+export const BERSERK_EMSCRIPTEN_WASM_URL = '/berserk/berserk-emscripten.wasm';
+export const BERSERK_EMSCRIPTEN_DATA_URL = '/berserk/berserk-emscripten.data';
 export const BERSERK_DEFAULT_WASM_URL = '/berserk/berserk.wasm';
 export const BERSERK_SIMD_WASM_URL = '/berserk/berserk-simd128.wasm';
 export const BERSERK_MAIN_NETWORK = 'berserk-9b84c340af7e.nn';
@@ -19,8 +28,13 @@ export const BERSERK_SOURCE_NETWORK_URL = `https://github.com/jhonnold/berserk-n
 const assetStatuses = new Map<string, BerserkAssetStatus>();
 const assetChecks = new Map<string, Promise<BerserkAssetStatus>>();
 
+function assetUrls(variant: BerserkVariant): string[] {
+  if (variant.jsUrl) return [variant.jsUrl, variant.wasmUrl, ...(variant.dataUrl ? [variant.dataUrl] : [])];
+  return [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
+}
+
 function assetKey(variant: BerserkVariant): string {
-  return [variant.wasmUrl, variant.nnueUrl].filter(Boolean).join('\n');
+  return assetUrls(variant).join('\n');
 }
 
 export function supportsBerserkWasmSimd(): boolean {
@@ -34,18 +48,28 @@ export function supportsBerserkWasmSimd(): boolean {
   ]));
 }
 
+export const BERSERK_EMSCRIPTEN_VARIANT: BerserkVariant = {
+  key: 'emscripten',
+  label: 'Berserk Emscripten experimental',
+  jsUrl: BERSERK_EMSCRIPTEN_JS_URL,
+  wasmUrl: BERSERK_EMSCRIPTEN_WASM_URL,
+  dataUrl: BERSERK_EMSCRIPTEN_DATA_URL,
+  sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
+  note: 'Smoked Berserk tag 14 single-thread Emscripten worker build with tablebases disabled and NNUE preloaded in .data.',
+};
+
 export const BERSERK_DEFAULT_VARIANT: BerserkVariant = {
   key: 'default',
-  label: 'Berserk scalar experimental',
+  label: 'Berserk scalar WASI planned',
   wasmUrl: BERSERK_DEFAULT_WASM_URL,
   nnueUrl: BERSERK_DEFAULT_NNUE_URL,
   sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
-  note: 'Planned Berserk tag 14 scalar wasm32-wasip1 UCI build. Experimental until first browser smoke passes.',
+  note: 'Planned Berserk tag 14 scalar wasm32-wasip1 UCI build. Experimental until a WASI browser smoke passes.',
 };
 
 export const BERSERK_SIMD_VARIANT: BerserkVariant = {
   key: 'simd',
-  label: 'Berserk SIMD experimental',
+  label: 'Berserk SIMD WASI planned',
   wasmUrl: BERSERK_SIMD_WASM_URL,
   nnueUrl: BERSERK_DEFAULT_NNUE_URL,
   sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
@@ -53,41 +77,65 @@ export const BERSERK_SIMD_VARIANT: BerserkVariant = {
 };
 
 export const BERSERK_VARIANTS: readonly BerserkVariant[] = [
+  BERSERK_EMSCRIPTEN_VARIANT,
   BERSERK_DEFAULT_VARIANT,
   BERSERK_SIMD_VARIANT,
 ];
 
 export function normalizeBerserkVariant(raw: string | null | undefined): BerserkVariantKey {
   const value = String(raw ?? '').toLowerCase().replace(/[ _-]+/g, '');
+  if (value === 'emscripten' || value === 'js' || value === 'worker' || value === 'browser') return 'emscripten';
   if (value === 'simd' || value === 'simd128' || value === 'wasmsimd') return 'simd';
-  if (value === 'scalar' || value === 'default' || value === 'full') return 'default';
+  if (value === 'scalar' || value === 'default' || value === 'wasi' || value === 'full') return 'default';
   if (value === 'custom') return 'custom';
-  return 'default';
+  return 'emscripten';
 }
 
 export function defaultBerserkVariantKey(): BerserkVariantKey {
-  return supportsBerserkWasmSimd() ? 'simd' : 'default';
+  return 'emscripten';
 }
 
 export function berserkVariantByKey(key: string): BerserkVariant {
   const normalized = normalizeBerserkVariant(key);
   if (normalized === 'simd') return BERSERK_SIMD_VARIANT;
-  if (normalized === 'custom') return { key: 'custom', label: 'Berserk Custom', wasmUrl: BERSERK_DEFAULT_WASM_URL, nnueUrl: BERSERK_DEFAULT_NNUE_URL, sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL, note: 'Custom Berserk WASM URL.' };
-  return BERSERK_DEFAULT_VARIANT;
+  if (normalized === 'default') return BERSERK_DEFAULT_VARIANT;
+  if (normalized === 'custom') return {
+    key: 'custom',
+    label: 'Berserk Custom',
+    wasmUrl: BERSERK_EMSCRIPTEN_WASM_URL,
+    jsUrl: BERSERK_EMSCRIPTEN_JS_URL,
+    dataUrl: BERSERK_EMSCRIPTEN_DATA_URL,
+    sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
+    note: 'Custom Berserk Emscripten JS URL.',
+  };
+  return BERSERK_EMSCRIPTEN_VARIANT;
 }
 
 export function hasExplicitBerserkVariant(params: URLSearchParams): boolean {
-  return params.has('berserkWasm') || params.has('berserkVariant') || params.has('berserk');
+  return params.has('berserkJs') || params.has('berserkWasm') || params.has('berserkVariant') || params.has('berserk');
 }
 
 export function berserkVariantFromParams(params: URLSearchParams): BerserkVariant {
-  const customUrl = params.get('berserkWasm');
+  const customJsUrl = params.get('berserkJs');
+  const customWasmUrl = params.get('berserkWasm');
+  const customDataUrl = params.get('berserkData');
   const customNnueUrl = params.get('berserkNnue') ?? undefined;
-  if (customUrl) {
+  if (customJsUrl) {
     return {
       key: 'custom',
       label: 'Berserk Custom',
-      wasmUrl: customUrl,
+      jsUrl: customJsUrl,
+      wasmUrl: customWasmUrl ?? BERSERK_EMSCRIPTEN_WASM_URL,
+      dataUrl: customDataUrl ?? BERSERK_EMSCRIPTEN_DATA_URL,
+      sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
+      note: 'Custom Berserk Emscripten JS URL from ?berserkJs=…',
+    };
+  }
+  if (customWasmUrl) {
+    return {
+      key: 'custom',
+      label: 'Berserk Custom',
+      wasmUrl: customWasmUrl,
       nnueUrl: customNnueUrl ?? BERSERK_DEFAULT_NNUE_URL,
       sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
       note: 'Custom Berserk WASM URL from ?berserkWasm=…',
@@ -95,7 +143,7 @@ export function berserkVariantFromParams(params: URLSearchParams): BerserkVarian
   }
   const explicit = params.get('berserkVariant') ?? params.get('berserk');
   const variant = berserkVariantByKey(explicit ?? defaultBerserkVariantKey());
-  if (!customNnueUrl) return variant;
+  if (!customNnueUrl || variant.jsUrl) return variant;
   return {
     ...variant,
     nnueUrl: customNnueUrl,
@@ -107,13 +155,7 @@ export async function resolveDefaultBerserkVariantAssetFallback(variant: Berserk
   if (explicit || variant.key !== 'simd') return variant;
   const status = await checkBerserkVariantAsset(variant, onChange);
   if (status !== 'missing') return variant;
-  if (!variant.nnueUrl || variant.nnueUrl === BERSERK_DEFAULT_NNUE_URL) return BERSERK_DEFAULT_VARIANT;
-  return {
-    ...BERSERK_DEFAULT_VARIANT,
-    nnueUrl: variant.nnueUrl,
-    sourceNetworkUrl: variant.sourceNetworkUrl,
-    note: `${BERSERK_DEFAULT_VARIANT.note} External NNUE overridden by ?berserkNnue=…`,
-  };
+  return BERSERK_EMSCRIPTEN_VARIANT;
 }
 
 export function berserkVariantAssetStatus(variant: BerserkVariant): BerserkAssetStatus {
@@ -128,8 +170,7 @@ export function checkBerserkVariantAsset(variant: BerserkVariant, onChange?: () 
   if (existing) return existing;
   assetStatuses.set(key, 'checking');
   onChange?.();
-  const urls = [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
-  const promise = Promise.all(urls.map((url) => fetch(url, { method: 'HEAD', cache: 'no-store' }).then((response) => response.ok).catch(() => false)))
+  const promise = Promise.all(assetUrls(variant).map((url) => fetch(url, { method: 'HEAD', cache: 'no-store' }).then((response) => response.ok).catch(() => false)))
     .then((results) => (results.every(Boolean) ? 'present' : 'missing') as BerserkAssetStatus)
     .then((status) => {
       assetStatuses.set(key, status);

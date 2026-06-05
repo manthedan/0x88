@@ -18,6 +18,8 @@ import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEn
 import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
+import { BerserkEngine } from './berserkEngine.ts';
+import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, normalizeBerserkVariant, type BerserkVariant } from './berserkVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support } from './bt4Engine.ts';
 import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
@@ -32,6 +34,7 @@ type Lc0AnalysisRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads';
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 const REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantFromParams(params);
+const REQUESTED_BERSERK_VARIANT = berserkVariantFromParams(params);
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
@@ -183,7 +186,7 @@ function uciShape(uci: string, brush: string): DrawShape | null {
 }
 function multiPv(): number { return Math.max(1, Math.floor(Number(inputEl('multiPvInput').value) || 3)); }
 // Engines to analyze are chosen as an add/remove list of cascading selects:
-// family (Lc0/Stockfish/Reckless/Viridithas) -> variant (Lc0: Small|BT4;
+// family (Lc0/Stockfish/Reckless/Viridithas/Berserk) -> variant (Lc0: Small|BT4;
 // SF: Lite|Full; UCI engines: variant) -> strength (Lc0 visits, UCI depth),
 // all per row.
 function strengthMeta(family: EngineFamily) {
@@ -219,8 +222,25 @@ function viridithasCacheKey(variant: ViridithasVariant): string {
   return `${variant.key}:${variant.wasmUrl}`;
 }
 
+function availableBerserkVariants(): BerserkVariant[] {
+  const builtIns = BERSERK_VARIANTS.filter((variant) => !!variant.jsUrl);
+  if (REQUESTED_BERSERK_VARIANT.key === 'custom' && REQUESTED_BERSERK_VARIANT.jsUrl) return [...builtIns, REQUESTED_BERSERK_VARIANT];
+  return builtIns;
+}
+
+function berserkVariantForKey(variantKey: string): BerserkVariant {
+  const key = normalizeBerserkVariant(variantKey);
+  if (key === 'custom' && REQUESTED_BERSERK_VARIANT.key === 'custom') return REQUESTED_BERSERK_VARIANT;
+  const variant = berserkVariantByKey(key);
+  return variant.jsUrl ? variant : BERSERK_VARIANTS.find((entry) => entry.jsUrl)!;
+}
+
+function berserkCacheKey(variant: BerserkVariant): string {
+  return `${variant.key}:${variant.jsUrl ?? ''}:${variant.wasmUrl}:${variant.dataUrl ?? ''}`;
+}
+
 // "Add engine" fills the next missing family by priority (Lc0 → SF → Reckless
-// → Viridithas), falling back to the top priority when all families are present.
+// → Viridithas → Berserk), falling back to the top priority when all families are present.
 function nextEngineFamily(): EngineFamily {
   const present = new Set(engineRows.map((row) => row.family));
   return ENGINE_FAMILY_PRIORITY.find((family) => !present.has(family)) ?? ENGINE_FAMILY_PRIORITY[0];
@@ -232,12 +252,14 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync());
   if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
+  if (family === 'berserk') return availableBerserkVariants().map((v) => ({ value: v.key, label: v.label }));
   return availableRecklessVariants().map((v) => ({ value: v.key, label: v.label }));
 }
 
 function defaultVariant(family: EngineFamily): string {
   if (family === 'reckless') return REQUESTED_RECKLESS_VARIANT.key;
   if (family === 'viridithas') return REQUESTED_VIRIDITHAS_VARIANT.key;
+  if (family === 'berserk') return REQUESTED_BERSERK_VARIANT.key;
   return defaultStaticEngineVariant(family);
 }
 
@@ -245,6 +267,7 @@ function rowLabel(row: EngineRow): string {
   if (row.family === 'lc0') return lc0EngineLabel(row.variant);
   if (row.family === 'sf') return stockfishEngineLabel(row.variant, 'analysis');
   if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
+  if (row.family === 'berserk') return berserkVariantForKey(row.variant).label;
   return recklessVariantForKey(row.variant).label;
 }
 
@@ -310,7 +333,16 @@ function renderRecklessRuntimeInfo(): void {
     const assetText = asset === 'ok' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${mode} · ${sab} · ${assetText} · ${status?.wasmUrl ?? variant.wasmUrl}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}${asset === 'missing' ? ' · build locally with npm run viridithas:build-wasi or viridithas:build-simd-wasi' : ''}`;
   });
-  el('recklessRuntimeInfo').textContent = `Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')}`;
+  const berserkRows = activeEngineRows().filter((row) => row.family === 'berserk');
+  const berserkVariants = berserkRows.length ? berserkRows.map((row) => berserkVariantForKey(row.variant)) : [REQUESTED_BERSERK_VARIANT].filter((variant) => !!variant.jsUrl);
+  const berserkParts = berserkVariants.map((variant) => {
+    const engine = berserkByVariant.get(berserkCacheKey(variant));
+    const asset = berserkVariantAssetStatus(variant);
+    if (asset === 'unknown') void checkBerserkVariantAsset(variant, renderRecklessRuntimeInfo);
+    const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+    return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl ?? variant.wasmUrl}`;
+  });
+  el('recklessRuntimeInfo').textContent = `Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'}`;
 }
 
 function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
@@ -325,6 +357,7 @@ function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
 
 const recklessByVariant = new Map<string, RecklessEngine>();
 const viridithasByVariant = new Map<string, ViridithasEngine>();
+const berserkByVariant = new Map<string, BerserkEngine>();
 function getRecklessFor(variantKey: string): RecklessEngine {
   const variant = recklessVariantForKey(variantKey);
   const key = recklessCacheKey(variant);
@@ -354,6 +387,18 @@ function getViridithasFor(variantKey: string): ViridithasEngine {
   return engine;
 }
 
+function getBerserkFor(variantKey: string): BerserkEngine {
+  const variant = berserkVariantForKey(variantKey);
+  const key = berserkCacheKey(variant);
+  let engine = berserkByVariant.get(key);
+  if (!engine) {
+    engine = new BerserkEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl);
+    berserkByVariant.set(key, engine);
+    renderRecklessRuntimeInfo();
+  }
+  return engine;
+}
+
 function disposeUnusedEngines(): void {
   if (!usesBt4Row()) bt4.dispose();
   const activeRows = activeEngineRows();
@@ -369,6 +414,13 @@ function disposeUnusedEngines(): void {
     if (!activeViridithasKeys.has(key)) {
       engine.dispose();
       viridithasByVariant.delete(key);
+    }
+  }
+  const activeBerserkKeys = new Set(activeRows.filter((row) => row.family === 'berserk').map((row) => berserkCacheKey(berserkVariantForKey(row.variant))));
+  for (const [key, engine] of [...berserkByVariant]) {
+    if (!activeBerserkKeys.has(key)) {
+      engine.dispose();
+      berserkByVariant.delete(key);
     }
   }
   renderRecklessRuntimeInfo();
@@ -632,6 +684,12 @@ async function analyzeCurrent() {
         tasks.push(engine.newGame(controller.signal)
           .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
+      } else if (row.family === 'berserk') {
+        const label = `${berserkVariantForKey(row.variant).label} d${row.strength}`;
+        const engine = getBerserkFor(row.variant);
+        tasks.push(engine.newGame(controller.signal)
+          .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
+          .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       } else {
         const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label} d${row.strength}`;
         tasks.push(getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
@@ -829,6 +887,8 @@ function disposeRuntimeResources(): void {
   recklessByVariant.clear();
   for (const engine of viridithasByVariant.values()) engine.dispose();
   viridithasByVariant.clear();
+  for (const engine of berserkByVariant.values()) engine.dispose();
+  berserkByVariant.clear();
   void mainEvaluator?.dispose();
   mainEvaluator = null;
   searcher = null;

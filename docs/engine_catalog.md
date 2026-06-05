@@ -38,7 +38,7 @@ Every engine family should have one card with these fields:
 | Stockfish | `lite`, `full` | Lite single-thread default opponent | NPM `stockfish` JS/WASM UCI worker | `stockfish@18.0.7` | Lite WASM ~7 MB; full WASM ~108 MB | Mature UCI baseline; strongest/large full variant is optional. |
 | Reckless | `simd`, `full`, `browser-api`, `browser-api-simd`, `browser-api-simd-external`, `lite` | SIMD if available; scalar fallback | Patched Rust `wasm32-wasip1` UCI; optional direct browser API | Upstream `codedeliveryservice/Reckless` commit `0010617448bd` + local patches | Integrated full WASM ~62 MB; external API WASM ~1.2 MB + NNUE ~60 MB | Best current non-Stockfish browser engine candidate; SIMD WASI/UCI is fastest proven path. |
 | Viridithas | `default`, `simd` | Experimental opt-in | Patched Rust `wasm32-wasip1` UCI, one-shot/persistent/batch | Upstream `cosmobobak/viridithas` commit `20d7402065ca` + v106 `atlantis-b800.nnue.zst` + local patches | WASM ~55 MB with compressed NNUE embedded | Integration works for shallow arena/analysis, but stop/abort and throughput remain experimental. |
-| Berserk | not in UI yet; planned `default`, `simd`, `custom` | Experimental intake only | Patched single-thread Emscripten UCI smoke; WASI still unpromoted | Upstream `jhonnold/berserk` tag `14` commit `8ae895a6151695be4a50d4fb65b0c131659c513a` + network `berserk-9b84c340af7e.nn` | Emscripten smoke emits JS glue + small WASM + ~24 MB preload data; generated/local only | Strong GPL C UCI candidate; first smoke path exists, but UI promotion waits for browser adapter/lifecycle characterization. |
+| Berserk | `emscripten` (WASI `default`/`simd` planned only) | Experimental opt-in | Patched single-thread Emscripten UCI worker; WASI still unpromoted | Upstream `jhonnold/berserk` tag `14` commit `8ae895a6151695be4a50d4fb65b0c131659c513a` + network `berserk-9b84c340af7e.nn` | Emscripten emits JS glue + ~128 KB WASM + ~24 MB preload data; generated/local only | Strong GPL C UCI candidate; staged UI integration is experimental while lifecycle/benchmark data accumulates. |
 
 ## Family cards
 
@@ -138,15 +138,16 @@ Every engine family should have one card with these fields:
 
 ### Berserk family
 
-- **Family id / UI label:** proposed `berserk` / `Berserk`. Do not add to staged selectors until a real browser UCI adapter smoke passes.
-- **Integration status:** experimental intake only. A Node Emscripten UCI smoke path exists; no arena/analysis UI promise yet.
+- **Family id / UI label:** `berserk` / `Berserk`.
+- **Integration status:** experimental opt-in. The Emscripten worker adapter passed Node and browser smokes and is available in staged arena/analysis selectors, but not as a default engine.
 - **Source/version anchor:** upstream `jhonnold/berserk` release tag `14`, commit `8ae895a6151695be4a50d4fb65b0c131659c513a`; default branch HEAD observed at `27212a24c16d9e5f9bc9180a75264c1c632808bb` during intake. The browser port pins tag `14` unless a newer release is deliberately selected.
 - **License/distribution:** GPL-3.0. Generated JS/WASM/data and copied NNUE assets must be treated as redistributable GPL engine artifacts with corresponding source/build instructions. Do not commit generated blobs until the project has an explicit release/source-archive policy for Berserk.
 - **Runtime adapter:** current first smoke is `patches/berserk-emscripten.patch` + `npm run berserk:build-emscripten`, exporting `command()`, `isReady()`, and `isSearching()` like Stockfish.js. It disables tablebases and uses synchronous single-thread search to avoid pthread/SAB requirements. WASI remains unpromoted unless it becomes useful later.
-- **Expected UI variants:** defined in `src/lc0/berserkVariants.ts` but not wired into selectors yet.
-  - `default`: scalar WASI/UCI candidate, expected URL `/berserk/berserk.wasm` after a build script exists.
-  - `simd`: optional SIMD candidate, expected URL `/berserk/berserk-simd128.wasm` only after wasm SIMD codegen validates.
-  - `custom`: URL param escape hatch for local experiments via `?berserkWasm=` and optional `?berserkNnue=`.
+- **UI variants:** defined in `src/lc0/berserkVariants.ts`.
+  - `emscripten`: current smoked worker path, `/berserk/berserk-emscripten.js` + `/berserk/berserk-emscripten.wasm` + `/berserk/berserk-emscripten.data`.
+  - `default`: planned scalar WASI/UCI candidate, expected URL `/berserk/berserk.wasm`; not exposed in normal staged selectors until it smokes.
+  - `simd`: planned SIMD WASI candidate, expected URL `/berserk/berserk-simd128.wasm`; not exposed in normal staged selectors until it smokes.
+  - `custom`: URL param escape hatch for local experiments via `?berserkJs=`/`?berserkData=` or future `?berserkWasm=` and optional `?berserkNnue=`.
 - **Expected NNUE assets:** upstream makefile uses `MAIN_NETWORK = berserk-9b84c340af7e.nn` from `https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn`. The Emscripten smoke preloads this network into `berserk-emscripten.data`; `berserkVariants.ts` still models external `/berserk/berserk-9b84c340af7e.nn` for any future WASI/custom path.
 - **Strength knob:** depth in staged UI if promoted; movetime should be available in benchmarks once UCI `go movetime` is verified. Tentative defaults should mirror other alpha-beta engines until measured (`arena` shallow depth, `analysis` deeper depth).
 - **Artifact footprint:** current local Emscripten smoke build is small JS glue + small WASM + ~24 MB `.data` NNUE preload. Record exact bytes from `npm run berserk:build-emscripten`/smoke reports and keep all generated `public/berserk/*.{js,wasm,data,nn,nnue}` assets ignored.
@@ -159,7 +160,7 @@ Every engine family should have one card with these fields:
   - Threads/tablebases: upstream exposes `Threads` and `SyzygyPath`; browser intake should begin single-threaded and tablebases disabled.
   - NNUE/model loading: decide embedded vs external; missing asset path must be visible in UI before promotion.
 - **Speed snapshot:** none yet. Use the Reckless/Viridithas rotated-FEN protocol after smoke, with cold/warm separation and engine-reported nodes/NPS.
-- **Validation:** `npm run berserk:build-emscripten` then `npm run berserk:smoke-emscripten` verifies `uci`, `isready`, `ucinewgame`, startpos search, and one non-startpos FEN search in Node. A local browser eval smoke against the same artifacts also passed; a reusable browser worker/adapter smoke is still required before UI selector promotion.
+- **Validation:** `npm run berserk:build-emscripten` then `npm run berserk:smoke-emscripten` verifies `uci`, `isready`, `ucinewgame`, startpos search, and one non-startpos FEN search in Node. `berserk-smoke.html` exercises the reusable `BerserkEngine` worker adapter in the browser; local smoke returned `bestmove d2d4` and `bestmove e1g1` at depth 1. UI selector promotion is still experimental pending longer arena/analysis lifecycle runs.
 - **Open risks:** browser adapter lifecycle, MultiPV parsing, graceful in-search stop, pthread/SIMD follow-up, GPL source/archive obligations, and whether Berserk offers a browser-speed advantage over Stockfish/Reckless after startup is amortized.
 
 ### Viridithas family

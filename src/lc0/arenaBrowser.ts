@@ -20,6 +20,8 @@ import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEn
 import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
+import { BerserkEngine } from './berserkEngine.ts';
+import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, normalizeBerserkVariant, type BerserkVariant } from './berserkVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
 import { defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
@@ -83,6 +85,7 @@ type Lc0ArenaRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads';
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 const REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantFromParams(params);
+const REQUESTED_BERSERK_VARIANT = berserkVariantFromParams(params);
 
 let ground: Ground | null = null;
 let board: BoardState = parseFen(START_FEN);
@@ -102,6 +105,7 @@ let stockfishLite: StockfishEngine | null = null;
 let stockfishFull: StockfishEngine | null = null;
 const recklessByVariant = new Map<string, RecklessEngine>();
 const viridithasByVariant = new Map<string, ViridithasEngine>();
+const berserkByVariant = new Map<string, BerserkEngine>();
 // Lc0 BT4 runs in its own worker (lazy, WebGPU-gated, disposable). See bt4Engine.ts.
 const bt4 = new Bt4WorkerSearcher();
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
@@ -402,6 +406,7 @@ function strengthMeta(family: EngineFamily) {
 function defaultVariant(family: EngineFamily): string {
   if (family === 'reckless') return REQUESTED_RECKLESS_VARIANT.key;
   if (family === 'viridithas') return REQUESTED_VIRIDITHAS_VARIANT.key;
+  if (family === 'berserk') return REQUESTED_BERSERK_VARIANT.key;
   return defaultStaticEngineVariant(family);
 }
 
@@ -409,6 +414,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync());
   if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
+  if (family === 'berserk') return availableBerserkVariants().map((v) => ({ value: v.key, label: v.label }));
   return availableRecklessVariants().map((v) => ({ value: v.key, label: v.label }));
 }
 
@@ -421,6 +427,7 @@ function rowLabel(row: EngineRow): string {
   if (row.family === 'lc0') return lc0EngineLabel(row.variant);
   if (row.family === 'sf') return stockfishEngineLabel(row.variant, 'arena');
   if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
+  if (row.family === 'berserk') return berserkVariantForKey(row.variant).label;
   return recklessVariantForKey(row.variant).label;
 }
 
@@ -654,6 +661,10 @@ function recordViridithasOutput(engineId: string, engineName: string, fen: strin
   recordUciOutput(engineId, engineName, 'Viridithas', fen, move, lines);
 }
 
+function recordBerserkOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[]): void {
+  recordUciOutput(engineId, engineName, 'Berserk', fen, move, lines);
+}
+
 function recordEngineThinking(engine: ArenaEngine): void {
   thinkingEngineIds.add(engine.id);
   renderSideLabels();
@@ -829,6 +840,57 @@ function refreshViridithasVariantUi(): void {
   renderViridithasRuntimeInfo();
 }
 
+function availableBerserkVariants(): BerserkVariant[] {
+  const builtIns = BERSERK_VARIANTS.filter((variant) => !!variant.jsUrl);
+  if (REQUESTED_BERSERK_VARIANT.key === 'custom' && REQUESTED_BERSERK_VARIANT.jsUrl) return [...builtIns, REQUESTED_BERSERK_VARIANT];
+  return builtIns;
+}
+
+function berserkVariantForKey(variantKey: string): BerserkVariant {
+  const key = normalizeBerserkVariant(variantKey);
+  if (key === 'custom' && REQUESTED_BERSERK_VARIANT.key === 'custom') return REQUESTED_BERSERK_VARIANT;
+  const variant = berserkVariantByKey(key);
+  return variant.jsUrl ? variant : BERSERK_VARIANTS.find((entry) => entry.jsUrl)!;
+}
+
+function berserkCacheKey(variant: BerserkVariant): string {
+  return `${variant.key}:${variant.jsUrl ?? ''}:${variant.wasmUrl}:${variant.dataUrl ?? ''}`;
+}
+
+function getBerserkFor(variantKey: string): BerserkEngine {
+  const variant = berserkVariantForKey(variantKey);
+  const key = berserkCacheKey(variant);
+  let engine = berserkByVariant.get(key);
+  if (!engine) {
+    engine = new BerserkEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl);
+    berserkByVariant.set(key, engine);
+  }
+  return engine;
+}
+
+function renderBerserkRuntimeInfo(): void {
+  const rows = activeSeatRows().filter((row) => row.family === 'berserk');
+  if (!rows.length) { el('berserkRuntimeInfo').textContent = 'Berserk: not selected'; return; }
+  const parts = rows.map((row) => {
+    const variant = berserkVariantForKey(row.variant);
+    const engine = berserkByVariant.get(berserkCacheKey(variant));
+    const asset = berserkVariantAssetStatus(variant);
+    if (asset === 'unknown') void checkBerserkVariantAsset(variant, renderBerserkRuntimeInfo);
+    const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+    return `${variant.label} d${row.strength} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
+  });
+  el('berserkRuntimeInfo').textContent = `Berserk: ${[...new Set(parts)].join(' | ')}`;
+}
+
+function refreshBerserkVariantUi(): void {
+  const select = selectEl('berserkVariantSelect');
+  if (!select.options.length) {
+    select.innerHTML = availableBerserkVariants().map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
+  }
+  select.disabled = running;
+  renderBerserkRuntimeInfo();
+}
+
 function refreshStockfishControls(): void {
   inputEl('stockfishThreadsInput').disabled = running || !threadedStockfishAvailable();
   inputEl('stockfishThreadsInput').value = String(stockfishThreads());
@@ -901,6 +963,10 @@ function disposeUnusedUciEngines(): void {
   for (const [key, engine] of viridithasByVariant) {
     if (!activeViridithas.has(key)) { engine.dispose(); viridithasByVariant.delete(key); }
   }
+  const activeBerserk = new Set(activeSeatRows().filter((row) => row.family === 'berserk').map((row) => berserkCacheKey(berserkVariantForKey(row.variant))));
+  for (const [key, engine] of berserkByVariant) {
+    if (!activeBerserk.has(key)) { engine.dispose(); berserkByVariant.delete(key); }
+  }
 }
 
 function buildEngines() {
@@ -968,6 +1034,15 @@ function buildEngines() {
     renderViridithasRuntimeInfo();
     return move;
   };
+  const berserkMove = (engineId: string, row: EngineRow, engine: BerserkEngine): ArenaEngine['move'] => async (positions, signal) => {
+    if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: 1 });
+    else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: 1 });
+    const fen = boardToFen(positions[positions.length - 1]);
+    const move = await engine.bestMove(fen, signal);
+    recordBerserkOutput(engineId, engines.get(engineId)?.name ?? 'Berserk', fen, move, engine.lastInfo());
+    renderBerserkRuntimeInfo();
+    return move;
+  };
   const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {
     const search = lc0SearcherFor(engineId);
     await search.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
@@ -1000,6 +1075,12 @@ function buildEngines() {
     await engine.newGame(signal);
     renderViridithasRuntimeInfo();
   };
+  const berserkWarmup = (engine: BerserkEngine) => async (signal: AbortSignal) => {
+    engine.setOptions({ depth: 1, movetimeMs: undefined, threads: 1 });
+    await engine.bestMove(START_FEN, signal);
+    await engine.newGame(signal);
+    renderBerserkRuntimeInfo();
+  };
   for (const row of activeSeatRows()) {
     const id = engineIdForRow(row);
     if (engines.has(id)) continue;
@@ -1013,13 +1094,17 @@ function buildEngines() {
       const engine = getRecklessFor(row.variant);
       prewarmReckless(engine);
       engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: recklessMove(id, row, engine), warmup: recklessWarmup(engine) });
-    } else {
+    } else if (row.family === 'viridithas') {
       const engine = getViridithasFor(row.variant);
       engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: viridithasMove(id, row, engine), warmup: viridithasWarmup(engine) });
+    } else {
+      const engine = getBerserkFor(row.variant);
+      engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: berserkMove(id, row, engine), warmup: berserkWarmup(engine) });
     }
   }
   renderRecklessRuntimeInfo();
   renderViridithasRuntimeInfo();
+  renderBerserkRuntimeInfo();
 }
 
 function selectedOpenings(): ArenaOpening[] {
@@ -1237,6 +1322,7 @@ async function startMatch() {
       resetLc0SearchTrees(seatIds);
       if (usesBt4 && bt4.loaded) await bt4.resetTree();
       for (const engine of viridithasByVariant.values()) await engine.newGame(abort.signal);
+      for (const engine of berserkByVariant.values()) await engine.newGame(abort.signal);
       setBoardSideEngines(whiteEngine.id, whiteEngine.name, blackEngine.id, blackEngine.name);
       el('pairing').textContent = `Game ${i + 1}/${schedule.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
       el('message').textContent = 'Playing…';
@@ -1275,6 +1361,7 @@ async function startMatch() {
     refreshStockfishControls();
     refreshRecklessVariantUi();
     refreshViridithasVariantUi();
+    refreshBerserkVariantUi();
     refreshSeatControls();
   }
 }
@@ -1306,6 +1393,8 @@ function disposeRuntimeResources(): void {
   recklessByVariant.clear();
   for (const engine of viridithasByVariant.values()) engine.dispose();
   viridithasByVariant.clear();
+  for (const engine of berserkByVariant.values()) engine.dispose();
+  berserkByVariant.clear();
   bt4.dispose();
 }
 
@@ -1390,6 +1479,7 @@ function wireEvents() {
       clampStrength(seatRows[seat]);
       renderRecklessRuntimeInfo();
       renderViridithasRuntimeInfo();
+      renderBerserkRuntimeInfo();
     }
   });
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
@@ -1415,10 +1505,13 @@ async function init() {
   selectEl('lc0RuntimeSelect').value = initialLc0Runtime();
   refreshRecklessVariantUi();
   refreshViridithasVariantUi();
+  refreshBerserkVariantUi();
   selectEl('recklessVariantSelect').value = REQUESTED_RECKLESS_VARIANT.key;
   selectEl('viridithasVariantSelect').value = REQUESTED_VIRIDITHAS_VARIANT.key;
+  selectEl('berserkVariantSelect').value = REQUESTED_BERSERK_VARIANT.key;
   renderRecklessRuntimeInfo();
   renderViridithasRuntimeInfo();
+  renderBerserkRuntimeInfo();
   inputEl('stockfishThreadsInput').value = String(Math.max(1, Math.min(32, Math.floor(Number(params.get('sfThreads') ?? '1') || 1))));
   refreshStockfishControls();
   void renderRuntimeBadge();

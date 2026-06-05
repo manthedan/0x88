@@ -1,4 +1,4 @@
-export type EngineFamily = 'lc0' | 'sf' | 'reckless' | 'viridithas';
+export type EngineFamily = 'lc0' | 'sf' | 'reckless' | 'viridithas' | 'berserk';
 export type EngineSurface = 'arena' | 'analysis';
 export type EngineStrengthUnit = 'visits' | 'depth';
 
@@ -31,7 +31,7 @@ export interface EngineFamilyCatalogEntry {
   note: string;
 }
 
-export const ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'sf', 'reckless', 'viridithas'];
+export const ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'sf', 'reckless', 'viridithas', 'berserk'];
 
 export const ENGINE_FAMILY_CATALOG: Record<EngineFamily, EngineFamilyCatalogEntry> = {
   lc0: {
@@ -66,6 +66,14 @@ export const ENGINE_FAMILY_CATALOG: Record<EngineFamily, EngineFamilyCatalogEntr
     docHref: 'docs/engine_catalog.md#viridithas-family',
     note: 'Patched browser/WASI UCI engine; integration remains experimental.',
   },
+  berserk: {
+    id: 'berserk',
+    label: 'Berserk',
+    shortLabel: 'Berserk',
+    status: 'experimental',
+    docHref: 'docs/engine_catalog.md#berserk-family',
+    note: 'Patched single-thread Emscripten UCI worker; early smoke passed, lifecycle remains experimental.',
+  },
 };
 
 export const LC0_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
@@ -84,12 +92,14 @@ const ENGINE_STRENGTH: Record<EngineSurface, Record<EngineFamily, EngineStrength
     sf: { unit: 'depth', min: 1, max: 40, def: 8 },
     reckless: { unit: 'depth', min: 1, max: 30, def: 4 },
     viridithas: { unit: 'depth', min: 1, max: 20, def: 6 },
+    berserk: { unit: 'depth', min: 1, max: 20, def: 4 },
   },
   analysis: {
     lc0: { unit: 'visits', min: 1, max: 100000, def: 400 },
     sf: { unit: 'depth', min: 1, max: 30, def: 14 },
     reckless: { unit: 'depth', min: 1, max: 30, def: 14 },
     viridithas: { unit: 'depth', min: 1, max: 20, def: 8 },
+    berserk: { unit: 'depth', min: 1, max: 20, def: 8 },
   },
 };
 
@@ -113,8 +123,9 @@ export function stockfishVariantOptions(): EngineVariantOption[] {
   return STOCKFISH_ENGINE_VARIANTS.map((option) => ({ ...option }));
 }
 
-export function defaultStaticEngineVariant(family: 'lc0' | 'sf'): string {
+export function defaultStaticEngineVariant(family: 'lc0' | 'sf' | 'berserk'): string {
   if (family === 'sf') return STOCKFISH_ENGINE_VARIANTS[0].value;
+  if (family === 'berserk') return 'emscripten';
   return LC0_ENGINE_VARIANTS[0].value;
 }
 
@@ -128,5 +139,5 @@ export function stockfishEngineLabel(variant: string, surface: EngineSurface): s
 }
 
 export function isEngineFamily(value: string): value is EngineFamily {
-  return value === 'lc0' || value === 'sf' || value === 'reckless' || value === 'viridithas';
+  return value === 'lc0' || value === 'sf' || value === 'reckless' || value === 'viridithas' || value === 'berserk';
 }
