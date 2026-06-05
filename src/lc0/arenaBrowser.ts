@@ -18,6 +18,8 @@ import type { Node as PuctNode } from '../search/puct.ts';
 import { StockfishEngine, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
 import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
 import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
+import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
+import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -78,6 +80,7 @@ const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_U
 type Lc0ArenaRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads';
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
+const REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantFromParams(params);
 
 let ground: Ground | null = null;
 let board: BoardState = parseFen(START_FEN);
@@ -95,6 +98,7 @@ let lc0Cache: CachedLc0Evaluator | null = null;
 let stockfishLite: StockfishEngine | null = null;
 let stockfishFull: StockfishEngine | null = null;
 let reckless: RecklessEngine | null = null;
+let viridithas: ViridithasEngine | null = null;
 // Lc0 BT4 runs in its own worker (lazy, WebGPU-gated, disposable). See bt4Engine.ts.
 const bt4 = new Bt4WorkerSearcher();
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
@@ -255,6 +259,7 @@ function shortEngineTag(name: string): string {
   if (n.includes('bt4')) return 'BT4';
   if (n.includes('lc0') || n.includes('leela')) return 'Lc0';
   if (n.includes('reckless')) return 'Reck';
+  if (n.includes('viridithas')) return 'Viri';
   if (n.includes('stockfish') || /\bsf\b/.test(n)) return n.includes('lite') ? 'SF-L' : 'SF';
   return name.split(/[\s·|]+/)[0] || name;
 }
@@ -268,6 +273,7 @@ function engineLogoFamily(name: string): string {
   const n = name.toLowerCase();
   if (n.includes('bt4') || n.includes('lc0') || n.includes('leela')) return 'lc0';
   if (n.includes('reckless')) return 'reckless';
+  if (n.includes('viridithas')) return 'viridithas';
   if (n.includes('stockfish') || /\bsf\b/.test(n)) return 'stockfish';
   return '';
 }
@@ -278,7 +284,7 @@ function engineLogoHtml(name: string): string {
 }
 
 async function probeEngineLogos(): Promise<void> {
-  await Promise.all(['lc0', 'stockfish', 'reckless'].map(async (family) => {
+  await Promise.all(['lc0', 'stockfish', 'reckless', 'viridithas'].map(async (family) => {
     try { if ((await fetch(`/engine-logos/${family}.png`, { method: 'HEAD', cache: 'no-store' })).ok) availableEngineLogos.add(family); } catch { /* absent */ }
   }));
   if (availableEngineLogos.size) renderSideLabels();
@@ -431,6 +437,10 @@ function arenaSfDepth(): number {
 
 function arenaRecklessDepth(): number {
   return Math.max(1, Math.min(20, Math.floor(Number(inputEl('recklessDepthInput').value) || 4)));
+}
+
+function arenaViridithasDepth(): number {
+  return Math.max(1, Math.min(20, Math.floor(Number(inputEl('viridithasDepthInput').value) || 6)));
 }
 
 function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): string {
@@ -587,6 +597,10 @@ function recordRecklessOutput(engineId: string, engineName: string, fen: string,
   recordUciOutput(engineId, engineName, 'Reckless', fen, move, lines);
 }
 
+function recordViridithasOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[]): void {
+  recordUciOutput(engineId, engineName, 'Viridithas', fen, move, lines);
+}
+
 function recordEngineThinking(engine: ArenaEngine): void {
   thinkingEngineIds.add(engine.id);
   renderSideLabels();
@@ -698,6 +712,43 @@ function refreshRecklessVariantUi(): void {
   renderRecklessRuntimeInfo();
 }
 
+function availableViridithasVariants(): ViridithasVariant[] {
+  return REQUESTED_VIRIDITHAS_VARIANT.key === 'custom' ? [...VIRIDITHAS_VARIANTS, REQUESTED_VIRIDITHAS_VARIANT] : [...VIRIDITHAS_VARIANTS];
+}
+
+function selectedViridithasVariant(): ViridithasVariant {
+  const key = normalizeViridithasVariant(selectEl('viridithasVariantSelect').value);
+  if (key === 'custom' && REQUESTED_VIRIDITHAS_VARIANT.key === 'custom') return REQUESTED_VIRIDITHAS_VARIANT;
+  return viridithasVariantByKey(key);
+}
+
+function viridithasName(depth: number): string {
+  return `${selectedViridithasVariant().label} d${depth}`;
+}
+
+function renderViridithasRuntimeInfo(): void {
+  const info = el('viridithasRuntimeInfo');
+  const variant = selectedViridithasVariant();
+  const status = viridithas?.runtimeStatus();
+  const mode = viridithas?.runtimeLabel() ?? (canUsePersistentViridithasWasi() ? 'persistent available' : 'one-shot fallback');
+  const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
+  const asset = viridithasVariantAssetStatus(variant);
+  if (asset === 'unknown') void checkViridithasVariantAsset(variant, renderViridithasRuntimeInfo);
+  const assetText = asset === 'ok' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+  info.textContent = `Viridithas: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${status?.wasmUrl ?? variant.wasmUrl}`;
+  if (status?.persistentDisabled) info.textContent += ' · persistent disabled after fallback';
+  if (asset === 'missing') info.textContent += ' · build locally with npm run viridithas:build-wasi or viridithas:build-simd-wasi';
+}
+
+function refreshViridithasVariantUi(): void {
+  const select = selectEl('viridithasVariantSelect');
+  if (!select.options.length) {
+    select.innerHTML = availableViridithasVariants().map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
+  }
+  select.disabled = running;
+  renderViridithasRuntimeInfo();
+}
+
 function refreshStockfishControls(): void {
   inputEl('stockfishThreadsInput').disabled = running || !threadedStockfishAvailable();
   inputEl('stockfishThreadsInput').value = String(stockfishThreads());
@@ -806,6 +857,16 @@ function buildEngines() {
     renderRecklessRuntimeInfo();
     return move;
   };
+  const viridithasMove = (engineId: string): ArenaEngine['move'] => async (positions, signal) => {
+    const depth = arenaViridithasDepth();
+    if (arenaBudgetMode() === 'movetime') viridithas!.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
+    else viridithas!.setOptions({ depth, movetimeMs: undefined });
+    const fen = boardToFen(positions[positions.length - 1]);
+    const move = await viridithas!.bestMove(fen, signal);
+    recordViridithasOutput(engineId, engines.get(engineId)?.name ?? 'Viridithas', fen, move, viridithas!.lastInfo());
+    renderViridithasRuntimeInfo();
+    return move;
+  };
   const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {
     const search = lc0SearcherFor(engineId);
     await search.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
@@ -832,11 +893,18 @@ function buildEngines() {
     await reckless!.bestMove(START_FEN, signal);
     renderRecklessRuntimeInfo();
   };
+  const viridithasWarmup = async (signal: AbortSignal) => {
+    viridithas!.setOptions({ depth: 1, movetimeMs: undefined });
+    await viridithas!.bestMove(START_FEN, signal);
+    await viridithas!.newGame(signal);
+    renderViridithasRuntimeInfo();
+  };
   engines.set('lc0', { id: 'lc0', name: 'Lc0', move: lc0Search('lc0'), warmup: lc0SearchWarmup('lc0') });
   engines.set('lc0-bt4', { id: 'lc0-bt4', name: 'Lc0 BT4', move: lc0Bt4Move('lc0-bt4'), warmup: lc0Bt4Warmup });
   engines.set('sf-lite', { id: 'sf-lite', name: 'Stockfish Lite', move: sf('sf-lite', 'lite'), warmup: stockfishWarmup('lite') });
   engines.set('sf', { id: 'sf', name: 'Stockfish', move: sf('sf', 'full'), warmup: stockfishWarmup('full') });
-  engines.set('reckless', { id: 'reckless', name: 'Reckless', move: recklessMove('reckless'), warmup: recklessWarmup });
+  engines.set('reckless', { id: 'reckless', name: recklessName(arenaRecklessDepth()), move: recklessMove('reckless'), warmup: recklessWarmup });
+  engines.set('viridithas', { id: 'viridithas', name: viridithasName(arenaViridithasDepth()), move: viridithasMove('viridithas'), warmup: viridithasWarmup });
 }
 
 function selectedOpenings(): ArenaOpening[] {
@@ -1021,6 +1089,7 @@ async function startMatch() {
   refreshOpeningPreview();
   refreshStockfishControls();
   refreshRecklessVariantUi();
+  refreshViridithasVariantUi();
   refreshSeatControls();
   games.length = 0;
   activeEngineIds = [];
@@ -1049,6 +1118,7 @@ async function startMatch() {
       // reused across both sides' plies — i.e. self-play when both seats match.
       resetLc0SearchTrees(seatIds);
       if (usesBt4 && bt4.loaded) await bt4.resetTree();
+      if ((whiteEngine.id === 'viridithas' || blackEngine.id === 'viridithas') && viridithas) await viridithas.newGame(abort.signal);
       setBoardSideEngines(whiteEngine.id, whiteEngine.name, blackEngine.id, blackEngine.name);
       el('pairing').textContent = `Game ${i + 1}/${schedule.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
       el('message').textContent = 'Playing…';
@@ -1086,6 +1156,7 @@ async function startMatch() {
     refreshOpeningPreview();
     refreshStockfishControls();
     refreshRecklessVariantUi();
+    refreshViridithasVariantUi();
     refreshSeatControls();
   }
 }
@@ -1115,6 +1186,8 @@ function disposeRuntimeResources(): void {
   disposeStockfish();
   reckless?.dispose();
   reckless = null;
+  viridithas?.dispose();
+  viridithas = null;
   bt4.dispose();
 }
 
@@ -1184,6 +1257,13 @@ function wireEvents() {
   el('lc0RuntimeSelect').addEventListener('change', () => { if (!running) void reloadLc0Evaluator(); });
   el('budgetModeSelect').addEventListener('change', () => resetLc0SearchTrees());
   el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
+  for (const id of ['recklessDepthInput', 'viridithasDepthInput'] as const) {
+    el(id).addEventListener('input', () => {
+      if (running) return;
+      buildEngines();
+      populateSeats();
+    });
+  }
   el('stockfishThreadsInput').addEventListener('input', () => {
     if (running) return;
     inputEl('stockfishThreadsInput').value = String(stockfishThreads());
@@ -1200,6 +1280,15 @@ function wireEvents() {
     populateSeats();
     refreshRecklessVariantUi();
   });
+  el('viridithasVariantSelect').addEventListener('change', () => {
+    if (running) return;
+    viridithas?.dispose();
+    const variant = selectedViridithasVariant();
+    viridithas = new ViridithasEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl);
+    buildEngines();
+    populateSeats();
+    refreshViridithasVariantUi();
+  });
   window.addEventListener('pagehide', (event) => {
     if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
   });
@@ -1210,8 +1299,11 @@ async function init() {
   renderBoard();
   selectEl('lc0RuntimeSelect').value = initialLc0Runtime();
   refreshRecklessVariantUi();
+  refreshViridithasVariantUi();
   selectEl('recklessVariantSelect').value = REQUESTED_RECKLESS_VARIANT.key;
+  selectEl('viridithasVariantSelect').value = REQUESTED_VIRIDITHAS_VARIANT.key;
   renderRecklessRuntimeInfo();
+  renderViridithasRuntimeInfo();
   inputEl('stockfishThreadsInput').value = String(Math.max(1, Math.min(32, Math.floor(Number(params.get('sfThreads') ?? '1') || 1))));
   refreshStockfishControls();
   void renderRuntimeBadge();
@@ -1225,8 +1317,11 @@ async function init() {
   // created lazily in its worker only when selected and WebGPU-gated.
   const variant = selectedRecklessVariant();
   reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, onStatus: renderRecklessRuntimeInfo });
+  const viridithasVariant = selectedViridithasVariant();
+  viridithas = new ViridithasEngine({ depth: 4, hashMb: 16 }, viridithasVariant.wasmUrl);
   prewarmReckless();
   renderRecklessRuntimeInfo();
+  renderViridithasRuntimeInfo();
   await loadLc0Evaluator();
   void renderRuntimeBadge();
 }

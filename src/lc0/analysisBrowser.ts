@@ -16,6 +16,8 @@ import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
 import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
+import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
+import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support } from './bt4Engine.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -28,6 +30,7 @@ const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_U
 type Lc0AnalysisRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads';
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
+const REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantFromParams(params);
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
@@ -179,13 +182,15 @@ function uciShape(uci: string, brush: string): DrawShape | null {
 }
 function multiPv(): number { return Math.max(1, Math.floor(Number(inputEl('multiPvInput').value) || 3)); }
 // Engines to analyze are chosen as an add/remove list of cascading selects:
-// family (Lc0/Stockfish/Reckless) -> variant (Lc0: Small|BT4; SF: Lite|Full;
-// Reckless: variant) -> strength (Lc0 visits, SF/Reckless depth), all per row.
-type EngineFamily = 'lc0' | 'sf' | 'reckless';
+// family (Lc0/Stockfish/Reckless/Viridithas) -> variant (Lc0: Small|BT4;
+// SF: Lite|Full; UCI engines: variant) -> strength (Lc0 visits, UCI depth),
+// all per row.
+type EngineFamily = 'lc0' | 'sf' | 'reckless' | 'viridithas';
 interface EngineRow { family: EngineFamily; variant: string; strength: number; }
 function strengthMeta(family: EngineFamily): { unit: string; min: number; max: number; def: number } {
   if (family === 'lc0') return { unit: 'visits', min: 1, max: 100000, def: 400 };
   if (family === 'sf') return { unit: 'depth', min: 1, max: 30, def: 14 };
+  if (family === 'viridithas') return { unit: 'depth', min: 1, max: 20, def: 8 };
   // Reckless is alpha-beta like Stockfish, so default to the same depth (14).
   return { unit: 'depth', min: 1, max: 30, def: 14 };
 }
@@ -205,9 +210,23 @@ function recklessCacheKey(variant: RecklessVariant): string {
   return `${variant.key}:${variant.wasmUrl}:${variant.nnueUrl ?? ''}`;
 }
 
-// "Add engine" fills the next missing family by priority (Lc0 → SF → Reckless),
-// falling back to the top priority when all families are already present.
-const FAMILY_PRIORITY: EngineFamily[] = ['lc0', 'sf', 'reckless'];
+function availableViridithasVariants(): ViridithasVariant[] {
+  return REQUESTED_VIRIDITHAS_VARIANT.key === 'custom' ? [...VIRIDITHAS_VARIANTS, REQUESTED_VIRIDITHAS_VARIANT] : [...VIRIDITHAS_VARIANTS];
+}
+
+function viridithasVariantForKey(variantKey: string): ViridithasVariant {
+  const key = normalizeViridithasVariant(variantKey);
+  if (key === 'custom' && REQUESTED_VIRIDITHAS_VARIANT.key === 'custom') return REQUESTED_VIRIDITHAS_VARIANT;
+  return viridithasVariantByKey(key);
+}
+
+function viridithasCacheKey(variant: ViridithasVariant): string {
+  return `${variant.key}:${variant.wasmUrl}`;
+}
+
+// "Add engine" fills the next missing family by priority (Lc0 → SF → Reckless
+// → Viridithas), falling back to the top priority when all families are present.
+const FAMILY_PRIORITY: EngineFamily[] = ['lc0', 'sf', 'reckless', 'viridithas'];
 function nextEngineFamily(): EngineFamily {
   const present = new Set(engineRows.map((row) => row.family));
   return FAMILY_PRIORITY.find((family) => !present.has(family)) ?? FAMILY_PRIORITY[0];
@@ -218,16 +237,20 @@ let engineRows: EngineRow[] = [{ family: 'lc0', variant: 'small', strength: 400 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
   if (family === 'lc0') return [{ value: 'small', label: 'Small' }, { value: 'bt4', label: 'BT4', disabled: !bt4SupportedSync() }];
   if (family === 'sf') return [{ value: 'lite', label: 'Lite' }, { value: 'full', label: 'Full' }];
+  if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
   return availableRecklessVariants().map((v) => ({ value: v.key, label: v.label }));
 }
 
 function defaultVariant(family: EngineFamily): string {
-  return family === 'reckless' ? REQUESTED_RECKLESS_VARIANT.key : variantOptions(family)[0].value;
+  if (family === 'reckless') return REQUESTED_RECKLESS_VARIANT.key;
+  if (family === 'viridithas') return REQUESTED_VIRIDITHAS_VARIANT.key;
+  return variantOptions(family)[0].value;
 }
 
 function rowLabel(row: EngineRow): string {
   if (row.family === 'lc0') return row.variant === 'bt4' ? 'Lc0 BT4' : 'Lc0';
   if (row.family === 'sf') return row.variant === 'lite' ? 'SF Lite' : 'SF';
+  if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
   return recklessVariantForKey(row.variant).label;
 }
 
@@ -241,7 +264,7 @@ function usesBt4Row(): boolean {
 }
 
 function renderEngineList(): void {
-  const families: [EngineFamily, string][] = [['lc0', 'Lc0'], ['sf', 'Stockfish'], ['reckless', 'Reckless']];
+  const families: [EngineFamily, string][] = [['lc0', 'Lc0'], ['sf', 'Stockfish'], ['reckless', 'Reckless'], ['viridithas', 'Viridithas']];
   el('engineList').innerHTML = engineRows.map((row, i) => {
     const famSel = families.map(([v, l]) => `<option value="${v}"${row.family === v ? ' selected' : ''}>${l}</option>`).join('');
     const varSel = variantOptions(row.family).map((o) => `<option value="${o.value}"${row.variant === o.value ? ' selected' : ''}${o.disabled ? ' disabled' : ''}>${htmlEscape(o.label)}</option>`).join('');
@@ -268,9 +291,9 @@ async function refreshBt4Availability(): Promise<void> {
 function renderRecklessRuntimeInfo(): void {
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
   const fallbackMode = (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) ? 'persistent available' : 'one-shot fallback';
-  const rows = activeEngineRows().filter((row) => row.family === 'reckless');
-  const variants = rows.length ? rows.map((row) => recklessVariantForKey(row.variant)) : [REQUESTED_RECKLESS_VARIANT];
-  const parts = variants.map((variant) => {
+  const recklessRows = activeEngineRows().filter((row) => row.family === 'reckless');
+  const recklessVariants = recklessRows.length ? recklessRows.map((row) => recklessVariantForKey(row.variant)) : [REQUESTED_RECKLESS_VARIANT];
+  const recklessParts = recklessVariants.map((variant) => {
     const engine = recklessByVariant.get(recklessCacheKey(variant));
     const status = engine?.runtimeStatus();
     const mode = engine?.runtimeLabel() ?? fallbackMode;
@@ -282,7 +305,18 @@ function renderRecklessRuntimeInfo(): void {
     const loadText = formatRecklessBrowserApiLoadStatus(status?.browserApiLoad);
     return `${variant.label} · ${mode} · ${sab} · ${assetText} · ${assetUrlText}${loadText ? ` · ${loadText}` : ''}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, reckless:build-browser-api-simd-external, or reckless:build-lite-wasi' : ''}`;
   });
-  el('recklessRuntimeInfo').textContent = `Reckless: ${parts.join(' | ')}`;
+  const viridithasRows = activeEngineRows().filter((row) => row.family === 'viridithas');
+  const viridithasVariants = viridithasRows.length ? viridithasRows.map((row) => viridithasVariantForKey(row.variant)) : [REQUESTED_VIRIDITHAS_VARIANT];
+  const viridithasParts = viridithasVariants.map((variant) => {
+    const engine = viridithasByVariant.get(viridithasCacheKey(variant));
+    const status = engine?.runtimeStatus();
+    const mode = engine?.runtimeLabel() ?? (canUsePersistentViridithasWasi() ? 'persistent available' : 'one-shot fallback');
+    const asset = viridithasVariantAssetStatus(variant);
+    if (asset === 'unknown') void checkViridithasVariantAsset(variant, renderRecklessRuntimeInfo);
+    const assetText = asset === 'ok' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+    return `${variant.label} · ${mode} · ${sab} · ${assetText} · ${status?.wasmUrl ?? variant.wasmUrl}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}${asset === 'missing' ? ' · build locally with npm run viridithas:build-wasi or viridithas:build-simd-wasi' : ''}`;
+  });
+  el('recklessRuntimeInfo').textContent = `Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')}`;
 }
 
 function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
@@ -296,6 +330,7 @@ function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
 }
 
 const recklessByVariant = new Map<string, RecklessEngine>();
+const viridithasByVariant = new Map<string, ViridithasEngine>();
 function getRecklessFor(variantKey: string): RecklessEngine {
   const variant = recklessVariantForKey(variantKey);
   const key = recklessCacheKey(variant);
@@ -313,13 +348,33 @@ function getRecklessFor(variantKey: string): RecklessEngine {
   return engine;
 }
 
+function getViridithasFor(variantKey: string): ViridithasEngine {
+  const variant = viridithasVariantForKey(variantKey);
+  const key = viridithasCacheKey(variant);
+  let engine = viridithasByVariant.get(key);
+  if (!engine) {
+    engine = new ViridithasEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl);
+    viridithasByVariant.set(key, engine);
+    renderRecklessRuntimeInfo();
+  }
+  return engine;
+}
+
 function disposeUnusedEngines(): void {
   if (!usesBt4Row()) bt4.dispose();
-  const activeRecklessKeys = new Set(activeEngineRows().filter((row) => row.family === 'reckless').map((row) => recklessCacheKey(recklessVariantForKey(row.variant))));
+  const activeRows = activeEngineRows();
+  const activeRecklessKeys = new Set(activeRows.filter((row) => row.family === 'reckless').map((row) => recklessCacheKey(recklessVariantForKey(row.variant))));
   for (const [key, engine] of [...recklessByVariant]) {
     if (!activeRecklessKeys.has(key)) {
       engine.dispose();
       recklessByVariant.delete(key);
+    }
+  }
+  const activeViridithasKeys = new Set(activeRows.filter((row) => row.family === 'viridithas').map((row) => viridithasCacheKey(viridithasVariantForKey(row.variant))));
+  for (const [key, engine] of [...viridithasByVariant]) {
+    if (!activeViridithasKeys.has(key)) {
+      engine.dispose();
+      viridithasByVariant.delete(key);
     }
   }
   renderRecklessRuntimeInfo();
@@ -577,6 +632,12 @@ async function analyzeCurrent() {
         const label = kind === 'lite' ? `SF Lite d${row.strength}` : `SF d${row.strength}`;
         tasks.push(getStockfish(kind).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
           .then((infos) => stockfishAnalysisLines(infos, fen, label)));
+      } else if (row.family === 'viridithas') {
+        const label = `${viridithasVariantForKey(row.variant).label} d${row.strength}`;
+        const engine = getViridithasFor(row.variant);
+        tasks.push(engine.newGame(controller.signal)
+          .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
+          .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       } else {
         const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label} d${row.strength}`;
         tasks.push(getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
@@ -772,6 +833,8 @@ function disposeRuntimeResources(): void {
   stockfishFull = null;
   for (const engine of recklessByVariant.values()) engine.dispose();
   recklessByVariant.clear();
+  for (const engine of viridithasByVariant.values()) engine.dispose();
+  viridithasByVariant.clear();
   void mainEvaluator?.dispose();
   mainEvaluator = null;
   searcher = null;

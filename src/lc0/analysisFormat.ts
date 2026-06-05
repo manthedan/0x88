@@ -75,12 +75,13 @@ const ENGINE_BRUSHES: Record<EngineColorKey, EngineBrushes> = {
   yellow: { primary: 'yellow', alt: 'paleGrey', swatch: '#e68f00' },
 };
 
-/** Stable color family per engine: LC0 green, Stockfish blue, Reckless red, others fall back. */
+/** Stable color family per engine: LC0 green, Stockfish blue, Reckless red, Viridithas yellow. */
 export function engineColorKey(engine: string): EngineColorKey {
   const lower = engine.toLowerCase();
   if (lower.startsWith('lc0')) return 'green';
   if (lower.startsWith('sf') || lower.startsWith('stockfish')) return 'blue';
   if (lower.startsWith('reckless')) return 'red';
+  if (lower.startsWith('viridithas')) return 'yellow';
   return 'yellow';
 }
 

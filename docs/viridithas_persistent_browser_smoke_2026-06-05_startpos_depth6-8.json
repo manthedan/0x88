@@ -1,0 +1,308 @@
+{
+  "runtime": {
+    "generatedAt": "2026-06-05T03:40:03.385Z",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.0.0 Safari/537.36",
+    "url": "http://localhost:5181/reckless-benchmark.html?runtime=fix-info",
+    "crossOriginIsolated": true,
+    "sharedArrayBuffer": true,
+    "persistentAvailable": true,
+    "viridithasPersistentAvailable": true
+  },
+  "config": {
+    "variants": [
+      {
+        "engine": "viridithas",
+        "key": "simd",
+        "label": "Viridithas SIMD experimental",
+        "wasmUrl": "/viridithas/viridithas-simd128.wasm",
+        "note": "Experimental patched Viridithas wasm32-wasip1 build with wasm simd128 NNUE kernels and one-shot, persistent, and batch benchmark modes.",
+        "asset": "ok"
+      }
+    ],
+    "modes": [
+      "persistent",
+      "one-shot"
+    ],
+    "budgets": [
+      {
+        "label": "depth 6",
+        "options": {
+          "depth": 6,
+          "hashMb": 16
+        }
+      },
+      {
+        "label": "depth 8",
+        "options": {
+          "depth": 8,
+          "hashMb": 16
+        }
+      }
+    ],
+    "positions": [
+      {
+        "label": "startpos",
+        "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+      }
+    ],
+    "repeats": 1,
+    "hashMb": 16,
+    "clearHashBetweenRuns": true
+  },
+  "summary": [
+    {
+      "variant": "Viridithas SIMD experimental",
+      "mode": "persistent",
+      "position": "startpos",
+      "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "budget": "depth 6",
+      "coldMs": 7.509999990463257,
+      "warmAvgMs": 3.074999988079071,
+      "warmMinMs": 3.074999988079071,
+      "warmMaxMs": 3.074999988079071,
+      "avgNodes": 1529,
+      "avgNps": 528151,
+      "runs": 2,
+      "wasmUrl": "/viridithas/viridithas-simd128.wasm"
+    },
+    {
+      "variant": "Viridithas SIMD experimental",
+      "mode": "persistent",
+      "position": "startpos",
+      "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "budget": "depth 8",
+      "coldMs": 19.194999992847443,
+      "warmAvgMs": 13.560000002384186,
+      "warmMinMs": 13.560000002384186,
+      "warmMaxMs": 13.560000002384186,
+      "avgNodes": 7149,
+      "avgNps": 533706,
+      "runs": 2,
+      "wasmUrl": "/viridithas/viridithas-simd128.wasm"
+    },
+    {
+      "variant": "Viridithas SIMD experimental",
+      "mode": "one-shot",
+      "position": "startpos",
+      "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "budget": "depth 6",
+      "coldMs": 738.1750000119209,
+      "warmAvgMs": 429.9699999690056,
+      "warmMinMs": 429.9699999690056,
+      "warmMaxMs": 429.9699999690056,
+      "avgNodes": 1529,
+      "avgNps": 456417,
+      "runs": 2,
+      "wasmUrl": "/viridithas/viridithas-simd128.wasm"
+    },
+    {
+      "variant": "Viridithas SIMD experimental",
+      "mode": "one-shot",
+      "position": "startpos",
+      "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "budget": "depth 8",
+      "coldMs": 764.1850000023842,
+      "warmAvgMs": 464.58999997377396,
+      "warmMinMs": 464.58999997377396,
+      "warmMaxMs": 464.58999997377396,
+      "avgNodes": 7149,
+      "avgNps": 481738,
+      "runs": 2,
+      "wasmUrl": "/viridithas/viridithas-simd128.wasm"
+    }
+  ],
+  "rows": [
+    {
+      "variant": "Viridithas SIMD experimental",
+      "mode": "persistent",
+      "position": "startpos",
+      "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "budget": "depth 6",
+      "run": "cold",
+      "wallMs": 7.509999990463257,
+      "bestMove": "d2d4",
+      "depth": 6,
+      "scoreCp": 26,
+      "mateIn": null,
+      "nodes": 1529,
+      "nps": 222886,
+      "pvUci": [
+        "d2d4",
+        "g8f6",
+        "g1f3",
+        "d7d5",
+        "c2c4"
+      ],
+      "runtime": "persistent",
+      "wasmUrl": "/viridithas/viridithas-simd128.wasm"
+    },
+    {
+      "variant": "Viridithas SIMD experimental",
+      "mode": "persistent",
+      "position": "startpos",
+      "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "budget": "depth 6",
+      "run": "warm-1",
+      "wallMs": 3.074999988079071,
+      "bestMove": "d2d4",
+      "depth": 6,
+      "scoreCp": 26,
+      "mateIn": null,
+      "nodes": 1529,
+      "nps": 528151,
+      "pvUci": [
+        "d2d4",
+        "g8f6",
+        "g1f3",
+        "d7d5",
+        "c2c4"
+      ],
+      "runtime": "persistent",
+      "wasmUrl": "/viridithas/viridithas-simd128.wasm"
+    },
+    {
+      "variant": "Viridithas SIMD experimental",
+      "mode": "persistent",
+      "position": "startpos",
+      "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "budget": "depth 8",
+      "run": "cold",
+      "wallMs": 19.194999992847443,
+      "bestMove": "e2e4",
+      "depth": 8,
+      "scoreCp": 23,
+      "mateIn": null,
+      "nodes": 7149,
+      "nps": 385286,
+      "pvUci": [
+        "e2e4",
+        "c7c5",
+        "g1f3",
+        "b8c6",
+        "f1b5"
+      ],
+      "runtime": "persistent",
+      "wasmUrl": "/viridithas/viridithas-simd128.wasm"
+    },
+    {
+      "variant": "Viridithas SIMD experimental",
+      "mode": "persistent",
+      "position": "startpos",
+      "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "budget": "depth 8",
+      "run": "warm-1",
+      "wallMs": 13.560000002384186,
+      "bestMove": "e2e4",
+      "depth": 8,
+      "scoreCp": 23,
+      "mateIn": null,
+      "nodes": 7149,
+      "nps": 533706,
+      "pvUci": [
+        "e2e4",
+        "c7c5",
+        "g1f3",
+        "b8c6",
+        "f1b5"
+      ],
+      "runtime": "persistent",
+      "wasmUrl": "/viridithas/viridithas-simd128.wasm"
+    },
+    {
+      "variant": "Viridithas SIMD experimental",
+      "mode": "one-shot",
+      "position": "startpos",
+      "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "budget": "depth 6",
+      "run": "cold",
+      "wallMs": 738.1750000119209,
+      "bestMove": "d2d4",
+      "depth": 6,
+      "scoreCp": 26,
+      "mateIn": null,
+      "nodes": 1529,
+      "nps": 185558,
+      "pvUci": [
+        "d2d4",
+        "g8f6",
+        "g1f3",
+        "d7d5",
+        "c2c4"
+      ],
+      "runtime": "one-shot forced",
+      "wasmUrl": "/viridithas/viridithas-simd128.wasm"
+    },
+    {
+      "variant": "Viridithas SIMD experimental",
+      "mode": "one-shot",
+      "position": "startpos",
+      "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "budget": "depth 6",
+      "run": "warm-1",
+      "wallMs": 429.9699999690056,
+      "bestMove": "d2d4",
+      "depth": 6,
+      "scoreCp": 26,
+      "mateIn": null,
+      "nodes": 1529,
+      "nps": 456417,
+      "pvUci": [
+        "d2d4",
+        "g8f6",
+        "g1f3",
+        "d7d5",
+        "c2c4"
+      ],
+      "runtime": "one-shot forced",
+      "wasmUrl": "/viridithas/viridithas-simd128.wasm"
+    },
+    {
+      "variant": "Viridithas SIMD experimental",
+      "mode": "one-shot",
+      "position": "startpos",
+      "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "budget": "depth 8",
+      "run": "cold",
+      "wallMs": 764.1850000023842,
+      "bestMove": "e2e4",
+      "depth": 8,
+      "scoreCp": 23,
+      "mateIn": null,
+      "nodes": 7149,
+      "nps": 361517,
+      "pvUci": [
+        "e2e4",
+        "c7c5",
+        "g1f3",
+        "b8c6",
+        "f1b5"
+      ],
+      "runtime": "one-shot forced",
+      "wasmUrl": "/viridithas/viridithas-simd128.wasm"
+    },
+    {
+      "variant": "Viridithas SIMD experimental",
+      "mode": "one-shot",
+      "position": "startpos",
+      "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "budget": "depth 8",
+      "run": "warm-1",
+      "wallMs": 464.58999997377396,
+      "bestMove": "e2e4",
+      "depth": 8,
+      "scoreCp": 23,
+      "mateIn": null,
+      "nodes": 7149,
+      "nps": 481738,
+      "pvUci": [
+        "e2e4",
+        "c7c5",
+        "g1f3",
+        "b8c6",
+        "f1b5"
+      ],
+      "runtime": "one-shot forced",
+      "wasmUrl": "/viridithas/viridithas-simd128.wasm"
+    }
+  ]
+}
