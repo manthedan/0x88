@@ -4634,6 +4634,19 @@ function arrayHasVariation(values: Float32Array<ArrayBufferLike>): boolean {
   return Math.abs(max - min) > 1e-8;
 }
 
+function arrayHasNonzeroAndVariation(values: Float32Array<ArrayBufferLike>): boolean {
+  if (!values.length) return false;
+  let hasNonzero = false;
+  let min = values[0];
+  let max = values[0];
+  for (const value of values) {
+    if (Math.abs(value) > 1e-8) hasNonzero = true;
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  }
+  return hasNonzero && Math.abs(max - min) > 1e-8;
+}
+
 function createU32UniformBuffer(device: DeviceLike, values: number[], usage: number): BufferLike {
   const data = new Uint32Array(4);
   data.set(values.slice(0, 4));
@@ -6502,8 +6515,8 @@ class Lc0WebHybridRuntime {
       const encoderDispatchSyncedMs = nowMs() - encoderStarted;
       const mappedPolicyF32 = fullHeadOutput?.mappedPolicy;
       const wdlF32 = gpuLegalOutput?.wdl ?? fullHeadOutput!.wdl;
-      if (mappedPolicyF32 && (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32))) throw new Error('WGSL hybrid heads produced zero or uniform mapped policy');
-      if (!arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error('WGSL hybrid heads produced zero or uniform WDL');
+      if (mappedPolicyF32 && !arrayHasNonzeroAndVariation(mappedPolicyF32)) throw new Error('WGSL hybrid heads produced zero or uniform mapped policy');
+      if (!arrayHasNonzeroAndVariation(wdlF32)) throw new Error('WGSL hybrid heads produced zero or uniform WDL');
       const mappedPolicy = mappedPolicyF32 ? Array.from(mappedPolicyF32) : [];
       const wdlValues = Array.from(wdlF32);
       const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
@@ -6739,8 +6752,8 @@ class Lc0WebHybridRuntime {
         const wdlF32 = gpuLegalCandidates
           ? readbackFloats.slice(base + WGSL_GPU_LEGAL_OUTPUT_FLOATS, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS + 3)
           : readbackFloats.slice(base + DEFAULT_POLICY_MAPPED_OUTPUTS, base + DEFAULT_POLICY_MAPPED_OUTPUTS + 3);
-        if (mappedPolicyF32 && (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32))) throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy for slot ${i}`);
-        if (!arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform WDL for slot ${i}`);
+        if (mappedPolicyF32 && !arrayHasNonzeroAndVariation(mappedPolicyF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy for slot ${i}`);
+        if (!arrayHasNonzeroAndVariation(wdlF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform WDL for slot ${i}`);
         const mappedPolicy = mappedPolicyF32 ? Array.from(mappedPolicyF32) : [];
         const wdlValues = Array.from(wdlF32);
         const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];

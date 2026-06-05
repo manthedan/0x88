@@ -114,6 +114,9 @@ Prefer small, isolated experiments in this order:
 - Discarded: omitting `mappedPolicy` result arrays in the evaluator search path. It did not improve the fast-loop primary metric and readback wait still dominated.
 - Discarded: replacing batched readback `Float32Array.slice` copies with `subarray` views. The fast-loop metric regressed; do not revisit without a focused CPU-copy microbench.
 - Discarded: opt-in GPU legal priors reduced readback bytes (`7444` -> `3084`) but worsened E2E timing and added a dispatch (`159` -> `160`). Byte reduction alone is not enough if extra GPU work/fence time grows.
+- Discarded: restoring full-buffer copy/early unmap after the suspect no-copy keep regressed in a two-rep check (`13.97` ms/eval). Do not toggle whole-copy vs no-copy again without a more controlled A/B.
+- Discarded: pre-copying per-slot slices and unmapping before legal-prior postprocess also regressed in a two-rep check (`14.03` ms/eval). Mapped lifetime/copy placement is not the next lever.
+- Discarded: compact JS legal-prior readback using one `copyBufferToBuffer` per legal move reduced reported readback bytes dramatically (`7444` -> `~143`) and kept dispatch count flat, but worsened E2E (`12.85` ms/eval). Avoid per-move copy-command gather.
 - Noise note: an unchanged rerun regressed by ~2.4%, so tiny single-run improvements need confirmation before keeping.
 
 Update this section after every few experiments, especially for discarded ideas and benchmark-noise observations.
