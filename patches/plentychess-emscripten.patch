@@ -1,0 +1,266 @@
+diff --git a/src/nnue.cpp b/src/nnue.cpp
+index c380952..cc0f5a9 100644
+--- a/src/nnue.cpp
++++ b/src/nnue.cpp
+@@ -5,0 +6 @@
++#include <cstdlib>
+@@ -13,0 +15 @@
++#ifndef __EMSCRIPTEN__
+@@ -30,0 +33 @@ INCBIN(NETWORK, EVALFILE);
++#endif
+@@ -39,0 +43,24 @@ void initNetworkData() {
++#ifdef __EMSCRIPTEN__
++    std::ifstream netFile(EVALFILE, std::ios::binary | std::ios::ate);
++    if (!netFile) {
++        std::cerr << "Unable to open network file " << EVALFILE << std::endl;
++        std::abort();
++    }
++    std::streamsize netSize = netFile.tellg();
++    netFile.seekg(0, std::ios::beg);
++    size_t requiredBytes = static_cast<size_t>(netSize);
++    size_t paddedBytes = (requiredBytes + ALIGNMENT - 1) / ALIGNMENT * ALIGNMENT;
++    void* netPtr = aligned_alloc(ALIGNMENT, paddedBytes);
++    if (!netPtr) {
++        std::cerr << "Unable to allocate network data" << std::endl;
++        std::abort();
++    }
++    if (!netFile.read(reinterpret_cast<char*>(netPtr), netSize)) {
++        std::cerr << "Unable to read network file " << EVALFILE << std::endl;
++        std::abort();
++    }
++    globalNetworkData = reinterpret_cast<NetworkData*>(netPtr);
++#else
++    globalNetworkData = (NetworkData*)gNETWORKData;
++#endif
++
+@@ -50 +76,0 @@ void initNetworkData() {
+-    globalNetworkData = (NetworkData*)gNETWORKData;
+diff --git a/src/thread.h b/src/thread.h
+index bcd5192..a21d003 100644
+--- a/src/thread.h
++++ b/src/thread.h
+@@ -247,0 +248,15 @@ public:
++#ifdef PLENTY_SYNC_SEARCH
++        if (workers.size() == numThreads)
++            return;
++
++        workers.clear();
++        threads.clear();
++        networkWeights.clear();
++        networkWeights.resize(1);
++        networkWeights[0] = globalNetworkData;
++        workers.resize(numThreads);
++        for (size_t i = 0; i < numThreads; i++) {
++            workers[i] = std::make_unique<Worker>(this, networkWeights[0], i);
++        }
++        return;
++#else
+@@ -303,0 +319 @@ public:
++#endif
+@@ -313,0 +330,9 @@ public:
++#ifdef PLENTY_SYNC_SEARCH
++        for (auto& worker : workers) {
++            worker.get()->rootMoves.clear();
++            worker.get()->stopped.store(false, std::memory_order_relaxed);
++            worker.get()->searching = true;
++            worker.get()->startSearching();
++            worker.get()->searching = false;
++        }
++#else
+@@ -323,0 +349 @@ public:
++#endif
+@@ -332,0 +359 @@ public:
++#ifndef PLENTY_SYNC_SEARCH
+@@ -335,0 +363 @@ public:
++#endif
+@@ -344,0 +373,4 @@ public:
++#ifdef PLENTY_SYNC_SEARCH
++        workers.clear();
++        threads.clear();
++#else
+@@ -347,0 +380,9 @@ public:
++#endif
++    }
++
++    bool isSearching() {
++        for (auto& worker : workers) {
++            if (worker.get()->searching)
++                return true;
++        }
++        return false;
+diff --git a/src/tt.h b/src/tt.h
+index 03a53b8..4313154 100644
+--- a/src/tt.h
++++ b/src/tt.h
+@@ -26 +26 @@ inline void* alignedAlloc(size_t alignment, size_t requiredBytes) {
+-    ptr = std::aligned_alloc(alignment, requiredBytes);
++    ptr = aligned_alloc(alignment, requiredBytes);
+@@ -146,0 +147,3 @@ public:
++#ifdef PLENTY_SYNC_SEARCH
++        std::memset(static_cast<void*>(table), 0, sizeof(TTCluster) * clusterCount);
++#else
+@@ -160,0 +164 @@ public:
++#endif
+diff --git a/src/uci.cpp b/src/uci.cpp
+index ee335cd..83ab077 100644
+--- a/src/uci.cpp
++++ b/src/uci.cpp
+@@ -9,0 +10 @@
++#include <memory>
+@@ -453,0 +455,64 @@ struct printOptions
++static bool processUciCommand(std::string line, Board& board, std::vector<Hash>& boardHistory) {
++    if (matchesToken(line, "quit")) {
++        threads.stopSearching();
++        threads.exit();
++        return false;
++    }
++    else if (matchesToken(line, "stop")) {
++        threads.searchParameters.ponderhit = false;
++        threads.stopSearching();
++    }
++    else if (matchesToken(line, "ponderhit")) {
++        threads.searchParameters.ponderhit = true;
++        threads.stopSearching();
++    }
++    else if (matchesToken(line, "wait")) {
++        threads.waitForSearchFinished();
++    }
++
++    else if (matchesToken(line, "isready")) {
++        threads.waitForSearchFinished();
++        std::cout << "readyok" << std::endl;
++    }
++    else if (matchesToken(line, "ucinewgame")) {
++        threads.resize(UCI::Options.threads.value);
++        TT.resize(UCI::Options.hash.value);
++        threads.ucinewgame();
++        UCI::optionsDirty = false;
++    }
++    else if (matchesToken(line, "uci")) {
++        std::cout << "id name PlentyChess " << static_cast<std::string>(VERSION) << "\nid author Yoshie2000\n" << std::endl;
++        UCI::Options.forEach(printOptions());
++        SPSA::printUCI();
++        std::cout << std::endl << "uciok" << std::endl;
++    }
++    else if (matchesToken(line, "go")) {
++        if (UCI::optionsDirty) {
++            threads.resize(UCI::Options.threads.value);
++            TT.resize(UCI::Options.hash.value);
++            UCI::optionsDirty = false;
++        }
++        go(line, board, boardHistory);
++    }
++    else if (matchesToken(line, "position")) position(line.substr(9), board, boardHistory);
++    else if (matchesToken(line, "setoption")) setoption(line.substr(10));
++
++    /* NON UCI COMMANDS */
++    else if (matchesToken(line, "bench")) bench(board, boardHistory);
++    else if (matchesToken(line, "perfttest")) perfttest(board, boardHistory);
++    else if (matchesToken(line, "debug")) board.debugBoard();
++    else if (matchesToken(line, "eval")) {
++        UCI::nnue.reset(&board);
++        std::cout << UCI::nnue.evaluate(&board) << std::endl;
++    }
++    else if (!line.empty()) std::cout << "Unknown command" << std::endl;
++
++    return true;
++}
++
++#ifdef __EMSCRIPTEN__
++static std::unique_ptr<Board> browserBoard;
++static std::vector<Hash> browserBoardHistory;
++static bool browserReady = false;
++#endif
++
+@@ -486 +550,0 @@ void uciLoop(int argc, char* argv[]) {
+-    for (std::string line = {};std::getline(std::cin, line);) {
+@@ -488,3 +552,7 @@ void uciLoop(int argc, char* argv[]) {
+-        if (matchesToken(line, "quit")) {
+-            threads.stopSearching();
+-            threads.exit();
++#ifdef __EMSCRIPTEN__
++    browserBoard = std::make_unique<Board>(board);
++    browserBoardHistory = boardHistory;
++    browserReady = true;
++#else
++    for (std::string line = {}; std::getline(std::cin, line);) {
++        if (!processUciCommand(line, board, boardHistory))
+@@ -492,49 +559,0 @@ void uciLoop(int argc, char* argv[]) {
+-        }
+-        else if (matchesToken(line, "stop")) {
+-            threads.searchParameters.ponderhit = false;
+-            threads.stopSearching();
+-        }
+-        else if (matchesToken(line, "ponderhit")) {
+-            threads.searchParameters.ponderhit = true;
+-            threads.stopSearching();
+-        }
+-        else if (matchesToken(line, "wait")) {
+-            threads.waitForSearchFinished();
+-        }
+-
+-        else if (matchesToken(line, "isready")) {
+-            threads.waitForSearchFinished();
+-            std::cout << "readyok" << std::endl;
+-        }
+-        else if (matchesToken(line, "ucinewgame")) {
+-            threads.resize(UCI::Options.threads.value);
+-            TT.resize(UCI::Options.hash.value);
+-            threads.ucinewgame();
+-            UCI::optionsDirty = false;
+-        }
+-        else if (matchesToken(line, "uci")) {
+-            std::cout << "id name PlentyChess " << static_cast<std::string>(VERSION) << "\nid author Yoshie2000\n" << std::endl;
+-            UCI::Options.forEach(printOptions());
+-            SPSA::printUCI();
+-            std::cout << std::endl << "uciok" << std::endl;
+-        }
+-        else if (matchesToken(line, "go")) {
+-            if (UCI::optionsDirty) {
+-                threads.resize(UCI::Options.threads.value);
+-                TT.resize(UCI::Options.hash.value);
+-                UCI::optionsDirty = false;
+-            }
+-            go(line, board, boardHistory);
+-        }
+-        else if (matchesToken(line, "position")) position(line.substr(9), board, boardHistory);
+-        else if (matchesToken(line, "setoption")) setoption(line.substr(10));
+-
+-        /* NON UCI COMMANDS */
+-        else if (matchesToken(line, "bench")) bench(board, boardHistory);
+-        else if (matchesToken(line, "perfttest")) perfttest(board, boardHistory);
+-        else if (matchesToken(line, "debug")) board.debugBoard();
+-        else if (matchesToken(line, "eval")) {
+-            UCI::nnue.reset(&board);
+-            std::cout << UCI::nnue.evaluate(&board) << std::endl;
+-        }
+-        else std::cout << "Unknown command" << std::endl;
+@@ -543,0 +563,12 @@ void uciLoop(int argc, char* argv[]) {
++#endif
++}
++
++#ifdef __EMSCRIPTEN__
++extern "C" void command(const char* rawCommand) {
++    if (!browserReady)
++        return;
++    processUciCommand(rawCommand ? std::string(rawCommand) : std::string(), *browserBoard, browserBoardHistory);
++}
++
++extern "C" bool isReady() {
++    return browserReady;
+@@ -544,0 +576,5 @@ void uciLoop(int argc, char* argv[]) {
++
++extern "C" bool isSearching() {
++    return threads.isSearching();
++}
++#endif
+diff --git a/src/uci.h b/src/uci.h
+index 9792653..1058d22 100644
+--- a/src/uci.h
++++ b/src/uci.h
+@@ -82,0 +83,3 @@ namespace UCI {
++#ifdef PLENTY_SYNC_SEARCH
++            1
++#else
+@@ -83,0 +87 @@ namespace UCI {
++#endif

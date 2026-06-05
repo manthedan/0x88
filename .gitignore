@@ -38,6 +38,15 @@ public/berserk/*.wasm
 public/berserk/*.nn
 public/berserk/*.nnue
 public/berserk/*corresponding-source*.tar.gz
+public/plentychess/*.js
+public/plentychess/*.cjs
+public/plentychess/*.data
+public/plentychess/*.worker.js
+public/plentychess/*.wasm
+public/plentychess/*.bin
+public/plentychess/*.nn
+public/plentychess/*.nnue
+public/plentychess/*corresponding-source*.tar.gz
 rust/**/target/
 node_modules/
 __pycache__/

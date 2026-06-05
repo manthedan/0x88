@@ -103,6 +103,8 @@
     "viridithas:smoke": "node scripts/viridithas_wasi_smoke.mjs --wasm public/viridithas/viridithas-simd128.wasm --depth 2 --repeat 2",
     "berserk:build-emscripten": "node scripts/build_berserk_emscripten.mjs",
     "berserk:smoke-emscripten": "node scripts/berserk_emscripten_smoke.mjs --js public/berserk/berserk-emscripten.js --depth 1",
+    "plentychess:build-emscripten": "node scripts/build_plentychess_emscripten.mjs",
+    "plentychess:smoke-emscripten": "node scripts/plentychess_emscripten_smoke.mjs --js public/plentychess/plentychess-emscripten.js --depth 1",
     "lc0:battle": "node --experimental-strip-types scripts/lc0_engine_battle.mjs",
     "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs"
   },
