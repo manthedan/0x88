@@ -5225,6 +5225,16 @@ function legalPolicyCandidates(board: BoardState): LegalPolicyCandidate[] {
   });
 }
 
+function legalPolicyPriorsFromCandidates(candidates: LegalPolicyCandidate[], logits: ArrayLike<number>, policyTemperature: number): Lc0Evaluation['legalPriors'] {
+  if (!candidates.length) return [];
+  const legal = candidates.map((entry) => ({ ...entry, logit: Number(logits[entry.index]) / policyTemperature }));
+  const max = Math.max(...legal.map((entry) => entry.logit));
+  const sum = legal.reduce((acc, entry) => acc + Math.exp(entry.logit - max), 0);
+  return legal
+    .map((entry) => ({ ...entry, prior: Math.exp(entry.logit - max) / sum }))
+    .sort((a, b) => b.prior - a.prior);
+}
+
 type WgslPolicyValueHeadRuntime = {
   densePipeline: PipelineLike;
   policyLogitsPipeline: PipelineLike;
@@ -5514,6 +5524,10 @@ export interface Lc0WebHybridTimingBreakdown {
   readbackMapAsyncMs?: number;
   /** CPU time to copy the mapped readback range and unmap it. */
   readbackMapCopyMs?: number;
+  /** CPU legal-move/index preparation run after queue submission and before mapAsync, so GPU work can overlap it. */
+  legalPriorsPrepMs?: number;
+  /** CPU work intentionally scheduled between queue submission and mapAsync to hide under GPU/readback latency. */
+  readbackOverlapCpuMs?: number;
   physicalBatchSize?: number;
   batchPosition?: number;
   inputBackend?: Lc0WebHybridInputBackend;
@@ -5905,7 +5919,9 @@ interface SubmittedWgslHybridBatch {
   inputs: Lc0EvaluatorInput[];
   boardsAndFens: Array<ReturnType<typeof currentBoardAndFen>>;
   legalCandidates?: LegalPolicyCandidate[][];
+  jsLegalCandidates?: LegalPolicyCandidate[][];
   legalPriorsSetupMs?: number;
+  legalPriorsPrepMs?: number;
   readbackBuffer: BufferLike;
   sequenceId: number;
   batchSequenceIndex?: number;
@@ -6633,16 +6649,26 @@ class Lc0WebHybridRuntime {
     const queueSubmitStarted = nowMs();
     this.device.queue.submit([commandBuffer]);
     const queueSubmitMs = nowMs() - queueSubmitStarted;
+    const submittedAt = nowMs();
+    let jsLegalCandidates: LegalPolicyCandidate[][] | undefined;
+    let legalPriorsPrepMs: number | undefined;
+    if (this.legalPriorsBackend === 'js') {
+      const legalPriorsPrepStarted = nowMs();
+      jsLegalCandidates = boardsAndFens.map(({ board }) => legalPolicyCandidates(board));
+      legalPriorsPrepMs = nowMs() - legalPriorsPrepStarted;
+    }
     return {
       inputs,
       boardsAndFens,
       legalCandidates,
+      jsLegalCandidates,
       legalPriorsSetupMs,
+      legalPriorsPrepMs,
       readbackBuffer,
       sequenceId: this.nextWgslSequenceId++,
       batchSequenceIndex: sequenceOptions.batchSequenceIndex,
       deferredReadbackSlot: sequenceOptions.deferredReadbackSlot,
-      submittedAt: nowMs(),
+      submittedAt,
       totalStarted,
       encoderStarted,
       inputBuildMs,
@@ -6692,9 +6718,16 @@ class Lc0WebHybridRuntime {
         const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
         const legalPriorsStarted = nowMs();
         const legalPriorsSetupMs = gpuLegalCandidates ? (submitted.legalPriorsSetupMs ?? 0) / submitted.inputs.length : 0;
+        const legalPriorsPrepMs = submitted.jsLegalCandidates ? (submitted.legalPriorsPrepMs ?? 0) / submitted.inputs.length : 0;
+        const jsLegalCandidates = submitted.jsLegalCandidates?.[i];
         const legalPriorsResult = gpuLegalCandidates
           ? { legalPriors: legalPriorsFromGpuOutput(gpuLegalCandidates, readbackFloats.slice(base, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS)), bestMove: undefined as string | undefined, legalPriorsMs: legalPriorsSetupMs + (nowMs() - legalPriorsStarted), wasmTiming: undefined }
-          : this.computeLegalPriors(submitted.boardsAndFens[i].board, submitted.boardsAndFens[i].fen, mappedPolicy, options.policyTemperature);
+          : jsLegalCandidates
+            ? (() => {
+                const legalPriors = legalPolicyPriorsFromCandidates(jsLegalCandidates, mappedPolicy, options.policyTemperature);
+                return { legalPriors, bestMove: legalPriors[0]?.uci, legalPriorsMs: legalPriorsPrepMs + (nowMs() - legalPriorsStarted), wasmTiming: undefined };
+              })()
+            : this.computeLegalPriors(submitted.boardsAndFens[i].board, submitted.boardsAndFens[i].fen, mappedPolicy, options.policyTemperature);
         const legalPriors = legalPriorsResult.legalPriors;
         const bestMove = gpuLegalCandidates ? legalPriors[0]?.uci : legalPriorsResult.bestMove;
         const { legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = legalPriorsResult;
@@ -6733,6 +6766,7 @@ class Lc0WebHybridRuntime {
             deferredReadbackDelayMs,
             readbackMapAsyncMs,
             readbackMapCopyMs,
+            ...(submitted.legalPriorsPrepMs !== undefined ? { legalPriorsPrepMs, readbackOverlapCpuMs: legalPriorsPrepMs } : {}),
             physicalBatchSize: submitted.inputs.length,
             batchPosition: i,
             inputBackend: this.inputBackend,
@@ -6874,7 +6908,7 @@ function mean(values: number[]): number {
 
 function summarizeHybridEvaluations(mode: 'immediate' | 'deferred-double-buffered', wallMs: number, batches: Lc0WebHybridEvaluationResult[][]): Lc0WebWgslDeferredReadbackBenchModeResult {
   const flat = batches.flat();
-  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount'];
+  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsPrepMs', 'readbackOverlapCpuMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount'];
   const physicalBatchScopedKeys = new Set<keyof Lc0WebHybridTimingBreakdown>(['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount']);
   const timingMeans: Partial<Record<keyof Lc0WebHybridTimingBreakdown, number>> = {};
   for (const key of timingKeys) {
