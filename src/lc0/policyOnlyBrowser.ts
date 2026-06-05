@@ -722,6 +722,7 @@ const QKV_BENCH_REQUESTED = params.get('qkvBench') === '1' || params.get('qkvBen
 const QKV_PROBE_REQUESTED = params.get('qkvProbe') === '1';
 const ORT_OP_BENCH_REQUESTED = params.get('ortOpBench') === '1' || params.get('ortBench') === '1';
 const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('kernelBenchmark') === '1' || params.get('wgslBench') === '1';
+const SHADER_F16_PROBE_REQUESTED = params.get('shaderF16Probe') === '1' || params.get('shader-f16-probe') === '1';
 const KERNEL_PROBE_REQUESTED = MAPPED_POLICY_PROBE_REQUESTED || WGSL_HEADS_PROBE_REQUESTED || WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED || ENCODER_STACK_BENCH_REQUESTED || ENCODER0_BLOCK_ORT_BENCH_REQUESTED || ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_ORT_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_ORT_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
@@ -1288,6 +1289,92 @@ function renderBenchmarkResult(result: EvalBenchResult) {
   };
   el('benchResult').textContent = JSON.stringify(rounded);
   el('message').textContent = `BENCH_DONE ${rounded.iterations} evals · avg ${rounded.avgMs.toFixed(1)} ms · ${rounded.evalsPerSecond.toFixed(2)} eval/s · ${rounded.backend}`;
+}
+
+async function runShaderF16Probe(): Promise<void> {
+  el('benchResult').textContent = 'SHADER_F16_PROBE_RUNNING';
+  setBusy(true, 'Probing WebGPU shader-f16 feature support…');
+  const started = performance.now();
+  const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
+  const maxAbsError = (actual: Float32Array, expected: number[]) => Math.max(0, ...expected.map((value, index) => Math.abs((actual[index] ?? NaN) - value)));
+  try {
+    if (!gpu) {
+      const result = { status: 'SHADER_F16_PROBE_DONE', shaderF16Supported: false, reason: 'navigator.gpu unavailable', maxAbsError: 0, elapsedMs: roundReportMs(performance.now() - started) };
+      el('benchResult').textContent = JSON.stringify(result);
+      el('message').textContent = 'SHADER_F16_PROBE_DONE unavailable: no navigator.gpu';
+      return;
+    }
+    const adapter = await gpu.requestAdapter() as { features?: Iterable<string> & { has?: (feature: string) => boolean }; requestDevice: (descriptor?: Record<string, unknown>) => Promise<unknown>; info?: Record<string, unknown> } | null;
+    if (!adapter) {
+      const result = { status: 'SHADER_F16_PROBE_DONE', shaderF16Supported: false, reason: 'WebGPU adapter unavailable', maxAbsError: 0, elapsedMs: roundReportMs(performance.now() - started) };
+      el('benchResult').textContent = JSON.stringify(result);
+      el('message').textContent = 'SHADER_F16_PROBE_DONE unavailable: no WebGPU adapter';
+      return;
+    }
+    const adapterFeatures = adapter.features ? Array.from(adapter.features).map(String).sort() : [];
+    const shaderF16Supported = adapter.features?.has?.('shader-f16') ?? adapterFeatures.includes('shader-f16');
+    if (!shaderF16Supported) {
+      const result = { status: 'SHADER_F16_PROBE_DONE', shaderF16Supported: false, adapterFeatures, adapterInfo: adapter.info, reason: 'adapter does not advertise shader-f16', maxAbsError: 0, elapsedMs: roundReportMs(performance.now() - started) };
+      el('benchResult').textContent = JSON.stringify(result);
+      el('message').textContent = 'SHADER_F16_PROBE_DONE unsupported on this adapter';
+      return;
+    }
+    const device = await adapter.requestDevice({ requiredFeatures: ['shader-f16'] }) as any;
+    const bufferUsage = (globalThis as any).GPUBufferUsage;
+    const mapMode = (globalThis as any).GPUMapMode;
+    const outputBuffer = device.createBuffer({ size: 16, usage: bufferUsage.STORAGE | bufferUsage.COPY_SRC });
+    const readbackBuffer = device.createBuffer({ size: 16, usage: bufferUsage.MAP_READ | bufferUsage.COPY_DST });
+    try {
+      const shader = `enable f16;
+@group(0) @binding(0) var<storage, read_write> output: array<f32>;
+@compute @workgroup_size(1)
+fn main() {
+  let a = vec4<f16>(f16(1.5), f16(-2.0), f16(0.25), f16(4.0));
+  let b = vec4<f16>(f16(2.0), f16(-0.5), f16(8.0), f16(0.125));
+  let c = a * b + vec4<f16>(f16(0.5), f16(-1.0), f16(0.25), f16(1.0));
+  output[0] = f32(c.x);
+  output[1] = f32(c.y);
+  output[2] = f32(c.z);
+  output[3] = f32(c.w);
+}`;
+      const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0 shader-f16 feature probe', code: shader }), entryPoint: 'main' } });
+      const bindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: outputBuffer } }] });
+      const encoder = device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(1);
+      pass.end();
+      encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, 16);
+      device.queue.submit([encoder.finish()]);
+      await readbackBuffer.mapAsync(mapMode.READ);
+      const actual = new Float32Array(readbackBuffer.getMappedRange().slice(0));
+      readbackBuffer.unmap();
+      const expected = [3.5, 0, 2.25, 1.5];
+      const result = {
+        status: 'SHADER_F16_PROBE_DONE',
+        shaderF16Supported: true,
+        adapterFeatures,
+        adapterInfo: adapter.info,
+        expected,
+        actual: Array.from(actual).map((value) => Number(value.toFixed(6))),
+        maxAbsError: maxAbsError(actual, expected),
+        elapsedMs: roundReportMs(performance.now() - started),
+      };
+      el('benchResult').textContent = JSON.stringify(result);
+      el('message').textContent = `SHADER_F16_PROBE_DONE supported · max error ${result.maxAbsError}`;
+    } finally {
+      outputBuffer.destroy();
+      readbackBuffer.destroy();
+      device.destroy?.();
+    }
+  } catch (error) {
+    el('benchResult').textContent = `SHADER_F16_PROBE_FAILED ${(error as Error).message}`;
+    el('message').textContent = `shader-f16 probe failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function runPackProbe(): Promise<void> {
@@ -3532,9 +3619,17 @@ async function init() {
   window.addEventListener('pagehide', (event) => {
     if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
   });
-  el('message').textContent = PACK_PROBE_REQUESTED ? 'Preparing dedicated worker for lc0web pack probe…' : WORKER_ONLY_MODEL ? 'Loading LC0 model in dedicated worker…' : 'Loading LC0 ONNX model…';
+  el('message').textContent = SHADER_F16_PROBE_REQUESTED ? 'Preparing WebGPU shader-f16 probe…' : PACK_PROBE_REQUESTED ? 'Preparing dedicated worker for lc0web pack probe…' : WORKER_ONLY_MODEL ? 'Loading LC0 model in dedicated worker…' : 'Loading LC0 ONNX model…';
   renderStatic();
   try {
+    if (SHADER_F16_PROBE_REQUESTED) {
+      mainModelCacheStatus = 'shader-f16 feature probe (no model loaded)';
+      workerModelCacheStatus = 'not used';
+      el('backend').textContent = 'webgpu-shader-f16-probe';
+      renderStatic();
+      await runShaderF16Probe();
+      return;
+    }
     if (PACK_PROBE_REQUESTED) {
       mainModelCacheStatus = 'pack-probe worker-only (no ONNX session)';
       workerModelCacheStatus = 'pack shards worker-owned';

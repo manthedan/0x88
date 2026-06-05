@@ -9,6 +9,12 @@ const DEFAULT_MAX_ERROR = 1e-3;
 
 const SMOKES = [
   {
+    name: 'shader-f16-probe',
+    query: 'shaderF16Probe=1',
+    doneText: 'SHADER_F16_PROBE_DONE',
+    default: false,
+  },
+  {
     name: 'softmax',
     query: 'softmaxBench=1&softmaxWarmup=1&softmaxIters=3&packVerify=0',
     doneText: 'SOFTMAX_BENCH_DONE',
@@ -306,6 +312,8 @@ async function runSmoke(args, baseUrl, smoke) {
     smoke: smoke.name,
     status: result.status,
     maxAbsError: error,
+    shaderF16Supported: result.shaderF16Supported ?? null,
+    reason: result.reason ?? null,
     iterations: result.iterations ?? null,
     readbackSyncedMs: result.readbackSyncedMs ?? null,
     gpuTimestampSupported: result.gpuTimestampSupported ?? null,
