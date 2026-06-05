@@ -9,7 +9,7 @@ const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 480_000;
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_lifecycle_smoke.mjs [options]\n\nRuns repeated browser/WebGPU WGSL-head deferred-readback lifecycle cycles. Each cycle asks the worker to create a fresh hybrid runtime, exercise physical WGSL batch buffers plus deferred double-buffer readback, destroy the runtime, and report browser memory samples when available.\n\nOptions:\n  --out PATH            Write full JSON artifact\n  --base-url URL        Use an existing dev server\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST           Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --session NAME        agent-browser session name\n  --timeout MS          Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --cycles N            Runtime create/exercise/destroy cycles (default 3)\n  --layers N            Encoder layers for hybrid path (default 10)\n  --input-backend MODE  js, wgsl, or wasm input path (default js)\n  --legal-priors-backend MODE\n                       Legal-prior backend: js, wasm, or gpu (default js; gpu is opt-in)\n  --batch N             Physical WGSL batch size (default 4)\n  --iters N             Timed batches per immediate/deferred mode and cycle (default 4)\n  --warmup N            Warmup batches per mode and cycle (default 1)\n  --fixture-limit N     Representative fixtures per cycle (default 4)\n  --pause-ms N          Pause between cycles (default 0)\n  --pack-verify         Enable shard sha256 verification (default skipped for smoke speed)\n  --allow-mismatches    Exit 0 even if any immediate/deferred best moves differ\n  --no-server           Do not auto-start Vite\n  --dry-run             Print URL and exit\n  -h, --help            Show this help\n`);
+  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_lifecycle_smoke.mjs [options]\n\nRuns repeated browser/WebGPU WGSL-head deferred-readback lifecycle cycles. Each cycle asks the worker to create a fresh hybrid runtime, exercise physical WGSL batch buffers plus deferred double-buffer readback, destroy the runtime, and report browser memory samples when available.\n\nOptions:\n  --out PATH            Write full JSON artifact\n  --base-url URL        Use an existing dev server\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST           Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --session NAME        agent-browser session name\n  --timeout MS          Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --cycles N            Runtime create/exercise/destroy cycles (default 3)\n  --layers N            Encoder layers for hybrid path (default 10)\n  --input-backend MODE  js, wgsl, or wasm input path (default js)\n  --legal-priors-backend MODE\n                       Legal-prior backend: js, wasm, or gpu (default js; gpu is opt-in)\n  --batch N             Physical WGSL batch size (default 4)\n  --iters N             Timed batches per immediate/deferred mode and cycle (default 4)\n  --warmup N            Warmup batches per mode and cycle (default 1)\n  --fixture-limit N     Representative fixtures per cycle (default 4)\n  --pause-ms N          Pause between cycles (default 0)\n  --pack-verify         Enable shard sha256 verification (default skipped for smoke speed)\n  --allow-mismatches    Exit 0 even if any immediate/deferred best moves differ\n  --skip-leak-check     Skip final browser/process leak check\n  --no-server           Do not auto-start Vite\n  --dry-run             Print URL and exit\n  -h, --help            Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -30,6 +30,7 @@ function parseArgs(argv) {
     pauseMs: 0,
     packVerify: false,
     allowMismatches: false,
+    skipLeakCheck: false,
     noServer: false,
     dryRun: false,
     explicitBaseUrl: false,
@@ -58,6 +59,7 @@ function parseArgs(argv) {
     else if (arg === '--pause-ms') args.pauseMs = Number(next());
     else if (arg === '--pack-verify') args.packVerify = true;
     else if (arg === '--allow-mismatches') args.allowMismatches = true;
+    else if (arg === '--skip-leak-check') args.skipLeakCheck = true;
     else if (arg === '--no-server') args.noServer = true;
     else if (arg === '--dry-run') args.dryRun = true;
     else if (arg === '-h' || arg === '--help') args.help = true;
@@ -139,12 +141,58 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
   throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
 }
 
+function spawnCapture(command, commandArgs, options = {}) {
+  return new Promise((resolve, reject) => {
+    const { timeoutMs, echoStderr, ...spawnOptions } = options;
+    const child = spawn(command, commandArgs, { stdio: ['ignore', 'pipe', 'pipe'], ...spawnOptions });
+    const chunks = { stdout: [], stderr: [] };
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      fn(value);
+    };
+    const timer = timeoutMs ? setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(reject, new Error(`${command} ${commandArgs.join(' ')} timed out after ${timeoutMs}ms`));
+    }, timeoutMs) : undefined;
+    child.stdout.on('data', (chunk) => chunks.stdout.push(chunk));
+    child.stderr.on('data', (chunk) => {
+      chunks.stderr.push(chunk);
+      if (echoStderr) process.stderr.write(chunk);
+    });
+    child.on('error', (error) => finish(reject, error));
+    child.on('close', (status) => {
+      const stdout = Buffer.concat(chunks.stdout).toString('utf8');
+      const stderr = Buffer.concat(chunks.stderr).toString('utf8');
+      if (status !== 0) return finish(reject, new Error(`${command} ${commandArgs.join(' ')} failed with ${status}: ${stderr || stdout}`));
+      finish(resolve, { stdout, stderr });
+    });
+  });
+}
+
 function startServer(args) {
   if (args.noServer) return null;
-  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
   server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
   return server;
+}
+
+async function leakCheck(args, options = {}) {
+  await runAgent(args, ['close', '--all'], 10_000).catch((error) => process.stderr.write(`[lc0-wgsl-lifecycle] warning: close --all failed: ${error.message ?? error}\n`));
+  const cleanupPatterns = ['agent-browser/bin/agent-browser', 'Google Chrome for Testing'];
+  if (options.checkVite !== false) cleanupPatterns.push(`vite .*${args.port}`);
+  for (const pattern of cleanupPatterns) await spawnCapture('pkill', ['-f', pattern], { timeoutMs: 10_000 }).catch(() => undefined);
+  await delay(1000);
+  const { stdout } = await spawnCapture('ps', ['-axo', 'pid,rss,command'], { timeoutMs: 10_000 });
+  const pattern = options.checkVite === false
+    ? /Google Chrome for Testing|agent-browser|lc0_browser_wgsl_lifecycle|lc0-policy-only/
+    : new RegExp(`Google Chrome for Testing|agent-browser|vite .*${args.port}|lc0_browser_wgsl_lifecycle|lc0-policy-only`);
+  const leaks = stdout.split('\n').filter((line) => pattern.test(line) && !/lc0_browser_wgsl_lifecycle_smoke|npm run lc0:browser-wgsl-lifecycle-smoke/.test(line));
+  if (leaks.length) throw new Error(`WGSL lifecycle browser/process leak check failed:\n${leaks.join('\n')}`);
+  return { status: 'LC0_WGSL_LIFECYCLE_LEAK_CHECK_CLEAN' };
 }
 
 function textFromGetResult(result) {
@@ -182,28 +230,39 @@ async function main() {
   if (args.help) return usage();
   if (args.dryRun) { console.log(lifecycleUrl(args)); return; }
   const server = startServer(args);
+  let result;
+  let runError;
   try {
     await waitForServer(args.baseUrl);
-    const result = await runBrowserLifecycle(args);
-    if (args.out) {
-      await mkdir(dirname(args.out), { recursive: true });
-      await writeFile(args.out, JSON.stringify(result, null, 2));
-    }
-    const summary = {
-      status: result.status,
-      out: args.out,
-      cycles: result.cycles,
-      inputCount: result.inputCount,
-      allCyclesBestMovesMatch: result.allCyclesBestMovesMatch,
-      failedCycles: result.failedCycles,
-      lastImmediateEvalsPerSecond: result.cycleResults?.at(-1)?.immediate?.evalsPerSecond,
-      lastDeferredEvalsPerSecond: result.cycleResults?.at(-1)?.deferred?.evalsPerSecond,
-    };
-    console.log(JSON.stringify(summary, null, 2));
-    if (!args.allowMismatches && !result.allCyclesBestMovesMatch) {
-      throw new Error(`WGSL deferred-readback lifecycle best-move mismatch in cycles: ${result.failedCycles?.join(',') || 'unknown'}; pass --allow-mismatches for artifact capture`);
-    }
-  } finally { server?.kill('SIGTERM'); }
+    result = await runBrowserLifecycle(args);
+  } catch (error) {
+    runError = error;
+  } finally {
+    server?.kill('SIGTERM');
+    if (server) await delay(1000);
+  }
+  const leak = args.skipLeakCheck ? { status: 'LC0_WGSL_LIFECYCLE_LEAK_CHECK_SKIPPED' } : await leakCheck(args, { checkVite: !args.noServer });
+  if (runError) throw runError;
+  const artifact = { ...result, leak };
+  if (args.out) {
+    await mkdir(dirname(args.out), { recursive: true });
+    await writeFile(args.out, JSON.stringify(artifact, null, 2));
+  }
+  const summary = {
+    status: artifact.status,
+    out: args.out,
+    cycles: artifact.cycles,
+    inputCount: artifact.inputCount,
+    allCyclesBestMovesMatch: artifact.allCyclesBestMovesMatch,
+    failedCycles: artifact.failedCycles,
+    lastImmediateEvalsPerSecond: artifact.cycleResults?.at(-1)?.immediate?.evalsPerSecond,
+    lastDeferredEvalsPerSecond: artifact.cycleResults?.at(-1)?.deferred?.evalsPerSecond,
+    leak: artifact.leak?.status,
+  };
+  console.log(JSON.stringify(summary, null, 2));
+  if (!args.allowMismatches && !artifact.allCyclesBestMovesMatch) {
+    throw new Error(`WGSL deferred-readback lifecycle best-move mismatch in cycles: ${artifact.failedCycles?.join(',') || 'unknown'}; pass --allow-mismatches for artifact capture`);
+  }
 }
 
 main().catch((error) => { console.error(error.stack ?? error.message); process.exit(1); });

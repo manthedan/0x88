@@ -2782,6 +2782,29 @@ function nativeSearchInput(record: NativeRecord): Lc0EvaluatorInput {
   return record.fen;
 }
 
+function rootVisitShare(children: Lc0SearchChild[]): Map<string, number> {
+  const total = children.reduce((sum, child) => sum + Math.max(0, child.visits), 0);
+  const denom = total > 0 ? total : 1;
+  return new Map(children.map((child) => [child.uci, Math.max(0, child.visits) / denom]));
+}
+
+function rootVisitDistributionL1(a: Lc0SearchChild[] | undefined, b: Lc0SearchChild[] | undefined): number | undefined {
+  if (!a || !b) return undefined;
+  const aa = rootVisitShare(a);
+  const bb = rootVisitShare(b);
+  const ucis = new Set([...aa.keys(), ...bb.keys()]);
+  let l1 = 0;
+  for (const uci of ucis) l1 += Math.abs((aa.get(uci) ?? 0) - (bb.get(uci) ?? 0));
+  return Number(l1.toFixed(6));
+}
+
+function rootTopVisitShare(children: Lc0SearchChild[]): number | undefined {
+  const total = children.reduce((sum, child) => sum + Math.max(0, child.visits), 0);
+  if (total <= 0) return undefined;
+  const top = children.reduce((max, child) => Math.max(max, child.visits), 0);
+  return Number((top / total).toFixed(6));
+}
+
 async function runHybridSearchFixtureParity(): Promise<void> {
   if (!searchWorkerReady) throw new Error('hybrid search fixture parity requires ready LC0 worker');
   const visitsList = queryIntList(['searchFixtureVisits', 'fixtureVisits', 'visitsList', 'visits'], [32], 1, 100000);
@@ -2791,7 +2814,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
   const fixtureLimit = boundedQueryInt(['fixtureLimit', 'fixtures'], 16, 1, 16);
   const batchSize = searchBatchSize;
   const cells = [];
-  const depthBaselines = new Map<string, string | undefined>();
+  const depthBaselines = new Map<string, { bestMove: string | undefined; children: Lc0SearchChild[] }>();
   setBusy(true, `Running hybrid search fixture parity: visits ${visitsList.join(',')} · depths ${depths.join(',')} · ${fixtureLimit} fixtures…`);
   el('benchResult').textContent = 'HYBRID_SEARCH_FIXTURE_PARITY_RUNNING';
   try {
@@ -2815,8 +2838,9 @@ async function runHybridSearchFixtureParity(): Promise<void> {
             });
             const result = response.result;
             const baselineKey = `${visits}\t${record.id}\t${repeat}`;
-            if (depth === 1) depthBaselines.set(baselineKey, result.move);
-            const depthBaselineBestMove = depthBaselines.get(baselineKey);
+            if (depth === 1) depthBaselines.set(baselineKey, { bestMove: result.move, children: result.children });
+            const depthBaseline = depthBaselines.get(baselineKey);
+            const depthBaselineBestMove = depthBaseline?.bestMove;
             cells.push({
               visits,
               batchSize,
@@ -2829,6 +2853,9 @@ async function runHybridSearchFixtureParity(): Promise<void> {
               matchesNative: result.move === expectedNativeBestMove,
               depthBaselineBestMove,
               matchesDepthBaseline: result.move === depthBaselineBestMove,
+              depthBaselineVisitL1: rootVisitDistributionL1(result.children, depthBaseline?.children),
+              topVisitShare: rootTopVisitShare(result.children),
+              depthBaselineTopVisitShare: depthBaseline ? rootTopVisitShare(depthBaseline.children) : undefined,
               completedVisits: result.stats?.completedVisits,
               stopReason: result.stats?.stopReason,
               elapsedMs: roundReportMs(performance.now() - started),
@@ -2871,6 +2898,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
       cells: cells.length,
       nativeMatches: cells.filter((cell) => cell.matchesNative).length,
       depthBaselineMatches: cells.filter((cell) => cell.matchesDepthBaseline).length,
+      maxDepthBaselineVisitL1: Math.max(0, ...cells.map((cell) => typeof cell.depthBaselineVisitL1 === 'number' ? cell.depthBaselineVisitL1 : 0)),
       mismatches,
       results: cells,
     };
