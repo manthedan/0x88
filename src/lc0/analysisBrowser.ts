@@ -10,7 +10,7 @@ import { ANALYSIS_DRAWABLE_BRUSHES, engineBrushes, evalBarWhitePercent, lc0Analy
 import { GameTree, type GameNode } from './gameTree.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { buildOpeningPositionIndex, mergeOpeningMoveStats, openingStatsFromIndex, openingStatsForPosition, openingSummary, positionKey, type ImportedGame, type OpeningMoveStat, type OpeningPositionIndex } from './openingStats.ts';
-import { defaultPgnCollectionName, deletePgnCollection, formatPgnCollectionSummary, listPgnCollections, loadPgnCollection, pgnDatabaseAvailable, savePgnCollection, searchPgnCollectionsByPosition, updatePgnCollectionPositionIndex, type PgnCollectionSource, type PgnCollectionSummary } from './pgnDatabase.ts';
+import { defaultPgnCollectionName, deletePgnCollection, duplicatePgnCollection, exportPgnDatabaseBackup, formatPgnCollectionSummary, importPgnDatabaseBackup, listPgnCollections, loadPgnCollection, pgnDatabaseAvailable, pgnDatabaseBackupFilename, renamePgnCollection, savePgnCollection, searchPgnCollectionsByPosition, updatePgnCollectionPositionIndex, type PgnCollectionSource, type PgnCollectionSummary } from './pgnDatabase.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
@@ -861,17 +861,27 @@ function renderPgnDatabaseCollections(selected = activePgnCollectionId): void {
     el('savePgnDb').toggleAttribute('disabled', true);
     el('loadPgnDb').toggleAttribute('disabled', true);
     el('deletePgnDb').toggleAttribute('disabled', true);
+    el('renamePgnDb').toggleAttribute('disabled', true);
+    el('duplicatePgnDb').toggleAttribute('disabled', true);
+    el('exportPgnDbCollection').toggleAttribute('disabled', true);
+    el('exportPgnDb').toggleAttribute('disabled', true);
+    el('importPgnDb').toggleAttribute('disabled', true);
     el('searchPgnDbPosition').toggleAttribute('disabled', true);
     el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.';
     return;
   }
   select.disabled = false;
   el('savePgnDb').toggleAttribute('disabled', false);
+  el('exportPgnDb').toggleAttribute('disabled', false);
+  el('importPgnDb').toggleAttribute('disabled', false);
   el('searchPgnDbPosition').toggleAttribute('disabled', false);
   const current = pgnCollections.some((entry) => entry.id === selected) ? selected : '';
   select.innerHTML = ['<option value="">new collection</option>', ...pgnCollections.map((entry) => `<option value="${htmlEscape(entry.id)}"${entry.id === current ? ' selected' : ''}>${htmlEscape(entry.name)} (${entry.gameCount})</option>`)].join('');
   el('loadPgnDb').toggleAttribute('disabled', !current);
   el('deletePgnDb').toggleAttribute('disabled', !current);
+  el('renamePgnDb').toggleAttribute('disabled', !current);
+  el('duplicatePgnDb').toggleAttribute('disabled', !current);
+  el('exportPgnDbCollection').toggleAttribute('disabled', !current);
   if (current) {
     const summary = pgnCollections.find((entry) => entry.id === current)!;
     inputEl('pgnDbName').value = summary.name;
@@ -940,19 +950,27 @@ async function fetchGames() {
   }
 }
 
-function downloadPgn() {
-  const pgn = inputEl('importGamesInput').value;
-  if (!pgn.trim()) { el('importInfo').textContent = 'nothing to download'; return; }
-  const name = (inputEl('importUser').value.trim() || 'games').replace(/[^\w.-]+/g, '_');
-  const blob = new Blob([pgn], { type: 'application/x-chess-pgn' });
+function safeFilename(name: string, fallback = 'games'): string {
+  return (name.trim() || fallback).replace(/[^\w.-]+/g, '_').slice(0, 80) || fallback;
+}
+
+function downloadTextFile(filename: string, content: string, type: string): void {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `${name}.pgn`;
+  anchor.download = filename;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadPgn() {
+  const pgn = inputEl('importGamesInput').value;
+  if (!pgn.trim()) { el('importInfo').textContent = 'nothing to download'; return; }
+  const name = safeFilename(inputEl('importUser').value.trim() || inputEl('pgnDbName').value.trim() || 'games');
+  downloadTextFile(`${name}.pgn`, pgn, 'application/x-chess-pgn');
   el('importInfo').textContent = `downloaded ${name}.pgn`;
 }
 
@@ -1014,6 +1032,76 @@ async function loadSelectedPgnCollection(): Promise<void> {
     }
   } catch (error) {
     el('pgnDbInfo').textContent = `Load failed: ${(error as Error).message}`;
+  }
+}
+
+async function renameSelectedPgnCollection(): Promise<void> {
+  const id = selectedPgnCollectionId();
+  if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to rename.'; return; }
+  try {
+    const record = await renamePgnCollection(id, inputEl('pgnDbName').value);
+    inputEl('pgnDbName').value = record.name;
+    await refreshPgnDatabaseCollections(record.id);
+    el('pgnDbInfo').textContent = `Renamed collection to “${record.name}”.`;
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Rename failed: ${(error as Error).message}`;
+  }
+}
+
+async function duplicateSelectedPgnCollection(): Promise<void> {
+  const id = selectedPgnCollectionId();
+  if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to duplicate.'; return; }
+  const summary = pgnCollections.find((entry) => entry.id === id);
+  const requestedName = inputEl('pgnDbName').value.trim();
+  const duplicateName = requestedName && requestedName !== summary?.name ? requestedName : `${summary?.name ?? 'PGN collection'} copy`;
+  try {
+    const record = await duplicatePgnCollection(id, duplicateName);
+    activePgnCollectionId = record.id;
+    inputEl('pgnDbName').value = record.name;
+    await refreshPgnDatabaseCollections(record.id);
+    el('pgnDbInfo').textContent = `Duplicated “${summary?.name ?? 'collection'}” as “${record.name}”.`;
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Duplicate failed: ${(error as Error).message}`;
+  }
+}
+
+async function exportSelectedPgnCollection(): Promise<void> {
+  const id = selectedPgnCollectionId();
+  if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to export.'; return; }
+  try {
+    const record = await loadPgnCollection(id);
+    if (!record) { el('pgnDbInfo').textContent = 'Saved PGN collection not found.'; await refreshPgnDatabaseCollections(''); return; }
+    const filename = `${safeFilename(record.name, 'collection')}.pgn`;
+    downloadTextFile(filename, record.pgn, 'application/x-chess-pgn');
+    el('pgnDbInfo').textContent = `Exported “${record.name}” as ${filename}.`;
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Export failed: ${(error as Error).message}`;
+  }
+}
+
+async function exportPgnDatabase(): Promise<void> {
+  if (!pgnDatabaseAvailable()) { el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.'; return; }
+  try {
+    const backup = await exportPgnDatabaseBackup();
+    const filename = pgnDatabaseBackupFilename(new Date(backup.exportedAt));
+    downloadTextFile(filename, JSON.stringify(backup, null, 2), 'application/json');
+    el('pgnDbInfo').textContent = `Exported ${backup.collections.length} PGN collections as ${filename}.`;
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Database export failed: ${(error as Error).message}`;
+  }
+}
+
+async function importPgnDatabaseFile(file: File | undefined): Promise<void> {
+  if (!file) return;
+  try {
+    const backup = JSON.parse(await file.text()) as unknown;
+    const count = await importPgnDatabaseBackup(backup);
+    await refreshPgnDatabaseCollections(activePgnCollectionId);
+    el('pgnDbInfo').textContent = `Imported ${count} PGN collections from ${file.name}.`;
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Database import failed: ${(error as Error).message}`;
+  } finally {
+    inputEl('importPgnDbFile').value = '';
   }
 }
 
@@ -1301,6 +1389,12 @@ function wireEvents() {
   el('savePgnDb').addEventListener('click', () => { void saveCurrentPgnCollection(); });
   el('loadPgnDb').addEventListener('click', () => { void loadSelectedPgnCollection(); });
   el('deletePgnDb').addEventListener('click', () => { void deleteSelectedPgnCollection(); });
+  el('renamePgnDb').addEventListener('click', () => { void renameSelectedPgnCollection(); });
+  el('duplicatePgnDb').addEventListener('click', () => { void duplicateSelectedPgnCollection(); });
+  el('exportPgnDbCollection').addEventListener('click', () => { void exportSelectedPgnCollection(); });
+  el('exportPgnDb').addEventListener('click', () => { void exportPgnDatabase(); });
+  el('importPgnDb').addEventListener('click', () => inputEl('importPgnDbFile').click());
+  el('importPgnDbFile').addEventListener('change', () => { void importPgnDatabaseFile(inputEl('importPgnDbFile').files?.[0]); });
   el('searchPgnDbPosition').addEventListener('click', () => { void searchCurrentPositionInPgnDatabase(); });
   inputEl('pgnDbName').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') void saveCurrentPgnCollection(); });
   inputEl('importGamesInput').addEventListener('input', () => {

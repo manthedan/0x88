@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { defaultPgnCollectionName, formatPgnCollectionSummary, sanitizePgnCollectionName } from '../src/lc0/pgnDatabase.ts';
+import { defaultPgnCollectionName, formatPgnCollectionSummary, normalizePgnDatabaseBackup, pgnDatabaseBackupFilename, sanitizePgnCollectionName } from '../src/lc0/pgnDatabase.ts';
 
 test('PGN collection names are trimmed and bounded', () => {
   assert.equal(sanitizePgnCollectionName('  My   Games  '), 'My Games');
@@ -28,4 +28,38 @@ test('PGN collection summary is compact and source-aware', () => {
     updatedAt: Date.UTC(2026, 5, 5),
   });
   assert.match(label, /^Blitz sample · 12 games · 42 positions · lichess:dan · /);
+});
+
+test('PGN database backup filenames are dated', () => {
+  assert.equal(pgnDatabaseBackupFilename(new Date('2026-06-05T12:00:00Z')), 'lc0-analysis-pgn-db-2026-06-05.json');
+});
+
+test('PGN database backup import normalizes collection records', () => {
+  const collections = normalizePgnDatabaseBackup({
+    kind: 'lc0-analysis-pgn-database-backup',
+    version: 1,
+    collections: [{
+      id: 'ignored',
+      name: '  Backup   Games  ',
+      pgn: '[Result "*"]\n\n1. e4 *',
+      gameCount: '3',
+      source: 'lichess',
+      username: ' dan ',
+      color: 'white',
+      positionIndex: {
+        'start w KQkq -': [{ uci: 'e2e4', san: 'e4', count: 3, whiteWins: 1, blackWins: 1, draws: 1 }],
+      },
+    }],
+  });
+  assert.equal(collections.length, 1);
+  assert.equal(collections[0].name, 'Backup Games');
+  assert.equal(collections[0].source, 'lichess');
+  assert.equal(collections[0].username, 'dan');
+  assert.equal(collections[0].gameCount, 3);
+  assert.equal(collections[0].indexedPositionCount, 1);
+});
+
+test('PGN database backup import rejects invalid backups', () => {
+  assert.throws(() => normalizePgnDatabaseBackup({}), /collections array/);
+  assert.throws(() => normalizePgnDatabaseBackup({ collections: [{ name: 'empty', pgn: '' }] }), /has no PGN/);
 });

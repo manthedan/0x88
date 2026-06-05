@@ -43,6 +43,7 @@ Sources:
    - Useful workflows: import PGNs, absolute/partial position search, opening tree stats, and local reference databases.
    - Current first step: analysis-page PGN batches can be saved to and loaded from an IndexedDB-backed local collection store, then reused by the existing opening explorer.
    - Saved collections now include a rebuildable position index, enabling current-position search across local collections without making raw PGN the query path.
+   - Local database management supports rename, duplicate, selected-PGN export, and full JSON backup import/export.
 
 7. **Asset and engine management**
    - Turn our engine artifact manifests into a UI: installed/missing assets, size, license, source link, runtime capability, and local build instructions.

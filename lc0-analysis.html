@@ -155,7 +155,13 @@ table.opening .san{font-family:var(--mono);font-weight:700}
         <input id="pgnDbName" type="text" spellcheck="false" autocomplete="off" placeholder="saved PGN collection" /></div>
       <button id="savePgnDb" type="button">Save to DB</button>
       <button id="loadPgnDb" type="button">Load</button>
+      <button id="renamePgnDb" type="button">Rename</button>
+      <button id="duplicatePgnDb" type="button">Duplicate</button>
       <button id="deletePgnDb" type="button">Delete</button>
+      <button id="exportPgnDbCollection" type="button">Export PGN</button>
+      <button id="exportPgnDb" type="button">Export DB</button>
+      <button id="importPgnDb" type="button">Import DB</button>
+      <input id="importPgnDbFile" type="file" accept="application/json,.json" style="display:none" />
       <button id="searchPgnDbPosition" type="button">Search position</button>
     </div>
     <div id="pgnDbInfo" class="small">Local PGN database: checking IndexedDB…</div>
