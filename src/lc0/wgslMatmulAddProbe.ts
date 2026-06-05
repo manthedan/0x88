@@ -5988,6 +5988,12 @@ class Lc0WebHybridRuntime {
   private wgslBatchUploadCapacity = 0;
   private wgslBatchReadbackBuffer?: BufferLike;
   private wgslBatchReadbackCapacity = 0;
+  // Deferred readback can have two command buffers queued before the first map;
+  // keep per-ring compute/upload resources separate from immediate batches so
+  // overlap experiments do not reuse mutable intermediate buffers in flight.
+  private wgslDeferredBatchSlots: HybridWgslBatchSlot[][] = [];
+  private wgslDeferredBatchUploadBuffers: BufferLike[] = [];
+  private wgslDeferredBatchUploadCapacities: number[] = [];
   private wgslDeferredReadbackBuffers: BufferLike[] = [];
   private wgslDeferredReadbackCapacity = 0;
   private wgslDeferredReadbackInUse = new Set<number>();
@@ -6146,6 +6152,13 @@ class Lc0WebHybridRuntime {
     return this.wgslBatchSlots.slice(0, count);
   }
 
+  private ensureWgslDeferredBatchSlots(count: number, slot: number): HybridWgslBatchSlot[] {
+    if (!this.wgslDeferredBatchSlots[slot]) this.wgslDeferredBatchSlots[slot] = [];
+    const slots = this.wgslDeferredBatchSlots[slot];
+    while (slots.length < count) slots.push(this.createWgslBatchSlot());
+    return slots.slice(0, count);
+  }
+
   private ensureWgslBatchUploadBuffer(count: number): BufferLike {
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
     if (!this.wgslBatchUploadBuffer || this.wgslBatchUploadCapacity < count) {
@@ -6154,6 +6167,17 @@ class Lc0WebHybridRuntime {
       this.buffers.push(this.wgslBatchUploadBuffer);
     }
     return this.wgslBatchUploadBuffer;
+  }
+
+  private ensureWgslDeferredBatchUploadBuffer(count: number, slot: number): BufferLike {
+    const outputElements = DEFAULT_TOKENS * DEFAULT_N;
+    if (!this.wgslDeferredBatchUploadBuffers[slot] || (this.wgslDeferredBatchUploadCapacities[slot] ?? 0) < count) {
+      const buffer = this.device.createBuffer({ size: count * outputElements * 4, usage: this.usage.COPY_SRC | this.usage.COPY_DST });
+      this.wgslDeferredBatchUploadBuffers[slot] = buffer;
+      this.wgslDeferredBatchUploadCapacities[slot] = count;
+      this.buffers.push(buffer);
+    }
+    return this.wgslDeferredBatchUploadBuffers[slot];
   }
 
   private ensureWgslBatchReadbackBuffer(count: number): BufferLike {
@@ -6607,8 +6631,12 @@ class Lc0WebHybridRuntime {
 
   private async submitWgslBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }, readbackBuffer: BufferLike, sequenceOptions: { batchSequenceIndex?: number; deferredReadbackSlot?: number } = {}): Promise<SubmittedWgslHybridBatch> {
     const totalStarted = nowMs();
-    const slots = this.ensureWgslBatchSlots(inputs.length);
-    const uploadBuffer = this.ensureWgslBatchUploadBuffer(inputs.length);
+    const slots = sequenceOptions.deferredReadbackSlot === undefined
+      ? this.ensureWgslBatchSlots(inputs.length)
+      : this.ensureWgslDeferredBatchSlots(inputs.length, sequenceOptions.deferredReadbackSlot);
+    const uploadBuffer = sequenceOptions.deferredReadbackSlot === undefined
+      ? this.ensureWgslBatchUploadBuffer(inputs.length)
+      : this.ensureWgslDeferredBatchUploadBuffer(inputs.length, sequenceOptions.deferredReadbackSlot);
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
     const inputElements = this.inputBackend !== 'js' ? DEFAULT_INPUT_PLANES * DEFAULT_TOKENS : outputElements;
     const boardsAndFens = inputs.map((input) => currentBoardAndFen(input));
@@ -6752,8 +6780,11 @@ class Lc0WebHybridRuntime {
         const wdlF32 = gpuLegalCandidates
           ? readbackFloats.slice(base + WGSL_GPU_LEGAL_OUTPUT_FLOATS, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS + 3)
           : readbackFloats.slice(base + DEFAULT_POLICY_MAPPED_OUTPUTS, base + DEFAULT_POLICY_MAPPED_OUTPUTS + 3);
-        if (mappedPolicyF32 && !arrayHasNonzeroAndVariation(mappedPolicyF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy for slot ${i}`);
-        if (!arrayHasNonzeroAndVariation(wdlF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform WDL for slot ${i}`);
+        const diagnosticFen = submitted.boardsAndFens[i].fen;
+        const diagnosticBatchFens = submitted.boardsAndFens.map((entry) => entry.fen).join(' | ');
+        const diagnosticSuffix = `slot ${i}, mode ${readbackMode}, sequence ${submitted.sequenceId}, batch ${submitted.batchSequenceIndex ?? 'single'}, position ${submitted.deferredReadbackSlot ?? 'immediate'}, fen ${diagnosticFen}, batchFens ${diagnosticBatchFens}`;
+        if (mappedPolicyF32 && !arrayHasNonzeroAndVariation(mappedPolicyF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy for ${diagnosticSuffix}`);
+        if (!arrayHasNonzeroAndVariation(wdlF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform WDL for ${diagnosticSuffix}`);
         const mappedPolicy = mappedPolicyF32 ? Array.from(mappedPolicyF32) : [];
         const wdlValues = Array.from(wdlF32);
         const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
