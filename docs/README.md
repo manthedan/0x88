@@ -22,6 +22,7 @@ For current planning, start in `knowledge/` first. Use `docs/` as stable referen
 | [`model_manifest.md`](model_manifest.md) | Current | Human-readable model inventory and promotion context. |
 | [`engine_catalog.md`](engine_catalog.md) | Current | Browser engine-family and variant cards: source/version anchors, adapters, feature parity, size/speed, onboarding process. |
 | [`browser_uci_adapter_contract.md`](browser_uci_adapter_contract.md) | Current | Standard TypeScript/behavioral contract for browser UCI engines before selector promotion. |
+| [`browser_c_engine_porting.md`](browser_c_engine_porting.md) | Current | Standard low-effort Emscripten-first intake recipe for C/C++ browser UCI engines. |
 | [`berserk_browser_benchmarks.md`](berserk_browser_benchmarks.md) | Active | Berserk Emscripten worker lifecycle and first rotated-FEN benchmark captures. |
 | [`model_efficiency_metrics.md`](model_efficiency_metrics.md) | Current | How we compare strength/bytes/params/latency/search usefulness. |
 | [`release_gate_and_distributed_bench.md`](release_gate_and_distributed_bench.md) | Current | Promotion gates, protocol cards, distributed benchmark shape. |
@@ -49,6 +50,7 @@ For current planning, start in `knowledge/` first. Use `docs/` as stable referen
 | [`model_manifest.md`](model_manifest.md) | Current | Curated model inventory. |
 | [`engine_catalog.md`](engine_catalog.md) | Current | Standard cards and onboarding process for browser engine families/variants. |
 | [`browser_uci_adapter_contract.md`](browser_uci_adapter_contract.md) | Current | Required adapter methods, lifecycle rules, diagnostics, asset-check responsibilities, and promotion checklist for browser UCI engines. |
+| [`browser_c_engine_porting.md`](browser_c_engine_porting.md) | Current | Emscripten-first C/C++ engine intake recipe, Stockfish.js reference observations, and deferred optimization ladder. |
 | [`berserk_browser_benchmarks.md`](berserk_browser_benchmarks.md) | Active | Berserk Emscripten worker lifecycle smoke, arena/analysis checks, and first rotated-FEN benchmark snapshot. |
 | [`onnx_deploy_workflow.md`](onnx_deploy_workflow.md) | Current | ONNX simplification/parity/deployment workflow. |
 | [`browser_runtime.md`](browser_runtime.md) | Reference | Browser runtime plan; short and older, still useful. |

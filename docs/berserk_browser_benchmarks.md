@@ -53,8 +53,27 @@ Aggregate result:
 | Nodes min / max by position | 585 / 6,965 |
 | Mean engine-reported NPS | 412,816 |
 
+## 2026-06-05 sanity comparison
+
+This is a porting-process sanity check, not a strength comparison. Engine-reported nodes are engine-specific, and `depth 7` is not equivalent work across engines.
+
+Same browser host, single engine-search thread per engine:
+
+| Engine / artifact | Protocol | Mean wall | Mean nodes/search | Mean engine-reported NPS |
+| --- | --- | ---: | ---: | ---: |
+| Berserk Emscripten `/berserk/berserk-emscripten.js` | 20 FENs, depth 7, cold + 1 warm; table shows warm | 7.02 ms | 2,242 | 412,816 |
+| Stockfish full single `/stockfish/stockfish-18-single.js` | 20 FENs, depth 7, one pass | 3.93 ms | 2,555 | 746,439 |
+| Reckless Full SIMD `/reckless/reckless-simd128.wasm` | 20 FENs, depth 7, cold + 1 warm; table shows warm | 7.40 ms | 4,536 | 794,346 |
+
+Additional Stockfish full-single timed sample: three positions at `go movetime 2000`, `Threads=1`, averaged about `700,693` NPS and loaded/prewarmed in about `0.41s`.
+
+Raw local ignored artifacts:
+
+- `artifacts/berserk/berserk-emscripten-depth7-rotated-fen-2026-06-05.json`
+- `artifacts/reckless/reckless-simd-depth7-rotated-fen-2026-06-05.json`
+
 Caveats:
 
 - Depth 7 is still shallow; wall-clock timings are useful mainly for adapter/lifecycle sanity, not strength or final speed claims.
 - Emscripten search is currently synchronous inside the worker. Abort is implemented by worker termination/recreation, not graceful `stop` preservation.
-- Results are not yet compared to Stockfish/Reckless/Viridithas under the exact same depth/position budget in this run.
+- Stockfish remains the expected strongest and highly optimized browser anchor; Berserk's value here is mostly proving the reusable C-engine intake pipeline.
