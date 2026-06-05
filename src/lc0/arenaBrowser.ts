@@ -22,6 +22,8 @@ import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEn
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
 import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, normalizeBerserkVariant, type BerserkVariant } from './berserkVariants.ts';
+import { PlentyChessEngine } from './plentychessEngine.ts';
+import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, type PlentyChessVariant } from './plentychessVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
 import { defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
@@ -86,6 +88,7 @@ const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 const REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantFromParams(params);
 const REQUESTED_BERSERK_VARIANT = berserkVariantFromParams(params);
+const REQUESTED_PLENTYCHESS_VARIANT = plentyChessVariantFromParams(params);
 
 let ground: Ground | null = null;
 let board: BoardState = parseFen(START_FEN);
@@ -106,6 +109,7 @@ let stockfishFull: StockfishEngine | null = null;
 const recklessByVariant = new Map<string, RecklessEngine>();
 const viridithasByVariant = new Map<string, ViridithasEngine>();
 const berserkByVariant = new Map<string, BerserkEngine>();
+const plentyChessByVariant = new Map<string, PlentyChessEngine>();
 // Lc0 BT4 runs in its own worker (lazy, WebGPU-gated, disposable). See bt4Engine.ts.
 const bt4 = new Bt4WorkerSearcher();
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
@@ -407,6 +411,7 @@ function defaultVariant(family: EngineFamily): string {
   if (family === 'reckless') return REQUESTED_RECKLESS_VARIANT.key;
   if (family === 'viridithas') return REQUESTED_VIRIDITHAS_VARIANT.key;
   if (family === 'berserk') return REQUESTED_BERSERK_VARIANT.key;
+  if (family === 'plentychess') return REQUESTED_PLENTYCHESS_VARIANT.key;
   return defaultStaticEngineVariant(family);
 }
 
@@ -415,6 +420,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
   if (family === 'berserk') return availableBerserkVariants().map((v) => ({ value: v.key, label: v.label }));
+  if (family === 'plentychess') return availablePlentyChessVariants().map((v) => ({ value: v.key, label: v.label }));
   return availableRecklessVariants().map((v) => ({ value: v.key, label: v.label }));
 }
 
@@ -428,6 +434,7 @@ function rowLabel(row: EngineRow): string {
   if (row.family === 'sf') return stockfishEngineLabel(row.variant, 'arena');
   if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
   if (row.family === 'berserk') return berserkVariantForKey(row.variant).label;
+  if (row.family === 'plentychess') return plentyChessVariantForKey(row.variant).label;
   return recklessVariantForKey(row.variant).label;
 }
 
@@ -665,6 +672,10 @@ function recordBerserkOutput(engineId: string, engineName: string, fen: string, 
   recordUciOutput(engineId, engineName, 'Berserk', fen, move, lines);
 }
 
+function recordPlentyChessOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[]): void {
+  recordUciOutput(engineId, engineName, 'PlentyChess', fen, move, lines);
+}
+
 function recordEngineThinking(engine: ArenaEngine): void {
   thinkingEngineIds.add(engine.id);
   renderSideLabels();
@@ -891,6 +902,55 @@ function refreshBerserkVariantUi(): void {
   renderBerserkRuntimeInfo();
 }
 
+function availablePlentyChessVariants(): PlentyChessVariant[] {
+  if (REQUESTED_PLENTYCHESS_VARIANT.key === 'custom') return [...PLENTYCHESS_VARIANTS, REQUESTED_PLENTYCHESS_VARIANT];
+  return [...PLENTYCHESS_VARIANTS];
+}
+
+function plentyChessVariantForKey(variantKey: string): PlentyChessVariant {
+  const key = normalizePlentyChessVariant(variantKey);
+  if (key === 'custom' && REQUESTED_PLENTYCHESS_VARIANT.key === 'custom') return REQUESTED_PLENTYCHESS_VARIANT;
+  return plentyChessVariantByKey(key);
+}
+
+function plentyChessCacheKey(variant: PlentyChessVariant): string {
+  return `${variant.key}:${variant.jsUrl}:${variant.wasmUrl}:${variant.dataUrl}`;
+}
+
+function getPlentyChessFor(variantKey: string): PlentyChessEngine {
+  const variant = plentyChessVariantForKey(variantKey);
+  const key = plentyChessCacheKey(variant);
+  let engine = plentyChessByVariant.get(key);
+  if (!engine) {
+    engine = new PlentyChessEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl);
+    plentyChessByVariant.set(key, engine);
+  }
+  return engine;
+}
+
+function renderPlentyChessRuntimeInfo(): void {
+  const rows = activeSeatRows().filter((row) => row.family === 'plentychess');
+  if (!rows.length) { el('plentychessRuntimeInfo').textContent = 'PlentyChess: not selected'; return; }
+  const parts = rows.map((row) => {
+    const variant = plentyChessVariantForKey(row.variant);
+    const engine = plentyChessByVariant.get(plentyChessCacheKey(variant));
+    const asset = plentyChessVariantAssetStatus(variant);
+    if (asset === 'unknown') void checkPlentyChessVariantAsset(variant, renderPlentyChessRuntimeInfo);
+    const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+    return `${variant.label} d${row.strength} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
+  });
+  el('plentychessRuntimeInfo').textContent = `PlentyChess: ${[...new Set(parts)].join(' | ')}`;
+}
+
+function refreshPlentyChessVariantUi(): void {
+  const select = selectEl('plentychessVariantSelect');
+  if (!select.options.length) {
+    select.innerHTML = availablePlentyChessVariants().map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
+  }
+  select.disabled = running;
+  renderPlentyChessRuntimeInfo();
+}
+
 function refreshStockfishControls(): void {
   inputEl('stockfishThreadsInput').disabled = running || !threadedStockfishAvailable();
   inputEl('stockfishThreadsInput').value = String(stockfishThreads());
@@ -966,6 +1026,10 @@ function disposeUnusedUciEngines(): void {
   const activeBerserk = new Set(activeSeatRows().filter((row) => row.family === 'berserk').map((row) => berserkCacheKey(berserkVariantForKey(row.variant))));
   for (const [key, engine] of berserkByVariant) {
     if (!activeBerserk.has(key)) { engine.dispose(); berserkByVariant.delete(key); }
+  }
+  const activePlenty = new Set(activeSeatRows().filter((row) => row.family === 'plentychess').map((row) => plentyChessCacheKey(plentyChessVariantForKey(row.variant))));
+  for (const [key, engine] of plentyChessByVariant) {
+    if (!activePlenty.has(key)) { engine.dispose(); plentyChessByVariant.delete(key); }
   }
 }
 
@@ -1043,6 +1107,15 @@ function buildEngines() {
     renderBerserkRuntimeInfo();
     return move;
   };
+  const plentyChessMove = (engineId: string, row: EngineRow, engine: PlentyChessEngine): ArenaEngine['move'] => async (positions, signal) => {
+    if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: 1 });
+    else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: 1 });
+    const fen = boardToFen(positions[positions.length - 1]);
+    const move = await engine.bestMove(fen, signal);
+    recordPlentyChessOutput(engineId, engines.get(engineId)?.name ?? 'PlentyChess', fen, move, engine.lastInfo());
+    renderPlentyChessRuntimeInfo();
+    return move;
+  };
   const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {
     const search = lc0SearcherFor(engineId);
     await search.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
@@ -1081,6 +1154,12 @@ function buildEngines() {
     await engine.newGame(signal);
     renderBerserkRuntimeInfo();
   };
+  const plentyChessWarmup = (engine: PlentyChessEngine) => async (signal: AbortSignal) => {
+    engine.setOptions({ depth: 1, movetimeMs: undefined, threads: 1 });
+    await engine.bestMove(START_FEN, signal);
+    await engine.newGame(signal);
+    renderPlentyChessRuntimeInfo();
+  };
   for (const row of activeSeatRows()) {
     const id = engineIdForRow(row);
     if (engines.has(id)) continue;
@@ -1097,14 +1176,18 @@ function buildEngines() {
     } else if (row.family === 'viridithas') {
       const engine = getViridithasFor(row.variant);
       engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: viridithasMove(id, row, engine), warmup: viridithasWarmup(engine) });
-    } else {
+    } else if (row.family === 'berserk') {
       const engine = getBerserkFor(row.variant);
       engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: berserkMove(id, row, engine), warmup: berserkWarmup(engine) });
+    } else {
+      const engine = getPlentyChessFor(row.variant);
+      engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: plentyChessMove(id, row, engine), warmup: plentyChessWarmup(engine) });
     }
   }
   renderRecklessRuntimeInfo();
   renderViridithasRuntimeInfo();
   renderBerserkRuntimeInfo();
+  renderPlentyChessRuntimeInfo();
 }
 
 function selectedOpenings(): ArenaOpening[] {
@@ -1293,6 +1376,8 @@ async function startMatch() {
   refreshStockfishControls();
   refreshRecklessVariantUi();
   refreshViridithasVariantUi();
+  refreshBerserkVariantUi();
+  refreshPlentyChessVariantUi();
   refreshSeatControls();
   games.length = 0;
   activeEngineIds = [];
@@ -1323,6 +1408,7 @@ async function startMatch() {
       if (usesBt4 && bt4.loaded) await bt4.resetTree();
       for (const engine of viridithasByVariant.values()) await engine.newGame(abort.signal);
       for (const engine of berserkByVariant.values()) await engine.newGame(abort.signal);
+      for (const engine of plentyChessByVariant.values()) await engine.newGame(abort.signal);
       setBoardSideEngines(whiteEngine.id, whiteEngine.name, blackEngine.id, blackEngine.name);
       el('pairing').textContent = `Game ${i + 1}/${schedule.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
       el('message').textContent = 'Playing…';
@@ -1362,6 +1448,7 @@ async function startMatch() {
     refreshRecklessVariantUi();
     refreshViridithasVariantUi();
     refreshBerserkVariantUi();
+    refreshPlentyChessVariantUi();
     refreshSeatControls();
   }
 }
@@ -1395,6 +1482,8 @@ function disposeRuntimeResources(): void {
   viridithasByVariant.clear();
   for (const engine of berserkByVariant.values()) engine.dispose();
   berserkByVariant.clear();
+  for (const engine of plentyChessByVariant.values()) engine.dispose();
+  plentyChessByVariant.clear();
   bt4.dispose();
 }
 
@@ -1480,6 +1569,7 @@ function wireEvents() {
       renderRecklessRuntimeInfo();
       renderViridithasRuntimeInfo();
       renderBerserkRuntimeInfo();
+      renderPlentyChessRuntimeInfo();
     }
   });
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
@@ -1506,12 +1596,15 @@ async function init() {
   refreshRecklessVariantUi();
   refreshViridithasVariantUi();
   refreshBerserkVariantUi();
+  refreshPlentyChessVariantUi();
   selectEl('recklessVariantSelect').value = REQUESTED_RECKLESS_VARIANT.key;
   selectEl('viridithasVariantSelect').value = REQUESTED_VIRIDITHAS_VARIANT.key;
   selectEl('berserkVariantSelect').value = REQUESTED_BERSERK_VARIANT.key;
+  selectEl('plentychessVariantSelect').value = REQUESTED_PLENTYCHESS_VARIANT.key;
   renderRecklessRuntimeInfo();
   renderViridithasRuntimeInfo();
   renderBerserkRuntimeInfo();
+  renderPlentyChessRuntimeInfo();
   inputEl('stockfishThreadsInput').value = String(Math.max(1, Math.min(32, Math.floor(Number(params.get('sfThreads') ?? '1') || 1))));
   refreshStockfishControls();
   void renderRuntimeBadge();

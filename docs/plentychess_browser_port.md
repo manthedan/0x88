@@ -4,7 +4,7 @@ Last updated: 2026-06-05
 
 ## Status
 
-PlentyChess has a first Emscripten proof-build, Node UCI smoke, reusable browser worker adapter, and browser lifecycle smoke. It is **not** integrated into arena/analysis selectors yet.
+PlentyChess has a first Emscripten proof-build, Node UCI smoke, reusable browser worker adapter, browser lifecycle smoke, benchmark harness coverage, and experimental arena/analysis selector integration.
 
 Current local commands:
 
@@ -99,9 +99,20 @@ The smoke page covers:
 - abort/recovery by terminating and recreating the synchronous Emscripten worker
 - missing JS asset failure surfacing
 
+## Experimental selector smoke
+
+Arena smoke passed with `PlentyChess Emscripten experimental d1` vs `Stockfish Lite d1` on a K-v-K custom FEN:
+
+- result: `1/2-1/2 (insufficientMaterial)`
+- runtime row: `Emscripten worker ready · asset ok`
+
+Analysis smoke passed after selecting `PlentyChess → Emscripten`:
+
+- depth 8 analysis rendered three PV lines for startpos.
+
 ## Current limitations
 
-- No arena/analysis selector integration yet.
+- Arena/analysis selector integration is experimental only.
 - Abort uses the same conservative terminate/recreate strategy as other synchronous worker engines.
 - GPL-3.0 distribution/corresponding-source policy is required before distributing generated artifacts.
 - The `.data` file is large because the processed NNUE is preloaded externally rather than embedded with upstream `incbin`.
@@ -124,8 +135,8 @@ Summary:
 
 This puts PlentyChess Emscripten roughly in the same shallow-browser-NPS band as full Stockfish single-threaded (~746k) and Reckless SIMD (~794k), with a much larger `.data` sidecar than Berserk.
 
-## Next gates before UI integration
+## Next gates before promotion beyond experimental
 
-1. Decide whether the ~63 MB `.data` artifact is acceptable for an experimental selector.
-2. If yes, add experimental staged selector metadata and UI wiring.
-3. Keep generated artifacts ignored and gated by GPL corresponding-source policy.
+1. Keep generated artifacts ignored and gated by GPL corresponding-source policy.
+2. Decide whether the ~63 MB `.data` artifact is acceptable for any release bundle.
+3. Run a broader matched benchmark matrix only if PlentyChess becomes strategically important.

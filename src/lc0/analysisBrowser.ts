@@ -20,6 +20,8 @@ import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEn
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
 import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, normalizeBerserkVariant, type BerserkVariant } from './berserkVariants.ts';
+import { PlentyChessEngine } from './plentychessEngine.ts';
+import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, type PlentyChessVariant } from './plentychessVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support } from './bt4Engine.ts';
 import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
@@ -35,6 +37,7 @@ const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 const REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantFromParams(params);
 const REQUESTED_BERSERK_VARIANT = berserkVariantFromParams(params);
+const REQUESTED_PLENTYCHESS_VARIANT = plentyChessVariantFromParams(params);
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
@@ -186,7 +189,7 @@ function uciShape(uci: string, brush: string): DrawShape | null {
 }
 function multiPv(): number { return Math.max(1, Math.floor(Number(inputEl('multiPvInput').value) || 3)); }
 // Engines to analyze are chosen as an add/remove list of cascading selects:
-// family (Lc0/Stockfish/Reckless/Viridithas/Berserk) -> variant (Lc0: Small|BT4;
+// family (Lc0/Stockfish/Reckless/Viridithas/Berserk/PlentyChess) -> variant (Lc0: Small|BT4;
 // SF: Lite|Full; UCI engines: variant) -> strength (Lc0 visits, UCI depth),
 // all per row.
 function strengthMeta(family: EngineFamily) {
@@ -239,8 +242,23 @@ function berserkCacheKey(variant: BerserkVariant): string {
   return `${variant.key}:${variant.jsUrl ?? ''}:${variant.wasmUrl}:${variant.dataUrl ?? ''}`;
 }
 
+function availablePlentyChessVariants(): PlentyChessVariant[] {
+  if (REQUESTED_PLENTYCHESS_VARIANT.key === 'custom') return [...PLENTYCHESS_VARIANTS, REQUESTED_PLENTYCHESS_VARIANT];
+  return [...PLENTYCHESS_VARIANTS];
+}
+
+function plentyChessVariantForKey(variantKey: string): PlentyChessVariant {
+  const key = normalizePlentyChessVariant(variantKey);
+  if (key === 'custom' && REQUESTED_PLENTYCHESS_VARIANT.key === 'custom') return REQUESTED_PLENTYCHESS_VARIANT;
+  return plentyChessVariantByKey(key);
+}
+
+function plentyChessCacheKey(variant: PlentyChessVariant): string {
+  return `${variant.key}:${variant.jsUrl}:${variant.wasmUrl}:${variant.dataUrl}`;
+}
+
 // "Add engine" fills the next missing family by priority (Lc0 → SF → Reckless
-// → Viridithas → Berserk), falling back to the top priority when all families are present.
+// → Viridithas → Berserk → PlentyChess), falling back to the top priority when all families are present.
 function nextEngineFamily(): EngineFamily {
   const present = new Set(engineRows.map((row) => row.family));
   return ENGINE_FAMILY_PRIORITY.find((family) => !present.has(family)) ?? ENGINE_FAMILY_PRIORITY[0];
@@ -253,6 +271,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
   if (family === 'berserk') return availableBerserkVariants().map((v) => ({ value: v.key, label: v.label }));
+  if (family === 'plentychess') return availablePlentyChessVariants().map((v) => ({ value: v.key, label: v.label }));
   return availableRecklessVariants().map((v) => ({ value: v.key, label: v.label }));
 }
 
@@ -260,6 +279,7 @@ function defaultVariant(family: EngineFamily): string {
   if (family === 'reckless') return REQUESTED_RECKLESS_VARIANT.key;
   if (family === 'viridithas') return REQUESTED_VIRIDITHAS_VARIANT.key;
   if (family === 'berserk') return REQUESTED_BERSERK_VARIANT.key;
+  if (family === 'plentychess') return REQUESTED_PLENTYCHESS_VARIANT.key;
   return defaultStaticEngineVariant(family);
 }
 
@@ -268,6 +288,7 @@ function rowLabel(row: EngineRow): string {
   if (row.family === 'sf') return stockfishEngineLabel(row.variant, 'analysis');
   if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
   if (row.family === 'berserk') return berserkVariantForKey(row.variant).label;
+  if (row.family === 'plentychess') return plentyChessVariantForKey(row.variant).label;
   return recklessVariantForKey(row.variant).label;
 }
 
@@ -342,7 +363,16 @@ function renderRecklessRuntimeInfo(): void {
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl ?? variant.wasmUrl}`;
   });
-  el('recklessRuntimeInfo').textContent = `Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'}`;
+  const plentyRows = activeEngineRows().filter((row) => row.family === 'plentychess');
+  const plentyVariants = plentyRows.length ? plentyRows.map((row) => plentyChessVariantForKey(row.variant)) : [REQUESTED_PLENTYCHESS_VARIANT];
+  const plentyParts = plentyVariants.map((variant) => {
+    const engine = plentyChessByVariant.get(plentyChessCacheKey(variant));
+    const asset = plentyChessVariantAssetStatus(variant);
+    if (asset === 'unknown') void checkPlentyChessVariantAsset(variant, renderRecklessRuntimeInfo);
+    const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+    return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
+  });
+  el('recklessRuntimeInfo').textContent = `Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'}`;
 }
 
 function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
@@ -358,6 +388,7 @@ function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
 const recklessByVariant = new Map<string, RecklessEngine>();
 const viridithasByVariant = new Map<string, ViridithasEngine>();
 const berserkByVariant = new Map<string, BerserkEngine>();
+const plentyChessByVariant = new Map<string, PlentyChessEngine>();
 function getRecklessFor(variantKey: string): RecklessEngine {
   const variant = recklessVariantForKey(variantKey);
   const key = recklessCacheKey(variant);
@@ -399,6 +430,18 @@ function getBerserkFor(variantKey: string): BerserkEngine {
   return engine;
 }
 
+function getPlentyChessFor(variantKey: string): PlentyChessEngine {
+  const variant = plentyChessVariantForKey(variantKey);
+  const key = plentyChessCacheKey(variant);
+  let engine = plentyChessByVariant.get(key);
+  if (!engine) {
+    engine = new PlentyChessEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl);
+    plentyChessByVariant.set(key, engine);
+    renderRecklessRuntimeInfo();
+  }
+  return engine;
+}
+
 function disposeUnusedEngines(): void {
   if (!usesBt4Row()) bt4.dispose();
   const activeRows = activeEngineRows();
@@ -421,6 +464,13 @@ function disposeUnusedEngines(): void {
     if (!activeBerserkKeys.has(key)) {
       engine.dispose();
       berserkByVariant.delete(key);
+    }
+  }
+  const activePlentyKeys = new Set(activeRows.filter((row) => row.family === 'plentychess').map((row) => plentyChessCacheKey(plentyChessVariantForKey(row.variant))));
+  for (const [key, engine] of [...plentyChessByVariant]) {
+    if (!activePlentyKeys.has(key)) {
+      engine.dispose();
+      plentyChessByVariant.delete(key);
     }
   }
   renderRecklessRuntimeInfo();
@@ -690,6 +740,12 @@ async function analyzeCurrent() {
         tasks.push(engine.newGame(controller.signal)
           .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
+      } else if (row.family === 'plentychess') {
+        const label = `${plentyChessVariantForKey(row.variant).label} d${row.strength}`;
+        const engine = getPlentyChessFor(row.variant);
+        tasks.push(engine.newGame(controller.signal)
+          .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
+          .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       } else {
         const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label} d${row.strength}`;
         tasks.push(getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
@@ -889,6 +945,8 @@ function disposeRuntimeResources(): void {
   viridithasByVariant.clear();
   for (const engine of berserkByVariant.values()) engine.dispose();
   berserkByVariant.clear();
+  for (const engine of plentyChessByVariant.values()) engine.dispose();
+  plentyChessByVariant.clear();
   void mainEvaluator?.dispose();
   mainEvaluator = null;
   searcher = null;
