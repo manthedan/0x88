@@ -20,6 +20,7 @@ For current planning, start in `knowledge/` first. Use `docs/` as stable referen
 | [`expert_handoff_2026-05-current.md`](expert_handoff_2026-05-current.md) | Current | Best single packet for an outside expert: project state, open questions, and where help matters. |
 | [`process_and_architecture_flows.md`](process_and_architecture_flows.md) | Current | Diagram-first atlas for model lanes, architecture breakdowns, training loops, cloud pipelines, self-play, eval, and deployment. |
 | [`model_manifest.md`](model_manifest.md) | Current | Human-readable model inventory and promotion context. |
+| [`engine_catalog.md`](engine_catalog.md) | Current | Browser engine-family and variant cards: source/version anchors, adapters, feature parity, size/speed, onboarding process. |
 | [`model_efficiency_metrics.md`](model_efficiency_metrics.md) | Current | How we compare strength/bytes/params/latency/search usefulness. |
 | [`release_gate_and_distributed_bench.md`](release_gate_and_distributed_bench.md) | Current | Promotion gates, protocol cards, distributed benchmark shape. |
 | [`mac_mini_cpu_offload_plan.md`](mac_mini_cpu_offload_plan.md) | Current | Compute split and Mac-mini workflow for CPU-bound post-training evals, arenas, tuning, and self-play limits. |
@@ -44,6 +45,7 @@ For current planning, start in `knowledge/` first. Use `docs/` as stable referen
 | [`mac_mini_cpu_offload_plan.md`](mac_mini_cpu_offload_plan.md) | Current | Mac-mini CPU offload process for post-training evals, PUCT tuning, anchor arenas, and two-machine self-play limits. |
 | [`model_efficiency_metrics.md`](model_efficiency_metrics.md) | Current | Size/latency/FLOPs/browser deployment metrics. |
 | [`model_manifest.md`](model_manifest.md) | Current | Curated model inventory. |
+| [`engine_catalog.md`](engine_catalog.md) | Current | Standard cards and onboarding process for browser engine families/variants. |
 | [`onnx_deploy_workflow.md`](onnx_deploy_workflow.md) | Current | ONNX simplification/parity/deployment workflow. |
 | [`browser_runtime.md`](browser_runtime.md) | Reference | Browser runtime plan; short and older, still useful. |
 | [`search_aux_head_calibration.md`](search_aux_head_calibration.md) | Active | AV/aux-PUCT calibration notes. |
