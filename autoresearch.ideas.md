@@ -9,4 +9,6 @@
 - Consider WASM legal-prior candidate/probability prep only if telemetry shows JS legal-prior postprocess becomes material after readback reductions.
 - Revisit generated/TVM/f16 kernels only after readback/fence telemetry stops dominating total eval time.
 - Separate exploratory scheduler sweep: batchSize 2/4/8, batchPipelineDepth 1/2/4, JS/WASM input, hand/mixed TVM kernels; treat depth >1 as speed/quality exploration, not parity-preserving promotion evidence.
+- Run the synchronized readback strategy matrix with `--input-backend wasm --encoder-kernel mixed-tvm-ffn` over `wgsl-pipe1,wgsl-gpu-legal,wgsl-pipe2`, comparing `--pipe2-batch 2` and `--pipe2-batch 4` in separate artifacts before changing the main autoresearch target.
+- Test combined overlap + byte reduction explicitly: add/compare a `wgsl-gpu-legal-pipe2` strategy if the existing matrix cannot express GPU legal priors with `batchPipelineDepth=2` cleanly.
 - Separate TVM/mixed-kernel lane over hand/tvm-packed-f16/mixed-tvm-ffn/mixed-tvm-ffn-outproj across batch 1/2/4/8 and 16/32 positions at 500/1000ms, using full-search evals/sec.

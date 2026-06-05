@@ -100,8 +100,9 @@ Known empirical state:
 - Hybrid WGSL b4 is useful and roughly tied with ONNX b1 at 500ms on prior 32-position checks.
 - Hybrid WGSL b4 lost to ONNX b1 on a 1000ms check.
 - The previous JS-input readback loop exhausted most readback micro-optimizations; WebGPU fence/readback remains a major cost.
-- Deferred-readback fixture attribution showed ~1.3–1.4x speedup with matching best moves, but fixed-suite `batchPipelineDepth=2` timed out and needs a dedicated harness.
+- Deferred-readback fixture attribution showed ~1.3–1.4x speedup with matching best moves; the diagnostics branch later added a fixed-FEN readback strategy matrix and failure-fast `HYBRID_SEARCH_BENCH_FAILED` handling so scheduler/readback experiments no longer masquerade as automation timeouts.
 - A non-comparable WASM-input screen showed a strong full-search signal (`~9.75 ms/eval` vs JS-input stronger-loop baseline `~11.65 ms/eval`), motivating this separate lane.
+- Synchronized diagnostic branch findings: `batch=4,batchPipelineDepth=2` correctness failure was a deferred-resource lifetime/preallocation hazard, not a bad FEN or WGSL-head kernel. Preallocating both deferred readback ring slots before any pipelined submit makes the cell testable again, but a short two-FEN smoke did not show a reliable E2E win.
 
 ## Hypothesis Queue
 
@@ -109,9 +110,9 @@ The default loop uses a stronger 16-position, 500ms, 3-rep median workload befor
 
 1. Establish a clean WASM-input b4/depth1 baseline and compare nearby JS-input controls only as diagnostics.
 2. Sweep batch size `2/4/8` at `batchPipelineDepth=1` with WASM input.
-3. Add a dedicated scheduler/quality harness for deferred readback before retrying `batchPipelineDepth>1` fixed-suite runs.
-4. If scheduler/fence overlap remains promising, explore `batchPipelineDepth=2/4` only as speculative speed/quality evidence.
-5. If input/backend time is no longer material, return to attribution modes or start a separate TVM/mixed-kernel lane.
+3. Use the fixed-FEN readback strategy matrix to compare ORT CPU-visible, ORT gpu-buffer, WGSL pipe1, WGSL GPU legal, WGSL pipe2 batch=2, and WGSL pipe2 batch=4 under the same FEN/repeat settings.
+4. Retry `batchPipelineDepth>1` only as speculative speed/quality evidence; compare both batch=2/depth=2 and preallocated batch=4/depth=2 because the former had the earlier local overlap signal while the latter is now correctness-stable but not yet faster.
+5. If input/backend time is no longer material, return to attribution modes or continue the TVM/mixed-kernel lane.
 6. Avoid readback micro-optimizations unless new attribution changes the bottleneck picture.
 
 ## What's Been Tried
@@ -121,7 +122,8 @@ The default loop uses a stronger 16-position, 500ms, 3-rep median workload befor
 - Starting mapAsync before JS legal-prior prep improves telemetry and is lifecycle-hardened, but CPU prep is too small to materially move E2E throughput.
 - Discarded: omitting `mappedPolicy` result arrays in the evaluator search path. It did not improve the fast-loop primary metric and readback wait still dominated.
 - Discarded: replacing batched readback `Float32Array.slice` copies with `subarray` views. The fast-loop metric regressed; do not revisit without a focused CPU-copy microbench.
-- Discarded: opt-in GPU legal priors reduced readback bytes (`7444` -> `3084`) but worsened E2E timing and added a dispatch (`159` -> `160`). Byte reduction alone is not enough if extra GPU work/fence time grows.
+- Discarded in the original JS-input lane: opt-in GPU legal priors reduced readback bytes (`7444` -> `3084`) but worsened E2E timing and added a dispatch (`159` -> `160`). Byte reduction alone is not enough if extra GPU work/fence time grows.
+- Kept in the current WASM-input/mixed-kernel lane: opt-in GPU legal priors with `mixed-tvm-ffn` improved the 16-position/500ms/3-rep primary metric, but this remains benchmark-only and should be A/B'd against JS legal priors with the synchronized readback matrix and fixed-suite harness.
 - Discarded: restoring full-buffer copy/early unmap after the suspect no-copy keep regressed in a two-rep check (`13.97` ms/eval). Do not toggle whole-copy vs no-copy again without a more controlled A/B.
 - Discarded: pre-copying per-slot slices and unmapping before legal-prior postprocess also regressed in a two-rep check (`14.03` ms/eval). Mapped lifetime/copy placement is not the next lever.
 - Discarded: compact JS legal-prior readback using one `copyBufferToBuffer` per legal move reduced reported readback bytes dramatically (`7444` -> `~143`) and kept dispatch count flat, but worsened E2E (`12.85` ms/eval). Avoid per-move copy-command gather.
