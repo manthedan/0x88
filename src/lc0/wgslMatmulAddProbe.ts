@@ -2551,10 +2551,14 @@ const DEFAULT_LN1_BIAS = '/encoder0/ln1/w/bias';
 const DEFAULT_LN_EPSILON = 9.999999974752427e-7;
 
 export type Lc0WebAttentionOutProjKernelVariant = 'hand' | 'tvm-packed-f16';
-export type Lc0WebEncoderKernelVariant = 'hand' | 'tvm-packed-f16' | 'mixed-tvm-ffn' | 'mixed-tvm-ffn-outproj';
+export type Lc0WebEncoderKernelVariant = 'hand' | 'tvm-packed-f16' | 'mixed-tvm-ffn' | 'mixed-tvm-ffn-outproj' | 'mixed-tvm-ffn-smolgen-project';
 
 function encoderUsesTvmPackedF16Ffn(variant: Lc0WebEncoderKernelVariant): boolean {
-  return variant === 'tvm-packed-f16' || variant === 'mixed-tvm-ffn' || variant === 'mixed-tvm-ffn-outproj';
+  return variant === 'tvm-packed-f16' || variant === 'mixed-tvm-ffn' || variant === 'mixed-tvm-ffn-outproj' || variant === 'mixed-tvm-ffn-smolgen-project';
+}
+
+function encoderUsesTiledSmolgenProject(variant: Lc0WebEncoderKernelVariant): boolean {
+  return variant === 'mixed-tvm-ffn-smolgen-project';
 }
 
 function encoderUsesTvmPackedF16Qkv(variant: Lc0WebEncoderKernelVariant): boolean {
@@ -2986,6 +2990,37 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const SMOLGEN_PROJECT_TILED_F16_WGSL = `
+@group(0) @binding(0) var<storage, read> inputVec: array<f32>;
+@group(0) @binding(1) var<storage, read> weightF16: array<u32>;
+@group(0) @binding(2) var<storage, read_write> outputVec: array<f32>;
+var<workgroup> inputTile: array<f32, 64>;
+
+fn pick_lane(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+fn load_weight(index: u32) -> f32 { return pick_lane(weightF16[index >> 1u], index); }
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let col = wid.x * 64u + lid.x;
+  let head = wid.z;
+  var sum = 0.0;
+  for (var tile = 0u; tile < 256u; tile = tile + 64u) {
+    inputTile[lid.x] = inputVec[head * 256u + tile + lid.x];
+    workgroupBarrier();
+    for (var k = 0u; k < 64u; k = k + 1u) {
+      sum = sum + inputTile[k] * load_weight((tile + k) * 4096u + col);
+    }
+    workgroupBarrier();
+  }
+  outputVec[head * 4096u + col] = sum;
+}
+`;
+
+type Lc0WebSmolgenKernelVariant = 'hand' | 'tiled-project-f16';
+
 type SmolgenPipelines = {
   compress: PipelineLike;
   compressBind: unknown;
@@ -2997,6 +3032,7 @@ type SmolgenPipelines = {
   dense2Bind: unknown;
   ln2: PipelineLike;
   ln2Bind: unknown;
+  projectKernelVariant: Lc0WebSmolgenKernelVariant;
   project: PipelineLike;
   projectBind: unknown;
 };
@@ -3019,7 +3055,7 @@ function createSmolgenPipelines(device: DeviceLike, buffers: {
   ln2: BufferLike;
   smolgenWeight: BufferLike;
   output: BufferLike;
-}): SmolgenPipelines {
+}, projectKernelVariant: Lc0WebSmolgenKernelVariant = 'hand'): SmolgenPipelines {
   const compress = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen compress', code: SMOLGEN_COMPRESS_WGSL }), entryPoint: 'main' } }) as PipelineLike;
   const compressBind = device.createBindGroup({ layout: compress.getBindGroupLayout(0), entries: [
     { binding: 0, resource: { buffer: buffers.input } },
@@ -3054,13 +3090,13 @@ function createSmolgenPipelines(device: DeviceLike, buffers: {
     { binding: 2, resource: { buffer: buffers.ln2Bias } },
     { binding: 3, resource: { buffer: buffers.ln2 } },
   ] });
-  const project = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen project', code: SMOLGEN_PROJECT_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const project = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: projectKernelVariant === 'tiled-project-f16' ? 'lc0web smolgen project tiled f16' : 'lc0web smolgen project', code: projectKernelVariant === 'tiled-project-f16' ? SMOLGEN_PROJECT_TILED_F16_WGSL : SMOLGEN_PROJECT_WGSL }), entryPoint: 'main' } }) as PipelineLike;
   const projectBind = device.createBindGroup({ layout: project.getBindGroupLayout(0), entries: [
     { binding: 0, resource: { buffer: buffers.ln2 } },
     { binding: 1, resource: { buffer: buffers.smolgenWeight } },
     { binding: 2, resource: { buffer: buffers.output } },
   ] });
-  return { compress, compressBind, dense1, dense1Bind, ln1, ln1Bind, dense2, dense2Bind, ln2, ln2Bind, project, projectBind };
+  return { compress, compressBind, dense1, dense1Bind, ln1, ln1Bind, dense2, dense2Bind, ln2, ln2Bind, projectKernelVariant, project, projectBind };
 }
 
 function encodeSmolgenCompressPass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
@@ -3096,7 +3132,8 @@ function encodeSmolgenLn2Pass(pass: ComputePassLike, pipelines: SmolgenPipelines
 function encodeSmolgenProjectPass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.project);
   pass.setBindGroup(0, pipelines.projectBind);
-  pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+  if (pipelines.projectKernelVariant === 'tiled-project-f16') pass.dispatchWorkgroups(Math.ceil((DEFAULT_TOKENS * DEFAULT_TOKENS) / 64), 1, DEFAULT_HEADS);
+  else pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
 }
 
 function encodeSmolgenPass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
@@ -5940,7 +5977,7 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
     ln2: smolgenLn2,
     smolgenWeight: weights.smolgenWeight,
     output: smolgenBias,
-  });
+  }, encoderUsesTiledSmolgenProject(encoderKernelVariant) ? 'tiled-project-f16' : 'hand');
   const attentionPipelines = createAttentionOutputPipelines(device, {
     input: layerInput, qWeight: weights.qWeight, qBias: weights.qBias, kWeight: weights.kWeight, kBias: weights.kBias, vWeight: weights.vWeight, vBias: weights.vBias, scale: weights.scale, smolgenBias, qkv, scores, probs, attn,
     outWeight: weights.outWeight, outBias: weights.outBias, alpha: weights.attentionAlpha, skip: attentionSkip, lnScale: weights.ln1Scale, lnBias: weights.ln1Bias, output: attentionOutput, podArgs,

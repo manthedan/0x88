@@ -628,7 +628,7 @@ type HybridEncoderProfileResult = {
   status: 'HYBRID_ENCODER_PROFILE_DONE';
   packUrl: string;
   layers: number;
-  encoderKernelVariant: 'hand' | 'tvm-packed-f16' | 'mixed-tvm-ffn' | 'mixed-tvm-ffn-outproj';
+  encoderKernelVariant: 'hand' | 'tvm-packed-f16' | 'mixed-tvm-ffn' | 'mixed-tvm-ffn-outproj' | 'mixed-tvm-ffn-smolgen-project';
   inputBackend: 'js' | 'wgsl' | 'wasm';
   warmup: number;
   iterations: number;
@@ -740,7 +740,7 @@ const HYBRID_LEGAL_PRIORS_BACKEND_PARAM = params.get('legalPriorsBackend') ?? pa
 const HYBRID_LEGAL_PRIORS_BACKEND_REQUESTED = HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'wasm' || HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'gpu';
 const HYBRID_LEGAL_PRIORS_BACKEND = HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'gpu' ? 'gpu' : (HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'wasm' ? 'wasm' : 'js');
 const HYBRID_ENCODER_KERNEL_PARAM = params.get('encoderKernel') ?? params.get('hybridEncoderKernel') ?? params.get('encoderKernelVariant');
-const HYBRID_ENCODER_KERNEL_VARIANT = HYBRID_ENCODER_KERNEL_PARAM === 'tvm-packed-f16' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-outproj' ? HYBRID_ENCODER_KERNEL_PARAM : 'hand';
+const HYBRID_ENCODER_KERNEL_VARIANT = HYBRID_ENCODER_KERNEL_PARAM === 'tvm-packed-f16' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-outproj' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-smolgen-project' ? HYBRID_ENCODER_KERNEL_PARAM : 'hand';
 const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_LEGAL_PRIORS_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';

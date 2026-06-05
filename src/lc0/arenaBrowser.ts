@@ -223,7 +223,7 @@ function lc0EncoderLayers(): number {
 }
 
 function normalizeLc0EncoderKernelVariant(value: string | null): Lc0WebEncoderKernelVariant {
-  return value === 'tvm-packed-f16' || value === 'mixed-tvm-ffn' || value === 'mixed-tvm-ffn-outproj' ? value : 'hand';
+  return value === 'tvm-packed-f16' || value === 'mixed-tvm-ffn' || value === 'mixed-tvm-ffn-outproj' || value === 'mixed-tvm-ffn-smolgen-project' ? value : 'hand';
 }
 
 function lc0EncoderKernelVariant(): Lc0WebEncoderKernelVariant {

@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 180_000;
-const ENCODER_KERNELS = ['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj'];
+const ENCODER_KERNELS = ['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'];
 
 function usage() {
   console.log(`Usage: node scripts/lc0_browser_hybrid_encoder_profile_matrix.mjs [options]\n\nRuns repeated browser hybrid encoder stage profiles over encoder-kernel variants and writes a JSON matrix artifact.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_encoder_profile_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --encoder-kernels LIST\n                       Comma-separated encoder kernels: ${ENCODER_KERNELS.join(',')} (default hand)\n  --repeats N           Repeat each variant, alternating variants in repeat order (default 1)\n  --layers N            Encoder layers (default 10)\n  --profile-mode MODE   gpu-timestamp or sync-staged (default gpu-timestamp)\n  --profile-iters N     Profile iterations per cell (default 10)\n  --profile-warmup N    Profile warmup iterations per cell (default 2)\n  --input-backend MODE  Hybrid input backend: js, wgsl, or wasm (default js)\n  --timeout MS          Per-cell browser timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and URLs without running\n  -h, --help            Show this help\n`);
