@@ -38,17 +38,20 @@ Secondary metrics are diagnostic only. Keep/discard decisions should be based on
 The script emits `METRIC name=value` lines for pi-autoresearch. Defaults:
 
 - FEN corpus: `artifacts/lc0_runtime_arena_20260605/batch_matrix/fixed_suite_32_fens.txt`
-- `LC0_AR_MAX_POSITIONS=4`
-- `LC0_AR_MOVETIME_MS=250`
-- `LC0_AR_REPS=1`
+- `LC0_AR_MAX_POSITIONS=16`
+- `LC0_AR_MOVETIME_MS=500`
+- `LC0_AR_REPS=3`
 - `LC0_AR_BATCH_SIZE=4`
 - `LC0_AR_PIPELINE_DEPTH=1`
 
 Useful manual overrides:
 
 ```bash
-LC0_AR_REPS=2 ./autoresearch.sh
-LC0_AR_MAX_POSITIONS=16 LC0_AR_MOVETIME_MS=500 ./autoresearch.sh
+# Fast screening only; do not keep based on this without confirmation.
+LC0_AR_REPS=1 LC0_AR_MAX_POSITIONS=4 LC0_AR_MOVETIME_MS=250 ./autoresearch.sh
+
+# Extra confirmation for promising structural changes.
+LC0_AR_REPS=5 ./autoresearch.sh
 ```
 
 For stronger evidence after promising keeps, run alternating 16/32-position fixed-suite checks comparing ONNX b1 against hybrid WGSL b4. Do not use the fast 4-position loop as promotion evidence.
@@ -97,14 +100,14 @@ Known empirical state:
 
 ## Hypothesis Queue
 
-Prefer small, isolated experiments in this order:
+The fast 4-position/1-rep loop produced several false keeps. The default loop now uses a stronger 16-position, 500ms, 3-rep median workload before keep/discard decisions. Prefer benchmark-quality and attribution work before more hot-path micro-optimizations:
 
-1. Reduce readback shape/bytes for WGSL heads while preserving legal-prior output quality.
-2. Improve or harden opt-in GPU legal-prior/top-k readback reduction.
-3. Separate WDL and policy readback timing/shape to identify unavoidable fence cost vs byte-copy cost.
-4. Add better timestamp/query attribution only if it guides E2E search changes.
-5. Explore WASM legal-prior prep only if telemetry shows JS legal-prior postprocess becomes meaningful.
-6. Consider generated/TVM/f16 kernel tweaks only after E2E/timestamp evidence shows kernel time, not readback, dominates.
+1. Add benchmark-only attribution modes: no readback/queue completion, WDL-only readback, policy-only readback, full readback, and profile-only sanity-scan toggles.
+2. Run repeated attribution matrices to decide whether the floor is command completion, readback bytes, map overhead, or CPU postprocessing.
+3. If fence/queue completion dominates, pursue scheduler/batch/deferred-readback lanes.
+4. If bytes dominate, pursue an integrated GPU legal gather/top-k path with one compact output and no per-move copies.
+5. If kernel time dominates under stronger E2E workloads, start a separate TVM/mixed-kernel lane with its own objective.
+6. Explore WASM legal-prior prep only if telemetry shows JS legal-prior postprocess becomes material after readback reductions.
 
 ## What's Been Tried
 
@@ -117,6 +120,8 @@ Prefer small, isolated experiments in this order:
 - Discarded: restoring full-buffer copy/early unmap after the suspect no-copy keep regressed in a two-rep check (`13.97` ms/eval). Do not toggle whole-copy vs no-copy again without a more controlled A/B.
 - Discarded: pre-copying per-slot slices and unmapping before legal-prior postprocess also regressed in a two-rep check (`14.03` ms/eval). Mapped lifetime/copy placement is not the next lever.
 - Discarded: compact JS legal-prior readback using one `copyBufferToBuffer` per legal move reduced reported readback bytes dramatically (`7444` -> `~143`) and kept dispatch count flat, but worsened E2E (`12.85` ms/eval). Avoid per-move copy-command gather.
-- Noise note: an unchanged rerun regressed by ~2.4%, so tiny single-run improvements need confirmation before keeping.
+- Low-confidence keep: combining nonzero/variation sanity scans had a strong single-run result (`9.86` ms/eval) but failed one-rep and two-rep confirmations (`13.04`, `13.60`). Treat as suspect until stronger alternating evidence; do not build on CPU scan micro-optimizations alone.
+- Noise note: an unchanged rerun regressed by ~2.4%, and several apparent single-run wins failed one-rep/two-rep confirmations. The loop now defaults to 16 positions, 500ms, 3 reps to reduce false keeps.
+- Stop exploring low-ROI readback micro-toggles without new attribution evidence: Array allocation cleanup, slice/subarray, map range, unmap timing, 256-byte stride padding, tiny dispatch fusions, and per-legal-move compact copies.
 
 Update this section after every few experiments, especially for discarded ideas and benchmark-noise observations.
