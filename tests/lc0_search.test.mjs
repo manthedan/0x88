@@ -136,16 +136,22 @@ test('LC0 pipelined PUCT works with singleton physical batches', async () => {
 test('LC0 search aggregates backend timings from physical pipeline batches', async () => {
   const fakeLc0 = {
     async evaluateBatchSequence(batches) {
-      return batches.map((batch) => batch.map((input, i) => ({
+      return batches.map((batch, batchIndex) => batch.map((input, i) => ({
         ...fakeLc0Evaluation(input),
         timing: {
           totalEvalMs: 20,
           readbackSyncedMs: 10,
+          deferredReadbackDelayMs: 4,
+          readbackMapAsyncMs: 8,
+          readbackMapCopyMs: 2,
           legalPriorsMs: i + 1,
           readbackBytes: 7444 * batch.length,
           readbackMapCount: 1,
           physicalBatchSize: batch.length,
           batchPosition: i,
+          wgslSequenceId: 100 + batchIndex,
+          batchSequenceIndex: batchIndex,
+          deferredReadbackSlot: batchIndex % 2,
         },
       })));
     },
@@ -159,10 +165,30 @@ test('LC0 search aggregates backend timings from physical pipeline batches', asy
   assert.equal(stats?.evalBackendTimingPositions, 8);
   assert.equal(stats?.evalBackendTimingMeans?.readbackSyncedMs, 10);
   assert.equal(stats?.evalBackendTimingPerPositionMeans?.readbackSyncedMs, 5);
+  assert.equal(stats?.evalBackendTimingMeans?.readbackMapAsyncMs, 8);
+  assert.equal(stats?.evalBackendTimingMeans?.readbackMapCopyMs, 2);
+  assert.equal(stats?.evalBackendTimingMeans?.deferredReadbackDelayMs, 4);
   assert.equal(stats?.evalBackendTimingMeans?.readbackMapCount, 1);
   assert.equal(stats?.evalBackendTimingPerPositionMeans?.readbackBytes, 7444);
   assert.equal(stats?.evalBackendTimingMeans?.legalPriorsMs, 3);
   assert.equal(stats?.evalBackendTimingPerPositionMeans?.legalPriorsMs, 1.5);
+  assert.equal(stats?.evalBackendTimingMeans?.wgslSequenceId, undefined, 'sequence IDs are metadata, not averaged timings');
+  assert.equal(stats?.evalBackendTimingMeans?.deferredReadbackSlot, undefined, 'ring-buffer slots are metadata, not averaged timings');
+});
+
+test('LC0 pipelined PUCT rejects malformed sequence result shapes', async () => {
+  const fakeLc0 = {
+    async evaluateBatchSequence(batches) {
+      return batches.map((batch, i) => i === 0 ? batch.slice(1).map(fakeLc0Evaluation) : batch.map(fakeLc0Evaluation));
+    },
+    async evaluate(input) {
+      return fakeLc0Evaluation(input);
+    },
+  };
+  await assert.rejects(
+    () => new Lc0PuctSearcher(fakeLc0).search(START_FEN, { visits: 4, batchSize: 2, batchPipelineDepth: 2 }),
+    /returned 1 result\(s\) for batch 0, expected 2/,
+  );
 });
 
 test('LC0 pipelined neural budget is bounded by remaining misses', async () => {

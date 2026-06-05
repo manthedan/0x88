@@ -5488,6 +5488,18 @@ export interface Lc0WebHybridTimingBreakdown {
   readbackBytes: number;
   readbackMapCount: number;
   readbackMode?: 'immediate' | 'deferred-double-buffered';
+  /** Monotonic runtime submission id for strict deferred-readback diagnostics. */
+  wgslSequenceId?: number;
+  /** Index of this logical batch in a multi-batch deferred sequence call. */
+  batchSequenceIndex?: number;
+  /** Readback-buffer ring slot used by deferred/double-buffered WGSL-head evaluation. */
+  deferredReadbackSlot?: number;
+  /** Wall time between queue submission and starting mapAsync; >0 in deferred modes means useful overlap was attempted. */
+  deferredReadbackDelayMs?: number;
+  /** Awaited mapAsync time, separated from CPU copy/postprocess. */
+  readbackMapAsyncMs?: number;
+  /** CPU time to copy the mapped readback range and unmap it. */
+  readbackMapCopyMs?: number;
   physicalBatchSize?: number;
   batchPosition?: number;
   inputBackend?: Lc0WebHybridInputBackend;
@@ -5881,6 +5893,10 @@ interface SubmittedWgslHybridBatch {
   legalCandidates?: LegalPolicyCandidate[][];
   legalPriorsSetupMs?: number;
   readbackBuffer: BufferLike;
+  sequenceId: number;
+  batchSequenceIndex?: number;
+  deferredReadbackSlot?: number;
+  submittedAt: number;
   totalStarted: number;
   encoderStarted: number;
   inputBuildMs: number;
@@ -5919,6 +5935,8 @@ class Lc0WebHybridRuntime {
   private wgslBatchReadbackCapacity = 0;
   private wgslDeferredReadbackBuffers: BufferLike[] = [];
   private wgslDeferredReadbackCapacity = 0;
+  private wgslDeferredReadbackInUse = new Set<number>();
+  private nextWgslSequenceId = 1;
 
   private constructor(options: {
     device: DeviceLike;
@@ -6094,6 +6112,7 @@ class Lc0WebHybridRuntime {
 
   private ensureWgslDeferredReadbackBuffer(count: number, slot: number): BufferLike {
     if (this.wgslDeferredReadbackCapacity < count) {
+      if (this.wgslDeferredReadbackInUse.size) throw new Error('cannot grow WGSL deferred readback buffers while a deferred readback is still in flight');
       for (const buffer of this.wgslDeferredReadbackBuffers) buffer.destroy?.();
       this.wgslDeferredReadbackBuffers = [];
       this.wgslDeferredReadbackCapacity = count;
@@ -6527,7 +6546,7 @@ class Lc0WebHybridRuntime {
     };
   }
 
-  private submitWgslBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }, readbackBuffer: BufferLike): SubmittedWgslHybridBatch {
+  private submitWgslBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }, readbackBuffer: BufferLike, sequenceOptions: { batchSequenceIndex?: number; deferredReadbackSlot?: number } = {}): SubmittedWgslHybridBatch {
     const totalStarted = nowMs();
     const slots = this.ensureWgslBatchSlots(inputs.length);
     const uploadBuffer = this.ensureWgslBatchUploadBuffer(inputs.length);
@@ -6594,81 +6613,122 @@ class Lc0WebHybridRuntime {
     const queueSubmitStarted = nowMs();
     this.device.queue.submit([commandBuffer]);
     const queueSubmitMs = nowMs() - queueSubmitStarted;
-    return { inputs, boardsAndFens, legalCandidates, legalPriorsSetupMs, readbackBuffer, totalStarted, encoderStarted, inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, inputBridgeCopyMs, wasmEncodeMs, wasmTotalMs };
+    return {
+      inputs,
+      boardsAndFens,
+      legalCandidates,
+      legalPriorsSetupMs,
+      readbackBuffer,
+      sequenceId: this.nextWgslSequenceId++,
+      batchSequenceIndex: sequenceOptions.batchSequenceIndex,
+      deferredReadbackSlot: sequenceOptions.deferredReadbackSlot,
+      submittedAt: nowMs(),
+      totalStarted,
+      encoderStarted,
+      inputBuildMs,
+      inputUploadMs,
+      commandEncodeMs,
+      queueSubmitMs,
+      inputBridgeCopyMs,
+      wasmEncodeMs,
+      wasmTotalMs,
+    };
   }
 
   private async finishWgslBatch(submitted: SubmittedWgslHybridBatch, options: { policyTemperature: number }, readbackMode: 'immediate' | 'deferred-double-buffered'): Promise<Lc0WebHybridEvaluationResult[]> {
-    const headStarted = nowMs();
-    const readbackStarted = nowMs();
-    await submitted.readbackBuffer.mapAsync(gpuGlobals().GPUMapMode!.READ);
-    const readbackBytesPerSlot = this.wgslHeadReadbackBytes();
-    const readbackRange = submitted.readbackBuffer.getMappedRange().slice(0, submitted.inputs.length * readbackBytesPerSlot);
-    submitted.readbackBuffer.unmap();
-    const readbackSyncedMs = nowMs() - readbackStarted;
-    const headRunMs = nowMs() - headStarted;
-    const encoderDispatchSyncedMs = nowMs() - submitted.encoderStarted;
-    const totalEvalMs = nowMs() - submitted.totalStarted;
-    const readbackFloats = new Float32Array(readbackRange);
-    const out: Lc0WebHybridEvaluationResult[] = [];
-    for (let i = 0; i < submitted.inputs.length; i++) {
-      const base = i * (readbackBytesPerSlot / 4);
-      const gpuLegalCandidates = submitted.legalCandidates?.[i];
-      const mappedPolicyF32 = gpuLegalCandidates ? undefined : readbackFloats.slice(base, base + DEFAULT_POLICY_MAPPED_OUTPUTS);
-      const wdlF32 = gpuLegalCandidates
-        ? readbackFloats.slice(base + WGSL_GPU_LEGAL_OUTPUT_FLOATS, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS + 3)
-        : readbackFloats.slice(base + DEFAULT_POLICY_MAPPED_OUTPUTS, base + DEFAULT_POLICY_MAPPED_OUTPUTS + 3);
-      if (mappedPolicyF32 && (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32))) throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy for slot ${i}`);
-      if (!arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform WDL for slot ${i}`);
-      const mappedPolicy = mappedPolicyF32 ? Array.from(mappedPolicyF32) : [];
-      const wdlValues = Array.from(wdlF32);
-      const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
-      const legalPriorsStarted = nowMs();
-      const legalPriorsSetupMs = gpuLegalCandidates ? (submitted.legalPriorsSetupMs ?? 0) / submitted.inputs.length : 0;
-      const legalPriorsResult = gpuLegalCandidates
-        ? { legalPriors: legalPriorsFromGpuOutput(gpuLegalCandidates, readbackFloats.slice(base, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS)), bestMove: undefined as string | undefined, legalPriorsMs: legalPriorsSetupMs + (nowMs() - legalPriorsStarted), wasmTiming: undefined }
-        : this.computeLegalPriors(submitted.boardsAndFens[i].board, submitted.boardsAndFens[i].fen, mappedPolicy, options.policyTemperature);
-      const legalPriors = legalPriorsResult.legalPriors;
-      const bestMove = gpuLegalCandidates ? legalPriors[0]?.uci : legalPriorsResult.bestMove;
-      const { legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = legalPriorsResult;
-      out.push({
-        status: 'LC0WEB_HYBRID_EVALUATION_DONE',
-        backend: 'lc0web-wgsl-encoder-wgsl-heads',
-        packUrl: this.packUrl,
-        layers: this.layers,
-        encoderKernelVariant: this.encoderKernelVariant,
-        packLoadMs: this.packLoadMs,
-        encoderDispatchSyncedMs,
-        headRunMs,
-        fen: submitted.boardsAndFens[i].fen,
-        wdl,
-        q: wdl[0] - wdl[2],
-        mlh: 0,
-        legalPriors,
-        bestMove,
-        mappedPolicy,
-        timing: {
-          totalEvalMs,
-          inputBuildMs: submitted.inputBuildMs,
-          inputUploadMs: submitted.inputUploadMs,
-          commandEncodeMs: submitted.commandEncodeMs,
-          queueSubmitMs: submitted.queueSubmitMs,
-          readbackSyncedMs,
-          headRunMs,
-          legalPriorsMs,
-          readbackBytes: submitted.inputs.length * readbackBytesPerSlot,
-          readbackMapCount: 1,
-          readbackMode,
-          physicalBatchSize: submitted.inputs.length,
-          batchPosition: i,
-          inputBackend: this.inputBackend,
-          legalPriorsBackend: this.legalPriorsBackend,
+    let readbackMapped = false;
+    try {
+      const headStarted = nowMs();
+      const readbackStarted = nowMs();
+      const deferredReadbackDelayMs = Math.max(0, readbackStarted - submitted.submittedAt);
+      const mapAsyncStarted = nowMs();
+      await submitted.readbackBuffer.mapAsync(gpuGlobals().GPUMapMode!.READ);
+      readbackMapped = true;
+      const readbackMapAsyncMs = nowMs() - mapAsyncStarted;
+      const readbackBytesPerSlot = this.wgslHeadReadbackBytes();
+      const mapCopyStarted = nowMs();
+      const readbackRange = submitted.readbackBuffer.getMappedRange().slice(0, submitted.inputs.length * readbackBytesPerSlot);
+      submitted.readbackBuffer.unmap();
+      readbackMapped = false;
+      const readbackMapCopyMs = nowMs() - mapCopyStarted;
+      const readbackSyncedMs = nowMs() - readbackStarted;
+      const headRunMs = nowMs() - headStarted;
+      const encoderDispatchSyncedMs = nowMs() - submitted.encoderStarted;
+      const totalEvalMs = nowMs() - submitted.totalStarted;
+      const readbackFloats = new Float32Array(readbackRange);
+      const out: Lc0WebHybridEvaluationResult[] = [];
+      for (let i = 0; i < submitted.inputs.length; i++) {
+        const base = i * (readbackBytesPerSlot / 4);
+        const gpuLegalCandidates = submitted.legalCandidates?.[i];
+        const mappedPolicyF32 = gpuLegalCandidates ? undefined : readbackFloats.slice(base, base + DEFAULT_POLICY_MAPPED_OUTPUTS);
+        const wdlF32 = gpuLegalCandidates
+          ? readbackFloats.slice(base + WGSL_GPU_LEGAL_OUTPUT_FLOATS, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS + 3)
+          : readbackFloats.slice(base + DEFAULT_POLICY_MAPPED_OUTPUTS, base + DEFAULT_POLICY_MAPPED_OUTPUTS + 3);
+        if (mappedPolicyF32 && (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32))) throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy for slot ${i}`);
+        if (!arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform WDL for slot ${i}`);
+        const mappedPolicy = mappedPolicyF32 ? Array.from(mappedPolicyF32) : [];
+        const wdlValues = Array.from(wdlF32);
+        const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
+        const legalPriorsStarted = nowMs();
+        const legalPriorsSetupMs = gpuLegalCandidates ? (submitted.legalPriorsSetupMs ?? 0) / submitted.inputs.length : 0;
+        const legalPriorsResult = gpuLegalCandidates
+          ? { legalPriors: legalPriorsFromGpuOutput(gpuLegalCandidates, readbackFloats.slice(base, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS)), bestMove: undefined as string | undefined, legalPriorsMs: legalPriorsSetupMs + (nowMs() - legalPriorsStarted), wasmTiming: undefined }
+          : this.computeLegalPriors(submitted.boardsAndFens[i].board, submitted.boardsAndFens[i].fen, mappedPolicy, options.policyTemperature);
+        const legalPriors = legalPriorsResult.legalPriors;
+        const bestMove = gpuLegalCandidates ? legalPriors[0]?.uci : legalPriorsResult.bestMove;
+        const { legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = legalPriorsResult;
+        out.push({
+          status: 'LC0WEB_HYBRID_EVALUATION_DONE',
+          backend: 'lc0web-wgsl-encoder-wgsl-heads',
+          packUrl: this.packUrl,
+          layers: this.layers,
           encoderKernelVariant: this.encoderKernelVariant,
-          ...(this.inputBackend === 'wasm' ? { inputBridgeCopyMs: submitted.inputBridgeCopyMs, wasmEncodeMs: submitted.wasmEncodeMs, wasmTotalMs: submitted.wasmTotalMs } : {}),
-          ...this.timingWasmLegalPriorsFields(legalPriorsWasmTiming),
-        },
-      });
+          packLoadMs: this.packLoadMs,
+          encoderDispatchSyncedMs,
+          headRunMs,
+          fen: submitted.boardsAndFens[i].fen,
+          wdl,
+          q: wdl[0] - wdl[2],
+          mlh: 0,
+          legalPriors,
+          bestMove,
+          mappedPolicy,
+          timing: {
+            totalEvalMs,
+            inputBuildMs: submitted.inputBuildMs,
+            inputUploadMs: submitted.inputUploadMs,
+            commandEncodeMs: submitted.commandEncodeMs,
+            queueSubmitMs: submitted.queueSubmitMs,
+            readbackSyncedMs,
+            headRunMs,
+            legalPriorsMs,
+            readbackBytes: submitted.inputs.length * readbackBytesPerSlot,
+            readbackMapCount: 1,
+            readbackMode,
+            wgslSequenceId: submitted.sequenceId,
+            batchSequenceIndex: submitted.batchSequenceIndex,
+            deferredReadbackSlot: submitted.deferredReadbackSlot,
+            deferredReadbackDelayMs,
+            readbackMapAsyncMs,
+            readbackMapCopyMs,
+            physicalBatchSize: submitted.inputs.length,
+            batchPosition: i,
+            inputBackend: this.inputBackend,
+            legalPriorsBackend: this.legalPriorsBackend,
+            encoderKernelVariant: this.encoderKernelVariant,
+            ...(this.inputBackend === 'wasm' ? { inputBridgeCopyMs: submitted.inputBridgeCopyMs, wasmEncodeMs: submitted.wasmEncodeMs, wasmTotalMs: submitted.wasmTotalMs } : {}),
+            ...this.timingWasmLegalPriorsFields(legalPriorsWasmTiming),
+          },
+        });
+      }
+      return out;
+    } finally {
+      if (readbackMapped) {
+        try { submitted.readbackBuffer.unmap(); }
+        catch { /* best-effort cleanup after a failed mapped-range read */ }
+      }
+      if (submitted.deferredReadbackSlot !== undefined) this.wgslDeferredReadbackInUse.delete(submitted.deferredReadbackSlot);
     }
-    return out;
   }
 
   async evaluateBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult[]> {
@@ -6696,8 +6756,23 @@ class Lc0WebHybridRuntime {
         out[i] = [];
         continue;
       }
-      const readbackBuffer = this.ensureWgslDeferredReadbackBuffer(batch.length, i % 2);
-      const submitted = this.submitWgslBatch(batch, options, readbackBuffer);
+      if (pending && this.wgslDeferredReadbackCapacity < batch.length) {
+        // Growing the readback buffers requires destroying/replacing the ring;
+        // finish the pending map first so no in-flight result points at it.
+        out[pending.index] = await this.finishWgslBatch(pending.submitted, options, 'deferred-double-buffered');
+        pending = undefined;
+      }
+      const deferredReadbackSlot = i % 2;
+      if (this.wgslDeferredReadbackInUse.has(deferredReadbackSlot)) throw new Error(`WGSL deferred readback slot ${deferredReadbackSlot} reused before its prior result was mapped`);
+      const readbackBuffer = this.ensureWgslDeferredReadbackBuffer(batch.length, deferredReadbackSlot);
+      this.wgslDeferredReadbackInUse.add(deferredReadbackSlot);
+      let submitted: SubmittedWgslHybridBatch;
+      try {
+        submitted = this.submitWgslBatch(batch, options, readbackBuffer, { batchSequenceIndex: i, deferredReadbackSlot });
+      } catch (error) {
+        this.wgslDeferredReadbackInUse.delete(deferredReadbackSlot);
+        throw error;
+      }
       if (pending) out[pending.index] = await this.finishWgslBatch(pending.submitted, options, 'deferred-double-buffered');
       pending = { index: i, submitted };
     }
@@ -6777,7 +6852,7 @@ function mean(values: number[]): number {
 
 function summarizeHybridEvaluations(mode: 'immediate' | 'deferred-double-buffered', wallMs: number, batches: Lc0WebHybridEvaluationResult[][]): Lc0WebWgslDeferredReadbackBenchModeResult {
   const flat = batches.flat();
-  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount'];
+  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount'];
   const timingMeans: Partial<Record<keyof Lc0WebHybridTimingBreakdown, number>> = {};
   for (const key of timingKeys) {
     const values = flat.map((entry) => entry.timing[key]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));

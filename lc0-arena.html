@@ -73,6 +73,8 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
       <label><input type="checkbox" value="sf-d8" /> Stockfish lite · depth 8</label>
     </div>
     <div class="row">
+      <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
+        <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
       <div class="field"><label for="formatSelect">Format</label>
         <select id="formatSelect"><option value="round-robin">Round robin</option><option value="gauntlet">Gauntlet</option></select></div>
       <div class="field"><label for="championSelect">Gauntlet champion</label>

@@ -622,7 +622,7 @@ function recordEvaluatorMetricsDelta(evaluator: Evaluator, before: EvaluatorMetr
   }
 }
 
-const EVAL_TIMING_METADATA_KEYS = new Set(['batchPosition', 'physicalBatchSize']);
+const EVAL_TIMING_METADATA_KEYS = new Set(['batchPosition', 'physicalBatchSize', 'wgslSequenceId', 'batchSequenceIndex', 'deferredReadbackSlot']);
 const EVAL_TIMING_PER_SLOT_KEYS = new Set(['legalPriorsMs']);
 
 function evaluationTimingRecord(evaln: Evaluation | undefined): Record<string, number> | undefined {
@@ -1042,12 +1042,14 @@ function finishExpansion(node: Node, moves: Move[], evaln: Evaluation, context: 
 }
 
 interface PreparedLeafBatch {
+  /** Monotonic ID assigned by the pipelined scheduler; used for stale-result diagnostics. */
+  generationId: number;
   prepared: PreparedLeaf[];
   evalNodes: Node[];
   evalMoves: Move[][];
 }
 
-function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, stats: SearchStats, transpositionTable: Map<string, Node> | undefined, collisionMode: SearchBatchCollisionMode, collisionRetryLimit: number, inFlightEvalLeaves?: Set<Node>): PreparedLeafBatch {
+function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, stats: SearchStats, transpositionTable: Map<string, Node> | undefined, collisionMode: SearchBatchCollisionMode, collisionRetryLimit: number, inFlightEvalLeaves?: Set<Node>, generationId = 0): PreparedLeafBatch {
   const selected: SelectedLeaf[] = [];
   const localInFlightEvalLeaves = inFlightEvalLeaves ?? new Set<Node>();
   const retryVirtualPaths: Edge[][] = [];
@@ -1097,7 +1099,7 @@ function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: Search
       prepared.push({ kind: 'eval', sel, slot });
     }
   }
-  return { prepared, evalNodes, evalMoves };
+  return { generationId, prepared, evalNodes, evalMoves };
 }
 
 function recordEvalBatchStats(batch: PreparedLeafBatch, stats: SearchStats): void {
@@ -1109,7 +1111,12 @@ function recordEvalBatchStats(batch: PreparedLeafBatch, stats: SearchStats): voi
 }
 
 function finishPreparedLeafBatch(batch: PreparedLeafBatch, evals: Evaluation[], searchPolicy: SearchPolicy, context: SearchPolicyContext, stats: SearchStats): void {
-  const values = batch.evalNodes.map((node, i) => { stats.expansions += 1; return finishExpansion(node, batch.evalMoves[i], evals[i], context); });
+  if (evals.length !== batch.evalNodes.length) throw new Error(`pipelined evaluation generation ${batch.generationId} returned ${evals.length} result(s) for ${batch.evalNodes.length} node(s)`);
+  const values = batch.evalNodes.map((node, i) => {
+    if (node.expanded || node.terminalValue !== null) throw new Error(`stale pipelined evaluation for generation ${batch.generationId} slot ${i}: node was already expanded before results were applied`);
+    stats.expansions += 1;
+    return finishExpansion(node, batch.evalMoves[i], evals[i], context);
+  });
   for (const item of batch.prepared) {
     let value: number | undefined;
     if (item.kind === 'terminal') value = item.value;
@@ -1217,6 +1224,15 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
   }
 }
 
+function assertEvaluationBatchSequenceShape(evalResults: Evaluation[][], evalBatches: EvaluationBatchRequest[]): void {
+  if (evalResults.length !== evalBatches.length) throw new Error(`evaluateBatchSequence returned ${evalResults.length} batch(es) for ${evalBatches.length} request batch(es)`);
+  for (let i = 0; i < evalBatches.length; i++) {
+    const expected = evalBatches[i].boards.length;
+    const actual = evalResults[i]?.length ?? 0;
+    if (actual !== expected) throw new Error(`evaluateBatchSequence returned ${actual} result(s) for batch ${i}, expected ${expected}`);
+  }
+}
+
 async function evaluatePreparedLeafBatches(evaluator: Evaluator, batches: PreparedLeafBatch[], stats: SearchStats): Promise<Evaluation[][]> {
   const evalBatches = batches.map((batch) => ({
     boards: batch.evalNodes.map((node) => node.board),
@@ -1241,6 +1257,7 @@ async function evaluatePreparedLeafBatches(evaluator: Evaluator, batches: Prepar
     evalResults = [];
     for (const batch of evalBatches) evalResults.push(await Promise.all(batch.boards.map((node, i) => evaluator.evaluate(node, batch.contexts[i]))));
   }
+  assertEvaluationBatchSequenceShape(evalResults, evalBatches as EvaluationBatchRequest[]);
   recordEvaluatorMetricsDelta(evaluator, beforeMetrics, evalBatches.reduce((sum, batch) => sum + batch.boards.length, 0), stats);
   recordEvaluationTimingBatches(stats, evalResults);
   const out: Evaluation[][] = [];
@@ -1253,12 +1270,13 @@ async function runPipelinedBatchedVisits(root: Node, evaluator: Evaluator, visit
   let scheduled = 0;
   let lastYield = nowMs();
   const inFlightEvalLeaves = new Set<Node>();
+  let nextGenerationId = 1;
   while (scheduled < visits && !deadlineExpired(deadlineMs)) {
     throwIfAborted(signal);
     const batches: PreparedLeafBatch[] = [];
     while (batches.length < pipelineDepth && scheduled < visits && !deadlineExpired(deadlineMs)) {
       const want = Math.min(batchSize, visits - scheduled);
-      const batch = collectPreparedLeafBatch(root, want, searchPolicy, context, stats, transpositionTable, collisionMode, collisionRetryLimit, inFlightEvalLeaves);
+      const batch = collectPreparedLeafBatch(root, want, searchPolicy, context, stats, transpositionTable, collisionMode, collisionRetryLimit, inFlightEvalLeaves, nextGenerationId++);
       if (!batch.prepared.length) break;
       batches.push(batch);
       scheduled += batch.prepared.length;
