@@ -103,6 +103,8 @@ table.opening .san{font-family:var(--mono);font-weight:700}
     <div id="engineList" class="engine-list"></div>
     <div class="row">
       <button id="addEngine" type="button">+ Add engine</button>
+      <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
+        <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
     </div>
     <div id="recklessRuntimeInfo" class="small">Reckless: detecting runtime…</div>
     <h2>Engine lines</h2>

@@ -33,6 +33,29 @@ test('CachedLc0Evaluator reuses evaluations and exposes hit/miss metrics', async
   assert.deepEqual(cached.metrics(), { hits: 1, misses: 1, entries: 1, maxEntries: 8 });
 });
 
+test('CachedLc0Evaluator preserves sequence batches for uncached misses', async () => {
+  const sequenceCalls = [];
+  const inner = {
+    async evaluateBatchSequence(batches) {
+      sequenceCalls.push(batches.map((batch) => batch.length));
+      return batches.map((batch) => batch.map((input) => evaluation(String(input))));
+    },
+    async evaluateBatch(inputs) {
+      return inputs.map((input) => evaluation(String(input)));
+    },
+  };
+  const cached = new CachedLc0Evaluator(inner, { maxEntries: 8 });
+  const batches = [['8/8/8/8/8/8/8/K6k w - - 0 1'], ['8/8/8/8/8/8/8/K5k1 w - - 0 1', '8/8/8/8/8/8/8/K4k2 w - - 0 1']];
+
+  const first = await cached.evaluateBatchSequence(batches);
+  const second = await cached.evaluateBatchSequence(batches);
+
+  assert.deepEqual(first.map((batch) => batch.map((entry) => entry.bestMove)), [['e2e4'], ['e2e4', 'e2e4']]);
+  assert.deepEqual(second.map((batch) => batch.map((entry) => entry.bestMove)), [['e2e4'], ['e2e4', 'e2e4']]);
+  assert.deepEqual(sequenceCalls, [[1, 2]], 'cache forwards the first miss set as one sequence call');
+  assert.deepEqual(cached.metrics(), { hits: 3, misses: 3, entries: 3, maxEntries: 8 });
+});
+
 test('CachedLc0Evaluator keeps bare FEN and explicit one-position history separate', async () => {
   let calls = 0;
   const fen = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2';

@@ -48,17 +48,39 @@ test('LC0 search evaluator reconstructs explicit history from search context', a
   assert.equal(boardToFen(calls[0].positions[1]), boardToFen(current));
 });
 
+function fakeLc0Evaluation(input) {
+  const board = typeof input === 'object' && input !== null && 'positions' in input ? input.positions[input.positions.length - 1] : input;
+  const parsed = typeof board === 'string' ? parseFen(board) : board;
+  const priors = legalMoves(parsed).map((move) => ({ uci: moveToUci(move), index: 0, logit: 0, prior: 1 }));
+  return { fen: boardToFen(parsed), wdl: [0.34, 0.32, 0.34], q: 0, mlh: 80, legalPriors: priors };
+}
+
+test('LC0 search evaluator sequence fallback preserves serial evaluateBatch calls', async () => {
+  let active = 0;
+  let maxActive = 0;
+  const evaluator = new Lc0SearchEvaluator({
+    async evaluateBatch(inputs) {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      active -= 1;
+      return inputs.map(fakeLc0Evaluation);
+    },
+    async evaluate(input) {
+      return fakeLc0Evaluation(input);
+    },
+  });
+  const board = parseFen(START_FEN);
+  await evaluator.evaluateBatchSequence([{ boards: [board] }, { boards: [board] }]);
+  assert.equal(maxActive, 1, 'fallback sequence does not overlap legacy evaluateBatch calls');
+});
+
 test('LC0 batched PUCT groups leaf evaluations through the LC0 adapter', async () => {
   const batchSizes = [];
   const fakeLc0 = {
     async evaluateBatch(inputs) {
       batchSizes.push(inputs.length);
-      return inputs.map((input) => {
-        const board = typeof input === 'object' && input !== null && 'positions' in input ? input.positions[input.positions.length - 1] : input;
-        const parsed = typeof board === 'string' ? parseFen(board) : board;
-        const priors = legalMoves(parsed).map((move) => ({ uci: moveToUci(move), index: 0, logit: 0, prior: 1 }));
-        return { fen: boardToFen(parsed), wdl: [0.34, 0.32, 0.34], q: 0, mlh: 80, legalPriors: priors };
-      });
+      return inputs.map(fakeLc0Evaluation);
     },
     async evaluate(input) {
       return (await this.evaluateBatch([input]))[0];
@@ -68,7 +90,123 @@ test('LC0 batched PUCT groups leaf evaluations through the LC0 adapter', async (
   assert.equal(result.search.stats?.completedVisits, 8);
   assert.equal(result.search.stats?.batchEvalCalls, 2);
   assert.equal(result.search.stats?.maxEvalBatch, 4);
+  assert.deepEqual(result.search.stats?.evalBatchSizeHistogram, { 4: 2 });
   assert.ok(batchSizes.includes(4), `expected a batch of 4, got ${batchSizes.join(',')}`);
+});
+
+test('LC0 pipelined PUCT can submit multiple leaf batches through the sequence API', async () => {
+  const sequenceShapes = [];
+  const fakeLc0 = {
+    async evaluateBatch(inputs) {
+      return inputs.map(fakeLc0Evaluation);
+    },
+    async evaluateBatchSequence(batches) {
+      sequenceShapes.push(batches.map((batch) => batch.length));
+      return batches.map((batch) => batch.map(fakeLc0Evaluation));
+    },
+    async evaluate(input) {
+      return fakeLc0Evaluation(input);
+    },
+  };
+  const result = await new Lc0PuctSearcher(fakeLc0).search(START_FEN, { visits: 8, batchSize: 2, batchPipelineDepth: 2 });
+  assert.equal(result.search.stats?.completedVisits, 8);
+  assert.equal(result.search.stats?.batchPipelineDepth, 2);
+  assert.equal(result.search.stats?.batchPipelineFlushes, 2);
+  assert.equal(result.search.stats?.maxBatchPipelineBatches, 2);
+  assert.deepEqual(sequenceShapes, [[2, 2], [2, 2]]);
+});
+
+test('LC0 pipelined PUCT works with singleton physical batches', async () => {
+  const sequenceShapes = [];
+  const fakeLc0 = {
+    async evaluateBatchSequence(batches) {
+      sequenceShapes.push(batches.map((batch) => batch.length));
+      return batches.map((batch) => batch.map(fakeLc0Evaluation));
+    },
+    async evaluate(input) {
+      return fakeLc0Evaluation(input);
+    },
+  };
+  const result = await new Lc0PuctSearcher(fakeLc0).search(START_FEN, { visits: 4, batchSize: 1, batchPipelineDepth: 2 });
+  assert.equal(result.search.stats?.completedVisits, 4);
+  assert.equal(result.search.stats?.batchPipelineFlushes, 2);
+  assert.deepEqual(sequenceShapes, [[1, 1], [1, 1]]);
+});
+
+test('LC0 search aggregates backend timings from physical pipeline batches', async () => {
+  const fakeLc0 = {
+    async evaluateBatchSequence(batches) {
+      return batches.map((batch, batchIndex) => batch.map((input, i) => ({
+        ...fakeLc0Evaluation(input),
+        timing: {
+          totalEvalMs: 20,
+          readbackSyncedMs: 10,
+          deferredReadbackDelayMs: 4,
+          readbackMapAsyncMs: 8,
+          readbackMapCopyMs: 2,
+          legalPriorsMs: i + 1,
+          readbackBytes: 7444 * batch.length,
+          readbackMapCount: 1,
+          physicalBatchSize: batch.length,
+          batchPosition: i,
+          wgslSequenceId: 100 + batchIndex,
+          batchSequenceIndex: batchIndex,
+          deferredReadbackSlot: batchIndex % 2,
+        },
+      })));
+    },
+    async evaluate(input) {
+      return fakeLc0Evaluation(input);
+    },
+  };
+  const result = await new Lc0PuctSearcher(fakeLc0).search(START_FEN, { visits: 8, batchSize: 2, batchPipelineDepth: 2 });
+  const stats = result.search.stats;
+  assert.equal(stats?.evalBackendTimingSamples, 4);
+  assert.equal(stats?.evalBackendTimingPositions, 8);
+  assert.equal(stats?.evalBackendTimingMeans?.readbackSyncedMs, 10);
+  assert.equal(stats?.evalBackendTimingPerPositionMeans?.readbackSyncedMs, 5);
+  assert.equal(stats?.evalBackendTimingMeans?.readbackMapAsyncMs, 8);
+  assert.equal(stats?.evalBackendTimingMeans?.readbackMapCopyMs, 2);
+  assert.equal(stats?.evalBackendTimingMeans?.deferredReadbackDelayMs, 4);
+  assert.equal(stats?.evalBackendTimingMeans?.readbackMapCount, 1);
+  assert.equal(stats?.evalBackendTimingPerPositionMeans?.readbackBytes, 7444);
+  assert.equal(stats?.evalBackendTimingMeans?.legalPriorsMs, 3);
+  assert.equal(stats?.evalBackendTimingPerPositionMeans?.legalPriorsMs, 1.5);
+  assert.equal(stats?.evalBackendTimingMeans?.wgslSequenceId, undefined, 'sequence IDs are metadata, not averaged timings');
+  assert.equal(stats?.evalBackendTimingMeans?.deferredReadbackSlot, undefined, 'ring-buffer slots are metadata, not averaged timings');
+});
+
+test('LC0 pipelined PUCT rejects malformed sequence result shapes', async () => {
+  const fakeLc0 = {
+    async evaluateBatchSequence(batches) {
+      return batches.map((batch, i) => i === 0 ? batch.slice(1).map(fakeLc0Evaluation) : batch.map(fakeLc0Evaluation));
+    },
+    async evaluate(input) {
+      return fakeLc0Evaluation(input);
+    },
+  };
+  await assert.rejects(
+    () => new Lc0PuctSearcher(fakeLc0).search(START_FEN, { visits: 4, batchSize: 2, batchPipelineDepth: 2 }),
+    /returned 1 result\(s\) for batch 0, expected 2/,
+  );
+});
+
+test('LC0 pipelined neural budget is bounded by remaining misses', async () => {
+  let misses = 0;
+  const fakeLc0 = {
+    metrics() { return { hits: 0, misses, entries: 0, maxEntries: 0 }; },
+    async evaluateBatchSequence(batches) {
+      misses += batches.reduce((sum, batch) => sum + batch.length, 0);
+      return batches.map((batch) => batch.map(fakeLc0Evaluation));
+    },
+    async evaluate(input) {
+      misses += 1;
+      return fakeLc0Evaluation(input);
+    },
+  };
+  const result = await new Lc0PuctSearcher(fakeLc0).search(START_FEN, { visits: 5, batchSize: 4, batchPipelineDepth: 4, budgetMode: 'neural' });
+  assert.equal(result.search.stats?.neuralEvalMisses, 6, 'root eval plus requested neural misses only');
+  assert.ok((result.search.stats?.completedVisits ?? 0) <= 8, 'pipeline does not spend a full depth-4 flush past budget');
 });
 
 function uniformEvaluator() {

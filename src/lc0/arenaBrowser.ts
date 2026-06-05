@@ -13,6 +13,7 @@ import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
+import { Lc0WebHybridEvaluator } from './wgslMatmulAddProbe.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { StockfishEngine, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
 import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
@@ -70,7 +71,11 @@ interface EngineOutputSnapshot {
 }
 
 const params = new URLSearchParams(location.search);
-const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
+const DEFAULT_MODEL_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
+const MODEL_URL = params.get('model') ?? DEFAULT_MODEL_URL;
+const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
+const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
+type Lc0ArenaRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads';
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 
@@ -113,6 +118,32 @@ function inputEl(id: string): HTMLInputElement { return el(id) as HTMLInputEleme
 function selectEl(id: string): HTMLSelectElement { return el(id) as HTMLSelectElement; }
 function htmlEscape(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+function normalizeLc0Runtime(value: string | null): Lc0ArenaRuntime {
+  const raw = (value ?? '').toLowerCase();
+  if (raw === 'hybrid' || raw === 'lc0web' || raw === 'hybrid-ort-heads' || raw === 'wgsl-encoder') return 'hybrid-ort-heads';
+  if (raw === 'hybrid-wgsl-heads' || raw === 'wgsl-heads' || raw === 'wgsl') return 'hybrid-wgsl-heads';
+  return 'onnx';
+}
+
+function initialLc0Runtime(): Lc0ArenaRuntime {
+  if (params.get('headBackend') === 'wgsl' || params.get('hybridHeads') === 'wgsl') return 'hybrid-wgsl-heads';
+  return normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime'));
+}
+
+function selectedLc0Runtime(): Lc0ArenaRuntime {
+  return normalizeLc0Runtime(selectEl('lc0RuntimeSelect').value);
+}
+
+function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
+  if (runtime === 'hybrid-wgsl-heads') return 'WGSL encoder + WGSL heads';
+  if (runtime === 'hybrid-ort-heads') return 'WGSL encoder + ORT heads';
+  return 'ORT ONNX';
+}
+
+function lc0EncoderLayers(): number {
+  return Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10)));
 }
 
 function percent(value: number): string {
@@ -370,6 +401,7 @@ function populateSeats(): void {
 function refreshSeatControls(): void {
   selectEl('seatA').disabled = running;
   selectEl('seatB').disabled = running;
+  selectEl('lc0RuntimeSelect').disabled = running;
 }
 
 function arenaBudgetMode(): 'fixed' | 'movetime' {
@@ -1063,9 +1095,7 @@ function exportPgn() {
   el('message').textContent = games.length ? `Exported ${games.length} game(s) as PGN.` : 'No games to export yet.';
 }
 
-function disposeRuntimeResources(): void {
-  abort?.abort();
-  abort = null;
+function disposeLc0Resources(): void {
   void lc0Cache?.dispose();
   lc0Cache = null;
   player = null;
@@ -1076,10 +1106,61 @@ function disposeRuntimeResources(): void {
   engineOutputs.clear();
   thinkingEngineIds.clear();
   activeEngineIds = [];
+}
+
+function disposeRuntimeResources(): void {
+  abort?.abort();
+  abort = null;
+  disposeLc0Resources();
   disposeStockfish();
   reckless?.dispose();
   reckless = null;
   bt4.dispose();
+}
+
+async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHybridEvaluator> {
+  const runtime = selectedLc0Runtime();
+  if (runtime === 'onnx') {
+    const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
+    return Lc0OnnxEvaluator.create(modelLoad.model);
+  }
+  return new Lc0WebHybridEvaluator({
+    packUrl: PACK_URL,
+    layers: lc0EncoderLayers(),
+    verifyShards: params.get('packVerify') !== '0',
+    headBackend: runtime === 'hybrid-wgsl-heads' ? 'wgsl' : 'ort',
+    wgslBatchMode: 'physical',
+    inputBackend: 'js',
+    legalPriorsBackend: 'js',
+  });
+}
+
+async function loadLc0Evaluator(): Promise<void> {
+  const runtime = selectedLc0Runtime();
+  el('start').toggleAttribute('disabled', true);
+  selectEl('lc0RuntimeSelect').disabled = true;
+  el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)}…`;
+  try {
+    const evaluator = await createSelectedLc0Evaluator();
+    lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
+    lc0Searchers.clear();
+    player = new Lc0PolicyOnlyPlayer(lc0Cache);
+    searcher = new Lc0PuctSearcher(lc0Cache);
+    renderCacheInfo();
+    el('start').toggleAttribute('disabled', false);
+    selectEl('lc0RuntimeSelect').disabled = false;
+    el('message').textContent = `Ready (${lc0RuntimeLabel(runtime)}). Pick engines and start a tournament.`;
+  } catch (error) {
+    selectEl('lc0RuntimeSelect').disabled = false;
+    el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(error as Error).message}`;
+  }
+}
+
+async function reloadLc0Evaluator(): Promise<void> {
+  abort?.abort();
+  disposeLc0Resources();
+  renderCacheInfo();
+  await loadLc0Evaluator();
 }
 
 function wireEvents() {
@@ -1100,6 +1181,7 @@ function wireEvents() {
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
   el('openingText').addEventListener('input', refreshOpeningPreview);
   el('cacheEntriesInput').addEventListener('input', () => { renderCacheInfo(); resetLc0SearchTrees(); });
+  el('lc0RuntimeSelect').addEventListener('change', () => { if (!running) void reloadLc0Evaluator(); });
   el('budgetModeSelect').addEventListener('change', () => resetLc0SearchTrees());
   el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
   el('stockfishThreadsInput').addEventListener('input', () => {
@@ -1126,6 +1208,7 @@ function wireEvents() {
 async function init() {
   REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
   renderBoard();
+  selectEl('lc0RuntimeSelect').value = initialLc0Runtime();
   refreshRecklessVariantUi();
   selectEl('recklessVariantSelect').value = REQUESTED_RECKLESS_VARIANT.key;
   renderRecklessRuntimeInfo();
@@ -1138,26 +1221,14 @@ async function init() {
   void probeEngineLogos();
   wireEvents();
   refreshOpeningPreview();
-  try {
-    const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
-    const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
-    lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
-    lc0Searchers.clear();
-    player = new Lc0PolicyOnlyPlayer(lc0Cache);
-    searcher = new Lc0PuctSearcher(lc0Cache);
-    // Stockfish (lite/full) instances are created lazily on first use; Lc0 BT4 is
-    // created lazily in its worker only when selected and WebGPU-gated.
-    const variant = selectedRecklessVariant();
-    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, onStatus: renderRecklessRuntimeInfo });
-    prewarmReckless();
-    renderRecklessRuntimeInfo();
-    renderCacheInfo();
-    void renderRuntimeBadge();
-    el('start').toggleAttribute('disabled', false);
-    el('message').textContent = 'Ready. Pick engines and start a tournament.';
-  } catch (error) {
-    el('message').textContent = `Model load failed: ${(error as Error).message}`;
-  }
+  // Stockfish (lite/full) instances are created lazily on first use; Lc0 BT4 is
+  // created lazily in its worker only when selected and WebGPU-gated.
+  const variant = selectedRecklessVariant();
+  reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, onStatus: renderRecklessRuntimeInfo });
+  prewarmReckless();
+  renderRecklessRuntimeInfo();
+  await loadLc0Evaluator();
+  void renderRuntimeBadge();
 }
 
 void init();

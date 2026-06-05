@@ -2,7 +2,7 @@ import { boardToFen, parseFen, type BoardState } from '../chess/board.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { moveToActionId, moveToUci, type Move } from '../chess/moveCodec.ts';
 import { searchRoot, type Node as PuctNode, type SearchOptions, type SearchResult } from '../search/puct.ts';
-import type { Evaluation, EvaluationContext, Evaluator } from '../nn/evaluator.ts';
+import type { Evaluation, EvaluationBatchRequest, EvaluationContext, Evaluator } from '../nn/evaluator.ts';
 import { Lc0OnnxEvaluator, type Lc0EvaluationCacheMetrics, type Lc0EvaluationProvider, type Lc0EvaluatorInput, type Lc0Evaluation, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
 import type { Lc0PositionHistoryInput } from './encoder112.ts';
 
@@ -57,7 +57,10 @@ function lc0ToSearchEvaluation(board: BoardState, lc0: Lc0Evaluation, context?: 
     const move = legalByUci.get(prior.uci);
     if (move) policy.set(moveToActionId(move), prior.prior);
   }
-  return { policy, wdl: lc0.wdl };
+  const evaluation: Evaluation & { timing?: unknown } = { policy, wdl: lc0.wdl };
+  const timing = (lc0 as { timing?: unknown }).timing;
+  if (timing !== undefined) evaluation.timing = timing;
+  return evaluation;
 }
 
 export class Lc0SearchEvaluator implements Evaluator {
@@ -78,6 +81,19 @@ export class Lc0SearchEvaluator implements Evaluator {
       ? await this.inner.evaluateBatch(inputs)
       : await Promise.all(inputs.map((input) => this.inner.evaluate(input)));
     return evals.map((lc0, i) => lc0ToSearchEvaluation(boards[i], lc0, contexts[i]));
+  }
+
+  async evaluateBatchSequence(batches: EvaluationBatchRequest[]): Promise<Evaluation[][]> {
+    const inputBatches = batches.map((batch) => batch.boards.map((board, i) => contextInput(board, batch.contexts?.[i])));
+    const lc0Batches = this.inner.evaluateBatchSequence ? await this.inner.evaluateBatchSequence(inputBatches) : [];
+    if (!this.inner.evaluateBatchSequence) {
+      for (const inputs of inputBatches) {
+        lc0Batches.push(this.inner.evaluateBatch
+          ? await this.inner.evaluateBatch(inputs)
+          : await Promise.all(inputs.map((input) => this.inner.evaluate(input))));
+      }
+    }
+    return lc0Batches.map((evals, batchIndex) => evals.map((lc0, i) => lc0ToSearchEvaluation(batches[batchIndex].boards[i], lc0, batches[batchIndex].contexts?.[i])));
   }
 
   metrics(): Lc0EvaluationCacheMetrics | undefined {

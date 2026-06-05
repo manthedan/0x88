@@ -19,14 +19,84 @@ const SMOKES = [
     doneText: 'ATTENTION_VALUE_BENCH_DONE',
   },
   {
+    name: 'attention-value-ort-wasm',
+    query: 'attentionValueOrtBench=1&attentionValueOrtWarmup=0&attentionValueOrtIters=1&ep=wasm&packVerify=0',
+    doneText: 'ATTENTION_VALUE_ORT_BENCH_DONE',
+  },
+  {
     name: 'attention-block',
     query: 'attentionBlockBench=1&attentionBlockWarmup=1&attentionBlockIters=1&packVerify=0',
     doneText: 'ATTENTION_BLOCK_BENCH_DONE',
   },
   {
+    name: 'attention-block-tvm-qkv-packed-f16',
+    query: 'attentionBlockBench=1&attentionQkvKernel=tvm-packed-f16&attentionBlockWarmup=1&attentionBlockIters=1&packVerify=0',
+    doneText: 'ATTENTION_BLOCK_BENCH_DONE',
+    default: false,
+  },
+  {
     name: 'attention-output',
     query: 'attentionOutputBench=1&attentionOutputWarmup=1&attentionOutputIters=1&packVerify=0',
     doneText: 'ATTENTION_OUTPUT_BENCH_DONE',
+  },
+  {
+    name: 'attention-output-tvm-proj-packed-f16',
+    query: 'attentionOutputBench=1&attentionOutProjKernel=tvm-packed-f16&attentionOutputWarmup=1&attentionOutputIters=1&packVerify=0',
+    doneText: 'ATTENTION_OUTPUT_BENCH_DONE',
+    default: false,
+  },
+  {
+    name: 'attention-output-ort-wasm',
+    query: 'attentionOutputOrtBench=1&attentionOutputOrtWarmup=0&attentionOutputOrtIters=1&ep=wasm&packVerify=0',
+    doneText: 'ATTENTION_OUTPUT_ORT_BENCH_DONE',
+  },
+  {
+    name: 'encoder0-ffn',
+    query: 'encoder0FfnBench=1&encoder0FfnWarmup=1&encoder0FfnIters=1&packVerify=0',
+    doneText: 'FFN_BENCH_DONE',
+  },
+  {
+    name: 'encoder0-ffn-tvm-packed-f16',
+    query: 'encoder0FfnBench=1&encoder0FfnKernel=tvm-packed-f16&encoder0FfnWarmup=1&encoder0FfnIters=1&packVerify=0',
+    doneText: 'FFN_BENCH_DONE',
+    default: false,
+  },
+  {
+    name: 'encoder0-ffn-ort-wasm',
+    query: 'encoder0FfnOrtBench=1&encoder0FfnOrtWarmup=0&encoder0FfnOrtIters=1&ep=wasm&packVerify=0',
+    doneText: 'FFN_ORT_BENCH_DONE',
+  },
+  {
+    name: 'encoder0-block',
+    query: 'encoder0BlockBench=1&encoder0BlockWarmup=1&encoder0BlockIters=1&packVerify=0',
+    doneText: 'ENCODER0_BLOCK_BENCH_DONE',
+  },
+  {
+    name: 'encoder1-block',
+    query: 'encoder0BlockBench=1&encoder0BlockWarmup=1&encoder0BlockIters=1&encoderPrefix=%2Fencoder1&packVerify=0',
+    doneText: 'ENCODER0_BLOCK_BENCH_DONE',
+  },
+  {
+    name: 'encoder0-block-ort-wasm',
+    query: 'encoder0BlockOrtBench=1&encoder0BlockOrtWarmup=0&encoder0BlockOrtIters=1&ep=wasm&packVerify=0',
+    doneText: 'ENCODER0_BLOCK_ORT_BENCH_DONE',
+  },
+  {
+    name: 'encoder-stack-2-wasm',
+    query: 'encoderStackBench=1&encoderLayers=2&encoderStackWarmup=0&encoderStackOrt=1&ep=wasm&packVerify=0',
+    doneText: 'ENCODER_STACK_BENCH_DONE',
+  },
+  {
+    name: 'encoder-stack-10-wasm',
+    query: 'encoderStackBench=1&encoderLayers=10&encoderStackWarmup=0&encoderStackOrt=1&ep=wasm&packVerify=0',
+    doneText: 'ENCODER_STACK_BENCH_DONE',
+    default: false,
+  },
+  {
+    name: 'encoder-stack-heads-2-wasm',
+    query: 'encoderStackHeadsBench=1&encoderLayers=2&encoderStackWarmup=0&encoderStackOrt=1&encoderStackHeads=1&ep=wasm&packVerify=0',
+    doneText: 'ENCODER_STACK_BENCH_DONE',
+    default: false,
   },
   {
     name: 'kernel-bench-scalar',
@@ -56,7 +126,8 @@ const SMOKES = [
 ];
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_smokes.mjs [options]\n\nRuns lc0-policy-only.html WebGPU smoke benchmarks through agent-browser.\n\nOptions:\n  --base-url URL        Use an existing dev server, e.g. http://127.0.0.1:5179\n  --port N             Port for the auto-started Vite dev server (default ${DEFAULT_PORT})\n  --host HOST          Host for the auto-started Vite dev server (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name (default: lc0-wgsl-smokes-PID)\n  --timeout MS         Per-smoke wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --max-error N        Max accepted maxAbsError across outputs (default ${DEFAULT_MAX_ERROR})\n  --only a,b,c         Comma-separated smoke names to run\n  --list               Print smoke names and URLs, then exit\n  --no-server          Do not auto-start Vite; requires --base-url or an already-running default URL\n  -h, --help           Show this help\n`);
+  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_smokes.mjs [options]\n\nRuns lc0-policy-only.html WebGPU smoke benchmarks through agent-browser.\n\nOptions:\n  --base-url URL        Use an existing dev server, e.g. http://127.0.0.1:5179\n  --port N             Port for the auto-started Vite dev server (default ${DEFAULT_PORT})\n  --host HOST          Host for the auto-started Vite dev server (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name (default: lc0-wgsl-smokes-PID)\n  --timeout MS         Per-smoke wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --max-error N        Max accepted maxAbsError across outputs (default ${DEFAULT_MAX_ERROR})\n  --only a,b,c         Comma-separated smoke names to run\n  --list               Print smoke names and URLs, then exit
+                       Heavy smokes such as encoder-stack-10-wasm and encoder-stack-heads-2-wasm are listed but excluded from the default run.\n  --no-server          Do not auto-start Vite; requires --base-url or an already-running default URL\n  -h, --help           Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -96,7 +167,9 @@ function parseArgs(argv) {
 }
 
 function selectedSmokes(args) {
-  const selected = args.only ? SMOKES.filter((smoke) => args.only.has(smoke.name)) : SMOKES;
+  const selected = args.only
+    ? SMOKES.filter((smoke) => args.only.has(smoke.name))
+    : args.list ? SMOKES : SMOKES.filter((smoke) => smoke.default !== false);
   if (args.only && selected.length !== args.only.size) {
     const known = new Set(SMOKES.map((smoke) => smoke.name));
     const missing = [...args.only].filter((name) => !known.has(name));
@@ -187,6 +260,22 @@ function textFromGetResult(result) {
   return typeof result?.text === 'string' ? result.text : typeof result?.data?.text === 'string' ? result.data.text : '';
 }
 
+function waitForText(args, text, totalTimeoutMs) {
+  const deadline = Date.now() + totalTimeoutMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    const chunk = Math.min(25_000, Math.max(1_000, remaining));
+    try {
+      return runJsonCommand(args.agentBrowser, ['wait', '--text', text, '--timeout', String(chunk)], chunk + 5_000, args.session);
+    } catch (error) {
+      lastError = error;
+      if (!String(error?.message ?? error).includes('Wait timed out')) throw error;
+    }
+  }
+  throw lastError ?? new Error(`Timed out waiting for ${text}`);
+}
+
 function parseBenchResult(rawText, smoke) {
   let result;
   try {
@@ -203,14 +292,28 @@ function parseBenchResult(rawText, smoke) {
 async function runSmoke(args, baseUrl, smoke) {
   const url = smokeUrl(baseUrl, smoke);
   runJsonCommand(args.agentBrowser, ['open', url], args.timeoutMs, args.session);
-  runJsonCommand(args.agentBrowser, ['wait', '--text', smoke.doneText, '--timeout', String(args.timeoutMs)], args.timeoutMs + 5_000, args.session);
+  waitForText(args, smoke.doneText, args.timeoutMs);
   const bench = runJsonCommand(args.agentBrowser, ['get', 'text', '#benchResult'], args.timeoutMs, args.session);
   const result = parseBenchResult(textFromGetResult(bench), smoke);
   const error = maxAbsError(result);
   if (error > args.maxError) {
     throw new Error(`${smoke.name}: maxAbsError ${error} exceeded threshold ${args.maxError}`);
   }
-  return { smoke: smoke.name, status: result.status, maxAbsError: error, iterations: result.iterations ?? null, readbackSyncedMs: result.readbackSyncedMs ?? null };
+  const slowestStage = Array.isArray(result.stageTimings) && result.stageTimings.length
+    ? result.stageTimings.reduce((best, timing) => timing.avgMs > best.avgMs ? timing : best, result.stageTimings[0])
+    : undefined;
+  return {
+    smoke: smoke.name,
+    status: result.status,
+    maxAbsError: error,
+    iterations: result.iterations ?? null,
+    readbackSyncedMs: result.readbackSyncedMs ?? null,
+    gpuTimestampSupported: result.gpuTimestampSupported ?? null,
+    gpuTimestampMs: result.gpuTimestampMs ?? null,
+    stageTimingTotalMs: result.stageTimingTotalMs ?? null,
+    slowestStage: slowestStage ? { stage: slowestStage.stage, label: slowestStage.label, avgMs: slowestStage.avgMs } : null,
+    stageTimings: result.stageTimings ?? null,
+  };
 }
 
 async function main() {

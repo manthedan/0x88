@@ -86,6 +86,8 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
       <span class="matchup-note small">colors alternate each game</span>
     </div>
     <div class="row">
+      <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
+        <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
       <div class="field"><label for="gamesInput">Games/opening</label>
         <input id="gamesInput" type="number" min="1" max="20" step="1" value="2" /></div>
       <div class="field"><label for="delayInput">Delay ms</label>

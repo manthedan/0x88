@@ -2,7 +2,7 @@ import { boardToFen, type BoardState } from '../chess/board.ts';
 import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToActionId, type Move } from '../chess/moveCodec.ts';
 import { automaticDrawReason } from '../chess/drawRules.ts';
-import type { Evaluation, Evaluator } from '../nn/evaluator.ts';
+import type { Evaluation, EvaluationBatchRequest, Evaluator } from '../nn/evaluator.ts';
 
 export interface SearchPolicyEntry { move: Move; visits: number; prior: number; q: number; probability: number; }
 export interface PrincipalVariationEntry { move: Move; visits: number; prior: number; q: number; depth: number; }
@@ -59,6 +59,13 @@ export interface SearchOptions {
   batchCollisionMode?: SearchBatchCollisionMode;
   /** Max retry selections per desired batch slot when avoiding in-flight leaves. */
   batchCollisionRetryLimit?: number;
+  /**
+   * Experimental async-search scheduler: collect this many physical leaf batches
+   * with virtual visits before awaiting evaluator results. Evaluators with a
+   * sequence/deferred readback path can submit later batches before mapping the
+   * earlier result. Default 1 preserves classic synchronous batch search.
+   */
+  batchPipelineDepth?: number;
   searchPolicy?: SearchPolicy;
   avWeight?: number;
   rankWeight?: number;
@@ -123,10 +130,28 @@ export interface SearchStats {
   evalCalls: number;
   batchEvalCalls: number;
   maxEvalBatch: number;
+  /** Histogram of leaf-evaluation batch sizes, keyed by the number of leaves sent to evaluateBatch. */
+  evalBatchSizeHistogram?: Record<string, number>;
   /** Duplicate in-flight leaves encountered while collecting a search batch. */
   batchLeafCollisions?: number;
   /** Extra selection attempts spent to avoid duplicate in-flight leaves. */
   batchLeafRetries?: number;
+  /** Requested experimental leaf-batch pipeline depth. */
+  batchPipelineDepth?: number;
+  /** Number of multi-batch pipeline flushes evaluated by the search loop. */
+  batchPipelineFlushes?: number;
+  /** Largest number of physical batches submitted through one sequence call. */
+  maxBatchPipelineBatches?: number;
+  /** Number of backend timing records observed from evaluation results. Physical WGSL batches count once. */
+  evalBackendTimingSamples?: number;
+  /** Number of evaluated positions represented by backend timing records. */
+  evalBackendTimingPositions?: number;
+  /** Sum of backend timing fields across physical evaluation records. */
+  evalBackendTimingTotals?: Record<string, number>;
+  /** Mean backend timing per physical evaluation record. */
+  evalBackendTimingMeans?: Record<string, number>;
+  /** Mean backend timing per evaluated position, useful for physical batches. */
+  evalBackendTimingPerPositionMeans?: Record<string, number>;
   budgetMode?: SearchBudgetMode;
   requestedNeuralEvals?: number;
   neuralEvalMisses?: number;
@@ -580,8 +605,9 @@ function evaluatorMetrics(evaluator: Evaluator): EvaluatorMetricsSnapshot | null
   const maybe = evaluator as Evaluator & { metrics?: () => { hits?: number; misses?: number } };
   if (typeof maybe.metrics !== 'function') return null;
   const metrics = maybe.metrics();
-  const hits = Number(metrics?.hits ?? 0);
-  const misses = Number(metrics?.misses ?? 0);
+  if (!metrics) return null;
+  const hits = Number(metrics.hits ?? 0);
+  const misses = Number(metrics.misses ?? 0);
   if (!Number.isFinite(hits) || !Number.isFinite(misses)) return null;
   return { hits, misses };
 }
@@ -594,6 +620,60 @@ function recordEvaluatorMetricsDelta(evaluator: Evaluator, before: EvaluatorMetr
   } else {
     stats.neuralEvalMisses = (stats.neuralEvalMisses ?? 0) + Math.max(0, fallbackMisses);
   }
+}
+
+const EVAL_TIMING_METADATA_KEYS = new Set(['batchPosition', 'physicalBatchSize', 'wgslSequenceId', 'batchSequenceIndex', 'deferredReadbackSlot']);
+const EVAL_TIMING_PER_SLOT_KEYS = new Set(['legalPriorsMs']);
+
+function evaluationTimingRecord(evaln: Evaluation | undefined): Record<string, number> | undefined {
+  const timing = (evaln as { timing?: unknown } | undefined)?.timing;
+  if (!timing || typeof timing !== 'object') return undefined;
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(timing as Record<string, unknown>)) {
+    if (EVAL_TIMING_METADATA_KEYS.has(key)) continue;
+    if (typeof value === 'number' && Number.isFinite(value)) out[key] = value;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function addEvaluationTimingRecord(stats: SearchStats, record: Record<string, number>, positions: number): void {
+  const samples = (stats.evalBackendTimingSamples ?? 0) + 1;
+  const representedPositions = Math.max(1, Math.floor(positions));
+  const positionCount = (stats.evalBackendTimingPositions ?? 0) + representedPositions;
+  const totals = { ...(stats.evalBackendTimingTotals ?? {}) };
+  for (const [key, value] of Object.entries(record)) totals[key] = (totals[key] ?? 0) + value;
+  stats.evalBackendTimingSamples = samples;
+  stats.evalBackendTimingPositions = positionCount;
+  stats.evalBackendTimingTotals = totals;
+}
+
+function recordEvaluationTimingBatch(stats: SearchStats, evals: Evaluation[]): void {
+  const records = evals.map(evaluationTimingRecord).filter((record): record is Record<string, number> => record !== undefined);
+  if (!records.length) return;
+  const physicalBatchSize = Number((evals[0] as { timing?: { physicalBatchSize?: unknown } } | undefined)?.timing?.physicalBatchSize);
+  if (Number.isFinite(physicalBatchSize) && physicalBatchSize === records.length) {
+    const physicalRecord = { ...records[0] };
+    for (const key of EVAL_TIMING_PER_SLOT_KEYS) {
+      const values = records.map((record) => record[key]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+      if (values.length) physicalRecord[key] = values.reduce((sum, value) => sum + value, 0);
+    }
+    addEvaluationTimingRecord(stats, physicalRecord, records.length);
+    return;
+  }
+  for (const record of records) addEvaluationTimingRecord(stats, record, 1);
+}
+
+function recordEvaluationTimingBatches(stats: SearchStats, batches: Evaluation[][]): void {
+  for (const batch of batches) recordEvaluationTimingBatch(stats, batch);
+}
+
+function finalizeEvaluationTimingStats(stats: SearchStats): void {
+  const samples = stats.evalBackendTimingSamples ?? 0;
+  const positions = stats.evalBackendTimingPositions ?? 0;
+  const totals = stats.evalBackendTimingTotals;
+  if (!samples || !totals) return;
+  stats.evalBackendTimingMeans = Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, Number((value / samples).toFixed(6))]));
+  if (positions) stats.evalBackendTimingPerPositionMeans = Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, Number((value / positions).toFixed(6))]));
 }
 
 function rootVisitCount(root: Node): number {
@@ -873,7 +953,10 @@ async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyCon
   const beforeMetrics = stats ? evaluatorMetrics(evaluator) : null;
   if (stats) stats.evalCalls += 1;
   const evaln = await evaluator.evaluate(node.board, { historyFens: node.historyFens, legalMoves: moves });
-  if (stats) recordEvaluatorMetricsDelta(evaluator, beforeMetrics, 1, stats);
+  if (stats) {
+    recordEvaluatorMetricsDelta(evaluator, beforeMetrics, 1, stats);
+    recordEvaluationTimingBatch(stats, [evaln]);
+  }
   const value = finishExpansion(node, moves, evaln, context);
   if (stats) stats.expansions += 1;
   return value;
@@ -958,6 +1041,94 @@ function finishExpansion(node: Node, moves: Move[], evaln: Evaluation, context: 
   return valueFromEvaluation(evaln, context);
 }
 
+interface PreparedLeafBatch {
+  /** Monotonic ID assigned by the pipelined scheduler; used for stale-result diagnostics. */
+  generationId: number;
+  prepared: PreparedLeaf[];
+  evalNodes: Node[];
+  evalMoves: Move[][];
+}
+
+function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, stats: SearchStats, transpositionTable: Map<string, Node> | undefined, collisionMode: SearchBatchCollisionMode, collisionRetryLimit: number, inFlightEvalLeaves?: Set<Node>, generationId = 0): PreparedLeafBatch {
+  const selected: SelectedLeaf[] = [];
+  const localInFlightEvalLeaves = inFlightEvalLeaves ?? new Set<Node>();
+  const retryVirtualPaths: Edge[][] = [];
+  let attempts = 0;
+  const maxAttempts = collisionMode === 'retry'
+    ? Math.max(want, want + Math.max(0, Math.floor(collisionRetryLimit)))
+    : want;
+  while (selected.length < want && attempts < maxAttempts) {
+    attempts += 1;
+    const sel = selectLeaf(root, searchPolicy, context, [], transpositionTable, stats);
+    if (collisionMode === 'retry' && !sel.node.expanded && sel.node.terminalValue === null) {
+      if (localInFlightEvalLeaves.has(sel.node)) {
+        stats.batchLeafCollisions = (stats.batchLeafCollisions ?? 0) + 1;
+        stats.batchLeafRetries = (stats.batchLeafRetries ?? 0) + 1;
+        retryVirtualPaths.push(sel.path);
+        continue;
+      }
+      localInFlightEvalLeaves.add(sel.node);
+    }
+    selected.push(sel);
+  }
+  if (collisionMode !== 'retry') while (selected.length < want) selected.push(selectLeaf(root, searchPolicy, context, [], transpositionTable, stats));
+  for (const path of retryVirtualPaths) unwindVirtualVisits(path);
+
+  const evalNodes: Node[] = [];
+  const evalMoves: Move[][] = [];
+  const evalIndex = new Map<Node, number>();
+  const prepared: PreparedLeaf[] = [];
+  for (const sel of selected) {
+    if (sel.node.terminalValue !== null) { prepared.push({ kind: 'terminal', sel, value: sel.node.terminalValue }); stats.terminalHits += 1; continue; }
+    if (sel.node.expanded) {
+      unwindVirtualVisits(sel.path);
+      throw new Error('selectLeaf returned an expanded non-terminal node');
+    }
+    const prep = prepareExpansion(sel.node, stats);
+    if (typeof prep === 'number') {
+      localInFlightEvalLeaves.delete(sel.node);
+      prepared.push({ kind: 'terminal', sel, value: prep });
+    } else {
+      let slot = evalIndex.get(sel.node);
+      if (slot === undefined) {
+        slot = evalNodes.length;
+        evalIndex.set(sel.node, slot);
+        evalNodes.push(sel.node);
+        evalMoves.push(prep);
+      }
+      prepared.push({ kind: 'eval', sel, slot });
+    }
+  }
+  return { generationId, prepared, evalNodes, evalMoves };
+}
+
+function recordEvalBatchStats(batch: PreparedLeafBatch, stats: SearchStats): void {
+  if (!batch.evalNodes.length) return;
+  stats.evalCalls += batch.evalNodes.length;
+  stats.maxEvalBatch = Math.max(stats.maxEvalBatch, batch.evalNodes.length);
+  const batchKey = String(batch.evalNodes.length);
+  stats.evalBatchSizeHistogram = { ...(stats.evalBatchSizeHistogram ?? {}), [batchKey]: (stats.evalBatchSizeHistogram?.[batchKey] ?? 0) + 1 };
+}
+
+function finishPreparedLeafBatch(batch: PreparedLeafBatch, evals: Evaluation[], searchPolicy: SearchPolicy, context: SearchPolicyContext, stats: SearchStats): void {
+  if (evals.length !== batch.evalNodes.length) throw new Error(`pipelined evaluation generation ${batch.generationId} returned ${evals.length} result(s) for ${batch.evalNodes.length} node(s)`);
+  const values = batch.evalNodes.map((node, i) => {
+    if (node.expanded || node.terminalValue !== null) throw new Error(`stale pipelined evaluation for generation ${batch.generationId} slot ${i}: node was already expanded before results were applied`);
+    stats.expansions += 1;
+    return finishExpansion(node, batch.evalMoves[i], evals[i], context);
+  });
+  for (const item of batch.prepared) {
+    let value: number | undefined;
+    if (item.kind === 'terminal') value = item.value;
+    else {
+      value = values[item.slot];
+      if (value === undefined) throw new Error(`missing batched evaluation value for slot ${item.slot}`);
+    }
+    searchPolicy.backup(item.sel.path, value, context);
+    stats.completedVisits += 1;
+  }
+}
+
 async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>, deadlineMs?: number, collisionMode: SearchBatchCollisionMode = 'retry', collisionRetryLimit = batchSize * 4) {
   let done = 0;
   let lastYield = nowMs();
@@ -1019,6 +1190,8 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
       const contexts = evalNodes.map((node, i) => ({ historyFens: node.historyFens, legalMoves: evalMoves[i] }));
       stats.evalCalls += evalNodes.length;
       stats.maxEvalBatch = Math.max(stats.maxEvalBatch, evalNodes.length);
+      const batchKey = String(evalNodes.length);
+      stats.evalBatchSizeHistogram = { ...(stats.evalBatchSizeHistogram ?? {}), [batchKey]: (stats.evalBatchSizeHistogram?.[batchKey] ?? 0) + 1 };
       const beforeMetrics = evaluatorMetrics(evaluator);
       if (evaluator.evaluateBatch) {
         stats.batchEvalCalls += 1;
@@ -1027,6 +1200,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
         evals = await Promise.all(evalNodes.map((node, i) => evaluator.evaluate(node.board, contexts[i])));
       }
       recordEvaluatorMetricsDelta(evaluator, beforeMetrics, evalNodes.length, stats);
+      recordEvaluationTimingBatch(stats, evals);
     }
     const values = evalNodes.map((node, i) => { stats.expansions += 1; return finishExpansion(node, evalMoves[i], evals[i], context); });
     for (const item of prepared) {
@@ -1040,6 +1214,79 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
       stats.completedVisits += 1;
     }
     done += want;
+    throwIfAborted(signal);
+    if (deadlineExpired(deadlineMs)) break;
+    if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
+      await yieldToUi();
+      lastYield = nowMs();
+      throwIfAborted(signal);
+    }
+  }
+}
+
+function assertEvaluationBatchSequenceShape(evalResults: Evaluation[][], evalBatches: EvaluationBatchRequest[]): void {
+  if (evalResults.length !== evalBatches.length) throw new Error(`evaluateBatchSequence returned ${evalResults.length} batch(es) for ${evalBatches.length} request batch(es)`);
+  for (let i = 0; i < evalBatches.length; i++) {
+    const expected = evalBatches[i].boards.length;
+    const actual = evalResults[i]?.length ?? 0;
+    if (actual !== expected) throw new Error(`evaluateBatchSequence returned ${actual} result(s) for batch ${i}, expected ${expected}`);
+  }
+}
+
+async function evaluatePreparedLeafBatches(evaluator: Evaluator, batches: PreparedLeafBatch[], stats: SearchStats): Promise<Evaluation[][]> {
+  const evalBatches = batches.map((batch) => ({
+    boards: batch.evalNodes.map((node) => node.board),
+    contexts: batch.evalNodes.map((node, i) => ({ historyFens: node.historyFens, legalMoves: batch.evalMoves[i] })),
+  })).filter((batch) => batch.boards.length > 0);
+  if (!evalBatches.length) return batches.map(() => []);
+  for (const batch of batches) recordEvalBatchStats(batch, stats);
+  const beforeMetrics = evaluatorMetrics(evaluator);
+  let evalResults: Evaluation[][];
+  if (evaluator.evaluateBatchSequence && evalBatches.length > 1) {
+    stats.batchEvalCalls += evalBatches.length;
+    stats.batchPipelineFlushes = (stats.batchPipelineFlushes ?? 0) + 1;
+    stats.maxBatchPipelineBatches = Math.max(stats.maxBatchPipelineBatches ?? 0, evalBatches.length);
+    evalResults = await evaluator.evaluateBatchSequence(evalBatches as EvaluationBatchRequest[]);
+  } else if (evaluator.evaluateBatch) {
+    evalResults = [];
+    for (const batch of evalBatches) {
+      stats.batchEvalCalls += 1;
+      evalResults.push(await evaluator.evaluateBatch(batch.boards, batch.contexts));
+    }
+  } else {
+    evalResults = [];
+    for (const batch of evalBatches) evalResults.push(await Promise.all(batch.boards.map((node, i) => evaluator.evaluate(node, batch.contexts[i]))));
+  }
+  assertEvaluationBatchSequenceShape(evalResults, evalBatches as EvaluationBatchRequest[]);
+  recordEvaluatorMetricsDelta(evaluator, beforeMetrics, evalBatches.reduce((sum, batch) => sum + batch.boards.length, 0), stats);
+  recordEvaluationTimingBatches(stats, evalResults);
+  const out: Evaluation[][] = [];
+  let evalBatchIndex = 0;
+  for (const batch of batches) out.push(batch.evalNodes.length ? evalResults[evalBatchIndex++] : []);
+  return out;
+}
+
+async function runPipelinedBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, pipelineDepth: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>, deadlineMs?: number, collisionMode: SearchBatchCollisionMode = 'retry', collisionRetryLimit = batchSize * 4) {
+  let scheduled = 0;
+  let lastYield = nowMs();
+  const inFlightEvalLeaves = new Set<Node>();
+  let nextGenerationId = 1;
+  while (scheduled < visits && !deadlineExpired(deadlineMs)) {
+    throwIfAborted(signal);
+    const batches: PreparedLeafBatch[] = [];
+    while (batches.length < pipelineDepth && scheduled < visits && !deadlineExpired(deadlineMs)) {
+      const want = Math.min(batchSize, visits - scheduled);
+      const batch = collectPreparedLeafBatch(root, want, searchPolicy, context, stats, transpositionTable, collisionMode, collisionRetryLimit, inFlightEvalLeaves, nextGenerationId++);
+      if (!batch.prepared.length) break;
+      batches.push(batch);
+      scheduled += batch.prepared.length;
+    }
+    if (!batches.length) break;
+    const evalResults = await evaluatePreparedLeafBatches(evaluator, batches, stats);
+    for (let i = 0; i < batches.length; i++) {
+      for (const node of batches[i].evalNodes) inFlightEvalLeaves.delete(node);
+      finishPreparedLeafBatch(batches[i], evalResults[i], searchPolicy, context, stats);
+    }
     throwIfAborted(signal);
     if (deadlineExpired(deadlineMs)) break;
     if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
@@ -1110,6 +1357,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
       stats.evalCalls += 1;
       const evaln = await evaluator.evaluate(root.board, { historyFens: root.historyFens, legalMoves: options.rootMoves });
       recordEvaluatorMetricsDelta(evaluator, beforeMetrics, 1, stats);
+      recordEvaluationTimingBatch(stats, [evaln]);
       rootValue = finishExpansion(root, options.rootMoves, evaln, context);
       stats.expansions += 1;
     }
@@ -1117,10 +1365,13 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     rootValue = await expand(root, evaluator, context, stats);
   }
   if (!root.edges.length) {
+    finalizeEvaluationTimingStats(stats);
     logSearchLatency('puct.search', { totalMs: nowMs() - tSearch0, requestedVisits: visits, completedVisits: 0, expansions: stats.expansions, terminalHits: stats.terminalHits, evalCalls: stats.evalCalls, batchEvalCalls: stats.batchEvalCalls, maxEvalBatch: stats.maxEvalBatch, stopReason: 'terminal-root' });
     return { move: null, visits: 0, value: rootValue, policy: [], stats };
   }
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? 1));
+  const batchPipelineDepth = Math.max(1, Math.floor(options.batchPipelineDepth ?? 1));
+  stats.batchPipelineDepth = batchPipelineDepth;
   const signal = options.signal;
   const deadlineMs = deadlineFromMovetime(tSearch0, options.movetimeMs);
   const yieldEveryMs = Math.max(0, Math.floor(options.yieldEveryMs ?? 0));
@@ -1139,7 +1390,10 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     stats.maxRootVisits = maxRootVisits;
     if (!cacheAware) {
       stats.stopReason = 'no-cache-metrics-fixed-visits';
-      if (batchSize > 1) await runBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
+      if (batchSize > 1 || batchPipelineDepth > 1) {
+        if (batchPipelineDepth > 1) await runPipelinedBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, batchPipelineDepth, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
+        else await runBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
+      }
       else {
         let lastYield = nowMs();
         for (let i = 0; i < visitsToRun && !deadlineExpired(deadlineMs); i++) {
@@ -1161,9 +1415,16 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
       while (((stats.neuralEvalMisses ?? 0) - startMisses) < visits && rootVisitCount(root) < maxRootVisits && !deadlineExpired(deadlineMs)) {
         throwIfAborted(signal);
         const room = Math.max(0, maxRootVisits - rootVisitCount(root));
-        const chunk = Math.max(1, Math.min(batchSize, room));
+        const remainingMissBudget = Math.max(1, visits - ((stats.neuralEvalMisses ?? 0) - startMisses));
+        // Preserve the older neural-budget behavior that can finish one
+        // physical batch, but do not let a deeper pipeline spend multiple
+        // extra batches before the miss counter is checked again.
+        const chunk = Math.max(1, Math.min(batchSize * batchPipelineDepth, room, Math.max(batchSize, remainingMissBudget)));
         const beforeCompleted = stats.completedVisits;
-        if (batchSize > 1) await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
+        if (batchSize > 1 || batchPipelineDepth > 1) {
+          if (batchPipelineDepth > 1) await runPipelinedBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, batchPipelineDepth, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
+          else await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
+        }
         else {
           await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
           stats.completedVisits += 1;
@@ -1186,12 +1447,15 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
       }
       if (!stats.stopReason) stats.stopReason = deadlineExpired(deadlineMs) ? 'movetime' : ((stats.neuralEvalMisses ?? 0) - startMisses) >= visits ? 'neural-budget' : 'max-visits';
     }
-  } else if (batchSize > 1) {
+  } else if (batchSize > 1 || batchPipelineDepth > 1) {
     let done = 0;
     while (done < visitsToRun && !deadlineExpired(deadlineMs)) {
-      const chunk = Math.min(batchSize, visitsToRun - done);
-      await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
-      done += chunk;
+      const chunk = Math.min(batchSize * batchPipelineDepth, visitsToRun - done);
+      const beforeCompleted = stats.completedVisits;
+      if (batchPipelineDepth > 1) await runPipelinedBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, batchPipelineDepth, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
+      else await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
+      done += Math.max(0, stats.completedVisits - beforeCompleted);
+      if (stats.completedVisits === beforeCompleted) break;
       if (deadlineExpired(deadlineMs)) break;
       const earlyStop = rootEarlyStopReason(root, context, options, fixedVisitTarget, kldState, bestStableState);
       if (earlyStop) {
@@ -1231,18 +1495,21 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     ? extractMultiPv(root, context, searchPolicy, pvDepth, pvSelector, multiPvCount)
     : undefined;
   const realizedVisits = Math.max(root.visits, root.edges.reduce((sum, edge) => sum + edge.visits, 0));
+  finalizeEvaluationTimingStats(stats);
   logSearchLatency('puct.search', {
     totalMs: nowMs() - tSearch0,
     requestedVisits: visits,
     realizedVisits,
     completedVisits: stats.completedVisits,
     batchSize,
+    batchPipelineDepth,
     budgetMode: stats.budgetMode,
     stopReason: stats.stopReason,
     rootReused: stats.rootReused,
     evalCalls: stats.evalCalls,
     batchEvalCalls: stats.batchEvalCalls,
     maxEvalBatch: stats.maxEvalBatch,
+    evalBatchSizeHistogram: stats.evalBatchSizeHistogram ?? {},
     expansions: stats.expansions,
     terminalHits: stats.terminalHits,
     cacheHits: stats.cacheHits,
@@ -1250,6 +1517,11 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     transpositionHits: stats.transpositionHits ?? 0,
     batchLeafCollisions: stats.batchLeafCollisions ?? 0,
     batchLeafRetries: stats.batchLeafRetries ?? 0,
+    batchPipelineFlushes: stats.batchPipelineFlushes ?? 0,
+    maxBatchPipelineBatches: stats.maxBatchPipelineBatches ?? 0,
+    evalBackendTimingSamples: stats.evalBackendTimingSamples ?? 0,
+    evalBackendTimingPositions: stats.evalBackendTimingPositions ?? 0,
+    evalBackendTimingMeans: stats.evalBackendTimingMeans ?? {},
   });
   return { move: bestEntry?.move ?? null, visits: realizedVisits, value: bestEntry?.q ?? rootValue, policy, ...(principalVariation ? { principalVariation } : {}), ...(multiPvLines ? { multiPvLines } : {}), stats, root };
 }

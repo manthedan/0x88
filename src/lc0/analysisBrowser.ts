@@ -21,7 +21,11 @@ import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support } 
 type Ground = ReturnType<typeof Chessground>;
 
 const params = new URLSearchParams(location.search);
-const MODEL_URL = params.get('model') ?? '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
+const DEFAULT_MODEL_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
+const MODEL_URL = params.get('model') ?? DEFAULT_MODEL_URL;
+const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
+const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
+type Lc0AnalysisRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads';
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 
@@ -78,6 +82,48 @@ function requestedEp(): string {
   return 'auto';
 }
 
+function normalizeLc0Runtime(value: string | null): Lc0AnalysisRuntime {
+  const raw = (value ?? '').toLowerCase();
+  if (raw === 'hybrid' || raw === 'lc0web' || raw === 'hybrid-ort-heads' || raw === 'wgsl-encoder') return 'hybrid-ort-heads';
+  if (raw === 'hybrid-wgsl-heads' || raw === 'wgsl-heads' || raw === 'wgsl') return 'hybrid-wgsl-heads';
+  return 'onnx';
+}
+
+function initialLc0Runtime(): Lc0AnalysisRuntime {
+  if (params.get('headBackend') === 'wgsl' || params.get('hybridHeads') === 'wgsl') return 'hybrid-wgsl-heads';
+  return normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime'));
+}
+
+function selectedLc0Runtime(): Lc0AnalysisRuntime {
+  return normalizeLc0Runtime(selectEl('lc0RuntimeSelect').value);
+}
+
+function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
+  if (runtime === 'hybrid-wgsl-heads') return 'WGSL encoder + WGSL heads';
+  if (runtime === 'hybrid-ort-heads') return 'WGSL encoder + ORT heads';
+  return 'ORT ONNX';
+}
+
+function lc0EncoderLayers(): number {
+  return Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10)));
+}
+
+function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown> {
+  const common = { type: 'init', modelUrl: MODEL_URL, ep: requestedEp(), cacheModel: false };
+  if (runtime === 'onnx') return common;
+  return {
+    ...common,
+    runtime: 'hybrid',
+    packUrl: PACK_URL,
+    layers: lc0EncoderLayers(),
+    verifyShards: params.get('packVerify') !== '0',
+    headBackend: runtime === 'hybrid-wgsl-heads' ? 'wgsl' : 'ort',
+    wgslBatchMode: 'physical',
+    inputBackend: 'js',
+    legalPriorsBackend: 'js',
+  };
+}
+
 function postWorker<T>(message: Record<string, unknown>, onId?: (id: number) => void): Promise<T> {
   if (!searchWorker) return Promise.reject(new Error('LC0 worker unavailable'));
   const id = ++workerSeq;
@@ -103,7 +149,7 @@ async function initWorker(): Promise<string> {
     for (const pending of workerPending.values()) pending.reject(new Error(event.message || 'LC0 worker error'));
     workerPending.clear();
   });
-  const ready = await postWorker<{ backend: string }>({ type: 'init', modelUrl: MODEL_URL, ep: requestedEp(), cacheModel: false });
+  const ready = await postWorker<{ backend: string }>(lc0InitMessage());
   workerReady = true;
   workerBackend = ready.backend;
   return workerBackend;
@@ -670,6 +716,7 @@ function wireEvents() {
     lineCache.delete(tree.current.fen);
     void analyzeCurrent();
   });
+  el('lc0RuntimeSelect').addEventListener('change', () => { void reloadLc0Backend(); });
   el('multiPvInput').addEventListener('change', () => { lineCache.delete(tree.current.fen); void analyzeCurrent(); });
   el('movelist').addEventListener('click', (event) => {
     const target = (event.target as HTMLElement).closest('[data-node]');
@@ -730,23 +777,24 @@ function disposeRuntimeResources(): void {
   searcher = null;
 }
 
-async function init() {
-  REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
-  window.addEventListener('pagehide', (event) => {
-    if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
-  });
-  renderAll();
-  renderEngineList();
-  renderRecklessRuntimeInfo();
-  wireEvents();
-  void refreshBt4Availability();
-  el('message').textContent = 'Loading LC0 model in a worker…';
+async function loadLc0Backend(): Promise<void> {
+  const runtime = selectedLc0Runtime();
+  el('analyze').toggleAttribute('disabled', true);
+  selectEl('lc0RuntimeSelect').disabled = true;
+  el('backend').textContent = `loading ${lc0RuntimeLabel(runtime)}…`;
+  el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)} in a worker…`;
   try {
     el('backend').textContent = await initWorker();
     el('analyze').toggleAttribute('disabled', false);
+    selectEl('lc0RuntimeSelect').disabled = false;
     el('message').textContent = 'Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.';
     if (inputEl('autoAnalyze').checked) void analyzeCurrent();
   } catch (workerError) {
+    if (runtime !== 'onnx') {
+      selectEl('lc0RuntimeSelect').disabled = false;
+      el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(workerError as Error).message}`;
+      return;
+    }
     // Fall back to a main-thread evaluator (analysis will block the UI, but works).
     console.warn('LC0 worker init failed; falling back to the main thread.', workerError);
     try {
@@ -756,12 +804,35 @@ async function init() {
       const diagnostics = await collectOrtRuntimeDiagnostics();
       el('backend').textContent = `${diagnostics.describe} (main thread)`;
       el('analyze').toggleAttribute('disabled', false);
+      selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
       if (inputEl('autoAnalyze').checked) void analyzeCurrent();
     } catch (error) {
+      selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `Model load failed: ${(error as Error).message}`;
     }
   }
+}
+
+async function reloadLc0Backend(): Promise<void> {
+  lineCache.clear();
+  disposeRuntimeResources();
+  renderRecklessRuntimeInfo();
+  await loadLc0Backend();
+}
+
+async function init() {
+  REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
+  window.addEventListener('pagehide', (event) => {
+    if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
+  });
+  selectEl('lc0RuntimeSelect').value = initialLc0Runtime();
+  renderAll();
+  renderEngineList();
+  renderRecklessRuntimeInfo();
+  wireEvents();
+  void refreshBt4Availability();
+  await loadLc0Backend();
 }
 
 void init();
