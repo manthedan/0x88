@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 
 const ROOT = process.cwd();
 
@@ -84,6 +85,25 @@ function toolchainSummary() {
   return 'emcc not found on PATH while writing manifest';
 }
 
+function compressionSummary(buf) {
+  const gzip = gzipSync(buf, { level: 9 });
+  const brotli = brotliCompressSync(buf, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 } });
+  const ratio = (bytes) => Number((bytes / buf.byteLength).toFixed(4));
+  return {
+    note: 'Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.',
+    gzip: { bytes: gzip.byteLength, ratio: ratio(gzip.byteLength) },
+    brotli: { bytes: brotli.byteLength, ratio: ratio(brotli.byteLength) },
+  };
+}
+
+function sumArtifactBytes(artifacts, field) {
+  return artifacts.reduce((sum, artifact) => {
+    if (artifact.missing) return sum;
+    if (field === 'bytes') return sum + artifact.bytes;
+    return sum + artifact.compression[field].bytes;
+  }, 0);
+}
+
 async function fileEntry(path, allowMissing) {
   if (!existsSync(path)) {
     if (allowMissing) return { path, missing: true };
@@ -94,6 +114,7 @@ async function fileEntry(path, allowMissing) {
     path,
     bytes: buf.byteLength,
     sha256: createHash('sha256').update(buf).digest('hex'),
+    compression: compressionSummary(buf),
   };
 }
 
@@ -106,6 +127,9 @@ if (!config) {
   const allowMissing = process.argv.includes('--allow-missing');
   const out = argValue('--out') ?? `artifacts/engine-manifests/${engine}-${config.flavor}.manifest.json`;
   const artifacts = await Promise.all(config.artifacts.map((p) => fileEntry(p, allowMissing)));
+  const totalBytes = sumArtifactBytes(artifacts, 'bytes');
+  const totalGzipBytes = sumArtifactBytes(artifacts, 'gzip');
+  const totalBrotliBytes = sumArtifactBytes(artifacts, 'brotli');
   const manifest = {
     schema: 'lc0-webgpu.browser-engine-artifact-manifest.v1',
     generatedAt: new Date().toISOString(),
@@ -113,6 +137,13 @@ if (!config) {
     ...config,
     build: { ...config.build, toolchain: toolchainSummary() },
     artifacts,
+    totals: {
+      bytes: totalBytes,
+      gzipBytes: totalGzipBytes,
+      brotliBytes: totalBrotliBytes,
+      gzipRatio: totalBytes ? Number((totalGzipBytes / totalBytes).toFixed(4)) : null,
+      brotliRatio: totalBytes ? Number((totalBrotliBytes / totalBytes).toFixed(4)) : null,
+    },
     sourceArchive: {
       required: true,
       url: null,

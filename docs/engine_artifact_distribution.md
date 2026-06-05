@@ -35,7 +35,7 @@ For each distributed engine/flavor, publish all of the following:
    - local patch file(s)
    - build script path and command
    - Emscripten/compiler version or container image digest
-   - output filenames, byte sizes, and SHA-256 hashes
+   - output filenames, byte sizes, SHA-256 hashes, and gzip/brotli transfer-size estimates
    - network/model source URL, license/provenance if known, raw hash, processed hash, and processing command if transformed
 
 3. **Corresponding-source archive**
@@ -121,7 +121,7 @@ npm run berserk:artifact-manifest
 npm run plentychess:artifact-manifest
 ```
 
-The helper writes ignored JSON under `artifacts/engine-manifests/`, including artifact sizes and SHA-256 hashes. A generated manifest is still not release-complete until `sourceArchive.url` and `sourceArchive.sha256` are filled with a published matching source archive.
+The helper writes ignored JSON under `artifacts/engine-manifests/`, including artifact sizes, SHA-256 hashes, and local gzip/brotli transfer-size estimates. A generated manifest is still not release-complete until `sourceArchive.url` and `sourceArchive.sha256` are filled with a published matching source archive.
 
 ## Manifest template
 
@@ -142,10 +142,11 @@ The helper writes ignored JSON under `artifacts/engine-manifests/`, including ar
     "toolchain": "emscripten version or image digest here"
   },
   "artifacts": [
-    { "path": "public/plentychess/plentychess-emscripten.js", "bytes": 0, "sha256": "..." },
-    { "path": "public/plentychess/plentychess-emscripten.wasm", "bytes": 0, "sha256": "..." },
-    { "path": "public/plentychess/plentychess-emscripten.data", "bytes": 0, "sha256": "..." }
+    { "path": "public/plentychess/plentychess-emscripten.js", "bytes": 0, "sha256": "...", "compression": { "gzip": { "bytes": 0 }, "brotli": { "bytes": 0 } } },
+    { "path": "public/plentychess/plentychess-emscripten.wasm", "bytes": 0, "sha256": "...", "compression": { "gzip": { "bytes": 0 }, "brotli": { "bytes": 0 } } },
+    { "path": "public/plentychess/plentychess-emscripten.data", "bytes": 0, "sha256": "...", "compression": { "gzip": { "bytes": 0 }, "brotli": { "bytes": 0 } } }
   ],
+  "totals": { "bytes": 0, "gzipBytes": 0, "brotliBytes": 0 },
   "assets": [
     {
       "name": "0134-2r24-s0.bin",
