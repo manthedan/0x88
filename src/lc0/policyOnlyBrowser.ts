@@ -2907,6 +2907,10 @@ function rootChildTrace(children: Lc0SearchChild[] | undefined): Array<{ uci: st
   }));
 }
 
+function pipelineSearchSemantics(depth: number): 'serial-parity' | 'speculative-pipelined' {
+  return depth > 1 ? 'speculative-pipelined' : 'serial-parity';
+}
+
 async function runHybridSearchFixtureParity(): Promise<void> {
   if (!searchWorkerReady) throw new Error('hybrid search fixture parity requires ready LC0 worker');
   const visitsList = queryIntList(['searchFixtureVisits', 'fixtureVisits', 'visitsList', 'visits'], [32], 1, 100000);
@@ -2959,6 +2963,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
               visits,
               batchSize,
               batchPipelineDepth: depth,
+              pipelineSearchSemantics: pipelineSearchSemantics(depth),
               repeat,
               id: record.id,
               kind: record.moves ? 'history' : 'fen',
@@ -3010,6 +3015,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
       visitsList,
       batchSize,
       batchPipelineDepths: depths,
+      pipelineSearchSemanticsByDepth: Object.fromEntries(depths.map((depth) => [String(depth), pipelineSearchSemantics(depth)])),
       repeats,
       fixtureLimit,
       fixtureIds,
