@@ -211,8 +211,9 @@ async function runBrowserBenchmark(args) {
     while (Date.now() < deadline) {
       const chunk = Math.min(25_000, Math.max(1000, deadline - Date.now()));
       try {
-        await runAgent(args, ['wait', '--text', 'HYBRID_SEARCH_BENCH_DONE', '--timeout', String(chunk)], chunk + 5_000);
+        await runAgent(args, ['wait', '--text', 'HYBRID_SEARCH_BENCH_', '--timeout', String(chunk)], chunk + 5_000);
         const text = textFromGetResult(await runAgent(args, ['get', 'text', '#benchResult'], 30_000));
+        if (text.startsWith('HYBRID_SEARCH_BENCH_FAILED')) throw new Error(text);
         const result = JSON.parse(text);
         if (result.status !== 'HYBRID_SEARCH_BENCH_DONE') throw new Error(`unexpected benchmark status: ${result.status}`);
         const expectedBackend = args.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
