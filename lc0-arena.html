@@ -86,6 +86,10 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
     <div class="row">
       <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
         <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
+      <div class="field"><label for="lc0BatchSizeInput">LC0 batch</label>
+        <input id="lc0BatchSizeInput" type="number" min="1" max="64" step="1" value="1" /></div>
+      <div class="field"><label for="lc0BatchPipelineDepthInput">LC0 pipeline</label>
+        <input id="lc0BatchPipelineDepthInput" type="number" min="1" max="16" step="1" value="1" /></div>
       <div class="field"><label for="gamesInput">Games/opening</label>
         <input id="gamesInput" type="number" min="1" max="20" step="1" value="2" /></div>
       <div class="field"><label for="delayInput">Delay ms</label>
@@ -133,6 +137,7 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
     <div id="matchScore" class="small">No games played yet.</div>
     <h2>Games</h2>
     <div class="log" id="log"></div>
+    <pre id="benchResult" class="small" hidden></pre>
     <div class="row"><button id="exportPgn" type="button">Export PGN</button></div>
     <textarea id="pgnOut" spellcheck="false" placeholder="game PGNs appear here after Export PGN"></textarea>
   </section>
