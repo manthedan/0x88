@@ -10,7 +10,7 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_FENS = 'eval/opening_suite_uho_lite_v1.fen';
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_readback_strategy_matrix.mjs [options]\n\nRuns a fixed-FEN browser matrix comparing ORT WebGPU output-download modes with custom WGSL-head search/readback modes.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_readback_strategy_matrix.json)\n  --base-url URL        Use an existing dev server\n  --host HOST           Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --fens PATH           FEN file (default ${DEFAULT_FENS})\n  --max-positions N     Max FENs to use (default 4)\n  --repeats N           Repeat each strategy/FEN cell (default 1)\n  --strategies LIST     Comma-separated: ort-cpu,ort-gpu,wgsl-pipe1,wgsl-pipe2 (default all)\n  --ort-iters N         ORT timed eval iterations per FEN (default 3)\n  --ort-warmup N        ORT warmup eval iterations per FEN (default 1)\n  --wgsl-eval-iters N   WGSL warm eval iterations per FEN (default 2)\n  --wgsl-search-iters N WGSL fixed-visit searches per FEN (default 2)\n  --wgsl-search-warmup N\n                       WGSL search warmup searches per FEN (default 1)\n  --visits N            WGSL fixed PUCT visits (default 32)\n  --batch N             WGSL search leaf batch size (default 4)\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-cell timeout (default ${DEFAULT_TIMEOUT_MS})\n  --no-server           Do not auto-start Vite\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`);
+  console.log(`Usage: node scripts/lc0_browser_readback_strategy_matrix.mjs [options]\n\nRuns a fixed-FEN browser matrix comparing ORT WebGPU output-download modes with custom WGSL-head search/readback modes.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_readback_strategy_matrix.json)\n  --base-url URL        Use an existing dev server\n  --host HOST           Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --fens PATH           FEN file (default ${DEFAULT_FENS})\n  --max-positions N     Max FENs to use (default 4)\n  --repeats N           Repeat each strategy/FEN cell (default 1)\n  --strategies LIST     Comma-separated: ort-cpu,ort-gpu,wgsl-pipe1,wgsl-gpu-legal,wgsl-pipe2 (default all)\n  --ort-iters N         ORT timed eval iterations per FEN (default 3)\n  --ort-warmup N        ORT warmup eval iterations per FEN (default 1)\n  --wgsl-eval-iters N   WGSL warm eval iterations per FEN (default 2)\n  --wgsl-search-iters N WGSL fixed-visit searches per FEN (default 2)\n  --wgsl-search-warmup N\n                       WGSL search warmup searches per FEN (default 1)\n  --visits N            WGSL fixed PUCT visits (default 32)\n  --batch N             WGSL search leaf batch size (default 4)\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-cell timeout (default ${DEFAULT_TIMEOUT_MS})\n  --no-server           Do not auto-start Vite\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`);
 }
 
 function intArg(value, label, min, max = Number.MAX_SAFE_INTEGER) {
@@ -31,7 +31,7 @@ function parseArgs(argv) {
     fens: DEFAULT_FENS,
     maxPositions: 4,
     repeats: 1,
-    strategies: ['ort-cpu', 'ort-gpu', 'wgsl-pipe1', 'wgsl-pipe2'],
+    strategies: ['ort-cpu', 'ort-gpu', 'wgsl-pipe1', 'wgsl-gpu-legal', 'wgsl-pipe2'],
     ortIters: 3,
     ortWarmup: 1,
     wgslEvalIters: 2,
@@ -75,7 +75,7 @@ function parseArgs(argv) {
   }
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
-  const valid = new Set(['ort-cpu', 'ort-gpu', 'wgsl-pipe1', 'wgsl-pipe2']);
+  const valid = new Set(['ort-cpu', 'ort-gpu', 'wgsl-pipe1', 'wgsl-gpu-legal', 'wgsl-pipe2']);
   for (const strategy of args.strategies) if (!valid.has(strategy)) throw new Error(`Invalid strategy: ${strategy}`);
   return args;
 }
@@ -156,6 +156,7 @@ function commandForCell(args, cell) {
     return { command: 'node', commandArgs };
   }
   const pipelineDepth = cell.strategy === 'wgsl-pipe2' ? 2 : 1;
+  const legalPriorsBackend = cell.strategy === 'wgsl-gpu-legal' ? 'gpu' : 'js';
   return {
     command: 'node',
     commandArgs: [
@@ -166,6 +167,7 @@ function commandForCell(args, cell) {
       '--fen', cell.fen,
       '--head-backend', 'wgsl',
       '--wgsl-batch-mode', 'physical',
+      '--legal-priors-backend', legalPriorsBackend,
       '--visits', String(args.visits),
       '--batch', String(args.batch),
       '--batch-pipeline-depth', String(pipelineDepth),
@@ -213,6 +215,7 @@ function compactResult(strategy, result) {
   const searchTiming = searchStats.evalBackendTimingMeans ?? {};
   return {
     backend: result.backend,
+    legalPriorsBackend: result.legalPriorsBackend ?? (strategy === 'wgsl-gpu-legal' ? 'gpu' : 'js'),
     evalMeanMs: result.eval?.timingStats?.meanMs,
     searchMeanMs: result.search?.timingStats?.meanMs,
     visitsPerSecond: result.search?.visitsPerSecond,
@@ -274,6 +277,8 @@ function summarize(cells) {
       webgpuMapAsyncMsMedian: get('webgpuMapAsyncMsMean'),
       readbackSyncedMsMedian: get('evalReadbackSyncedMs'),
       searchReadbackSyncedMsMedian: get('searchReadbackSyncedMs'),
+      readbackBytesMedian: get('evalReadbackBytes'),
+      searchReadbackBytesMedian: get('searchReadbackBytes'),
       mapReadBufferBytesMedian: get('webgpuMapReadBufferBytesMean'),
     }];
   }));
