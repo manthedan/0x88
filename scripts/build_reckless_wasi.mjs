@@ -70,8 +70,14 @@ pub unsafe fn permute(a: v128) -> v128 { a }
 pub unsafe fn splat_i32(a: i32) -> v128 { i32x4_splat(a) }
 pub unsafe fn zero_f32() -> v128 { f32x4_splat(0.0) }
 pub unsafe fn splat_f32(a: f32) -> v128 { f32x4_splat(a) }
+#[cfg(target_feature = "relaxed-simd")]
+pub unsafe fn mul_add_f32(a: v128, b: v128, c: v128) -> v128 { f32x4_relaxed_madd(a, b, c) }
+#[cfg(not(target_feature = "relaxed-simd"))]
 pub unsafe fn mul_add_f32(a: v128, b: v128, c: v128) -> v128 { f32x4_add(f32x4_mul(a, b), c) }
 pub unsafe fn convert_to_f32(a: v128) -> v128 { f32x4_convert_i32x4(a) }
+#[cfg(target_feature = "relaxed-simd")]
+pub unsafe fn clamp_f32(x: v128, min: v128, max: v128) -> v128 { f32x4_relaxed_max(f32x4_relaxed_min(x, max), min) }
+#[cfg(not(target_feature = "relaxed-simd"))]
 pub unsafe fn clamp_f32(x: v128, min: v128, max: v128) -> v128 { f32x4_max(f32x4_min(x, max), min) }
 
 unsafe fn dpbusd_once(i32s: v128, u8s: v128, i8s: v128) -> v128 {
