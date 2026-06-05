@@ -227,6 +227,7 @@ It compares:
 - `ort-cpu` — ORT WebGPU with default CPU-visible outputs, still instrumented.
 - `ort-gpu` — ORT WebGPU with `preferredOutputLocation=gpu-buffer` and explicit `tensor.getData()` timing.
 - `wgsl-pipe1` — custom WGSL encoder + WGSL heads with physical batching and normal search scheduling.
+- `wgsl-gpu-legal` — same path with GPU legal-prior filtering, reducing per-position readback bytes from full mapped policy to legal-move triples + WDL.
 - `wgsl-pipe2` — same custom WGSL path with `batchPipelineDepth=2`; failures are preserved in the artifact instead of aborting the full matrix.
 
 A short local two-FEN smoke was run:
@@ -261,9 +262,25 @@ wgsl-pipe1 eval readbackMs    10.40
 wgsl-pipe1 search readbackMs  24.48
 ```
 
+A follow-up two-FEN smoke compared normal WGSL readback with existing GPU legal-prior readback:
+
+```text
+wgsl-pipe1 eval bytes          7444
+wgsl-pipe1 search bytes       27295
+wgsl-pipe1 search readbackMs  24.08
+wgsl-pipe1 visits/s          106.67
+
+wgsl-gpu-legal eval bytes      3084
+wgsl-gpu-legal search bytes   11308
+wgsl-gpu-legal search readbackMs 24.61
+wgsl-gpu-legal visits/s       104.73
+```
+
+So GPU legal-prior readback reduced bytes by roughly 59% but did not reduce readback wall time in this short run. That points at fixed `mapAsync`/queue-drain/fence cost rather than raw transfer size for the current small outputs.
+
 A separate `wgsl-pipe2` smoke with 16 visits timed out on this branch. Treat that as a scheduler correctness/stability issue to investigate before using pipeline-depth numbers as evidence.
 
-Immediate implication: the best next implementation bet is not making ORT GPU-backed outputs the default. It is reducing or avoiding CPU-visible policy readback for the custom WGSL path: compact/combined readback first, then GPU legal-prior/top-k if the compact path still leaves readback as the dominant search cost.
+Immediate implication: the best next implementation bet is not making ORT GPU-backed outputs the default, and it is not byte reduction alone. The next useful lane is readback/fence overlap and scheduler stability: fix or bound `batchPipelineDepth=2`, then rerun the same matrix with `wgsl-gpu-legal` included to see whether byte reduction helps once fences are overlapped.
 
 ## Guardrails
 
