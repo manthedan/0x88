@@ -107,3 +107,36 @@ Takeaways:
 - Startup/NNUE decompression is the dominant Viridithas browser cost at short depths. Amortising it across 20 searches cuts effective depth-6 wall time from hundreds of milliseconds to ~22 ms/search.
 - Batch depth-10 and timed-search wall NPS now lands in the same broad range as the earlier SIMD engine-reported NPS, which suggests the SIMD kernels are doing useful work once startup is removed.
 - This makes a real resident Viridithas runtime worth considering if Viridithas remains interesting: either a wasm-friendly persistent UCI stdin loop or a direct browser API. Batch mode itself is only a benchmark probe and is not suitable as an interactive engine backend.
+
+## 2026-06-05 Viridithas SIMD persistent browser smoke
+
+Raw smoke report: [`viridithas_persistent_browser_smoke_2026-06-05_startpos_depth6-8.json`](./viridithas_persistent_browser_smoke_2026-06-05_startpos_depth6-8.json)
+
+After the batch probe, the wasm patch was extended so non-argv wasm runs read stdin synchronously instead of relying on Viridithas' native stdin-reader thread. The existing shared-stdin WASI worker can now keep a Viridithas process resident in browser contexts where `SharedArrayBuffer` and `crossOriginIsolated` are available.
+
+Fast smoke configuration:
+
+- Browser/static server: `http://localhost:5181/reckless-benchmark.html?runtime=1`
+- Cross-origin isolated: true; SharedArrayBuffer available: true
+- Variant: Viridithas SIMD experimental
+- Modes: persistent and one-shot
+- Position: startpos
+- Budgets: depths 6 and 8
+- Warm repeats: 1
+- Hash: 16 MiB; `ucinewgame` before timed persistent runs
+
+Warm results:
+
+| Mode | Budget | Warm avg ms | Best move | Nodes/NPS parsed |
+|---|---:|---:|---|---|
+| persistent | depth 6 | 3.1 | d2d4 | 1,529 / 528,151 |
+| persistent | depth 8 | 13.6 | e2e4 | 7,149 / 533,706 |
+| one-shot | depth 6 | 430.0 | d2d4 | 1,529 / 456,417 |
+| one-shot | depth 8 | 464.6 | e2e4 | 7,149 / 481,738 |
+
+Takeaways:
+
+- The persistent runtime successfully answers sequential searches and avoids the repeated ~400 ms one-shot startup/decompression cost after the resident process is initialized.
+- The depth-6/8 startpos best moves matched one-shot in this smoke.
+- Persistent rows now preserve parseable `info` lines: depth/nodes/NPS/PV are captured for the resident Viridithas run as well as one-shot.
+- Abort/stop is still experimental: the TS adapter currently tears down the worker on abort instead of issuing a graceful UCI `stop` and reusing the process.

@@ -1,7 +1,7 @@
 import { START_FEN } from '../chess/board.ts';
 import { RecklessEngine, canUsePersistentRecklessWasi, type RecklessOptions } from './recklessEngine.ts';
 import { RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT, RECKLESS_SIMD_VARIANT, checkRecklessVariantAsset, recklessVariantAssetStatus, type RecklessVariant } from './recklessVariants.ts';
-import { ViridithasEngine } from './viridithasEngine.ts';
+import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_DEFAULT_VARIANT, VIRIDITHAS_SIMD_VARIANT, checkViridithasVariantAsset, viridithasVariantAssetStatus, type ViridithasVariant } from './viridithasVariants.ts';
 
 interface BenchPosition {
@@ -208,6 +208,7 @@ function runtimeMetadata() {
     crossOriginIsolated: (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true,
     sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
     persistentAvailable: canUsePersistentRecklessWasi(),
+    viridithasPersistentAvailable: canUsePersistentViridithasWasi(),
   };
 }
 
@@ -294,7 +295,10 @@ function render(): void {
 }
 
 async function timeSearch(engine: BenchEngine, variant: BenchVariant, mode: BenchMode, position: BenchPosition, budget: BenchBudget, run: string, signal: AbortSignal, clearPersistentHash: boolean): Promise<void> {
-  if (variant.engine === 'reckless' && engine instanceof RecklessEngine && mode === 'persistent' && clearPersistentHash) await engine.newGame(signal);
+  if (mode === 'persistent' && clearPersistentHash) {
+    if (variant.engine === 'reckless' && engine instanceof RecklessEngine) await engine.newGame(signal);
+    if (variant.engine === 'viridithas' && engine instanceof ViridithasEngine) await engine.newGame(signal);
+  }
   const start = performance.now();
   const bestMove = await engine.bestMove(position.fen, signal);
   const wallMs = performance.now() - start;
@@ -372,8 +376,8 @@ async function runBench(): Promise<void> {
       }
       for (const mode of config.modes) {
         if (abort.signal.aborted) return;
-        if (mode === 'persistent' && variant.engine === 'viridithas') {
-          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'Viridithas one-shot only', wasmUrl: variant.wasmUrl });
+        if (mode === 'persistent' && variant.engine === 'viridithas' && !canUsePersistentViridithasWasi()) {
+          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'persistent unavailable', wasmUrl: variant.wasmUrl });
           render();
           continue;
         }
@@ -394,7 +398,7 @@ async function runBench(): Promise<void> {
         }
         for (const budget of config.budgets) {
           const engine: BenchEngine = variant.engine === 'viridithas'
-            ? new ViridithasEngine(budget.options, variant.wasmUrl)
+            ? new ViridithasEngine(budget.options, variant.wasmUrl, { forceOneShot: mode !== 'persistent', disablePersistentFallback: mode === 'persistent' })
             : new RecklessEngine(
               budget.options,
               variant.wasmUrl,
@@ -468,5 +472,5 @@ el('downloadCsv').addEventListener('click', () => downloadText(csvReport(), 'rec
 for (const variant of [RECKLESS_FULL_VARIANT, RECKLESS_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_LITE_VARIANT]) void checkRecklessVariantAsset(variant, render);
 void checkViridithasVariantAsset(VIRIDITHAS_DEFAULT_VARIANT, render);
 void checkViridithasVariantAsset(VIRIDITHAS_SIMD_VARIANT, render);
-setStatus(`Ready. persistentAvailable=${canUsePersistentRecklessWasi()} · SAB=${typeof SharedArrayBuffer !== 'undefined'}`);
+setStatus(`Ready. recklessPersistent=${canUsePersistentRecklessWasi()} · viridithasPersistent=${canUsePersistentViridithasWasi()} · SAB=${typeof SharedArrayBuffer !== 'undefined'}`);
 render();

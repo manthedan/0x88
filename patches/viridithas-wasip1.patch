@@ -667,7 +667,7 @@ index c4a1398..fb14d90 100644
 +#[cfg(not(target_arch = "wasm32"))]
 +pub use imp::*;
 diff --git a/src/uci.rs b/src/uci.rs
-index 45eefbd..00a2045 100644
+index 45eefbd..52f90c1 100644
 --- a/src/uci.rs
 +++ b/src/uci.rs
 @@ -56,6 +56,8 @@ const BENCH_THREADS: usize = 1;
@@ -679,7 +679,7 @@ index 45eefbd..00a2045 100644
  #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
  pub fn main_loop() -> Result<(), UciError> {
      let version_extension = if cfg!(feature = "final-release") {
-@@ -90,7 +92,9 @@ pub fn main_loop() -> Result<(), UciError> {
+@@ -90,15 +92,13 @@ pub fn main_loop() -> Result<(), UciError> {
          &worker_threads,
      )
      .map_err(|e| UciError::NnueInit(e.to_string()))?;
@@ -690,7 +690,16 @@ index 45eefbd..00a2045 100644
 
      loop {
          std::io::stdout().flush()?;
-@@ -239,7 +243,9 @@ pub fn main_loop() -> Result<(), UciError> {
+-        let Ok(line) = stdin
+-            .lock()
+-            .map_err(|_| UciError::Internal("failed to take lock on stdin"))?
+-            .recv()
+-        else {
++        let Some(line) = read_next_command(&stdin)? else {
+             break;
+         };
+         let input = line.trim();
+@@ -239,7 +239,9 @@ pub fn main_loop() -> Result<(), UciError> {
                          for t in &mut thread_data {
                              t.info.conf = conf.search_config.clone();
                              t.info.lm_table = LMTable::new(&t.info.conf);
@@ -701,7 +710,7 @@ index 45eefbd..00a2045 100644
                          }
 
                          let chess960 = control.chess960.load(Ordering::Relaxed);
-@@ -782,11 +788,36 @@ fn parse_setoption(
+@@ -782,11 +784,53 @@ fn parse_setoption(
      Ok(out)
  }
 
@@ -724,21 +733,38 @@ index 45eefbd..00a2045 100644
 +type StdinReader = (mpsc::Receiver<String>, WasmStdinReaderHandle);
 +
 +fn should_poll_stdin_during_search() -> bool {
++    cfg!(not(target_arch = "wasm32"))
++}
++
++fn read_next_command(stdin: &Mutex<mpsc::Receiver<String>>) -> Result<Option<String>, UciError> {
 +    #[cfg(target_arch = "wasm32")]
-+    {
-+        !WASM_ARG_COMMANDS.load(Ordering::SeqCst)
++    if !WASM_ARG_COMMANDS.load(Ordering::SeqCst) {
++        let mut linebuf = String::with_capacity(128);
++        loop {
++            linebuf.clear();
++            let bytes = std::io::stdin().read_line(&mut linebuf)?;
++            if bytes == 0 {
++                return Ok(None);
++            }
++            let cmd = linebuf.trim();
++            if !cmd.is_empty() {
++                return Ok(Some(cmd.to_owned()));
++            }
++        }
 +    }
-+    #[cfg(not(target_arch = "wasm32"))]
-+    {
-+        true
-+    }
++
++    Ok(stdin
++        .lock()
++        .map_err(|_| UciError::Internal("failed to take lock on stdin"))?
++        .recv()
++        .ok())
 +}
 +
 +#[cfg(not(target_arch = "wasm32"))]
  fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
      let (sender, receiver) = mpsc::channel();
      let handle = std::thread::Builder::new()
-@@ -795,6 +826,23 @@ fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
+@@ -795,6 +839,21 @@ fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
      Ok((receiver, handle))
  }
 
@@ -752,10 +778,8 @@ index 45eefbd..00a2045 100644
 +            sent_arg_command = true;
 +        }
 +    }
++    let _ = control;
 +    WASM_ARG_COMMANDS.store(sent_arg_command, Ordering::SeqCst);
-+    if !sent_arg_command {
-+        let _ = stdin_reader_worker(sender.clone(), &control);
-+    }
 +    Ok((receiver, WasmStdinReaderHandle))
 +}
 +

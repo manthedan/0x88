@@ -12,6 +12,7 @@ type PersistentWorkerRequest = {
   type: 'start-persistent';
   wasmUrl: string;
   inputBuffer: SharedArrayBuffer;
+  executableName?: string;
 };
 
 type WorkerRequest = OneShotWorkerRequest | PersistentWorkerRequest;
@@ -95,7 +96,7 @@ class SharedStdin extends Fd {
 
 async function fetchAndCompileModule(wasmUrl: string): Promise<WebAssembly.Module> {
   const response = await fetch(wasmUrl);
-  if (!response.ok) throw new Error(`failed to fetch Reckless WASI module ${wasmUrl}: HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`failed to fetch WASI module ${wasmUrl}: HTTP ${response.status}`);
 
   // Use streaming compilation when the server advertises an acceptable wasm MIME
   // type, but keep an ArrayBuffer fallback for dev/static servers that do not.
@@ -140,9 +141,9 @@ async function runWasiUci(wasmUrl: string, executableName: string, commands: str
   return { stdout, stderr, exitCode };
 }
 
-async function runPersistentReckless(wasmUrl: string, inputBuffer: SharedArrayBuffer): Promise<void> {
+async function runPersistentWasiUci(wasmUrl: string, inputBuffer: SharedArrayBuffer, executableName = 'reckless'): Promise<void> {
   const wasiInstance = new WASI(
-    ['reckless'],
+    [executableName],
     [],
     [
       new SharedStdin(inputBuffer),
@@ -169,7 +170,7 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
     return;
   }
   if (message.type === 'start-persistent') {
-    void runPersistentReckless(message.wasmUrl, message.inputBuffer)
+    void runPersistentWasiUci(message.wasmUrl, message.inputBuffer, message.executableName)
       .catch((error) => post({ type: 'persistent-error', error: (error as Error).message }));
   }
 });

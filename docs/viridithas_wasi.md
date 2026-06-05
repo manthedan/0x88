@@ -28,27 +28,29 @@ The WASI patch is intentionally narrow and prototype-oriented:
 - uses wasm-safe NNUE geometry/SIMD shims where Viridithas normally assumes x86/NEON intrinsics, with both scalar and wasm `simd128` NNUE backends;
 - replaces worker-thread dispatch with inline execution on `wasm32`, because browser WASI has no native thread spawning;
 - bypasses temp-file/mmap NNUE caching on `wasm32`, leaking one decompressed network for the process lifetime instead;
-- treats argv entries as queued UCI commands in `wasm32` builds and disables search-time stdin polling for argv-driven runs, so one-shot and benchmark-batch searches run to their requested limit instead of treating the next queued command as `stop`.
+- treats argv entries as queued UCI commands in `wasm32` builds, disables search-time stdin polling for argv-driven runs, and uses a direct blocking `stdin().read_line()` loop when no argv commands are present. That gives the browser worker a real resident UCI process over the shared WASI stdin shim while keeping one-shot and benchmark-batch searches from treating the next queued command as `stop`.
 
 ## Browser status
 
-`/reckless-benchmark.html` is now a small WASI UCI benchmark page and includes opt-in **Viridithas scalar experimental** and **Viridithas SIMD experimental** checkboxes. Viridithas is one-shot only as an interactive engine for now; persistent SAB stdin is skipped because upstream Viridithas expects a separate stdin reader thread for full interactive UCI. The page also has a benchmark-only **Viridithas batch one-process** mode that feeds a full position sweep to one argv-driven WASI invocation to estimate startup/NNUE amortisation upside.
+`/reckless-benchmark.html` is now a small WASI UCI benchmark page and includes opt-in **Viridithas scalar experimental** and **Viridithas SIMD experimental** checkboxes. Viridithas now supports the same broad browser modes as the Reckless WASI path:
 
-Local Node and browser smokes from the patched WASI artifact succeeded for:
+- **persistent**: one patched WASI process remains alive and receives UCI commands through the shared stdin ring buffer when `SharedArrayBuffer` and `crossOriginIsolated` are available;
+- **one-shot**: argv-driven fallback for non-isolated contexts and for apples-to-apples startup-cost measurements;
+- **batch**: benchmark-only argv mode that feeds a full position sweep to one WASI invocation to estimate startup/NNUE amortisation upside.
 
-```text
-uci
-isready
-setoption name Hash value 16
-position startpos
-go depth 2
+The persistent runtime is still experimental. It is good enough for sequential searches and benchmark probes, but abort/`stop` handling currently terminates the worker rather than performing a graceful in-search stop.
+
+Fast local smoke:
+
+```bash
+npm run viridithas:smoke
 ```
 
-and returned `bestmove g1f3` with depth/nodes/NPS info from the v20.0.0-dev/v106 network build.
+This runs an argv-driven depth-2 two-search WASI smoke against `public/viridithas/viridithas-simd128.wasm` and verifies two `bestmove` lines plus at least one `info` line. A browser persistent smoke also succeeded on the isolated static server for startpos depths 6 and 8; see `docs/viridithas_persistent_browser_smoke_2026-06-05_startpos_depth6-8.json`.
 
 ## Caveats
 
 - This is a compatibility spike, not a tuned browser engine.
-- The scalar NNUE path is expected to be slower than native Viridithas; the wasm SIMD path improves engine NPS substantially but still pays one-shot startup/decompression overhead.
+- The scalar NNUE path is expected to be slower than native Viridithas; the wasm SIMD path improves engine NPS substantially. Persistent mode avoids the one-shot startup/decompression cost after the first command sequence.
 - The WASM artifact is about 55 MiB raw with the compressed network embedded.
 - Strength/eval correctness should be treated as provisional until a larger benchmark and gauntlet run.
