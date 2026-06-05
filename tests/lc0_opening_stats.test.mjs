@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import { parsePgnGames } from '../src/chess/pgn.ts';
-import { openingStatsForPosition, openingSummary, positionKey } from '../src/lc0/openingStats.ts';
+import { buildOpeningPositionIndex, mergeOpeningMoveStats, openingStatsForPosition, openingStatsFromIndex, openingSummary, positionKey } from '../src/lc0/openingStats.ts';
 
 const PGN = [
   '[Result "1-0"]\n\n1. e4 e5 2. Nf3 Nc6 1-0',
@@ -38,4 +38,23 @@ test('openingStatsForPosition follows transpositions to a deeper position', () =
   assert.equal(stats[0].count, 2);
   const summary = openingSummary(stats);
   assert.deepEqual(summary, { total: 2, whiteWins: 1, blackWins: 1, draws: 0 });
+});
+
+test('buildOpeningPositionIndex precomputes lookup stats by position key', () => {
+  const games = parsePgnGames(PGN);
+  const index = buildOpeningPositionIndex(games);
+  const startStats = openingStatsFromIndex(index, START_FEN);
+  assert.equal(Object.keys(index).includes(positionKey(START_FEN)), true);
+  assert.equal(startStats[0].san, 'e4');
+  assert.equal(startStats[0].count, 3);
+  assert.deepEqual(openingStatsFromIndex(index, '8/8/8/8/8/8/8/8 w - - 0 1'), []);
+});
+
+test('mergeOpeningMoveStats aggregates saved collection search hits', () => {
+  const merged = mergeOpeningMoveStats([
+    [{ uci: 'e2e4', san: 'e4', count: 2, whiteWins: 1, blackWins: 1, draws: 0 }],
+    [{ uci: 'e2e4', san: 'e4', count: 1, whiteWins: 0, blackWins: 0, draws: 1 }, { uci: 'd2d4', san: 'd4', count: 2, whiteWins: 2, blackWins: 0, draws: 0 }],
+  ]);
+  assert.deepEqual(merged.map((stat) => [stat.san, stat.count]), [['e4', 3], ['d4', 2]]);
+  assert.equal(merged[0].draws, 1);
 });

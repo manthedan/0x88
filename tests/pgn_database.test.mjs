@@ -23,8 +23,9 @@ test('PGN collection summary is compact and source-aware', () => {
     gameCount: 12,
     source: 'lichess',
     username: 'dan',
+    indexedPositionCount: 42,
     createdAt: Date.UTC(2026, 5, 5),
     updatedAt: Date.UTC(2026, 5, 5),
   });
-  assert.match(label, /^Blitz sample · 12 games · lichess:dan · /);
+  assert.match(label, /^Blitz sample · 12 games · 42 positions · lichess:dan · /);
 });

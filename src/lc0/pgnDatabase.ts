@@ -1,10 +1,12 @@
 /**
  * IndexedDB-backed PGN collection storage for the analysis opening explorer.
  *
- * We store raw PGN batches plus lightweight metadata. Opening statistics still
- * parse into the existing in-memory GameTree representation on load/import, so
- * this first persistence step is small and reversible.
+ * We store raw PGN batches plus lightweight metadata and a derived position
+ * index. Raw PGN remains authoritative; the index is rebuildable acceleration
+ * for current-position opening lookups across saved collections.
  */
+
+import { openingSummary, positionKey, type OpeningMoveStat, type OpeningPositionIndex } from './openingStats.ts';
 
 export type PgnCollectionSource = 'manual' | 'lichess' | 'chesscom';
 
@@ -16,11 +18,13 @@ export interface PgnCollectionRecord {
   source: PgnCollectionSource;
   username?: string;
   color?: string;
+  positionIndex?: OpeningPositionIndex;
+  indexedPositionCount?: number;
   createdAt: number;
   updatedAt: number;
 }
 
-export type PgnCollectionSummary = Omit<PgnCollectionRecord, 'pgn'>;
+export type PgnCollectionSummary = Omit<PgnCollectionRecord, 'pgn' | 'positionIndex'>;
 
 export interface SavePgnCollectionInput {
   id?: string;
@@ -30,10 +34,18 @@ export interface SavePgnCollectionInput {
   source?: PgnCollectionSource;
   username?: string;
   color?: string;
+  positionIndex?: OpeningPositionIndex;
+  indexedPositionCount?: number;
+}
+
+export interface PgnPositionSearchResult {
+  summary: PgnCollectionSummary;
+  stats: OpeningMoveStat[];
+  total: number;
 }
 
 const DB_NAME = 'lc0-analysis-pgn-database';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'collections';
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
@@ -92,7 +104,13 @@ export function defaultPgnCollectionName(source: PgnCollectionSource = 'manual',
 export function formatPgnCollectionSummary(summary: PgnCollectionSummary): string {
   const when = new Date(summary.updatedAt).toLocaleDateString();
   const source = summary.username ? `${summary.source}:${summary.username}` : summary.source;
-  return `${summary.name} · ${summary.gameCount} games · ${source} · ${when}`;
+  const indexed = summary.indexedPositionCount ? ` · ${summary.indexedPositionCount} positions` : '';
+  return `${summary.name} · ${summary.gameCount} games${indexed} · ${source} · ${when}`;
+}
+
+function collectionSummary(record: PgnCollectionRecord): PgnCollectionSummary {
+  const { pgn: _pgn, positionIndex: _positionIndex, ...summary } = record;
+  return summary;
 }
 
 export async function listPgnCollections(): Promise<PgnCollectionSummary[]> {
@@ -100,7 +118,7 @@ export async function listPgnCollections(): Promise<PgnCollectionSummary[]> {
   try {
     const records = await requestToPromise<PgnCollectionRecord[]>(db.transaction(STORE, 'readonly').objectStore(STORE).getAll());
     return records
-      .map(({ pgn: _pgn, ...summary }) => summary)
+      .map(collectionSummary)
       .sort((a, b) => b.updatedAt - a.updatedAt || a.name.localeCompare(b.name));
   } finally {
     db.close();
@@ -131,6 +149,8 @@ export async function savePgnCollection(input: SavePgnCollectionInput): Promise<
       source: input.source ?? existing?.source ?? 'manual',
       username: input.username !== undefined ? (input.username.trim() || undefined) : existing?.username,
       color: input.color !== undefined ? (input.color || undefined) : existing?.color,
+      positionIndex: input.positionIndex,
+      indexedPositionCount: input.indexedPositionCount ?? (input.positionIndex ? Object.keys(input.positionIndex).length : 0),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
@@ -143,12 +163,46 @@ export async function savePgnCollection(input: SavePgnCollectionInput): Promise<
   }
 }
 
+export async function updatePgnCollectionPositionIndex(id: string, positionIndex: OpeningPositionIndex): Promise<void> {
+  const db = await openDatabase();
+  try {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    const record = await requestToPromise<PgnCollectionRecord | undefined>(store.get(id));
+    if (record) {
+      record.positionIndex = positionIndex;
+      record.indexedPositionCount = Object.keys(positionIndex).length;
+      store.put(record);
+    }
+    await transactionDone(tx);
+  } finally {
+    db.close();
+  }
+}
+
 export async function deletePgnCollection(id: string): Promise<void> {
   const db = await openDatabase();
   try {
     const tx = db.transaction(STORE, 'readwrite');
     tx.objectStore(STORE).delete(id);
     await transactionDone(tx);
+  } finally {
+    db.close();
+  }
+}
+
+export async function searchPgnCollectionsByPosition(fen: string): Promise<PgnPositionSearchResult[]> {
+  const key = positionKey(fen);
+  const db = await openDatabase();
+  try {
+    const records = await requestToPromise<PgnCollectionRecord[]>(db.transaction(STORE, 'readonly').objectStore(STORE).getAll());
+    return records
+      .map((record) => {
+        const stats = record.positionIndex?.[key] ?? [];
+        return { summary: collectionSummary(record), stats, total: openingSummary(stats).total };
+      })
+      .filter((result) => result.total > 0)
+      .sort((a, b) => b.total - a.total || b.summary.updatedAt - a.summary.updatedAt || a.summary.name.localeCompare(b.summary.name));
   } finally {
     db.close();
   }

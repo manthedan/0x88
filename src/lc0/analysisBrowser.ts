@@ -9,8 +9,8 @@ import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { ANALYSIS_DRAWABLE_BRUSHES, engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
-import { openingStatsForPosition, openingSummary, type ImportedGame, type OpeningMoveStat } from './openingStats.ts';
-import { defaultPgnCollectionName, deletePgnCollection, formatPgnCollectionSummary, listPgnCollections, loadPgnCollection, pgnDatabaseAvailable, savePgnCollection, type PgnCollectionSource, type PgnCollectionSummary } from './pgnDatabase.ts';
+import { buildOpeningPositionIndex, mergeOpeningMoveStats, openingStatsFromIndex, openingStatsForPosition, openingSummary, positionKey, type ImportedGame, type OpeningMoveStat, type OpeningPositionIndex } from './openingStats.ts';
+import { defaultPgnCollectionName, deletePgnCollection, formatPgnCollectionSummary, listPgnCollections, loadPgnCollection, pgnDatabaseAvailable, savePgnCollection, searchPgnCollectionsByPosition, updatePgnCollectionPositionIndex, type PgnCollectionSource, type PgnCollectionSummary } from './pgnDatabase.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
@@ -64,6 +64,10 @@ interface EngineAnalysisProfile {
 }
 let engineProfiles: EngineAnalysisProfile[] = [];
 let importedGames: ImportedGame[] = [];
+let importedPositionIndex: OpeningPositionIndex | null = null;
+let databasePositionStats: OpeningMoveStat[] = [];
+let databasePositionKey = '';
+let databasePositionCollectionCount = 0;
 let pgnCollections: PgnCollectionSummary[] = [];
 let activePgnCollectionId = '';
 let lastImportSource: PgnCollectionSource = 'manual';
@@ -75,10 +79,15 @@ const BOOK_BRUSH = 'yellow';
 const BOOK_SWATCH = '#e68f00';
 
 function currentBookStats(): OpeningMoveStat[] {
-  if (!importedGames.length) return [];
   const fen = tree.current.fen;
-  let stats = bookCache.get(fen);
-  if (!stats) { stats = openingStatsForPosition(importedGames, fen); bookCache.set(fen, stats); }
+  const key = positionKey(fen);
+  if (databasePositionKey === key && databasePositionStats.length) return databasePositionStats;
+  if (!importedGames.length) return [];
+  let stats = bookCache.get(key);
+  if (!stats) {
+    stats = importedPositionIndex ? openingStatsFromIndex(importedPositionIndex, fen) : openingStatsForPosition(importedGames, fen);
+    bookCache.set(key, stats);
+  }
   return stats;
 }
 
@@ -809,10 +818,12 @@ function renderMoveList() {
 
 function renderOpening() {
   const body = el('opening').querySelector('tbody')!;
-  if (!importedGames.length) { body.innerHTML = '<tr><td colspan="3" class="small">import games to see opening stats</td></tr>'; return; }
+  const hasDatabasePositionStats = databasePositionKey === positionKey(tree.current.fen) && databasePositionStats.length > 0;
+  if (!importedGames.length && !hasDatabasePositionStats) { body.innerHTML = '<tr><td colspan="3" class="small">import games or search the local DB to see opening stats</td></tr>'; return; }
   const stats = currentBookStats();
   const summary = openingSummary(stats);
-  el('importInfo').textContent = `${importedGames.length} games · ${summary.total} from here`;
+  if (hasDatabasePositionStats && !importedGames.length) el('importInfo').textContent = `local DB search · ${databasePositionCollectionCount} collections · ${summary.total} from here`;
+  else el('importInfo').textContent = `${importedGames.length} games · ${summary.total} from here`;
   if (!stats.length) { body.innerHTML = '<tr><td colspan="3" class="small">no games reached this position</td></tr>'; return; }
   body.innerHTML = stats.map((stat) => {
     const pct = (n: number) => (stat.count ? (n / stat.count) * 100 : 0).toFixed(0);
@@ -826,6 +837,10 @@ function renderOpening() {
 function setImportedPgn(raw: string, messagePrefix = 'imported'): number {
   const games = parsePgnGames(raw).map((game) => ({ tree: game.tree, result: game.result }));
   importedGames = games;
+  importedPositionIndex = buildOpeningPositionIndex(games);
+  databasePositionStats = [];
+  databasePositionKey = '';
+  databasePositionCollectionCount = 0;
   bookCache.clear();
   el('importInfo').textContent = `${messagePrefix} ${games.length} games`;
   renderOpening();
@@ -846,11 +861,13 @@ function renderPgnDatabaseCollections(selected = activePgnCollectionId): void {
     el('savePgnDb').toggleAttribute('disabled', true);
     el('loadPgnDb').toggleAttribute('disabled', true);
     el('deletePgnDb').toggleAttribute('disabled', true);
+    el('searchPgnDbPosition').toggleAttribute('disabled', true);
     el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.';
     return;
   }
   select.disabled = false;
   el('savePgnDb').toggleAttribute('disabled', false);
+  el('searchPgnDbPosition').toggleAttribute('disabled', false);
   const current = pgnCollections.some((entry) => entry.id === selected) ? selected : '';
   select.innerHTML = ['<option value="">new collection</option>', ...pgnCollections.map((entry) => `<option value="${htmlEscape(entry.id)}"${entry.id === current ? ' selected' : ''}>${htmlEscape(entry.name)} (${entry.gameCount})</option>`)].join('');
   el('loadPgnDb').toggleAttribute('disabled', !current);
@@ -961,6 +978,8 @@ async function saveCurrentPgnCollection(): Promise<void> {
       source: lastImportSource,
       username: lastImportUsername,
       color: lastImportColor,
+      positionIndex: importedPositionIndex ?? undefined,
+      indexedPositionCount: importedPositionIndex ? Object.keys(importedPositionIndex).length : 0,
     });
     activePgnCollectionId = record.id;
     inputEl('pgnDbName').value = record.name;
@@ -986,9 +1005,47 @@ async function loadSelectedPgnCollection(): Promise<void> {
     inputEl('pgnDbName').value = record.name;
     inputEl('importGamesInput').value = record.pgn;
     setImportedPgn(record.pgn, `loaded “${record.name}”:`);
-    renderPgnDatabaseCollections(record.id);
+    if (!record.positionIndex && importedPositionIndex) {
+      await updatePgnCollectionPositionIndex(record.id, importedPositionIndex);
+      await refreshPgnDatabaseCollections(record.id);
+      el('pgnDbInfo').textContent = `Loaded and indexed “${record.name}” (${record.gameCount} games).`;
+    } else {
+      renderPgnDatabaseCollections(record.id);
+    }
   } catch (error) {
     el('pgnDbInfo').textContent = `Load failed: ${(error as Error).message}`;
+  }
+}
+
+async function searchCurrentPositionInPgnDatabase(): Promise<void> {
+  if (!pgnDatabaseAvailable()) { el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.'; return; }
+  el('searchPgnDbPosition').toggleAttribute('disabled', true);
+  try {
+    const results = await searchPgnCollectionsByPosition(tree.current.fen);
+    databasePositionStats = mergeOpeningMoveStats(results.map((result) => result.stats));
+    databasePositionKey = results.length ? positionKey(tree.current.fen) : '';
+    databasePositionCollectionCount = results.length;
+    if (results.length) {
+      importedGames = [];
+      importedPositionIndex = null;
+      bookCache.clear();
+      const summary = openingSummary(databasePositionStats);
+      const names = results.slice(0, 3).map((result) => result.summary.name).join(', ');
+      const extra = results.length > 3 ? `, +${results.length - 3} more` : '';
+      el('pgnDbInfo').textContent = `Found ${summary.total} games from this position in ${results.length} local collections: ${names}${extra}.`;
+    } else {
+      databasePositionStats = [];
+      databasePositionKey = '';
+      databasePositionCollectionCount = 0;
+      el('pgnDbInfo').textContent = 'No indexed local PGN collections reached this position.';
+    }
+    renderOpening();
+    renderLines();
+    setShapes(bestShapes());
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Position search failed: ${(error as Error).message}`;
+  } finally {
+    el('searchPgnDbPosition').toggleAttribute('disabled', false);
   }
 }
 
@@ -1244,12 +1301,16 @@ function wireEvents() {
   el('savePgnDb').addEventListener('click', () => { void saveCurrentPgnCollection(); });
   el('loadPgnDb').addEventListener('click', () => { void loadSelectedPgnCollection(); });
   el('deletePgnDb').addEventListener('click', () => { void deleteSelectedPgnCollection(); });
+  el('searchPgnDbPosition').addEventListener('click', () => { void searchCurrentPositionInPgnDatabase(); });
   inputEl('pgnDbName').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') void saveCurrentPgnCollection(); });
   inputEl('importGamesInput').addEventListener('input', () => {
     activePgnCollectionId = '';
     lastImportSource = 'manual';
     lastImportUsername = '';
     lastImportColor = '';
+    databasePositionStats = [];
+    databasePositionKey = '';
+    databasePositionCollectionCount = 0;
     renderPgnDatabaseCollections('');
   });
   inputEl('importUser').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') void fetchGames(); });
