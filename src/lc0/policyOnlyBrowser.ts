@@ -2896,6 +2896,17 @@ function rootTopVisitShare(children: Lc0SearchChild[]): number | undefined {
   return Number((top / total).toFixed(6));
 }
 
+function rootChildTrace(children: Lc0SearchChild[] | undefined): Array<{ uci: string; visits: number; prior: number; q: number; probability: number }> | undefined {
+  if (!children) return undefined;
+  return children.map((child) => ({
+    uci: child.uci,
+    visits: child.visits,
+    prior: roundReportMs(child.prior) ?? child.prior,
+    q: roundReportMs(child.q) ?? child.q,
+    probability: roundReportMs(child.probability) ?? child.probability,
+  }));
+}
+
 async function runHybridSearchFixtureParity(): Promise<void> {
   if (!searchWorkerReady) throw new Error('hybrid search fixture parity requires ready LC0 worker');
   const visitsList = queryIntList(['searchFixtureVisits', 'fixtureVisits', 'visitsList', 'visits'], [32], 1, 100000);
@@ -2903,6 +2914,9 @@ async function runHybridSearchFixtureParity(): Promise<void> {
   const depths = [1, ...requestedDepths.filter((depth) => depth !== 1)];
   const repeats = boundedQueryInt(['searchFixtureRepeats', 'fixtureRepeats', 'repeats'], 1, 1, 10);
   const fixtureLimit = boundedQueryInt(['fixtureLimit', 'fixtures'], 16, 1, 16);
+  const fixtureIds = (params.get('fixtureIds') ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+  const fixtureIdSet = fixtureIds.length ? new Set(fixtureIds) : undefined;
+  const traceRootChildren = params.get('traceRootChildren') === '1';
   const batchSize = searchBatchSize;
   const cells = [];
   const depthBaselines = new Map<string, { bestMove: string | undefined; children: Lc0SearchChild[] }>();
@@ -2910,7 +2924,14 @@ async function runHybridSearchFixtureParity(): Promise<void> {
   el('benchResult').textContent = 'HYBRID_SEARCH_FIXTURE_PARITY_RUNNING';
   try {
     for (const visits of visitsList) {
-      const records = await loadNativeSearchRecords(visits, fixtureLimit);
+      const loadedRecords = await loadNativeSearchRecords(visits, 16);
+      const filteredRecords = fixtureIdSet ? loadedRecords.filter((record) => fixtureIdSet.has(record.id)) : loadedRecords;
+      if (fixtureIdSet && filteredRecords.length !== fixtureIdSet.size) {
+        const loadedIds = new Set(loadedRecords.map((record) => record.id));
+        const missing = fixtureIds.filter((id) => !loadedIds.has(id));
+        throw new Error(`requested fixture ID(s) not found for visits ${visits}: ${missing.join(', ')}`);
+      }
+      const records = filteredRecords.slice(0, fixtureLimit);
       for (const record of records) {
         const input = nativeSearchInput(record);
         const expectedNativeBestMove = nativeCastlingToStandard(record.bestmove);
@@ -2947,6 +2968,8 @@ async function runHybridSearchFixtureParity(): Promise<void> {
               depthBaselineVisitL1: rootVisitDistributionL1(result.children, depthBaseline?.children),
               topVisitShare: rootTopVisitShare(result.children),
               depthBaselineTopVisitShare: depthBaseline ? rootTopVisitShare(depthBaseline.children) : undefined,
+              rootChildren: traceRootChildren ? rootChildTrace(result.children) : undefined,
+              depthBaselineRootChildren: traceRootChildren ? rootChildTrace(depthBaseline?.children) : undefined,
               completedVisits: result.stats?.completedVisits,
               stopReason: result.stats?.stopReason,
               elapsedMs: roundReportMs(performance.now() - started),
@@ -2986,6 +3009,8 @@ async function runHybridSearchFixtureParity(): Promise<void> {
       batchPipelineDepths: depths,
       repeats,
       fixtureLimit,
+      fixtureIds,
+      traceRootChildren,
       cells: cells.length,
       nativeMatches: cells.filter((cell) => cell.matchesNative).length,
       depthBaselineMatches: cells.filter((cell) => cell.matchesDepthBaseline).length,

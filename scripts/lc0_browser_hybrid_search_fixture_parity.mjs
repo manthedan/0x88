@@ -9,7 +9,7 @@ const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 300_000;
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_hybrid_search_fixture_parity.mjs [options]\n\nRuns browser/WebGPU LC0 fixed-search fixture parity for hybrid search across batch pipeline depths.\n\nOptions:\n  --out PATH                 Write JSON artifact (default stdout only)\n  --base-url URL             Use an existing dev server\n  --host HOST                Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N                   Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN        Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --session NAME             agent-browser session name\n  --timeout MS               Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --visits LIST              Comma-separated fixed-visit fixture sets, e.g. 32,64 (default 32)\n  --batch N                  Search leaf batch size (default 4)\n  --batch-pipeline-depths L  Comma-separated depths (default 1; use 1,2,4 with --allow-mismatches for exploratory pipeline matrices)\n  --repeats N                Repeats per fixture/depth (default 1)\n  --fixture-limit N          Fixtures per visit set (max currently 16, default 16)\n  --layers N                 Encoder layers (default 10)\n  --head-backend MODE        ort or wgsl (default ort; use wgsl to opt into experimental WGSL heads)\n  --encoder-kernel MODE      hand, mixed-tvm-ffn, mixed-tvm-ffn-outproj, tvm-packed-f16 (default hand)\n  --input-backend MODE       js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                            Legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads; opt-in)\n  --max-depth-visit-l1 N     Optional fail gate on root visit-distribution L1 vs depth=1 baseline\n  --no-server                Do not auto-start Vite\n  --allow-mismatches         Exit 0 and write/report artifacts even when parity mismatches are found\n  --dry-run                  Print URL and exit\n  -h, --help                 Show this help\n`);
+  console.log(`Usage: node scripts/lc0_browser_hybrid_search_fixture_parity.mjs [options]\n\nRuns browser/WebGPU LC0 fixed-search fixture parity for hybrid search across batch pipeline depths.\n\nOptions:\n  --out PATH                 Write JSON artifact (default stdout only)\n  --base-url URL             Use an existing dev server\n  --host HOST                Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N                   Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN        Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --session NAME             agent-browser session name\n  --timeout MS               Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --visits LIST              Comma-separated fixed-visit fixture sets, e.g. 32,64 (default 32)\n  --batch N                  Search leaf batch size (default 4)\n  --batch-pipeline-depths L  Comma-separated depths (default 1; use 1,2,4 with --allow-mismatches for exploratory pipeline matrices)\n  --repeats N                Repeats per fixture/depth (default 1)\n  --fixture-limit N          Fixtures per visit set (max currently 16, default 16)\n  --fixture-ids LIST         Comma-separated native fixture IDs to run before applying --fixture-limit\n  --trace-root-children      Include depth-baseline/root child visit/prior/q traces in the browser artifact\n  --layers N                 Encoder layers (default 10)\n  --head-backend MODE        ort or wgsl (default ort; use wgsl to opt into experimental WGSL heads)\n  --encoder-kernel MODE      hand, mixed-tvm-ffn, mixed-tvm-ffn-outproj, tvm-packed-f16 (default hand)\n  --input-backend MODE       js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                            Legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads; opt-in)\n  --max-depth-visit-l1 N     Optional fail gate on root visit-distribution L1 vs depth=1 baseline\n  --no-server                Do not auto-start Vite\n  --allow-mismatches         Exit 0 and write/report artifacts even when parity mismatches are found\n  --dry-run                  Print URL and exit\n  -h, --help                 Show this help\n`);
 }
 
 function parseList(raw, mapper = Number, label = 'list') {
@@ -30,6 +30,8 @@ function parseArgs(argv) {
     batchPipelineDepths: [1],
     repeats: 1,
     fixtureLimit: 16,
+    fixtureIds: [],
+    traceRootChildren: false,
     layers: 10,
     headBackend: 'ort',
     encoderKernel: 'hand',
@@ -60,6 +62,8 @@ function parseArgs(argv) {
     else if (arg === '--batch-pipeline-depths' || arg === '--pipeline-depths') args.batchPipelineDepths = parseList(next(), Number, 'batch-pipeline-depths');
     else if (arg === '--repeats') args.repeats = Number(next());
     else if (arg === '--fixture-limit' || arg === '--fixtures') args.fixtureLimit = Number(next());
+    else if (arg === '--fixture-ids') args.fixtureIds = next().split(',').map((value) => value.trim()).filter(Boolean);
+    else if (arg === '--trace-root-children') args.traceRootChildren = true;
     else if (arg === '--layers') args.layers = Number(next());
     else if (arg === '--head-backend') args.headBackend = next();
     else if (arg === '--encoder-kernel') args.encoderKernel = next();
@@ -106,6 +110,8 @@ function parityUrl(args) {
   url.searchParams.set('batchPipelineDepths', args.batchPipelineDepths.join(','));
   url.searchParams.set('repeats', String(args.repeats));
   url.searchParams.set('fixtureLimit', String(args.fixtureLimit));
+  if (args.fixtureIds.length) url.searchParams.set('fixtureIds', args.fixtureIds.join(','));
+  if (args.traceRootChildren) url.searchParams.set('traceRootChildren', '1');
   url.searchParams.set('ep', 'wasm');
   if (!args.packVerify) url.searchParams.set('packVerify', '0');
   return String(url);
