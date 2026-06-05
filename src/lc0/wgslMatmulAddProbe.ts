@@ -3063,25 +3063,49 @@ function createSmolgenPipelines(device: DeviceLike, buffers: {
   return { compress, compressBind, dense1, dense1Bind, ln1, ln1Bind, dense2, dense2Bind, ln2, ln2Bind, project, projectBind };
 }
 
-function encodeSmolgenPass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
+function encodeSmolgenCompressPass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.compress);
   pass.setBindGroup(0, pipelines.compressBind);
   pass.dispatchWorkgroups(Math.ceil(DEFAULT_SMOLGEN_COMPRESSED / 8), Math.ceil(DEFAULT_TOKENS / 8));
+}
+
+function encodeSmolgenDense1Pass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.dense1);
   pass.setBindGroup(0, pipelines.dense1Bind);
   pass.dispatchWorkgroups(Math.ceil(DEFAULT_SMOLGEN_HIDDEN / 64));
+}
+
+function encodeSmolgenLn1Pass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.ln1);
   pass.setBindGroup(0, pipelines.ln1Bind);
   pass.dispatchWorkgroups(1);
+}
+
+function encodeSmolgenDense2Pass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.dense2);
   pass.setBindGroup(0, pipelines.dense2Bind);
   pass.dispatchWorkgroups(Math.ceil(DEFAULT_SMOLGEN_FLAT / 64));
+}
+
+function encodeSmolgenLn2Pass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.ln2);
   pass.setBindGroup(0, pipelines.ln2Bind);
   pass.dispatchWorkgroups(1);
+}
+
+function encodeSmolgenProjectPass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.project);
   pass.setBindGroup(0, pipelines.projectBind);
   pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+}
+
+function encodeSmolgenPass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
+  encodeSmolgenCompressPass(pass, pipelines);
+  encodeSmolgenDense1Pass(pass, pipelines);
+  encodeSmolgenLn1Pass(pass, pipelines);
+  encodeSmolgenDense2Pass(pass, pipelines);
+  encodeSmolgenLn2Pass(pass, pipelines);
+  encodeSmolgenProjectPass(pass, pipelines);
 }
 
 function createAttentionOutputPipelines(device: DeviceLike, buffers: {
@@ -5574,6 +5598,12 @@ export interface Lc0WebHybridEvaluationResult extends Lc0Evaluation {
 export type Lc0WebHybridEncoderProfileStageName =
   | 'inputBody'
   | 'smolgen'
+  | 'smolgenCompress'
+  | 'smolgenDense1'
+  | 'smolgenLn1'
+  | 'smolgenDense2'
+  | 'smolgenLn2'
+  | 'smolgenProject'
   | 'qkvProjection'
   | 'attentionScores'
   | 'softmax'
@@ -6352,7 +6382,7 @@ class Lc0WebHybridRuntime {
 
     if (profileMode === 'gpu-timestamp') {
       const globals = gpuGlobals();
-      const timestampStageCount = (this.inputBackend !== 'js' ? 1 : 0) + this.layerRuntimes.length * 10;
+      const timestampStageCount = (this.inputBackend !== 'js' ? 1 : 0) + this.layerRuntimes.length * 15;
       const timestampCount = timestampStageCount * 2;
       const timestampBytes = timestampCount * 8;
       let output: Float32Array<ArrayBufferLike> = new Float32Array(DEFAULT_TOKENS * DEFAULT_N);
@@ -6382,7 +6412,12 @@ class Lc0WebHybridRuntime {
           if (this.inputBackend !== 'js') encodeTimestampStage('inputBody', 'input body projection', undefined, (pass) => encodeInputBodyPass(pass, this.inputBodyGpu!));
           for (let layerIndex = 0; layerIndex < this.layerRuntimes.length; layerIndex++) {
             const layer = this.layerRuntimes[layerIndex];
-            encodeTimestampStage('smolgen', 'smolgen', layerIndex, (pass) => encodeSmolgenPass(pass, layer.smolgenPipelines));
+            encodeTimestampStage('smolgenCompress', 'smolgen compress', layerIndex, (pass) => encodeSmolgenCompressPass(pass, layer.smolgenPipelines));
+            encodeTimestampStage('smolgenDense1', 'smolgen dense1', layerIndex, (pass) => encodeSmolgenDense1Pass(pass, layer.smolgenPipelines));
+            encodeTimestampStage('smolgenLn1', 'smolgen ln1', layerIndex, (pass) => encodeSmolgenLn1Pass(pass, layer.smolgenPipelines));
+            encodeTimestampStage('smolgenDense2', 'smolgen dense2', layerIndex, (pass) => encodeSmolgenDense2Pass(pass, layer.smolgenPipelines));
+            encodeTimestampStage('smolgenLn2', 'smolgen ln2', layerIndex, (pass) => encodeSmolgenLn2Pass(pass, layer.smolgenPipelines));
+            encodeTimestampStage('smolgenProject', 'smolgen project', layerIndex, (pass) => encodeSmolgenProjectPass(pass, layer.smolgenPipelines));
             encodeTimestampStage('qkvProjection', 'QKV projection', layerIndex, (pass) => encodeAttentionQkvPass(pass, layer.attentionPipelines));
             encodeTimestampStage('attentionScores', 'attention scores', layerIndex, (pass) => encodeAttentionScoresPass(pass, layer.attentionPipelines));
             encodeTimestampStage('softmax', 'softmax', layerIndex, (pass) => encodeAttentionSoftmaxPass(pass, layer.attentionPipelines));
@@ -6466,7 +6501,12 @@ class Lc0WebHybridRuntime {
       }
       for (let layerIndex = 0; layerIndex < this.layerRuntimes.length; layerIndex++) {
         const layer = this.layerRuntimes[layerIndex];
-        addLayer(layerIndex, 'smolgen', 'smolgen', await submitAndMeasure((pass) => encodeSmolgenPass(pass, layer.smolgenPipelines)));
+        addLayer(layerIndex, 'smolgenCompress', 'smolgen compress', await submitAndMeasure((pass) => encodeSmolgenCompressPass(pass, layer.smolgenPipelines)));
+        addLayer(layerIndex, 'smolgenDense1', 'smolgen dense1', await submitAndMeasure((pass) => encodeSmolgenDense1Pass(pass, layer.smolgenPipelines)));
+        addLayer(layerIndex, 'smolgenLn1', 'smolgen ln1', await submitAndMeasure((pass) => encodeSmolgenLn1Pass(pass, layer.smolgenPipelines)));
+        addLayer(layerIndex, 'smolgenDense2', 'smolgen dense2', await submitAndMeasure((pass) => encodeSmolgenDense2Pass(pass, layer.smolgenPipelines)));
+        addLayer(layerIndex, 'smolgenLn2', 'smolgen ln2', await submitAndMeasure((pass) => encodeSmolgenLn2Pass(pass, layer.smolgenPipelines)));
+        addLayer(layerIndex, 'smolgenProject', 'smolgen project', await submitAndMeasure((pass) => encodeSmolgenProjectPass(pass, layer.smolgenPipelines)));
         addLayer(layerIndex, 'qkvProjection', 'QKV projection', await submitAndMeasure((pass) => encodeAttentionQkvPass(pass, layer.attentionPipelines)));
         addLayer(layerIndex, 'attentionScores', 'attention scores', await submitAndMeasure((pass) => encodeAttentionScoresPass(pass, layer.attentionPipelines)));
         addLayer(layerIndex, 'softmax', 'softmax', await submitAndMeasure((pass) => encodeAttentionSoftmaxPass(pass, layer.attentionPipelines)));

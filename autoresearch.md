@@ -95,11 +95,11 @@ Drift baseline for the same recovered opt-in path (`hybrid-wgsl-heads`, WASM inp
 
 ## Hypothesis Queue
 
-1. Add a scaffolded quantized FFN candidate as an explicit encoder kernel variant, initially for FFN weights only.
-2. Start with per-output-channel symmetric int8 weights and f32/f16 dequant in WGSL; measure whether lower bandwidth offsets dequant overhead.
-3. If FFN int8 is too slow or drifts too much, try mixed precision: int8 dense1 only or dense2 only.
-4. Keep quantized path opt-in and run stronger 32-position/9-fixture confirmations only after fast-loop wins pass drift.
-5. If quantized matmul is bandwidth-bound but dequant overhead dominates, pivot to f16 packed/generator improvements instead of more int8 variants.
+1. Highest ROI moved from naive int8 to generated/fused f16 GPU kernels. The current profile says smolgen project and smolgen dense1 dominate the recovered `mixed-tvm-ffn` encoder path, ahead of FFN dense2 and QKV.
+2. Add generated/packed-f16 smolgen candidates first, especially smolgen project (`256 -> 4096`) and smolgen dense1 (`2048 -> 256`). Keep them as explicit encoder-kernel opt-ins until full fixed-suite speed and drift pass.
+3. Look for structural dispatch reductions only where they preserve the optimized matmul shape. Dense2+residual+ln2 fusion is tempting but likely loses if the matmul becomes less tiled.
+4. Revisit GPU legal/top-k only as a fused mask/softmax/top-k/readback shrink path, not as a standalone GPU legal-prior toggle.
+5. Treat CPU/WASM int8 as a separate future fallback lane; do not spend more WebGPU time on scalar dequant-in-inner-loop int8.
 
 ## What's Been Tried
 
@@ -107,3 +107,5 @@ Drift baseline for the same recovered opt-in path (`hybrid-wgsl-heads`, WASM inp
 - Added drift-harness support for `--input-backend` and `--legal-priors-backend` so this lane can validate the same WASM-input/JS-legal path it benchmarks.
 - Added `autoresearch.sh` drift guard metrics and thresholds. Keeps must retain drift guard unless the experiment is explicitly a harness diagnosis.
 - Discarded: explicit opt-in per-output-channel int8 FFN WGSL variants. Full FFN int8 passed 3-fixture drift but regressed the default fixed suite to `7.30 ms/eval` versus the recovered `mixed-tvm-ffn` baseline around `6.27 ms/eval` (`/tmp/lc0_autoresearch/20260605_142441_72448_rep3.json`, drift `/tmp/lc0_autoresearch/20260605_142441_72448_drift.json`). Dense2-only int8 also passed drift but regressed to `7.06 ms/eval` (`/tmp/lc0_autoresearch/20260605_142908_74450_rep3.json`). Fast screens for dense1-only/dense2-only were slower as well. The simple WGSL dequant-in-inner-loop approach adds enough ALU/fence time to lose the f16 TVM advantage; do not revisit this shape without a generated/fused int8 kernel or different packing strategy.
+- Added smolgen-substage timestamp/profile breakdown. Representative mixed-TVM/WASM-input profile: `/tmp/lc0_profile_mixed_smolgen_breakdown_final.json`, `profiledStageTotalMs=32.96` for 5 profile iterations, with per-layer averages `smolgenProject=0.1717 ms`, `smolgenDense1=0.1127 ms`, `ffnDense2Residual=0.0891 ms`, `qkvProjection=0.0695 ms`, `ffnDense1=0.0485 ms`. This redirects generated/fused f16 work toward smolgen project/dense1 before more FFN-only tweaks.
+- Discarded local smolgen micro-shader attempts: a paired-output smolgen project shader and a shared-input tiled smolgen dense1 shader were both slower in timestamp profiles. The next smolgen attempt should be generated/packed-f16 matmul or a better tiled kernel, not ad-hoc scalar rewrites.

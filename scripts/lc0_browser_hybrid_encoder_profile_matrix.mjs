@@ -159,6 +159,8 @@ function profileUrl(args, combo) {
 
 function compactProfile(result, combo) {
   const stages = Object.fromEntries((result.aggregateStageTimings ?? []).map((stage) => [stage.stage, stage.avgMs]));
+  const smolgenSubstageAvgMs = ['smolgenCompress', 'smolgenDense1', 'smolgenLn1', 'smolgenDense2', 'smolgenLn2', 'smolgenProject']
+    .reduce((sum, stage) => sum + (stages[stage] ?? 0), 0);
   return {
     ...combo,
     encoderKernelVariant: result.encoderKernelVariant,
@@ -167,7 +169,13 @@ function compactProfile(result, combo) {
     gpuTimestampSupported: result.gpuTimestampSupported,
     profiledStageTotalMs: result.profiledStageTotalMs,
     readbackSyncedMs: result.readbackSyncedMs,
-    smolgenAvgMs: stages.smolgen,
+    smolgenAvgMs: stages.smolgen ?? smolgenSubstageAvgMs,
+    smolgenCompressAvgMs: stages.smolgenCompress,
+    smolgenDense1AvgMs: stages.smolgenDense1,
+    smolgenLn1AvgMs: stages.smolgenLn1,
+    smolgenDense2AvgMs: stages.smolgenDense2,
+    smolgenLn2AvgMs: stages.smolgenLn2,
+    smolgenProjectAvgMs: stages.smolgenProject,
     qkvProjectionAvgMs: stages.qkvProjection,
     outputProjectionAvgMs: stages.outputProjection,
     ffnDense1AvgMs: stages.ffnDense1,

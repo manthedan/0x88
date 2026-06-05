@@ -72,7 +72,7 @@ Every engine family should have one card with these fields:
   - Model caching: Cache API/local symlink flow exists; BT4 warns because of size.
 - **Speed snapshot:** see `docs/lc0web_custom_inference_checkpoint.md`. Representative final local 32 visits/batch 4: stable ORT heads ~65 visits/s; experimental WGSL heads ~110 visits/s. The 2026-06-05 recovered-state autoresearch lane favored the explicit opt-in `hybrid-wgsl-heads` + WASM input + `mixed-tvm-ffn` + JS legal priors + batch 4/depth 1 path at about `6.1 ms/eval` on the fixed suite after benchmark-harness cleanup; this is not a default and must be compared only against similarly cleaned controls.
 - **Validation:** `npm run lc0:browser-ci-smoke`, LC0 fixture parity tests, model manifest sha256 checks, and browser search matrix artifacts.
-- **Open work:** keep extracting shared catalog metadata into UI config; keep experimental LC0 runtime lanes opt-in until repeated parity, leak, and cross-host latency gates pass. Next high-ROI lane is quantized/int8 FFN or encoder variants against the cleaned mixed-TVM JS-legal baseline.
+- **Open work:** keep extracting shared catalog metadata into UI config; keep experimental LC0 runtime lanes opt-in until repeated parity, leak, and cross-host latency gates pass. After the naive WebGPU int8 FFN lane regressed throughput despite passing drift, the next high-ROI GPU lane is generated/packed-f16 smolgen project/dense1 work against the cleaned mixed-TVM JS-legal baseline.
 
 ### Stockfish family
 

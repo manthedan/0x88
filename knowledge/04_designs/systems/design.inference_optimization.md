@@ -72,7 +72,7 @@ Promotion policy for this lane:
 5. Use TVM/generated WGSL only after timing identifies hot stages. Replace targeted kernels/fusions behind full-search parity and repeated E2E timing gates; do not treat isolated kernel wins as promotion evidence.
 6. Treat browser/WebGPU harness state as part of the benchmark contract. Rebaseline comparisons under the same scoped cleanup policy for wrapper-owned browser/agent sessions, and do not claim runtime speedups from recovering a degraded measurement window.
 
-Current LC0 browser-lane recommendation, 2026-06-05: productize only as an explicit opt-in the recovered-state `hybrid-wgsl-heads` configuration with WASM input, `mixed-tvm-ffn`, JS legal priors, batch size 4, and `batchPipelineDepth=1`. Deprioritize GPU legal priors, pipe2/depth>1 fixed-suite runs, batch-size sweeps, and readback micro-toggles unless new full-search attribution changes the bottleneck. The next high-ROI exploration axis is a separate quantized/int8 FFN or encoder lane with parity/top-k/value drift gates.
+Current LC0 browser-lane recommendation, 2026-06-05: productize only as an explicit opt-in the recovered-state `hybrid-wgsl-heads` configuration with WASM input, `mixed-tvm-ffn`, JS legal priors, batch size 4, and `batchPipelineDepth=1`. Deprioritize GPU legal priors, pipe2/depth>1 fixed-suite runs, batch-size sweeps, and readback micro-toggles unless new full-search attribution changes the bottleneck. A simple WebGPU int8 FFN lane passed drift but regressed throughput, so the next high-ROI GPU axis is generated/packed-f16 smolgen work (especially project and dense1) with the same fixed-suite speed and drift gates. Treat CPU/WASM int8 as a separate fallback lane, not the current WebGPU priority.
 
 ## Optimization backlog
 
