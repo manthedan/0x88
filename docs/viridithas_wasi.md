@@ -1,6 +1,6 @@
 # Viridithas WASI spike
 
-Viridithas is an experimental browser/WASI UCI engine candidate. This branch adds a reproducible local build path and benchmark-only browser adapter.
+Viridithas is an experimental browser/WASI UCI engine candidate. This branch adds a reproducible local build path, benchmark adapter, and experimental arena/analysis UI registration.
 
 ## Build
 
@@ -32,13 +32,13 @@ The WASI patch is intentionally narrow and prototype-oriented:
 
 ## Browser status
 
-`/reckless-benchmark.html` is now a small WASI UCI benchmark page and includes opt-in **Viridithas scalar experimental** and **Viridithas SIMD experimental** checkboxes. Viridithas now supports the same broad browser modes as the Reckless WASI path:
+`/reckless-benchmark.html` is now a small WASI UCI benchmark page and includes opt-in **Viridithas scalar experimental** and **Viridithas SIMD experimental** checkboxes. The experimental variants are also selectable in `/lc0-arena.html` and `/lc0-analysis.html` for shallow smoke games/lines, with runtime/asset status shown next to the Reckless status. Viridithas now supports the same broad browser modes as the Reckless WASI path:
 
 - **persistent**: one patched WASI process remains alive and receives UCI commands through the shared stdin ring buffer when `SharedArrayBuffer` and `crossOriginIsolated` are available;
 - **one-shot**: argv-driven fallback for non-isolated contexts and for apples-to-apples startup-cost measurements;
 - **batch**: benchmark-only argv mode that feeds a full position sweep to one WASI invocation to estimate startup/NNUE amortisation upside.
 
-The persistent runtime is still experimental. It is good enough for sequential searches and benchmark probes, but abort/`stop` handling currently terminates the worker rather than performing a graceful in-search stop.
+The persistent runtime is still experimental. It is good enough for sequential searches, shallow arena games, and benchmark probes, but abort/`stop` handling currently terminates the worker rather than performing a graceful in-search stop. Analysis UI use should therefore remain cautious around rapid position changes/stops.
 
 Fast local smoke:
 

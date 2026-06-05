@@ -24,10 +24,28 @@ export const VIRIDITHAS_SIMD_VARIANT: ViridithasVariant = {
   note: 'Experimental patched Viridithas wasm32-wasip1 build with wasm simd128 NNUE kernels and one-shot, persistent, and batch benchmark modes.',
 };
 
+export const VIRIDITHAS_VARIANTS: readonly ViridithasVariant[] = [
+  VIRIDITHAS_DEFAULT_VARIANT,
+  VIRIDITHAS_SIMD_VARIANT,
+];
+
+export function normalizeViridithasVariant(raw: string | null | undefined): ViridithasVariant['key'] {
+  const value = String(raw ?? '').toLowerCase().replace(/[ _-]+/g, '');
+  if (value === 'simd' || value === 'simd128' || value === 'wasmsimd') return 'simd';
+  if (value === 'scalar' || value === 'default') return 'default';
+  if (value === 'custom') return 'custom';
+  return 'default';
+}
+
+export function viridithasVariantByKey(key: string): ViridithasVariant {
+  const normalized = normalizeViridithasVariant(key);
+  return VIRIDITHAS_VARIANTS.find((variant) => variant.key === normalized) ?? VIRIDITHAS_DEFAULT_VARIANT;
+}
+
 export function viridithasVariantFromParams(params: URLSearchParams): ViridithasVariant {
   const customUrl = params.get('viridithasWasm');
   if (customUrl) return { key: 'custom', label: 'Viridithas Custom', wasmUrl: customUrl, note: 'Custom Viridithas WASM URL from ?viridithasWasm=…' };
-  return VIRIDITHAS_DEFAULT_VARIANT;
+  return viridithasVariantByKey(params.get('viridithas') ?? params.get('viridithasVariant') ?? 'default');
 }
 
 export function viridithasVariantAssetStatus(variant: ViridithasVariant): ViridithasAssetStatus {
