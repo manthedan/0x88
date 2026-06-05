@@ -67,9 +67,10 @@ function benchmarkUrl(args) {
   url.searchParams.set('benchIters', String(args.iters));
   url.searchParams.set('benchWarmup', String(args.warmup));
   url.searchParams.set('ortReadbackProfile', '1');
-  if (args.kernelProfile) url.searchParams.set('ortWebGpuProfile', '1');
-  if (args.monkeyPatch) url.searchParams.set('ortMonkeyPatchWebGpu', '1');
+  url.searchParams.set('ortWebGpuProfile', args.kernelProfile ? '1' : '0');
+  url.searchParams.set('ortMonkeyPatchWebGpu', args.monkeyPatch ? '1' : '0');
   if (args.gpuOutputs) url.searchParams.set('ortPreferredOutputLocation', 'gpu-buffer');
+  else url.searchParams.set('ortGpuOutputs', '0');
   if (args.model) url.searchParams.set('model', args.model);
   return String(url);
 }

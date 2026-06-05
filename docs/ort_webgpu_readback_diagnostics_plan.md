@@ -55,6 +55,8 @@ ortMonkeyPatchWebGpu=1
 ortPreferredOutputLocation=gpu-buffer
 ```
 
+The convenience runner emits explicit `=0` overrides for `--no-kernel-profile`, `--no-monkey-patch`, and `--no-gpu-outputs`, so those flags really disable the default `ortReadbackProfile=1` subfeatures.
+
 A convenience runner is available:
 
 ```bash
