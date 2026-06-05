@@ -48,6 +48,30 @@ A very small browser smoke on `http://localhost:5205/reckless-benchmark.html` co
 
 This smoke is not sufficient for promotion; it mainly proves the artifact compiles, validates, loads in an isolated browser, emits relaxed opcodes, and produces a matching shallow startpos result.
 
+## Yukon x86_64 Chromium probe
+
+A remote Crabbox run on `yukon` used HeadlessChrome 148 on Linux x86_64. Note: `yukon` reported an AMD Ryzen 9 3900XT rather than Intel, so this is an x86_64/Chrome data point, not an Intel-specific one.
+
+Raw report: [`reckless_relaxed_simd_yukon_chromium_2026-06-05_depth7-8_warm10.json`](./reckless_relaxed_simd_yukon_chromium_2026-06-05_depth7-8_warm10.json). Summary: [`reckless_relaxed_simd_yukon_chromium_2026-06-05_depth7-8_warm10_summary.json`](./reckless_relaxed_simd_yukon_chromium_2026-06-05_depth7-8_warm10_summary.json).
+
+Configuration:
+
+- Chrome runtime validated Relaxed SIMD and was cross-origin isolated with `SharedArrayBuffer`.
+- Persistent mode only.
+- 20-position rotated FEN suite.
+- Depth 7 and depth 8.
+- 10 warm repeats with hash clearing.
+- 880 raw rows; 440 exact SIMD-vs-relaxed comparison pairs.
+
+Results:
+
+- Parity: 440/440 exact pairs for best move, depth, score, nodes, and PV.
+- Weighted warm wall-clock averages were lower for relaxed SIMD (`depth 7`: 17.10 ms vs 23.30 ms; `depth 8`: 30.55 ms vs 36.24 ms), but this was skewed by large standard-SIMD outliers.
+- Paired robust timing did **not** show a clean win: relaxed SIMD median wall ratio was 1.086 at depth 7 and 1.069 at depth 8; relaxed was slower in most paired warm comparisons.
+- Engine-reported NPS was also lower for relaxed SIMD on this run.
+
+Interpretation: the x86_64 browser probe supports parity, but not promotion. Relaxed SIMD remains useful as an explicit experimental artifact; the current measured speed signal is mixed/noisy and not a reliable improvement over standard SIMD128.
+
 ## Validation requirements before promotion
 
 1. Build standard SIMD and relaxed SIMD artifacts from the same source ref.

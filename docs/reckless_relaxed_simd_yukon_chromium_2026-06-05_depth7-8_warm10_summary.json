@@ -1,0 +1,64 @@
+{
+  "runtime": {
+    "generatedAt": "2026-06-05T08:39:52.866Z",
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.7778.96 Safari/537.36",
+    "url": "http://127.0.0.1:5213/reckless-benchmark.html",
+    "crossOriginIsolated": true,
+    "sharedArrayBuffer": true,
+    "persistentAvailable": true,
+    "relaxedSimdSupported": true,
+    "viridithasPersistentAvailable": true
+  },
+  "rows": 880,
+  "summaryRows": 80,
+  "aggregate": {
+    "Reckless Full SIMD|depth 7": {
+      "warmRuns": 200,
+      "weightedWarmAvgMs": 23.304475001096726,
+      "weightedAvgNps": 334920.3
+    },
+    "Reckless Full SIMD|depth 8": {
+      "warmRuns": 200,
+      "weightedWarmAvgMs": 36.23802499771118,
+      "weightedAvgNps": 349170.415
+    },
+    "Reckless Full Relaxed SIMD experimental|depth 7": {
+      "warmRuns": 200,
+      "weightedWarmAvgMs": 17.09795000195503,
+      "weightedAvgNps": 314596.61
+    },
+    "Reckless Full Relaxed SIMD experimental|depth 8": {
+      "warmRuns": 200,
+      "weightedWarmAvgMs": 30.551900010108948,
+      "weightedAvgNps": 331645.89
+    }
+  },
+  "parity": {
+    "pairs": 440,
+    "mismatch": 0
+  },
+  "pairedWall": {
+    "depth 7": {
+      "pairs": 200,
+      "avgRatio": 1.0136696024817125,
+      "medianRatio": 1.085763293029879,
+      "p10Ratio": 0.30988649922608674,
+      "p90Ratio": 1.4349235664715854,
+      "avgDeltaMs": -6.206524999141693,
+      "medianDeltaMs": 1.25,
+      "relaxedFasterCount": 77,
+      "relaxedSlowerCount": 123
+    },
+    "depth 8": {
+      "pairs": 200,
+      "avgRatio": 1.0644967925084399,
+      "medianRatio": 1.0689713059739925,
+      "p10Ratio": 0.5050781805819506,
+      "p90Ratio": 1.3893229289010547,
+      "avgDeltaMs": -5.686124987602234,
+      "medianDeltaMs": 1.9550001621246338,
+      "relaxedFasterCount": 60,
+      "relaxedSlowerCount": 140
+    }
+  }
+}
