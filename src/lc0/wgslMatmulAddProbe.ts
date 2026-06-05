@@ -2837,8 +2837,10 @@ fn load_bias(index: u32) -> f32 { return pick_lane(biasF16[index >> 1u], index);
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
   let col = wid.x * 16u + lid.x;
   var sum = 0.0;
-  for (var row = lid.y; row < 2048u; row = row + 8u) {
+  for (var row = lid.y; row < 2048u; row = row + 16u) {
     sum = sum + inputVec[row] * load_weight(row * 256u + col);
+    let row2 = row + 8u;
+    sum = sum + inputVec[row2] * load_weight(row2 * 256u + col);
   }
   partial[lid.y * 16u + lid.x] = sum;
   workgroupBarrier();
