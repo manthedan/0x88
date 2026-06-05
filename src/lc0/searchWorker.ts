@@ -1,4 +1,4 @@
-import { collectOrtRuntimeDiagnostics, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
+import { collectOrtRuntimeDiagnostics, setOrtRuntimeDiagnosticOptionsForCurrentThread, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference, type OrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
 import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { loadLc0WebModelPack } from './modelPack.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationProvider, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
@@ -79,6 +79,7 @@ type InitMessage = {
   legalPriorsBackend?: Lc0WebHybridLegalPriorsBackend;
   encoderKernelVariant?: Lc0WebEncoderKernelVariant;
   evalCacheEntries?: number;
+  ortDiagnostics?: OrtRuntimeDiagnosticOptions;
 };
 
 type SearchMessage = {
@@ -491,6 +492,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     legalPriorsBackend: message.legalPriorsBackend,
     encoderKernelVariant: message.encoderKernelVariant,
     evalCacheEntries: message.evalCacheEntries ?? 0,
+    ortDiagnostics: message.ortDiagnostics ?? null,
   });
   if (evaluator && configuredInitKey === initKey) {
     post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: `${configuredModelCacheStatus} · reused existing worker session` });
@@ -500,6 +502,7 @@ async function handleInit(message: InitMessage): Promise<void> {
   const evalCacheEntries = Math.max(0, Math.floor(message.evalCacheEntries ?? 0));
   const cacheLabel = evalCacheEntries > 0 ? ` · eval-cache ${evalCacheEntries}` : '';
   setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  setOrtRuntimeDiagnosticOptionsForCurrentThread(message.ortDiagnostics ?? null);
   if (message.runtime === 'hybrid') {
     if (!message.packUrl) throw new Error('hybrid LC0 worker init requires packUrl');
     const baseEvaluator: WorkerEvaluator = new Lc0WebHybridEvaluator({
