@@ -747,6 +747,12 @@ const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || 
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
 const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
 const HYBRID_EVAL_CACHE_ENTRIES = clampInt(params.get('evalCacheEntries') ?? (params.get('evalCache') === '1' ? '2048' : '0'), 0, 100000, 0);
+const ORT_READBACK_PROFILE_REQUESTED = params.get('ortReadbackProfile') === '1' || params.get('ortDiagnostics') === '1';
+const ORT_WEBGPU_PROFILE_REQUESTED = ORT_READBACK_PROFILE_REQUESTED || params.get('ortWebGpuProfile') === '1' || params.get('ortKernelProfile') === '1';
+const ORT_WEBGPU_API_TRACE_REQUESTED = ORT_READBACK_PROFILE_REQUESTED || params.get('ortMonkeyPatchWebGpu') === '1' || params.get('ortWebGpuApiTrace') === '1';
+const ORT_PREFERRED_OUTPUT_LOCATION = params.get('ortPreferredOutputLocation') === 'cpu' || params.get('ortPreferredOutputLocation') === 'cpu-pinned' || params.get('ortPreferredOutputLocation') === 'gpu-buffer'
+  ? params.get('ortPreferredOutputLocation') as 'cpu' | 'cpu-pinned' | 'gpu-buffer'
+  : (ORT_READBACK_PROFILE_REQUESTED || params.get('ortGpuOutputs') === '1' ? 'gpu-buffer' : undefined);
 const BENCH_WARMUP = Math.min(100, Math.max(0, Math.floor(Number(params.get('benchWarmup') ?? '5') || 0)));
 const BENCH_ITERS = Math.min(1000, Math.max(1, Math.floor(Number(params.get('benchIters') ?? params.get('iters') ?? '25') || 25)));
 function requestedKernelVariant(): KernelVariant {
@@ -865,6 +871,15 @@ function requestedWorkerEp(): OrtExecutionProviderPreference {
   if (raw === 'webgpu,wasm' || raw === 'webgpu+wasm' || raw === 'gpu,wasm' || raw === 'gpu+wasm') return 'webgpu,wasm';
   if (raw === 'auto' || raw === '') return 'auto';
   return 'wasm';
+}
+
+function requestedOrtDiagnosticsPayload() {
+  if (!ORT_WEBGPU_PROFILE_REQUESTED && !ORT_WEBGPU_API_TRACE_REQUESTED && !ORT_PREFERRED_OUTPUT_LOCATION) return undefined;
+  return {
+    webgpuProfiling: ORT_WEBGPU_PROFILE_REQUESTED,
+    webgpuApiInstrumentation: ORT_WEBGPU_API_TRACE_REQUESTED,
+    ...(ORT_PREFERRED_OUTPUT_LOCATION ? { preferredOutputLocation: ORT_PREFERRED_OUTPUT_LOCATION } : {}),
+  };
 }
 
 function evaluationAvailable(): boolean {
@@ -1087,6 +1102,7 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
     modelUrl: MODEL_URL,
     ep: requestedWorkerEp(),
     cacheModel: CACHE_MODEL,
+    ortDiagnostics: requestedOrtDiagnosticsPayload(),
     ...(HYBRID_EVALUATOR_REQUESTED ? {
       runtime: 'hybrid',
       packUrl: PACK_URL,
@@ -1115,6 +1131,7 @@ async function initHybridWorkerWithInputBackend(inputBackend: 'js' | 'wgsl' | 'w
     modelUrl: MODEL_URL,
     ep: requestedWorkerEp(),
     cacheModel: CACHE_MODEL,
+    ortDiagnostics: requestedOrtDiagnosticsPayload(),
     runtime: 'hybrid',
     packUrl: PACK_URL,
     layers: Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10))),
@@ -2372,6 +2389,7 @@ async function runWorkerEvalBenchmark(): Promise<void> {
   if (!searchWorkerReady) throw new Error('benchmark requires ready LC0 worker');
   const input = currentEvaluationInput();
   const times: number[] = [];
+  const backendTimingSamples: Record<string, number[]> = {};
   let last: BrowserEvaluationChoice | undefined;
   setBusy(true, `Running LC0 worker eval benchmark: ${BENCH_WARMUP} warmup + ${BENCH_ITERS} timed evals…`);
   el('benchResult').textContent = 'BENCH_RUNNING';
@@ -2385,6 +2403,7 @@ async function runWorkerEvalBenchmark(): Promise<void> {
       const started = performance.now();
       last = await evaluateWithWorker(input);
       times.push(performance.now() - started);
+      recordNumericTimingSamples(backendTimingSamples, (last.evaluation as { timing?: unknown }).timing);
       el('benchResult').textContent = `BENCH_TIMED ${i + 1}/${BENCH_ITERS}`;
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
@@ -2401,8 +2420,10 @@ async function runWorkerEvalBenchmark(): Promise<void> {
       bestMove: last?.move,
       q: last?.evaluation.q,
       mlh: last?.evaluation.mlh,
+      lastBackendTiming: roundedNumericRecord((last?.evaluation as { timing?: unknown } | undefined)?.timing),
+      phaseTimingStats: summarizeNumericTimingSamples(backendTimingSamples, 'onnx worker eval backend timing'),
       ...stats,
-    });
+    } as EvalBenchResult & Record<string, unknown>);
   } catch (error) {
     el('benchResult').textContent = `BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Benchmark failed: ${(error as Error).message}`;

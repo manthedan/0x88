@@ -1,0 +1,171 @@
+# ORT WebGPU Readback Diagnostics Plan
+
+## Goal
+
+Understand why ONNX Runtime WebGPU often looks better than the custom LC0 WGSL path at end-to-end search, especially around command submission, output download, `mapAsync`, and readback/fence behavior.
+
+This is a diagnostic lane, not a runtime replacement. The output should tell us whether to invest next in scheduler/readback changes, generated/TVM kernels, graph-level fusion, or compact legal-prior/top-k readback.
+
+## Why this matters
+
+The custom WGSL path currently exposes detailed telemetry and LC0-specific levers, but fast-loop experiments show many apparent wins are dominated by noisy WebGPU fence/readback time. ORT WebGPU is a useful comparison point because it runs the full ONNX graph through a mature WebGPU backend and may differ in:
+
+- command-buffer batching;
+- dispatch count and fusion;
+- buffer reuse;
+- output download timing;
+- whether `session.run()` waits for CPU-visible outputs;
+- GPU kernel shape choices.
+
+## What to inspect in ORT
+
+Installed source paths worth reading/breakpointing:
+
+- `node_modules/onnxruntime-web/lib/wasm/jsep/backend-webgpu.ts`
+- `node_modules/onnxruntime-web/lib/wasm/jsep/webgpu/gpu-data-manager.ts`
+- `node_modules/onnxruntime-web/lib/wasm/wasm-core-impl.ts`
+
+The standard ORT WebGPU download path appears to be:
+
+```text
+create MAP_READ | COPY_DST read buffer
+copyBufferToBuffer(outputGpuBuffer -> readBuffer)
+flush/submit command encoder
+await readBuffer.mapAsync(GPUMapMode.READ)
+getMappedRange()
+copy/clone bytes into CPU typed array
+destroy read buffer
+```
+
+That is close enough to our WGSL readback path that we can compare mechanics directly.
+
+## Implemented diagnostic mode
+
+The opt-in query mode is:
+
+```text
+ortReadbackProfile=1
+```
+
+It enables, unless explicitly overridden:
+
+```text
+ortWebGpuProfile=1
+ortMonkeyPatchWebGpu=1
+ortPreferredOutputLocation=gpu-buffer
+```
+
+A convenience runner is available:
+
+```bash
+npm run lc0:browser-ort-readback-profile -- --iters 5 --warmup 1
+```
+
+The mode creates an ORT WebGPU session with:
+
+```ts
+preferredOutputLocation: 'gpu-buffer'
+```
+
+and times these phases separately in LC0 ONNX evaluator results:
+
+```text
+sessionRunMs / ortRunMs   // ORT graph execution returning GPU-backed outputs
+ortPolicyGetDataMs        // explicit policy tensor download
+ortWdlGetDataMs           // explicit WDL tensor download
+ortMlhGetDataMs           // explicit MLH tensor download
+ortAllGetDataMs           // Promise.all of required downloads
+postprocessMs             // legal-prior and search output prep
+totalEvalMs               // encode + ORT run + downloads + postprocess
+```
+
+This separates GPU graph execution from CPU-visible output download.
+
+## ORT WebGPU profiling hook
+
+The diagnostic mode enables ORT's WebGPU timestamp profiling:
+
+```ts
+ort.env.webgpu.profiling.mode = 'default';
+ort.env.webgpu.profiling.ondata = (data) => {
+  // collect kernelName, programName, input/output metadata, startTime, endTime
+};
+```
+
+Aggregated numeric fields currently emitted into evaluator timing include:
+
+```text
+ortKernelCount
+ortKernelGpuMs
+```
+
+Note: ORT only emits timestamp records when the browser/device exposes the required WebGPU timestamp-query features. On devices without those features, these fields can remain zero even while the WebGPU API monkey-patch counters are working.
+
+## WebGPU API monkey-patch
+
+Before ORT initializes, diagnostic mode wraps WebGPU methods for black-box counts:
+
+```text
+GPUQueue.submit
+GPUBuffer.mapAsync
+GPUCommandEncoder.copyBufferToBuffer
+GPUDevice.createBuffer
+GPUDevice.createComputePipeline
+GPUDevice.createComputePipelineAsync
+```
+
+Emitted numeric timing fields include:
+
+```text
+webgpuSubmitCount
+webgpuSubmittedCommandBufferCount
+webgpuMapAsyncCount
+webgpuMapAsyncMs
+webgpuCopyBufferToBufferCount
+webgpuCopyBufferToBufferBytes
+webgpuMapReadBufferCount
+webgpuMapReadBufferBytes
+webgpuCreateBufferCount
+webgpuCreateBufferBytes
+webgpuComputePipelineCreateCount
+webgpuComputePipelineCreateAsyncCount
+```
+
+Keep this behind the explicit diagnostic flag because monkey-patching can perturb timings.
+
+## Comparison questions
+
+1. Does `session.run()` still wait for completion when outputs are GPU-backed?
+2. How much latency is added by `policy.getData()` vs WDL/MLH download?
+3. Does ORT use fewer queue submits/maps than the custom WGSL path?
+4. How many GPU kernels does ORT run for LC0, and which programs dominate GPU time?
+5. Is ORT's advantage mainly graph/kernel execution, or output download/fence behavior?
+6. Does ORT benefit from graph capture or persistent GPU outputs in a way we can emulate?
+
+## Implementation locations
+
+Primary files:
+
+- `src/nn/ortRuntime.ts` — opt-in session options, ORT WebGPU profiling hook, WebGPU API instrumentation snapshots.
+- `src/lc0/onnxEvaluator.ts` — timing hooks around `session.run()` and output `getData()`.
+- `src/lc0/searchWorker.ts` and `src/lc0/policyOnlyBrowser.ts` — pass diagnostic options into worker-owned ORT sessions.
+- `scripts/lc0_browser_ort_readback_profile.mjs` — convenience browser runner.
+- `docs/lc0web_custom_inference_checkpoint.md` — summarize findings after larger repeated runs.
+
+Avoid changing stable defaults. ORT ONNX/WebGPU should remain the arena baseline unless repeated E2E evidence says otherwise.
+
+## Promotion implications
+
+Interpret results as follows:
+
+- If ORT graph execution is fast but `getData()` dominates, prioritize scheduler/readback overlap and compact legal-prior/top-k readback.
+- If ORT kernels are much faster or fewer, prioritize targeted TVM/generated WGSL or operator fusion lanes.
+- If ORT uses fewer submits/maps, prioritize command-buffer consolidation and batch/evaluate sequence changes.
+- If ORT's advantage disappears when outputs are GPU-backed and downloads are isolated, readback is the main shared bottleneck.
+
+## Guardrails
+
+- Do not use browser diagnostic numbers from one noisy run as promotion evidence.
+- Do not promote `preferredOutputLocation: 'gpu-buffer'` into normal ONNX evaluator behavior until all downstream consumers explicitly handle GPU tensors.
+- Keep monkey-patching disabled by default.
+- Preserve LC0 native/BLAS and f32 ONNX parity ladders.

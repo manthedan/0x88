@@ -29,6 +29,8 @@ export interface Lc0Evaluation {
   mlh: number;
   legalPriors: Lc0LegalPrior[];
   bestMove?: string;
+  /** Optional backend timing diagnostics consumed by search/benchmark reporters. */
+  timing?: unknown;
 }
 
 export interface Lc0OnnxEvaluatorOptions {
@@ -103,17 +105,35 @@ function float32ToFloat16Array(values: Float32Array): Uint16Array {
   return out;
 }
 
-function tensorData(outputs: Awaited<ReturnType<ort.InferenceSession['run']>>, name: string): number[] | Float32Array {
-  const tensor = outputs[name];
-  if (!tensor) throw new Error(`LC0 ONNX output ${name} missing`);
+function coerceTensorData(tensor: { type?: string }, rawData: unknown): number[] | Float32Array {
   if (tensor.type === 'float16') {
-    const data = tensor.data as ArrayLike<number> & { constructor?: { name?: string } };
+    const data = rawData as ArrayLike<number> & { constructor?: { name?: string } };
     // ORT-web returns Uint16Array float16 bits in Node today, while modern
     // browsers may expose Float16Array values directly. Handle both forms.
     if (data.constructor?.name === 'Float16Array') return Array.from(data);
     return Array.from(data, f16ToF32);
   }
-  return tensor.data as Float32Array | number[];
+  return rawData as Float32Array | number[];
+}
+
+function tensorData(outputs: Awaited<ReturnType<ort.InferenceSession['run']>>, name: string): number[] | Float32Array {
+  const tensor = outputs[name];
+  if (!tensor) throw new Error(`LC0 ONNX output ${name} missing`);
+  return coerceTensorData(tensor, tensor.data);
+}
+
+async function tensorDataTimed(outputs: Awaited<ReturnType<ort.InferenceSession['run']>>, name: string, timingKey: string, timing: Record<string, number>): Promise<number[] | Float32Array> {
+  const tensor = outputs[name] as (ort.Tensor & { location?: string; getData?: () => Promise<unknown> }) | undefined;
+  if (!tensor) throw new Error(`LC0 ONNX output ${name} missing`);
+  const started = ort.tinyLeelaNowMs();
+  try {
+    const rawData = tensor.location === 'gpu-buffer' && typeof tensor.getData === 'function'
+      ? await tensor.getData()
+      : tensor.data;
+    return coerceTensorData(tensor, rawData);
+  } finally {
+    timing[`${timingKey}GetDataMs`] = ort.tinyLeelaNowMs() - started;
+  }
 }
 
 function sessionInputMetadata(session: ort.InferenceSession): { type?: string; shape?: unknown[] } | undefined {
@@ -344,9 +364,11 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   private async runPhysicalBatch(inputs: Lc0EvaluatorInput[], physicalBatchSize: number): Promise<Lc0Evaluation[]> {
     this.assertNotDisposed();
     if (!inputs.length) return [];
+    const totalStarted = ort.tinyLeelaNowMs();
     const encodedPlanes = new Float32Array(physicalBatchSize * LC0_INPUT_PLANES_SIZE);
     const boards: BoardState[] = [];
     const fens: string[] = [];
+    const encodeStarted = ort.tinyLeelaNowMs();
     for (let i = 0; i < inputs.length; i++) {
       const input = inputs[i];
       const { board, fen } = currentBoardAndFen(input);
@@ -360,20 +382,62 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     for (let i = inputs.length; i < physicalBatchSize; i++) {
       encodedPlanes.copyWithin(i * LC0_INPUT_PLANES_SIZE, (inputs.length - 1) * LC0_INPUT_PLANES_SIZE, inputs.length * LC0_INPUT_PLANES_SIZE);
     }
+    const encodeMs = ort.tinyLeelaNowMs() - encodeStarted;
     const inputType = sessionInputType(this.session);
     const inputTensor = inputType === 'float16'
       ? new ort.Tensor('float16', float32ToFloat16Array(encodedPlanes), [physicalBatchSize, 112, 8, 8])
       : new ort.Tensor('float32', encodedPlanes, [physicalBatchSize, 112, 8, 8]);
+    const webgpuBefore = ort.getOrtWebGpuDiagnosticsSnapshot();
+    const ortRunStarted = ort.tinyLeelaNowMs();
     const outputs = await this.session.run({
       [LC0_ONNX_INPUT_PLANES]: inputTensor,
     });
-    const policy = tensorData(outputs, LC0_ONNX_OUTPUT_POLICY);
-    const wdlRaw = tensorData(outputs, LC0_ONNX_OUTPUT_WDL);
-    const mlhRaw = tensorData(outputs, LC0_ONNX_OUTPUT_MLH);
-    return inputs.map((_, i) => {
+    const ortRunMs = ort.tinyLeelaNowMs() - ortRunStarted;
+    const downloadTiming: Record<string, number> = {};
+    const allGetDataStarted = ort.tinyLeelaNowMs();
+    const [policy, wdlRaw, mlhRaw] = await Promise.all([
+      tensorDataTimed(outputs, LC0_ONNX_OUTPUT_POLICY, 'ortPolicy', downloadTiming),
+      tensorDataTimed(outputs, LC0_ONNX_OUTPUT_WDL, 'ortWdl', downloadTiming),
+      tensorDataTimed(outputs, LC0_ONNX_OUTPUT_MLH, 'ortMlh', downloadTiming),
+    ]);
+    const allGetDataMs = ort.tinyLeelaNowMs() - allGetDataStarted;
+    await ort.waitForOrtWebGpuDiagnostics();
+    const postprocessStarted = ort.tinyLeelaNowMs();
+    const webgpuDelta = ort.subtractOrtWebGpuDiagnosticsSnapshot(ort.getOrtWebGpuDiagnosticsSnapshot(), webgpuBefore);
+    const baseTiming: Record<string, number | string | undefined> = {
+      backend: 'ort-onnx',
+      inputBuildMs: encodeMs,
+      ortRunMs,
+      sessionRunMs: ortRunMs,
+      ortAllGetDataMs: allGetDataMs,
+      readbackSyncedMs: allGetDataMs,
+      readbackBytes: physicalBatchSize * (LC0_POLICY_SIZE + LC0_WDL_SIZE + LC0_MLH_SIZE) * 4,
+      readbackMapCount: webgpuDelta.api.mapAsyncCount,
+      ortKernelCount: webgpuDelta.profiling.eventCount,
+      ortKernelGpuMs: webgpuDelta.profiling.kernelGpuMsTotal,
+      webgpuSubmitCount: webgpuDelta.api.submitCount,
+      webgpuSubmittedCommandBufferCount: webgpuDelta.api.submittedCommandBufferCount,
+      webgpuMapAsyncCount: webgpuDelta.api.mapAsyncCount,
+      webgpuMapAsyncMs: webgpuDelta.api.mapAsyncMsTotal,
+      webgpuCopyBufferToBufferCount: webgpuDelta.api.copyBufferToBufferCount,
+      webgpuCopyBufferToBufferBytes: webgpuDelta.api.copyBufferToBufferBytes,
+      webgpuMapReadBufferCount: webgpuDelta.api.mapReadBufferCount,
+      webgpuMapReadBufferBytes: webgpuDelta.api.mapReadBufferBytes,
+      webgpuCreateBufferCount: webgpuDelta.api.createBufferCount,
+      webgpuCreateBufferBytes: webgpuDelta.api.createBufferBytes,
+      webgpuComputePipelineCreateCount: webgpuDelta.api.computePipelineCreateCount,
+      webgpuComputePipelineCreateAsyncCount: webgpuDelta.api.computePipelineCreateAsyncCount,
+      batchPosition: 0,
+      physicalBatchSize: inputs.length,
+      ortPhysicalBatchSize: physicalBatchSize,
+      ...downloadTiming,
+    };
+    const results: Lc0Evaluation[] = inputs.map((_, i) => {
+      const legalPriorsStarted = ort.tinyLeelaNowMs();
       const wdlSlice = arraySlice(wdlRaw, i * LC0_WDL_SIZE, LC0_WDL_SIZE);
       const wdl: [number, number, number] = [Number(wdlSlice[0]), Number(wdlSlice[1]), Number(wdlSlice[2])];
       const legalPriors = legalPolicyPriors(boards[i], arraySlice(policy, i * LC0_POLICY_SIZE, LC0_POLICY_SIZE), this.policyTemperature);
+      const legalPriorsMs = ort.tinyLeelaNowMs() - legalPriorsStarted;
       return {
         fen: fens[i],
         wdl,
@@ -381,8 +445,17 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
         mlh: Number(arraySlice(mlhRaw, i * LC0_MLH_SIZE, LC0_MLH_SIZE)[0]),
         legalPriors,
         bestMove: legalPriors[0]?.uci,
+        timing: { ...baseTiming, batchPosition: i, legalPriorsMs },
       };
     });
+    const postprocessMs = ort.tinyLeelaNowMs() - postprocessStarted;
+    const totalEvalMs = ort.tinyLeelaNowMs() - totalStarted;
+    for (const result of results) {
+      const timing = result.timing as Record<string, unknown>;
+      timing.postprocessMs = postprocessMs;
+      timing.totalEvalMs = totalEvalMs;
+    }
+    return results;
   }
 
   async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
