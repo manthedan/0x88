@@ -21,11 +21,10 @@ import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVarian
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
+import { defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
 type Ground = ReturnType<typeof Chessground>;
-type EngineFamily = 'lc0' | 'sf' | 'reckless' | 'viridithas';
 type SeatId = 'A' | 'B';
-interface EngineRow { family: EngineFamily; variant: string; strength: number; }
 interface ArenaEngine {
   id: string;
   name: string;
@@ -396,22 +395,19 @@ function renderBoard() {
 
 // The arena is a two-seat head-to-head. Each seat uses the same staged selector
 // pattern as the analysis page: family → variant → strength.
-function strengthMeta(family: EngineFamily): { unit: string; min: number; max: number; def: number } {
-  if (family === 'lc0') return { unit: 'visits', min: 1, max: 100000, def: 100 };
-  if (family === 'sf') return { unit: 'depth', min: 1, max: 40, def: 8 };
-  if (family === 'viridithas') return { unit: 'depth', min: 1, max: 20, def: 6 };
-  return { unit: 'depth', min: 1, max: 30, def: 4 };
+function strengthMeta(family: EngineFamily) {
+  return engineStrengthMeta(family, 'arena');
 }
 
 function defaultVariant(family: EngineFamily): string {
   if (family === 'reckless') return REQUESTED_RECKLESS_VARIANT.key;
   if (family === 'viridithas') return REQUESTED_VIRIDITHAS_VARIANT.key;
-  return family === 'sf' ? 'lite' : 'small';
+  return defaultStaticEngineVariant(family);
 }
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
-  if (family === 'lc0') return [{ value: 'small', label: 'Small' }, { value: 'bt4', label: 'BT4', disabled: !bt4SupportedSync() }];
-  if (family === 'sf') return [{ value: 'lite', label: 'Lite' }, { value: 'full', label: 'Full' }];
+  if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync());
+  if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
   return availableRecklessVariants().map((v) => ({ value: v.key, label: v.label }));
 }
@@ -422,8 +418,8 @@ function clampStrength(row: EngineRow): void {
 }
 
 function rowLabel(row: EngineRow): string {
-  if (row.family === 'lc0') return row.variant === 'bt4' ? 'Lc0 BT4' : 'Lc0';
-  if (row.family === 'sf') return row.variant === 'lite' ? 'Stockfish Lite' : 'Stockfish';
+  if (row.family === 'lc0') return lc0EngineLabel(row.variant);
+  if (row.family === 'sf') return stockfishEngineLabel(row.variant, 'arena');
   if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
   return recklessVariantForKey(row.variant).label;
 }
@@ -441,11 +437,11 @@ function seatEngineId(seat: SeatId): string {
 }
 
 function renderSeatSelectors(): void {
-  const families: [EngineFamily, string][] = [['lc0', 'Lc0'], ['sf', 'Stockfish'], ['reckless', 'Reckless'], ['viridithas', 'Viridithas']];
+  const families = engineFamilyOptions();
   el('arenaSeatList').innerHTML = (['A', 'B'] as const).map((seat) => {
     const row = seatRows[seat];
     const meta = strengthMeta(row.family);
-    const famSel = families.map(([value, label]) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
+    const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
     const varSel = variantOptions(row.family).map((option) => `<option value="${option.value}"${row.variant === option.value ? ' selected' : ''}${option.disabled ? ' disabled' : ''}>${htmlEscape(option.label)}</option>`).join('');
     const label = `Engine ${seat === 'A' ? '1' : '2'}`;
     return `<div class="engine-row seat-row" data-seat="${seat}"><span class="seat-name">${label}</span><select class="seat-fam" data-seat="${seat}" aria-label="${label} family">${famSel}</select><span class="arrow">→</span><select class="seat-var" data-seat="${seat}" aria-label="${label} variant">${varSel}</select><span class="arrow">→</span><input class="seat-strength row-strength" data-seat="${seat}" aria-label="${label} strength" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span></div>`;
@@ -455,8 +451,8 @@ function renderSeatSelectors(): void {
 function syncSeatRowsFromDom(): void {
   for (const seat of ['A', 'B'] as const) {
     const host = el('arenaSeatList');
-    const family = host.querySelector<HTMLSelectElement>(`.seat-fam[data-seat="${seat}"]`)?.value as EngineFamily | undefined;
-    if (family === 'lc0' || family === 'sf' || family === 'reckless' || family === 'viridithas') seatRows[seat].family = family;
+    const family = host.querySelector<HTMLSelectElement>(`.seat-fam[data-seat="${seat}"]`)?.value;
+    if (family && isEngineFamily(family)) seatRows[seat].family = family;
     const variant = host.querySelector<HTMLSelectElement>(`.seat-var[data-seat="${seat}"]`)?.value;
     if (variant) seatRows[seat].variant = variant;
     const strength = host.querySelector<HTMLInputElement>(`.seat-strength[data-seat="${seat}"]`)?.value;

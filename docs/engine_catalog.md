@@ -184,15 +184,16 @@ Use this checklist before adding a family to the staged selectors.
 10. **Gate promotion.** Do not move from experimental to default until the card has: repeatable build, clean asset status, UI smoke, fixture/arena correctness where relevant, speed/size numbers, lifecycle cleanup, and explicit stop/abort behavior.
 11. **Keep the card fresh.** When an upstream release lands, add a dated note: old version, new version, changed assets, migration risk, benchmark delta, and whether the UI default changed.
 
-## Catalog-to-UI follow-up
+## Catalog-to-UI source of truth
 
-The staged selectors currently encode family/variant facts across `arenaBrowser.ts`, `analysisBrowser.ts`, `stockfishEngine.ts`, `recklessVariants.ts`, and `viridithasVariants.ts`. A useful next refactor is a typed `engineCatalog.ts` source of truth that exports:
+The staged selectors now consume the shared typed catalog in `src/lc0/engineCatalog.ts` for:
 
-- family ids and labels;
-- variant lists and default/fallback logic;
-- strength metadata;
-- asset URLs/status checks;
-- experimental/stable flags;
-- card/doc anchors for UI help text.
+- family ids, labels, UI order, and doc anchors;
+- static Lc0/Stockfish variant lists and BT4 gating metadata;
+- arena vs analysis strength metadata/defaults;
+- shared row labels for Lc0 and Stockfish;
+- the `EngineFamily` / `EngineRow` types used by arena and analysis.
 
-Until that refactor exists, any UI variant change should update this catalog in the same commit.
+Reckless and Viridithas still keep their dynamic artifact metadata in `recklessVariants.ts` and `viridithasVariants.ts` because those modules own URL-param custom variants, asset checks, and runtime-specific defaults. If a future engine uses similar generated artifacts, add a dedicated variant module and then surface its family/static selector facts through `engineCatalog.ts`.
+
+Any UI variant/default change should update both `src/lc0/engineCatalog.ts` and this card in the same commit. `tests/engine_catalog.test.mjs` pins the current selector order, static variants, family guard, and arena/analysis strength defaults.

@@ -19,6 +19,7 @@ import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVarian
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support } from './bt4Engine.ts';
+import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
@@ -185,16 +186,10 @@ function multiPv(): number { return Math.max(1, Math.floor(Number(inputEl('multi
 // family (Lc0/Stockfish/Reckless/Viridithas) -> variant (Lc0: Small|BT4;
 // SF: Lite|Full; UCI engines: variant) -> strength (Lc0 visits, UCI depth),
 // all per row.
-type EngineFamily = 'lc0' | 'sf' | 'reckless' | 'viridithas';
-interface EngineRow { family: EngineFamily; variant: string; strength: number; }
-function strengthMeta(family: EngineFamily): { unit: string; min: number; max: number; def: number } {
-  if (family === 'lc0') return { unit: 'visits', min: 1, max: 100000, def: 400 };
-  if (family === 'sf') return { unit: 'depth', min: 1, max: 30, def: 14 };
-  if (family === 'viridithas') return { unit: 'depth', min: 1, max: 20, def: 8 };
-  // Reckless is alpha-beta like Stockfish, so default to the same depth (14).
-  return { unit: 'depth', min: 1, max: 30, def: 14 };
+function strengthMeta(family: EngineFamily) {
+  return engineStrengthMeta(family, 'analysis');
 }
-function defaultStrength(family: EngineFamily): number { return strengthMeta(family).def; }
+function defaultStrength(family: EngineFamily): number { return defaultEngineStrength(family, 'analysis'); }
 
 function availableRecklessVariants(): RecklessVariant[] {
   return REQUESTED_RECKLESS_VARIANT.key === 'custom' ? [...RECKLESS_VARIANTS, REQUESTED_RECKLESS_VARIANT] : [...RECKLESS_VARIANTS];
@@ -226,17 +221,16 @@ function viridithasCacheKey(variant: ViridithasVariant): string {
 
 // "Add engine" fills the next missing family by priority (Lc0 → SF → Reckless
 // → Viridithas), falling back to the top priority when all families are present.
-const FAMILY_PRIORITY: EngineFamily[] = ['lc0', 'sf', 'reckless', 'viridithas'];
 function nextEngineFamily(): EngineFamily {
   const present = new Set(engineRows.map((row) => row.family));
-  return FAMILY_PRIORITY.find((family) => !present.has(family)) ?? FAMILY_PRIORITY[0];
+  return ENGINE_FAMILY_PRIORITY.find((family) => !present.has(family)) ?? ENGINE_FAMILY_PRIORITY[0];
 }
 
 let engineRows: EngineRow[] = [{ family: 'lc0', variant: 'small', strength: 400 }];
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
-  if (family === 'lc0') return [{ value: 'small', label: 'Small' }, { value: 'bt4', label: 'BT4', disabled: !bt4SupportedSync() }];
-  if (family === 'sf') return [{ value: 'lite', label: 'Lite' }, { value: 'full', label: 'Full' }];
+  if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync());
+  if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
   return availableRecklessVariants().map((v) => ({ value: v.key, label: v.label }));
 }
@@ -244,12 +238,12 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
 function defaultVariant(family: EngineFamily): string {
   if (family === 'reckless') return REQUESTED_RECKLESS_VARIANT.key;
   if (family === 'viridithas') return REQUESTED_VIRIDITHAS_VARIANT.key;
-  return variantOptions(family)[0].value;
+  return defaultStaticEngineVariant(family);
 }
 
 function rowLabel(row: EngineRow): string {
-  if (row.family === 'lc0') return row.variant === 'bt4' ? 'Lc0 BT4' : 'Lc0';
-  if (row.family === 'sf') return row.variant === 'lite' ? 'SF Lite' : 'SF';
+  if (row.family === 'lc0') return lc0EngineLabel(row.variant);
+  if (row.family === 'sf') return stockfishEngineLabel(row.variant, 'analysis');
   if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
   return recklessVariantForKey(row.variant).label;
 }
@@ -264,9 +258,9 @@ function usesBt4Row(): boolean {
 }
 
 function renderEngineList(): void {
-  const families: [EngineFamily, string][] = [['lc0', 'Lc0'], ['sf', 'Stockfish'], ['reckless', 'Reckless'], ['viridithas', 'Viridithas']];
+  const families = engineFamilyOptions();
   el('engineList').innerHTML = engineRows.map((row, i) => {
-    const famSel = families.map(([v, l]) => `<option value="${v}"${row.family === v ? ' selected' : ''}>${l}</option>`).join('');
+    const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
     const varSel = variantOptions(row.family).map((o) => `<option value="${o.value}"${row.variant === o.value ? ' selected' : ''}${o.disabled ? ' disabled' : ''}>${htmlEscape(o.label)}</option>`).join('');
     const meta = strengthMeta(row.family);
     const remove = engineRows.length > 1 ? `<button class="row-rm" data-i="${i}" type="button" title="Remove engine">×</button>` : '';
