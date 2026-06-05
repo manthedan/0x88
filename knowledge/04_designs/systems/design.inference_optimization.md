@@ -70,6 +70,9 @@ Promotion policy for this lane:
 3. Aggregate timing over all LC0 evals/searches, not only the last search; report ORT provider diagnostics, batch size, pipeline depth, physical batch histograms, readback bytes/maps, dispatch count where available, and evals/sec inside PUCT.
 4. Design parity-preserving overlap that hides/amortizes `mapAsync` without selecting future leaves from stale tree values. `batchPipelineDepth>1` remains speculative parallel search, not a promotion path for fixed-search parity.
 5. Use TVM/generated WGSL only after timing identifies hot stages. Replace targeted kernels/fusions behind full-search parity and repeated E2E timing gates; do not treat isolated kernel wins as promotion evidence.
+6. Treat browser/WebGPU harness state as part of the benchmark contract. Rebaseline comparisons under the same scoped cleanup policy for wrapper-owned browser/agent sessions, and do not claim runtime speedups from recovering a degraded measurement window.
+
+Current LC0 browser-lane recommendation, 2026-06-05: productize only as an explicit opt-in the recovered-state `hybrid-wgsl-heads` configuration with WASM input, `mixed-tvm-ffn`, JS legal priors, batch size 4, and `batchPipelineDepth=1`. Deprioritize GPU legal priors, pipe2/depth>1 fixed-suite runs, batch-size sweeps, and readback micro-toggles unless new full-search attribution changes the bottleneck. The next high-ROI exploration axis is a separate quantized/int8 FFN or encoder lane with parity/top-k/value drift gates.
 
 ## Optimization backlog
 

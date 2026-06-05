@@ -1,14 +1,10 @@
 # Autoresearch Ideas: LC0 WGSL readback b4
 
-- Compact WGSL-head readback: avoid full mapped-policy readback when only legal priors/top candidates are needed.
-- Revisit opt-in GPU legal priors with stronger lifecycle checks and compare `readbackBytes`, map count, and E2E eval/s against JS legal priors.
-- Split WDL and policy readback timing/shape to determine whether WDL-only or policy-only reads can avoid some fence cost.
-- Add benchmark-only attribution modes for no-readback/queue-completion, WDL-only readback, policy-only readback, full readback, and profile-only sanity scan toggles; run repeated matrices before more micro-optimizations.
-- Add a focused microbench for policy readback bytes vs map/fence latency, but require E2E fixed-suite confirmation before keeping complex changes.
-- Improve telemetry for GPU completion vs CPU copy: timestamp queries or staged command submission only if it informs E2E search changes.
-- Consider WASM legal-prior candidate/probability prep only if telemetry shows JS legal-prior postprocess becomes material after readback reductions.
-- Revisit generated/TVM/f16 kernels only after readback/fence telemetry stops dominating total eval time.
-- Separate exploratory scheduler sweep: batchSize 2/4/8, batchPipelineDepth 1/2/4, JS/WASM input, hand/mixed TVM kernels; treat depth >1 as speed/quality exploration, not parity-preserving promotion evidence.
-- Run the synchronized readback strategy matrix with `--input-backend wasm --encoder-kernel mixed-tvm-ffn` over `wgsl-pipe1,wgsl-gpu-legal,wgsl-pipe2`, comparing `--pipe2-batch 2` and `--pipe2-batch 4` in separate artifacts before changing the main autoresearch target.
-- Test combined overlap + byte reduction explicitly: add/compare a `wgsl-gpu-legal-pipe2` strategy if the existing matrix cannot express GPU legal priors with `batchPipelineDepth=2` cleanly.
-- Separate TVM/mixed-kernel lane over hand/tvm-packed-f16/mixed-tvm-ffn/mixed-tvm-ffn-outproj across batch 1/2/4/8 and 16/32 positions at 500/1000ms, using full-search evals/sec.
+- Productize/document the current opt-in candidate: WASM input + `mixed-tvm-ffn` + JS legal priors + b4/depth1, with stable defaults unchanged and benchmark hygiene called out explicitly.
+- Rebaseline any future comparisons under the same pre-run browser-harness cleanup policy; do not compare cleaned runs to degraded-window controls as runtime speedups.
+- Start a separate quantized/int8 FFN or encoder lane against the recovered-state `mixed-tvm-ffn` JS-legal baseline. Require full fixed-suite ms/eval, parity/top-k/value drift checks, explicit opt-in wiring, and no default changes.
+- Keep GPU legal priors as an opt-in scaffold/correctness path only; byte reduction (`7444` -> `3084`) did not beat JS legal priors under adjacent recovered-state controls.
+- Keep `batchPipelineDepth>1` and pipe2 readback strategies as speculative scheduler/readback-overlap diagnostics only; do not use them as fixed-search promotion evidence.
+- Deprioritize readback byte/micro-toggles unless new attribution changes the bottleneck picture: slice/subarray/copy/unmap placement, map range, 256-byte padding, tiny dispatch fusions, and compact per-legal-move copies.
+- Deprioritize batch-size sweeps (`b2/b8/b16`) for this lane unless a stronger alternating matrix shows a new regime.
+- If returning to readback diagnostics, prefer matrix/attribution runs that explain E2E full-search behavior rather than isolated microbench wins.

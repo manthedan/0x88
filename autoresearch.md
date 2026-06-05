@@ -103,6 +103,8 @@ Known empirical state:
 - Deferred-readback fixture attribution showed ~1.3–1.4x speedup with matching best moves; the diagnostics branch later added a fixed-FEN readback strategy matrix and failure-fast `HYBRID_SEARCH_BENCH_FAILED` handling so scheduler/readback experiments no longer masquerade as automation timeouts.
 - A non-comparable WASM-input screen showed a strong full-search signal (`~9.75 ms/eval` vs JS-input stronger-loop baseline `~11.65 ms/eval`), motivating this separate lane.
 - Synchronized diagnostic branch findings: `batch=4,batchPipelineDepth=2` correctness failure was a deferred-resource lifetime/preallocation hazard, not a bad FEN or WGSL-head kernel. Preallocating both deferred readback ring slots before any pipelined submit makes the cell testable again, but a short two-FEN smoke did not show a reliable E2E win.
+- 2026-06-05 autoresearch closeout: stale wrapper-owned browser/WebGPU harness state can dominate measurements. A degraded window pushed mixed-TVM JS-legal controls to `~10.3–11.7 ms/eval` and ONNX b1 to `17.7 ms/eval`; hard-resetting wrapper-owned `agent-browser`/Chrome-for-Testing processes recovered mixed-TVM JS-legal to `~6.1–6.2 ms/eval`, hand JS-legal to `7.14 ms/eval`, GPU-legal mixed-TVM to `6.58 ms/eval`, and ONNX b1 to `10.66 ms/eval`. `autoresearch.sh` now performs this scoped pre-run cleanup by default; treat it as benchmark hygiene, not a runtime speedup.
+- Under recovered conditions, the preferred opt-in product candidate is `hybrid-wgsl-heads` with WASM input, `encoderKernel=mixed-tvm-ffn`, JS legal priors, `lc0BatchSize=4`, and `batchPipelineDepth=1`. A 32-position/3-rep confirmation reported `6.11 ms/eval` with readback wait around `5.8 ms`; stable defaults remain unchanged.
 
 ## Hypothesis Queue
 
@@ -114,6 +116,7 @@ The default loop uses a stronger 16-position, 500ms, 3-rep median workload befor
 4. Retry `batchPipelineDepth>1` only as speculative speed/quality evidence; compare both batch=2/depth=2 and preallocated batch=4/depth=2 because the former had the earlier local overlap signal while the latter is now correctness-stable but not yet faster.
 5. If input/backend time is no longer material, return to attribution modes or continue the TVM/mixed-kernel lane.
 6. Avoid readback micro-optimizations unless new attribution changes the bottleneck picture.
+7. After documenting/productizing the recovered-state mixed-TVM JS-legal candidate, start a separate quantized/int8 FFN or encoder lane with its own baseline, parity/top-k/value drift gates, and recovered-state controls.
 
 ## What's Been Tried
 
@@ -123,7 +126,7 @@ The default loop uses a stronger 16-position, 500ms, 3-rep median workload befor
 - Discarded: omitting `mappedPolicy` result arrays in the evaluator search path. It did not improve the fast-loop primary metric and readback wait still dominated.
 - Discarded: replacing batched readback `Float32Array.slice` copies with `subarray` views. The fast-loop metric regressed; do not revisit without a focused CPU-copy microbench.
 - Discarded in the original JS-input lane: opt-in GPU legal priors reduced readback bytes (`7444` -> `3084`) but worsened E2E timing and added a dispatch (`159` -> `160`). Byte reduction alone is not enough if extra GPU work/fence time grows.
-- Kept in the current WASM-input/mixed-kernel lane: opt-in GPU legal priors with `mixed-tvm-ffn` improved the 16-position/500ms/3-rep primary metric, but this remains benchmark-only and should be A/B'd against JS legal priors with the synchronized readback matrix and fixed-suite harness.
+- Low-confidence/retired as primary: opt-in GPU legal priors with `mixed-tvm-ffn` initially improved the 16-position/500ms/3-rep primary metric and reduced bytes (`7444` -> `3084`), but adjacent recovered-state controls favored JS legal priors (`~6.1–6.2 ms/eval` JS legal vs `6.58 ms/eval` GPU legal), and degraded-window evidence was highly unstable. Keep GPU legal priors opt-in/scaffold only.
 - Discarded: restoring full-buffer copy/early unmap after the suspect no-copy keep regressed in a two-rep check (`13.97` ms/eval). Do not toggle whole-copy vs no-copy again without a more controlled A/B.
 - Discarded: pre-copying per-slot slices and unmapping before legal-prior postprocess also regressed in a two-rep check (`14.03` ms/eval). Mapped lifetime/copy placement is not the next lever.
 - Discarded: compact JS legal-prior readback using one `copyBufferToBuffer` per legal move reduced reported readback bytes dramatically (`7444` -> `~143`) and kept dispatch count flat, but worsened E2E (`12.85` ms/eval). Avoid per-move copy-command gather.
@@ -131,5 +134,7 @@ The default loop uses a stronger 16-position, 500ms, 3-rep median workload befor
 - Noise note: an unchanged rerun regressed by ~2.4%, and several apparent single-run wins failed one-rep/two-rep confirmations. The loop now defaults to 16 positions, 500ms, 3 reps to reduce false keeps.
 - Stop exploring low-ROI readback micro-toggles without new attribution evidence: Array allocation cleanup, slice/subarray, map range, unmap timing, 256-byte stride padding, tiny dispatch fusions, and per-legal-move compact copies.
 - Discarded as non-comparable to the JS-input loop but promising for this lane: opt-in WASM input reported `~9.75 ms/eval` on the stronger workload. Treat this lane's first run as the new baseline rather than mixing it with JS-input results.
+- Kept as benchmark hygiene: scoped pre-run cleanup of wrapper-owned `agent-browser`/Chrome-for-Testing plus default Vite listeners in `autoresearch.sh`. This recovered stable readback timing but is not a code-path optimization and must be applied consistently when comparing controls.
+- Current opt-in candidate: WASM input + `mixed-tvm-ffn` + JS legal priors + b4/depth1. Recovered-state adjacent controls favored it over hand, GPU legal priors, and ONNX b1. Productize/document as opt-in only; stable arena/default remains ORT ONNX/WebGPU.
 
 Update this section after every few experiments, especially for discarded ideas and benchmark-noise observations.
