@@ -7,7 +7,7 @@ This is the standard low-effort intake path for C/C++ UCI engines after the Bers
 - Prefer **Emscripten first** for C/C++ engines. It matches the successful Stockfish.js-style browser pattern and avoids forcing engines through WASI stdin/pthread problems before the engine has proven useful.
 - Start with a **single-thread synchronous worker build**. Pthreads, shared worker pools, and graceful in-search stop are follow-up work only after the engine earns it.
 - Disable tablebases/Syzygy for first smoke unless the upstream engine can tolerate missing tablebase files cleanly.
-- Keep generated JS/WASM/data/NNUE blobs ignored until license and corresponding-source packaging are explicit.
+- Keep generated JS/WASM/data/NNUE blobs ignored until license and corresponding-source packaging are explicit; use `docs/engine_artifact_distribution.md` as the distribution gate.
 - Promote to normal UI selectors only after the reusable adapter smoke passes; keep new engines experimental until benchmark and lifecycle data justify defaults.
 
 ## Minimal Emscripten target
@@ -59,6 +59,7 @@ Before catalog/UI promotion:
    - MultiPV if analysis UI will expose it
 6. A small benchmark captures cold/warm behavior over the rotated FEN suite using the shared browser benchmark harness.
 7. Docs update `engine_catalog.md` and, if benchmarked, a per-engine benchmark note.
+8. Before any public artifact deployment, publish the matching source archive and manifest described in `docs/engine_artifact_distribution.md`.
 
 ## Stockfish.js as the reference pattern
 
@@ -89,3 +90,13 @@ Only climb this ladder when benchmark data says the engine deserves more time:
 6. Consider direct browser API bypassing UCI text only if UCI overhead is visible in profiling.
 
 For Berserk, stop at step 1 for now: the adapter works, speed is acceptable for an experimental opponent, and Stockfish remains the expected speed/strength anchor.
+
+## Distribution gate
+
+Generated engine bundles are not release-ready just because they build and smoke. For GPL-family engines such as Berserk and PlentyChess, public deployment of JS/WASM/data/NNUE files is blocked until the release also includes:
+
+- an artifact manifest with output hashes and exact upstream/source pins;
+- a corresponding-source archive containing the upstream source snapshot, local patches, build scripts, wrapper source, and network-processing provenance;
+- explicit notes for required NNUE/network assets and any transformed/preloaded data files.
+
+See `docs/engine_artifact_distribution.md` for the canonical checklist and current Berserk/PlentyChess release cards.

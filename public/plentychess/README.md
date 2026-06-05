@@ -17,4 +17,4 @@ npm run plentychess:smoke-emscripten
 
 Use `/plentychess-smoke.html` in the dev server for browser worker lifecycle smoke.
 
-The generated blobs are ignored. PlentyChess is GPL-3.0, so do not distribute the generated JS/WASM/data artifacts until the project has an explicit corresponding-source/archive policy for this engine and its processed NNUE asset.
+The generated blobs are ignored. PlentyChess is GPL-3.0, so do not distribute the generated JS/WASM/data artifacts until they are accompanied by the source archive and manifest required by `docs/engine_artifact_distribution.md`, including provenance for the raw and processed NNUE asset.

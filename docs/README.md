@@ -23,6 +23,7 @@ For current planning, start in `knowledge/` first. Use `docs/` as stable referen
 | [`engine_catalog.md`](engine_catalog.md) | Current | Browser engine-family and variant cards: source/version anchors, adapters, feature parity, size/speed, onboarding process. |
 | [`browser_uci_adapter_contract.md`](browser_uci_adapter_contract.md) | Current | Standard TypeScript/behavioral contract for browser UCI engines before selector promotion. |
 | [`browser_c_engine_porting.md`](browser_c_engine_porting.md) | Current | Standard low-effort Emscripten-first intake recipe for C/C++ browser UCI engines. |
+| [`engine_artifact_distribution.md`](engine_artifact_distribution.md) | Current | GPL/corresponding-source release policy for generated browser engine JS/WASM/data/NNUE artifacts. |
 | [`berserk_browser_benchmarks.md`](berserk_browser_benchmarks.md) | Active | Berserk Emscripten worker lifecycle and first rotated-FEN benchmark captures. |
 | [`plentychess_browser_port.md`](plentychess_browser_port.md) | Active | PlentyChess Emscripten proof-build plus Node/browser worker smoke notes. |
 | [`model_efficiency_metrics.md`](model_efficiency_metrics.md) | Current | How we compare strength/bytes/params/latency/search usefulness. |
@@ -52,6 +53,7 @@ For current planning, start in `knowledge/` first. Use `docs/` as stable referen
 | [`engine_catalog.md`](engine_catalog.md) | Current | Standard cards and onboarding process for browser engine families/variants. |
 | [`browser_uci_adapter_contract.md`](browser_uci_adapter_contract.md) | Current | Required adapter methods, lifecycle rules, diagnostics, asset-check responsibilities, and promotion checklist for browser UCI engines. |
 | [`browser_c_engine_porting.md`](browser_c_engine_porting.md) | Current | Emscripten-first C/C++ engine intake recipe, Stockfish.js reference observations, and deferred optimization ladder. |
+| [`engine_artifact_distribution.md`](engine_artifact_distribution.md) | Current | Artifact/source-archive manifest policy before publishing generated GPL engine bundles. |
 | [`berserk_browser_benchmarks.md`](berserk_browser_benchmarks.md) | Active | Berserk Emscripten worker lifecycle smoke, arena/analysis checks, and first rotated-FEN benchmark snapshot. |
 | [`plentychess_browser_port.md`](plentychess_browser_port.md) | Active | PlentyChess Emscripten build shape, artifact sizes, and Node/browser worker smoke. |
 | [`onnx_deploy_workflow.md`](onnx_deploy_workflow.md) | Current | ONNX simplification/parity/deployment workflow. |
