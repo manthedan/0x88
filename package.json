@@ -88,6 +88,7 @@
     "lc0:runtime-arena-analyze": "node scripts/lc0_runtime_arena_analyze.mjs",
     "lc0:browser-runtime-fixed-suite": "node --experimental-strip-types scripts/lc0_browser_runtime_fixed_suite.mjs",
     "lc0:browser-ort-readback-profile": "node scripts/lc0_browser_ort_readback_profile.mjs",
+    "lc0:browser-readback-strategy-matrix": "node scripts/lc0_browser_readback_strategy_matrix.mjs",
     "lc0:generate-tvm-wgsl": "node scripts/generate_lc0_tvm_wgsl_kernels.mjs",
     "lc0:check-tvm-wgsl": "node scripts/generate_lc0_tvm_wgsl_kernels.mjs --check",
     "reckless:build-wasi": "node scripts/build_reckless_wasi.mjs",
