@@ -13,7 +13,7 @@ import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
-import { Lc0WebHybridEvaluator } from './wgslMatmulAddProbe.ts';
+import { Lc0WebHybridEvaluator, type Lc0WebEncoderKernelVariant } from './wgslMatmulAddProbe.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { StockfishEngine, stockfishFlavorLabel, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
 import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
@@ -207,6 +207,11 @@ function lc0HybridInputBackend(): 'js' | 'wgsl' | 'wasm' {
 
 function lc0EncoderLayers(): number {
   return Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10)));
+}
+
+function lc0EncoderKernelVariant(): Lc0WebEncoderKernelVariant {
+  const raw = params.get('encoderKernel') ?? params.get('lc0EncoderKernel') ?? params.get('encoderKernelVariant') ?? 'hand';
+  return raw === 'tvm-packed-f16' || raw === 'mixed-tvm-ffn' || raw === 'mixed-tvm-ffn-outproj' ? raw : 'hand';
 }
 
 function boundedIntValue(value: unknown, fallback: number, min: number, max: number): number {
@@ -1660,6 +1665,7 @@ async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHy
     wgslBatchMode: 'physical',
     inputBackend: lc0HybridInputBackend(),
     legalPriorsBackend: 'js',
+    encoderKernelVariant: lc0EncoderKernelVariant(),
   });
 }
 

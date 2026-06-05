@@ -20,6 +20,7 @@ ATTR_ITERS="${LC0_AR_ATTR_ITERS:-8}"
 ATTR_WARMUP="${LC0_AR_ATTR_WARMUP:-1}"
 ATTR_FIXTURE_LIMIT="${LC0_AR_ATTR_FIXTURE_LIMIT:-$MAX_POSITIONS}"
 INPUT_BACKEND="${LC0_AR_INPUT_BACKEND:-wasm}"
+ENCODER_KERNEL="${LC0_AR_ENCODER_KERNEL:-hand}"
 
 if [[ ! -f "$FENS" ]]; then
   echo "missing FEN corpus: $FENS" >&2
@@ -31,6 +32,7 @@ mkdir -p "$OUT_DIR"
 if [[ "$ATTRIBUTION_MODE" == "deferred-readback" ]]; then
   attr_out="$OUT_DIR/${RUN_ID}_deferred_readback_attr.json"
   node --experimental-strip-types scripts/lc0_browser_wgsl_deferred_readback_bench.mjs \
+    --input-backend "$INPUT_BACKEND" \
     --batch "$BATCH_SIZE" \
     --iters "$ATTR_ITERS" \
     --warmup "$ATTR_WARMUP" \
@@ -75,6 +77,7 @@ for rep in $(seq 1 "$REPS"); do
     --lc0-batch-size "$BATCH_SIZE" \
     --batch-pipeline-depth "$PIPELINE_DEPTH" \
     --input-backend "$INPUT_BACKEND" \
+    --encoder-kernel "$ENCODER_KERNEL" \
     --session "$session" \
     --out "$out" \
     --summary-only \
