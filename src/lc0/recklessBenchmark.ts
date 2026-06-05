@@ -1,6 +1,8 @@
 import { START_FEN } from '../chess/board.ts';
 import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_EMSCRIPTEN_VARIANT, berserkVariantAssetStatus, checkBerserkVariantAsset, type BerserkVariant } from './berserkVariants.ts';
+import { PlentyChessEngine } from './plentychessEngine.ts';
+import { PLENTYCHESS_EMSCRIPTEN_VARIANT, checkPlentyChessVariantAsset, plentyChessVariantAssetStatus, type PlentyChessVariant } from './plentychessVariants.ts';
 import { RecklessEngine, canUsePersistentRecklessWasi, type RecklessOptions } from './recklessEngine.ts';
 import { RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT, RECKLESS_SIMD_VARIANT, checkRecklessVariantAsset, recklessVariantAssetStatus, type RecklessVariant } from './recklessVariants.ts';
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
@@ -52,8 +54,8 @@ interface BenchSummaryRow {
 }
 
 type BenchMode = 'persistent' | 'one-shot' | 'batch';
-type BenchVariant = (RecklessVariant & { engine: 'reckless' }) | (ViridithasVariant & { engine: 'viridithas' }) | (BerserkVariant & { engine: 'berserk' });
-type BenchEngine = RecklessEngine | ViridithasEngine | BerserkEngine;
+type BenchVariant = (RecklessVariant & { engine: 'reckless' }) | (ViridithasVariant & { engine: 'viridithas' }) | (BerserkVariant & { engine: 'berserk' }) | (PlentyChessVariant & { engine: 'plentychess' });
+type BenchEngine = RecklessEngine | ViridithasEngine | BerserkEngine | PlentyChessEngine;
 
 interface BenchConfig {
   variants: BenchVariant[];
@@ -152,6 +154,7 @@ function selectedVariants(): BenchVariant[] {
   if (inputEl('benchViridithas').checked) variants.push({ ...VIRIDITHAS_DEFAULT_VARIANT, engine: 'viridithas' });
   if (inputEl('benchViridithasSimd').checked) variants.push({ ...VIRIDITHAS_SIMD_VARIANT, engine: 'viridithas' });
   if (inputEl('benchBerserk').checked) variants.push({ ...BERSERK_EMSCRIPTEN_VARIANT, engine: 'berserk' });
+  if (inputEl('benchPlentyChess').checked) variants.push({ ...PLENTYCHESS_EMSCRIPTEN_VARIANT, engine: 'plentychess' });
   return variants;
 }
 function selectedModes(): BenchMode[] {
@@ -162,7 +165,7 @@ function selectedModes(): BenchMode[] {
   return modes;
 }
 function setStatus(text: string): void { el('status').textContent = text; }
-function variantArtifactUrl(variant: BenchVariant): string { return variant.engine === 'berserk' ? (variant.jsUrl ?? variant.wasmUrl) : variant.wasmUrl; }
+function variantArtifactUrl(variant: BenchVariant): string { return variant.engine === 'berserk' || variant.engine === 'plentychess' ? (variant.jsUrl ?? variant.wasmUrl) : variant.wasmUrl; }
 
 function groupKey(row: Pick<BenchRow, 'variant' | 'mode' | 'position' | 'fen' | 'budget'>): string {
   return `${row.variant}\u0000${row.mode}\u0000${row.position}\u0000${row.fen}\u0000${row.budget}`;
@@ -237,8 +240,9 @@ function reportConfig(config: BenchConfig) {
       wasmUrl: variant.wasmUrl,
       ...(variant.engine === 'reckless' ? { nnueUrl: variant.nnueUrl, backend: variant.backend ?? 'wasi' } : {}),
       ...(variant.engine === 'berserk' ? { jsUrl: variant.jsUrl, dataUrl: variant.dataUrl, nnueUrl: variant.nnueUrl } : {}),
+      ...(variant.engine === 'plentychess' ? { jsUrl: variant.jsUrl, dataUrl: variant.dataUrl } : {}),
       note: variant.note,
-      asset: variant.engine === 'viridithas' ? viridithasVariantAssetStatus(variant) : variant.engine === 'berserk' ? berserkVariantAssetStatus(variant) : recklessVariantAssetStatus(variant),
+      asset: variant.engine === 'viridithas' ? viridithasVariantAssetStatus(variant) : variant.engine === 'berserk' ? berserkVariantAssetStatus(variant) : variant.engine === 'plentychess' ? plentyChessVariantAssetStatus(variant) : recklessVariantAssetStatus(variant),
     })),
     modes: config.modes,
     budgets: config.budgets.map((budget) => ({ label: budget.label, options: budget.options })),
@@ -304,6 +308,7 @@ async function timeSearch(engine: BenchEngine, variant: BenchVariant, mode: Benc
     if (variant.engine === 'reckless' && engine instanceof RecklessEngine) await engine.newGame(signal);
     if (variant.engine === 'viridithas' && engine instanceof ViridithasEngine) await engine.newGame(signal);
     if (variant.engine === 'berserk' && engine instanceof BerserkEngine) await engine.newGame(signal);
+    if (variant.engine === 'plentychess' && engine instanceof PlentyChessEngine) await engine.newGame(signal);
   }
   const start = performance.now();
   const bestMove = await engine.bestMove(position.fen, signal);
@@ -376,7 +381,9 @@ async function runBench(): Promise<void> {
         ? await checkViridithasVariantAsset(variant, render)
         : variant.engine === 'berserk'
           ? await checkBerserkVariantAsset(variant, render)
-          : await checkRecklessVariantAsset(variant, render);
+          : variant.engine === 'plentychess'
+            ? await checkPlentyChessVariantAsset(variant, render)
+            : await checkRecklessVariantAsset(variant, render);
       if (assetStatus === 'missing') {
         rows.push({ variant: variant.label, mode: config.modes[0] ?? 'one-shot', position: 'asset', fen: '', budget: 'asset check', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'asset missing', wasmUrl: variantArtifactUrl(variant) });
         render();
@@ -394,8 +401,8 @@ async function runBench(): Promise<void> {
           render();
           continue;
         }
-        if (mode !== 'persistent' && variant.engine === 'berserk') {
-          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: mode, run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'Berserk Emscripten adapter benchmarks as a resident worker only', wasmUrl: variantArtifactUrl(variant) });
+        if (mode !== 'persistent' && (variant.engine === 'berserk' || variant.engine === 'plentychess')) {
+          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: mode, run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: `${variant.label} Emscripten adapter benchmarks as a resident worker only`, wasmUrl: variantArtifactUrl(variant) });
           render();
           continue;
         }
@@ -414,7 +421,9 @@ async function runBench(): Promise<void> {
             ? new ViridithasEngine(budget.options, variant.wasmUrl, { forceOneShot: mode !== 'persistent', disablePersistentFallback: mode === 'persistent' })
             : variant.engine === 'berserk'
               ? new BerserkEngine({ ...budget.options, threads: 1 }, variant.jsUrl)
-              : new RecklessEngine(
+              : variant.engine === 'plentychess'
+                ? new PlentyChessEngine({ ...budget.options, threads: 1 }, variant.jsUrl)
+                : new RecklessEngine(
                 budget.options,
                 variant.wasmUrl,
                 { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, forceOneShot: mode === 'one-shot', disablePersistentFallback: mode === 'persistent' },
@@ -488,5 +497,6 @@ for (const variant of [RECKLESS_FULL_VARIANT, RECKLESS_SIMD_VARIANT, RECKLESS_BR
 void checkViridithasVariantAsset(VIRIDITHAS_DEFAULT_VARIANT, render);
 void checkViridithasVariantAsset(VIRIDITHAS_SIMD_VARIANT, render);
 void checkBerserkVariantAsset(BERSERK_EMSCRIPTEN_VARIANT, render);
-setStatus(`Ready. recklessPersistent=${canUsePersistentRecklessWasi()} · viridithasPersistent=${canUsePersistentViridithasWasi()} · Berserk Emscripten=${BERSERK_EMSCRIPTEN_VARIANT.jsUrl} · SAB=${typeof SharedArrayBuffer !== 'undefined'}`);
+void checkPlentyChessVariantAsset(PLENTYCHESS_EMSCRIPTEN_VARIANT, render);
+setStatus(`Ready. recklessPersistent=${canUsePersistentRecklessWasi()} · viridithasPersistent=${canUsePersistentViridithasWasi()} · Berserk Emscripten=${BERSERK_EMSCRIPTEN_VARIANT.jsUrl} · PlentyChess Emscripten=${PLENTYCHESS_EMSCRIPTEN_VARIANT.jsUrl} · SAB=${typeof SharedArrayBuffer !== 'undefined'}`);
 render();

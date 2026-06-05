@@ -106,8 +106,26 @@ The smoke page covers:
 - GPL-3.0 distribution/corresponding-source policy is required before distributing generated artifacts.
 - The `.data` file is large because the processed NNUE is preloaded externally rather than embedded with upstream `incbin`.
 
+## First rotated-FEN benchmark
+
+The shared browser UCI benchmark harness (`reckless-benchmark.html`) now includes a `PlentyChess Emscripten experimental` checkbox. A depth-7, 20-position rotated-FEN run with cold + 1 warm pass completed in persistent worker mode.
+
+Raw ignored artifact:
+
+- `artifacts/plentychess/plentychess-emscripten-depth7-rotated-fen-2026-06-05.json`
+
+Summary:
+
+- rows: 40 raw, 20 summary
+- warm average/search: ~9.35 ms
+- warm min/max: ~2.37 / 15.14 ms
+- mean nodes/search: ~4,068
+- mean engine-reported NPS: ~718k
+
+This puts PlentyChess Emscripten roughly in the same shallow-browser-NPS band as full Stockfish single-threaded (~746k) and Reckless SIMD (~794k), with a much larger `.data` sidecar than Berserk.
+
 ## Next gates before UI integration
 
-1. Run a small rotated-FEN benchmark against Berserk/Reckless/Stockfish.
-2. Decide whether the ~63 MB `.data` artifact is acceptable for an experimental selector.
-3. Only then add an experimental staged selector variant.
+1. Decide whether the ~63 MB `.data` artifact is acceptable for an experimental selector.
+2. If yes, add experimental staged selector metadata and UI wiring.
+3. Keep generated artifacts ignored and gated by GPL corresponding-source policy.
