@@ -212,6 +212,59 @@ Interpretation:
 - ORT still maps three output tensors and copies about 36 KB through `copyBufferToBuffer` per eval, even though the CPU-visible model outputs are only about 7.3 KB.
 - ORT timestamp kernel profiling remained unavailable on this browser/device (`ortKernelCount=0`), so WebGPU API counters are the reliable attribution signal here.
 
+## Fixed-FEN strategy matrix
+
+A reusable fixed-FEN comparison runner now exists:
+
+```bash
+npm run lc0:browser-readback-strategy-matrix -- \
+  --out /tmp/lc0_readback_strategy_matrix.json \
+  --max-positions 4 --repeats 2
+```
+
+It compares:
+
+- `ort-cpu` — ORT WebGPU with default CPU-visible outputs, still instrumented.
+- `ort-gpu` — ORT WebGPU with `preferredOutputLocation=gpu-buffer` and explicit `tensor.getData()` timing.
+- `wgsl-pipe1` — custom WGSL encoder + WGSL heads with physical batching and normal search scheduling.
+- `wgsl-pipe2` — same custom WGSL path with `batchPipelineDepth=2`; failures are preserved in the artifact instead of aborting the full matrix.
+
+A short local two-FEN smoke was run:
+
+```bash
+npm run lc0:browser-readback-strategy-matrix -- \
+  --out /tmp/lc0_readback_strategy_matrix_2fen.json \
+  --max-positions 2 --repeats 1 \
+  --strategies ort-cpu,ort-gpu,wgsl-pipe1 \
+  --ort-iters 3 --ort-warmup 1 \
+  --wgsl-eval-iters 2 --wgsl-search-iters 2 --wgsl-search-warmup 1 \
+  --visits 32 --batch 4
+```
+
+Median smoke summary:
+
+```text
+ort-cpu avgMs                 13.01
+ort-cpu ortRunMs              12.28
+ort-cpu ortAllGetDataMs        0.02
+ort-cpu MAP_READ bytes      7472
+
+ort-gpu avgMs                 14.41
+ort-gpu ortRunMs               8.13
+ort-gpu ortAllGetDataMs        5.44
+ort-gpu MAP_READ bytes      7472
+
+wgsl-pipe1 evalMeanMs         14.25
+wgsl-pipe1 searchMeanMs      306.47  // 32 visits, batch 4
+wgsl-pipe1 visits/s          104.41
+wgsl-pipe1 eval readbackMs    10.40
+wgsl-pipe1 search readbackMs  24.48
+```
+
+A separate `wgsl-pipe2` smoke with 16 visits timed out on this branch. Treat that as a scheduler correctness/stability issue to investigate before using pipeline-depth numbers as evidence.
+
+Immediate implication: the best next implementation bet is not making ORT GPU-backed outputs the default. It is reducing or avoiding CPU-visible policy readback for the custom WGSL path: compact/combined readback first, then GPU legal-prior/top-k if the compact path still leaves readback as the dominant search cost.
+
 ## Guardrails
 
 - Do not use browser diagnostic numbers from one noisy run as promotion evidence.
