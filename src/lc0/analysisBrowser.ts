@@ -22,7 +22,7 @@ import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, normalizeBerserkVariant, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, type PlentyChessVariant } from './plentychessVariants.ts';
-import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support } from './bt4Engine.ts';
+import { BT4_MODEL_URL, Bt4WorkerSearcher, bt4AssetStatusSync, bt4LoadWarning, bt4SupportedSync, checkBt4Asset, probeBt4Support } from './bt4Engine.ts';
 import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -232,11 +232,20 @@ function currentEngineProfile(name: string): EngineAnalysisProfile {
 function profileHasBt4(rows: EngineRow[]): boolean {
   return rows.some((row) => row.family === 'lc0' && row.variant === 'bt4');
 }
+function bt4SelectableSync(): boolean {
+  return bt4SupportedSync() && bt4AssetStatusSync() === 'present';
+}
+function bt4UnavailableText(): string {
+  if (!bt4SupportedSync()) return 'Lc0 BT4 needs WebGPU support.';
+  if (bt4AssetStatusSync() === 'missing') return `Lc0 BT4 model asset is missing at ${BT4_MODEL_URL}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
+  if (bt4AssetStatusSync() === 'unknown') return 'Lc0 BT4 model asset is still being checked.';
+  return '';
+}
 function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): EngineRow[] {
   return rows.map((row) => {
     const next = { ...row, strength: clampStrengthForRow(row) };
     if (next.family === 'lc0' && next.variant === 'bt4') {
-      const allowed = bt4SupportedSync() && allowBt4Prompt && window.confirm(`${bt4LoadWarning()}\n\nLoad the saved Lc0 BT4 profile row?`);
+      const allowed = bt4SelectableSync() && allowBt4Prompt && window.confirm(`${bt4LoadWarning()}\n\nLoad the saved Lc0 BT4 profile row?`);
       if (!allowed) next.variant = 'small';
     }
     return next;
@@ -382,7 +391,7 @@ function nextEngineFamily(): EngineFamily {
 let engineRows: EngineRow[] = [{ family: 'lc0', variant: 'small', strength: 400 }];
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
-  if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync());
+  if (family === 'lc0') return lc0VariantOptions(bt4SelectableSync());
   if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
   if (family === 'berserk') return availableBerserkVariants().map((v) => ({ value: v.key, label: v.label }));
@@ -432,17 +441,22 @@ async function workerBt4Lines(fen: string, visits: number): Promise<AnalysisLine
   return result.cancelled ? [] : lc0AnalysisLines(result, fen, 'Lc0 BT4');
 }
 
-// Lc0 BT4 is WebGPU-only; its option is disabled in the list when WebGPU is unusable.
+// Lc0 BT4 is WebGPU-only and requires the large local ONNX asset to be exposed.
 async function refreshBt4Availability(): Promise<void> {
-  await probeBt4Support();
-  if (!bt4SupportedSync()) {
+  await Promise.all([probeBt4Support(), checkBt4Asset(renderRecklessRuntimeInfo)]);
+  if (!bt4SelectableSync()) {
     for (const row of engineRows) if (row.family === 'lc0' && row.variant === 'bt4') row.variant = 'small';
   }
   renderEngineList();
+  renderRecklessRuntimeInfo();
 }
 
 function renderRecklessRuntimeInfo(): void {
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
+  const bt4Asset = bt4AssetStatusSync();
+  if (bt4Asset === 'unknown') void checkBt4Asset(renderRecklessRuntimeInfo);
+  const bt4AssetText = bt4Asset === 'present' ? 'asset ok' : bt4Asset === 'missing' ? `asset missing · ${BT4_MODEL_URL} · run node scripts/lc0_prepare_model_assets.mjs` : 'checking asset';
+  const bt4Text = `Lc0 BT4: ${bt4SupportedSync() ? 'WebGPU ok' : 'WebGPU unavailable'} · ${bt4AssetText}`;
   const fallbackMode = (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) ? 'persistent available' : 'one-shot fallback';
   const recklessRows = activeEngineRows().filter((row) => row.family === 'reckless');
   const recklessVariants = recklessRows.length ? recklessRows.map((row) => recklessVariantForKey(row.variant)) : [REQUESTED_RECKLESS_VARIANT];
@@ -487,7 +501,7 @@ function renderRecklessRuntimeInfo(): void {
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
   });
-  el('recklessRuntimeInfo').textContent = `Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'}`;
+  el('recklessRuntimeInfo').textContent = `${bt4Text} · Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'}`;
 }
 
 function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
@@ -1023,6 +1037,7 @@ function wireEvents() {
     } else if (target.classList.contains('row-var')) {
       if (engineRows[i].family === 'lc0' && target.value === 'bt4') {
         // One-time gate before the ~353MB lazy load.
+        if (!bt4SelectableSync()) { el('message').textContent = bt4UnavailableText(); target.value = engineRows[i].variant; return; }
         if (!window.confirm(`${bt4LoadWarning()}\n\nUse Lc0 BT4?`)) { target.value = engineRows[i].variant; return; }
       }
       engineRows[i].variant = target.value;

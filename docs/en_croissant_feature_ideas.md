@@ -44,6 +44,7 @@ Sources:
 
 7. **Asset and engine management**
    - Turn our engine artifact manifests into a UI: installed/missing assets, size, license, source link, runtime capability, and local build instructions.
+   - Current first step: the analysis page preflights the large local BT4 ONNX asset and shows the `lc0_prepare_model_assets.mjs` recovery command instead of letting BT4 fail later during analysis.
 
 8. **Lichess/chess.com import pipeline**
    - Expand current import flow into a first-class “fetch my games, analyze locally, generate report” workflow.
