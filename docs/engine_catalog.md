@@ -143,11 +143,11 @@ Every engine family should have one card with these fields:
 - **Source/version anchor:** upstream `jhonnold/berserk` release tag `14`, commit `8ae895a6151695be4a50d4fb65b0c131659c513a`; default branch HEAD observed at `27212a24c16d9e5f9bc9180a75264c1c632808bb` during intake. The first browser port should pin tag `14` unless a newer release is deliberately selected.
 - **License/distribution:** GPL-3.0. Generated WASM and copied NNUE assets must be treated as redistributable GPL engine artifacts with corresponding source/build instructions. Do not commit generated blobs until the project has an explicit release/source-archive policy for Berserk.
 - **Runtime adapter:** planned patched C `wasm32-wasip1` UCI path, starting with one-shot smoke. Persistent WASI should only follow if startup/NNUE loading dominates and the one-shot UCI path is correct.
-- **Expected UI variants:**
+- **Expected UI variants:** defined in `src/lc0/berserkVariants.ts` but not wired into selectors yet.
   - `default`: scalar WASI/UCI candidate, expected URL `/berserk/berserk.wasm` after a build script exists.
   - `simd`: optional SIMD candidate, expected URL `/berserk/berserk-simd128.wasm` only after wasm SIMD codegen validates.
-  - `custom`: URL param escape hatch for local experiments, likely `?berserkWasm=`.
-- **Expected NNUE assets:** upstream makefile uses `MAIN_NETWORK = berserk-9b84c340af7e.nn` from `https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn`. First smoke should decide whether to embed it with `incbin` or load it externally through a WASI preopen/fetch bridge; external loading is preferred if it keeps WASM rebuilds small and cacheable.
+  - `custom`: URL param escape hatch for local experiments via `?berserkWasm=` and optional `?berserkNnue=`.
+- **Expected NNUE assets:** upstream makefile uses `MAIN_NETWORK = berserk-9b84c340af7e.nn` from `https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn`. `berserkVariants.ts` currently models it as external `/berserk/berserk-9b84c340af7e.nn`; first smoke can still switch to embedded `incbin` if that proves simpler, but external loading is preferred if it keeps WASM rebuilds small and cacheable.
 - **Strength knob:** depth in staged UI if promoted; movetime should be available in benchmarks once UCI `go movetime` is verified. Tentative defaults should mirror other alpha-beta engines until measured (`arena` shallow depth, `analysis` deeper depth).
 - **Artifact footprint:** unknown. Record scalar/SIMD WASM size and NNUE size after the first reproducible build. Expected policy is `public/berserk/*.wasm` and downloaded NNUE blobs are generated/local assets, not source-controlled defaults.
 - **Feature parity to verify:**
@@ -221,6 +221,6 @@ The staged selectors now consume the shared typed catalog in `src/lc0/engineCata
 - shared row labels for Lc0 and Stockfish;
 - the `EngineFamily` / `EngineRow` types used by arena and analysis.
 
-Reckless and Viridithas still keep their dynamic artifact metadata in `recklessVariants.ts` and `viridithasVariants.ts` because those modules own URL-param custom variants, asset checks, and runtime-specific defaults. If a future engine uses similar generated artifacts, add a dedicated variant module and then surface its family/static selector facts through `engineCatalog.ts`.
+Reckless, Viridithas, and the pre-UI Berserk intake keep their dynamic artifact metadata in `recklessVariants.ts`, `viridithasVariants.ts`, and `berserkVariants.ts` because those modules own URL-param custom variants, asset checks, and runtime-specific defaults. If a future engine uses similar generated artifacts, add a dedicated variant module and then surface its family/static selector facts through `engineCatalog.ts`.
 
 Any UI variant/default change should update both `src/lc0/engineCatalog.ts` and this card in the same commit. `tests/engine_catalog.test.mjs` pins the current selector order, static variants, family guard, and arena/analysis strength defaults.

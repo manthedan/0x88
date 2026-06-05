@@ -30,6 +30,10 @@ public/reckless/*.wasm
 public/reckless/*.nnue
 public/reckless/*corresponding-source*.tar.gz
 public/viridithas/*.wasm
+public/berserk/*.wasm
+public/berserk/*.nn
+public/berserk/*.nnue
+public/berserk/*corresponding-source*.tar.gz
 rust/**/target/
 node_modules/
 __pycache__/
