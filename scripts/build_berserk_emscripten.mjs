@@ -17,6 +17,7 @@ const outBase = path.basename(jsOut, '.js');
 const srcDir = path.join(engineDir, 'src');
 const netPath = path.join(netDir, netName);
 const emsdkImage = process.env.BERSERK_EMSDK_IMAGE ?? 'emscripten/emsdk:latest';
+const skipGit = process.env.BERSERK_SKIP_GIT === '1';
 
 function run(command, args, options = {}) {
   console.log(`$ ${command} ${args.join(' ')}`);
@@ -41,13 +42,17 @@ fs.mkdirSync(path.dirname(engineDir), { recursive: true });
 fs.mkdirSync(netDir, { recursive: true });
 fs.mkdirSync(path.dirname(jsOut), { recursive: true });
 
-if (!fs.existsSync(path.join(engineDir, '.git'))) {
-  run('git', ['clone', repo, engineDir]);
+if (!skipGit) {
+  if (!fs.existsSync(path.join(engineDir, '.git'))) {
+    run('git', ['clone', repo, engineDir]);
+  }
+  run('git', ['fetch', '--tags', 'origin'], { cwd: engineDir });
+  run('git', ['checkout', ref], { cwd: engineDir });
+  run('git', ['reset', '--hard'], { cwd: engineDir });
+  run('git', ['clean', '-fdx'], { cwd: engineDir });
+} else if (!fs.existsSync(srcDir)) {
+  throw new Error(`BERSERK_SKIP_GIT=1 requires an unpacked Berserk source tree at ${engineDir}`);
 }
-run('git', ['fetch', '--tags', 'origin'], { cwd: engineDir });
-run('git', ['checkout', ref], { cwd: engineDir });
-run('git', ['reset', '--hard'], { cwd: engineDir });
-run('git', ['clean', '-fdx'], { cwd: engineDir });
 
 if (!fs.existsSync(netPath)) {
   run('curl', ['-L', '--fail', '-o', netPath, netUrl]);

@@ -95,7 +95,8 @@ If the selector is visible in a public deployment but assets are intentionally a
 - Build: `npm run berserk:build-emscripten`
 - Smoke: `npm run berserk:smoke-emscripten`, `berserk-smoke.html`
 - Network: `berserk-9b84c340af7e.nn`
-- Distribution status: not cleared until a matching source archive and manifest are published.
+- Network license/provenance: unresolved; no standalone license file found in `jhonnold/berserk-networks` during intake. Do not publicly distribute the network/data bundle until that is resolved or confirmed as covered by the engine release.
+- Distribution status: source-archive/manifest tooling exists, but public distribution remains blocked on network license/provenance confirmation.
 
 ### PlentyChess Emscripten
 
@@ -107,21 +108,33 @@ If the selector is visible in a public deployment but assets are intentionally a
 - Build: `npm run plentychess:build-emscripten`
 - Smoke: `npm run plentychess:smoke-emscripten`, `plentychess-smoke.html`
 - Network: `0134-2r24-s0.bin`
+- Network license/provenance: `Yoshie2000/PlentyNetworks` GPL-3.0.
 - Raw network SHA-256: `550a0b664b68113fd228f501524b25e0cea1be500a608bb0f26d42a6255c8061`
 - Processed network SHA-256: `691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4`
 - Processing command: upstream `tools/process_net false`, then preload as `/processed.bin`
-- Distribution status: not cleared until a matching source archive and manifest are published; the ~63 MB `.data` sidecar also needs an explicit product/footprint decision.
+- Distribution status: cleared mechanically once generated artifacts, source archive, release manifest, and GPL notices are published together; the ~63 MB `.data` sidecar still needs an explicit product/footprint decision before enabling by default.
 
 ## Manifest helper
 
-Use the checked-in helper to draft a manifest from local generated artifacts:
+Use the checked-in helpers to draft manifests and source archives from local generated artifacts:
 
 ```sh
 npm run berserk:artifact-manifest
 npm run plentychess:artifact-manifest
+npm run berserk:source-archive
+npm run plentychess:source-archive
 ```
 
-The helper writes ignored JSON under `artifacts/engine-manifests/`, including artifact sizes, SHA-256 hashes, and local gzip/brotli transfer-size estimates. `npm run build:netlify` uses `scripts/precompress_engine_artifacts.mjs` to emit `.br`/`.gz` sidecars in `dist-client/`; see `docs/netlify_engine_artifacts.md`. A generated manifest is still not release-complete until `sourceArchive.url` and `sourceArchive.sha256` are filled with a published matching source archive.
+The artifact-manifest helper writes ignored JSON under `artifacts/engine-manifests/`, including artifact sizes, SHA-256 hashes, and local gzip/brotli transfer-size estimates. The source-archive helper writes ignored `*corresponding-source.tar.gz` files beside the generated engine artifacts under `public/<engine>/`. The archives contain the pinned upstream source snapshot, local patch, build/smoke scripts, browser adapter source, docs, raw network/model asset, and rebuild instructions using `*_SKIP_GIT=1`.
+
+For a distribution-ready manifest that records the source archive hash and relative deployment URL, run:
+
+```sh
+npm run berserk:release-manifest
+npm run plentychess:release-manifest
+```
+
+Pass `ENGINE_ARTIFACT_TOOLCHAIN='...'` or `-- --toolchain '...'` when writing a release manifest if `emcc` is not on PATH; the release manifest must identify the Emscripten version or container image digest actually used for the generated artifacts. `npm run build:netlify` uses `scripts/precompress_engine_artifacts.mjs` to emit `.br`/`.gz` sidecars in `dist-client/`; see `docs/netlify_engine_artifacts.md`. A manifest generated without a source archive URL and exact toolchain remains a draft, not a public-distribution clearance.
 
 ## Manifest template
 

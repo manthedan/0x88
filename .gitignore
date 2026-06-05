@@ -39,6 +39,7 @@ public/berserk/*.nn
 public/berserk/*.nnue
 public/berserk/*.br
 public/berserk/*.gz
+public/berserk/*.manifest.json
 public/berserk/*corresponding-source*.tar.gz
 public/plentychess/*.js
 public/plentychess/*.cjs
@@ -50,6 +51,7 @@ public/plentychess/*.nn
 public/plentychess/*.nnue
 public/plentychess/*.br
 public/plentychess/*.gz
+public/plentychess/*.manifest.json
 public/plentychess/*corresponding-source*.tar.gz
 rust/**/target/
 node_modules/

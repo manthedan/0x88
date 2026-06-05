@@ -62,4 +62,4 @@ The local isolated static server will serve `.br`/`.gz` sidecars through normal 
 
 ## Release-policy reminder
 
-Precompression does not change licensing obligations. Do not deploy Berserk or PlentyChess generated artifacts publicly until `docs/engine_artifact_distribution.md` is satisfied with a matching source archive and artifact manifest.
+Precompression does not change licensing obligations. Do not deploy Berserk or PlentyChess generated artifacts publicly until `docs/engine_artifact_distribution.md` is satisfied with a matching source archive and artifact manifest. Use `npm run plentychess:source-archive && npm run plentychess:release-manifest` (and the Berserk equivalents if those artifacts are present) before publishing a build that serves the generated JS/WASM/data files.

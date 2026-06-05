@@ -32,6 +32,8 @@ const CONFIGS = {
       {
         name: 'berserk-9b84c340af7e.nn',
         sourceUrl: 'https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn',
+        rawSha256: '9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084',
+        licenseNote: 'No standalone license file found in jhonnold/berserk-networks during intake; do not publicly distribute this network until provenance/license is resolved or confirmed as covered by the engine release.',
         embeddedIn: 'public/berserk/berserk-emscripten.data',
       },
     ],
@@ -64,6 +66,7 @@ const CONFIGS = {
         processedPath: '/processed.bin',
         processedSha256: '691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4',
         processingCommand: 'tools/process_net false',
+        licenseNote: 'Yoshie2000/PlentyNetworks is licensed under GPL-3.0; preserve GPL-3.0 notices with the network asset.',
         embeddedIn: 'public/plentychess/plentychess-emscripten.data',
       },
     ],
@@ -80,9 +83,11 @@ function argValue(name) {
 }
 
 function toolchainSummary() {
+  const explicit = argValue('--toolchain') ?? process.env.ENGINE_ARTIFACT_TOOLCHAIN;
+  if (explicit) return explicit;
   const emcc = spawnSync('emcc', ['--version'], { encoding: 'utf8' });
   if (emcc.status === 0) return emcc.stdout.split('\n')[0]?.trim() || 'emcc available';
-  return 'emcc not found on PATH while writing manifest';
+  return 'emcc not found on PATH while writing manifest; pass --toolchain or ENGINE_ARTIFACT_TOOLCHAIN for release manifests';
 }
 
 function compressionSummary(buf) {
@@ -104,16 +109,25 @@ function sumArtifactBytes(artifacts, field) {
   }, 0);
 }
 
-async function fileEntry(path, allowMissing) {
+async function fileMetadata(path, allowMissing, label = 'artifact') {
   if (!existsSync(path)) {
     if (allowMissing) return { path, missing: true };
-    throw new Error(`Missing artifact: ${path}`);
+    throw new Error(`Missing ${label}: ${path}`);
   }
   const buf = await readFile(path);
   return {
     path,
     bytes: buf.byteLength,
     sha256: createHash('sha256').update(buf).digest('hex'),
+  };
+}
+
+async function fileEntry(path, allowMissing) {
+  const entry = await fileMetadata(path, allowMissing, 'artifact');
+  if (entry.missing) return entry;
+  const buf = await readFile(path);
+  return {
+    ...entry,
     compression: compressionSummary(buf),
   };
 }
@@ -126,6 +140,8 @@ if (!config) {
 } else {
   const allowMissing = process.argv.includes('--allow-missing');
   const out = argValue('--out') ?? `artifacts/engine-manifests/${engine}-${config.flavor}.manifest.json`;
+  const sourceArchivePath = argValue('--source-archive');
+  const sourceArchiveUrl = argValue('--source-url');
   const artifacts = await Promise.all(config.artifacts.map((p) => fileEntry(p, allowMissing)));
   const totalBytes = sumArtifactBytes(artifacts, 'bytes');
   const totalGzipBytes = sumArtifactBytes(artifacts, 'gzip');
@@ -144,12 +160,19 @@ if (!config) {
       gzipRatio: totalBytes ? Number((totalGzipBytes / totalBytes).toFixed(4)) : null,
       brotliRatio: totalBytes ? Number((totalBrotliBytes / totalBytes).toFixed(4)) : null,
     },
-    sourceArchive: {
-      required: true,
-      url: null,
-      sha256: null,
-      note: 'Fill before public distribution; source archive must match this manifest.',
-    },
+    sourceArchive: sourceArchivePath
+      ? {
+          required: true,
+          ...(await fileMetadata(sourceArchivePath, false, 'source archive')),
+          url: sourceArchiveUrl ?? null,
+          note: sourceArchiveUrl ? 'Source archive recorded for public distribution.' : 'Source archive hash recorded; add --source-url before public distribution.',
+        }
+      : {
+          required: true,
+          url: null,
+          sha256: null,
+          note: 'Fill before public distribution; source archive must match this manifest.',
+        },
   };
   await mkdir(dirname(out), { recursive: true });
   await writeFile(out, `${JSON.stringify(manifest, null, 2)}\n`);

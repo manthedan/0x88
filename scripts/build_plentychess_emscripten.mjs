@@ -21,6 +21,7 @@ const processedName = process.env.PLENTYCHESS_PROCESSED_NETWORK ?? 'processed.bi
 const processedPath = path.join(engineDir, processedName);
 const emsdkImage = process.env.PLENTYCHESS_EMSDK_IMAGE ?? 'emscripten/emsdk:latest';
 const nativeArch = process.env.PLENTYCHESS_NATIVE_ARCH ?? (process.arch === 'arm64' ? 'arm64' : 'generic');
+const skipGit = process.env.PLENTYCHESS_SKIP_GIT === '1';
 
 function run(command, args, options = {}) {
   console.log(`$ ${command} ${args.join(' ')}`);
@@ -49,13 +50,17 @@ fs.mkdirSync(path.dirname(engineDir), { recursive: true });
 fs.mkdirSync(netDir, { recursive: true });
 fs.mkdirSync(path.dirname(jsOut), { recursive: true });
 
-if (!fs.existsSync(path.join(engineDir, '.git'))) {
-  run('git', ['clone', repo, engineDir]);
+if (!skipGit) {
+  if (!fs.existsSync(path.join(engineDir, '.git'))) {
+    run('git', ['clone', repo, engineDir]);
+  }
+  run('git', ['fetch', '--tags', 'origin'], { cwd: engineDir });
+  run('git', ['checkout', ref], { cwd: engineDir });
+  run('git', ['reset', '--hard'], { cwd: engineDir });
+  run('git', ['clean', '-fdx'], { cwd: engineDir });
+} else if (!fs.existsSync(path.join(engineDir, 'src')) || !fs.existsSync(path.join(engineDir, 'tools'))) {
+  throw new Error(`PLENTYCHESS_SKIP_GIT=1 requires an unpacked PlentyChess source tree at ${engineDir}`);
 }
-run('git', ['fetch', '--tags', 'origin'], { cwd: engineDir });
-run('git', ['checkout', ref], { cwd: engineDir });
-run('git', ['reset', '--hard'], { cwd: engineDir });
-run('git', ['clean', '-fdx'], { cwd: engineDir });
 
 const netPath = path.join(netDir, netName);
 if (!fs.existsSync(netPath)) {
