@@ -204,7 +204,7 @@ Use this checklist before adding a family to the staged selectors.
    - Direct browser API only when UCI overhead/control limitations are proven blockers.
 4. **Define variants in one place.** Add variant metadata with `key`, `label`, artifact URL(s), backend kind, note, asset check behavior, and default/fallback rule. Keep UI labels and URL params stable.
 5. **Add strength semantics.** Decide whether the UI knob means visits, depth, movetime, nodes, or skill. Clamp ranges and document default values.
-6. **Implement lifecycle contract.** Each adapter should state how it handles `uci/newgame/isready`, hash reset, repeated searches, cancellation, worker disposal, model/NNUE caching, and errors.
+6. **Implement lifecycle contract.** Each adapter should implement `src/lc0/browserUciEngine.ts` and follow `docs/browser_uci_adapter_contract.md`: `prewarm()`, `search()`/`bestMove()`, `analyze()`, `newGame()`, stop/abort behavior, `dispose()`, runtime status/labels, asset checks, and missing-asset UI state.
 7. **Add asset policy.** Decide whether blobs are committed, symlinked, generated locally, or published by deployment. For GPL/AGPL engines, document source/archive obligations next to the build script.
 8. **Smoke before UI promotion.** Minimum: startpos bestmove, one non-startpos bestmove, abort/dispose behavior, asset-missing UI path, and one shallow arena or analysis run.
 9. **Benchmark with a shared protocol.** Use rotated multi-FEN suites, cold + warm separation, persistent hash clearing/new-game reset, depth and movetime budgets where applicable, raw JSON output, and browser runtime metadata.

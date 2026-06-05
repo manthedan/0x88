@@ -1,3 +1,5 @@
+import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
+
 /**
  * Stockfish "lite" opponent for the engine battle. Drives the single-threaded
  * stockfish-18-lite WASM build (served from /stockfish/) over its UCI worker
@@ -74,15 +76,7 @@ function threadsCommand(threads: number): string {
   return `setoption name Threads value ${Math.max(1, Math.min(32, Math.floor(threads)))}`;
 }
 
-export interface StockfishInfoLine {
-  multipv: number;
-  depth: number;
-  scoreCp?: number;
-  mateIn?: number;
-  nodes?: number;
-  nps?: number;
-  pvUci: string[];
-}
+export interface StockfishInfoLine extends BrowserUciInfoLine {}
 
 /** Parse a UCI `info ... multipv K ... score ... pv ...` line, or null if it lacks a PV. */
 export function parseStockfishInfo(line: string): StockfishInfoLine | null {
@@ -105,7 +99,13 @@ export function parseStockfishInfo(line: string): StockfishInfoLine | null {
   };
 }
 
-export class StockfishEngine {
+function abortError(): Error {
+  const error = new Error('Stockfish search aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+export class StockfishEngine implements BrowserUciEngine {
   readonly name = 'stockfish-lite';
   private worker: Worker | null = null;
   private readyPromise: Promise<void> | null = null;
@@ -113,6 +113,8 @@ export class StockfishEngine {
   private rejectMove: ((error: Error) => void) | null = null;
   private resolveAnalyze: ((lines: StockfishInfoLine[]) => void) | null = null;
   private rejectAnalyze: ((error: Error) => void) | null = null;
+  private resolveReady: (() => void) | null = null;
+  private rejectReady: ((error: Error) => void) | null = null;
   private analyzeLines: Map<number, StockfishInfoLine> | null = null;
   private lastInfoLines: StockfishInfoLine[] = [];
   private queueTail: Promise<void> = Promise.resolve();
@@ -151,10 +153,13 @@ export class StockfishEngine {
   private failActive(error: Error): void {
     const rejectMove = this.rejectMove;
     const rejectAnalyze = this.rejectAnalyze;
+    const rejectReady = this.rejectReady;
     this.resolveMove = null;
     this.rejectMove = null;
     this.resolveAnalyze = null;
     this.rejectAnalyze = null;
+    this.resolveReady = null;
+    this.rejectReady = null;
     this.analyzeLines = null;
     this.lastInfoLines = [];
     this.worker?.terminate();
@@ -162,6 +167,7 @@ export class StockfishEngine {
     this.readyPromise = null;
     rejectMove?.(error);
     rejectAnalyze?.(error);
+    rejectReady?.(error);
   }
 
   private init(): Promise<void> {
@@ -173,7 +179,17 @@ export class StockfishEngine {
         worker.onmessage = (event: MessageEvent) => {
           const line = typeof event.data === 'string' ? event.data : String(event.data);
           if (line === 'uciok') { this.applyOptions(); worker.postMessage('isready'); return; }
-          if (line === 'readyok') { resolve(); return; }
+          if (line === 'readyok') {
+            if (this.resolveReady) {
+              const resolveReady = this.resolveReady;
+              this.resolveReady = null;
+              this.rejectReady = null;
+              resolveReady();
+              return;
+            }
+            resolve();
+            return;
+          }
           if (line.startsWith('info ') && this.analyzeLines) {
             const info = parseStockfishInfo(line);
             if (info) this.analyzeLines.set(info.multipv, info);
@@ -214,12 +230,71 @@ export class StockfishEngine {
     return this.readyPromise;
   }
 
+  private waitReady(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return Promise.reject(abortError());
+    if (!this.worker) return Promise.reject(new Error('Stockfish worker was not initialized'));
+    return new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        this.resolveReady = null;
+        this.rejectReady = null;
+        reject(abortError());
+      };
+      this.resolveReady = () => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      };
+      this.rejectReady = (error) => {
+        signal?.removeEventListener('abort', onAbort);
+        reject(error);
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      this.worker!.postMessage('isready');
+    });
+  }
+
+  /** Start the worker and complete the UCI/isready handshake before a real search. */
+  async prewarm(signal?: AbortSignal): Promise<void> {
+    return this.runExclusive(async () => {
+      await this.init();
+      if (signal?.aborted) throw abortError();
+    });
+  }
+
+  /** Reset Stockfish state/hash for a fresh game and wait for `readyok`. */
+  async newGame(signal?: AbortSignal): Promise<void> {
+    return this.runExclusive(async () => {
+      await this.init();
+      if (!this.worker || signal?.aborted) throw abortError();
+      this.worker.postMessage('ucinewgame');
+      await this.waitReady(signal);
+      this.lastInfoLines = [];
+    });
+  }
+
+  runtimeStatus(): BrowserUciRuntimeStatus {
+    return {
+      mode: this.worker ? 'worker' : 'idle',
+      persistentAvailable: false,
+      persistentDisabled: false,
+      forceOneShot: false,
+      workerUrl: this.url,
+    };
+  }
+
+  runtimeLabel(): string {
+    return this.worker ? 'worker ready' : 'worker idle';
+  }
+
   /** Last parsed UCI info/PV lines from `bestMove` or `analyze`, sorted by MultiPV rank. */
   lastInfo(): StockfishInfoLine[] {
     return this.lastInfoLines.map((entry) => ({ ...entry, pvUci: [...entry.pvUci] }));
   }
 
   /** Best move for a FEN. Aborting sends `stop`, so Stockfish returns its current best. */
+  async search(fen: string, signal?: AbortSignal): Promise<string | null> {
+    return this.bestMove(fen, signal);
+  }
+
   async bestMove(fen: string, signal?: AbortSignal): Promise<string | null> {
     return this.runExclusive(async () => {
       await this.init();
@@ -249,7 +324,7 @@ export class StockfishEngine {
   }
 
   /** MultiPV analysis of a FEN: returns one info line per PV, sorted by rank. */
-  async analyze(fen: string, opts: { multipv?: number; depth?: number; movetimeMs?: number; signal?: AbortSignal } = {}): Promise<StockfishInfoLine[]> {
+  async analyze(fen: string, opts: BrowserUciAnalysisOptions = {}): Promise<StockfishInfoLine[]> {
     return this.runExclusive(async () => {
       await this.init();
       if (!this.worker || opts.signal?.aborted) return [];
@@ -284,6 +359,8 @@ export class StockfishEngine {
     this.rejectMove = null;
     this.resolveAnalyze = null;
     this.rejectAnalyze = null;
+    this.resolveReady = null;
+    this.rejectReady = null;
     this.analyzeLines = null;
     this.lastInfoLines = [];
   }

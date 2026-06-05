@@ -1,3 +1,4 @@
+import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
 import type { RecklessOptions } from './recklessEngine.ts';
 
@@ -97,7 +98,7 @@ export function canUsePersistentViridithasWasi(): boolean {
 }
 
 /** Experimental WASI adapter for patched Viridithas. */
-export class ViridithasEngine {
+export class ViridithasEngine implements BrowserUciEngine {
   readonly name = 'viridithas-wasi';
   private worker: Worker | null = null;
   private workerMode: 'oneshot' | 'persistent' | null = null;
@@ -396,6 +397,25 @@ export class ViridithasEngine {
     return this.lastInfoLines.map((entry) => ({ ...entry, pvUci: [...entry.pvUci] }));
   }
 
+  /**
+   * Start and initialize the persistent WASI/UCI process before the first real
+   * search when isolation allows it. One-shot mode has nothing useful to keep
+   * warm, so it returns after checking the requested runtime policy.
+   */
+  async prewarm(signal?: AbortSignal): Promise<void> {
+    return this.runExclusive(async () => {
+      if (this.runtimeOptions.forceOneShot || this.persistentDisabled || !canUsePersistentViridithasWasi()) return;
+      try {
+        const result = await this.runCommandsUntil(['uci', 'isready'], signal, (line, stream) => stream === 'stdout' && line === 'readyok');
+        if (result.exitCode !== 0) throw new Error(`Viridithas prewarm exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
+      } catch (error) {
+        if ((error as Error).name === 'AbortError' || this.runtimeOptions.disablePersistentFallback) throw error;
+        this.persistentDisabled = true;
+        this.disposeWorker();
+      }
+    });
+  }
+
   runtimeStatus(): ViridithasRuntimeStatus {
     return {
       mode: this.workerMode ?? 'idle',
@@ -424,6 +444,10 @@ export class ViridithasEngine {
       if (result.exitCode !== 0) throw new Error(`Viridithas new game exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = [];
     });
+  }
+
+  async search(fen: string, signal?: AbortSignal): Promise<string | null> {
+    return this.bestMove(fen, signal);
   }
 
   async bestMove(fen: string, signal?: AbortSignal): Promise<string | null> {
