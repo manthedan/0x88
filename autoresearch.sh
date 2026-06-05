@@ -20,8 +20,12 @@ ATTR_ITERS="${LC0_AR_ATTR_ITERS:-8}"
 ATTR_WARMUP="${LC0_AR_ATTR_WARMUP:-1}"
 ATTR_FIXTURE_LIMIT="${LC0_AR_ATTR_FIXTURE_LIMIT:-$MAX_POSITIONS}"
 INPUT_BACKEND="${LC0_AR_INPUT_BACKEND:-wasm}"
-ENCODER_KERNEL="${LC0_AR_ENCODER_KERNEL:-hand}"
+ENCODER_KERNEL="${LC0_AR_ENCODER_KERNEL:-mixed-tvm-ffn}"
 LEGAL_PRIORS_BACKEND="${LC0_AR_LEGAL_PRIORS_BACKEND:-js}"
+DRIFT_GUARD="${LC0_AR_DRIFT_GUARD:-1}"
+DRIFT_LIMIT="${LC0_AR_DRIFT_LIMIT:-3}"
+DRIFT_F32_WDL_MAX="${LC0_AR_DRIFT_F32_WDL_MAX:-0.005}"
+DRIFT_F32_TOP_PRIOR_MAX="${LC0_AR_DRIFT_F32_TOP_PRIOR_MAX:-0.01}"
 CLEAN_BROWSER_HARNESS="${LC0_AR_CLEAN_BROWSER_HARNESS:-1}"
 CLEAN_BROWSER_WAIT_SECONDS="${LC0_AR_CLEAN_BROWSER_WAIT_SECONDS:-20}"
 
@@ -149,3 +153,45 @@ const keys = Object.keys(perRun[0]).filter((key) => key !== 'path');
 for (const key of keys) console.log(`METRIC ${key}=${median(perRun.map((run) => run[key]))}`);
 console.log(`ARTIFACT latest=${perRun.at(-1).path}`);
 NODE
+
+if [[ "$DRIFT_GUARD" == "1" && "$RUNTIME" != "onnx" ]]; then
+  drift_out="$OUT_DIR/${RUN_ID}_drift.json"
+  head_backend="ort"
+  if [[ "$RUNTIME" == "hybrid-wgsl-heads" ]]; then head_backend="wgsl"; fi
+  node --experimental-strip-types scripts/lc0_browser_hybrid_drift.mjs \
+    --limit "$DRIFT_LIMIT" \
+    --head-backend "$head_backend" \
+    --input-backend "$INPUT_BACKEND" \
+    --encoder-kernel "$ENCODER_KERNEL" \
+    --legal-priors-backend "$LEGAL_PRIORS_BACKEND" \
+    --timeout "$TIMEOUT_MS" >"$drift_out"
+  node - "$drift_out" "$DRIFT_F32_WDL_MAX" "$DRIFT_F32_TOP_PRIOR_MAX" <<'NODE'
+const fs = require('fs');
+const [path, wdlLimitRaw, priorLimitRaw] = process.argv.slice(2);
+const raw = fs.readFileSync(path, 'utf8');
+const start = raw.indexOf('{');
+if (start < 0) throw new Error(`drift report has no JSON object: ${path}`);
+const report = JSON.parse(raw.slice(start));
+const summary = report.summary ?? {};
+const fixtures = Number(report.fixtures ?? 0);
+const f32BestMoveMatches = Number(summary.f32BestMoveMatches ?? 0);
+const nativeBestMoveMatches = Number(summary.nativeBestMoveMatches ?? 0);
+const f32WdlMaxAbsDiff = Number(summary.f32WdlMaxAbsDiff ?? Infinity);
+const f32TopPriorMaxAbsDiff = Number(summary.f32TopPriorMaxAbsDiff ?? Infinity);
+const nativeTopPriorMaxAbsDiff = Number(summary.nativeTopPriorMaxAbsDiff ?? Infinity);
+console.log(`METRIC drift_fixtures=${fixtures}`);
+console.log(`METRIC drift_f32_best_move_matches=${f32BestMoveMatches}`);
+console.log(`METRIC drift_native_best_move_matches=${nativeBestMoveMatches}`);
+console.log(`METRIC drift_f32_wdl_max_abs_diff=${f32WdlMaxAbsDiff}`);
+console.log(`METRIC drift_f32_top_prior_max_abs_diff=${f32TopPriorMaxAbsDiff}`);
+console.log(`METRIC drift_native_top_prior_max_abs_diff=${nativeTopPriorMaxAbsDiff}`);
+console.log(`ARTIFACT drift=${path}`);
+const wdlLimit = Number(wdlLimitRaw);
+const priorLimit = Number(priorLimitRaw);
+if (fixtures <= 0) throw new Error('drift guard evaluated no fixtures');
+if (f32BestMoveMatches !== fixtures) throw new Error(`drift guard failed: f32 best-move matches ${f32BestMoveMatches}/${fixtures}`);
+if (nativeBestMoveMatches !== fixtures) throw new Error(`drift guard failed: native best-move matches ${nativeBestMoveMatches}/${fixtures}`);
+if (!(f32WdlMaxAbsDiff <= wdlLimit)) throw new Error(`drift guard failed: f32 WDL max abs diff ${f32WdlMaxAbsDiff} > ${wdlLimit}`);
+if (!(f32TopPriorMaxAbsDiff <= priorLimit)) throw new Error(`drift guard failed: f32 top-prior max abs diff ${f32TopPriorMaxAbsDiff} > ${priorLimit}`);
+NODE
+fi
