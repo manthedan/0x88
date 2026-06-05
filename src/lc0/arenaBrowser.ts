@@ -20,9 +20,12 @@ import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEn
 import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
-import { Bt4WorkerSearcher, bt4LoadWarning, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
+import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
 
 type Ground = ReturnType<typeof Chessground>;
+type EngineFamily = 'lc0' | 'sf' | 'reckless' | 'viridithas';
+type SeatId = 'A' | 'B';
+interface EngineRow { family: EngineFamily; variant: string; strength: number; }
 interface ArenaEngine {
   id: string;
   name: string;
@@ -30,7 +33,7 @@ interface ArenaEngine {
   warmup?(signal: AbortSignal): Promise<void>;
 }
 interface GameRecord { pgn: string; }
-interface MatchGame { whiteSeat: 'A' | 'B'; opening: ArenaOpening; }
+interface MatchGame { whiteSeat: SeatId; opening: ArenaOpening; }
 interface MatchScore { a: number; b: number; aWins: number; bWins: number; draws: number; games: number; }
 interface Lc0TreeTelemetry {
   engineName: string;
@@ -90,6 +93,7 @@ let boardWhiteId: string | null = null;
 let boardBlackId: string | null = null;
 let boardWhiteName: string | null = null;
 let boardBlackName: string | null = null;
+let loadingLc0 = false;
 let running = false;
 let abort: AbortController | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
@@ -97,8 +101,8 @@ let searcher: Lc0PuctSearcher | null = null;
 let lc0Cache: CachedLc0Evaluator | null = null;
 let stockfishLite: StockfishEngine | null = null;
 let stockfishFull: StockfishEngine | null = null;
-let reckless: RecklessEngine | null = null;
-let viridithas: ViridithasEngine | null = null;
+const recklessByVariant = new Map<string, RecklessEngine>();
+const viridithasByVariant = new Map<string, ViridithasEngine>();
 // Lc0 BT4 runs in its own worker (lazy, WebGPU-gated, disposable). See bt4Engine.ts.
 const bt4 = new Bt4WorkerSearcher();
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
@@ -112,6 +116,10 @@ const engineOutputs = new Map<string, EngineOutputSnapshot>();
 const thinkingEngineIds = new Set<string>();
 let activeEngineIds: string[] = [];
 const games: GameRecord[] = [];
+const seatRows: Record<SeatId, EngineRow> = {
+  A: { family: 'lc0', variant: 'small', strength: 100 },
+  B: { family: 'sf', variant: 'lite', strength: 8 },
+};
 
 function el(id: string): HTMLElement {
   const node = document.getElementById(id);
@@ -386,28 +394,93 @@ function renderBoard() {
   renderEngineOutputs();
 }
 
-// The arena is a two-seat head-to-head (same engine in both seats is allowed and
-// behaves as Lc0-style self-play: one shared model + one shared, reused search
-// tree). A multi-engine tournament mode (round-robin/gauntlet/standings) is a
-// planned follow-up — see the git history for the prior implementation.
-function seatEngineId(seat: 'A' | 'B'): string {
-  return selectEl(seat === 'A' ? 'seatA' : 'seatB').value;
+// The arena is a two-seat head-to-head. Each seat uses the same staged selector
+// pattern as the analysis page: family → variant → strength.
+function strengthMeta(family: EngineFamily): { unit: string; min: number; max: number; def: number } {
+  if (family === 'lc0') return { unit: 'visits', min: 1, max: 100000, def: 100 };
+  if (family === 'sf') return { unit: 'depth', min: 1, max: 40, def: 8 };
+  if (family === 'viridithas') return { unit: 'depth', min: 1, max: 20, def: 6 };
+  return { unit: 'depth', min: 1, max: 30, def: 4 };
+}
+
+function defaultVariant(family: EngineFamily): string {
+  if (family === 'reckless') return REQUESTED_RECKLESS_VARIANT.key;
+  if (family === 'viridithas') return REQUESTED_VIRIDITHAS_VARIANT.key;
+  return family === 'sf' ? 'lite' : 'small';
+}
+
+function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
+  if (family === 'lc0') return [{ value: 'small', label: 'Small' }, { value: 'bt4', label: 'BT4', disabled: !bt4SupportedSync() }];
+  if (family === 'sf') return [{ value: 'lite', label: 'Lite' }, { value: 'full', label: 'Full' }];
+  if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
+  return availableRecklessVariants().map((v) => ({ value: v.key, label: v.label }));
+}
+
+function clampStrength(row: EngineRow): void {
+  const meta = strengthMeta(row.family);
+  row.strength = Math.max(meta.min, Math.min(meta.max, Math.floor(Number(row.strength) || meta.def)));
+}
+
+function rowLabel(row: EngineRow): string {
+  if (row.family === 'lc0') return row.variant === 'bt4' ? 'Lc0 BT4' : 'Lc0';
+  if (row.family === 'sf') return row.variant === 'lite' ? 'Stockfish Lite' : 'Stockfish';
+  if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
+  return recklessVariantForKey(row.variant).label;
+}
+
+function engineIdForRow(row: EngineRow): string {
+  return `${row.family}:${row.variant}:${row.strength}`;
+}
+
+function activeSeatRows(): EngineRow[] {
+  return [seatRows.A, seatRows.B];
+}
+
+function seatEngineId(seat: SeatId): string {
+  return engineIdForRow(seatRows[seat]);
+}
+
+function renderSeatSelectors(): void {
+  const families: [EngineFamily, string][] = [['lc0', 'Lc0'], ['sf', 'Stockfish'], ['reckless', 'Reckless'], ['viridithas', 'Viridithas']];
+  el('arenaSeatList').innerHTML = (['A', 'B'] as const).map((seat) => {
+    const row = seatRows[seat];
+    const meta = strengthMeta(row.family);
+    const famSel = families.map(([value, label]) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
+    const varSel = variantOptions(row.family).map((option) => `<option value="${option.value}"${row.variant === option.value ? ' selected' : ''}${option.disabled ? ' disabled' : ''}>${htmlEscape(option.label)}</option>`).join('');
+    const label = `Engine ${seat === 'A' ? '1' : '2'}`;
+    return `<div class="engine-row seat-row" data-seat="${seat}"><span class="seat-name">${label}</span><select class="seat-fam" data-seat="${seat}" aria-label="${label} family">${famSel}</select><span class="arrow">→</span><select class="seat-var" data-seat="${seat}" aria-label="${label} variant">${varSel}</select><span class="arrow">→</span><input class="seat-strength row-strength" data-seat="${seat}" aria-label="${label} strength" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span></div>`;
+  }).join('');
+}
+
+function syncSeatRowsFromDom(): void {
+  for (const seat of ['A', 'B'] as const) {
+    const host = el('arenaSeatList');
+    const family = host.querySelector<HTMLSelectElement>(`.seat-fam[data-seat="${seat}"]`)?.value as EngineFamily | undefined;
+    if (family === 'lc0' || family === 'sf' || family === 'reckless' || family === 'viridithas') seatRows[seat].family = family;
+    const variant = host.querySelector<HTMLSelectElement>(`.seat-var[data-seat="${seat}"]`)?.value;
+    if (variant) seatRows[seat].variant = variant;
+    const strength = host.querySelector<HTMLInputElement>(`.seat-strength[data-seat="${seat}"]`)?.value;
+    if (strength != null) seatRows[seat].strength = Number(strength);
+    clampStrength(seatRows[seat]);
+  }
 }
 
 function populateSeats(): void {
   const options = [...engines.values()].map((engine) => `<option value="${htmlEscape(engine.id)}">${htmlEscape(engine.name)}</option>`).join('');
-  for (const id of ['seatA', 'seatB'] as const) {
-    const select = selectEl(id);
-    const prev = select.value;
-    select.innerHTML = options;
-    select.value = engines.has(prev) ? prev : id === 'seatB' ? 'sf-lite' : 'lc0';
-  }
+  selectEl('seatA').innerHTML = options;
+  selectEl('seatB').innerHTML = options;
+  selectEl('seatA').value = seatEngineId('A');
+  selectEl('seatB').value = seatEngineId('B');
+  renderSeatSelectors();
 }
 
 function refreshSeatControls(): void {
   selectEl('seatA').disabled = running;
   selectEl('seatB').disabled = running;
-  selectEl('lc0RuntimeSelect').disabled = running;
+  selectEl('lc0RuntimeSelect').disabled = running || loadingLc0;
+  for (const selector of ['.seat-fam', '.seat-var', '.seat-strength']) {
+    for (const node of el('arenaSeatList').querySelectorAll<HTMLInputElement | HTMLSelectElement>(selector)) node.disabled = running;
+  }
 }
 
 function arenaBudgetMode(): 'fixed' | 'movetime' {
@@ -425,22 +498,6 @@ function arenaCacheEntries(): number {
 function stockfishThreads(): number {
   const requested = Math.max(1, Math.min(32, Math.floor(Number(inputEl('stockfishThreadsInput').value) || 1)));
   return threadedStockfishAvailable() ? requested : 1;
-}
-
-function arenaLc0Visits(): number {
-  return Math.max(1, Math.min(100000, Math.floor(Number(inputEl('lc0VisitsInput').value) || 100)));
-}
-
-function arenaSfDepth(): number {
-  return Math.max(1, Math.min(40, Math.floor(Number(inputEl('sfDepthInput').value) || 8)));
-}
-
-function arenaRecklessDepth(): number {
-  return Math.max(1, Math.min(20, Math.floor(Number(inputEl('recklessDepthInput').value) || 4)));
-}
-
-function arenaViridithasDepth(): number {
-  return Math.max(1, Math.min(20, Math.floor(Number(inputEl('viridithasDepthInput').value) || 6)));
 }
 
 function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): string {
@@ -502,7 +559,7 @@ function renderSearchTelemetryInfo(): void {
 }
 
 function isLc0SearchEngine(engineId: string): boolean {
-  return engineId.startsWith('lc0-s');
+  return engineId.startsWith('lc0:small:');
 }
 
 function childForRootMove(result: Lc0SearchResult | undefined, uci: string): PuctNode | null {
@@ -664,49 +721,62 @@ function disposeStockfish(): void {
   stockfishFull = null;
 }
 
-function selectedRecklessVariant(): RecklessVariant {
-  const key = normalizeRecklessVariant(selectEl('recklessVariantSelect').value);
+function availableRecklessVariants(): RecklessVariant[] {
+  return REQUESTED_RECKLESS_VARIANT.key === 'custom' ? [...RECKLESS_VARIANTS, REQUESTED_RECKLESS_VARIANT] : [...RECKLESS_VARIANTS];
+}
+
+function recklessVariantForKey(variantKey: string): RecklessVariant {
+  const key = normalizeRecklessVariant(variantKey);
   if (key === 'custom' && REQUESTED_RECKLESS_VARIANT.key === 'custom') return REQUESTED_RECKLESS_VARIANT;
   return recklessVariantByKey(key);
 }
 
-function recklessName(depth: number): string {
-  return `${selectedRecklessVariant().label} d${depth}`;
+function recklessCacheKey(variant: RecklessVariant): string {
+  return `${variant.key}:${variant.wasmUrl}:${variant.nnueUrl ?? ''}:${variant.backend ?? 'wasi'}`;
 }
 
-function prewarmReckless(): void {
-  const engine = reckless;
-  if (!engine) return;
+function getRecklessFor(variantKey: string): RecklessEngine {
+  const variant = recklessVariantForKey(variantKey);
+  const key = recklessCacheKey(variant);
+  let engine = recklessByVariant.get(key);
+  if (!engine) {
+    engine = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, onStatus: renderRecklessRuntimeInfo });
+    recklessByVariant.set(key, engine);
+  }
+  return engine;
+}
+
+function prewarmReckless(engine: RecklessEngine): void {
   void engine.prewarm()
-    .then(() => { if (reckless === engine) renderRecklessRuntimeInfo(); })
+    .then(renderRecklessRuntimeInfo)
     .catch((error) => {
       if ((error as Error).name !== 'AbortError') console.warn('Reckless prewarm failed', error);
-      if (reckless === engine) renderRecklessRuntimeInfo();
+      renderRecklessRuntimeInfo();
     });
 }
 
 function renderRecklessRuntimeInfo(): void {
-  const info = el('recklessRuntimeInfo');
-  const variant = selectedRecklessVariant();
-  const status = reckless?.runtimeStatus();
-  const mode = reckless?.runtimeLabel() ?? (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated ? 'persistent available' : 'one-shot fallback');
+  const rows = activeSeatRows().filter((row) => row.family === 'reckless');
+  if (!rows.length) { el('recklessRuntimeInfo').textContent = 'Reckless: not selected'; return; }
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
-  const asset = recklessVariantAssetStatus(variant);
-  if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
-  const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
-  const assetUrlText = variant.nnueUrl ? `${variant.wasmUrl} + ${variant.nnueUrl}` : variant.wasmUrl;
-  info.textContent = `Reckless: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${assetUrlText}`;
-  const loadText = formatRecklessBrowserApiLoadStatus(status?.browserApiLoad);
-  if (loadText) info.textContent += ` · ${loadText}`;
-  if (status?.persistentDisabled) info.textContent += ' · persistent disabled after fallback';
-  if (asset === 'missing') info.textContent += ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, reckless:build-browser-api-simd-external, or reckless:build-lite-wasi';
+  const parts = rows.map((row) => {
+    const variant = recklessVariantForKey(row.variant);
+    const engine = recklessByVariant.get(recklessCacheKey(variant));
+    const status = engine?.runtimeStatus();
+    const mode = engine?.runtimeLabel() ?? (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated ? 'persistent available' : 'one-shot fallback');
+    const asset = recklessVariantAssetStatus(variant);
+    if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
+    const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+    const loadText = formatRecklessBrowserApiLoadStatus(status?.browserApiLoad);
+    return `${variant.label} d${row.strength} · ${mode} · ${sab} · ${assetText}${loadText ? ` · ${loadText}` : ''}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
+  });
+  el('recklessRuntimeInfo').textContent = `Reckless: ${[...new Set(parts)].join(' | ')}`;
 }
 
 function refreshRecklessVariantUi(): void {
   const select = selectEl('recklessVariantSelect');
   if (!select.options.length) {
-    const variants = REQUESTED_RECKLESS_VARIANT.key === 'custom' ? [...RECKLESS_VARIANTS, REQUESTED_RECKLESS_VARIANT] : [...RECKLESS_VARIANTS];
-    select.innerHTML = variants.map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
+    select.innerHTML = availableRecklessVariants().map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
   }
   select.disabled = running;
   renderRecklessRuntimeInfo();
@@ -716,28 +786,42 @@ function availableViridithasVariants(): ViridithasVariant[] {
   return REQUESTED_VIRIDITHAS_VARIANT.key === 'custom' ? [...VIRIDITHAS_VARIANTS, REQUESTED_VIRIDITHAS_VARIANT] : [...VIRIDITHAS_VARIANTS];
 }
 
-function selectedViridithasVariant(): ViridithasVariant {
-  const key = normalizeViridithasVariant(selectEl('viridithasVariantSelect').value);
+function viridithasVariantForKey(variantKey: string): ViridithasVariant {
+  const key = normalizeViridithasVariant(variantKey);
   if (key === 'custom' && REQUESTED_VIRIDITHAS_VARIANT.key === 'custom') return REQUESTED_VIRIDITHAS_VARIANT;
   return viridithasVariantByKey(key);
 }
 
-function viridithasName(depth: number): string {
-  return `${selectedViridithasVariant().label} d${depth}`;
+function viridithasCacheKey(variant: ViridithasVariant): string {
+  return `${variant.key}:${variant.wasmUrl}`;
+}
+
+function getViridithasFor(variantKey: string): ViridithasEngine {
+  const variant = viridithasVariantForKey(variantKey);
+  const key = viridithasCacheKey(variant);
+  let engine = viridithasByVariant.get(key);
+  if (!engine) {
+    engine = new ViridithasEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl);
+    viridithasByVariant.set(key, engine);
+  }
+  return engine;
 }
 
 function renderViridithasRuntimeInfo(): void {
-  const info = el('viridithasRuntimeInfo');
-  const variant = selectedViridithasVariant();
-  const status = viridithas?.runtimeStatus();
-  const mode = viridithas?.runtimeLabel() ?? (canUsePersistentViridithasWasi() ? 'persistent available' : 'one-shot fallback');
+  const rows = activeSeatRows().filter((row) => row.family === 'viridithas');
+  if (!rows.length) { el('viridithasRuntimeInfo').textContent = 'Viridithas: not selected'; return; }
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
-  const asset = viridithasVariantAssetStatus(variant);
-  if (asset === 'unknown') void checkViridithasVariantAsset(variant, renderViridithasRuntimeInfo);
-  const assetText = asset === 'ok' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
-  info.textContent = `Viridithas: ${variant.label} · ${mode} · ${sab} · ${assetText} · ${status?.wasmUrl ?? variant.wasmUrl}`;
-  if (status?.persistentDisabled) info.textContent += ' · persistent disabled after fallback';
-  if (asset === 'missing') info.textContent += ' · build locally with npm run viridithas:build-wasi or viridithas:build-simd-wasi';
+  const parts = rows.map((row) => {
+    const variant = viridithasVariantForKey(row.variant);
+    const engine = viridithasByVariant.get(viridithasCacheKey(variant));
+    const status = engine?.runtimeStatus();
+    const mode = engine?.runtimeLabel() ?? (canUsePersistentViridithasWasi() ? 'persistent available' : 'one-shot fallback');
+    const asset = viridithasVariantAssetStatus(variant);
+    if (asset === 'unknown') void checkViridithasVariantAsset(variant, renderViridithasRuntimeInfo);
+    const assetText = asset === 'ok' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+    return `${variant.label} d${row.strength} · ${mode} · ${sab} · ${assetText}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
+  });
+  el('viridithasRuntimeInfo').textContent = `Viridithas: ${[...new Set(parts)].join(' | ')}`;
 }
 
 function refreshViridithasVariantUi(): void {
@@ -754,18 +838,17 @@ function refreshStockfishControls(): void {
   inputEl('stockfishThreadsInput').value = String(stockfishThreads());
 }
 
-// Lc0 BT4 is WebGPU-only; disable the checkbox (with reason) when WebGPU is unusable.
+// Lc0 BT4 is WebGPU-only; disable/downgrade its staged option when WebGPU is unusable.
 async function refreshBt4Availability(): Promise<void> {
   const ok = await probeBt4Support();
-  for (const id of ['seatA', 'seatB'] as const) {
-    const select = selectEl(id);
-    const option = select.querySelector('option[value="lc0-bt4"]') as HTMLOptionElement | null;
-    if (option) {
-      option.disabled = !ok;
-      option.title = ok ? 'Lc0 BT4 — large net (~353MB), runs on WebGPU in a worker' : 'needs WebGPU (unavailable here)';
-    }
-    if (!ok && select.value === 'lc0-bt4') select.value = id === 'seatB' ? 'sf-lite' : 'lc0';
+  if (!ok) {
+    for (const row of activeSeatRows()) if (row.family === 'lc0' && row.variant === 'bt4') row.variant = 'small';
+    buildEngines();
+    populateSeats();
+  } else {
+    renderSeatSelectors();
   }
+  refreshSeatControls();
 }
 
 async function renderRuntimeBadge(): Promise<void> {
@@ -804,13 +887,37 @@ function resetLc0SearchTrees(ids?: string[]): void {
   for (const search of targets) search.resetTree();
 }
 
+function pruneUnusedLc0Searchers(activeIds: Set<string>): void {
+  for (const id of lc0Searchers.keys()) {
+    if (activeIds.has(id)) continue;
+    lc0Searchers.delete(id);
+    lastLc0SearchResults.delete(id);
+    lc0TreeTelemetry.delete(id);
+  }
+}
+
+function disposeUnusedUciEngines(): void {
+  const activeReckless = new Set(activeSeatRows().filter((row) => row.family === 'reckless').map((row) => recklessCacheKey(recklessVariantForKey(row.variant))));
+  for (const [key, engine] of recklessByVariant) {
+    if (!activeReckless.has(key)) { engine.dispose(); recklessByVariant.delete(key); }
+  }
+  const activeViridithas = new Set(activeSeatRows().filter((row) => row.family === 'viridithas').map((row) => viridithasCacheKey(viridithasVariantForKey(row.variant))));
+  for (const [key, engine] of viridithasByVariant) {
+    if (!activeViridithas.has(key)) { engine.dispose(); viridithasByVariant.delete(key); }
+  }
+}
+
 function buildEngines() {
+  for (const row of activeSeatRows()) clampStrength(row);
+  const activeIds = new Set(activeSeatRows().map(engineIdForRow));
+  pruneUnusedLc0Searchers(activeIds);
   engines.clear();
+  disposeUnusedUciEngines();
   const warmupPositions = [parseFen(START_FEN)];
-  const lc0Search = (engineId: string): ArenaEngine['move'] => async (positions, signal) => {
+  const lc0Search = (engineId: string, row: EngineRow): ArenaEngine['move'] => async (positions, signal) => {
     const timed = arenaBudgetMode() === 'movetime';
     const result = await lc0SearcherFor(engineId).search({ positions }, {
-      visits: timed ? undefined : arenaLc0Visits(),
+      visits: timed ? undefined : row.strength,
       movetimeMs: timed ? arenaMovetimeMs() : undefined,
       signal,
       yieldEveryMs: 16,
@@ -821,13 +928,13 @@ function buildEngines() {
     recordLc0SearchOutput(engineId, engineName, result);
     return result.move ?? null;
   };
-  const lc0Bt4Move = (engineId: string): ArenaEngine['move'] => async (positions, signal) => {
+  const lc0Bt4Move = (engineId: string, row: EngineRow): ArenaEngine['move'] => async (positions, signal) => {
     const onAbort = () => bt4.cancel();
     signal.addEventListener('abort', onAbort, { once: true });
     try {
       const timed = arenaBudgetMode() === 'movetime';
       const result = await bt4.search({ positions }, {
-        visits: timed ? undefined : arenaLc0Visits(),
+        visits: timed ? undefined : row.strength,
         movetimeMs: timed ? arenaMovetimeMs() : undefined,
         reuseTree: true,
       });
@@ -838,32 +945,30 @@ function buildEngines() {
       signal.removeEventListener('abort', onAbort);
     }
   };
-  const sf = (engineId: string, kind: 'lite' | 'full'): ArenaEngine['move'] => async (positions, signal) => {
+  const sf = (engineId: string, row: EngineRow, kind: 'lite' | 'full'): ArenaEngine['move'] => async (positions, signal) => {
     const engine = stockfishEngineFor(kind);
     if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: stockfishThreads() });
-    else engine.setOptions({ depth: arenaSfDepth(), movetimeMs: undefined, threads: stockfishThreads() });
+    else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: stockfishThreads() });
     const fen = boardToFen(positions[positions.length - 1]);
     const move = await engine.bestMove(fen, signal);
     recordStockfishOutput(engineId, engines.get(engineId)?.name ?? (kind === 'lite' ? 'Stockfish Lite' : 'Stockfish'), fen, move, engine.lastInfo());
     return move;
   };
-  const recklessMove = (engineId: string): ArenaEngine['move'] => async (positions, signal) => {
-    const depth = arenaRecklessDepth();
-    if (arenaBudgetMode() === 'movetime') reckless!.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
-    else reckless!.setOptions({ depth, movetimeMs: undefined });
+  const recklessMove = (engineId: string, row: EngineRow, engine: RecklessEngine): ArenaEngine['move'] => async (positions, signal) => {
+    if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
+    else engine.setOptions({ depth: row.strength, movetimeMs: undefined });
     const fen = boardToFen(positions[positions.length - 1]);
-    const move = await reckless!.bestMove(fen, signal);
-    recordRecklessOutput(engineId, engines.get(engineId)?.name ?? 'Reckless', fen, move, reckless!.lastInfo());
+    const move = await engine.bestMove(fen, signal);
+    recordRecklessOutput(engineId, engines.get(engineId)?.name ?? 'Reckless', fen, move, engine.lastInfo());
     renderRecklessRuntimeInfo();
     return move;
   };
-  const viridithasMove = (engineId: string): ArenaEngine['move'] => async (positions, signal) => {
-    const depth = arenaViridithasDepth();
-    if (arenaBudgetMode() === 'movetime') viridithas!.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
-    else viridithas!.setOptions({ depth, movetimeMs: undefined });
+  const viridithasMove = (engineId: string, row: EngineRow, engine: ViridithasEngine): ArenaEngine['move'] => async (positions, signal) => {
+    if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
+    else engine.setOptions({ depth: row.strength, movetimeMs: undefined });
     const fen = boardToFen(positions[positions.length - 1]);
-    const move = await viridithas!.bestMove(fen, signal);
-    recordViridithasOutput(engineId, engines.get(engineId)?.name ?? 'Viridithas', fen, move, viridithas!.lastInfo());
+    const move = await engine.bestMove(fen, signal);
+    recordViridithasOutput(engineId, engines.get(engineId)?.name ?? 'Viridithas', fen, move, engine.lastInfo());
     renderViridithasRuntimeInfo();
     return move;
   };
@@ -888,23 +993,37 @@ function buildEngines() {
     engine.setOptions({ depth: 1, movetimeMs: undefined, threads: stockfishThreads() });
     await engine.bestMove(START_FEN, signal);
   };
-  const recklessWarmup = async (signal: AbortSignal) => {
-    reckless!.setOptions({ depth: 1, movetimeMs: undefined });
-    await reckless!.bestMove(START_FEN, signal);
+  const recklessWarmup = (engine: RecklessEngine) => async (signal: AbortSignal) => {
+    engine.setOptions({ depth: 1, movetimeMs: undefined });
+    await engine.bestMove(START_FEN, signal);
     renderRecklessRuntimeInfo();
   };
-  const viridithasWarmup = async (signal: AbortSignal) => {
-    viridithas!.setOptions({ depth: 1, movetimeMs: undefined });
-    await viridithas!.bestMove(START_FEN, signal);
-    await viridithas!.newGame(signal);
+  const viridithasWarmup = (engine: ViridithasEngine) => async (signal: AbortSignal) => {
+    engine.setOptions({ depth: 1, movetimeMs: undefined });
+    await engine.bestMove(START_FEN, signal);
+    await engine.newGame(signal);
     renderViridithasRuntimeInfo();
   };
-  engines.set('lc0', { id: 'lc0', name: 'Lc0', move: lc0Search('lc0'), warmup: lc0SearchWarmup('lc0') });
-  engines.set('lc0-bt4', { id: 'lc0-bt4', name: 'Lc0 BT4', move: lc0Bt4Move('lc0-bt4'), warmup: lc0Bt4Warmup });
-  engines.set('sf-lite', { id: 'sf-lite', name: 'Stockfish Lite', move: sf('sf-lite', 'lite'), warmup: stockfishWarmup('lite') });
-  engines.set('sf', { id: 'sf', name: 'Stockfish', move: sf('sf', 'full'), warmup: stockfishWarmup('full') });
-  engines.set('reckless', { id: 'reckless', name: recklessName(arenaRecklessDepth()), move: recklessMove('reckless'), warmup: recklessWarmup });
-  engines.set('viridithas', { id: 'viridithas', name: viridithasName(arenaViridithasDepth()), move: viridithasMove('viridithas'), warmup: viridithasWarmup });
+  for (const row of activeSeatRows()) {
+    const id = engineIdForRow(row);
+    if (engines.has(id)) continue;
+    if (row.family === 'lc0') {
+      if (row.variant === 'bt4') engines.set(id, { id, name: `${rowLabel(row)} v${row.strength}`, move: lc0Bt4Move(id, row), warmup: lc0Bt4Warmup });
+      else engines.set(id, { id, name: `${rowLabel(row)} v${row.strength}`, move: lc0Search(id, row), warmup: lc0SearchWarmup(id) });
+    } else if (row.family === 'sf') {
+      const kind = row.variant === 'full' ? 'full' : 'lite';
+      engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: sf(id, row, kind), warmup: stockfishWarmup(kind) });
+    } else if (row.family === 'reckless') {
+      const engine = getRecklessFor(row.variant);
+      prewarmReckless(engine);
+      engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: recklessMove(id, row, engine), warmup: recklessWarmup(engine) });
+    } else {
+      const engine = getViridithasFor(row.variant);
+      engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: viridithasMove(id, row, engine), warmup: viridithasWarmup(engine) });
+    }
+  }
+  renderRecklessRuntimeInfo();
+  renderViridithasRuntimeInfo();
 }
 
 function selectedOpenings(): ArenaOpening[] {
@@ -1057,18 +1176,21 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
 
 async function startMatch() {
   if (running) return;
+  syncSeatRowsFromDom();
+  buildEngines();
+  populateSeats();
   const idA = seatEngineId('A');
   const idB = seatEngineId('B');
   const engineA = engines.get(idA);
   const engineB = engines.get(idB);
   if (!engineA || !engineB) { el('message').textContent = 'Pick two engines.'; return; }
-  if ((idA === 'lc0-bt4' || idB === 'lc0-bt4') && !(await probeBt4Support())) {
+  const usesBt4 = activeSeatRows().some((row) => row.family === 'lc0' && row.variant === 'bt4');
+  if (usesBt4 && !(await probeBt4Support())) {
     el('message').textContent = 'Lc0 BT4 needs WebGPU, which is unavailable in this browser.';
     return;
   }
   const sameEngine = idA === idB;
   const seatIds = sameEngine ? [idA] : [idA, idB];
-  const usesBt4 = idA === 'lc0-bt4' || idB === 'lc0-bt4';
   const gamesPerOpening = Math.max(1, Math.floor(Number(inputEl('gamesInput').value) || 2));
   let schedule: MatchGame[];
   try {
@@ -1118,7 +1240,7 @@ async function startMatch() {
       // reused across both sides' plies — i.e. self-play when both seats match.
       resetLc0SearchTrees(seatIds);
       if (usesBt4 && bt4.loaded) await bt4.resetTree();
-      if ((whiteEngine.id === 'viridithas' || blackEngine.id === 'viridithas') && viridithas) await viridithas.newGame(abort.signal);
+      for (const engine of viridithasByVariant.values()) await engine.newGame(abort.signal);
       setBoardSideEngines(whiteEngine.id, whiteEngine.name, blackEngine.id, blackEngine.name);
       el('pairing').textContent = `Game ${i + 1}/${schedule.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
       el('message').textContent = 'Playing…';
@@ -1184,10 +1306,10 @@ function disposeRuntimeResources(): void {
   abort = null;
   disposeLc0Resources();
   disposeStockfish();
-  reckless?.dispose();
-  reckless = null;
-  viridithas?.dispose();
-  viridithas = null;
+  for (const engine of recklessByVariant.values()) engine.dispose();
+  recklessByVariant.clear();
+  for (const engine of viridithasByVariant.values()) engine.dispose();
+  viridithasByVariant.clear();
   bt4.dispose();
 }
 
@@ -1210,8 +1332,9 @@ async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHy
 
 async function loadLc0Evaluator(): Promise<void> {
   const runtime = selectedLc0Runtime();
+  loadingLc0 = true;
   el('start').toggleAttribute('disabled', true);
-  selectEl('lc0RuntimeSelect').disabled = true;
+  refreshSeatControls();
   el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)}…`;
   try {
     const evaluator = await createSelectedLc0Evaluator();
@@ -1221,11 +1344,12 @@ async function loadLc0Evaluator(): Promise<void> {
     searcher = new Lc0PuctSearcher(lc0Cache);
     renderCacheInfo();
     el('start').toggleAttribute('disabled', false);
-    selectEl('lc0RuntimeSelect').disabled = false;
     el('message').textContent = `Ready (${lc0RuntimeLabel(runtime)}). Pick engines and start a tournament.`;
   } catch (error) {
-    selectEl('lc0RuntimeSelect').disabled = false;
     el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(error as Error).message}`;
+  } finally {
+    loadingLc0 = false;
+    refreshSeatControls();
   }
 }
 
@@ -1240,54 +1364,49 @@ function wireEvents() {
   el('start').addEventListener('click', () => { void startMatch(); });
   el('stop').addEventListener('click', () => { abort?.abort(); el('message').textContent = 'Stopping…'; });
   el('exportPgn').addEventListener('click', exportPgn);
-  for (const id of ['seatA', 'seatB'] as const) {
-    selectEl(id).addEventListener('change', (event) => {
-      const select = event.target as HTMLSelectElement;
-      if (select.value === 'lc0-bt4') {
-        // One-time gate before the ~353MB lazy load.
-        if (!window.confirm(`${bt4LoadWarning()}\n\nUse Lc0 BT4?`)) { select.value = id === 'seatB' ? 'sf-lite' : 'lc0'; }
-      }
-      // Free the resident BT4 net once neither seat uses it.
-      if (seatEngineId('A') !== 'lc0-bt4' && seatEngineId('B') !== 'lc0-bt4') bt4.dispose();
-    });
-  }
+  el('arenaSeatList').addEventListener('change', (event) => {
+    if (running) return;
+    const target = event.target as HTMLInputElement | HTMLSelectElement;
+    const seat = target.dataset.seat as SeatId | undefined;
+    if (seat !== 'A' && seat !== 'B') return;
+    const row = seatRows[seat];
+    if (target.classList.contains('seat-fam')) {
+      row.family = target.value as EngineFamily;
+      row.variant = defaultVariant(row.family);
+      row.strength = strengthMeta(row.family).def;
+    } else if (target.classList.contains('seat-var')) {
+      if (row.family === 'lc0' && target.value === 'bt4' && !window.confirm(`${bt4LoadWarning()}\n\nUse Lc0 BT4?`)) { target.value = row.variant; return; }
+      row.variant = target.value;
+    } else if (target.classList.contains('seat-strength')) {
+      row.strength = Number(target.value);
+      clampStrength(row);
+    }
+    if (!activeSeatRows().some((r) => r.family === 'lc0' && r.variant === 'bt4')) bt4.dispose();
+    buildEngines();
+    populateSeats();
+  });
+  el('arenaSeatList').addEventListener('input', (event) => {
+    if (running) return;
+    const target = event.target as HTMLInputElement;
+    const seat = target.dataset.seat as SeatId | undefined;
+    if ((seat === 'A' || seat === 'B') && target.classList.contains('seat-strength')) {
+      seatRows[seat].strength = Number(target.value);
+      clampStrength(seatRows[seat]);
+      renderRecklessRuntimeInfo();
+      renderViridithasRuntimeInfo();
+    }
+  });
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
   el('openingText').addEventListener('input', refreshOpeningPreview);
   el('cacheEntriesInput').addEventListener('input', () => { renderCacheInfo(); resetLc0SearchTrees(); });
   el('lc0RuntimeSelect').addEventListener('change', () => { if (!running) void reloadLc0Evaluator(); });
   el('budgetModeSelect').addEventListener('change', () => resetLc0SearchTrees());
   el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
-  for (const id of ['recklessDepthInput', 'viridithasDepthInput'] as const) {
-    el(id).addEventListener('input', () => {
-      if (running) return;
-      buildEngines();
-      populateSeats();
-    });
-  }
   el('stockfishThreadsInput').addEventListener('input', () => {
     if (running) return;
     inputEl('stockfishThreadsInput').value = String(stockfishThreads());
     // Threads flips single<->threaded flavor (different wasm); rebuild on next use.
     disposeStockfish();
-  });
-  el('recklessVariantSelect').addEventListener('change', () => {
-    if (running) return;
-    reckless?.dispose();
-    const variant = selectedRecklessVariant();
-    reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, onStatus: renderRecklessRuntimeInfo });
-    prewarmReckless();
-    buildEngines();
-    populateSeats();
-    refreshRecklessVariantUi();
-  });
-  el('viridithasVariantSelect').addEventListener('change', () => {
-    if (running) return;
-    viridithas?.dispose();
-    const variant = selectedViridithasVariant();
-    viridithas = new ViridithasEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl);
-    buildEngines();
-    populateSeats();
-    refreshViridithasVariantUi();
   });
   window.addEventListener('pagehide', (event) => {
     if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
@@ -1313,15 +1432,6 @@ async function init() {
   void probeEngineLogos();
   wireEvents();
   refreshOpeningPreview();
-  // Stockfish (lite/full) instances are created lazily on first use; Lc0 BT4 is
-  // created lazily in its worker only when selected and WebGPU-gated.
-  const variant = selectedRecklessVariant();
-  reckless = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, onStatus: renderRecklessRuntimeInfo });
-  const viridithasVariant = selectedViridithasVariant();
-  viridithas = new ViridithasEngine({ depth: 4, hashMb: 16 }, viridithasVariant.wasmUrl);
-  prewarmReckless();
-  renderRecklessRuntimeInfo();
-  renderViridithasRuntimeInfo();
   await loadLc0Evaluator();
   void renderRuntimeBadge();
 }

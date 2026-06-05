@@ -32,7 +32,7 @@ main{display:grid;grid-template-columns:minmax(0,1fr) minmax(330px,400px);gap:20
 button{border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink);padding:8px 10px;font:inherit;font-size:13px;cursor:pointer}
 button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:700}button:disabled{opacity:.55;cursor:not-allowed}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px}
-.row.matchup{align-items:end}.row.matchup .field{flex:1 1 0;min-width:120px}.row.matchup select{width:100%}.row.matchup .vs{font-weight:700;color:var(--muted);padding-bottom:7px}.matchup-note{align-self:end;padding-bottom:8px;color:var(--muted)}
+.engine-list{display:grid;gap:6px;margin-top:10px}.engine-row{display:flex;align-items:center;gap:6px}.engine-row select{flex:1 1 0;min-width:0;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;background:white}.engine-row .arrow{color:var(--muted);font-weight:700}.engine-row .row-strength{flex:0 0 76px;width:76px;font:inherit;font-size:13px;font-family:var(--mono);padding:6px 8px;border:1px solid var(--rule);border-radius:6px}.engine-row .row-unit{flex:0 0 auto;color:var(--muted);font-size:11px}.engine-row .seat-name{flex:0 0 56px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:700}.matchup-note{margin-top:6px;color:var(--muted)}
 #matchScore{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--ink);padding:8px 10px;border:1px solid var(--rule);border-radius:7px;background:var(--soft)}
 .field{display:grid;gap:3px}.field label{font-size:11px;color:var(--muted)}
 input[type=number]{width:70px;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;font-family:var(--mono)}
@@ -77,14 +77,9 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
   </section>
   <section class="panel" aria-label="Tournament">
     <h2>Matchup</h2>
-    <div class="row matchup">
-      <div class="field"><label for="seatA">Engine 1</label>
-        <select id="seatA"></select></div>
-      <span class="vs">vs</span>
-      <div class="field"><label for="seatB">Engine 2</label>
-        <select id="seatB"></select></div>
-      <span class="matchup-note small">colors alternate each game</span>
-    </div>
+    <select id="seatA" hidden></select><select id="seatB" hidden></select>
+    <div id="arenaSeatList" class="engine-list" aria-label="Arena engine selectors"></div>
+    <div class="matchup-note small">family → variant → strength; colors alternate each game</div>
     <div class="row">
       <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
         <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
@@ -98,20 +93,16 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
         <input id="movetimeInput" type="number" min="10" max="60000" step="50" value="500" /></div>
       <div class="field"><label for="cacheEntriesInput">NN cache entries</label>
         <input id="cacheEntriesInput" type="number" min="0" max="100000" step="128" value="2048" /></div>
-      <div class="field"><label for="lc0VisitsInput">Lc0 visits</label>
-        <input id="lc0VisitsInput" type="number" min="1" max="100000" step="1" value="100" /></div>
-      <div class="field"><label for="sfDepthInput">SF depth</label>
-        <input id="sfDepthInput" type="number" min="1" max="40" step="1" value="8" /></div>
       <div class="field"><label for="stockfishThreadsInput">SF threads</label>
         <input id="stockfishThreadsInput" type="number" min="1" max="32" step="1" value="1" /></div>
-      <div class="field"><label for="recklessDepthInput">Reckless depth</label>
-        <input id="recklessDepthInput" type="number" min="1" max="20" step="1" value="4" /></div>
-      <div class="field"><label for="recklessVariantSelect">Reckless variant</label>
-        <select id="recklessVariantSelect"></select></div>
-      <div class="field"><label for="viridithasDepthInput">Viridithas depth</label>
-        <input id="viridithasDepthInput" type="number" min="1" max="20" step="1" value="6" /></div>
-      <div class="field"><label for="viridithasVariantSelect">Viridithas variant</label>
-        <select id="viridithasVariantSelect"></select></div>
+    </div>
+    <div hidden>
+      <input id="lc0VisitsInput" type="number" value="100" />
+      <input id="sfDepthInput" type="number" value="8" />
+      <input id="recklessDepthInput" type="number" value="4" />
+      <select id="recklessVariantSelect"></select>
+      <input id="viridithasDepthInput" type="number" value="6" />
+      <select id="viridithasVariantSelect"></select>
     </div>
     <div id="recklessRuntimeInfo" class="small">Reckless: detecting runtime…</div>
     <div id="viridithasRuntimeInfo" class="small">Viridithas: detecting runtime…</div>
