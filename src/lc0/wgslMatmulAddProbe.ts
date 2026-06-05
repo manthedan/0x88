@@ -2824,6 +2824,7 @@ const SMOLGEN_DENSE1_WGSL = `
 @group(0) @binding(1) var<storage, read> weightF16: array<u32>;
 @group(0) @binding(2) var<storage, read> biasF16: array<u32>;
 @group(0) @binding(3) var<storage, read_write> outputVec: array<f32>;
+var<workgroup> partial: array<f32, 128>;
 
 fn pick_lane(word: u32, index: u32) -> f32 {
   let pair = unpack2x16float(word);
@@ -2832,15 +2833,24 @@ fn pick_lane(word: u32, index: u32) -> f32 {
 fn load_weight(index: u32) -> f32 { return pick_lane(weightF16[index >> 1u], index); }
 fn load_bias(index: u32) -> f32 { return pick_lane(biasF16[index >> 1u], index); }
 
-@compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let col = gid.x;
-  if (col >= 256u) { return; }
-  var sum = load_bias(col);
-  for (var row = 0u; row < 2048u; row = row + 1u) {
+@compute @workgroup_size(16, 8, 1)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let col = wid.x * 16u + lid.x;
+  var sum = 0.0;
+  for (var row = lid.y; row < 2048u; row = row + 8u) {
     sum = sum + inputVec[row] * load_weight(row * 256u + col);
   }
-  outputVec[col] = sum;
+  partial[lid.y * 16u + lid.x] = sum;
+  workgroupBarrier();
+  for (var stride = 4u; stride > 0u; stride = stride / 2u) {
+    if (lid.y < stride) {
+      partial[lid.y * 16u + lid.x] = partial[lid.y * 16u + lid.x] + partial[(lid.y + stride) * 16u + lid.x];
+    }
+    workgroupBarrier();
+  }
+  if (lid.y == 0u) {
+    outputVec[col] = partial[lid.x] + load_bias(col);
+  }
 }
 `;
 
@@ -3108,7 +3118,7 @@ function encodeSmolgenCompressPass(pass: ComputePassLike, pipelines: SmolgenPipe
 function encodeSmolgenDense1Pass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.dense1);
   pass.setBindGroup(0, pipelines.dense1Bind);
-  pass.dispatchWorkgroups(Math.ceil(DEFAULT_SMOLGEN_HIDDEN / 64));
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_SMOLGEN_HIDDEN / 16));
 }
 
 function encodeSmolgenLn1Pass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
