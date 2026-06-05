@@ -1,15 +1,15 @@
-# Autoresearch: LC0 WGSL-head readback optimization at batch 4
+# Autoresearch: LC0 WGSL-head WASM-input/scheduler lane at batch 4
 
 ## Objective
 
-Optimize the opt-in LC0 browser hybrid runtime path `hybrid-wgsl-heads` for parity-preserving fixed-suite search at:
+Optimize the opt-in LC0 browser hybrid runtime path `hybrid-wgsl-heads` for full-search fixed-suite throughput at:
 
 - `lc0BatchSize=4`
-- `batchPipelineDepth=1`
-- JS input backend
+- `batchPipelineDepth=1` unless explicitly running scheduler exploration
+- WASM input backend
 - JS legal-prior backend unless explicitly experimenting with opt-in alternatives
 
-The loop should reduce or hide WebGPU readback/fence cost without changing search semantics, stable defaults, or correctness baselines. The primary workload is small enough for repeated autonomous experiments, but conclusions about promotion must come from stronger alternating fixed-suite/arena evidence outside the fast loop.
+This is a separate input-backend/scheduler lane from the previous JS-input readback loop. Keep WASM input opt-in and do not change stable defaults. The primary workload is still parity-preserving at `batchPipelineDepth=1`; any `batchPipelineDepth>1` run is speculative speed/quality exploration only, not promotion evidence.
 
 ## Metrics
 
@@ -43,6 +43,7 @@ The script emits `METRIC name=value` lines for pi-autoresearch. Defaults:
 - `LC0_AR_REPS=3`
 - `LC0_AR_BATCH_SIZE=4`
 - `LC0_AR_PIPELINE_DEPTH=1`
+- `LC0_AR_INPUT_BACKEND=wasm`
 
 Useful manual overrides:
 
@@ -52,6 +53,9 @@ LC0_AR_REPS=1 LC0_AR_MAX_POSITIONS=4 LC0_AR_MOVETIME_MS=250 ./autoresearch.sh
 
 # Extra confirmation for promising structural changes.
 LC0_AR_REPS=5 ./autoresearch.sh
+
+# Compare against the previous JS-input lane without changing this lane's baseline.
+LC0_AR_INPUT_BACKEND=js ./autoresearch.sh
 ```
 
 For stronger evidence after promising keeps, run alternating 16/32-position fixed-suite checks comparing ONNX b1 against hybrid WGSL b4. Do not use the fast 4-position loop as promotion evidence.
@@ -95,19 +99,20 @@ Known empirical state:
 
 - Hybrid WGSL b4 is useful and roughly tied with ONNX b1 at 500ms on prior 32-position checks.
 - Hybrid WGSL b4 lost to ONNX b1 on a 1000ms check.
-- Current dominant cost remains WebGPU fence/readback time, not JS legal-prior candidate prep.
-- Eager mapAsync-before-CPU-prep works and has clean auto-review, but only hides roughly `~0.01–0.03ms`/eval of CPU prep.
+- The previous JS-input readback loop exhausted most readback micro-optimizations; WebGPU fence/readback remains a major cost.
+- Deferred-readback fixture attribution showed ~1.3–1.4x speedup with matching best moves, but fixed-suite `batchPipelineDepth=2` timed out and needs a dedicated harness.
+- A non-comparable WASM-input screen showed a strong full-search signal (`~9.75 ms/eval` vs JS-input stronger-loop baseline `~11.65 ms/eval`), motivating this separate lane.
 
 ## Hypothesis Queue
 
-The fast 4-position/1-rep loop produced several false keeps. The default loop now uses a stronger 16-position, 500ms, 3-rep median workload before keep/discard decisions. Prefer benchmark-quality and attribution work before more hot-path micro-optimizations:
+The default loop uses a stronger 16-position, 500ms, 3-rep median workload before keep/discard decisions. This lane should first confirm and then optimize the opt-in WASM-input path:
 
-1. Add benchmark-only attribution modes: no readback/queue completion, WDL-only readback, policy-only readback, full readback, and profile-only sanity-scan toggles.
-2. Run repeated attribution matrices to decide whether the floor is command completion, readback bytes, map overhead, or CPU postprocessing.
-3. If fence/queue completion dominates, pursue scheduler/batch/deferred-readback lanes.
-4. If bytes dominate, pursue an integrated GPU legal gather/top-k path with one compact output and no per-move copies.
-5. If kernel time dominates under stronger E2E workloads, start a separate TVM/mixed-kernel lane with its own objective.
-6. Explore WASM legal-prior prep only if telemetry shows JS legal-prior postprocess becomes material after readback reductions.
+1. Establish a clean WASM-input b4/depth1 baseline and compare nearby JS-input controls only as diagnostics.
+2. Sweep batch size `2/4/8` at `batchPipelineDepth=1` with WASM input.
+3. Add a dedicated scheduler/quality harness for deferred readback before retrying `batchPipelineDepth>1` fixed-suite runs.
+4. If scheduler/fence overlap remains promising, explore `batchPipelineDepth=2/4` only as speculative speed/quality evidence.
+5. If input/backend time is no longer material, return to attribution modes or start a separate TVM/mixed-kernel lane.
+6. Avoid readback micro-optimizations unless new attribution changes the bottleneck picture.
 
 ## What's Been Tried
 
@@ -123,5 +128,6 @@ The fast 4-position/1-rep loop produced several false keeps. The default loop no
 - Low-confidence keep: combining nonzero/variation sanity scans had a strong single-run result (`9.86` ms/eval) but failed one-rep and two-rep confirmations (`13.04`, `13.60`). Treat as suspect until stronger alternating evidence; do not build on CPU scan micro-optimizations alone.
 - Noise note: an unchanged rerun regressed by ~2.4%, and several apparent single-run wins failed one-rep/two-rep confirmations. The loop now defaults to 16 positions, 500ms, 3 reps to reduce false keeps.
 - Stop exploring low-ROI readback micro-toggles without new attribution evidence: Array allocation cleanup, slice/subarray, map range, unmap timing, 256-byte stride padding, tiny dispatch fusions, and per-legal-move compact copies.
+- Discarded as non-comparable to the JS-input loop but promising for this lane: opt-in WASM input reported `~9.75 ms/eval` on the stronger workload. Treat this lane's first run as the new baseline rather than mixing it with JS-input results.
 
 Update this section after every few experiments, especially for discarded ideas and benchmark-noise observations.

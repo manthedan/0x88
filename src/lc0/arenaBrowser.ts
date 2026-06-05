@@ -200,6 +200,11 @@ function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
   return 'ORT ONNX';
 }
 
+function lc0HybridInputBackend(): 'js' | 'wgsl' | 'wasm' {
+  const raw = params.get('inputBackend') ?? params.get('lc0InputBackend') ?? 'js';
+  return raw === 'wgsl' || raw === 'wasm' ? raw : 'js';
+}
+
 function lc0EncoderLayers(): number {
   return Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10)));
 }
@@ -1653,7 +1658,7 @@ async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHy
     verifyShards: params.get('packVerify') !== '0',
     headBackend: runtime === 'hybrid-wgsl-heads' ? 'wgsl' : 'ort',
     wgslBatchMode: 'physical',
-    inputBackend: 'js',
+    inputBackend: lc0HybridInputBackend(),
     legalPriorsBackend: 'js',
   });
 }

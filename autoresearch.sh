@@ -15,6 +15,11 @@ TIMEOUT_MS="${LC0_AR_TIMEOUT_MS:-120000}"
 RUNTIME="${LC0_AR_RUNTIME:-hybrid-wgsl-heads}"
 OUT_DIR="${LC0_AR_OUT_DIR:-/tmp/lc0_autoresearch}"
 RUN_ID="${LC0_AR_RUN_ID:-$(date +%Y%m%d_%H%M%S)_$$}"
+ATTRIBUTION_MODE="${LC0_AR_ATTRIBUTION_MODE:-}"
+ATTR_ITERS="${LC0_AR_ATTR_ITERS:-8}"
+ATTR_WARMUP="${LC0_AR_ATTR_WARMUP:-1}"
+ATTR_FIXTURE_LIMIT="${LC0_AR_ATTR_FIXTURE_LIMIT:-$MAX_POSITIONS}"
+INPUT_BACKEND="${LC0_AR_INPUT_BACKEND:-wasm}"
 
 if [[ ! -f "$FENS" ]]; then
   echo "missing FEN corpus: $FENS" >&2
@@ -22,6 +27,34 @@ if [[ ! -f "$FENS" ]]; then
 fi
 
 mkdir -p "$OUT_DIR"
+
+if [[ "$ATTRIBUTION_MODE" == "deferred-readback" ]]; then
+  attr_out="$OUT_DIR/${RUN_ID}_deferred_readback_attr.json"
+  node --experimental-strip-types scripts/lc0_browser_wgsl_deferred_readback_bench.mjs \
+    --batch "$BATCH_SIZE" \
+    --iters "$ATTR_ITERS" \
+    --warmup "$ATTR_WARMUP" \
+    --fixture-limit "$ATTR_FIXTURE_LIMIT" \
+    --timeout "$TIMEOUT_MS" >"$attr_out"
+  node - "$attr_out" <<'NODE'
+const fs = require('fs');
+const path = process.argv[2];
+const report = JSON.parse(fs.readFileSync(path, 'utf8'));
+const timing = (mode, key) => Number(report[mode]?.timingMeans?.[key] ?? 0);
+for (const mode of ['immediate', 'deferred']) {
+  const evalsPerSecond = Number(report[mode]?.evalsPerSecond ?? 0);
+  console.log(`ATTR ${mode}_evals_per_second=${evalsPerSecond}`);
+  console.log(`ATTR ${mode}_ms_per_eval=${evalsPerSecond > 0 ? 1000 / evalsPerSecond : 0}`);
+  console.log(`ATTR ${mode}_readback_synced_ms=${timing(mode, 'readbackSyncedMs')}`);
+  console.log(`ATTR ${mode}_readback_map_async_ms=${timing(mode, 'readbackMapAsyncMs')}`);
+  console.log(`ATTR ${mode}_readback_map_wait_ms=${timing(mode, 'readbackMapAsyncWaitMs')}`);
+  console.log(`ATTR ${mode}_readback_bytes=${timing(mode, 'readbackBytes')}`);
+}
+console.log(`ATTR deferred_over_immediate_speedup=${Number(report.deferred?.evalsPerSecond ?? 0) / Math.max(1e-9, Number(report.immediate?.evalsPerSecond ?? 0))}`);
+console.log(`ATTR all_best_moves_match=${report.allBestMovesMatch === true ? 1 : 0}`);
+console.log(`ARTIFACT deferred_readback_attr=${path}`);
+NODE
+fi
 
 # Fast precheck: catch TypeScript syntax/transpile issues in the touched hot file
 # before spending browser time. Full type/build checks live in autoresearch.checks.sh.
@@ -41,6 +74,7 @@ for rep in $(seq 1 "$REPS"); do
     --stockfish-score-depth "$SCORE_DEPTH" \
     --lc0-batch-size "$BATCH_SIZE" \
     --batch-pipeline-depth "$PIPELINE_DEPTH" \
+    --input-backend "$INPUT_BACKEND" \
     --session "$session" \
     --out "$out" \
     --summary-only \
