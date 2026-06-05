@@ -136,6 +136,8 @@ export interface SearchStats {
   batchLeafCollisions?: number;
   /** Extra selection attempts spent to avoid duplicate in-flight leaves. */
   batchLeafRetries?: number;
+  /** Requested MCTS leaf batch size. */
+  batchSize?: number;
   /** Requested experimental leaf-batch pipeline depth. */
   batchPipelineDepth?: number;
   /** Number of multi-batch pipeline flushes evaluated by the search loop. */
@@ -1371,6 +1373,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   }
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? 1));
   const batchPipelineDepth = Math.max(1, Math.floor(options.batchPipelineDepth ?? 1));
+  stats.batchSize = batchSize;
   stats.batchPipelineDepth = batchPipelineDepth;
   const signal = options.signal;
   const deadlineMs = deadlineFromMovetime(tSearch0, options.movetimeMs);

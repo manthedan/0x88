@@ -305,6 +305,18 @@ type ComputePassLike = {
   end: () => void;
 };
 
+type DispatchCounter = { count: number };
+
+function beginCountedComputePass(encoder: CommandEncoderLike, counter: DispatchCounter, descriptor?: Record<string, unknown>): ComputePassLike {
+  const pass = encoder.beginComputePass(descriptor);
+  return {
+    setPipeline: (pipeline) => pass.setPipeline(pipeline),
+    setBindGroup: (index, bindGroup) => pass.setBindGroup(index, bindGroup),
+    dispatchWorkgroups: (x, y, z) => { counter.count += 1; pass.dispatchWorkgroups(x, y, z); },
+    end: () => pass.end(),
+  };
+}
+
 function gpuGlobals(): GpuGlobals {
   return globalThis as GpuGlobals;
 }
@@ -5487,6 +5499,8 @@ export interface Lc0WebHybridTimingBreakdown {
   legalPriorsMs: number;
   readbackBytes: number;
   readbackMapCount: number;
+  /** Number of WebGPU compute dispatch calls encoded by this custom WGSL eval, when available. */
+  dispatchCount?: number;
   readbackMode?: 'immediate' | 'deferred-double-buffered';
   /** Monotonic runtime submission id for strict deferred-readback diagnostics. */
   wgslSequenceId?: number;
@@ -5906,6 +5920,7 @@ interface SubmittedWgslHybridBatch {
   inputBridgeCopyMs: number;
   wasmEncodeMs: number;
   wasmTotalMs: number;
+  dispatchCount: number;
 }
 
 class Lc0WebHybridRuntime {
@@ -6163,7 +6178,7 @@ class Lc0WebHybridRuntime {
     fen: string;
     output: Float32Array<ArrayBufferLike>;
     encoderDispatchSyncedMs: number;
-    timing: Pick<Lc0WebHybridTimingBreakdown, 'inputBuildMs' | 'inputUploadMs' | 'commandEncodeMs' | 'queueSubmitMs' | 'readbackSyncedMs' | 'readbackBytes' | 'readbackMapCount' | 'inputBackend' | 'encoderKernelVariant' | 'inputBridgeCopyMs' | 'wasmEncodeMs' | 'wasmTotalMs'>;
+    timing: Pick<Lc0WebHybridTimingBreakdown, 'inputBuildMs' | 'inputUploadMs' | 'commandEncodeMs' | 'queueSubmitMs' | 'readbackSyncedMs' | 'readbackBytes' | 'readbackMapCount' | 'dispatchCount' | 'inputBackend' | 'encoderKernelVariant' | 'inputBridgeCopyMs' | 'wasmEncodeMs' | 'wasmTotalMs'>;
   }> {
     const { board, fen } = currentBoardAndFen(input);
     const inputBuildStarted = nowMs();
@@ -6180,14 +6195,15 @@ class Lc0WebHybridRuntime {
     const blockStarted = nowMs();
     const commandEncodeStarted = nowMs();
     const encoder = this.device.createCommandEncoder();
+    const dispatchCounter: DispatchCounter = { count: 0 };
     if (this.inputBackend !== 'js') {
       if (!this.inputBodyGpu) throw new Error('WGSL/WASM input backend is not initialized');
-      const inputPass = encoder.beginComputePass();
+      const inputPass = beginCountedComputePass(encoder, dispatchCounter);
       encodeInputBodyPass(inputPass, this.inputBodyGpu);
       inputPass.end();
     }
     for (const layer of this.layerRuntimes) {
-      const pass = encoder.beginComputePass();
+      const pass = beginCountedComputePass(encoder, dispatchCounter);
       encodeSmolgenPass(pass, layer.smolgenPipelines);
       encodeLc0WebEncoderBlockPass(pass, layer.attentionPipelines, layer.ffnPipelines);
       pass.end();
@@ -6205,7 +6221,7 @@ class Lc0WebHybridRuntime {
       fen,
       output,
       encoderDispatchSyncedMs: nowMs() - blockStarted,
-      timing: { inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, readbackSyncedMs, readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4, readbackMapCount: 1, inputBackend: this.inputBackend, encoderKernelVariant: this.encoderKernelVariant, ...this.timingWasmFields(wasmTiming) },
+      timing: { inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, readbackSyncedMs, readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4, readbackMapCount: 1, dispatchCount: dispatchCounter.count, inputBackend: this.inputBackend, encoderKernelVariant: this.encoderKernelVariant, ...this.timingWasmFields(wasmTiming) },
     };
   }
 
@@ -6428,19 +6444,20 @@ class Lc0WebHybridRuntime {
       const encoderStarted = nowMs();
       const commandEncodeStarted = nowMs();
       const encoder = this.device.createCommandEncoder();
+      const dispatchCounter: DispatchCounter = { count: 0 };
       if (this.inputBackend !== 'js') {
         if (!this.inputBodyGpu) throw new Error('WGSL/WASM input backend is not initialized');
-        const inputPass = encoder.beginComputePass();
+        const inputPass = beginCountedComputePass(encoder, dispatchCounter);
         encodeInputBodyPass(inputPass, this.inputBodyGpu);
         inputPass.end();
       }
       for (const layer of this.layerRuntimes) {
-        const pass = encoder.beginComputePass();
+        const pass = beginCountedComputePass(encoder, dispatchCounter);
         encodeSmolgenPass(pass, layer.smolgenPipelines);
         encodeLc0WebEncoderBlockPass(pass, layer.attentionPipelines, layer.ffnPipelines);
         pass.end();
       }
-      const headPass = encoder.beginComputePass();
+      const headPass = beginCountedComputePass(encoder, dispatchCounter);
       encodeWgslPolicyValueHeads(headPass, this.wgslHeads);
       if (gpuLegalCandidates) encodeWgslLegalPriors(headPass, this.wgslHeads);
       headPass.end();
@@ -6495,6 +6512,7 @@ class Lc0WebHybridRuntime {
           legalPriorsMs,
           readbackBytes: gpuLegalOutput ? WGSL_GPU_LEGAL_READBACK_BYTES : WGSL_HEADS_READBACK_BYTES,
           readbackMapCount: 1,
+          dispatchCount: dispatchCounter.count,
           inputBackend: this.inputBackend,
           legalPriorsBackend: this.legalPriorsBackend,
           encoderKernelVariant: this.encoderKernelVariant,
@@ -6535,6 +6553,7 @@ class Lc0WebHybridRuntime {
         legalPriorsMs,
         readbackBytes: encoded.timing.readbackBytes,
         readbackMapCount: encoded.timing.readbackMapCount,
+        dispatchCount: encoded.timing.dispatchCount,
         inputBackend: this.inputBackend,
         legalPriorsBackend: this.legalPriorsBackend,
         encoderKernelVariant: this.encoderKernelVariant,
@@ -6577,20 +6596,21 @@ class Lc0WebHybridRuntime {
     const encoderStarted = nowMs();
     const commandEncodeStarted = nowMs();
     const encoder = this.device.createCommandEncoder();
+    const dispatchCounter: DispatchCounter = { count: 0 };
     for (let slotIndex = 0; slotIndex < slots.length; slotIndex++) {
       const slot = slots[slotIndex];
       if (this.inputBackend !== 'js') {
         const inputBodyGpu = slot.inputBodyGpu;
         if (!inputBodyGpu) throw new Error('WGSL/WASM input backend batch slot is not initialized');
         encoder.copyBufferToBuffer(uploadBuffer, slotIndex * inputElements * 4, inputBodyGpu.planesBuffer, 0, inputElements * 4);
-        const inputPass = encoder.beginComputePass();
+        const inputPass = beginCountedComputePass(encoder, dispatchCounter);
         encodeInputBodyPass(inputPass, inputBodyGpu);
         inputPass.end();
       } else {
         encoder.copyBufferToBuffer(uploadBuffer, slotIndex * inputElements * 4, slot.inputBuffer, 0, inputElements * 4);
       }
       for (const layer of slot.layerRuntimes) {
-        const pass = encoder.beginComputePass();
+        const pass = beginCountedComputePass(encoder, dispatchCounter);
         encodeSmolgenPass(pass, layer.smolgenPipelines);
         encodeLc0WebEncoderBlockPass(pass, layer.attentionPipelines, layer.ffnPipelines);
         pass.end();
@@ -6600,7 +6620,7 @@ class Lc0WebHybridRuntime {
         uploadWgslLegalPriorsInputs(this.device, slots[slotIndex].wgslHeads, legalCandidates[slotIndex], options.policyTemperature);
         legalPriorsSetupMs = (legalPriorsSetupMs ?? 0) + (nowMs() - legalUploadStarted);
       }
-      const headPass = encoder.beginComputePass();
+      const headPass = beginCountedComputePass(encoder, dispatchCounter);
       encodeWgslPolicyValueHeads(headPass, slots[slotIndex].wgslHeads);
       if (legalCandidates) encodeWgslLegalPriors(headPass, slots[slotIndex].wgslHeads);
       headPass.end();
@@ -6632,6 +6652,7 @@ class Lc0WebHybridRuntime {
       inputBridgeCopyMs,
       wasmEncodeMs,
       wasmTotalMs,
+      dispatchCount: dispatchCounter.count,
     };
   }
 
@@ -6704,6 +6725,7 @@ class Lc0WebHybridRuntime {
             legalPriorsMs,
             readbackBytes: submitted.inputs.length * readbackBytesPerSlot,
             readbackMapCount: 1,
+            dispatchCount: submitted.dispatchCount,
             readbackMode,
             wgslSequenceId: submitted.sequenceId,
             batchSequenceIndex: submitted.batchSequenceIndex,
@@ -6852,10 +6874,16 @@ function mean(values: number[]): number {
 
 function summarizeHybridEvaluations(mode: 'immediate' | 'deferred-double-buffered', wallMs: number, batches: Lc0WebHybridEvaluationResult[][]): Lc0WebWgslDeferredReadbackBenchModeResult {
   const flat = batches.flat();
-  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount'];
+  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount'];
+  const physicalBatchScopedKeys = new Set<keyof Lc0WebHybridTimingBreakdown>(['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount']);
   const timingMeans: Partial<Record<keyof Lc0WebHybridTimingBreakdown, number>> = {};
   for (const key of timingKeys) {
-    const values = flat.map((entry) => entry.timing[key]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    const values = flat.map((entry) => {
+      const value = entry.timing[key];
+      if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+      const physicalBatchSize = Math.max(1, Math.floor(Number(entry.timing.physicalBatchSize ?? 1)));
+      return physicalBatchScopedKeys.has(key) ? value / physicalBatchSize : value;
+    }).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     if (values.length) timingMeans[key] = mean(values);
   }
   return {

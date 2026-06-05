@@ -59,6 +59,18 @@ Report both microbenchmarks and engine-level metrics:
 - warm-start and cold-start time
 - strength at fixed visits and fixed time
 
+## LC0 browser arena WebGPU lane
+
+The LC0 custom `lc0web` WebGPU runtime is an opt-in research lane, not the arena default. Current arena evidence shows ORT-WebGPU full ONNX can be faster at batch-size-1 fixed-time search because ORT executes the full graph as one optimized session, while the custom WGSL path pays many dispatches and a blocking `mapAsync` fence per eval. Treat the custom path as valuable only where it exposes LC0/search-specific levers that ORT cannot: physical leaf batching, parity-preserving readback/eval overlap, GPU legal-prior/top-k filtering, generated/fused kernels, and eventually quantized packed kernels.
+
+Promotion policy for this lane:
+
+1. Keep ORT ONNX/WebGPU as the browser arena baseline/default until repeated full E2E fixed-suite/arena runs prove otherwise.
+2. First add arena/fixed-suite batch-size controls and compare `batchSize=1,2,4,8` with `batchPipelineDepth=1`; depth 1 is the parity-preserving search baseline.
+3. Aggregate timing over all LC0 evals/searches, not only the last search; report ORT provider diagnostics, batch size, pipeline depth, physical batch histograms, readback bytes/maps, dispatch count where available, and evals/sec inside PUCT.
+4. Design parity-preserving overlap that hides/amortizes `mapAsync` without selecting future leaves from stale tree values. `batchPipelineDepth>1` remains speculative parallel search, not a promotion path for fixed-search parity.
+5. Use TVM/generated WGSL only after timing identifies hot stages. Replace targeted kernels/fusions behind full-search parity and repeated E2E timing gates; do not treat isolated kernel wins as promotion evidence.
+
 ## Optimization backlog
 
 High-priority work:
