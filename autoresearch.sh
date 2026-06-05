@@ -21,6 +21,7 @@ ATTR_WARMUP="${LC0_AR_ATTR_WARMUP:-1}"
 ATTR_FIXTURE_LIMIT="${LC0_AR_ATTR_FIXTURE_LIMIT:-$MAX_POSITIONS}"
 INPUT_BACKEND="${LC0_AR_INPUT_BACKEND:-wasm}"
 ENCODER_KERNEL="${LC0_AR_ENCODER_KERNEL:-hand}"
+LEGAL_PRIORS_BACKEND="${LC0_AR_LEGAL_PRIORS_BACKEND:-js}"
 
 if [[ ! -f "$FENS" ]]; then
   echo "missing FEN corpus: $FENS" >&2
@@ -78,6 +79,7 @@ for rep in $(seq 1 "$REPS"); do
     --batch-pipeline-depth "$PIPELINE_DEPTH" \
     --input-backend "$INPUT_BACKEND" \
     --encoder-kernel "$ENCODER_KERNEL" \
+    --legal-priors-backend "$LEGAL_PRIORS_BACKEND" \
     --session "$session" \
     --out "$out" \
     --summary-only \

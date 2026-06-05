@@ -205,6 +205,11 @@ function lc0HybridInputBackend(): 'js' | 'wgsl' | 'wasm' {
   return raw === 'wgsl' || raw === 'wasm' ? raw : 'js';
 }
 
+function lc0HybridLegalPriorsBackend(): 'js' | 'wasm' | 'gpu' {
+  const raw = params.get('legalPriorsBackend') ?? params.get('lc0LegalPriorsBackend') ?? params.get('hybridLegalPriors') ?? 'js';
+  return raw === 'wasm' || raw === 'gpu' ? raw : 'js';
+}
+
 function lc0EncoderLayers(): number {
   return Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10)));
 }
@@ -1664,7 +1669,7 @@ async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHy
     headBackend: runtime === 'hybrid-wgsl-heads' ? 'wgsl' : 'ort',
     wgslBatchMode: 'physical',
     inputBackend: lc0HybridInputBackend(),
-    legalPriorsBackend: 'js',
+    legalPriorsBackend: lc0HybridLegalPriorsBackend(),
     encoderKernelVariant: lc0EncoderKernelVariant(),
   });
 }

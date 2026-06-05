@@ -11,6 +11,8 @@ const DEFAULT_RUNTIMES = ['onnx', 'hybrid-ort-heads', 'hybrid-wgsl-heads'];
 
 function usage() {
   console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_runtime_fixed_suite.mjs [options]\n\nRuns the same fixed LC0-to-move positions in the browser for each LC0 runtime, then scores each LC0 move with Stockfish on the resulting position.\n\nOptions:\n  --source-report PATH      Existing runtime arena JSON to derive positions from\n  --source-runtime NAME     Runtime in source report (default hybrid-wgsl-heads)\n  --source-game N           1-based game number in that runtime PGN (default 2)\n  --max-positions N         Max LC0-to-move positions to extract (default 16)\n  --skip-plies N            Ignore positions before this absolute ply (default 0)\n  --fens FILE               Use newline-separated FENs instead of --source-report\n  --runtimes LIST           Comma-separated runtimes (default ${DEFAULT_RUNTIMES.join(',')})\n  --movetime MS             LC0 movetime per fixed position (default 1000)\n  --stockfish-score-ms MS   Stockfish movetime to score each post-LC0 position (default 500)\n  --stockfish-score-depth N Use fixed Stockfish depth for scoring instead of movetime\n  --cache N                 LC0 NN cache entries (default 2048)\n  --lc0-batch-size N        LC0 PUCT leaf batch size passed to arena search (default 1)\n  --batch-pipeline-depth N  LC0 batch pipeline depth (default 1; >1 is speculative search semantics)\n  --input-backend NAME      Hybrid input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME     Hybrid encoder kernel: hand, tvm-packed-f16, mixed-tvm-ffn, or mixed-tvm-ffn-outproj (default hand)
+  --legal-priors-backend NAME
+                            Hybrid legal-priors backend: js, wasm, or gpu (default js; gpu requires WGSL heads)
   --out PATH                Write full JSON report to PATH\n  --summary-only            Print compact summary only\n  --base-url URL            Use existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N                  Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST               Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN       Browser automation binary (default agent-browser)\n  --session NAME            agent-browser session prefix\n  --timeout MS              Per-runtime browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --no-server               Do not auto-start Vite\n  -h, --help                Show this help\n`);
 }
 
@@ -36,6 +38,7 @@ function parseArgs(argv) {
     batchPipelineDepth: 1,
     inputBackend: 'js',
     encoderKernel: 'hand',
+    legalPriorsBackend: 'js',
     out: '',
     summaryOnly: false,
     noServer: false,
@@ -62,6 +65,7 @@ function parseArgs(argv) {
     else if (arg === '--batch-pipeline-depth' || arg === '--pipeline-depth') args.batchPipelineDepth = Number(next());
     else if (arg === '--input-backend') args.inputBackend = next();
     else if (arg === '--encoder-kernel' || arg === '--encoder-kernel-variant') args.encoderKernel = next();
+    else if (arg === '--legal-priors-backend' || arg === '--hybrid-legal-priors') args.legalPriorsBackend = next();
     else if (arg === '--out') args.out = next();
     else if (arg === '--summary-only') args.summaryOnly = true;
     else if (arg === '--base-url') { args.baseUrl = next(); args.explicitBaseUrl = true; }
@@ -82,6 +86,8 @@ function parseArgs(argv) {
   if (args.stockfishScoreDepth !== undefined && (!Number.isFinite(args.stockfishScoreDepth) || args.stockfishScoreDepth <= 0)) throw new Error(`Invalid stockfishScoreDepth: ${args.stockfishScoreDepth}`);
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid inputBackend: ${args.inputBackend}`);
   if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj'].includes(args.encoderKernel)) throw new Error(`Invalid encoderKernel: ${args.encoderKernel}`);
+  if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid legalPriorsBackend: ${args.legalPriorsBackend}`);
+  if (args.legalPriorsBackend === 'gpu' && args.runtimes.some((runtime) => runtime !== 'hybrid-wgsl-heads')) throw new Error('--legal-priors-backend gpu requires hybrid-wgsl-heads runtime');
   if (args.batchPipelineDepth > 1) process.stderr.write('[lc0-fixed-suite] warning: batchPipelineDepth > 1 is speculative parallel search; depth=1 is the parity-preserving arena baseline.\n');
   return args;
 }
@@ -129,6 +135,7 @@ function arenaUrl(args, runtime, fens) {
   url.searchParams.set('lc0BatchPipelineDepth', String(args.batchPipelineDepth));
   url.searchParams.set('inputBackend', args.inputBackend);
   url.searchParams.set('encoderKernel', args.encoderKernel);
+  url.searchParams.set('legalPriorsBackend', args.legalPriorsBackend);
   url.searchParams.set('sfThreads', '1');
   url.searchParams.set('fixedSuiteFens', fens.join('|'));
   url.searchParams.set('packVerify', '0');
