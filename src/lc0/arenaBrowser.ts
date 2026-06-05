@@ -15,12 +15,12 @@ import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 import { Lc0WebHybridEvaluator } from './wgslMatmulAddProbe.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
-import { StockfishEngine, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
+import { StockfishEngine, stockfishFlavorLabel, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
 import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
 import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
-import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
+import { BT4_APPROX_MB, Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
 import { defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -49,6 +49,40 @@ interface Lc0TreeTelemetry {
   replyVisited: number;
   replyTopPolicy5: number;
   replyTopVisits5: number;
+  totalElapsedMs?: number;
+  lastElapsedMs?: number;
+  evalBackendTimingSamples?: number;
+  evalBackendTimingPositions?: number;
+  evalBackendTimingTotals?: Record<string, number>;
+  evalBackendTimingMeans?: Record<string, number>;
+  evalBackendTimingPerPositionMeans?: Record<string, number>;
+  lastBackendTimingMeans?: Record<string, number>;
+  lastBackendTimingPerPositionMeans?: Record<string, number>;
+  lastBatchSize?: number;
+  lastBatchPipelineDepth?: number;
+  maxEvalBatch?: number;
+  evalBatchSizeHistogram?: Record<string, number>;
+}
+interface UciEngineTelemetry {
+  engineName: string;
+  searches: number;
+  totalNodes: number;
+  lastDepth?: number;
+  lastNodes?: number;
+  lastNps?: number;
+  lastPvMoves?: number;
+  lastMultiPv?: number;
+  totalElapsedMs?: number;
+  lastElapsedMs?: number;
+}
+interface Bt4Telemetry {
+  engineName: string;
+  searches: number;
+  completedVisits: number;
+  evalCalls: number;
+  cacheHits: number;
+  totalElapsedMs?: number;
+  lastElapsedMs?: number;
 }
 interface PendingLc0ReplyProbe {
   engineId: string;
@@ -72,6 +106,14 @@ interface EngineOutputSnapshot {
   evalBar?: EngineEvalBar;
   detail?: string;
   pv?: string[];
+  /** UCI score converted to White's perspective, in centipawns. Positive is good for White. */
+  whiteCp?: number;
+  /** UCI mate score converted to White's perspective. Positive means White mates. */
+  mateInWhitePov?: number;
+  depth?: number;
+  nodes?: number;
+  nps?: number;
+  elapsedMs?: number;
 }
 
 const params = new URLSearchParams(location.search);
@@ -111,7 +153,12 @@ const lc0Searchers = new Map<string, Lc0PuctSearcher>();
 const lastLc0SearchResults = new Map<string, Lc0SearchResult>();
 const pendingLc0ReplyProbes = new Map<string, PendingLc0ReplyProbe>();
 const lc0TreeTelemetry = new Map<string, Lc0TreeTelemetry>();
+const uciTelemetry = new Map<string, UciEngineTelemetry>();
+const bt4Telemetry = new Map<string, Bt4Telemetry>();
 const engineOutputs = new Map<string, EngineOutputSnapshot>();
+const engineOutputHistory: EngineOutputSnapshot[] = [];
+let engineOutputTotalCount = 0;
+const MAX_ENGINE_OUTPUT_HISTORY = 1000;
 const thinkingEngineIds = new Set<string>();
 let activeEngineIds: string[] = [];
 const games: GameRecord[] = [];
@@ -155,6 +202,78 @@ function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
 
 function lc0EncoderLayers(): number {
   return Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10)));
+}
+
+function boundedIntValue(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Math.floor(Number(value ?? fallback));
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+}
+
+function lc0BatchSize(): number {
+  const node = document.getElementById('lc0BatchSizeInput') as HTMLInputElement | null;
+  return boundedIntValue(node?.value ?? params.get('lc0BatchSize') ?? params.get('batchSize') ?? params.get('batch'), 1, 1, 64);
+}
+
+function lc0BatchPipelineDepth(): number {
+  const node = document.getElementById('lc0BatchPipelineDepthInput') as HTMLInputElement | null;
+  return boundedIntValue(node?.value ?? params.get('lc0BatchPipelineDepth') ?? params.get('batchPipelineDepth'), 1, 1, 16);
+}
+
+function intParam(name: string, fallback: number, min: number, max: number): number {
+  const raw = params.get(name);
+  if (raw == null) return fallback;
+  const parsed = Math.floor(Number(raw));
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+}
+
+function parseSeatSpec(value: string | null): EngineRow | undefined {
+  if (!value) return undefined;
+  const [familyRaw, variantRaw, strengthRaw] = value.split(/[:;,]/).map((part) => part.trim());
+  if (!isEngineFamily(familyRaw)) return undefined;
+  const variant = variantRaw || defaultVariant(familyRaw);
+  const strength = strengthRaw === undefined || strengthRaw === '' ? strengthMeta(familyRaw).def : Number(strengthRaw);
+  const row: EngineRow = { family: familyRaw, variant, strength };
+  clampStrength(row);
+  return row;
+}
+
+function applyArenaQueryParams(): void {
+  const seatA = parseSeatSpec(params.get('seatA') ?? params.get('engineA'));
+  const seatB = parseSeatSpec(params.get('seatB') ?? params.get('engineB'));
+  if (seatA) seatRows.A = seatA;
+  if (seatB) seatRows.B = seatB;
+
+  if (params.has('lc0Strength')) {
+    seatRows.A.family = 'lc0';
+    seatRows.A.variant = 'small';
+    seatRows.A.strength = Number(params.get('lc0Strength'));
+    clampStrength(seatRows.A);
+  }
+  const opponentFamily = params.get('opponentFamily');
+  if (opponentFamily && isEngineFamily(opponentFamily)) {
+    seatRows.B.family = opponentFamily;
+    seatRows.B.variant = params.get('opponentVariant') ?? defaultVariant(opponentFamily);
+    seatRows.B.strength = Number(params.get('opponentStrength') ?? strengthMeta(opponentFamily).def);
+    clampStrength(seatRows.B);
+  }
+
+  inputEl('gamesInput').value = String(intParam('gamesPerOpening', intParam('games', Number(inputEl('gamesInput').value) || 2, 1, 20), 1, 20));
+  inputEl('delayInput').value = String(intParam('delayMs', intParam('delay', Number(inputEl('delayInput').value) || 0, 0, 3000), 0, 3000));
+  const budget = params.get('budgetMode') ?? params.get('budget');
+  if (budget === 'movetime' || budget === 'fixed') selectEl('budgetModeSelect').value = budget;
+  inputEl('movetimeInput').value = String(intParam('movetimeMs', intParam('movetime', Number(inputEl('movetimeInput').value) || 500, 10, 60000), 10, 60000));
+  inputEl('cacheEntriesInput').value = String(intParam('cacheEntries', intParam('cache', Number(inputEl('cacheEntriesInput').value) || 2048, 0, 100000), 0, 100000));
+  inputEl('stockfishThreadsInput').value = String(intParam('sfThreads', Number(inputEl('stockfishThreadsInput').value) || 1, 1, 32));
+  inputEl('lc0BatchSizeInput').value = String(boundedIntValue(params.get('lc0BatchSize') ?? params.get('batchSize') ?? params.get('batch'), Number(inputEl('lc0BatchSizeInput').value) || 1, 1, 64));
+  inputEl('lc0BatchPipelineDepthInput').value = String(boundedIntValue(params.get('lc0BatchPipelineDepth') ?? params.get('batchPipelineDepth'), Number(inputEl('lc0BatchPipelineDepthInput').value) || 1, 1, 16));
+
+  const suite = params.get('openingSuite') ?? params.get('openings') ?? params.get('startingPosition');
+  if (suite === 'start' || suite === 'built-in' || suite === 'custom') selectEl('startingPositionSelect').value = suite;
+  const openingText = params.get('openingText') ?? params.get('customOpenings');
+  if (openingText != null) {
+    selectEl('startingPositionSelect').value = 'custom';
+    (el('openingText') as HTMLTextAreaElement).value = openingText;
+  }
 }
 
 function percent(value: number): string {
@@ -215,6 +334,14 @@ function stockfishScoreCompact(info: StockfishInfoLine | undefined, fen: string)
   return `d${info.depth}`;
 }
 
+function stockfishWhiteCp(info: StockfishInfoLine | undefined, fen: string): number | undefined {
+  return info?.scoreCp === undefined ? undefined : (fenTurn(fen) === 'w' ? info.scoreCp : -info.scoreCp);
+}
+
+function stockfishMateInWhitePov(info: StockfishInfoLine | undefined, fen: string): number | undefined {
+  return info?.mateIn === undefined ? undefined : (fenTurn(fen) === 'w' ? info.mateIn : -info.mateIn);
+}
+
 function lc0WdlText(evaluation: Lc0Evaluation): string {
   const wdl = toWhiteWdl(evaluation.wdl, evaluation.fen);
   return `WDL ${percent(wdl[0])}/${percent(wdl[1])}/${percent(wdl[2])} · Q ${signed(toWhiteQ(evaluation.q, evaluation.fen), 3)} · MLH ${evaluation.mlh.toFixed(1)}`;
@@ -257,8 +384,12 @@ function searchWdlText(wdl: [number, number, number], q: number, fen: string): s
 function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
   thinkingEngineIds.delete(snapshot.engineId);
   engineOutputs.set(snapshot.engineId, snapshot);
+  engineOutputTotalCount += 1;
+  engineOutputHistory.push(snapshot);
+  if (engineOutputHistory.length > MAX_ENGINE_OUTPUT_HISTORY) engineOutputHistory.splice(0, engineOutputHistory.length - MAX_ENGINE_OUTPUT_HISTORY);
   renderSideLabels();
   renderEngineOutputs();
+  renderEngineDiagnosticsInfo();
 }
 
 function shortEngineTag(name: string): string {
@@ -474,6 +605,8 @@ function refreshSeatControls(): void {
   selectEl('seatA').disabled = running;
   selectEl('seatB').disabled = running;
   selectEl('lc0RuntimeSelect').disabled = running || loadingLc0;
+  inputEl('lc0BatchSizeInput').disabled = running;
+  inputEl('lc0BatchPipelineDepthInput').disabled = running;
   for (const selector of ['.seat-fam', '.seat-var', '.seat-strength']) {
     for (const node of el('arenaSeatList').querySelectorAll<HTMLInputElement | HTMLSelectElement>(selector)) node.disabled = running;
   }
@@ -496,15 +629,81 @@ function stockfishThreads(): number {
   return threadedStockfishAvailable() ? requested : 1;
 }
 
+function formatCount(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return '—';
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(Math.round(value));
+}
+
+function formatMs(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return '—';
+  return value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${Math.round(value)}ms`;
+}
+
+function averageMs(total: number | undefined, count: number): string {
+  return total !== undefined && count > 0 ? formatMs(total / count) : '—';
+}
+
+function timingMeansText(means: Record<string, number> | undefined): string {
+  if (!means) return '';
+  const entries = Object.entries(means).filter(([, value]) => Number.isFinite(value));
+  if (!entries.length) return '';
+  return entries.slice(0, 4).map(([key, value]) => `${key} ${formatMs(value)}`).join(' · ');
+}
+
 function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): string {
-  if (!metrics) return 'NN cache: unavailable';
-  return `NN cache: ${metrics.entries}/${metrics.maxEntries} entries · ${metrics.hits} hit${metrics.hits === 1 ? '' : 's'} · ${metrics.misses} miss${metrics.misses === 1 ? '' : 'es'}`;
+  if (!metrics) return 'NN cache unavailable';
+  return `NN cache ${metrics.entries}/${metrics.maxEntries} entries · ${metrics.hits} hit${metrics.hits === 1 ? '' : 's'} · ${metrics.misses} miss${metrics.misses === 1 ? '' : 'es'}`;
+}
+
+function diagnosticEngineIds(): string[] {
+  const ids = activeEngineIds.length ? activeEngineIds : [seatEngineId('A'), seatEngineId('B')];
+  return [...new Set(ids)].filter((id) => engines.has(id));
+}
+
+function rowForEngineId(engineId: string): EngineRow | undefined {
+  return activeSeatRows().find((row) => engineIdForRow(row) === engineId);
+}
+
+function budgetText(row: EngineRow | undefined): string {
+  if (arenaBudgetMode() === 'movetime') return `${arenaMovetimeMs()}ms/move`;
+  if (!row) return 'budget —';
+  const meta = strengthMeta(row.family);
+  return `${meta.unit} ${row.strength}`;
+}
+
+function engineRuntimeDiagnosticsText(): string {
+  const ids = diagnosticEngineIds();
+  if (!ids.length) return 'Engine diagnostics: choose engines.';
+  const parts = ids.map((id) => {
+    const row = rowForEngineId(id);
+    const name = engines.get(id)?.name ?? id;
+    if (row?.family === 'lc0' && row.variant !== 'bt4') return `${name}: ${budgetText(row)} · ${lc0RuntimeLabel()} · batch ${lc0BatchSize()} · pipeline depth ${lc0BatchPipelineDepth()} · ${cacheMetricsText(lc0Cache?.metrics())}`;
+    if (row?.family === 'lc0' && row.variant === 'bt4') return `${name}: ${budgetText(row)} · ${bt4.loaded ? `loaded ${bt4.backend || 'WebGPU'}` : 'lazy WebGPU worker'} · ~${BT4_APPROX_MB}MB net`;
+    if (row?.family === 'sf') {
+      const kind = row.variant === 'full' ? 'full' : 'lite';
+      return `${name}: ${budgetText(row)} · ${stockfishFlavorLabel(stockfishFlavorFor(kind))} · ${stockfishThreads()} thread${stockfishThreads() === 1 ? '' : 's'}`;
+    }
+    if (row?.family === 'reckless') {
+      const variant = recklessVariantForKey(row.variant);
+      const engine = recklessByVariant.get(recklessCacheKey(variant));
+      return `${name}: ${budgetText(row)} · ${variant.label} · ${engine?.runtimeLabel() ?? 'not loaded'} · hash 16MB`;
+    }
+    if (row?.family === 'viridithas') {
+      const variant = viridithasVariantForKey(row.variant);
+      const engine = viridithasByVariant.get(viridithasCacheKey(variant));
+      return `${name}: ${budgetText(row)} · ${variant.label} · ${engine?.runtimeLabel() ?? 'not loaded'} · hash 16MB`;
+    }
+    return `${name}: diagnostics unavailable`;
+  });
+  return `Engine diagnostics: ${parts.join(' | ')}`;
 }
 
 function renderCacheInfo(): void {
   lc0Cache?.setMaxEntries(arenaCacheEntries());
-  el('cacheInfo').textContent = cacheMetricsText(lc0Cache?.metrics());
-  renderSearchTelemetryInfo();
+  renderEngineDiagnosticsInfo();
 }
 
 function emptyTreeTelemetry(engineName: string): Lc0TreeTelemetry {
@@ -541,17 +740,55 @@ function ratioText(numerator: number, denominator: number): string {
   return denominator > 0 ? `${numerator}/${denominator}` : '0/0';
 }
 
+function lc0TreeTelemetrySummary(t: Lc0TreeTelemetry): string {
+  const fresh = Math.max(0, t.searches - t.rootReused);
+  const backend = timingMeansText(t.evalBackendTimingPerPositionMeans ?? t.evalBackendTimingMeans ?? t.lastBackendTimingPerPositionMeans ?? t.lastBackendTimingMeans);
+  const batch = t.lastBatchSize ? ` · batch ${t.lastBatchSize} · maxEvalBatch ${t.maxEvalBatch ?? t.lastBatchSize}${t.lastBatchPipelineDepth && t.lastBatchPipelineDepth > 1 ? ` · pipeline ${t.lastBatchPipelineDepth}` : ''}` : '';
+  return `${t.engineName}: searches ${t.searches} · avg ${averageMs(t.totalElapsedMs, t.searches)} · last ${formatMs(t.lastElapsedMs)}${backend ? ` · backend avg ${backend}` : ''}${batch} · tree reuse ${ratioText(t.rootReused, t.searches)} (${fresh} fresh) · reused visits ${t.reusedRootVisits} · reply parent ${ratioText(t.replyParentsExpanded, t.replyChecks)} · reply visited ${ratioText(t.replyVisited, t.replyChecks)} · opp reply top-policy≤5 ${ratioText(t.replyTopPolicy5, t.replyChecks)} · top-visits≤5 ${ratioText(t.replyTopVisits5, t.replyChecks)} · evals ${t.evalCalls} · cache hits ${t.cacheHits} · trans ${t.transpositionHits}`;
+}
+
+function uciTelemetrySummary(t: UciEngineTelemetry): string {
+  const last = t.lastDepth !== undefined
+    ? `last d${t.lastDepth} · nodes ${formatCount(t.lastNodes)} · nps ${formatCount(t.lastNps)} · PV ${t.lastPvMoves ?? 0}`
+    : 'waiting for first PV';
+  return `${t.engineName}: searches ${t.searches} · avg ${averageMs(t.totalElapsedMs, t.searches)} · last ${formatMs(t.lastElapsedMs)} · total nodes ${formatCount(t.totalNodes)} · ${last}${t.lastMultiPv && t.lastMultiPv > 1 ? ` · MultiPV ${t.lastMultiPv}` : ''}`;
+}
+
+function bt4TelemetrySummary(t: Bt4Telemetry): string {
+  return `${t.engineName}: searches ${t.searches} · avg ${averageMs(t.totalElapsedMs, t.searches)} · visits ${t.completedVisits} · evals ${t.evalCalls} · cache hits ${t.cacheHits} · last ${formatMs(t.lastElapsedMs)} · ${bt4.loaded ? `backend ${bt4.backend || 'WebGPU'}` : 'worker not loaded'}`;
+}
+
+function engineSearchDiagnosticsText(): string {
+  const ids = diagnosticEngineIds();
+  if (!ids.length) return 'Search diagnostics: choose engines.';
+  const parts = ids.map((id) => {
+    const row = rowForEngineId(id);
+    const name = engines.get(id)?.name ?? id;
+    if (row?.family === 'lc0' && row.variant !== 'bt4') {
+      const t = lc0TreeTelemetry.get(id);
+      return t && (t.searches || t.replyChecks) ? lc0TreeTelemetrySummary(t) : `${name}: tree waiting for searches · ${cacheMetricsText(lc0Cache?.metrics())}`;
+    }
+    if (row?.family === 'lc0' && row.variant === 'bt4') {
+      const t = bt4Telemetry.get(id);
+      return t?.searches ? bt4TelemetrySummary(t) : `${name}: BT4 search waiting${bt4.loaded ? ` · backend ${bt4.backend || 'WebGPU'}` : ''}`;
+    }
+    const uci = uciTelemetry.get(id);
+    return uci?.searches ? uciTelemetrySummary(uci) : `${name}: UCI search waiting for info`;
+  });
+  return `Search diagnostics: ${parts.join(' | ')}`;
+}
+
+function renderEngineDiagnosticsInfo(): void {
+  el('cacheInfo').textContent = engineRuntimeDiagnosticsText();
+  el('searchTelemetryInfo').textContent = engineSearchDiagnosticsText();
+}
+
 function searchTelemetryText(): string {
-  const entries = [...lc0TreeTelemetry.values()].filter((t) => t.searches || t.replyChecks);
-  if (!entries.length) return 'LC0 tree: waiting for searches…';
-  return `LC0 tree: ${entries.map((t) => {
-    const fresh = Math.max(0, t.searches - t.rootReused);
-    return `${t.engineName}: reuse ${ratioText(t.rootReused, t.searches)} (${fresh} fresh) · reused visits ${t.reusedRootVisits} · reply parent ${ratioText(t.replyParentsExpanded, t.replyChecks)} · reply visited ${ratioText(t.replyVisited, t.replyChecks)} · opp reply top-policy≤5 ${ratioText(t.replyTopPolicy5, t.replyChecks)} · top-visits≤5 ${ratioText(t.replyTopVisits5, t.replyChecks)} · evals ${t.evalCalls} · cache hits ${t.cacheHits} · trans ${t.transpositionHits}`;
-  }).join(' | ')}`;
+  return engineSearchDiagnosticsText();
 }
 
 function renderSearchTelemetryInfo(): void {
-  el('searchTelemetryInfo').textContent = searchTelemetryText();
+  renderEngineDiagnosticsInfo();
 }
 
 function isLc0SearchEngine(engineId: string): boolean {
@@ -564,7 +801,26 @@ function childForRootMove(result: Lc0SearchResult | undefined, uci: string): Puc
   return root.edges.find((edge) => moveToUci(edge.move) === uci)?.child ?? null;
 }
 
-function recordLc0SearchTelemetry(engineId: string, engineName: string, result: Lc0SearchResult): void {
+function addNumericTotals(target: Record<string, number>, source: Record<string, number> | undefined): void {
+  if (!source) return;
+  for (const [key, value] of Object.entries(source)) {
+    if (Number.isFinite(value)) target[key] = (target[key] ?? 0) + value;
+  }
+}
+
+function meanRecord(totals: Record<string, number> | undefined, denominator: number | undefined): Record<string, number> | undefined {
+  if (!totals || !denominator || denominator <= 0) return undefined;
+  return Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, Number((value / denominator).toFixed(6))]));
+}
+
+function mergeHistogram(target: Record<string, number> | undefined, source: Record<string, number> | undefined): Record<string, number> | undefined {
+  if (!source) return target;
+  const out = { ...(target ?? {}) };
+  for (const [key, value] of Object.entries(source)) out[key] = (out[key] ?? 0) + value;
+  return out;
+}
+
+function recordLc0SearchTelemetry(engineId: string, engineName: string, result: Lc0SearchResult, elapsedMs?: number): void {
   const stats = result.search.stats;
   const t = telemetryFor(engineId, engineName);
   const completed = stats?.completedVisits ?? 0;
@@ -576,7 +832,55 @@ function recordLc0SearchTelemetry(engineId: string, engineName: string, result: 
   t.cacheHits += stats?.cacheHits ?? 0;
   t.neuralEvalMisses += stats?.neuralEvalMisses ?? 0;
   t.transpositionHits += stats?.transpositionHits ?? 0;
+  t.evalBackendTimingSamples = (t.evalBackendTimingSamples ?? 0) + (stats?.evalBackendTimingSamples ?? 0);
+  t.evalBackendTimingPositions = (t.evalBackendTimingPositions ?? 0) + (stats?.evalBackendTimingPositions ?? 0);
+  t.evalBackendTimingTotals ??= {};
+  addNumericTotals(t.evalBackendTimingTotals, stats?.evalBackendTimingTotals);
+  t.evalBackendTimingMeans = meanRecord(t.evalBackendTimingTotals, t.evalBackendTimingSamples);
+  t.evalBackendTimingPerPositionMeans = meanRecord(t.evalBackendTimingTotals, t.evalBackendTimingPositions);
+  t.lastBatchSize = stats?.batchSize;
+  t.lastBatchPipelineDepth = stats?.batchPipelineDepth;
+  t.maxEvalBatch = Math.max(t.maxEvalBatch ?? 0, stats?.maxEvalBatch ?? 0);
+  t.evalBatchSizeHistogram = mergeHistogram(t.evalBatchSizeHistogram, stats?.evalBatchSizeHistogram);
+  if (elapsedMs !== undefined) {
+    t.totalElapsedMs = (t.totalElapsedMs ?? 0) + elapsedMs;
+    t.lastElapsedMs = elapsedMs;
+  }
+  t.lastBackendTimingMeans = stats?.evalBackendTimingMeans;
+  t.lastBackendTimingPerPositionMeans = stats?.evalBackendTimingPerPositionMeans;
   lastLc0SearchResults.set(engineId, result);
+  renderSearchTelemetryInfo();
+}
+
+function recordBt4Telemetry(engineId: string, engineName: string, result: Bt4SearchResult): void {
+  const existing = bt4Telemetry.get(engineId) ?? { engineName, searches: 0, completedVisits: 0, evalCalls: 0, cacheHits: 0 };
+  existing.engineName = engineName;
+  existing.searches += 1;
+  existing.completedVisits += result.visits ?? 0;
+  existing.evalCalls += result.stats?.evalCalls ?? 0;
+  existing.cacheHits += result.stats?.cacheHits ?? 0;
+  existing.totalElapsedMs = (existing.totalElapsedMs ?? 0) + (result.elapsedMs ?? 0);
+  existing.lastElapsedMs = result.elapsedMs;
+  bt4Telemetry.set(engineId, existing);
+  renderSearchTelemetryInfo();
+}
+
+function recordUciTelemetry(engineId: string, engineName: string, lines: StockfishInfoLine[], elapsedMs?: number): void {
+  const best = lines[0];
+  const existing = uciTelemetry.get(engineId) ?? { engineName, searches: 0, totalNodes: 0 };
+  existing.engineName = engineName;
+  existing.searches += 1;
+  if (best?.nodes !== undefined) existing.totalNodes += best.nodes;
+  existing.lastDepth = best?.depth;
+  existing.lastNodes = best?.nodes;
+  existing.lastNps = best?.nps;
+  existing.lastPvMoves = best?.pvUci.length;
+  existing.lastMultiPv = lines.length;
+  if (elapsedMs !== undefined) {
+    existing.totalElapsedMs = (existing.totalElapsedMs ?? 0) + elapsedMs;
+    existing.lastElapsedMs = elapsedMs;
+  }
+  uciTelemetry.set(engineId, existing);
   renderSearchTelemetryInfo();
 }
 
@@ -612,6 +916,7 @@ function recordLc0SearchOutput(engineId: string, engineName: string, result: Lc0
 }
 
 function recordBt4SearchOutput(engineId: string, engineName: string, result: Bt4SearchResult): void {
+  recordBt4Telemetry(engineId, engineName, result);
   recordEngineOutput({
     engineId,
     engineName,
@@ -626,7 +931,8 @@ function recordBt4SearchOutput(engineId: string, engineName: string, result: Bt4
   });
 }
 
-function recordUciOutput(engineId: string, engineName: string, label: string, fen: string, move: string | null, lines: StockfishInfoLine[]): void {
+function recordUciOutput(engineId: string, engineName: string, label: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
+  recordUciTelemetry(engineId, engineName, lines, elapsedMs);
   const best = lines[0];
   recordEngineOutput({
     engineId,
@@ -639,19 +945,25 @@ function recordUciOutput(engineId: string, engineName: string, label: string, fe
     evalBar: stockfishEvalBar(fen, best),
     detail: lines.length > 1 ? `MultiPV ${lines.slice(0, 3).map((line) => `#${line.multipv} ${stockfishScoreText(line, fen)}`).join(' · ')}` : undefined,
     pv: best?.pvUci,
+    whiteCp: stockfishWhiteCp(best, fen),
+    mateInWhitePov: stockfishMateInWhitePov(best, fen),
+    depth: best?.depth,
+    nodes: best?.nodes,
+    nps: best?.nps,
+    elapsedMs,
   });
 }
 
-function recordStockfishOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[]): void {
-  recordUciOutput(engineId, engineName, 'SF', fen, move, lines);
+function recordStockfishOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
+  recordUciOutput(engineId, engineName, 'SF', fen, move, lines, elapsedMs);
 }
 
-function recordRecklessOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[]): void {
-  recordUciOutput(engineId, engineName, 'Reckless', fen, move, lines);
+function recordRecklessOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
+  recordUciOutput(engineId, engineName, 'Reckless', fen, move, lines, elapsedMs);
 }
 
-function recordViridithasOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[]): void {
-  recordUciOutput(engineId, engineName, 'Viridithas', fen, move, lines);
+function recordViridithasOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
+  recordUciOutput(engineId, engineName, 'Viridithas', fen, move, lines, elapsedMs);
 }
 
 function recordEngineThinking(engine: ArenaEngine): void {
@@ -912,15 +1224,19 @@ function buildEngines() {
   const warmupPositions = [parseFen(START_FEN)];
   const lc0Search = (engineId: string, row: EngineRow): ArenaEngine['move'] => async (positions, signal) => {
     const timed = arenaBudgetMode() === 'movetime';
+    const started = performance.now();
     const result = await lc0SearcherFor(engineId).search({ positions }, {
       visits: timed ? undefined : row.strength,
       movetimeMs: timed ? arenaMovetimeMs() : undefined,
       signal,
       yieldEveryMs: 16,
       reuseTree: true,
+      batchSize: lc0BatchSize(),
+      batchPipelineDepth: lc0BatchPipelineDepth(),
     });
+    const elapsedMs = performance.now() - started;
     const engineName = engines.get(engineId)?.name ?? engineId;
-    recordLc0SearchTelemetry(engineId, engineName, result);
+    recordLc0SearchTelemetry(engineId, engineName, result, elapsedMs);
     recordLc0SearchOutput(engineId, engineName, result);
     return result.move ?? null;
   };
@@ -946,16 +1262,20 @@ function buildEngines() {
     if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: stockfishThreads() });
     else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: stockfishThreads() });
     const fen = boardToFen(positions[positions.length - 1]);
+    const started = performance.now();
     const move = await engine.bestMove(fen, signal);
-    recordStockfishOutput(engineId, engines.get(engineId)?.name ?? (kind === 'lite' ? 'Stockfish Lite' : 'Stockfish'), fen, move, engine.lastInfo());
+    const elapsedMs = performance.now() - started;
+    recordStockfishOutput(engineId, engines.get(engineId)?.name ?? (kind === 'lite' ? 'Stockfish Lite' : 'Stockfish'), fen, move, engine.lastInfo(), elapsedMs);
     return move;
   };
   const recklessMove = (engineId: string, row: EngineRow, engine: RecklessEngine): ArenaEngine['move'] => async (positions, signal) => {
     if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
     else engine.setOptions({ depth: row.strength, movetimeMs: undefined });
     const fen = boardToFen(positions[positions.length - 1]);
+    const started = performance.now();
     const move = await engine.bestMove(fen, signal);
-    recordRecklessOutput(engineId, engines.get(engineId)?.name ?? 'Reckless', fen, move, engine.lastInfo());
+    const elapsedMs = performance.now() - started;
+    recordRecklessOutput(engineId, engines.get(engineId)?.name ?? 'Reckless', fen, move, engine.lastInfo(), elapsedMs);
     renderRecklessRuntimeInfo();
     return move;
   };
@@ -963,8 +1283,10 @@ function buildEngines() {
     if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
     else engine.setOptions({ depth: row.strength, movetimeMs: undefined });
     const fen = boardToFen(positions[positions.length - 1]);
+    const started = performance.now();
     const move = await engine.bestMove(fen, signal);
-    recordViridithasOutput(engineId, engines.get(engineId)?.name ?? 'Viridithas', fen, move, engine.lastInfo());
+    const elapsedMs = performance.now() - started;
+    recordViridithasOutput(engineId, engines.get(engineId)?.name ?? 'Viridithas', fen, move, engine.lastInfo(), elapsedMs);
     renderViridithasRuntimeInfo();
     return move;
   };
@@ -1020,6 +1342,7 @@ function buildEngines() {
   }
   renderRecklessRuntimeInfo();
   renderViridithasRuntimeInfo();
+  renderEngineDiagnosticsInfo();
 }
 
 function selectedOpenings(): ArenaOpening[] {
@@ -1212,10 +1535,14 @@ async function startMatch() {
   games.length = 0;
   activeEngineIds = [];
   engineOutputs.clear();
+  engineOutputHistory.length = 0;
+  engineOutputTotalCount = 0;
   thinkingEngineIds.clear();
   lastLc0SearchResults.clear();
   pendingLc0ReplyProbes.clear();
   lc0TreeTelemetry.clear();
+  uciTelemetry.clear();
+  bt4Telemetry.clear();
   el('log').innerHTML = '';
   renderEngineOutputs();
   renderSearchTelemetryInfo();
@@ -1251,7 +1578,7 @@ async function startMatch() {
       const tags: Record<string, string> = { Event: 'LC0 arena', White: whiteEngine.name, Black: blackEngine.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
       games.push({ pgn: gameTreeToPgn(tree, tags, result) });
       renderCacheInfo();
-      appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason}) · ${cacheMetricsText(lc0Cache?.metrics())} · ${searchTelemetryText()}`);
+      appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason}) · ${engineRuntimeDiagnosticsText()} · ${searchTelemetryText()}`);
       renderMatchScore(engineA.name, engineB.name, sameEngine, score);
     }
     el('message').textContent = abort.signal.aborted ? `Stopped after ${score.games} game(s).` : `Match done (${score.games} game${score.games === 1 ? '' : 's'}).`;
@@ -1292,7 +1619,12 @@ function disposeLc0Resources(): void {
   lc0Searchers.clear();
   lastLc0SearchResults.clear();
   pendingLc0ReplyProbes.clear();
+  lc0TreeTelemetry.clear();
+  uciTelemetry.clear();
+  bt4Telemetry.clear();
   engineOutputs.clear();
+  engineOutputHistory.length = 0;
+  engineOutputTotalCount = 0;
   thinkingEngineIds.clear();
   activeEngineIds = [];
 }
@@ -1356,6 +1688,234 @@ async function reloadLc0Evaluator(): Promise<void> {
   await loadLc0Evaluator();
 }
 
+function setBenchResult(result: unknown): void {
+  const node = el('benchResult');
+  node.hidden = false;
+  node.textContent = JSON.stringify(result, null, 2);
+}
+
+function mapValues<T>(map: Map<string, T>): Record<string, T> {
+  return Object.fromEntries(map.entries());
+}
+
+async function safeOrtRuntimeDiagnostics(): Promise<unknown> {
+  try { return await collectOrtRuntimeDiagnostics({ probeAdapter: false }); }
+  catch (error) { return { error: (error as Error).message }; }
+}
+
+function fixedSuiteFensFromParams(): string[] {
+  const raw = params.get('fixedSuiteFens') ?? params.get('fens') ?? '';
+  return raw.split(/[|\n]/).map((fen) => fen.trim()).filter(Boolean);
+}
+
+function stockfishScoreMs(): number {
+  return intParam('stockfishScoreMs', arenaMovetimeMs(), 1, 60_000);
+}
+
+function stockfishScoreDepth(): number | undefined {
+  const raw = params.get('stockfishScoreDepth');
+  if (raw == null || raw === '') return undefined;
+  return intParam('stockfishScoreDepth', 8, 1, 245);
+}
+
+async function runFixedSuiteBenchAutorun(): Promise<void> {
+  if (params.get('fixedSuiteBench') !== '1' && params.get('benchmark') !== 'fixed-suite') return;
+  const fens = fixedSuiteFensFromParams();
+  setBenchResult({ status: 'LC0_FIXED_SUITE_RUNNING', runtime: selectedLc0Runtime(), positions: fens.length, startedAt: new Date().toISOString() });
+  const started = performance.now();
+  const controller = new AbortController();
+  try {
+    if (!fens.length) throw new Error('fixedSuiteFens is empty');
+    engineOutputs.clear();
+    engineOutputHistory.length = 0;
+    engineOutputTotalCount = 0;
+    thinkingEngineIds.clear();
+    lastLc0SearchResults.clear();
+    pendingLc0ReplyProbes.clear();
+    lc0TreeTelemetry.clear();
+    uciTelemetry.clear();
+    bt4Telemetry.clear();
+    buildEngines();
+    const lc0Id = seatEngineId('A');
+    const lc0Row = seatRows.A;
+    if (lc0Row.family !== 'lc0') throw new Error('fixed suite expects seat A to be LC0');
+    const lc0Name = engines.get(lc0Id)?.name ?? rowLabel(lc0Row);
+    const sfKind = seatRows.B.family === 'sf' && seatRows.B.variant === 'full' ? 'full' : 'lite';
+    const sfId = seatRows.B.family === 'sf' ? seatEngineId('B') : 'sf:lite:8';
+    const sfName = seatRows.B.family === 'sf' ? (engines.get(sfId)?.name ?? rowLabel(seatRows.B)) : 'Stockfish Lite d8';
+    await warmUpSelectedEngines([lc0Id, sfId], controller.signal);
+    const sfEngine = stockfishEngineFor(sfKind);
+    const timed = arenaBudgetMode() === 'movetime';
+    const scoreMs = stockfishScoreMs();
+    const scoreDepth = stockfishScoreDepth();
+    sfEngine.setOptions({ depth: scoreDepth ?? (timed ? undefined : seatRows.B.strength), movetimeMs: scoreDepth === undefined && timed ? scoreMs : undefined, threads: stockfishThreads() });
+    resetLc0SearchTrees([lc0Id]);
+    const positions = [];
+    for (let i = 0; i < fens.length; i++) {
+      const boardAtMove = parseFen(fens[i]);
+      const searchStarted = performance.now();
+      const search = await lc0SearcherFor(lc0Id).search({ positions: [boardAtMove] }, {
+        visits: timed ? undefined : lc0Row.strength,
+        movetimeMs: timed ? arenaMovetimeMs() : undefined,
+        signal: controller.signal,
+        yieldEveryMs: 16,
+        reuseTree: false,
+        batchSize: lc0BatchSize(),
+        batchPipelineDepth: lc0BatchPipelineDepth(),
+      });
+      const searchElapsedMs = performance.now() - searchStarted;
+      recordLc0SearchTelemetry(lc0Id, lc0Name, search, searchElapsedMs);
+      recordLc0SearchOutput(lc0Id, lc0Name, search);
+      const legal = legalFromUci(boardAtMove, search.move ?? null);
+      if (!legal || !search.move) {
+        positions.push({ index: i + 1, fen: fens[i], lc0Move: search.move, error: 'LC0 returned no legal move' });
+        continue;
+      }
+      const afterBoard = makeMove(boardAtMove, legal);
+      const afterFen = boardToFen(afterBoard);
+      const scoreStarted = performance.now();
+      const sfMove = await sfEngine.bestMove(afterFen, controller.signal);
+      const scoreElapsedMs = performance.now() - scoreStarted;
+      const lines = sfEngine.lastInfo();
+      recordStockfishOutput(sfId, sfName, afterFen, sfMove, lines, scoreElapsedMs);
+      const best = lines[0];
+      const whiteCp = stockfishWhiteCp(best, afterFen);
+      const mateInWhitePov = stockfishMateInWhitePov(best, afterFen);
+      positions.push({
+        index: i + 1,
+        fen: fens[i],
+        sideToMove: boardAtMove.turn,
+        lc0Move: search.move,
+        lc0Pv: search.pv,
+        lc0Search: {
+          visits: search.visits,
+          evals: search.search.stats?.evalCalls ?? 0,
+          cacheHits: search.search.stats?.cacheHits ?? 0,
+          elapsedMs: searchElapsedMs,
+          batchSize: search.search.stats?.batchSize,
+          batchPipelineDepth: search.search.stats?.batchPipelineDepth,
+          maxEvalBatch: search.search.stats?.maxEvalBatch,
+          evalBatchSizeHistogram: search.search.stats?.evalBatchSizeHistogram,
+          evalBackendTimingMeans: search.search.stats?.evalBackendTimingMeans,
+          evalBackendTimingPerPositionMeans: search.search.stats?.evalBackendTimingPerPositionMeans,
+          qWhite: toWhiteQ(search.value, search.fen),
+        },
+        afterFen,
+        stockfish: {
+          scoreMovetimeMs: scoreDepth === undefined ? scoreMs : undefined,
+          scoreDepth,
+          reply: sfMove,
+          whiteCp,
+          mateInWhitePov,
+          lc0PerspectiveCp: whiteCp === undefined ? undefined : (boardAtMove.turn === 'w' ? whiteCp : -whiteCp),
+          lc0PerspectiveMate: mateInWhitePov === undefined ? undefined : (boardAtMove.turn === 'w' ? mateInWhitePov : -mateInWhitePov),
+          depth: best?.depth,
+          nodes: best?.nodes,
+          nps: best?.nps,
+          pv: best?.pvUci,
+          elapsedMs: scoreElapsedMs,
+        },
+      });
+    }
+    const cpValues = positions.map((p) => p.stockfish?.lc0PerspectiveCp).filter((value): value is number => Number.isFinite(value));
+    const ortRuntimeDiagnostics = await safeOrtRuntimeDiagnostics();
+    const result = {
+      status: 'LC0_FIXED_SUITE_DONE',
+      runtime: selectedLc0Runtime(),
+      runtimeLabel: lc0RuntimeLabel(),
+      elapsedMs: Math.round(performance.now() - started),
+      configuration: {
+        seatA: { ...seatRows.A, id: lc0Id, label: rowLabel(seatRows.A) },
+        stockfish: { id: sfId, label: sfName, scoreMovetimeMs: scoreDepth === undefined ? scoreMs : undefined, scoreDepth, threads: stockfishThreads() },
+        budgetMode: arenaBudgetMode(),
+        movetimeMs: arenaMovetimeMs(),
+        cacheEntries: arenaCacheEntries(),
+        lc0BatchSize: lc0BatchSize(),
+        lc0BatchPipelineDepth: lc0BatchPipelineDepth(),
+        positions: fens.length,
+        ortRuntimeDiagnostics,
+      },
+      summary: {
+        avgStockfishLc0PerspectiveCp: cpValues.length ? cpValues.reduce((sum, value) => sum + value, 0) / cpValues.length : null,
+        evaluatedCpPositions: cpValues.length,
+        runtimeDiagnostics: el('cacheInfo').textContent ?? '',
+        searchDiagnostics: el('searchTelemetryInfo').textContent ?? '',
+      },
+      telemetry: {
+        lc0Tree: mapValues(lc0TreeTelemetry),
+        uci: mapValues(uciTelemetry),
+        lc0Cache: lc0Cache?.metrics(),
+      },
+      positions,
+      engineOutputCount: engineOutputTotalCount,
+      engineOutputRetainedCount: engineOutputHistory.length,
+      engineOutputsTruncated: engineOutputHistory.length < engineOutputTotalCount,
+      engineOutputs: [...engineOutputHistory],
+    };
+    setBenchResult(result);
+  } catch (error) {
+    setBenchResult({ status: 'LC0_FIXED_SUITE_FAILED', runtime: selectedLc0Runtime(), elapsedMs: Math.round(performance.now() - started), error: (error as Error).message, stack: (error as Error).stack });
+  }
+}
+
+async function runArenaBenchAutorun(): Promise<void> {
+  if (params.get('arenaBench') !== '1' && params.get('benchmark') !== 'arena') return;
+  setBenchResult({ status: 'ARENA_BENCH_RUNNING', runtime: selectedLc0Runtime(), startedAt: new Date().toISOString() });
+  const started = performance.now();
+  try {
+    if ((el('start') as HTMLButtonElement).disabled) throw new Error(el('message').textContent || 'arena start is disabled');
+    await startMatch();
+    const matchMessage = el('message').textContent ?? '';
+    if (!games.length || /^(Match failed|Opening setup error|No games|Select two|Stopped|Lc0 BT4 needs)/.test(matchMessage)) {
+      throw new Error(matchMessage || 'arena benchmark did not complete any games');
+    }
+    const ortRuntimeDiagnostics = await safeOrtRuntimeDiagnostics();
+    const result = {
+      status: 'ARENA_BENCH_DONE',
+      runtime: selectedLc0Runtime(),
+      runtimeLabel: lc0RuntimeLabel(),
+      elapsedMs: Math.round(performance.now() - started),
+      configuration: {
+        seatA: { ...seatRows.A, id: seatEngineId('A'), label: rowLabel(seatRows.A) },
+        seatB: { ...seatRows.B, id: seatEngineId('B'), label: rowLabel(seatRows.B) },
+        budgetMode: arenaBudgetMode(),
+        movetimeMs: arenaMovetimeMs(),
+        gamesPerOpening: Math.max(1, Math.floor(Number(inputEl('gamesInput').value) || 2)),
+        openingSuite: selectEl('startingPositionSelect').value,
+        openings: selectedOpenings().map((opening) => opening.name),
+        cacheEntries: arenaCacheEntries(),
+        lc0BatchSize: lc0BatchSize(),
+        lc0BatchPipelineDepth: lc0BatchPipelineDepth(),
+        stockfishThreads: stockfishThreads(),
+        ortRuntimeDiagnostics,
+      },
+      summary: {
+        message: el('message').textContent ?? '',
+        pairing: el('pairing').textContent ?? '',
+        matchScore: el('matchScore').textContent ?? '',
+        runtimeDiagnostics: el('cacheInfo').textContent ?? '',
+        searchDiagnostics: el('searchTelemetryInfo').textContent ?? '',
+        runtimeBadge: el('runtimeBadge').textContent ?? '',
+      },
+      telemetry: {
+        lc0Tree: mapValues(lc0TreeTelemetry),
+        uci: mapValues(uciTelemetry),
+        bt4: mapValues(bt4Telemetry),
+        lc0Cache: lc0Cache?.metrics(),
+      },
+      engineOutputCount: engineOutputTotalCount,
+      engineOutputRetainedCount: engineOutputHistory.length,
+      engineOutputsTruncated: engineOutputHistory.length < engineOutputTotalCount,
+      engineOutputs: [...engineOutputHistory],
+      log: [...el('log').children].reverse().map((node) => node.textContent ?? ''),
+      pgn: games.map((game) => game.pgn).join('\n\n'),
+    };
+    setBenchResult(result);
+  } catch (error) {
+    setBenchResult({ status: 'ARENA_BENCH_FAILED', runtime: selectedLc0Runtime(), elapsedMs: Math.round(performance.now() - started), error: (error as Error).message, stack: (error as Error).stack });
+  }
+}
+
 function wireEvents() {
   el('start').addEventListener('click', () => { void startMatch(); });
   el('stop').addEventListener('click', () => { abort?.abort(); el('message').textContent = 'Stopping…'; });
@@ -1395,6 +1955,8 @@ function wireEvents() {
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
   el('openingText').addEventListener('input', refreshOpeningPreview);
   el('cacheEntriesInput').addEventListener('input', () => { renderCacheInfo(); resetLc0SearchTrees(); });
+  el('lc0BatchSizeInput').addEventListener('input', () => { inputEl('lc0BatchSizeInput').value = String(lc0BatchSize()); renderCacheInfo(); resetLc0SearchTrees(); });
+  el('lc0BatchPipelineDepthInput').addEventListener('input', () => { inputEl('lc0BatchPipelineDepthInput').value = String(lc0BatchPipelineDepth()); renderCacheInfo(); resetLc0SearchTrees(); });
   el('lc0RuntimeSelect').addEventListener('change', () => { if (!running) void reloadLc0Evaluator(); });
   el('budgetModeSelect').addEventListener('change', () => resetLc0SearchTrees());
   el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
@@ -1417,6 +1979,7 @@ async function init() {
   refreshViridithasVariantUi();
   selectEl('recklessVariantSelect').value = REQUESTED_RECKLESS_VARIANT.key;
   selectEl('viridithasVariantSelect').value = REQUESTED_VIRIDITHAS_VARIANT.key;
+  applyArenaQueryParams();
   renderRecklessRuntimeInfo();
   renderViridithasRuntimeInfo();
   inputEl('stockfishThreadsInput').value = String(Math.max(1, Math.min(32, Math.floor(Number(params.get('sfThreads') ?? '1') || 1))));
@@ -1430,6 +1993,8 @@ async function init() {
   refreshOpeningPreview();
   await loadLc0Evaluator();
   void renderRuntimeBadge();
+  void runFixedSuiteBenchAutorun();
+  void runArenaBenchAutorun();
 }
 
 void init();
