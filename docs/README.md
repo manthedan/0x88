@@ -24,7 +24,7 @@ For current planning, start in `knowledge/` first. Use `docs/` as stable referen
 | [`browser_uci_adapter_contract.md`](browser_uci_adapter_contract.md) | Current | Standard TypeScript/behavioral contract for browser UCI engines before selector promotion. |
 | [`browser_c_engine_porting.md`](browser_c_engine_porting.md) | Current | Standard low-effort Emscripten-first intake recipe for C/C++ browser UCI engines. |
 | [`berserk_browser_benchmarks.md`](berserk_browser_benchmarks.md) | Active | Berserk Emscripten worker lifecycle and first rotated-FEN benchmark captures. |
-| [`plentychess_browser_port.md`](plentychess_browser_port.md) | Active | PlentyChess Emscripten proof-build and Node UCI smoke notes. |
+| [`plentychess_browser_port.md`](plentychess_browser_port.md) | Active | PlentyChess Emscripten proof-build plus Node/browser worker smoke notes. |
 | [`model_efficiency_metrics.md`](model_efficiency_metrics.md) | Current | How we compare strength/bytes/params/latency/search usefulness. |
 | [`release_gate_and_distributed_bench.md`](release_gate_and_distributed_bench.md) | Current | Promotion gates, protocol cards, distributed benchmark shape. |
 | [`mac_mini_cpu_offload_plan.md`](mac_mini_cpu_offload_plan.md) | Current | Compute split and Mac-mini workflow for CPU-bound post-training evals, arenas, tuning, and self-play limits. |
@@ -53,7 +53,7 @@ For current planning, start in `knowledge/` first. Use `docs/` as stable referen
 | [`browser_uci_adapter_contract.md`](browser_uci_adapter_contract.md) | Current | Required adapter methods, lifecycle rules, diagnostics, asset-check responsibilities, and promotion checklist for browser UCI engines. |
 | [`browser_c_engine_porting.md`](browser_c_engine_porting.md) | Current | Emscripten-first C/C++ engine intake recipe, Stockfish.js reference observations, and deferred optimization ladder. |
 | [`berserk_browser_benchmarks.md`](berserk_browser_benchmarks.md) | Active | Berserk Emscripten worker lifecycle smoke, arena/analysis checks, and first rotated-FEN benchmark snapshot. |
-| [`plentychess_browser_port.md`](plentychess_browser_port.md) | Active | PlentyChess Emscripten build shape, artifact sizes, and first Node UCI smoke. |
+| [`plentychess_browser_port.md`](plentychess_browser_port.md) | Active | PlentyChess Emscripten build shape, artifact sizes, and Node/browser worker smoke. |
 | [`onnx_deploy_workflow.md`](onnx_deploy_workflow.md) | Current | ONNX simplification/parity/deployment workflow. |
 | [`browser_runtime.md`](browser_runtime.md) | Reference | Browser runtime plan; short and older, still useful. |
 | [`search_aux_head_calibration.md`](search_aux_head_calibration.md) | Active | AV/aux-PUCT calibration notes. |

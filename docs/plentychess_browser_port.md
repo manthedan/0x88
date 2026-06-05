@@ -4,7 +4,7 @@ Last updated: 2026-06-05
 
 ## Status
 
-PlentyChess has a first Emscripten proof-build and Node UCI smoke. It is **not** integrated into arena/analysis selectors yet.
+PlentyChess has a first Emscripten proof-build, Node UCI smoke, reusable browser worker adapter, and browser lifecycle smoke. It is **not** integrated into arena/analysis selectors yet.
 
 Current local commands:
 
@@ -14,6 +14,12 @@ npm run plentychess:smoke-emscripten
 ```
 
 Generated artifacts are intentionally ignored under `public/plentychess/`.
+
+Browser worker smoke page:
+
+```text
+/plentychess-smoke.html
+```
 
 ## Source and assets
 
@@ -51,7 +57,9 @@ From the first successful local build:
 | `public/plentychess/plentychess-emscripten.wasm` | 389,983 bytes |
 | `public/plentychess/plentychess-emscripten.data` | 63,023,936 bytes |
 
-## Node smoke result
+## Smoke results
+
+### Node
 
 `npm run plentychess:smoke-emscripten` at depth 1 passed:
 
@@ -68,20 +76,38 @@ Representative final info line:
 info depth 1 seldepth 3 score cp 143 multipv 1 nodes 37 tbhits 0 time 1 nps 37000 hashfull 0 pv e1g1
 ```
 
+### Browser worker lifecycle
+
+`plentychess-smoke.html?depth=1&abortDepth=16` passed locally with:
+
+- startpos: `c2c4`
+- non-startpos FEN: `e1g1`
+- repeated startpos search: `c2c4`
+- MultiPV depth 1: `e1g1`, `b1c3`
+- abort: `AbortError`, recovery returned `e1g1`
+- missing asset failure surfaced:
+  - `Failed to execute 'importScripts' on 'WorkerGlobalScope': The script at 'http://127.0.0.1:5173/plentychess/missing-plentychess-...js' failed to load.`
+
+The smoke page covers:
+
+- prewarm/`uci`/`isready`
+- `ucinewgame`
+- startpos search
+- non-startpos FEN search
+- repeated search after `ucinewgame`
+- MultiPV depth-1 analysis
+- abort/recovery by terminating and recreating the synchronous Emscripten worker
+- missing JS asset failure surfacing
+
 ## Current limitations
 
-- No browser worker adapter yet.
-- No lifecycle smoke yet for repeated search, MultiPV, abort/recovery, or missing assets.
 - No arena/analysis selector integration yet.
-- Abort would currently need the same conservative terminate/recreate strategy used for other synchronous worker engines.
+- Abort uses the same conservative terminate/recreate strategy as other synchronous worker engines.
 - GPL-3.0 distribution/corresponding-source policy is required before distributing generated artifacts.
 - The `.data` file is large because the processed NNUE is preloaded externally rather than embedded with upstream `incbin`.
 
 ## Next gates before UI integration
 
-1. Add a reusable `PlentyChessEngine` worker adapter implementing `BrowserUciEngine`.
-2. Add `plentychess-smoke.html` or extend a smoke harness for browser lifecycle checks.
-3. Verify MultiPV parsing and repeated `ucinewgame` behavior.
-4. Verify missing `.js`/`.wasm`/`.data` failures are visible.
-5. Run a small rotated-FEN benchmark against Berserk/Reckless/Stockfish.
-6. Only then add an experimental staged selector variant.
+1. Run a small rotated-FEN benchmark against Berserk/Reckless/Stockfish.
+2. Decide whether the ~63 MB `.data` artifact is acceptable for an experimental selector.
+3. Only then add an experimental staged selector variant.
