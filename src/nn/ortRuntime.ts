@@ -113,8 +113,21 @@ function truthyParam(value: string | null | undefined): boolean {
   return !['0', 'false', 'no', 'off'].includes(String(value).toLowerCase());
 }
 
+function falseyParam(value: string | null | undefined): boolean {
+  if (value === null || value === undefined) return false;
+  return ['0', 'false', 'no', 'off'].includes(String(value).toLowerCase());
+}
+
+function diagnosticParamValue(name: string): string | null | undefined {
+  return browserParam(name) ?? envValue(`TINY_LEELA_${name.toUpperCase()}`);
+}
+
 function ortDiagnosticsParamEnabled(...names: string[]): boolean {
-  return names.some((name) => truthyParam(browserParam(name) ?? envValue(`TINY_LEELA_${name.toUpperCase()}`)));
+  return names.some((name) => truthyParam(diagnosticParamValue(name)));
+}
+
+function ortDiagnosticsParamDisabled(...names: string[]): boolean {
+  return names.some((name) => falseyParam(diagnosticParamValue(name)));
 }
 
 let forcedOrtExecutionProvider: OrtExecutionProviderPreference | null = null;
@@ -236,16 +249,21 @@ function requestedOrtPreferredOutputLocation(): OrtRuntimeDiagnosticOptions['pre
   if (forcedOrtDiagnosticsOptions?.preferredOutputLocation) return forcedOrtDiagnosticsOptions.preferredOutputLocation;
   const raw = browserParam('ortPreferredOutputLocation') ?? browserParam('preferredOutputLocation');
   if (raw === 'gpu-buffer' || raw === 'cpu-pinned' || raw === 'cpu') return raw;
+  if (ortDiagnosticsParamDisabled('ortGpuOutputs')) return undefined;
   if (ortDiagnosticsParamEnabled('ortGpuOutputs', 'ortReadbackProfile')) return 'gpu-buffer';
   return undefined;
 }
 
 function requestedOrtWebGpuProfiling(): boolean {
-  return !!forcedOrtDiagnosticsOptions?.webgpuProfiling || ortDiagnosticsParamEnabled('ortWebGpuProfile', 'ortKernelProfile', 'ortReadbackProfile');
+  if (forcedOrtDiagnosticsOptions?.webgpuProfiling !== undefined) return forcedOrtDiagnosticsOptions.webgpuProfiling;
+  if (ortDiagnosticsParamDisabled('ortWebGpuProfile', 'ortKernelProfile')) return false;
+  return ortDiagnosticsParamEnabled('ortWebGpuProfile', 'ortKernelProfile', 'ortReadbackProfile');
 }
 
 function requestedOrtWebGpuApiInstrumentation(): boolean {
-  return !!forcedOrtDiagnosticsOptions?.webgpuApiInstrumentation || ortDiagnosticsParamEnabled('ortMonkeyPatchWebGpu', 'ortWebGpuApiTrace', 'ortReadbackProfile');
+  if (forcedOrtDiagnosticsOptions?.webgpuApiInstrumentation !== undefined) return forcedOrtDiagnosticsOptions.webgpuApiInstrumentation;
+  if (ortDiagnosticsParamDisabled('ortMonkeyPatchWebGpu', 'ortWebGpuApiTrace')) return false;
+  return ortDiagnosticsParamEnabled('ortMonkeyPatchWebGpu', 'ortWebGpuApiTrace', 'ortReadbackProfile');
 }
 
 type OrtWebGpuProfileRecord = { programName: string; kernelName: string; kernelType: string; gpuMs: number };
@@ -457,7 +475,7 @@ export function sessionOptions(executionProviders = resolvedOrtExecutionProvider
   const threads = requestedOrtWasmThreads(typeof document !== 'undefined', typeof document === 'undefined' && !!globalThis.process?.versions?.node);
   const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all', executionProviders };
   const preferredOutputLocation = requestedOrtPreferredOutputLocation();
-  if (preferredOutputLocation) opts.preferredOutputLocation = preferredOutputLocation;
+  if (preferredOutputLocation && executionProviders.includes('webgpu')) opts.preferredOutputLocation = preferredOutputLocation;
   if (threads > 0) {
     opts.intraOpNumThreads = threads;
     opts.interOpNumThreads = 1;

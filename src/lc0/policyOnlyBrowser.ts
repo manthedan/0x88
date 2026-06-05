@@ -751,12 +751,22 @@ const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || 
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
 const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
 const HYBRID_EVAL_CACHE_ENTRIES = clampInt(params.get('evalCacheEntries') ?? (params.get('evalCache') === '1' ? '2048' : '0'), 0, 100000, 0);
-const ORT_READBACK_PROFILE_REQUESTED = params.get('ortReadbackProfile') === '1' || params.get('ortDiagnostics') === '1';
-const ORT_WEBGPU_PROFILE_REQUESTED = ORT_READBACK_PROFILE_REQUESTED || params.get('ortWebGpuProfile') === '1' || params.get('ortKernelProfile') === '1';
-const ORT_WEBGPU_API_TRACE_REQUESTED = ORT_READBACK_PROFILE_REQUESTED || params.get('ortMonkeyPatchWebGpu') === '1' || params.get('ortWebGpuApiTrace') === '1';
+function paramTruthy(name: string): boolean {
+  const value = params.get(name);
+  return value !== null && !['0', 'false', 'no', 'off'].includes(value.toLowerCase());
+}
+
+function paramFalsey(name: string): boolean {
+  const value = params.get(name);
+  return value !== null && ['0', 'false', 'no', 'off'].includes(value.toLowerCase());
+}
+
+const ORT_READBACK_PROFILE_REQUESTED = paramTruthy('ortReadbackProfile') || paramTruthy('ortDiagnostics');
+const ORT_WEBGPU_PROFILE_REQUESTED = !paramFalsey('ortWebGpuProfile') && !paramFalsey('ortKernelProfile') && (ORT_READBACK_PROFILE_REQUESTED || paramTruthy('ortWebGpuProfile') || paramTruthy('ortKernelProfile'));
+const ORT_WEBGPU_API_TRACE_REQUESTED = !paramFalsey('ortMonkeyPatchWebGpu') && !paramFalsey('ortWebGpuApiTrace') && (ORT_READBACK_PROFILE_REQUESTED || paramTruthy('ortMonkeyPatchWebGpu') || paramTruthy('ortWebGpuApiTrace'));
 const ORT_PREFERRED_OUTPUT_LOCATION = params.get('ortPreferredOutputLocation') === 'cpu' || params.get('ortPreferredOutputLocation') === 'cpu-pinned' || params.get('ortPreferredOutputLocation') === 'gpu-buffer'
   ? params.get('ortPreferredOutputLocation') as 'cpu' | 'cpu-pinned' | 'gpu-buffer'
-  : (ORT_READBACK_PROFILE_REQUESTED || params.get('ortGpuOutputs') === '1' ? 'gpu-buffer' : undefined);
+  : (!paramFalsey('ortGpuOutputs') && (ORT_READBACK_PROFILE_REQUESTED || paramTruthy('ortGpuOutputs')) ? 'gpu-buffer' : undefined);
 const BENCH_WARMUP = Math.min(100, Math.max(0, Math.floor(Number(params.get('benchWarmup') ?? '5') || 0)));
 const BENCH_ITERS = Math.min(1000, Math.max(1, Math.floor(Number(params.get('benchIters') ?? params.get('iters') ?? '25') || 25)));
 function requestedKernelVariant(): KernelVariant {
