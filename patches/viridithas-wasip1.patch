@@ -667,10 +667,41 @@ index c4a1398..fb14d90 100644
 +#[cfg(not(target_arch = "wasm32"))]
 +pub use imp::*;
 diff --git a/src/uci.rs b/src/uci.rs
-index 45eefbd..ab322f7 100644
+index 45eefbd..00a2045 100644
 --- a/src/uci.rs
 +++ b/src/uci.rs
-@@ -782,11 +782,25 @@ fn parse_setoption(
+@@ -56,6 +56,8 @@ const BENCH_THREADS: usize = 1;
+
+ static SET_TERM: Once = Once::new();
+ static STDIN_READER_THREAD_KEEP_RUNNING: AtomicBool = AtomicBool::new(true);
++#[cfg(target_arch = "wasm32")]
++static WASM_ARG_COMMANDS: AtomicBool = AtomicBool::new(false);
+ #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
+ pub fn main_loop() -> Result<(), UciError> {
+     let version_extension = if cfg!(feature = "final-release") {
+@@ -90,7 +92,9 @@ pub fn main_loop() -> Result<(), UciError> {
+         &worker_threads,
+     )
+     .map_err(|e| UciError::NnueInit(e.to_string()))?;
+-    thread_data[0].info.set_stdin(&stdin);
++    if should_poll_stdin_during_search() {
++        thread_data[0].info.set_stdin(&stdin);
++    }
+
+     loop {
+         std::io::stdout().flush()?;
+@@ -239,7 +243,9 @@ pub fn main_loop() -> Result<(), UciError> {
+                         for t in &mut thread_data {
+                             t.info.conf = conf.search_config.clone();
+                             t.info.lm_table = LMTable::new(&t.info.conf);
+-                            t.info.set_stdin(&stdin);
++                            if should_poll_stdin_during_search() {
++                                t.info.set_stdin(&stdin);
++                            }
+                         }
+
+                         let chess960 = control.chess960.load(Ordering::Relaxed);
+@@ -782,11 +788,36 @@ fn parse_setoption(
      Ok(out)
  }
 
@@ -692,11 +723,22 @@ index 45eefbd..ab322f7 100644
 +#[cfg(target_arch = "wasm32")]
 +type StdinReader = (mpsc::Receiver<String>, WasmStdinReaderHandle);
 +
++fn should_poll_stdin_during_search() -> bool {
++    #[cfg(target_arch = "wasm32")]
++    {
++        !WASM_ARG_COMMANDS.load(Ordering::SeqCst)
++    }
++    #[cfg(not(target_arch = "wasm32"))]
++    {
++        true
++    }
++}
++
 +#[cfg(not(target_arch = "wasm32"))]
  fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
      let (sender, receiver) = mpsc::channel();
      let handle = std::thread::Builder::new()
-@@ -795,6 +809,22 @@ fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
+@@ -795,6 +826,23 @@ fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
      Ok((receiver, handle))
  }
 
@@ -710,6 +752,7 @@ index 45eefbd..ab322f7 100644
 +            sent_arg_command = true;
 +        }
 +    }
++    WASM_ARG_COMMANDS.store(sent_arg_command, Ordering::SeqCst);
 +    if !sent_arg_command {
 +        let _ = stdin_reader_worker(sender.clone(), &control);
 +    }

@@ -9,6 +9,11 @@ interface RunResult {
   exitCode: number;
 }
 
+export interface ViridithasBatchSearchResult {
+  bestMove: string | null;
+  info: StockfishInfoLine | null;
+}
+
 type Pending = { resolve: (result: RunResult) => void; reject: (error: Error) => void };
 
 function abortError(): Error {
@@ -106,16 +111,31 @@ export class ViridithasEngine {
     });
   }
 
-  private searchCommands(fen: string, options: RecklessOptions, multipv = 1): string[] {
+  private setupCommands(options: RecklessOptions, multipv = 1): string[] {
     return [
       'uci',
       'isready',
       hashCommand(options.hashMb ?? this.options.hashMb ?? 16),
       'setoption name Threads value 1',
       `setoption name MultiPV value ${Math.max(1, Math.floor(multipv))}`,
+    ];
+  }
+
+  private searchCommands(fen: string, options: RecklessOptions, multipv = 1): string[] {
+    return [
+      ...this.setupCommands(options, multipv),
       `position fen ${fen}`,
       goCommand(options),
     ];
+  }
+
+  private batchSearchCommands(fens: string[], options: RecklessOptions, multipv = 1, clearHashBetweenSearches = true): string[] {
+    const commands = this.setupCommands(options, multipv);
+    for (const fen of fens) {
+      if (clearHashBetweenSearches) commands.push('ucinewgame');
+      commands.push(`position fen ${fen}`, goCommand(options));
+    }
+    return commands;
   }
 
   private parseInfo(stdout: string[]): StockfishInfoLine[] {
@@ -147,6 +167,21 @@ export class ViridithasEngine {
     return [...latest.values()].sort((a, b) => a.multipv - b.multipv);
   }
 
+  private parseBatchResults(stdout: string[]): ViridithasBatchSearchResult[] {
+    const results: ViridithasBatchSearchResult[] = [];
+    let chunk: string[] = [];
+    for (const line of stdout) {
+      chunk.push(line);
+      if (!line.startsWith('bestmove')) continue;
+      results.push({
+        bestMove: parseBestMove(line),
+        info: this.parseInfo(chunk)[0] ?? null,
+      });
+      chunk = [];
+    }
+    return results;
+  }
+
   lastInfo(): StockfishInfoLine[] {
     return this.lastInfoLines.map((entry) => ({ ...entry, pvUci: [...entry.pvUci] }));
   }
@@ -170,6 +205,17 @@ export class ViridithasEngine {
       if (result.exitCode !== 0) throw new Error(`Viridithas exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = this.parseInfo(result.stdout);
       return this.lastInfo();
+    });
+  }
+
+  async bestMovesBatch(fens: string[], signal?: AbortSignal, opts: { clearHashBetweenSearches?: boolean } = {}): Promise<ViridithasBatchSearchResult[]> {
+    return this.runExclusive(async () => {
+      const result = await this.runCommands(this.batchSearchCommands(fens, this.options, 1, opts.clearHashBetweenSearches ?? true), signal);
+      if (result.exitCode !== 0) throw new Error(`Viridithas exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
+      const searches = this.parseBatchResults(result.stdout);
+      if (searches.length !== fens.length) throw new Error(`Viridithas batch returned ${searches.length} bestmove line(s) for ${fens.length} position(s)`);
+      this.lastInfoLines = searches.map((search) => search.info).filter((info): info is StockfishInfoLine => info !== null);
+      return searches.map((search) => ({ bestMove: search.bestMove, info: search.info ? { ...search.info, pvUci: [...search.info.pvUci] } : null }));
     });
   }
 

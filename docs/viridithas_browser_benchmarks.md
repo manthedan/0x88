@@ -84,3 +84,26 @@ Takeaways:
 - Fixed one-shot overhead still dominates short searches. The depth-6 SIMD artifact reports much higher NPS but worse wall time because startup/decompression/instantiation cost overwhelms the tiny search.
 - At deeper or timed budgets, SIMD also improves wall time, with the largest wall gain here at movetime 250ms (~1.6x faster).
 - Even with SIMD, Viridithas remains one-shot-only and still pays a large startup cost on every search; persistent/direct API work would be needed before treating it as a delivery candidate.
+
+## 2026-06-05 Viridithas SIMD batch one-process probe
+
+Raw report: [`viridithas_batch_browser_benchmark_2026-06-05_rotated_depth6-10_movetime100-500.json`](./viridithas_batch_browser_benchmark_2026-06-05_rotated_depth6-10_movetime100-500.json)
+
+This run used the same 20-FEN suite, budgets, and warm repeats as the prior runs, but selected only **Viridithas SIMD experimental** in the new benchmark-only **batch one-process** mode. Batch mode feeds the full 20-position sweep to one WASI invocation, with `ucinewgame` before each search when hash clearing is enabled. It is not interactive persistence, but it estimates the upside from paying wasm startup and NNUE decompression once per sweep instead of once per position.
+
+Aggregate warm-run means:
+
+| Budget | Batch warm total ms | Batch warm ms/search | Batch total nodes | Batch wall NPS | Prior SIMD one-shot ms/search | Batch wall speedup |
+|---|---:|---:|---:|---:|---:|---:|
+| depth 6 | 437.0 | 21.8 | 34,750 | 79,556 | 674.3 | 30.87x |
+| depth 8 | 585.1 | 29.3 | 109,754 | 187,652 | 432.0 | 14.77x |
+| depth 10 | 1,041.5 | 52.1 | 349,009 | 335,102 | 433.9 | 8.33x |
+| movetime 100ms | 2,396.4 | 119.8 | 1,010,560 | 421,698 | 504.8 | 4.21x |
+| movetime 250ms | 5,396.0 | 269.8 | 2,494,819 | 462,350 | 659.4 | 2.44x |
+| movetime 500ms | 10,396.8 | 519.8 | 4,807,344 | 462,387 | 965.0 | 1.86x |
+
+Takeaways:
+
+- Startup/NNUE decompression is the dominant Viridithas browser cost at short depths. Amortising it across 20 searches cuts effective depth-6 wall time from hundreds of milliseconds to ~22 ms/search.
+- Batch depth-10 and timed-search wall NPS now lands in the same broad range as the earlier SIMD engine-reported NPS, which suggests the SIMD kernels are doing useful work once startup is removed.
+- This makes a real resident Viridithas runtime worth considering if Viridithas remains interesting: either a wasm-friendly persistent UCI stdin loop or a direct browser API. Batch mode itself is only a benchmark probe and is not suitable as an interactive engine backend.

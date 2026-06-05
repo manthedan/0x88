@@ -28,11 +28,11 @@ The WASI patch is intentionally narrow and prototype-oriented:
 - uses wasm-safe NNUE geometry/SIMD shims where Viridithas normally assumes x86/NEON intrinsics, with both scalar and wasm `simd128` NNUE backends;
 - replaces worker-thread dispatch with inline execution on `wasm32`, because browser WASI has no native thread spawning;
 - bypasses temp-file/mmap NNUE caching on `wasm32`, leaking one decompressed network for the process lifetime instead;
-- treats argv entries as queued UCI commands in `wasm32` builds, then closes the command channel after those commands so one-shot browser searches run to their requested limit instead of being interrupted by an immediate `quit`.
+- treats argv entries as queued UCI commands in `wasm32` builds and disables search-time stdin polling for argv-driven runs, so one-shot and benchmark-batch searches run to their requested limit instead of treating the next queued command as `stop`.
 
 ## Browser status
 
-`/reckless-benchmark.html` is now a small WASI UCI benchmark page and includes opt-in **Viridithas scalar experimental** and **Viridithas SIMD experimental** checkboxes. Viridithas is one-shot only for now; persistent SAB stdin is skipped because upstream Viridithas expects a separate stdin reader thread for full interactive UCI.
+`/reckless-benchmark.html` is now a small WASI UCI benchmark page and includes opt-in **Viridithas scalar experimental** and **Viridithas SIMD experimental** checkboxes. Viridithas is one-shot only as an interactive engine for now; persistent SAB stdin is skipped because upstream Viridithas expects a separate stdin reader thread for full interactive UCI. The page also has a benchmark-only **Viridithas batch one-process** mode that feeds a full position sweep to one argv-driven WASI invocation to estimate startup/NNUE amortisation upside.
 
 Local Node and browser smokes from the patched WASI artifact succeeded for:
 

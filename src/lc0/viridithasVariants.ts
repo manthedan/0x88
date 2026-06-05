@@ -14,14 +14,14 @@ export const VIRIDITHAS_DEFAULT_VARIANT: ViridithasVariant = {
   key: 'default',
   label: 'Viridithas scalar experimental',
   wasmUrl: DEFAULT_VIRIDITHAS_WASM_URL,
-  note: 'Experimental patched Viridithas wasm32-wasip1 scalar build; one-shot only.',
+  note: 'Experimental patched Viridithas wasm32-wasip1 scalar build; one-shot/batch benchmark only, no persistent runtime.',
 };
 
 export const VIRIDITHAS_SIMD_VARIANT: ViridithasVariant = {
   key: 'simd',
   label: 'Viridithas SIMD experimental',
   wasmUrl: '/viridithas/viridithas-simd128.wasm',
-  note: 'Experimental patched Viridithas wasm32-wasip1 build with wasm simd128 NNUE kernels; one-shot only.',
+  note: 'Experimental patched Viridithas wasm32-wasip1 build with wasm simd128 NNUE kernels; one-shot/batch benchmark only, no persistent runtime.',
 };
 
 export function viridithasVariantFromParams(params: URLSearchParams): ViridithasVariant {

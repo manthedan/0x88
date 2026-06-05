@@ -16,7 +16,7 @@ interface BenchBudget {
 
 interface BenchRow {
   variant: string;
-  mode: 'persistent' | 'one-shot';
+  mode: BenchMode;
   position: string;
   fen: string;
   budget: string;
@@ -35,7 +35,7 @@ interface BenchRow {
 
 interface BenchSummaryRow {
   variant: string;
-  mode: 'persistent' | 'one-shot';
+  mode: BenchMode;
   position: string;
   fen: string;
   budget: string;
@@ -49,12 +49,13 @@ interface BenchSummaryRow {
   wasmUrl: string;
 }
 
+type BenchMode = 'persistent' | 'one-shot' | 'batch';
 type BenchVariant = (RecklessVariant & { engine: 'reckless' }) | (ViridithasVariant & { engine: 'viridithas' });
 type BenchEngine = RecklessEngine | ViridithasEngine;
 
 interface BenchConfig {
   variants: BenchVariant[];
-  modes: Array<'persistent' | 'one-shot'>;
+  modes: BenchMode[];
   budgets: BenchBudget[];
   positions: BenchPosition[];
   repeats: number;
@@ -150,10 +151,11 @@ function selectedVariants(): BenchVariant[] {
   if (inputEl('benchViridithasSimd').checked) variants.push({ ...VIRIDITHAS_SIMD_VARIANT, engine: 'viridithas' });
   return variants;
 }
-function selectedModes(): Array<'persistent' | 'one-shot'> {
-  const modes: Array<'persistent' | 'one-shot'> = [];
+function selectedModes(): BenchMode[] {
+  const modes: BenchMode[] = [];
   if (inputEl('benchPersistent').checked) modes.push('persistent');
   if (inputEl('benchOneShot').checked) modes.push('one-shot');
+  if (inputEl('benchBatch').checked) modes.push('batch');
   return modes;
 }
 function setStatus(text: string): void { el('status').textContent = text; }
@@ -291,7 +293,7 @@ function render(): void {
   el('jsonOut').textContent = JSON.stringify(report(), null, 2);
 }
 
-async function timeSearch(engine: BenchEngine, variant: BenchVariant, mode: 'persistent' | 'one-shot', position: BenchPosition, budget: BenchBudget, run: string, signal: AbortSignal, clearPersistentHash: boolean): Promise<void> {
+async function timeSearch(engine: BenchEngine, variant: BenchVariant, mode: BenchMode, position: BenchPosition, budget: BenchBudget, run: string, signal: AbortSignal, clearPersistentHash: boolean): Promise<void> {
   if (variant.engine === 'reckless' && engine instanceof RecklessEngine && mode === 'persistent' && clearPersistentHash) await engine.newGame(signal);
   const start = performance.now();
   const bestMove = await engine.bestMove(position.fen, signal);
@@ -313,6 +315,34 @@ async function timeSearch(engine: BenchEngine, variant: BenchVariant, mode: 'per
     nps: info?.nps ?? null,
     pvUci: info?.pvUci ?? [],
     runtime: engine.runtimeLabel(),
+    wasmUrl: variant.wasmUrl,
+  });
+  render();
+}
+
+async function timeViridithasBatch(engine: ViridithasEngine, variant: BenchVariant & { engine: 'viridithas' }, positions: BenchPosition[], budget: BenchBudget, run: string, signal: AbortSignal, clearHashBetweenSearches: boolean): Promise<void> {
+  const start = performance.now();
+  const searches = await engine.bestMovesBatch(positions.map((position) => position.fen), signal, { clearHashBetweenSearches });
+  const wallMs = performance.now() - start;
+  const infos = searches.map((search) => search.info).filter((info): info is NonNullable<typeof info> => info !== null);
+  const nodes = infos.map((info) => info.nodes).filter((value): value is number => value !== undefined).reduce((sum, value) => sum + value, 0);
+  const depths = infos.map((info) => info.depth).filter((value) => Number.isFinite(value));
+  rows.push({
+    variant: variant.label,
+    mode: 'batch',
+    position: `batch (${positions.length} positions)`,
+    fen: positions.map((position) => `${position.label} | ${position.fen}`).join('\n'),
+    budget: budget.label,
+    run,
+    wallMs,
+    bestMove: `${searches.filter((search) => search.bestMove).length}/${searches.length} bestmoves`,
+    depth: depths.length ? Math.min(...depths) : null,
+    scoreCp: null,
+    mateIn: null,
+    nodes: nodes || null,
+    nps: nodes && wallMs > 0 ? Math.round(nodes / (wallMs / 1000)) : null,
+    pvUci: [],
+    runtime: 'batch-one-process',
     wasmUrl: variant.wasmUrl,
   });
   render();
@@ -347,6 +377,11 @@ async function runBench(): Promise<void> {
           render();
           continue;
         }
+        if (mode === 'batch' && variant.engine === 'reckless') {
+          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'batch', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'batch mode is Viridithas-only', wasmUrl: variant.wasmUrl });
+          render();
+          continue;
+        }
         if (mode === 'persistent' && variant.engine === 'reckless' && !persistentAvailable && variant.backend !== 'browser-api') {
           rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'persistent unavailable', wasmUrl: variant.wasmUrl });
           render();
@@ -366,6 +401,16 @@ async function runBench(): Promise<void> {
               { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, forceOneShot: mode === 'one-shot', disablePersistentFallback: mode === 'persistent' },
             );
           try {
+            if (mode === 'batch' && variant.engine === 'viridithas' && engine instanceof ViridithasEngine) {
+              setStatus(`Running ${variant.label} batch ${budget.label} first pass across ${config.positions.length} positions…`);
+              await timeViridithasBatch(engine, variant, config.positions, budget, 'cold', abort.signal, config.clearHashBetweenRuns);
+              for (let i = 1; i <= config.repeats; i += 1) {
+                if (abort.signal.aborted) return;
+                setStatus(`Running ${variant.label} batch ${budget.label} warm ${i}/${config.repeats} across ${config.positions.length} positions…`);
+                await timeViridithasBatch(engine, variant, config.positions, budget, `warm-${i}`, abort.signal, config.clearHashBetweenRuns);
+              }
+              continue;
+            }
             for (const position of config.positions) {
               if (abort.signal.aborted) return;
               setStatus(`Running ${variant.label} ${mode} ${budget.label} ${position.label} first pass…`);
