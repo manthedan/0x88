@@ -423,7 +423,7 @@ function getBerserkFor(variantKey: string): BerserkEngine {
   const key = berserkCacheKey(variant);
   let engine = berserkByVariant.get(key);
   if (!engine) {
-    engine = new BerserkEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl);
+    engine = new BerserkEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
     berserkByVariant.set(key, engine);
     renderRecklessRuntimeInfo();
   }
@@ -435,7 +435,7 @@ function getPlentyChessFor(variantKey: string): PlentyChessEngine {
   const key = plentyChessCacheKey(variant);
   let engine = plentyChessByVariant.get(key);
   if (!engine) {
-    engine = new PlentyChessEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl);
+    engine = new PlentyChessEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
     plentyChessByVariant.set(key, engine);
     renderRecklessRuntimeInfo();
   }

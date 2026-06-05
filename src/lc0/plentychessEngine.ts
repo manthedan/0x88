@@ -46,14 +46,20 @@ function postError(id, error) {
 function resolveUrl(url) {
   return new URL(url, self.location.href).href;
 }
-async function init(id, jsUrl) {
+async function init(id, jsUrl, wasmUrl, dataUrl) {
   if (!modulePromise) {
     const resolvedJsUrl = resolveUrl(jsUrl);
+    const resolvedWasmUrl = wasmUrl ? resolveUrl(wasmUrl) : null;
+    const resolvedDataUrl = dataUrl ? resolveUrl(dataUrl) : null;
     importScripts(resolvedJsUrl);
     factory = self.PlentyChess || (typeof PlentyChess !== 'undefined' ? PlentyChess : null);
     if (!factory) throw new Error('PlentyChess Emscripten factory was not found after importScripts()');
     modulePromise = factory({
-      locateFile(file) { return new URL(file, resolvedJsUrl).href; },
+      locateFile(file) {
+        if (resolvedWasmUrl && String(file).endsWith('.wasm')) return resolvedWasmUrl;
+        if (resolvedDataUrl && String(file).endsWith('.data')) return resolvedDataUrl;
+        return new URL(file, resolvedJsUrl).href;
+      },
       print(line) { self.postMessage({ type: 'line', line: String(line), stream: 'stdout' }); },
       printErr(line) { self.postMessage({ type: 'line', line: String(line), stream: 'stderr' }); },
     }).then((mod) => {
@@ -69,11 +75,11 @@ self.onmessage = (event) => {
   const id = message.id;
   Promise.resolve().then(async () => {
     if (message.type === 'init') {
-      await init(id, message.jsUrl);
+      await init(id, message.jsUrl, message.wasmUrl, message.dataUrl);
       return;
     }
     if (message.type === 'command') {
-      await init(id, message.jsUrl);
+      await init(id, message.jsUrl, message.wasmUrl, message.dataUrl);
       engine.ccall('command', null, ['string'], [String(message.command)]);
       self.postMessage({ type: 'commandDone', id });
       return;
@@ -116,10 +122,14 @@ export class PlentyChessEngine implements BrowserUciEngine {
   private queueTail: Promise<void> = Promise.resolve();
   private lastInfoLines: PlentyChessInfoLine[] = [];
   private readonly jsUrl: string;
+  private readonly wasmUrl?: string;
+  private readonly dataUrl?: string;
 
-  constructor(options: PlentyChessOptions = {}, jsUrl: string = DEFAULT_PLENTYCHESS_EMSCRIPTEN_JS_URL) {
+  constructor(options: PlentyChessOptions = {}, jsUrl: string = DEFAULT_PLENTYCHESS_EMSCRIPTEN_JS_URL, wasmUrl?: string, dataUrl?: string) {
     this.options = options;
     this.jsUrl = jsUrl;
+    this.wasmUrl = wasmUrl;
+    this.dataUrl = dataUrl;
   }
 
   setOptions(next: PlentyChessOptions): void {
@@ -202,6 +212,14 @@ export class PlentyChessEngine implements BrowserUciEngine {
     return new URL(this.jsUrl, location.href).href;
   }
 
+  private resolvedWasmUrl(): string | undefined {
+    return this.wasmUrl ? new URL(this.wasmUrl, location.href).href : undefined;
+  }
+
+  private resolvedDataUrl(): string | undefined {
+    return this.dataUrl ? new URL(this.dataUrl, location.href).href : undefined;
+  }
+
   private request(type: 'init' | 'command', payload: Record<string, unknown> = {}, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) return Promise.reject(abortError());
     const worker = this.makeWorker();
@@ -215,7 +233,7 @@ export class PlentyChessEngine implements BrowserUciEngine {
       const cleanup = () => signal?.removeEventListener('abort', onAbort);
       this.pending.set(id, { resolve, reject, cleanup });
       signal?.addEventListener('abort', onAbort, { once: true });
-      worker.postMessage({ type, id, jsUrl: this.resolvedJsUrl(), ...payload });
+      worker.postMessage({ type, id, jsUrl: this.resolvedJsUrl(), wasmUrl: this.resolvedWasmUrl(), dataUrl: this.resolvedDataUrl(), ...payload });
     });
   }
 

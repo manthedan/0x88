@@ -121,7 +121,7 @@ npm run berserk:artifact-manifest
 npm run plentychess:artifact-manifest
 ```
 
-The helper writes ignored JSON under `artifacts/engine-manifests/`, including artifact sizes, SHA-256 hashes, and local gzip/brotli transfer-size estimates. A generated manifest is still not release-complete until `sourceArchive.url` and `sourceArchive.sha256` are filled with a published matching source archive.
+The helper writes ignored JSON under `artifacts/engine-manifests/`, including artifact sizes, SHA-256 hashes, and local gzip/brotli transfer-size estimates. `npm run build:netlify` uses `scripts/precompress_engine_artifacts.mjs` to emit `.br`/`.gz` sidecars in `dist-client/`; see `docs/netlify_engine_artifacts.md`. A generated manifest is still not release-complete until `sourceArchive.url` and `sourceArchive.sha256` are filled with a published matching source archive.
 
 ## Manifest template
 

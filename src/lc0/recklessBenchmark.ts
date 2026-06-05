@@ -420,9 +420,9 @@ async function runBench(): Promise<void> {
           const engine: BenchEngine = variant.engine === 'viridithas'
             ? new ViridithasEngine(budget.options, variant.wasmUrl, { forceOneShot: mode !== 'persistent', disablePersistentFallback: mode === 'persistent' })
             : variant.engine === 'berserk'
-              ? new BerserkEngine({ ...budget.options, threads: 1 }, variant.jsUrl)
+              ? new BerserkEngine({ ...budget.options, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl)
               : variant.engine === 'plentychess'
-                ? new PlentyChessEngine({ ...budget.options, threads: 1 }, variant.jsUrl)
+                ? new PlentyChessEngine({ ...budget.options, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl)
                 : new RecklessEngine(
                 budget.options,
                 variant.wasmUrl,
