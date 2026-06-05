@@ -5,6 +5,7 @@
 - Prefer generator-quality tiled matmul or fused kernels over ad-hoc scalar WGSL rewrites. Local paired-output smolgen project and simple shared-input dense1 tiling attempts were slower, while 64-column tiled smolgen project won in full fixed-suite despite noisy/slower substage timestamps.
 - If future smolgen dense1 work resumes, try a materially different generated/fused schedule (for example fusing dense1 with swish/LN1 reduction or a TVM-style packed layout), not the reverted one-output-per-lane shared-input tile.
 - If future smolgen-project/attention-score fusion resumes, start with isolated score+bias parity. The first direct fusion failed WGSL-head drift with zero/uniform mapped policy and was reverted.
+- Do not revisit adjacent current-best toggles without a new implementation shape: TVM outproj+project, TVM QKV+project, GPU/WASM legal priors, and JS/WGSL input backends all lost fast screens against the WASM-input/JS-legal project winner.
 - Treat simple WebGPU int8 FFN as discarded for now: drift passed, but scalar dequant-in-inner-loop regressed fixed-suite throughput. CPU/WASM int8 can be a separate future fallback lane.
 - Revisit dense2+residual+ln2 fusion only if it preserves a good tiled matmul shape; reducing dispatches is not enough if matmul gets slower.
 - Revisit GPU legal/top-k only as a fused mask/softmax/top-k/readback-shrink path, not as another standalone legal-prior backend toggle.
