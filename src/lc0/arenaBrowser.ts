@@ -200,23 +200,42 @@ function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
   return 'ORT ONNX';
 }
 
+function normalizeLc0InputBackend(value: string | null): 'js' | 'wgsl' | 'wasm' {
+  return value === 'wgsl' || value === 'wasm' ? value : 'js';
+}
+
 function lc0HybridInputBackend(): 'js' | 'wgsl' | 'wasm' {
-  const raw = params.get('inputBackend') ?? params.get('lc0InputBackend') ?? 'js';
-  return raw === 'wgsl' || raw === 'wasm' ? raw : 'js';
+  const node = document.getElementById('lc0InputBackendSelect') as HTMLSelectElement | null;
+  return normalizeLc0InputBackend(node?.value ?? params.get('inputBackend') ?? params.get('lc0InputBackend'));
+}
+
+function normalizeLc0LegalPriorsBackend(value: string | null): 'js' | 'wasm' | 'gpu' {
+  return value === 'wasm' || value === 'gpu' ? value : 'js';
 }
 
 function lc0HybridLegalPriorsBackend(): 'js' | 'wasm' | 'gpu' {
-  const raw = params.get('legalPriorsBackend') ?? params.get('lc0LegalPriorsBackend') ?? params.get('hybridLegalPriors') ?? 'js';
-  return raw === 'wasm' || raw === 'gpu' ? raw : 'js';
+  const node = document.getElementById('lc0LegalPriorsSelect') as HTMLSelectElement | null;
+  return normalizeLc0LegalPriorsBackend(node?.value ?? params.get('legalPriorsBackend') ?? params.get('lc0LegalPriorsBackend') ?? params.get('hybridLegalPriors'));
 }
 
 function lc0EncoderLayers(): number {
   return Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10)));
 }
 
+function normalizeLc0EncoderKernelVariant(value: string | null): Lc0WebEncoderKernelVariant {
+  return value === 'tvm-packed-f16' || value === 'mixed-tvm-ffn' || value === 'mixed-tvm-ffn-outproj' ? value : 'hand';
+}
+
 function lc0EncoderKernelVariant(): Lc0WebEncoderKernelVariant {
-  const raw = params.get('encoderKernel') ?? params.get('lc0EncoderKernel') ?? params.get('encoderKernelVariant') ?? 'hand';
-  return raw === 'tvm-packed-f16' || raw === 'mixed-tvm-ffn' || raw === 'mixed-tvm-ffn-outproj' ? raw : 'hand';
+  const node = document.getElementById('lc0EncoderKernelSelect') as HTMLSelectElement | null;
+  return normalizeLc0EncoderKernelVariant(node?.value ?? params.get('encoderKernel') ?? params.get('lc0EncoderKernel') ?? params.get('encoderKernelVariant'));
+}
+
+function lc0HybridConfigLabel(runtime = selectedLc0Runtime()): string {
+  if (runtime === 'onnx') return '';
+  const legal = lc0HybridLegalPriorsBackend();
+  const effectiveLegal = legal === 'gpu' && runtime !== 'hybrid-wgsl-heads' ? 'js' : legal;
+  return `input ${lc0HybridInputBackend()} · encoder ${lc0EncoderKernelVariant()} · legal ${effectiveLegal}`;
 }
 
 function boundedIntValue(value: unknown, fallback: number, min: number, max: number): number {
@@ -281,6 +300,9 @@ function applyArenaQueryParams(): void {
   inputEl('stockfishThreadsInput').value = String(intParam('sfThreads', Number(inputEl('stockfishThreadsInput').value) || 1, 1, 32));
   inputEl('lc0BatchSizeInput').value = String(boundedIntValue(params.get('lc0BatchSize') ?? params.get('batchSize') ?? params.get('batch'), Number(inputEl('lc0BatchSizeInput').value) || 1, 1, 64));
   inputEl('lc0BatchPipelineDepthInput').value = String(boundedIntValue(params.get('lc0BatchPipelineDepth') ?? params.get('batchPipelineDepth'), Number(inputEl('lc0BatchPipelineDepthInput').value) || 1, 1, 16));
+  selectEl('lc0InputBackendSelect').value = normalizeLc0InputBackend(params.get('inputBackend') ?? params.get('lc0InputBackend'));
+  selectEl('lc0EncoderKernelSelect').value = normalizeLc0EncoderKernelVariant(params.get('encoderKernel') ?? params.get('lc0EncoderKernel') ?? params.get('encoderKernelVariant'));
+  selectEl('lc0LegalPriorsSelect').value = normalizeLc0LegalPriorsBackend(params.get('legalPriorsBackend') ?? params.get('lc0LegalPriorsBackend') ?? params.get('hybridLegalPriors'));
 
   const suite = params.get('openingSuite') ?? params.get('openings') ?? params.get('startingPosition');
   if (suite === 'start' || suite === 'built-in' || suite === 'custom') selectEl('startingPositionSelect').value = suite;
@@ -620,6 +642,10 @@ function refreshSeatControls(): void {
   selectEl('seatA').disabled = running;
   selectEl('seatB').disabled = running;
   selectEl('lc0RuntimeSelect').disabled = running || loadingLc0;
+  const hybridControlsDisabled = running || loadingLc0 || selectedLc0Runtime() === 'onnx';
+  selectEl('lc0InputBackendSelect').disabled = hybridControlsDisabled;
+  selectEl('lc0EncoderKernelSelect').disabled = hybridControlsDisabled;
+  selectEl('lc0LegalPriorsSelect').disabled = hybridControlsDisabled;
   inputEl('lc0BatchSizeInput').disabled = running;
   inputEl('lc0BatchPipelineDepthInput').disabled = running;
   for (const selector of ['.seat-fam', '.seat-var', '.seat-strength']) {
@@ -695,7 +721,10 @@ function engineRuntimeDiagnosticsText(): string {
   const parts = ids.map((id) => {
     const row = rowForEngineId(id);
     const name = engines.get(id)?.name ?? id;
-    if (row?.family === 'lc0' && row.variant !== 'bt4') return `${name}: ${budgetText(row)} · ${lc0RuntimeLabel()} · batch ${lc0BatchSize()} · pipeline depth ${lc0BatchPipelineDepth()} · ${cacheMetricsText(lc0Cache?.metrics())}`;
+    if (row?.family === 'lc0' && row.variant !== 'bt4') {
+    const hybrid = lc0HybridConfigLabel();
+    return `${name}: ${budgetText(row)} · ${lc0RuntimeLabel()}${hybrid ? ` · ${hybrid}` : ''} · batch ${lc0BatchSize()} · pipeline depth ${lc0BatchPipelineDepth()} · ${cacheMetricsText(lc0Cache?.metrics())}`;
+  }
     if (row?.family === 'lc0' && row.variant === 'bt4') return `${name}: ${budgetText(row)} · ${bt4.loaded ? `loaded ${bt4.backend || 'WebGPU'}` : 'lazy WebGPU worker'} · ~${BT4_APPROX_MB}MB net`;
     if (row?.family === 'sf') {
       const kind = row.variant === 'full' ? 'full' : 'lite';
@@ -1662,14 +1691,16 @@ async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHy
     const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
     return Lc0OnnxEvaluator.create(modelLoad.model);
   }
+  const headBackend = runtime === 'hybrid-wgsl-heads' ? 'wgsl' : 'ort';
+  const legalPriorsBackend = lc0HybridLegalPriorsBackend();
   return new Lc0WebHybridEvaluator({
     packUrl: PACK_URL,
     layers: lc0EncoderLayers(),
     verifyShards: params.get('packVerify') !== '0',
-    headBackend: runtime === 'hybrid-wgsl-heads' ? 'wgsl' : 'ort',
+    headBackend,
     wgslBatchMode: 'physical',
     inputBackend: lc0HybridInputBackend(),
-    legalPriorsBackend: lc0HybridLegalPriorsBackend(),
+    legalPriorsBackend: legalPriorsBackend === 'gpu' && headBackend !== 'wgsl' ? 'js' : legalPriorsBackend,
     encoderKernelVariant: lc0EncoderKernelVariant(),
   });
 }
@@ -1679,7 +1710,8 @@ async function loadLc0Evaluator(): Promise<void> {
   loadingLc0 = true;
   el('start').toggleAttribute('disabled', true);
   refreshSeatControls();
-  el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)}…`;
+  const hybrid = lc0HybridConfigLabel(runtime);
+  el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)}${hybrid ? ` (${hybrid})` : ''}…`;
   try {
     const evaluator = await createSelectedLc0Evaluator();
     lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
@@ -1688,7 +1720,7 @@ async function loadLc0Evaluator(): Promise<void> {
     searcher = new Lc0PuctSearcher(lc0Cache);
     renderCacheInfo();
     el('start').toggleAttribute('disabled', false);
-    el('message').textContent = `Ready (${lc0RuntimeLabel(runtime)}). Pick engines and start a tournament.`;
+    el('message').textContent = `Ready (${lc0RuntimeLabel(runtime)}${hybrid ? ` · ${hybrid}` : ''}). Pick engines and start a tournament.`;
   } catch (error) {
     el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(error as Error).message}`;
   } finally {
@@ -1973,7 +2005,10 @@ function wireEvents() {
   el('cacheEntriesInput').addEventListener('input', () => { renderCacheInfo(); resetLc0SearchTrees(); });
   el('lc0BatchSizeInput').addEventListener('input', () => { inputEl('lc0BatchSizeInput').value = String(lc0BatchSize()); renderCacheInfo(); resetLc0SearchTrees(); });
   el('lc0BatchPipelineDepthInput').addEventListener('input', () => { inputEl('lc0BatchPipelineDepthInput').value = String(lc0BatchPipelineDepth()); renderCacheInfo(); resetLc0SearchTrees(); });
-  el('lc0RuntimeSelect').addEventListener('change', () => { if (!running) void reloadLc0Evaluator(); });
+  el('lc0RuntimeSelect').addEventListener('change', () => { refreshSeatControls(); if (!running) void reloadLc0Evaluator(); });
+  for (const id of ['lc0InputBackendSelect', 'lc0EncoderKernelSelect', 'lc0LegalPriorsSelect']) {
+    el(id).addEventListener('change', () => { renderCacheInfo(); if (!running && selectedLc0Runtime() !== 'onnx') void reloadLc0Evaluator(); });
+  }
   el('budgetModeSelect').addEventListener('change', () => resetLc0SearchTrees());
   el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
   el('stockfishThreadsInput').addEventListener('input', () => {

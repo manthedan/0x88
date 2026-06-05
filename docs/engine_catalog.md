@@ -53,7 +53,7 @@ Every engine family should have one card with these fields:
   - Model manifest: `public/models/lc0/manifest.json` with bytes and sha256 values.
 - **Runtime adapter:**
   - Small/default: `searchWorker.ts` with ORT and the stable `lc0web-wgsl-encoder-ort-heads` path when requested.
-  - Experimental LC0 runtime lanes include WGSL heads, WASM input encoder, WASM/GPU legal priors, deferred readback, TVM-packed kernels, and pipeline-depth experiments. They are not normal UI defaults.
+  - Experimental LC0 runtime lanes include WGSL heads, WASM input encoder, WASM/GPU legal priors, deferred readback, TVM-packed kernels, and pipeline-depth experiments. The arena UI exposes the input backend, encoder kernel, and legal-prior backend as explicit LC0 opt-ins; their defaults remain JS input, hand WGSL encoder, and JS legal priors.
   - BT4: lazy dedicated `Bt4WorkerSearcher`, WebGPU-only by policy, disposable worker per searcher.
 - **UI variants:**
   - `small`: label `Lc0`, strength unit `visits`.
@@ -70,9 +70,9 @@ Every engine family should have one card with these fields:
   - Abort: supported through worker cancellation for LC0 search paths; BT4 has explicit `cancel()` and worker disposal.
   - Threads: WebGPU/ORT worker model, not UCI thread controls.
   - Model caching: Cache API/local symlink flow exists; BT4 warns because of size.
-- **Speed snapshot:** see `docs/lc0web_custom_inference_checkpoint.md`. Representative final local 32 visits/batch 4: stable ORT heads ~65 visits/s; experimental WGSL heads ~110 visits/s, but experimental paths stay opt-in until parity/lifecycle gates are stronger.
+- **Speed snapshot:** see `docs/lc0web_custom_inference_checkpoint.md`. Representative final local 32 visits/batch 4: stable ORT heads ~65 visits/s; experimental WGSL heads ~110 visits/s. The 2026-06-05 recovered-state autoresearch lane favored the explicit opt-in `hybrid-wgsl-heads` + WASM input + `mixed-tvm-ffn` + JS legal priors + batch 4/depth 1 path at about `6.1 ms/eval` on the fixed suite after benchmark-harness cleanup; this is not a default and must be compared only against similarly cleaned controls.
 - **Validation:** `npm run lc0:browser-ci-smoke`, LC0 fixture parity tests, model manifest sha256 checks, and browser search matrix artifacts.
-- **Open work:** keep extracting shared catalog metadata into UI config; keep experimental LC0 runtime lanes behind explicit params until repeated parity, leak, and cross-host latency gates pass.
+- **Open work:** keep extracting shared catalog metadata into UI config; keep experimental LC0 runtime lanes opt-in until repeated parity, leak, and cross-host latency gates pass. Next high-ROI lane is quantized/int8 FFN or encoder variants against the cleaned mixed-TVM JS-legal baseline.
 
 ### Stockfish family
 
