@@ -29,6 +29,7 @@ public/models/*.json
 public/reckless/*.wasm
 public/reckless/*.nnue
 public/reckless/*corresponding-source*.tar.gz
+public/viridithas/*.wasm
 rust/**/target/
 node_modules/
 __pycache__/
