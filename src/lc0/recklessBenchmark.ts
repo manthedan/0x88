@@ -1,4 +1,6 @@
 import { START_FEN } from '../chess/board.ts';
+import { BerserkEngine } from './berserkEngine.ts';
+import { BERSERK_EMSCRIPTEN_VARIANT, berserkVariantAssetStatus, checkBerserkVariantAsset, type BerserkVariant } from './berserkVariants.ts';
 import { RecklessEngine, canUsePersistentRecklessWasi, type RecklessOptions } from './recklessEngine.ts';
 import { RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT, RECKLESS_SIMD_VARIANT, checkRecklessVariantAsset, recklessVariantAssetStatus, type RecklessVariant } from './recklessVariants.ts';
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
@@ -50,8 +52,8 @@ interface BenchSummaryRow {
 }
 
 type BenchMode = 'persistent' | 'one-shot' | 'batch';
-type BenchVariant = (RecklessVariant & { engine: 'reckless' }) | (ViridithasVariant & { engine: 'viridithas' });
-type BenchEngine = RecklessEngine | ViridithasEngine;
+type BenchVariant = (RecklessVariant & { engine: 'reckless' }) | (ViridithasVariant & { engine: 'viridithas' }) | (BerserkVariant & { engine: 'berserk' });
+type BenchEngine = RecklessEngine | ViridithasEngine | BerserkEngine;
 
 interface BenchConfig {
   variants: BenchVariant[];
@@ -149,6 +151,7 @@ function selectedVariants(): BenchVariant[] {
   if (inputEl('benchLite').checked) variants.push({ ...RECKLESS_LITE_VARIANT, engine: 'reckless' });
   if (inputEl('benchViridithas').checked) variants.push({ ...VIRIDITHAS_DEFAULT_VARIANT, engine: 'viridithas' });
   if (inputEl('benchViridithasSimd').checked) variants.push({ ...VIRIDITHAS_SIMD_VARIANT, engine: 'viridithas' });
+  if (inputEl('benchBerserk').checked) variants.push({ ...BERSERK_EMSCRIPTEN_VARIANT, engine: 'berserk' });
   return variants;
 }
 function selectedModes(): BenchMode[] {
@@ -159,6 +162,7 @@ function selectedModes(): BenchMode[] {
   return modes;
 }
 function setStatus(text: string): void { el('status').textContent = text; }
+function variantArtifactUrl(variant: BenchVariant): string { return variant.engine === 'berserk' ? (variant.jsUrl ?? variant.wasmUrl) : variant.wasmUrl; }
 
 function groupKey(row: Pick<BenchRow, 'variant' | 'mode' | 'position' | 'fen' | 'budget'>): string {
   return `${row.variant}\u0000${row.mode}\u0000${row.position}\u0000${row.fen}\u0000${row.budget}`;
@@ -232,8 +236,9 @@ function reportConfig(config: BenchConfig) {
       label: variant.label,
       wasmUrl: variant.wasmUrl,
       ...(variant.engine === 'reckless' ? { nnueUrl: variant.nnueUrl, backend: variant.backend ?? 'wasi' } : {}),
+      ...(variant.engine === 'berserk' ? { jsUrl: variant.jsUrl, dataUrl: variant.dataUrl, nnueUrl: variant.nnueUrl } : {}),
       note: variant.note,
-      asset: variant.engine === 'viridithas' ? viridithasVariantAssetStatus(variant) : recklessVariantAssetStatus(variant),
+      asset: variant.engine === 'viridithas' ? viridithasVariantAssetStatus(variant) : variant.engine === 'berserk' ? berserkVariantAssetStatus(variant) : recklessVariantAssetStatus(variant),
     })),
     modes: config.modes,
     budgets: config.budgets.map((budget) => ({ label: budget.label, options: budget.options })),
@@ -298,6 +303,7 @@ async function timeSearch(engine: BenchEngine, variant: BenchVariant, mode: Benc
   if (mode === 'persistent' && clearPersistentHash) {
     if (variant.engine === 'reckless' && engine instanceof RecklessEngine) await engine.newGame(signal);
     if (variant.engine === 'viridithas' && engine instanceof ViridithasEngine) await engine.newGame(signal);
+    if (variant.engine === 'berserk' && engine instanceof BerserkEngine) await engine.newGame(signal);
   }
   const start = performance.now();
   const bestMove = await engine.bestMove(position.fen, signal);
@@ -319,7 +325,7 @@ async function timeSearch(engine: BenchEngine, variant: BenchVariant, mode: Benc
     nps: info?.nps ?? null,
     pvUci: info?.pvUci ?? [],
     runtime: engine.runtimeLabel(),
-    wasmUrl: variant.wasmUrl,
+    wasmUrl: variantArtifactUrl(variant),
   });
   render();
 }
@@ -368,42 +374,51 @@ async function runBench(): Promise<void> {
     for (const variant of config.variants) {
       const assetStatus = variant.engine === 'viridithas'
         ? await checkViridithasVariantAsset(variant, render)
-        : await checkRecklessVariantAsset(variant, render);
+        : variant.engine === 'berserk'
+          ? await checkBerserkVariantAsset(variant, render)
+          : await checkRecklessVariantAsset(variant, render);
       if (assetStatus === 'missing') {
-        rows.push({ variant: variant.label, mode: config.modes[0] ?? 'one-shot', position: 'asset', fen: '', budget: 'asset check', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'asset missing', wasmUrl: variant.wasmUrl });
+        rows.push({ variant: variant.label, mode: config.modes[0] ?? 'one-shot', position: 'asset', fen: '', budget: 'asset check', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'asset missing', wasmUrl: variantArtifactUrl(variant) });
         render();
         continue;
       }
       for (const mode of config.modes) {
         if (abort.signal.aborted) return;
         if (mode === 'persistent' && variant.engine === 'viridithas' && !canUsePersistentViridithasWasi()) {
-          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'persistent unavailable', wasmUrl: variant.wasmUrl });
+          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'persistent unavailable', wasmUrl: variantArtifactUrl(variant) });
           render();
           continue;
         }
         if (mode === 'batch' && variant.engine === 'reckless') {
-          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'batch', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'batch mode is Viridithas-only', wasmUrl: variant.wasmUrl });
+          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'batch', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'batch mode is Viridithas-only', wasmUrl: variantArtifactUrl(variant) });
+          render();
+          continue;
+        }
+        if (mode !== 'persistent' && variant.engine === 'berserk') {
+          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: mode, run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'Berserk Emscripten adapter benchmarks as a resident worker only', wasmUrl: variantArtifactUrl(variant) });
           render();
           continue;
         }
         if (mode === 'persistent' && variant.engine === 'reckless' && !persistentAvailable && variant.backend !== 'browser-api') {
-          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'persistent unavailable', wasmUrl: variant.wasmUrl });
+          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'persistent unavailable', wasmUrl: variantArtifactUrl(variant) });
           render();
           continue;
         }
         if (mode === 'one-shot' && variant.engine === 'reckless' && variant.backend === 'browser-api') {
-          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'one-shot', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'browser API reuses a resident worker/engine; one-shot mode is WASI/UCI only', wasmUrl: variant.wasmUrl });
+          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'one-shot', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'browser API reuses a resident worker/engine; one-shot mode is WASI/UCI only', wasmUrl: variantArtifactUrl(variant) });
           render();
           continue;
         }
         for (const budget of config.budgets) {
           const engine: BenchEngine = variant.engine === 'viridithas'
             ? new ViridithasEngine(budget.options, variant.wasmUrl, { forceOneShot: mode !== 'persistent', disablePersistentFallback: mode === 'persistent' })
-            : new RecklessEngine(
-              budget.options,
-              variant.wasmUrl,
-              { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, forceOneShot: mode === 'one-shot', disablePersistentFallback: mode === 'persistent' },
-            );
+            : variant.engine === 'berserk'
+              ? new BerserkEngine({ ...budget.options, threads: 1 }, variant.jsUrl)
+              : new RecklessEngine(
+                budget.options,
+                variant.wasmUrl,
+                { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, forceOneShot: mode === 'one-shot', disablePersistentFallback: mode === 'persistent' },
+              );
           try {
             if (mode === 'batch' && variant.engine === 'viridithas' && engine instanceof ViridithasEngine) {
               setStatus(`Running ${variant.label} batch ${budget.label} first pass across ${config.positions.length} positions…`);
@@ -472,5 +487,6 @@ el('downloadCsv').addEventListener('click', () => downloadText(csvReport(), 'rec
 for (const variant of [RECKLESS_FULL_VARIANT, RECKLESS_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_LITE_VARIANT]) void checkRecklessVariantAsset(variant, render);
 void checkViridithasVariantAsset(VIRIDITHAS_DEFAULT_VARIANT, render);
 void checkViridithasVariantAsset(VIRIDITHAS_SIMD_VARIANT, render);
-setStatus(`Ready. recklessPersistent=${canUsePersistentRecklessWasi()} · viridithasPersistent=${canUsePersistentViridithasWasi()} · SAB=${typeof SharedArrayBuffer !== 'undefined'}`);
+void checkBerserkVariantAsset(BERSERK_EMSCRIPTEN_VARIANT, render);
+setStatus(`Ready. recklessPersistent=${canUsePersistentRecklessWasi()} · viridithasPersistent=${canUsePersistentViridithasWasi()} · Berserk Emscripten=${BERSERK_EMSCRIPTEN_VARIANT.jsUrl} · SAB=${typeof SharedArrayBuffer !== 'undefined'}`);
 render();

@@ -340,10 +340,15 @@ export class BerserkEngine implements BrowserUciEngine {
       await this.sendCommand(`position fen ${fen}`, signal);
       const searchStart = this.stdout.length;
       const commandPromise = this.sendCommand(berserkGoCommand(this.options), signal);
-      const bestLine = await this.waitForLine((line) => line.startsWith('bestmove '), 'bestmove', searchStart, signal, 60000);
-      await commandPromise;
-      this.lastInfoLines = this.collectInfoLines(searchStart);
-      return parseBestMove(bestLine);
+      try {
+        const bestLine = await this.waitForLine((line) => line.startsWith('bestmove '), 'bestmove', searchStart, signal, 60000);
+        await commandPromise;
+        this.lastInfoLines = this.collectInfoLines(searchStart);
+        return parseBestMove(bestLine);
+      } catch (error) {
+        commandPromise.catch(() => undefined);
+        throw error;
+      }
     });
   }
 
@@ -357,10 +362,15 @@ export class BerserkEngine implements BrowserUciEngine {
       await this.sendCommand(`position fen ${fen}`, opts.signal);
       const searchStart = this.stdout.length;
       const commandPromise = this.sendCommand(berserkGoCommand({ ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs }), opts.signal);
-      await this.waitForLine((line) => line.startsWith('bestmove '), 'analysis bestmove', searchStart, opts.signal, 60000);
-      await commandPromise;
-      this.lastInfoLines = this.collectInfoLines(searchStart);
-      return this.lastInfo();
+      try {
+        await this.waitForLine((line) => line.startsWith('bestmove '), 'analysis bestmove', searchStart, opts.signal, 60000);
+        await commandPromise;
+        this.lastInfoLines = this.collectInfoLines(searchStart);
+        return this.lastInfo();
+      } catch (error) {
+        commandPromise.catch(() => undefined);
+        throw error;
+      }
     });
   }
 

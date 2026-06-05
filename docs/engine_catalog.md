@@ -160,8 +160,8 @@ Every engine family should have one card with these fields:
   - Threads/tablebases: upstream exposes `Threads` and `SyzygyPath`; browser intake should begin single-threaded and tablebases disabled.
   - NNUE/model loading: decide embedded vs external; missing asset path must be visible in UI before promotion.
 - **Speed snapshot:** none yet. Use the Reckless/Viridithas rotated-FEN protocol after smoke, with cold/warm separation and engine-reported nodes/NPS.
-- **Validation:** `npm run berserk:build-emscripten` then `npm run berserk:smoke-emscripten` verifies `uci`, `isready`, `ucinewgame`, startpos search, and one non-startpos FEN search in Node. `berserk-smoke.html` exercises the reusable `BerserkEngine` worker adapter in the browser; local smoke returned `bestmove d2d4` and `bestmove e1g1` at depth 1. UI selector promotion is still experimental pending longer arena/analysis lifecycle runs.
-- **Open risks:** browser adapter lifecycle, MultiPV parsing, graceful in-search stop, pthread/SIMD follow-up, GPL source/archive obligations, and whether Berserk offers a browser-speed advantage over Stockfish/Reckless after startup is amortized.
+- **Validation:** `npm run berserk:build-emscripten` then `npm run berserk:smoke-emscripten` verifies `uci`, `isready`, `ucinewgame`, startpos search, and one non-startpos FEN search in Node. `berserk-smoke.html` exercises the reusable `BerserkEngine` worker adapter in the browser; lifecycle smoke now covers repeated searches, MultiPV parsing, abort-by-worker-restart recovery, and missing-asset failure. Arena/analysis selector smokes and a first depth-7 rotated-FEN benchmark snapshot are recorded in `docs/berserk_browser_benchmarks.md`.
+- **Open risks:** graceful in-search stop without losing the resident worker, pthread/SIMD follow-up, GPL source/archive obligations, deeper benchmark comparison against Stockfish/Reckless/Viridithas, and whether Berserk offers a browser-speed advantage after startup is amortized.
 
 ### Viridithas family
 
