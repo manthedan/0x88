@@ -7,6 +7,7 @@ import {
   runLc0WebAttentionOutputBenchmark,
   runLc0WebAttentionOutputOrtBenchmark,
   runLc0WebAttentionScoreBenchmark,
+  runLc0WebSmolgenBenchmark,
   runLc0WebEncoder0BlockBenchmark,
   runLc0WebEncoder0BlockOrtBenchmark,
   runLc0WebEncoder0FfnBenchmark,
@@ -35,6 +36,7 @@ import {
   type Lc0WebAttentionOutputOrtBenchmarkResult,
   type Lc0WebAttentionScoreBenchmarkResult,
   type Lc0WebAttentionScoreOrtBenchmarkResult,
+  type Lc0WebSmolgenBenchmarkResult,
   type Lc0WebAttentionValueBenchmarkResult,
   type Lc0WebAttentionValueOrtBenchmarkResult,
   type Lc0WebEncoder0BlockBenchmarkResult,
@@ -229,6 +231,16 @@ type AttentionScoreOrtBenchmarkMessage = {
   verifyShards?: boolean;
 };
 
+type SmolgenBenchmarkMessage = {
+  type: 'smolgenBenchmark';
+  id: number;
+  packUrl: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+  encoderPrefix?: string;
+};
+
 type SoftmaxBenchmarkMessage = {
   type: 'softmaxBenchmark';
   id: number;
@@ -389,7 +401,7 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | ResetSearchMessage | EvaluateMessage | EvaluateBatchMessage | HybridEvaluateMessage | HybridEncoderProfileMessage | WgslDeferredReadbackBenchmarkMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | WgslHeadsProbeMessage | WgslHeadsVsOrtFixturesMessage | MappedPolicyProbeMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionValueOrtBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | AttentionOutputOrtBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0FfnOrtBenchmarkMessage | Encoder0BlockBenchmarkMessage | EncoderStackBenchmarkMessage | Encoder0BlockOrtBenchmarkMessage | CancelMessage;
+type WorkerRequest = InitMessage | SearchMessage | ResetSearchMessage | EvaluateMessage | EvaluateBatchMessage | HybridEvaluateMessage | HybridEncoderProfileMessage | WgslDeferredReadbackBenchmarkMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | WgslHeadsProbeMessage | WgslHeadsVsOrtFixturesMessage | MappedPolicyProbeMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SmolgenBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionValueOrtBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | AttentionOutputOrtBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0FfnOrtBenchmarkMessage | Encoder0BlockBenchmarkMessage | EncoderStackBenchmarkMessage | Encoder0BlockOrtBenchmarkMessage | CancelMessage;
 
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
@@ -427,6 +439,7 @@ type WorkerResponse =
   | { type: 'qkvBenchmarkResult'; id: number; result: Lc0WebQkvProjectionBenchmarkResult }
   | { type: 'attentionScoreBenchmarkResult'; id: number; result: Lc0WebAttentionScoreBenchmarkResult }
   | { type: 'attentionScoreOrtBenchmarkResult'; id: number; result: Lc0WebAttentionScoreOrtBenchmarkResult }
+  | { type: 'smolgenBenchmarkResult'; id: number; result: Lc0WebSmolgenBenchmarkResult }
   | { type: 'softmaxBenchmarkResult'; id: number; result: Lc0WebSoftmaxBenchmarkResult }
   | { type: 'attentionValueBenchmarkResult'; id: number; result: Lc0WebAttentionValueBenchmarkResult }
   | { type: 'attentionValueOrtBenchmarkResult'; id: number; result: Lc0WebAttentionValueOrtBenchmarkResult }
@@ -649,6 +662,17 @@ async function handleAttentionScoreOrtBenchmark(message: AttentionScoreOrtBenchm
     verifyShards: message.verifyShards,
   });
   post({ type: 'attentionScoreOrtBenchmarkResult', id: message.id, result });
+}
+
+async function handleSmolgenBenchmark(message: SmolgenBenchmarkMessage): Promise<void> {
+  const result = await runLc0WebSmolgenBenchmark({
+    packUrl: message.packUrl,
+    iterations: message.iterations,
+    warmup: message.warmup,
+    verifyShards: message.verifyShards,
+    encoderPrefix: message.encoderPrefix,
+  });
+  post({ type: 'smolgenBenchmarkResult', id: message.id, result });
 }
 
 async function handleSoftmaxBenchmark(message: SoftmaxBenchmarkMessage): Promise<void> {
@@ -949,6 +973,7 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       else if (message.type === 'qkvBenchmark') await handleQkvBenchmark(message);
       else if (message.type === 'attentionScoreBenchmark') await handleAttentionScoreBenchmark(message);
       else if (message.type === 'attentionScoreOrtBenchmark') await handleAttentionScoreOrtBenchmark(message);
+      else if (message.type === 'smolgenBenchmark') await handleSmolgenBenchmark(message);
       else if (message.type === 'softmaxBenchmark') await handleSoftmaxBenchmark(message);
       else if (message.type === 'attentionValueBenchmark') await handleAttentionValueBenchmark(message);
       else if (message.type === 'attentionValueOrtBenchmark') await handleAttentionValueOrtBenchmark(message);

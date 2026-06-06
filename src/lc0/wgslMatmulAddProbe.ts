@@ -218,6 +218,40 @@ export interface Lc0WebAttentionScoreBenchmarkResult {
   outputSample: number[];
 }
 
+export interface Lc0WebSmolgenBenchmarkOptions {
+  packUrl: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+  encoderPrefix?: string;
+}
+
+export interface Lc0WebSmolgenBenchmarkResult {
+  status: 'SMOLGEN_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  encoderPrefix: string;
+  tokens: number;
+  channels: number;
+  compressed: number;
+  hidden: number;
+  heads: number;
+  epsilon: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  uploadSetupMs: number;
+  dispatchLoopMs: number;
+  dispatchLoopAvgMs: number;
+  stageDispatchAvgMs: Record<'compress' | 'dense1' | 'ln1' | 'dense2' | 'ln2' | 'project', number>;
+  readbackSyncedMs: number;
+  endToEndMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+}
+
 export interface Lc0WebAttentionScoreOrtBenchmarkResult {
   status: 'ATTENTION_SCORE_ORT_BENCH_DONE';
   packUrl: string;
@@ -3155,6 +3189,146 @@ function encodeSmolgenPass(pass: ComputePassLike, pipelines: SmolgenPipelines): 
   encodeSmolgenDense2Pass(pass, pipelines);
   encodeSmolgenLn2Pass(pass, pipelines);
   encodeSmolgenProjectPass(pass, pipelines);
+}
+
+function encodeSmolgenBenchmarkDispatches(device: DeviceLike, pipelines: SmolgenPipelines, iterations: number): unknown {
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  for (let i = 0; i < iterations; i++) encodeSmolgenPass(pass, pipelines);
+  pass.end();
+  return encoder.finish();
+}
+
+function encodeSmolgenBenchmarkStageDispatches(device: DeviceLike, iterations: number, encodeStage: (pass: ComputePassLike) => void): unknown {
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  for (let i = 0; i < iterations; i++) encodeStage(pass);
+  pass.end();
+  return encoder.finish();
+}
+
+async function measureSmolgenBenchmarkStage(device: DeviceLike, warmup: number, iterations: number, encodeStage: (pass: ComputePassLike) => void): Promise<number> {
+  if (warmup > 0) {
+    device.queue.submit([encodeSmolgenBenchmarkStageDispatches(device, warmup, encodeStage)]);
+    await device.queue.onSubmittedWorkDone?.();
+  }
+  const started = nowMs();
+  device.queue.submit([encodeSmolgenBenchmarkStageDispatches(device, iterations, encodeStage)]);
+  await device.queue.onSubmittedWorkDone?.();
+  return (nowMs() - started) / iterations;
+}
+
+export async function runLc0WebSmolgenBenchmark(options: Lc0WebSmolgenBenchmarkOptions): Promise<Lc0WebSmolgenBenchmarkResult> {
+  const totalStarted = nowMs();
+  const warmup = clampInteger(options.warmup, 3, 0, 1000);
+  const iterations = clampInteger(options.iterations, 50, 1, 100_000);
+  const tensorNames = lc0WebEncoderBlockTensorNames(options.encoderPrefix).smolgen;
+  const { device, adapterInfo } = await requestDevice();
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: Object.values(tensorNames),
+  });
+  const tensors = loadEncoder0SmolgenTensors(pack, tensorNames);
+  const input = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_N);
+  const reference = cpuEncoder0SmolgenBias(input, tensors);
+  const globals = gpuGlobals();
+  const usage = globals.GPUBufferUsage!;
+  const buffers: BufferLike[] = [];
+  try {
+    const setupStarted = nowMs();
+    const inputBuffer = createStorageBuffer(device, input, usage.STORAGE | usage.COPY_DST);
+    const compressWeight = createStorageBuffer(device, tensors.compressWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const dense1Weight = createStorageBuffer(device, tensors.dense1Weight.bytes, usage.STORAGE | usage.COPY_DST);
+    const dense1Bias = createStorageBuffer(device, tensors.dense1Bias.bytes, usage.STORAGE | usage.COPY_DST);
+    const ln1Scale = createStorageBuffer(device, tensors.ln1Scale.bytes, usage.STORAGE | usage.COPY_DST);
+    const ln1Bias = createStorageBuffer(device, tensors.ln1Bias.bytes, usage.STORAGE | usage.COPY_DST);
+    const dense2Weight = createStorageBuffer(device, tensors.dense2Weight.bytes, usage.STORAGE | usage.COPY_DST);
+    const dense2Bias = createStorageBuffer(device, tensors.dense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
+    const ln2Scale = createStorageBuffer(device, tensors.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
+    const ln2Bias = createStorageBuffer(device, tensors.ln2Bias.bytes, usage.STORAGE | usage.COPY_DST);
+    const smolgenWeight = createStorageBuffer(device, tensors.smolgenWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const compressed = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
+    const dense1 = device.createBuffer({ size: DEFAULT_SMOLGEN_HIDDEN * 4, usage: usage.STORAGE });
+    const ln1 = device.createBuffer({ size: DEFAULT_SMOLGEN_HIDDEN * 4, usage: usage.STORAGE });
+    const dense2 = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
+    const ln2 = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
+    const output = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_SRC });
+    const readbackBuffer = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.MAP_READ | usage.COPY_DST });
+    buffers.push(inputBuffer, compressWeight, dense1Weight, dense1Bias, ln1Scale, ln1Bias, dense2Weight, dense2Bias, ln2Scale, ln2Bias, smolgenWeight, compressed, dense1, ln1, dense2, ln2, output, readbackBuffer);
+    const pipelines = createSmolgenPipelines(device, {
+      input: inputBuffer,
+      compressWeight,
+      compressed,
+      dense1Weight,
+      dense1Bias,
+      dense1,
+      ln1Scale,
+      ln1Bias,
+      ln1,
+      dense2Weight,
+      dense2Bias,
+      dense2,
+      ln2Scale,
+      ln2Bias,
+      ln2,
+      smolgenWeight,
+      output,
+    }, 'tiled-project-f16');
+    const uploadSetupMs = nowMs() - setupStarted;
+
+    if (warmup > 0) {
+      device.queue.submit([encodeSmolgenBenchmarkDispatches(device, pipelines, warmup)]);
+      await device.queue.onSubmittedWorkDone?.();
+    }
+    const dispatchStarted = nowMs();
+    device.queue.submit([encodeSmolgenBenchmarkDispatches(device, pipelines, iterations)]);
+    const dispatchLoopMs = nowMs() - dispatchStarted;
+    const readbackStarted = nowMs();
+    const outputValues = await readF32OutputOnce(device, output, readbackBuffer, reference.length);
+    const readbackSyncedMs = nowMs() - readbackStarted;
+    const { maxAbsError, rmsError } = computeErrorStats(outputValues, reference, reference.length);
+    assertErrorInTolerance(maxAbsError);
+
+    // Re-initialize the pipeline once, then time each smolgen stage in isolation.
+    device.queue.submit([encodeSmolgenBenchmarkDispatches(device, pipelines, 1)]);
+    await device.queue.onSubmittedWorkDone?.();
+    const stageDispatchAvgMs = {
+      compress: await measureSmolgenBenchmarkStage(device, warmup, iterations, (pass) => encodeSmolgenCompressPass(pass, pipelines)),
+      dense1: await measureSmolgenBenchmarkStage(device, warmup, iterations, (pass) => encodeSmolgenDense1Pass(pass, pipelines)),
+      ln1: await measureSmolgenBenchmarkStage(device, warmup, iterations, (pass) => encodeSmolgenLn1Pass(pass, pipelines)),
+      dense2: await measureSmolgenBenchmarkStage(device, warmup, iterations, (pass) => encodeSmolgenDense2Pass(pass, pipelines)),
+      ln2: await measureSmolgenBenchmarkStage(device, warmup, iterations, (pass) => encodeSmolgenLn2Pass(pass, pipelines)),
+      project: await measureSmolgenBenchmarkStage(device, warmup, iterations, (pass) => encodeSmolgenProjectPass(pass, pipelines)),
+    };
+
+    return {
+      status: 'SMOLGEN_BENCH_DONE',
+      packUrl: pack.manifestUrl,
+      modelName: pack.manifest.model.name,
+      adapterInfo,
+      encoderPrefix: normalizeEncoderPrefix(options.encoderPrefix),
+      tokens: DEFAULT_TOKENS,
+      channels: DEFAULT_N,
+      compressed: DEFAULT_SMOLGEN_COMPRESSED,
+      hidden: DEFAULT_SMOLGEN_HIDDEN,
+      heads: DEFAULT_HEADS,
+      epsilon: DEFAULT_SMOLGEN_EPSILON,
+      warmup,
+      iterations,
+      packLoadMs: pack.elapsedMs,
+      uploadSetupMs,
+      dispatchLoopMs,
+      dispatchLoopAvgMs: dispatchLoopMs / iterations,
+      stageDispatchAvgMs,
+      readbackSyncedMs,
+      endToEndMs: nowMs() - totalStarted,
+      maxAbsError,
+      rmsError,
+      outputSample: Array.from(outputValues.slice(0, 8)),
+    };
+  } finally {
+    for (const buffer of buffers) buffer.destroy?.();
+  }
 }
 
 function createAttentionOutputPipelines(device: DeviceLike, buffers: {
