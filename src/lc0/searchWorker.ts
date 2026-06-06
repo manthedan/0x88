@@ -37,6 +37,7 @@ import {
   type Lc0WebAttentionScoreBenchmarkResult,
   type Lc0WebAttentionScoreOrtBenchmarkResult,
   type Lc0WebSmolgenBenchmarkResult,
+  type Lc0WebSmolgenKernelVariant,
   type Lc0WebAttentionValueBenchmarkResult,
   type Lc0WebAttentionValueOrtBenchmarkResult,
   type Lc0WebEncoder0BlockBenchmarkResult,
@@ -239,6 +240,7 @@ type SmolgenBenchmarkMessage = {
   warmup?: number;
   verifyShards?: boolean;
   encoderPrefix?: string;
+  projectKernelVariant?: Lc0WebSmolgenKernelVariant;
 };
 
 type SoftmaxBenchmarkMessage = {
@@ -671,6 +673,7 @@ async function handleSmolgenBenchmark(message: SmolgenBenchmarkMessage): Promise
     warmup: message.warmup,
     verifyShards: message.verifyShards,
     encoderPrefix: message.encoderPrefix,
+    projectKernelVariant: message.projectKernelVariant,
   });
   post({ type: 'smolgenBenchmarkResult', id: message.id, result });
 }

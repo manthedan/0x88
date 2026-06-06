@@ -224,6 +224,7 @@ export interface Lc0WebSmolgenBenchmarkOptions {
   warmup?: number;
   verifyShards?: boolean;
   encoderPrefix?: string;
+  projectKernelVariant?: Lc0WebSmolgenKernelVariant;
 }
 
 export interface Lc0WebSmolgenBenchmarkResult {
@@ -232,6 +233,7 @@ export interface Lc0WebSmolgenBenchmarkResult {
   modelName: string;
   adapterInfo?: Record<string, unknown>;
   encoderPrefix: string;
+  projectKernelVariant: Lc0WebSmolgenKernelVariant;
   tokens: number;
   channels: number;
   compressed: number;
@@ -3036,11 +3038,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
-const SMOLGEN_PROJECT_TILED_F16_WGSL = `
+function smolgenProjectTiledF16Wgsl(tileSize: number): string {
+  return `
 @group(0) @binding(0) var<storage, read> inputVec: array<f32>;
 @group(0) @binding(1) var<storage, read> weightF16: array<u32>;
 @group(0) @binding(2) var<storage, read_write> outputVec: array<f32>;
-var<workgroup> inputTile: array<f32, 64>;
+var<workgroup> inputTile: array<f32, ${tileSize}>;
 
 fn pick_lane(word: u32, index: u32) -> f32 {
   let pair = unpack2x16float(word);
@@ -3048,15 +3051,15 @@ fn pick_lane(word: u32, index: u32) -> f32 {
 }
 fn load_weight(index: u32) -> f32 { return pick_lane(weightF16[index >> 1u], index); }
 
-@compute @workgroup_size(64, 1, 1)
+@compute @workgroup_size(${tileSize}, 1, 1)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
-  let col = wid.x * 64u + lid.x;
+  let col = wid.x * ${tileSize}u + lid.x;
   let head = wid.z;
   var sum = 0.0;
-  for (var tile = 0u; tile < 256u; tile = tile + 64u) {
+  for (var tile = 0u; tile < 256u; tile = tile + ${tileSize}u) {
     inputTile[lid.x] = inputVec[head * 256u + tile + lid.x];
     workgroupBarrier();
-    for (var k = 0u; k < 64u; k = k + 1u) {
+    for (var k = 0u; k < ${tileSize}u; k = k + 1u) {
       sum = sum + inputTile[k] * load_weight((tile + k) * 4096u + col);
     }
     workgroupBarrier();
@@ -3064,8 +3067,26 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   outputVec[head * 4096u + col] = sum;
 }
 `;
+}
 
-type Lc0WebSmolgenKernelVariant = 'hand' | 'tiled-project-f16';
+const SMOLGEN_PROJECT_TILED_F16_WGSL = smolgenProjectTiledF16Wgsl(64);
+
+export type Lc0WebSmolgenKernelVariant = 'hand' | 'tiled-project-f16' | 'tiled-project-f16-16' | 'tiled-project-f16-32' | 'tiled-project-f16-128' | 'tiled-project-f16-256';
+
+export function parseLc0WebSmolgenKernelVariant(raw: string | undefined | null): Lc0WebSmolgenKernelVariant {
+  if (!raw || raw === 'tiled' || raw === 'tiled-project') return 'tiled-project-f16';
+  if (raw === 'hand' || raw === 'tiled-project-f16' || raw === 'tiled-project-f16-16' || raw === 'tiled-project-f16-32' || raw === 'tiled-project-f16-128' || raw === 'tiled-project-f16-256') return raw;
+  throw new Error(`Unsupported smolgen project kernel variant: ${raw}`);
+}
+
+function smolgenProjectKernelTileSize(variant: Lc0WebSmolgenKernelVariant): number | null {
+  if (variant === 'hand') return null;
+  if (variant === 'tiled-project-f16-16') return 16;
+  if (variant === 'tiled-project-f16-32') return 32;
+  if (variant === 'tiled-project-f16-128') return 128;
+  if (variant === 'tiled-project-f16-256') return 256;
+  return 64;
+}
 
 type SmolgenPipelines = {
   compress: PipelineLike;
@@ -3136,7 +3157,8 @@ function createSmolgenPipelines(device: DeviceLike, buffers: {
     { binding: 2, resource: { buffer: buffers.ln2Bias } },
     { binding: 3, resource: { buffer: buffers.ln2 } },
   ] });
-  const project = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: projectKernelVariant === 'tiled-project-f16' ? 'lc0web smolgen project tiled f16' : 'lc0web smolgen project', code: projectKernelVariant === 'tiled-project-f16' ? SMOLGEN_PROJECT_TILED_F16_WGSL : SMOLGEN_PROJECT_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const projectTileSize = smolgenProjectKernelTileSize(projectKernelVariant);
+  const project = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: projectTileSize ? `lc0web smolgen project tiled f16 ${projectTileSize}` : 'lc0web smolgen project', code: projectTileSize ? (projectTileSize === 64 ? SMOLGEN_PROJECT_TILED_F16_WGSL : smolgenProjectTiledF16Wgsl(projectTileSize)) : SMOLGEN_PROJECT_WGSL }), entryPoint: 'main' } }) as PipelineLike;
   const projectBind = device.createBindGroup({ layout: project.getBindGroupLayout(0), entries: [
     { binding: 0, resource: { buffer: buffers.ln2 } },
     { binding: 1, resource: { buffer: buffers.smolgenWeight } },
@@ -3178,7 +3200,8 @@ function encodeSmolgenLn2Pass(pass: ComputePassLike, pipelines: SmolgenPipelines
 function encodeSmolgenProjectPass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.project);
   pass.setBindGroup(0, pipelines.projectBind);
-  if (pipelines.projectKernelVariant === 'tiled-project-f16') pass.dispatchWorkgroups(Math.ceil((DEFAULT_TOKENS * DEFAULT_TOKENS) / 64), 1, DEFAULT_HEADS);
+  const tileSize = smolgenProjectKernelTileSize(pipelines.projectKernelVariant);
+  if (tileSize) pass.dispatchWorkgroups(Math.ceil((DEFAULT_TOKENS * DEFAULT_TOKENS) / tileSize), 1, DEFAULT_HEADS);
   else pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
 }
 
@@ -3222,6 +3245,7 @@ export async function runLc0WebSmolgenBenchmark(options: Lc0WebSmolgenBenchmarkO
   const totalStarted = nowMs();
   const warmup = clampInteger(options.warmup, 3, 0, 1000);
   const iterations = clampInteger(options.iterations, 50, 1, 100_000);
+  const projectKernelVariant = options.projectKernelVariant ?? 'tiled-project-f16';
   const tensorNames = lc0WebEncoderBlockTensorNames(options.encoderPrefix).smolgen;
   const { device, adapterInfo } = await requestDevice();
   const pack = await loadLc0WebModelPack(options.packUrl, {
@@ -3273,7 +3297,7 @@ export async function runLc0WebSmolgenBenchmark(options: Lc0WebSmolgenBenchmarkO
       ln2,
       smolgenWeight,
       output,
-    }, 'tiled-project-f16');
+    }, projectKernelVariant);
     const uploadSetupMs = nowMs() - setupStarted;
 
     if (warmup > 0) {
@@ -3307,6 +3331,7 @@ export async function runLc0WebSmolgenBenchmark(options: Lc0WebSmolgenBenchmarkO
       modelName: pack.manifest.model.name,
       adapterInfo,
       encoderPrefix: normalizeEncoderPrefix(options.encoderPrefix),
+      projectKernelVariant,
       tokens: DEFAULT_TOKENS,
       channels: DEFAULT_N,
       compressed: DEFAULT_SMOLGEN_COMPRESSED,

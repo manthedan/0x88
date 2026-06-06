@@ -192,12 +192,21 @@ type AttentionScoreOrtBenchmarkResult = {
   outputSample: number[];
 };
 
+type SmolgenProjectKernelVariant = 'hand' | 'tiled-project-f16' | 'tiled-project-f16-16' | 'tiled-project-f16-32' | 'tiled-project-f16-128' | 'tiled-project-f16-256';
+
+function parseSmolgenProjectKernelVariant(raw: string | null): SmolgenProjectKernelVariant {
+  if (!raw || raw === 'tiled' || raw === 'tiled-project') return 'tiled-project-f16';
+  if (raw === 'hand' || raw === 'tiled-project-f16' || raw === 'tiled-project-f16-16' || raw === 'tiled-project-f16-32' || raw === 'tiled-project-f16-128' || raw === 'tiled-project-f16-256') return raw;
+  throw new Error(`Unsupported smolgen project kernel variant: ${raw}`);
+}
+
 type SmolgenBenchmarkResult = {
   status: 'SMOLGEN_BENCH_DONE';
   packUrl: string;
   modelName: string;
   adapterInfo?: Record<string, unknown>;
   encoderPrefix: string;
+  projectKernelVariant: SmolgenProjectKernelVariant;
   tokens: number;
   channels: number;
   compressed: number;
@@ -1387,8 +1396,9 @@ async function runSmolgenBenchmark(): Promise<void> {
   const iterations = Math.min(100_000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 50)));
   const warmup = Math.min(1000, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 3)));
   const encoderPrefix = params.get('encoderPrefix') ?? undefined;
+  const projectKernelVariant = parseSmolgenProjectKernelVariant(params.get('smolgenProjectKernel') ?? params.get('smolgenKernelVariant'));
   el('benchResult').textContent = 'SMOLGEN_BENCH_RUNNING';
-  setBusy(true, `Benchmarking lc0web WGSL smolgen stages: ${warmup} warmup + ${iterations} queued passes, one final readback…`);
+  setBusy(true, `Benchmarking lc0web WGSL smolgen stages (${projectKernelVariant}): ${warmup} warmup + ${iterations} queued passes, one final readback…`);
   try {
     const response = await postWorkerRequest<{ type: 'smolgenBenchmarkResult'; result: SmolgenBenchmarkResult }>({
       type: 'smolgenBenchmark',
@@ -1397,6 +1407,7 @@ async function runSmolgenBenchmark(): Promise<void> {
       warmup,
       verifyShards: params.get('packVerify') !== '0',
       encoderPrefix,
+      projectKernelVariant,
     });
     const rounded = {
       ...response.result,
@@ -1411,7 +1422,7 @@ async function runSmolgenBenchmark(): Promise<void> {
       .sort((a, b) => b[1] - a[1])
       .map(([stage, ms]) => `${stage} ${ms.toFixed(4)}ms`)
       .join(', ');
-    el('message').textContent = `SMOLGEN_BENCH_DONE avg ${response.result.dispatchLoopAvgMs.toFixed(4)} ms/pass · ${stages}`;
+    el('message').textContent = `SMOLGEN_BENCH_DONE ${response.result.projectKernelVariant} avg ${response.result.dispatchLoopAvgMs.toFixed(4)} ms/pass · ${stages}`;
   } catch (error) {
     el('benchResult').textContent = `SMOLGEN_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Smolgen benchmark failed: ${(error as Error).message}`;
