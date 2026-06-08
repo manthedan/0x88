@@ -179,6 +179,12 @@ function cloneEvaluation(evaluation: Lc0Evaluation): Lc0Evaluation {
   return { ...evaluation, wdl: [...evaluation.wdl] as [number, number, number], legalPriors: evaluation.legalPriors.map((prior) => ({ ...prior })) };
 }
 
+function cloneCachedEvaluation(evaluation: Lc0Evaluation): Lc0Evaluation {
+  const cloned = cloneEvaluation(evaluation);
+  delete cloned.timing;
+  return cloned;
+}
+
 function approximateCacheKeyBytes(key: string): number {
   return key.length * 2;
 }
@@ -283,7 +289,7 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
         this.hits += 1;
         this.cache.delete(key);
         this.cache.set(key, cached);
-        results[i] = cloneEvaluation(cached);
+        results[i] = cloneCachedEvaluation(cached);
       } else {
         this.misses += 1;
         missInputs.push(inputs[i]);
@@ -319,7 +325,7 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
           this.hits += 1;
           this.cache.delete(key);
           this.cache.set(key, cached);
-          out[batchIndex][i] = cloneEvaluation(cached);
+          out[batchIndex][i] = cloneCachedEvaluation(cached);
         } else {
           this.misses += 1;
           missInputs.push(batches[batchIndex][i]);
@@ -355,7 +361,7 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
 
   private store(key: string, value: Lc0Evaluation): void {
     if (this.maxEntries <= 0) return;
-    this.cache.set(key, cloneEvaluation(value));
+    this.cache.set(key, cloneCachedEvaluation(value));
     this.evictIfNeeded();
   }
 
