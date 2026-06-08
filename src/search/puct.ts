@@ -1,6 +1,6 @@
 import { boardToFen, type BoardState } from '../chess/board.ts';
 import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
-import { moveToActionId, type Move } from '../chess/moveCodec.ts';
+import { moveToActionId, moveToUci, type Move } from '../chess/moveCodec.ts';
 import { automaticDrawReason } from '../chess/drawRules.ts';
 import type { Evaluation, EvaluationBatchRequest, Evaluator } from '../nn/evaluator.ts';
 
@@ -94,6 +94,8 @@ export interface SearchOptions {
   root?: Node | null;
   /** Experimental per-search/game transposition table. Key includes FEN and history for history-aware model correctness. */
   transpositionTable?: Map<string, Node>;
+  /** Opt-in diagnostic trace for batched/pipelined visit selection and backup order. */
+  traceSearchVisits?: boolean;
   /** Budget fixed visits or paid neural/backend eval misses when a cache-aware evaluator is present. */
   budgetMode?: SearchBudgetMode;
   /** Adaptive neural mode cap: max additional root visits = visits * multiplier. */
@@ -120,6 +122,36 @@ export interface SearchOptions {
   butterflyMaxBonus?: number;
 }
 export interface GumbelRootOptions { candidateCount?: number; seed?: number; gumbelScale?: number; qWeight?: number; priorWeight?: number; visitPenalty?: number; }
+
+export interface SearchTraceRootChild {
+  uci: string;
+  visits: number;
+  virtualVisits: number;
+  prior: number;
+  q: number;
+  score: number;
+}
+
+export interface SearchTraceItem {
+  index: number;
+  kind: 'eval' | 'terminal';
+  rootMove?: string;
+  path: string[];
+  evalSlot?: number;
+  value?: number;
+}
+
+export interface SearchTraceEvent {
+  event: 'batch-prepared' | 'evals-returned' | 'backup-applied';
+  generationId?: number;
+  pipelineDepth?: number;
+  batchIndex?: number;
+  itemIndex?: number;
+  evalBatchSizes?: number[];
+  items?: SearchTraceItem[];
+  item?: SearchTraceItem;
+  rootChildren?: SearchTraceRootChild[];
+}
 
 export interface SearchStats {
   requestedVisits: number;
@@ -162,6 +194,8 @@ export interface SearchStats {
   stopReason?: 'visit-budget' | 'movetime' | 'neural-budget' | 'max-visits' | 'root-dominance' | 'kld-stable' | 'best-stable' | 'no-cache-metrics-fixed-visits';
   rootReused?: boolean;
   transpositionHits?: number;
+  /** Opt-in diagnostic trace for batched/pipelined visit selection and backup order. */
+  searchTrace?: SearchTraceEvent[];
 }
 
 export interface Edge {
@@ -983,6 +1017,72 @@ type PreparedLeaf =
   | { kind: 'terminal'; sel: SelectedLeaf; value: number }
   | { kind: 'eval'; sel: SelectedLeaf; slot: number };
 
+const searchTraceGenerationIds = new WeakMap<SearchStats, number>();
+
+function nextSearchTraceGenerationId(stats: SearchStats): number {
+  const next = searchTraceGenerationIds.get(stats) ?? 1;
+  searchTraceGenerationIds.set(stats, next + 1);
+  return next;
+}
+
+function roundTraceNumber(value: number): number {
+  return Number.isFinite(value) ? Number(value.toFixed(6)) : value;
+}
+
+function pathToUci(path: Edge[]): string[] {
+  return path.map((edge) => moveToUci(edge.move));
+}
+
+function rootChildTraceSnapshot(root: Node, searchPolicy: SearchPolicy, context: SearchPolicyContext): SearchTraceRootChild[] {
+  return root.edges
+    .map((edge) => ({
+      uci: moveToUci(edge.move),
+      visits: edge.visits,
+      virtualVisits: edge.virtualVisits,
+      prior: roundTraceNumber(edge.prior),
+      q: roundTraceNumber(edgeQForParentInNode(edge, root, context)),
+      score: roundTraceNumber(searchPolicy.scoreEdge(root, edge, context)),
+    }))
+    .sort((a, b) => b.visits - a.visits || b.virtualVisits - a.virtualVisits || b.prior - a.prior);
+}
+
+function preparedLeafTraceItem(item: PreparedLeaf, index: number, value?: number): SearchTraceItem {
+  const path = pathToUci(item.sel.path);
+  return {
+    index,
+    kind: item.kind,
+    rootMove: path[0],
+    path,
+    evalSlot: item.kind === 'eval' ? item.slot : undefined,
+    value: value === undefined ? undefined : roundTraceNumber(value),
+  };
+}
+
+function recordPreparedBatchTrace(stats: SearchStats, root: Node, searchPolicy: SearchPolicy, context: SearchPolicyContext, batch: PreparedLeafBatch, pipelineDepth: number, batchIndex: number): void {
+  if (!stats.searchTrace) return;
+  stats.searchTrace.push({
+    event: 'batch-prepared',
+    generationId: batch.generationId,
+    pipelineDepth,
+    batchIndex,
+    items: batch.prepared.map((item, index) => preparedLeafTraceItem(item, index)),
+    rootChildren: rootChildTraceSnapshot(root, searchPolicy, context),
+  });
+}
+
+function recordBackupTrace(stats: SearchStats, root: Node, searchPolicy: SearchPolicy, context: SearchPolicyContext, batch: PreparedLeafBatch, item: PreparedLeaf, itemIndex: number, value: number, pipelineDepth: number, batchIndex: number): void {
+  if (!stats.searchTrace) return;
+  stats.searchTrace.push({
+    event: 'backup-applied',
+    generationId: batch.generationId,
+    pipelineDepth,
+    batchIndex,
+    itemIndex,
+    item: preparedLeafTraceItem(item, itemIndex, value),
+    rootChildren: rootChildTraceSnapshot(root, searchPolicy, context),
+  });
+}
+
 function unwindVirtualVisits(path: Edge[]): void {
   for (const edge of path) edge.virtualVisits = Math.max(0, edge.virtualVisits - 1);
 }
@@ -1112,14 +1212,15 @@ function recordEvalBatchStats(batch: PreparedLeafBatch, stats: SearchStats): voi
   stats.evalBatchSizeHistogram = { ...(stats.evalBatchSizeHistogram ?? {}), [batchKey]: (stats.evalBatchSizeHistogram?.[batchKey] ?? 0) + 1 };
 }
 
-function finishPreparedLeafBatch(batch: PreparedLeafBatch, evals: Evaluation[], searchPolicy: SearchPolicy, context: SearchPolicyContext, stats: SearchStats): void {
+function finishPreparedLeafBatch(batch: PreparedLeafBatch, evals: Evaluation[], searchPolicy: SearchPolicy, context: SearchPolicyContext, stats: SearchStats, root: Node, pipelineDepth: number, batchIndex: number): void {
   if (evals.length !== batch.evalNodes.length) throw new Error(`pipelined evaluation generation ${batch.generationId} returned ${evals.length} result(s) for ${batch.evalNodes.length} node(s)`);
   const values = batch.evalNodes.map((node, i) => {
     if (node.expanded || node.terminalValue !== null) throw new Error(`stale pipelined evaluation for generation ${batch.generationId} slot ${i}: node was already expanded before results were applied`);
     stats.expansions += 1;
     return finishExpansion(node, batch.evalMoves[i], evals[i], context);
   });
-  for (const item of batch.prepared) {
+  for (let itemIndex = 0; itemIndex < batch.prepared.length; itemIndex++) {
+    const item = batch.prepared[itemIndex];
     let value: number | undefined;
     if (item.kind === 'terminal') value = item.value;
     else {
@@ -1128,6 +1229,7 @@ function finishPreparedLeafBatch(batch: PreparedLeafBatch, evals: Evaluation[], 
     }
     searchPolicy.backup(item.sel.path, value, context);
     stats.completedVisits += 1;
+    recordBackupTrace(stats, root, searchPolicy, context, batch, item, itemIndex, value, pipelineDepth, batchIndex);
   }
 }
 
@@ -1187,6 +1289,9 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
       }
     }
 
+    const traceBatch: PreparedLeafBatch = { generationId: nextSearchTraceGenerationId(stats), prepared, evalNodes, evalMoves };
+    recordPreparedBatchTrace(stats, root, searchPolicy, context, traceBatch, 1, 0);
+
     let evals: Evaluation[] = [];
     if (evalNodes.length) {
       const contexts = evalNodes.map((node, i) => ({ historyFens: node.historyFens, legalMoves: evalMoves[i] }));
@@ -1204,8 +1309,10 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
       recordEvaluatorMetricsDelta(evaluator, beforeMetrics, evalNodes.length, stats);
       recordEvaluationTimingBatch(stats, evals);
     }
+    if (stats.searchTrace) stats.searchTrace.push({ event: 'evals-returned', generationId: traceBatch.generationId, pipelineDepth: 1, evalBatchSizes: [evals.length] });
     const values = evalNodes.map((node, i) => { stats.expansions += 1; return finishExpansion(node, evalMoves[i], evals[i], context); });
-    for (const item of prepared) {
+    for (let itemIndex = 0; itemIndex < prepared.length; itemIndex++) {
+      const item = prepared[itemIndex];
       let value: number | undefined;
       if (item.kind === 'terminal') value = item.value;
       else {
@@ -1214,6 +1321,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
       }
       searchPolicy.backup(item.sel.path, value, context);
       stats.completedVisits += 1;
+      recordBackupTrace(stats, root, searchPolicy, context, traceBatch, item, itemIndex, value, 1, 0);
     }
     done += want;
     throwIfAborted(signal);
@@ -1272,22 +1380,29 @@ async function runPipelinedBatchedVisits(root: Node, evaluator: Evaluator, visit
   let scheduled = 0;
   let lastYield = nowMs();
   const inFlightEvalLeaves = new Set<Node>();
-  let nextGenerationId = 1;
   while (scheduled < visits && !deadlineExpired(deadlineMs)) {
     throwIfAborted(signal);
     const batches: PreparedLeafBatch[] = [];
     while (batches.length < pipelineDepth && scheduled < visits && !deadlineExpired(deadlineMs)) {
       const want = Math.min(batchSize, visits - scheduled);
-      const batch = collectPreparedLeafBatch(root, want, searchPolicy, context, stats, transpositionTable, collisionMode, collisionRetryLimit, inFlightEvalLeaves, nextGenerationId++);
+      const batch = collectPreparedLeafBatch(root, want, searchPolicy, context, stats, transpositionTable, collisionMode, collisionRetryLimit, inFlightEvalLeaves, nextSearchTraceGenerationId(stats));
       if (!batch.prepared.length) break;
       batches.push(batch);
       scheduled += batch.prepared.length;
     }
     if (!batches.length) break;
+    for (let i = 0; i < batches.length; i++) recordPreparedBatchTrace(stats, root, searchPolicy, context, batches[i], pipelineDepth, i);
     const evalResults = await evaluatePreparedLeafBatches(evaluator, batches, stats);
+    if (stats.searchTrace) {
+      stats.searchTrace.push({
+        event: 'evals-returned',
+        pipelineDepth,
+        evalBatchSizes: evalResults.map((evals) => evals.length),
+      });
+    }
     for (let i = 0; i < batches.length; i++) {
       for (const node of batches[i].evalNodes) inFlightEvalLeaves.delete(node);
-      finishPreparedLeafBatch(batches[i], evalResults[i], searchPolicy, context, stats);
+      finishPreparedLeafBatch(batches[i], evalResults[i], searchPolicy, context, stats, root, pipelineDepth, i);
     }
     throwIfAborted(signal);
     if (deadlineExpired(deadlineMs)) break;
@@ -1330,6 +1445,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   };
   const searchPolicy = options.searchPolicy ?? classicPuctPolicy;
   const stats = makeStats(visits);
+  if (options.traceSearchVisits) stats.searchTrace = [];
   const requestedHistory = options.historyFens ?? [];
   const reusableRoot = !options.rootMoves && options.root && boardToFen(options.root.board) === boardToFen(board) && sameHistory(options.root.historyFens, requestedHistory) ? options.root : null;
   const root: Node = reusableRoot ?? makeSearchRoot(board, requestedHistory);

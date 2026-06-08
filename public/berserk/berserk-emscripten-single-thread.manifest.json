@@ -1,0 +1,96 @@
+{
+  "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
+  "generatedAt": "2026-06-05T19:00:59.943Z",
+  "distributionPolicy": "docs/engine_artifact_distribution.md",
+  "engine": "berserk",
+  "flavor": "emscripten-single-thread",
+  "status": "experimental",
+  "upstream": {
+    "repo": "https://github.com/jhonnold/berserk.git",
+    "tag": "14",
+    "commit": "8ae895a6151695be4a50d4fb65b0c131659c513a",
+    "license": "GPL-3.0-or-compatible upstream; verify exact release notices before publishing"
+  },
+  "build": {
+    "script": "scripts/build_berserk_emscripten.mjs",
+    "command": "npm run berserk:build-emscripten",
+    "patches": [
+      "patches/berserk-emscripten.patch"
+    ],
+    "toolchain": "emscripten/emsdk@sha256:9eed2e47b4206928b22f99d2917013ad5462d777bb24cb546a652729896badd8; emcc 6.0.0 (afa15e0c56d1292e073c2c91bafc1d5e0cdf0dd3)"
+  },
+  "artifacts": [
+    {
+      "path": "public/berserk/berserk-emscripten.js",
+      "bytes": 66372,
+      "sha256": "ab5dd3fd1b87cdd281cdb401e3714498a8520deccc0e83a464d49e316a85c279",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 18676,
+          "ratio": 0.2814
+        },
+        "brotli": {
+          "bytes": 16552,
+          "ratio": 0.2494
+        }
+      }
+    },
+    {
+      "path": "public/berserk/berserk-emscripten.wasm",
+      "bytes": 128172,
+      "sha256": "0cffe539d41787c8cc2963911e24fe0bdf5319bae1fe03fae243642e8cda9372",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 59130,
+          "ratio": 0.4613
+        },
+        "brotli": {
+          "bytes": 50495,
+          "ratio": 0.394
+        }
+      }
+    },
+    {
+      "path": "public/berserk/berserk-emscripten.data",
+      "bytes": 25201924,
+      "sha256": "9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 17759011,
+          "ratio": 0.7047
+        },
+        "brotli": {
+          "bytes": 14814131,
+          "ratio": 0.5878
+        }
+      }
+    }
+  ],
+  "assets": [
+    {
+      "name": "berserk-9b84c340af7e.nn",
+      "sourceUrl": "https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn",
+      "rawSha256": "9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084",
+      "licenseNote": "No standalone license file found in jhonnold/berserk-networks during intake; do not publicly distribute this network until provenance/license is resolved or confirmed as covered by the engine release.",
+      "embeddedIn": "public/berserk/berserk-emscripten.data"
+    }
+  ],
+  "totals": {
+    "bytes": 25396468,
+    "gzipBytes": 17836817,
+    "brotliBytes": 14881178,
+    "gzipRatio": 0.7023,
+    "brotliRatio": 0.586
+  },
+  "sourceArchive": {
+    "required": true,
+    "path": "public/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz",
+    "bytes": 18427893,
+    "sha256": "01b9184b5193af4bd04e75fe0edc25fc025f132cb53a0f245e05cd0cb6dd0136",
+    "url": "/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz",
+    "note": "Source archive recorded for public distribution."
+  }
+}

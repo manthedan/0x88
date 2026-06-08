@@ -43,7 +43,7 @@ const DEFAULT_SMOLGEN_HIDDEN = 256;
 const DEFAULT_SMOLGEN_FLAT = DEFAULT_TOKENS * DEFAULT_SMOLGEN_COMPRESSED;
 const DEFAULT_SMOLGEN_EPSILON = 1e-3;
 
-export type Lc0WebMatmulAddKernelVariant = 'scalar' | 'tiled16' | 'scalar-transposed';
+export type Lc0WebMatmulAddKernelVariant = 'scalar' | 'tiled16' | 'scalar-transposed' | 'scalar-shader-f16-accum-f32';
 
 export interface Lc0WebMatmulAddKernelProbeOptions {
   packUrl: string;
@@ -77,6 +77,7 @@ export interface Lc0WebMatmulAddKernelProbeResult {
   packUrl: string;
   modelName: string;
   adapterInfo?: Record<string, unknown>;
+  shaderF16Supported?: boolean;
   weightTensor: string;
   biasTensor: string;
   variant: Lc0WebMatmulAddKernelVariant;
@@ -100,6 +101,7 @@ export interface Lc0WebMatmulAddKernelBenchmarkResult {
   packUrl: string;
   modelName: string;
   adapterInfo?: Record<string, unknown>;
+  shaderF16Supported?: boolean;
   weightTensor: string;
   biasTensor: string;
   variant: Lc0WebMatmulAddKernelVariant;
@@ -273,6 +275,7 @@ type DeviceLike = {
   createComputePipeline: (descriptor: Record<string, unknown>) => PipelineLike;
   createBindGroup: (descriptor: Record<string, unknown>) => unknown;
   createCommandEncoder: () => CommandEncoderLike;
+  destroy?: () => void;
 };
 
 type QuerySetLike = {
@@ -320,7 +323,11 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
 }
 
 function normalizeKernelVariant(value: unknown): Lc0WebMatmulAddKernelVariant {
-  return value === 'tiled16' || value === 'scalar-transposed' ? value : 'scalar';
+  return value === 'tiled16' || value === 'scalar-transposed' || value === 'scalar-shader-f16-accum-f32' ? value : 'scalar';
+}
+
+function kernelVariantRequiresShaderF16(variant: Lc0WebMatmulAddKernelVariant): boolean {
+  return variant === 'scalar-shader-f16-accum-f32';
 }
 
 export function f16BitsToF32(bits: number): number {
@@ -330,6 +337,32 @@ export function f16BitsToF32(bits: number): number {
   if (exp === 0) return sign * (frac === 0 ? 0 : Math.pow(2, -14) * (frac / 1024));
   if (exp === 0x1f) return frac === 0 ? sign * Infinity : NaN;
   return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
+}
+
+function f32ToF16Bits(value: number): number {
+  if (Number.isNaN(value)) return 0x7e00;
+  if (value === Infinity) return 0x7c00;
+  if (value === -Infinity) return 0xfc00;
+  const sign = value < 0 || Object.is(value, -0) ? 0x8000 : 0;
+  const abs = Math.abs(value);
+  if (abs === 0) return sign;
+  if (abs >= 65504) return sign | 0x7bff;
+  if (abs < 2 ** -24) return sign;
+  if (abs < 2 ** -14) return sign | Math.round(abs / 2 ** -24);
+  const exponent = Math.floor(Math.log2(abs));
+  const fraction = abs / 2 ** exponent - 1;
+  let halfExponent = exponent + 15;
+  let halfFraction = Math.round(fraction * 1024);
+  if (halfFraction === 1024) {
+    halfExponent += 1;
+    halfFraction = 0;
+  }
+  if (halfExponent >= 31) return sign | 0x7bff;
+  return sign | (halfExponent << 10) | (halfFraction & 0x03ff);
+}
+
+function f32ToF16RoundedF32(value: number): number {
+  return f16BitsToF32(f32ToF16Bits(value));
 }
 
 function readF16At(bytes: Uint8Array, index: number): number {
@@ -367,11 +400,33 @@ function cpuMatmulAdd(input: Float32Array<ArrayBufferLike>, weight: Uint8Array, 
   return output;
 }
 
+function cpuMatmulAddShaderF16AccumF32(input: Float32Array<ArrayBufferLike>, weight: Uint8Array, bias: Uint8Array, k: number, n: number): Float32Array<ArrayBufferLike> {
+  const output = new Float32Array(n);
+  for (let col = 0; col < n; col++) {
+    let sum = readF16At(bias, col);
+    for (let row = 0; row < k; row++) {
+      const product = f32ToF16RoundedF32(f32ToF16RoundedF32(input[row]) * readF16At(weight, row * n + col));
+      sum += product;
+    }
+    output[col] = sum;
+  }
+  return output;
+}
+
 function cpuProjectTokens(input: Float32Array<ArrayBufferLike>, weight: Uint8Array, bias: Uint8Array, tokens: number, k: number, n: number): Float32Array<ArrayBufferLike> {
   const output = new Float32Array(tokens * n);
   for (let token = 0; token < tokens; token++) {
     const tokenInput = input.subarray(token * k, (token + 1) * k);
     output.set(cpuMatmulAdd(tokenInput, weight, bias, k, n), token * n);
+  }
+  return output;
+}
+
+function cpuProjectTokensShaderF16AccumF32(input: Float32Array<ArrayBufferLike>, weight: Uint8Array, bias: Uint8Array, tokens: number, k: number, n: number): Float32Array<ArrayBufferLike> {
+  const output = new Float32Array(tokens * n);
+  for (let token = 0; token < tokens; token++) {
+    const tokenInput = input.subarray(token * k, (token + 1) * k);
+    output.set(cpuMatmulAddShaderF16AccumF32(tokenInput, weight, bias, k, n), token * n);
   }
   return output;
 }
@@ -796,9 +851,42 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
 }
 `;
 
+const SCALAR_SHADER_F16_ACCUM_F32_WGSL = `enable f16;
+@group(0) @binding(0) var<storage, read> inputVec: array<f32>;
+@group(0) @binding(1) var<storage, read> weightsF16: array<u32>;
+@group(0) @binding(2) var<storage, read> biasF16: array<u32>;
+@group(0) @binding(3) var<storage, read_write> outputVec: array<f32>;
+
+fn pick_lane_f32(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+
+fn load_weight_f16(index: u32) -> f16 {
+  return f16(pick_lane_f32(weightsF16[index >> 1u], index));
+}
+
+fn load_bias_f16(index: u32) -> f16 {
+  return f16(pick_lane_f32(biasF16[index >> 1u], index));
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let col = gid.x;
+  if (col >= 256u) { return; }
+  var sum = f32(load_bias_f16(col));
+  for (var row = 0u; row < 256u; row = row + 1u) {
+    let product = f16(inputVec[row]) * load_weight_f16(row * 256u + col);
+    sum = sum + f32(product);
+  }
+  outputVec[col] = sum;
+}
+`;
+
 function wgslForVariant(variant: Lc0WebMatmulAddKernelVariant): string {
   if (variant === 'tiled16') return TILED16_WGSL;
   if (variant === 'scalar-transposed') return SCALAR_TRANSPOSED_WGSL;
+  if (variant === 'scalar-shader-f16-accum-f32') return SCALAR_SHADER_F16_ACCUM_F32_WGSL;
   return SCALAR_WGSL;
 }
 
@@ -814,7 +902,7 @@ function cloneableAdapterInfo(info: unknown): Record<string, unknown> | undefine
   return Object.keys(out).length ? out : undefined;
 }
 
-async function requestDevice(options: { timestampQuery?: boolean } = {}): Promise<{ device: DeviceLike; adapterInfo?: Record<string, unknown>; timestampQuerySupported: boolean }> {
+async function requestDevice(options: { timestampQuery?: boolean; shaderF16?: boolean } = {}): Promise<{ device: DeviceLike; adapterInfo?: Record<string, unknown>; timestampQuerySupported: boolean; shaderF16Supported: boolean }> {
   const globals = gpuGlobals();
   const gpu = globals.navigator?.gpu as GpuLike | undefined;
   if (!gpu) throw new Error('WebGPU unavailable for lc0web kernel probe');
@@ -822,8 +910,14 @@ async function requestDevice(options: { timestampQuery?: boolean } = {}): Promis
   if (!adapter) throw new Error('WebGPU adapter unavailable for lc0web kernel probe');
   const rawAdapterInfo = adapter.requestAdapterInfo ? await adapter.requestAdapterInfo() : adapter.info;
   const timestampQuerySupported = adapter.features?.has('timestamp-query') === true;
-  const device = await adapter.requestDevice(options.timestampQuery && timestampQuerySupported ? { requiredFeatures: ['timestamp-query'] } : undefined);
-  return { device, adapterInfo: cloneableAdapterInfo(rawAdapterInfo), timestampQuerySupported };
+  const shaderF16Supported = adapter.features?.has('shader-f16') === true;
+  if (options.shaderF16 && !shaderF16Supported) throw new Error('WebGPU adapter does not support required shader-f16 feature');
+  const requiredFeatures = [
+    ...(options.timestampQuery && timestampQuerySupported ? ['timestamp-query'] : []),
+    ...(options.shaderF16 ? ['shader-f16'] : []),
+  ];
+  const device = await adapter.requestDevice(requiredFeatures.length ? { requiredFeatures } : undefined);
+  return { device, adapterInfo: cloneableAdapterInfo(rawAdapterInfo), timestampQuerySupported, shaderF16Supported };
 }
 
 function dispatchKernel(pass: ComputePassLike, variant: Lc0WebMatmulAddKernelVariant, n: number): void {
@@ -868,8 +962,7 @@ function computeErrorStats(gpuOutput: Float32Array<ArrayBufferLike>, cpu: Float3
   return { maxAbsError, rmsError: Math.sqrt(sq / n) };
 }
 
-function assertErrorInTolerance(maxAbsError: number): void {
-  const tolerance = 1e-3;
+function assertErrorInTolerance(maxAbsError: number, tolerance = 1e-3): void {
   if (!Number.isFinite(maxAbsError) || maxAbsError > tolerance) {
     throw new Error(`lc0web MatMul+Add kernel verification failed: maxAbsError=${maxAbsError}, tolerance=${tolerance}`);
   }
@@ -898,7 +991,7 @@ export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKern
   const iterations = clampInteger(options.iterations, 10, 1, 1000);
   // Request WebGPU before fetching pack shards so unsupported browsers fail
   // without downloading/verifying model weights.
-  const { device, adapterInfo } = await requestDevice();
+  const { device, adapterInfo, shaderF16Supported } = await requestDevice({ shaderF16: kernelVariantRequiresShaderF16(variant) });
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
     tensorNames: [weightTensorName, biasTensorName],
@@ -916,7 +1009,9 @@ export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKern
   const globals = gpuGlobals();
   const usage = globals.GPUBufferUsage!;
   const input = makeInputVector(DEFAULT_K);
-  const cpu = cpuMatmulAdd(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N);
+  const cpu = kernelVariantRequiresShaderF16(variant)
+    ? cpuMatmulAddShaderF16AccumF32(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N)
+    : cpuMatmulAdd(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N);
 
   const buffers: BufferLike[] = [];
   try {
@@ -947,6 +1042,7 @@ export async function runLc0WebMatmulAddKernelProbe(options: Lc0WebMatmulAddKern
       packUrl: pack.manifestUrl,
       modelName: pack.manifest.model.name,
       adapterInfo,
+      shaderF16Supported,
       weightTensor: weightTensorName,
       biasTensor: biasTensorName,
       variant,
@@ -976,7 +1072,7 @@ export async function runLc0WebMatmulAddKernelBenchmark(options: Lc0WebMatmulAdd
   const variant = normalizeKernelVariant(options.variant);
   const warmup = clampInteger(options.warmup, 10, 0, 1000);
   const iterations = clampInteger(options.iterations, 1000, 1, 100_000);
-  const { device, adapterInfo } = await requestDevice();
+  const { device, adapterInfo, shaderF16Supported } = await requestDevice({ shaderF16: kernelVariantRequiresShaderF16(variant) });
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
     tensorNames: [weightTensorName, biasTensorName],
@@ -993,7 +1089,9 @@ export async function runLc0WebMatmulAddKernelBenchmark(options: Lc0WebMatmulAdd
   const globals = gpuGlobals();
   const usage = globals.GPUBufferUsage!;
   const input = makeInputVector(DEFAULT_K);
-  const cpu = cpuMatmulAdd(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N);
+  const cpu = kernelVariantRequiresShaderF16(variant)
+    ? cpuMatmulAddShaderF16AccumF32(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N)
+    : cpuMatmulAdd(input, weight.bytes, bias.bytes, DEFAULT_K, DEFAULT_N);
   const buffers: BufferLike[] = [];
   try {
     const setupStarted = nowMs();
@@ -1030,6 +1128,7 @@ export async function runLc0WebMatmulAddKernelBenchmark(options: Lc0WebMatmulAdd
       packUrl: pack.manifestUrl,
       modelName: pack.manifest.model.name,
       adapterInfo,
+      shaderF16Supported,
       weightTensor: weightTensorName,
       biasTensor: biasTensorName,
       variant,
@@ -3443,7 +3542,11 @@ function encoderBlockTensorNameList(names: Lc0WebEncoderBlockTensorNames): strin
   ];
 }
 
-export type Lc0WebFfnKernelVariant = 'hand' | 'tvm-packed-f16';
+export type Lc0WebFfnKernelVariant = 'hand' | 'tvm-packed-f16' | 'hand-shader-f16-accum-f32';
+
+function ffnKernelRequiresShaderF16(variant: Lc0WebFfnKernelVariant): boolean {
+  return variant === 'hand-shader-f16-accum-f32';
+}
 
 export interface Lc0WebEncoder0FfnBenchmarkOptions {
   packUrl: string;
@@ -3459,6 +3562,7 @@ export interface Lc0WebEncoder0FfnBenchmarkResult {
   packUrl: string;
   modelName: string;
   adapterInfo?: Record<string, unknown>;
+  shaderF16Supported?: boolean;
   tokens: number;
   channels: number;
   hidden: number;
@@ -3545,18 +3649,19 @@ function cpuSqrRelu(input: Float32Array<ArrayBufferLike>): Float32Array<ArrayBuf
   return output;
 }
 
-function cpuEncoder0FfnFromLn1(input: Float32Array<ArrayBufferLike>, tensors: Encoder0FfnTensors): { output: Float32Array<ArrayBufferLike>; alpha: number } {
-  const hidden = cpuSqrRelu(cpuProjectTokens(input, tensors.ffnDense1Weight.bytes, tensors.ffnDense1Bias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_FFN_HIDDEN));
-  const projected = cpuProjectTokens(hidden, tensors.ffnDense2Weight.bytes, tensors.ffnDense2Bias.bytes, DEFAULT_TOKENS, DEFAULT_FFN_HIDDEN, DEFAULT_N);
+function cpuEncoder0FfnFromLn1(input: Float32Array<ArrayBufferLike>, tensors: Encoder0FfnTensors, options: { shaderF16AccumF32?: boolean } = {}): { output: Float32Array<ArrayBufferLike>; alpha: number } {
+  const project = options.shaderF16AccumF32 ? cpuProjectTokensShaderF16AccumF32 : cpuProjectTokens;
+  const hidden = cpuSqrRelu(project(input, tensors.ffnDense1Weight.bytes, tensors.ffnDense1Bias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_FFN_HIDDEN));
+  const projected = project(hidden, tensors.ffnDense2Weight.bytes, tensors.ffnDense2Bias.bytes, DEFAULT_TOKENS, DEFAULT_FFN_HIDDEN, DEFAULT_N);
   const alpha = readF16At(tensors.ffnAlpha.bytes, 0);
   const skip = new Float32Array(projected.length);
   for (let i = 0; i < projected.length; i++) skip[i] = projected[i] * alpha + input[i];
   return { output: cpuLayerNormRows(skip, tensors.ln2Scale.bytes, tensors.ln2Bias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_LN_EPSILON), alpha };
 }
 
-function buildEncoder0FfnReference(tensors: Encoder0FfnTensors): { input: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; alpha: number } {
+function buildEncoder0FfnReference(tensors: Encoder0FfnTensors, options: { shaderF16AccumF32?: boolean } = {}): { input: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; alpha: number } {
   const input = buildAttentionOutputReference(tensors).output;
-  const ffn = cpuEncoder0FfnFromLn1(input, tensors);
+  const ffn = cpuEncoder0FfnFromLn1(input, tensors, options);
   return { input, output: ffn.output, alpha: ffn.alpha };
 }
 
@@ -3662,6 +3767,85 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
 }
 `;
 
+const FFN_SHADER_F16_HEADER = `enable f16;
+@group(0) @binding(0) var<storage, read> inputVec: array<f32>;
+@group(0) @binding(1) var<storage, read> weightsF16: array<u32>;
+@group(0) @binding(2) var<storage, read> biasF16: array<u32>;
+@group(0) @binding(3) var<storage, read_write> outputVec: array<f32>;
+
+fn pick_lane_f32(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+
+fn pick_lane_f16(word: u32, index: u32) -> f16 {
+  return f16(pick_lane_f32(word, index));
+}
+`;
+
+const FFN_DENSE1_SHADER_F16_ACCUM_F32_WGSL = `${FFN_SHADER_F16_HEADER}
+var<workgroup> dense1InputTile: array<f16, 128>;
+var<workgroup> dense1WeightTile: array<f16, 128>;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let col = wid.x * 8u + lid.x;
+  let token = wid.y * 8u + lid.y;
+  let local_index = lid.y * 8u + lid.x;
+  var sum = f32(pick_lane_f16(biasF16[col >> 1u], col));
+  for (var tile = 0u; tile < 256u; tile = tile + 16u) {
+    for (var i = local_index; i < 128u; i = i + 64u) {
+      let tile_row = i / 16u;
+      let tile_k = i % 16u;
+      let input_token = wid.y * 8u + tile_row;
+      let weight_col = wid.x * 8u + (i % 8u);
+      let weight_k = tile + (i / 8u);
+      dense1InputTile[i] = f16(inputVec[input_token * 256u + tile + tile_k]);
+      dense1WeightTile[i] = pick_lane_f16(weightsF16[(weight_col * 256u + weight_k) >> 1u], weight_col * 256u + weight_k);
+    }
+    workgroupBarrier();
+    for (var k = 0u; k < 16u; k = k + 1u) {
+      sum = sum + f32(dense1InputTile[lid.y * 16u + k] * dense1WeightTile[k * 8u + lid.x]);
+    }
+    workgroupBarrier();
+  }
+  let value = max(sum, 0.0);
+  outputVec[token * 1024u + col] = value * value;
+}
+`;
+
+const FFN_DENSE2_SHADER_F16_ACCUM_F32_WGSL = `${FFN_SHADER_F16_HEADER}
+@group(0) @binding(4) var<storage, read> residualVec: array<f32>;
+@group(0) @binding(5) var<storage, read> alphaF16: array<u32>;
+var<workgroup> dense2InputTile: array<f16, 128>;
+var<workgroup> dense2WeightTile: array<f16, 128>;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let col = wid.x * 8u + lid.x;
+  let token = wid.y * 8u + lid.y;
+  let local_index = lid.y * 8u + lid.x;
+  var sum = f32(pick_lane_f16(biasF16[col >> 1u], col));
+  for (var tile = 0u; tile < 1024u; tile = tile + 16u) {
+    for (var i = local_index; i < 128u; i = i + 64u) {
+      let tile_row = i / 16u;
+      let tile_k = i % 16u;
+      let input_token = wid.y * 8u + tile_row;
+      let weight_col = wid.x * 8u + (i % 8u);
+      let weight_k = tile + (i / 8u);
+      dense2InputTile[i] = f16(inputVec[input_token * 1024u + tile + tile_k]);
+      dense2WeightTile[i] = pick_lane_f16(weightsF16[(weight_col * 1024u + weight_k) >> 1u], weight_col * 1024u + weight_k);
+    }
+    workgroupBarrier();
+    for (var k = 0u; k < 16u; k = k + 1u) {
+      sum = sum + f32(dense2InputTile[lid.y * 16u + k] * dense2WeightTile[k * 8u + lid.x]);
+    }
+    workgroupBarrier();
+  }
+  outputVec[token * 256u + col] = sum * f32(pick_lane_f16(alphaF16[0], 0u)) + residualVec[token * 256u + col];
+}
+`;
+
 const FFN_LN2_WGSL = ATTENTION_OUTPUT_NORM_WGSL;
 
 function createEncoder0FfnPipelines(device: DeviceLike, buffers: {
@@ -3679,10 +3863,11 @@ function createEncoder0FfnPipelines(device: DeviceLike, buffers: {
   podArgs?: BufferLike;
 }, ffnKernelVariant: Lc0WebFfnKernelVariant = 'hand'): { ffnKernelVariant: Lc0WebFfnKernelVariant; dense1: PipelineLike; dense1Bind: unknown; dense2: PipelineLike; dense2Bind: unknown; ln2: PipelineLike; ln2Bind: unknown } {
   const useTvmPackedF16 = ffnKernelVariant === 'tvm-packed-f16';
+  const useShaderF16AccumF32 = ffnKernelVariant === 'hand-shader-f16-accum-f32';
   if (useTvmPackedF16 && !buffers.podArgs) throw new Error('TVM packed-f16 FFN kernels require a POD args uniform buffer');
   const dense1Module = device.createShaderModule({
-    label: useTvmPackedF16 ? 'lc0web encoder0 FFN dense1 TVM packed-f16 sqrrelu' : 'lc0web encoder0 FFN dense1 sqrrelu',
-    code: useTvmPackedF16 ? FFN_DENSE1_TVM_PACKED_F16_WGSL : FFN_DENSE1_WGSL,
+    label: useTvmPackedF16 ? 'lc0web encoder0 FFN dense1 TVM packed-f16 sqrrelu' : useShaderF16AccumF32 ? 'lc0web encoder0 FFN dense1 shader-f16 sqrrelu' : 'lc0web encoder0 FFN dense1 sqrrelu',
+    code: useTvmPackedF16 ? FFN_DENSE1_TVM_PACKED_F16_WGSL : useShaderF16AccumF32 ? FFN_DENSE1_SHADER_F16_ACCUM_F32_WGSL : FFN_DENSE1_WGSL,
   });
   const dense1 = device.createComputePipeline({ layout: 'auto', compute: { module: dense1Module, entryPoint: useTvmPackedF16 ? 'matmul_kernel' : 'main' } }) as PipelineLike;
   const dense1Bind = device.createBindGroup({ layout: dense1.getBindGroupLayout(0), entries: useTvmPackedF16 ? [
@@ -3698,8 +3883,8 @@ function createEncoder0FfnPipelines(device: DeviceLike, buffers: {
     { binding: 3, resource: { buffer: buffers.hidden } },
   ] });
   const dense2Module = device.createShaderModule({
-    label: useTvmPackedF16 ? 'lc0web encoder0 FFN dense2 TVM packed-f16 residual' : 'lc0web encoder0 FFN dense2 residual',
-    code: useTvmPackedF16 ? FFN_DENSE2_TVM_PACKED_F16_WGSL : FFN_DENSE2_WGSL,
+    label: useTvmPackedF16 ? 'lc0web encoder0 FFN dense2 TVM packed-f16 residual' : useShaderF16AccumF32 ? 'lc0web encoder0 FFN dense2 shader-f16 residual' : 'lc0web encoder0 FFN dense2 residual',
+    code: useTvmPackedF16 ? FFN_DENSE2_TVM_PACKED_F16_WGSL : useShaderF16AccumF32 ? FFN_DENSE2_SHADER_F16_ACCUM_F32_WGSL : FFN_DENSE2_WGSL,
   });
   const dense2 = device.createComputePipeline({ layout: 'auto', compute: { module: dense2Module, entryPoint: useTvmPackedF16 ? 'matmul_kernel' : 'main' } }) as PipelineLike;
   const dense2Bind = device.createBindGroup({ layout: dense2.getBindGroupLayout(0), entries: useTvmPackedF16 ? [
@@ -3825,14 +4010,14 @@ export async function runLc0WebEncoder0FfnBenchmark(options: Lc0WebEncoder0FfnBe
   const warmup = clampInteger(options.warmup, 2, 0, 1000);
   const iterations = clampInteger(options.iterations, 10, 1, 10_000);
   const ffnKernelVariant = options.ffnKernelVariant ?? 'hand';
-  const { device, adapterInfo } = await requestDevice();
+  const { device, adapterInfo, shaderF16Supported } = await requestDevice({ shaderF16: ffnKernelRequiresShaderF16(ffnKernelVariant) });
   const tensorNames = lc0WebEncoderBlockTensorNames(options.encoderPrefix);
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
     tensorNames: encoderBlockTensorNameList(tensorNames),
   });
   const tensors = loadEncoder0FfnInputs(pack, tensorNames);
-  const reference = buildEncoder0FfnReference(tensors);
+  const reference = buildEncoder0FfnReference(tensors, { shaderF16AccumF32: ffnKernelRequiresShaderF16(ffnKernelVariant) });
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
   const globals = gpuGlobals();
   const usage = globals.GPUBufferUsage!;
@@ -3867,12 +4052,13 @@ export async function runLc0WebEncoder0FfnBenchmark(options: Lc0WebEncoder0FfnBe
     const gpuOutput = await readF32OutputOnce(device, output, readback, outputElements);
     const readbackSyncedMs = nowMs() - readbackStarted;
     const { maxAbsError, rmsError } = computeErrorStats(gpuOutput, reference.output, outputElements);
-    assertErrorInTolerance(maxAbsError);
+    assertErrorInTolerance(maxAbsError, ffnKernelRequiresShaderF16(ffnKernelVariant) ? 2e-3 : 1e-3);
     return {
       status: 'FFN_BENCH_DONE',
       packUrl: pack.manifestUrl,
       modelName: pack.manifest.model.name,
       adapterInfo,
+      shaderF16Supported,
       tokens: DEFAULT_TOKENS,
       channels: DEFAULT_N,
       hidden: DEFAULT_FFN_HIDDEN,
@@ -5933,6 +6119,12 @@ class Lc0WebHybridRuntime {
   private wgslBatchUploadCapacity = 0;
   private wgslBatchReadbackBuffer?: BufferLike;
   private wgslBatchReadbackCapacity = 0;
+  // Deferred readback can have two command buffers queued before the first map;
+  // keep per-ring compute/upload resources separate from immediate batches so
+  // overlap experiments do not reuse mutable intermediate buffers in flight.
+  private wgslDeferredBatchSlots: HybridWgslBatchSlot[][] = [];
+  private wgslDeferredBatchUploadBuffers: BufferLike[] = [];
+  private wgslDeferredBatchUploadCapacities: number[] = [];
   private wgslDeferredReadbackBuffers: BufferLike[] = [];
   private wgslDeferredReadbackCapacity = 0;
   private wgslDeferredReadbackInUse = new Set<number>();
@@ -6091,6 +6283,13 @@ class Lc0WebHybridRuntime {
     return this.wgslBatchSlots.slice(0, count);
   }
 
+  private ensureWgslDeferredBatchSlots(count: number, slot: number): HybridWgslBatchSlot[] {
+    if (!this.wgslDeferredBatchSlots[slot]) this.wgslDeferredBatchSlots[slot] = [];
+    const slots = this.wgslDeferredBatchSlots[slot];
+    while (slots.length < count) slots.push(this.createWgslBatchSlot());
+    return slots.slice(0, count);
+  }
+
   private ensureWgslBatchUploadBuffer(count: number): BufferLike {
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
     if (!this.wgslBatchUploadBuffer || this.wgslBatchUploadCapacity < count) {
@@ -6099,6 +6298,17 @@ class Lc0WebHybridRuntime {
       this.buffers.push(this.wgslBatchUploadBuffer);
     }
     return this.wgslBatchUploadBuffer;
+  }
+
+  private ensureWgslDeferredBatchUploadBuffer(count: number, slot: number): BufferLike {
+    const outputElements = DEFAULT_TOKENS * DEFAULT_N;
+    if (!this.wgslDeferredBatchUploadBuffers[slot] || (this.wgslDeferredBatchUploadCapacities[slot] ?? 0) < count) {
+      const buffer = this.device.createBuffer({ size: count * outputElements * 4, usage: this.usage.COPY_SRC | this.usage.COPY_DST });
+      this.wgslDeferredBatchUploadBuffers[slot] = buffer;
+      this.wgslDeferredBatchUploadCapacities[slot] = count;
+      this.buffers.push(buffer);
+    }
+    return this.wgslDeferredBatchUploadBuffers[slot];
   }
 
   private ensureWgslBatchReadbackBuffer(count: number): BufferLike {
@@ -6548,8 +6758,12 @@ class Lc0WebHybridRuntime {
 
   private submitWgslBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }, readbackBuffer: BufferLike, sequenceOptions: { batchSequenceIndex?: number; deferredReadbackSlot?: number } = {}): SubmittedWgslHybridBatch {
     const totalStarted = nowMs();
-    const slots = this.ensureWgslBatchSlots(inputs.length);
-    const uploadBuffer = this.ensureWgslBatchUploadBuffer(inputs.length);
+    const slots = sequenceOptions.deferredReadbackSlot === undefined
+      ? this.ensureWgslBatchSlots(inputs.length)
+      : this.ensureWgslDeferredBatchSlots(inputs.length, sequenceOptions.deferredReadbackSlot);
+    const uploadBuffer = sequenceOptions.deferredReadbackSlot === undefined
+      ? this.ensureWgslBatchUploadBuffer(inputs.length)
+      : this.ensureWgslDeferredBatchUploadBuffer(inputs.length, sequenceOptions.deferredReadbackSlot);
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
     const inputElements = this.inputBackend !== 'js' ? DEFAULT_INPUT_PLANES * DEFAULT_TOKENS : outputElements;
     const boardsAndFens = inputs.map((input) => currentBoardAndFen(input));
@@ -6664,8 +6878,11 @@ class Lc0WebHybridRuntime {
         const wdlF32 = gpuLegalCandidates
           ? readbackFloats.slice(base + WGSL_GPU_LEGAL_OUTPUT_FLOATS, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS + 3)
           : readbackFloats.slice(base + DEFAULT_POLICY_MAPPED_OUTPUTS, base + DEFAULT_POLICY_MAPPED_OUTPUTS + 3);
-        if (mappedPolicyF32 && (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32))) throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy for slot ${i}`);
-        if (!arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform WDL for slot ${i}`);
+        const diagnosticFen = submitted.boardsAndFens[i].fen;
+        const diagnosticBatchFens = submitted.boardsAndFens.map((entry) => entry.fen).join(' | ');
+        const diagnosticSuffix = `slot ${i}, mode ${readbackMode}, sequence ${submitted.sequenceId}, batch ${submitted.batchSequenceIndex ?? 'single'}, position ${submitted.deferredReadbackSlot ?? 'immediate'}, fen ${diagnosticFen}, batchFens ${diagnosticBatchFens}`;
+        if (mappedPolicyF32 && (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32))) throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy for ${diagnosticSuffix}`);
+        if (!arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform WDL for ${diagnosticSuffix}`);
         const mappedPolicy = mappedPolicyF32 ? Array.from(mappedPolicyF32) : [];
         const wdlValues = Array.from(wdlF32);
         const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
@@ -6745,6 +6962,14 @@ class Lc0WebHybridRuntime {
   async evaluateWgslBatchesDeferredReadback(batches: Lc0EvaluatorInput[][], options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult[][]> {
     if (this.headBackend !== 'wgsl') throw new Error('deferred readback benchmark requires the WGSL-head backend');
     const out: Lc0WebHybridEvaluationResult[][] = new Array(batches.length);
+    const maxBatchLength = Math.max(0, ...batches.map((batch) => batch.length));
+    if (maxBatchLength > 0) {
+      for (const slot of [0, 1]) {
+        this.ensureWgslDeferredBatchSlots(maxBatchLength, slot);
+        this.ensureWgslDeferredBatchUploadBuffer(maxBatchLength, slot);
+        this.ensureWgslDeferredReadbackBuffer(maxBatchLength, slot);
+      }
+    }
     let pending: { index: number; submitted: SubmittedWgslHybridBatch } | undefined;
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];

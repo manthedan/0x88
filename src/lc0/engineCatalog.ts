@@ -1,4 +1,4 @@
-export type EngineFamily = 'lc0' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
+export type EngineFamily = 'lc0' | 'tiny' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
 export type EngineSurface = 'arena' | 'analysis';
 export type EngineStrengthUnit = 'visits' | 'depth';
 
@@ -31,7 +31,7 @@ export interface EngineFamilyCatalogEntry {
   note: string;
 }
 
-export const ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess'];
+export const ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'tiny', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess'];
 
 export const ENGINE_FAMILY_CATALOG: Record<EngineFamily, EngineFamilyCatalogEntry> = {
   lc0: {
@@ -41,6 +41,14 @@ export const ENGINE_FAMILY_CATALOG: Record<EngineFamily, EngineFamilyCatalogEntr
     status: 'mixed',
     docHref: 'docs/engine_catalog.md#lc0-family',
     note: 'Browser-native neural/search lane; small model is stable, BT4 and runtime experiments are gated.',
+  },
+  tiny: {
+    id: 'tiny',
+    label: 'Tiny Leela',
+    shortLabel: 'TL',
+    status: 'mixed',
+    docHref: 'docs/tiny_leela_research.md',
+    note: 'Tiny SquareFormer family; ORT is baseline and promoted custom WebGPU can be selected separately from LC0.',
   },
   sf: {
     id: 'sf',
@@ -89,6 +97,12 @@ export const LC0_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
   { value: 'bt4', label: 'BT4', experimental: true },
 ];
 
+export const TINY_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
+  { value: 'bt4-auto', label: 'BT4 Anneal Muon Best · runtime auto' },
+  { value: 'bt4-ort', label: 'BT4 Anneal Muon Best · ORT baseline' },
+  { value: 'bt4-custom', label: 'BT4 Anneal Muon Best · custom WebGPU strict', experimental: true },
+];
+
 export const STOCKFISH_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
   { value: 'lite', label: 'Lite' },
   { value: 'full', label: 'Full' },
@@ -97,6 +111,7 @@ export const STOCKFISH_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
 const ENGINE_STRENGTH: Record<EngineSurface, Record<EngineFamily, EngineStrengthMeta>> = {
   arena: {
     lc0: { unit: 'visits', min: 1, max: 100000, def: 100 },
+    tiny: { unit: 'visits', min: 1, max: 100000, def: 100 },
     sf: { unit: 'depth', min: 1, max: 40, def: 8 },
     reckless: { unit: 'depth', min: 1, max: 30, def: 4 },
     viridithas: { unit: 'depth', min: 1, max: 20, def: 6 },
@@ -105,6 +120,7 @@ const ENGINE_STRENGTH: Record<EngineSurface, Record<EngineFamily, EngineStrength
   },
   analysis: {
     lc0: { unit: 'visits', min: 1, max: 100000, def: 400 },
+    tiny: { unit: 'visits', min: 1, max: 100000, def: 400 },
     sf: { unit: 'depth', min: 1, max: 30, def: 14 },
     reckless: { unit: 'depth', min: 1, max: 30, def: 14 },
     viridithas: { unit: 'depth', min: 1, max: 20, def: 8 },
@@ -129,11 +145,16 @@ export function lc0VariantOptions(bt4Supported: boolean): EngineVariantOption[] 
   return LC0_ENGINE_VARIANTS.map((option) => ({ ...option, disabled: option.value === 'bt4' ? !bt4Supported : option.disabled }));
 }
 
+export function tinyVariantOptions(): EngineVariantOption[] {
+  return TINY_ENGINE_VARIANTS.map((option) => ({ ...option }));
+}
+
 export function stockfishVariantOptions(): EngineVariantOption[] {
   return STOCKFISH_ENGINE_VARIANTS.map((option) => ({ ...option }));
 }
 
-export function defaultStaticEngineVariant(family: 'lc0' | 'sf' | 'berserk' | 'plentychess'): string {
+export function defaultStaticEngineVariant(family: 'lc0' | 'tiny' | 'sf' | 'berserk' | 'plentychess'): string {
+  if (family === 'tiny') return TINY_ENGINE_VARIANTS[0].value;
   if (family === 'sf') return STOCKFISH_ENGINE_VARIANTS[0].value;
   if (family === 'berserk' || family === 'plentychess') return 'emscripten';
   return LC0_ENGINE_VARIANTS[0].value;
@@ -148,6 +169,12 @@ export function stockfishEngineLabel(variant: string, surface: EngineSurface): s
   return variant === 'lite' ? 'Stockfish Lite' : 'Stockfish';
 }
 
+export function tinyEngineLabel(variant: string): string {
+  if (variant === 'bt4-ort') return 'Tiny Leela · ORT';
+  if (variant === 'bt4-custom') return 'Tiny Leela · custom WebGPU';
+  return 'Tiny Leela · auto';
+}
+
 export function isEngineFamily(value: string): value is EngineFamily {
-  return value === 'lc0' || value === 'sf' || value === 'reckless' || value === 'viridithas' || value === 'berserk' || value === 'plentychess';
+  return value === 'lc0' || value === 'tiny' || value === 'sf' || value === 'reckless' || value === 'viridithas' || value === 'berserk' || value === 'plentychess';
 }

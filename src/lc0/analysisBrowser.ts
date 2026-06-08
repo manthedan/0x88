@@ -38,6 +38,9 @@ let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 const REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantFromParams(params);
 const REQUESTED_BERSERK_VARIANT = berserkVariantFromParams(params);
 const REQUESTED_PLENTYCHESS_VARIANT = plentyChessVariantFromParams(params);
+// Tiny Leela is currently implemented for the arena/playable frontend only.
+// Keep the shared catalog entry out of analysis selectors until an analysis evaluator is wired here.
+const ANALYSIS_ENGINE_FAMILY_PRIORITY = ENGINE_FAMILY_PRIORITY.filter((family) => family !== 'tiny');
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
@@ -233,7 +236,7 @@ function availableBerserkVariants(): BerserkVariant[] {
 
 function berserkVariantForKey(variantKey: string): BerserkVariant {
   const key = normalizeBerserkVariant(variantKey);
-  if (key === 'custom' && REQUESTED_BERSERK_VARIANT.key === 'custom') return REQUESTED_BERSERK_VARIANT;
+  if (key === 'custom' && REQUESTED_BERSERK_VARIANT.key === 'custom' && REQUESTED_BERSERK_VARIANT.jsUrl) return REQUESTED_BERSERK_VARIANT;
   const variant = berserkVariantByKey(key);
   return variant.jsUrl ? variant : BERSERK_VARIANTS.find((entry) => entry.jsUrl)!;
 }
@@ -257,16 +260,22 @@ function plentyChessCacheKey(variant: PlentyChessVariant): string {
   return `${variant.key}:${variant.jsUrl}:${variant.wasmUrl}:${variant.dataUrl}`;
 }
 
-// "Add engine" fills the next missing family by priority (Lc0 → SF → Reckless
-// → Viridithas → Berserk → PlentyChess), falling back to the top priority when all families are present.
+// "Add engine" fills the next missing analysis-capable family by priority
+// (Lc0 → SF → Reckless → Viridithas → Berserk → PlentyChess), falling back to
+// the top priority when all analysis families are present.
 function nextEngineFamily(): EngineFamily {
   const present = new Set(engineRows.map((row) => row.family));
-  return ENGINE_FAMILY_PRIORITY.find((family) => !present.has(family)) ?? ENGINE_FAMILY_PRIORITY[0];
+  return ANALYSIS_ENGINE_FAMILY_PRIORITY.find((family) => !present.has(family)) ?? ANALYSIS_ENGINE_FAMILY_PRIORITY[0];
 }
 
 let engineRows: EngineRow[] = [{ family: 'lc0', variant: 'small', strength: 400 }];
 
+function analysisEngineFamilyOptions(): { value: EngineFamily; label: string }[] {
+  return engineFamilyOptions().filter((option) => option.value !== 'tiny');
+}
+
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
+  if (family === 'tiny') return [];
   if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync());
   if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
@@ -284,6 +293,7 @@ function defaultVariant(family: EngineFamily): string {
 }
 
 function rowLabel(row: EngineRow): string {
+  if (row.family === 'tiny') return 'Tiny Leela (arena only)';
   if (row.family === 'lc0') return lc0EngineLabel(row.variant);
   if (row.family === 'sf') return stockfishEngineLabel(row.variant, 'analysis');
   if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
@@ -294,7 +304,13 @@ function rowLabel(row: EngineRow): string {
 
 function activeEngineRows(): EngineRow[] {
   const seen = new Set<string>();
-  return engineRows.filter((r) => { const k = `${r.family}:${r.variant}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  return engineRows.filter((r) => {
+    if (r.family === 'tiny') return false;
+    const k = `${r.family}:${r.variant}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 function usesBt4Row(): boolean {
@@ -302,7 +318,7 @@ function usesBt4Row(): boolean {
 }
 
 function renderEngineList(): void {
-  const families = engineFamilyOptions();
+  const families = analysisEngineFamilyOptions();
   el('engineList').innerHTML = engineRows.map((row, i) => {
     const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
     const varSel = variantOptions(row.family).map((o) => `<option value="${o.value}"${row.variant === o.value ? ' selected' : ''}${o.disabled ? ' disabled' : ''}>${htmlEscape(o.label)}</option>`).join('');

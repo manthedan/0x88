@@ -4,6 +4,9 @@ Tiny Leela model metadata is split across ONNX files, runtime `*.meta.json` file
 dataset manifests, training logs, arena results, and frontier cards. The project-level model
 manifest makes those pieces queryable from one place.
 
+For the Tiny Leela transformer -> larger LC0 browser deployment ladder, see
+[`tiny_leela_lc0_browser_model_roadmap.md`](tiny_leela_lc0_browser_model_roadmap.md). That roadmap defines the additional `architecture`, `browser_runtime`, and `quality_gates` fields we should add before treating a model as browser-productizable.
+
 ## Files
 
 - Curated provenance overrides:
@@ -115,6 +118,19 @@ Manual in `eval/model_manifest_overrides.json`:
 - training source and intended row budget
 - whether a run is queued/running/completed
 - notes/tags for historical context
+
+## Browser deployment extension
+
+The next manifest iteration should add deployment-specific fields shared by TinyBT and LC0-web packs:
+
+```text
+architecture      token/plane schema, layers, channels, heads, FFN size, exported heads
+exports           f32/f16/int8 artifacts, pack shards, checksums, byte sizes
+browser_runtime   ORT WebGPU/WASM loadability, custom WGSL support, memory/load/latency
+quality_gates     policy/WDL drift, top-k agreement, fixed-search and arena references
+```
+
+Keep these as evidence fields, not aspirations: unknown browser support should be `null`/missing until a smoke or artifact exists.
 
 ## Conventions
 

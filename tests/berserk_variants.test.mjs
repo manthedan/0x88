@@ -50,25 +50,25 @@ test('Berserk variant normalization and lookup are stable', () => {
 test('Berserk URL params support explicit and custom variants', () => {
   assert.equal(hasExplicitBerserkVariant(new URLSearchParams('')), false);
   assert.equal(hasExplicitBerserkVariant(new URLSearchParams('berserk=simd')), true);
-  assert.equal(hasExplicitBerserkVariant(new URLSearchParams('berserkJs=/local/berserk.js')), true);
+  assert.equal(hasExplicitBerserkVariant(new URLSearchParams('berserkJs=/berserk/custom.js')), true);
   assert.equal(hasExplicitBerserkVariant(new URLSearchParams('berserkNnue=/tmp/net.nn')), false);
   assert.equal(berserkVariantFromParams(new URLSearchParams('')).key, 'emscripten');
   assert.equal(berserkVariantFromParams(new URLSearchParams('berserk=simd')).key, 'simd');
-  const builtInWithCustomNnue = berserkVariantFromParams(new URLSearchParams('berserk=simd&berserkNnue=/local/net.nn'));
+  const builtInWithCustomNnue = berserkVariantFromParams(new URLSearchParams('berserk=simd&berserkNnue=/berserk/net.nn'));
   assert.equal(builtInWithCustomNnue.key, 'simd');
   assert.equal(builtInWithCustomNnue.wasmUrl, '/berserk/berserk-simd128.wasm');
-  assert.equal(builtInWithCustomNnue.nnueUrl, '/local/net.nn');
-  const defaultWithCustomNnue = berserkVariantFromParams(new URLSearchParams('berserk=default&berserkNnue=/local/default-net.nn'));
-  assert.equal(defaultWithCustomNnue.nnueUrl, '/local/default-net.nn');
-  const customJs = berserkVariantFromParams(new URLSearchParams('berserkJs=/local/berserk.js&berserkWasm=/local/berserk.wasm&berserkData=/local/berserk.data'));
+  assert.equal(builtInWithCustomNnue.nnueUrl, '/berserk/net.nn');
+  const defaultWithCustomNnue = berserkVariantFromParams(new URLSearchParams('berserk=default&berserkNnue=/berserk/default-net.nn'));
+  assert.equal(defaultWithCustomNnue.nnueUrl, '/berserk/default-net.nn');
+  const customJs = berserkVariantFromParams(new URLSearchParams('berserkJs=/berserk/custom.js&berserkWasm=/berserk/custom.wasm&berserkData=/berserk/custom.data'));
   assert.equal(customJs.key, 'custom');
-  assert.equal(customJs.jsUrl, '/local/berserk.js');
-  assert.equal(customJs.wasmUrl, '/local/berserk.wasm');
-  assert.equal(customJs.dataUrl, '/local/berserk.data');
-  const customWasi = berserkVariantFromParams(new URLSearchParams('berserkWasm=/local/berserk.wasm&berserkNnue=/local/net.nn'));
-  assert.equal(customWasi.key, 'custom');
-  assert.equal(customWasi.wasmUrl, '/local/berserk.wasm');
-  assert.equal(customWasi.nnueUrl, '/local/net.nn');
+  assert.equal(customJs.jsUrl, '/berserk/custom.js');
+  assert.equal(customJs.wasmUrl, '/berserk/custom.wasm');
+  assert.equal(customJs.dataUrl, '/berserk/custom.data');
+  const customWasi = berserkVariantFromParams(new URLSearchParams('berserkWasm=/berserk/custom.wasm&berserkNnue=/berserk/net.nn'));
+  assert.equal(customWasi.key, 'emscripten');
+  const rejectedCustom = berserkVariantFromParams(new URLSearchParams('berserkJs=https://evil.example/berserk.js&berserkWasm=/local/berserk.wasm'));
+  assert.equal(rejectedCustom.key, 'emscripten');
 });
 
 test('Berserk asset checks use Emscripten sidecars or WASI+NNUE assets', async () => {

@@ -34,13 +34,14 @@ type PackLoadResult = {
   elapsedMs: number;
 };
 
-type KernelVariant = 'scalar' | 'tiled16' | 'scalar-transposed';
+type KernelVariant = 'scalar' | 'tiled16' | 'scalar-transposed' | 'scalar-shader-f16-accum-f32';
 
 type KernelProbeResult = {
   status: 'KERNEL_DONE';
   packUrl: string;
   modelName: string;
   adapterInfo?: Record<string, unknown>;
+  shaderF16Supported?: boolean;
   weightTensor: string;
   biasTensor: string;
   variant: KernelVariant;
@@ -86,6 +87,7 @@ type KernelBenchmarkResult = {
   packUrl: string;
   modelName: string;
   adapterInfo?: Record<string, unknown>;
+  shaderF16Supported?: boolean;
   weightTensor: string;
   biasTensor: string;
   variant: KernelVariant;
@@ -554,12 +556,13 @@ type Encoder0FfnBenchmarkResult = {
   packUrl: string;
   modelName: string;
   adapterInfo?: Record<string, unknown>;
+  shaderF16Supported?: boolean;
   tokens: number;
   channels: number;
   hidden: number;
   epsilon: number;
   alpha: number;
-  ffnKernelVariant: 'hand' | 'tvm-packed-f16';
+  ffnKernelVariant: 'hand' | 'tvm-packed-f16' | 'hand-shader-f16-accum-f32';
   warmup: number;
   iterations: number;
   packLoadMs: number;
@@ -722,6 +725,7 @@ const QKV_BENCH_REQUESTED = params.get('qkvBench') === '1' || params.get('qkvBen
 const QKV_PROBE_REQUESTED = params.get('qkvProbe') === '1';
 const ORT_OP_BENCH_REQUESTED = params.get('ortOpBench') === '1' || params.get('ortBench') === '1';
 const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('kernelBenchmark') === '1' || params.get('wgslBench') === '1';
+const SHADER_F16_PROBE_REQUESTED = params.get('shaderF16Probe') === '1' || params.get('shader-f16-probe') === '1';
 const KERNEL_PROBE_REQUESTED = MAPPED_POLICY_PROBE_REQUESTED || WGSL_HEADS_PROBE_REQUESTED || WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED || ENCODER_STACK_BENCH_REQUESTED || ENCODER0_BLOCK_ORT_BENCH_REQUESTED || ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_ORT_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_ORT_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
@@ -747,11 +751,27 @@ const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || 
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
 const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
 const HYBRID_EVAL_CACHE_ENTRIES = clampInt(params.get('evalCacheEntries') ?? (params.get('evalCache') === '1' ? '2048' : '0'), 0, 100000, 0);
+function paramTruthy(name: string): boolean {
+  const value = params.get(name);
+  return value !== null && !['0', 'false', 'no', 'off'].includes(value.toLowerCase());
+}
+
+function paramFalsey(name: string): boolean {
+  const value = params.get(name);
+  return value !== null && ['0', 'false', 'no', 'off'].includes(value.toLowerCase());
+}
+
+const ORT_READBACK_PROFILE_REQUESTED = paramTruthy('ortReadbackProfile') || paramTruthy('ortDiagnostics');
+const ORT_WEBGPU_PROFILE_REQUESTED = !paramFalsey('ortWebGpuProfile') && !paramFalsey('ortKernelProfile') && (ORT_READBACK_PROFILE_REQUESTED || paramTruthy('ortWebGpuProfile') || paramTruthy('ortKernelProfile'));
+const ORT_WEBGPU_API_TRACE_REQUESTED = !paramFalsey('ortMonkeyPatchWebGpu') && !paramFalsey('ortWebGpuApiTrace') && (ORT_READBACK_PROFILE_REQUESTED || paramTruthy('ortMonkeyPatchWebGpu') || paramTruthy('ortWebGpuApiTrace'));
+const ORT_PREFERRED_OUTPUT_LOCATION = params.get('ortPreferredOutputLocation') === 'cpu' || params.get('ortPreferredOutputLocation') === 'cpu-pinned' || params.get('ortPreferredOutputLocation') === 'gpu-buffer'
+  ? params.get('ortPreferredOutputLocation') as 'cpu' | 'cpu-pinned' | 'gpu-buffer'
+  : (!paramFalsey('ortGpuOutputs') && (ORT_READBACK_PROFILE_REQUESTED || paramTruthy('ortGpuOutputs')) ? 'gpu-buffer' : undefined);
 const BENCH_WARMUP = Math.min(100, Math.max(0, Math.floor(Number(params.get('benchWarmup') ?? '5') || 0)));
 const BENCH_ITERS = Math.min(1000, Math.max(1, Math.floor(Number(params.get('benchIters') ?? params.get('iters') ?? '25') || 25)));
 function requestedKernelVariant(): KernelVariant {
   const value = params.get('kernelVariant') ?? params.get('variant');
-  return value === 'tiled16' || value === 'scalar-transposed' ? value : 'scalar';
+  return value === 'tiled16' || value === 'scalar-transposed' || value === 'scalar-shader-f16-accum-f32' ? value : 'scalar';
 }
 // Register the offline app-shell SW in production builds, or opt in with ?sw=1.
 // Disabled in dev by default so it never serves stale HMR modules.
@@ -865,6 +885,15 @@ function requestedWorkerEp(): OrtExecutionProviderPreference {
   if (raw === 'webgpu,wasm' || raw === 'webgpu+wasm' || raw === 'gpu,wasm' || raw === 'gpu+wasm') return 'webgpu,wasm';
   if (raw === 'auto' || raw === '') return 'auto';
   return 'wasm';
+}
+
+function requestedOrtDiagnosticsPayload() {
+  if (!ORT_WEBGPU_PROFILE_REQUESTED && !ORT_WEBGPU_API_TRACE_REQUESTED && !ORT_PREFERRED_OUTPUT_LOCATION) return undefined;
+  return {
+    webgpuProfiling: ORT_WEBGPU_PROFILE_REQUESTED,
+    webgpuApiInstrumentation: ORT_WEBGPU_API_TRACE_REQUESTED,
+    ...(ORT_PREFERRED_OUTPUT_LOCATION ? { preferredOutputLocation: ORT_PREFERRED_OUTPUT_LOCATION } : {}),
+  };
 }
 
 function evaluationAvailable(): boolean {
@@ -1087,6 +1116,7 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
     modelUrl: MODEL_URL,
     ep: requestedWorkerEp(),
     cacheModel: CACHE_MODEL,
+    ortDiagnostics: requestedOrtDiagnosticsPayload(),
     ...(HYBRID_EVALUATOR_REQUESTED ? {
       runtime: 'hybrid',
       packUrl: PACK_URL,
@@ -1115,6 +1145,7 @@ async function initHybridWorkerWithInputBackend(inputBackend: 'js' | 'wgsl' | 'w
     modelUrl: MODEL_URL,
     ep: requestedWorkerEp(),
     cacheModel: CACHE_MODEL,
+    ortDiagnostics: requestedOrtDiagnosticsPayload(),
     runtime: 'hybrid',
     packUrl: PACK_URL,
     layers: Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10))),
@@ -1288,6 +1319,92 @@ function renderBenchmarkResult(result: EvalBenchResult) {
   };
   el('benchResult').textContent = JSON.stringify(rounded);
   el('message').textContent = `BENCH_DONE ${rounded.iterations} evals · avg ${rounded.avgMs.toFixed(1)} ms · ${rounded.evalsPerSecond.toFixed(2)} eval/s · ${rounded.backend}`;
+}
+
+async function runShaderF16Probe(): Promise<void> {
+  el('benchResult').textContent = 'SHADER_F16_PROBE_RUNNING';
+  setBusy(true, 'Probing WebGPU shader-f16 feature support…');
+  const started = performance.now();
+  const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
+  const maxAbsError = (actual: Float32Array, expected: number[]) => Math.max(0, ...expected.map((value, index) => Math.abs((actual[index] ?? NaN) - value)));
+  try {
+    if (!gpu) {
+      const result = { status: 'SHADER_F16_PROBE_DONE', shaderF16Supported: false, reason: 'navigator.gpu unavailable', maxAbsError: 0, elapsedMs: roundReportMs(performance.now() - started) };
+      el('benchResult').textContent = JSON.stringify(result);
+      el('message').textContent = 'SHADER_F16_PROBE_DONE unavailable: no navigator.gpu';
+      return;
+    }
+    const adapter = await gpu.requestAdapter() as { features?: Iterable<string> & { has?: (feature: string) => boolean }; requestDevice: (descriptor?: Record<string, unknown>) => Promise<unknown>; info?: Record<string, unknown> } | null;
+    if (!adapter) {
+      const result = { status: 'SHADER_F16_PROBE_DONE', shaderF16Supported: false, reason: 'WebGPU adapter unavailable', maxAbsError: 0, elapsedMs: roundReportMs(performance.now() - started) };
+      el('benchResult').textContent = JSON.stringify(result);
+      el('message').textContent = 'SHADER_F16_PROBE_DONE unavailable: no WebGPU adapter';
+      return;
+    }
+    const adapterFeatures = adapter.features ? Array.from(adapter.features).map(String).sort() : [];
+    const shaderF16Supported = adapter.features?.has?.('shader-f16') ?? adapterFeatures.includes('shader-f16');
+    if (!shaderF16Supported) {
+      const result = { status: 'SHADER_F16_PROBE_DONE', shaderF16Supported: false, adapterFeatures, adapterInfo: adapter.info, reason: 'adapter does not advertise shader-f16', maxAbsError: 0, elapsedMs: roundReportMs(performance.now() - started) };
+      el('benchResult').textContent = JSON.stringify(result);
+      el('message').textContent = 'SHADER_F16_PROBE_DONE unsupported on this adapter';
+      return;
+    }
+    const device = await adapter.requestDevice({ requiredFeatures: ['shader-f16'] }) as any;
+    const bufferUsage = (globalThis as any).GPUBufferUsage;
+    const mapMode = (globalThis as any).GPUMapMode;
+    const outputBuffer = device.createBuffer({ size: 16, usage: bufferUsage.STORAGE | bufferUsage.COPY_SRC });
+    const readbackBuffer = device.createBuffer({ size: 16, usage: bufferUsage.MAP_READ | bufferUsage.COPY_DST });
+    try {
+      const shader = `enable f16;
+@group(0) @binding(0) var<storage, read_write> output: array<f32>;
+@compute @workgroup_size(1)
+fn main() {
+  let a = vec4<f16>(f16(1.5), f16(-2.0), f16(0.25), f16(4.0));
+  let b = vec4<f16>(f16(2.0), f16(-0.5), f16(8.0), f16(0.125));
+  let c = a * b + vec4<f16>(f16(0.5), f16(-1.0), f16(0.25), f16(1.0));
+  output[0] = f32(c.x);
+  output[1] = f32(c.y);
+  output[2] = f32(c.z);
+  output[3] = f32(c.w);
+}`;
+      const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0 shader-f16 feature probe', code: shader }), entryPoint: 'main' } });
+      const bindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: outputBuffer } }] });
+      const encoder = device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(1);
+      pass.end();
+      encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, 16);
+      device.queue.submit([encoder.finish()]);
+      await readbackBuffer.mapAsync(mapMode.READ);
+      const actual = new Float32Array(readbackBuffer.getMappedRange().slice(0));
+      readbackBuffer.unmap();
+      const expected = [3.5, 0, 2.25, 1.5];
+      const result = {
+        status: 'SHADER_F16_PROBE_DONE',
+        shaderF16Supported: true,
+        adapterFeatures,
+        adapterInfo: adapter.info,
+        expected,
+        actual: Array.from(actual).map((value) => Number(value.toFixed(6))),
+        maxAbsError: maxAbsError(actual, expected),
+        elapsedMs: roundReportMs(performance.now() - started),
+      };
+      el('benchResult').textContent = JSON.stringify(result);
+      el('message').textContent = `SHADER_F16_PROBE_DONE supported · max error ${result.maxAbsError}`;
+    } finally {
+      outputBuffer.destroy();
+      readbackBuffer.destroy();
+      device.destroy?.();
+    }
+  } catch (error) {
+    el('benchResult').textContent = `SHADER_F16_PROBE_FAILED ${(error as Error).message}`;
+    el('message').textContent = `shader-f16 probe failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function runPackProbe(): Promise<void> {
@@ -1765,7 +1882,8 @@ async function runEncoder0FfnBenchmark(): Promise<void> {
   const rawWarmup = Number(params.get('encoder0FfnWarmup') ?? params.get('ffnWarmup') ?? '2');
   const iterations = Math.min(10_000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 10)));
   const warmup = Math.min(1000, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 2)));
-  const ffnKernelVariant = params.get('ffnKernel') === 'tvm-packed-f16' || params.get('encoder0FfnKernel') === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand';
+  const rawFfnKernelVariant = params.get('encoder0FfnKernel') ?? params.get('ffnKernel');
+  const ffnKernelVariant = rawFfnKernelVariant === 'tvm-packed-f16' || rawFfnKernelVariant === 'hand-shader-f16-accum-f32' ? rawFfnKernelVariant : 'hand';
   el('benchResult').textContent = 'FFN_BENCH_RUNNING';
   setBusy(true, `Benchmarking lc0web WGSL encoder0 FFN dense1/sqrrelu/dense2/residual/ln2: ${warmup} warmup + ${iterations} queued blocks, one final readback…`);
   try {
@@ -2372,6 +2490,7 @@ async function runWorkerEvalBenchmark(): Promise<void> {
   if (!searchWorkerReady) throw new Error('benchmark requires ready LC0 worker');
   const input = currentEvaluationInput();
   const times: number[] = [];
+  const backendTimingSamples: Record<string, number[]> = {};
   let last: BrowserEvaluationChoice | undefined;
   setBusy(true, `Running LC0 worker eval benchmark: ${BENCH_WARMUP} warmup + ${BENCH_ITERS} timed evals…`);
   el('benchResult').textContent = 'BENCH_RUNNING';
@@ -2385,6 +2504,7 @@ async function runWorkerEvalBenchmark(): Promise<void> {
       const started = performance.now();
       last = await evaluateWithWorker(input);
       times.push(performance.now() - started);
+      recordNumericTimingSamples(backendTimingSamples, (last.evaluation as { timing?: unknown }).timing);
       el('benchResult').textContent = `BENCH_TIMED ${i + 1}/${BENCH_ITERS}`;
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
@@ -2401,8 +2521,10 @@ async function runWorkerEvalBenchmark(): Promise<void> {
       bestMove: last?.move,
       q: last?.evaluation.q,
       mlh: last?.evaluation.mlh,
+      lastBackendTiming: roundedNumericRecord((last?.evaluation as { timing?: unknown } | undefined)?.timing),
+      phaseTimingStats: summarizeNumericTimingSamples(backendTimingSamples, 'onnx worker eval backend timing'),
       ...stats,
-    });
+    } as EvalBenchResult & Record<string, unknown>);
   } catch (error) {
     el('benchResult').textContent = `BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Benchmark failed: ${(error as Error).message}`;
@@ -2782,6 +2904,44 @@ function nativeSearchInput(record: NativeRecord): Lc0EvaluatorInput {
   return record.fen;
 }
 
+function rootVisitShare(children: Lc0SearchChild[]): Map<string, number> {
+  const total = children.reduce((sum, child) => sum + Math.max(0, child.visits), 0);
+  const denom = total > 0 ? total : 1;
+  return new Map(children.map((child) => [child.uci, Math.max(0, child.visits) / denom]));
+}
+
+function rootVisitDistributionL1(a: Lc0SearchChild[] | undefined, b: Lc0SearchChild[] | undefined): number | undefined {
+  if (!a || !b) return undefined;
+  const aa = rootVisitShare(a);
+  const bb = rootVisitShare(b);
+  const ucis = new Set([...aa.keys(), ...bb.keys()]);
+  let l1 = 0;
+  for (const uci of ucis) l1 += Math.abs((aa.get(uci) ?? 0) - (bb.get(uci) ?? 0));
+  return Number(l1.toFixed(6));
+}
+
+function rootTopVisitShare(children: Lc0SearchChild[]): number | undefined {
+  const total = children.reduce((sum, child) => sum + Math.max(0, child.visits), 0);
+  if (total <= 0) return undefined;
+  const top = children.reduce((max, child) => Math.max(max, child.visits), 0);
+  return Number((top / total).toFixed(6));
+}
+
+function rootChildTrace(children: Lc0SearchChild[] | undefined): Array<{ uci: string; visits: number; prior: number; q: number; probability: number }> | undefined {
+  if (!children) return undefined;
+  return children.map((child) => ({
+    uci: child.uci,
+    visits: child.visits,
+    prior: roundReportMs(child.prior) ?? child.prior,
+    q: roundReportMs(child.q) ?? child.q,
+    probability: roundReportMs(child.probability) ?? child.probability,
+  }));
+}
+
+function pipelineSearchSemantics(depth: number): 'serial-parity' | 'speculative-pipelined' {
+  return depth > 1 ? 'speculative-pipelined' : 'serial-parity';
+}
+
 async function runHybridSearchFixtureParity(): Promise<void> {
   if (!searchWorkerReady) throw new Error('hybrid search fixture parity requires ready LC0 worker');
   const visitsList = queryIntList(['searchFixtureVisits', 'fixtureVisits', 'visitsList', 'visits'], [32], 1, 100000);
@@ -2789,14 +2949,25 @@ async function runHybridSearchFixtureParity(): Promise<void> {
   const depths = [1, ...requestedDepths.filter((depth) => depth !== 1)];
   const repeats = boundedQueryInt(['searchFixtureRepeats', 'fixtureRepeats', 'repeats'], 1, 1, 10);
   const fixtureLimit = boundedQueryInt(['fixtureLimit', 'fixtures'], 16, 1, 16);
+  const fixtureIds = (params.get('fixtureIds') ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+  const fixtureIdSet = fixtureIds.length ? new Set(fixtureIds) : undefined;
+  const traceRootChildren = params.get('traceRootChildren') === '1';
+  const traceSearchVisits = params.get('traceSearchVisits') === '1';
   const batchSize = searchBatchSize;
   const cells = [];
-  const depthBaselines = new Map<string, string | undefined>();
+  const depthBaselines = new Map<string, { bestMove: string | undefined; children: Lc0SearchChild[] }>();
   setBusy(true, `Running hybrid search fixture parity: visits ${visitsList.join(',')} · depths ${depths.join(',')} · ${fixtureLimit} fixtures…`);
   el('benchResult').textContent = 'HYBRID_SEARCH_FIXTURE_PARITY_RUNNING';
   try {
     for (const visits of visitsList) {
-      const records = await loadNativeSearchRecords(visits, fixtureLimit);
+      const loadedRecords = await loadNativeSearchRecords(visits, 16);
+      const filteredRecords = fixtureIdSet ? loadedRecords.filter((record) => fixtureIdSet.has(record.id)) : loadedRecords;
+      if (fixtureIdSet && filteredRecords.length !== fixtureIdSet.size) {
+        const loadedIds = new Set(loadedRecords.map((record) => record.id));
+        const missing = fixtureIds.filter((id) => !loadedIds.has(id));
+        throw new Error(`requested fixture ID(s) not found for visits ${visits}: ${missing.join(', ')}`);
+      }
+      const records = filteredRecords.slice(0, fixtureLimit);
       for (const record of records) {
         const input = nativeSearchInput(record);
         const expectedNativeBestMove = nativeCastlingToStandard(record.bestmove);
@@ -2810,17 +2981,20 @@ async function runHybridSearchFixtureParity(): Promise<void> {
               visits,
               batchSize,
               batchPipelineDepth: depth,
+              traceSearchVisits,
               multiPv: 1,
               reuseTree: false,
             });
             const result = response.result;
             const baselineKey = `${visits}\t${record.id}\t${repeat}`;
-            if (depth === 1) depthBaselines.set(baselineKey, result.move);
-            const depthBaselineBestMove = depthBaselines.get(baselineKey);
+            if (depth === 1) depthBaselines.set(baselineKey, { bestMove: result.move, children: result.children });
+            const depthBaseline = depthBaselines.get(baselineKey);
+            const depthBaselineBestMove = depthBaseline?.bestMove;
             cells.push({
               visits,
               batchSize,
               batchPipelineDepth: depth,
+              pipelineSearchSemantics: pipelineSearchSemantics(depth),
               repeat,
               id: record.id,
               kind: record.moves ? 'history' : 'fen',
@@ -2829,6 +3003,12 @@ async function runHybridSearchFixtureParity(): Promise<void> {
               matchesNative: result.move === expectedNativeBestMove,
               depthBaselineBestMove,
               matchesDepthBaseline: result.move === depthBaselineBestMove,
+              depthBaselineVisitL1: rootVisitDistributionL1(result.children, depthBaseline?.children),
+              topVisitShare: rootTopVisitShare(result.children),
+              depthBaselineTopVisitShare: depthBaseline ? rootTopVisitShare(depthBaseline.children) : undefined,
+              rootChildren: traceRootChildren ? rootChildTrace(result.children) : undefined,
+              depthBaselineRootChildren: traceRootChildren ? rootChildTrace(depthBaseline?.children) : undefined,
+              searchTrace: traceSearchVisits ? result.stats?.searchTrace : undefined,
               completedVisits: result.stats?.completedVisits,
               stopReason: result.stats?.stopReason,
               elapsedMs: roundReportMs(performance.now() - started),
@@ -2866,11 +3046,16 @@ async function runHybridSearchFixtureParity(): Promise<void> {
       visitsList,
       batchSize,
       batchPipelineDepths: depths,
+      pipelineSearchSemanticsByDepth: Object.fromEntries(depths.map((depth) => [String(depth), pipelineSearchSemantics(depth)])),
       repeats,
       fixtureLimit,
+      fixtureIds,
+      traceRootChildren,
+      traceSearchVisits,
       cells: cells.length,
       nativeMatches: cells.filter((cell) => cell.matchesNative).length,
       depthBaselineMatches: cells.filter((cell) => cell.matchesDepthBaseline).length,
+      maxDepthBaselineVisitL1: Math.max(0, ...cells.map((cell) => typeof cell.depthBaselineVisitL1 === 'number' ? cell.depthBaselineVisitL1 : 0)),
       mismatches,
       results: cells,
     };
@@ -3504,9 +3689,17 @@ async function init() {
   window.addEventListener('pagehide', (event) => {
     if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
   });
-  el('message').textContent = PACK_PROBE_REQUESTED ? 'Preparing dedicated worker for lc0web pack probe…' : WORKER_ONLY_MODEL ? 'Loading LC0 model in dedicated worker…' : 'Loading LC0 ONNX model…';
+  el('message').textContent = SHADER_F16_PROBE_REQUESTED ? 'Preparing WebGPU shader-f16 probe…' : PACK_PROBE_REQUESTED ? 'Preparing dedicated worker for lc0web pack probe…' : WORKER_ONLY_MODEL ? 'Loading LC0 model in dedicated worker…' : 'Loading LC0 ONNX model…';
   renderStatic();
   try {
+    if (SHADER_F16_PROBE_REQUESTED) {
+      mainModelCacheStatus = 'shader-f16 feature probe (no model loaded)';
+      workerModelCacheStatus = 'not used';
+      el('backend').textContent = 'webgpu-shader-f16-probe';
+      renderStatic();
+      await runShaderF16Probe();
+      return;
+    }
     if (PACK_PROBE_REQUESTED) {
       mainModelCacheStatus = 'pack-probe worker-only (no ONNX session)';
       workerModelCacheStatus = 'pack shards worker-owned';

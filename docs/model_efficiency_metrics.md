@@ -2,6 +2,8 @@
 
 We optimize Tiny Leela as a Pareto problem, not as one absolute Elo number. A model is only unambiguously better when it is stronger, smaller/simpler, and faster, or at least no worse on every axis. Do not reduce "tiny" to a hard MB cap: params, FLOPs/MACs, ONNX/export bytes, memory, latency, and strength per real wall-clock move are separate axes.
 
+For the current model-family plan — Tiny Leela transformers first, then larger LC0 browser packs — see [`tiny_leela_lc0_browser_model_roadmap.md`](tiny_leela_lc0_browser_model_roadmap.md).
+
 ## Official comparison axes
 
 Every serious model comparison should report:
@@ -116,8 +118,11 @@ policy KL vs FP32
 top-k agreement vs FP32
 WDL/value drift
 AV drift, if AV head exists
+fixed-search best-move/PV sanity
 small arena parity
 ```
+
+For transformer/LC0 browser work, start quantization with the largest dense, least softmax-sensitive subgraphs first: FFN dense layers, policy/value dense heads, and projections. Defer full int8 attention/layernorm paths until f16/custom-runtime parity is stable.
 
 ## Standard analysis tool
 

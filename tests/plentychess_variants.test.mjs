@@ -39,14 +39,16 @@ test('PlentyChess variant normalization and lookup are stable', () => {
 test('PlentyChess URL params support explicit and custom Emscripten sidecars', () => {
   assert.equal(hasExplicitPlentyChessVariant(new URLSearchParams('')), false);
   assert.equal(hasExplicitPlentyChessVariant(new URLSearchParams('plentychess=emscripten')), true);
-  assert.equal(hasExplicitPlentyChessVariant(new URLSearchParams('plentyChessJs=/local/plenty.js')), true);
+  assert.equal(hasExplicitPlentyChessVariant(new URLSearchParams('plentyChessJs=/plentychess/custom.js')), true);
   assert.equal(plentyChessVariantFromParams(new URLSearchParams('')).key, 'emscripten');
   assert.equal(plentyChessVariantFromParams(new URLSearchParams('plentychess=custom')).key, 'custom');
-  const custom = plentyChessVariantFromParams(new URLSearchParams('plentyChessJs=/local/plenty.js&plentyChessWasm=/local/plenty.wasm&plentyChessData=/local/plenty.data'));
+  const custom = plentyChessVariantFromParams(new URLSearchParams('plentyChessJs=/plentychess/custom.js&plentyChessWasm=/plentychess/custom.wasm&plentyChessData=/plentychess/custom.data'));
   assert.equal(custom.key, 'custom');
-  assert.equal(custom.jsUrl, '/local/plenty.js');
-  assert.equal(custom.wasmUrl, '/local/plenty.wasm');
-  assert.equal(custom.dataUrl, '/local/plenty.data');
+  assert.equal(custom.jsUrl, '/plentychess/custom.js');
+  assert.equal(custom.wasmUrl, '/plentychess/custom.wasm');
+  assert.equal(custom.dataUrl, '/plentychess/custom.data');
+  const rejectedCustom = plentyChessVariantFromParams(new URLSearchParams('plentyChessJs=https://evil.example/plenty.js&plentyChessWasm=/local/plenty.wasm'));
+  assert.equal(rejectedCustom.key, 'emscripten');
 });
 
 test('PlentyChess asset checks require JS, WASM, and data sidecars', async () => {
