@@ -129,7 +129,8 @@
     "plentychess:artifact-manifest": "node scripts/write_engine_artifact_manifest.mjs plentychess",
     "plentychess:release-manifest": "node scripts/write_engine_artifact_manifest.mjs plentychess --source-archive public/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz --source-url /plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz --out public/plentychess/plentychess-emscripten-single-thread.manifest.json",
     "lc0:battle": "node --experimental-strip-types scripts/lc0_engine_battle.mjs",
-    "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs"
+    "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs",
+    "lc0:tiny-strict-custom-webgpu-smoke": "node scripts/lc0_tiny_strict_custom_webgpu_smoke.mjs"
   },
   "devDependencies": {
     "binaryen": "^130.0.0",
