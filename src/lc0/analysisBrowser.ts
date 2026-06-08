@@ -15,6 +15,8 @@ import { GameTree, type GameNode } from './gameTree.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { buildOpeningPositionIndex, mergeOpeningMoveStats, openingStatsFromIndex, openingStatsForPosition, openingSummary, positionKey, type ImportedGame, type OpeningMoveStat, type OpeningPositionIndex } from './openingStats.ts';
 import { defaultPgnCollectionName, deletePgnCollection, duplicatePgnCollection, exportPgnDatabaseBackup, formatPgnCollectionSummary, importPgnDatabaseBackup, listPgnCollections, loadPgnCollection, pgnDatabaseAvailable, pgnDatabaseBackupFilename, renamePgnCollection, savePgnCollection, searchPgnCollectionsByPosition, updatePgnCollectionPositionIndex, type PgnCollectionSource, type PgnCollectionSummary } from './pgnDatabase.ts';
+
+type PgnDatabaseSearchResult = Awaited<ReturnType<typeof searchPgnCollectionsByPosition>>[number];
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator, type Lc0EvaluationProvider } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
@@ -1156,6 +1158,42 @@ function selectedPgnCollectionId(): string {
   return selectEl('pgnDbSelect').value;
 }
 
+function renderPgnDatabaseList(selected = activePgnCollectionId): void {
+  const list = el('pgnDbList');
+  if (!pgnDatabaseAvailable()) { list.innerHTML = '<div class="empty">IndexedDB unavailable; local PGN collections cannot be listed.</div>'; return; }
+  if (!pgnCollections.length) {
+    list.innerHTML = '<div class="empty">No saved collections yet. Import PGN, name it, then Save to DB.</div>';
+    return;
+  }
+  list.innerHTML = pgnCollections.map((entry) => {
+    const selectedClass = entry.id === selected ? ' selected' : '';
+    const indexed = entry.indexedPositionCount ? `${entry.indexedPositionCount} indexed positions` : 'index rebuilds on load/import';
+    return `<button type="button" class="pgn-db-card${selectedClass}" data-id="${htmlEscape(entry.id)}">`
+      + `<span class="name">${htmlEscape(entry.name)}</span><span class="meta">${entry.gameCount} games</span>`
+      + `<span class="meta">${htmlEscape(formatPgnCollectionSummary(entry))}</span><span class="meta">${indexed}</span></button>`;
+  }).join('');
+}
+
+function clearPgnDatabaseSearchResults(message = 'Search position checks saved collections and shows matching collection hits here.'): void {
+  el('pgnDbSearchResults').innerHTML = `<div class="empty">${htmlEscape(message)}</div>`;
+}
+
+function renderPgnDatabaseSearchResults(results: PgnDatabaseSearchResult[]): void {
+  const container = el('pgnDbSearchResults');
+  if (!results.length) {
+    container.innerHTML = '<div class="empty">No saved collection reached this position.</div>';
+    return;
+  }
+  container.innerHTML = results.map((result) => {
+    const total = result.total;
+    const moves = result.stats.slice(0, 5).map((stat) => `${stat.san} ${stat.count}`).join(' · ');
+    const extra = result.stats.length > 5 ? ` · +${result.stats.length - 5} moves` : '';
+    return `<div class="pgn-db-hit"><div class="name">${htmlEscape(result.summary.name)}</div>`
+      + `<div class="meta">${total} games reached this position · ${htmlEscape(formatPgnCollectionSummary(result.summary))}</div>`
+      + `<div class="moves">${htmlEscape(moves || 'terminal/no next move')}${extra}</div></div>`;
+  }).join('');
+}
+
 function renderPgnDatabaseCollections(selected = activePgnCollectionId): void {
   const select = selectEl('pgnDbSelect');
   if (!pgnDatabaseAvailable()) {
@@ -1171,6 +1209,8 @@ function renderPgnDatabaseCollections(selected = activePgnCollectionId): void {
     el('importPgnDb').toggleAttribute('disabled', true);
     el('searchPgnDbPosition').toggleAttribute('disabled', true);
     el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.';
+    renderPgnDatabaseList('');
+    clearPgnDatabaseSearchResults('IndexedDB unavailable; position search is disabled.');
     return;
   }
   select.disabled = false;
@@ -1192,6 +1232,8 @@ function renderPgnDatabaseCollections(selected = activePgnCollectionId): void {
   } else {
     el('pgnDbInfo').textContent = pgnCollections.length ? `${pgnCollections.length} saved PGN collections` : 'No saved PGN collections yet.';
   }
+  renderPgnDatabaseList(current);
+  if (!databasePositionStats.length) clearPgnDatabaseSearchResults();
 }
 
 async function refreshPgnDatabaseCollections(selected = activePgnCollectionId): Promise<void> {
@@ -1388,7 +1430,7 @@ async function exportPgnDatabase(): Promise<void> {
     const backup = await exportPgnDatabaseBackup();
     const filename = pgnDatabaseBackupFilename(new Date(backup.exportedAt));
     downloadTextFile(filename, JSON.stringify(backup, null, 2), 'application/json');
-    el('pgnDbInfo').textContent = `Exported ${backup.collections.length} PGN collections as ${filename}.`;
+    el('pgnDbInfo').textContent = `Exported ${backup.collections.length} PGN collections as ${filename}. Raw PGN is included; position indexes are rebuildable.`;
   } catch (error) {
     el('pgnDbInfo').textContent = `Database export failed: ${(error as Error).message}`;
   }
@@ -1400,7 +1442,7 @@ async function importPgnDatabaseFile(file: File | undefined): Promise<void> {
     const backup = JSON.parse(await file.text()) as unknown;
     const count = await importPgnDatabaseBackup(backup);
     await refreshPgnDatabaseCollections(activePgnCollectionId);
-    el('pgnDbInfo').textContent = `Imported ${count} PGN collections from ${file.name}.`;
+    el('pgnDbInfo').textContent = `Imported ${count} PGN collections from ${file.name}; position indexes rebuilt from raw PGN.`;
   } catch (error) {
     el('pgnDbInfo').textContent = `Database import failed: ${(error as Error).message}`;
   } finally {
@@ -1424,17 +1466,20 @@ async function searchCurrentPositionInPgnDatabase(): Promise<void> {
       const names = results.slice(0, 3).map((result) => result.summary.name).join(', ');
       const extra = results.length > 3 ? `, +${results.length - 3} more` : '';
       el('pgnDbInfo').textContent = `Found ${summary.total} games from this position in ${results.length} local collections: ${names}${extra}.`;
+      renderPgnDatabaseSearchResults(results);
     } else {
       databasePositionStats = [];
       databasePositionKey = '';
       databasePositionCollectionCount = 0;
       el('pgnDbInfo').textContent = 'No indexed local PGN collections reached this position.';
+      renderPgnDatabaseSearchResults([]);
     }
     renderOpening();
     renderLines();
     setShapes(bestShapes());
   } catch (error) {
     el('pgnDbInfo').textContent = `Position search failed: ${(error as Error).message}`;
+    clearPgnDatabaseSearchResults(`Position search failed: ${(error as Error).message}`);
   } finally {
     el('searchPgnDbPosition').toggleAttribute('disabled', false);
   }
@@ -1713,6 +1758,14 @@ function wireEvents() {
   el('fetchGames').addEventListener('click', () => { void fetchGames(); });
   el('downloadPgn').addEventListener('click', downloadPgn);
   el('pgnDbSelect').addEventListener('change', () => { activePgnCollectionId = selectedPgnCollectionId(); renderPgnDatabaseCollections(activePgnCollectionId); });
+  el('pgnDbList').addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('.pgn-db-card');
+    const id = button?.dataset.id;
+    if (!id) return;
+    activePgnCollectionId = id;
+    selectEl('pgnDbSelect').value = id;
+    renderPgnDatabaseCollections(id);
+  });
   el('savePgnDb').addEventListener('click', () => { void saveCurrentPgnCollection(); });
   el('loadPgnDb').addEventListener('click', () => { void loadSelectedPgnCollection(); });
   el('deletePgnDb').addEventListener('click', () => { void deleteSelectedPgnCollection(); });

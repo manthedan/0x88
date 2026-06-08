@@ -197,6 +197,8 @@ async function runSmoke(args) {
         hasSavePgnDb: !!document.querySelector('#savePgnDb'),
         hasLoadPgnDb: !!document.querySelector('#loadPgnDb'),
         hasSearchPgnDbPosition: !!document.querySelector('#searchPgnDbPosition'),
+        hasPgnDbList: !!document.querySelector('#pgnDbList'),
+        hasPgnDbSearchResults: !!document.querySelector('#pgnDbSearchResults'),
         hasEngineCompare: !!document.querySelector('#engineCompare tbody'),
         runtimeText: text('#recklessRuntimeInfo'),
         pgnDbInfo: text('#pgnDbInfo'),
@@ -205,7 +207,7 @@ async function runSmoke(args) {
       if (!value || typeof value !== 'object') return false;
       if (!REQUIRED_FAMILIES.every((family) => value.families?.includes(family))) return false;
       if (!value.hasProfileSelect || !value.hasProfileName || !value.hasSaveProfile || !value.hasDeleteProfile) return false;
-      if (!value.hasPgnDbSelect || !value.hasPgnDbName || !value.hasSavePgnDb || !value.hasLoadPgnDb || !value.hasSearchPgnDbPosition) return false;
+      if (!value.hasPgnDbSelect || !value.hasPgnDbName || !value.hasSavePgnDb || !value.hasLoadPgnDb || !value.hasSearchPgnDbPosition || !value.hasPgnDbList || !value.hasPgnDbSearchResults) return false;
       if (!value.hasEngineCompare) return false;
       if (value.runtimeText === 'Reckless: detecting runtime…') return false;
       return REQUIRED_RUNTIME_TOKENS.every((token) => value.runtimeText?.includes(token));

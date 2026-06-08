@@ -60,6 +60,7 @@ details.runtime-details summary:hover{color:inherit}
 h2{font-size:13px;margin:14px 0 0;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
 #message{margin-top:10px;padding:8px;border:1px solid var(--rule);border-radius:6px;background:var(--soft);font-family:var(--mono);font-size:12px}
 .small{font-size:12px;color:var(--muted)}
+.pgn-db-list,.pgn-db-results{display:grid;gap:6px;margin-top:8px}.pgn-db-list .empty,.pgn-db-results .empty{padding:7px 8px;border:1px dashed var(--rule);border-radius:6px;background:#fff}.pgn-db-card{display:grid;grid-template-columns:1fr auto;gap:3px 8px;text-align:left;background:#fff}.pgn-db-card.selected{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}.pgn-db-card .name{font-weight:700;color:var(--ink)}.pgn-db-card .meta,.pgn-db-hit .meta{color:var(--muted);font-size:11px}.pgn-db-hit{padding:7px 8px;border:1px solid var(--rule);border-radius:6px;background:#fff}.pgn-db-hit .name{font-weight:700;color:var(--ink)}.pgn-db-hit .moves{font-family:var(--mono);color:var(--ink);margin-top:3px;overflow-wrap:anywhere}
 table.opening{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
 table.opening th,table.opening td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--rule)}
 table.opening th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase}
@@ -178,6 +179,8 @@ table.opening .san{font-family:var(--mono);font-weight:700}
       <button id="searchPgnDbPosition" type="button">Search position</button>
     </div>
     <div id="pgnDbInfo" class="small">Local PGN database: checking IndexedDB…</div>
+    <div id="pgnDbList" class="pgn-db-list small"></div>
+    <div id="pgnDbSearchResults" class="pgn-db-results small"></div>
     <table id="opening" class="opening"><thead><tr><th>Move</th><th class="num">Games</th><th>White / Draw / Black</th></tr></thead><tbody></tbody></table>
   </section>
 </main>
