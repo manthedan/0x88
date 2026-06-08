@@ -6,3 +6,4 @@ public/berserk/*.wasm filter=lfs diff=lfs merge=lfs -text
 public/berserk/*corresponding-source*.tar.gz filter=lfs diff=lfs merge=lfs -text
 public/plentychess/*.data filter=lfs diff=lfs merge=lfs -text
 public/plentychess/*.wasm filter=lfs diff=lfs merge=lfs -text
+public/models/bt4_anneal_muon_best.onnx filter=lfs diff=lfs merge=lfs -text
