@@ -37,6 +37,16 @@ The browser page now emits a `benchmarkReport` object with browser metadata, GPU
 
 ## Current evidence
 
+### Recovered b4 WGSL-head opt-in lane, 2026-06-08
+
+The current fixed-suite research lane remains an explicit opt-in configuration: `hybrid-wgsl-heads`, WASM input, JS legal priors, `mixed-tvm-ffn` encoder kernel, `lc0BatchSize=4`, and `batchPipelineDepth=1`. Stable ORT ONNX/WebGPU and stable hybrid ORT-head paths are not changed by this lane.
+
+Benchmark hygiene matters for this lane. The local autoresearch launcher clears only wrapper-owned `agent-browser` Chrome-for-Testing/CLI sessions plus the benchmark's default Vite ports before measured fixed-suite work. Treat this as measurement cleanup, not a runtime optimization or a speedup claim. Compare only against controls run under the same cleanup policy.
+
+Latest adjacent cleaned confirmation: `LC0_AR_RUN_ID=r1c113329 bash autoresearch.sh.disabled-local` reported `hybrid_b4_ms_per_eval=5.508`, `evals_per_second=181.55`, `readback_synced_ms=5.267`, `readback_bytes=7444`, `readback_maps=0.260`, and `dispatch_count=160`; drift guard passed `3/3` against f32/native best moves with f32 WDL max abs diff `0.000141` and f32 top-prior max abs diff `0.000403`. Artifacts: `/tmp/lc0_autoresearch/r1c113329_rep3.json` and `/tmp/lc0_autoresearch/r1c113329_drift.json`.
+
+A depth1-only readback attribution matrix for this same b4 lane (`npm run lc0:browser-readback-depth1-b4-matrix -- --out /tmp/lc0-readback-depth1-b4-ralph-item3.json`) found `wgsl-pipe1` at median `181.6 visits/s`, `searchReadbackSyncedMs=18.36`, `readbackBytes=7444`, and `searchReadbackBytes≈27295`; standalone `wgsl-gpu-legal` reduced bytes (`3084` eval, `≈11308` search) but was slower at median `173.0 visits/s` with higher search readback sync. This reinforces the prior rule: do not revisit standalone GPU legal priors; only consider a fused mask/softmax/top-k/readback-shrink path with drift gates.
+
 Recent local Chromium/WebGPU/WASM smokes on the batch-8 f16 lc0web pack passed. These are browser smoke results, not CI guarantees:
 
 - `npm run lc0:browser-wgsl-smokes -- --no-server --only encoder0-ffn,encoder0-block --timeout 25000`

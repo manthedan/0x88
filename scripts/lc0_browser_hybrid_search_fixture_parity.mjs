@@ -10,7 +10,39 @@ const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 300_000;
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_hybrid_search_fixture_parity.mjs [options]\n\nRuns browser/WebGPU LC0 fixed-search fixture parity for hybrid search across batch pipeline depths.\n\nOptions:\n  --out PATH                 Write JSON artifact (default stdout only)\n  --base-url URL             Use an existing dev server\n  --host HOST                Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N                   Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN        Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --session NAME             agent-browser session name\n  --timeout MS               Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --visits LIST              Comma-separated fixed-visit fixture sets, e.g. 32,64 (default 32)\n  --preset NAME              Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --batch N                  Search leaf batch size (default 4)\n  --batch-pipeline-depths L  Comma-separated depths (default 1; use 1,2,4 with --allow-mismatches for exploratory pipeline matrices)\n  --repeats N                Repeats per fixture/depth (default 1)\n  --fixture-limit N          Fixtures per visit set (max currently 16, default 16)\n  --layers N                 Encoder layers (default 10)\n  --head-backend MODE        ort or wgsl (default ort; use wgsl to opt into experimental WGSL heads)\n  --encoder-kernel MODE      hand, mixed-tvm-ffn, mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project, tvm-packed-f16 (default hand)\n  --input-backend MODE       js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                            Legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads; opt-in)\n  --no-server                Do not auto-start Vite\n  --allow-mismatches         Exit 0 and write/report artifacts even when parity mismatches are found\n  --dry-run                  Print URL and exit\n  -h, --help                 Show this help\n`);
+  console.log(`Usage: node scripts/lc0_browser_hybrid_search_fixture_parity.mjs [options]
+
+Runs browser/WebGPU LC0 fixed-search fixture parity for hybrid search across batch pipeline depths.
+
+Options:
+  --out PATH                 Write JSON artifact (default stdout only)
+  --base-url URL             Use an existing dev server
+  --host HOST                Vite host when auto-starting (default ${DEFAULT_HOST})
+  --port N                   Vite port when auto-starting (default ${DEFAULT_PORT})
+  --agent-browser BIN        Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)
+  --session NAME             agent-browser session name
+  --timeout MS               Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})
+  --progress-timeout MS      Fail if #benchResult does not change for this long (default: disabled)
+  --visits LIST              Comma-separated fixed-visit fixture sets, e.g. 32,64 (default 32)
+  --preset NAME              Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)
+  --batch N                  Search leaf batch size (default 4)
+  --batch-pipeline-depths L  Comma-separated depths (default 1; depths >1 are speculative parallel-search semantics, not parity mode)
+  --repeats N                Repeats per fixture/depth (default 1)
+  --fixture-limit N          Fixtures per visit set (max currently 16, default 16)
+  --fixture-ids LIST         Comma-separated native fixture IDs to run before applying --fixture-limit
+  --trace-root-children      Include depth-baseline/root child visit/prior/q traces in the browser artifact
+  --layers N                 Encoder layers (default 10)
+  --head-backend MODE        ort or wgsl (default ort; use wgsl to opt into experimental WGSL heads)
+  --encoder-kernel MODE      hand, mixed-tvm-ffn, mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project, tvm-packed-f16 (default hand)
+  --input-backend MODE       js, wgsl, or wasm (default js)
+  --legal-priors-backend MODE
+                            Legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads; opt-in)
+  --max-depth-visit-l1 N     Optional fail gate on root visit-distribution L1 vs depth=1 baseline
+  --no-server                Do not auto-start Vite
+  --allow-mismatches         Exit 0 and write/report artifacts even when parity mismatches are found
+  --dry-run                  Print URL and exit
+  -h, --help                 Show this help
+`);
 }
 
 function parseList(raw, mapper = Number, label = 'list') {
@@ -24,6 +56,7 @@ function parseArgs(argv) {
     host: DEFAULT_HOST,
     port: DEFAULT_PORT,
     timeoutMs: DEFAULT_TIMEOUT_MS,
+    progressTimeoutMs: 0,
     agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
     session: process.env.AGENT_BROWSER_SESSION ?? `lc0-search-fixture-parity-${process.pid}`,
     visits: [32],
@@ -32,12 +65,15 @@ function parseArgs(argv) {
     batchPipelineDepths: [1],
     repeats: 1,
     fixtureLimit: 16,
+    fixtureIds: [],
+    traceRootChildren: false,
     layers: 10,
     headBackend: 'ort',
     encoderKernel: 'hand',
     inputBackend: 'js',
     legalPriorsBackend: 'js',
     packVerify: false,
+    maxDepthVisitL1: undefined,
     allowMismatches: false,
     noServer: false,
     dryRun: false,
@@ -56,18 +92,22 @@ function parseArgs(argv) {
     else if (arg === '--agent-browser') args.agentBrowser = next();
     else if (arg === '--session') args.session = next();
     else if (arg === '--timeout') args.timeoutMs = Number(next());
+    else if (arg === '--progress-timeout') args.progressTimeoutMs = Number(next());
     else if (arg === '--visits') args.visits = parseList(next(), Number, 'visits');
     else if (arg === '--preset') args.preset = next();
     else if (arg === '--batch') args.batch = Number(next());
     else if (arg === '--batch-pipeline-depths' || arg === '--pipeline-depths') args.batchPipelineDepths = parseList(next(), Number, 'batch-pipeline-depths');
     else if (arg === '--repeats') args.repeats = Number(next());
     else if (arg === '--fixture-limit' || arg === '--fixtures') args.fixtureLimit = Number(next());
+    else if (arg === '--fixture-ids') args.fixtureIds = next().split(',').map((value) => value.trim()).filter(Boolean);
+    else if (arg === '--trace-root-children') args.traceRootChildren = true;
     else if (arg === '--layers') args.layers = Number(next());
     else if (arg === '--head-backend') args.headBackend = next();
     else if (arg === '--encoder-kernel') args.encoderKernel = next();
     else if (arg === '--input-backend') args.inputBackend = next();
     else if (arg === '--legal-priors-backend' || arg === '--hybrid-legal-priors') args.legalPriorsBackend = next();
     else if (arg === '--pack-verify') args.packVerify = true;
+    else if (arg === '--max-depth-visit-l1' || arg === '--max-depth-baseline-visit-l1') args.maxDepthVisitL1 = Number(next());
     else if (arg === '--allow-mismatches') args.allowMismatches = true;
     else if (arg === '--no-server') args.noServer = true;
     else if (arg === '--dry-run') args.dryRun = true;
@@ -85,6 +125,8 @@ function parseArgs(argv) {
   for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs], ['batch', args.batch], ['repeats', args.repeats], ['fixture-limit', args.fixtureLimit], ['layers', args.layers]]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
+  if (!Number.isFinite(args.progressTimeoutMs) || args.progressTimeoutMs < 0) throw new Error(`Invalid --progress-timeout: ${args.progressTimeoutMs}`);
+  if (args.maxDepthVisitL1 !== undefined && (!Number.isFinite(args.maxDepthVisitL1) || args.maxDepthVisitL1 < 0 || args.maxDepthVisitL1 > 2)) throw new Error(`Invalid --max-depth-visit-l1: ${args.maxDepthVisitL1}`);
   for (const [name, values] of [['visits', args.visits], ['batch-pipeline-depths', args.batchPipelineDepths]]) {
     if (values.some((value) => !Number.isFinite(value) || value <= 0)) throw new Error(`Invalid --${name}: ${values.join(',')}`);
   }
@@ -107,6 +149,8 @@ function parityUrl(args) {
   url.searchParams.set('batchPipelineDepths', args.batchPipelineDepths.join(','));
   url.searchParams.set('repeats', String(args.repeats));
   url.searchParams.set('fixtureLimit', String(args.fixtureLimit));
+  if (args.fixtureIds.length) url.searchParams.set('fixtureIds', args.fixtureIds.join(','));
+  if (args.traceRootChildren) url.searchParams.set('traceRootChildren', '1');
   url.searchParams.set('ep', 'wasm');
   if (!args.packVerify) url.searchParams.set('packVerify', '0');
   return String(url);
@@ -160,9 +204,25 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
 
 function startServer(args) {
   if (args.noServer) return null;
-  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
-  server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
-  server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
+  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  let readySettled = false;
+  server.ready = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => settle(reject, new Error(`Vite dev server did not report readiness on port ${args.port}: ${output.trim()}`)), 30_000);
+    const settle = (fn, value) => {
+      if (readySettled) return;
+      readySettled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const onOutput = (chunk) => {
+      output += chunk.toString('utf8');
+      if (/ready in \d+\s*ms/.test(output) || output.includes(`:${args.port}/`)) settle(resolve);
+    };
+    server.stdout.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
+    server.stderr.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
+    server.on('exit', (status, signal) => settle(reject, new Error(`Vite dev server exited before ready (${status ?? signal}): ${output.trim()}`)));
+  });
   return server;
 }
 
@@ -172,49 +232,76 @@ function textFromGetResult(result) {
   throw new Error(`agent-browser get text returned unexpected payload: ${JSON.stringify(result)}`);
 }
 
+function omitVerboseTrace(cell) {
+  if (!cell || typeof cell !== 'object' || !('searchTrace' in cell)) return cell;
+  const { searchTrace: _searchTrace, ...rest } = cell;
+  return rest;
+}
+
 async function runBrowserParity(args) {
   const url = parityUrl(args);
   process.stderr.write(`[lc0-search-fixture-parity] ${url}\n`);
+  let lastBenchText = '';
+  let lastProgressAt = Date.now();
+  const progressWindow = args.progressTimeoutMs > 0 ? args.progressTimeoutMs : args.timeoutMs;
   try {
     await runAgent(args, ['open', url], 30_000);
     const deadline = Date.now() + args.timeoutMs;
     while (Date.now() < deadline) {
-      const chunk = Math.min(25_000, Math.max(1000, deadline - Date.now()));
-      let doneSeen = false;
+      const chunk = Math.min(5_000, Math.max(1000, deadline - Date.now()));
+      let benchText = lastBenchText;
       try {
-        await runAgent(args, ['wait', '--text', 'HYBRID_SEARCH_FIXTURE_PARITY_DONE', '--timeout', String(chunk)], chunk + 5_000);
-        doneSeen = true;
-        const text = textFromGetResult(await runAgent(args, ['get', 'text', '#benchResult'], 30_000));
-        const result = JSON.parse(text);
+        benchText = textFromGetResult(await runAgent(args, ['get', 'text', '#benchResult'], chunk + 5_000));
+      } catch (error) {
+        if (Date.now() >= deadline) throw error;
+        await delay(250);
+        continue;
+      }
+      if (benchText !== lastBenchText) {
+        lastBenchText = benchText;
+        lastProgressAt = Date.now();
+        process.stderr.write(`[lc0-search-fixture-parity] progress ${benchText.slice(0, 160).replace(/\s+/g, ' ')}${benchText.length > 160 ? '…' : ''}\n`);
+      }
+      if (benchText.startsWith('HYBRID_SEARCH_FIXTURE_PARITY_FAILED')) throw new Error(benchText);
+      if (benchText.includes('HYBRID_SEARCH_FIXTURE_PARITY_DONE')) {
+        const result = JSON.parse(benchText);
         if (result.status !== 'HYBRID_SEARCH_FIXTURE_PARITY_DONE') throw new Error(`unexpected status: ${result.status}`);
         const expectedBackend = args.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
         if (result.backend !== expectedBackend) throw new Error(`unexpected backend: ${result.backend}`);
         if ((result.encoderKernelVariant ?? 'hand') !== args.encoderKernel) throw new Error(`unexpected encoder kernel: ${result.encoderKernelVariant ?? 'hand'}`);
         return { ...result, scriptPreset: args.preset || null, runtimeConfiguration: lc0RuntimeConfiguration(args) };
-      } catch (error) {
-        if (doneSeen || Date.now() >= deadline) throw error;
       }
+      if (Date.now() - lastProgressAt > progressWindow) {
+        throw new Error(`No hybrid search fixture parity progress for ${Date.now() - lastProgressAt}ms (last #benchResult: ${lastBenchText || 'empty'})`);
+      }
+      await delay(250);
     }
-    throw new Error(`Timed out waiting for HYBRID_SEARCH_FIXTURE_PARITY_DONE after ${args.timeoutMs}ms`);
+    throw new Error(`Timed out waiting for HYBRID_SEARCH_FIXTURE_PARITY_DONE after ${args.timeoutMs}ms (last #benchResult: ${lastBenchText || 'empty'})`);
   } finally { await closeAgentSession(args); }
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) return usage();
+  if (args.batchPipelineDepths.some((depth) => depth > 1)) {
+    process.stderr.write('[lc0-search-fixture-parity] warning: batchPipelineDepth > 1 is speculative parallel search; depth=1 is the fixed-search parity baseline. Use --allow-mismatches for exploratory artifacts.\n');
+  }
   if (args.dryRun) { console.log(parityUrl(args)); return; }
   const server = startServer(args);
   try {
+    if (server) await server.ready;
     await waitForServer(args.baseUrl);
     const result = await runBrowserParity(args);
     if (args.out) {
       await mkdir(dirname(args.out), { recursive: true });
       await writeFile(args.out, JSON.stringify(result, null, 2));
     }
-    const summary = { status: result.status, out: args.out, cells: result.cells, nativeMatches: result.nativeMatches, depthBaselineMatches: result.depthBaselineMatches, mismatches: result.mismatches };
+    const summary = { status: result.status, out: args.out, cells: result.cells, nativeMatches: result.nativeMatches, depthBaselineMatches: result.depthBaselineMatches, maxDepthBaselineVisitL1: result.maxDepthBaselineVisitL1, mismatches: result.mismatches?.map(omitVerboseTrace) };
     console.log(JSON.stringify(summary, null, 2));
-    if (!args.allowMismatches && (result.mismatches?.length || result.nativeMatches !== result.cells || result.depthBaselineMatches !== result.cells)) {
-      throw new Error(`search fixture parity failed: native ${result.nativeMatches}/${result.cells}, depth baseline ${result.depthBaselineMatches}/${result.cells}; pass --allow-mismatches for exploratory artifact capture`);
+    const visitL1Failed = args.maxDepthVisitL1 !== undefined && Number(result.maxDepthBaselineVisitL1 ?? 0) > args.maxDepthVisitL1;
+    if (!args.allowMismatches && (result.mismatches?.length || result.nativeMatches !== result.cells || result.depthBaselineMatches !== result.cells || visitL1Failed)) {
+      const visitL1Message = args.maxDepthVisitL1 !== undefined ? `, max depth visit L1 ${result.maxDepthBaselineVisitL1} > ${args.maxDepthVisitL1}` : '';
+      throw new Error(`search fixture parity failed: native ${result.nativeMatches}/${result.cells}, depth baseline ${result.depthBaselineMatches}/${result.cells}${visitL1Message}; pass --allow-mismatches for exploratory artifact capture`);
     }
   } finally { server?.kill('SIGTERM'); }
 }
