@@ -1,4 +1,5 @@
 import { parseFen, type BoardState } from '../chess/board.ts';
+import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { uciLineToSan } from '../chess/san.ts';
 
 /**
@@ -145,6 +146,45 @@ export function lc0AnalysisLines(result: Lc0SearchLike, fen: string, engine = 'L
     const q = (child ? child.q : result.value) * w;
     const visits = child?.visits ?? result.visits;
     const scoreCp = qToCentipawns(q);
+    return {
+      engine,
+      multipv: index + 1,
+      scoreCp,
+      scoreText: formatCentipawns(scoreCp),
+      detail: `${visits} visits`,
+      pvUci,
+      pvSan: uciLineToSan(board, pvUci, 12),
+    };
+  });
+}
+
+export interface TinyPuctLineEntryLike {
+  move: Move;
+  visits: number;
+  q: number;
+}
+
+export interface TinyPuctSearchLike {
+  value: number;
+  visits: number;
+  policy: TinyPuctLineEntryLike[];
+  principalVariation?: TinyPuctLineEntryLike[];
+  multiPvLines?: TinyPuctLineEntryLike[][];
+}
+
+/** Build analysis lines from Tiny Leela's browser PUCT result. */
+export function tinyPuctAnalysisLines(result: TinyPuctSearchLike, fen: string, engine = 'Tiny Leela'): AnalysisLine[] {
+  const board = parseFen(fen);
+  const w = board.turn === 'w' ? 1 : -1;
+  const pvLines = result.multiPvLines?.length ? result.multiPvLines : (result.principalVariation?.length ? [result.principalVariation] : []);
+  const lines = pvLines.length ? pvLines : result.policy.slice(0, 1).map((entry) => [entry]);
+  return lines.filter((line) => line.length).map((line, index) => {
+    const rootUci = moveToUci(line[0].move);
+    const child = result.policy.find((entry) => moveToUci(entry.move) === rootUci);
+    const q = (child?.q ?? line[0].q ?? result.value) * w;
+    const visits = child?.visits ?? line[0].visits ?? result.visits;
+    const scoreCp = qToCentipawns(q);
+    const pvUci = line.map((entry) => moveToUci(entry.move));
     return {
       engine,
       multipv: index + 1,

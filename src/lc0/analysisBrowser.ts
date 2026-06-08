@@ -6,7 +6,10 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import { engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
+import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
+import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
+import { engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, tinyPuctAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { openingStatsForPosition, openingSummary, type ImportedGame, type OpeningMoveStat } from './openingStats.ts';
@@ -23,7 +26,7 @@ import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berse
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, type PlentyChessVariant } from './plentychessVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support } from './bt4Engine.ts';
-import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
@@ -32,21 +35,45 @@ const DEFAULT_MODEL_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f3
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL_URL;
 const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
 const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
+const DEFAULT_TINY_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
+const DEFAULT_TINY_META_URL = '/models/bt4_anneal_muon_best.meta.json';
+const DEFAULT_TINY_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
 type Lc0AnalysisRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads';
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 const REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantFromParams(params);
 const REQUESTED_BERSERK_VARIANT = berserkVariantFromParams(params);
 const REQUESTED_PLENTYCHESS_VARIANT = plentyChessVariantFromParams(params);
-// Tiny Leela is currently implemented for the arena/playable frontend only.
-// Keep the shared catalog entry out of analysis selectors until an analysis evaluator is wired here.
-const ANALYSIS_ENGINE_FAMILY_PRIORITY = ENGINE_FAMILY_PRIORITY.filter((family) => family !== 'tiny');
+
+function sameOriginPathParam(names: string[], fallback: string, allowedPrefixes: string[]): string {
+  for (const name of names) {
+    const raw = params.get(name);
+    if (!raw) continue;
+    try {
+      const url = new URL(raw, location.origin);
+      if (url.origin === location.origin && allowedPrefixes.some((prefix) => url.pathname.startsWith(prefix))) return `${url.pathname}${url.search}${url.hash}`;
+    } catch {
+      // Ignore malformed experimental overrides and use the bundled default below.
+    }
+    console.warn(`[lc0-analysis] ignoring unsafe ${name} override`, raw);
+  }
+  return fallback;
+}
+
+const TINY_MODEL_URL = sameOriginPathParam(['tinyModel', 'tinyOnnx'], DEFAULT_TINY_MODEL_URL, ['/models/']);
+const TINY_META_URL = sameOriginPathParam(['tinyMeta'], DEFAULT_TINY_META_URL, ['/models/']);
+const TINY_HYBRID_MANIFEST_URL = sameOriginPathParam(['tinyManifest', 'manifest', 'manifestUrl'], DEFAULT_TINY_HYBRID_MANIFEST_URL, ['/runtimes/']);
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
 let mainEvaluator: Lc0OnnxEvaluator | null = null;
 let stockfishLite: StockfishEngine | null = null;
 let stockfishFull: StockfishEngine | null = null;
+const tinyEvaluatorPromises = new Map<string, Promise<Evaluator>>();
+const tinyEvaluators = new Set<CachedEvaluator>();
+const tinyEvaluatorsByKey = new Map<string, CachedEvaluator>();
+let tinyEvaluatorGeneration = 0;
+let tinyHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 // Lc0 BT4 runs in its own worker (lazy, WebGPU-gated, disposable). See bt4Engine.ts.
 const bt4 = new Bt4WorkerSearcher();
 let ground: Ground | null = null;
@@ -191,10 +218,125 @@ function uciShape(uci: string, brush: string): DrawShape | null {
   return uci.length >= 4 ? { orig: uci.slice(0, 2) as Key, dest: uci.slice(2, 4) as Key, brush } : null;
 }
 function multiPv(): number { return Math.max(1, Math.floor(Number(inputEl('multiPvInput').value) || 3)); }
+
+function tinyRuntimeForVariant(variant: string): 'auto' | 'ort' | 'custom-webgpu' {
+  if (variant.endsWith('-ort')) return 'ort';
+  if (variant.endsWith('-custom')) return 'custom-webgpu';
+  return 'auto';
+}
+
+function tinyRuntimeFallbackForVariant(variant: string): boolean {
+  return !variant.endsWith('-custom');
+}
+
+function tinyHybridManifestStatusText(): string {
+  if (tinyHybridManifestStatus === 'present') return `Tiny hybrid bundle present (${TINY_HYBRID_MANIFEST_URL})`;
+  if (tinyHybridManifestStatus === 'missing') return `Tiny hybrid bundle missing; auto uses ORT fallback (${TINY_HYBRID_MANIFEST_URL})`;
+  return `Tiny hybrid bundle checking (${TINY_HYBRID_MANIFEST_URL})`;
+}
+
+async function refreshTinyHybridManifestStatus(): Promise<void> {
+  try {
+    const res = await fetch(TINY_HYBRID_MANIFEST_URL, { method: 'HEAD', cache: 'no-store' });
+    tinyHybridManifestStatus = res.ok ? 'present' : 'missing';
+  } catch {
+    tinyHybridManifestStatus = 'missing';
+  }
+  if (tinyHybridManifestStatus === 'missing') {
+    for (const row of engineRows) if (row.family === 'tiny' && row.variant === 'bt4-custom') row.variant = 'bt4-auto';
+    renderEngineList();
+  }
+  renderRecklessRuntimeInfo();
+}
+
+function tinyEvaluatorCacheKey(variant: string): string {
+  const runtime = tinyRuntimeForVariant(variant);
+  const fallback = tinyRuntimeFallbackForVariant(variant);
+  return `${runtime}:${fallback ? 'fallback' : 'strict'}:${TINY_MODEL_URL}:${TINY_META_URL}:${TINY_HYBRID_MANIFEST_URL}`;
+}
+
+function activeTinyEvaluatorKeys(): Set<string> {
+  return new Set(activeEngineRows().filter((row) => row.family === 'tiny').map((row) => tinyEvaluatorCacheKey(row.variant)));
+}
+
+async function tinyEvaluator(variant: string): Promise<Evaluator> {
+  const runtime = tinyRuntimeForVariant(variant);
+  const fallback = tinyRuntimeFallbackForVariant(variant);
+  const key = tinyEvaluatorCacheKey(variant);
+  const existing = tinyEvaluatorPromises.get(key);
+  if (existing) return existing;
+  const generation = tinyEvaluatorGeneration;
+  const created = (async () => {
+    const loaded = await createBrowserSquareformerRuntimeEvaluator({
+      id: 'bt4-anneal-muon-best',
+      modelId: 'bt4-anneal-muon-best',
+      label: tinyEngineLabel(variant),
+      onnx: TINY_MODEL_URL,
+      meta: TINY_META_URL,
+      runtime,
+      manifestUrl: TINY_HYBRID_MANIFEST_URL,
+    }, { runtime, manifestUrl: TINY_HYBRID_MANIFEST_URL, fallback });
+    console.info('[lc0-analysis] loaded Tiny Leela evaluator', {
+      requestedRuntime: loaded.requestedRuntime,
+      resolvedRuntime: loaded.resolvedRuntime,
+      runtimeConfigId: loaded.runtimeConfigId,
+      manifestUrl: loaded.manifestUrl,
+      fallbackReason: loaded.fallbackReason,
+    });
+    const cached = new CachedEvaluator(loaded.evaluator, { maxEntries: 4096, includeHistory: true, includeLegalMoves: true, label: `tiny-leela-analysis:${runtime}` });
+    if (tinyEvaluatorGeneration !== generation || !activeTinyEvaluatorKeys().has(key)) {
+      destroyTinyEvaluator(cached);
+      const error = new Error('Tiny Leela evaluator was disposed before it finished loading');
+      error.name = 'AbortError';
+      throw error;
+    }
+    tinyEvaluators.add(cached);
+    tinyEvaluatorsByKey.set(key, cached);
+    return cached;
+  })();
+  tinyEvaluatorPromises.set(key, created);
+  try {
+    return await created;
+  } catch (error) {
+    tinyEvaluatorPromises.delete(key);
+    throw error;
+  }
+}
+
+function tinyHistoryFens(positions: BoardState[]): string[] {
+  return positions.slice(0, -1).map(boardToFen).reverse().slice(0, 16);
+}
+
+function destroyTinyEvaluator(evaluator: CachedEvaluator): void {
+  evaluator.clear();
+  const destroy = (evaluator.inner as Evaluator & { destroy?: () => void }).destroy;
+  if (typeof destroy === 'function') destroy.call(evaluator.inner);
+}
+
+function disposeTinyEvaluators(): void {
+  tinyEvaluatorGeneration++;
+  for (const evaluator of tinyEvaluators) destroyTinyEvaluator(evaluator);
+  tinyEvaluators.clear();
+  tinyEvaluatorsByKey.clear();
+  tinyEvaluatorPromises.clear();
+}
+
+function disposeUnusedTinyEvaluators(): void {
+  const activeTinyKeys = activeTinyEvaluatorKeys();
+  for (const key of [...tinyEvaluatorPromises.keys()]) if (!activeTinyKeys.has(key)) tinyEvaluatorPromises.delete(key);
+  for (const [key, evaluator] of [...tinyEvaluatorsByKey]) {
+    if (activeTinyKeys.has(key)) continue;
+    destroyTinyEvaluator(evaluator);
+    tinyEvaluators.delete(evaluator);
+    tinyEvaluatorsByKey.delete(key);
+    tinyEvaluatorPromises.delete(key);
+  }
+}
+
 // Engines to analyze are chosen as an add/remove list of cascading selects:
-// family (Lc0/Stockfish/Reckless/Viridithas/Berserk/PlentyChess) -> variant (Lc0: Small|BT4;
-// SF: Lite|Full; UCI engines: variant) -> strength (Lc0 visits, UCI depth),
-// all per row.
+// family (Lc0/Tiny Leela/Stockfish/Reckless/Viridithas/Berserk/PlentyChess)
+// -> variant (Lc0: Small|BT4; Tiny: runtime config; SF: Lite|Full; UCI engines: variant)
+// -> strength (neural visits, UCI depth), all per row.
 function strengthMeta(family: EngineFamily) {
   return engineStrengthMeta(family, 'analysis');
 }
@@ -260,22 +402,24 @@ function plentyChessCacheKey(variant: PlentyChessVariant): string {
   return `${variant.key}:${variant.jsUrl}:${variant.wasmUrl}:${variant.dataUrl}`;
 }
 
-// "Add engine" fills the next missing analysis-capable family by priority
-// (Lc0 → SF → Reckless → Viridithas → Berserk → PlentyChess), falling back to
-// the top priority when all analysis families are present.
+// "Add engine" fills the next missing family by priority
+// (Lc0 → Tiny Leela → SF → Reckless → Viridithas → Berserk → PlentyChess),
+// falling back to the top priority when all families are present.
 function nextEngineFamily(): EngineFamily {
   const present = new Set(engineRows.map((row) => row.family));
-  return ANALYSIS_ENGINE_FAMILY_PRIORITY.find((family) => !present.has(family)) ?? ANALYSIS_ENGINE_FAMILY_PRIORITY[0];
+  return ENGINE_FAMILY_PRIORITY.find((family) => !present.has(family)) ?? ENGINE_FAMILY_PRIORITY[0];
 }
 
 let engineRows: EngineRow[] = [{ family: 'lc0', variant: 'small', strength: 400 }];
 
 function analysisEngineFamilyOptions(): { value: EngineFamily; label: string }[] {
-  return engineFamilyOptions().filter((option) => option.value !== 'tiny');
+  return engineFamilyOptions();
 }
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
-  if (family === 'tiny') return [];
+  if (family === 'tiny') return tinyVariantOptions().map((option) => option.value === 'bt4-custom' && tinyHybridManifestStatus === 'missing'
+    ? { ...option, disabled: true, label: `${option.label} (bundle missing)` }
+    : option);
   if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync());
   if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
@@ -293,7 +437,7 @@ function defaultVariant(family: EngineFamily): string {
 }
 
 function rowLabel(row: EngineRow): string {
-  if (row.family === 'tiny') return 'Tiny Leela (arena only)';
+  if (row.family === 'tiny') return tinyEngineLabel(row.variant);
   if (row.family === 'lc0') return lc0EngineLabel(row.variant);
   if (row.family === 'sf') return stockfishEngineLabel(row.variant, 'analysis');
   if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
@@ -305,7 +449,6 @@ function rowLabel(row: EngineRow): string {
 function activeEngineRows(): EngineRow[] {
   const seen = new Set<string>();
   return engineRows.filter((r) => {
-    if (r.family === 'tiny') return false;
     const k = `${r.family}:${r.variant}`;
     if (seen.has(k)) return false;
     seen.add(k);
@@ -345,6 +488,8 @@ async function refreshBt4Availability(): Promise<void> {
 function renderRecklessRuntimeInfo(): void {
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
   const fallbackMode = (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) ? 'persistent available' : 'one-shot fallback';
+  const tinyRows = activeEngineRows().filter((row) => row.family === 'tiny');
+  const tinyParts = tinyRows.length ? tinyRows.map((row) => `${tinyEngineLabel(row.variant)} · SquareFormer ${tinyRuntimeForVariant(row.variant)} · ${tinyHybridManifestStatusText()}`) : [];
   const recklessRows = activeEngineRows().filter((row) => row.family === 'reckless');
   const recklessVariants = recklessRows.length ? recklessRows.map((row) => recklessVariantForKey(row.variant)) : [REQUESTED_RECKLESS_VARIANT];
   const recklessParts = recklessVariants.map((variant) => {
@@ -388,7 +533,7 @@ function renderRecklessRuntimeInfo(): void {
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
   });
-  el('recklessRuntimeInfo').textContent = `Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'}`;
+  el('recklessRuntimeInfo').textContent = `Tiny: ${tinyParts.join(' | ') || 'not selected'} · Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'}`;
 }
 
 function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
@@ -460,6 +605,7 @@ function getPlentyChessFor(variantKey: string): PlentyChessEngine {
 
 function disposeUnusedEngines(): void {
   if (!usesBt4Row()) bt4.dispose();
+  disposeUnusedTinyEvaluators();
   const activeRows = activeEngineRows();
   const activeRecklessKeys = new Set(activeRows.filter((row) => row.family === 'reckless').map((row) => recklessCacheKey(recklessVariantForKey(row.variant))));
   for (const [key, engine] of [...recklessByVariant]) {
@@ -577,9 +723,61 @@ function renderLegend(lines: AnalysisLine[]) {
     `<span class="key"><span class="dot" style="background:${key.swatch}"></span>${htmlEscape(key.label)}</span>`).join('');
 }
 
+function firstSanMove(line: AnalysisLine): string {
+  return line.pvSan.split(/\s+/).find(Boolean) ?? line.pvUci[0] ?? '—';
+}
+
+function signedCp(value: number): string {
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${Math.round(value)}`;
+}
+
+function renderEngineComparison(lines: AnalysisLine[]): void {
+  const bestByEngine = [...new Map(lines
+    .filter((line) => line.multipv === 1 && line.pvUci[0])
+    .map((line) => [line.engine, line])).values()];
+  const body = el('engineCompare').querySelector('tbody')!;
+  if (!bestByEngine.length) {
+    el('engineConsensus').textContent = 'No analysis yet.';
+    body.innerHTML = '<tr><td colspan="6" class="small">Run analysis to compare selected engines.</td></tr>';
+    return;
+  }
+  const finiteScores = bestByEngine.map((line) => line.scoreCp).filter((score): score is number => score !== undefined);
+  const evalSpread = finiteScores.length >= 2 ? Math.max(...finiteScores) - Math.min(...finiteScores) : null;
+  const moveCounts = new Map<string, { count: number; san: string }>();
+  for (const line of bestByEngine) {
+    const uci = line.pvUci[0]!;
+    const current = moveCounts.get(uci) ?? { count: 0, san: firstSanMove(line) };
+    current.count += 1;
+    moveCounts.set(uci, current);
+  }
+  const consensus = [...moveCounts.entries()].sort((a, b) => b[1].count - a[1].count)[0];
+  const consensusUci = consensus?.[0] ?? '';
+  const consensusText = consensus
+    ? `${consensus[1].count}/${bestByEngine.length} engines prefer ${consensus[1].san} (${consensusUci})`
+    : 'No first-move consensus.';
+  const spreadText = evalSpread === null ? 'eval spread unavailable' : `eval spread ${signedCp(evalSpread)} cp`;
+  el('engineConsensus').textContent = `${consensusText} · ${spreadText}`;
+  const reference = finiteScores.length ? finiteScores[0] : undefined;
+  body.innerHTML = bestByEngine.map((line) => {
+    const swatch = engineBrushes(line.engine).swatch;
+    const delta = reference === undefined || line.scoreCp === undefined ? '—' : signedCp(line.scoreCp - reference);
+    const agreed = line.pvUci[0] === consensusUci && (consensus?.[1].count ?? 0) > 1;
+    return `<tr style="border-left:3px solid ${swatch}">`
+      + `<td>${htmlEscape(line.engine)}</td>`
+      + `<td class="mono ${agreed ? 'agree' : ''}">${htmlEscape(firstSanMove(line))}<br><span class="small">${htmlEscape(line.pvUci[0] ?? '')}</span></td>`
+      + `<td class="mono">${htmlEscape(line.scoreText)}</td>`
+      + `<td class="mono">${htmlEscape(delta)}</td>`
+      + `<td class="mono">${htmlEscape(line.detail)}</td>`
+      + `<td class="pv">${htmlEscape(line.pvSan)}</td>`
+      + '</tr>';
+  }).join('');
+}
+
 function renderLines() {
   const lines = lineCache.get(tree.current.fen) ?? [];
   renderLegend(lines);
+  renderEngineComparison(lines);
   el('lines').innerHTML = lines.map((line) => {
     const cls = line.scoreCp === undefined ? '' : line.scoreCp > 0 ? 'pos' : line.scoreCp < 0 ? 'neg' : '';
     const swatch = engineBrushes(line.engine).swatch;
@@ -728,7 +926,7 @@ async function analyzeCurrent() {
     el('analyze').toggleAttribute('disabled', false);
     return;
   }
-  const selectedLabels = rows.map((row) => row.family === 'lc0' ? `${rowLabel(row)} ${row.strength}v` : `${rowLabel(row)} d${row.strength}`).join(' + ');
+  const selectedLabels = rows.map((row) => (row.family === 'lc0' || row.family === 'tiny') ? `${rowLabel(row)} ${row.strength}v` : `${rowLabel(row)} d${row.strength}`).join(' + ');
   el('message').textContent = `Analyzing (${selectedLabels}, ${multiPv()} lines)…`;
   try {
     const tasks: Promise<AnalysisLine[]>[] = [];
@@ -739,6 +937,21 @@ async function analyzeCurrent() {
         if (workerReady) tasks.push(workerLc0Lines(fen, row.strength));
         else if (searcher) tasks.push(searcher.search({ positions: tree.historyBoards() }, { visits: row.strength, multiPv: multiPv(), signal: controller.signal, yieldEveryMs: 16 })
           .then((result) => lc0AnalysisLines(result, fen, 'Lc0')));
+      } else if (row.family === 'tiny') {
+        const positions = tree.historyBoards();
+        const current = positions[positions.length - 1];
+        tasks.push(tinyEvaluator(row.variant)
+          .then((evaluator) => chooseMove(current, evaluator, {
+            visits: row.strength,
+            batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('tinyBatch') ?? '32') || 32))),
+            signal: controller.signal,
+            historyFens: tinyHistoryFens(positions),
+            searchPolicy: montyLitePuctPolicy,
+            includePv: true,
+            multiPv: multiPv(),
+            pvDepth: 12,
+          }))
+          .then((result) => tinyPuctAnalysisLines(result, fen, tinyEngineLabel(row.variant))));
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
         const label = kind === 'lite' ? `SF Lite d${row.strength}` : `SF d${row.strength}`;
@@ -955,6 +1168,7 @@ function disposeRuntimeResources(): void {
   stockfishLite = null;
   stockfishFull?.dispose();
   stockfishFull = null;
+  disposeTinyEvaluators();
   for (const engine of recklessByVariant.values()) engine.dispose();
   recklessByVariant.clear();
   for (const engine of viridithasByVariant.values()) engine.dispose();
@@ -1023,6 +1237,7 @@ async function init() {
   renderRecklessRuntimeInfo();
   wireEvents();
   void refreshBt4Availability();
+  void refreshTinyHybridManifestStatus();
   await loadLc0Backend();
 }
 
