@@ -6,7 +6,8 @@
  * for current-position opening lookups across saved collections.
  */
 
-import { openingSummary, positionKey, type OpeningMoveStat, type OpeningPositionIndex } from './openingStats.ts';
+import { parsePgnGames } from '../chess/pgn.ts';
+import { buildOpeningPositionIndex, openingSummary, positionKey, type OpeningMoveStat, type OpeningPositionIndex } from './openingStats.ts';
 
 export type PgnCollectionSource = 'manual' | 'lichess' | 'chesscom';
 
@@ -311,8 +312,21 @@ export async function exportPgnDatabaseBackup(now = new Date()): Promise<PgnData
   }
 }
 
+export function rebuildPgnCollectionIndex(collection: SavePgnCollectionInput): SavePgnCollectionInput {
+  const games = parsePgnGames(collection.pgn).map((game) => ({ tree: game.tree, result: game.result }));
+  const positionIndex = buildOpeningPositionIndex(games);
+  return {
+    ...collection,
+    gameCount: games.length,
+    positionIndex,
+    indexedPositionCount: Object.keys(positionIndex).length,
+  };
+}
+
 export async function importPgnDatabaseBackup(input: unknown): Promise<number> {
-  const collections = normalizePgnDatabaseBackup(input);
+  // Raw PGN is authoritative; never trust imported derived indexes because they
+  // can be stale, partial, or user-edited. Rebuild on every backup import.
+  const collections = normalizePgnDatabaseBackup(input).map(rebuildPgnCollectionIndex);
   for (const collection of collections) await savePgnCollection(collection);
   return collections.length;
 }

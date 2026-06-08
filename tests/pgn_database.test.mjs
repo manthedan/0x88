@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { defaultPgnCollectionName, formatPgnCollectionSummary, normalizePgnDatabaseBackup, pgnDatabaseBackupFilename, sanitizePgnCollectionName } from '../src/lc0/pgnDatabase.ts';
+import { defaultPgnCollectionName, formatPgnCollectionSummary, normalizePgnDatabaseBackup, pgnDatabaseBackupFilename, rebuildPgnCollectionIndex, sanitizePgnCollectionName } from '../src/lc0/pgnDatabase.ts';
 
 test('PGN collection names are trimmed and bounded', () => {
   assert.equal(sanitizePgnCollectionName('  My   Games  '), 'My Games');
@@ -62,4 +62,18 @@ test('PGN database backup import normalizes collection records', () => {
 test('PGN database backup import rejects invalid backups', () => {
   assert.throws(() => normalizePgnDatabaseBackup({}), /collections array/);
   assert.throws(() => normalizePgnDatabaseBackup({ collections: [{ name: 'empty', pgn: '' }] }), /has no PGN/);
+});
+
+test('PGN database import rebuilds position indexes from raw PGN', () => {
+  const rebuilt = rebuildPgnCollectionIndex({
+    name: 'Unindexed backup',
+    pgn: '[Result "1-0"]\n\n1. e4 e5 1-0',
+    gameCount: 0,
+    source: 'manual',
+    positionIndex: { stale: [{ uci: 'd2d4', san: 'd4', count: 99, whiteWins: 0, blackWins: 0, draws: 0 }] },
+  });
+  assert.equal(rebuilt.gameCount, 1);
+  assert.ok(rebuilt.indexedPositionCount > 0);
+  assert.equal(rebuilt.positionIndex.stale, undefined);
+  assert.equal(rebuilt.positionIndex['rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -'][0].san, 'e4');
 });
