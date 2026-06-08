@@ -41,6 +41,7 @@ function sameOriginViridithasAsset(raw: string | null | undefined): string | und
   }
 }
 
+
 export function normalizeViridithasVariant(raw: string | null | undefined): ViridithasVariant['key'] {
   const value = String(raw ?? '').toLowerCase().replace(/[ _-]+/g, '');
   if (value === 'simd' || value === 'simd128' || value === 'wasmsimd') return 'simd';

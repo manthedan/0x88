@@ -16,10 +16,37 @@ const mime = new Map([
   ['.nnue', 'application/octet-stream'],
   ['.onnx', 'application/octet-stream'],
   ['.bin', 'application/octet-stream'],
+  ['.data', 'application/octet-stream'],
+  ['.br', 'application/octet-stream'],
   ['.gz', 'application/gzip'],
   ['.png', 'image/png'],
   ['.svg', 'image/svg+xml'],
 ]);
+
+function acceptsEncoding(req, encoding) {
+  return String(req.headers['accept-encoding'] ?? '')
+    .split(',')
+    .map((part) => part.trim().toLowerCase().split(';')[0])
+    .includes(encoding);
+}
+
+function uncompressedPathFor(path) {
+  if (path.endsWith('.br')) return path.slice(0, -3);
+  if (path.endsWith('.gz')) return path.slice(0, -3);
+  return path;
+}
+
+function contentTypeFor(path) {
+  return mime.get(extname(uncompressedPathFor(path))) ?? 'application/octet-stream';
+}
+
+function encodedCandidate(req, file) {
+  if (file.endsWith('.br')) return { file, encoding: 'br' };
+  if (file.endsWith('.gz')) return { file, encoding: 'gzip' };
+  if (acceptsEncoding(req, 'br') && existsSync(`${file}.br`)) return { file: `${file}.br`, encoding: 'br' };
+  if (acceptsEncoding(req, 'gzip') && existsSync(`${file}.gz`)) return { file: `${file}.gz`, encoding: 'gzip' };
+  return { file, encoding: null };
+}
 
 function safePath(urlPath) {
   let decoded;
@@ -50,16 +77,24 @@ const server = createServer((req, res) => {
     res.end('Not found');
     return;
   }
+  const encoded = encodedCandidate(req, file);
+  file = encoded.file;
   const stats = statSync(file);
-  const ext = extname(file);
-  res.setHeader('Content-Type', mime.get(ext) ?? 'application/octet-stream');
+  const ext = extname(uncompressedPathFor(file));
+  res.setHeader('Content-Type', contentTypeFor(file));
   res.setHeader('Content-Length', String(stats.size));
-  const rel = file.slice(root.length + 1).replace(/\\/g, '/');
+  if (encoded.encoding) {
+    res.setHeader('Content-Encoding', encoded.encoding);
+    res.setHeader('Vary', 'Accept-Encoding');
+  }
+  const rel = uncompressedPathFor(file).slice(root.length + 1).replace(/\\/g, '/');
   if (ext === '.nnue') {
     // Full Reckless network filenames include the network hash, so they are safe
     // to cache aggressively and reuse across small WASM rebuilds.
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   } else if (rel.startsWith('reckless/') && rel.includes('corresponding-source') && ext === '.gz') {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  } else if ((rel.startsWith('berserk/') || rel.startsWith('plentychess/')) && (ext === '.js' || ext === '.wasm' || ext === '.data' || ext === '.nn' || ext === '.nnue' || ext === '.bin')) {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   } else if (rel.startsWith('assets/')) {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -67,6 +102,10 @@ const server = createServer((req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=3600');
   } else {
     res.setHeader('Cache-Control', 'no-cache');
+  }
+  if (req.method === 'HEAD') {
+    res.end();
+    return;
   }
   createReadStream(file).pipe(res);
 });

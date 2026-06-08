@@ -40,6 +40,7 @@ function sameOriginBerserkAsset(raw: string | null | undefined): string | undefi
   }
 }
 
+
 function assetUrls(variant: BerserkVariant): string[] {
   if (variant.jsUrl) return [variant.jsUrl, variant.wasmUrl, ...(variant.dataUrl ? [variant.dataUrl] : [])];
   return [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
@@ -141,16 +142,6 @@ export function berserkVariantFromParams(params: URLSearchParams): BerserkVarian
       dataUrl: customDataUrl ?? BERSERK_EMSCRIPTEN_DATA_URL,
       sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
       note: 'Custom Berserk Emscripten JS URL from ?berserkJs=…',
-    };
-  }
-  if (customWasmUrl) {
-    return {
-      key: 'custom',
-      label: 'Berserk Custom',
-      wasmUrl: customWasmUrl,
-      nnueUrl: customNnueUrl ?? BERSERK_DEFAULT_NNUE_URL,
-      sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
-      note: 'Custom Berserk WASM URL from ?berserkWasm=…',
     };
   }
   const explicit = params.get('berserkVariant') ?? params.get('berserk');

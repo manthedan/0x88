@@ -35,6 +35,7 @@ function sameOriginPlentyChessAsset(raw: string | null | undefined): string | un
   }
 }
 
+
 function assetUrls(variant: PlentyChessVariant): string[] {
   return [variant.jsUrl, variant.wasmUrl, variant.dataUrl];
 }

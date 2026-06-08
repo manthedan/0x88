@@ -14,3 +14,49 @@
 /reckless/*corresponding-source*.tar.gz
   Content-Type: application/gzip
   Cache-Control: public, max-age=31536000, immutable
+
+/berserk/*.js.br
+  Content-Type: text/javascript; charset=utf-8
+  Content-Encoding: br
+  Vary: Accept-Encoding
+  Cache-Control: public, max-age=31536000, immutable
+
+/berserk/*.wasm.br
+  Content-Type: application/wasm
+  Content-Encoding: br
+  Vary: Accept-Encoding
+  Cache-Control: public, max-age=31536000, immutable
+
+/berserk/*.data.br
+  Content-Type: application/octet-stream
+  Content-Encoding: br
+  Vary: Accept-Encoding
+  Cache-Control: public, max-age=31536000, immutable
+
+/plentychess/*.js.br
+  Content-Type: text/javascript; charset=utf-8
+  Content-Encoding: br
+  Vary: Accept-Encoding
+  Cache-Control: public, max-age=31536000, immutable
+
+/plentychess/*.wasm.br
+  Content-Type: application/wasm
+  Content-Encoding: br
+  Vary: Accept-Encoding
+  Cache-Control: public, max-age=31536000, immutable
+
+/plentychess/*.data.br
+  Content-Type: application/octet-stream
+  Content-Encoding: br
+  Vary: Accept-Encoding
+  Cache-Control: public, max-age=31536000, immutable
+
+/berserk/*.gz
+  Content-Encoding: gzip
+  Vary: Accept-Encoding
+  Cache-Control: public, max-age=31536000, immutable
+
+/plentychess/*.gz
+  Content-Encoding: gzip
+  Vary: Accept-Encoding
+  Cache-Control: public, max-age=31536000, immutable

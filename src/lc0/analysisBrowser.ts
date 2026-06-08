@@ -16,7 +16,14 @@ import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
 import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
+import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
+import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
+import { BerserkEngine } from './berserkEngine.ts';
+import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, normalizeBerserkVariant, type BerserkVariant } from './berserkVariants.ts';
+import { PlentyChessEngine } from './plentychessEngine.ts';
+import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, type PlentyChessVariant } from './plentychessVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support } from './bt4Engine.ts';
+import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
@@ -28,6 +35,12 @@ const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_U
 type Lc0AnalysisRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads';
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
+const REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantFromParams(params);
+const REQUESTED_BERSERK_VARIANT = berserkVariantFromParams(params);
+const REQUESTED_PLENTYCHESS_VARIANT = plentyChessVariantFromParams(params);
+// Tiny Leela is currently implemented for the arena/playable frontend only.
+// Keep the shared catalog entry out of analysis selectors until an analysis evaluator is wired here.
+const ANALYSIS_ENGINE_FAMILY_PRIORITY = ENGINE_FAMILY_PRIORITY.filter((family) => family !== 'tiny');
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
@@ -179,17 +192,13 @@ function uciShape(uci: string, brush: string): DrawShape | null {
 }
 function multiPv(): number { return Math.max(1, Math.floor(Number(inputEl('multiPvInput').value) || 3)); }
 // Engines to analyze are chosen as an add/remove list of cascading selects:
-// family (Lc0/Stockfish/Reckless) -> variant (Lc0: Small|BT4; SF: Lite|Full;
-// Reckless: variant) -> strength (Lc0 visits, SF/Reckless depth), all per row.
-type EngineFamily = 'lc0' | 'sf' | 'reckless';
-interface EngineRow { family: EngineFamily; variant: string; strength: number; }
-function strengthMeta(family: EngineFamily): { unit: string; min: number; max: number; def: number } {
-  if (family === 'lc0') return { unit: 'visits', min: 1, max: 100000, def: 400 };
-  if (family === 'sf') return { unit: 'depth', min: 1, max: 30, def: 14 };
-  // Reckless is alpha-beta like Stockfish, so default to the same depth (14).
-  return { unit: 'depth', min: 1, max: 30, def: 14 };
+// family (Lc0/Stockfish/Reckless/Viridithas/Berserk/PlentyChess) -> variant (Lc0: Small|BT4;
+// SF: Lite|Full; UCI engines: variant) -> strength (Lc0 visits, UCI depth),
+// all per row.
+function strengthMeta(family: EngineFamily) {
+  return engineStrengthMeta(family, 'analysis');
 }
-function defaultStrength(family: EngineFamily): number { return strengthMeta(family).def; }
+function defaultStrength(family: EngineFamily): number { return defaultEngineStrength(family, 'analysis'); }
 
 function availableRecklessVariants(): RecklessVariant[] {
   return REQUESTED_RECKLESS_VARIANT.key === 'custom' ? [...RECKLESS_VARIANTS, REQUESTED_RECKLESS_VARIANT] : [...RECKLESS_VARIANTS];
@@ -205,35 +214,103 @@ function recklessCacheKey(variant: RecklessVariant): string {
   return `${variant.key}:${variant.wasmUrl}:${variant.nnueUrl ?? ''}`;
 }
 
-// "Add engine" fills the next missing family by priority (Lc0 → SF → Reckless),
-// falling back to the top priority when all families are already present.
-const FAMILY_PRIORITY: EngineFamily[] = ['lc0', 'sf', 'reckless'];
+function availableViridithasVariants(): ViridithasVariant[] {
+  return REQUESTED_VIRIDITHAS_VARIANT.key === 'custom' ? [...VIRIDITHAS_VARIANTS, REQUESTED_VIRIDITHAS_VARIANT] : [...VIRIDITHAS_VARIANTS];
+}
+
+function viridithasVariantForKey(variantKey: string): ViridithasVariant {
+  const key = normalizeViridithasVariant(variantKey);
+  if (key === 'custom' && REQUESTED_VIRIDITHAS_VARIANT.key === 'custom') return REQUESTED_VIRIDITHAS_VARIANT;
+  return viridithasVariantByKey(key);
+}
+
+function viridithasCacheKey(variant: ViridithasVariant): string {
+  return `${variant.key}:${variant.wasmUrl}`;
+}
+
+function availableBerserkVariants(): BerserkVariant[] {
+  const builtIns = BERSERK_VARIANTS.filter((variant) => !!variant.jsUrl);
+  if (REQUESTED_BERSERK_VARIANT.key === 'custom' && REQUESTED_BERSERK_VARIANT.jsUrl) return [...builtIns, REQUESTED_BERSERK_VARIANT];
+  return builtIns;
+}
+
+function berserkVariantForKey(variantKey: string): BerserkVariant {
+  const key = normalizeBerserkVariant(variantKey);
+  if (key === 'custom' && REQUESTED_BERSERK_VARIANT.key === 'custom' && REQUESTED_BERSERK_VARIANT.jsUrl) return REQUESTED_BERSERK_VARIANT;
+  const variant = berserkVariantByKey(key);
+  return variant.jsUrl ? variant : BERSERK_VARIANTS.find((entry) => entry.jsUrl)!;
+}
+
+function berserkCacheKey(variant: BerserkVariant): string {
+  return `${variant.key}:${variant.jsUrl ?? ''}:${variant.wasmUrl}:${variant.dataUrl ?? ''}`;
+}
+
+function availablePlentyChessVariants(): PlentyChessVariant[] {
+  if (REQUESTED_PLENTYCHESS_VARIANT.key === 'custom') return [...PLENTYCHESS_VARIANTS, REQUESTED_PLENTYCHESS_VARIANT];
+  return [...PLENTYCHESS_VARIANTS];
+}
+
+function plentyChessVariantForKey(variantKey: string): PlentyChessVariant {
+  const key = normalizePlentyChessVariant(variantKey);
+  if (key === 'custom' && REQUESTED_PLENTYCHESS_VARIANT.key === 'custom') return REQUESTED_PLENTYCHESS_VARIANT;
+  return plentyChessVariantByKey(key);
+}
+
+function plentyChessCacheKey(variant: PlentyChessVariant): string {
+  return `${variant.key}:${variant.jsUrl}:${variant.wasmUrl}:${variant.dataUrl}`;
+}
+
+// "Add engine" fills the next missing analysis-capable family by priority
+// (Lc0 → SF → Reckless → Viridithas → Berserk → PlentyChess), falling back to
+// the top priority when all analysis families are present.
 function nextEngineFamily(): EngineFamily {
   const present = new Set(engineRows.map((row) => row.family));
-  return FAMILY_PRIORITY.find((family) => !present.has(family)) ?? FAMILY_PRIORITY[0];
+  return ANALYSIS_ENGINE_FAMILY_PRIORITY.find((family) => !present.has(family)) ?? ANALYSIS_ENGINE_FAMILY_PRIORITY[0];
 }
 
 let engineRows: EngineRow[] = [{ family: 'lc0', variant: 'small', strength: 400 }];
 
+function analysisEngineFamilyOptions(): { value: EngineFamily; label: string }[] {
+  return engineFamilyOptions().filter((option) => option.value !== 'tiny');
+}
+
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
-  if (family === 'lc0') return [{ value: 'small', label: 'Small' }, { value: 'bt4', label: 'BT4', disabled: !bt4SupportedSync() }];
-  if (family === 'sf') return [{ value: 'lite', label: 'Lite' }, { value: 'full', label: 'Full' }];
+  if (family === 'tiny') return [];
+  if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync());
+  if (family === 'sf') return stockfishVariantOptions();
+  if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
+  if (family === 'berserk') return availableBerserkVariants().map((v) => ({ value: v.key, label: v.label }));
+  if (family === 'plentychess') return availablePlentyChessVariants().map((v) => ({ value: v.key, label: v.label }));
   return availableRecklessVariants().map((v) => ({ value: v.key, label: v.label }));
 }
 
 function defaultVariant(family: EngineFamily): string {
-  return family === 'reckless' ? REQUESTED_RECKLESS_VARIANT.key : variantOptions(family)[0].value;
+  if (family === 'reckless') return REQUESTED_RECKLESS_VARIANT.key;
+  if (family === 'viridithas') return REQUESTED_VIRIDITHAS_VARIANT.key;
+  if (family === 'berserk') return REQUESTED_BERSERK_VARIANT.key;
+  if (family === 'plentychess') return REQUESTED_PLENTYCHESS_VARIANT.key;
+  return defaultStaticEngineVariant(family);
 }
 
 function rowLabel(row: EngineRow): string {
-  if (row.family === 'lc0') return row.variant === 'bt4' ? 'Lc0 BT4' : 'Lc0';
-  if (row.family === 'sf') return row.variant === 'lite' ? 'SF Lite' : 'SF';
+  if (row.family === 'tiny') return 'Tiny Leela (arena only)';
+  if (row.family === 'lc0') return lc0EngineLabel(row.variant);
+  if (row.family === 'sf') return stockfishEngineLabel(row.variant, 'analysis');
+  if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
+  if (row.family === 'berserk') return berserkVariantForKey(row.variant).label;
+  if (row.family === 'plentychess') return plentyChessVariantForKey(row.variant).label;
   return recklessVariantForKey(row.variant).label;
 }
 
 function activeEngineRows(): EngineRow[] {
   const seen = new Set<string>();
-  return engineRows.filter((r) => { const k = `${r.family}:${r.variant}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  return engineRows.filter((r) => {
+    if (r.family === 'tiny') return false;
+    const k = `${r.family}:${r.variant}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 function usesBt4Row(): boolean {
@@ -241,9 +318,9 @@ function usesBt4Row(): boolean {
 }
 
 function renderEngineList(): void {
-  const families: [EngineFamily, string][] = [['lc0', 'Lc0'], ['sf', 'Stockfish'], ['reckless', 'Reckless']];
+  const families = analysisEngineFamilyOptions();
   el('engineList').innerHTML = engineRows.map((row, i) => {
-    const famSel = families.map(([v, l]) => `<option value="${v}"${row.family === v ? ' selected' : ''}>${l}</option>`).join('');
+    const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
     const varSel = variantOptions(row.family).map((o) => `<option value="${o.value}"${row.variant === o.value ? ' selected' : ''}${o.disabled ? ' disabled' : ''}>${htmlEscape(o.label)}</option>`).join('');
     const meta = strengthMeta(row.family);
     const remove = engineRows.length > 1 ? `<button class="row-rm" data-i="${i}" type="button" title="Remove engine">×</button>` : '';
@@ -268,9 +345,9 @@ async function refreshBt4Availability(): Promise<void> {
 function renderRecklessRuntimeInfo(): void {
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
   const fallbackMode = (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) ? 'persistent available' : 'one-shot fallback';
-  const rows = activeEngineRows().filter((row) => row.family === 'reckless');
-  const variants = rows.length ? rows.map((row) => recklessVariantForKey(row.variant)) : [REQUESTED_RECKLESS_VARIANT];
-  const parts = variants.map((variant) => {
+  const recklessRows = activeEngineRows().filter((row) => row.family === 'reckless');
+  const recklessVariants = recklessRows.length ? recklessRows.map((row) => recklessVariantForKey(row.variant)) : [REQUESTED_RECKLESS_VARIANT];
+  const recklessParts = recklessVariants.map((variant) => {
     const engine = recklessByVariant.get(recklessCacheKey(variant));
     const status = engine?.runtimeStatus();
     const mode = engine?.runtimeLabel() ?? fallbackMode;
@@ -282,7 +359,36 @@ function renderRecklessRuntimeInfo(): void {
     const loadText = formatRecklessBrowserApiLoadStatus(status?.browserApiLoad);
     return `${variant.label} · ${mode} · ${sab} · ${assetText} · ${assetUrlText}${loadText ? ` · ${loadText}` : ''}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, reckless:build-browser-api-simd-external, or reckless:build-lite-wasi' : ''}`;
   });
-  el('recklessRuntimeInfo').textContent = `Reckless: ${parts.join(' | ')}`;
+  const viridithasRows = activeEngineRows().filter((row) => row.family === 'viridithas');
+  const viridithasVariants = viridithasRows.length ? viridithasRows.map((row) => viridithasVariantForKey(row.variant)) : [REQUESTED_VIRIDITHAS_VARIANT];
+  const viridithasParts = viridithasVariants.map((variant) => {
+    const engine = viridithasByVariant.get(viridithasCacheKey(variant));
+    const status = engine?.runtimeStatus();
+    const mode = engine?.runtimeLabel() ?? (canUsePersistentViridithasWasi() ? 'persistent available' : 'one-shot fallback');
+    const asset = viridithasVariantAssetStatus(variant);
+    if (asset === 'unknown') void checkViridithasVariantAsset(variant, renderRecklessRuntimeInfo);
+    const assetText = asset === 'ok' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+    return `${variant.label} · ${mode} · ${sab} · ${assetText} · ${status?.wasmUrl ?? variant.wasmUrl}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}${asset === 'missing' ? ' · build locally with npm run viridithas:build-wasi or viridithas:build-simd-wasi' : ''}`;
+  });
+  const berserkRows = activeEngineRows().filter((row) => row.family === 'berserk');
+  const berserkVariants = berserkRows.length ? berserkRows.map((row) => berserkVariantForKey(row.variant)) : [REQUESTED_BERSERK_VARIANT].filter((variant) => !!variant.jsUrl);
+  const berserkParts = berserkVariants.map((variant) => {
+    const engine = berserkByVariant.get(berserkCacheKey(variant));
+    const asset = berserkVariantAssetStatus(variant);
+    if (asset === 'unknown') void checkBerserkVariantAsset(variant, renderRecklessRuntimeInfo);
+    const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+    return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl ?? variant.wasmUrl}`;
+  });
+  const plentyRows = activeEngineRows().filter((row) => row.family === 'plentychess');
+  const plentyVariants = plentyRows.length ? plentyRows.map((row) => plentyChessVariantForKey(row.variant)) : [REQUESTED_PLENTYCHESS_VARIANT];
+  const plentyParts = plentyVariants.map((variant) => {
+    const engine = plentyChessByVariant.get(plentyChessCacheKey(variant));
+    const asset = plentyChessVariantAssetStatus(variant);
+    if (asset === 'unknown') void checkPlentyChessVariantAsset(variant, renderRecklessRuntimeInfo);
+    const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+    return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
+  });
+  el('recklessRuntimeInfo').textContent = `Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'}`;
 }
 
 function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
@@ -296,6 +402,9 @@ function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
 }
 
 const recklessByVariant = new Map<string, RecklessEngine>();
+const viridithasByVariant = new Map<string, ViridithasEngine>();
+const berserkByVariant = new Map<string, BerserkEngine>();
+const plentyChessByVariant = new Map<string, PlentyChessEngine>();
 function getRecklessFor(variantKey: string): RecklessEngine {
   const variant = recklessVariantForKey(variantKey);
   const key = recklessCacheKey(variant);
@@ -313,13 +422,71 @@ function getRecklessFor(variantKey: string): RecklessEngine {
   return engine;
 }
 
+function getViridithasFor(variantKey: string): ViridithasEngine {
+  const variant = viridithasVariantForKey(variantKey);
+  const key = viridithasCacheKey(variant);
+  let engine = viridithasByVariant.get(key);
+  if (!engine) {
+    engine = new ViridithasEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl);
+    viridithasByVariant.set(key, engine);
+    renderRecklessRuntimeInfo();
+  }
+  return engine;
+}
+
+function getBerserkFor(variantKey: string): BerserkEngine {
+  const variant = berserkVariantForKey(variantKey);
+  const key = berserkCacheKey(variant);
+  let engine = berserkByVariant.get(key);
+  if (!engine) {
+    engine = new BerserkEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
+    berserkByVariant.set(key, engine);
+    renderRecklessRuntimeInfo();
+  }
+  return engine;
+}
+
+function getPlentyChessFor(variantKey: string): PlentyChessEngine {
+  const variant = plentyChessVariantForKey(variantKey);
+  const key = plentyChessCacheKey(variant);
+  let engine = plentyChessByVariant.get(key);
+  if (!engine) {
+    engine = new PlentyChessEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
+    plentyChessByVariant.set(key, engine);
+    renderRecklessRuntimeInfo();
+  }
+  return engine;
+}
+
 function disposeUnusedEngines(): void {
   if (!usesBt4Row()) bt4.dispose();
-  const activeRecklessKeys = new Set(activeEngineRows().filter((row) => row.family === 'reckless').map((row) => recklessCacheKey(recklessVariantForKey(row.variant))));
+  const activeRows = activeEngineRows();
+  const activeRecklessKeys = new Set(activeRows.filter((row) => row.family === 'reckless').map((row) => recklessCacheKey(recklessVariantForKey(row.variant))));
   for (const [key, engine] of [...recklessByVariant]) {
     if (!activeRecklessKeys.has(key)) {
       engine.dispose();
       recklessByVariant.delete(key);
+    }
+  }
+  const activeViridithasKeys = new Set(activeRows.filter((row) => row.family === 'viridithas').map((row) => viridithasCacheKey(viridithasVariantForKey(row.variant))));
+  for (const [key, engine] of [...viridithasByVariant]) {
+    if (!activeViridithasKeys.has(key)) {
+      engine.dispose();
+      viridithasByVariant.delete(key);
+    }
+  }
+  const activeBerserkKeys = new Set(activeRows.filter((row) => row.family === 'berserk').map((row) => berserkCacheKey(berserkVariantForKey(row.variant))));
+  for (const [key, engine] of [...berserkByVariant]) {
+    if (!activeBerserkKeys.has(key)) {
+      engine.dispose();
+      berserkByVariant.delete(key);
+    }
+  }
+  const activePlentyKeys = new Set(activeRows.filter((row) => row.family === 'plentychess').map((row) => plentyChessCacheKey(plentyChessVariantForKey(row.variant))));
+  for (const [key, engine] of [...plentyChessByVariant]) {
+    if (!activePlentyKeys.has(key)) {
+      engine.dispose();
+      plentyChessByVariant.delete(key);
     }
   }
   renderRecklessRuntimeInfo();
@@ -577,6 +744,24 @@ async function analyzeCurrent() {
         const label = kind === 'lite' ? `SF Lite d${row.strength}` : `SF d${row.strength}`;
         tasks.push(getStockfish(kind).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
           .then((infos) => stockfishAnalysisLines(infos, fen, label)));
+      } else if (row.family === 'viridithas') {
+        const label = `${viridithasVariantForKey(row.variant).label} d${row.strength}`;
+        const engine = getViridithasFor(row.variant);
+        tasks.push(engine.newGame(controller.signal)
+          .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
+          .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
+      } else if (row.family === 'berserk') {
+        const label = `${berserkVariantForKey(row.variant).label} d${row.strength}`;
+        const engine = getBerserkFor(row.variant);
+        tasks.push(engine.newGame(controller.signal)
+          .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
+          .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
+      } else if (row.family === 'plentychess') {
+        const label = `${plentyChessVariantForKey(row.variant).label} d${row.strength}`;
+        const engine = getPlentyChessFor(row.variant);
+        tasks.push(engine.newGame(controller.signal)
+          .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
+          .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       } else {
         const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label} d${row.strength}`;
         tasks.push(getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
@@ -772,6 +957,12 @@ function disposeRuntimeResources(): void {
   stockfishFull = null;
   for (const engine of recklessByVariant.values()) engine.dispose();
   recklessByVariant.clear();
+  for (const engine of viridithasByVariant.values()) engine.dispose();
+  viridithasByVariant.clear();
+  for (const engine of berserkByVariant.values()) engine.dispose();
+  berserkByVariant.clear();
+  for (const engine of plentyChessByVariant.values()) engine.dispose();
+  plentyChessByVariant.clear();
   void mainEvaluator?.dispose();
   mainEvaluator = null;
   searcher = null;

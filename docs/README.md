@@ -20,6 +20,13 @@ For current planning, start in `knowledge/` first. Use `docs/` as stable referen
 | [`expert_handoff_2026-05-current.md`](expert_handoff_2026-05-current.md) | Current | Best single packet for an outside expert: project state, open questions, and where help matters. |
 | [`process_and_architecture_flows.md`](process_and_architecture_flows.md) | Current | Diagram-first atlas for model lanes, architecture breakdowns, training loops, cloud pipelines, self-play, eval, and deployment. |
 | [`model_manifest.md`](model_manifest.md) | Current | Human-readable model inventory and promotion context. |
+| [`engine_catalog.md`](engine_catalog.md) | Current | Browser engine-family and variant cards: source/version anchors, adapters, feature parity, size/speed, onboarding process. |
+| [`browser_uci_adapter_contract.md`](browser_uci_adapter_contract.md) | Current | Standard TypeScript/behavioral contract for browser UCI engines before selector promotion. |
+| [`browser_c_engine_porting.md`](browser_c_engine_porting.md) | Current | Standard low-effort Emscripten-first intake recipe for C/C++ browser UCI engines. |
+| [`engine_artifact_distribution.md`](engine_artifact_distribution.md) | Current | GPL/corresponding-source release policy for generated browser engine JS/WASM/data/NNUE artifacts. |
+| [`netlify_engine_artifacts.md`](netlify_engine_artifacts.md) | Current | Netlify build/deploy path for precompressed generated engine sidecars. |
+| [`berserk_browser_benchmarks.md`](berserk_browser_benchmarks.md) | Active | Berserk Emscripten worker lifecycle and first rotated-FEN benchmark captures. |
+| [`plentychess_browser_port.md`](plentychess_browser_port.md) | Active | PlentyChess Emscripten proof-build plus Node/browser worker smoke notes. |
 | [`model_efficiency_metrics.md`](model_efficiency_metrics.md) | Current | How we compare strength/bytes/params/latency/search usefulness. |
 | [`release_gate_and_distributed_bench.md`](release_gate_and_distributed_bench.md) | Current | Promotion gates, protocol cards, distributed benchmark shape. |
 | [`mac_mini_cpu_offload_plan.md`](mac_mini_cpu_offload_plan.md) | Current | Compute split and Mac-mini workflow for CPU-bound post-training evals, arenas, tuning, and self-play limits. |
@@ -44,6 +51,13 @@ For current planning, start in `knowledge/` first. Use `docs/` as stable referen
 | [`mac_mini_cpu_offload_plan.md`](mac_mini_cpu_offload_plan.md) | Current | Mac-mini CPU offload process for post-training evals, PUCT tuning, anchor arenas, and two-machine self-play limits. |
 | [`model_efficiency_metrics.md`](model_efficiency_metrics.md) | Current | Size/latency/FLOPs/browser deployment metrics. |
 | [`model_manifest.md`](model_manifest.md) | Current | Curated model inventory. |
+| [`engine_catalog.md`](engine_catalog.md) | Current | Standard cards and onboarding process for browser engine families/variants. |
+| [`browser_uci_adapter_contract.md`](browser_uci_adapter_contract.md) | Current | Required adapter methods, lifecycle rules, diagnostics, asset-check responsibilities, and promotion checklist for browser UCI engines. |
+| [`browser_c_engine_porting.md`](browser_c_engine_porting.md) | Current | Emscripten-first C/C++ engine intake recipe, Stockfish.js reference observations, and deferred optimization ladder. |
+| [`engine_artifact_distribution.md`](engine_artifact_distribution.md) | Current | Artifact/source-archive manifest policy before publishing generated GPL engine bundles. |
+| [`netlify_engine_artifacts.md`](netlify_engine_artifacts.md) | Current | Netlify precompression/rewrite/header path for large `.data` engine sidecars. |
+| [`berserk_browser_benchmarks.md`](berserk_browser_benchmarks.md) | Active | Berserk Emscripten worker lifecycle smoke, arena/analysis checks, and first rotated-FEN benchmark snapshot. |
+| [`plentychess_browser_port.md`](plentychess_browser_port.md) | Active | PlentyChess Emscripten build shape, artifact sizes, and Node/browser worker smoke. |
 | [`onnx_deploy_workflow.md`](onnx_deploy_workflow.md) | Current | ONNX simplification/parity/deployment workflow. |
 | [`browser_runtime.md`](browser_runtime.md) | Reference | Browser runtime plan; short and older, still useful. |
 | [`search_aux_head_calibration.md`](search_aux_head_calibration.md) | Active | AV/aux-PUCT calibration notes. |

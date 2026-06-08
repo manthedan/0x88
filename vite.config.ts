@@ -19,7 +19,7 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      input: ['client-demo.html', 'lc0-policy-only.html', 'lc0-analysis.html', 'lc0-arena.html', 'reckless-benchmark.html', 'browser-benchmark.html', 'browser-ort-bridge-benchmark.html', 'browser-rust-wasm-webgpu-benchmark.html', 'browser-eval-broker-prototype.html', 'browser-wasm-selfplay-broker.html', 'browser-two-model-arena.html', 'browser-multimodel-arena.html'],
+      input: ['client-demo.html', 'lc0-policy-only.html', 'lc0-analysis.html', 'lc0-arena.html', 'berserk-smoke.html', 'plentychess-smoke.html', 'reckless-benchmark.html', 'browser-benchmark.html', 'browser-ort-bridge-benchmark.html', 'browser-rust-wasm-webgpu-benchmark.html', 'browser-eval-broker-prototype.html', 'browser-wasm-selfplay-broker.html', 'browser-two-model-arena.html', 'browser-multimodel-arena.html'],
     },
   },
 });

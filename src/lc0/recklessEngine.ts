@@ -1,3 +1,4 @@
+import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
 
 export interface RecklessOptions {
@@ -167,7 +168,7 @@ export function formatRecklessBrowserApiLoadStatus(status: RecklessBrowserApiLoa
  * preserves Reckless' hash across searches and avoids repeated WASI process and
  * NNUE initialization. Non-isolated browsers fall back to one-shot argv searches.
  */
-export class RecklessEngine {
+export class RecklessEngine implements BrowserUciEngine {
   readonly name = 'reckless-wasi';
   private worker: Worker | null = null;
   private workerMode: 'oneshot' | 'persistent' | 'browser-api' | null = null;
@@ -586,6 +587,10 @@ export class RecklessEngine {
     if (status.mode === 'persistent') return 'persistent';
     if (status.mode === 'oneshot') return status.persistentAvailable && status.persistentDisabled ? 'one-shot fallback' : 'one-shot';
     return status.persistentAvailable ? 'persistent available' : 'one-shot fallback';
+  }
+
+  async search(fen: string, signal?: AbortSignal): Promise<string | null> {
+    return this.bestMove(fen, signal);
   }
 
   async bestMove(fen: string, signal?: AbortSignal): Promise<string | null> {

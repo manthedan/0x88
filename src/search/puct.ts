@@ -161,6 +161,8 @@ export interface SearchStats {
   /** Evaluation requests made by search before cache filtering. */
   evalCalls: number;
   batchEvalCalls: number;
+  /** Requested leaf batch size used by this search. */
+  batchSize?: number;
   maxEvalBatch: number;
   /** Histogram of leaf-evaluation batch sizes, keyed by the number of leaves sent to evaluateBatch. */
   evalBatchSizeHistogram?: Record<string, number>;
@@ -1487,6 +1489,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   }
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? 1));
   const batchPipelineDepth = Math.max(1, Math.floor(options.batchPipelineDepth ?? 1));
+  stats.batchSize = batchSize;
   stats.batchPipelineDepth = batchPipelineDepth;
   const signal = options.signal;
   const deadlineMs = deadlineFromMovetime(tSearch0, options.movetimeMs);

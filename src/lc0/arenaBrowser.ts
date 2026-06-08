@@ -940,8 +940,8 @@ function recordLc0SearchTelemetry(engineId: string, engineName: string, result: 
   addNumericTotals(t.evalBackendTimingTotals, stats?.evalBackendTimingTotals);
   t.evalBackendTimingMeans = meanRecord(t.evalBackendTimingTotals, t.evalBackendTimingSamples);
   t.evalBackendTimingPerPositionMeans = meanRecord(t.evalBackendTimingTotals, t.evalBackendTimingPositions);
-  t.lastBatchSize = (stats as { batchSize?: number } | undefined)?.batchSize;
-  t.lastBatchPipelineDepth = (stats as { batchPipelineDepth?: number } | undefined)?.batchPipelineDepth;
+  t.lastBatchSize = stats?.batchSize;
+  t.lastBatchPipelineDepth = stats?.batchPipelineDepth;
   t.maxEvalBatch = Math.max(t.maxEvalBatch ?? 0, stats?.maxEvalBatch ?? 0);
   t.evalBatchSizeHistogram = mergeHistogram(t.evalBatchSizeHistogram, stats?.evalBatchSizeHistogram);
   if (elapsedMs !== undefined) {
@@ -1049,9 +1049,9 @@ function recordTinySearchOutput(engineId: string, engineName: string, fen: strin
   });
 }
 
-function recordUciOutput(engineId: string, engineName: string, label: string, fen: string, move: string | null, lines: unknown[], elapsedMs?: number): void {
-  recordUciTelemetry(engineId, engineName, lines as StockfishInfoLine[], elapsedMs);
-  const best = lines[0] as StockfishInfoLine | undefined;
+function recordUciOutput(engineId: string, engineName: string, label: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
+  recordUciTelemetry(engineId, engineName, lines, elapsedMs);
+  const best = lines[0];
   recordEngineOutput({
     engineId,
     engineName,
@@ -1072,23 +1072,23 @@ function recordUciOutput(engineId: string, engineName: string, label: string, fe
   });
 }
 
-function recordStockfishOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: unknown[], elapsedMs?: number): void {
+function recordStockfishOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
   recordUciOutput(engineId, engineName, 'SF', fen, move, lines, elapsedMs);
 }
 
-function recordRecklessOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: unknown[], elapsedMs?: number): void {
+function recordRecklessOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
   recordUciOutput(engineId, engineName, 'Reckless', fen, move, lines, elapsedMs);
 }
 
-function recordViridithasOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: unknown[], elapsedMs?: number): void {
+function recordViridithasOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
   recordUciOutput(engineId, engineName, 'Viridithas', fen, move, lines, elapsedMs);
 }
 
-function recordBerserkOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: unknown[], elapsedMs?: number): void {
+function recordBerserkOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
   recordUciOutput(engineId, engineName, 'Berserk', fen, move, lines, elapsedMs);
 }
 
-function recordPlentyChessOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: unknown[], elapsedMs?: number): void {
+function recordPlentyChessOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
   recordUciOutput(engineId, engineName, 'PlentyChess', fen, move, lines, elapsedMs);
 }
 
@@ -1275,7 +1275,7 @@ function availableBerserkVariants(): BerserkVariant[] {
 
 function berserkVariantForKey(variantKey: string): BerserkVariant {
   const key = normalizeBerserkVariant(variantKey);
-  if (key === 'custom' && REQUESTED_BERSERK_VARIANT.key === 'custom') return REQUESTED_BERSERK_VARIANT;
+  if (key === 'custom' && REQUESTED_BERSERK_VARIANT.key === 'custom' && REQUESTED_BERSERK_VARIANT.jsUrl) return REQUESTED_BERSERK_VARIANT;
   const variant = berserkVariantByKey(key);
   return variant.jsUrl ? variant : BERSERK_VARIANTS.find((entry) => entry.jsUrl)!;
 }
@@ -2121,8 +2121,8 @@ async function runFixedSuiteBenchAutorun(): Promise<void> {
           evals: search.search.stats?.evalCalls ?? 0,
           cacheHits: search.search.stats?.cacheHits ?? 0,
           elapsedMs: searchElapsedMs,
-          batchSize: (search.search.stats as { batchSize?: number } | undefined)?.batchSize,
-          batchPipelineDepth: (search.search.stats as { batchPipelineDepth?: number } | undefined)?.batchPipelineDepth,
+          batchSize: search.search.stats?.batchSize,
+          batchPipelineDepth: search.search.stats?.batchPipelineDepth,
           maxEvalBatch: search.search.stats?.maxEvalBatch,
           evalBatchSizeHistogram: search.search.stats?.evalBatchSizeHistogram,
           evalBackendTimingMeans: search.search.stats?.evalBackendTimingMeans,
