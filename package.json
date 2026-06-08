@@ -49,6 +49,7 @@
     "build:netlify": "npm run build:client && npm run engine-artifacts:precompress-dist",
     "engine-artifacts:precompress": "node scripts/precompress_engine_artifacts.mjs public --allow-missing",
     "engine-artifacts:precompress-dist": "node scripts/precompress_engine_artifacts.mjs dist-client --allow-missing",
+    "engine-artifacts:check-browser": "node scripts/check_browser_engine_assets.mjs",
     "distill:check": "python3 scripts/check_lc0_teacher.py",
     "distill:seed": "python3 scripts/export_seed_fens.py",
     "distill:query": "python3 scripts/query_lc0_teacher.py",
