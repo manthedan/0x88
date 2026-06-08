@@ -23,6 +23,18 @@ export const PLENTYCHESS_SOURCE_NETWORK_URL = `https://github.com/Yoshie2000/Ple
 const assetStatuses = new Map<string, PlentyChessAssetStatus>();
 const assetChecks = new Map<string, Promise<PlentyChessAssetStatus>>();
 
+function sameOriginPlentyChessAsset(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const base = typeof location !== 'undefined' ? location.origin : 'http://localhost';
+    const url = new URL(raw, base);
+    if (url.origin !== base || !url.pathname.startsWith('/plentychess/')) return undefined;
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function assetUrls(variant: PlentyChessVariant): string[] {
   return [variant.jsUrl, variant.wasmUrl, variant.dataUrl];
 }
@@ -74,9 +86,9 @@ export function hasExplicitPlentyChessVariant(params: URLSearchParams): boolean 
 }
 
 export function plentyChessVariantFromParams(params: URLSearchParams): PlentyChessVariant {
-  const customJsUrl = params.get('plentyChessJs');
-  const customWasmUrl = params.get('plentyChessWasm');
-  const customDataUrl = params.get('plentyChessData');
+  const customJsUrl = sameOriginPlentyChessAsset(params.get('plentyChessJs'));
+  const customWasmUrl = sameOriginPlentyChessAsset(params.get('plentyChessWasm'));
+  const customDataUrl = sameOriginPlentyChessAsset(params.get('plentyChessData'));
   if (customJsUrl || customWasmUrl || customDataUrl) {
     return {
       key: 'custom',

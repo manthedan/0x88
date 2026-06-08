@@ -28,6 +28,18 @@ export const BERSERK_SOURCE_NETWORK_URL = `https://github.com/jhonnold/berserk-n
 const assetStatuses = new Map<string, BerserkAssetStatus>();
 const assetChecks = new Map<string, Promise<BerserkAssetStatus>>();
 
+function sameOriginBerserkAsset(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const base = typeof location !== 'undefined' ? location.origin : 'http://localhost';
+    const url = new URL(raw, base);
+    if (url.origin !== base || !url.pathname.startsWith('/berserk/')) return undefined;
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function assetUrls(variant: BerserkVariant): string[] {
   if (variant.jsUrl) return [variant.jsUrl, variant.wasmUrl, ...(variant.dataUrl ? [variant.dataUrl] : [])];
   return [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
@@ -116,10 +128,10 @@ export function hasExplicitBerserkVariant(params: URLSearchParams): boolean {
 }
 
 export function berserkVariantFromParams(params: URLSearchParams): BerserkVariant {
-  const customJsUrl = params.get('berserkJs');
-  const customWasmUrl = params.get('berserkWasm');
-  const customDataUrl = params.get('berserkData');
-  const customNnueUrl = params.get('berserkNnue') ?? undefined;
+  const customJsUrl = sameOriginBerserkAsset(params.get('berserkJs'));
+  const customWasmUrl = sameOriginBerserkAsset(params.get('berserkWasm'));
+  const customDataUrl = sameOriginBerserkAsset(params.get('berserkData'));
+  const customNnueUrl = sameOriginBerserkAsset(params.get('berserkNnue'));
   if (customJsUrl) {
     return {
       key: 'custom',

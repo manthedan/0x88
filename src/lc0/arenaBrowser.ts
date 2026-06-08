@@ -1407,6 +1407,10 @@ async function renderRuntimeBadge(): Promise<void> {
   }
 }
 
+function selectedSeatsNeedLc0Evaluator(): boolean {
+  return activeSeatRows().some((row) => row.family === 'lc0' && row.variant !== 'bt4');
+}
+
 function lc0SearcherFor(engineId: string): Lc0PuctSearcher {
   const existing = lc0Searchers.get(engineId);
   if (existing) return existing;
@@ -1974,6 +1978,12 @@ async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHy
 
 async function loadLc0Evaluator(): Promise<void> {
   const runtime = selectedLc0Runtime();
+  if (!selectedSeatsNeedLc0Evaluator()) {
+    el('start').toggleAttribute('disabled', false);
+    refreshSeatControls();
+    el('message').textContent = 'Ready (LC0 not loaded for current matchup). Pick engines and start a tournament.';
+    return;
+  }
   loadingLc0 = true;
   el('start').toggleAttribute('disabled', true);
   refreshSeatControls();
@@ -1988,7 +1998,12 @@ async function loadLc0Evaluator(): Promise<void> {
     el('start').toggleAttribute('disabled', false);
     el('message').textContent = `Ready (${lc0RuntimeLabel(runtime)}). Pick engines and start a tournament.`;
   } catch (error) {
-    el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(error as Error).message}`;
+    if (!selectedSeatsNeedLc0Evaluator()) {
+      el('start').toggleAttribute('disabled', false);
+      el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed, but current non-LC0 matchup is ready: ${(error as Error).message}`;
+    } else {
+      el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(error as Error).message}`;
+    }
   } finally {
     loadingLc0 = false;
     refreshSeatControls();
@@ -2254,6 +2269,8 @@ function wireEvents() {
     if (!activeSeatRows().some((r) => r.family === 'lc0' && r.variant === 'bt4')) bt4.dispose();
     buildEngines();
     populateSeats();
+    if (selectedSeatsNeedLc0Evaluator() && !lc0Cache && !loadingLc0) void loadLc0Evaluator();
+    else if (!loadingLc0) el('start').toggleAttribute('disabled', false);
   });
   el('arenaSeatList').addEventListener('input', (event) => {
     if (running) return;
