@@ -33,8 +33,12 @@ export interface Bt4SearchOptions {
   reuseTree?: boolean;
 }
 
+export type Bt4AssetStatus = 'unknown' | 'present' | 'missing';
+
 let supportProbe: Promise<boolean> | null = null;
 let supportedCached: boolean | null = null;
+let assetProbe: Promise<Bt4AssetStatus> | null = null;
+let assetStatus: Bt4AssetStatus = 'unknown';
 
 /** WebGPU usable for BT4? Cached after the first probe. */
 export async function probeBt4Support(): Promise<boolean> {
@@ -54,6 +58,27 @@ export async function probeBt4Support(): Promise<boolean> {
 /** Last probed support result without re-probing (false until probed). */
 export function bt4SupportedSync(): boolean {
   return supportedCached === true;
+}
+
+/** Last probed local BT4 model asset result without re-probing. */
+export function bt4AssetStatusSync(): Bt4AssetStatus {
+  return assetStatus;
+}
+
+/** Browser-served BT4 ONNX asset availability. Cached after the first probe. */
+export async function checkBt4Asset(onStatus?: () => void): Promise<Bt4AssetStatus> {
+  if (assetProbe) return assetProbe;
+  assetProbe = (async () => {
+    try {
+      const response = await fetch(BT4_MODEL_URL, { method: 'HEAD', cache: 'no-store' });
+      assetStatus = response.ok ? 'present' : 'missing';
+    } catch {
+      assetStatus = 'missing';
+    }
+    onStatus?.();
+    return assetStatus;
+  })();
+  return assetProbe;
 }
 
 /** A memory caution string when the device reports limited RAM, else null. */

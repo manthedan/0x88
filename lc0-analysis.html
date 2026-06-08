@@ -38,7 +38,7 @@ textarea{width:100%;min-height:64px;font-family:var(--mono);font-size:12px;borde
 .lines .pv{font-family:var(--mono);overflow-wrap:anywhere}.lines .eng{font-size:10px;color:var(--muted)}
 .lines li{padding-left:9px}
 .compare-summary{margin-top:8px;padding:8px;border:1px solid var(--rule);border-radius:6px;background:#fff;font-size:12px;color:var(--muted)}
-table.engine-compare{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}table.engine-compare th,table.engine-compare td{text-align:left;padding:5px 7px;border-bottom:1px solid var(--rule);vertical-align:top}table.engine-compare th{color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase}table.engine-compare .mono{font-family:var(--mono)}table.engine-compare .pv{font-family:var(--mono);overflow-wrap:anywhere}table.engine-compare .agree{color:var(--accent);font-weight:700}
+table.engine-compare{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}table.engine-compare th,table.engine-compare td{text-align:left;padding:5px 7px;border-bottom:1px solid var(--rule);vertical-align:top}table.engine-compare th{color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase}table.engine-compare .mono{font-family:var(--mono)}table.engine-compare .pv{font-family:var(--mono);overflow-wrap:anywhere}table.engine-compare .agree{color:var(--accent);font-weight:700}.profile-row{align-items:end}.profile-row select{min-width:150px}.profile-row input[type=text]{min-width:130px}
 .legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:12px;color:var(--muted)}
 .legend .key{display:inline-flex;align-items:center;gap:5px}
 .legend .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
@@ -103,6 +103,14 @@ table.opening .san{font-family:var(--mono);font-weight:700}
         <input id="multiPvInput" type="number" min="1" max="10" step="1" value="3" /></div>
     </div>
     <div id="engineList" class="engine-list"></div>
+    <div class="row profile-row">
+      <div class="field"><label for="engineProfileSelect">Profile</label>
+        <select id="engineProfileSelect"><option value="">default</option></select></div>
+      <div class="field"><label for="engineProfileName">Name</label>
+        <input id="engineProfileName" type="text" spellcheck="false" autocomplete="off" placeholder="analysis profile" /></div>
+      <button id="saveEngineProfile" type="button">Save profile</button>
+      <button id="deleteEngineProfile" type="button">Delete</button>
+    </div>
     <div class="row">
       <button id="addEngine" type="button">+ Add engine</button>
       <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
@@ -140,6 +148,23 @@ table.opening .san{font-family:var(--mono);font-weight:700}
       <button id="downloadPgn" type="button">Download PGN</button>
       <span id="importInfo" class="small"></span>
     </div>
+    <div class="row database-row">
+      <div class="field"><label for="pgnDbSelect">Local database</label>
+        <select id="pgnDbSelect"><option value="">no saved collections</option></select></div>
+      <div class="field" style="flex:1 1 180px"><label for="pgnDbName">Collection name</label>
+        <input id="pgnDbName" type="text" spellcheck="false" autocomplete="off" placeholder="saved PGN collection" /></div>
+      <button id="savePgnDb" type="button">Save to DB</button>
+      <button id="loadPgnDb" type="button">Load</button>
+      <button id="renamePgnDb" type="button">Rename</button>
+      <button id="duplicatePgnDb" type="button">Duplicate</button>
+      <button id="deletePgnDb" type="button">Delete</button>
+      <button id="exportPgnDbCollection" type="button">Export PGN</button>
+      <button id="exportPgnDb" type="button">Export DB</button>
+      <button id="importPgnDb" type="button">Import DB</button>
+      <input id="importPgnDbFile" type="file" accept="application/json,.json" style="display:none" />
+      <button id="searchPgnDbPosition" type="button">Search position</button>
+    </div>
+    <div id="pgnDbInfo" class="small">Local PGN database: checking IndexedDB…</div>
     <table id="opening" class="opening"><thead><tr><th>Move</th><th class="num">Games</th><th>White / Draw / Black</th></tr></thead><tbody></tbody></table>
   </section>
 </main>

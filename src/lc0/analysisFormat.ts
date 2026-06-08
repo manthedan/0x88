@@ -18,6 +18,8 @@ export interface AnalysisLine {
   scoreText: string;
   /** Depth (Stockfish) or visit count (LC0) summary. */
   detail: string;
+  nodes?: number;
+  nps?: number;
   pvUci: string[];
   pvSan: string;
 }
@@ -58,7 +60,7 @@ export function evalBarWhitePercent(scoreCp: number | undefined, mateIn: number 
   return Math.max(0, Math.min(100, 50 + 50 * whiteAdvantage));
 }
 
-export type EngineColorKey = 'green' | 'blue' | 'red' | 'yellow';
+export type EngineColorKey = 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'cyan' | 'pink' | 'yellow';
 
 export interface EngineBrushes {
   /** Chessground brush for the engine's best move. */
@@ -69,21 +71,46 @@ export interface EngineBrushes {
   swatch: string;
 }
 
+export const ANALYSIS_DRAWABLE_BRUSHES = {
+  green: { key: 'g', color: '#15781B', opacity: 1, lineWidth: 10 },
+  paleGreen: { key: 'pg', color: '#15781B', opacity: 0.4, lineWidth: 15 },
+  blue: { key: 'b', color: '#003088', opacity: 1, lineWidth: 10 },
+  paleBlue: { key: 'pb', color: '#003088', opacity: 0.4, lineWidth: 15 },
+  red: { key: 'r', color: '#882020', opacity: 1, lineWidth: 10 },
+  paleRed: { key: 'pr', color: '#882020', opacity: 0.4, lineWidth: 15 },
+  purple: { key: 'purple', color: '#68217a', opacity: 0.85, lineWidth: 10 },
+  palePurple: { key: 'palePurple', color: '#68217a', opacity: 0.35, lineWidth: 15 },
+  orange: { key: 'orange', color: '#c45a11', opacity: 0.85, lineWidth: 10 },
+  paleOrange: { key: 'paleOrange', color: '#c45a11', opacity: 0.35, lineWidth: 15 },
+  cyan: { key: 'cyan', color: '#007a87', opacity: 0.85, lineWidth: 10 },
+  paleCyan: { key: 'paleCyan', color: '#007a87', opacity: 0.35, lineWidth: 15 },
+  pink: { key: 'pink', color: '#b02080', opacity: 0.75, lineWidth: 10 },
+  palePink: { key: 'palePink', color: '#b02080', opacity: 0.3, lineWidth: 15 },
+  yellow: { key: 'y', color: '#e68f00', opacity: 1, lineWidth: 10 },
+  paleGrey: { key: 'pgr', color: '#4a4a4a', opacity: 0.35, lineWidth: 15 },
+} as const;
+
 const ENGINE_BRUSHES: Record<EngineColorKey, EngineBrushes> = {
   green: { primary: 'green', alt: 'paleGreen', swatch: '#15781B' },
   blue: { primary: 'blue', alt: 'paleBlue', swatch: '#003088' },
   red: { primary: 'red', alt: 'paleRed', swatch: '#882020' },
+  purple: { primary: 'purple', alt: 'palePurple', swatch: '#68217a' },
+  orange: { primary: 'orange', alt: 'paleOrange', swatch: '#c45a11' },
+  cyan: { primary: 'cyan', alt: 'paleCyan', swatch: '#007a87' },
+  pink: { primary: 'pink', alt: 'palePink', swatch: '#b02080' },
   yellow: { primary: 'yellow', alt: 'paleGrey', swatch: '#e68f00' },
 };
 
-/** Stable color family per engine: LC0 green, Stockfish blue, Reckless red, Viridithas yellow. */
+/** Stable color family per engine/family for multi-engine analysis overlays. */
 export function engineColorKey(engine: string): EngineColorKey {
   const lower = engine.toLowerCase();
   if (lower.startsWith('lc0')) return 'green';
   if (lower.startsWith('sf') || lower.startsWith('stockfish')) return 'blue';
   if (lower.startsWith('reckless')) return 'red';
-  if (lower.startsWith('viridithas')) return 'yellow';
-  return 'yellow';
+  if (lower.startsWith('viridithas')) return 'purple';
+  if (lower.startsWith('berserk')) return 'orange';
+  if (lower.startsWith('plentychess')) return 'cyan';
+  return 'pink';
 }
 
 export function engineBrushes(engine: string): EngineBrushes {
@@ -95,7 +122,22 @@ export interface StockfishInfoLineLike {
   depth: number;
   scoreCp?: number;
   mateIn?: number;
+  nodes?: number;
+  nps?: number;
   pvUci: string[];
+}
+
+function formatCompactNumber(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k`;
+  return String(Math.round(value));
+}
+
+function stockfishDetail(info: StockfishInfoLineLike): string {
+  const parts = [`depth ${info.depth}`];
+  if (info.nodes !== undefined) parts.push(`${formatCompactNumber(info.nodes)} nodes`);
+  if (info.nps !== undefined) parts.push(`${formatCompactNumber(info.nps)} nps`);
+  return parts.join(' · ');
 }
 
 /** Build analysis lines from Stockfish MultiPV info for the given FEN. */
@@ -114,7 +156,9 @@ export function stockfishAnalysisLines(infos: StockfishInfoLineLike[], fen: stri
         scoreCp,
         mateIn,
         scoreText: formatScore(scoreCp, mateIn),
-        detail: `depth ${info.depth}`,
+        detail: stockfishDetail(info),
+        ...(info.nodes !== undefined ? { nodes: info.nodes } : {}),
+        ...(info.nps !== undefined ? { nps: info.nps } : {}),
         pvUci: info.pvUci,
         pvSan: uciLineToSan(board, info.pvUci, 12),
       };
@@ -152,6 +196,7 @@ export function lc0AnalysisLines(result: Lc0SearchLike, fen: string, engine = 'L
       scoreCp,
       scoreText: formatCentipawns(scoreCp),
       detail: `${visits} visits`,
+      nodes: visits,
       pvUci,
       pvSan: uciLineToSan(board, pvUci, 12),
     };

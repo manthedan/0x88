@@ -9,10 +9,11 @@ import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
-import { engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, tinyPuctAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
+import { ANALYSIS_DRAWABLE_BRUSHES, engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, tinyPuctAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
-import { openingStatsForPosition, openingSummary, type ImportedGame, type OpeningMoveStat } from './openingStats.ts';
+import { buildOpeningPositionIndex, mergeOpeningMoveStats, openingStatsFromIndex, openingStatsForPosition, openingSummary, positionKey, type ImportedGame, type OpeningMoveStat, type OpeningPositionIndex } from './openingStats.ts';
+import { defaultPgnCollectionName, deletePgnCollection, duplicatePgnCollection, exportPgnDatabaseBackup, formatPgnCollectionSummary, importPgnDatabaseBackup, listPgnCollections, loadPgnCollection, pgnDatabaseAvailable, pgnDatabaseBackupFilename, renamePgnCollection, savePgnCollection, searchPgnCollectionsByPosition, updatePgnCollectionPositionIndex, type PgnCollectionSource, type PgnCollectionSummary } from './pgnDatabase.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
@@ -25,8 +26,8 @@ import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, normalizeBerserkVariant, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, type PlentyChessVariant } from './plentychessVariants.ts';
-import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support } from './bt4Engine.ts';
-import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { BT4_MODEL_URL, Bt4WorkerSearcher, bt4AssetStatusSync, bt4LoadWarning, bt4SupportedSync, checkBt4Asset, probeBt4Support } from './bt4Engine.ts';
+import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
@@ -82,17 +83,41 @@ let analysisAbort: AbortController | null = null;
 let analyzing = false;
 const lineCache = new Map<string, AnalysisLine[]>();
 const nodeIndex = new Map<number, GameNode>();
+const ENGINE_PROFILE_STORAGE_KEY = 'lc0-analysis-engine-profiles-v1';
+const LAST_ENGINE_PROFILE_STORAGE_KEY = 'lc0-analysis-last-engine-profile-v1';
+
+interface EngineAnalysisProfile {
+  name: string;
+  rows: EngineRow[];
+  multiPv: number;
+  lc0Runtime: Lc0AnalysisRuntime;
+}
+let engineProfiles: EngineAnalysisProfile[] = [];
 let importedGames: ImportedGame[] = [];
+let importedPositionIndex: OpeningPositionIndex | null = null;
+let databasePositionStats: OpeningMoveStat[] = [];
+let databasePositionKey = '';
+let databasePositionCollectionCount = 0;
+let pgnCollections: PgnCollectionSummary[] = [];
+let activePgnCollectionId = '';
+let lastImportSource: PgnCollectionSource = 'manual';
+let lastImportUsername = '';
+let lastImportColor = '';
 const bookCache = new Map<string, OpeningMoveStat[]>();
 // Distinct brush for the opening-book most-played move (not LC0 green / SF blue).
 const BOOK_BRUSH = 'yellow';
 const BOOK_SWATCH = '#e68f00';
 
 function currentBookStats(): OpeningMoveStat[] {
-  if (!importedGames.length) return [];
   const fen = tree.current.fen;
-  let stats = bookCache.get(fen);
-  if (!stats) { stats = openingStatsForPosition(importedGames, fen); bookCache.set(fen, stats); }
+  const key = positionKey(fen);
+  if (databasePositionKey === key && databasePositionStats.length) return databasePositionStats;
+  if (!importedGames.length) return [];
+  let stats = bookCache.get(key);
+  if (!stats) {
+    stats = importedPositionIndex ? openingStatsFromIndex(importedPositionIndex, fen) : openingStatsForPosition(importedGames, fen);
+    bookCache.set(key, stats);
+  }
   return stats;
 }
 
@@ -212,6 +237,15 @@ function inputEl(id: string): HTMLInputElement { return el(id) as HTMLInputEleme
 function selectEl(id: string): HTMLSelectElement { return el(id) as HTMLSelectElement; }
 function htmlEscape(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+function storageGet(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function storageSet(key: string, value: string): void {
+  try { localStorage.setItem(key, value); } catch { /* profiles are optional */ }
+}
+function storageRemove(key: string): void {
+  try { localStorage.removeItem(key); } catch { /* profiles are optional */ }
 }
 function setShapes(shapes: DrawShape[]) { ground?.setAutoShapes(shapes); }
 function uciShape(uci: string, brush: string): DrawShape | null {
@@ -333,6 +367,112 @@ function disposeUnusedTinyEvaluators(): void {
   }
 }
 
+function clampStrengthForRow(row: EngineRow): number {
+  const meta = strengthMeta(row.family);
+  return Math.max(meta.min, Math.min(meta.max, Math.floor(Number(row.strength) || meta.def)));
+}
+function sanitizeEngineRow(value: unknown): EngineRow | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<EngineRow>;
+  if (!isEngineFamily(String(raw.family))) return null;
+  const family = raw.family as EngineFamily;
+  if (raw.variant === 'custom') return null;
+  const row = { family, variant: String(raw.variant || defaultVariant(family)), strength: Number(raw.strength) || defaultStrength(family) };
+  row.strength = clampStrengthForRow(row);
+  return row;
+}
+function currentEngineProfile(name: string): EngineAnalysisProfile {
+  return {
+    name,
+    rows: activeEngineRows().map((row) => ({ ...row })),
+    multiPv: multiPv(),
+    lc0Runtime: selectedLc0Runtime(),
+  };
+}
+function profileHasBt4(rows: EngineRow[]): boolean {
+  return rows.some((row) => row.family === 'lc0' && row.variant === 'bt4');
+}
+function bt4SelectableSync(): boolean {
+  return bt4SupportedSync() && bt4AssetStatusSync() === 'present';
+}
+function bt4UnavailableText(): string {
+  if (!bt4SupportedSync()) return 'Lc0 BT4 needs WebGPU support.';
+  if (bt4AssetStatusSync() === 'missing') return `Lc0 BT4 model asset is missing at ${BT4_MODEL_URL}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
+  if (bt4AssetStatusSync() === 'unknown') return 'Lc0 BT4 model asset is still being checked.';
+  return '';
+}
+function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): EngineRow[] {
+  return rows.map((row) => {
+    const next = { ...row, strength: clampStrengthForRow(row) };
+    if (next.family === 'lc0' && next.variant === 'bt4') {
+      const allowed = bt4SelectableSync() && allowBt4Prompt && window.confirm(`${bt4LoadWarning()}\n\nLoad the saved Lc0 BT4 profile row?`);
+      if (!allowed) next.variant = 'small';
+    }
+    return next;
+  });
+}
+function loadEngineProfiles(): EngineAnalysisProfile[] {
+  try {
+    const parsed = JSON.parse(storageGet(ENGINE_PROFILE_STORAGE_KEY) ?? '[]') as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const raw = entry as Partial<EngineAnalysisProfile>;
+      const name = String(raw.name ?? '').trim();
+      if (!name || !Array.isArray(raw.rows)) return [];
+      const rows = raw.rows.map(sanitizeEngineRow).filter((row): row is EngineRow => !!row);
+      if (!rows.length) return [];
+      return [{ name, rows, multiPv: Math.max(1, Math.min(10, Math.floor(Number(raw.multiPv) || 3))), lc0Runtime: normalizeLc0Runtime(raw.lc0Runtime ?? 'onnx') }];
+    }).sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+function persistEngineProfiles(): void {
+  storageSet(ENGINE_PROFILE_STORAGE_KEY, JSON.stringify(engineProfiles));
+}
+function renderEngineProfiles(selected = storageGet(LAST_ENGINE_PROFILE_STORAGE_KEY) ?? ''): void {
+  const options = ['<option value="">manual / default</option>', ...engineProfiles.map((profile) => `<option value="${htmlEscape(profile.name)}"${profile.name === selected ? ' selected' : ''}>${htmlEscape(profile.name)}</option>`)];
+  selectEl('engineProfileSelect').innerHTML = options.join('');
+  inputEl('engineProfileName').value = selected;
+}
+function applyEngineProfile(profile: EngineAnalysisProfile): void {
+  const runtimeChanged = selectedLc0Runtime() !== profile.lc0Runtime;
+  engineRows = profileRowsForUse(profile.rows, true);
+  inputEl('multiPvInput').value = String(profile.multiPv);
+  selectEl('lc0RuntimeSelect').value = profile.lc0Runtime;
+  storageSet(LAST_ENGINE_PROFILE_STORAGE_KEY, profile.name);
+  renderEngineList();
+  renderEngineProfiles(profile.name);
+  disposeUnusedEngines();
+  lineCache.clear();
+  if (runtimeChanged) void reloadLc0Backend(true);
+  else void analyzeCurrent();
+}
+function saveCurrentEngineProfile(): void {
+  const name = inputEl('engineProfileName').value.trim();
+  if (!name) { el('message').textContent = 'Name the engine profile before saving.'; return; }
+  if (activeEngineRows().some((row) => row.variant === 'custom')) {
+    el('message').textContent = 'Custom URL variants are not saved in profiles yet; choose a built-in variant first.';
+    return;
+  }
+  const profile = currentEngineProfile(name);
+  engineProfiles = [...engineProfiles.filter((entry) => entry.name !== name), profile].sort((a, b) => a.name.localeCompare(b.name));
+  persistEngineProfiles();
+  storageSet(LAST_ENGINE_PROFILE_STORAGE_KEY, name);
+  renderEngineProfiles(name);
+  el('message').textContent = `Saved engine profile “${name}”.`;
+}
+function deleteSelectedEngineProfile(): void {
+  const name = selectEl('engineProfileSelect').value || inputEl('engineProfileName').value.trim();
+  if (!name) return;
+  engineProfiles = engineProfiles.filter((entry) => entry.name !== name);
+  persistEngineProfiles();
+  storageRemove(LAST_ENGINE_PROFILE_STORAGE_KEY);
+  renderEngineProfiles('');
+  el('message').textContent = `Deleted engine profile “${name}”.`;
+}
+
 // Engines to analyze are chosen as an add/remove list of cascading selects:
 // family (Lc0/Tiny Leela/Stockfish/Reckless/Viridithas/Berserk/PlentyChess)
 // -> variant (Lc0: Small|BT4; Tiny: runtime config; SF: Lite|Full; UCI engines: variant)
@@ -420,7 +560,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'tiny') return tinyVariantOptions().map((option) => option.value === 'bt4-custom' && tinyHybridManifestStatus === 'missing'
     ? { ...option, disabled: true, label: `${option.label} (bundle missing)` }
     : option);
-  if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync());
+  if (family === 'lc0') return lc0VariantOptions(bt4SelectableSync());
   if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
   if (family === 'berserk') return availableBerserkVariants().map((v) => ({ value: v.key, label: v.label }));
@@ -476,17 +616,22 @@ async function workerBt4Lines(fen: string, visits: number): Promise<AnalysisLine
   return result.cancelled ? [] : lc0AnalysisLines(result, fen, 'Lc0 BT4');
 }
 
-// Lc0 BT4 is WebGPU-only; its option is disabled in the list when WebGPU is unusable.
+// Lc0 BT4 is WebGPU-only and requires the large local ONNX asset to be exposed.
 async function refreshBt4Availability(): Promise<void> {
-  await probeBt4Support();
-  if (!bt4SupportedSync()) {
+  await Promise.all([probeBt4Support(), checkBt4Asset(renderRecklessRuntimeInfo)]);
+  if (!bt4SelectableSync()) {
     for (const row of engineRows) if (row.family === 'lc0' && row.variant === 'bt4') row.variant = 'small';
   }
   renderEngineList();
+  renderRecklessRuntimeInfo();
 }
 
 function renderRecklessRuntimeInfo(): void {
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
+  const bt4Asset = bt4AssetStatusSync();
+  if (bt4Asset === 'unknown') void checkBt4Asset(renderRecklessRuntimeInfo);
+  const bt4AssetText = bt4Asset === 'present' ? 'asset ok' : bt4Asset === 'missing' ? `asset missing · ${BT4_MODEL_URL} · run node scripts/lc0_prepare_model_assets.mjs` : 'checking asset';
+  const bt4Text = `Lc0 BT4: ${bt4SupportedSync() ? 'WebGPU ok' : 'WebGPU unavailable'} · ${bt4AssetText}`;
   const fallbackMode = (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) ? 'persistent available' : 'one-shot fallback';
   const tinyRows = activeEngineRows().filter((row) => row.family === 'tiny');
   const tinyParts = tinyRows.length ? tinyRows.map((row) => `${tinyEngineLabel(row.variant)} · SquareFormer ${tinyRuntimeForVariant(row.variant)} · ${tinyHybridManifestStatusText()}`) : [];
@@ -533,7 +678,7 @@ function renderRecklessRuntimeInfo(): void {
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
   });
-  el('recklessRuntimeInfo').textContent = `Tiny: ${tinyParts.join(' | ') || 'not selected'} · Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'}`;
+  el('recklessRuntimeInfo').textContent = `${bt4Text} · Tiny: ${tinyParts.join(' | ') || 'not selected'} · Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'}`;
 }
 
 function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
@@ -701,9 +846,13 @@ function renderBoard() {
       events: { after: onUserMove },
     },
     lastMove: lastUci ? [lastUci.slice(0, 2) as Key, lastUci.slice(2, 4) as Key] : undefined,
+    drawable: { brushes: ANALYSIS_DRAWABLE_BRUSHES },
   };
-  if (!ground) ground = Chessground(el('ground'), config);
-  else ground.set(config);
+  // Cast: chessground's DrawBrushes type exposes the built-in keys, but custom
+  // brush keys are supported at runtime and are needed to distinguish 3+ engines.
+  const cfg = config as unknown as NonNullable<Parameters<typeof Chessground>[1]>;
+  if (!ground) ground = Chessground(el('ground'), cfg);
+  else ground.set(cfg);
   el('sideToMove').textContent = board.turn === 'w' ? 'White to move' : 'Black to move';
   renderEvalBar();
   setShapes(bestShapes());
@@ -832,10 +981,12 @@ function renderMoveList() {
 
 function renderOpening() {
   const body = el('opening').querySelector('tbody')!;
-  if (!importedGames.length) { body.innerHTML = '<tr><td colspan="3" class="small">import games to see opening stats</td></tr>'; return; }
+  const hasDatabasePositionStats = databasePositionKey === positionKey(tree.current.fen) && databasePositionStats.length > 0;
+  if (!importedGames.length && !hasDatabasePositionStats) { body.innerHTML = '<tr><td colspan="3" class="small">import games or search the local DB to see opening stats</td></tr>'; return; }
   const stats = currentBookStats();
   const summary = openingSummary(stats);
-  el('importInfo').textContent = `${importedGames.length} games · ${summary.total} from here`;
+  if (hasDatabasePositionStats && !importedGames.length) el('importInfo').textContent = `local DB search · ${databasePositionCollectionCount} collections · ${summary.total} from here`;
+  else el('importInfo').textContent = `${importedGames.length} games · ${summary.total} from here`;
   if (!stats.length) { body.innerHTML = '<tr><td colspan="3" class="small">no games reached this position</td></tr>'; return; }
   body.innerHTML = stats.map((stat) => {
     const pct = (n: number) => (stat.count ? (n / stat.count) * 100 : 0).toFixed(0);
@@ -846,16 +997,90 @@ function renderOpening() {
   }).join('');
 }
 
+function setImportedPgn(raw: string, messagePrefix = 'imported'): number {
+  const games = parsePgnGames(raw).map((game) => ({ tree: game.tree, result: game.result }));
+  importedGames = games;
+  importedPositionIndex = buildOpeningPositionIndex(games);
+  databasePositionStats = [];
+  databasePositionKey = '';
+  databasePositionCollectionCount = 0;
+  bookCache.clear();
+  el('importInfo').textContent = `${messagePrefix} ${games.length} games`;
+  renderOpening();
+  renderLines(); // refresh the legend so the Book key appears
+  setShapes(bestShapes());
+  return games.length;
+}
+
+function selectedPgnCollectionId(): string {
+  return selectEl('pgnDbSelect').value;
+}
+
+function renderPgnDatabaseCollections(selected = activePgnCollectionId): void {
+  const select = selectEl('pgnDbSelect');
+  if (!pgnDatabaseAvailable()) {
+    select.innerHTML = '<option value="">IndexedDB unavailable</option>';
+    select.disabled = true;
+    el('savePgnDb').toggleAttribute('disabled', true);
+    el('loadPgnDb').toggleAttribute('disabled', true);
+    el('deletePgnDb').toggleAttribute('disabled', true);
+    el('renamePgnDb').toggleAttribute('disabled', true);
+    el('duplicatePgnDb').toggleAttribute('disabled', true);
+    el('exportPgnDbCollection').toggleAttribute('disabled', true);
+    el('exportPgnDb').toggleAttribute('disabled', true);
+    el('importPgnDb').toggleAttribute('disabled', true);
+    el('searchPgnDbPosition').toggleAttribute('disabled', true);
+    el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.';
+    return;
+  }
+  select.disabled = false;
+  el('savePgnDb').toggleAttribute('disabled', false);
+  el('exportPgnDb').toggleAttribute('disabled', false);
+  el('importPgnDb').toggleAttribute('disabled', false);
+  el('searchPgnDbPosition').toggleAttribute('disabled', false);
+  const current = pgnCollections.some((entry) => entry.id === selected) ? selected : '';
+  select.innerHTML = ['<option value="">new collection</option>', ...pgnCollections.map((entry) => `<option value="${htmlEscape(entry.id)}"${entry.id === current ? ' selected' : ''}>${htmlEscape(entry.name)} (${entry.gameCount})</option>`)].join('');
+  el('loadPgnDb').toggleAttribute('disabled', !current);
+  el('deletePgnDb').toggleAttribute('disabled', !current);
+  el('renamePgnDb').toggleAttribute('disabled', !current);
+  el('duplicatePgnDb').toggleAttribute('disabled', !current);
+  el('exportPgnDbCollection').toggleAttribute('disabled', !current);
+  if (current) {
+    const summary = pgnCollections.find((entry) => entry.id === current)!;
+    inputEl('pgnDbName').value = summary.name;
+    el('pgnDbInfo').textContent = formatPgnCollectionSummary(summary);
+  } else {
+    el('pgnDbInfo').textContent = pgnCollections.length ? `${pgnCollections.length} saved PGN collections` : 'No saved PGN collections yet.';
+  }
+}
+
+async function refreshPgnDatabaseCollections(selected = activePgnCollectionId): Promise<void> {
+  if (!pgnDatabaseAvailable()) { renderPgnDatabaseCollections(''); return; }
+  try {
+    pgnCollections = await listPgnCollections();
+    activePgnCollectionId = pgnCollections.some((entry) => entry.id === selected) ? selected : '';
+    renderPgnDatabaseCollections(activePgnCollectionId);
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Local PGN database failed: ${(error as Error).message}`;
+  }
+}
+
+function suggestPgnDatabaseName(): void {
+  if (inputEl('pgnDbName').value.trim()) return;
+  inputEl('pgnDbName').value = defaultPgnCollectionName(lastImportSource, lastImportUsername);
+}
+
 function importGames() {
   const raw = inputEl('importGamesInput').value.trim();
   if (!raw) { el('importInfo').textContent = 'paste or fetch PGN first'; return; }
   try {
-    importedGames = parsePgnGames(raw).map((game) => ({ tree: game.tree, result: game.result }));
-    bookCache.clear();
-    el('importInfo').textContent = `imported ${importedGames.length} games`;
-    renderOpening();
-    renderLines(); // refresh the legend so the Book key appears
-    setShapes(bestShapes());
+    lastImportSource = 'manual';
+    lastImportUsername = '';
+    lastImportColor = '';
+    activePgnCollectionId = '';
+    setImportedPgn(raw);
+    suggestPgnDatabaseName();
+    renderPgnDatabaseCollections('');
   } catch (error) {
     el('importInfo').textContent = `import failed: ${(error as Error).message}`;
   }
@@ -872,7 +1097,13 @@ async function fetchGames() {
     const pgn = await fetchGameHistoryPgn(site, username, opts, fetch);
     inputEl('importGamesInput').value = pgn;
     if (!pgn.trim()) { el('importInfo').textContent = 'no games found'; return; }
-    importGames();
+    lastImportSource = site;
+    lastImportUsername = username;
+    lastImportColor = opts.color;
+    activePgnCollectionId = '';
+    inputEl('pgnDbName').value = defaultPgnCollectionName(site, username);
+    setImportedPgn(pgn, `fetched ${username}:`);
+    renderPgnDatabaseCollections('');
   } catch (error) {
     // A network/CORS failure surfaces as a TypeError with no status.
     const message = (error as Error).message || 'fetch failed';
@@ -882,20 +1113,206 @@ async function fetchGames() {
   }
 }
 
-function downloadPgn() {
-  const pgn = inputEl('importGamesInput').value;
-  if (!pgn.trim()) { el('importInfo').textContent = 'nothing to download'; return; }
-  const name = (inputEl('importUser').value.trim() || 'games').replace(/[^\w.-]+/g, '_');
-  const blob = new Blob([pgn], { type: 'application/x-chess-pgn' });
+function safeFilename(name: string, fallback = 'games'): string {
+  return (name.trim() || fallback).replace(/[^\w.-]+/g, '_').slice(0, 80) || fallback;
+}
+
+function downloadTextFile(filename: string, content: string, type: string): void {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `${name}.pgn`;
+  anchor.download = filename;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadPgn() {
+  const pgn = inputEl('importGamesInput').value;
+  if (!pgn.trim()) { el('importInfo').textContent = 'nothing to download'; return; }
+  const name = safeFilename(inputEl('importUser').value.trim() || inputEl('pgnDbName').value.trim() || 'games');
+  downloadTextFile(`${name}.pgn`, pgn, 'application/x-chess-pgn');
   el('importInfo').textContent = `downloaded ${name}.pgn`;
+}
+
+async function saveCurrentPgnCollection(): Promise<void> {
+  const raw = inputEl('importGamesInput').value.trim();
+  if (!raw) { el('pgnDbInfo').textContent = 'Paste, fetch, or load PGN before saving to the local database.'; return; }
+  let gameCount = 0;
+  try {
+    // Always parse the textarea at save time: users can edit PGN after an
+    // import/load, and the persisted metadata must describe the saved text.
+    gameCount = setImportedPgn(raw);
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Cannot save invalid PGN: ${(error as Error).message}`;
+    return;
+  }
+  el('savePgnDb').toggleAttribute('disabled', true);
+  try {
+    const record = await savePgnCollection({
+      id: selectedPgnCollectionId() || activePgnCollectionId || undefined,
+      name: inputEl('pgnDbName').value || defaultPgnCollectionName(lastImportSource, lastImportUsername),
+      pgn: raw,
+      gameCount,
+      source: lastImportSource,
+      username: lastImportUsername,
+      color: lastImportColor,
+      positionIndex: importedPositionIndex ?? undefined,
+      indexedPositionCount: importedPositionIndex ? Object.keys(importedPositionIndex).length : 0,
+    });
+    activePgnCollectionId = record.id;
+    inputEl('pgnDbName').value = record.name;
+    await refreshPgnDatabaseCollections(record.id);
+    el('pgnDbInfo').textContent = `Saved “${record.name}” (${record.gameCount} games) to local IndexedDB.`;
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Save failed: ${(error as Error).message}`;
+  } finally {
+    el('savePgnDb').toggleAttribute('disabled', false);
+  }
+}
+
+async function loadSelectedPgnCollection(): Promise<void> {
+  const id = selectedPgnCollectionId();
+  if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to load.'; return; }
+  try {
+    const record = await loadPgnCollection(id);
+    if (!record) { el('pgnDbInfo').textContent = 'Saved PGN collection not found.'; await refreshPgnDatabaseCollections(''); return; }
+    activePgnCollectionId = record.id;
+    lastImportSource = record.source;
+    lastImportUsername = record.username ?? '';
+    lastImportColor = record.color ?? '';
+    inputEl('pgnDbName').value = record.name;
+    inputEl('importGamesInput').value = record.pgn;
+    setImportedPgn(record.pgn, `loaded “${record.name}”:`);
+    if (!record.positionIndex && importedPositionIndex) {
+      await updatePgnCollectionPositionIndex(record.id, importedPositionIndex);
+      await refreshPgnDatabaseCollections(record.id);
+      el('pgnDbInfo').textContent = `Loaded and indexed “${record.name}” (${record.gameCount} games).`;
+    } else {
+      renderPgnDatabaseCollections(record.id);
+    }
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Load failed: ${(error as Error).message}`;
+  }
+}
+
+async function renameSelectedPgnCollection(): Promise<void> {
+  const id = selectedPgnCollectionId();
+  if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to rename.'; return; }
+  try {
+    const record = await renamePgnCollection(id, inputEl('pgnDbName').value);
+    inputEl('pgnDbName').value = record.name;
+    await refreshPgnDatabaseCollections(record.id);
+    el('pgnDbInfo').textContent = `Renamed collection to “${record.name}”.`;
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Rename failed: ${(error as Error).message}`;
+  }
+}
+
+async function duplicateSelectedPgnCollection(): Promise<void> {
+  const id = selectedPgnCollectionId();
+  if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to duplicate.'; return; }
+  const summary = pgnCollections.find((entry) => entry.id === id);
+  const requestedName = inputEl('pgnDbName').value.trim();
+  const duplicateName = requestedName && requestedName !== summary?.name ? requestedName : `${summary?.name ?? 'PGN collection'} copy`;
+  try {
+    const record = await duplicatePgnCollection(id, duplicateName);
+    activePgnCollectionId = record.id;
+    inputEl('pgnDbName').value = record.name;
+    await refreshPgnDatabaseCollections(record.id);
+    el('pgnDbInfo').textContent = `Duplicated “${summary?.name ?? 'collection'}” as “${record.name}”.`;
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Duplicate failed: ${(error as Error).message}`;
+  }
+}
+
+async function exportSelectedPgnCollection(): Promise<void> {
+  const id = selectedPgnCollectionId();
+  if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to export.'; return; }
+  try {
+    const record = await loadPgnCollection(id);
+    if (!record) { el('pgnDbInfo').textContent = 'Saved PGN collection not found.'; await refreshPgnDatabaseCollections(''); return; }
+    const filename = `${safeFilename(record.name, 'collection')}.pgn`;
+    downloadTextFile(filename, record.pgn, 'application/x-chess-pgn');
+    el('pgnDbInfo').textContent = `Exported “${record.name}” as ${filename}.`;
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Export failed: ${(error as Error).message}`;
+  }
+}
+
+async function exportPgnDatabase(): Promise<void> {
+  if (!pgnDatabaseAvailable()) { el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.'; return; }
+  try {
+    const backup = await exportPgnDatabaseBackup();
+    const filename = pgnDatabaseBackupFilename(new Date(backup.exportedAt));
+    downloadTextFile(filename, JSON.stringify(backup, null, 2), 'application/json');
+    el('pgnDbInfo').textContent = `Exported ${backup.collections.length} PGN collections as ${filename}.`;
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Database export failed: ${(error as Error).message}`;
+  }
+}
+
+async function importPgnDatabaseFile(file: File | undefined): Promise<void> {
+  if (!file) return;
+  try {
+    const backup = JSON.parse(await file.text()) as unknown;
+    const count = await importPgnDatabaseBackup(backup);
+    await refreshPgnDatabaseCollections(activePgnCollectionId);
+    el('pgnDbInfo').textContent = `Imported ${count} PGN collections from ${file.name}.`;
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Database import failed: ${(error as Error).message}`;
+  } finally {
+    inputEl('importPgnDbFile').value = '';
+  }
+}
+
+async function searchCurrentPositionInPgnDatabase(): Promise<void> {
+  if (!pgnDatabaseAvailable()) { el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.'; return; }
+  el('searchPgnDbPosition').toggleAttribute('disabled', true);
+  try {
+    const results = await searchPgnCollectionsByPosition(tree.current.fen);
+    databasePositionStats = mergeOpeningMoveStats(results.map((result) => result.stats));
+    databasePositionKey = results.length ? positionKey(tree.current.fen) : '';
+    databasePositionCollectionCount = results.length;
+    if (results.length) {
+      importedGames = [];
+      importedPositionIndex = null;
+      bookCache.clear();
+      const summary = openingSummary(databasePositionStats);
+      const names = results.slice(0, 3).map((result) => result.summary.name).join(', ');
+      const extra = results.length > 3 ? `, +${results.length - 3} more` : '';
+      el('pgnDbInfo').textContent = `Found ${summary.total} games from this position in ${results.length} local collections: ${names}${extra}.`;
+    } else {
+      databasePositionStats = [];
+      databasePositionKey = '';
+      databasePositionCollectionCount = 0;
+      el('pgnDbInfo').textContent = 'No indexed local PGN collections reached this position.';
+    }
+    renderOpening();
+    renderLines();
+    setShapes(bestShapes());
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Position search failed: ${(error as Error).message}`;
+  } finally {
+    el('searchPgnDbPosition').toggleAttribute('disabled', false);
+  }
+}
+
+async function deleteSelectedPgnCollection(): Promise<void> {
+  const id = selectedPgnCollectionId();
+  if (!id) return;
+  const summary = pgnCollections.find((entry) => entry.id === id);
+  if (summary && !window.confirm(`Delete local PGN collection “${summary.name}”?`)) return;
+  try {
+    await deletePgnCollection(id);
+    if (activePgnCollectionId === id) activePgnCollectionId = '';
+    await refreshPgnDatabaseCollections('');
+    el('pgnDbInfo').textContent = summary ? `Deleted “${summary.name}”.` : 'Deleted PGN collection.';
+  } catch (error) {
+    el('pgnDbInfo').textContent = `Delete failed: ${(error as Error).message}`;
+  }
 }
 
 function renderAll() {
@@ -1085,6 +1502,7 @@ function wireEvents() {
     } else if (target.classList.contains('row-var')) {
       if (engineRows[i].family === 'lc0' && target.value === 'bt4') {
         // One-time gate before the ~353MB lazy load.
+        if (!bt4SelectableSync()) { el('message').textContent = bt4UnavailableText(); target.value = engineRows[i].variant; return; }
         if (!window.confirm(`${bt4LoadWarning()}\n\nUse Lc0 BT4?`)) { target.value = engineRows[i].variant; return; }
       }
       engineRows[i].variant = target.value;
@@ -1096,6 +1514,15 @@ function wireEvents() {
     lineCache.delete(tree.current.fen);
     void analyzeCurrent();
   });
+  el('engineProfileSelect').addEventListener('change', () => {
+    const name = selectEl('engineProfileSelect').value;
+    const profile = engineProfiles.find((entry) => entry.name === name);
+    if (profile) applyEngineProfile(profile);
+    else { storageRemove(LAST_ENGINE_PROFILE_STORAGE_KEY); inputEl('engineProfileName').value = ''; }
+  });
+  el('saveEngineProfile').addEventListener('click', saveCurrentEngineProfile);
+  el('deleteEngineProfile').addEventListener('click', deleteSelectedEngineProfile);
+  inputEl('engineProfileName').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') saveCurrentEngineProfile(); });
   el('engineList').addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest('.row-rm') as HTMLElement | null;
     if (!button) return;
@@ -1136,6 +1563,28 @@ function wireEvents() {
   el('importGames').addEventListener('click', importGames);
   el('fetchGames').addEventListener('click', () => { void fetchGames(); });
   el('downloadPgn').addEventListener('click', downloadPgn);
+  el('pgnDbSelect').addEventListener('change', () => { activePgnCollectionId = selectedPgnCollectionId(); renderPgnDatabaseCollections(activePgnCollectionId); });
+  el('savePgnDb').addEventListener('click', () => { void saveCurrentPgnCollection(); });
+  el('loadPgnDb').addEventListener('click', () => { void loadSelectedPgnCollection(); });
+  el('deletePgnDb').addEventListener('click', () => { void deleteSelectedPgnCollection(); });
+  el('renamePgnDb').addEventListener('click', () => { void renameSelectedPgnCollection(); });
+  el('duplicatePgnDb').addEventListener('click', () => { void duplicateSelectedPgnCollection(); });
+  el('exportPgnDbCollection').addEventListener('click', () => { void exportSelectedPgnCollection(); });
+  el('exportPgnDb').addEventListener('click', () => { void exportPgnDatabase(); });
+  el('importPgnDb').addEventListener('click', () => inputEl('importPgnDbFile').click());
+  el('importPgnDbFile').addEventListener('change', () => { void importPgnDatabaseFile(inputEl('importPgnDbFile').files?.[0]); });
+  el('searchPgnDbPosition').addEventListener('click', () => { void searchCurrentPositionInPgnDatabase(); });
+  inputEl('pgnDbName').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') void saveCurrentPgnCollection(); });
+  inputEl('importGamesInput').addEventListener('input', () => {
+    activePgnCollectionId = '';
+    lastImportSource = 'manual';
+    lastImportUsername = '';
+    lastImportColor = '';
+    databasePositionStats = [];
+    databasePositionKey = '';
+    databasePositionCollectionCount = 0;
+    renderPgnDatabaseCollections('');
+  });
   inputEl('importUser').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') void fetchGames(); });
   el('opening').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest('tr[data-uci]');
@@ -1182,7 +1631,7 @@ function disposeRuntimeResources(): void {
   searcher = null;
 }
 
-async function loadLc0Backend(): Promise<void> {
+async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
   const runtime = selectedLc0Runtime();
   el('analyze').toggleAttribute('disabled', true);
   selectEl('lc0RuntimeSelect').disabled = true;
@@ -1193,12 +1642,13 @@ async function loadLc0Backend(): Promise<void> {
     el('analyze').toggleAttribute('disabled', false);
     selectEl('lc0RuntimeSelect').disabled = false;
     el('message').textContent = 'Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.';
-    if (inputEl('autoAnalyze').checked) void analyzeCurrent();
+    if (runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
+    return true;
   } catch (workerError) {
     if (runtime !== 'onnx') {
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(workerError as Error).message}`;
-      return;
+      return false;
     }
     // Fall back to a main-thread evaluator (analysis will block the UI, but works).
     console.warn('LC0 worker init failed; falling back to the main thread.', workerError);
@@ -1211,19 +1661,22 @@ async function loadLc0Backend(): Promise<void> {
       el('analyze').toggleAttribute('disabled', false);
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
-      if (inputEl('autoAnalyze').checked) void analyzeCurrent();
+      if (runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
+      return true;
     } catch (error) {
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `Model load failed: ${(error as Error).message}`;
+      return false;
     }
   }
 }
 
-async function reloadLc0Backend(): Promise<void> {
+async function reloadLc0Backend(forceAnalyzeAfterLoad = false): Promise<void> {
   lineCache.clear();
   disposeRuntimeResources();
   renderRecklessRuntimeInfo();
-  await loadLc0Backend();
+  const loaded = await loadLc0Backend(!forceAnalyzeAfterLoad);
+  if (loaded && forceAnalyzeAfterLoad) void analyzeCurrent();
 }
 
 async function init() {
@@ -1231,11 +1684,23 @@ async function init() {
   window.addEventListener('pagehide', (event) => {
     if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
   });
+  engineProfiles = loadEngineProfiles();
   selectEl('lc0RuntimeSelect').value = initialLc0Runtime();
+  const storedLastProfile = engineProfiles.find((profile) => profile.name === storageGet(LAST_ENGINE_PROFILE_STORAGE_KEY));
+  // Do not silently restore saved BT4 rows on page load: selecting that profile
+  // later goes through the explicit support check and large-download prompt.
+  const lastProfile = storedLastProfile && !profileHasBt4(storedLastProfile.rows) ? storedLastProfile : undefined;
+  if (lastProfile) {
+    engineRows = profileRowsForUse(lastProfile.rows, false);
+    inputEl('multiPvInput').value = String(lastProfile.multiPv);
+    selectEl('lc0RuntimeSelect').value = lastProfile.lc0Runtime;
+  }
+  renderEngineProfiles(lastProfile?.name ?? '');
   renderAll();
   renderEngineList();
   renderRecklessRuntimeInfo();
   wireEvents();
+  void refreshPgnDatabaseCollections();
   void refreshBt4Availability();
   void refreshTinyHybridManifestStatus();
   await loadLc0Backend();
