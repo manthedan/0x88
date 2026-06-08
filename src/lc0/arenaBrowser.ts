@@ -243,7 +243,13 @@ async function tinyEvaluator(variant: string): Promise<Evaluator> {
       meta: TINY_META_URL,
       runtime,
       manifestUrl: TINY_HYBRID_MANIFEST_URL,
-    }, { params, runtime, manifestUrl: TINY_HYBRID_MANIFEST_URL, fallback });
+    }, {
+      params,
+      runtime,
+      manifestUrl: TINY_HYBRID_MANIFEST_URL,
+      fallback,
+      audit: { surface: 'arena', searchBudget: 'visits=seat strength' },
+    });
     console.info('[lc0-arena] loaded Tiny Leela evaluator', {
       requestedRuntime: loaded.requestedRuntime,
       resolvedRuntime: loaded.resolvedRuntime,

@@ -1,6 +1,7 @@
 import { SquareFormerEvaluator, type SquareFormerMeta } from './squareformerEvaluator.ts';
 import { SquareformerTvmHybridEvaluator } from './squareformerTvmHybridEvaluator.ts';
 import type { Evaluator } from './evaluator.ts';
+import { publishBrowserRuntimeAudit, type BrowserRuntimeAuditDetail } from './runtimeAudit.ts';
 import {
   BT4_ANNEAL_MUON_BEST_MODEL_ID,
   normalizeRuntimeModelKey,
@@ -71,6 +72,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
     kernelBase?: string | null;
     fixtureRoot?: string | null;
     fallback?: boolean;
+    audit?: Partial<BrowserRuntimeAuditDetail>;
   } = {},
 ): Promise<BrowserRuntimeEvaluatorResult> {
   const params = options.params;
@@ -83,6 +85,18 @@ export async function createBrowserSquareformerRuntimeEvaluator(
   const kernelBase = options.kernelBase ?? spec.kernelBase ?? params?.get('kernelBase') ?? undefined;
   const fixtureRoot = options.fixtureRoot ?? spec.fixtureRoot ?? params?.get('fixtureRoot') ?? undefined;
   const customRequested = shouldAttemptCustomRuntime(modelId, requestedRuntime);
+  const auditBase = {
+    source: 'createBrowserSquareformerRuntimeEvaluator',
+    family: 'tiny',
+    engineLabel: spec.label,
+    modelId,
+    modelUrl: spec.onnx,
+    metaUrl: spec.meta,
+    requestedRuntime,
+    runtimeConfigId: entry?.runtimeConfigId,
+    manifestUrl,
+    ...options.audit,
+  };
 
   if (requestedRuntime === 'custom-webgpu' && !entry && !manifestUrl) {
     throw new Error(`No promoted custom WebGPU runtime is registered for ${modelId}`);
@@ -90,37 +104,46 @@ export async function createBrowserSquareformerRuntimeEvaluator(
 
   if (customRequested) {
     try {
-      return {
-        evaluator: await createHybridEvaluator(meta, manifestUrl, kernelBase, fixtureRoot),
+      const evaluator = await createHybridEvaluator(meta, manifestUrl, kernelBase, fixtureRoot);
+      const result = {
+        evaluator,
         meta,
         modelId,
         requestedRuntime,
-        resolvedRuntime: 'custom-webgpu',
+        resolvedRuntime: 'custom-webgpu' as const,
         runtimeConfigId: entry?.runtimeConfigId,
         manifestUrl,
       };
+      publishBrowserRuntimeAudit({ ...auditBase, resolvedRuntime: result.resolvedRuntime });
+      return result;
     } catch (err) {
       if (!fallback) throw err;
       const fallbackReason = err instanceof Error ? err.message : String(err);
       console.warn('Custom WebGPU runtime unavailable; falling back to ORT SquareFormer.', { label: spec.label ?? spec.id, modelId, fallbackReason });
-      return {
-        evaluator: await SquareFormerEvaluator.create(spec.onnx, meta),
+      const evaluator = await SquareFormerEvaluator.create(spec.onnx, meta);
+      const result = {
+        evaluator,
         meta,
         modelId,
         requestedRuntime,
-        resolvedRuntime: 'custom-webgpu-fallback-ort',
+        resolvedRuntime: 'custom-webgpu-fallback-ort' as const,
         runtimeConfigId: entry?.runtimeConfigId,
         manifestUrl,
         fallbackReason,
       };
+      publishBrowserRuntimeAudit({ ...auditBase, resolvedRuntime: result.resolvedRuntime, fallbackReason });
+      return result;
     }
   }
 
-  return {
-    evaluator: await SquareFormerEvaluator.create(spec.onnx, meta),
+  const evaluator = await SquareFormerEvaluator.create(spec.onnx, meta);
+  const result = {
+    evaluator,
     meta,
     modelId,
     requestedRuntime,
-    resolvedRuntime: 'ort',
+    resolvedRuntime: 'ort' as const,
   };
+  publishBrowserRuntimeAudit({ ...auditBase, resolvedRuntime: result.resolvedRuntime });
+  return result;
 }

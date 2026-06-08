@@ -309,7 +309,12 @@ async function tinyEvaluator(variant: string): Promise<Evaluator> {
       meta: TINY_META_URL,
       runtime,
       manifestUrl: TINY_HYBRID_MANIFEST_URL,
-    }, { runtime, manifestUrl: TINY_HYBRID_MANIFEST_URL, fallback });
+    }, {
+      runtime,
+      manifestUrl: TINY_HYBRID_MANIFEST_URL,
+      fallback,
+      audit: { surface: 'analysis', searchBudget: `multipv=${multiPv()}` },
+    });
     console.info('[lc0-analysis] loaded Tiny Leela evaluator', {
       requestedRuntime: loaded.requestedRuntime,
       resolvedRuntime: loaded.resolvedRuntime,
