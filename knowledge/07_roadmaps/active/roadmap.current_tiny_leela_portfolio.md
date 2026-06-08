@@ -72,6 +72,7 @@ Inference optimization and deployment performance lane:
 - Maintain matrix coverage for batch size, ORT threads, legal bucket size, precision, cold/warm startup, evals/sec inside PUCT, and fixed-time strength.
 - Feed latency, params, FLOPs/MACs, bytes, cache behavior, target-specific export cards, and quantized-vs-FP drift into promotion gates before deployment.
 - Make [[Design - Candidate frontier cards]] the standard eval output for serious candidates: searchless proxy, calibrated protocol Elo at v16/v64/v128, fixed-time strength, evals/sec, params, FLOPs/MACs, bytes, arena/fixed-suite blunder rates, and value calibration.
+- Use `docs/browser_runtime_configuration_and_benchmark_schema.md` as the shared runtime artifact contract for LC0, Tiny Leela/SquareFormer, larger LC0 packs, and future UCI/piece-odds variants so runtime recipes and model-quality frontier cards remain comparable but distinct.
 - Prefer Mac mini for bounded CPU inference benchmarking and PUCT throughput sweeps after local correctness gates pass.
 
 Workflow delegation lane:

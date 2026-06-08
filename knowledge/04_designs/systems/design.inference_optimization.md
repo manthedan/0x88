@@ -37,6 +37,8 @@ Optimize and measure the whole inference path:
 
 ## Required benchmark matrix
 
+Use `docs/browser_runtime_configuration_and_benchmark_schema.md` as the canonical cross-engine artifact schema for Runtime Configuration identity, benchmark protocols, Pack Footprint, Execution Footprint, cacheFootprint, Drift Checks, and promotion assessments. Candidate frontier cards remain the model-quality/product promotion report; runtime benchmark artifacts are the execution evidence that feeds those cards.
+
 Maintain a repeatable matrix for every serious deploy candidate:
 
 ```text

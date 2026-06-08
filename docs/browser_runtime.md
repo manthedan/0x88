@@ -1,5 +1,7 @@
 # Browser Runtime Plan
 
+For the canonical cross-engine Runtime Configuration, benchmark artifact, and footprint schemas, see [Browser Runtime Configuration and Benchmark Schema](browser_runtime_configuration_and_benchmark_schema.md).
+
 The shared engine substrate is backend-neutral:
 
 1. chess rules and move encoding live in `src/chess/`;
