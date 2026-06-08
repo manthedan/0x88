@@ -1,0 +1,99 @@
+{
+  "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
+  "generatedAt": "2026-06-05T19:00:30.034Z",
+  "distributionPolicy": "docs/engine_artifact_distribution.md",
+  "engine": "plentychess",
+  "flavor": "emscripten-single-thread",
+  "status": "experimental",
+  "upstream": {
+    "repo": "https://github.com/Yoshie2000/PlentyChess.git",
+    "commit": "58d8ba2505ae2b49f48dd410d214a457d15c12c6",
+    "version": "7.0.66",
+    "license": "GPL-3.0"
+  },
+  "build": {
+    "script": "scripts/build_plentychess_emscripten.mjs",
+    "command": "npm run plentychess:build-emscripten",
+    "patches": [
+      "patches/plentychess-emscripten.patch"
+    ],
+    "toolchain": "emscripten/emsdk@sha256:9eed2e47b4206928b22f99d2917013ad5462d777bb24cb546a652729896badd8; emcc 6.0.0 (afa15e0c56d1292e073c2c91bafc1d5e0cdf0dd3)"
+  },
+  "artifacts": [
+    {
+      "path": "public/plentychess/plentychess-emscripten.js",
+      "bytes": 70886,
+      "sha256": "8f4762d5df9efd36b6793fad2cf65a06f3ac39eebe4e76682920912b7858f20e",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 20021,
+          "ratio": 0.2824
+        },
+        "brotli": {
+          "bytes": 17743,
+          "ratio": 0.2503
+        }
+      }
+    },
+    {
+      "path": "public/plentychess/plentychess-emscripten.wasm",
+      "bytes": 389983,
+      "sha256": "39fc84dec6bcc703727ac4bf58f02d03e260c17c190b4dc25378491ff8046ab3",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 150243,
+          "ratio": 0.3853
+        },
+        "brotli": {
+          "bytes": 122064,
+          "ratio": 0.313
+        }
+      }
+    },
+    {
+      "path": "public/plentychess/plentychess-emscripten.data",
+      "bytes": 63023936,
+      "sha256": "691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 34010279,
+          "ratio": 0.5396
+        },
+        "brotli": {
+          "bytes": 32447720,
+          "ratio": 0.5148
+        }
+      }
+    }
+  ],
+  "assets": [
+    {
+      "name": "0134-2r24-s0.bin",
+      "sourceUrl": "https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/0134-2r24-s0.bin",
+      "rawSha256": "550a0b664b68113fd228f501524b25e0cea1be500a608bb0f26d42a6255c8061",
+      "processedPath": "/processed.bin",
+      "processedSha256": "691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4",
+      "processingCommand": "tools/process_net false",
+      "licenseNote": "Yoshie2000/PlentyNetworks is licensed under GPL-3.0; preserve GPL-3.0 notices with the network asset.",
+      "embeddedIn": "public/plentychess/plentychess-emscripten.data"
+    }
+  ],
+  "totals": {
+    "bytes": 63484805,
+    "gzipBytes": 34180543,
+    "brotliBytes": 32587527,
+    "gzipRatio": 0.5384,
+    "brotliRatio": 0.5133
+  },
+  "sourceArchive": {
+    "required": true,
+    "path": "public/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz",
+    "bytes": 33590971,
+    "sha256": "822a26f9c33b392418502e46cf5ffa46dbb60468bee66ca8145bc09b055f2d23",
+    "url": "/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz",
+    "note": "Source archive recorded for public distribution."
+  }
+}
