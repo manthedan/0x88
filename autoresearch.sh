@@ -43,7 +43,10 @@ if [[ "$CLEAN_BROWSER_HARNESS" == "1" ]]; then
   # the measured metric still covers only the fixed-suite workload below.
   pkill -f '/node_modules/agent-browser/bin/agent-browser-darwin-arm64' >/dev/null 2>&1 || true
   pkill -f '/\.agent-browser/browsers/.*/Google Chrome for Testing' >/dev/null 2>&1 || true
-  (lsof -tiTCP:5179 -sTCP:LISTEN 2>/dev/null; lsof -tiTCP:5180 -sTCP:LISTEN 2>/dev/null) | sort -u | xargs -r kill >/dev/null 2>&1 || true
+  vite_pids="$( { lsof -tiTCP:5179 -sTCP:LISTEN 2>/dev/null; lsof -tiTCP:5180 -sTCP:LISTEN 2>/dev/null; } | sort -u || true )"
+  if [[ -n "$vite_pids" ]]; then
+    kill $vite_pids >/dev/null 2>&1 || true
+  fi
   sleep "$CLEAN_BROWSER_WAIT_SECONDS"
 fi
 
