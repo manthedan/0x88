@@ -801,6 +801,7 @@ const KERNEL_PROBE_REQUESTED = MAPPED_POLICY_PROBE_REQUESTED || WGSL_HEADS_PROBE
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
 const HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED = params.get('hybridSearchFixtureParity') === '1' || params.get('searchFixtureParity') === '1';
+const HYBRID_GPU_LEGAL_PARITY_REQUESTED = params.get('gpuLegalParity') === '1' || params.get('legalTopKParity') === '1';
 const HYBRID_SEARCH_BENCH_REQUESTED = params.get('hybridSearchBench') === '1' || params.get('hybridSearchBenchmark') === '1';
 const HYBRID_ENCODER_PROFILE_REQUESTED = params.get('hybridEncoderProfile') === '1' || params.get('encoderProfile') === '1' || params.get('hybridProfile') === '1';
 const HYBRID_INPUT_BENCH_REQUESTED = params.get('hybridInputBench') === '1' || params.get('hybridInputBenchmark') === '1' || params.get('wasmInputBench') === '1';
@@ -817,7 +818,7 @@ const HYBRID_LEGAL_PRIORS_BACKEND_RAW = HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'g
 const HYBRID_LEGAL_PRIORS_BACKEND = HYBRID_LEGAL_PRIORS_BACKEND_RAW === 'gpu' && !HYBRID_WGSL_HEADS_REQUESTED ? 'js' : HYBRID_LEGAL_PRIORS_BACKEND_RAW;
 const HYBRID_ENCODER_KERNEL_PARAM = params.get('encoderKernel') ?? params.get('hybridEncoderKernel') ?? params.get('encoderKernelVariant');
 const HYBRID_ENCODER_KERNEL_VARIANT = HYBRID_ENCODER_KERNEL_PARAM === 'tvm-packed-f16' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-outproj' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-smolgen-project' ? HYBRID_ENCODER_KERNEL_PARAM : 'hand';
-const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_LEGAL_PRIORS_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
+const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED || HYBRID_GPU_LEGAL_PARITY_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_LEGAL_PRIORS_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
@@ -1209,7 +1210,7 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
   renderStatic();
 }
 
-async function initHybridWorkerWithInputBackend(inputBackend: 'js' | 'wgsl' | 'wasm'): Promise<void> {
+async function initHybridWorkerWithOptions(options: { inputBackend?: 'js' | 'wgsl' | 'wasm'; legalPriorsBackend?: 'js' | 'wasm' | 'gpu'; encoderKernelVariant?: string; headBackend?: 'ort' | 'wgsl' } = {}): Promise<void> {
   if (!searchWorker) await initSearchWorker({ initModel: false });
   const initStarted = performance.now();
   const ready = await postWorkerRequest<{ type: 'ready'; backend: string; modelCache: string }>({
@@ -1222,17 +1223,21 @@ async function initHybridWorkerWithInputBackend(inputBackend: 'js' | 'wgsl' | 'w
     packUrl: PACK_URL,
     layers: Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10))),
     verifyShards: params.get('packVerify') !== '0',
-    headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
+    headBackend: options.headBackend ?? (HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort'),
     wgslBatchMode: HYBRID_WGSL_BATCH_MODE,
-    inputBackend,
-    legalPriorsBackend: HYBRID_LEGAL_PRIORS_BACKEND,
-    encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
+    inputBackend: options.inputBackend ?? HYBRID_INPUT_BACKEND,
+    legalPriorsBackend: options.legalPriorsBackend ?? HYBRID_LEGAL_PRIORS_BACKEND,
+    encoderKernelVariant: options.encoderKernelVariant ?? HYBRID_ENCODER_KERNEL_VARIANT,
     evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
   });
   searchWorkerInitMs = performance.now() - initStarted;
   searchWorkerReady = true;
   searchWorkerBackend = ready.backend;
   workerModelCacheStatus = ready.modelCache;
+}
+
+async function initHybridWorkerWithInputBackend(inputBackend: 'js' | 'wgsl' | 'wasm'): Promise<void> {
+  await initHybridWorkerWithOptions({ inputBackend });
 }
 
 async function evaluateWithWorker(input: Lc0EvaluatorInput): Promise<BrowserEvaluationChoice> {
@@ -3382,6 +3387,103 @@ async function fetchNativeRecords(path: string): Promise<NativeRecord[]> {
   return (await response.text()).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as NativeRecord);
 }
 
+function priorMapByUci(priors: Lc0Evaluation['legalPriors']): Map<string, Lc0Evaluation['legalPriors'][number]> {
+  return new Map(priors.map((prior) => [prior.uci, prior]));
+}
+
+async function runHybridGpuLegalParity(): Promise<void> {
+  if (!searchWorkerReady) throw new Error('GPU legal parity requires initialized LC0 worker');
+  setBusy(true, 'Running isolated WGSL GPU legal/top-k parity fixtures…');
+  el('benchResult').textContent = 'GPU_LEGAL_PARITY_RUNNING';
+  try {
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(params.get('gpuLegalParityLimit') ?? params.get('fixtureLimit') ?? '9') || 9)));
+    const topK = Math.min(64, Math.max(1, Math.floor(Number(params.get('topK') ?? params.get('legalTopK') ?? '16') || 16)));
+    const records = [
+      ...await fetchNativeRecords('/lc0/native_fen_only_blas.jsonl'),
+      ...await fetchNativeRecords('/lc0/native_history_blas.jsonl'),
+    ].slice(0, limit);
+    const inputs = records.map((native) => native.moves ? { positions: buildBoardHistoryFromMoves(native.moves, native.startFen) } : native.fen);
+    const started = performance.now();
+    await initHybridWorkerWithOptions({ headBackend: 'wgsl', inputBackend: HYBRID_INPUT_BACKEND, legalPriorsBackend: 'js', encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT });
+    const jsEvaluations: Lc0Evaluation[] = [];
+    for (let i = 0; i < inputs.length; i++) {
+      jsEvaluations.push((await evaluateWithWorker(inputs[i])).evaluation);
+      el('benchResult').textContent = `GPU_LEGAL_PARITY_JS ${i + 1}/${inputs.length}`;
+    }
+    await initHybridWorkerWithOptions({ headBackend: 'wgsl', inputBackend: HYBRID_INPUT_BACKEND, legalPriorsBackend: 'gpu', encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT });
+    const gpuEvaluations: Lc0Evaluation[] = [];
+    for (let i = 0; i < inputs.length; i++) {
+      gpuEvaluations.push((await evaluateWithWorker(inputs[i])).evaluation);
+      el('benchResult').textContent = `GPU_LEGAL_PARITY_GPU ${i + 1}/${inputs.length}`;
+    }
+    const cells = records.map((native, i) => {
+      const js = jsEvaluations[i];
+      const gpu = gpuEvaluations[i];
+      const jsMap = priorMapByUci(js.legalPriors);
+      const gpuTop = gpu.legalPriors.slice(0, topK);
+      let maxPriorAbsDiff = 0;
+      let maxLogitAbsDiff = 0;
+      let missingFromGpu = 0;
+      for (const prior of js.legalPriors) {
+        const actual = gpu.legalPriors.find((entry) => entry.uci === prior.uci);
+        if (!actual) { missingFromGpu += 1; continue; }
+        maxPriorAbsDiff = Math.max(maxPriorAbsDiff, Math.abs(actual.prior - prior.prior));
+        maxLogitAbsDiff = Math.max(maxLogitAbsDiff, Math.abs((actual.logit ?? 0) - (prior.logit ?? 0)));
+      }
+      const topKMatches = js.legalPriors.slice(0, topK).every((prior, index) => gpuTop[index]?.uci === prior.uci);
+      const topKPriorMaxAbsDiff = gpuTop.reduce((max, prior) => Math.max(max, Math.abs(prior.prior - (jsMap.get(prior.uci)?.prior ?? 0))), 0);
+      const wdlMaxAbsDiff = Math.max(...gpu.wdl.map((value, index) => Math.abs(value - js.wdl[index])));
+      return {
+        id: native.id,
+        kind: native.moves ? 'history' : 'fen',
+        jsBestMove: js.bestMove,
+        gpuBestMove: gpu.bestMove,
+        bestMoveMatches: js.bestMove === gpu.bestMove,
+        legalCount: js.legalPriors.length,
+        gpuLegalCount: gpu.legalPriors.length,
+        topK,
+        topKMatches,
+        maxPriorAbsDiff,
+        topKPriorMaxAbsDiff,
+        maxLogitAbsDiff,
+        wdlMaxAbsDiff,
+        missingFromGpu,
+        jsTop: js.legalPriors.slice(0, topK).map(({ uci, index, prior, logit }) => ({ uci, index, prior, logit })),
+        gpuTop: gpuTop.map(({ uci, index, prior, logit }) => ({ uci, index, prior, logit })),
+        jsTiming: js.timing,
+        gpuTiming: gpu.timing,
+      };
+    });
+    const result = {
+      status: 'GPU_LEGAL_PARITY_DONE',
+      backend: searchWorkerBackend,
+      inputBackend: HYBRID_INPUT_BACKEND,
+      encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
+      fixtures: cells.length,
+      topK,
+      elapsedMs: Number((performance.now() - started).toFixed(3)),
+      bestMoveMatches: cells.filter((cell) => cell.bestMoveMatches).length,
+      topKMatches: cells.filter((cell) => cell.topKMatches).length,
+      maxPriorAbsDiff: Math.max(0, ...cells.map((cell) => cell.maxPriorAbsDiff)),
+      maxTopKPriorAbsDiff: Math.max(0, ...cells.map((cell) => cell.topKPriorMaxAbsDiff)),
+      maxLogitAbsDiff: Math.max(0, ...cells.map((cell) => cell.maxLogitAbsDiff)),
+      maxWdlAbsDiff: Math.max(0, ...cells.map((cell) => cell.wdlMaxAbsDiff)),
+      maxMissingFromGpu: Math.max(0, ...cells.map((cell) => cell.missingFromGpu)),
+      fullGpuLegalReadbackBytes: 256 * 3 * 4 + 3 * 4,
+      compactTopKReadbackBytesEstimate: topK * 3 * 4 + 3 * 4,
+      cells,
+    };
+    el('benchResult').textContent = JSON.stringify(result);
+    el('message').textContent = `GPU_LEGAL_PARITY_DONE best ${result.bestMoveMatches}/${result.fixtures} · top${topK} ${result.topKMatches}/${result.fixtures}`;
+  } catch (error) {
+    el('benchResult').textContent = `GPU_LEGAL_PARITY_FAILED ${(error as Error).message}`;
+    el('message').textContent = `GPU legal parity failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function runHybridDriftFixtures() {
   if (!searchWorkerReady) throw new Error('hybrid drift requires initialized LC0 worker');
   setBusy(true, 'Running hybrid WGSL encoder + ORT heads fixture evaluations in browser…');
@@ -3814,6 +3916,10 @@ async function init() {
       : 'Ready. Drag a legal move or ask the engine to move.';
     if (HYBRID_DRIFT_REQUESTED) {
       await runHybridDriftFixtures();
+      return;
+    }
+    if (HYBRID_GPU_LEGAL_PARITY_REQUESTED) {
+      await runHybridGpuLegalParity();
       return;
     }
     if (HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED) {

@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createHash } from 'node:crypto';
 import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
@@ -43,6 +44,13 @@ Options:
   --dry-run                  Print URL and exit
   -h, --help                 Show this help
 `);
+}
+
+function sanitizeAgentBrowserSessionName(value) {
+  const safe = String(value).replace(/[^A-Za-z0-9_.-]+/g, '-');
+  if (safe.length <= 60) return safe;
+  const hash = createHash('sha1').update(safe).digest('hex').slice(0, 10);
+  return `${safe.slice(0, 49)}-${hash}`;
 }
 
 function parseList(raw, mapper = Number, label = 'list') {
@@ -130,6 +138,7 @@ function parseArgs(argv) {
   for (const [name, values] of [['visits', args.visits], ['batch-pipeline-depths', args.batchPipelineDepths]]) {
     if (values.some((value) => !Number.isFinite(value) || value <= 0)) throw new Error(`Invalid --${name}: ${values.join(',')}`);
   }
+  args.session = sanitizeAgentBrowserSessionName(args.session);
   args.batchPipelineDepths = [1, ...args.batchPipelineDepths.filter((depth) => depth !== 1)];
   return args;
 }

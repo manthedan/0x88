@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createHash } from 'node:crypto';
 import { parsePgnGames } from '../src/chess/pgn.ts';
 import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
 
@@ -15,6 +16,13 @@ function usage() {
   --legal-priors-backend NAME
                             Hybrid legal-priors backend: js, wasm, or gpu (default js; gpu requires WGSL heads)
   --out PATH                Write full JSON report to PATH\n  --summary-only            Print compact summary only\n  --base-url URL            Use existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N                  Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST               Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN       Browser automation binary (default agent-browser)\n  --session NAME            agent-browser session prefix\n  --timeout MS              Per-runtime browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --no-server               Do not auto-start Vite\n  -h, --help                Show this help\n`);
+}
+
+function sanitizeAgentBrowserSessionName(value) {
+  const safe = String(value).replace(/[^A-Za-z0-9_.-]+/g, '-');
+  if (safe.length <= 60) return safe;
+  const hash = createHash('sha1').update(safe).digest('hex').slice(0, 10);
+  return `${safe.slice(0, 49)}-${hash}`;
 }
 
 function parseArgs(argv) {
@@ -93,6 +101,7 @@ function parseArgs(argv) {
   if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel)) throw new Error(`Invalid encoderKernel: ${args.encoderKernel}`);
   if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid legalPriorsBackend: ${args.legalPriorsBackend}`);
   if (args.legalPriorsBackend === 'gpu' && args.runtimes.some((runtime) => runtime !== 'hybrid-wgsl-heads')) throw new Error('--legal-priors-backend gpu requires hybrid-wgsl-heads runtime');
+  args.session = sanitizeAgentBrowserSessionName(args.session);
   if (args.batchPipelineDepth > 1) process.stderr.write('[lc0-fixed-suite] warning: batchPipelineDepth > 1 is speculative parallel search; depth=1 is the parity-preserving arena baseline.\n');
   return args;
 }
@@ -218,7 +227,7 @@ function startServer(args) {
 }
 
 async function runOne(args, runtime, fens) {
-  const session = `${args.session}-${runtime}`;
+  const session = sanitizeAgentBrowserSessionName(`${args.session}-${runtime}`);
   const url = arenaUrl(args, runtime, fens);
   process.stderr.write(`[lc0-fixed-suite] ${runtime}: ${fens.length} positions\n`);
   try {

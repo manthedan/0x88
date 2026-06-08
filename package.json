@@ -90,6 +90,7 @@
     "lc0:browser-ort-readback-profile": "node scripts/lc0_browser_ort_readback_profile.mjs",
     "lc0:browser-readback-strategy-matrix": "node scripts/lc0_browser_readback_strategy_matrix.mjs",
     "lc0:browser-readback-depth1-b4-matrix": "node scripts/lc0_browser_readback_strategy_matrix.mjs --strategies wgsl-pipe1,wgsl-gpu-legal --input-backend wasm --encoder-kernel mixed-tvm-ffn --batch 4 --max-positions 4 --repeats 1 --wgsl-search-iters 2 --wgsl-search-warmup 1",
+    "lc0:browser-gpu-legal-parity": "node scripts/lc0_browser_gpu_legal_parity.mjs",
     "lc0:generate-tvm-wgsl": "node scripts/generate_lc0_tvm_wgsl_kernels.mjs",
     "lc0:check-tvm-wgsl": "node scripts/generate_lc0_tvm_wgsl_kernels.mjs --check",
     "reckless:build-wasi": "node scripts/build_reckless_wasi.mjs",
