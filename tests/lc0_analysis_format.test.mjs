@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { START_FEN } from '../src/chess/board.ts';
+import { parseFen, START_FEN } from '../src/chess/board.ts';
+import { legalMoves } from '../src/chess/movegen.ts';
+import { moveToUci } from '../src/chess/moveCodec.ts';
 import {
   engineBrushes,
   engineColorKey,
@@ -9,6 +11,7 @@ import {
   lc0AnalysisLines,
   qToCentipawns,
   stockfishAnalysisLines,
+  tinyPuctAnalysisLines,
 } from '../src/lc0/analysisFormat.ts';
 import { parseStockfishInfo } from '../src/lc0/stockfishEngine.ts';
 
@@ -58,6 +61,33 @@ test('lc0AnalysisLines builds MultiPV lines with SAN and root-mover score', () =
   assert.match(lines[0].pvSan, /^d4 d5 c4/);
   assert.equal(lines[0].detail, '21 visits');
   assert.match(lines[1].pvSan, /^Nf3 Nf6/);
+});
+
+function startMove(uci) {
+  const move = legalMoves(parseFen(START_FEN)).find((candidate) => moveToUci(candidate) === uci);
+  assert.ok(move, `${uci} should be legal in the start position`);
+  return move;
+}
+
+test('tinyPuctAnalysisLines builds Tiny Leela MultiPV lines with SAN and root-mover score', () => {
+  const d4 = startMove('d2d4');
+  const nf3 = startMove('g1f3');
+  const result = {
+    value: 0.1,
+    visits: 40,
+    policy: [
+      { move: d4, visits: 24, q: 0.18 },
+      { move: nf3, visits: 10, q: 0.03 },
+    ],
+    multiPvLines: [[{ move: d4, visits: 24, q: 0.18 }], [{ move: nf3, visits: 10, q: 0.03 }]],
+  };
+  const lines = tinyPuctAnalysisLines(result, START_FEN, 'Tiny Leela · auto');
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].engine, 'Tiny Leela · auto');
+  assert.equal(lines[0].detail, '24 visits');
+  assert.ok(lines[0].scoreCp > lines[1].scoreCp);
+  assert.match(lines[0].pvSan, /^d4/);
+  assert.match(lines[1].pvSan, /^Nf3/);
 });
 
 test('engineColorKey assigns stable per-engine color families', () => {
