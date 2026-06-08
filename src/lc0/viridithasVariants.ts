@@ -29,6 +29,18 @@ export const VIRIDITHAS_VARIANTS: readonly ViridithasVariant[] = [
   VIRIDITHAS_DEFAULT_VARIANT,
 ];
 
+function sameOriginViridithasAsset(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const base = typeof location !== 'undefined' ? location.origin : 'http://localhost';
+    const url = new URL(raw, base);
+    if (url.origin !== base || !url.pathname.startsWith('/viridithas/')) return undefined;
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return undefined;
+  }
+}
+
 export function normalizeViridithasVariant(raw: string | null | undefined): ViridithasVariant['key'] {
   const value = String(raw ?? '').toLowerCase().replace(/[ _-]+/g, '');
   if (value === 'simd' || value === 'simd128' || value === 'wasmsimd') return 'simd';
@@ -43,8 +55,8 @@ export function viridithasVariantByKey(key: string): ViridithasVariant {
 }
 
 export function viridithasVariantFromParams(params: URLSearchParams): ViridithasVariant {
-  const customUrl = params.get('viridithasWasm');
-  if (customUrl) return { key: 'custom', label: 'Viridithas Custom', wasmUrl: customUrl, note: 'Custom Viridithas WASM URL from ?viridithasWasm=…' };
+  const customUrl = sameOriginViridithasAsset(params.get('viridithasWasm'));
+  if (customUrl) return { key: 'custom', label: 'Viridithas Custom', wasmUrl: customUrl, note: 'Custom same-origin Viridithas WASM URL from ?viridithasWasm=…' };
   // SIMD has the strongest/current smoke and benchmark evidence; scalar remains
   // available as an explicit compatibility fallback via ?viridithas=default.
   return viridithasVariantByKey(params.get('viridithas') ?? params.get('viridithasVariant') ?? 'simd');
