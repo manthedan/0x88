@@ -4701,13 +4701,42 @@ function policyValueHeadTensorNameList(): string[] {
   return [...Object.values(DEFAULT_POLICY_HEAD_TENSORS), ...Object.values(DEFAULT_VALUE_HEAD_TENSORS)];
 }
 
+function copyTensorView(tensor: Lc0WebTensorView): Lc0WebTensorView {
+  const bytes = new Uint8Array(tensor.bytes.byteLength);
+  bytes.set(tensor.bytes);
+  return { info: { ...tensor.info, shape: [...tensor.info.shape] }, bytes };
+}
+
+function detachPolicyValueHeadTensors(tensors: Lc0WebPolicyValueHeadTensors): Lc0WebPolicyValueHeadTensors {
+  // Head tensors are retained by the hybrid runtime for lazy WGSL physical-batch
+  // slot creation. Copy only those retained views into exact-sized buffers so
+  // the larger downloaded shard ArrayBuffers can be collected after create().
+  return {
+    policyDense1Weight: copyTensorView(tensors.policyDense1Weight),
+    policyDense1Bias: copyTensorView(tensors.policyDense1Bias),
+    policyQWeight: copyTensorView(tensors.policyQWeight),
+    policyQBias: copyTensorView(tensors.policyQBias),
+    policyKWeight: copyTensorView(tensors.policyKWeight),
+    policyKBias: copyTensorView(tensors.policyKBias),
+    policyScale: copyTensorView(tensors.policyScale),
+    policyPromotionWeight: copyTensorView(tensors.policyPromotionWeight),
+    policyMappingTable: copyTensorView(tensors.policyMappingTable),
+    valueEmbedWeight: copyTensorView(tensors.valueEmbedWeight),
+    valueEmbedBias: copyTensorView(tensors.valueEmbedBias),
+    valueDense1Weight: copyTensorView(tensors.valueDense1Weight),
+    valueDense1Bias: copyTensorView(tensors.valueDense1Bias),
+    valueDense2Weight: copyTensorView(tensors.valueDense2Weight),
+    valueDense2Bias: copyTensorView(tensors.valueDense2Bias),
+  };
+}
+
 function loadPolicyValueHeadTensors(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>): Lc0WebPolicyValueHeadTensors {
   const get = (name: string): Lc0WebTensorView => {
     const tensor = pack.tensors.get(name);
     if (!tensor) throw new Error(`lc0web policy/value head tensor was not loaded: ${name}`);
     return tensor;
   };
-  const tensors: Lc0WebPolicyValueHeadTensors = {
+  const tensors: Lc0WebPolicyValueHeadTensors = detachPolicyValueHeadTensors({
     policyDense1Weight: get(DEFAULT_POLICY_HEAD_TENSORS.dense1Weight),
     policyDense1Bias: get(DEFAULT_POLICY_HEAD_TENSORS.dense1Bias),
     policyQWeight: get(DEFAULT_POLICY_HEAD_TENSORS.qWeight),
@@ -4723,7 +4752,7 @@ function loadPolicyValueHeadTensors(pack: Awaited<ReturnType<typeof loadLc0WebMo
     valueDense1Bias: get(DEFAULT_VALUE_HEAD_TENSORS.dense1Bias),
     valueDense2Weight: get(DEFAULT_VALUE_HEAD_TENSORS.dense2Weight),
     valueDense2Bias: get(DEFAULT_VALUE_HEAD_TENSORS.dense2Bias),
-  };
+  });
   assertTensorShapeAndBytes(tensors.policyDense1Weight, [DEFAULT_N, DEFAULT_N], 2, 'policyDense1Weight');
   assertTensorShapeAndBytes(tensors.policyDense1Bias, [DEFAULT_N], 2, 'policyDense1Bias');
   assertTensorShapeAndBytes(tensors.policyQWeight, [DEFAULT_N, DEFAULT_N], 2, 'policyQWeight');
