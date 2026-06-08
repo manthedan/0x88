@@ -7,6 +7,7 @@ import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import { BROWSER_RUNTIME_AUDIT_EVENT, formatBrowserRuntimeAudit, publishBrowserRuntimeAudit, type BrowserRuntimeAuditDetail } from '../nn/runtimeAudit.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { ANALYSIS_DRAWABLE_BRUSHES, engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, tinyPuctAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
@@ -163,6 +164,19 @@ function selectedLc0Runtime(): Lc0AnalysisRuntime {
   return normalizeLc0Runtime(selectEl('lc0RuntimeSelect').value);
 }
 
+function lc0ResolvedRuntime(runtime: Lc0AnalysisRuntime): string {
+  if (runtime === 'onnx') return 'ort-worker';
+  return `${runtime}-lazy`;
+}
+
+function installRuntimeAuditPanel(): void {
+  window.addEventListener(BROWSER_RUNTIME_AUDIT_EVENT, (event) => {
+    const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
+    if (detail.family !== 'lc0') return;
+    el('runtimeAudit').textContent = formatBrowserRuntimeAudit(detail);
+  });
+}
+
 function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
   if (runtime === 'hybrid-wgsl-heads') return 'WGSL encoder + WGSL heads';
   if (runtime === 'hybrid-ort-heads') return 'WGSL encoder + ORT heads';
@@ -217,6 +231,21 @@ async function initWorker(): Promise<string> {
   const ready = await postWorker<{ backend: string }>(lc0InitMessage());
   workerReady = true;
   workerBackend = ready.backend;
+  const runtime = selectedLc0Runtime();
+  publishBrowserRuntimeAudit({
+    source: 'lc0-analysis-worker',
+    surface: 'analysis',
+    family: 'lc0',
+    engineLabel: 'LC0',
+    modelId: 'lc0-default',
+    modelUrl: MODEL_URL,
+    requestedRuntime: runtime,
+    resolvedRuntime: lc0ResolvedRuntime(runtime),
+    runtimeConfigId: runtime === 'onnx' ? undefined : runtime,
+    manifestUrl: runtime === 'onnx' ? undefined : PACK_URL,
+    searchBudget: `multipv=${multiPv()}`,
+    notes: runtime === 'onnx' ? [ready.backend] : [ready.backend, 'hybrid runtime is pack-lazy until first evaluation succeeds'],
+  });
   return workerBackend;
 }
 
@@ -1663,6 +1692,19 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
       searcher = new Lc0PuctSearcher(mainEvaluator);
       const diagnostics = await collectOrtRuntimeDiagnostics();
       el('backend').textContent = `${diagnostics.describe} (main thread)`;
+      publishBrowserRuntimeAudit({
+        source: 'lc0-analysis-main-thread-fallback',
+        surface: 'analysis',
+        family: 'lc0',
+        engineLabel: 'LC0',
+        modelId: 'lc0-default',
+        modelUrl: MODEL_URL,
+        requestedRuntime: runtime,
+        resolvedRuntime: 'ort-main-thread-fallback',
+        fallbackReason: (workerError as Error).message,
+        searchBudget: `multipv=${multiPv()}`,
+        notes: [diagnostics.describe],
+      });
       el('analyze').toggleAttribute('disabled', false);
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
@@ -1701,6 +1743,7 @@ async function init() {
     selectEl('lc0RuntimeSelect').value = lastProfile.lc0Runtime;
   }
   renderEngineProfiles(lastProfile?.name ?? '');
+  installRuntimeAuditPanel();
   renderAll();
   renderEngineList();
   renderRecklessRuntimeInfo();

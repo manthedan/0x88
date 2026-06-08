@@ -6,6 +6,7 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { bestMoveShapes, searchShapes } from './boardArrows.ts';
 import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig, type OrtExecutionProviderPreference, type OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
+import { publishBrowserRuntimeAudit } from '../nn/runtimeAudit.ts';
 import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
 import { clearLc0ModelCache, describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
@@ -1158,6 +1159,11 @@ function renderEvaluation() {
   });
 }
 
+function lc0PolicyRuntimeName(): string {
+  if (!HYBRID_EVALUATOR_REQUESTED) return 'onnx';
+  return HYBRID_WGSL_HEADS_REQUESTED ? 'hybrid-wgsl-heads' : 'hybrid-ort-heads';
+}
+
 function postWorkerRequest<T>(message: Record<string, unknown>, onId?: (id: number) => void): Promise<T> {
   if (!searchWorker) return Promise.reject(new Error('LC0 search worker unavailable'));
   const id = ++workerRequestSeq;
@@ -1210,6 +1216,21 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
   searchWorkerReady = true;
   searchWorkerBackend = ready.backend;
   workerModelCacheStatus = ready.modelCache;
+  const runtime = lc0PolicyRuntimeName();
+  publishBrowserRuntimeAudit({
+    source: 'lc0-policy-worker',
+    surface: 'single-engine',
+    family: 'lc0',
+    engineLabel: 'LC0',
+    modelId: 'lc0-default',
+    modelUrl: HYBRID_EVALUATOR_REQUESTED ? PACK_URL : MODEL_URL,
+    requestedRuntime: runtime,
+    resolvedRuntime: runtime === 'onnx' ? 'ort-worker' : `${runtime}-lazy`,
+    runtimeConfigId: HYBRID_EVALUATOR_REQUESTED ? runtime : undefined,
+    manifestUrl: HYBRID_EVALUATOR_REQUESTED ? PACK_URL : undefined,
+    searchBudget: params.get('search') === '1' ? `visits=${params.get('visits') ?? params.get('nodes') ?? 'default'}` : BENCH_REQUESTED ? `bench repeat=${params.get('repeat') ?? 'default'}` : 'policy-only',
+    notes: runtime === 'onnx' ? [ready.backend, ready.modelCache] : [ready.backend, ready.modelCache, 'hybrid runtime is pack-lazy until first evaluation succeeds'],
+  });
   renderStatic();
 }
 
@@ -1237,6 +1258,21 @@ async function initHybridWorkerWithInputBackend(inputBackend: 'js' | 'wgsl' | 'w
   searchWorkerReady = true;
   searchWorkerBackend = ready.backend;
   workerModelCacheStatus = ready.modelCache;
+  const runtime = HYBRID_WGSL_HEADS_REQUESTED ? 'hybrid-wgsl-heads' : 'hybrid-ort-heads';
+  publishBrowserRuntimeAudit({
+    source: 'lc0-policy-hybrid-worker-input-probe',
+    surface: 'single-engine',
+    family: 'lc0',
+    engineLabel: 'LC0',
+    modelId: 'lc0-default',
+    modelUrl: PACK_URL,
+    requestedRuntime: runtime,
+    resolvedRuntime: `${runtime}-lazy`,
+    runtimeConfigId: runtime,
+    manifestUrl: PACK_URL,
+    searchBudget: `inputBackend=${inputBackend}`,
+    notes: [ready.backend, ready.modelCache, 'hybrid runtime is pack-lazy until first evaluation succeeds'],
+  });
 }
 
 async function evaluateWithWorker(input: Lc0EvaluatorInput): Promise<BrowserEvaluationChoice> {
@@ -3898,6 +3934,18 @@ async function init() {
       const diagnostics = await collectOrtRuntimeDiagnostics();
       el('backend').textContent = diagnostics.describe;
       renderGpuStatus(diagnostics);
+      publishBrowserRuntimeAudit({
+        source: 'lc0-policy-main-thread',
+        surface: 'single-engine',
+        family: 'lc0',
+        engineLabel: 'LC0',
+        modelId: 'lc0-default',
+        modelUrl: MODEL_URL,
+        requestedRuntime: 'onnx',
+        resolvedRuntime: 'ort-main-thread',
+        searchBudget: params.get('search') === '1' ? `visits=${params.get('visits') ?? params.get('nodes') ?? 'default'}` : 'policy-only',
+        notes: [diagnostics.describe, mainModelCacheStatus],
+      });
       if (SEARCH_WORKER_REQUESTED) {
         el('message').textContent = 'Initializing LC0 search worker…';
         try {
