@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
+import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5180;
@@ -9,7 +10,7 @@ const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_RUNTIMES = ['onnx', 'hybrid-ort-heads', 'hybrid-wgsl-heads'];
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_runtime_arena_bench.mjs [options]\n\nRuns the browser arena as an e2e fixed-time benchmark: LC0 small is matched against a configurable opponent once for each LC0 runtime, then emits one JSON report with match results, diagnostics, search telemetry, engine output snapshots, logs, and PGN.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session prefix\n  --timeout MS         Per-runtime browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --runtimes LIST      Comma-separated runtimes (default ${DEFAULT_RUNTIMES.join(',')})\n  --movetime MS        Equal movetime per move (default 500)\n  --games N            Games per opening (default 2)\n  --delay MS           UI delay between plies (default 0)\n  --cache N            LC0 NN cache entries (default 2048)\n  --lc0-batch-size N   LC0 PUCT leaf batch size passed to arena search (default 1)\n  --batch-pipeline-depth N  LC0 batch pipeline depth (default 1; >1 is speculative search semantics)\n  --lc0-strength N     LC0 fixed-visit strength field, retained for labels when budget=movetime (default 100)\n  --opponent SPEC      Opponent as family:variant:strength (default sf:lite:8)\n  --sf-threads N       Stockfish threads (default 1)\n  --openings SUITE     start, built-in, or custom (default start)\n  --opening-text TEXT  Custom opening lines; implies --openings custom\n  --out PATH           Write full JSON report to PATH\n  --summary-only       Print only compact summary to stdout; pair with --out for full artifacts\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URLs and exit\n  -h, --help           Show this help\n`);
+  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_runtime_arena_bench.mjs [options]\n\nRuns the browser arena as an e2e fixed-time benchmark: LC0 small is matched against a configurable opponent once for each LC0 runtime, then emits one JSON report with match results, diagnostics, search telemetry, engine output snapshots, logs, and PGN.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session prefix\n  --timeout MS         Per-runtime browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --runtimes LIST      Comma-separated runtimes (default ${DEFAULT_RUNTIMES.join(',')})\n  --preset NAME        Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --movetime MS        Equal movetime per move (default 500)\n  --games N            Games per opening (default 2)\n  --delay MS           UI delay between plies (default 0)\n  --cache N            LC0 NN cache entries (default 2048)\n  --lc0-batch-size N   LC0 PUCT leaf batch size passed to arena search (default 1)\n  --batch-pipeline-depth N  LC0 batch pipeline depth (default 1; >1 is speculative search semantics)\n  --input-backend NAME Hybrid input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME Hybrid encoder kernel: hand, tvm-packed-f16, mixed-tvm-ffn, mixed-tvm-ffn-outproj, or mixed-tvm-ffn-smolgen-project (default hand)\n  --legal-priors-backend NAME\n                       Hybrid legal-priors backend: js, wasm, or gpu (default js; gpu requires WGSL heads)\n  --lc0-strength N     LC0 fixed-visit strength field, retained for labels when budget=movetime (default 100)\n  --opponent SPEC      Opponent as family:variant:strength (default sf:lite:8)\n  --sf-threads N       Stockfish threads (default 1)\n  --openings SUITE     start, built-in, or custom (default start)\n  --opening-text TEXT  Custom opening lines; implies --openings custom\n  --out PATH           Write full JSON report to PATH\n  --summary-only       Print only compact summary to stdout; pair with --out for full artifacts\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URLs and exit\n  -h, --help           Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -20,12 +21,16 @@ function parseArgs(argv) {
     agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
     session: process.env.AGENT_BROWSER_SESSION ?? `lc0-runtime-arena-${process.pid}`,
     runtimes: [...DEFAULT_RUNTIMES],
+    preset: '',
     movetime: 500,
     games: 2,
     delay: 0,
     cache: 2048,
     lc0BatchSize: 1,
     batchPipelineDepth: 1,
+    inputBackend: 'js',
+    encoderKernel: 'hand',
+    legalPriorsBackend: 'js',
     lc0Strength: 100,
     opponent: 'sf:lite:8',
     sfThreads: 1,
@@ -50,12 +55,16 @@ function parseArgs(argv) {
     else if (arg === '--session') args.session = next();
     else if (arg === '--timeout') args.timeoutMs = Number(next());
     else if (arg === '--runtimes') args.runtimes = next().split(',').map((s) => s.trim()).filter(Boolean);
+    else if (arg === '--preset') args.preset = next();
     else if (arg === '--movetime') args.movetime = Number(next());
     else if (arg === '--games' || arg === '--games-per-opening') args.games = Number(next());
     else if (arg === '--delay') args.delay = Number(next());
     else if (arg === '--cache' || arg === '--cache-entries') args.cache = Number(next());
     else if (arg === '--lc0-batch-size' || arg === '--batch-size' || arg === '--batch') args.lc0BatchSize = Number(next());
     else if (arg === '--batch-pipeline-depth' || arg === '--pipeline-depth') args.batchPipelineDepth = Number(next());
+    else if (arg === '--input-backend') args.inputBackend = next();
+    else if (arg === '--encoder-kernel' || arg === '--encoder-kernel-variant') args.encoderKernel = next();
+    else if (arg === '--legal-priors-backend' || arg === '--hybrid-legal-priors') args.legalPriorsBackend = next();
     else if (arg === '--lc0-strength') args.lc0Strength = Number(next());
     else if (arg === '--opponent') args.opponent = next();
     else if (arg === '--sf-threads') args.sfThreads = Number(next());
@@ -68,11 +77,16 @@ function parseArgs(argv) {
     else if (arg === '-h' || arg === '--help') args.help = true;
     else throw new Error(`Unknown option: ${arg}`);
   }
+  applyLc0RuntimePreset(args, argv);
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   const validRuntimes = new Set(DEFAULT_RUNTIMES);
   for (const runtime of args.runtimes) if (!validRuntimes.has(runtime)) throw new Error(`Invalid runtime: ${runtime}`);
   if (!['start', 'built-in', 'custom'].includes(args.openings)) throw new Error(`Invalid --openings: ${args.openings}`);
+  if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
+  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel)) throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
+  if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid --legal-priors-backend: ${args.legalPriorsBackend}`);
+  if (args.legalPriorsBackend === 'gpu' && args.runtimes.some((runtime) => runtime !== 'hybrid-wgsl-heads')) throw new Error('--legal-priors-backend gpu requires hybrid-wgsl-heads runtime');
   for (const [name, value] of [['timeout', args.timeoutMs], ['movetime', args.movetime], ['games', args.games], ['delay', args.delay], ['cache', args.cache], ['lc0-batch-size', args.lc0BatchSize], ['batch-pipeline-depth', args.batchPipelineDepth], ['lc0-strength', args.lc0Strength], ['sf-threads', args.sfThreads]]) {
     if (!Number.isFinite(value) || value < 0 || (['timeout', 'movetime', 'games', 'lc0-batch-size', 'batch-pipeline-depth', 'lc0-strength', 'sf-threads'].includes(name) && value <= 0)) throw new Error(`Invalid --${name}: ${value}`);
   }
@@ -93,6 +107,9 @@ function arenaUrl(args, runtime) {
   url.searchParams.set('cacheEntries', String(args.cache));
   url.searchParams.set('lc0BatchSize', String(args.lc0BatchSize));
   url.searchParams.set('lc0BatchPipelineDepth', String(args.batchPipelineDepth));
+  url.searchParams.set('inputBackend', args.inputBackend);
+  url.searchParams.set('encoderKernel', args.encoderKernel);
+  url.searchParams.set('legalPriorsBackend', args.legalPriorsBackend);
   url.searchParams.set('sfThreads', String(args.sfThreads));
   url.searchParams.set('openingSuite', args.openings);
   if (args.openingText) url.searchParams.set('openingText', args.openingText);
@@ -257,6 +274,7 @@ async function main() {
         lc0BatchSize: args.lc0BatchSize,
         batchPipelineDepth: args.batchPipelineDepth,
         sfThreads: args.sfThreads,
+        runtimeConfiguration: lc0RuntimeConfiguration(args),
       },
       summary: results.map(compactRuntime),
       results,

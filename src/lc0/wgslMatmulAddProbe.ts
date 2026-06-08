@@ -5782,6 +5782,27 @@ export interface Lc0WebHybridEvaluationOptions {
   timestampQuery?: boolean;
 }
 
+export interface Lc0WebExecutionFootprintCategory {
+  bytes: number;
+  count: number;
+}
+
+export interface Lc0WebExecutionFootprint {
+  /** Explicit lc0web-owned persistent GPU buffer bytes known to this runtime. */
+  gpuBufferBytes: number;
+  gpuBufferCount: number;
+  categories: Record<string, Lc0WebExecutionFootprintCategory>;
+  layers: number;
+  physicalSlots: number;
+  primaryBatchSlots: number;
+  deferredBatchSlots: number;
+  deferredBatchRings: number;
+  wgslBatchUploadCapacity: number;
+  wgslBatchReadbackCapacity: number;
+  wgslDeferredReadbackCapacity: number;
+  note: string;
+}
+
 export interface Lc0WebHybridTimingBreakdown {
   totalEvalMs: number;
   inputBuildMs: number;
@@ -5841,6 +5862,7 @@ export interface Lc0WebHybridEvaluationResult extends Lc0Evaluation {
   headRunMs: number;
   mappedPolicy: number[];
   timing: Lc0WebHybridTimingBreakdown;
+  executionFootprint?: Lc0WebExecutionFootprint;
 }
 
 export type Lc0WebHybridEncoderProfileStageName =
@@ -5910,6 +5932,7 @@ export interface Lc0WebHybridEncoderProfileResult {
   aggregateStageTimings: Lc0WebHybridEncoderProfileStageTiming[];
   layerTimings: Lc0WebHybridEncoderProfileLayerTiming[];
   note: string;
+  executionFootprint?: Lc0WebExecutionFootprint;
 }
 
 function inputBodyTensorNameList(): string[] {
@@ -6109,6 +6132,24 @@ type HybridEncoderLayerRuntime = HybridEncoderLayerSlotRuntime & {
   weights: HybridEncoderLayerWeights;
 };
 
+type HybridEncoderLayerSlotScratch = {
+  smolgenBias: BufferLike;
+  smolgenCompressed: BufferLike;
+  smolgenDense1: BufferLike;
+  smolgenLn1: BufferLike;
+  smolgenDense2: BufferLike;
+  smolgenLn2: BufferLike;
+  qkv: BufferLike;
+  scores: BufferLike;
+  probs: BufferLike;
+  attn: BufferLike;
+  attentionSkip: BufferLike;
+  attentionOutput: BufferLike;
+  ffnHidden: BufferLike;
+  ffnSkip: BufferLike;
+  podArgs?: BufferLike;
+};
+
 type HybridWgslBatchSlot = {
   inputBuffer: BufferLike;
   inputBodyGpu?: InputBodyGpuRuntime;
@@ -6116,7 +6157,7 @@ type HybridWgslBatchSlot = {
   wgslHeads: WgslPolicyValueHeadRuntime;
 };
 
-function createHybridEncoderLayerWeights(device: DeviceLike, tensors: ReturnType<typeof loadEncoder0FfnInputs>, usage: Record<string, number>): { weights: HybridEncoderLayerWeights; buffers: BufferLike[] } {
+function createHybridEncoderLayerWeights(device: DeviceLike, tensors: ReturnType<typeof loadEncoder0FfnInputs>, usage: Record<string, number>, sharedSmolgenWeight?: BufferLike): { weights: HybridEncoderLayerWeights; buffers: BufferLike[] } {
   const qWeight = createTransposedF16StorageBuffer(device, tensors.qWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
   const qBias = createStorageBuffer(device, tensors.qBias.bytes, usage.STORAGE | usage.COPY_DST);
   const kWeight = createTransposedF16StorageBuffer(device, tensors.kWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
@@ -6145,12 +6186,13 @@ function createHybridEncoderLayerWeights(device: DeviceLike, tensors: ReturnType
   const smolgenDense2Bias = createStorageBuffer(device, tensors.smolgen.dense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
   const smolgenLn2Scale = createStorageBuffer(device, tensors.smolgen.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
   const smolgenLn2Bias = createStorageBuffer(device, tensors.smolgen.ln2Bias.bytes, usage.STORAGE | usage.COPY_DST);
-  const smolgenWeight = createStorageBuffer(device, tensors.smolgen.smolgenWeight.bytes, usage.STORAGE | usage.COPY_DST);
+  const smolgenWeight = sharedSmolgenWeight ?? createStorageBuffer(device, tensors.smolgen.smolgenWeight.bytes, usage.STORAGE | usage.COPY_DST);
   const weights = { qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, outWeight, outBias, attentionAlpha, ln1Scale, ln1Bias, ffnDense1Weight, ffnDense1Bias, ffnDense2Weight, ffnDense2Bias, ffnAlpha, ln2Scale, ln2Bias, smolgenCompressWeight, smolgenDense1Weight, smolgenDense1Bias, smolgenLn1Scale, smolgenLn1Bias, smolgenDense2Weight, smolgenDense2Bias, smolgenLn2Scale, smolgenLn2Bias, smolgenWeight };
-  return { weights, buffers: Object.values(weights) };
+  const buffers = Object.values(weights).filter((buffer) => buffer !== sharedSmolgenWeight);
+  return { weights, buffers };
 }
 
-function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<string, number>, weights: HybridEncoderLayerWeights, layerInput: BufferLike, encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand'): { runtime: HybridEncoderLayerSlotRuntime; buffers: BufferLike[] } {
+function createHybridEncoderLayerSlotScratch(device: DeviceLike, usage: Record<string, number>, encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand'): { scratch: HybridEncoderLayerSlotScratch; buffers: BufferLike[] } {
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
   const smolgenBias = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_DST });
   const smolgenCompressed = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
@@ -6166,10 +6208,20 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
   const attentionOutput = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
   const ffnHidden = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN * 4, usage: usage.STORAGE | usage.COPY_DST });
   const ffnSkip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
-  const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC | usage.COPY_DST });
   const podArgs = encoderUsesTvmPackedF16Qkv(encoderKernelVariant) || encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) || encoderUsesTvmPackedF16Ffn(encoderKernelVariant) ? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
-  const buffers = [smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, output];
+  const scratch: HybridEncoderLayerSlotScratch = { smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, podArgs };
+  const buffers = [smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip];
   if (podArgs) buffers.push(podArgs);
+  return { scratch, buffers };
+}
+
+function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<string, number>, weights: HybridEncoderLayerWeights, layerInput: BufferLike, encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand', sharedScratch?: HybridEncoderLayerSlotScratch): { runtime: HybridEncoderLayerSlotRuntime; buffers: BufferLike[] } {
+  const outputElements = DEFAULT_TOKENS * DEFAULT_N;
+  const scratchAndBuffers = sharedScratch ? { scratch: sharedScratch, buffers: [] as BufferLike[] } : createHybridEncoderLayerSlotScratch(device, usage, encoderKernelVariant);
+  const { scratch, buffers: scratchBuffers } = scratchAndBuffers;
+  const { smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, podArgs } = scratch;
+  const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC | usage.COPY_DST });
+  const buffers = [...scratchBuffers, output];
   const smolgenPipelines = createSmolgenPipelines(device, {
     input: layerInput,
     compressWeight: weights.smolgenCompressWeight,
@@ -6239,6 +6291,132 @@ interface SubmittedWgslHybridBatch {
   wasmEncodeMs: number;
   wasmTotalMs: number;
   dispatchCount: number;
+}
+
+function addFootprintCategory(categories: Record<string, Lc0WebExecutionFootprintCategory>, name: string, bytes: number, count = 1): void {
+  if (bytes <= 0 || count <= 0) return;
+  const entry = categories[name] ?? { bytes: 0, count: 0 };
+  entry.bytes += bytes;
+  entry.count += count;
+  categories[name] = entry;
+}
+
+function footprintBytes(categories: Record<string, Lc0WebExecutionFootprintCategory>): number {
+  return Object.values(categories).reduce((sum, entry) => sum + entry.bytes, 0);
+}
+
+function paddedGpuBytes(bytes: number): number {
+  return Math.max(4, Math.ceil(bytes / 4) * 4);
+}
+
+function matrixF16Bytes(rows: number, cols: number): number {
+  return rows * cols * 2;
+}
+
+function vectorF16Bytes(elements: number): number {
+  return elements * 2;
+}
+
+function f32StorageBytes(elements: number): number {
+  return elements * 4;
+}
+
+function inputBodyGpuFootprintBytes(): number {
+  return paddedGpuBytes(DEFAULT_INPUT_PLANES * DEFAULT_TOKENS * 4)
+    + paddedGpuBytes(DEFAULT_TOKENS * DEFAULT_POSITIONAL_CHANNELS * 4)
+    + paddedGpuBytes(DEFAULT_PADDED_INPUT_CHANNELS * DEFAULT_N * 4)
+    + paddedGpuBytes(DEFAULT_N * 4)
+    + paddedGpuBytes(DEFAULT_TOKENS * DEFAULT_N * 4)
+    + paddedGpuBytes(DEFAULT_TOKENS * DEFAULT_N * 4)
+    + paddedGpuBytes(4 * 4);
+}
+
+function encoderLayerWeightFootprint(): Record<string, Lc0WebExecutionFootprintCategory> {
+  const categories: Record<string, Lc0WebExecutionFootprintCategory> = {};
+  addFootprintCategory(categories, 'encoderAttentionWeights',
+    4 * paddedGpuBytes(matrixF16Bytes(DEFAULT_K, DEFAULT_N))
+    + 4 * paddedGpuBytes(vectorF16Bytes(DEFAULT_N))
+    + 2 * paddedGpuBytes(vectorF16Bytes(1))
+    + 2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_N)),
+    12);
+  addFootprintCategory(categories, 'encoderFfnWeights',
+    paddedGpuBytes(matrixF16Bytes(DEFAULT_N, DEFAULT_FFN_HIDDEN))
+    + paddedGpuBytes(vectorF16Bytes(DEFAULT_FFN_HIDDEN))
+    + paddedGpuBytes(matrixF16Bytes(DEFAULT_FFN_HIDDEN, DEFAULT_N))
+    + paddedGpuBytes(vectorF16Bytes(DEFAULT_N))
+    + paddedGpuBytes(vectorF16Bytes(1))
+    + 2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_N)),
+    7);
+  addFootprintCategory(categories, 'encoderSmolgenWeights',
+    paddedGpuBytes(matrixF16Bytes(DEFAULT_N, DEFAULT_SMOLGEN_COMPRESSED))
+    + paddedGpuBytes(matrixF16Bytes(DEFAULT_SMOLGEN_FLAT, DEFAULT_SMOLGEN_HIDDEN))
+    + paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_HIDDEN))
+    + 2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_HIDDEN))
+    + paddedGpuBytes(matrixF16Bytes(DEFAULT_SMOLGEN_HIDDEN, DEFAULT_SMOLGEN_FLAT))
+    + paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_FLAT))
+    + 2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_FLAT)),
+    9);
+  return categories;
+}
+
+function addEncoderLayerScratchFootprint(categories: Record<string, Lc0WebExecutionFootprintCategory>, layers: number, physicalSlots: number, hasPodArgs: boolean): void {
+  const perPhysicalSlotSmolgen = f32StorageBytes(DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS)
+    + f32StorageBytes(DEFAULT_SMOLGEN_FLAT)
+    + f32StorageBytes(DEFAULT_SMOLGEN_HIDDEN)
+    + f32StorageBytes(DEFAULT_SMOLGEN_HIDDEN)
+    + f32StorageBytes(DEFAULT_SMOLGEN_FLAT)
+    + f32StorageBytes(DEFAULT_SMOLGEN_FLAT);
+  const perPhysicalSlotAttention = f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N * 3)
+    + f32StorageBytes(DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS)
+    + f32StorageBytes(DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N);
+  const perPhysicalSlotFfnScratch = f32StorageBytes(DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N);
+  const perLayerSlotOutput = f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N);
+  const totalLayerSlots = layers * physicalSlots;
+  addFootprintCategory(categories, 'encoderSmolgenScratch', perPhysicalSlotSmolgen * physicalSlots, 6 * physicalSlots);
+  addFootprintCategory(categories, 'encoderAttentionScratch', perPhysicalSlotAttention * physicalSlots, 6 * physicalSlots);
+  addFootprintCategory(categories, 'encoderFfnScratch', perPhysicalSlotFfnScratch * physicalSlots, 2 * physicalSlots);
+  addFootprintCategory(categories, 'encoderLayerOutputs', perLayerSlotOutput * totalLayerSlots, totalLayerSlots);
+  if (hasPodArgs) addFootprintCategory(categories, 'encoderKernelUniforms', paddedGpuBytes(4) * physicalSlots, physicalSlots);
+}
+
+function wgslHeadsFootprintCategories(): Record<string, Lc0WebExecutionFootprintCategory> {
+  const categories: Record<string, Lc0WebExecutionFootprintCategory> = {};
+  addFootprintCategory(categories, 'wgslHeadWeights',
+    f32StorageBytes(DEFAULT_N * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_N)
+    + f32StorageBytes(DEFAULT_N * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_N)
+    + f32StorageBytes(DEFAULT_N * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_N)
+    + f32StorageBytes(1)
+    + f32StorageBytes(DEFAULT_N * 4)
+    + f32StorageBytes(DEFAULT_POLICY_MAPPED_OUTPUTS)
+    + f32StorageBytes(DEFAULT_N * DEFAULT_VALUE_EMBED)
+    + f32StorageBytes(DEFAULT_VALUE_EMBED)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * DEFAULT_VALUE_HIDDEN)
+    + f32StorageBytes(DEFAULT_VALUE_HIDDEN)
+    + f32StorageBytes(DEFAULT_VALUE_HIDDEN * 3)
+    + f32StorageBytes(3),
+    15);
+  addFootprintCategory(categories, 'wgslHeadScratch',
+    f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_POLICY_OUTPUTS)
+    + f32StorageBytes(DEFAULT_POLICY_MAPPED_OUTPUTS)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_VALUE_EMBED)
+    + f32StorageBytes(DEFAULT_VALUE_HIDDEN)
+    + f32StorageBytes(3)
+    + f32StorageBytes(3),
+    9);
+  addFootprintCategory(categories, 'legalPriorsBuffers', WGSL_GPU_LEGAL_MAX_MOVES * 4 + 4 * 4 + WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4, 3);
+  addFootprintCategory(categories, 'wgslHeadReadback', Math.max(WGSL_HEADS_READBACK_BYTES, WGSL_GPU_LEGAL_READBACK_BYTES), 1);
+  addFootprintCategory(categories, 'wgslHeadUniforms', 5 * paddedGpuBytes(4 * 4), 5);
+  return categories;
 }
 
 class Lc0WebHybridRuntime {
@@ -6364,11 +6542,15 @@ class Lc0WebHybridRuntime {
     const inputBodyGpu = usesGpuInputBody ? createInputBodyGpuRuntime(device, inputTensors, inputBuffer, usage) : undefined;
     if (inputBodyGpu) buffers.push(...inputBodyGpu.buffers);
     const layerRuntimes: HybridEncoderLayerRuntime[] = [];
+    const sharedSmolgenWeight = createStorageBuffer(device, tensorsByLayer[0].smolgen.smolgenWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    buffers.push(sharedSmolgenWeight);
+    const { scratch: sharedLayerScratch, buffers: sharedLayerScratchBuffers } = createHybridEncoderLayerSlotScratch(device, usage, encoderKernelVariant);
+    buffers.push(...sharedLayerScratchBuffers);
     let layerInput = inputBuffer;
     for (const tensors of tensorsByLayer) {
-      const { weights, buffers: weightBuffers } = createHybridEncoderLayerWeights(device, tensors, usage);
+      const { weights, buffers: weightBuffers } = createHybridEncoderLayerWeights(device, tensors, usage, sharedSmolgenWeight);
       buffers.push(...weightBuffers);
-      const { runtime, buffers: slotBuffers } = createHybridEncoderLayerSlotRuntime(device, usage, weights, layerInput, encoderKernelVariant);
+      const { runtime, buffers: slotBuffers } = createHybridEncoderLayerSlotRuntime(device, usage, weights, layerInput, encoderKernelVariant, sharedLayerScratch);
       buffers.push(...slotBuffers);
       layerRuntimes.push({ ...runtime, weights });
       layerInput = runtime.output;
@@ -6409,9 +6591,11 @@ class Lc0WebHybridRuntime {
     const inputBodyGpu = this.inputBackend === 'wgsl' || this.inputBackend === 'wasm' ? createInputBodyGpuRuntime(this.device, this.inputTensors, inputBuffer, this.usage) : undefined;
     if (inputBodyGpu) this.buffers.push(...inputBodyGpu.buffers);
     const layerRuntimes: HybridEncoderLayerSlotRuntime[] = [];
+    const { scratch: sharedLayerScratch, buffers: sharedLayerScratchBuffers } = createHybridEncoderLayerSlotScratch(this.device, this.usage, this.encoderKernelVariant);
+    this.buffers.push(...sharedLayerScratchBuffers);
     let layerInput = inputBuffer;
     for (const layer of this.layerRuntimes) {
-      const { runtime, buffers } = createHybridEncoderLayerSlotRuntime(this.device, this.usage, layer.weights, layerInput, this.encoderKernelVariant);
+      const { runtime, buffers } = createHybridEncoderLayerSlotRuntime(this.device, this.usage, layer.weights, layerInput, this.encoderKernelVariant, sharedLayerScratch);
       this.buffers.push(...buffers);
       layerRuntimes.push(runtime);
       layerInput = runtime.output;
@@ -6502,6 +6686,50 @@ class Lc0WebHybridRuntime {
 
   private wgslHeadReadbackBytes(): number {
     return this.legalPriorsBackend === 'gpu' ? WGSL_GPU_LEGAL_READBACK_BYTES : WGSL_HEADS_READBACK_BYTES;
+  }
+
+  executionFootprint(): Lc0WebExecutionFootprint {
+    const primaryBatchSlots = Math.max(1, this.wgslBatchSlots?.length ?? 1);
+    const deferredBatchSlots = this.wgslDeferredBatchSlots.reduce((sum, slots) => sum + slots.length, 0);
+    const deferredBatchRings = this.wgslDeferredBatchSlots.filter((slots) => slots.length > 0).length;
+    const physicalSlots = primaryBatchSlots + deferredBatchSlots;
+    const categories: Record<string, Lc0WebExecutionFootprintCategory> = {};
+    addFootprintCategory(categories, 'inputActivation', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) * physicalSlots, physicalSlots);
+    addFootprintCategory(categories, 'encoderReadback', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N), 1);
+    if (this.inputBackend !== 'js') addFootprintCategory(categories, 'inputBody', inputBodyGpuFootprintBytes() * physicalSlots, 7 * physicalSlots);
+    const layerWeight = encoderLayerWeightFootprint();
+    for (const [name, entry] of Object.entries(layerWeight)) addFootprintCategory(categories, name, entry.bytes * this.layers, entry.count * this.layers);
+    addFootprintCategory(categories, 'encoderSharedSmolgenWeight', paddedGpuBytes(matrixF16Bytes(DEFAULT_SMOLGEN_HIDDEN, DEFAULT_TOKENS * DEFAULT_TOKENS)), 1);
+    const hasPodArgs = encoderUsesTvmPackedF16Qkv(this.encoderKernelVariant) || encoderUsesTvmPackedF16AttentionOutProj(this.encoderKernelVariant) || encoderUsesTvmPackedF16Ffn(this.encoderKernelVariant);
+    addEncoderLayerScratchFootprint(categories, this.layers, physicalSlots, hasPodArgs);
+    if (this.headBackend === 'wgsl') {
+      const headCategories = wgslHeadsFootprintCategories();
+      for (const [name, entry] of Object.entries(headCategories)) addFootprintCategory(categories, name, entry.bytes * physicalSlots, entry.count * physicalSlots);
+    }
+    if (this.wgslBatchUploadCapacity > 0) addFootprintCategory(categories, 'batchUpload', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) * this.wgslBatchUploadCapacity, 1);
+    for (const capacity of this.wgslDeferredBatchUploadCapacities) {
+      if (capacity > 0) addFootprintCategory(categories, 'batchUpload', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) * capacity, 1);
+    }
+    if (this.wgslBatchReadbackCapacity > 0) addFootprintCategory(categories, 'batchReadback', this.wgslHeadReadbackBytes() * this.wgslBatchReadbackCapacity, 1);
+    if (this.wgslDeferredReadbackBuffers.length > 0 && this.wgslDeferredReadbackCapacity > 0) {
+      addFootprintCategory(categories, 'batchReadback', this.wgslHeadReadbackBytes() * this.wgslDeferredReadbackCapacity * this.wgslDeferredReadbackBuffers.length, this.wgslDeferredReadbackBuffers.length);
+    }
+    const gpuBufferBytes = footprintBytes(categories);
+    const gpuBufferCount = Object.values(categories).reduce((sum, entry) => sum + entry.count, 0);
+    return {
+      gpuBufferBytes,
+      gpuBufferCount,
+      categories,
+      layers: this.layers,
+      physicalSlots,
+      primaryBatchSlots,
+      deferredBatchSlots,
+      deferredBatchRings,
+      wgslBatchUploadCapacity: this.wgslBatchUploadCapacity,
+      wgslBatchReadbackCapacity: this.wgslBatchReadbackCapacity,
+      wgslDeferredReadbackCapacity: this.wgslDeferredReadbackCapacity,
+      note: 'Explicit lc0web-owned persistent GPU buffer accounting; excludes browser/driver allocation overhead, shader/pipeline objects, transient timestamp-query buffers, ORT session internals, and browser heap samples.',
+    };
   }
 
   private computeLegalPriors(board: ReturnType<typeof currentBoardAndFen>['board'], fen: string, mappedPolicy: ArrayLike<number>, policyTemperature: number): { legalPriors: Lc0Evaluation['legalPriors']; bestMove?: string; legalPriorsMs: number; wasmTiming?: Lc0WasmLegalPriorTiming } {
@@ -6625,6 +6853,7 @@ class Lc0WebHybridRuntime {
           stages: Array.from(layer.stages.entries()).map(([stage, entry]) => toStageTiming(stage, entry)).sort((a, b) => b.totalMs - a.totalMs),
         })),
         note,
+        executionFootprint: this.executionFootprint(),
       };
     };
 
@@ -6853,6 +7082,7 @@ class Lc0WebHybridRuntime {
         legalPriors,
         bestMove,
         mappedPolicy,
+        executionFootprint: this.executionFootprint(),
         timing: {
           totalEvalMs: nowMs() - totalStarted,
           inputBuildMs,
@@ -6894,6 +7124,7 @@ class Lc0WebHybridRuntime {
       legalPriors,
       bestMove,
       mappedPolicy: heads.mappedPolicy,
+      executionFootprint: this.executionFootprint(),
       timing: {
         totalEvalMs: nowMs() - totalStarted,
         inputBuildMs: encoded.timing.inputBuildMs,
@@ -7108,6 +7339,7 @@ class Lc0WebHybridRuntime {
           legalPriors,
           bestMove,
           mappedPolicy,
+          executionFootprint: this.executionFootprint(),
           timing: {
             totalEvalMs,
             inputBuildMs: submitted.inputBuildMs,
@@ -7393,6 +7625,7 @@ export class Lc0WebHybridEvaluator {
   readonly legalPriorsBackend: Lc0WebHybridLegalPriorsBackend;
   readonly encoderKernelVariant: Lc0WebEncoderKernelVariant;
   private runtimePromise?: Promise<Lc0WebHybridRuntime>;
+  private currentRuntime?: Lc0WebHybridRuntime;
   private evaluationQueue: Promise<void> = Promise.resolve();
 
   constructor(options: Omit<Lc0WebHybridEvaluationOptions, 'input'>) {
@@ -7423,12 +7656,18 @@ export class Lc0WebHybridEvaluator {
         legalPriorsBackend: this.legalPriorsBackend,
         encoderKernelVariant: this.encoderKernelVariant,
       });
-      runtimePromise.catch(() => {
+      runtimePromise.then((runtime) => {
+        if (this.runtimePromise === runtimePromise) this.currentRuntime = runtime;
+      }).catch(() => {
         if (this.runtimePromise === runtimePromise) this.runtimePromise = undefined;
       });
       this.runtimePromise = runtimePromise;
     }
     return this.runtimePromise;
+  }
+
+  executionFootprint(): Lc0WebExecutionFootprint | undefined {
+    return this.currentRuntime?.executionFootprint();
   }
 
   private enqueueEvaluation<T>(work: () => Promise<T>): Promise<T> {
@@ -7468,6 +7707,7 @@ export class Lc0WebHybridEvaluator {
   async dispose(): Promise<void> {
     const runtimePromise = this.runtimePromise;
     this.runtimePromise = undefined;
+    this.currentRuntime = undefined;
     if (!runtimePromise) return;
     const runtime = await runtimePromise.catch(() => undefined);
     runtime?.destroy();

@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 180_000;
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_search_bench.mjs [options]\n\nRuns a bounded browser benchmark for the hybrid WGSL encoder + ORT heads evaluator, including warm eval latency and fixed-visit PUCT search latency.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --fen FEN            Position to benchmark (default page start position)\n  --visits N           Fixed PUCT visits per timed search (default 32)\n  --batch N            Search leaf batch size (default 1)\n  --batch-pipeline-depth N\n                       Experimental leaf-batch pipeline depth for deferred readback/search scheduling (default 1)\n  --layers N           Encoder layers for hybrid path (default 10)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --wgsl-batch-mode MODE\n                       WGSL-head evaluateBatch mode: physical or serial (default physical)\n  --input-backend MODE Hybrid input backend: js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                       Legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads; opt-in)\n  --encoder-kernel MODE\n                       Hybrid encoder kernels: hand, tvm-packed-f16, mixed-tvm-ffn, or mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project (default hand)\n  --eval-iters N       Timed warm eval iterations (default 3, max 100; 0 for search-only)\n  --eval-warmup N      Warm eval warmup iterations (default 1, max 20)\n  --batch-eval-iters N Timed evaluateBatch iterations at --batch size (default 0)\n  --batch-eval-warmup N\n                       evaluateBatch warmup iterations (default 0)\n  --search-iters N     Timed fixed-visit searches (default 3, max 50)\n  --search-warmup N    Search warmup iterations (default 1, max 10)\n  --reuse-tree         Reuse the worker search tree across repeated searches\n  --reset-between-searches\n                       Reset the tree before every search even when reuse is enabled\n  --no-reset-between-searches\n                       Keep the tree between repeated searches\n  --eval-cache-entries N\n                       Enable worker-side LC0 eval cache with this many entries\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`);
+  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_search_bench.mjs [options]\n\nRuns a bounded browser benchmark for the hybrid WGSL encoder + ORT heads evaluator, including warm eval latency and fixed-visit PUCT search latency.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --fen FEN            Position to benchmark (default page start position)\n  --visits N           Fixed PUCT visits per timed search (default 32)\n  --preset NAME        Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --batch N            Search leaf batch size (default 1)\n  --batch-pipeline-depth N\n                       Experimental leaf-batch pipeline depth for deferred readback/search scheduling (default 1)\n  --layers N           Encoder layers for hybrid path (default 10)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --wgsl-batch-mode MODE\n                       WGSL-head evaluateBatch mode: physical or serial (default physical)\n  --input-backend MODE Hybrid input backend: js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                       Legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads; opt-in)\n  --encoder-kernel MODE\n                       Hybrid encoder kernels: hand, tvm-packed-f16, mixed-tvm-ffn, or mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project (default hand)\n  --eval-iters N       Timed warm eval iterations (default 3, max 100; 0 for search-only)\n  --eval-warmup N      Warm eval warmup iterations (default 1, max 20)\n  --batch-eval-iters N Timed evaluateBatch iterations at --batch size (default 0)\n  --batch-eval-warmup N\n                       evaluateBatch warmup iterations (default 0)\n  --search-iters N     Timed fixed-visit searches (default 3, max 50)\n  --search-warmup N    Search warmup iterations (default 1, max 10)\n  --reuse-tree         Reuse the worker search tree across repeated searches\n  --reset-between-searches\n                       Reset the tree before every search even when reuse is enabled\n  --no-reset-between-searches\n                       Keep the tree between repeated searches\n  --eval-cache-entries N\n                       Enable worker-side LC0 eval cache with this many entries\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -18,6 +19,7 @@ function parseArgs(argv) {
     agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
     session: process.env.AGENT_BROWSER_SESSION ?? `lc0-hybrid-search-bench-${process.pid}`,
     visits: 32,
+    preset: '',
     batch: 1,
     batchPipelineDepth: 1,
     layers: 10,
@@ -57,6 +59,7 @@ function parseArgs(argv) {
     else if (arg === '--fen') args.fen = next();
     else if (arg === '--timeout') args.timeoutMs = Number(next());
     else if (arg === '--visits') args.visits = Number(next());
+    else if (arg === '--preset') args.preset = next();
     else if (arg === '--batch') args.batch = Number(next());
     else if (arg === '--batch-pipeline-depth' || arg === '--pipeline-depth') args.batchPipelineDepth = Number(next());
     else if (arg === '--layers') args.layers = Number(next());
@@ -82,6 +85,7 @@ function parseArgs(argv) {
     else if (arg === '-h' || arg === '--help') args.help = true;
     else throw new Error(`Unknown option: ${arg}`);
   }
+  applyLc0RuntimePreset(args, argv);
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   if (!['ort', 'wgsl'].includes(args.headBackend)) throw new Error(`Invalid --head-backend: ${args.headBackend}`);
@@ -220,7 +224,7 @@ async function runBrowserBenchmark(args) {
         if (result.backend !== expectedBackend) throw new Error(`unexpected hybrid backend: ${result.backend}`);
         if ((result.encoderKernelVariant ?? 'hand') !== args.encoderKernel) throw new Error(`unexpected encoder kernel variant: ${result.encoderKernelVariant ?? 'hand'}`);
         if ((result.legalPriorsBackend ?? 'js') !== args.legalPriorsBackend) throw new Error(`unexpected legal-priors backend: ${result.legalPriorsBackend ?? 'js'}`);
-        return result;
+        return { ...result, scriptPreset: args.preset || null, runtimeConfiguration: lc0RuntimeConfiguration(args) };
       } catch (error) {
         if (Date.now() >= deadline) throw error;
       }

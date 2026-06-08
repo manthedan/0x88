@@ -18,7 +18,43 @@ import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyS
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
 type NativeRecord = { id: string; backend?: string; fen: string; startFen?: string; moves?: string[]; bestmove: string; topPriors: NativePrior[] };
-type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; pv?: string[]; multiPv?: string[][]; elapsedMs?: number; cancelled?: boolean; stats?: Lc0SearchResult['search']['stats'] };
+type ExecutionFootprint = {
+  gpuBufferBytes: number;
+  gpuBufferCount: number;
+  categories: Record<string, { bytes: number; count: number }>;
+  layers: number;
+  physicalSlots: number;
+  primaryBatchSlots: number;
+  deferredBatchSlots: number;
+  deferredBatchRings: number;
+  wgslBatchUploadCapacity: number;
+  wgslBatchReadbackCapacity: number;
+  wgslDeferredReadbackCapacity: number;
+  note: string;
+};
+
+type CacheFootprint = {
+  entries: number;
+  maxEntries: number;
+  approxBytes: number;
+  approxKeyBytes: number;
+  approxEvaluationBytes: number;
+  note: string;
+};
+
+type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; pv?: string[]; multiPv?: string[][]; elapsedMs?: number; cancelled?: boolean; stats?: Lc0SearchResult['search']['stats']; executionFootprint?: ExecutionFootprint; cacheFootprint?: CacheFootprint };
+type PackFootprint = {
+  declaredTensorBytes: number;
+  loadedTensorBytes: number;
+  totalShardBytes: number;
+  loadedShardBytes: number;
+  tensorCount: number;
+  loadedTensorCount: number;
+  shardCount: number;
+  loadedShardCount: number;
+  dtypeHistogram: Record<string, number>;
+};
+
 type PackLoadResult = {
   packUrl: string;
   modelName: string;
@@ -31,6 +67,7 @@ type PackLoadResult = {
   shardCount: number;
   verifiedShardCount: number;
   shardBytes: number;
+  packFootprint: PackFootprint;
   elapsedMs: number;
 };
 
@@ -677,6 +714,7 @@ type HybridEncoderProfileResult = {
   aggregateStageTimings: Array<{ stage: string; label: string; iterations: number; totalMs: number; avgMs: number; percentOfProfiledStageMs: number }>;
   layerTimings: Array<{ layer: number; totalMs: number; stages: Array<{ stage: string; label: string; iterations: number; totalMs: number; avgMs: number; percentOfProfiledStageMs: number }> }>;
   note: string;
+  executionFootprint?: ExecutionFootprint;
 };
 
 type WorkerResponse =
@@ -1285,6 +1323,25 @@ function roundedNumericRecord(value: unknown, digits = 4): Record<string, number
   return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
+function evaluationExecutionFootprint(evaluation: Lc0Evaluation | undefined): ExecutionFootprint | undefined {
+  return (evaluation as (Lc0Evaluation & { executionFootprint?: ExecutionFootprint }) | undefined)?.executionFootprint;
+}
+
+function executionFootprintMB(footprint: ExecutionFootprint | undefined): Record<string, number> | undefined {
+  if (!footprint) return undefined;
+  const entries = Object.entries(footprint.categories).map(([key, value]) => [key, Number((value.bytes / 1_000_000).toFixed(3))] as const);
+  return { gpuBufferMB: Number((footprint.gpuBufferBytes / 1_000_000).toFixed(3)), ...Object.fromEntries(entries) };
+}
+
+function cacheFootprintKB(footprint: CacheFootprint | undefined): Record<string, number> | undefined {
+  if (!footprint) return undefined;
+  return {
+    approxKB: Number((footprint.approxBytes / 1_000).toFixed(3)),
+    approxKeyKB: Number((footprint.approxKeyBytes / 1_000).toFixed(3)),
+    approxEvaluationKB: Number((footprint.approxEvaluationBytes / 1_000).toFixed(3)),
+  };
+}
+
 function recordNumericTimingSamples(samples: Record<string, number[]>, value: unknown): void {
   const rounded = roundedNumericRecord(value, 8);
   if (!rounded) return;
@@ -1377,6 +1434,12 @@ async function runPackProbe(): Promise<void> {
       elapsedMs: Number(response.result.elapsedMs.toFixed(3)),
       shardMB: Number((response.result.shardBytes / 1_000_000).toFixed(3)),
       loadedTensorMB: Number((response.result.loadedTensorBytes / 1_000_000).toFixed(3)),
+      packFootprintMB: {
+        declaredTensorMB: Number((response.result.packFootprint.declaredTensorBytes / 1_000_000).toFixed(3)),
+        loadedTensorMB: Number((response.result.packFootprint.loadedTensorBytes / 1_000_000).toFixed(3)),
+        totalShardMB: Number((response.result.packFootprint.totalShardBytes / 1_000_000).toFixed(3)),
+        loadedShardMB: Number((response.result.packFootprint.loadedShardBytes / 1_000_000).toFixed(3)),
+      },
     };
     el('benchResult').textContent = JSON.stringify(result);
     el('message').textContent = `PACK_DONE ${result.modelName} · ${result.shardMB.toFixed(1)} MB shards · ${result.elapsedMs.toFixed(0)} ms worker load`;
@@ -2511,6 +2574,8 @@ async function runWorkerEvalBenchmark(): Promise<void> {
       q: last?.evaluation.q,
       mlh: last?.evaluation.mlh,
       lastBackendTiming: roundedNumericRecord((last?.evaluation as { timing?: unknown } | undefined)?.timing),
+      executionFootprint: evaluationExecutionFootprint(last?.evaluation),
+      executionFootprintMB: executionFootprintMB(evaluationExecutionFootprint(last?.evaluation)),
       phaseTimingStats: summarizeNumericTimingSamples(backendTimingSamples, 'onnx worker eval backend timing'),
       ...stats,
     } as EvalBenchResult & Record<string, unknown>);
@@ -2654,6 +2719,7 @@ async function runHybridSearchBenchmark(): Promise<void> {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
     const totalSearchMs = searchTimes.reduce((sum, value) => sum + value, 0);
+    const executionFootprint = lastSearch?.executionFootprint ?? evaluationExecutionFootprint(lastBatchEval?.[0]?.evaluation) ?? evaluationExecutionFootprint(lastEval?.evaluation);
     const result = {
       status: 'HYBRID_SEARCH_BENCH_DONE',
       backend: searchWorkerBackend,
@@ -2675,6 +2741,10 @@ async function runHybridSearchBenchmark(): Promise<void> {
       reuseTree,
       resetBetweenSearches,
       evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
+      executionFootprint,
+      executionFootprintMB: executionFootprintMB(executionFootprint),
+      cacheFootprint: lastSearch?.cacheFootprint,
+      cacheFootprintKB: cacheFootprintKB(lastSearch?.cacheFootprint),
       eval: {
         warmup: evalWarmup,
         iterations: evalIterations,

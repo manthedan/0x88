@@ -3,13 +3,14 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 300_000;
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_hybrid_search_fixture_parity.mjs [options]\n\nRuns browser/WebGPU LC0 fixed-search fixture parity for hybrid search across batch pipeline depths.\n\nOptions:\n  --out PATH                 Write JSON artifact (default stdout only)\n  --base-url URL             Use an existing dev server\n  --host HOST                Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N                   Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN        Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --session NAME             agent-browser session name\n  --timeout MS               Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --visits LIST              Comma-separated fixed-visit fixture sets, e.g. 32,64 (default 32)\n  --batch N                  Search leaf batch size (default 4)\n  --batch-pipeline-depths L  Comma-separated depths (default 1; use 1,2,4 with --allow-mismatches for exploratory pipeline matrices)\n  --repeats N                Repeats per fixture/depth (default 1)\n  --fixture-limit N          Fixtures per visit set (max currently 16, default 16)\n  --layers N                 Encoder layers (default 10)\n  --head-backend MODE        ort or wgsl (default ort; use wgsl to opt into experimental WGSL heads)\n  --encoder-kernel MODE      hand, mixed-tvm-ffn, mixed-tvm-ffn-outproj, tvm-packed-f16 (default hand)\n  --input-backend MODE       js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                            Legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads; opt-in)\n  --no-server                Do not auto-start Vite\n  --allow-mismatches         Exit 0 and write/report artifacts even when parity mismatches are found\n  --dry-run                  Print URL and exit\n  -h, --help                 Show this help\n`);
+  console.log(`Usage: node scripts/lc0_browser_hybrid_search_fixture_parity.mjs [options]\n\nRuns browser/WebGPU LC0 fixed-search fixture parity for hybrid search across batch pipeline depths.\n\nOptions:\n  --out PATH                 Write JSON artifact (default stdout only)\n  --base-url URL             Use an existing dev server\n  --host HOST                Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N                   Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN        Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --session NAME             agent-browser session name\n  --timeout MS               Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --visits LIST              Comma-separated fixed-visit fixture sets, e.g. 32,64 (default 32)\n  --preset NAME              Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --batch N                  Search leaf batch size (default 4)\n  --batch-pipeline-depths L  Comma-separated depths (default 1; use 1,2,4 with --allow-mismatches for exploratory pipeline matrices)\n  --repeats N                Repeats per fixture/depth (default 1)\n  --fixture-limit N          Fixtures per visit set (max currently 16, default 16)\n  --layers N                 Encoder layers (default 10)\n  --head-backend MODE        ort or wgsl (default ort; use wgsl to opt into experimental WGSL heads)\n  --encoder-kernel MODE      hand, mixed-tvm-ffn, mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project, tvm-packed-f16 (default hand)\n  --input-backend MODE       js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                            Legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads; opt-in)\n  --no-server                Do not auto-start Vite\n  --allow-mismatches         Exit 0 and write/report artifacts even when parity mismatches are found\n  --dry-run                  Print URL and exit\n  -h, --help                 Show this help\n`);
 }
 
 function parseList(raw, mapper = Number, label = 'list') {
@@ -26,6 +27,7 @@ function parseArgs(argv) {
     agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
     session: process.env.AGENT_BROWSER_SESSION ?? `lc0-search-fixture-parity-${process.pid}`,
     visits: [32],
+    preset: '',
     batch: 4,
     batchPipelineDepths: [1],
     repeats: 1,
@@ -55,6 +57,7 @@ function parseArgs(argv) {
     else if (arg === '--session') args.session = next();
     else if (arg === '--timeout') args.timeoutMs = Number(next());
     else if (arg === '--visits') args.visits = parseList(next(), Number, 'visits');
+    else if (arg === '--preset') args.preset = next();
     else if (arg === '--batch') args.batch = Number(next());
     else if (arg === '--batch-pipeline-depths' || arg === '--pipeline-depths') args.batchPipelineDepths = parseList(next(), Number, 'batch-pipeline-depths');
     else if (arg === '--repeats') args.repeats = Number(next());
@@ -71,6 +74,7 @@ function parseArgs(argv) {
     else if (arg === '-h' || arg === '--help') args.help = true;
     else throw new Error(`Unknown option: ${arg}`);
   }
+  applyLc0RuntimePreset(args, argv);
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   if (!['ort', 'wgsl'].includes(args.headBackend)) throw new Error(`Invalid --head-backend: ${args.headBackend}`);
@@ -186,7 +190,7 @@ async function runBrowserParity(args) {
         const expectedBackend = args.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
         if (result.backend !== expectedBackend) throw new Error(`unexpected backend: ${result.backend}`);
         if ((result.encoderKernelVariant ?? 'hand') !== args.encoderKernel) throw new Error(`unexpected encoder kernel: ${result.encoderKernelVariant ?? 'hand'}`);
-        return result;
+        return { ...result, scriptPreset: args.preset || null, runtimeConfiguration: lc0RuntimeConfiguration(args) };
       } catch (error) {
         if (doneSeen || Date.now() >= deadline) throw error;
       }

@@ -3,12 +3,13 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_hybrid_search_matrix.mjs [options]\n\nRuns the browser hybrid search benchmark over encoder-kernel/head-backend/visits/batch combinations and writes a JSON matrix artifact.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_search_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --visits LIST         Comma-separated visits list (default 1,32,128)\n  --batches LIST        Comma-separated batch sizes (default 1,2,4,8)\n  --batch-pipeline-depths LIST\n                       Comma-separated experimental search pipeline depths (default 1)\n  --head-backends LIST  Comma-separated head backends: ort,wgsl (default ort; include wgsl to opt into experimental WGSL heads)\n  --legal-priors-backends LIST\n                       Comma-separated legal-prior backends: js,wasm,gpu (default js; gpu requires WGSL heads; opt-in)\n  --encoder-kernels LIST\n                       Comma-separated encoder kernels: hand,tvm-packed-f16,mixed-tvm-ffn,mixed-tvm-ffn-outproj,mixed-tvm-ffn-smolgen-project (default hand)\n  --repeats N           Repeat each cell, alternating variants in repeat order (default 1)\n  --layers N            Encoder layers (default 10)\n  --eval-iters N        Warm eval timed iterations per cell (default 3)\n  --eval-warmup N       Warm eval warmup iterations per cell (default 1)\n  --search-iters N      Search timed iterations per cell (default 3)\n  --search-warmup N     Search warmup iterations per cell (default 1)\n  --timeout MS          Per-cell browser timeout (default 180000)\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`);
+  console.log(`Usage: node scripts/lc0_browser_hybrid_search_matrix.mjs [options]\n\nRuns the browser hybrid search benchmark over encoder-kernel/head-backend/visits/batch combinations and writes a JSON matrix artifact.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_search_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --visits LIST         Comma-separated visits list (default 1,32,128)\n  --preset NAME         Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --batches LIST        Comma-separated batch sizes (default 1,2,4,8)\n  --batch-pipeline-depths LIST\n                       Comma-separated experimental search pipeline depths (default 1)\n  --head-backends LIST  Comma-separated head backends: ort,wgsl (default ort; include wgsl to opt into experimental WGSL heads)\n  --input-backend MODE  Hybrid input backend for all cells: js, wgsl, or wasm (default js)\n  --legal-priors-backends LIST\n                       Comma-separated legal-prior backends: js,wasm,gpu (default js; gpu requires WGSL heads; opt-in)\n  --encoder-kernels LIST\n                       Comma-separated encoder kernels: hand,tvm-packed-f16,mixed-tvm-ffn,mixed-tvm-ffn-outproj,mixed-tvm-ffn-smolgen-project (default hand)\n  --repeats N           Repeat each cell, alternating variants in repeat order (default 1)\n  --layers N            Encoder layers (default 10)\n  --eval-iters N        Warm eval timed iterations per cell (default 3)\n  --eval-warmup N       Warm eval warmup iterations per cell (default 1)\n  --search-iters N      Search timed iterations per cell (default 3)\n  --search-warmup N     Search warmup iterations per cell (default 1)\n  --timeout MS          Per-cell browser timeout (default 180000)\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`);
 }
 
 function parseList(raw, parse, name) {
@@ -23,9 +24,11 @@ function parseArgs(argv) {
     host: DEFAULT_HOST,
     port: DEFAULT_PORT,
     visits: [1, 32, 128],
+    preset: '',
     batches: [1, 2, 4, 8],
     batchPipelineDepths: [1],
     headBackends: ['ort'],
+    inputBackend: 'js',
     legalPriorsBackends: ['js'],
     encoderKernels: ['hand'],
     repeats: 1,
@@ -53,9 +56,11 @@ function parseArgs(argv) {
       args.explicitBaseUrl = true;
     }
     else if (arg === '--visits') args.visits = parseList(next(), Number, 'visits');
+    else if (arg === '--preset') args.preset = next();
     else if (arg === '--batches') args.batches = parseList(next(), Number, 'batches');
     else if (arg === '--batch-pipeline-depths' || arg === '--pipeline-depths') args.batchPipelineDepths = parseList(next(), Number, 'batch-pipeline-depths');
     else if (arg === '--head-backends') args.headBackends = parseList(next(), (value) => value, 'head-backends');
+    else if (arg === '--input-backend') args.inputBackend = next();
     else if (arg === '--legal-priors-backends' || arg === '--legal-priors-backend') args.legalPriorsBackends = parseList(next(), (value) => value, 'legal-priors-backends');
     else if (arg === '--encoder-kernels') args.encoderKernels = parseList(next(), (value) => value, 'encoder-kernels');
     else if (arg === '--repeats') args.repeats = Number(next());
@@ -70,8 +75,10 @@ function parseArgs(argv) {
     else if (arg === '-h' || arg === '--help') args.help = true;
     else throw new Error(`Unknown option: ${arg}`);
   }
+  applyLc0RuntimePreset(args, argv);
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   for (const backend of args.headBackends) if (!['ort', 'wgsl'].includes(backend)) throw new Error(`Invalid backend: ${backend}`);
+  if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
   for (const backend of args.legalPriorsBackends) if (!['js', 'wasm', 'gpu'].includes(backend)) throw new Error(`Invalid legal-priors backend: ${backend}`);
   for (const kernel of args.encoderKernels) if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(kernel)) throw new Error(`Invalid encoder kernel: ${kernel}`);
   for (const [name, value] of [['port', args.port], ['layers', args.layers], ['repeats', args.repeats], ['search-iters', args.searchIters], ['timeout', args.timeoutMs]]) {
@@ -200,6 +207,7 @@ async function runCell(args, combo, index, total) {
     '--agent-browser', args.agentBrowser,
     '--session', session,
     '--head-backend', combo.headBackend,
+    '--input-backend', args.inputBackend,
     '--legal-priors-backend', combo.legalPriorsBackend,
     '--encoder-kernel', combo.encoderKernel,
     '--visits', String(combo.visits),
@@ -253,7 +261,9 @@ async function main() {
       finishedAt: new Date().toISOString(),
       baseUrl: args.baseUrl,
       layers: args.layers,
+      runtimeConfiguration: lc0RuntimeConfiguration(args),
       encoderKernels: args.encoderKernels,
+      inputBackend: args.inputBackend,
       legalPriorsBackends: args.legalPriorsBackends,
       repeats: args.repeats,
       batchPipelineDepths: args.batchPipelineDepths,

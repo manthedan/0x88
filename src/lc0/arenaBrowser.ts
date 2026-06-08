@@ -10,10 +10,10 @@ import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { GameTree } from './gameTree.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
+import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
-import { Lc0WebHybridEvaluator, type Lc0WebEncoderKernelVariant } from './wgslMatmulAddProbe.ts';
+import { Lc0WebHybridEvaluator, type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint } from './wgslMatmulAddProbe.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { StockfishEngine, stockfishFlavorLabel, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
 import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
@@ -697,6 +697,14 @@ function timingMeansText(means: Record<string, number> | undefined): string {
 function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): string {
   if (!metrics) return 'NN cache unavailable';
   return `NN cache ${metrics.entries}/${metrics.maxEntries} entries · ${metrics.hits} hit${metrics.hits === 1 ? '' : 's'} · ${metrics.misses} miss${metrics.misses === 1 ? '' : 'es'}`;
+}
+
+function lc0ExecutionFootprint(): Lc0WebExecutionFootprint | undefined {
+  return (lc0Cache?.inner as { executionFootprint?: () => Lc0WebExecutionFootprint | undefined } | undefined)?.executionFootprint?.();
+}
+
+function lc0CacheFootprint(): Lc0EvaluationCacheFootprint | undefined {
+  return lc0Cache?.cacheFootprint();
 }
 
 function diagnosticEngineIds(): string[] {
@@ -1893,6 +1901,8 @@ async function runFixedSuiteBenchAutorun(): Promise<void> {
         lc0Tree: mapValues(lc0TreeTelemetry),
         uci: mapValues(uciTelemetry),
         lc0Cache: lc0Cache?.metrics(),
+        lc0CacheFootprint: lc0CacheFootprint(),
+        lc0ExecutionFootprint: lc0ExecutionFootprint(),
       },
       positions,
       engineOutputCount: engineOutputTotalCount,
@@ -1950,6 +1960,8 @@ async function runArenaBenchAutorun(): Promise<void> {
         uci: mapValues(uciTelemetry),
         bt4: mapValues(bt4Telemetry),
         lc0Cache: lc0Cache?.metrics(),
+        lc0CacheFootprint: lc0CacheFootprint(),
+        lc0ExecutionFootprint: lc0ExecutionFootprint(),
       },
       engineOutputCount: engineOutputTotalCount,
       engineOutputRetainedCount: engineOutputHistory.length,

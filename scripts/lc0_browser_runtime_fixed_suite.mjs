@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parsePgnGames } from '../src/chess/pgn.ts';
+import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5180;
@@ -10,7 +11,7 @@ const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_RUNTIMES = ['onnx', 'hybrid-ort-heads', 'hybrid-wgsl-heads'];
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_runtime_fixed_suite.mjs [options]\n\nRuns the same fixed LC0-to-move positions in the browser for each LC0 runtime, then scores each LC0 move with Stockfish on the resulting position.\n\nOptions:\n  --source-report PATH      Existing runtime arena JSON to derive positions from\n  --source-runtime NAME     Runtime in source report (default hybrid-wgsl-heads)\n  --source-game N           1-based game number in that runtime PGN (default 2)\n  --max-positions N         Max LC0-to-move positions to extract (default 16)\n  --skip-plies N            Ignore positions before this absolute ply (default 0)\n  --fens FILE               Use newline-separated FENs instead of --source-report\n  --runtimes LIST           Comma-separated runtimes (default ${DEFAULT_RUNTIMES.join(',')})\n  --movetime MS             LC0 movetime per fixed position (default 1000)\n  --stockfish-score-ms MS   Stockfish movetime to score each post-LC0 position (default 500)\n  --stockfish-score-depth N Use fixed Stockfish depth for scoring instead of movetime\n  --cache N                 LC0 NN cache entries (default 2048)\n  --lc0-batch-size N        LC0 PUCT leaf batch size passed to arena search (default 1)\n  --batch-pipeline-depth N  LC0 batch pipeline depth (default 1; >1 is speculative search semantics)\n  --input-backend NAME      Hybrid input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME     Hybrid encoder kernel: hand, tvm-packed-f16, mixed-tvm-ffn, or mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project (default hand)
+  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_runtime_fixed_suite.mjs [options]\n\nRuns the same fixed LC0-to-move positions in the browser for each LC0 runtime, then scores each LC0 move with Stockfish on the resulting position.\n\nOptions:\n  --source-report PATH      Existing runtime arena JSON to derive positions from\n  --source-runtime NAME     Runtime in source report (default hybrid-wgsl-heads)\n  --source-game N           1-based game number in that runtime PGN (default 2)\n  --max-positions N         Max LC0-to-move positions to extract (default 16)\n  --skip-plies N            Ignore positions before this absolute ply (default 0)\n  --fens FILE               Use newline-separated FENs instead of --source-report\n  --runtimes LIST           Comma-separated runtimes (default ${DEFAULT_RUNTIMES.join(',')})\n  --preset NAME             Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --movetime MS             LC0 movetime per fixed position (default 1000)\n  --stockfish-score-ms MS   Stockfish movetime to score each post-LC0 position (default 500)\n  --stockfish-score-depth N Use fixed Stockfish depth for scoring instead of movetime\n  --cache N                 LC0 NN cache entries (default 2048)\n  --lc0-batch-size N        LC0 PUCT leaf batch size passed to arena search (default 1)\n  --batch-pipeline-depth N  LC0 batch pipeline depth (default 1; >1 is speculative search semantics)\n  --input-backend NAME      Hybrid input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME     Hybrid encoder kernel: hand, tvm-packed-f16, mixed-tvm-ffn, or mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project (default hand)
   --legal-priors-backend NAME
                             Hybrid legal-priors backend: js, wasm, or gpu (default js; gpu requires WGSL heads)
   --out PATH                Write full JSON report to PATH\n  --summary-only            Print compact summary only\n  --base-url URL            Use existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N                  Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST               Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN       Browser automation binary (default agent-browser)\n  --session NAME            agent-browser session prefix\n  --timeout MS              Per-runtime browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --no-server               Do not auto-start Vite\n  -h, --help                Show this help\n`);
@@ -24,6 +25,7 @@ function parseArgs(argv) {
     agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
     session: process.env.AGENT_BROWSER_SESSION ?? `lc0-fixed-suite-${process.pid}`,
     runtimes: [...DEFAULT_RUNTIMES],
+    preset: '',
     sourceReport: '',
     sourceRuntime: 'hybrid-wgsl-heads',
     sourceGame: 2,
@@ -57,6 +59,7 @@ function parseArgs(argv) {
     else if (arg === '--skip-plies') args.skipPlies = Number(next());
     else if (arg === '--fens') args.fensFile = next();
     else if (arg === '--runtimes') args.runtimes = next().split(',').map((s) => s.trim()).filter(Boolean);
+    else if (arg === '--preset') args.preset = next();
     else if (arg === '--movetime') args.movetime = Number(next());
     else if (arg === '--stockfish-score-ms') args.stockfishScoreMs = Number(next());
     else if (arg === '--stockfish-score-depth') args.stockfishScoreDepth = Number(next());
@@ -78,11 +81,13 @@ function parseArgs(argv) {
     else if (arg === '-h' || arg === '--help') args.help = true;
     else throw new Error(`Unknown option: ${arg}`);
   }
+  applyLc0RuntimePreset(args, argv);
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
-  for (const name of ['sourceGame', 'maxPositions', 'movetime', 'stockfishScoreMs', 'cache', 'timeoutMs', 'lc0BatchSize', 'batchPipelineDepth']) {
+  for (const name of ['sourceGame', 'maxPositions', 'movetime', 'stockfishScoreMs', 'timeoutMs', 'lc0BatchSize', 'batchPipelineDepth']) {
     if (!Number.isFinite(args[name]) || args[name] <= 0) throw new Error(`Invalid ${name}: ${args[name]}`);
   }
+  if (!Number.isFinite(args.cache) || args.cache < 0) throw new Error(`Invalid cache: ${args.cache}`);
   if (args.stockfishScoreDepth !== undefined && (!Number.isFinite(args.stockfishScoreDepth) || args.stockfishScoreDepth <= 0)) throw new Error(`Invalid stockfishScoreDepth: ${args.stockfishScoreDepth}`);
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid inputBackend: ${args.inputBackend}`);
   if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel)) throw new Error(`Invalid encoderKernel: ${args.encoderKernel}`);
@@ -99,7 +104,7 @@ function lc0SideFromTags(tags) {
 }
 
 async function loadFixedFens(args) {
-  if (args.fensFile) return (await readFile(args.fensFile, 'utf8')).split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, args.maxPositions);
+  if (args.fensFile) return (await readFile(args.fensFile, 'utf8')).split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#')).slice(0, args.maxPositions);
   if (!args.sourceReport) throw new Error('expected --source-report or --fens');
   const report = JSON.parse(await readFile(args.sourceReport, 'utf8'));
   const result = (report.results ?? []).find((entry) => entry.runtime === args.sourceRuntime) ?? report.results?.[0];
@@ -239,11 +244,21 @@ async function runOne(args, runtime, fens) {
   }
 }
 
+function bytesToMb(value) {
+  return Number.isFinite(value) ? Math.round((value / 1_000_000) * 1000) / 1000 : null;
+}
+
+function bytesToKb(value) {
+  return Number.isFinite(value) ? Math.round((value / 1_000) * 1000) / 1000 : null;
+}
+
 function compactRuntime(result) {
   const cp = result.positions.map((p) => p.stockfish?.lc0PerspectiveCp).filter(Number.isFinite);
   const visits = result.positions.map((p) => p.lc0Search?.visits).filter(Number.isFinite).reduce((a, b) => a + b, 0);
   const evals = result.positions.map((p) => p.lc0Search?.evals).filter(Number.isFinite).reduce((a, b) => a + b, 0);
   const lc0Ms = result.positions.map((p) => p.lc0Search?.elapsedMs).filter(Number.isFinite).reduce((a, b) => a + b, 0);
+  const executionFootprint = result.telemetry?.lc0ExecutionFootprint;
+  const cacheFootprint = result.telemetry?.lc0CacheFootprint;
   return {
     runtime: result.runtime,
     positions: result.positions.length,
@@ -254,6 +269,9 @@ function compactRuntime(result) {
     elapsedMs: result.elapsedMs,
     lc0BatchSize: result.configuration?.lc0BatchSize,
     lc0BatchPipelineDepth: result.configuration?.lc0BatchPipelineDepth,
+    executionFootprintMB: bytesToMb(executionFootprint?.gpuBufferBytes),
+    cacheFootprintKB: bytesToKb(cacheFootprint?.approxBytes),
+    cacheEntries: cacheFootprint?.entries,
   };
 }
 
@@ -300,6 +318,7 @@ async function main() {
         lc0BatchSize: args.lc0BatchSize,
         batchPipelineDepth: args.batchPipelineDepth,
         positions: fens.length,
+        runtimeConfiguration: lc0RuntimeConfiguration(args),
       },
       fens,
       summary: addRelativeLoss(results.map(compactRuntime), results),
