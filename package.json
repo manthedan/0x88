@@ -92,6 +92,7 @@
     "lc0:browser-hybrid-encoder-profile-matrix": "node --experimental-strip-types scripts/lc0_browser_hybrid_encoder_profile_matrix.mjs",
     "lc0:browser-hybrid-search-reuse-cache-matrix": "node --experimental-strip-types scripts/lc0_browser_hybrid_search_reuse_cache_matrix.mjs",
     "lc0:browser-hybrid-move-sequence-cache-matrix": "node --experimental-strip-types scripts/lc0_browser_hybrid_move_sequence_cache_matrix.mjs",
+    "lc0:analysis-browser-smoke": "node scripts/lc0_analysis_browser_smoke.mjs",
     "lc0:browser-ci-smoke": "node --experimental-strip-types scripts/lc0_browser_ci_smoke.mjs",
     "lc0:browser-wgsl-vs-ort-webgpu": "node --experimental-strip-types scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs",
     "lc0:browser-ort-readback-profile": "node scripts/lc0_browser_ort_readback_profile.mjs",
