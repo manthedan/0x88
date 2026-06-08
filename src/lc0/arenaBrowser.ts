@@ -10,6 +10,9 @@ import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { GameTree } from './gameTree.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
+import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
+import { chooseMove, montyLitePuctPolicy, type SearchResult as TinySearchResult } from '../search/puct.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
@@ -25,7 +28,7 @@ import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berse
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, type PlentyChessVariant } from './plentychessVariants.ts';
 import { BT4_APPROX_MB, Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
-import { defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 type SeatId = 'A' | 'B';
@@ -125,6 +128,12 @@ const DEFAULT_MODEL_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f3
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL_URL;
 const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
 const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
+const DEFAULT_TINY_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
+const DEFAULT_TINY_META_URL = '/models/bt4_anneal_muon_best.meta.json';
+const DEFAULT_TINY_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
+const TINY_MODEL_URL = params.get('tinyModel') ?? params.get('tinyOnnx') ?? DEFAULT_TINY_MODEL_URL;
+const TINY_META_URL = params.get('tinyMeta') ?? DEFAULT_TINY_META_URL;
+const TINY_HYBRID_MANIFEST_URL = params.get('tinyManifest') ?? params.get('manifest') ?? params.get('manifestUrl') ?? DEFAULT_TINY_HYBRID_MANIFEST_URL;
 type Lc0ArenaRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads';
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
@@ -152,6 +161,8 @@ const recklessByVariant = new Map<string, RecklessEngine>();
 const viridithasByVariant = new Map<string, ViridithasEngine>();
 const berserkByVariant = new Map<string, BerserkEngine>();
 const plentyChessByVariant = new Map<string, PlentyChessEngine>();
+const tinyEvaluatorPromises = new Map<string, Promise<Evaluator>>();
+let tinyHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 // Lc0 BT4 runs in its own worker (lazy, WebGPU-gated, disposable). See bt4Engine.ts.
 const bt4 = new Bt4WorkerSearcher();
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
@@ -184,6 +195,75 @@ function inputEl(id: string): HTMLInputElement { return el(id) as HTMLInputEleme
 function selectEl(id: string): HTMLSelectElement { return el(id) as HTMLSelectElement; }
 function htmlEscape(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+function tinyRuntimeForVariant(variant: string): 'auto' | 'ort' | 'custom-webgpu' {
+  if (variant.endsWith('-ort')) return 'ort';
+  if (variant.endsWith('-custom')) return 'custom-webgpu';
+  return 'auto';
+}
+
+function tinyRuntimeFallbackForVariant(variant: string): boolean {
+  return !variant.endsWith('-custom');
+}
+
+function tinyHybridManifestStatusText(): string {
+  if (tinyHybridManifestStatus === 'present') return `Tiny hybrid bundle present (${TINY_HYBRID_MANIFEST_URL})`;
+  if (tinyHybridManifestStatus === 'missing') return `Tiny hybrid bundle missing; auto uses ORT fallback (${TINY_HYBRID_MANIFEST_URL})`;
+  return `Tiny hybrid bundle checking (${TINY_HYBRID_MANIFEST_URL})`;
+}
+
+async function refreshTinyHybridManifestStatus(): Promise<void> {
+  try {
+    const res = await fetch(TINY_HYBRID_MANIFEST_URL, { method: 'HEAD', cache: 'no-store' });
+    tinyHybridManifestStatus = res.ok ? 'present' : 'missing';
+  } catch {
+    tinyHybridManifestStatus = 'missing';
+  }
+  if (tinyHybridManifestStatus === 'missing') {
+    for (const row of activeSeatRows()) {
+      if (row.family === 'tiny' && row.variant === 'bt4-custom') row.variant = 'bt4-auto';
+    }
+  }
+  void renderRuntimeBadge();
+}
+
+async function tinyEvaluator(variant: string): Promise<Evaluator> {
+  const runtime = tinyRuntimeForVariant(variant);
+  const fallback = tinyRuntimeFallbackForVariant(variant);
+  const key = `${runtime}:${fallback ? 'fallback' : 'strict'}:${TINY_MODEL_URL}:${TINY_META_URL}`;
+  const existing = tinyEvaluatorPromises.get(key);
+  if (existing) return existing;
+  const created = (async () => {
+    const loaded = await createBrowserSquareformerRuntimeEvaluator({
+      id: 'bt4-anneal-muon-best',
+      modelId: 'bt4-anneal-muon-best',
+      label: tinyEngineLabel(variant),
+      onnx: TINY_MODEL_URL,
+      meta: TINY_META_URL,
+      runtime,
+      manifestUrl: TINY_HYBRID_MANIFEST_URL,
+    }, { params, runtime, manifestUrl: TINY_HYBRID_MANIFEST_URL, fallback });
+    console.info('[lc0-arena] loaded Tiny Leela evaluator', {
+      requestedRuntime: loaded.requestedRuntime,
+      resolvedRuntime: loaded.resolvedRuntime,
+      runtimeConfigId: loaded.runtimeConfigId,
+      manifestUrl: loaded.manifestUrl,
+      fallbackReason: loaded.fallbackReason,
+    });
+    return new CachedEvaluator(loaded.evaluator, { maxEntries: arenaCacheEntries(), includeHistory: true, includeLegalMoves: true, label: `tiny-leela-arena:${runtime}` });
+  })();
+  tinyEvaluatorPromises.set(key, created);
+  try {
+    return await created;
+  } catch (error) {
+    tinyEvaluatorPromises.delete(key);
+    throw error;
+  }
+}
+
+function tinyHistoryFens(positions: BoardState[]): string[] {
+  return positions.slice(0, -1).map(boardToFen).reverse().slice(0, 16);
 }
 
 function normalizeLc0Runtime(value: string | null): Lc0ArenaRuntime {
@@ -402,6 +482,7 @@ function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
 
 function shortEngineTag(name: string): string {
   const n = name.toLowerCase();
+  if (n.includes('tiny leela')) return 'TL';
   if (n.includes('bt4')) return 'BT4';
   if (n.includes('lc0') || n.includes('leela')) return 'Lc0';
   if (n.includes('reckless')) return 'Reck';
@@ -417,6 +498,7 @@ const availableEngineLogos = new Set<string>();
 
 function engineLogoFamily(name: string): string {
   const n = name.toLowerCase();
+  if (n.includes('tiny leela')) return '';
   if (n.includes('bt4') || n.includes('lc0') || n.includes('leela')) return 'lc0';
   if (n.includes('reckless')) return 'reckless';
   if (n.includes('viridithas')) return 'viridithas';
@@ -548,6 +630,9 @@ function defaultVariant(family: EngineFamily): string {
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
   if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync());
+  if (family === 'tiny') return tinyVariantOptions().map((option) => option.value === 'bt4-custom' && tinyHybridManifestStatus === 'missing'
+    ? { ...option, label: `${option.label} (bundle missing)`, disabled: true }
+    : option);
   if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
   if (family === 'berserk') return availableBerserkVariants().map((v) => ({ value: v.key, label: v.label }));
@@ -562,6 +647,7 @@ function clampStrength(row: EngineRow): void {
 
 function rowLabel(row: EngineRow): string {
   if (row.family === 'lc0') return lc0EngineLabel(row.variant);
+  if (row.family === 'tiny') return tinyEngineLabel(row.variant);
   if (row.family === 'sf') return stockfishEngineLabel(row.variant, 'arena');
   if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
   if (row.family === 'berserk') return berserkVariantForKey(row.variant).label;
@@ -696,6 +782,7 @@ function engineRuntimeDiagnosticsText(): string {
     const name = engines.get(id)?.name ?? id;
     if (row?.family === 'lc0' && row.variant !== 'bt4') return `${name}: ${budgetText(row)} · ${lc0RuntimeLabel()} · batch ${lc0BatchSize()} · pipeline depth ${lc0BatchPipelineDepth()} · ${cacheMetricsText(lc0Cache?.metrics())}`;
     if (row?.family === 'lc0' && row.variant === 'bt4') return `${name}: ${budgetText(row)} · ${bt4.loaded ? `loaded ${bt4.backend || 'WebGPU'}` : 'lazy WebGPU worker'} · ~${BT4_APPROX_MB}MB net`;
+    if (row?.family === 'tiny') return `${name}: ${budgetText(row)} · SquareFormer ${tinyRuntimeForVariant(row.variant)} · ${tinyHybridManifestStatusText()}`;
     if (row?.family === 'sf') {
       const kind = row.variant === 'full' ? 'full' : 'lite';
       return `${name}: ${budgetText(row)} · ${stockfishFlavorLabel(stockfishFlavorFor(kind))} · ${stockfishThreads()} thread${stockfishThreads() === 1 ? '' : 's'}`;
@@ -786,6 +873,7 @@ function engineSearchDiagnosticsText(): string {
       const t = bt4Telemetry.get(id);
       return t?.searches ? bt4TelemetrySummary(t) : `${name}: BT4 search waiting${bt4.loaded ? ` · backend ${bt4.backend || 'WebGPU'}` : ''}`;
     }
+    if (row?.family === 'tiny') return engineOutputs.has(id) ? `${name}: Tiny SquareFormer search output ready` : `${name}: Tiny SquareFormer search waiting`;
     const uci = uciTelemetry.get(id);
     return uci?.searches ? uciTelemetrySummary(uci) : `${name}: UCI search waiting for info`;
   });
@@ -945,9 +1033,25 @@ function recordBt4SearchOutput(engineId: string, engineName: string, result: Bt4
   });
 }
 
-function recordUciOutput(engineId: string, engineName: string, label: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
-  recordUciTelemetry(engineId, engineName, lines, elapsedMs);
-  const best = lines[0];
+function recordTinySearchOutput(engineId: string, engineName: string, fen: string, result: TinySearchResult): void {
+  const pv = result.principalVariation?.map((entry) => moveToUci(entry.move));
+  recordEngineOutput({
+    engineId,
+    engineName,
+    kind: 'lc0',
+    fen,
+    move: result.move ? moveToUci(result.move) : undefined,
+    summary: `Tiny Q ${signed(toWhiteQ(result.value, fen), 3)}`,
+    shortEval: `Q ${signed(toWhiteQ(result.value, fen), 2)}`,
+    evalBar: qEvalBar(fen, result.value),
+    detail: `visits ${result.visits} · evals ${result.stats?.evalCalls ?? 0} · cache hits ${result.stats?.cacheHits ?? 0}`,
+    pv,
+  });
+}
+
+function recordUciOutput(engineId: string, engineName: string, label: string, fen: string, move: string | null, lines: unknown[], elapsedMs?: number): void {
+  recordUciTelemetry(engineId, engineName, lines as StockfishInfoLine[], elapsedMs);
+  const best = lines[0] as StockfishInfoLine | undefined;
   recordEngineOutput({
     engineId,
     engineName,
@@ -957,7 +1061,7 @@ function recordUciOutput(engineId: string, engineName: string, label: string, fe
     summary: `${label} ${stockfishScoreText(best, fen)}`,
     shortEval: stockfishScoreCompact(best, fen),
     evalBar: stockfishEvalBar(fen, best),
-    detail: lines.length > 1 ? `MultiPV ${lines.slice(0, 3).map((line) => `#${line.multipv} ${stockfishScoreText(line, fen)}`).join(' · ')}` : undefined,
+    detail: lines.length > 1 ? `MultiPV ${(lines.slice(0, 3) as StockfishInfoLine[]).map((line) => `#${line.multipv ?? 1} ${stockfishScoreText(line, fen)}`).join(' · ')}` : undefined,
     pv: best?.pvUci,
     whiteCp: stockfishWhiteCp(best, fen),
     mateInWhitePov: stockfishMateInWhitePov(best, fen),
@@ -968,23 +1072,23 @@ function recordUciOutput(engineId: string, engineName: string, label: string, fe
   });
 }
 
-function recordStockfishOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
+function recordStockfishOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: unknown[], elapsedMs?: number): void {
   recordUciOutput(engineId, engineName, 'SF', fen, move, lines, elapsedMs);
 }
 
-function recordRecklessOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
+function recordRecklessOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: unknown[], elapsedMs?: number): void {
   recordUciOutput(engineId, engineName, 'Reckless', fen, move, lines, elapsedMs);
 }
 
-function recordViridithasOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
+function recordViridithasOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: unknown[], elapsedMs?: number): void {
   recordUciOutput(engineId, engineName, 'Viridithas', fen, move, lines, elapsedMs);
 }
 
-function recordBerserkOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
+function recordBerserkOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: unknown[], elapsedMs?: number): void {
   recordUciOutput(engineId, engineName, 'Berserk', fen, move, lines, elapsedMs);
 }
 
-function recordPlentyChessOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
+function recordPlentyChessOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: unknown[], elapsedMs?: number): void {
   recordUciOutput(engineId, engineName, 'PlentyChess', fen, move, lines, elapsedMs);
 }
 
@@ -1294,7 +1398,7 @@ async function renderRuntimeBadge(): Promise<void> {
     const sfThreads = threadedStockfishAvailable() ? 'SF threaded yes' : 'SF threaded no';
     const ortThreads = `ORT wasm threads ${diag.wasm.numThreads ?? '?'}`;
     const ortSessions = `ORT sessions ${diag.sessions.active} active`;
-    badge.textContent = `Runtime: ${isolated} · ${sab} · ${webgpu} · ${diag.describe} · ${ortThreads} · ${ortSessions} · ${sfThreads}`;
+    badge.textContent = `Runtime: ${isolated} · ${sab} · ${webgpu} · ${diag.describe} · ${ortThreads} · ${ortSessions} · ${sfThreads} · ${tinyHybridManifestStatusText()}`;
     badge.classList.toggle('ready', runtimeIsolation && (diag.webgpuAvailable || runtimeSharedArrayBuffer));
     badge.classList.toggle('warn', !runtimeIsolation || !diag.webgpuAvailable);
   } catch (error) {
@@ -1387,6 +1491,22 @@ function buildEngines() {
       signal.removeEventListener('abort', onAbort);
     }
   };
+  const tinyMove = (engineId: string, row: EngineRow): ArenaEngine['move'] => async (positions, signal) => {
+    const current = positions[positions.length - 1];
+    const fen = boardToFen(current);
+    const evaluator = await tinyEvaluator(row.variant);
+    const timed = arenaBudgetMode() === 'movetime';
+    const result = await chooseMove(current, evaluator, {
+      visits: timed ? undefined : row.strength,
+      movetimeMs: timed ? arenaMovetimeMs() : undefined,
+      batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('tinyBatch') ?? '32') || 32))),
+      signal,
+      historyFens: tinyHistoryFens(positions),
+      searchPolicy: montyLitePuctPolicy,
+    });
+    recordTinySearchOutput(engineId, engines.get(engineId)?.name ?? tinyEngineLabel(row.variant), fen, result);
+    return result.move ? moveToUci(result.move) : null;
+  };
   const sf = (engineId: string, row: EngineRow, kind: 'lite' | 'full'): ArenaEngine['move'] => async (positions, signal) => {
     const engine = stockfishEngineFor(kind);
     if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: stockfishThreads() });
@@ -1458,6 +1578,15 @@ function buildEngines() {
       signal.removeEventListener('abort', onAbort);
     }
   };
+  const tinyWarmup = (row: EngineRow) => async (signal: AbortSignal) => {
+    const evaluator = await tinyEvaluator(row.variant);
+    await chooseMove(warmupPositions[0], evaluator, {
+      visits: 1,
+      batchSize: 1,
+      signal,
+      searchPolicy: montyLitePuctPolicy,
+    });
+  };
   const stockfishWarmup = (kind: 'lite' | 'full') => async (signal: AbortSignal) => {
     const engine = stockfishEngineFor(kind);
     engine.setOptions({ depth: 1, movetimeMs: undefined, threads: stockfishThreads() });
@@ -1492,6 +1621,8 @@ function buildEngines() {
     if (row.family === 'lc0') {
       if (row.variant === 'bt4') engines.set(id, { id, name: `${rowLabel(row)} v${row.strength}`, move: lc0Bt4Move(id, row), warmup: lc0Bt4Warmup });
       else engines.set(id, { id, name: `${rowLabel(row)} v${row.strength}`, move: lc0Search(id, row), warmup: lc0SearchWarmup(id) });
+    } else if (row.family === 'tiny') {
+      engines.set(id, { id, name: `${rowLabel(row)} v${row.strength}`, move: tinyMove(id, row), warmup: tinyWarmup(row) });
     } else if (row.family === 'sf') {
       const kind = row.variant === 'full' ? 'full' : 'lite';
       engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: sf(id, row, kind), warmup: stockfishWarmup(kind) });
@@ -1811,6 +1942,7 @@ function disposeRuntimeResources(): void {
   abort?.abort();
   abort = null;
   disposeLc0Resources();
+  tinyEvaluatorPromises.clear();
   disposeStockfish();
   for (const engine of recklessByVariant.values()) engine.dispose();
   recklessByVariant.clear();
@@ -2175,6 +2307,7 @@ async function init() {
   inputEl('stockfishThreadsInput').value = String(Math.max(1, Math.min(32, Math.floor(Number(params.get('sfThreads') ?? '1') || 1))));
   refreshStockfishControls();
   void renderRuntimeBadge();
+  await refreshTinyHybridManifestStatus();
   buildEngines();
   populateSeats();
   void refreshBt4Availability();
