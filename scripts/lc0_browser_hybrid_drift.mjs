@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { boardToFen } from '../src/chess/board.ts';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
+import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
@@ -16,7 +17,7 @@ const PARALLEL_BASELINE_MIN_MEMORY_GIB = 24;
 const PARALLEL_BASELINE_MAX_FIXTURES = 16;
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_drift.mjs [options]\n\nCompares browser hybrid lc0web WGSL encoder + ORT heads output against f32 ONNX and native BLAS fixture priors.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --limit N            Number of native fixtures to evaluate (default ${DEFAULT_LIMIT})\n  --layers N           Encoder layers for hybrid path (default 10)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --encoder-kernel MODE\n                       Hybrid encoder kernels: hand, tvm-packed-f16, mixed-tvm-ffn, or mixed-tvm-ffn-outproj (default hand)\n  --f32-model PATH     f32 ONNX baseline (default ${DEFAULT_F32_MODEL})\n  --baseline-mode MODE Run browser hybrid and f32 baseline as auto|parallel|serial (default auto)\n  --parallel-baseline  Alias for --baseline-mode parallel\n  --serial-baseline    Alias for --baseline-mode serial\n  --no-server          Do not auto-start Vite\n  -h, --help           Show this help\n`);
+  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_drift.mjs [options]\n\nCompares browser hybrid lc0web WGSL encoder + ORT heads output against f32 ONNX and native BLAS fixture priors.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --limit N            Number of native fixtures to evaluate (default ${DEFAULT_LIMIT})\n  --layers N           Encoder layers for hybrid path (default 10)\n  --preset NAME        Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --input-backend MODE Hybrid input backend: js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                       Hybrid legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads)\n  --encoder-kernel MODE\n                       Hybrid encoder kernels: hand, tvm-packed-f16, mixed-tvm-ffn, or mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project (default hand)\n  --f32-model PATH     f32 ONNX baseline (default ${DEFAULT_F32_MODEL})\n  --baseline-mode MODE Run browser hybrid and f32 baseline as auto|parallel|serial (default auto)\n  --parallel-baseline  Alias for --baseline-mode parallel\n  --serial-baseline    Alias for --baseline-mode serial\n  --no-server          Do not auto-start Vite\n  -h, --help           Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -29,7 +30,10 @@ function parseArgs(argv) {
     agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
     session: process.env.AGENT_BROWSER_SESSION ?? `lc0-hybrid-drift-${process.pid}`,
     f32Model: DEFAULT_F32_MODEL,
+    preset: '',
     headBackend: 'ort',
+    inputBackend: 'js',
+    legalPriorsBackend: 'js',
     encoderKernel: 'hand',
     baselineMode: 'auto',
     noServer: false,
@@ -48,7 +52,10 @@ function parseArgs(argv) {
     else if (arg === '--timeout') args.timeoutMs = Number(next());
     else if (arg === '--limit') args.limit = Number(next());
     else if (arg === '--layers') args.layers = Number(next());
+    else if (arg === '--preset') args.preset = next();
     else if (arg === '--head-backend') args.headBackend = next();
+    else if (arg === '--input-backend') args.inputBackend = next();
+    else if (arg === '--legal-priors-backend' || arg === '--hybrid-legal-priors') args.legalPriorsBackend = next();
     else if (arg === '--encoder-kernel') args.encoderKernel = next();
     else if (arg === '--f32-model') args.f32Model = next();
     else if (arg === '--baseline-mode') args.baselineMode = next();
@@ -58,10 +65,14 @@ function parseArgs(argv) {
     else if (arg === '-h' || arg === '--help') args.help = true;
     else throw new Error(`Unknown option: ${arg}`);
   }
+  applyLc0RuntimePreset(args, argv);
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (!['auto', 'parallel', 'serial'].includes(args.baselineMode)) throw new Error(`Invalid --baseline-mode: ${args.baselineMode}`);
   if (!['ort', 'wgsl'].includes(args.headBackend)) throw new Error(`Invalid --head-backend: ${args.headBackend}`);
-  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj'].includes(args.encoderKernel)) throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
+  if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
+  if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid --legal-priors-backend: ${args.legalPriorsBackend}`);
+  if (args.legalPriorsBackend === 'gpu' && args.headBackend !== 'wgsl') throw new Error('--legal-priors-backend gpu requires --head-backend wgsl');
+  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel)) throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
   for (const [name, value] of [['port', args.port], ['limit', args.limit], ['layers', args.layers], ['timeout', args.timeoutMs]]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
@@ -201,6 +212,8 @@ async function browserHybrid(args) {
   url.searchParams.set('ep', 'wasm');
   url.searchParams.set('packVerify', '0');
   if (args.headBackend !== 'ort') url.searchParams.set('headBackend', args.headBackend);
+  url.searchParams.set('inputBackend', args.inputBackend);
+  url.searchParams.set('legalPriorsBackend', args.legalPriorsBackend);
   if (args.encoderKernel !== 'hand') url.searchParams.set('encoderKernel', args.encoderKernel);
   process.stderr.write(`[lc0-hybrid-drift] ${url}\n`);
   try {
@@ -308,7 +321,8 @@ async function main() {
     const result = {
       status: 'LC0_HYBRID_DRIFT_DONE',
       fixtures: comparisons.length,
-      browser: { backend: hybrid.backend, layers: hybrid.layers, encoderKernelVariant: args.encoderKernel, elapsedMs: hybrid.elapsedMs },
+      browser: { backend: hybrid.backend, layers: hybrid.layers, headBackend: args.headBackend, inputBackend: args.inputBackend, legalPriorsBackend: args.legalPriorsBackend, encoderKernelVariant: args.encoderKernel, elapsedMs: hybrid.elapsedMs },
+      runtimeConfiguration: lc0RuntimeConfiguration(args),
       baselineMode,
       summary: {
         f32BestMoveMatches: comparisons.filter((c) => c.hybridBestMove === c.f32BestMove).length,

@@ -220,6 +220,42 @@ export interface Lc0WebAttentionScoreBenchmarkResult {
   outputSample: number[];
 }
 
+export interface Lc0WebSmolgenBenchmarkOptions {
+  packUrl: string;
+  iterations?: number;
+  warmup?: number;
+  verifyShards?: boolean;
+  encoderPrefix?: string;
+  projectKernelVariant?: Lc0WebSmolgenKernelVariant;
+}
+
+export interface Lc0WebSmolgenBenchmarkResult {
+  status: 'SMOLGEN_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  encoderPrefix: string;
+  projectKernelVariant: Lc0WebSmolgenKernelVariant;
+  tokens: number;
+  channels: number;
+  compressed: number;
+  hidden: number;
+  heads: number;
+  epsilon: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  uploadSetupMs: number;
+  dispatchLoopMs: number;
+  dispatchLoopAvgMs: number;
+  stageDispatchAvgMs: Record<'compress' | 'dense1' | 'ln1' | 'dense2' | 'ln2' | 'project', number>;
+  readbackSyncedMs: number;
+  endToEndMs: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+}
+
 export interface Lc0WebAttentionScoreOrtBenchmarkResult {
   status: 'ATTENTION_SCORE_ORT_BENCH_DONE';
   packUrl: string;
@@ -307,6 +343,18 @@ type ComputePassLike = {
   dispatchWorkgroups: (x: number, y?: number, z?: number) => void;
   end: () => void;
 };
+
+type DispatchCounter = { count: number };
+
+function beginCountedComputePass(encoder: CommandEncoderLike, counter: DispatchCounter, descriptor?: Record<string, unknown>): ComputePassLike {
+  const pass = encoder.beginComputePass(descriptor);
+  return {
+    setPipeline: (pipeline) => pass.setPipeline(pipeline),
+    setBindGroup: (index, bindGroup) => pass.setBindGroup(index, bindGroup),
+    dispatchWorkgroups: (x, y, z) => { counter.count += 1; pass.dispatchWorkgroups(x, y, z); },
+    end: () => pass.end(),
+  };
+}
 
 function gpuGlobals(): GpuGlobals {
   return globalThis as GpuGlobals;
@@ -2638,10 +2686,14 @@ const DEFAULT_LN1_BIAS = '/encoder0/ln1/w/bias';
 const DEFAULT_LN_EPSILON = 9.999999974752427e-7;
 
 export type Lc0WebAttentionOutProjKernelVariant = 'hand' | 'tvm-packed-f16';
-export type Lc0WebEncoderKernelVariant = 'hand' | 'tvm-packed-f16' | 'mixed-tvm-ffn' | 'mixed-tvm-ffn-outproj';
+export type Lc0WebEncoderKernelVariant = 'hand' | 'tvm-packed-f16' | 'mixed-tvm-ffn' | 'mixed-tvm-ffn-outproj' | 'mixed-tvm-ffn-smolgen-project';
 
 function encoderUsesTvmPackedF16Ffn(variant: Lc0WebEncoderKernelVariant): boolean {
-  return variant === 'tvm-packed-f16' || variant === 'mixed-tvm-ffn' || variant === 'mixed-tvm-ffn-outproj';
+  return variant === 'tvm-packed-f16' || variant === 'mixed-tvm-ffn' || variant === 'mixed-tvm-ffn-outproj' || variant === 'mixed-tvm-ffn-smolgen-project';
+}
+
+function encoderUsesTiledSmolgenProject(variant: Lc0WebEncoderKernelVariant): boolean {
+  return variant === 'mixed-tvm-ffn-smolgen-project';
 }
 
 function encoderUsesTvmPackedF16Qkv(variant: Lc0WebEncoderKernelVariant): boolean {
@@ -2907,6 +2959,7 @@ const SMOLGEN_DENSE1_WGSL = `
 @group(0) @binding(1) var<storage, read> weightF16: array<u32>;
 @group(0) @binding(2) var<storage, read> biasF16: array<u32>;
 @group(0) @binding(3) var<storage, read_write> outputVec: array<f32>;
+var<workgroup> partial: array<f32, 128>;
 
 fn pick_lane(word: u32, index: u32) -> f32 {
   let pair = unpack2x16float(word);
@@ -2915,15 +2968,26 @@ fn pick_lane(word: u32, index: u32) -> f32 {
 fn load_weight(index: u32) -> f32 { return pick_lane(weightF16[index >> 1u], index); }
 fn load_bias(index: u32) -> f32 { return pick_lane(biasF16[index >> 1u], index); }
 
-@compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let col = gid.x;
-  if (col >= 256u) { return; }
-  var sum = load_bias(col);
-  for (var row = 0u; row < 2048u; row = row + 1u) {
+@compute @workgroup_size(16, 8, 1)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let col = wid.x * 16u + lid.x;
+  var sum = 0.0;
+  for (var row = lid.y; row < 2048u; row = row + 16u) {
     sum = sum + inputVec[row] * load_weight(row * 256u + col);
+    let row2 = row + 8u;
+    sum = sum + inputVec[row2] * load_weight(row2 * 256u + col);
   }
-  outputVec[col] = sum;
+  partial[lid.y * 16u + lid.x] = sum;
+  workgroupBarrier();
+  for (var stride = 4u; stride > 0u; stride = stride / 2u) {
+    if (lid.y < stride) {
+      partial[lid.y * 16u + lid.x] = partial[lid.y * 16u + lid.x] + partial[(lid.y + stride) * 16u + lid.x];
+    }
+    workgroupBarrier();
+  }
+  if (lid.y == 0u) {
+    outputVec[col] = partial[lid.x] + load_bias(col);
+  }
 }
 `;
 
@@ -3073,6 +3137,56 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+function smolgenProjectTiledF16Wgsl(tileSize: number): string {
+  return `
+@group(0) @binding(0) var<storage, read> inputVec: array<f32>;
+@group(0) @binding(1) var<storage, read> weightF16: array<u32>;
+@group(0) @binding(2) var<storage, read_write> outputVec: array<f32>;
+var<workgroup> inputTile: array<f32, ${tileSize}>;
+
+fn pick_lane(word: u32, index: u32) -> f32 {
+  let pair = unpack2x16float(word);
+  return select(pair.x, pair.y, (index & 1u) == 1u);
+}
+fn load_weight(index: u32) -> f32 { return pick_lane(weightF16[index >> 1u], index); }
+
+@compute @workgroup_size(${tileSize}, 1, 1)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let col = wid.x * ${tileSize}u + lid.x;
+  let head = wid.z;
+  var sum = 0.0;
+  for (var tile = 0u; tile < 256u; tile = tile + ${tileSize}u) {
+    inputTile[lid.x] = inputVec[head * 256u + tile + lid.x];
+    workgroupBarrier();
+    for (var k = 0u; k < ${tileSize}u; k = k + 1u) {
+      sum = sum + inputTile[k] * load_weight((tile + k) * 4096u + col);
+    }
+    workgroupBarrier();
+  }
+  outputVec[head * 4096u + col] = sum;
+}
+`;
+}
+
+const SMOLGEN_PROJECT_TILED_F16_WGSL = smolgenProjectTiledF16Wgsl(64);
+
+export type Lc0WebSmolgenKernelVariant = 'hand' | 'tiled-project-f16' | 'tiled-project-f16-16' | 'tiled-project-f16-32' | 'tiled-project-f16-128' | 'tiled-project-f16-256';
+
+export function parseLc0WebSmolgenKernelVariant(raw: string | undefined | null): Lc0WebSmolgenKernelVariant {
+  if (!raw || raw === 'tiled' || raw === 'tiled-project') return 'tiled-project-f16';
+  if (raw === 'hand' || raw === 'tiled-project-f16' || raw === 'tiled-project-f16-16' || raw === 'tiled-project-f16-32' || raw === 'tiled-project-f16-128' || raw === 'tiled-project-f16-256') return raw;
+  throw new Error(`Unsupported smolgen project kernel variant: ${raw}`);
+}
+
+function smolgenProjectKernelTileSize(variant: Lc0WebSmolgenKernelVariant): number | null {
+  if (variant === 'hand') return null;
+  if (variant === 'tiled-project-f16-16') return 16;
+  if (variant === 'tiled-project-f16-32') return 32;
+  if (variant === 'tiled-project-f16-128') return 128;
+  if (variant === 'tiled-project-f16-256') return 256;
+  return 64;
+}
+
 type SmolgenPipelines = {
   compress: PipelineLike;
   compressBind: unknown;
@@ -3084,6 +3198,7 @@ type SmolgenPipelines = {
   dense2Bind: unknown;
   ln2: PipelineLike;
   ln2Bind: unknown;
+  projectKernelVariant: Lc0WebSmolgenKernelVariant;
   project: PipelineLike;
   projectBind: unknown;
 };
@@ -3106,7 +3221,7 @@ function createSmolgenPipelines(device: DeviceLike, buffers: {
   ln2: BufferLike;
   smolgenWeight: BufferLike;
   output: BufferLike;
-}): SmolgenPipelines {
+}, projectKernelVariant: Lc0WebSmolgenKernelVariant = 'hand'): SmolgenPipelines {
   const compress = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen compress', code: SMOLGEN_COMPRESS_WGSL }), entryPoint: 'main' } }) as PipelineLike;
   const compressBind = device.createBindGroup({ layout: compress.getBindGroupLayout(0), entries: [
     { binding: 0, resource: { buffer: buffers.input } },
@@ -3141,34 +3256,203 @@ function createSmolgenPipelines(device: DeviceLike, buffers: {
     { binding: 2, resource: { buffer: buffers.ln2Bias } },
     { binding: 3, resource: { buffer: buffers.ln2 } },
   ] });
-  const project = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen project', code: SMOLGEN_PROJECT_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const projectTileSize = smolgenProjectKernelTileSize(projectKernelVariant);
+  const project = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: projectTileSize ? `lc0web smolgen project tiled f16 ${projectTileSize}` : 'lc0web smolgen project', code: projectTileSize ? (projectTileSize === 64 ? SMOLGEN_PROJECT_TILED_F16_WGSL : smolgenProjectTiledF16Wgsl(projectTileSize)) : SMOLGEN_PROJECT_WGSL }), entryPoint: 'main' } }) as PipelineLike;
   const projectBind = device.createBindGroup({ layout: project.getBindGroupLayout(0), entries: [
     { binding: 0, resource: { buffer: buffers.ln2 } },
     { binding: 1, resource: { buffer: buffers.smolgenWeight } },
     { binding: 2, resource: { buffer: buffers.output } },
   ] });
-  return { compress, compressBind, dense1, dense1Bind, ln1, ln1Bind, dense2, dense2Bind, ln2, ln2Bind, project, projectBind };
+  return { compress, compressBind, dense1, dense1Bind, ln1, ln1Bind, dense2, dense2Bind, ln2, ln2Bind, projectKernelVariant, project, projectBind };
 }
 
-function encodeSmolgenPass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
+function encodeSmolgenCompressPass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.compress);
   pass.setBindGroup(0, pipelines.compressBind);
   pass.dispatchWorkgroups(Math.ceil(DEFAULT_SMOLGEN_COMPRESSED / 8), Math.ceil(DEFAULT_TOKENS / 8));
+}
+
+function encodeSmolgenDense1Pass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.dense1);
   pass.setBindGroup(0, pipelines.dense1Bind);
-  pass.dispatchWorkgroups(Math.ceil(DEFAULT_SMOLGEN_HIDDEN / 64));
+  pass.dispatchWorkgroups(Math.ceil(DEFAULT_SMOLGEN_HIDDEN / 16));
+}
+
+function encodeSmolgenLn1Pass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.ln1);
   pass.setBindGroup(0, pipelines.ln1Bind);
   pass.dispatchWorkgroups(1);
+}
+
+function encodeSmolgenDense2Pass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.dense2);
   pass.setBindGroup(0, pipelines.dense2Bind);
   pass.dispatchWorkgroups(Math.ceil(DEFAULT_SMOLGEN_FLAT / 64));
+}
+
+function encodeSmolgenLn2Pass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.ln2);
   pass.setBindGroup(0, pipelines.ln2Bind);
   pass.dispatchWorkgroups(1);
+}
+
+function encodeSmolgenProjectPass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
   pass.setPipeline(pipelines.project);
   pass.setBindGroup(0, pipelines.projectBind);
-  pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+  const tileSize = smolgenProjectKernelTileSize(pipelines.projectKernelVariant);
+  if (tileSize) pass.dispatchWorkgroups(Math.ceil((DEFAULT_TOKENS * DEFAULT_TOKENS) / tileSize), 1, DEFAULT_HEADS);
+  else pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS);
+}
+
+function encodeSmolgenPass(pass: ComputePassLike, pipelines: SmolgenPipelines): void {
+  encodeSmolgenCompressPass(pass, pipelines);
+  encodeSmolgenDense1Pass(pass, pipelines);
+  encodeSmolgenLn1Pass(pass, pipelines);
+  encodeSmolgenDense2Pass(pass, pipelines);
+  encodeSmolgenLn2Pass(pass, pipelines);
+  encodeSmolgenProjectPass(pass, pipelines);
+}
+
+function encodeSmolgenBenchmarkDispatches(device: DeviceLike, pipelines: SmolgenPipelines, iterations: number): unknown {
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  for (let i = 0; i < iterations; i++) encodeSmolgenPass(pass, pipelines);
+  pass.end();
+  return encoder.finish();
+}
+
+function encodeSmolgenBenchmarkStageDispatches(device: DeviceLike, iterations: number, encodeStage: (pass: ComputePassLike) => void): unknown {
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  for (let i = 0; i < iterations; i++) encodeStage(pass);
+  pass.end();
+  return encoder.finish();
+}
+
+async function measureSmolgenBenchmarkStage(device: DeviceLike, warmup: number, iterations: number, encodeStage: (pass: ComputePassLike) => void): Promise<number> {
+  if (warmup > 0) {
+    device.queue.submit([encodeSmolgenBenchmarkStageDispatches(device, warmup, encodeStage)]);
+    await device.queue.onSubmittedWorkDone?.();
+  }
+  const started = nowMs();
+  device.queue.submit([encodeSmolgenBenchmarkStageDispatches(device, iterations, encodeStage)]);
+  await device.queue.onSubmittedWorkDone?.();
+  return (nowMs() - started) / iterations;
+}
+
+export async function runLc0WebSmolgenBenchmark(options: Lc0WebSmolgenBenchmarkOptions): Promise<Lc0WebSmolgenBenchmarkResult> {
+  const totalStarted = nowMs();
+  const warmup = clampInteger(options.warmup, 3, 0, 1000);
+  const iterations = clampInteger(options.iterations, 50, 1, 100_000);
+  const projectKernelVariant = options.projectKernelVariant ?? 'tiled-project-f16';
+  const tensorNames = lc0WebEncoderBlockTensorNames(options.encoderPrefix).smolgen;
+  const { device, adapterInfo } = await requestDevice();
+  const pack = await loadLc0WebModelPack(options.packUrl, {
+    verifyShards: options.verifyShards ?? true,
+    tensorNames: Object.values(tensorNames),
+  });
+  const tensors = loadEncoder0SmolgenTensors(pack, tensorNames);
+  const input = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_N);
+  const reference = cpuEncoder0SmolgenBias(input, tensors);
+  const globals = gpuGlobals();
+  const usage = globals.GPUBufferUsage!;
+  const buffers: BufferLike[] = [];
+  try {
+    const setupStarted = nowMs();
+    const inputBuffer = createStorageBuffer(device, input, usage.STORAGE | usage.COPY_DST);
+    const compressWeight = createStorageBuffer(device, tensors.compressWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const dense1Weight = createStorageBuffer(device, tensors.dense1Weight.bytes, usage.STORAGE | usage.COPY_DST);
+    const dense1Bias = createStorageBuffer(device, tensors.dense1Bias.bytes, usage.STORAGE | usage.COPY_DST);
+    const ln1Scale = createStorageBuffer(device, tensors.ln1Scale.bytes, usage.STORAGE | usage.COPY_DST);
+    const ln1Bias = createStorageBuffer(device, tensors.ln1Bias.bytes, usage.STORAGE | usage.COPY_DST);
+    const dense2Weight = createStorageBuffer(device, tensors.dense2Weight.bytes, usage.STORAGE | usage.COPY_DST);
+    const dense2Bias = createStorageBuffer(device, tensors.dense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
+    const ln2Scale = createStorageBuffer(device, tensors.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
+    const ln2Bias = createStorageBuffer(device, tensors.ln2Bias.bytes, usage.STORAGE | usage.COPY_DST);
+    const smolgenWeight = createStorageBuffer(device, tensors.smolgenWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    const compressed = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
+    const dense1 = device.createBuffer({ size: DEFAULT_SMOLGEN_HIDDEN * 4, usage: usage.STORAGE });
+    const ln1 = device.createBuffer({ size: DEFAULT_SMOLGEN_HIDDEN * 4, usage: usage.STORAGE });
+    const dense2 = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
+    const ln2 = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
+    const output = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_SRC });
+    const readbackBuffer = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.MAP_READ | usage.COPY_DST });
+    buffers.push(inputBuffer, compressWeight, dense1Weight, dense1Bias, ln1Scale, ln1Bias, dense2Weight, dense2Bias, ln2Scale, ln2Bias, smolgenWeight, compressed, dense1, ln1, dense2, ln2, output, readbackBuffer);
+    const pipelines = createSmolgenPipelines(device, {
+      input: inputBuffer,
+      compressWeight,
+      compressed,
+      dense1Weight,
+      dense1Bias,
+      dense1,
+      ln1Scale,
+      ln1Bias,
+      ln1,
+      dense2Weight,
+      dense2Bias,
+      dense2,
+      ln2Scale,
+      ln2Bias,
+      ln2,
+      smolgenWeight,
+      output,
+    }, projectKernelVariant);
+    const uploadSetupMs = nowMs() - setupStarted;
+
+    if (warmup > 0) {
+      device.queue.submit([encodeSmolgenBenchmarkDispatches(device, pipelines, warmup)]);
+      await device.queue.onSubmittedWorkDone?.();
+    }
+    const dispatchStarted = nowMs();
+    device.queue.submit([encodeSmolgenBenchmarkDispatches(device, pipelines, iterations)]);
+    const dispatchLoopMs = nowMs() - dispatchStarted;
+    const readbackStarted = nowMs();
+    const outputValues = await readF32OutputOnce(device, output, readbackBuffer, reference.length);
+    const readbackSyncedMs = nowMs() - readbackStarted;
+    const { maxAbsError, rmsError } = computeErrorStats(outputValues, reference, reference.length);
+    assertErrorInTolerance(maxAbsError);
+
+    // Re-initialize the pipeline once, then time each smolgen stage in isolation.
+    device.queue.submit([encodeSmolgenBenchmarkDispatches(device, pipelines, 1)]);
+    await device.queue.onSubmittedWorkDone?.();
+    const stageDispatchAvgMs = {
+      compress: await measureSmolgenBenchmarkStage(device, warmup, iterations, (pass) => encodeSmolgenCompressPass(pass, pipelines)),
+      dense1: await measureSmolgenBenchmarkStage(device, warmup, iterations, (pass) => encodeSmolgenDense1Pass(pass, pipelines)),
+      ln1: await measureSmolgenBenchmarkStage(device, warmup, iterations, (pass) => encodeSmolgenLn1Pass(pass, pipelines)),
+      dense2: await measureSmolgenBenchmarkStage(device, warmup, iterations, (pass) => encodeSmolgenDense2Pass(pass, pipelines)),
+      ln2: await measureSmolgenBenchmarkStage(device, warmup, iterations, (pass) => encodeSmolgenLn2Pass(pass, pipelines)),
+      project: await measureSmolgenBenchmarkStage(device, warmup, iterations, (pass) => encodeSmolgenProjectPass(pass, pipelines)),
+    };
+
+    return {
+      status: 'SMOLGEN_BENCH_DONE',
+      packUrl: pack.manifestUrl,
+      modelName: pack.manifest.model.name,
+      adapterInfo,
+      encoderPrefix: normalizeEncoderPrefix(options.encoderPrefix),
+      projectKernelVariant,
+      tokens: DEFAULT_TOKENS,
+      channels: DEFAULT_N,
+      compressed: DEFAULT_SMOLGEN_COMPRESSED,
+      hidden: DEFAULT_SMOLGEN_HIDDEN,
+      heads: DEFAULT_HEADS,
+      epsilon: DEFAULT_SMOLGEN_EPSILON,
+      warmup,
+      iterations,
+      packLoadMs: pack.elapsedMs,
+      uploadSetupMs,
+      dispatchLoopMs,
+      dispatchLoopAvgMs: dispatchLoopMs / iterations,
+      stageDispatchAvgMs,
+      readbackSyncedMs,
+      endToEndMs: nowMs() - totalStarted,
+      maxAbsError,
+      rmsError,
+      outputSample: Array.from(outputValues.slice(0, 8)),
+    };
+  } finally {
+    for (const buffer of buffers) buffer.destroy?.();
+  }
 }
 
 function createAttentionOutputPipelines(device: DeviceLike, buffers: {
@@ -4808,6 +5092,19 @@ function arrayHasVariation(values: Float32Array<ArrayBufferLike>): boolean {
   return Math.abs(max - min) > 1e-8;
 }
 
+function arrayHasNonzeroAndVariation(values: Float32Array<ArrayBufferLike>): boolean {
+  if (!values.length) return false;
+  let hasNonzero = false;
+  let min = values[0];
+  let max = values[0];
+  for (const value of values) {
+    if (Math.abs(value) > 1e-8) hasNonzero = true;
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  }
+  return hasNonzero && Math.abs(max - min) > 1e-8;
+}
+
 function createU32UniformBuffer(device: DeviceLike, values: number[], usage: number): BufferLike {
   const data = new Uint32Array(4);
   data.set(values.slice(0, 4));
@@ -5399,6 +5696,16 @@ function legalPolicyCandidates(board: BoardState): LegalPolicyCandidate[] {
   });
 }
 
+function legalPolicyPriorsFromCandidates(candidates: LegalPolicyCandidate[], logits: ArrayLike<number>, policyTemperature: number): Lc0Evaluation['legalPriors'] {
+  if (!candidates.length) return [];
+  const legal = candidates.map((entry) => ({ ...entry, logit: Number(logits[entry.index]) / policyTemperature }));
+  const max = Math.max(...legal.map((entry) => entry.logit));
+  const sum = legal.reduce((acc, entry) => acc + Math.exp(entry.logit - max), 0);
+  return legal
+    .map((entry) => ({ ...entry, prior: Math.exp(entry.logit - max) / sum }))
+    .sort((a, b) => b.prior - a.prior);
+}
+
 type WgslPolicyValueHeadRuntime = {
   densePipeline: PipelineLike;
   policyLogitsPipeline: PipelineLike;
@@ -5661,6 +5968,27 @@ export interface Lc0WebHybridEvaluationOptions {
   timestampQuery?: boolean;
 }
 
+export interface Lc0WebExecutionFootprintCategory {
+  bytes: number;
+  count: number;
+}
+
+export interface Lc0WebExecutionFootprint {
+  /** Explicit lc0web-owned persistent GPU buffer bytes known to this runtime. */
+  gpuBufferBytes: number;
+  gpuBufferCount: number;
+  categories: Record<string, Lc0WebExecutionFootprintCategory>;
+  layers: number;
+  physicalSlots: number;
+  primaryBatchSlots: number;
+  deferredBatchSlots: number;
+  deferredBatchRings: number;
+  wgslBatchUploadCapacity: number;
+  wgslBatchReadbackCapacity: number;
+  wgslDeferredReadbackCapacity: number;
+  note: string;
+}
+
 export interface Lc0WebHybridTimingBreakdown {
   totalEvalMs: number;
   inputBuildMs: number;
@@ -5673,6 +6001,8 @@ export interface Lc0WebHybridTimingBreakdown {
   legalPriorsMs: number;
   readbackBytes: number;
   readbackMapCount: number;
+  /** Number of WebGPU compute dispatch calls encoded by this custom WGSL eval, when available. */
+  dispatchCount?: number;
   readbackMode?: 'immediate' | 'deferred-double-buffered';
   /** Monotonic runtime submission id for strict deferred-readback diagnostics. */
   wgslSequenceId?: number;
@@ -5680,12 +6010,20 @@ export interface Lc0WebHybridTimingBreakdown {
   batchSequenceIndex?: number;
   /** Readback-buffer ring slot used by deferred/double-buffered WGSL-head evaluation. */
   deferredReadbackSlot?: number;
-  /** Wall time between queue submission and starting mapAsync; >0 in deferred modes means useful overlap was attempted. */
+  /** Wall time between queue submission and starting mapAsync; near-zero when readback mapping is requested eagerly. */
   deferredReadbackDelayMs?: number;
-  /** Awaited mapAsync time, separated from CPU copy/postprocess. */
+  /** Total mapAsync pending time from request to resolution, separated from CPU copy/postprocess. */
   readbackMapAsyncMs?: number;
+  /** Wall time spent awaiting an already-started mapAsync promise during result finalization. */
+  readbackMapAsyncWaitMs?: number;
   /** CPU time to copy the mapped readback range and unmap it. */
   readbackMapCopyMs?: number;
+  /** CPU legal-move/index preparation run after queue submission while mapAsync is already pending. */
+  legalPriorsPrepMs?: number;
+  /** CPU work intentionally scheduled while mapAsync is pending to hide under GPU/readback latency. */
+  readbackOverlapCpuMs?: number;
+  /** Portion of readbackOverlapCpuMs estimated to be hidden by the pending mapAsync interval. */
+  readbackOverlapHiddenMs?: number;
   physicalBatchSize?: number;
   batchPosition?: number;
   inputBackend?: Lc0WebHybridInputBackend;
@@ -5710,11 +6048,18 @@ export interface Lc0WebHybridEvaluationResult extends Lc0Evaluation {
   headRunMs: number;
   mappedPolicy: number[];
   timing: Lc0WebHybridTimingBreakdown;
+  executionFootprint?: Lc0WebExecutionFootprint;
 }
 
 export type Lc0WebHybridEncoderProfileStageName =
   | 'inputBody'
   | 'smolgen'
+  | 'smolgenCompress'
+  | 'smolgenDense1'
+  | 'smolgenLn1'
+  | 'smolgenDense2'
+  | 'smolgenLn2'
+  | 'smolgenProject'
   | 'qkvProjection'
   | 'attentionScores'
   | 'softmax'
@@ -5773,6 +6118,7 @@ export interface Lc0WebHybridEncoderProfileResult {
   aggregateStageTimings: Lc0WebHybridEncoderProfileStageTiming[];
   layerTimings: Lc0WebHybridEncoderProfileLayerTiming[];
   note: string;
+  executionFootprint?: Lc0WebExecutionFootprint;
 }
 
 function inputBodyTensorNameList(): string[] {
@@ -5972,6 +6318,24 @@ type HybridEncoderLayerRuntime = HybridEncoderLayerSlotRuntime & {
   weights: HybridEncoderLayerWeights;
 };
 
+type HybridEncoderLayerSlotScratch = {
+  smolgenBias: BufferLike;
+  smolgenCompressed: BufferLike;
+  smolgenDense1: BufferLike;
+  smolgenLn1: BufferLike;
+  smolgenDense2: BufferLike;
+  smolgenLn2: BufferLike;
+  qkv: BufferLike;
+  scores: BufferLike;
+  probs: BufferLike;
+  attn: BufferLike;
+  attentionSkip: BufferLike;
+  attentionOutput: BufferLike;
+  ffnHidden: BufferLike;
+  ffnSkip: BufferLike;
+  podArgs?: BufferLike;
+};
+
 type HybridWgslBatchSlot = {
   inputBuffer: BufferLike;
   inputBodyGpu?: InputBodyGpuRuntime;
@@ -5979,7 +6343,7 @@ type HybridWgslBatchSlot = {
   wgslHeads: WgslPolicyValueHeadRuntime;
 };
 
-function createHybridEncoderLayerWeights(device: DeviceLike, tensors: ReturnType<typeof loadEncoder0FfnInputs>, usage: Record<string, number>): { weights: HybridEncoderLayerWeights; buffers: BufferLike[] } {
+function createHybridEncoderLayerWeights(device: DeviceLike, tensors: ReturnType<typeof loadEncoder0FfnInputs>, usage: Record<string, number>, sharedSmolgenWeight?: BufferLike): { weights: HybridEncoderLayerWeights; buffers: BufferLike[] } {
   const qWeight = createTransposedF16StorageBuffer(device, tensors.qWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
   const qBias = createStorageBuffer(device, tensors.qBias.bytes, usage.STORAGE | usage.COPY_DST);
   const kWeight = createTransposedF16StorageBuffer(device, tensors.kWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
@@ -6008,12 +6372,13 @@ function createHybridEncoderLayerWeights(device: DeviceLike, tensors: ReturnType
   const smolgenDense2Bias = createStorageBuffer(device, tensors.smolgen.dense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
   const smolgenLn2Scale = createStorageBuffer(device, tensors.smolgen.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
   const smolgenLn2Bias = createStorageBuffer(device, tensors.smolgen.ln2Bias.bytes, usage.STORAGE | usage.COPY_DST);
-  const smolgenWeight = createStorageBuffer(device, tensors.smolgen.smolgenWeight.bytes, usage.STORAGE | usage.COPY_DST);
+  const smolgenWeight = sharedSmolgenWeight ?? createStorageBuffer(device, tensors.smolgen.smolgenWeight.bytes, usage.STORAGE | usage.COPY_DST);
   const weights = { qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, outWeight, outBias, attentionAlpha, ln1Scale, ln1Bias, ffnDense1Weight, ffnDense1Bias, ffnDense2Weight, ffnDense2Bias, ffnAlpha, ln2Scale, ln2Bias, smolgenCompressWeight, smolgenDense1Weight, smolgenDense1Bias, smolgenLn1Scale, smolgenLn1Bias, smolgenDense2Weight, smolgenDense2Bias, smolgenLn2Scale, smolgenLn2Bias, smolgenWeight };
-  return { weights, buffers: Object.values(weights) };
+  const buffers = Object.values(weights).filter((buffer) => buffer !== sharedSmolgenWeight);
+  return { weights, buffers };
 }
 
-function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<string, number>, weights: HybridEncoderLayerWeights, layerInput: BufferLike, encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand'): { runtime: HybridEncoderLayerSlotRuntime; buffers: BufferLike[] } {
+function createHybridEncoderLayerSlotScratch(device: DeviceLike, usage: Record<string, number>, encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand'): { scratch: HybridEncoderLayerSlotScratch; buffers: BufferLike[] } {
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
   const smolgenBias = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_DST });
   const smolgenCompressed = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
@@ -6029,10 +6394,20 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
   const attentionOutput = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
   const ffnHidden = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN * 4, usage: usage.STORAGE | usage.COPY_DST });
   const ffnSkip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
-  const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC | usage.COPY_DST });
   const podArgs = encoderUsesTvmPackedF16Qkv(encoderKernelVariant) || encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) || encoderUsesTvmPackedF16Ffn(encoderKernelVariant) ? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
-  const buffers = [smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, output];
+  const scratch: HybridEncoderLayerSlotScratch = { smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, podArgs };
+  const buffers = [smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip];
   if (podArgs) buffers.push(podArgs);
+  return { scratch, buffers };
+}
+
+function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<string, number>, weights: HybridEncoderLayerWeights, layerInput: BufferLike, encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand', sharedScratch?: HybridEncoderLayerSlotScratch): { runtime: HybridEncoderLayerSlotRuntime; buffers: BufferLike[] } {
+  const outputElements = DEFAULT_TOKENS * DEFAULT_N;
+  const scratchAndBuffers = sharedScratch ? { scratch: sharedScratch, buffers: [] as BufferLike[] } : createHybridEncoderLayerSlotScratch(device, usage, encoderKernelVariant);
+  const { scratch, buffers: scratchBuffers } = scratchAndBuffers;
+  const { smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, podArgs } = scratch;
+  const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC | usage.COPY_DST });
+  const buffers = [...scratchBuffers, output];
   const smolgenPipelines = createSmolgenPipelines(device, {
     input: layerInput,
     compressWeight: weights.smolgenCompressWeight,
@@ -6051,7 +6426,7 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
     ln2: smolgenLn2,
     smolgenWeight: weights.smolgenWeight,
     output: smolgenBias,
-  });
+  }, encoderUsesTiledSmolgenProject(encoderKernelVariant) ? 'tiled-project-f16' : 'hand');
   const attentionPipelines = createAttentionOutputPipelines(device, {
     input: layerInput, qWeight: weights.qWeight, qBias: weights.qBias, kWeight: weights.kWeight, kBias: weights.kBias, vWeight: weights.vWeight, vBias: weights.vBias, scale: weights.scale, smolgenBias, qkv, scores, probs, attn,
     outWeight: weights.outWeight, outBias: weights.outBias, alpha: weights.attentionAlpha, skip: attentionSkip, lnScale: weights.ln1Scale, lnBias: weights.ln1Bias, output: attentionOutput, podArgs,
@@ -6073,12 +6448,21 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
   return { runtime: { output, smolgenPipelines, attentionPipelines, ffnPipelines }, buffers };
 }
 
+interface SubmittedWgslHybridBatchReadbackMapState {
+  startedAt: number;
+  settledAt?: number;
+  promise: Promise<void>;
+}
+
 interface SubmittedWgslHybridBatch {
   inputs: Lc0EvaluatorInput[];
   boardsAndFens: Array<ReturnType<typeof currentBoardAndFen>>;
   legalCandidates?: LegalPolicyCandidate[][];
+  jsLegalCandidates?: LegalPolicyCandidate[][];
   legalPriorsSetupMs?: number;
+  legalPriorsPrepMs?: number;
   readbackBuffer: BufferLike;
+  readbackMapState: SubmittedWgslHybridBatchReadbackMapState;
   sequenceId: number;
   batchSequenceIndex?: number;
   deferredReadbackSlot?: number;
@@ -6092,6 +6476,133 @@ interface SubmittedWgslHybridBatch {
   inputBridgeCopyMs: number;
   wasmEncodeMs: number;
   wasmTotalMs: number;
+  dispatchCount: number;
+}
+
+function addFootprintCategory(categories: Record<string, Lc0WebExecutionFootprintCategory>, name: string, bytes: number, count = 1): void {
+  if (bytes <= 0 || count <= 0) return;
+  const entry = categories[name] ?? { bytes: 0, count: 0 };
+  entry.bytes += bytes;
+  entry.count += count;
+  categories[name] = entry;
+}
+
+function footprintBytes(categories: Record<string, Lc0WebExecutionFootprintCategory>): number {
+  return Object.values(categories).reduce((sum, entry) => sum + entry.bytes, 0);
+}
+
+function paddedGpuBytes(bytes: number): number {
+  return Math.max(4, Math.ceil(bytes / 4) * 4);
+}
+
+function matrixF16Bytes(rows: number, cols: number): number {
+  return rows * cols * 2;
+}
+
+function vectorF16Bytes(elements: number): number {
+  return elements * 2;
+}
+
+function f32StorageBytes(elements: number): number {
+  return elements * 4;
+}
+
+function inputBodyGpuFootprintBytes(): number {
+  return paddedGpuBytes(DEFAULT_INPUT_PLANES * DEFAULT_TOKENS * 4)
+    + paddedGpuBytes(DEFAULT_TOKENS * DEFAULT_POSITIONAL_CHANNELS * 4)
+    + paddedGpuBytes(DEFAULT_PADDED_INPUT_CHANNELS * DEFAULT_N * 4)
+    + paddedGpuBytes(DEFAULT_N * 4)
+    + paddedGpuBytes(DEFAULT_TOKENS * DEFAULT_N * 4)
+    + paddedGpuBytes(DEFAULT_TOKENS * DEFAULT_N * 4)
+    + paddedGpuBytes(4 * 4);
+}
+
+function encoderLayerWeightFootprint(): Record<string, Lc0WebExecutionFootprintCategory> {
+  const categories: Record<string, Lc0WebExecutionFootprintCategory> = {};
+  addFootprintCategory(categories, 'encoderAttentionWeights',
+    4 * paddedGpuBytes(matrixF16Bytes(DEFAULT_K, DEFAULT_N))
+    + 4 * paddedGpuBytes(vectorF16Bytes(DEFAULT_N))
+    + 2 * paddedGpuBytes(vectorF16Bytes(1))
+    + 2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_N)),
+    12);
+  addFootprintCategory(categories, 'encoderFfnWeights',
+    paddedGpuBytes(matrixF16Bytes(DEFAULT_N, DEFAULT_FFN_HIDDEN))
+    + paddedGpuBytes(vectorF16Bytes(DEFAULT_FFN_HIDDEN))
+    + paddedGpuBytes(matrixF16Bytes(DEFAULT_FFN_HIDDEN, DEFAULT_N))
+    + paddedGpuBytes(vectorF16Bytes(DEFAULT_N))
+    + paddedGpuBytes(vectorF16Bytes(1))
+    + 2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_N)),
+    7);
+  addFootprintCategory(categories, 'encoderSmolgenWeights',
+    paddedGpuBytes(matrixF16Bytes(DEFAULT_N, DEFAULT_SMOLGEN_COMPRESSED))
+    + paddedGpuBytes(matrixF16Bytes(DEFAULT_SMOLGEN_FLAT, DEFAULT_SMOLGEN_HIDDEN))
+    + paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_HIDDEN))
+    + 2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_HIDDEN))
+    + paddedGpuBytes(matrixF16Bytes(DEFAULT_SMOLGEN_HIDDEN, DEFAULT_SMOLGEN_FLAT))
+    + paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_FLAT))
+    + 2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_FLAT)),
+    9);
+  return categories;
+}
+
+function addEncoderLayerScratchFootprint(categories: Record<string, Lc0WebExecutionFootprintCategory>, layers: number, physicalSlots: number, hasPodArgs: boolean): void {
+  const perPhysicalSlotSmolgen = f32StorageBytes(DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS)
+    + f32StorageBytes(DEFAULT_SMOLGEN_FLAT)
+    + f32StorageBytes(DEFAULT_SMOLGEN_HIDDEN)
+    + f32StorageBytes(DEFAULT_SMOLGEN_HIDDEN)
+    + f32StorageBytes(DEFAULT_SMOLGEN_FLAT)
+    + f32StorageBytes(DEFAULT_SMOLGEN_FLAT);
+  const perPhysicalSlotAttention = f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N * 3)
+    + f32StorageBytes(DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS)
+    + f32StorageBytes(DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N);
+  const perPhysicalSlotFfnScratch = f32StorageBytes(DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N);
+  const perLayerSlotOutput = f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N);
+  const totalLayerSlots = layers * physicalSlots;
+  addFootprintCategory(categories, 'encoderSmolgenScratch', perPhysicalSlotSmolgen * physicalSlots, 6 * physicalSlots);
+  addFootprintCategory(categories, 'encoderAttentionScratch', perPhysicalSlotAttention * physicalSlots, 6 * physicalSlots);
+  addFootprintCategory(categories, 'encoderFfnScratch', perPhysicalSlotFfnScratch * physicalSlots, 2 * physicalSlots);
+  addFootprintCategory(categories, 'encoderLayerOutputs', perLayerSlotOutput * totalLayerSlots, totalLayerSlots);
+  if (hasPodArgs) addFootprintCategory(categories, 'encoderKernelUniforms', paddedGpuBytes(4) * physicalSlots, physicalSlots);
+}
+
+function wgslHeadsFootprintCategories(): Record<string, Lc0WebExecutionFootprintCategory> {
+  const categories: Record<string, Lc0WebExecutionFootprintCategory> = {};
+  addFootprintCategory(categories, 'wgslHeadWeights',
+    f32StorageBytes(DEFAULT_N * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_N)
+    + f32StorageBytes(DEFAULT_N * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_N)
+    + f32StorageBytes(DEFAULT_N * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_N)
+    + f32StorageBytes(1)
+    + f32StorageBytes(DEFAULT_N * 4)
+    + f32StorageBytes(DEFAULT_POLICY_MAPPED_OUTPUTS)
+    + f32StorageBytes(DEFAULT_N * DEFAULT_VALUE_EMBED)
+    + f32StorageBytes(DEFAULT_VALUE_EMBED)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * DEFAULT_VALUE_HIDDEN)
+    + f32StorageBytes(DEFAULT_VALUE_HIDDEN)
+    + f32StorageBytes(DEFAULT_VALUE_HIDDEN * 3)
+    + f32StorageBytes(3),
+    15);
+  addFootprintCategory(categories, 'wgslHeadScratch',
+    f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
+    + f32StorageBytes(DEFAULT_POLICY_OUTPUTS)
+    + f32StorageBytes(DEFAULT_POLICY_MAPPED_OUTPUTS)
+    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_VALUE_EMBED)
+    + f32StorageBytes(DEFAULT_VALUE_HIDDEN)
+    + f32StorageBytes(3)
+    + f32StorageBytes(3),
+    9);
+  addFootprintCategory(categories, 'legalPriorsBuffers', WGSL_GPU_LEGAL_MAX_MOVES * 4 + 4 * 4 + WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4, 3);
+  addFootprintCategory(categories, 'wgslHeadReadback', Math.max(WGSL_HEADS_READBACK_BYTES, WGSL_GPU_LEGAL_READBACK_BYTES), 1);
+  addFootprintCategory(categories, 'wgslHeadUniforms', 5 * paddedGpuBytes(4 * 4), 5);
+  return categories;
 }
 
 class Lc0WebHybridRuntime {
@@ -6217,11 +6728,15 @@ class Lc0WebHybridRuntime {
     const inputBodyGpu = usesGpuInputBody ? createInputBodyGpuRuntime(device, inputTensors, inputBuffer, usage) : undefined;
     if (inputBodyGpu) buffers.push(...inputBodyGpu.buffers);
     const layerRuntimes: HybridEncoderLayerRuntime[] = [];
+    const sharedSmolgenWeight = createStorageBuffer(device, tensorsByLayer[0].smolgen.smolgenWeight.bytes, usage.STORAGE | usage.COPY_DST);
+    buffers.push(sharedSmolgenWeight);
+    const { scratch: sharedLayerScratch, buffers: sharedLayerScratchBuffers } = createHybridEncoderLayerSlotScratch(device, usage, encoderKernelVariant);
+    buffers.push(...sharedLayerScratchBuffers);
     let layerInput = inputBuffer;
     for (const tensors of tensorsByLayer) {
-      const { weights, buffers: weightBuffers } = createHybridEncoderLayerWeights(device, tensors, usage);
+      const { weights, buffers: weightBuffers } = createHybridEncoderLayerWeights(device, tensors, usage, sharedSmolgenWeight);
       buffers.push(...weightBuffers);
-      const { runtime, buffers: slotBuffers } = createHybridEncoderLayerSlotRuntime(device, usage, weights, layerInput, encoderKernelVariant);
+      const { runtime, buffers: slotBuffers } = createHybridEncoderLayerSlotRuntime(device, usage, weights, layerInput, encoderKernelVariant, sharedLayerScratch);
       buffers.push(...slotBuffers);
       layerRuntimes.push({ ...runtime, weights });
       layerInput = runtime.output;
@@ -6262,9 +6777,11 @@ class Lc0WebHybridRuntime {
     const inputBodyGpu = this.inputBackend === 'wgsl' || this.inputBackend === 'wasm' ? createInputBodyGpuRuntime(this.device, this.inputTensors, inputBuffer, this.usage) : undefined;
     if (inputBodyGpu) this.buffers.push(...inputBodyGpu.buffers);
     const layerRuntimes: HybridEncoderLayerSlotRuntime[] = [];
+    const { scratch: sharedLayerScratch, buffers: sharedLayerScratchBuffers } = createHybridEncoderLayerSlotScratch(this.device, this.usage, this.encoderKernelVariant);
+    this.buffers.push(...sharedLayerScratchBuffers);
     let layerInput = inputBuffer;
     for (const layer of this.layerRuntimes) {
-      const { runtime, buffers } = createHybridEncoderLayerSlotRuntime(this.device, this.usage, layer.weights, layerInput, this.encoderKernelVariant);
+      const { runtime, buffers } = createHybridEncoderLayerSlotRuntime(this.device, this.usage, layer.weights, layerInput, this.encoderKernelVariant, sharedLayerScratch);
       this.buffers.push(...buffers);
       layerRuntimes.push(runtime);
       layerInput = runtime.output;
@@ -6357,6 +6874,50 @@ class Lc0WebHybridRuntime {
     return this.legalPriorsBackend === 'gpu' ? WGSL_GPU_LEGAL_READBACK_BYTES : WGSL_HEADS_READBACK_BYTES;
   }
 
+  executionFootprint(): Lc0WebExecutionFootprint {
+    const primaryBatchSlots = Math.max(1, this.wgslBatchSlots?.length ?? 1);
+    const deferredBatchSlots = this.wgslDeferredBatchSlots.reduce((sum, slots) => sum + slots.length, 0);
+    const deferredBatchRings = this.wgslDeferredBatchSlots.filter((slots) => slots.length > 0).length;
+    const physicalSlots = primaryBatchSlots + deferredBatchSlots;
+    const categories: Record<string, Lc0WebExecutionFootprintCategory> = {};
+    addFootprintCategory(categories, 'inputActivation', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) * physicalSlots, physicalSlots);
+    addFootprintCategory(categories, 'encoderReadback', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N), 1);
+    if (this.inputBackend !== 'js') addFootprintCategory(categories, 'inputBody', inputBodyGpuFootprintBytes() * physicalSlots, 7 * physicalSlots);
+    const layerWeight = encoderLayerWeightFootprint();
+    for (const [name, entry] of Object.entries(layerWeight)) addFootprintCategory(categories, name, entry.bytes * this.layers, entry.count * this.layers);
+    addFootprintCategory(categories, 'encoderSharedSmolgenWeight', paddedGpuBytes(matrixF16Bytes(DEFAULT_SMOLGEN_HIDDEN, DEFAULT_TOKENS * DEFAULT_TOKENS)), 1);
+    const hasPodArgs = encoderUsesTvmPackedF16Qkv(this.encoderKernelVariant) || encoderUsesTvmPackedF16AttentionOutProj(this.encoderKernelVariant) || encoderUsesTvmPackedF16Ffn(this.encoderKernelVariant);
+    addEncoderLayerScratchFootprint(categories, this.layers, physicalSlots, hasPodArgs);
+    if (this.headBackend === 'wgsl') {
+      const headCategories = wgslHeadsFootprintCategories();
+      for (const [name, entry] of Object.entries(headCategories)) addFootprintCategory(categories, name, entry.bytes * physicalSlots, entry.count * physicalSlots);
+    }
+    if (this.wgslBatchUploadCapacity > 0) addFootprintCategory(categories, 'batchUpload', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) * this.wgslBatchUploadCapacity, 1);
+    for (const capacity of this.wgslDeferredBatchUploadCapacities) {
+      if (capacity > 0) addFootprintCategory(categories, 'batchUpload', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) * capacity, 1);
+    }
+    if (this.wgslBatchReadbackCapacity > 0) addFootprintCategory(categories, 'batchReadback', this.wgslHeadReadbackBytes() * this.wgslBatchReadbackCapacity, 1);
+    if (this.wgslDeferredReadbackBuffers.length > 0 && this.wgslDeferredReadbackCapacity > 0) {
+      addFootprintCategory(categories, 'batchReadback', this.wgslHeadReadbackBytes() * this.wgslDeferredReadbackCapacity * this.wgslDeferredReadbackBuffers.length, this.wgslDeferredReadbackBuffers.length);
+    }
+    const gpuBufferBytes = footprintBytes(categories);
+    const gpuBufferCount = Object.values(categories).reduce((sum, entry) => sum + entry.count, 0);
+    return {
+      gpuBufferBytes,
+      gpuBufferCount,
+      categories,
+      layers: this.layers,
+      physicalSlots,
+      primaryBatchSlots,
+      deferredBatchSlots,
+      deferredBatchRings,
+      wgslBatchUploadCapacity: this.wgslBatchUploadCapacity,
+      wgslBatchReadbackCapacity: this.wgslBatchReadbackCapacity,
+      wgslDeferredReadbackCapacity: this.wgslDeferredReadbackCapacity,
+      note: 'Explicit lc0web-owned persistent GPU buffer accounting; excludes browser/driver allocation overhead, shader/pipeline objects, transient timestamp-query buffers, ORT session internals, and browser heap samples.',
+    };
+  }
+
   private computeLegalPriors(board: ReturnType<typeof currentBoardAndFen>['board'], fen: string, mappedPolicy: ArrayLike<number>, policyTemperature: number): { legalPriors: Lc0Evaluation['legalPriors']; bestMove?: string; legalPriorsMs: number; wasmTiming?: Lc0WasmLegalPriorTiming } {
     const legalPriorsStarted = nowMs();
     if (this.legalPriorsBackend === 'wasm') {
@@ -6373,7 +6934,7 @@ class Lc0WebHybridRuntime {
     fen: string;
     output: Float32Array<ArrayBufferLike>;
     encoderDispatchSyncedMs: number;
-    timing: Pick<Lc0WebHybridTimingBreakdown, 'inputBuildMs' | 'inputUploadMs' | 'commandEncodeMs' | 'queueSubmitMs' | 'readbackSyncedMs' | 'readbackBytes' | 'readbackMapCount' | 'inputBackend' | 'encoderKernelVariant' | 'inputBridgeCopyMs' | 'wasmEncodeMs' | 'wasmTotalMs'>;
+    timing: Pick<Lc0WebHybridTimingBreakdown, 'inputBuildMs' | 'inputUploadMs' | 'commandEncodeMs' | 'queueSubmitMs' | 'readbackSyncedMs' | 'readbackBytes' | 'readbackMapCount' | 'dispatchCount' | 'inputBackend' | 'encoderKernelVariant' | 'inputBridgeCopyMs' | 'wasmEncodeMs' | 'wasmTotalMs'>;
   }> {
     const { board, fen } = currentBoardAndFen(input);
     const inputBuildStarted = nowMs();
@@ -6390,14 +6951,15 @@ class Lc0WebHybridRuntime {
     const blockStarted = nowMs();
     const commandEncodeStarted = nowMs();
     const encoder = this.device.createCommandEncoder();
+    const dispatchCounter: DispatchCounter = { count: 0 };
     if (this.inputBackend !== 'js') {
       if (!this.inputBodyGpu) throw new Error('WGSL/WASM input backend is not initialized');
-      const inputPass = encoder.beginComputePass();
+      const inputPass = beginCountedComputePass(encoder, dispatchCounter);
       encodeInputBodyPass(inputPass, this.inputBodyGpu);
       inputPass.end();
     }
     for (const layer of this.layerRuntimes) {
-      const pass = encoder.beginComputePass();
+      const pass = beginCountedComputePass(encoder, dispatchCounter);
       encodeSmolgenPass(pass, layer.smolgenPipelines);
       encodeLc0WebEncoderBlockPass(pass, layer.attentionPipelines, layer.ffnPipelines);
       pass.end();
@@ -6415,7 +6977,7 @@ class Lc0WebHybridRuntime {
       fen,
       output,
       encoderDispatchSyncedMs: nowMs() - blockStarted,
-      timing: { inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, readbackSyncedMs, readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4, readbackMapCount: 1, inputBackend: this.inputBackend, encoderKernelVariant: this.encoderKernelVariant, ...this.timingWasmFields(wasmTiming) },
+      timing: { inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, readbackSyncedMs, readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4, readbackMapCount: 1, dispatchCount: dispatchCounter.count, inputBackend: this.inputBackend, encoderKernelVariant: this.encoderKernelVariant, ...this.timingWasmFields(wasmTiming) },
     };
   }
 
@@ -6477,12 +7039,13 @@ class Lc0WebHybridRuntime {
           stages: Array.from(layer.stages.entries()).map(([stage, entry]) => toStageTiming(stage, entry)).sort((a, b) => b.totalMs - a.totalMs),
         })),
         note,
+        executionFootprint: this.executionFootprint(),
       };
     };
 
     if (profileMode === 'gpu-timestamp') {
       const globals = gpuGlobals();
-      const timestampStageCount = (this.inputBackend !== 'js' ? 1 : 0) + this.layerRuntimes.length * 10;
+      const timestampStageCount = (this.inputBackend !== 'js' ? 1 : 0) + this.layerRuntimes.length * 15;
       const timestampCount = timestampStageCount * 2;
       const timestampBytes = timestampCount * 8;
       let output: Float32Array<ArrayBufferLike> = new Float32Array(DEFAULT_TOKENS * DEFAULT_N);
@@ -6512,7 +7075,12 @@ class Lc0WebHybridRuntime {
           if (this.inputBackend !== 'js') encodeTimestampStage('inputBody', 'input body projection', undefined, (pass) => encodeInputBodyPass(pass, this.inputBodyGpu!));
           for (let layerIndex = 0; layerIndex < this.layerRuntimes.length; layerIndex++) {
             const layer = this.layerRuntimes[layerIndex];
-            encodeTimestampStage('smolgen', 'smolgen', layerIndex, (pass) => encodeSmolgenPass(pass, layer.smolgenPipelines));
+            encodeTimestampStage('smolgenCompress', 'smolgen compress', layerIndex, (pass) => encodeSmolgenCompressPass(pass, layer.smolgenPipelines));
+            encodeTimestampStage('smolgenDense1', 'smolgen dense1', layerIndex, (pass) => encodeSmolgenDense1Pass(pass, layer.smolgenPipelines));
+            encodeTimestampStage('smolgenLn1', 'smolgen ln1', layerIndex, (pass) => encodeSmolgenLn1Pass(pass, layer.smolgenPipelines));
+            encodeTimestampStage('smolgenDense2', 'smolgen dense2', layerIndex, (pass) => encodeSmolgenDense2Pass(pass, layer.smolgenPipelines));
+            encodeTimestampStage('smolgenLn2', 'smolgen ln2', layerIndex, (pass) => encodeSmolgenLn2Pass(pass, layer.smolgenPipelines));
+            encodeTimestampStage('smolgenProject', 'smolgen project', layerIndex, (pass) => encodeSmolgenProjectPass(pass, layer.smolgenPipelines));
             encodeTimestampStage('qkvProjection', 'QKV projection', layerIndex, (pass) => encodeAttentionQkvPass(pass, layer.attentionPipelines));
             encodeTimestampStage('attentionScores', 'attention scores', layerIndex, (pass) => encodeAttentionScoresPass(pass, layer.attentionPipelines));
             encodeTimestampStage('softmax', 'softmax', layerIndex, (pass) => encodeAttentionSoftmaxPass(pass, layer.attentionPipelines));
@@ -6596,7 +7164,12 @@ class Lc0WebHybridRuntime {
       }
       for (let layerIndex = 0; layerIndex < this.layerRuntimes.length; layerIndex++) {
         const layer = this.layerRuntimes[layerIndex];
-        addLayer(layerIndex, 'smolgen', 'smolgen', await submitAndMeasure((pass) => encodeSmolgenPass(pass, layer.smolgenPipelines)));
+        addLayer(layerIndex, 'smolgenCompress', 'smolgen compress', await submitAndMeasure((pass) => encodeSmolgenCompressPass(pass, layer.smolgenPipelines)));
+        addLayer(layerIndex, 'smolgenDense1', 'smolgen dense1', await submitAndMeasure((pass) => encodeSmolgenDense1Pass(pass, layer.smolgenPipelines)));
+        addLayer(layerIndex, 'smolgenLn1', 'smolgen ln1', await submitAndMeasure((pass) => encodeSmolgenLn1Pass(pass, layer.smolgenPipelines)));
+        addLayer(layerIndex, 'smolgenDense2', 'smolgen dense2', await submitAndMeasure((pass) => encodeSmolgenDense2Pass(pass, layer.smolgenPipelines)));
+        addLayer(layerIndex, 'smolgenLn2', 'smolgen ln2', await submitAndMeasure((pass) => encodeSmolgenLn2Pass(pass, layer.smolgenPipelines)));
+        addLayer(layerIndex, 'smolgenProject', 'smolgen project', await submitAndMeasure((pass) => encodeSmolgenProjectPass(pass, layer.smolgenPipelines)));
         addLayer(layerIndex, 'qkvProjection', 'QKV projection', await submitAndMeasure((pass) => encodeAttentionQkvPass(pass, layer.attentionPipelines)));
         addLayer(layerIndex, 'attentionScores', 'attention scores', await submitAndMeasure((pass) => encodeAttentionScoresPass(pass, layer.attentionPipelines)));
         addLayer(layerIndex, 'softmax', 'softmax', await submitAndMeasure((pass) => encodeAttentionSoftmaxPass(pass, layer.attentionPipelines)));
@@ -6638,19 +7211,20 @@ class Lc0WebHybridRuntime {
       const encoderStarted = nowMs();
       const commandEncodeStarted = nowMs();
       const encoder = this.device.createCommandEncoder();
+      const dispatchCounter: DispatchCounter = { count: 0 };
       if (this.inputBackend !== 'js') {
         if (!this.inputBodyGpu) throw new Error('WGSL/WASM input backend is not initialized');
-        const inputPass = encoder.beginComputePass();
+        const inputPass = beginCountedComputePass(encoder, dispatchCounter);
         encodeInputBodyPass(inputPass, this.inputBodyGpu);
         inputPass.end();
       }
       for (const layer of this.layerRuntimes) {
-        const pass = encoder.beginComputePass();
+        const pass = beginCountedComputePass(encoder, dispatchCounter);
         encodeSmolgenPass(pass, layer.smolgenPipelines);
         encodeLc0WebEncoderBlockPass(pass, layer.attentionPipelines, layer.ffnPipelines);
         pass.end();
       }
-      const headPass = encoder.beginComputePass();
+      const headPass = beginCountedComputePass(encoder, dispatchCounter);
       encodeWgslPolicyValueHeads(headPass, this.wgslHeads);
       if (gpuLegalCandidates) encodeWgslLegalPriors(headPass, this.wgslHeads);
       headPass.end();
@@ -6668,8 +7242,8 @@ class Lc0WebHybridRuntime {
       const encoderDispatchSyncedMs = nowMs() - encoderStarted;
       const mappedPolicyF32 = fullHeadOutput?.mappedPolicy;
       const wdlF32 = gpuLegalOutput?.wdl ?? fullHeadOutput!.wdl;
-      if (mappedPolicyF32 && (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32))) throw new Error('WGSL hybrid heads produced zero or uniform mapped policy');
-      if (!arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error('WGSL hybrid heads produced zero or uniform WDL');
+      if (mappedPolicyF32 && !arrayHasNonzeroAndVariation(mappedPolicyF32)) throw new Error('WGSL hybrid heads produced zero or uniform mapped policy');
+      if (!arrayHasNonzeroAndVariation(wdlF32)) throw new Error('WGSL hybrid heads produced zero or uniform WDL');
       const mappedPolicy = mappedPolicyF32 ? Array.from(mappedPolicyF32) : [];
       const wdlValues = Array.from(wdlF32);
       const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
@@ -6694,6 +7268,7 @@ class Lc0WebHybridRuntime {
         legalPriors,
         bestMove,
         mappedPolicy,
+        executionFootprint: this.executionFootprint(),
         timing: {
           totalEvalMs: nowMs() - totalStarted,
           inputBuildMs,
@@ -6705,6 +7280,7 @@ class Lc0WebHybridRuntime {
           legalPriorsMs,
           readbackBytes: gpuLegalOutput ? WGSL_GPU_LEGAL_READBACK_BYTES : WGSL_HEADS_READBACK_BYTES,
           readbackMapCount: 1,
+          dispatchCount: dispatchCounter.count,
           inputBackend: this.inputBackend,
           legalPriorsBackend: this.legalPriorsBackend,
           encoderKernelVariant: this.encoderKernelVariant,
@@ -6734,6 +7310,7 @@ class Lc0WebHybridRuntime {
       legalPriors,
       bestMove,
       mappedPolicy: heads.mappedPolicy,
+      executionFootprint: this.executionFootprint(),
       timing: {
         totalEvalMs: nowMs() - totalStarted,
         inputBuildMs: encoded.timing.inputBuildMs,
@@ -6745,6 +7322,7 @@ class Lc0WebHybridRuntime {
         legalPriorsMs,
         readbackBytes: encoded.timing.readbackBytes,
         readbackMapCount: encoded.timing.readbackMapCount,
+        dispatchCount: encoded.timing.dispatchCount,
         inputBackend: this.inputBackend,
         legalPriorsBackend: this.legalPriorsBackend,
         encoderKernelVariant: this.encoderKernelVariant,
@@ -6756,7 +7334,7 @@ class Lc0WebHybridRuntime {
     };
   }
 
-  private submitWgslBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }, readbackBuffer: BufferLike, sequenceOptions: { batchSequenceIndex?: number; deferredReadbackSlot?: number } = {}): SubmittedWgslHybridBatch {
+  private async submitWgslBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }, readbackBuffer: BufferLike, sequenceOptions: { batchSequenceIndex?: number; deferredReadbackSlot?: number } = {}): Promise<SubmittedWgslHybridBatch> {
     const totalStarted = nowMs();
     const slots = sequenceOptions.deferredReadbackSlot === undefined
       ? this.ensureWgslBatchSlots(inputs.length)
@@ -6791,20 +7369,21 @@ class Lc0WebHybridRuntime {
     const encoderStarted = nowMs();
     const commandEncodeStarted = nowMs();
     const encoder = this.device.createCommandEncoder();
+    const dispatchCounter: DispatchCounter = { count: 0 };
     for (let slotIndex = 0; slotIndex < slots.length; slotIndex++) {
       const slot = slots[slotIndex];
       if (this.inputBackend !== 'js') {
         const inputBodyGpu = slot.inputBodyGpu;
         if (!inputBodyGpu) throw new Error('WGSL/WASM input backend batch slot is not initialized');
         encoder.copyBufferToBuffer(uploadBuffer, slotIndex * inputElements * 4, inputBodyGpu.planesBuffer, 0, inputElements * 4);
-        const inputPass = encoder.beginComputePass();
+        const inputPass = beginCountedComputePass(encoder, dispatchCounter);
         encodeInputBodyPass(inputPass, inputBodyGpu);
         inputPass.end();
       } else {
         encoder.copyBufferToBuffer(uploadBuffer, slotIndex * inputElements * 4, slot.inputBuffer, 0, inputElements * 4);
       }
       for (const layer of slot.layerRuntimes) {
-        const pass = encoder.beginComputePass();
+        const pass = beginCountedComputePass(encoder, dispatchCounter);
         encodeSmolgenPass(pass, layer.smolgenPipelines);
         encodeLc0WebEncoderBlockPass(pass, layer.attentionPipelines, layer.ffnPipelines);
         pass.end();
@@ -6814,7 +7393,7 @@ class Lc0WebHybridRuntime {
         uploadWgslLegalPriorsInputs(this.device, slots[slotIndex].wgslHeads, legalCandidates[slotIndex], options.policyTemperature);
         legalPriorsSetupMs = (legalPriorsSetupMs ?? 0) + (nowMs() - legalUploadStarted);
       }
-      const headPass = encoder.beginComputePass();
+      const headPass = beginCountedComputePass(encoder, dispatchCounter);
       encodeWgslPolicyValueHeads(headPass, slots[slotIndex].wgslHeads);
       if (legalCandidates) encodeWgslLegalPriors(headPass, slots[slotIndex].wgslHeads);
       headPass.end();
@@ -6827,16 +7406,34 @@ class Lc0WebHybridRuntime {
     const queueSubmitStarted = nowMs();
     this.device.queue.submit([commandBuffer]);
     const queueSubmitMs = nowMs() - queueSubmitStarted;
+    const submittedAt = nowMs();
+    const readbackMapState: SubmittedWgslHybridBatchReadbackMapState = { startedAt: nowMs(), promise: Promise.resolve() };
+    readbackMapState.promise = readbackBuffer.mapAsync(gpuGlobals().GPUMapMode!.READ).then(() => { readbackMapState.settledAt = nowMs(); });
+    let jsLegalCandidates: LegalPolicyCandidate[][] | undefined;
+    let legalPriorsPrepMs: number | undefined;
+    try {
+      if (this.legalPriorsBackend === 'js') {
+        const legalPriorsPrepStarted = nowMs();
+        jsLegalCandidates = boardsAndFens.map(({ board }) => legalPolicyCandidates(board));
+        legalPriorsPrepMs = nowMs() - legalPriorsPrepStarted;
+      }
+    } catch (error) {
+      await this.cleanupStartedReadbackMap(readbackBuffer, readbackMapState);
+      throw error;
+    }
     return {
       inputs,
       boardsAndFens,
       legalCandidates,
+      jsLegalCandidates,
       legalPriorsSetupMs,
+      legalPriorsPrepMs,
       readbackBuffer,
+      readbackMapState,
       sequenceId: this.nextWgslSequenceId++,
       batchSequenceIndex: sequenceOptions.batchSequenceIndex,
       deferredReadbackSlot: sequenceOptions.deferredReadbackSlot,
-      submittedAt: nowMs(),
+      submittedAt,
       totalStarted,
       encoderStarted,
       inputBuildMs,
@@ -6846,7 +7443,18 @@ class Lc0WebHybridRuntime {
       inputBridgeCopyMs,
       wasmEncodeMs,
       wasmTotalMs,
+      dispatchCount: dispatchCounter.count,
     };
+  }
+
+  private async cleanupStartedReadbackMap(readbackBuffer: BufferLike, readbackMapState: SubmittedWgslHybridBatchReadbackMapState): Promise<void> {
+    try {
+      await readbackMapState.promise;
+      readbackBuffer.unmap();
+    } catch {
+      // The caller is already propagating the primary error. If mapAsync also
+      // fails, there is no mapped range to release.
+    }
   }
 
   private async finishWgslBatch(submitted: SubmittedWgslHybridBatch, options: { policyTemperature: number }, readbackMode: 'immediate' | 'deferred-double-buffered'): Promise<Lc0WebHybridEvaluationResult[]> {
@@ -6854,22 +7462,21 @@ class Lc0WebHybridRuntime {
     try {
       const headStarted = nowMs();
       const readbackStarted = nowMs();
-      const deferredReadbackDelayMs = Math.max(0, readbackStarted - submitted.submittedAt);
-      const mapAsyncStarted = nowMs();
-      await submitted.readbackBuffer.mapAsync(gpuGlobals().GPUMapMode!.READ);
+      const deferredReadbackDelayMs = Math.max(0, submitted.readbackMapState.startedAt - submitted.submittedAt);
+      const mapAsyncAwaitStarted = nowMs();
+      await submitted.readbackMapState.promise;
       readbackMapped = true;
-      const readbackMapAsyncMs = nowMs() - mapAsyncStarted;
+      const readbackMapAsyncWaitMs = nowMs() - mapAsyncAwaitStarted;
+      const readbackMapAsyncMs = Math.max(0, (submitted.readbackMapState.settledAt ?? nowMs()) - submitted.readbackMapState.startedAt);
       const readbackBytesPerSlot = this.wgslHeadReadbackBytes();
       const mapCopyStarted = nowMs();
-      const readbackRange = submitted.readbackBuffer.getMappedRange().slice(0, submitted.inputs.length * readbackBytesPerSlot);
-      submitted.readbackBuffer.unmap();
-      readbackMapped = false;
+      const readbackRange = submitted.readbackBuffer.getMappedRange();
+      const readbackFloats = new Float32Array(readbackRange, 0, submitted.inputs.length * (readbackBytesPerSlot / 4));
       const readbackMapCopyMs = nowMs() - mapCopyStarted;
       const readbackSyncedMs = nowMs() - readbackStarted;
       const headRunMs = nowMs() - headStarted;
       const encoderDispatchSyncedMs = nowMs() - submitted.encoderStarted;
       const totalEvalMs = nowMs() - submitted.totalStarted;
-      const readbackFloats = new Float32Array(readbackRange);
       const out: Lc0WebHybridEvaluationResult[] = [];
       for (let i = 0; i < submitted.inputs.length; i++) {
         const base = i * (readbackBytesPerSlot / 4);
@@ -6881,16 +7488,24 @@ class Lc0WebHybridRuntime {
         const diagnosticFen = submitted.boardsAndFens[i].fen;
         const diagnosticBatchFens = submitted.boardsAndFens.map((entry) => entry.fen).join(' | ');
         const diagnosticSuffix = `slot ${i}, mode ${readbackMode}, sequence ${submitted.sequenceId}, batch ${submitted.batchSequenceIndex ?? 'single'}, position ${submitted.deferredReadbackSlot ?? 'immediate'}, fen ${diagnosticFen}, batchFens ${diagnosticBatchFens}`;
-        if (mappedPolicyF32 && (!arrayHasNonzero(mappedPolicyF32) || !arrayHasVariation(mappedPolicyF32))) throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy for ${diagnosticSuffix}`);
-        if (!arrayHasNonzero(wdlF32) || !arrayHasVariation(wdlF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform WDL for ${diagnosticSuffix}`);
+        if (mappedPolicyF32 && !arrayHasNonzeroAndVariation(mappedPolicyF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy for ${diagnosticSuffix}`);
+        if (!arrayHasNonzeroAndVariation(wdlF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform WDL for ${diagnosticSuffix}`);
         const mappedPolicy = mappedPolicyF32 ? Array.from(mappedPolicyF32) : [];
         const wdlValues = Array.from(wdlF32);
         const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
         const legalPriorsStarted = nowMs();
         const legalPriorsSetupMs = gpuLegalCandidates ? (submitted.legalPriorsSetupMs ?? 0) / submitted.inputs.length : 0;
+        const legalPriorsPrepMs = submitted.jsLegalCandidates ? (submitted.legalPriorsPrepMs ?? 0) / submitted.inputs.length : 0;
+        const readbackOverlapHiddenMs = submitted.jsLegalCandidates ? Math.min(submitted.legalPriorsPrepMs ?? 0, readbackMapAsyncMs) / submitted.inputs.length : 0;
+        const jsLegalCandidates = submitted.jsLegalCandidates?.[i];
         const legalPriorsResult = gpuLegalCandidates
           ? { legalPriors: legalPriorsFromGpuOutput(gpuLegalCandidates, readbackFloats.slice(base, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS)), bestMove: undefined as string | undefined, legalPriorsMs: legalPriorsSetupMs + (nowMs() - legalPriorsStarted), wasmTiming: undefined }
-          : this.computeLegalPriors(submitted.boardsAndFens[i].board, submitted.boardsAndFens[i].fen, mappedPolicy, options.policyTemperature);
+          : jsLegalCandidates
+            ? (() => {
+                const legalPriors = legalPolicyPriorsFromCandidates(jsLegalCandidates, mappedPolicy, options.policyTemperature);
+                return { legalPriors, bestMove: legalPriors[0]?.uci, legalPriorsMs: legalPriorsPrepMs + (nowMs() - legalPriorsStarted), wasmTiming: undefined };
+              })()
+            : this.computeLegalPriors(submitted.boardsAndFens[i].board, submitted.boardsAndFens[i].fen, mappedPolicy, options.policyTemperature);
         const legalPriors = legalPriorsResult.legalPriors;
         const bestMove = gpuLegalCandidates ? legalPriors[0]?.uci : legalPriorsResult.bestMove;
         const { legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = legalPriorsResult;
@@ -6910,6 +7525,7 @@ class Lc0WebHybridRuntime {
           legalPriors,
           bestMove,
           mappedPolicy,
+          executionFootprint: this.executionFootprint(),
           timing: {
             totalEvalMs,
             inputBuildMs: submitted.inputBuildMs,
@@ -6921,13 +7537,16 @@ class Lc0WebHybridRuntime {
             legalPriorsMs,
             readbackBytes: submitted.inputs.length * readbackBytesPerSlot,
             readbackMapCount: 1,
+            dispatchCount: submitted.dispatchCount,
             readbackMode,
             wgslSequenceId: submitted.sequenceId,
             batchSequenceIndex: submitted.batchSequenceIndex,
             deferredReadbackSlot: submitted.deferredReadbackSlot,
             deferredReadbackDelayMs,
             readbackMapAsyncMs,
+            readbackMapAsyncWaitMs,
             readbackMapCopyMs,
+            ...(submitted.legalPriorsPrepMs !== undefined ? { legalPriorsPrepMs, readbackOverlapCpuMs: legalPriorsPrepMs, readbackOverlapHiddenMs } : {}),
             physicalBatchSize: submitted.inputs.length,
             batchPosition: i,
             inputBackend: this.inputBackend,
@@ -6956,7 +7575,8 @@ class Lc0WebHybridRuntime {
       return out;
     }
     const readbackBuffer = this.ensureWgslBatchReadbackBuffer(inputs.length);
-    return this.finishWgslBatch(this.submitWgslBatch(inputs, options, readbackBuffer), options, 'immediate');
+    const submitted = await this.submitWgslBatch(inputs, options, readbackBuffer);
+    return this.finishWgslBatch(submitted, options, 'immediate');
   }
 
   async evaluateWgslBatchesDeferredReadback(batches: Lc0EvaluatorInput[][], options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult[][]> {
@@ -6993,12 +7613,20 @@ class Lc0WebHybridRuntime {
       this.wgslDeferredReadbackInUse.add(deferredReadbackSlot);
       let submitted: SubmittedWgslHybridBatch;
       try {
-        submitted = this.submitWgslBatch(batch, options, readbackBuffer, { batchSequenceIndex: i, deferredReadbackSlot });
+        submitted = await this.submitWgslBatch(batch, options, readbackBuffer, { batchSequenceIndex: i, deferredReadbackSlot });
       } catch (error) {
         this.wgslDeferredReadbackInUse.delete(deferredReadbackSlot);
         throw error;
       }
-      if (pending) out[pending.index] = await this.finishWgslBatch(pending.submitted, options, 'deferred-double-buffered');
+      if (pending) {
+        try {
+          out[pending.index] = await this.finishWgslBatch(pending.submitted, options, 'deferred-double-buffered');
+        } catch (error) {
+          this.wgslDeferredReadbackInUse.delete(deferredReadbackSlot);
+          await this.cleanupStartedReadbackMap(readbackBuffer, submitted.readbackMapState);
+          throw error;
+        }
+      }
       pending = { index: i, submitted };
     }
     if (pending) out[pending.index] = await this.finishWgslBatch(pending.submitted, options, 'deferred-double-buffered');
@@ -7077,10 +7705,16 @@ function mean(values: number[]): number {
 
 function summarizeHybridEvaluations(mode: 'immediate' | 'deferred-double-buffered', wallMs: number, batches: Lc0WebHybridEvaluationResult[][]): Lc0WebWgslDeferredReadbackBenchModeResult {
   const flat = batches.flat();
-  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount'];
+  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsPrepMs', 'readbackOverlapCpuMs', 'readbackOverlapHiddenMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount'];
+  const physicalBatchScopedKeys = new Set<keyof Lc0WebHybridTimingBreakdown>(['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount']);
   const timingMeans: Partial<Record<keyof Lc0WebHybridTimingBreakdown, number>> = {};
   for (const key of timingKeys) {
-    const values = flat.map((entry) => entry.timing[key]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    const values = flat.map((entry) => {
+      const value = entry.timing[key];
+      if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+      const physicalBatchSize = Math.max(1, Math.floor(Number(entry.timing.physicalBatchSize ?? 1)));
+      return physicalBatchScopedKeys.has(key) ? value / physicalBatchSize : value;
+    }).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     if (values.length) timingMeans[key] = mean(values);
   }
   return {
@@ -7177,6 +7811,7 @@ export class Lc0WebHybridEvaluator {
   readonly legalPriorsBackend: Lc0WebHybridLegalPriorsBackend;
   readonly encoderKernelVariant: Lc0WebEncoderKernelVariant;
   private runtimePromise?: Promise<Lc0WebHybridRuntime>;
+  private currentRuntime?: Lc0WebHybridRuntime;
   private evaluationQueue: Promise<void> = Promise.resolve();
 
   constructor(options: Omit<Lc0WebHybridEvaluationOptions, 'input'>) {
@@ -7207,12 +7842,18 @@ export class Lc0WebHybridEvaluator {
         legalPriorsBackend: this.legalPriorsBackend,
         encoderKernelVariant: this.encoderKernelVariant,
       });
-      runtimePromise.catch(() => {
+      runtimePromise.then((runtime) => {
+        if (this.runtimePromise === runtimePromise) this.currentRuntime = runtime;
+      }).catch(() => {
         if (this.runtimePromise === runtimePromise) this.runtimePromise = undefined;
       });
       this.runtimePromise = runtimePromise;
     }
     return this.runtimePromise;
+  }
+
+  executionFootprint(): Lc0WebExecutionFootprint | undefined {
+    return this.currentRuntime?.executionFootprint();
   }
 
   private enqueueEvaluation<T>(work: () => Promise<T>): Promise<T> {
@@ -7252,6 +7893,7 @@ export class Lc0WebHybridEvaluator {
   async dispose(): Promise<void> {
     const runtimePromise = this.runtimePromise;
     this.runtimePromise = undefined;
+    this.currentRuntime = undefined;
     if (!runtimePromise) return;
     const runtime = await runtimePromise.catch(() => undefined);
     runtime?.destroy();

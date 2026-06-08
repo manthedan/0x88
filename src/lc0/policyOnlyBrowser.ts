@@ -18,7 +18,43 @@ import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyS
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
 type NativeRecord = { id: string; backend?: string; fen: string; startFen?: string; moves?: string[]; bestmove: string; topPriors: NativePrior[] };
-type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; pv?: string[]; multiPv?: string[][]; elapsedMs?: number; cancelled?: boolean; stats?: Lc0SearchResult['search']['stats'] };
+type ExecutionFootprint = {
+  gpuBufferBytes: number;
+  gpuBufferCount: number;
+  categories: Record<string, { bytes: number; count: number }>;
+  layers: number;
+  physicalSlots: number;
+  primaryBatchSlots: number;
+  deferredBatchSlots: number;
+  deferredBatchRings: number;
+  wgslBatchUploadCapacity: number;
+  wgslBatchReadbackCapacity: number;
+  wgslDeferredReadbackCapacity: number;
+  note: string;
+};
+
+type CacheFootprint = {
+  entries: number;
+  maxEntries: number;
+  approxBytes: number;
+  approxKeyBytes: number;
+  approxEvaluationBytes: number;
+  note: string;
+};
+
+type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; pv?: string[]; multiPv?: string[][]; elapsedMs?: number; cancelled?: boolean; stats?: Lc0SearchResult['search']['stats']; executionFootprint?: ExecutionFootprint; cacheFootprint?: CacheFootprint };
+type PackFootprint = {
+  declaredTensorBytes: number;
+  loadedTensorBytes: number;
+  totalShardBytes: number;
+  loadedShardBytes: number;
+  tensorCount: number;
+  loadedTensorCount: number;
+  shardCount: number;
+  loadedShardCount: number;
+  dtypeHistogram: Record<string, number>;
+};
+
 type PackLoadResult = {
   packUrl: string;
   modelName: string;
@@ -31,6 +67,7 @@ type PackLoadResult = {
   shardCount: number;
   verifiedShardCount: number;
   shardBytes: number;
+  packFootprint: PackFootprint;
   elapsedMs: number;
 };
 
@@ -189,6 +226,41 @@ type AttentionScoreOrtBenchmarkResult = {
   firstMs: number;
   timesMs?: number[];
   runsPerSecond: number;
+  maxAbsError: number;
+  rmsError: number;
+  outputSample: number[];
+};
+
+type SmolgenProjectKernelVariant = 'hand' | 'tiled-project-f16' | 'tiled-project-f16-16' | 'tiled-project-f16-32' | 'tiled-project-f16-128' | 'tiled-project-f16-256';
+
+function parseSmolgenProjectKernelVariant(raw: string | null): SmolgenProjectKernelVariant {
+  if (!raw || raw === 'tiled' || raw === 'tiled-project') return 'tiled-project-f16';
+  if (raw === 'hand' || raw === 'tiled-project-f16' || raw === 'tiled-project-f16-16' || raw === 'tiled-project-f16-32' || raw === 'tiled-project-f16-128' || raw === 'tiled-project-f16-256') return raw;
+  throw new Error(`Unsupported smolgen project kernel variant: ${raw}`);
+}
+
+type SmolgenBenchmarkResult = {
+  status: 'SMOLGEN_BENCH_DONE';
+  packUrl: string;
+  modelName: string;
+  adapterInfo?: Record<string, unknown>;
+  encoderPrefix: string;
+  projectKernelVariant: SmolgenProjectKernelVariant;
+  tokens: number;
+  channels: number;
+  compressed: number;
+  hidden: number;
+  heads: number;
+  epsilon: number;
+  warmup: number;
+  iterations: number;
+  packLoadMs: number;
+  uploadSetupMs: number;
+  dispatchLoopMs: number;
+  dispatchLoopAvgMs: number;
+  stageDispatchAvgMs: Record<string, number>;
+  readbackSyncedMs: number;
+  endToEndMs: number;
   maxAbsError: number;
   rmsError: number;
   outputSample: number[];
@@ -631,7 +703,7 @@ type HybridEncoderProfileResult = {
   status: 'HYBRID_ENCODER_PROFILE_DONE';
   packUrl: string;
   layers: number;
-  encoderKernelVariant: 'hand' | 'tvm-packed-f16' | 'mixed-tvm-ffn' | 'mixed-tvm-ffn-outproj';
+  encoderKernelVariant: 'hand' | 'tvm-packed-f16' | 'mixed-tvm-ffn' | 'mixed-tvm-ffn-outproj' | 'mixed-tvm-ffn-smolgen-project';
   inputBackend: 'js' | 'wgsl' | 'wasm';
   warmup: number;
   iterations: number;
@@ -645,6 +717,7 @@ type HybridEncoderProfileResult = {
   aggregateStageTimings: Array<{ stage: string; label: string; iterations: number; totalMs: number; avgMs: number; percentOfProfiledStageMs: number }>;
   layerTimings: Array<{ layer: number; totalMs: number; stages: Array<{ stage: string; label: string; iterations: number; totalMs: number; avgMs: number; percentOfProfiledStageMs: number }> }>;
   note: string;
+  executionFootprint?: ExecutionFootprint;
 };
 
 type WorkerResponse =
@@ -659,6 +732,7 @@ type WorkerResponse =
   | { type: 'qkvBenchmarkResult'; id: number; result: QkvBenchmarkResult }
   | { type: 'attentionScoreBenchmarkResult'; id: number; result: AttentionScoreBenchmarkResult }
   | { type: 'attentionScoreOrtBenchmarkResult'; id: number; result: AttentionScoreOrtBenchmarkResult }
+  | { type: 'smolgenBenchmarkResult'; id: number; result: SmolgenBenchmarkResult }
   | { type: 'softmaxBenchmarkResult'; id: number; result: SoftmaxBenchmarkResult }
   | { type: 'attentionValueBenchmarkResult'; id: number; result: AttentionValueBenchmarkResult }
   | { type: 'attentionValueOrtBenchmarkResult'; id: number; result: AttentionValueOrtBenchmarkResult }
@@ -721,12 +795,13 @@ const ENCODER0_FFN_BENCH_REQUESTED = params.get('encoder0FfnBench') === '1' || p
 const ENCODER0_FFN_ORT_BENCH_REQUESTED = params.get('encoder0FfnOrtBench') === '1' || params.get('ffnOrtBench') === '1';
 const ATTENTION_SCORE_BENCH_REQUESTED = params.get('attentionScoreBench') === '1' || params.get('scoreBench') === '1';
 const ATTENTION_SCORE_ORT_BENCH_REQUESTED = params.get('attentionScoreOrtBench') === '1' || params.get('scoreOrtBench') === '1';
+const SMOLGEN_BENCH_REQUESTED = params.get('smolgenBench') === '1' || params.get('smolgenBenchmark') === '1';
 const QKV_BENCH_REQUESTED = params.get('qkvBench') === '1' || params.get('qkvBenchmark') === '1';
 const QKV_PROBE_REQUESTED = params.get('qkvProbe') === '1';
 const ORT_OP_BENCH_REQUESTED = params.get('ortOpBench') === '1' || params.get('ortBench') === '1';
 const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('kernelBenchmark') === '1' || params.get('wgslBench') === '1';
 const SHADER_F16_PROBE_REQUESTED = params.get('shaderF16Probe') === '1' || params.get('shader-f16-probe') === '1';
-const KERNEL_PROBE_REQUESTED = MAPPED_POLICY_PROBE_REQUESTED || WGSL_HEADS_PROBE_REQUESTED || WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED || ENCODER_STACK_BENCH_REQUESTED || ENCODER0_BLOCK_ORT_BENCH_REQUESTED || ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_ORT_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_ORT_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
+const KERNEL_PROBE_REQUESTED = MAPPED_POLICY_PROBE_REQUESTED || WGSL_HEADS_PROBE_REQUESTED || WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED || ENCODER_STACK_BENCH_REQUESTED || ENCODER0_BLOCK_ORT_BENCH_REQUESTED || ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_ORT_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_ORT_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || SMOLGEN_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || SHADER_F16_PROBE_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
 const HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED = params.get('hybridSearchFixtureParity') === '1' || params.get('searchFixtureParity') === '1';
@@ -742,9 +817,10 @@ const HYBRID_INPUT_BACKEND_REQUESTED = HYBRID_INPUT_BACKEND_PARAM === 'wgsl' || 
 const HYBRID_INPUT_BACKEND = HYBRID_INPUT_BACKEND_PARAM === 'wasm' ? 'wasm' : (HYBRID_INPUT_BACKEND_PARAM === 'wgsl' ? 'wgsl' : 'js');
 const HYBRID_LEGAL_PRIORS_BACKEND_PARAM = params.get('legalPriorsBackend') ?? params.get('hybridLegalPriors');
 const HYBRID_LEGAL_PRIORS_BACKEND_REQUESTED = HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'wasm' || HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'gpu';
-const HYBRID_LEGAL_PRIORS_BACKEND = HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'gpu' ? 'gpu' : (HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'wasm' ? 'wasm' : 'js');
+const HYBRID_LEGAL_PRIORS_BACKEND_RAW = HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'gpu' ? 'gpu' : (HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'wasm' ? 'wasm' : 'js');
+const HYBRID_LEGAL_PRIORS_BACKEND = HYBRID_LEGAL_PRIORS_BACKEND_RAW === 'gpu' && !HYBRID_WGSL_HEADS_REQUESTED ? 'js' : HYBRID_LEGAL_PRIORS_BACKEND_RAW;
 const HYBRID_ENCODER_KERNEL_PARAM = params.get('encoderKernel') ?? params.get('hybridEncoderKernel') ?? params.get('encoderKernelVariant');
-const HYBRID_ENCODER_KERNEL_VARIANT = HYBRID_ENCODER_KERNEL_PARAM === 'tvm-packed-f16' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-outproj' ? HYBRID_ENCODER_KERNEL_PARAM : 'hand';
+const HYBRID_ENCODER_KERNEL_VARIANT = HYBRID_ENCODER_KERNEL_PARAM === 'tvm-packed-f16' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-outproj' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-smolgen-project' ? HYBRID_ENCODER_KERNEL_PARAM : 'hand';
 const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_LEGAL_PRIORS_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
@@ -1252,6 +1328,25 @@ function roundedNumericRecord(value: unknown, digits = 4): Record<string, number
   return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
+function evaluationExecutionFootprint(evaluation: Lc0Evaluation | undefined): ExecutionFootprint | undefined {
+  return (evaluation as (Lc0Evaluation & { executionFootprint?: ExecutionFootprint }) | undefined)?.executionFootprint;
+}
+
+function executionFootprintMB(footprint: ExecutionFootprint | undefined): Record<string, number> | undefined {
+  if (!footprint) return undefined;
+  const entries = Object.entries(footprint.categories).map(([key, value]) => [key, Number((value.bytes / 1_000_000).toFixed(3))] as const);
+  return { gpuBufferMB: Number((footprint.gpuBufferBytes / 1_000_000).toFixed(3)), ...Object.fromEntries(entries) };
+}
+
+function cacheFootprintKB(footprint: CacheFootprint | undefined): Record<string, number> | undefined {
+  if (!footprint) return undefined;
+  return {
+    approxKB: Number((footprint.approxBytes / 1_000).toFixed(3)),
+    approxKeyKB: Number((footprint.approxKeyBytes / 1_000).toFixed(3)),
+    approxEvaluationKB: Number((footprint.approxEvaluationBytes / 1_000).toFixed(3)),
+  };
+}
+
 function recordNumericTimingSamples(samples: Record<string, number[]>, value: unknown): void {
   const rounded = roundedNumericRecord(value, 8);
   if (!rounded) return;
@@ -1430,12 +1525,61 @@ async function runPackProbe(): Promise<void> {
       elapsedMs: Number(response.result.elapsedMs.toFixed(3)),
       shardMB: Number((response.result.shardBytes / 1_000_000).toFixed(3)),
       loadedTensorMB: Number((response.result.loadedTensorBytes / 1_000_000).toFixed(3)),
+      packFootprintMB: {
+        declaredTensorMB: Number((response.result.packFootprint.declaredTensorBytes / 1_000_000).toFixed(3)),
+        loadedTensorMB: Number((response.result.packFootprint.loadedTensorBytes / 1_000_000).toFixed(3)),
+        totalShardMB: Number((response.result.packFootprint.totalShardBytes / 1_000_000).toFixed(3)),
+        loadedShardMB: Number((response.result.packFootprint.loadedShardBytes / 1_000_000).toFixed(3)),
+      },
     };
     el('benchResult').textContent = JSON.stringify(result);
     el('message').textContent = `PACK_DONE ${result.modelName} · ${result.shardMB.toFixed(1)} MB shards · ${result.elapsedMs.toFixed(0)} ms worker load`;
   } catch (error) {
     el('benchResult').textContent = `PACK_FAILED ${(error as Error).message}`;
     el('message').textContent = `Pack probe failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runSmolgenBenchmark(): Promise<void> {
+  if (!searchWorker) throw new Error('smolgen benchmark requires LC0 worker');
+  const rawIters = Number(params.get('smolgenIters') ?? params.get('kernelBenchIters') ?? '50');
+  const rawWarmup = Number(params.get('smolgenWarmup') ?? params.get('kernelBenchWarmup') ?? '3');
+  const iterations = Math.min(100_000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 50)));
+  const warmup = Math.min(1000, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 3)));
+  const encoderPrefix = params.get('encoderPrefix') ?? undefined;
+  const projectKernelVariant = parseSmolgenProjectKernelVariant(params.get('smolgenProjectKernel') ?? params.get('smolgenKernelVariant'));
+  el('benchResult').textContent = 'SMOLGEN_BENCH_RUNNING';
+  setBusy(true, `Benchmarking lc0web WGSL smolgen stages (${projectKernelVariant}): ${warmup} warmup + ${iterations} queued passes, one final readback…`);
+  try {
+    const response = await postWorkerRequest<{ type: 'smolgenBenchmarkResult'; result: SmolgenBenchmarkResult }>({
+      type: 'smolgenBenchmark',
+      packUrl: PACK_URL,
+      iterations,
+      warmup,
+      verifyShards: params.get('packVerify') !== '0',
+      encoderPrefix,
+      projectKernelVariant,
+    });
+    const rounded = {
+      ...response.result,
+      dispatchLoopAvgMs: Number(response.result.dispatchLoopAvgMs.toFixed(6)),
+      stageDispatchAvgMs: Object.fromEntries(Object.entries(response.result.stageDispatchAvgMs).map(([stage, ms]) => [stage, Number(ms.toFixed(6))])),
+      maxAbsError: Number(response.result.maxAbsError.toExponential(6)),
+      rmsError: Number(response.result.rmsError.toExponential(6)),
+      benchmarkReport: buildBenchmarkReport(response.result),
+    };
+    el('benchResult').textContent = JSON.stringify(rounded);
+    const stages = Object.entries(response.result.stageDispatchAvgMs)
+      .sort((a, b) => b[1] - a[1])
+      .map(([stage, ms]) => `${stage} ${ms.toFixed(4)}ms`)
+      .join(', ');
+    el('message').textContent = `SMOLGEN_BENCH_DONE ${response.result.projectKernelVariant} avg ${response.result.dispatchLoopAvgMs.toFixed(4)} ms/pass · ${stages}`;
+  } catch (error) {
+    el('benchResult').textContent = `SMOLGEN_BENCH_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Smolgen benchmark failed: ${(error as Error).message}`;
     throw error;
   } finally {
     setBusy(false);
@@ -2522,6 +2666,8 @@ async function runWorkerEvalBenchmark(): Promise<void> {
       q: last?.evaluation.q,
       mlh: last?.evaluation.mlh,
       lastBackendTiming: roundedNumericRecord((last?.evaluation as { timing?: unknown } | undefined)?.timing),
+      executionFootprint: evaluationExecutionFootprint(last?.evaluation),
+      executionFootprintMB: executionFootprintMB(evaluationExecutionFootprint(last?.evaluation)),
       phaseTimingStats: summarizeNumericTimingSamples(backendTimingSamples, 'onnx worker eval backend timing'),
       ...stats,
     } as EvalBenchResult & Record<string, unknown>);
@@ -2665,6 +2811,7 @@ async function runHybridSearchBenchmark(): Promise<void> {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
     const totalSearchMs = searchTimes.reduce((sum, value) => sum + value, 0);
+    const executionFootprint = lastSearch?.executionFootprint ?? evaluationExecutionFootprint(lastBatchEval?.[0]?.evaluation) ?? evaluationExecutionFootprint(lastEval?.evaluation);
     const result = {
       status: 'HYBRID_SEARCH_BENCH_DONE',
       backend: searchWorkerBackend,
@@ -2686,6 +2833,10 @@ async function runHybridSearchBenchmark(): Promise<void> {
       reuseTree,
       resetBetweenSearches,
       evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
+      executionFootprint,
+      executionFootprintMB: executionFootprintMB(executionFootprint),
+      cacheFootprint: lastSearch?.cacheFootprint,
+      cacheFootprintKB: cacheFootprintKB(lastSearch?.cacheFootprint),
       eval: {
         warmup: evalWarmup,
         iterations: evalIterations,
@@ -3705,7 +3856,7 @@ async function init() {
       workerModelCacheStatus = 'pack shards worker-owned';
       useSearchWorker = true;
       await initSearchWorker({ initModel: false });
-      searchWorkerBackend = MAPPED_POLICY_PROBE_REQUESTED ? 'lc0web-wgsl-mapped-policy-probe' : WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED ? 'lc0web-wgsl-encoder-wgsl-heads-probe' : WGSL_HEADS_PROBE_REQUESTED ? 'lc0web-wgsl-heads-probe' : ENCODER_STACK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder-stack-bench' : ENCODER0_BLOCK_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-block-bench' : ENCODER0_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-block-bench' : ENCODER0_FFN_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-ffn-bench' : ENCODER0_FFN_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-ffn-bench' : ATTENTION_OUTPUT_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-output-bench' : ATTENTION_OUTPUT_BENCH_REQUESTED ? 'lc0web-wgsl-attention-output-bench' : ATTENTION_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-attention-block-bench' : ATTENTION_VALUE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-value-bench' : ATTENTION_VALUE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-value-bench' : SOFTMAX_BENCH_REQUESTED ? 'lc0web-wgsl-softmax-bench' : ATTENTION_SCORE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-score-bench' : ATTENTION_SCORE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-score-bench' : QKV_BENCH_REQUESTED ? 'lc0web-wgsl-qkv-bench' : QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
+      searchWorkerBackend = MAPPED_POLICY_PROBE_REQUESTED ? 'lc0web-wgsl-mapped-policy-probe' : WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED ? 'lc0web-wgsl-encoder-wgsl-heads-probe' : WGSL_HEADS_PROBE_REQUESTED ? 'lc0web-wgsl-heads-probe' : ENCODER_STACK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder-stack-bench' : ENCODER0_BLOCK_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-block-bench' : ENCODER0_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-block-bench' : ENCODER0_FFN_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-ffn-bench' : ENCODER0_FFN_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-ffn-bench' : ATTENTION_OUTPUT_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-output-bench' : ATTENTION_OUTPUT_BENCH_REQUESTED ? 'lc0web-wgsl-attention-output-bench' : ATTENTION_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-attention-block-bench' : ATTENTION_VALUE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-value-bench' : ATTENTION_VALUE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-value-bench' : SMOLGEN_BENCH_REQUESTED ? 'lc0web-wgsl-smolgen-bench' : SOFTMAX_BENCH_REQUESTED ? 'lc0web-wgsl-softmax-bench' : ATTENTION_SCORE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-score-bench' : ATTENTION_SCORE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-score-bench' : QKV_BENCH_REQUESTED ? 'lc0web-wgsl-qkv-bench' : QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
       renderStatic();
       if (MAPPED_POLICY_PROBE_REQUESTED) await runMappedPolicyProbe();
       else if (WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED) await runWgslHeadsVsOrtFixtures();
@@ -3720,6 +3871,7 @@ async function init() {
       else if (ATTENTION_BLOCK_BENCH_REQUESTED) await runAttentionBlockBenchmark();
       else if (ATTENTION_VALUE_ORT_BENCH_REQUESTED) await runAttentionValueOrtBenchmark();
       else if (ATTENTION_VALUE_BENCH_REQUESTED) await runAttentionValueBenchmark();
+      else if (SMOLGEN_BENCH_REQUESTED) await runSmolgenBenchmark();
       else if (SOFTMAX_BENCH_REQUESTED) await runSoftmaxBenchmark();
       else if (ATTENTION_SCORE_ORT_BENCH_REQUESTED) await runAttentionScoreOrtBenchmark();
       else if (ATTENTION_SCORE_BENCH_REQUESTED) await runAttentionScoreBenchmark();

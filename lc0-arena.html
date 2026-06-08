@@ -90,6 +90,12 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
         <input id="lc0BatchSizeInput" type="number" min="1" max="64" step="1" value="1" /></div>
       <div class="field"><label for="lc0BatchPipelineDepthInput">LC0 pipeline</label>
         <input id="lc0BatchPipelineDepthInput" type="number" min="1" max="16" step="1" value="1" /></div>
+      <div class="field"><label for="lc0InputBackendSelect">LC0 input</label>
+        <select id="lc0InputBackendSelect"><option value="js">JS</option><option value="wasm">WASM</option><option value="wgsl">WGSL</option></select></div>
+      <div class="field"><label for="lc0EncoderKernelSelect">LC0 encoder</label>
+        <select id="lc0EncoderKernelSelect"><option value="hand">Hand WGSL</option><option value="mixed-tvm-ffn">Mixed TVM FFN</option><option value="mixed-tvm-ffn-outproj">Mixed TVM FFN+outproj</option><option value="mixed-tvm-ffn-smolgen-project">Mixed TVM FFN+smolgen project</option><option value="tvm-packed-f16">TVM packed f16</option></select></div>
+      <div class="field"><label for="lc0LegalPriorsSelect">LC0 legal priors</label>
+        <select id="lc0LegalPriorsSelect"><option value="js">JS</option><option value="wasm">WASM</option><option value="gpu">GPU legal (WGSL heads)</option></select></div>
       <div class="field"><label for="gamesInput">Games/opening</label>
         <input id="gamesInput" type="number" min="1" max="20" step="1" value="2" /></div>
       <div class="field"><label for="delayInput">Delay ms</label>

@@ -231,7 +231,7 @@ It compares:
 - `wgsl-pipe2` — same custom WGSL path with `batchPipelineDepth=2`. The matrix also exposes `--pipe2-batch` as an override/cap for overlap experiments; the default now matches `--batch 4` after deferred resources are preallocated before submitting pipelined work.
 - `wgsl-gpu-legal-pipe2` — combined interaction test: GPU legal-prior compact readback plus `batchPipelineDepth=2`, using the same `--pipe2-batch` cap.
 
-For autoresearch-sourced lanes, the WGSL strategies also accept `--input-backend js|wgsl|wasm` and `--encoder-kernel hand|tvm-packed-f16|mixed-tvm-ffn|mixed-tvm-ffn-outproj`, so the same readback attribution matrix can be run against WASM-input/mixed-kernel candidates without changing stable defaults.
+For autoresearch-sourced lanes, the WGSL strategies also accept `--input-backend js|wgsl|wasm` and `--encoder-kernel hand|tvm-packed-f16|mixed-tvm-ffn|mixed-tvm-ffn-outproj|mixed-tvm-ffn-smolgen-project`, so the same readback attribution matrix can be run against WASM-input/mixed-kernel candidates without changing stable defaults.
 
 A short local two-FEN smoke was run:
 

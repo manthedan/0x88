@@ -3,13 +3,46 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 300_000;
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_hybrid_search_fixture_parity.mjs [options]\n\nRuns browser/WebGPU LC0 fixed-search fixture parity for hybrid search across batch pipeline depths.\n\nOptions:\n  --out PATH                 Write JSON artifact (default stdout only)\n  --base-url URL             Use an existing dev server\n  --host HOST                Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N                   Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN        Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --session NAME             agent-browser session name\n  --timeout MS               Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --visits LIST              Comma-separated fixed-visit fixture sets, e.g. 32,64 (default 32)\n  --batch N                  Search leaf batch size (default 4)\n  --batch-pipeline-depths L  Comma-separated depths (default 1; depths >1 are speculative parallel-search semantics, not parity mode)\n  --repeats N                Repeats per fixture/depth (default 1)\n  --fixture-limit N          Fixtures per visit set (max currently 16, default 16)\n  --fixture-ids LIST         Comma-separated native fixture IDs to run before applying --fixture-limit\n  --trace-root-children      Include depth-baseline/root child visit/prior/q traces in the browser artifact\n  --trace-search-visits      Include per-batch selection/backup search trace in the browser artifact\n  --layers N                 Encoder layers (default 10)\n  --head-backend MODE        ort or wgsl (default ort; use wgsl to opt into experimental WGSL heads)\n  --encoder-kernel MODE      hand, mixed-tvm-ffn, mixed-tvm-ffn-outproj, tvm-packed-f16 (default hand)\n  --input-backend MODE       js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                            Legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads; opt-in)\n  --max-depth-visit-l1 N     Optional fail gate on root visit-distribution L1 vs depth=1 baseline\n  --no-server                Do not auto-start Vite\n  --allow-mismatches         Exit 0 and write/report artifacts even when parity mismatches are found\n  --dry-run                  Print URL and exit\n  -h, --help                 Show this help\n`);
+  console.log(`Usage: node scripts/lc0_browser_hybrid_search_fixture_parity.mjs [options]
+
+Runs browser/WebGPU LC0 fixed-search fixture parity for hybrid search across batch pipeline depths.
+
+Options:
+  --out PATH                 Write JSON artifact (default stdout only)
+  --base-url URL             Use an existing dev server
+  --host HOST                Vite host when auto-starting (default ${DEFAULT_HOST})
+  --port N                   Vite port when auto-starting (default ${DEFAULT_PORT})
+  --agent-browser BIN        Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)
+  --session NAME             agent-browser session name
+  --timeout MS               Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})
+  --visits LIST              Comma-separated fixed-visit fixture sets, e.g. 32,64 (default 32)
+  --preset NAME              Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)
+  --batch N                  Search leaf batch size (default 4)
+  --batch-pipeline-depths L  Comma-separated depths (default 1; depths >1 are speculative parallel-search semantics, not parity mode)
+  --repeats N                Repeats per fixture/depth (default 1)
+  --fixture-limit N          Fixtures per visit set (max currently 16, default 16)
+  --fixture-ids LIST         Comma-separated native fixture IDs to run before applying --fixture-limit
+  --trace-root-children      Include depth-baseline/root child visit/prior/q traces in the browser artifact
+  --trace-search-visits      Include per-batch selection/backup search trace in the browser artifact
+  --layers N                 Encoder layers (default 10)
+  --head-backend MODE        ort or wgsl (default ort; use wgsl to opt into experimental WGSL heads)
+  --encoder-kernel MODE      hand, mixed-tvm-ffn, mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project, tvm-packed-f16 (default hand)
+  --input-backend MODE       js, wgsl, or wasm (default js)
+  --legal-priors-backend MODE
+                            Legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads; opt-in)
+  --max-depth-visit-l1 N     Optional fail gate on root visit-distribution L1 vs depth=1 baseline
+  --no-server                Do not auto-start Vite
+  --allow-mismatches         Exit 0 and write/report artifacts even when parity mismatches are found
+  --dry-run                  Print URL and exit
+  -h, --help                 Show this help
+`);
 }
 
 function parseList(raw, mapper = Number, label = 'list') {
@@ -26,6 +59,7 @@ function parseArgs(argv) {
     agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
     session: process.env.AGENT_BROWSER_SESSION ?? `lc0-search-fixture-parity-${process.pid}`,
     visits: [32],
+    preset: '',
     batch: 4,
     batchPipelineDepths: [1],
     repeats: 1,
@@ -59,6 +93,7 @@ function parseArgs(argv) {
     else if (arg === '--session') args.session = next();
     else if (arg === '--timeout') args.timeoutMs = Number(next());
     else if (arg === '--visits') args.visits = parseList(next(), Number, 'visits');
+    else if (arg === '--preset') args.preset = next();
     else if (arg === '--batch') args.batch = Number(next());
     else if (arg === '--batch-pipeline-depths' || arg === '--pipeline-depths') args.batchPipelineDepths = parseList(next(), Number, 'batch-pipeline-depths');
     else if (arg === '--repeats') args.repeats = Number(next());
@@ -79,13 +114,14 @@ function parseArgs(argv) {
     else if (arg === '-h' || arg === '--help') args.help = true;
     else throw new Error(`Unknown option: ${arg}`);
   }
+  applyLc0RuntimePreset(args, argv);
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   if (!['ort', 'wgsl'].includes(args.headBackend)) throw new Error(`Invalid --head-backend: ${args.headBackend}`);
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
   if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid --legal-priors-backend: ${args.legalPriorsBackend}`);
   if (args.legalPriorsBackend === 'gpu' && args.headBackend !== 'wgsl') throw new Error('--legal-priors-backend gpu requires --head-backend wgsl');
-  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj'].includes(args.encoderKernel)) throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
+  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel)) throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
   for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs], ['batch', args.batch], ['repeats', args.repeats], ['fixture-limit', args.fixtureLimit], ['layers', args.layers]]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
@@ -204,7 +240,7 @@ async function runBrowserParity(args) {
         const expectedBackend = args.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
         if (result.backend !== expectedBackend) throw new Error(`unexpected backend: ${result.backend}`);
         if ((result.encoderKernelVariant ?? 'hand') !== args.encoderKernel) throw new Error(`unexpected encoder kernel: ${result.encoderKernelVariant ?? 'hand'}`);
-        return result;
+        return { ...result, scriptPreset: args.preset || null, runtimeConfiguration: lc0RuntimeConfiguration(args) };
       } catch (error) {
         if (doneSeen || Date.now() >= deadline) throw error;
       }

@@ -55,6 +55,15 @@ export interface Lc0EvaluationCacheMetrics {
   maxEntries: number;
 }
 
+export interface Lc0EvaluationCacheFootprint {
+  entries: number;
+  maxEntries: number;
+  approxBytes: number;
+  approxKeyBytes: number;
+  approxEvaluationBytes: number;
+  note: string;
+}
+
 export interface Lc0EvaluationCacheOptions {
   maxEntries?: number;
 }
@@ -170,6 +179,23 @@ function cloneEvaluation(evaluation: Lc0Evaluation): Lc0Evaluation {
   return { ...evaluation, wdl: [...evaluation.wdl] as [number, number, number], legalPriors: evaluation.legalPriors.map((prior) => ({ ...prior })) };
 }
 
+function cloneCachedEvaluation(evaluation: Lc0Evaluation): Lc0Evaluation {
+  const cloned = cloneEvaluation(evaluation);
+  delete cloned.timing;
+  return cloned;
+}
+
+function approximateCacheKeyBytes(key: string): number {
+  return key.length * 2;
+}
+
+function approximateCachedEvaluationBytes(evaluation: Lc0Evaluation): number {
+  const stringBytes = evaluation.fen.length * 2 + (evaluation.bestMove?.length ?? 0) * 2;
+  const scalarBytes = 5 * 8; // WDL[3], q, mlh as JS numbers; object overhead is excluded.
+  const legalPriorBytes = evaluation.legalPriors.reduce((sum, prior) => sum + prior.uci.length * 2 + 3 * 8, 0);
+  return stringBytes + scalarBytes + legalPriorBytes;
+}
+
 export function currentBoardAndFen(input: Lc0EvaluatorInput): { board: BoardState; fen: string } {
   if (typeof input === 'object' && input !== null && 'positions' in input) {
     if (input.positions.length === 0) throw new Error('LC0 evaluator history input requires at least one position');
@@ -229,6 +255,23 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
     return { hits: this.hits, misses: this.misses, entries: this.cache.size, maxEntries: this.maxEntries };
   }
 
+  cacheFootprint(): Lc0EvaluationCacheFootprint {
+    let approxKeyBytes = 0;
+    let approxEvaluationBytes = 0;
+    for (const [key, evaluation] of this.cache.entries()) {
+      approxKeyBytes += approximateCacheKeyBytes(key);
+      approxEvaluationBytes += approximateCachedEvaluationBytes(evaluation);
+    }
+    return {
+      entries: this.cache.size,
+      maxEntries: this.maxEntries,
+      approxBytes: approxKeyBytes + approxEvaluationBytes,
+      approxKeyBytes,
+      approxEvaluationBytes,
+      note: 'Approximate JS evaluator-cache payload bytes for keys, FENs, scalar outputs, and legal-prior entries; excludes JS object/map overhead and cached backend/runtime resources.',
+    };
+  }
+
   async evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> {
     return (await this.evaluateBatch([input]))[0];
   }
@@ -246,7 +289,7 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
         this.hits += 1;
         this.cache.delete(key);
         this.cache.set(key, cached);
-        results[i] = cloneEvaluation(cached);
+        results[i] = cloneCachedEvaluation(cached);
       } else {
         this.misses += 1;
         missInputs.push(inputs[i]);
@@ -282,7 +325,7 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
           this.hits += 1;
           this.cache.delete(key);
           this.cache.set(key, cached);
-          out[batchIndex][i] = cloneEvaluation(cached);
+          out[batchIndex][i] = cloneCachedEvaluation(cached);
         } else {
           this.misses += 1;
           missInputs.push(batches[batchIndex][i]);
@@ -318,7 +361,7 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
 
   private store(key: string, value: Lc0Evaluation): void {
     if (this.maxEntries <= 0) return;
-    this.cache.set(key, cloneEvaluation(value));
+    this.cache.set(key, cloneCachedEvaluation(value));
     this.evictIfNeeded();
   }
 
