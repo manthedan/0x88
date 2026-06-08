@@ -89,6 +89,7 @@
     "lc0:browser-wgsl-lifecycle-smoke": "node --experimental-strip-types scripts/lc0_browser_wgsl_lifecycle_smoke.mjs",
     "lc0:browser-hybrid-search-matrix": "node --experimental-strip-types scripts/lc0_browser_hybrid_search_matrix.mjs",
     "lc0:browser-hybrid-search-fixture-parity": "node --experimental-strip-types scripts/lc0_browser_hybrid_search_fixture_parity.mjs",
+    "lc0:browser-hybrid-search-fixture-b4-wgsl-smoke": "node --experimental-strip-types scripts/lc0_browser_hybrid_search_fixture_parity.mjs --port 5197 --head-backend wgsl --input-backend wasm --batch 4 --batch-pipeline-depths 1 --fixture-limit 1 --visits 32 --timeout 180000 --progress-timeout 60000",
     "lc0:browser-hybrid-encoder-profile-matrix": "node --experimental-strip-types scripts/lc0_browser_hybrid_encoder_profile_matrix.mjs",
     "lc0:browser-hybrid-search-reuse-cache-matrix": "node --experimental-strip-types scripts/lc0_browser_hybrid_search_reuse_cache_matrix.mjs",
     "lc0:browser-hybrid-move-sequence-cache-matrix": "node --experimental-strip-types scripts/lc0_browser_hybrid_move_sequence_cache_matrix.mjs",
