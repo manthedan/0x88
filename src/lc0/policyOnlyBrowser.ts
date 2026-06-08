@@ -806,6 +806,7 @@ const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === 
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
 const HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED = params.get('hybridSearchFixtureParity') === '1' || params.get('searchFixtureParity') === '1';
 const HYBRID_SEARCH_BENCH_REQUESTED = params.get('hybridSearchBench') === '1' || params.get('hybridSearchBenchmark') === '1';
+const HYBRID_MOVE_SEQUENCE_BENCH_REQUESTED = params.get('moveSequenceBench') === '1' || params.get('hybridMoveSequenceBench') === '1';
 const HYBRID_ENCODER_PROFILE_REQUESTED = params.get('hybridEncoderProfile') === '1' || params.get('encoderProfile') === '1' || params.get('hybridProfile') === '1';
 const HYBRID_INPUT_BENCH_REQUESTED = params.get('hybridInputBench') === '1' || params.get('hybridInputBenchmark') === '1' || params.get('wasmInputBench') === '1';
 const HYBRID_DEFERRED_READBACK_BENCH_REQUESTED = params.get('wgslDeferredReadbackBench') === '1' || params.get('deferredReadbackBench') === '1';
@@ -821,7 +822,7 @@ const HYBRID_LEGAL_PRIORS_BACKEND_RAW = HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'g
 const HYBRID_LEGAL_PRIORS_BACKEND = HYBRID_LEGAL_PRIORS_BACKEND_RAW === 'gpu' && !HYBRID_WGSL_HEADS_REQUESTED ? 'js' : HYBRID_LEGAL_PRIORS_BACKEND_RAW;
 const HYBRID_ENCODER_KERNEL_PARAM = params.get('encoderKernel') ?? params.get('hybridEncoderKernel') ?? params.get('encoderKernelVariant');
 const HYBRID_ENCODER_KERNEL_VARIANT = HYBRID_ENCODER_KERNEL_PARAM === 'tvm-packed-f16' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-outproj' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-smolgen-project' ? HYBRID_ENCODER_KERNEL_PARAM : 'hand';
-const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_LEGAL_PRIORS_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
+const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_MOVE_SEQUENCE_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_LEGAL_PRIORS_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
 const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
 const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
@@ -2887,6 +2888,110 @@ async function runHybridSearchBenchmark(): Promise<void> {
   }
 }
 
+async function runHybridMoveSequenceBenchmark(): Promise<void> {
+  if (!searchWorkerReady) throw new Error('hybrid move-sequence benchmark requires ready LC0 worker');
+  const plies = boundedQueryInt(['moveSequencePlies', 'sequencePlies', 'plies'], 8, 1, 200);
+  const reuseTree = queryBool(['reuseTree', 'searchReuseTree', 'treeReuse'], false);
+  const resetBetweenPlies = queryBool(['resetBetweenPlies', 'resetBetweenSearches', 'resetSearchTree'], !reuseTree);
+  const searchTimes: number[] = [];
+  const searchStatsSamples: SearchStatsSnapshot[] = [];
+  const positions = [];
+  let lastSearch: RenderableSearchResult | undefined;
+  setBusy(true, `Running LC0 move-sequence benchmark: ${plies} plies at ${searchVisits} visits…`);
+  el('benchResult').textContent = 'HYBRID_MOVE_SEQUENCE_BENCH_RUNNING';
+  try {
+    await resetSearchTreeState();
+    for (let ply = 0; ply < plies; ply++) {
+      const fen = boardToFen(board);
+      const input = currentEvaluationInput();
+      if (resetBetweenPlies) await resetSearchTreeState();
+      const started = performance.now();
+      const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
+        type: 'search',
+        input,
+        visits: searchVisits,
+        batchSize: searchBatchSize,
+        batchPipelineDepth: searchBatchPipelineDepth,
+        multiPv: searchMultiPv,
+        reuseTree,
+      });
+      const elapsedMs = performance.now() - started;
+      lastSearch = response.result;
+      searchTimes.push(elapsedMs);
+      if (lastSearch.stats) searchStatsSamples.push(lastSearch.stats);
+      const move = lastSearch.move;
+      const legal = move ? legalMoveFromUci(move) : undefined;
+      const entry = {
+        ply: ply + 1,
+        fen,
+        move,
+        legal: !!legal,
+        elapsedMs: roundReportMs(elapsedMs),
+        value: lastSearch.value === undefined ? undefined : Number(lastSearch.value.toFixed(8)),
+        pv: lastSearch.pv,
+        stats: lastSearch.stats,
+      };
+      if (!legal || !move) {
+        positions.push({ ...entry, stopped: 'no-legal-search-move' });
+        break;
+      }
+      const uci = applyMove(legal);
+      positions.push({ ...entry, move: uci, afterFen: boardToFen(board) });
+      renderStatic();
+      el('benchResult').textContent = `HYBRID_MOVE_SEQUENCE_BENCH_PLY ${ply + 1}/${plies}`;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    const totalSearchMs = searchTimes.reduce((sum, value) => sum + value, 0);
+    const aggregateStats = aggregateSearchStats(searchStatsSamples);
+    const result = {
+      status: 'HYBRID_MOVE_SEQUENCE_BENCH_DONE',
+      backend: searchWorkerBackend,
+      packUrl: PACK_URL,
+      model: MODEL_URL,
+      layers: boundedQueryInt(['encoderLayers', 'layers'], 10, 1, 32),
+      browserInfo: browserReportInfo(),
+      workerInitMs: roundReportMs(searchWorkerInitMs),
+      requestedEp: requestedWorkerEp(),
+      packVerification: params.get('packVerify') === '0' ? 'disabled' : 'enabled',
+      visits: searchVisits,
+      requestedPlies: plies,
+      completedPlies: positions.filter((position) => position.legal).length,
+      batchSize: searchBatchSize,
+      batchPipelineDepth: searchBatchPipelineDepth,
+      wgslBatchMode: HYBRID_WGSL_HEADS_REQUESTED ? HYBRID_WGSL_BATCH_MODE : undefined,
+      inputBackend: HYBRID_INPUT_BACKEND,
+      legalPriorsBackend: HYBRID_LEGAL_PRIORS_BACKEND,
+      encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
+      multiPv: searchMultiPv,
+      reuseTree,
+      resetBetweenPlies,
+      evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
+      executionFootprint: lastSearch?.executionFootprint,
+      executionFootprintMB: executionFootprintMB(lastSearch?.executionFootprint),
+      cacheFootprint: lastSearch?.cacheFootprint,
+      cacheFootprintKB: cacheFootprintKB(lastSearch?.cacheFootprint),
+      search: {
+        timingStats: sampleTimingStats(searchTimes, 'hybrid move-sequence search round trips'),
+        timesMs: searchTimes.map((time) => roundReportMs(time)),
+        requestedVisitsPerSecond: Number(((searchVisits * searchTimes.length) / Math.max(1e-9, totalSearchMs / 1000)).toFixed(3)),
+        completedVisitsPerSecond: Number((aggregateStats.completedVisits / Math.max(1e-9, totalSearchMs / 1000)).toFixed(3)),
+        aggregateStats,
+        statsSamples: searchStatsSamples,
+      },
+      positions,
+      finalFen: boardToFen(board),
+    };
+    el('benchResult').textContent = JSON.stringify(result);
+    el('message').textContent = `HYBRID_MOVE_SEQUENCE_BENCH_DONE plies ${result.completedPlies}/${plies} · ${result.search.completedVisitsPerSecond.toFixed(1)} completed visits/s · ${searchWorkerBackend}`;
+  } catch (error) {
+    el('benchResult').textContent = `HYBRID_MOVE_SEQUENCE_BENCH_FAILED ${(error as Error).message}`;
+    el('message').textContent = `Hybrid move-sequence benchmark failed: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+
 type HybridInputBenchFixture = { id: string; kind: 'fen' | 'history'; input: Lc0EvaluatorInput };
 
 async function loadRepresentativeInputFixtures(): Promise<HybridInputBenchFixture[]> {
@@ -3937,6 +4042,10 @@ async function init() {
     }
     if (HYBRID_SEARCH_BENCH_REQUESTED) {
       await runHybridSearchBenchmark();
+      return;
+    }
+    if (HYBRID_MOVE_SEQUENCE_BENCH_REQUESTED) {
+      await runHybridMoveSequenceBenchmark();
       return;
     }
     if (HYBRID_INPUT_BENCH_REQUESTED) {
