@@ -169,7 +169,7 @@ function isActionableConsoleEntry(entry) {
 
 async function consoleErrors(args, session) {
   try {
-    const payload = await runAgent(args, ['console', '--errors'], 10_000, session);
+    const payload = await runAgent(args, ['errors'], 10_000, session);
     return normalizeConsoleEntries(payload).filter(isActionableConsoleEntry);
   } catch (error) {
     return [{ error: `console inspection failed: ${error.message ?? error}` }];
@@ -192,6 +192,10 @@ async function runSmoke(args) {
         hasProfileName: !!document.querySelector('#engineProfileName'),
         hasSaveProfile: !!document.querySelector('#saveEngineProfile'),
         hasDeleteProfile: !!document.querySelector('#deleteEngineProfile'),
+        hasExportProfiles: !!document.querySelector('#exportEngineProfiles'),
+        hasImportProfiles: !!document.querySelector('#importEngineProfiles'),
+        hasProfileSummary: !!document.querySelector('#engineProfileSummary'),
+        profileOptionValues: [...document.querySelectorAll('#engineProfileSelect option')].map((option) => option.value),
         hasPgnDbSelect: !!document.querySelector('#pgnDbSelect'),
         hasPgnDbName: !!document.querySelector('#pgnDbName'),
         hasSavePgnDb: !!document.querySelector('#savePgnDb'),
@@ -206,7 +210,8 @@ async function runSmoke(args) {
     })()`, (value) => {
       if (!value || typeof value !== 'object') return false;
       if (!REQUIRED_FAMILIES.every((family) => value.families?.includes(family))) return false;
-      if (!value.hasProfileSelect || !value.hasProfileName || !value.hasSaveProfile || !value.hasDeleteProfile) return false;
+      if (!value.hasProfileSelect || !value.hasProfileName || !value.hasSaveProfile || !value.hasDeleteProfile || !value.hasExportProfiles || !value.hasImportProfiles || !value.hasProfileSummary) return false;
+      if (!['builtin:lc0-stockfish', 'builtin:browser-native-survey', 'builtin:lc0-wgsl-heads'].every((option) => value.profileOptionValues?.includes(option))) return false;
       if (!value.hasPgnDbSelect || !value.hasPgnDbName || !value.hasSavePgnDb || !value.hasLoadPgnDb || !value.hasSearchPgnDbPosition || !value.hasPgnDbList || !value.hasPgnDbSearchResults) return false;
       if (!value.hasEngineCompare) return false;
       if (value.runtimeText === 'Reckless: detecting runtime…') return false;
