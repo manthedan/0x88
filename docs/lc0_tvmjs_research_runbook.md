@@ -298,6 +298,27 @@ Startup/footprint sample from `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_
 - WebGPU pipeline prebuild: `101.635 ms`.
 - VM creation: `27.78 ms`.
 
+Startup/amortization sidecar:
+
+```bash
+npm run lc0:tvmjs-startup-amortization -- \
+  --in artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n1_r1_hybrid_alloc.json \
+  --out artifacts/tvm/lc0_tvmjs_startup_amortization_uho_b8_hb4_v16_n1_r1.json
+```
+
+Current one-row sidecar findings:
+
+- TVMJS known cold-start phase sum: `434.615 ms`; TVMJS search mean: `78.205 ms`; one-row amortized mean: `512.82 ms`.
+- ORT f16 search mean in the same smoke comparison: `89.905 ms`; ORT session/device startup is not separated in this matrix artifact.
+- Hybrid worker init: `68.16 ms`; hybrid search mean: `404.665 ms`; one-row amortized mean: `472.825 ms`.
+- Caveat: this sidecar sums observed phase timings for research triage; it is not proof of a strictly serialized critical path or a production startup SLA.
+
+Strict same-FEN visit sweep samples now cover visits `16`, `32`, and `64`:
+
+- `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n1_r1_hybrid_alloc.json`: rows `1`, TVMJS-vs-hybrid `1/1`, TVMJS mean `78.205 ms`, hybrid mean `404.665 ms`.
+- `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v32_n2_r1.json`: rows `2`, TVMJS-vs-hybrid `2/2`, TVMJS mean `97.54 ms`, hybrid mean `299.795 ms`.
+- `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v64_n2_r1.json`: rows `2`, TVMJS-vs-hybrid `2/2`, TVMJS mean `180.55 ms`, hybrid mean `457.143 ms`.
+
 ## GPU allocation instrumentation status
 
 Current prototypes:
@@ -357,6 +378,23 @@ Current default-family footprint sidecar summary:
 - gzip level-9 bytes: `113,885,414` (`0.8172` ratio).
 - Brotli quality-11 bytes: `107,101,046` (`0.7685` ratio).
 - Caveat: these are Node zlib estimates and do not prove deployed `Content-Encoding` behavior.
+
+Local static `Content-Encoding` smoke:
+
+```bash
+npm run lc0:tvmjs-static-content-encoding-smoke -- \
+  --file public/runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/tvmjs_runtime.wasm \
+  --out artifacts/tvm/lc0_tvmjs_static_content_encoding_smoke_runtime_wasm.json
+```
+
+Current local static smoke summary:
+
+- Artifact: `artifacts/tvm/lc0_tvmjs_static_content_encoding_smoke_runtime_wasm.json`.
+- Status: `ok: true`.
+- For `Accept-Encoding: br, gzip`, response header `Content-Encoding: br`, `Content-Type: application/wasm`, bytes `673,133`.
+- For `Accept-Encoding: gzip`, response header `Content-Encoding: gzip`, `Content-Type: application/wasm`, bytes `1,200,884`.
+- For `Accept-Encoding: identity`, no `Content-Encoding`, raw bytes `5,354,374`.
+- Caveat: this proves the local static-serving semantics for temporary sidecars only. Production still depends on host/CDN metadata and rewrites for the exact published path.
 
 ## Recipes for additional net families
 
