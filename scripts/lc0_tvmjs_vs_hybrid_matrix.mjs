@@ -175,6 +175,7 @@ function summarizeTvmjs(artifact) {
 
 function summarizeHybrid(artifact) {
   const rows = artifact?.results ?? [];
+  const gpuBufferAllocation = artifact?.gpuBufferAllocation ?? rows.at(-1)?.gpuBufferAllocation;
   return {
     ok: artifact?.status === 'HYBRID_SEARCH_FIXTURE_PARITY_DONE',
     backend: artifact?.backend,
@@ -182,9 +183,11 @@ function summarizeHybrid(artifact) {
     inputBackend: artifact?.inputBackend,
     encoderKernelVariant: artifact?.encoderKernelVariant,
     legalPriorsBackend: artifact?.legalPriorsBackend,
+    workerInitMs: artifact?.workerInitMs,
     cells: artifact?.cells,
     nativeMatches: artifact?.nativeMatches,
     depthBaselineMatches: artifact?.depthBaselineMatches,
+    gpuBufferAllocation,
     searchMeanElapsedMs: mean(rows.map((row) => row.elapsedMs)),
     backendSearchMeanElapsedMs: mean(rows.map((row) => row.searchElapsedMs)),
     totalEvalMsPerPosition: mean(rows.map((row) => row.totalEvalMsPerPosition)),

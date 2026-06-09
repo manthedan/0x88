@@ -23,7 +23,7 @@ It is **not promotion-ready** yet because the evidence is still smoke-derived an
 | ORT f16 comparison | Smoke/search rows currently match ORT f16 WebGPU in local evidence. | Promising, but still smoke-derived. |
 | Hybrid comparison | Same-server and strict same-FEN TVMJS-vs-hybrid matrix exists. | First direct evidence exists; expand beyond n=2 smoke rows. |
 | Startup timing | TVMJS smoke records bundle load, wasm fetch/verify, instantiate, WebGPU device, pipeline prebuild, VM creation, and input upload. | Good enough for first amortization analysis. |
-| GPU footprint | TVMJS smoke monkeypatches `GPUDevice.createBuffer` and reports allocation counts/bytes/categories. | Prototype only; compare against hybrid/ORT with same instrumentation next. |
+| GPU footprint | TVMJS smoke and hybrid policy-only worker now both report `GPUDevice.createBuffer` allocation-request counts/bytes; ORT has opt-in prototype-level WebGPU API diagnostics for `createBuffer` during ORT evals. | Useful for relative startup/run allocation telemetry, but still not live GPU residency or a promotion-grade memory budget. |
 | Fixed-suite evidence | Existing reports are fixed-suite-style but smoke-harness based. | Still blocked from promotion. |
 | Artifact release | Generated TVMJS wasm/runtime artifacts remain ignored/local. | Publication/hosting/cache policy required. |
 
@@ -32,7 +32,7 @@ It is **not promotion-ready** yet because the evidence is still smoke-derived an
 - Expand direct same-session full-model TVMJS vs custom hybrid TVM/WGSL comparison beyond smoke-sized rows.
 - Production-style fixed-suite integration, not only `lc0-tvmjs-webgpu-smoke.html`.
 - Repeated throughput and startup/pipeline compile amortization evidence.
-- Cross-runtime GPU allocation/footprint instrumentation, including hybrid and ORT where possible.
+- Broader cross-runtime GPU allocation/footprint instrumentation and interpretation, including ORT WebGPU API diagnostics limits.
 - Release/hosting/cache policy for generated model/runtime wasm artifacts.
 - f16 drift/tolerance policy against native/ORT baselines.
 
@@ -298,30 +298,47 @@ Startup/footprint sample from `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_
 - WebGPU pipeline prebuild: `101.635 ms`.
 - VM creation: `27.78 ms`.
 
-## GPU allocation instrumentation plan
+## GPU allocation instrumentation status
 
-Current prototype:
+Current prototypes:
 
-- `lc0-tvmjs-webgpu-smoke.html` wraps the acquired TVMJS `GPUDevice.createBuffer` before TVM initialization and model execution.
-- The result reports total allocation calls/bytes and categories decoded from `GPUBufferUsage` flags.
-- This captures buffers created through that JS device object after patch installation.
+- `lc0-tvmjs-webgpu-smoke.html` wraps the acquired TVMJS `GPUDevice.createBuffer` before TVM initialization and model execution. Results report total allocation calls/bytes, max buffer size, mapped-at-creation count, and categories decoded from `GPUBufferUsage` flags.
+- The hybrid policy-only worker now installs a worker-side `navigator.gpu.requestAdapter`/`requestDevice`/`GPUDevice.createBuffer` patch before initializing the custom WGSL evaluator. Hybrid search fixture artifacts include `gpuBufferAllocation` on each row and at the aggregate top level.
+- `scripts/lc0_tvmjs_vs_hybrid_matrix.mjs` forwards the latest hybrid allocation snapshot into `summary.hybrid.gpuBufferAllocation`, next to `summary.tvmjs.gpuBufferAllocation`, for strict same-FEN comparisons.
+- ORT already has opt-in WebGPU API instrumentation in `src/nn/ortRuntime.ts` when ORT diagnostics/API tracing are requested; `src/lc0/onnxEvaluator.ts` records per-eval deltas such as `webgpuCreateBufferCount` and `webgpuCreateBufferBytes`. This is patchable only when browser WebGPU prototypes are visible before ORT creates/uses the device.
+
+Sample strict same-FEN allocation artifact:
+
+```bash
+npm run lc0:tvmjs-vs-hybrid-matrix -- \
+  --batch 8 \
+  --hybrid-batch 4 \
+  --fixtures 1 \
+  --visits 16 \
+  --repeats 1 \
+  --fens ../leelaweb-arena-diagnostics/eval/opening_suite_uho_lite_v1.fen \
+  --out artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n1_r1_hybrid_alloc.json
+```
+
+Observed in that one-row telemetry artifact:
+
+- TVMJS: `538` buffer creation requests, `45,201,396` requested bytes, max buffer `2,097,152` bytes.
+- Hybrid worker: `548` buffer creation requests, `56,901,112` requested bytes, max buffer `2,097,152` bytes.
+- Startup/init fields now appear side by side in the matrix summary: TVMJS startup timings include wasm fetch/verify `153.01 ms`, instantiate `43.01 ms`, pipeline prebuild `122.03 ms`, VM creation `25.55 ms`; hybrid reports worker init `68.16 ms` for the same run.
+- Head-to-head row: TVMJS and hybrid both chose `c6c5`; TVMJS search `78.20 ms`, hybrid search `404.67 ms`.
 
 Known limitations:
 
 - It is allocation-request telemetry, not a definitive GPU memory residency measurement.
-- It does not observe allocations hidden behind a different device object.
-- It does not decrement on destruction; use it for startup footprint comparison, not live-memory accounting.
-
-Hybrid/ORT follow-up rationale:
-
-- Hybrid allocation telemetry should be added as a dedicated follow-up because the hybrid runtime is initialized through the policy-only worker/device path, not the TVMJS smoke page's single acquired device. A safe patch needs to instrument the worker-side device creation path used by `lc0-policy-only.html` and ensure it does not perturb existing WGSL/ORT probes.
-- ORT WebGPU allocation telemetry may not be directly observable unless the ORT EP uses a patchable JS `GPUDevice`; if not, record ORT footprint as indirect/unknown and rely on network/model footprint plus timing.
+- It does not observe allocations hidden behind an unpatched device/prototype or native browser internals.
+- It does not decrement on destruction; use it for startup/run footprint comparison, not live-memory accounting.
+- ORT WebGPU telemetry should be treated as direct only when the diagnostic summary reports the API patch installed and nonzero per-eval deltas; otherwise record ORT allocation footprint as indirect/unknown and rely on model/network footprint plus timing.
 
 Next footprint work:
 
-1. Install the same `createBuffer` probe in the hybrid policy-only worker/device path and arena fixed-suite page.
-2. Add a wrapper summary comparing TVMJS vs hybrid buffer counts/bytes on strict same-FEN rows.
-3. Investigate whether ORT WebGPU exposes enough surface to patch the device it uses; otherwise record ORT as unknown/indirect.
+1. Run the TVMJS-vs-hybrid allocation matrix across larger UHO-lite visit/repeat rows.
+2. Add an ORT-focused fixed-suite/readback diagnostic artifact that asserts whether `webgpuCreateBufferCount`/bytes are observable in the target browser.
+3. Add release-host smoke or static-serving check for gzip/Brotli `Content-Encoding` behavior before publication.
 4. Expand artifact/network footprint sidecars across future model families and release candidates.
 
 Current bundle-footprint sidecar:

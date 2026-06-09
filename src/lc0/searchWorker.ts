@@ -408,12 +408,23 @@ type CancelMessage = {
 
 type WorkerRequest = InitMessage | SearchMessage | ResetSearchMessage | EvaluateMessage | EvaluateBatchMessage | HybridEvaluateMessage | HybridEncoderProfileMessage | WgslDeferredReadbackBenchmarkMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | WgslHeadsProbeMessage | WgslHeadsVsOrtFixturesMessage | MappedPolicyProbeMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SmolgenBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionValueOrtBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | AttentionOutputOrtBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0FfnOrtBenchmarkMessage | Encoder0BlockBenchmarkMessage | EncoderStackBenchmarkMessage | Encoder0BlockOrtBenchmarkMessage | CancelMessage;
 
+type WebGpuBufferAllocationTelemetry = {
+  installed: boolean;
+  createBufferCount: number;
+  createBufferBytes: number;
+  maxBufferBytes: number;
+  failures: number;
+  byUsage: Record<string, { count: number; bytes: number }>;
+  note: string;
+};
+
 type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   stats?: Lc0SearchResult['search']['stats'];
   elapsedMs: number;
   cancelled?: boolean;
   executionFootprint?: Lc0WebExecutionFootprint;
   cacheFootprint?: Lc0EvaluationCacheFootprint;
+  gpuBufferAllocation?: WebGpuBufferAllocationTelemetry;
 };
 
 type PackFootprint = {
@@ -483,6 +494,88 @@ type WorkerEvaluator = Lc0EvaluationProvider & {
   executionFootprint?(): Lc0WebExecutionFootprint | undefined;
   cacheFootprint?(): Lc0EvaluationCacheFootprint | undefined;
 };
+
+const webGpuBufferAllocationTelemetry: WebGpuBufferAllocationTelemetry = {
+  installed: false,
+  createBufferCount: 0,
+  createBufferBytes: 0,
+  maxBufferBytes: 0,
+  failures: 0,
+  byUsage: {},
+  note: 'GPUDevice.createBuffer request telemetry only; counts allocation requests visible to this worker monkeypatch, not live GPU residency.',
+};
+const patchedAdapters = new WeakSet<object>();
+const patchedDevices = new WeakSet<object>();
+
+function recordWebGpuBufferAllocation(descriptor: unknown): void {
+  const maybeDescriptor = descriptor as { size?: unknown; usage?: unknown } | undefined;
+  const size = typeof maybeDescriptor?.size === 'bigint'
+    ? Number(maybeDescriptor.size)
+    : Number(maybeDescriptor?.size ?? 0);
+  const bytes = Number.isFinite(size) && size > 0 ? Math.floor(size) : 0;
+  const usage = String(maybeDescriptor?.usage ?? 'unknown');
+  webGpuBufferAllocationTelemetry.createBufferCount += 1;
+  webGpuBufferAllocationTelemetry.createBufferBytes += bytes;
+  webGpuBufferAllocationTelemetry.maxBufferBytes = Math.max(webGpuBufferAllocationTelemetry.maxBufferBytes, bytes);
+  const bucket = webGpuBufferAllocationTelemetry.byUsage[usage] ?? { count: 0, bytes: 0 };
+  bucket.count += 1;
+  bucket.bytes += bytes;
+  webGpuBufferAllocationTelemetry.byUsage[usage] = bucket;
+}
+
+function patchWebGpuDevice(device: unknown): void {
+  if (!device || (typeof device !== 'object' && typeof device !== 'function')) return;
+  const target = device as { createBuffer?: (...args: unknown[]) => unknown };
+  if (patchedDevices.has(target) || typeof target.createBuffer !== 'function') return;
+  const originalCreateBuffer = target.createBuffer;
+  patchedDevices.add(target);
+  target.createBuffer = function patchedCreateBuffer(this: unknown, descriptor: unknown, ...rest: unknown[]) {
+    try {
+      recordWebGpuBufferAllocation(descriptor);
+    } catch {
+      webGpuBufferAllocationTelemetry.failures += 1;
+    }
+    return originalCreateBuffer.call(this, descriptor, ...rest);
+  };
+}
+
+function patchWebGpuAdapter(adapter: unknown): void {
+  if (!adapter || (typeof adapter !== 'object' && typeof adapter !== 'function')) return;
+  const target = adapter as { requestDevice?: (...args: unknown[]) => Promise<unknown> };
+  if (patchedAdapters.has(target) || typeof target.requestDevice !== 'function') return;
+  const originalRequestDevice = target.requestDevice;
+  patchedAdapters.add(target);
+  target.requestDevice = async function patchedRequestDevice(this: unknown, ...args: unknown[]) {
+    const device = await originalRequestDevice.apply(this, args);
+    patchWebGpuDevice(device);
+    return device;
+  };
+}
+
+function installWebGpuBufferAllocationProbe(): void {
+  try {
+    const gpu = (globalThis.navigator as { gpu?: { requestAdapter?: (...args: unknown[]) => Promise<unknown> } } | undefined)?.gpu;
+    if (!gpu || typeof gpu.requestAdapter !== 'function') return;
+    const originalRequestAdapter = gpu.requestAdapter;
+    gpu.requestAdapter = async function patchedRequestAdapter(this: unknown, ...args: unknown[]) {
+      const adapter = await originalRequestAdapter.apply(this, args);
+      patchWebGpuAdapter(adapter);
+      return adapter;
+    };
+    webGpuBufferAllocationTelemetry.installed = true;
+  } catch {
+    webGpuBufferAllocationTelemetry.failures += 1;
+  }
+}
+
+function currentWebGpuBufferAllocationTelemetry(): WebGpuBufferAllocationTelemetry {
+  return {
+    ...webGpuBufferAllocationTelemetry,
+    byUsage: Object.fromEntries(Object.entries(webGpuBufferAllocationTelemetry.byUsage).map(([usage, stats]) => [usage, { ...stats }])),
+  };
+}
+
+installWebGpuBufferAllocationProbe();
 
 let evaluator: WorkerEvaluator | null = null;
 let searcher: Lc0PuctSearcher | null = null;
@@ -971,6 +1064,7 @@ async function handleSearch(message: SearchMessage): Promise<void> {
         cancelled: controller.signal.aborted,
         executionFootprint: currentExecutionFootprint(),
         cacheFootprint: currentCacheFootprint(),
+        gpuBufferAllocation: currentWebGpuBufferAllocationTelemetry(),
       },
     });
   } catch (error) {

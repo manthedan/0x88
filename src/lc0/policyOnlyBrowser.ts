@@ -43,7 +43,17 @@ type CacheFootprint = {
   note: string;
 };
 
-type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; pv?: string[]; multiPv?: string[][]; elapsedMs?: number; cancelled?: boolean; stats?: Lc0SearchResult['search']['stats']; executionFootprint?: ExecutionFootprint; cacheFootprint?: CacheFootprint };
+type WebGpuBufferAllocationTelemetry = {
+  installed: boolean;
+  createBufferCount: number;
+  createBufferBytes: number;
+  maxBufferBytes: number;
+  failures: number;
+  byUsage: Record<string, { count: number; bytes: number }>;
+  note: string;
+};
+
+type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; pv?: string[]; multiPv?: string[][]; elapsedMs?: number; cancelled?: boolean; stats?: Lc0SearchResult['search']['stats']; executionFootprint?: ExecutionFootprint; cacheFootprint?: CacheFootprint; gpuBufferAllocation?: WebGpuBufferAllocationTelemetry };
 type PackFootprint = {
   declaredTensorBytes: number;
   loadedTensorBytes: number;
@@ -3338,6 +3348,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
               legalPriorsWasmTotalMs: result.stats?.evalBackendTimingMeans?.legalPriorsWasmTotalMs,
               readbackSyncedMs: result.stats?.evalBackendTimingMeans?.readbackSyncedMs,
               readbackSyncedMsPerPosition: result.stats?.evalBackendTimingPerPositionMeans?.readbackSyncedMs,
+              gpuBufferAllocation: result.gpuBufferAllocation,
             });
             el('benchResult').textContent = `HYBRID_SEARCH_FIXTURE_PARITY ${cells.length}/${visitsList.length * records.length * depths.length * repeats}`;
             await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -3353,6 +3364,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
       inputBackend: HYBRID_INPUT_BACKEND,
       legalPriorsBackend: HYBRID_LEGAL_PRIORS_BACKEND,
       encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
+      workerInitMs: roundReportMs(searchWorkerInitMs),
       visitsList,
       batchSize,
       batchPipelineDepths: depths,
@@ -3368,6 +3380,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
       nativeMatches: cells.filter((cell) => cell.matchesNative).length,
       depthBaselineMatches: cells.filter((cell) => cell.matchesDepthBaseline).length,
       maxDepthBaselineVisitL1: Math.max(0, ...cells.map((cell) => typeof cell.depthBaselineVisitL1 === 'number' ? cell.depthBaselineVisitL1 : 0)),
+      gpuBufferAllocation: cells.at(-1)?.gpuBufferAllocation,
       mismatches,
       results: cells,
     };
