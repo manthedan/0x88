@@ -1,0 +1,166 @@
+{
+  "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
+  "generatedAt": "2026-06-09T08:41:01.404Z",
+  "distributionPolicy": "docs/engine_artifact_distribution.md",
+  "engine": "stockfish",
+  "flavor": "stockfish-js-18.0.7",
+  "status": "release",
+  "upstream": {
+    "repo": "https://github.com/nmrugg/stockfish.js.git",
+    "commit": "32d4b5ae40c01db88219bfbe2b82dbe6dec93832",
+    "version": "18.0.7",
+    "license": "GPL-3.0"
+  },
+  "build": {
+    "script": "upstream build.js",
+    "command": "cd upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832 && npm install && node build.js --all -f",
+    "patches": [],
+    "toolchain": "Emscripten 3.1.7 as required by Stockfish.js 18 upstream README; Node/npm to install the upstream build dependencies."
+  },
+  "artifacts": [
+    {
+      "path": "public/stockfish/stockfish-18-lite-single.js",
+      "bytes": 20670,
+      "sha256": "2278005057f381491f1c9bb3e44c9f5920b3a00bef9759e33cc6582769a1f1fe",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 7911,
+          "ratio": 0.3827
+        },
+        "brotli": {
+          "bytes": 7107,
+          "ratio": 0.3438
+        }
+      }
+    },
+    {
+      "path": "public/stockfish/stockfish-18-lite-single.wasm",
+      "bytes": 7295411,
+      "sha256": "a8fbc05ec6920b56d7485826dcb02c5ffd2826bcbf751cf973046f237a9096f1",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 5614117,
+          "ratio": 0.7695
+        },
+        "brotli": {
+          "bytes": 5330012,
+          "ratio": 0.7306
+        }
+      }
+    },
+    {
+      "path": "public/stockfish/stockfish-18-lite.js",
+      "bytes": 32109,
+      "sha256": "f79e667c9d56ee768aca35e8343f91548ceef6a732f67cd82f267cf9eab7f665",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 11774,
+          "ratio": 0.3667
+        },
+        "brotli": {
+          "bytes": 10527,
+          "ratio": 0.3279
+        }
+      }
+    },
+    {
+      "path": "public/stockfish/stockfish-18-lite.wasm",
+      "bytes": 7093151,
+      "sha256": "d50136919dcd90e75eb8df78b255d47d618962b670028b38961343f6eb409174",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 5561790,
+          "ratio": 0.7841
+        },
+        "brotli": {
+          "bytes": 5284417,
+          "ratio": 0.745
+        }
+      }
+    },
+    {
+      "path": "public/stockfish/stockfish-18-single.js",
+      "bytes": 20569,
+      "sha256": "0c745dded6825d54a925095aa2698b38d95895b02e4c3560e9dc4e2af36163af",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 7852,
+          "ratio": 0.3817
+        },
+        "brotli": {
+          "bytes": 7048,
+          "ratio": 0.3427
+        }
+      }
+    },
+    {
+      "path": "public/stockfish/stockfish-18-single.wasm",
+      "bytes": 112992459,
+      "sha256": "f611ac05ddb248fe975a4f180ac9fec7f7fb650f8f17f5fe4230fcc0fe6419c7",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 75394475,
+          "ratio": 0.6673
+        },
+        "brotli": {
+          "bytes": 71724186,
+          "ratio": 0.6348
+        }
+      }
+    },
+    {
+      "path": "public/stockfish/stockfish-18.js",
+      "bytes": 32010,
+      "sha256": "8bce234759d32fa02b27cfca7e58c3816c9729733910c304df057a169fb755e1",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 11715,
+          "ratio": 0.366
+        },
+        "brotli": {
+          "bytes": 10533,
+          "ratio": 0.3291
+        }
+      }
+    },
+    {
+      "path": "public/stockfish/stockfish-18.wasm",
+      "bytes": 113007340,
+      "sha256": "8bef136a3d7a428b5cbc624459a2091fd3e750c22a48dad9ad3b292ac80373cb",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 74661029,
+          "ratio": 0.6607
+        },
+        "brotli": {
+          "bytes": 71179788,
+          "ratio": 0.6299
+        }
+      }
+    }
+  ],
+  "assets": [],
+  "totals": {
+    "bytes": 240493719,
+    "gzipBytes": 161270663,
+    "brotliBytes": 153553618,
+    "gzipRatio": 0.6706,
+    "brotliRatio": 0.6385
+  },
+  "sourceArchive": {
+    "required": true,
+    "path": "public/stockfish/stockfish-18.0.7-corresponding-source.tar.gz",
+    "bytes": 659584,
+    "sha256": "e9dfe7ece529344a73f079dc4e9aa4b8481e364bc5c81dbb53db1c121b084bbb",
+    "url": "/stockfish/stockfish-18.0.7-corresponding-source.tar.gz",
+    "note": "Source archive recorded for public distribution."
+  }
+}

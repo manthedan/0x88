@@ -1,4 +1,6 @@
 public/plentychess/*corresponding-source*.tar.gz filter=lfs diff=lfs merge=lfs -text
+public/viridithas/*corresponding-source*.tar.gz filter=lfs diff=lfs merge=lfs -text
+public/stockfish/*corresponding-source*.tar.gz filter=lfs diff=lfs merge=lfs -text
 public/viridithas/*.wasm filter=lfs diff=lfs merge=lfs -text
 public/runtimes/squareformer-tvm-hybrid/** filter=lfs diff=lfs merge=lfs -text
 public/berserk/*.data filter=lfs diff=lfs merge=lfs -text

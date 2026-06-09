@@ -71,10 +71,67 @@ const CONFIGS = {
       },
     ],
   },
+  viridithas: {
+    engine: 'viridithas',
+    flavor: 'wasip1-scalar-simd128',
+    status: 'experimental',
+    upstream: {
+      repo: 'https://github.com/cosmobobak/viridithas.git',
+      commit: '20d7402065cae084715183e019fdd18089e2dfac',
+      license: 'MIT',
+    },
+    build: {
+      script: 'scripts/build_viridithas_wasi.mjs',
+      command: 'npm run viridithas:build-wasi && npm run viridithas:build-simd-wasi',
+      patches: ['patches/viridithas-wasip1.patch'],
+      toolchain: 'Rust cargo with wasm32-wasip1 target; scalar build uses +bulk-memory, SIMD build also uses +simd128.',
+    },
+    artifacts: [
+      'public/viridithas/viridithas.wasm',
+      'public/viridithas/viridithas-simd128.wasm',
+    ],
+    assets: [
+      {
+        name: 'atlantis-b800.nnue.zst',
+        sourceUrl: 'https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst',
+        rawSha256: '2d387407b926df4dbda441cdc3e2288fee2e6a2afa8e1bd22262309ec0fb668a',
+        licenseNote: 'Viridithas network required by the WASI build; preserve upstream notices with the MIT engine source and network provider provenance.',
+        embeddedIn: 'public/viridithas/viridithas.wasm and public/viridithas/viridithas-simd128.wasm',
+      },
+    ],
+  },
+  stockfish: {
+    engine: 'stockfish',
+    flavor: 'stockfish-js-18.0.7',
+    status: 'release',
+    upstream: {
+      repo: 'https://github.com/nmrugg/stockfish.js.git',
+      commit: '32d4b5ae40c01db88219bfbe2b82dbe6dec93832',
+      version: '18.0.7',
+      license: 'GPL-3.0',
+    },
+    build: {
+      script: 'upstream build.js',
+      command: 'cd upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832 && npm install && node build.js --all -f',
+      patches: [],
+      toolchain: 'Emscripten 3.1.7 as required by Stockfish.js 18 upstream README; Node/npm to install the upstream build dependencies.',
+    },
+    artifacts: [
+      'public/stockfish/stockfish-18-lite-single.js',
+      'public/stockfish/stockfish-18-lite-single.wasm',
+      'public/stockfish/stockfish-18-lite.js',
+      'public/stockfish/stockfish-18-lite.wasm',
+      'public/stockfish/stockfish-18-single.js',
+      'public/stockfish/stockfish-18-single.wasm',
+      'public/stockfish/stockfish-18.js',
+      'public/stockfish/stockfish-18.wasm',
+    ],
+    assets: [],
+  },
 };
 
 function usage() {
-  console.error('Usage: node scripts/write_engine_artifact_manifest.mjs <berserk|plentychess> [--out path] [--allow-missing]');
+  console.error('Usage: node scripts/write_engine_artifact_manifest.mjs <berserk|plentychess|viridithas|stockfish> [--out path] [--allow-missing]');
 }
 
 function argValue(name) {
@@ -82,9 +139,10 @@ function argValue(name) {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
-function toolchainSummary() {
+function toolchainSummary(config) {
   const explicit = argValue('--toolchain') ?? process.env.ENGINE_ARTIFACT_TOOLCHAIN;
   if (explicit) return explicit;
+  if (config.build.toolchain) return config.build.toolchain;
   const emcc = spawnSync('emcc', ['--version'], { encoding: 'utf8' });
   if (emcc.status === 0) return emcc.stdout.split('\n')[0]?.trim() || 'emcc available';
   return 'emcc not found on PATH while writing manifest; pass --toolchain or ENGINE_ARTIFACT_TOOLCHAIN for release manifests';
@@ -151,7 +209,7 @@ if (!config) {
     generatedAt: new Date().toISOString(),
     distributionPolicy: 'docs/engine_artifact_distribution.md',
     ...config,
-    build: { ...config.build, toolchain: toolchainSummary() },
+    build: { ...config.build, toolchain: toolchainSummary(config) },
     artifacts,
     totals: {
       bytes: totalBytes,

@@ -77,10 +77,59 @@ const CONFIGS = {
     ],
     envPrefix: 'PLENTYCHESS',
   },
+  viridithas: {
+    engine: 'viridithas',
+    flavor: 'wasip1-scalar-simd128',
+    upstreamRepo: 'https://github.com/cosmobobak/viridithas.git',
+    upstreamCommit: '20d7402065cae084715183e019fdd18089e2dfac',
+    buildDir: '.local_engines/viridithas-wasi-src',
+    sourcePrefix: 'upstream/viridithas-20d7402065cae084715183e019fdd18089e2dfac/',
+    output: 'public/viridithas/viridithas-wasip1-corresponding-source.tar.gz',
+    patch: 'patches/viridithas-wasip1.patch',
+    buildScript: 'scripts/build_viridithas_wasi.mjs',
+    smokeScript: 'scripts/viridithas_wasi_smoke.mjs',
+    adapterFiles: [
+      'src/lc0/viridithasEngine.ts',
+      'src/lc0/viridithasVariants.ts',
+      'src/lc0/stockfishEngine.ts',
+      'src/chess/board.ts',
+    ],
+    docs: ['docs/engine_artifact_distribution.md', 'docs/browser_c_engine_porting.md', 'docs/engine_catalog.md', 'docs/netlify_engine_artifacts.md', 'public/viridithas/README.md'],
+    assetDir: '.local_engines/viridithas-nets',
+    assets: [
+      {
+        name: 'atlantis-b800.nnue.zst',
+        sourceUrl: 'https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst',
+        rawSha256: '2d387407b926df4dbda441cdc3e2288fee2e6a2afa8e1bd22262309ec0fb668a',
+        licenseNote: 'Viridithas network required by the WASI build; preserve upstream notices with the MIT engine source and network provider provenance.',
+      },
+    ],
+    envPrefix: 'VIRIDITHAS',
+  },
+  stockfish: {
+    engine: 'stockfish',
+    flavor: 'stockfish-js-18.0.7',
+    upstreamRepo: 'https://github.com/nmrugg/stockfish.js.git',
+    upstreamCommit: '32d4b5ae40c01db88219bfbe2b82dbe6dec93832',
+    upstreamVersion: '18.0.7',
+    buildDir: '.local_engines/stockfish-js-src',
+    sourcePrefix: 'upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832/',
+    output: 'public/stockfish/stockfish-18.0.7-corresponding-source.tar.gz',
+    buildScript: null,
+    smokeScript: 'scripts/uci_stockfish_js_wrapper.mjs',
+    adapterFiles: [
+      'src/lc0/stockfishEngine.ts',
+      'src/lc0/engineCatalog.ts',
+      'src/chess/board.ts',
+    ],
+    docs: ['docs/engine_artifact_distribution.md', 'docs/engine_catalog.md', 'docs/netlify_engine_artifacts.md', 'public/stockfish/README.md', 'node_modules/stockfish/README.md', 'node_modules/stockfish/Copying.txt', 'node_modules/stockfish/package.json'],
+    assets: [],
+    envPrefix: 'STOCKFISH_JS',
+  },
 };
 
 function usage() {
-  console.error('Usage: node scripts/write_engine_source_archive.mjs <berserk|plentychess> [--out path] [--allow-missing-assets]');
+  console.error('Usage: node scripts/write_engine_source_archive.mjs <berserk|plentychess|viridithas|stockfish> [--out path] [--allow-missing-assets]');
 }
 
 function argValue(name) {
@@ -115,8 +164,14 @@ async function copyFiles(paths, archiveRoot) {
 
 function ensureGitSource(config) {
   const dir = resolve(config.buildDir);
-  if (existsSync(join(dir, '.git'))) return dir;
-  throw new Error(`Missing local git checkout for ${config.engine}: ${dir}. Run ${config.buildScript} once or set up the source checkout before writing a source archive.`);
+  if (!existsSync(join(dir, '.git'))) {
+    mkdirSync(dirname(dir), { recursive: true });
+    run('git', ['clone', config.upstreamRepo, dir]);
+  }
+  run('git', ['fetch', '--tags', 'origin'], { cwd: dir });
+  run('git', ['checkout', config.upstreamCommit], { cwd: dir });
+  run('git', ['reset', '--hard'], { cwd: dir });
+  return dir;
 }
 
 async function exportUpstream(config, archiveRoot) {
@@ -133,6 +188,10 @@ async function copyAssets(config, archiveRoot, allowMissingAssets) {
   await mkdir(assetOut, { recursive: true });
   for (const asset of config.assets) {
     const source = resolve(config.assetDir, asset.name);
+    if (!existsSync(source) && asset.sourceUrl && !allowMissingAssets) {
+      mkdirSync(dirname(source), { recursive: true });
+      run('curl', ['-L', '--fail', '-o', source, asset.sourceUrl]);
+    }
     if (!existsSync(source)) {
       if (allowMissingAssets) {
         copied.push({ ...asset, missing: true });
@@ -151,8 +210,17 @@ async function copyAssets(config, archiveRoot, allowMissingAssets) {
 
 function rebuildCommand(config) {
   const sourceDir = `$PWD/${config.sourcePrefix.replace(/\/$/, '')}`;
-  const outDir = config.engine === 'berserk' ? '$PWD/out/public/berserk/berserk-emscripten.js' : '$PWD/out/public/plentychess/plentychess-emscripten.js';
-  return `${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_EMSCRIPTEN_JS_OUT="${outDir}" npm run ${config.engine}:build-emscripten`;
+  if (config.engine === 'berserk' || config.engine === 'plentychess') {
+    const outDir = config.engine === 'berserk' ? '$PWD/out/public/berserk/berserk-emscripten.js' : '$PWD/out/public/plentychess/plentychess-emscripten.js';
+    return `${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_EMSCRIPTEN_JS_OUT="${outDir}" npm run ${config.engine}:build-emscripten`;
+  }
+  if (config.engine === 'viridithas') {
+    return `${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_OUT="$PWD/out/public/viridithas/viridithas.wasm" npm run viridithas:build-wasi && ${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_SIMD=1 ${config.envPrefix}_WASM_OUT="$PWD/out/public/viridithas/viridithas-simd128.wasm" npm run viridithas:build-wasi`;
+  }
+  if (config.engine === 'stockfish') {
+    return 'cd upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832 && npm install && node build.js --all -f';
+  }
+  return `npm run ${config.engine}:build`;
 }
 
 async function writeArchiveDocs(config, archiveRoot) {
@@ -167,13 +235,14 @@ async function writeArchiveDocs(config, archiveRoot) {
       tag: config.upstreamTag,
       version: config.upstreamVersion,
     },
-    patch: config.patch,
+    patch: config.patch ?? null,
     buildScript: config.buildScript,
     smokeScript: config.smokeScript,
     assets: config.assets.map((asset) => asset.name),
   };
   await writeFile(join(archiveRoot, 'SOURCE_ARCHIVE.json'), `${JSON.stringify(meta, null, 2)}\n`);
-  await writeFile(join(archiveRoot, 'BUILDING.md'), `# ${config.engine} ${config.flavor} corresponding source\n\nThis archive contains the upstream source snapshot, local browser-port patch, build scripts, browser adapter source, docs, and required network/model asset provenance for the generated ${config.engine} Emscripten artifacts.\n\n## Rebuild\n\nInstall Node dependencies and provide Emscripten either on PATH or through Docker, then run:\n\n\`\`\`sh\nnpm ci\n${rebuildCommand(config)}\n\`\`\`\n\nThe build script applies ${config.patch} to the upstream snapshot in ${config.sourcePrefix}. It writes JS/WASM/data outputs under \`out/public/${config.engine}/\`.\n\nTo smoke-test the rebuilt artifact, point the smoke script at the rebuilt JS output, for example:\n\n\`\`\`sh\nnode ${config.smokeScript} --js out/public/${config.engine}/${config.engine}-emscripten.js --depth 1\n\`\`\`\n\nSee \`ASSET_PROVENANCE.json\` for network/model source URLs and hashes.\n`);
+  const patchNote = config.patch ? `The build script applies ${config.patch} to the upstream snapshot in ${config.sourcePrefix}.` : `No local source patch is applied; the deployed artifacts come from the pinned upstream/package source in ${config.sourcePrefix}.`;
+  await writeFile(join(archiveRoot, 'BUILDING.md'), `# ${config.engine} ${config.flavor} corresponding source\n\nThis archive contains the upstream source snapshot, local browser integration scripts/adapters, docs, and required network/model asset provenance for the generated ${config.engine} browser artifacts.\n\n## Rebuild\n\nInstall Node dependencies and the documented upstream toolchain, then run:\n\n\`\`\`sh\nnpm ci\n${rebuildCommand(config)}\n\`\`\`\n\n${patchNote}\n\nThe build writes outputs under \`out/public/${config.engine}/\` or the upstream build directory as noted by the command above.\n\nSee \`ASSET_PROVENANCE.json\` for network/model source URLs and hashes.\n`);
 }
 
 async function writeArchive(config, outPath, allowMissingAssets) {
@@ -197,7 +266,7 @@ async function writeArchive(config, outPath, allowMissingAssets) {
       config.smokeHtml,
       ...config.adapterFiles,
       ...config.docs,
-    ], archiveRoot);
+    ].filter(Boolean), archiveRoot);
     await copyAssets(config, archiveRoot, allowMissingAssets);
     await writeArchiveDocs(config, archiveRoot);
     await mkdir(dirname(outPath), { recursive: true });
