@@ -20,6 +20,7 @@ function parseArgs(argv) {
     const arg = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`); return argv[++i]; };
     if (arg === '--batch') args.batch = Number(next());
+    else if (arg === '--manifest') args.manifest = next();
     else if (arg === '--fixtures') args.fixtures = true;
     else if (arg === '--no-fixtures') args.fixtures = false;
     else if (arg === '--fixture-offset') args.fixtureOffset = Number(next());
@@ -31,6 +32,7 @@ function parseArgs(argv) {
     else if (arg === '--search-fixtures') args.searchFixtures = Number(next());
     else if (arg === '--search-repeats') args.searchRepeats = Number(next());
     else if (arg === '--search-pipeline-depth') args.searchPipelineDepth = Number(next());
+    else if (arg === '--pass-coalesce') args.passCoalesce = true;
     else if (arg === '--stockfish-score-depth') args.stockfishScoreDepth = Number(next());
     else if (arg === '--stockfish-score-ms') args.stockfishScoreMs = Number(next());
     else if (arg === '--base-url') { args.baseUrl = next(); args.noServer = true; }
@@ -171,6 +173,8 @@ async function main() {
     const session = `lc0-tvmjs-${process.pid}`;
     const url = new URL('/lc0-tvmjs-webgpu-smoke.html', args.baseUrl);
     url.searchParams.set('batch', String(args.batch));
+    if (args.manifest) url.searchParams.set('manifest', args.manifest);
+    if (args.passCoalesce) url.searchParams.set('passCoalesce', '1');
     url.searchParams.set('invoke', '1');
     if (args.fixtures) {
       url.searchParams.set('fixtures', '1');
@@ -201,6 +205,7 @@ async function main() {
         generatedAt: new Date().toISOString(),
         url: String(url),
         batch: args.batch,
+        manifest: args.manifest,
         fixtures: args.fixtures,
         fixtureOffset: args.fixtureOffset,
         fixtureCount: args.fixtureCount ?? args.batch,

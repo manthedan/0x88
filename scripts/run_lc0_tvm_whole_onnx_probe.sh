@@ -38,6 +38,9 @@ fi
 if [[ "${EXPORT_TVMJS_WASM:-0}" == "1" ]]; then
   extra_args+=(--export-tvmjs-wasm)
 fi
+if [[ "${DLIGHT:-0}" == "1" ]]; then
+  extra_args+=(--dlight)
+fi
 
 MODEL_FAMILY="${LC0_TVMJS_MODEL_FAMILY:-t1-256x10-distilled-swa-2432500}"
 DTYPE="${LC0_TVMJS_DTYPE:-f16}"

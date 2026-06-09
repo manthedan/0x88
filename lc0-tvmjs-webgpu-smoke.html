@@ -138,6 +138,37 @@ function installGpuKernelProfiler(device) {
     },
   };
 }
+// Experimental compute-pass coalescing: the tvmjs WebGPU runtime opens one
+// compute pass per kernel dispatch (~229/invoke). WebGPU guarantees write
+// visibility between dispatches within a single pass, and the runtime flushes
+// its pending encoder before any copy/readback, so dispatches recorded on one
+// encoder can legally share one pass. end() is deferred until encoder.finish().
+function installComputePassCoalescer(device) {
+  const origCreateEncoder = device.createCommandEncoder.bind(device);
+  let coalescedPasses = 0;
+  let openedPasses = 0;
+  device.createCommandEncoder = (descriptor) => {
+    const encoder = origCreateEncoder(descriptor);
+    const origBegin = encoder.beginComputePass.bind(encoder);
+    const origFinish = encoder.finish.bind(encoder);
+    let shared = null;
+    let realEnd = null;
+    encoder.beginComputePass = (passDescriptor = {}) => {
+      if (shared) { coalescedPasses += 1; return shared; }
+      shared = origBegin(passDescriptor);
+      openedPasses += 1;
+      realEnd = shared.end.bind(shared);
+      shared.end = () => {};
+      return shared;
+    };
+    encoder.finish = (...finishArgs) => {
+      if (shared) { realEnd(); shared = null; realEnd = null; }
+      return origFinish(...finishArgs);
+    };
+    return encoder;
+  };
+  return { stats() { return { openedPasses, coalescedPasses }; } };
+}
 async function sha256Hex(bytes) {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -816,10 +847,15 @@ async function run() {
   if (adapter.features.has('timestamp-query')) requiredFeatures.push('timestamp-query');
   const device = await timed('requestDeviceMs', () => adapter.requestDevice({ requiredFeatures }));
   const gpuAllocationProbe = installGpuBufferAllocationProbe(device);
-  const gpuKernelProfiler = params.get('kernelProfile') === '0'
-    ? { supported: false, reason: 'disabled via kernelProfile=0', arm() {}, disarm() {}, async collect() { return { supported: false, reason: 'disabled via kernelProfile=0' }; } }
+  const passCoalesce = params.get('passCoalesce') === '1';
+  const passCoalescer = passCoalesce ? installComputePassCoalescer(device) : null;
+  // Per-pass timestamps are meaningless with a shared pass; the two probes are
+  // mutually exclusive.
+  const gpuKernelProfiler = passCoalesce || params.get('kernelProfile') === '0'
+    ? { supported: false, reason: passCoalesce ? 'disabled: passCoalesce=1' : 'disabled via kernelProfile=0', arm() {}, disarm() {}, async collect() { return { supported: false, reason: 'disabled' }; } }
     : installGpuKernelProfiler(device);
   log('gpu kernel profiler', gpuKernelProfiler.supported ? 'armed-capable' : gpuKernelProfiler.reason);
+  if (passCoalesce) log('compute pass coalescing enabled');
   device.addEventListener('uncapturederror', (event) => {
     log('webgpu uncaptured', event.error?.message || String(event.error));
   });
@@ -982,6 +1018,7 @@ async function run() {
           evalTiming,
           evalPositionTiming,
           gpuKernelProfile,
+          ...(passCoalescer ? { passCoalescing: passCoalescer.stats() } : {}),
           ...(ortComparisons ? { ortComparisons } : {}),
           ...(searchParity ? { searchParity } : {}),
           results: fixtureResults,

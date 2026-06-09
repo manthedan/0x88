@@ -329,6 +329,11 @@ def main() -> int:
         action="store_true",
         help="Also try export_library(..., fcompile=tvmjs.create_tvmjs_wasm) for browser TVMJS runtime loading",
     )
+    parser.add_argument(
+        "--dlight",
+        action="store_true",
+        help="Opt-in: apply dlight GPU schedule rules (Matmul/GEMV/Reduction/GeneralReduction/Fallback) instead of TVM's naive DefaultGPUSchedule thread binding",
+    )
     args = parser.parse_args()
 
     model_path = Path(args.model).resolve()
@@ -345,6 +350,7 @@ def main() -> int:
         "sanitize_onnx_names": args.sanitize_onnx_names,
         "capture_module_sources": args.capture_module_sources,
         "export_tvmjs_wasm": args.export_tvmjs_wasm,
+        "dlight": args.dlight,
         "env": {
             "python": sys.version,
             "executable": sys.executable,
@@ -435,7 +441,28 @@ def main() -> int:
 
         target = tvm.target.Target(parse_target_spec(tvm, args.target), host=parse_target_spec(tvm, args.host_target)) if args.host_target else parse_target_spec(tvm, args.target)
         result["build_target"] = str(target)
-        return relax.build(mod, target=target)
+        build_mod = mod
+        if args.dlight:
+            try:
+                from tvm import dlight as dl  # type: ignore
+            except ImportError:
+                # This TVM checkout ships dlight under s_tir.
+                from tvm.s_tir import dlight as dl  # type: ignore
+
+            # Lower relax ops to TIR first, then let dlight schedule the TIR
+            # functions; relax.build's default pipeline skips already-scheduled
+            # functions in DefaultGPUSchedule.
+            with tvm.target.Target(target):
+                build_mod = relax.get_pipeline("zero")(mod)
+                build_mod = dl.ApplyDefaultSchedule(
+                    dl.gpu.Matmul(),
+                    dl.gpu.GEMV(),
+                    dl.gpu.Reduction(),
+                    dl.gpu.GeneralReduction(),
+                    dl.gpu.Fallback(),
+                )(build_mod)
+            result["dlight_applied"] = True
+        return relax.build(build_mod, target=target)
 
     executable = run_step(result, "relax_build_target", build_relax) if mod is not None else None
     if executable is not None:

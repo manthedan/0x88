@@ -384,6 +384,24 @@ Silicon Chrome, one warm invoke):
 - Tuning implications: (a) matmul schedules are `3–10×` off a naive roofline estimate, spread across ~6 fused matmul variants — dlight-style schedule rules would need to lift the whole family, not one hot spot; (b) pass-count reduction (more aggressive fusion of elementwise/reshape chains, or pass/encoder batching in the tvmjs runtime) attacks the ~`5 ms` non-kernel GPU wall and the long tail of tiny passes.
 - Caveats: single warm invoke, one device; Chrome may quantize timestamps without developer features (observed values are not 100 µs multiples here, so quantization did not flatten this run).
 
+### Dlight default-schedule rebuild (marginal) and pass coalescing (nil), 2026-06-09
+
+Two follow-up experiments on the same v16/b8 protocol, both parity-clean (native
+8/8 with identical max top-prior diff, search 8/8):
+
+- **Dlight rebuild**: `scripts/lc0_tvm_whole_onnx_probe.py --dlight` (env `DLIGHT=1`) applies `tvm.s_tir.dlight` GPU rules (Matmul/GEMV/Reduction/GeneralReduction/Fallback) after the zero pipeline instead of relying on naive `DefaultGPUSchedule`. Staged separately under `.../f16/v2-dlight` (stage script takes `--artifacts=`/`--out=` in `--name=value` form only); the smoke driver gained `--manifest`. Result (`artifacts/tvm/lc0_tvmjs_dlight_profile_b8_v16.json`): kernel time `9.24 → 8.52 ms` (−8%), search wall `56.9 ms` vs `54.3 ms` control — no end-to-end gain. Same 229 passes; top kernel ranking unchanged.
+- **Compute-pass coalescing**: the tvmjs runtime opens one compute pass per dispatch; the smoke can now coalesce all dispatches on the pending encoder into one shared pass (`--pass-coalesce`, page param `passCoalesce=1`, deferring `pass.end()` to `encoder.finish()`; legal because WebGPU orders dispatches within a pass and the runtime flushes before copies/readback). Result (`artifacts/tvm/lc0_tvmjs_passcoalesce_profile_b8_v16.json`): 5928 dispatches coalesced into 26 passes, search wall `53.0 ms` vs `54.3 ms` control — within noise. Pass boundaries are not the missing GPU wall either.
+
+Campaign conclusion: per-b8-batch GPU wall (~`14 ms`) decomposes into ~`9 ms`
+genuine kernel arithmetic (dlight defaults barely move it) plus ~`2–3 ms` sync/
+readback machinery and small residuals. Eliminated as levers: JS search
+overhead (~2 ms), pipelining (net negative), pass-boundary overhead (nil),
+default dlight rules (−8% kernel, nil end-to-end). Remaining levers, in order:
+real per-shape schedule tuning (metaschedule or hand-written dlight rules for
+the 4 fused matmul families at 512×256-class shapes), larger physical batches
+(b16/b32) for visit budgets that can fill them, and evaluation-count reduction
+(cache/tree reuse) on the search side.
+
 Strict same-FEN visit sweep samples now cover visits `16`, `32`, and `64`:
 
 - `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n1_r1_hybrid_alloc.json`: rows `1`, TVMJS-vs-hybrid `1/1`, TVMJS mean `78.205 ms`, hybrid mean `404.665 ms`.
