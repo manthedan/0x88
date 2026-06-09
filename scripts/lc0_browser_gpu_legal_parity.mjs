@@ -24,6 +24,9 @@ Options:
   --timeout MS            Browser wait timeout (default ${DEFAULT_TIMEOUT_MS})
   --fixture-limit N       Native fixtures to compare (default 3)
   --top-k N               Top-K order/detail check (default 16)
+  --max-prior-diff N      Max allowed prior/top-K prior abs diff (default 0.01)
+  --max-wdl-diff N        Max allowed WDL abs diff (default 0.005)
+  --max-logit-diff N      Max allowed legal logit abs diff (default 0.05)
   --input-backend MODE    js, wgsl, or wasm (default wasm)
   --encoder-kernel MODE   Encoder kernel variant (default mixed-tvm-ffn)
   --no-server             Do not auto-start Vite
@@ -48,6 +51,9 @@ function parseArgs(argv) {
     timeoutMs: DEFAULT_TIMEOUT_MS,
     fixtureLimit: 3,
     topK: 16,
+    maxPriorDiff: 0.01,
+    maxWdlDiff: 0.005,
+    maxLogitDiff: 0.05,
     inputBackend: 'wasm',
     encoderKernel: 'mixed-tvm-ffn',
     out: '',
@@ -70,6 +76,9 @@ function parseArgs(argv) {
     else if (arg === '--timeout') args.timeoutMs = Number(next());
     else if (arg === '--fixture-limit' || arg === '--fixtures') args.fixtureLimit = Number(next());
     else if (arg === '--top-k' || arg === '--topk') args.topK = Number(next());
+    else if (arg === '--max-prior-diff') args.maxPriorDiff = Number(next());
+    else if (arg === '--max-wdl-diff') args.maxWdlDiff = Number(next());
+    else if (arg === '--max-logit-diff') args.maxLogitDiff = Number(next());
     else if (arg === '--input-backend') args.inputBackend = next();
     else if (arg === '--encoder-kernel') args.encoderKernel = next();
     else if (arg === '--no-server') args.noServer = true;
@@ -82,6 +91,9 @@ function parseArgs(argv) {
   args.session = shortSessionName(args.session);
   for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs], ['fixture-limit', args.fixtureLimit], ['top-k', args.topK]]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
+  }
+  for (const [name, value] of [['max-prior-diff', args.maxPriorDiff], ['max-wdl-diff', args.maxWdlDiff], ['max-logit-diff', args.maxLogitDiff]]) {
+    if (!Number.isFinite(value) || value < 0) throw new Error(`Invalid --${name}: ${value}`);
   }
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
   if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel)) throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
@@ -235,13 +247,25 @@ async function main() {
       topKMatches: result.topKMatches,
       maxPriorAbsDiff: result.maxPriorAbsDiff,
       maxTopKPriorAbsDiff: result.maxTopKPriorAbsDiff,
+      maxLogitAbsDiff: result.maxLogitAbsDiff,
       maxWdlAbsDiff: result.maxWdlAbsDiff,
       compactTopKReadbackBytesEstimate: result.compactTopKReadbackBytesEstimate,
       fullGpuLegalReadbackBytes: result.fullGpuLegalReadbackBytes,
+      thresholds: {
+        maxPriorDiff: args.maxPriorDiff,
+        maxWdlDiff: args.maxWdlDiff,
+        maxLogitDiff: args.maxLogitDiff,
+      },
     };
     console.log(JSON.stringify(summary, null, 2));
-    if (result.bestMoveMatches !== result.fixtures || result.topKMatches !== result.fixtures || result.maxMissingFromGpu !== 0) {
-      throw new Error(`GPU legal parity failed: best ${result.bestMoveMatches}/${result.fixtures}, topK ${result.topKMatches}/${result.fixtures}, missing ${result.maxMissingFromGpu}`);
+    const driftFailures = [];
+    if (Number(result.maxPriorAbsDiff) > args.maxPriorDiff) driftFailures.push(`prior ${result.maxPriorAbsDiff} > ${args.maxPriorDiff}`);
+    if (Number(result.maxTopKPriorAbsDiff) > args.maxPriorDiff) driftFailures.push(`topK prior ${result.maxTopKPriorAbsDiff} > ${args.maxPriorDiff}`);
+    if (Number(result.maxWdlAbsDiff) > args.maxWdlDiff) driftFailures.push(`wdl ${result.maxWdlAbsDiff} > ${args.maxWdlDiff}`);
+    if (Number(result.maxLogitAbsDiff) > args.maxLogitDiff) driftFailures.push(`logit ${result.maxLogitAbsDiff} > ${args.maxLogitDiff}`);
+    if (result.bestMoveMatches !== result.fixtures || result.topKMatches !== result.fixtures || result.maxMissingFromGpu !== 0 || driftFailures.length) {
+      const driftMessage = driftFailures.length ? `, drift ${driftFailures.join('; ')}` : '';
+      throw new Error(`GPU legal parity failed: best ${result.bestMoveMatches}/${result.fixtures}, topK ${result.topKMatches}/${result.fixtures}, missing ${result.maxMissingFromGpu}${driftMessage}`);
     }
   } finally { server?.kill('SIGTERM'); }
 }
