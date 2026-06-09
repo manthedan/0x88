@@ -276,10 +276,11 @@ Summary from the scored strict same-FEN UHO-lite matrix:
 
 Current production-style fixed-suite bridge smoke:
 
-- Artifact: `artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_bridge_uho2_v16_r1_sfdepth3.json`.
+- Artifact: `artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_bridge_uho8_v16_r1_sfdepth3.json`.
 - Status: `ok: true`, `researchOnly: true`, `noStableRuntimePromotion: true`.
-- Fixed FEN rows: `2`; TVMJS-vs-ORT f16 search move match: `2/2`.
-- This proves the fixed-suite input/report bridge works end-to-end, but the evidence is still smoke-sized and remains non-promotional.
+- Fixed FEN rows: `8`; TVMJS-vs-ORT f16 search move match: `8/8`.
+- Earlier 2-row bridge artifact: `artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_bridge_uho2_v16_r1_sfdepth3.json`.
+- This proves the fixed-suite input/report bridge works end-to-end beyond a tiny smoke pair, but the evidence remains non-promotional until broader suites/repeats and release policy are in place.
 
 Startup/footprint sample from `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n2_r1_startup.json`:
 
@@ -382,7 +383,32 @@ npm run lc0:stage-tvmjs-webgpu -- \
 
 The staging script also accepts `--stem-template='{modelFamily}.batch{batch}.{dtype}.webgpu.tvmjs-wasm.probe'` when exported artifact stems differ from the default.
 
-The export and staging scripts are now parameterized for model family, dtype, batch list, naming templates, and destination path. The local artifact checker is still default-bundle oriented, so promotion/publication for new families should add a manifest-specific check before release.
+The export and staging scripts are parameterized for model family, dtype, batch list, naming templates, and destination path. Check the staged manifest/files for the exact family before running or publishing evidence:
+
+```bash
+npm run lc0:tvmjs-webgpu-local-artifacts-check -- \
+  --manifest "public/runtimes/lc0-tvmjs-webgpu/$LC0_TVMJS_MODEL_FAMILY/$LC0_TVMJS_DTYPE/$LC0_TVMJS_VERSION/manifest.json" \
+  --no-evidence \
+  --expected-model-family "$LC0_TVMJS_MODEL_FAMILY" \
+  --expected-dtype "$LC0_TVMJS_DTYPE" \
+  --expected-version "$LC0_TVMJS_VERSION" \
+  --expected-batches "$LC0_TVMJS_BATCHES"
+```
+
+Once family-specific evidence exists, drop `--no-evidence` and pass `--evidence <family-summary.json>` plus an appropriate `--min-search-rows` threshold.
+
+## Generated artifact release/hosting/cache policy
+
+Current policy: generated TVMJS wasm/runtime artifacts are local research artifacts and must stay ignored/unpublished until a release owner explicitly promotes a bundle. A promotable release needs all of the following:
+
+1. A manifest-specific local artifact check for the exact model family/dtype/version/batches.
+2. Evidence summary covering loader, evaluator parity, search parity, fixed-suite bridge rows, and same-session hybrid/ORT comparisons where applicable.
+3. Raw size plus gzip/Brotli sidecar size audit for `tvmjs.bundle.js`, `tvmjs_runtime.wasm`, each model wasm, and probe metadata.
+4. Host/CDN configuration that serves compressed sidecars with correct `Content-Encoding`; do not assume safe Brotli/gzip serving from file extension alone.
+5. Immutable versioned paths (`.../<model-family>/<dtype>/<version>/`) and long-lived cache headers only for content-hashed/manifest-pinned files. Manifests should use a shorter revalidation policy unless their path is immutable and release-tagged.
+6. Rollback plan: keep ORT ONNX/WebGPU as the stable default, and require opt-in TVMJS selection until promotion evidence and artifact policy are accepted.
+
+Do not add TVMJS to `src/nn/runtimeRegistry.ts`, `src/nn/browserRuntimeEvaluator.ts`, or the stable arena runtime UI as part of artifact publication alone.
 
 ## Evidence naming convention
 
