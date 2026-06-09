@@ -198,6 +198,21 @@ npm run lc0:tvmjs-vs-hybrid-matrix -- \
   --out artifacts/tvm/lc0_tvmjs_vs_hybrid_b8_hb4_v32_n4_r1.json
 ```
 
+Scored strict same-FEN UHO-lite wrapper:
+
+```bash
+cd "$WEB"
+npm run lc0:tvmjs-vs-hybrid-matrix -- \
+  --batch 8 \
+  --hybrid-batch 4 \
+  --fixtures 4 \
+  --visits 16 \
+  --repeats 2 \
+  --stockfish-score-depth 3 \
+  --fens ../leelaweb-arena-diagnostics/eval/opening_suite_uho_lite_v1.fen \
+  --out artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n4_r2_sfdepth3.json
+```
+
 The wrapper writes an aggregate `lc0_browser.tvmjs_vs_hybrid_matrix.v1` JSON artifact and child artifacts for each lane. With `--fens`, both lanes run the same FEN rows. The TVMJS child artifact and aggregate include:
 
 - `startupTimings`: manifest fetch, TVMJS bundle load, WebGPU adapter/device acquisition, wasm fetch/verification, async wasm instantiate, TVM WebGPU init, `systemLib`, WebGPU pipeline prebuild, VM creation, input tensor allocation, and input upload.
@@ -227,6 +242,17 @@ Summary from the strict same-FEN UHO-lite smoke matrix:
 - Hybrid b4 WGSL-heads mean search timing: `224.76 ms`.
 - TVMJS-vs-ORT f16 move match within the TVMJS lane: `2/2`.
 - Hybrid arbitrary-FEN mode has no native best-move oracle; compare row moves, timings, and hybrid depth-baseline stability.
+
+Summary from the scored strict same-FEN UHO-lite matrix:
+
+- Artifact: `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n4_r2_sfdepth3.json`.
+- Same FEN/repeat rows: `8`.
+- TVMJS-vs-hybrid search move match: `6/8`.
+- The two mismatches are the same FEN across both repeats: TVMJS chose `d7d6`; hybrid chose `e5d4`.
+- TVMJS b8 mean search timing: `48.67 ms`.
+- Hybrid b4 WGSL-heads mean search timing: `133.27 ms`.
+- TVMJS-vs-ORT f16 Stockfish-scored deltas: `6` scored rows, cp delta min/max/mean `0/0/0`.
+- Interpretation: TVMJS remains aligned with ORT f16 on the scored rows, while the custom hybrid piecemeal runtime can choose a different search move on at least one UHO-lite position at 16 visits. This supports keeping hybrid and TVMJS as distinct research/product lanes rather than treating them as interchangeable.
 
 Startup/footprint sample from `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n2_r1_startup.json`:
 

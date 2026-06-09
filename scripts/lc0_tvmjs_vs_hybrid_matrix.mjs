@@ -10,7 +10,7 @@ const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_OUT = 'artifacts/tvm/lc0_tvmjs_vs_hybrid_matrix.json';
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_tvmjs_vs_hybrid_matrix.mjs [options]\n\nRuns a reproducible LC0 research matrix for full-model TVMJS/WebGPU and the custom hybrid TVM/WGSL path using one Vite server.\n\nThis is a research wrapper, not a promotion gate. The current hybrid lane uses its native search fixture records; arbitrary-FEN TVMJS runs are marked as not directly fixture-identical until the hybrid page grows arbitrary-FEN support.\n\nOptions:\n  --out PATH                  Aggregate JSON path (default ${DEFAULT_OUT})\n  --base-url URL              Use existing Vite server\n  --host HOST                 Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N                    Vite port when auto-starting (default ${DEFAULT_PORT})\n  --timeout MS                Per child command timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN         Browser automation binary forwarded to child harnesses\n  --batch N                   TVMJS batch artifact, usually 8 (default 8)\n  --hybrid-batch N            Hybrid search leaf batch size, usually 4 (default 4)\n  --fixtures N                Fixture/search rows for both lanes where supported (default 4)\n  --visits N                  Search visits for both lanes; hybrid fixtures currently require 32,64,128 (default 32)\n  --repeats N                 Search repeats for both lanes (default 1)\n  --fens PATH                 Optional TVMJS FEN file; hybrid still uses native fixture records\n  --tvmjs-out PATH            Override child TVMJS artifact path\n  --hybrid-out PATH           Override child hybrid artifact path\n  --hybrid-preset NAME        Hybrid runtime preset (default lc0-webgpu-research-b4)\n  --hybrid-head-backend MODE  Hybrid head backend, ort or wgsl (default wgsl)\n  --hybrid-input-backend MODE Hybrid input backend, js/wgsl/wasm (default wasm)\n  --hybrid-encoder MODE       Hybrid encoder kernel (default mixed-tvm-ffn-smolgen-project)\n  --hybrid-legal MODE         Hybrid legal-priors backend (default js)\n  --no-server                 Do not auto-start Vite\n  --dry-run                   Print child commands only\n  -h, --help                  Show help\n`);
+  console.log(`Usage: node scripts/lc0_tvmjs_vs_hybrid_matrix.mjs [options]\n\nRuns a reproducible LC0 research matrix for full-model TVMJS/WebGPU and the custom hybrid TVM/WGSL path using one Vite server.\n\nThis is a research wrapper, not a promotion gate. The current hybrid lane uses its native search fixture records; arbitrary-FEN TVMJS runs are marked as not directly fixture-identical until the hybrid page grows arbitrary-FEN support.\n\nOptions:\n  --out PATH                  Aggregate JSON path (default ${DEFAULT_OUT})\n  --base-url URL              Use existing Vite server\n  --host HOST                 Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N                    Vite port when auto-starting (default ${DEFAULT_PORT})\n  --timeout MS                Per child command timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN         Browser automation binary forwarded to child harnesses\n  --batch N                   TVMJS batch artifact, usually 8 (default 8)\n  --hybrid-batch N            Hybrid search leaf batch size, usually 4 (default 4)\n  --fixtures N                Fixture/search rows for both lanes where supported (default 4)\n  --visits N                  Search visits for both lanes; hybrid fixtures currently require 32,64,128 (default 32)\n  --repeats N                 Search repeats for both lanes (default 1)\n  --stockfish-score-depth N   Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N      Score TVMJS/ORT post-search moves by Stockfish movetime\n  --fens PATH                 Optional FEN file; with --fens both lanes use the same FEN rows\n  --tvmjs-out PATH            Override child TVMJS artifact path\n  --hybrid-out PATH           Override child hybrid artifact path\n  --hybrid-preset NAME        Hybrid runtime preset (default lc0-webgpu-research-b4)\n  --hybrid-head-backend MODE  Hybrid head backend, ort or wgsl (default wgsl)\n  --hybrid-input-backend MODE Hybrid input backend, js/wgsl/wasm (default wasm)\n  --hybrid-encoder MODE       Hybrid encoder kernel (default mixed-tvm-ffn-smolgen-project)\n  --hybrid-legal MODE         Hybrid legal-priors backend (default js)\n  --no-server                 Do not auto-start Vite\n  --dry-run                   Print child commands only\n  -h, --help                  Show help\n`);
 }
 
 function parseArgs(argv) {
@@ -25,6 +25,8 @@ function parseArgs(argv) {
     fixtures: 4,
     visits: 32,
     repeats: 1,
+    stockfishScoreDepth: undefined,
+    stockfishScoreMs: undefined,
     fensFile: '',
     hybridPreset: 'lc0-webgpu-research-b4',
     hybridHeadBackend: 'wgsl',
@@ -49,6 +51,8 @@ function parseArgs(argv) {
     else if (arg === '--fixtures' || arg === '--fixture-count') args.fixtures = Number(next());
     else if (arg === '--visits') args.visits = Number(next());
     else if (arg === '--repeats') args.repeats = Number(next());
+    else if (arg === '--stockfish-score-depth') args.stockfishScoreDepth = Number(next());
+    else if (arg === '--stockfish-score-ms') args.stockfishScoreMs = Number(next());
     else if (arg === '--fens') args.fensFile = next();
     else if (arg === '--tvmjs-out') args.tvmjsOut = next();
     else if (arg === '--hybrid-out') args.hybridOut = next();
@@ -68,6 +72,8 @@ function parseArgs(argv) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
   if (![1, 4, 8].includes(args.batch)) throw new Error(`Invalid --batch ${args.batch}; expected 1, 4, or 8`);
+  if (args.stockfishScoreDepth !== undefined && (!Number.isFinite(args.stockfishScoreDepth) || args.stockfishScoreDepth <= 0)) throw new Error(`Invalid --stockfish-score-depth ${args.stockfishScoreDepth}`);
+  if (args.stockfishScoreMs !== undefined && (!Number.isFinite(args.stockfishScoreMs) || args.stockfishScoreMs <= 0)) throw new Error(`Invalid --stockfish-score-ms ${args.stockfishScoreMs}`);
   if (!args.fensFile && ![32, 64, 128].includes(args.visits)) throw new Error(`Invalid --visits ${args.visits}; current hybrid native search fixtures exist for 32, 64, or 128 unless --fens is provided`);
   if (!['ort', 'wgsl'].includes(args.hybridHeadBackend)) throw new Error(`Invalid --hybrid-head-backend ${args.hybridHeadBackend}`);
   if (!['js', 'wgsl', 'wasm'].includes(args.hybridInputBackend)) throw new Error(`Invalid --hybrid-input-backend ${args.hybridInputBackend}`);
@@ -138,8 +144,15 @@ function mean(values) {
   return xs.length ? xs.reduce((sum, value) => sum + value, 0) / xs.length : undefined;
 }
 
+function numericStats(values) {
+  const xs = values.filter((value) => Number.isFinite(value));
+  if (!xs.length) return undefined;
+  return { count: xs.length, min: Math.min(...xs), max: Math.max(...xs), mean: mean(xs) };
+}
+
 function summarizeTvmjs(artifact) {
   const rows = artifact?.result?.searchParity?.rows ?? [];
+  const stockfishDeltas = rows.map((row) => row.stockfishCpDeltaTvmMinusOrt);
   return {
     ok: artifact?.ok === true,
     batch: artifact?.batch,
@@ -153,6 +166,8 @@ function summarizeTvmjs(artifact) {
     ortF16Comparable: artifact?.result?.ortComparisons?.f16?.comparable,
     searchRows: rows.length || artifact?.result?.searchParity?.fixtureCount,
     searchMoveMatches: artifact?.result?.searchParity?.moveMatches,
+    stockfishScoredRows: stockfishDeltas.filter((value) => Number.isFinite(value)).length,
+    stockfishCpDeltaTvmMinusOrt: numericStats(stockfishDeltas),
     tvmSearchMeanMs: mean(rows.map((row) => row.tvmMs)),
     ortSearchMeanMs: mean(rows.map((row) => row.ortMs)),
   };
@@ -177,30 +192,49 @@ function summarizeHybrid(artifact) {
   };
 }
 
+function rowRepeatKey(row, source) {
+  const raw = row?.repeat;
+  if (!Number.isFinite(raw)) return 1;
+  return source === 'tvmjs' ? raw + 1 : raw;
+}
+
 function summarizeHeadToHead(tvmjs, hybrid) {
   const tvmRows = tvmjs?.result?.searchParity?.rows ?? [];
   const hybridRows = hybrid?.results ?? [];
-  const count = Math.min(tvmRows.length, hybridRows.length);
+  const hybridByFenRepeat = new Map();
+  for (const row of hybridRows) {
+    if (!row?.fen) continue;
+    hybridByFenRepeat.set(`${row.fen}\t${rowRepeatKey(row, 'hybrid')}`, row);
+  }
   const rows = [];
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < tvmRows.length; i++) {
     const tvm = tvmRows[i];
-    const hyb = hybridRows[i];
+    const repeat = rowRepeatKey(tvm, 'tvmjs');
+    const hyb = tvm?.fen ? hybridByFenRepeat.get(`${tvm.fen}\t${repeat}`) : undefined;
+    if (!hyb) {
+      rows.push({ index: i, fen: tvm?.fen, repeat, tvmjsMove: tvm?.tvmMove, matchedHybridRow: false, tvmjsMs: tvm?.tvmMs });
+      continue;
+    }
     rows.push({
       index: i,
-      fen: tvm?.fen ?? hyb?.fen,
-      tvmjsMove: tvm?.tvmMove,
-      hybridMove: hyb?.bestMove,
-      moveMatches: tvm?.tvmMove === hyb?.bestMove,
-      tvmjsMs: tvm?.tvmMs,
-      hybridMs: hyb?.elapsedMs,
-      hybridBackendMs: hyb?.searchElapsedMs,
+      fen: tvm.fen,
+      repeat,
+      matchedHybridRow: true,
+      tvmjsMove: tvm.tvmMove,
+      hybridMove: hyb.bestMove,
+      moveMatches: tvm.tvmMove === hyb.bestMove,
+      tvmjsMs: tvm.tvmMs,
+      hybridMs: hyb.elapsedMs,
+      hybridBackendMs: hyb.searchElapsedMs,
     });
   }
+  const comparableRows = rows.filter((row) => row.matchedHybridRow);
   return {
-    comparableRows: count,
-    moveMatches: rows.filter((row) => row.moveMatches).length,
-    tvmjsMeanMs: mean(rows.map((row) => row.tvmjsMs)),
-    hybridMeanMs: mean(rows.map((row) => row.hybridMs)),
+    comparableRows: comparableRows.length,
+    unmatchedTvmjsRows: rows.length - comparableRows.length,
+    moveMatches: comparableRows.filter((row) => row.moveMatches).length,
+    tvmjsMeanMs: mean(comparableRows.map((row) => row.tvmjsMs)),
+    hybridMeanMs: mean(comparableRows.map((row) => row.hybridMs)),
     rows,
   };
 }
@@ -214,6 +248,8 @@ async function main() {
   if (args.help) return usage();
 
   const tvmjsCommand = ['scripts/lc0_tvmjs_webgpu_smoke.mjs', '--base-url', args.baseUrl, '--batch', String(args.batch), '--fixture-count', String(args.fixtures), '--ort-compare', 'f16', '--ort-ep', 'webgpu', '--search-visits', String(args.visits), '--search-fixtures', String(args.fixtures), '--search-repeats', String(args.repeats), '--agent-browser', args.agentBrowser, '--out', args.tvmjsOut];
+  if (args.stockfishScoreDepth !== undefined) tvmjsCommand.push('--stockfish-score-depth', String(args.stockfishScoreDepth));
+  if (args.stockfishScoreMs !== undefined) tvmjsCommand.push('--stockfish-score-ms', String(args.stockfishScoreMs));
   if (args.fensFile) tvmjsCommand.push('--fens', args.fensFile);
 
   const hybridCommand = ['--experimental-strip-types', 'scripts/lc0_browser_hybrid_search_fixture_parity.mjs', '--base-url', args.baseUrl, '--preset', args.hybridPreset, '--head-backend', args.hybridHeadBackend, '--input-backend', args.hybridInputBackend, '--encoder-kernel', args.hybridEncoder, '--legal-priors-backend', args.hybridLegal, '--batch', String(args.hybridBatch), '--visits', String(args.visits), '--fixture-limit', String(args.fixtures), '--repeats', String(args.repeats), '--allow-mismatches', '--agent-browser', args.agentBrowser, '--out', args.hybridOut];
@@ -251,6 +287,8 @@ async function main() {
         fixtures: args.fixtures,
         visits: args.visits,
         repeats: args.repeats,
+        stockfishScoreDepth: args.stockfishScoreDepth,
+        stockfishScoreMs: args.stockfishScoreMs,
         fensFile: args.fensFile || undefined,
         hybridPreset: args.hybridPreset,
         hybridHeadBackend: args.hybridHeadBackend,

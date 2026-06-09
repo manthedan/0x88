@@ -3307,6 +3307,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
               repeat,
               id: record.id,
               kind: record.moves ? 'history' : 'fen',
+              fen: record.fen,
               expectedNativeBestMove,
               bestMove: result.move,
               matchesNative: expectedNativeBestMove ? result.move === expectedNativeBestMove : undefined,
