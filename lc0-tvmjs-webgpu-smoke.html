@@ -381,6 +381,59 @@ function timingStatsByKey(rows, keys = TVM_EVAL_TIMING_KEYS) {
   for (const key of keys) out[key] = timingStats(rows.map((row) => row?.[key]));
   return out;
 }
+// Per-search visit-loop attribution: reconcile one search's wall time against
+// the evaluator-phase buckets recorded during that search, so the remainder is
+// attributable to JS search work (movegen, PUCT, history/context building).
+// Note: tvmInvokeMs is CPU-side VM submit time; GPU completion is awaited
+// inside outputReadbackMs, so readback includes the GPU wait.
+const TVM_PHASE_KEYS = TVM_EVAL_TIMING_KEYS.filter((key) => key !== 'tvmBatchEvalMs');
+function sumFinite(values) {
+  let sum = 0;
+  for (const value of values) if (Number.isFinite(value)) sum += value;
+  return sum;
+}
+function visitLoopAttribution(batchTimings, positionTimings, searchWallMs, physicalBatchSize) {
+  const phases = {};
+  for (const key of TVM_PHASE_KEYS) phases[key] = sumFinite(batchTimings.map((timing) => timing?.[key]));
+  const legalPriorsMs = sumFinite(positionTimings.map((timing) => timing?.legalPriorsMs));
+  const tvmBatchEvalMs = sumFinite(batchTimings.map((timing) => timing?.tvmBatchEvalMs));
+  const inEvaluatorMs = tvmBatchEvalMs + legalPriorsMs;
+  const logicalPositions = sumFinite(batchTimings.map((timing) => timing?.logicalBatchSize));
+  return {
+    searchWallMs,
+    evalBatches: batchTimings.length,
+    evalPositions: positionTimings.length,
+    meanLogicalBatchSize: batchTimings.length ? logicalPositions / batchTimings.length : undefined,
+    batchFillRate: batchTimings.length && physicalBatchSize ? logicalPositions / (batchTimings.length * physicalBatchSize) : undefined,
+    inEvaluatorMs,
+    tvmBatchEvalMs,
+    legalPriorsMs,
+    searchJsOverheadMs: searchWallMs - inEvaluatorMs,
+    phases,
+  };
+}
+function aggregateVisitLoopBreakdown(rows) {
+  const breakdowns = rows.map((row) => row.tvmVisitLoop).filter(Boolean);
+  if (!breakdowns.length) return undefined;
+  const wallSum = sumFinite(breakdowns.map((b) => b.searchWallMs));
+  const share = (selector) => wallSum > 0 ? sumFinite(breakdowns.map(selector)) / wallSum : undefined;
+  const shareOfSearchWall = {};
+  for (const key of TVM_PHASE_KEYS) shareOfSearchWall[key] = share((b) => b.phases[key]);
+  shareOfSearchWall.legalPriorsMs = share((b) => b.legalPriorsMs);
+  shareOfSearchWall.searchJsOverheadMs = share((b) => b.searchJsOverheadMs);
+  return {
+    note: 'Sums of per-batch evaluator phase buckets per TVMJS search, reconciled against search wall time. tvmInvokeMs is CPU-side submit; GPU completion is awaited inside outputReadbackMs.',
+    rows: breakdowns.length,
+    searchWallMs: timingStats(breakdowns.map((b) => b.searchWallMs)),
+    inEvaluatorMs: timingStats(breakdowns.map((b) => b.inEvaluatorMs)),
+    searchJsOverheadMs: timingStats(breakdowns.map((b) => b.searchJsOverheadMs)),
+    evalBatchesPerSearch: timingStats(breakdowns.map((b) => b.evalBatches)),
+    meanLogicalBatchSize: breakdowns.length ? sumFinite(breakdowns.map((b) => b.meanLogicalBatchSize)) / breakdowns.length : undefined,
+    meanBatchFillRate: breakdowns.length ? sumFinite(breakdowns.map((b) => b.batchFillRate)) / breakdowns.length : undefined,
+    phaseTotals: Object.fromEntries(TVM_PHASE_KEYS.map((key) => [key, timingStats(breakdowns.map((b) => b.phases[key]))])),
+    shareOfSearchWall,
+  };
+}
 function uniqueBatchTimings(rowTimings) {
   const seen = new Set();
   const out = [];
@@ -487,9 +540,18 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
     const rows = [];
     for (let repeat = 0; repeat < repeats; repeat++) {
       for (const fen of fens) {
+        const evalBatchStart = tvmProvider.evaluationTimings.length;
+        const evalPositionStart = tvmProvider.positionTimings.length;
         const t0 = performance.now();
         const tvmResult = await tvmSearcher.search(fen, { visits, batchSize: batch, temperature: 0 });
         const tvmMs = performance.now() - t0;
+        const tvmVisitLoop = visitLoopAttribution(
+          tvmProvider.evaluationTimings.slice(evalBatchStart),
+          tvmProvider.positionTimings.slice(evalPositionStart),
+          tvmMs,
+          batch,
+        );
+        const tvmStats = tvmResult.search?.stats;
         const o0 = performance.now();
         const ortResult = await ortSearcher.search(fen, { visits, batchSize: batch, temperature: 0 });
         const ortMs = performance.now() - o0;
@@ -502,6 +564,18 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
           moveMatches: tvmResult.move === ortResult.move,
           tvmMs,
           ortMs,
+          tvmVisitLoop,
+          tvmSearchStats: tvmStats ? {
+            completedVisits: tvmStats.completedVisits,
+            expansions: tvmStats.expansions,
+            terminalHits: tvmStats.terminalHits,
+            evalCalls: tvmStats.evalCalls,
+            batchEvalCalls: tvmStats.batchEvalCalls,
+            maxEvalBatch: tvmStats.maxEvalBatch,
+            evalBatchSizeHistogram: tvmStats.evalBatchSizeHistogram,
+            batchLeafCollisions: tvmStats.batchLeafCollisions,
+            batchLeafRetries: tvmStats.batchLeafRetries,
+          } : undefined,
           tvmTop: tvmResult.children.slice(0, 5),
           ortTop: ortResult.children.slice(0, 5),
         });
@@ -520,6 +594,7 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
       tvmEvalTimingRows: tvmProvider.evaluationTimings.length,
       tvmEvalPositionTiming: timingStatsByKey(tvmProvider.positionTimings, TVM_POSITION_TIMING_KEYS),
       tvmEvalPositionTimingRows: tvmProvider.positionTimings.length,
+      visitLoopBreakdown: aggregateVisitLoopBreakdown(rows),
       ...(stockfish ? { stockfish } : {}),
       rows,
     };

@@ -331,6 +331,29 @@ Current timing-breakdown sidecar summary:
 - Caveat: older smoke artifacts do not contain per-evaluation phase buckets. Newly generated smoke artifacts include `evalTiming` and `searchParity.tvmEvalTiming` buckets for encode, f16 conversion, tensor allocation, upload, `set_input`, VM invoke, output handle fetch, readback/sync, decode, and legal-prior filtering.
 - New one-fixture timing proof: `artifacts/tvm/lc0_tvmjs_webgpu_smoke_b8_fixture1_timing.json` and `artifacts/tvm/lc0_tvmjs_timing_breakdown_b8_fixture1.json` show fixture parity `1/1`, top-level invoke `5.435 ms`, known startup phase sum `364.845 ms`, per-eval batch eval `14.545 ms`, VM invoke `2.675 ms`, and output readback/sync `10.325 ms`.
 
+### Visit-loop attribution (per-search wall-time reconciliation)
+
+Search-parity rows now carry `tvmVisitLoop` (per-search sums of the evaluator phase
+buckets reconciled against that search's wall time, plus batch-fill stats) and
+`tvmSearchStats` (visit/batch counters from the PUCT searcher). The aggregate is
+`searchParity.visitLoopBreakdown` with per-phase totals and `shareOfSearchWall`.
+Phase semantics: `tvmInvokeMs` is CPU-side VM submit; GPU completion is awaited
+inside `outputReadbackMs`, so the readback share includes the GPU compute wait.
+
+```bash
+node scripts/lc0_tvmjs_webgpu_smoke.mjs --batch 8 --fixture-count 8 \
+  --search-visits 16 --search-fixtures 4 --search-repeats 2 \
+  --out artifacts/tvm/lc0_tvmjs_visit_loop_profile_b8_v16.json
+```
+
+Current visit-loop attribution result (`artifacts/tvm/lc0_tvmjs_visit_loop_profile_b8_v16.json`,
+8 search rows at v16/b8, search parity 8/8, native fixture parity 8/8):
+
+- Search wall mean `52.88 ms`; in-evaluator mean `50.98 ms` (`96.4%`); JS search overhead (selection, PUCT, backup, context building) mean `1.90 ms` (`3.6%`).
+- Share of search wall: output readback/GPU-wait `86.6%`, VM submit `4.6%`, encode `1.5%`, f16 input convert `1.1%`, legal priors `1.1%`, output decode `0.9%`; tensor alloc, upload, `set_input`, and handle fetch each `<0.3%`.
+- Eval batches per search: `3`; mean logical batch size `4.83/8` (`60.4%` fill); per-search leaf-collision retries ranged `11–69`.
+- Reading: the visit loop is serialized on per-batch GPU completion (about `14 ms` per batch, of which about `2.4 ms` is CPU submit). The lever order is therefore (1) overlap/pipelining so encode/upload/submit of batch N+1 happens during batch N's GPU work (deferred readback, as in the ORT readback diagnostics lane), (2) batch fill / larger logical batches, (3) kernel tuning. JS search optimization is not a lever at ~`2 ms` per search.
+
 Strict same-FEN visit sweep samples now cover visits `16`, `32`, and `64`:
 
 - `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n1_r1_hybrid_alloc.json`: rows `1`, TVMJS-vs-hybrid `1/1`, TVMJS mean `78.205 ms`, hybrid mean `404.665 ms`.
