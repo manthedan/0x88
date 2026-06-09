@@ -146,6 +146,7 @@ function summarizeTvmjs(artifact) {
     fixtureCount: artifact?.result?.fixtureCount,
     invokeMs: artifact?.result?.invokeMs,
     startupTimings: artifact?.result?.startupTimings,
+    gpuBufferAllocation: artifact?.result?.gpuBufferAllocation,
     nativeMatches: artifact?.result?.bestMoveMatches,
     nativeComparable: artifact?.result?.nativeComparable,
     ortF16Matches: artifact?.result?.ortComparisons?.f16?.bestMoveMatches,

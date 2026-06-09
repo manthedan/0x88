@@ -14,12 +14,25 @@ The whole-model LC0 f16 ONNX → TVM Relax → TVMJS/WebGPU path is mechanically
 
 It is **not promotion-ready** yet because the evidence is still smoke-derived and generated artifacts are local/ignored. Promotion remains blocked by the checklist below.
 
+## Promotion readiness snapshot
+
+| Area | Current state | Promotion implication |
+| --- | --- | --- |
+| Default runtime safety | ORT ONNX/WebGPU remains stable default; TVMJS is absent from runtime registry/default UI. | Safe to continue research without changing product behavior. |
+| Browser execution | Whole-model f16 TVMJS/WebGPU loads, verifies wasm SHA/bytes, requests `shader-f16`, prebuilds pipelines, and runs Relax VM. | Mechanically close to opt-in, not default. |
+| ORT f16 comparison | Smoke/search rows currently match ORT f16 WebGPU in local evidence. | Promising, but still smoke-derived. |
+| Hybrid comparison | Same-server and strict same-FEN TVMJS-vs-hybrid matrix exists. | First direct evidence exists; expand beyond n=2 smoke rows. |
+| Startup timing | TVMJS smoke records bundle load, wasm fetch/verify, instantiate, WebGPU device, pipeline prebuild, VM creation, and input upload. | Good enough for first amortization analysis. |
+| GPU footprint | TVMJS smoke monkeypatches `GPUDevice.createBuffer` and reports allocation counts/bytes/categories. | Prototype only; compare against hybrid/ORT with same instrumentation next. |
+| Fixed-suite evidence | Existing reports are fixed-suite-style but smoke-harness based. | Still blocked from promotion. |
+| Artifact release | Generated TVMJS wasm/runtime artifacts remain ignored/local. | Publication/hosting/cache policy required. |
+
 ## Promotion blockers
 
-- Direct same-session full-model TVMJS vs custom hybrid TVM/WGSL comparison.
+- Expand direct same-session full-model TVMJS vs custom hybrid TVM/WGSL comparison beyond smoke-sized rows.
 - Production-style fixed-suite integration, not only `lc0-tvmjs-webgpu-smoke.html`.
 - Repeated throughput and startup/pipeline compile amortization evidence.
-- GPU allocation/footprint instrumentation.
+- Cross-runtime GPU allocation/footprint instrumentation, including hybrid and ORT where possible.
 - Release/hosting/cache policy for generated model/runtime wasm artifacts.
 - f16 drift/tolerance policy against native/ORT baselines.
 
@@ -185,7 +198,10 @@ npm run lc0:tvmjs-vs-hybrid-matrix -- \
   --out artifacts/tvm/lc0_tvmjs_vs_hybrid_b8_hb4_v32_n4_r1.json
 ```
 
-The wrapper writes an aggregate `lc0_browser.tvmjs_vs_hybrid_matrix.v1` JSON artifact and child artifacts for each lane. With `--fens`, both lanes run the same FEN rows. The TVMJS child artifact and aggregate include `startupTimings` for manifest fetch, TVMJS bundle load, WebGPU adapter/device acquisition, wasm fetch/verification, async wasm instantiate, TVM WebGPU init, `systemLib`, WebGPU pipeline prebuild, VM creation, input tensor allocation, and input upload.
+The wrapper writes an aggregate `lc0_browser.tvmjs_vs_hybrid_matrix.v1` JSON artifact and child artifacts for each lane. With `--fens`, both lanes run the same FEN rows. The TVMJS child artifact and aggregate include:
+
+- `startupTimings`: manifest fetch, TVMJS bundle load, WebGPU adapter/device acquisition, wasm fetch/verification, async wasm instantiate, TVM WebGPU init, `systemLib`, WebGPU pipeline prebuild, VM creation, input tensor allocation, and input upload.
+- `gpuBufferAllocation`: a `GPUDevice.createBuffer` monkeypatch snapshot with buffer count, total bytes, max buffer bytes, mapped-at-creation count, and usage-category totals. This is a prototype allocation footprint, not a browser/GPU-resident memory guarantee.
 
 First local wrapper artifacts:
 
@@ -211,6 +227,36 @@ Summary from the strict same-FEN UHO-lite smoke matrix:
 - Hybrid b4 WGSL-heads mean search timing: `224.76 ms`.
 - TVMJS-vs-ORT f16 move match within the TVMJS lane: `2/2`.
 - Hybrid arbitrary-FEN mode has no native best-move oracle; compare row moves, timings, and hybrid depth-baseline stability.
+
+Startup/footprint sample from `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n2_r1_startup.json`:
+
+- TVMJS bundle load: `3.505 ms`.
+- wasm fetch+verify: `126.82 ms`.
+- TVMJS instantiate: `42.47 ms`.
+- WebGPU pipeline prebuild: `101.635 ms`.
+- VM creation: `27.78 ms`.
+
+## GPU allocation instrumentation plan
+
+Current prototype:
+
+- `lc0-tvmjs-webgpu-smoke.html` wraps the acquired TVMJS `GPUDevice.createBuffer` before TVM initialization and model execution.
+- The result reports total allocation calls/bytes and categories decoded from `GPUBufferUsage` flags.
+- This captures buffers created through that JS device object after patch installation.
+
+Known limitations:
+
+- It is allocation-request telemetry, not a definitive GPU memory residency measurement.
+- It does not observe allocations hidden behind a different device object.
+- It does not yet patch the hybrid/ORT paths in `lc0-policy-only.html` / `lc0-arena.html`.
+- It does not decrement on destruction; use it for startup footprint comparison, not live-memory accounting.
+
+Next footprint work:
+
+1. Install the same `createBuffer` probe in the hybrid policy-only page and arena fixed-suite page.
+2. Add a wrapper summary comparing TVMJS vs hybrid buffer counts/bytes on strict same-FEN rows.
+3. Investigate whether ORT WebGPU exposes enough surface to patch the device it uses; otherwise record ORT as unknown/indirect.
+4. Add artifact/network footprint sidecars for raw/gzip/brotli staged bundle size.
 
 ## Recipes for additional net families
 
