@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createHash } from 'node:crypto';
 import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
@@ -22,6 +23,7 @@ Options:
   --agent-browser BIN        Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)
   --session NAME             agent-browser session name
   --timeout MS               Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})
+  --progress-timeout MS      Fail if #benchResult does not change for this long (default: disabled)
   --visits LIST              Comma-separated fixed-visit fixture sets, e.g. 32,64 (default 32)
   --preset NAME              Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)
   --batch N                  Search leaf batch size (default 4)
@@ -30,7 +32,6 @@ Options:
   --fixture-limit N          Fixtures per visit set (max currently 16, default 16)
   --fixture-ids LIST         Comma-separated native fixture IDs to run before applying --fixture-limit
   --trace-root-children      Include depth-baseline/root child visit/prior/q traces in the browser artifact
-  --trace-search-visits      Include per-batch selection/backup search trace in the browser artifact
   --layers N                 Encoder layers (default 10)
   --head-backend MODE        ort or wgsl (default ort; use wgsl to opt into experimental WGSL heads)
   --encoder-kernel MODE      hand, mixed-tvm-ffn, mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project, tvm-packed-f16 (default hand)
@@ -45,6 +46,13 @@ Options:
 `);
 }
 
+function sanitizeAgentBrowserSessionName(value) {
+  const safe = String(value).replace(/[^A-Za-z0-9_.-]+/g, '-');
+  if (safe.length <= 60) return safe;
+  const hash = createHash('sha1').update(safe).digest('hex').slice(0, 10);
+  return `${safe.slice(0, 49)}-${hash}`;
+}
+
 function parseList(raw, mapper = Number, label = 'list') {
   const values = String(raw).split(',').map((entry) => entry.trim()).filter(Boolean).map(mapper);
   if (!values.length) throw new Error(`Invalid --${label}: empty list`);
@@ -56,6 +64,7 @@ function parseArgs(argv) {
     host: DEFAULT_HOST,
     port: DEFAULT_PORT,
     timeoutMs: DEFAULT_TIMEOUT_MS,
+    progressTimeoutMs: 0,
     agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
     session: process.env.AGENT_BROWSER_SESSION ?? `lc0-search-fixture-parity-${process.pid}`,
     visits: [32],
@@ -66,7 +75,6 @@ function parseArgs(argv) {
     fixtureLimit: 16,
     fixtureIds: [],
     traceRootChildren: false,
-    traceSearchVisits: false,
     layers: 10,
     headBackend: 'ort',
     encoderKernel: 'hand',
@@ -92,6 +100,7 @@ function parseArgs(argv) {
     else if (arg === '--agent-browser') args.agentBrowser = next();
     else if (arg === '--session') args.session = next();
     else if (arg === '--timeout') args.timeoutMs = Number(next());
+    else if (arg === '--progress-timeout') args.progressTimeoutMs = Number(next());
     else if (arg === '--visits') args.visits = parseList(next(), Number, 'visits');
     else if (arg === '--preset') args.preset = next();
     else if (arg === '--batch') args.batch = Number(next());
@@ -100,7 +109,6 @@ function parseArgs(argv) {
     else if (arg === '--fixture-limit' || arg === '--fixtures') args.fixtureLimit = Number(next());
     else if (arg === '--fixture-ids') args.fixtureIds = next().split(',').map((value) => value.trim()).filter(Boolean);
     else if (arg === '--trace-root-children') args.traceRootChildren = true;
-    else if (arg === '--trace-search-visits') args.traceSearchVisits = true;
     else if (arg === '--layers') args.layers = Number(next());
     else if (arg === '--head-backend') args.headBackend = next();
     else if (arg === '--encoder-kernel') args.encoderKernel = next();
@@ -125,10 +133,12 @@ function parseArgs(argv) {
   for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs], ['batch', args.batch], ['repeats', args.repeats], ['fixture-limit', args.fixtureLimit], ['layers', args.layers]]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
+  if (!Number.isFinite(args.progressTimeoutMs) || args.progressTimeoutMs < 0) throw new Error(`Invalid --progress-timeout: ${args.progressTimeoutMs}`);
   if (args.maxDepthVisitL1 !== undefined && (!Number.isFinite(args.maxDepthVisitL1) || args.maxDepthVisitL1 < 0 || args.maxDepthVisitL1 > 2)) throw new Error(`Invalid --max-depth-visit-l1: ${args.maxDepthVisitL1}`);
   for (const [name, values] of [['visits', args.visits], ['batch-pipeline-depths', args.batchPipelineDepths]]) {
     if (values.some((value) => !Number.isFinite(value) || value <= 0)) throw new Error(`Invalid --${name}: ${values.join(',')}`);
   }
+  args.session = sanitizeAgentBrowserSessionName(args.session);
   args.batchPipelineDepths = [1, ...args.batchPipelineDepths.filter((depth) => depth !== 1)];
   return args;
 }
@@ -150,7 +160,6 @@ function parityUrl(args) {
   url.searchParams.set('fixtureLimit', String(args.fixtureLimit));
   if (args.fixtureIds.length) url.searchParams.set('fixtureIds', args.fixtureIds.join(','));
   if (args.traceRootChildren) url.searchParams.set('traceRootChildren', '1');
-  if (args.traceSearchVisits) url.searchParams.set('traceSearchVisits', '1');
   url.searchParams.set('ep', 'wasm');
   if (!args.packVerify) url.searchParams.set('packVerify', '0');
   return String(url);
@@ -205,8 +214,24 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
 function startServer(args) {
   if (args.noServer) return null;
   const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'] });
-  server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
-  server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
+  let output = '';
+  let readySettled = false;
+  server.ready = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => settle(reject, new Error(`Vite dev server did not report readiness on port ${args.port}: ${output.trim()}`)), 30_000);
+    const settle = (fn, value) => {
+      if (readySettled) return;
+      readySettled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const onOutput = (chunk) => {
+      output += chunk.toString('utf8');
+      if (/ready in \d+\s*ms/.test(output) || output.includes(`:${args.port}/`)) settle(resolve);
+    };
+    server.stdout.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
+    server.stderr.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
+    server.on('exit', (status, signal) => settle(reject, new Error(`Vite dev server exited before ready (${status ?? signal}): ${output.trim()}`)));
+  });
   return server;
 }
 
@@ -225,27 +250,42 @@ function omitVerboseTrace(cell) {
 async function runBrowserParity(args) {
   const url = parityUrl(args);
   process.stderr.write(`[lc0-search-fixture-parity] ${url}\n`);
+  let lastBenchText = '';
+  let lastProgressAt = Date.now();
+  const progressWindow = args.progressTimeoutMs > 0 ? args.progressTimeoutMs : args.timeoutMs;
   try {
     await runAgent(args, ['open', url], 30_000);
     const deadline = Date.now() + args.timeoutMs;
     while (Date.now() < deadline) {
-      const chunk = Math.min(25_000, Math.max(1000, deadline - Date.now()));
-      let doneSeen = false;
+      const chunk = Math.min(5_000, Math.max(1000, deadline - Date.now()));
+      let benchText = lastBenchText;
       try {
-        await runAgent(args, ['wait', '--text', 'HYBRID_SEARCH_FIXTURE_PARITY_DONE', '--timeout', String(chunk)], chunk + 5_000);
-        doneSeen = true;
-        const text = textFromGetResult(await runAgent(args, ['get', 'text', '#benchResult'], 30_000));
-        const result = JSON.parse(text);
+        benchText = textFromGetResult(await runAgent(args, ['get', 'text', '#benchResult'], chunk + 5_000));
+      } catch (error) {
+        if (Date.now() >= deadline) throw error;
+        await delay(250);
+        continue;
+      }
+      if (benchText !== lastBenchText) {
+        lastBenchText = benchText;
+        lastProgressAt = Date.now();
+        process.stderr.write(`[lc0-search-fixture-parity] progress ${benchText.slice(0, 160).replace(/\s+/g, ' ')}${benchText.length > 160 ? '…' : ''}\n`);
+      }
+      if (benchText.startsWith('HYBRID_SEARCH_FIXTURE_PARITY_FAILED')) throw new Error(benchText);
+      if (benchText.includes('HYBRID_SEARCH_FIXTURE_PARITY_DONE')) {
+        const result = JSON.parse(benchText);
         if (result.status !== 'HYBRID_SEARCH_FIXTURE_PARITY_DONE') throw new Error(`unexpected status: ${result.status}`);
         const expectedBackend = args.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
         if (result.backend !== expectedBackend) throw new Error(`unexpected backend: ${result.backend}`);
         if ((result.encoderKernelVariant ?? 'hand') !== args.encoderKernel) throw new Error(`unexpected encoder kernel: ${result.encoderKernelVariant ?? 'hand'}`);
         return { ...result, scriptPreset: args.preset || null, runtimeConfiguration: lc0RuntimeConfiguration(args) };
-      } catch (error) {
-        if (doneSeen || Date.now() >= deadline) throw error;
       }
+      if (Date.now() - lastProgressAt > progressWindow) {
+        throw new Error(`No hybrid search fixture parity progress for ${Date.now() - lastProgressAt}ms (last #benchResult: ${lastBenchText || 'empty'})`);
+      }
+      await delay(250);
     }
-    throw new Error(`Timed out waiting for HYBRID_SEARCH_FIXTURE_PARITY_DONE after ${args.timeoutMs}ms`);
+    throw new Error(`Timed out waiting for HYBRID_SEARCH_FIXTURE_PARITY_DONE after ${args.timeoutMs}ms (last #benchResult: ${lastBenchText || 'empty'})`);
   } finally { await closeAgentSession(args); }
 }
 
@@ -258,6 +298,7 @@ async function main() {
   if (args.dryRun) { console.log(parityUrl(args)); return; }
   const server = startServer(args);
   try {
+    if (server) await server.ready;
     await waitForServer(args.baseUrl);
     const result = await runBrowserParity(args);
     if (args.out) {
