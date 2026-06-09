@@ -18,8 +18,30 @@ function copyTracked(src, dst, root) {
   return { path: relative(root, dst).replaceAll('\\', '/'), bytes: statSync(dst).size, sha256: sha256(dst) };
 }
 
+function parseBatches(raw) {
+  const tokens = String(raw).split(',').map((item) => item.trim());
+  if (!tokens.length) throw new Error(`Invalid --batches: ${raw}`);
+  const batches = [];
+  for (const token of tokens) {
+    if (!/^[-+]?\d+$/.test(token)) throw new Error(`Invalid positive integer batch token '${token}' in --batches=${raw}`);
+    const value = Number(token);
+    if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`Invalid positive integer batch token '${token}' in --batches=${raw}`);
+    batches.push(value);
+  }
+  if (!batches.length) throw new Error(`Invalid --batches: ${raw}`);
+  return batches;
+}
+function renderTemplate(template, values) {
+  return String(template).replaceAll('{modelFamily}', values.modelFamily).replaceAll('{dtype}', values.dtype).replaceAll('{batch}', String(values.batch));
+}
+
 const repo = process.cwd();
-const out = resolve(arg('out', 'public/runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-swa-2432500/f16/v1'));
+const modelFamily = arg('model-family', process.env.LC0_TVMJS_MODEL_FAMILY ?? 't1-256x10-distilled-swa-2432500');
+const dtype = arg('dtype', process.env.LC0_TVMJS_DTYPE ?? 'f16');
+const version = arg('version', process.env.LC0_TVMJS_VERSION ?? 'v1');
+const batches = parseBatches(arg('batches', process.env.LC0_TVMJS_BATCHES ?? '1,4,8'));
+const stemTemplate = arg('stem-template', process.env.LC0_TVMJS_STEM_TEMPLATE ?? '{modelFamily}.batch{batch}.{dtype}.webgpu.tvmjs-wasm.probe');
+const out = resolve(arg('out', process.env.LC0_TVMJS_OUT ?? `public/runtimes/lc0-tvmjs-webgpu/${modelFamily}/${dtype}/${version}`));
 if (flag('clean')) {
   rmSync(out, { recursive: true, force: true });
   console.log(JSON.stringify({ ok: true, action: 'clean', out }, null, 2));
@@ -31,14 +53,13 @@ const tvmjsBundle = resolve(arg('tvmjs-bundle', join(tvmSrc, 'web/dist/tvmjs.bun
 const tvmjsRuntimeWasm = resolve(arg('tvmjs-runtime-wasm', join(tvmSrc, 'web/dist/wasm/tvmjs_runtime.wasm')));
 const manifestName = arg('manifest-name', 'manifest.json');
 
-const batches = [1, 4, 8];
 mkdirSync(out, { recursive: true });
 const files = [];
 files.push(copyTracked(tvmjsBundle, join(out, 'tvmjs.bundle.js'), out));
 files.push(copyTracked(tvmjsRuntimeWasm, join(out, 'tvmjs_runtime.wasm'), out));
 const models = [];
 for (const batch of batches) {
-  const stem = `t1-256x10-distilled-swa-2432500.batch${batch}.f16.webgpu.tvmjs-wasm.probe`;
+  const stem = renderTemplate(stemTemplate, { modelFamily, dtype, batch });
   const wasm = join(artifacts, `${stem}.tvmjs.wasm`);
   const probe = join(artifacts, `${stem}.json`);
   files.push(copyTracked(wasm, join(out, basename(wasm)), out));
@@ -53,8 +74,9 @@ for (const batch of batches) {
 }
 const manifest = {
   schema: 'lc0_browser.lc0_tvmjs_webgpu_bundle.v1',
-  modelFamily: 't1-256x10-distilled-swa-2432500',
-  dtype: 'f16',
+  modelFamily,
+  dtype,
+  version,
   target: 'webgpu',
   hostTarget: { kind: 'llvm', mtriple: 'wasm32-unknown-unknown-wasm' },
   generatedAt: new Date().toISOString(),

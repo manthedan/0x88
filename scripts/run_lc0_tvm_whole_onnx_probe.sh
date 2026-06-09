@@ -5,7 +5,7 @@ set -euo pipefail
 # Run from anywhere; durable TVM state lives under /Users/macthedan/projects/lc0_browser.
 
 ROOT="${LC0_BROWSER_ROOT:-/Users/macthedan/projects/lc0_browser}"
-REPO="$ROOT/leelaweb"
+REPO="${LC0_WEB_REPO:-$ROOT/leelaweb}"
 TVM_SRC="${TVM_SRC:-$ROOT/.deps/tvm-webgpu-src}"
 TVM_ENV="${TVM_ENV:-$ROOT/.envs/tvm-mlc-py313}"
 TARGET="${TVM_TARGET:-webgpu}"
@@ -18,17 +18,6 @@ export PATH="/opt/homebrew/bin:/opt/homebrew/opt/llvm/bin:$TVM_ENV/bin:${PATH:-}
 export TVM_LIBRARY_PATH="$TVM_LIB_DIR"
 export DYLD_LIBRARY_PATH="$TVM_LIB_DIR:/opt/homebrew/opt/llvm/lib:${DYLD_LIBRARY_PATH:-}"
 export PYTHONPATH="$TVM_SRC/python:${PYTHONPATH:-}"
-
-if [[ ! -x "$TVM_ENV/bin/python" ]]; then
-  echo "Missing TVM python: $TVM_ENV/bin/python" >&2
-  exit 2
-fi
-if [[ ! -d "$TVM_LIB_DIR" ]]; then
-  echo "Missing TVM build lib dir: $TVM_LIB_DIR" >&2
-  exit 2
-fi
-
-mkdir -p "$OUT_DIR"
 
 extra_args=()
 if [[ "${CAST_INT64_INITIALIZERS_TO_INT32:-0}" == "1" ]]; then
@@ -50,11 +39,60 @@ if [[ "${EXPORT_TVMJS_WASM:-0}" == "1" ]]; then
   extra_args+=(--export-tvmjs-wasm)
 fi
 
-models=(
-  "t1-256x10-distilled-swa-2432500.batch1.f16.onnx"
-  "t1-256x10-distilled-swa-2432500.batch4.f16.onnx"
-  "t1-256x10-distilled-swa-2432500.batch8.f16.onnx"
-)
+MODEL_FAMILY="${LC0_TVMJS_MODEL_FAMILY:-t1-256x10-distilled-swa-2432500}"
+DTYPE="${LC0_TVMJS_DTYPE:-f16}"
+BATCHES_CSV="${LC0_TVMJS_BATCHES:-1,4,8}"
+if [[ -n "${LC0_TVMJS_MODEL_TEMPLATE:-}" ]]; then
+  MODEL_TEMPLATE="$LC0_TVMJS_MODEL_TEMPLATE"
+else
+  MODEL_TEMPLATE='{family}.batch{batch}.{dtype}.onnx'
+fi
+
+IFS=',' read -r -a batches <<< "$BATCHES_CSV"
+models=()
+for raw_batch in "${batches[@]}"; do
+  batch="${raw_batch//[[:space:]]/}"
+  if [[ -z "$batch" ]]; then
+    echo "Invalid empty batch token in LC0_TVMJS_BATCHES=$BATCHES_CSV" >&2
+    exit 2
+  fi
+  if [[ ! "$batch" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Invalid positive-integer batch token '$batch' in LC0_TVMJS_BATCHES=$BATCHES_CSV" >&2
+    exit 2
+  fi
+  model="$MODEL_TEMPLATE"
+  model="${model//\{family\}/$MODEL_FAMILY}"
+  model="${model//\{modelFamily\}/$MODEL_FAMILY}"
+  model="${model//\{batch\}/$batch}"
+  model="${model//\{dtype\}/$DTYPE}"
+  models+=("$model")
+done
+
+if [[ "${#models[@]}" -eq 0 ]]; then
+  echo "No models resolved from LC0_TVMJS_BATCHES=$BATCHES_CSV" >&2
+  exit 2
+fi
+
+if [[ "${DRY_RUN:-0}" == "1" ]]; then
+  printf '[lc0-tvm-probe] repo=%s\n' "$REPO"
+  printf '[lc0-tvm-probe] model_dir=%s\n' "$MODEL_DIR"
+  printf '[lc0-tvm-probe] out_dir=%s\n' "$OUT_DIR"
+  printf '[lc0-tvm-probe] target=%s\n' "$TARGET"
+  printf '[lc0-tvm-probe] models:\n'
+  printf '  %s\n' "${models[@]}"
+  exit 0
+fi
+
+if [[ ! -x "$TVM_ENV/bin/python" ]]; then
+  echo "Missing TVM python: $TVM_ENV/bin/python" >&2
+  exit 2
+fi
+if [[ ! -d "$TVM_LIB_DIR" ]]; then
+  echo "Missing TVM build lib dir: $TVM_LIB_DIR" >&2
+  exit 2
+fi
+
+mkdir -p "$OUT_DIR"
 
 for model in "${models[@]}"; do
   model_path="$MODEL_DIR/$model"

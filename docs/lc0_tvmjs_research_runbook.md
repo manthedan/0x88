@@ -274,12 +274,16 @@ Known limitations:
 
 - It is allocation-request telemetry, not a definitive GPU memory residency measurement.
 - It does not observe allocations hidden behind a different device object.
-- It does not yet patch the hybrid/ORT paths in `lc0-policy-only.html` / `lc0-arena.html`.
 - It does not decrement on destruction; use it for startup footprint comparison, not live-memory accounting.
+
+Hybrid/ORT follow-up rationale:
+
+- Hybrid allocation telemetry should be added as a dedicated follow-up because the hybrid runtime is initialized through the policy-only worker/device path, not the TVMJS smoke page's single acquired device. A safe patch needs to instrument the worker-side device creation path used by `lc0-policy-only.html` and ensure it does not perturb existing WGSL/ORT probes.
+- ORT WebGPU allocation telemetry may not be directly observable unless the ORT EP uses a patchable JS `GPUDevice`; if not, record ORT footprint as indirect/unknown and rely on network/model footprint plus timing.
 
 Next footprint work:
 
-1. Install the same `createBuffer` probe in the hybrid policy-only page and arena fixed-suite page.
+1. Install the same `createBuffer` probe in the hybrid policy-only worker/device path and arena fixed-suite page.
 2. Add a wrapper summary comparing TVMJS vs hybrid buffer counts/bytes on strict same-FEN rows.
 3. Investigate whether ORT WebGPU exposes enough surface to patch the device it uses; otherwise record ORT as unknown/indirect.
 4. Add artifact/network footprint sidecars for raw/gzip/brotli staged bundle size.
@@ -308,13 +312,50 @@ Per net family:
 Template environment for a new net:
 
 ```bash
-export LC0_TVMJS_MODEL_ID='<family>/<net-id>'
-export LC0_TVMJS_PRECISION='f16'
+export LC0_WEB_REPO="$WEB"
+export LC0_TVMJS_MODEL_FAMILY='bt4-large/<net-id>'
+export LC0_TVMJS_DTYPE='f16'
 export LC0_TVMJS_VERSION='v1'
-# TODO: wire these env vars into staging/export scripts before relying on them.
+export LC0_TVMJS_BATCHES='1,4,8'
+# Default model template is: {family}.batch{batch}.{dtype}.onnx
+# Override when source ONNX names differ, e.g.:
+# export LC0_TVMJS_MODEL_TEMPLATE='{family}.b{batch}.{dtype}.onnx'
 ```
 
-Current scripts are still default-model oriented. Before repeating this at scale, parameterize the export/staging/check scripts so model id, ONNX paths, precision, batch list, and destination manifest path are explicit CLI/env inputs.
+Check resolved export inputs before compiling:
+
+```bash
+cd "$WEB"
+DRY_RUN=1 ./scripts/run_lc0_tvm_whole_onnx_probe.sh
+```
+
+Export with the same TVMJS mitigations:
+
+```bash
+cd "$WEB"
+CAST_INT64_INITIALIZERS_TO_INT32=1 \
+TRUST_NONNEGATIVE_GATHER_INDICES=1 \
+SANITIZE_ONNX_NAMES=1 \
+EXPORT_TVMJS_WASM=1 \
+TVM_BUILD_DIR=build-tvmjs \
+TVM_HOST_TARGET='{"kind":"llvm","mtriple":"wasm32-unknown-unknown-wasm"}' \
+./scripts/run_lc0_tvm_whole_onnx_probe.sh
+```
+
+Stage a family-specific bundle:
+
+```bash
+cd "$WEB"
+npm run lc0:stage-tvmjs-webgpu -- \
+  --model-family="$LC0_TVMJS_MODEL_FAMILY" \
+  --dtype="$LC0_TVMJS_DTYPE" \
+  --version="$LC0_TVMJS_VERSION" \
+  --batches="$LC0_TVMJS_BATCHES"
+```
+
+The staging script also accepts `--stem-template='{modelFamily}.batch{batch}.{dtype}.webgpu.tvmjs-wasm.probe'` when exported artifact stems differ from the default.
+
+The export and staging scripts are now parameterized for model family, dtype, batch list, naming templates, and destination path. The local artifact checker is still default-bundle oriented, so promotion/publication for new families should add a manifest-specific check before release.
 
 ## Evidence naming convention
 
