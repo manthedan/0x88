@@ -1,0 +1,642 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>LC0 TVMJS/WebGPU smoke</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; }
+  pre { background: #111; color: #eee; padding: 1rem; white-space: pre-wrap; }
+</style>
+<h1>LC0 TVMJS/WebGPU smoke</h1>
+<p>Loads the staged whole-model TVMJS/WebGPU wasm bundle and prebuilds WebGPU pipelines. This is a loader smoke, not parity/perf evidence.</p>
+<label>Manifest <input id="manifest" size="90" value="/runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json" /></label>
+<label>Batch <select id="batch"><option>1</option><option>4</option><option>8</option></select></label>
+<label><input id="invoke" type="checkbox" /> Invoke zero-input VM</label>
+<label><input id="fixtures" type="checkbox" /> Use real LC0 fixtures</label>
+<label>ORT compare <select id="ortCompare"><option value="none">none</option><option value="f16">f16</option><option value="f32">f32</option><option value="both">both</option></select></label>
+<label>ORT EP <select id="ortEp"><option value="webgpu">webgpu</option><option value="wasm">wasm</option><option value="webgpu,wasm">webgpu,wasm</option></select></label>
+<button id="run">Run smoke</button>
+<pre id="log"></pre>
+<script type="module">
+import { boardToFen, parseFen } from '/src/chess/board.ts';
+import { legalMoves, makeMove } from '/src/chess/movegen.ts';
+import { moveFromUci, moveToUci } from '/src/chess/moveCodec.ts';
+import { encodeLc0Classical112 } from '/src/lc0/encoder112.ts';
+import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from '/src/lc0/policyMap.ts';
+import { Lc0OnnxEvaluator } from '/src/lc0/onnxEvaluator.ts';
+import { Lc0PuctSearcher } from '/src/lc0/search.ts';
+import { StockfishEngine } from '/src/lc0/stockfishEngine.ts';
+import { setRequestedOrtExecutionProviderForCurrentThread } from '/src/nn/ortRuntime.ts';
+
+const LC0_POLICY_TEMPERATURE = 1.359;
+const LC0_POLICY_SIZE = 1858;
+const LC0_INPUT_PLANES_SIZE = 112 * 8 * 8;
+const STAGED_TVMJS_RUNTIME_PREFIX = '/runtimes/lc0-tvmjs-webgpu/';
+const logEl = document.getElementById('log');
+function log(...args) {
+  logEl.textContent += `${args.map((x) => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')}\n`;
+}
+async function sha256Hex(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+function checkedStagedRuntimeUrl(value, baseUrl, label) {
+  const url = new URL(value, baseUrl);
+  if (url.origin !== location.origin) throw new Error(`${label} must be same-origin: ${url}`);
+  if (!url.pathname.startsWith(STAGED_TVMJS_RUNTIME_PREFIX)) throw new Error(`${label} must stay under ${STAGED_TVMJS_RUNTIME_PREFIX}: ${url.pathname}`);
+  return url;
+}
+async function fetchChecked(baseUrl, rel, expected) {
+  const url = checkedStagedRuntimeUrl(rel, baseUrl, `artifact ${rel}`).toString();
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Fetch failed ${response.status}: ${url}`);
+  const bytes = await response.arrayBuffer();
+  if (expected?.bytes != null && bytes.byteLength !== expected.bytes) throw new Error(`Size mismatch for ${rel}: ${bytes.byteLength} != ${expected.bytes}`);
+  if (expected?.sha256) {
+    const actual = await sha256Hex(bytes);
+    if (actual !== expected.sha256) throw new Error(`SHA-256 mismatch for ${rel}: ${actual} != ${expected.sha256}`);
+  }
+  return bytes;
+}
+async function loadTvmjsBundle(bundleUrl, baseUrl) {
+  const url = checkedStagedRuntimeUrl(bundleUrl, baseUrl, 'TVMJS bundle').toString();
+  if (globalThis.tvmjs && globalThis.lc0TvmjsBundleUrl === url) return;
+  await new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = url;
+    script.async = true;
+    script.onload = () => {
+      globalThis.lc0TvmjsBundleUrl = url;
+      resolve();
+    };
+    script.onerror = () => reject(new Error(`TVMJS bundle load failed: ${url}`));
+    document.head.appendChild(script);
+  });
+  if (!globalThis.tvmjs) throw new Error(`tvmjs global missing after loading ${url}`);
+}
+async function diagnoseShader(tvm, sys, entryName, device) {
+  try {
+    tvm.beginScope();
+    const fmapText = sys.getFunction('webgpu.get_fmap', true)();
+    const getShader = tvm.detachFromCurrentScope(sys.getFunction('webgpu.get_shader'));
+    tvm.endScope();
+    const fmap = JSON.parse(fmapText);
+    const key = Object.keys(fmap).find((item) => item === entryName || fmap[item]?.name === entryName);
+    if (!key) {
+      log('diagnose no shader key for', entryName, 'available', Object.keys(fmap).slice(0, 8));
+      return;
+    }
+    const code = getShader(key);
+    log('diagnose shader', key, 'bytes', code.length);
+    const module = device.createShaderModule({ code });
+    if (module.compilationInfo) {
+      const info = await module.compilationInfo();
+      for (const message of info.messages) {
+        log('wgsl', { type: message.type, lineNum: message.lineNum, linePos: message.linePos, offset: message.offset, length: message.length, message: message.message });
+      }
+    }
+    const lines = code.split('\n');
+    log('shader head\n' + lines.slice(0, 40).join('\n'));
+  } catch (diagErr) {
+    log('diagnose failed', diagErr?.stack || diagErr?.message || String(diagErr));
+  }
+}
+
+function f32ToF16Bits(value) {
+  if (Number.isNaN(value)) return 0x7e00;
+  if (value === Infinity) return 0x7c00;
+  if (value === -Infinity) return 0xfc00;
+  const sign = value < 0 || Object.is(value, -0) ? 0x8000 : 0;
+  const abs = Math.abs(value);
+  if (abs === 0) return sign;
+  if (abs >= 65504) return sign | 0x7bff;
+  if (abs < 2 ** -24) return sign;
+  if (abs < 2 ** -14) return sign | Math.round(abs / 2 ** -24);
+  const exponent = Math.floor(Math.log2(abs));
+  const fraction = abs / 2 ** exponent - 1;
+  let halfExponent = exponent + 15;
+  let halfFraction = Math.round(fraction * 1024);
+  if (halfFraction === 1024) { halfExponent += 1; halfFraction = 0; }
+  if (halfExponent >= 31) return sign | 0x7bff;
+  return sign | (halfExponent << 10) | (halfFraction & 0x03ff);
+}
+function f16BitsToF32(bits) {
+  const sign = (bits & 0x8000) ? -1 : 1;
+  const exponent = (bits >>> 10) & 0x1f;
+  const fraction = bits & 0x03ff;
+  if (exponent === 0) return sign * (fraction === 0 ? 0 : 2 ** -14 * (fraction / 1024));
+  if (exponent === 0x1f) return fraction === 0 ? sign * Infinity : NaN;
+  return sign * 2 ** (exponent - 15) * (1 + fraction / 1024);
+}
+function float32ToFloat16Bytes(values) {
+  const out = new Uint16Array(values.length);
+  for (let i = 0; i < values.length; i++) out[i] = f32ToF16Bits(values[i]);
+  return new Uint8Array(out.buffer);
+}
+function f16BytesToFloat32Array(raw) {
+  const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+  const out = new Float32Array(raw.byteLength / 2);
+  for (let i = 0; i < out.length; i++) out[i] = f16BitsToF32(view.getUint16(i * 2, true));
+  return out;
+}
+function zeroBytesFor(shape, dtype) {
+  const elements = shape.reduce((a, b) => a * b, 1);
+  const bytesPer = dtype === 'float16' ? 2 : dtype === 'float32' ? 4 : (() => { throw new Error(`Unsupported dtype ${dtype}`); })();
+  return new Uint8Array(elements * bytesPer);
+}
+function fileOf(square) { return square % 8; }
+function isStandardCastlingMove(board, move) {
+  const piece = board.squares[move.from];
+  return piece?.[1] === 'k' && Math.abs(fileOf(move.to) - fileOf(move.from)) === 2;
+}
+function legalPolicyPriors(board, logits) {
+  const moveTransform = board.turn === 'b' ? LC0_MIRROR_TRANSFORM : 0;
+  const legal = legalMoves(board).map((move) => {
+    const uci = moveToUci(move);
+    const index = uciToLc0PolicyIndex(uci, moveTransform, { standardCastling: isStandardCastlingMove(board, move) });
+    if (index === undefined) throw new Error(`No LC0 policy index for legal move ${uci}`);
+    return { uci, index, logit: Number(logits[index]) / LC0_POLICY_TEMPERATURE };
+  });
+  if (!legal.length) return [];
+  const max = Math.max(...legal.map((entry) => entry.logit));
+  const sum = legal.reduce((acc, entry) => acc + Math.exp(entry.logit - max), 0);
+  return legal.map((entry) => ({ ...entry, prior: Math.exp(entry.logit - max) / sum })).sort((a, b) => b.prior - a.prior);
+}
+async function loadNativeFixtureRows() {
+  const response = await fetch('/fixtures/lc0/native_fen_only_blas.jsonl');
+  if (!response.ok) return new Map();
+  const text = await response.text();
+  return new Map(text.trim().split('\n').filter(Boolean).map((line) => {
+    const row = JSON.parse(line);
+    return [row.id, row];
+  }));
+}
+function compareTvmToEvaluations(tvmRows, evalRows) {
+  const byFen = new Map(evalRows.map((row) => [row.fen, row]));
+  const rows = tvmRows.map((row) => {
+    const ev = byFen.get(row.fen);
+    const diffs = ev ? row.topPriors.map((prior) => {
+      const found = ev.legalPriors.find((candidate) => candidate.index === prior.index);
+      return found ? Math.abs(found.prior - prior.prior) : undefined;
+    }).filter((value) => value !== undefined) : [];
+    return {
+      id: row.id,
+      tvmBestMove: row.bestMove,
+      ortBestMove: ev?.bestMove,
+      bestMoveMatches: ev?.bestMove ? row.bestMove === ev.bestMove : undefined,
+      maxTopPriorAbsDiff: diffs.length ? Math.max(...diffs) : undefined,
+      qAbsDiff: ev?.q !== undefined && row.q !== undefined ? Math.abs(ev.q - row.q) : undefined,
+      mlhAbsDiff: ev?.mlh !== undefined && row.mlh !== undefined ? Math.abs(ev.mlh - row.mlh) : undefined,
+    };
+  });
+  const finiteMax = (values) => {
+    const finite = values.filter((value) => Number.isFinite(value));
+    return finite.length ? Math.max(...finite) : undefined;
+  };
+  return {
+    comparable: rows.filter((row) => row.ortBestMove).length,
+    bestMoveMatches: rows.filter((row) => row.bestMoveMatches).length,
+    maxTopPriorAbsDiff: finiteMax(rows.map((row) => row.maxTopPriorAbsDiff)),
+    maxQAbsDiff: finiteMax(rows.map((row) => row.qAbsDiff)),
+    maxMlhAbsDiff: finiteMax(rows.map((row) => row.mlhAbsDiff)),
+    rows,
+  };
+}
+function currentBoardAndFen(input) {
+  if (typeof input === 'object' && input !== null && 'positions' in input) {
+    if (!input.positions.length) throw new Error('history input requires at least one position');
+    const last = input.positions[input.positions.length - 1];
+    const board = typeof last === 'string' ? parseFen(last) : last;
+    return { board, fen: boardToFen(board) };
+  }
+  const board = typeof input === 'string' ? parseFen(input) : input;
+  return { board, fen: typeof input === 'string' ? boardToFen(board) : boardToFen(board) };
+}
+async function runTvmBatchEvaluation(tvm, vmMod, inputs, physicalBatchSize) {
+  if (!inputs.length) return [];
+  const setInput = vmMod.getFunction('set_input');
+  const invokeStateful = vmMod.getFunction('invoke_stateful');
+  const getOutput = vmMod.getFunction('get_output');
+  const shape = [physicalBatchSize, 112, 8, 8];
+  const encoded = new Float32Array(physicalBatchSize * LC0_INPUT_PLANES_SIZE);
+  const boards = [];
+  const fens = [];
+  for (let i = 0; i < inputs.length; i++) {
+    const { board, fen } = currentBoardAndFen(inputs[i]);
+    boards.push(board);
+    fens.push(fen);
+    encoded.set(encodeLc0Classical112(inputs[i], { historyFill: 'fen_only' }).planes, i * LC0_INPUT_PLANES_SIZE);
+  }
+  for (let i = inputs.length; i < physicalBatchSize; i++) {
+    encoded.copyWithin(i * LC0_INPUT_PLANES_SIZE, (inputs.length - 1) * LC0_INPUT_PLANES_SIZE, inputs.length * LC0_INPUT_PLANES_SIZE);
+  }
+  const input = tvm.empty(shape, 'float16', tvm.webgpu());
+  input.copyFromRawBytes(float32ToFloat16Bytes(encoded));
+  setInput('main', input);
+  const started = performance.now();
+  invokeStateful('main');
+  const invokeMs = performance.now() - started;
+  const policyOut = getOutput('main', tvm.scalar(0, 'int32'));
+  const wdlOut = getOutput('main', tvm.scalar(1, 'int32'));
+  const mlhOut = getOutput('main', tvm.scalar(2, 'int32'));
+  const [policyRaw, wdlRaw, mlhRaw] = await Promise.all([outputRawBytes(tvm, policyOut), outputRawBytes(tvm, wdlOut), outputRawBytes(tvm, mlhOut)]);
+  if (!policyRaw) throw new Error('TVMJS policy output readback unavailable');
+  const policy = f16BytesToFloat32Array(policyRaw);
+  const wdl = wdlRaw ? f16BytesToFloat32Array(wdlRaw) : undefined;
+  const mlh = mlhRaw ? f16BytesToFloat32Array(mlhRaw) : undefined;
+  return inputs.map((_, i) => {
+    const wdlSlice = wdl ? Array.from(wdl.subarray(i * 3, i * 3 + 3)) : [NaN, NaN, NaN];
+    const logits = policy.subarray(i * LC0_POLICY_SIZE, (i + 1) * LC0_POLICY_SIZE);
+    const legalPriors = legalPolicyPriors(boards[i], logits);
+    return {
+      fen: fens[i],
+      wdl: wdlSlice,
+      q: wdlSlice[0] - wdlSlice[2],
+      mlh: mlh ? mlh[i] : NaN,
+      legalPriors,
+      bestMove: legalPriors[0]?.uci,
+      timing: { backend: 'tvmjs-webgpu', tvmInvokeMs: invokeMs, physicalBatchSize, batchPosition: i },
+    };
+  });
+}
+function createTvmEvaluationProvider(tvm, vmMod, physicalBatchSize) {
+  return {
+    async evaluate(input) { return (await runTvmBatchEvaluation(tvm, vmMod, [input], physicalBatchSize))[0]; },
+    async evaluateBatch(inputs) {
+      const out = [];
+      for (let i = 0; i < inputs.length; i += physicalBatchSize) out.push(...await runTvmBatchEvaluation(tvm, vmMod, inputs.slice(i, i + physicalBatchSize), physicalBatchSize));
+      return out;
+    },
+  };
+}
+function timingStats(values) {
+  const finite = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (!finite.length) return { count: 0 };
+  const sum = finite.reduce((a, b) => a + b, 0);
+  const mid = Math.floor(finite.length / 2);
+  return {
+    count: finite.length,
+    minMs: finite[0],
+    meanMs: sum / finite.length,
+    medianMs: finite.length % 2 ? finite[mid] : (finite[mid - 1] + finite[mid]) / 2,
+    maxMs: finite[finite.length - 1],
+  };
+}
+function stockfishWhiteCp(info, fen) {
+  if (info?.scoreCp === undefined) return undefined;
+  return parseFen(fen).turn === 'w' ? info.scoreCp : -info.scoreCp;
+}
+function afterFenForUci(fen, uci) {
+  if (!uci) return undefined;
+  return boardToFen(makeMove(parseFen(fen), moveFromUci(uci)));
+}
+async function scoreSearchRowsWithStockfish(rows) {
+  const depthRaw = params.get('stockfishScoreDepth');
+  const msRaw = params.get('stockfishScoreMs');
+  const depth = depthRaw ? Math.max(1, Number(depthRaw) || 1) : undefined;
+  const movetimeMs = msRaw ? Math.max(1, Number(msRaw) || 1) : undefined;
+  if (!depth && !movetimeMs) return undefined;
+  const engine = new StockfishEngine({ depth, movetimeMs, threads: 1 });
+  const cache = new Map();
+  const scoreOne = async (fen, perspectiveTurn) => {
+    if (!fen) return undefined;
+    if (!cache.has(fen)) {
+      const started = performance.now();
+      const reply = await engine.bestMove(fen, new AbortController().signal);
+      const elapsedMs = performance.now() - started;
+      const info = engine.lastInfo()[0];
+      const whiteCp = stockfishWhiteCp(info, fen);
+      cache.set(fen, {
+        fen,
+        reply,
+        whiteCp,
+        mateInWhitePov: info?.mateIn === undefined ? undefined : (parseFen(fen).turn === 'w' ? info.mateIn : -info.mateIn),
+        depth: info?.depth,
+        nodes: info?.nodes,
+        nps: info?.nps,
+        pv: info?.pvUci,
+        elapsedMs,
+      });
+    }
+    const scored = cache.get(fen);
+    return {
+      ...scored,
+      lc0PerspectiveCp: scored.whiteCp === undefined ? undefined : (perspectiveTurn === 'w' ? scored.whiteCp : -scored.whiteCp),
+      lc0PerspectiveMate: scored.mateInWhitePov === undefined ? undefined : (perspectiveTurn === 'w' ? scored.mateInWhitePov : -scored.mateInWhitePov),
+    };
+  };
+  try {
+    for (const row of rows) {
+      const board = parseFen(row.fen);
+      row.tvmAfterFen = afterFenForUci(row.fen, row.tvmMove);
+      row.ortAfterFen = afterFenForUci(row.fen, row.ortMove);
+      row.stockfish = {
+        scoreDepth: depth,
+        scoreMovetimeMs: movetimeMs,
+        tvm: await scoreOne(row.tvmAfterFen, board.turn),
+        ort: await scoreOne(row.ortAfterFen, board.turn),
+      };
+      const tvmCp = row.stockfish.tvm?.lc0PerspectiveCp;
+      const ortCp = row.stockfish.ort?.lc0PerspectiveCp;
+      row.stockfishCpDeltaTvmMinusOrt = Number.isFinite(tvmCp) && Number.isFinite(ortCp) ? tvmCp - ortCp : undefined;
+    }
+  } finally {
+    engine.dispose();
+  }
+  const deltas = rows.map((row) => row.stockfishCpDeltaTvmMinusOrt).filter(Number.isFinite);
+  return {
+    scoreDepth: depth,
+    scoreMovetimeMs: movetimeMs,
+    scoredRows: rows.filter((row) => row.stockfish?.tvm || row.stockfish?.ort).length,
+    uniqueScoredPositions: cache.size,
+    tvmMinusOrtCp: deltas.length ? {
+      count: deltas.length,
+      min: Math.min(...deltas),
+      mean: deltas.reduce((a, b) => a + b, 0) / deltas.length,
+      max: Math.max(...deltas),
+    } : undefined,
+  };
+}
+async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
+  const visits = Number(params.get('searchVisits') ?? 0) || 0;
+  if (!visits || !fixtureRows.length) return undefined;
+  const limit = Math.max(1, Math.min(fixtureRows.length, Number(params.get('searchFixtureCount') ?? Math.min(2, fixtureRows.length)) || 2));
+  const repeats = Math.max(1, Number(params.get('searchRepeats') ?? 1) || 1);
+  const fens = fixtureRows.slice(0, limit).map((row) => row.fen);
+  const tvmSearcher = new Lc0PuctSearcher(createTvmEvaluationProvider(tvm, vmMod, batch));
+  const ortEvaluator = await Lc0OnnxEvaluator.create(`/models/lc0/t1-256x10-distilled-swa-2432500.batch${batch}.f16.onnx`);
+  const ortSearcher = new Lc0PuctSearcher(ortEvaluator);
+  try {
+    const rows = [];
+    for (let repeat = 0; repeat < repeats; repeat++) {
+      for (const fen of fens) {
+        const t0 = performance.now();
+        const tvmResult = await tvmSearcher.search(fen, { visits, batchSize: batch, temperature: 0 });
+        const tvmMs = performance.now() - t0;
+        const o0 = performance.now();
+        const ortResult = await ortSearcher.search(fen, { visits, batchSize: batch, temperature: 0 });
+        const ortMs = performance.now() - o0;
+        rows.push({
+          repeat,
+          fen,
+          visits,
+          tvmMove: tvmResult.move,
+          ortMove: ortResult.move,
+          moveMatches: tvmResult.move === ortResult.move,
+          tvmMs,
+          ortMs,
+          tvmTop: tvmResult.children.slice(0, 5),
+          ortTop: ortResult.children.slice(0, 5),
+        });
+      }
+    }
+    const stockfish = await scoreSearchRowsWithStockfish(rows);
+    return {
+      visits,
+      repeats,
+      fixtureCount: fens.length,
+      searchRows: rows.length,
+      moveMatches: rows.filter((row) => row.moveMatches).length,
+      tvmTiming: timingStats(rows.map((row) => row.tvmMs)),
+      ortTiming: timingStats(rows.map((row) => row.ortMs)),
+      ...(stockfish ? { stockfish } : {}),
+      rows,
+    };
+  } finally {
+    await ortEvaluator.dispose();
+  }
+}
+async function runOrtComparisons(batch, fixtureRows, tvmRows) {
+  const mode = document.getElementById('ortCompare').value;
+  if (mode === 'none' || !fixtureRows.length) return undefined;
+  const ep = document.getElementById('ortEp').value;
+  setRequestedOrtExecutionProviderForCurrentThread(ep);
+  const comparisons = {};
+  const wanted = mode === 'both' ? ['f16', 'f32'] : [mode];
+  try {
+    for (const dtype of wanted) {
+      if (dtype === 'f32' && batch !== 1) {
+        comparisons.f32 = { skipped: true, reason: 'Only batch1 f32 ONNX is currently staged.' };
+        continue;
+      }
+      const modelBatch = dtype === 'f32' ? 1 : batch;
+      const modelPath = `/models/lc0/t1-256x10-distilled-swa-2432500.batch${modelBatch}.${dtype}.onnx`;
+      const inputs = dtype === 'f32' ? fixtureRows.slice(0, 1).map((row) => row.fen) : fixtureRows.map((row) => row.fen);
+      const compareRows = dtype === 'f32' ? tvmRows.slice(0, 1) : tvmRows;
+      log('ort compare start', { dtype, ep, modelPath, inputs: inputs.length });
+      const evaluator = await Lc0OnnxEvaluator.create(modelPath);
+      const started = performance.now();
+      const evals = await evaluator.evaluateBatch(inputs);
+      const evalMs = performance.now() - started;
+      await evaluator.dispose();
+      comparisons[dtype] = { ep, modelPath, evalMs, ...compareTvmToEvaluations(compareRows, evals) };
+      log('ort compare done', dtype, { evalMs, bestMoveMatches: comparisons[dtype].bestMoveMatches, comparable: comparisons[dtype].comparable });
+    }
+  } finally {
+    setRequestedOrtExecutionProviderForCurrentThread(null);
+  }
+  return comparisons;
+}
+async function outputRawBytes(tvm, out) {
+  const elementCount = out.shape.reduce((a, b) => a * b, 1);
+  const rawBytes = elementCount * (out.dtype === 'float16' ? 2 : out.dtype === 'float32' ? 4 : 1);
+  if (rawBytes % 4 !== 0) return null;
+  const cpu = tvm.empty(out.shape, out.dtype, tvm.cpu());
+  cpu.copyFrom(out);
+  await out.device.sync();
+  return cpu.toRawBytes();
+}
+
+async function run() {
+  logEl.textContent = '';
+  const manifestUrl = document.getElementById('manifest').value;
+  const batch = Number(document.getElementById('batch').value);
+  const base = checkedStagedRuntimeUrl(manifestUrl, location.href, 'manifest');
+  log('manifest', base.toString());
+  const manifestResponse = await fetch(base);
+  if (!manifestResponse.ok) throw new Error(`Manifest fetch failed: ${manifestResponse.status}`);
+  const manifest = await manifestResponse.json();
+  const model = manifest.models.find((item) => item.batch === batch);
+  if (!model) throw new Error(`Batch ${batch} not in manifest`);
+  const tvmjsBundle = manifest.runtime?.tvmjsBundle ?? 'tvmjs.bundle.js';
+  await loadTvmjsBundle(tvmjsBundle, base);
+  if (!navigator.gpu) throw new Error('navigator.gpu missing');
+  log('schema', manifest.schema);
+  log('tvmjs bundle', tvmjsBundle);
+  log('model wasm', model.wasm, model.bytes);
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) throw new Error('WebGPU adapter unavailable');
+  const requiredFeatures = ['shader-f16'];
+  for (const feature of requiredFeatures) {
+    if (!adapter.features.has(feature)) throw new Error(`WebGPU adapter missing required feature: ${feature}`);
+  }
+  const device = await adapter.requestDevice({ requiredFeatures });
+  device.addEventListener('uncapturederror', (event) => {
+    log('webgpu uncaptured', event.error?.message || String(event.error));
+  });
+  log('webgpu device acquired');
+  const wasmBytes = await fetchChecked(base, model.wasm, model);
+  log('wasm fetched+verified', wasmBytes.byteLength);
+  const tvm = await tvmjs.instantiate(wasmBytes, tvmjs.createPolyfillWASI(), (message) => log('tvmjs', message));
+  tvm.initWebGPU(device);
+  log('tvm instance initialized');
+  tvm.beginScope();
+  try {
+    const sys = tvm.systemLib();
+    log('systemLib loaded');
+    try {
+      await tvm.asyncLoadWebGPUPipelines(sys);
+      log('webgpu pipelines prebuilt');
+    } catch (pipelineErr) {
+      const message = pipelineErr?.message || String(pipelineErr);
+      const match = message.match(/entryPoint: \"([^\"]+)\"/);
+      if (match) await diagnoseShader(tvm, sys, match[1], device);
+      throw pipelineErr;
+    }
+    const candidates = ['main', 'vm_load_executable', 'vm_initialization'];
+    const available = [];
+    for (const name of candidates) {
+      try {
+        const fn = sys.getFunction(name, true);
+        if (fn) available.push(name);
+      } catch {}
+    }
+    log('candidate functions', available);
+    const vm = tvm.createVirtualMachine(tvm.webgpu());
+    const vmMod = vm.getInternalModule();
+    const vmCandidates = ['set_input', 'invoke_stateful', 'get_output', 'get_outputs', 'main', 'vm_initialization'];
+    const vmAvailable = [];
+    for (const name of vmCandidates) {
+      try {
+        const fn = vmMod.getFunction(name, true);
+        if (fn) vmAvailable.push(name);
+      } catch {}
+    }
+    log('vm candidate functions', vmAvailable);
+    if (document.getElementById('invoke').checked) {
+      const useFixtures = document.getElementById('fixtures').checked;
+      const shape = [batch, 112, 8, 8];
+      let fixtureRows = [];
+      let inputBytes = zeroBytesFor(shape, 'float16');
+      if (useFixtures) {
+        const fixtureOffset = Math.max(0, Number(params.get('fixtureOffset') ?? 0) || 0);
+        const requestedFixtureCount = Math.max(1, Number(params.get('fixtureCount') ?? batch) || batch);
+        const fixedSuiteFens = (params.get('fixedSuiteFens') ?? '').split('|').map((fen) => fen.trim()).filter(Boolean);
+        if (fixedSuiteFens.length) {
+          fixtureRows = fixedSuiteFens.slice(0, requestedFixtureCount).map((fen, i) => ({ id: `fen-${fixtureOffset + i}`, fen, source: 'fixedSuiteFens' }));
+        } else {
+          const fixtures = await (await fetch('/fixtures/lc0/fen_only.json')).json();
+          fixtureRows = fixtures.slice(fixtureOffset, fixtureOffset + requestedFixtureCount);
+        }
+        if (!fixtureRows.length) throw new Error('No LC0 fixtures loaded');
+        const encoded = new Float32Array(batch * LC0_INPUT_PLANES_SIZE);
+        for (let i = 0; i < batch; i++) {
+          const fixture = fixtureRows[Math.min(i, fixtureRows.length - 1)];
+          encoded.set(encodeLc0Classical112(fixture.fen, { historyFill: 'fen_only' }).planes, i * LC0_INPUT_PLANES_SIZE);
+        }
+        inputBytes = float32ToFloat16Bytes(encoded);
+        log('fixtures encoded', { fixtureOffset, requestedFixtureCount, ids: fixtureRows.map((row) => row.id) });
+      }
+      const input = tvm.empty(shape, 'float16', tvm.webgpu());
+      input.copyFromRawBytes(inputBytes);
+      log('input allocated+uploaded', { shape, dtype: input.dtype, bytes: inputBytes.byteLength, mode: useFixtures ? 'fixtures' : 'zero' });
+      const setInput = vmMod.getFunction('set_input');
+      const invokeStateful = vmMod.getFunction('invoke_stateful');
+      const getOutput = vmMod.getFunction('get_output');
+      const t0 = performance.now();
+      setInput('main', input);
+      log('set_input ok');
+      invokeStateful('main');
+      const invokeMs = performance.now() - t0;
+      log('invoke_stateful ok', `${invokeMs.toFixed(3)}ms`);
+      const outputRaws = [];
+      const outputMetas = [];
+      for (let i = 0; i < 3; i++) {
+        try {
+          const out = getOutput('main', tvm.scalar(i, 'int32'));
+          const meta = { index: i, shape: out.shape, dtype: out.dtype, deviceType: out.device.deviceType };
+          outputMetas.push(meta);
+          log('output', i, meta);
+          const raw = await outputRawBytes(tvm, out);
+          outputRaws[i] = raw;
+          if (raw) log('output raw bytes', i, raw.byteLength, 'head', Array.from(raw.slice(0, 16)));
+          else log('output raw bytes skipped', i, 'not 4-byte aligned for WebGPU buffer copy/map');
+        } catch (err) {
+          log('output stop/error', i, err?.message || String(err));
+          break;
+        }
+      }
+      if (useFixtures && fixtureRows.length) {
+        const nativeRows = await loadNativeFixtureRows();
+        const tvmEvalRows = await createTvmEvaluationProvider(tvm, vmMod, batch).evaluateBatch(fixtureRows.map((row) => row.fen));
+        const fixtureResults = fixtureRows.map((fixture, i) => {
+          const tvmEval = tvmEvalRows[i];
+          const native = nativeRows.get(fixture.id);
+          const nativePriorDiffs = (native?.topPriors ?? []).map((entry) => {
+            const found = tvmEval.legalPriors.find((prior) => prior.index === entry.index);
+            return found ? Math.abs(found.prior - entry.prior) : undefined;
+          }).filter((value) => value !== undefined);
+          return {
+            id: fixture.id,
+            fen: fixture.fen,
+            bestMove: tvmEval.bestMove,
+            nativeBestMove: native?.bestmove,
+            bestMoveMatchesNative: native?.bestmove ? tvmEval.bestMove === native.bestmove : undefined,
+            maxNativeTopPriorAbsDiff: nativePriorDiffs.length ? Math.max(...nativePriorDiffs) : undefined,
+            qAbsDiffNative: native?.node?.q !== undefined && Number.isFinite(tvmEval.q) ? Math.abs(tvmEval.q - native.node.q) : undefined,
+            mlhAbsDiffNative: native?.node?.mlh !== undefined && Number.isFinite(tvmEval.mlh) ? Math.abs(tvmEval.mlh - native.node.mlh) : undefined,
+            topPriors: tvmEval.legalPriors.slice(0, 5).map(({ uci, index, prior, logit }) => ({ uci, index, prior, logit })),
+            wdl: tvmEval.wdl,
+            q: tvmEval.q,
+            mlh: tvmEval.mlh,
+            timing: tvmEval.timing,
+          };
+        });
+        const definedMax = (values) => {
+          const finite = values.filter((value) => Number.isFinite(value));
+          return finite.length ? Math.max(...finite) : undefined;
+        };
+        const ortComparisons = await runOrtComparisons(batch, fixtureRows, fixtureResults);
+        const searchParity = await runSearchParity(tvm, vmMod, batch, fixtureRows);
+        const summary = {
+          batch,
+          fixtureOffset: useFixtures ? Math.max(0, Number(params.get('fixtureOffset') ?? 0) || 0) : undefined,
+          fixtureCount: fixtureRows.length,
+          invokeMs,
+          bestMoveMatches: fixtureResults.filter((row) => row.bestMoveMatchesNative).length,
+          nativeComparable: fixtureResults.filter((row) => row.nativeBestMove).length,
+          maxNativeTopPriorAbsDiff: definedMax(fixtureResults.map((row) => row.maxNativeTopPriorAbsDiff)),
+          maxQAbsDiffNative: definedMax(fixtureResults.map((row) => row.qAbsDiffNative)),
+          maxMlhAbsDiffNative: definedMax(fixtureResults.map((row) => row.mlhAbsDiffNative)),
+          ...(ortComparisons ? { ortComparisons } : {}),
+          ...(searchParity ? { searchParity } : {}),
+          results: fixtureResults,
+        };
+        log('FIXTURE_RESULT', summary);
+        window.lc0TvmjsLastResult = summary;
+      } else {
+        const summary = {
+          batch,
+          fixtureCount: 0,
+          invokeMs,
+          inputMode: useFixtures ? 'fixtures' : 'zero',
+          outputs: outputMetas,
+          rawBytesRead: outputRaws.map((raw) => raw?.byteLength ?? null),
+        };
+        log('ZERO_RESULT', summary);
+        window.lc0TvmjsLastResult = summary;
+      }
+    }
+    log('SMOKE_OK');
+  } finally {
+    tvm.endScope();
+  }
+}
+document.getElementById('run').addEventListener('click', () => run().catch((err) => { console.error(err); window.lc0TvmjsLastError = err?.stack || err?.message || String(err); log('SMOKE_ERROR', window.lc0TvmjsLastError); }));
+const params = new URLSearchParams(location.search);
+if (params.has('manifest')) document.getElementById('manifest').value = params.get('manifest');
+if (params.has('batch')) document.getElementById('batch').value = params.get('batch');
+if (params.get('invoke') === '1') document.getElementById('invoke').checked = true;
+if (params.get('fixtures') === '1') document.getElementById('fixtures').checked = true;
+if (params.has('ortCompare')) document.getElementById('ortCompare').value = params.get('ortCompare');
+if (params.has('ortEp')) document.getElementById('ortEp').value = params.get('ortEp');
+if (params.get('autorun') === '1') setTimeout(() => document.getElementById('run').click(), 0);
+</script>
