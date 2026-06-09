@@ -3184,6 +3184,15 @@ function parseJsonlRecords<T>(text: string): T[] {
   return text.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as T);
 }
 
+function fixedSuiteFenRecordsFromParams(limit: number): NativeRecord[] {
+  const raw = params.get('fixedSuiteFens') ?? params.get('fens') ?? '';
+  if (!raw.trim()) return [];
+  return raw.split('|').map((entry) => entry.trim()).filter(Boolean).slice(0, limit).map((fen, index) => {
+    parseFen(fen);
+    return { id: `fixed-fen-${index + 1}`, fen, bestmove: '', topPriors: [] };
+  });
+}
+
 async function loadNativeSearchRecords(visits: number, limit: number): Promise<NativeRecord[]> {
   const [fenResponse, historyResponse] = await Promise.all([
     fetch(`/lc0/native_search_fen_only_blas_nodes${visits}.jsonl`, { cache: 'no-store' }),
@@ -3259,9 +3268,10 @@ async function runHybridSearchFixtureParity(): Promise<void> {
   el('benchResult').textContent = 'HYBRID_SEARCH_FIXTURE_PARITY_RUNNING';
   try {
     for (const visits of visitsList) {
-      const loadedRecords = await loadNativeSearchRecords(visits, 16);
-      const filteredRecords = fixtureIdSet ? loadedRecords.filter((record) => fixtureIdSet.has(record.id)) : loadedRecords;
-      if (fixtureIdSet && filteredRecords.length !== fixtureIdSet.size) {
+      const fixedSuiteRecords = fixedSuiteFenRecordsFromParams(fixtureLimit);
+      const loadedRecords = fixedSuiteRecords.length ? fixedSuiteRecords : await loadNativeSearchRecords(visits, 16);
+      const filteredRecords = fixtureIdSet && !fixedSuiteRecords.length ? loadedRecords.filter((record) => fixtureIdSet.has(record.id)) : loadedRecords;
+      if (fixtureIdSet && !fixedSuiteRecords.length && filteredRecords.length !== fixtureIdSet.size) {
         const loadedIds = new Set(loadedRecords.map((record) => record.id));
         const missing = fixtureIds.filter((id) => !loadedIds.has(id));
         throw new Error(`requested fixture ID(s) not found for visits ${visits}: ${missing.join(', ')}`);
@@ -3269,7 +3279,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
       const records = filteredRecords.slice(0, fixtureLimit);
       for (const record of records) {
         const input = nativeSearchInput(record);
-        const expectedNativeBestMove = nativeCastlingToStandard(record.bestmove);
+        const expectedNativeBestMove = record.bestmove ? nativeCastlingToStandard(record.bestmove) : undefined;
         for (const depth of depths) {
           for (let repeat = 1; repeat <= repeats; repeat++) {
             await resetSearchTreeState();
@@ -3299,7 +3309,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
               kind: record.moves ? 'history' : 'fen',
               expectedNativeBestMove,
               bestMove: result.move,
-              matchesNative: result.move === expectedNativeBestMove,
+              matchesNative: expectedNativeBestMove ? result.move === expectedNativeBestMove : undefined,
               depthBaselineBestMove,
               matchesDepthBaseline: result.move === depthBaselineBestMove,
               depthBaselineVisitL1: rootVisitDistributionL1(result.children, depthBaseline?.children),
@@ -3334,7 +3344,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
         }
       }
     }
-    const mismatches = cells.filter((cell) => !cell.matchesNative || !cell.matchesDepthBaseline);
+    const mismatches = cells.filter((cell) => cell.matchesNative === false || cell.matchesDepthBaseline === false);
     const result = {
       status: 'HYBRID_SEARCH_FIXTURE_PARITY_DONE',
       backend: searchWorkerBackend,
@@ -3349,9 +3359,11 @@ async function runHybridSearchFixtureParity(): Promise<void> {
       repeats,
       fixtureLimit,
       fixtureIds,
+      fixedSuiteFens: fixedSuiteFenRecordsFromParams(fixtureLimit).map((record) => record.fen),
       traceRootChildren,
       traceSearchVisits,
       cells: cells.length,
+      nativeComparable: cells.filter((cell) => cell.matchesNative !== undefined).length,
       nativeMatches: cells.filter((cell) => cell.matchesNative).length,
       depthBaselineMatches: cells.filter((cell) => cell.matchesDepthBaseline).length,
       maxDepthBaselineVisitL1: Math.max(0, ...cells.map((cell) => typeof cell.depthBaselineVisitL1 === 'number' ? cell.depthBaselineVisitL1 : 0)),

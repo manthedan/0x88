@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
@@ -31,6 +31,7 @@ Options:
   --repeats N                Repeats per fixture/depth (default 1)
   --fixture-limit N          Fixtures per visit set (max currently 16, default 16)
   --fixture-ids LIST         Comma-separated native fixture IDs to run before applying --fixture-limit
+  --fens FILE                Newline-separated FENs; bypasses native best-move fixtures and compares depth baselines only
   --trace-root-children      Include depth-baseline/root child visit/prior/q traces in the browser artifact
   --trace-search-visits      Include per-batch selection/backup search trace in the browser artifact
   --layers N                 Encoder layers (default 10)
@@ -75,6 +76,8 @@ function parseArgs(argv) {
     repeats: 1,
     fixtureLimit: 16,
     fixtureIds: [],
+    fensFile: '',
+    fixedSuiteFens: [],
     traceRootChildren: false,
     traceSearchVisits: false,
     layers: 10,
@@ -110,6 +113,7 @@ function parseArgs(argv) {
     else if (arg === '--repeats') args.repeats = Number(next());
     else if (arg === '--fixture-limit' || arg === '--fixtures') args.fixtureLimit = Number(next());
     else if (arg === '--fixture-ids') args.fixtureIds = next().split(',').map((value) => value.trim()).filter(Boolean);
+    else if (arg === '--fens') args.fensFile = next();
     else if (arg === '--trace-root-children') args.traceRootChildren = true;
     else if (arg === '--trace-search-visits') args.traceSearchVisits = true;
     else if (arg === '--layers') args.layers = Number(next());
@@ -162,6 +166,7 @@ function parityUrl(args) {
   url.searchParams.set('repeats', String(args.repeats));
   url.searchParams.set('fixtureLimit', String(args.fixtureLimit));
   if (args.fixtureIds.length) url.searchParams.set('fixtureIds', args.fixtureIds.join(','));
+  if (args.fixedSuiteFens.length) url.searchParams.set('fixedSuiteFens', args.fixedSuiteFens.join('|'));
   if (args.traceRootChildren) url.searchParams.set('traceRootChildren', '1');
   if (args.traceSearchVisits) url.searchParams.set('traceSearchVisits', '1');
   url.searchParams.set('ep', 'wasm');
@@ -293,9 +298,17 @@ async function runBrowserParity(args) {
   } finally { await closeAgentSession(args); }
 }
 
+async function loadFixedSuiteFens(args) {
+  if (!args.fensFile) return [];
+  const rows = (await readFile(args.fensFile, 'utf8')).split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));
+  if (!rows.length) throw new Error(`No FEN rows found in ${args.fensFile}`);
+  return rows.slice(0, args.fixtureLimit);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) return usage();
+  args.fixedSuiteFens = await loadFixedSuiteFens(args);
   if (args.batchPipelineDepths.some((depth) => depth > 1)) {
     process.stderr.write('[lc0-search-fixture-parity] warning: batchPipelineDepth > 1 is speculative parallel search; depth=1 is the fixed-search parity baseline. Use --allow-mismatches for exploratory artifacts.\n');
   }
@@ -309,12 +322,13 @@ async function main() {
       await mkdir(dirname(args.out), { recursive: true });
       await writeFile(args.out, JSON.stringify(result, null, 2));
     }
-    const summary = { status: result.status, out: args.out, cells: result.cells, nativeMatches: result.nativeMatches, depthBaselineMatches: result.depthBaselineMatches, maxDepthBaselineVisitL1: result.maxDepthBaselineVisitL1, mismatches: result.mismatches?.map(omitVerboseTrace) };
+    const summary = { status: result.status, out: args.out, cells: result.cells, nativeComparable: result.nativeComparable, nativeMatches: result.nativeMatches, depthBaselineMatches: result.depthBaselineMatches, maxDepthBaselineVisitL1: result.maxDepthBaselineVisitL1, mismatches: result.mismatches?.map(omitVerboseTrace) };
     console.log(JSON.stringify(summary, null, 2));
     const visitL1Failed = args.maxDepthVisitL1 !== undefined && Number(result.maxDepthBaselineVisitL1 ?? 0) > args.maxDepthVisitL1;
-    if (!args.allowMismatches && (result.mismatches?.length || result.nativeMatches !== result.cells || result.depthBaselineMatches !== result.cells || visitL1Failed)) {
+    const nativeComparable = result.nativeComparable ?? result.cells;
+    if (!args.allowMismatches && (result.mismatches?.length || result.nativeMatches !== nativeComparable || result.depthBaselineMatches !== result.cells || visitL1Failed)) {
       const visitL1Message = args.maxDepthVisitL1 !== undefined ? `, max depth visit L1 ${result.maxDepthBaselineVisitL1} > ${args.maxDepthVisitL1}` : '';
-      throw new Error(`search fixture parity failed: native ${result.nativeMatches}/${result.cells}, depth baseline ${result.depthBaselineMatches}/${result.cells}${visitL1Message}; pass --allow-mismatches for exploratory artifact capture`);
+      throw new Error(`search fixture parity failed: native ${result.nativeMatches}/${nativeComparable}, depth baseline ${result.depthBaselineMatches}/${result.cells}${visitL1Message}; pass --allow-mismatches for exploratory artifact capture`);
     }
   } finally { server?.kill('SIGTERM'); }
 }
