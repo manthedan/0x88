@@ -45,7 +45,7 @@ node scripts/lc0_browser_hybrid_search_fixture_parity.mjs \
   --timeout 300000
 ```
 
-Expected: `LC0_SEARCH_FIXTURE_PARITY_DONE`, no mismatches, and depth-1 semantics only.
+Expected: `HYBRID_SEARCH_FIXTURE_PARITY_DONE`, no mismatches, and depth-1 semantics only.
 
 ## 2. Cleaned fixed-suite confirmation
 
