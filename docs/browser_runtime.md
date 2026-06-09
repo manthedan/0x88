@@ -42,15 +42,17 @@ npm run web:isolated:static
 
 The full Stockfish assets are exposed through `public/stockfish/` as symlinks to the installed `stockfish` package so they can be loaded on demand without committing 100MB+ WASM blobs. ORT's threaded WASM sidecars are exposed through `public/ort/` for the same reason; this lets ORT load its pthread worker module when `ortThreads` is greater than 1.
 
-## Runtime audit and fast productization gate
+## Runtime audit and targeted productization smoke
 
 Runtime audit events are intentionally browser-visible and machine-readable. leelaweb emits `console.info('[lc0-browser-runtime-audit]', detail)` plus the `lc0-browser-runtime-audit` `window` event. Payload fields distinguish model identity (`family`, `modelId`, `modelUrl`, `metaUrl`) from runtime configuration (`requestedRuntime`, `resolvedRuntime`, `runtimeConfigId`, `manifestUrl`, `fallbackReason`, `searchBudget`). The LC0 audit panels filter to `family === 'lc0'`; Tiny Leela audit events remain available in the browser event stream without overwriting LC0 runtime details.
 
-The fast gate for runtime-audit/Tiny-LC0 productization is:
+The targeted productization smoke for runtime-audit/Tiny-LC0 work is:
 
 ```sh
-npm run productization:fast-gate
+npm run productization:targeted-smoke
 ```
+
+`npm run productization:fast-gate` remains as a compatibility alias, but new documentation and release notes should use `productization:targeted-smoke` to avoid implying full shipped-path parity coverage.
 
 By default it runs:
 
@@ -62,12 +64,12 @@ By default it runs:
 Use the real browser/WebGPU smoke only on hosts with current Chrome/WebGPU and the versioned Tiny hybrid bundle present:
 
 ```sh
-npm run productization:fast-gate -- --strict-browser-smoke
+npm run productization:targeted-smoke -- --strict-browser-smoke
 ```
 
-That path drives `lc0-analysis.html` and `lc0-arena.html`, installs an audit-event collector, requests Tiny `runtime=custom-webgpu` with strict fallback disabled, and fails on missing `custom-webgpu` resolution or any ORT fallback event. Save evidence with `--out artifacts/productization_fast_gate.json`.
+That path drives `lc0-analysis.html` and `lc0-arena.html`, installs an audit-event collector, requests Tiny `runtime=custom-webgpu` with strict fallback disabled, and fails on missing `custom-webgpu` resolution or any ORT fallback event. Save evidence with `--out artifacts/targeted_productization_smoke.json`.
 
-Known exclusions from the fast gate are deliberate: full `npm test` remains noisy because some fixture/artifact-dependent tests are pre-existing productization blockers, and cross-browser/cross-GPU latency/lifecycle repeats remain release-candidate evidence rather than every-commit checks. Treat `npm run productization:fast-gate` as a targeted productization smoke, not a full shipped-path parity guarantee.
+Known exclusions are deliberate: full `npm test` remains noisy because some fixture/artifact-dependent tests are pre-existing productization blockers, and cross-browser/cross-GPU latency/lifecycle repeats remain release-candidate evidence rather than every-commit checks. Treat `npm run productization:targeted-smoke` as a targeted productization smoke, not a full shipped-path parity guarantee.
 
 For shipped LC0 WebGPU parity, run the browser CI smoke on a host where WebGPU is expected and fail closed on WebGPU unavailability:
 

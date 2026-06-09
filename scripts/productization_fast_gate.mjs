@@ -4,7 +4,7 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 function usage() {
-  console.log(`Usage: node scripts/productization_fast_gate.mjs [options]\n\nFast leelaweb productization gate for runtime-audit/Tiny-LC0 browser work. It avoids the known noisy full test suite and checks targeted runtime/catalog/analysis invariants plus dry-run strict browser smoke wiring by default.\n\nOptions:\n  --strict-browser-smoke   Also run real lc0-analysis/lc0-arena Tiny strict custom WebGPU smokes\n  --agent-browser BIN      Forwarded to strict browser smoke\n  --base-url URL           Forwarded to strict browser smoke\n  --timeout MS             Forwarded to strict browser smoke\n  --out PATH               Optional JSON artifact path\n  --dry-run                Print commands without running\n  -h, --help               Show this help\n`);
+  console.log(`Usage: npm run productization:targeted-smoke -- [options]\n       node scripts/productization_fast_gate.mjs [options]\n\nTargeted leelaweb productization smoke for runtime-audit/Tiny-LC0 browser work. This is a fast, focused check of runtime/catalog/analysis invariants plus strict Tiny custom WebGPU smoke wiring; it is not the full shipped-path LC0 WebGPU parity gate. Keep using lc0:browser-ci-smoke for browser WebGPU parity.\n\nOptions:\n  --strict-browser-smoke   Also run real lc0-analysis/lc0-arena Tiny strict custom WebGPU smokes\n  --agent-browser BIN      Forwarded to strict browser smoke\n  --base-url URL           Forwarded to strict browser smoke\n  --timeout MS             Forwarded to strict browser smoke\n  --out PATH               Optional JSON artifact path\n  --dry-run                Print commands without running\n  -h, --help               Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -58,16 +58,16 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) { usage(); return; }
   const plan = commandPlan(args);
-  if (args.dryRun) { console.log(JSON.stringify({ schema: 'leelaweb.productization-fast-gate.plan.v1', commands: plan }, null, 2)); return; }
+  if (args.dryRun) { console.log(JSON.stringify({ schema: 'leelaweb.targeted-productization-smoke.plan.v1', commands: plan }, null, 2)); return; }
   const rows = [];
   const startedAt = new Date().toISOString();
   try {
     for (const step of plan) rows.push({ name: step.name, ...(await run(step.command, step.args)) });
-    const artifact = { schema: 'leelaweb.productization-fast-gate.v1', status: 'PRODUCTIZATION_FAST_GATE_DONE', startedAt, finishedAt: new Date().toISOString(), strictBrowserSmoke: args.strictBrowserSmoke, rows };
+    const artifact = { schema: 'leelaweb.targeted-productization-smoke.v1', status: 'TARGETED_PRODUCTIZATION_SMOKE_DONE', startedAt, finishedAt: new Date().toISOString(), strictBrowserSmoke: args.strictBrowserSmoke, rows };
     if (args.out) { await mkdir(dirname(args.out), { recursive: true }); await writeFile(args.out, `${JSON.stringify(artifact, null, 2)}\n`); }
     console.log(JSON.stringify(artifact, null, 2));
   } catch (error) {
-    const artifact = { schema: 'leelaweb.productization-fast-gate.v1', status: 'PRODUCTIZATION_FAST_GATE_FAILED', startedAt, finishedAt: new Date().toISOString(), strictBrowserSmoke: args.strictBrowserSmoke, rows, failed: error.row, error: error.message };
+    const artifact = { schema: 'leelaweb.targeted-productization-smoke.v1', status: 'TARGETED_PRODUCTIZATION_SMOKE_FAILED', startedAt, finishedAt: new Date().toISOString(), strictBrowserSmoke: args.strictBrowserSmoke, rows, failed: error.row, error: error.message };
     if (args.out) { await mkdir(dirname(args.out), { recursive: true }); await writeFile(args.out, `${JSON.stringify(artifact, null, 2)}\n`).catch(() => undefined); }
     console.error(error.stack ?? error.message);
     process.exit(1);
