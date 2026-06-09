@@ -239,8 +239,10 @@ function currentBoardAndFen(input) {
   const board = typeof input === 'string' ? parseFen(input) : input;
   return { board, fen: typeof input === 'string' ? boardToFen(board) : boardToFen(board) };
 }
+let tvmBatchEvalSequence = 0;
 async function runTvmBatchEvaluation(tvm, vmMod, inputs, physicalBatchSize) {
   if (!inputs.length) return [];
+  const totalStarted = performance.now();
   const setInput = vmMod.getFunction('set_input');
   const invokeStateful = vmMod.getFunction('invoke_stateful');
   const getOutput = vmMod.getFunction('get_output');
@@ -248,6 +250,7 @@ async function runTvmBatchEvaluation(tvm, vmMod, inputs, physicalBatchSize) {
   const encoded = new Float32Array(physicalBatchSize * LC0_INPUT_PLANES_SIZE);
   const boards = [];
   const fens = [];
+  let phaseStarted = performance.now();
   for (let i = 0; i < inputs.length; i++) {
     const { board, fen } = currentBoardAndFen(inputs[i]);
     boards.push(board);
@@ -257,24 +260,60 @@ async function runTvmBatchEvaluation(tvm, vmMod, inputs, physicalBatchSize) {
   for (let i = inputs.length; i < physicalBatchSize; i++) {
     encoded.copyWithin(i * LC0_INPUT_PLANES_SIZE, (inputs.length - 1) * LC0_INPUT_PLANES_SIZE, inputs.length * LC0_INPUT_PLANES_SIZE);
   }
+  const encodeMs = performance.now() - phaseStarted;
+  phaseStarted = performance.now();
+  const inputBytes = float32ToFloat16Bytes(encoded);
+  const inputConvertMs = performance.now() - phaseStarted;
+  phaseStarted = performance.now();
   const input = tvm.empty(shape, 'float16', tvm.webgpu());
-  input.copyFromRawBytes(float32ToFloat16Bytes(encoded));
+  const inputTensorAllocMs = performance.now() - phaseStarted;
+  phaseStarted = performance.now();
+  input.copyFromRawBytes(inputBytes);
+  const inputUploadMs = performance.now() - phaseStarted;
+  phaseStarted = performance.now();
   setInput('main', input);
-  const started = performance.now();
+  const setInputMs = performance.now() - phaseStarted;
+  phaseStarted = performance.now();
   invokeStateful('main');
-  const invokeMs = performance.now() - started;
+  const invokeMs = performance.now() - phaseStarted;
+  phaseStarted = performance.now();
   const policyOut = getOutput('main', tvm.scalar(0, 'int32'));
   const wdlOut = getOutput('main', tvm.scalar(1, 'int32'));
   const mlhOut = getOutput('main', tvm.scalar(2, 'int32'));
+  const outputHandleMs = performance.now() - phaseStarted;
+  phaseStarted = performance.now();
   const [policyRaw, wdlRaw, mlhRaw] = await Promise.all([outputRawBytes(tvm, policyOut), outputRawBytes(tvm, wdlOut), outputRawBytes(tvm, mlhOut)]);
+  const outputReadbackMs = performance.now() - phaseStarted;
   if (!policyRaw) throw new Error('TVMJS policy output readback unavailable');
+  phaseStarted = performance.now();
   const policy = f16BytesToFloat32Array(policyRaw);
   const wdl = wdlRaw ? f16BytesToFloat32Array(wdlRaw) : undefined;
   const mlh = mlhRaw ? f16BytesToFloat32Array(mlhRaw) : undefined;
+  const outputDecodeMs = performance.now() - phaseStarted;
+  const batchEvalMs = performance.now() - totalStarted;
+  const sharedTiming = {
+    backend: 'tvmjs-webgpu',
+    timingScope: 'tvm-batch-invocation',
+    tvmBatchEvalId: ++tvmBatchEvalSequence,
+    tvmBatchEvalMs: batchEvalMs,
+    encodeMs,
+    inputConvertMs,
+    inputTensorAllocMs,
+    inputUploadMs,
+    setInputMs,
+    tvmInvokeMs: invokeMs,
+    outputHandleMs,
+    outputReadbackMs,
+    outputDecodeMs,
+    physicalBatchSize,
+    logicalBatchSize: inputs.length,
+  };
   return inputs.map((_, i) => {
     const wdlSlice = wdl ? Array.from(wdl.subarray(i * 3, i * 3 + 3)) : [NaN, NaN, NaN];
     const logits = policy.subarray(i * LC0_POLICY_SIZE, (i + 1) * LC0_POLICY_SIZE);
+    const legalStarted = performance.now();
     const legalPriors = legalPolicyPriors(boards[i], logits);
+    const legalPriorsMs = performance.now() - legalStarted;
     return {
       fen: fens[i],
       wdl: wdlSlice,
@@ -282,16 +321,31 @@ async function runTvmBatchEvaluation(tvm, vmMod, inputs, physicalBatchSize) {
       mlh: mlh ? mlh[i] : NaN,
       legalPriors,
       bestMove: legalPriors[0]?.uci,
-      timing: { backend: 'tvmjs-webgpu', tvmInvokeMs: invokeMs, physicalBatchSize, batchPosition: i },
+      timing: { ...sharedTiming, legalPriorsMs, batchPosition: i },
     };
   });
 }
+function batchTimingFromRowTiming(timing) {
+  if (!timing) return undefined;
+  const { legalPriorsMs, batchPosition, ...batchTiming } = timing;
+  return batchTiming;
+}
 function createTvmEvaluationProvider(tvm, vmMod, physicalBatchSize) {
+  const evaluationTimings = [];
+  const positionTimings = [];
+  const remember = (rows) => {
+    const batchTiming = batchTimingFromRowTiming(rows[0]?.timing);
+    if (batchTiming) evaluationTimings.push(batchTiming);
+    for (const row of rows) positionTimings.push(row.timing);
+    return rows;
+  };
   return {
-    async evaluate(input) { return (await runTvmBatchEvaluation(tvm, vmMod, [input], physicalBatchSize))[0]; },
+    evaluationTimings,
+    positionTimings,
+    async evaluate(input) { return remember(await runTvmBatchEvaluation(tvm, vmMod, [input], physicalBatchSize))[0]; },
     async evaluateBatch(inputs) {
       const out = [];
-      for (let i = 0; i < inputs.length; i += physicalBatchSize) out.push(...await runTvmBatchEvaluation(tvm, vmMod, inputs.slice(i, i + physicalBatchSize), physicalBatchSize));
+      for (let i = 0; i < inputs.length; i += physicalBatchSize) out.push(...remember(await runTvmBatchEvaluation(tvm, vmMod, inputs.slice(i, i + physicalBatchSize), physicalBatchSize)));
       return out;
     },
   };
@@ -308,6 +362,41 @@ function timingStats(values) {
     medianMs: finite.length % 2 ? finite[mid] : (finite[mid - 1] + finite[mid]) / 2,
     maxMs: finite[finite.length - 1],
   };
+}
+const TVM_EVAL_TIMING_KEYS = [
+  'tvmBatchEvalMs',
+  'encodeMs',
+  'inputConvertMs',
+  'inputTensorAllocMs',
+  'inputUploadMs',
+  'setInputMs',
+  'tvmInvokeMs',
+  'outputHandleMs',
+  'outputReadbackMs',
+  'outputDecodeMs',
+];
+const TVM_POSITION_TIMING_KEYS = ['legalPriorsMs'];
+function timingStatsByKey(rows, keys = TVM_EVAL_TIMING_KEYS) {
+  const out = {};
+  for (const key of keys) out[key] = timingStats(rows.map((row) => row?.[key]));
+  return out;
+}
+function uniqueBatchTimings(rowTimings) {
+  const seen = new Set();
+  const out = [];
+  for (const timing of rowTimings) {
+    const id = timing?.tvmBatchEvalId;
+    if (id === undefined) {
+      const batchTiming = batchTimingFromRowTiming(timing);
+      if (batchTiming) out.push(batchTiming);
+      continue;
+    }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const batchTiming = batchTimingFromRowTiming(timing);
+    if (batchTiming) out.push(batchTiming);
+  }
+  return out;
 }
 function stockfishWhiteCp(info, fen) {
   if (info?.scoreCp === undefined) return undefined;
@@ -390,7 +479,8 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
   const limit = Math.max(1, Math.min(fixtureRows.length, Number(params.get('searchFixtureCount') ?? Math.min(2, fixtureRows.length)) || 2));
   const repeats = Math.max(1, Number(params.get('searchRepeats') ?? 1) || 1);
   const fens = fixtureRows.slice(0, limit).map((row) => row.fen);
-  const tvmSearcher = new Lc0PuctSearcher(createTvmEvaluationProvider(tvm, vmMod, batch));
+  const tvmProvider = createTvmEvaluationProvider(tvm, vmMod, batch);
+  const tvmSearcher = new Lc0PuctSearcher(tvmProvider);
   const ortEvaluator = await Lc0OnnxEvaluator.create(`/models/lc0/t1-256x10-distilled-swa-2432500.batch${batch}.f16.onnx`);
   const ortSearcher = new Lc0PuctSearcher(ortEvaluator);
   try {
@@ -426,6 +516,10 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
       moveMatches: rows.filter((row) => row.moveMatches).length,
       tvmTiming: timingStats(rows.map((row) => row.tvmMs)),
       ortTiming: timingStats(rows.map((row) => row.ortMs)),
+      tvmEvalTiming: timingStatsByKey(tvmProvider.evaluationTimings),
+      tvmEvalTimingRows: tvmProvider.evaluationTimings.length,
+      tvmEvalPositionTiming: timingStatsByKey(tvmProvider.positionTimings, TVM_POSITION_TIMING_KEYS),
+      tvmEvalPositionTimingRows: tvmProvider.positionTimings.length,
       ...(stockfish ? { stockfish } : {}),
       rows,
     };
@@ -635,6 +729,9 @@ async function run() {
           const finite = values.filter((value) => Number.isFinite(value));
           return finite.length ? Math.max(...finite) : undefined;
         };
+        const evalPositionTimings = fixtureResults.map((row) => row.timing);
+        const evalTiming = timingStatsByKey(uniqueBatchTimings(evalPositionTimings));
+        const evalPositionTiming = timingStatsByKey(evalPositionTimings, TVM_POSITION_TIMING_KEYS);
         const ortComparisons = await runOrtComparisons(batch, fixtureRows, fixtureResults);
         const searchParity = await runSearchParity(tvm, vmMod, batch, fixtureRows);
         const summary = {
@@ -649,6 +746,8 @@ async function run() {
           maxNativeTopPriorAbsDiff: definedMax(fixtureResults.map((row) => row.maxNativeTopPriorAbsDiff)),
           maxQAbsDiffNative: definedMax(fixtureResults.map((row) => row.qAbsDiffNative)),
           maxMlhAbsDiffNative: definedMax(fixtureResults.map((row) => row.mlhAbsDiffNative)),
+          evalTiming,
+          evalPositionTiming,
           ...(ortComparisons ? { ortComparisons } : {}),
           ...(searchParity ? { searchParity } : {}),
           results: fixtureResults,

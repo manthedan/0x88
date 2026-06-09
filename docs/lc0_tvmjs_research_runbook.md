@@ -313,6 +313,24 @@ Current one-row sidecar findings:
 - Hybrid worker init: `68.16 ms`; hybrid search mean: `404.665 ms`; one-row amortized mean: `472.825 ms`.
 - Caveat: this sidecar sums observed phase timings for research triage; it is not proof of a strictly serialized critical path or a production startup SLA.
 
+Timing-breakdown sidecar for smoke/matrix artifacts:
+
+```bash
+npm run lc0:tvmjs-timing-breakdown -- \
+  --in artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n4_r2_sfdepth3.json \
+  --in artifacts/tvm/lc0_tvmjs_vs_hybrid_b8_hb4_v16_n4_r2.tvmjs.json \
+  --out artifacts/tvm/lc0_tvmjs_timing_breakdown_uho_b8_hb4_v16_n4_r2.json
+```
+
+Current timing-breakdown sidecar summary:
+
+- Artifact: `artifacts/tvm/lc0_tvmjs_timing_breakdown_uho_b8_hb4_v16_n4_r2.json`.
+- Inputs: matrix aggregate plus TVMJS child smoke for the scored strict same-FEN UHO-lite run.
+- TVMJS search mean: `48.67 ms`; top-level invoke: `5.145 ms`; search-to-single-invoke ratio: `9.46`.
+- Known startup phase sum for this artifact pair: `373.205 ms`.
+- Caveat: older smoke artifacts do not contain per-evaluation phase buckets. Newly generated smoke artifacts include `evalTiming` and `searchParity.tvmEvalTiming` buckets for encode, f16 conversion, tensor allocation, upload, `set_input`, VM invoke, output handle fetch, readback/sync, decode, and legal-prior filtering.
+- New one-fixture timing proof: `artifacts/tvm/lc0_tvmjs_webgpu_smoke_b8_fixture1_timing.json` and `artifacts/tvm/lc0_tvmjs_timing_breakdown_b8_fixture1.json` show fixture parity `1/1`, top-level invoke `5.435 ms`, known startup phase sum `364.845 ms`, per-eval batch eval `14.545 ms`, VM invoke `2.675 ms`, and output readback/sync `10.325 ms`.
+
 Strict same-FEN visit sweep samples now cover visits `16`, `32`, and `64`:
 
 - `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n1_r1_hybrid_alloc.json`: rows `1`, TVMJS-vs-hybrid `1/1`, TVMJS mean `78.205 ms`, hybrid mean `404.665 ms`.
@@ -378,6 +396,35 @@ Current default-family footprint sidecar summary:
 - gzip level-9 bytes: `113,885,414` (`0.8172` ratio).
 - Brotli quality-11 bytes: `107,101,046` (`0.7685` ratio).
 - Caveat: these are Node zlib estimates and do not prove deployed `Content-Encoding` behavior.
+
+### Tensor-cache / separated-params planning probe
+
+Use the weight-cache planning sidecar before any release-candidate staging decision:
+
+```bash
+npm run lc0:tvmjs-weight-cache-plan -- \
+  --manifest public/runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json \
+  --tvm-src ../.deps/tvm-webgpu-src \
+  --out artifacts/tvm/lc0_tvmjs_weight_cache_plan_current.json
+```
+
+Current default-family planning sidecar summary:
+
+- Artifact: `artifacts/tvm/lc0_tvmjs_weight_cache_plan_current.json`.
+- Local TVM API support: `tvm.contrib.tvmjs.dump_tensor_cache`, `tvm.contrib.tvmjs.load_tensor_cache`, browser `tvm.fetchTensorCache`, artifact cache, and Relax `detach_params` are present.
+- Current parameter strategy: `embedded-in-per-batch-wasm`.
+- Runtime + model wasm bytes covered by the staged manifest: `139,228,830`.
+- Model wasm share: `95.93%`.
+- Duplicate batch-wasm upper bound: `88,919,507` bytes (`63.87%` of runtime+model bytes).
+- Caveat: this is an upper bound, not a guaranteed savings figure; exact savings require a real detached-param export because TVM code and metadata also differ by batch.
+
+Separated-params release-candidate recipe:
+
+1. Detach Relax parameters when possible before VM build, or otherwise emit f16 params through `tvm.contrib.tvmjs.dump_tensor_cache(..., encode_format="raw")`.
+2. Stage `tensor-cache.json` plus `params_shard_*` files under the immutable model-family/dtype/version path.
+3. Add manifest entries with bytes/SHA-256 for every tensor-cache shard and record whether params are embedded or detached.
+4. Load shared params in the browser through TVMJS `fetchTensorCache` before VM invocation; keep `shader-f16` gating and ORT fallback behavior unchanged.
+5. Compare embedded vs tensor-cache on cold start, repeat-load cache hit behavior, raw/gzip/Brotli footprint, search parity, and Stockfish-scored deltas before publication.
 
 Local static `Content-Encoding` smoke:
 
@@ -497,10 +544,21 @@ Current policy: generated TVMJS wasm/runtime artifacts are local research artifa
 
 1. A manifest-specific local artifact check for the exact model family/dtype/version/batches.
 2. Evidence summary covering loader, evaluator parity, search parity, fixed-suite bridge rows, and same-session hybrid/ORT comparisons where applicable.
-3. Raw size plus gzip/Brotli sidecar size audit for `tvmjs.bundle.js`, `tvmjs_runtime.wasm`, each model wasm, and probe metadata.
+3. Raw size plus gzip/Brotli sidecar size audit for `tvmjs.bundle.js`, `tvmjs_runtime.wasm`, each model wasm, probe metadata, and tensor-cache shards if separated params are used.
 4. Host/CDN configuration that serves compressed sidecars with correct `Content-Encoding`; do not assume safe Brotli/gzip serving from file extension alone.
 5. Immutable versioned paths (`.../<model-family>/<dtype>/<version>/`) and long-lived cache headers only for content-hashed/manifest-pinned files. Manifests should use a shorter revalidation policy unless their path is immutable and release-tagged.
 6. Rollback plan: keep ORT ONNX/WebGPU as the stable default, and require opt-in TVMJS selection until promotion evidence and artifact policy are accepted.
+7. Compiler provenance in the staged manifest: TVM commit/dirty status, TVM build dir, Emscripten version, required WebGPU features, and parameter strategy.
+
+Suggested numeric promotion gates to ratify before stable exposure:
+
+- Correctness: TVMJS-vs-ORT f16 best-move/search-move parity is `100%` on the agreed fixed suite, with an explicit f16 numeric drift tolerance for policy top-prior, WDL/Q, and MLH.
+- Search quality: Stockfish-scored TVMJS-minus-ORT move deltas are within the accepted cp/mate threshold on the fixed suite; all nonzero deltas are triaged.
+- Performance: TVMJS visits/s or mean search latency beats ORT f16 WebGPU by the agreed margin on the reference device and does not regress beyond tolerance on secondary devices.
+- Startup: cold start and repeat-load cached start fit the accepted budget, including TVMJS wasm fetch/verify, instantiate, WebGPU pipeline prebuild, VM creation, tensor-cache load if used, and first useful search.
+- Footprint: raw/gzip/Brotli artifact footprint fits the accepted size budget; duplicated batch-specific weight storage is either removed or explicitly accepted.
+- Coverage: pass on at least the agreed Chrome/WebGPU device matrix, including a non-Apple GPU, plus documented fallback behavior when `shader-f16` or WebGPU is unavailable.
+- Isolation: TVMJS remains absent from stable runtime registry/UI/default arena flow until release owner approval explicitly changes that policy.
 
 Do not add TVMJS to `src/nn/runtimeRegistry.ts`, `src/nn/browserRuntimeEvaluator.ts`, or the stable arena runtime UI as part of artifact publication alone.
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { basename, join, relative, resolve } from 'node:path';
 
 function arg(name, fallback) {
@@ -33,6 +34,38 @@ function parseBatches(raw) {
 }
 function renderTemplate(template, values) {
   return String(template).replaceAll('{modelFamily}', values.modelFamily).replaceAll('{dtype}', values.dtype).replaceAll('{batch}', String(values.batch));
+}
+function commandOutput(command, args, options = {}) {
+  const result = spawnSync(command, args, { encoding: 'utf8', ...options });
+  if (result.status !== 0) return undefined;
+  return String(result.stdout ?? '').trim() || undefined;
+}
+function contains(path, needle) {
+  try { return readFileSync(path, 'utf8').includes(needle); } catch { return false; }
+}
+function publicPathLabel(value, fallback) {
+  return basename(String(value || fallback));
+}
+function tvmProvenance(tvmSrc) {
+  const webRuntime = join(tvmSrc, 'web/src/runtime.ts');
+  const tvmjsPy = join(tvmSrc, 'python/tvm/contrib/tvmjs.py');
+  const emccCommand = process.env.EMCC ?? 'emcc';
+  return {
+    gitCommit: commandOutput('git', ['rev-parse', 'HEAD'], { cwd: tvmSrc }),
+    gitDescribe: commandOutput('git', ['describe', '--always', '--dirty', '--tags'], { cwd: tvmSrc }),
+    gitDirty: commandOutput('git', ['status', '--short'], { cwd: tvmSrc }) ? true : false,
+    tvmBuildDir: publicPathLabel(process.env.TVM_BUILD_DIR, 'build-tvmjs'),
+    note: 'Local filesystem paths are intentionally omitted because this manifest can be browser-fetchable when artifacts are published.',
+    emscripten: {
+      emcc: publicPathLabel(emccCommand, 'emcc'),
+      version: commandOutput(emccCommand, ['--version'])?.split('\n')[0],
+    },
+    webgpu: {
+      requiredFeatures: ['webgpu', 'shader-f16'],
+      fetchTensorCacheApiPresent: contains(webRuntime, 'fetchTensorCache('),
+      dumpTensorCacheApiPresent: contains(tvmjsPy, 'def dump_tensor_cache('),
+    },
+  };
 }
 
 const repo = process.cwd();
@@ -86,6 +119,15 @@ const manifest = {
     tvmjsRuntimeWasm: 'tvmjs_runtime.wasm',
     note: 'TVMJS/WebGPU whole-model export bundle. Runtime/parity/perf still require browser validation.',
   },
+  parameterStrategy: {
+    current: 'embedded-in-per-batch-wasm',
+    note: 'Current research staging embeds model weights in each batch-specific TVMJS wasm. Future release candidates should evaluate TVM tensor-cache weight separation before publication.',
+    tensorCacheApis: {
+      pythonDumpTensorCache: 'tvm.contrib.tvmjs.dump_tensor_cache',
+      browserFetchTensorCache: 'tvm.fetchTensorCache',
+    },
+  },
+  compilerProvenance: tvmProvenance(tvmSrc),
   models,
   files,
 };

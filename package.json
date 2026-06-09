@@ -108,6 +108,8 @@
     "lc0:tvmjs-webgpu-evidence-summary": "node scripts/summarize_lc0_tvmjs_webgpu_evidence.mjs",
     "lc0:tvmjs-webgpu-evidence-check": "node scripts/summarize_lc0_tvmjs_webgpu_evidence.mjs --no-write --require-all-matches --min-search-rows 94 --min-stockfish-scored-runs 3 --min-fixed-suite-reports 4",
     "lc0:tvmjs-webgpu-bundle-footprint": "node scripts/summarize_lc0_tvmjs_bundle_footprint.mjs",
+    "lc0:tvmjs-weight-cache-plan": "node scripts/analyze_lc0_tvmjs_weight_cache_plan.mjs",
+    "lc0:tvmjs-timing-breakdown": "node scripts/summarize_lc0_tvmjs_timing_breakdown.mjs",
     "lc0:tvmjs-startup-amortization": "node scripts/summarize_lc0_tvmjs_startup_amortization.mjs",
     "lc0:tvmjs-static-content-encoding-smoke": "node scripts/check_static_content_encoding.mjs",
     "lc0:tvmjs-webgpu-local-artifacts-check": "node scripts/check_lc0_tvmjs_webgpu_local_artifacts.mjs",
