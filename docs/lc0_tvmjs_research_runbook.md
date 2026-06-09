@@ -134,13 +134,33 @@ npm run lc0:tvmjs-webgpu-smoke -- \
   --out artifacts/tvm/lc0_tvmjs_webgpu_smoke_b8_v32_ortf16.json
 ```
 
-Aggregate the current local research evidence:
+Aggregate the current local research evidence from an existing smoke artifact:
 
 ```bash
 cd "$WEB"
 npm run lc0:tvmjs-webgpu-summary -- \
-  --artifact artifacts/tvm/lc0_tvmjs_webgpu_smoke_b8_v16_ortf16.json \
+  --in artifacts/tvm/lc0_tvmjs_webgpu_smoke_b8_v16_ortf16.json \
   --out artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_b8_v16_ortf16_report.json
+```
+
+Research-only fixed-suite bridge, using the same fixed FEN input style as `lc0_browser_runtime_fixed_suite.mjs` but without adding TVMJS to the stable runtime registry/UI:
+
+```bash
+npm run lc0:tvmjs-webgpu-fixed-suite -- \
+  --fens ../leelaweb-arena-diagnostics/eval/opening_suite_uho_lite_v1.fen \
+  --max-positions 2 \
+  --batch 8 \
+  --visits 16 \
+  --repeats 1 \
+  --stockfish-score-depth 3 \
+  --out artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_bridge_uho2_v16_r1_sfdepth3.json
+```
+
+The bridge emits normalized suite FENs, a child TVMJS smoke artifact, a `*_report.json` fixed-suite-style report discoverable by the evidence summarizer, and an aggregate `lc0_browser.tvmjs_webgpu_fixed_suite_research_bridge.v1` JSON with `researchOnly: true` and `noStableRuntimePromotion: true`.
+
+Then refresh/check aggregate evidence:
+
+```bash
 npm run lc0:tvmjs-webgpu-evidence-summary
 npm run lc0:tvmjs-webgpu-research-gate
 ```
@@ -253,6 +273,13 @@ Summary from the scored strict same-FEN UHO-lite matrix:
 - Hybrid b4 WGSL-heads mean search timing: `133.27 ms`.
 - TVMJS-vs-ORT f16 Stockfish-scored deltas: `6` scored rows, cp delta min/max/mean `0/0/0`.
 - Interpretation: TVMJS remains aligned with ORT f16 on the scored rows, while the custom hybrid piecemeal runtime can choose a different search move on at least one UHO-lite position at 16 visits. This supports keeping hybrid and TVMJS as distinct research/product lanes rather than treating them as interchangeable.
+
+Current production-style fixed-suite bridge smoke:
+
+- Artifact: `artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_bridge_uho2_v16_r1_sfdepth3.json`.
+- Status: `ok: true`, `researchOnly: true`, `noStableRuntimePromotion: true`.
+- Fixed FEN rows: `2`; TVMJS-vs-ORT f16 search move match: `2/2`.
+- This proves the fixed-suite input/report bridge works end-to-end, but the evidence is still smoke-sized and remains non-promotional.
 
 Startup/footprint sample from `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n2_r1_startup.json`:
 

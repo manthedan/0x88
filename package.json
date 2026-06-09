@@ -102,6 +102,7 @@
     "lc0:build-tvmjs-webgpu-toolchain": "scripts/build_tvmjs_webgpu_toolchain.sh",
     "lc0:stage-tvmjs-webgpu": "node scripts/stage_lc0_tvmjs_webgpu_artifacts.mjs",
     "lc0:tvmjs-webgpu-smoke": "node scripts/lc0_tvmjs_webgpu_smoke.mjs",
+    "lc0:tvmjs-webgpu-fixed-suite": "node --experimental-strip-types scripts/lc0_tvmjs_webgpu_fixed_suite.mjs",
     "lc0:tvmjs-vs-hybrid-matrix": "node scripts/lc0_tvmjs_vs_hybrid_matrix.mjs",
     "lc0:tvmjs-webgpu-summary": "node scripts/summarize_lc0_tvmjs_webgpu_smoke.mjs",
     "lc0:tvmjs-webgpu-evidence-summary": "node scripts/summarize_lc0_tvmjs_webgpu_evidence.mjs",
