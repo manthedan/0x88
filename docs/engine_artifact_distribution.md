@@ -8,6 +8,8 @@ This policy applies before publishing or deploying generated artifacts for third
 
 - Berserk Emscripten artifacts under `/berserk/`
 - PlentyChess Emscripten artifacts under `/plentychess/`
+- Viridithas WASI artifacts under `/viridithas/`
+- Stockfish.js artifacts under `/stockfish/`
 - future C/C++/Rust engine browser ports that bundle or require engine/network assets
 
 Local ignored artifacts may be built and smoke-tested for development. Public distribution is gated by this document.
@@ -69,10 +71,10 @@ If the asset license or provenance is unclear, do not publish the generated engi
 
 ## Repository hygiene
 
-- Keep generated engine artifacts ignored in git.
-- Commit source patches, build scripts, smoke scripts, variant metadata, and documentation.
-- Commit small release manifests only after they refer to an actual published source archive.
-- Do not add generated JS/WASM/data/NNUE files to this repository unless a separate decision explicitly changes repo policy.
+- Decide per engine whether artifacts are deploy-tracked or CI-generated; do not leave deployed artifacts hidden by `.gitignore` rules.
+- For the current Netlify/Vite deployment, committed/LFS public artifacts are intentional for Berserk, PlentyChess, Viridithas, Stockfish.js, and selected model packs.
+- Commit source patches, build scripts, smoke scripts, variant metadata, documentation, source archives, and release manifests for deployed third-party binaries, especially copyleft/GPL binaries.
+- Keep generated precompressed `.br`/`.gz` sidecars ignored; they are rebuilt into `dist-client/`.
 
 ## Browser UI/deployment gate
 
@@ -114,6 +116,28 @@ If the selector is visible in a public deployment but assets are intentionally a
 - Processing command: upstream `tools/process_net false`, then preload as `/processed.bin`
 - Distribution status: cleared mechanically once generated artifacts, source archive, release manifest, and GPL notices are published together; the ~63 MB `.data` sidecar still needs an explicit product/footprint decision before enabling by default.
 
+### Viridithas WASI
+
+- License: MIT upstream at the pinned commit (`LICENSE` and `Cargo.toml`).
+- Upstream: `https://github.com/cosmobobak/viridithas.git`
+- Pin: commit `20d7402065cae084715183e019fdd18089e2dfac`
+- Patch: `patches/viridithas-wasip1.patch`
+- Build: `npm run viridithas:build-wasi` and `npm run viridithas:build-simd-wasi`
+- Smoke: `npm run viridithas:smoke`
+- Network: `atlantis-b800.nnue.zst`
+- Network source: `https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst`
+- Raw network SHA-256: `2d387407b926df4dbda441cdc3e2288fee2e6a2afa8e1bd22262309ec0fb668a`
+- Distribution status: source/provenance archive and manifest are committed beside the deployed WASI binaries.
+
+### Stockfish.js
+
+- License: GPL-3.0 upstream/package.
+- Upstream: `https://github.com/nmrugg/stockfish.js.git`
+- Package: `stockfish@18.0.7`
+- Pin: npm `gitHead`/upstream commit `32d4b5ae40c01db88219bfbe2b82dbe6dec93832`
+- Build: upstream `npm ci && node build.js --all -f`
+- Distribution status: release archive and manifest are committed beside the deployed Stockfish.js assets.
+
 ## Manifest helper
 
 Use the checked-in helpers to draft manifests and source archives from local generated artifacts:
@@ -121,20 +145,26 @@ Use the checked-in helpers to draft manifests and source archives from local gen
 ```sh
 npm run berserk:artifact-manifest
 npm run plentychess:artifact-manifest
+npm run viridithas:artifact-manifest
+npm run stockfish:artifact-manifest
 npm run berserk:source-archive
 npm run plentychess:source-archive
+npm run viridithas:source-archive
+npm run stockfish:source-archive
 ```
 
-The artifact-manifest helper writes ignored JSON under `artifacts/engine-manifests/`, including artifact sizes, SHA-256 hashes, and local gzip/brotli transfer-size estimates. The source-archive helper writes ignored `*corresponding-source.tar.gz` files beside the generated engine artifacts under `public/<engine>/`. The archives contain the pinned upstream source snapshot, local patch, build/smoke scripts, browser adapter source, docs, raw network/model asset, and rebuild instructions using `*_SKIP_GIT=1`.
+The artifact-manifest helper writes ignored JSON under `artifacts/engine-manifests/`, including artifact sizes, SHA-256 hashes, and local gzip/brotli transfer-size estimates. The source-archive helper writes `*corresponding-source.tar.gz` files beside the generated engine artifacts under `public/<engine>/`. Deployed GPL engines should commit these release archives and manifests with the deployed binaries.
 
 For a distribution-ready manifest that records the source archive hash and relative deployment URL, run:
 
 ```sh
 npm run berserk:release-manifest
 npm run plentychess:release-manifest
+npm run viridithas:release-manifest
+npm run stockfish:release-manifest
 ```
 
-Pass `ENGINE_ARTIFACT_TOOLCHAIN='...'` or `-- --toolchain '...'` when writing a release manifest if `emcc` is not on PATH; the release manifest must identify the Emscripten version or container image digest actually used for the generated artifacts. `npm run build:netlify` uses `scripts/precompress_engine_artifacts.mjs` to emit `.br`/`.gz` sidecars in `dist-client/`; see `docs/netlify_engine_artifacts.md`. A manifest generated without a source archive URL and exact toolchain remains a draft, not a public-distribution clearance.
+Pass `ENGINE_ARTIFACT_TOOLCHAIN='...'` or `-- --toolchain '...'` when writing a release manifest if the auto-detected/default toolchain text is not exact enough for the generated artifacts. `npm run build:netlify` uses `scripts/precompress_engine_artifacts.mjs` to emit `.br`/`.gz` sidecars in `dist-client/`; see `docs/netlify_engine_artifacts.md`. A manifest generated without a source archive URL and exact toolchain remains a draft, not a public-distribution clearance.
 
 ## Manifest template
 

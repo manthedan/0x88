@@ -1,0 +1,11 @@
+[
+  {
+    "id": "threefold-knight-shuffle-history",
+    "description": "Two repeated knight shuffles return to startpos for a threefold draw and exercise LC0 repetition planes without altering WASM input-encoder parity fixtures.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "moves": ["g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6", "f3g1", "f6g8"],
+    "finalFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 8 5",
+    "expectedDraw": "threefold",
+    "expectedRepetitionPlanes": [0, 1, 2, 3, 4]
+  }
+]

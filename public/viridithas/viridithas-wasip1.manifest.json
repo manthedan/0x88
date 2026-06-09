@@ -1,0 +1,79 @@
+{
+  "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
+  "generatedAt": "2026-06-09T08:55:27.882Z",
+  "distributionPolicy": "docs/engine_artifact_distribution.md",
+  "engine": "viridithas",
+  "flavor": "wasip1-scalar-simd128",
+  "status": "experimental",
+  "upstream": {
+    "repo": "https://github.com/cosmobobak/viridithas.git",
+    "commit": "20d7402065cae084715183e019fdd18089e2dfac",
+    "license": "MIT"
+  },
+  "build": {
+    "script": "scripts/build_viridithas_wasi.mjs",
+    "command": "npm run viridithas:build-wasi && npm run viridithas:build-simd-wasi",
+    "patches": [
+      "patches/viridithas-wasip1.patch"
+    ],
+    "toolchain": "Rust cargo with wasm32-wasip1 target; scalar build uses +bulk-memory, SIMD build also uses +simd128."
+  },
+  "artifacts": [
+    {
+      "path": "public/viridithas/viridithas.wasm",
+      "bytes": 57442854,
+      "sha256": "792a18d743ce8dda2369549096ae065d38d2908aec270ce39398b675872529db",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 54514620,
+          "ratio": 0.949
+        },
+        "brotli": {
+          "bytes": 54404372,
+          "ratio": 0.9471
+        }
+      }
+    },
+    {
+      "path": "public/viridithas/viridithas-simd128.wasm",
+      "bytes": 57419901,
+      "sha256": "50259f73d2cb49edf9e274217a416fb3cb9b87222efab99145e7d6a7b6594acf",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 54506501,
+          "ratio": 0.9493
+        },
+        "brotli": {
+          "bytes": 54400824,
+          "ratio": 0.9474
+        }
+      }
+    }
+  ],
+  "assets": [
+    {
+      "name": "atlantis-b800.nnue.zst",
+      "sourceUrl": "https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst",
+      "rawSha256": "2d387407b926df4dbda441cdc3e2288fee2e6a2afa8e1bd22262309ec0fb668a",
+      "licenseNote": "Viridithas network required by the WASI build; preserve upstream notices with the MIT engine source and network provider provenance.",
+      "embeddedIn": "public/viridithas/viridithas.wasm and public/viridithas/viridithas-simd128.wasm"
+    }
+  ],
+  "totals": {
+    "bytes": 114862755,
+    "gzipBytes": 109021121,
+    "brotliBytes": 108805196,
+    "gzipRatio": 0.9491,
+    "brotliRatio": 0.9473
+  },
+  "sourceArchive": {
+    "required": true,
+    "path": "public/viridithas/viridithas-wasip1-corresponding-source.tar.gz",
+    "bytes": 62096377,
+    "sha256": "f7218c099882ec37047aa5a161182492d3b8151db11315257a55345065346c41",
+    "url": "/viridithas/viridithas-wasip1-corresponding-source.tar.gz",
+    "note": "Source archive recorded for public distribution."
+  }
+}

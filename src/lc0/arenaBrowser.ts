@@ -12,6 +12,7 @@ import { loadLc0ModelForOrt } from './modelCache.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
+import { BROWSER_RUNTIME_AUDIT_EVENT, formatBrowserRuntimeAudit, publishBrowserRuntimeAudit, type BrowserRuntimeAuditDetail } from '../nn/runtimeAudit.ts';
 import { chooseMove, montyLitePuctPolicy, type SearchResult as TinySearchResult } from '../search/puct.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
@@ -243,7 +244,13 @@ async function tinyEvaluator(variant: string): Promise<Evaluator> {
       meta: TINY_META_URL,
       runtime,
       manifestUrl: TINY_HYBRID_MANIFEST_URL,
-    }, { params, runtime, manifestUrl: TINY_HYBRID_MANIFEST_URL, fallback });
+    }, {
+      params,
+      runtime,
+      manifestUrl: TINY_HYBRID_MANIFEST_URL,
+      fallback,
+      audit: { surface: 'arena', searchBudget: 'visits=seat strength' },
+    });
     console.info('[lc0-arena] loaded Tiny Leela evaluator', {
       requestedRuntime: loaded.requestedRuntime,
       resolvedRuntime: loaded.resolvedRuntime,
@@ -280,6 +287,19 @@ function initialLc0Runtime(): Lc0ArenaRuntime {
 
 function selectedLc0Runtime(): Lc0ArenaRuntime {
   return normalizeLc0Runtime(selectEl('lc0RuntimeSelect').value);
+}
+
+function lc0ResolvedRuntime(runtime: Lc0ArenaRuntime): string {
+  if (runtime === 'onnx') return 'ort-main-thread';
+  return `${runtime}-lazy`;
+}
+
+function installRuntimeAuditPanel(): void {
+  window.addEventListener(BROWSER_RUNTIME_AUDIT_EVENT, (event) => {
+    const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
+    if (detail.family !== 'lc0') return;
+    el('runtimeAuditInfo').textContent = `LC0 runtime audit: ${formatBrowserRuntimeAudit(detail)}`;
+  });
 }
 
 function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
@@ -2046,6 +2066,20 @@ async function loadLc0Evaluator(): Promise<void> {
   el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)}${hybrid ? ` (${hybrid})` : ''}…`;
   try {
     const evaluator = await createSelectedLc0Evaluator();
+    publishBrowserRuntimeAudit({
+      source: 'lc0-arena-evaluator',
+      surface: 'arena',
+      family: 'lc0',
+      engineLabel: 'LC0',
+      modelId: 'lc0-default',
+      modelUrl: runtime === 'onnx' ? MODEL_URL : PACK_URL,
+      requestedRuntime: runtime,
+      resolvedRuntime: lc0ResolvedRuntime(runtime),
+      runtimeConfigId: runtime === 'onnx' ? undefined : runtime,
+      manifestUrl: runtime === 'onnx' ? undefined : PACK_URL,
+      searchBudget: activeSeatRows().filter((row) => row.family === 'lc0' && row.variant !== 'bt4').map((row) => budgetText(row)).join(', '),
+      notes: [lc0RuntimeLabel(runtime), hybrid, runtime === 'onnx' ? undefined : 'hybrid runtime is pack-lazy until first evaluation succeeds'].filter((part): part is string => !!part),
+    });
     lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
     lc0Searchers.clear();
     player = new Lc0PolicyOnlyPlayer(lc0Cache);
@@ -2370,6 +2404,7 @@ function wireEvents() {
 async function init() {
   REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
   renderBoard();
+  installRuntimeAuditPanel();
   selectEl('lc0RuntimeSelect').value = initialLc0Runtime();
   refreshRecklessVariantUi();
   refreshViridithasVariantUi();

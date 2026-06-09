@@ -1,4 +1,5 @@
 import { parseFen, START_FEN, type BoardState, type Color, type PieceRole } from '../chess/board.ts';
+import { repetitionKey } from '../chess/drawRules.ts';
 
 export const LC0_CLASSICAL_112_PLANES = 112;
 export const LC0_HISTORY_PLANES = 8;
@@ -144,10 +145,10 @@ export function encodeLc0Classical112(boardOrFen: Lc0EncoderInput, options?: { h
     while (historyBoards.length < LC0_HISTORY_PLANES) historyBoards.push(syntheticHistoryBoard);
   }
 
+  const historyKeys = explicitHistory ? historyBoards.map(repetitionKey) : [];
   for (let i = 0; i < Math.min(historyBoards.length, LC0_HISTORY_PLANES); i++) {
     setPiecePlanes(historyBoards[i], masks, i, board.turn);
-    // Repetition plane remains zero for Phase 1.5 explicit fixtures: no fixture
-    // yet includes a repeated position that would set LC0's repetition plane.
+    if (explicitHistory && historyKeys.slice(i + 1).includes(historyKeys[i])) masks[i * LC0_PLANES_PER_HISTORY + 12] = ALL_SQUARES_MASK;
   }
   setClassicalAuxPlanes(board, masks, values);
 
