@@ -449,41 +449,52 @@ async function run() {
   logEl.textContent = '';
   const manifestUrl = document.getElementById('manifest').value;
   const batch = Number(document.getElementById('batch').value);
+  const startupTimings = {};
+  const timed = async (name, fn) => {
+    const started = performance.now();
+    try { return await fn(); }
+    finally { startupTimings[name] = performance.now() - started; }
+  };
+  const timedSync = (name, fn) => {
+    const started = performance.now();
+    try { return fn(); }
+    finally { startupTimings[name] = performance.now() - started; }
+  };
   const base = checkedStagedRuntimeUrl(manifestUrl, location.href, 'manifest');
   log('manifest', base.toString());
-  const manifestResponse = await fetch(base);
+  const manifestResponse = await timed('manifestFetchMs', () => fetch(base));
   if (!manifestResponse.ok) throw new Error(`Manifest fetch failed: ${manifestResponse.status}`);
-  const manifest = await manifestResponse.json();
+  const manifest = await timed('manifestJsonMs', () => manifestResponse.json());
   const model = manifest.models.find((item) => item.batch === batch);
   if (!model) throw new Error(`Batch ${batch} not in manifest`);
   const tvmjsBundle = manifest.runtime?.tvmjsBundle ?? 'tvmjs.bundle.js';
-  await loadTvmjsBundle(tvmjsBundle, base);
+  await timed('tvmjsBundleLoadMs', () => loadTvmjsBundle(tvmjsBundle, base));
   if (!navigator.gpu) throw new Error('navigator.gpu missing');
   log('schema', manifest.schema);
   log('tvmjs bundle', tvmjsBundle);
   log('model wasm', model.wasm, model.bytes);
-  const adapter = await navigator.gpu.requestAdapter();
+  const adapter = await timed('requestAdapterMs', () => navigator.gpu.requestAdapter());
   if (!adapter) throw new Error('WebGPU adapter unavailable');
   const requiredFeatures = ['shader-f16'];
   for (const feature of requiredFeatures) {
     if (!adapter.features.has(feature)) throw new Error(`WebGPU adapter missing required feature: ${feature}`);
   }
-  const device = await adapter.requestDevice({ requiredFeatures });
+  const device = await timed('requestDeviceMs', () => adapter.requestDevice({ requiredFeatures }));
   device.addEventListener('uncapturederror', (event) => {
     log('webgpu uncaptured', event.error?.message || String(event.error));
   });
   log('webgpu device acquired');
-  const wasmBytes = await fetchChecked(base, model.wasm, model);
+  const wasmBytes = await timed('wasmFetchVerifyMs', () => fetchChecked(base, model.wasm, model));
   log('wasm fetched+verified', wasmBytes.byteLength);
-  const tvm = await tvmjs.instantiate(wasmBytes, tvmjs.createPolyfillWASI(), (message) => log('tvmjs', message));
-  tvm.initWebGPU(device);
+  const tvm = await timed('tvmjsInstantiateMs', () => tvmjs.instantiate(wasmBytes, tvmjs.createPolyfillWASI(), (message) => log('tvmjs', message)));
+  timedSync('tvmInitWebGpuMs', () => tvm.initWebGPU(device));
   log('tvm instance initialized');
   tvm.beginScope();
   try {
-    const sys = tvm.systemLib();
+    const sys = timedSync('systemLibMs', () => tvm.systemLib());
     log('systemLib loaded');
     try {
-      await tvm.asyncLoadWebGPUPipelines(sys);
+      await timed('webgpuPipelinePrebuildMs', () => tvm.asyncLoadWebGPUPipelines(sys));
       log('webgpu pipelines prebuilt');
     } catch (pipelineErr) {
       const message = pipelineErr?.message || String(pipelineErr);
@@ -500,7 +511,7 @@ async function run() {
       } catch {}
     }
     log('candidate functions', available);
-    const vm = tvm.createVirtualMachine(tvm.webgpu());
+    const vm = timedSync('createVirtualMachineMs', () => tvm.createVirtualMachine(tvm.webgpu()));
     const vmMod = vm.getInternalModule();
     const vmCandidates = ['set_input', 'invoke_stateful', 'get_output', 'get_outputs', 'main', 'vm_initialization'];
     const vmAvailable = [];
@@ -535,8 +546,8 @@ async function run() {
         inputBytes = float32ToFloat16Bytes(encoded);
         log('fixtures encoded', { fixtureOffset, requestedFixtureCount, ids: fixtureRows.map((row) => row.id) });
       }
-      const input = tvm.empty(shape, 'float16', tvm.webgpu());
-      input.copyFromRawBytes(inputBytes);
+      const input = timedSync('inputTensorAllocMs', () => tvm.empty(shape, 'float16', tvm.webgpu()));
+      timedSync('inputUploadMs', () => input.copyFromRawBytes(inputBytes));
       log('input allocated+uploaded', { shape, dtype: input.dtype, bytes: inputBytes.byteLength, mode: useFixtures ? 'fixtures' : 'zero' });
       const setInput = vmMod.getFunction('set_input');
       const invokeStateful = vmMod.getFunction('invoke_stateful');
@@ -601,6 +612,7 @@ async function run() {
           fixtureOffset: useFixtures ? Math.max(0, Number(params.get('fixtureOffset') ?? 0) || 0) : undefined,
           fixtureCount: fixtureRows.length,
           invokeMs,
+          startupTimings,
           bestMoveMatches: fixtureResults.filter((row) => row.bestMoveMatchesNative).length,
           nativeComparable: fixtureResults.filter((row) => row.nativeBestMove).length,
           maxNativeTopPriorAbsDiff: definedMax(fixtureResults.map((row) => row.maxNativeTopPriorAbsDiff)),
@@ -617,6 +629,7 @@ async function run() {
           batch,
           fixtureCount: 0,
           invokeMs,
+          startupTimings,
           inputMode: useFixtures ? 'fixtures' : 'zero',
           outputs: outputMetas,
           rawBytesRead: outputRaws.map((raw) => raw?.byteLength ?? null),

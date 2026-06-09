@@ -185,7 +185,7 @@ npm run lc0:tvmjs-vs-hybrid-matrix -- \
   --out artifacts/tvm/lc0_tvmjs_vs_hybrid_b8_hb4_v32_n4_r1.json
 ```
 
-The wrapper writes an aggregate `lc0_browser.tvmjs_vs_hybrid_matrix.v1` JSON artifact and child artifacts for each lane. Current caveat: the TVMJS lane can use arbitrary FEN files, but the hybrid search fixture parity page still uses native search fixture records. Add arbitrary-FEN support to the hybrid page before treating rows as strictly fixture-identical.
+The wrapper writes an aggregate `lc0_browser.tvmjs_vs_hybrid_matrix.v1` JSON artifact and child artifacts for each lane. With `--fens`, both lanes run the same FEN rows. The TVMJS child artifact and aggregate include `startupTimings` for manifest fetch, TVMJS bundle load, WebGPU adapter/device acquisition, wasm fetch/verification, async wasm instantiate, TVM WebGPU init, `systemLib`, WebGPU pipeline prebuild, VM creation, input tensor allocation, and input upload.
 
 First local wrapper artifacts:
 
