@@ -274,13 +274,21 @@ Summary from the scored strict same-FEN UHO-lite matrix:
 - TVMJS-vs-ORT f16 Stockfish-scored deltas: `6` scored rows, cp delta min/max/mean `0/0/0`.
 - Interpretation: TVMJS remains aligned with ORT f16 on the scored rows, while the custom hybrid piecemeal runtime can choose a different search move on at least one UHO-lite position at 16 visits. This supports keeping hybrid and TVMJS as distinct research/product lanes rather than treating them as interchangeable.
 
-Current production-style fixed-suite bridge smoke:
+Current production-style fixed-suite bridge evidence:
 
-- Artifact: `artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_bridge_uho8_v16_r1_sfdepth3.json`.
-- Status: `ok: true`, `researchOnly: true`, `noStableRuntimePromotion: true`.
-- Fixed FEN rows: `8`; TVMJS-vs-ORT f16 search move match: `8/8`.
-- Earlier 2-row bridge artifact: `artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_bridge_uho2_v16_r1_sfdepth3.json`.
-- This proves the fixed-suite input/report bridge works end-to-end beyond a tiny smoke pair, but the evidence remains non-promotional until broader suites/repeats and release policy are in place.
+- Main repeat artifact: `artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_bridge_uho16_v16_r2_sfdepth3.json`.
+  - Status: `ok: true`, `researchOnly: true`, `noStableRuntimePromotion: true`.
+  - Fixed FEN rows: `16`; search rows: `32` (`repeats=2`, visits `16`).
+  - TVMJS-vs-ORT f16 search move match: `32/32`.
+  - TVMJS mean/median/max search timing: `48.20 / 47.28 / 59.45 ms`.
+  - Stockfish TVMJS-minus-ORT f16 cp deltas: `30` scored rows, min/max/mean `0/0/0`.
+- Visit-depth artifact: `artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_bridge_uho8_v32_r1_sfdepth3.json`.
+  - Fixed FEN rows: `8`; search rows: `8` (visits `32`).
+  - TVMJS-vs-ORT f16 search move match: `8/8`.
+  - TVMJS mean/median/max search timing: `84.36 / 79.48 / 108.72 ms`.
+  - Stockfish TVMJS-minus-ORT f16 cp deltas: `7` scored rows, min/max/mean `0/0/0`.
+- Earlier smoke artifacts: `artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_bridge_uho8_v16_r1_sfdepth3.json` and `artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_bridge_uho2_v16_r1_sfdepth3.json`.
+- The bridge now covers more rows, repeats, and a higher visit budget, but the evidence remains non-promotional until broader suites and release/hosting policy are accepted.
 
 Startup/footprint sample from `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n2_r1_startup.json`:
 
