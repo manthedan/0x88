@@ -3213,6 +3213,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
   const fixtureIds = (params.get('fixtureIds') ?? '').split(',').map((value) => value.trim()).filter(Boolean);
   const fixtureIdSet = fixtureIds.length ? new Set(fixtureIds) : undefined;
   const traceRootChildren = params.get('traceRootChildren') === '1';
+  const traceSearchVisits = params.get('traceSearchVisits') === '1';
   const batchSize = searchBatchSize;
   const cells = [];
   const depthBaselines = new Map<string, { bestMove: string | undefined; children: Lc0SearchChild[] }>();
@@ -3241,6 +3242,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
               visits,
               batchSize,
               batchPipelineDepth: depth,
+              traceSearchVisits,
               multiPv: 1,
               reuseTree: false,
             });
@@ -3267,6 +3269,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
               depthBaselineTopVisitShare: depthBaseline ? rootTopVisitShare(depthBaseline.children) : undefined,
               rootChildren: traceRootChildren ? rootChildTrace(result.children) : undefined,
               depthBaselineRootChildren: traceRootChildren ? rootChildTrace(depthBaseline?.children) : undefined,
+              searchTrace: traceSearchVisits ? result.stats?.searchTrace : undefined,
               completedVisits: result.stats?.completedVisits,
               stopReason: result.stats?.stopReason,
               elapsedMs: roundReportMs(performance.now() - started),
@@ -3309,6 +3312,7 @@ async function runHybridSearchFixtureParity(): Promise<void> {
       fixtureLimit,
       fixtureIds,
       traceRootChildren,
+      traceSearchVisits,
       cells: cells.length,
       nativeMatches: cells.filter((cell) => cell.matchesNative).length,
       depthBaselineMatches: cells.filter((cell) => cell.matchesDepthBaseline).length,

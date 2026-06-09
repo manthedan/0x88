@@ -32,6 +32,7 @@ Options:
   --fixture-limit N          Fixtures per visit set (max currently 16, default 16)
   --fixture-ids LIST         Comma-separated native fixture IDs to run before applying --fixture-limit
   --trace-root-children      Include depth-baseline/root child visit/prior/q traces in the browser artifact
+  --trace-search-visits      Include per-batch selection/backup search trace in the browser artifact
   --layers N                 Encoder layers (default 10)
   --head-backend MODE        ort or wgsl (default ort; use wgsl to opt into experimental WGSL heads)
   --encoder-kernel MODE      hand, mixed-tvm-ffn, mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project, tvm-packed-f16 (default hand)
@@ -75,6 +76,7 @@ function parseArgs(argv) {
     fixtureLimit: 16,
     fixtureIds: [],
     traceRootChildren: false,
+    traceSearchVisits: false,
     layers: 10,
     headBackend: 'ort',
     encoderKernel: 'hand',
@@ -109,6 +111,7 @@ function parseArgs(argv) {
     else if (arg === '--fixture-limit' || arg === '--fixtures') args.fixtureLimit = Number(next());
     else if (arg === '--fixture-ids') args.fixtureIds = next().split(',').map((value) => value.trim()).filter(Boolean);
     else if (arg === '--trace-root-children') args.traceRootChildren = true;
+    else if (arg === '--trace-search-visits') args.traceSearchVisits = true;
     else if (arg === '--layers') args.layers = Number(next());
     else if (arg === '--head-backend') args.headBackend = next();
     else if (arg === '--encoder-kernel') args.encoderKernel = next();
@@ -160,6 +163,7 @@ function parityUrl(args) {
   url.searchParams.set('fixtureLimit', String(args.fixtureLimit));
   if (args.fixtureIds.length) url.searchParams.set('fixtureIds', args.fixtureIds.join(','));
   if (args.traceRootChildren) url.searchParams.set('traceRootChildren', '1');
+  if (args.traceSearchVisits) url.searchParams.set('traceSearchVisits', '1');
   url.searchParams.set('ep', 'wasm');
   if (!args.packVerify) url.searchParams.set('packVerify', '0');
   return String(url);
