@@ -1238,6 +1238,7 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
 
 async function initHybridWorkerWithOptions(options: { inputBackend?: 'js' | 'wgsl' | 'wasm'; legalPriorsBackend?: 'js' | 'wasm' | 'gpu'; encoderKernelVariant?: string; headBackend?: 'ort' | 'wgsl' } = {}): Promise<void> {
   if (!searchWorker) await initSearchWorker({ initModel: false });
+  const inputBackend = options.inputBackend ?? HYBRID_INPUT_BACKEND;
   const initStarted = performance.now();
   const ready = await postWorkerRequest<{ type: 'ready'; backend: string; modelCache: string }>({
     type: 'init',
@@ -1251,7 +1252,7 @@ async function initHybridWorkerWithOptions(options: { inputBackend?: 'js' | 'wgs
     verifyShards: params.get('packVerify') !== '0',
     headBackend: options.headBackend ?? (HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort'),
     wgslBatchMode: HYBRID_WGSL_BATCH_MODE,
-    inputBackend: options.inputBackend ?? HYBRID_INPUT_BACKEND,
+    inputBackend,
     legalPriorsBackend: options.legalPriorsBackend ?? HYBRID_LEGAL_PRIORS_BACKEND,
     encoderKernelVariant: options.encoderKernelVariant ?? HYBRID_ENCODER_KERNEL_VARIANT,
     evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
