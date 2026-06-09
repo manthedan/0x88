@@ -504,6 +504,38 @@ Current policy: generated TVMJS wasm/runtime artifacts are local research artifa
 
 Do not add TVMJS to `src/nn/runtimeRegistry.ts`, `src/nn/browserRuntimeEvaluator.ts`, or the stable arena runtime UI as part of artifact publication alone.
 
+## Branch push/merge checklist for `tvmjs-hybrid-research-runbooks`
+
+Before pushing or merging this research branch:
+
+1. Confirm the worktree is clean except the Ralph task file in the parent coordination repo, if that repo tracks it separately.
+2. Confirm `git log --oneline main..tvmjs-hybrid-research-runbooks` contains only research-lane commits and no generated TVMJS wasm/runtime artifacts.
+3. Re-run:
+
+   ```bash
+   npm run typecheck
+   npm run lc0:tvmjs-webgpu-research-gate
+   npm run lc0:tvmjs-research-only-check
+   git diff --check
+   ```
+
+4. Run autoreview with the same validation bundle:
+
+   ```bash
+   /Users/macthedan/.pi/agent/skills/autoreview/scripts/autoreview --mode local --parallel-tests "npm run typecheck && npm run lc0:tvmjs-webgpu-research-gate"
+   ```
+
+5. Push the branch only after the checks pass:
+
+   ```bash
+   git push -u origin tvmjs-hybrid-research-runbooks
+   ```
+
+6. In the PR/merge notes, state explicitly that TVMJS remains research-only and is not added to `src/nn/runtimeRegistry.ts`, `src/nn/browserRuntimeEvaluator.ts`, stable runtime UI, or default arena flow.
+7. Mention ignored/local artifact policy: generated TVMJS wasm/runtime files and evidence artifacts are not release payloads unless a release owner separately accepts the hosting/cache policy.
+8. Include the current evidence highlights: fixed-suite bridge `94/94` TVMJS-vs-ORT f16 search move matches, same-session TVMJS-vs-hybrid visit samples at `16/32/64`, GPU allocation-request telemetry, startup/amortization sidecar, bundle footprint sidecar, and local static `Content-Encoding` smoke.
+9. Treat merge as a research/runbook merge only; TVMJS promotion remains blocked by broader production fixed-suite evidence, release-host verification, f16 drift/tolerance policy, and accepted artifact publication policy.
+
 ## Evidence naming convention
 
 Use names that encode lane, model, suite, batch, visits, repeats, and baseline:
