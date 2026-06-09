@@ -367,6 +367,23 @@ to both searchers so the search shape stays matched). A/B at v16/b8,
 - Mechanism check: per-batch GPU-wait share was `15.58 ms` with a dedicated sync per batch versus `13.85 ms` as half of a 2-batch shared sync — a 2-batch flush syncs in roughly 2× a single batch. The "readback wait" is therefore **GPU compute (~13–15 ms per padded b8 invoke), not sync/readback overhead**, and pipelining cannot hide it. The depth-2 scheduler also fragments the small visit budget into more, worse-filled physical batches, each costing a full padded-b8 GPU pass.
 - Revised lever order: (1) per-batch GPU compute — kernel/schedule tuning (dlight rules, per-kernel timestamp-query attribution); (2) physical invoke count — batch fill (~40% of GPU work is padding at 60% fill) and visit budgets that fill b8; (3) pipelining only pays once per-batch GPU time shrinks or CPU encode grows. Keep `searchPipelineDepth=1` as the default; the pipelined path stays as an opt-in research knob.
 
+### Per-kernel GPU attribution via timestamp-query (2026-06-09)
+
+The smoke page now installs a GPU kernel profiler when the adapter offers
+`timestamp-query` (optional feature; `kernelProfile=0` disables). It wraps
+compute-pipeline creation to learn TVM kernel entry-point names, injects
+`timestampWrites` into every compute pass during one dedicated warm b8 invoke,
+and attaches the aggregate as `result.gpuKernelProfile`.
+
+Current b8 result (`artifacts/tvm/lc0_tvmjs_kernel_profile_b8.json`, Apple
+Silicon Chrome, one warm invoke):
+
+- **229 compute passes** per b8 invoke; per-pass GPU busy time sums to **9.24 ms** versus the ~`14 ms` end-to-end GPU wait, so roughly a third of the GPU wall is inter-pass gaps/submit/readback overhead rather than kernel execution.
+- No dominant kernel. Top entries: `fused_matmul4_add2_tir_sigmoid_multiply2` `1.70 ms` (18.4%, ×10), `fused_matmul9_add_multiply5_add5` `1.51 ms` (16.3%, ×10), `fused_matmul8_add6_relu_multiply6` `1.38 ms` (14.9%, ×10), `fused_matmul1_add` `1.25 ms` (13.5%, ×32), `matmul6` `0.66 ms` (×10), `softmax` `0.52 ms` (×10). The top 4 matmul families are ~63% of kernel time.
+- Reshape/transpose/layer-norm kernels are individually tiny (~`0.007 ms`) but cost a full pass each (~50 of the 229 passes), so their cost is mostly pass overhead, not arithmetic.
+- Tuning implications: (a) matmul schedules are `3–10×` off a naive roofline estimate, spread across ~6 fused matmul variants — dlight-style schedule rules would need to lift the whole family, not one hot spot; (b) pass-count reduction (more aggressive fusion of elementwise/reshape chains, or pass/encoder batching in the tvmjs runtime) attacks the ~`5 ms` non-kernel GPU wall and the long tail of tiny passes.
+- Caveats: single warm invoke, one device; Chrome may quantize timestamps without developer features (observed values are not 100 µs multiples here, so quantization did not flatten this run).
+
 Strict same-FEN visit sweep samples now cover visits `16`, `32`, and `64`:
 
 - `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n1_r1_hybrid_alloc.json`: rows `1`, TVMJS-vs-hybrid `1/1`, TVMJS mean `78.205 ms`, hybrid mean `404.665 ms`.

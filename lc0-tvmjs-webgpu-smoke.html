@@ -63,6 +63,81 @@ function installGpuBufferAllocationProbe(device) {
     },
   };
 }
+// Per-kernel GPU time attribution. Wraps compute-pipeline creation to learn
+// entry-point names, and beginComputePass to inject timestampWrites while
+// armed. Chrome may quantize timestamps (100us buckets) without developer
+// features enabled; aggregation across dispatches still ranks kernels.
+function installGpuKernelProfiler(device) {
+  if (!device.features.has('timestamp-query')) {
+    return { supported: false, reason: 'timestamp-query feature unavailable', arm() {}, disarm() {}, async collect() { return { supported: false, reason: 'timestamp-query feature unavailable' }; } };
+  }
+  const MAX_PASSES = 2048;
+  const querySet = device.createQuerySet({ type: 'timestamp', count: MAX_PASSES * 2 });
+  const resolveBuffer = device.createBuffer({ size: MAX_PASSES * 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC });
+  const readBuffer = device.createBuffer({ size: MAX_PASSES * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const pipelineNames = new WeakMap();
+  const rememberPipeline = (pipeline, descriptor) => {
+    const name = descriptor?.compute?.entryPoint ?? descriptor?.label ?? 'unknown';
+    if (typeof pipeline?.then === 'function') return pipeline.then((resolved) => { pipelineNames.set(resolved, name); return resolved; });
+    pipelineNames.set(pipeline, name);
+    return pipeline;
+  };
+  const origCreatePipeline = device.createComputePipeline.bind(device);
+  device.createComputePipeline = (descriptor) => rememberPipeline(origCreatePipeline(descriptor), descriptor);
+  const origCreatePipelineAsync = device.createComputePipelineAsync.bind(device);
+  device.createComputePipelineAsync = (descriptor) => rememberPipeline(origCreatePipelineAsync(descriptor), descriptor);
+  let armed = false;
+  let slots = [];
+  const origCreateEncoder = device.createCommandEncoder.bind(device);
+  device.createCommandEncoder = (descriptor) => {
+    const encoder = origCreateEncoder(descriptor);
+    const origBegin = encoder.beginComputePass.bind(encoder);
+    encoder.beginComputePass = (passDescriptor = {}) => {
+      if (!armed || slots.length >= MAX_PASSES) return origBegin(passDescriptor);
+      const slot = { index: slots.length, pipelineName: 'unknown' };
+      slots.push(slot);
+      const pass = origBegin({ ...passDescriptor, timestampWrites: { querySet, beginningOfPassWriteIndex: slot.index * 2, endOfPassWriteIndex: slot.index * 2 + 1 } });
+      const origSetPipeline = pass.setPipeline.bind(pass);
+      pass.setPipeline = (pipeline) => { slot.pipelineName = pipelineNames.get(pipeline) ?? 'unknown'; return origSetPipeline(pipeline); };
+      return pass;
+    };
+    return encoder;
+  };
+  return {
+    supported: true,
+    arm() { slots = []; armed = true; },
+    disarm() { armed = false; },
+    async collect() {
+      armed = false;
+      if (!slots.length) return { supported: true, passes: 0, kernels: [] };
+      const entryCount = slots.length * 2;
+      const encoder = origCreateEncoder();
+      encoder.resolveQuerySet(querySet, 0, entryCount, resolveBuffer, 0);
+      encoder.copyBufferToBuffer(resolveBuffer, 0, readBuffer, 0, entryCount * 8);
+      device.queue.submit([encoder.finish()]);
+      await readBuffer.mapAsync(GPUMapMode.READ, 0, entryCount * 8);
+      const ticks = new BigUint64Array(readBuffer.getMappedRange(0, entryCount * 8).slice(0));
+      readBuffer.unmap();
+      const byKernel = new Map();
+      let totalGpuMs = 0;
+      for (const slot of slots) {
+        const begin = ticks[slot.index * 2];
+        const end = ticks[slot.index * 2 + 1];
+        const ms = end > begin ? Number(end - begin) / 1e6 : 0;
+        totalGpuMs += ms;
+        const entry = byKernel.get(slot.pipelineName) ?? { name: slot.pipelineName, dispatches: 0, totalMs: 0, maxMs: 0 };
+        entry.dispatches += 1;
+        entry.totalMs += ms;
+        entry.maxMs = Math.max(entry.maxMs, ms);
+        byKernel.set(slot.pipelineName, entry);
+      }
+      const kernels = [...byKernel.values()]
+        .map((entry) => ({ ...entry, meanMs: entry.totalMs / entry.dispatches, share: totalGpuMs > 0 ? entry.totalMs / totalGpuMs : 0 }))
+        .sort((a, b) => b.totalMs - a.totalMs);
+      return { supported: true, passes: slots.length, totalGpuMs, kernels };
+    },
+  };
+}
 async function sha256Hex(bytes) {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -737,8 +812,14 @@ async function run() {
   for (const feature of requiredFeatures) {
     if (!adapter.features.has(feature)) throw new Error(`WebGPU adapter missing required feature: ${feature}`);
   }
+  // timestamp-query is optional: used only for per-kernel GPU attribution.
+  if (adapter.features.has('timestamp-query')) requiredFeatures.push('timestamp-query');
   const device = await timed('requestDeviceMs', () => adapter.requestDevice({ requiredFeatures }));
   const gpuAllocationProbe = installGpuBufferAllocationProbe(device);
+  const gpuKernelProfiler = params.get('kernelProfile') === '0'
+    ? { supported: false, reason: 'disabled via kernelProfile=0', arm() {}, disarm() {}, async collect() { return { supported: false, reason: 'disabled via kernelProfile=0' }; } }
+    : installGpuKernelProfiler(device);
+  log('gpu kernel profiler', gpuKernelProfiler.supported ? 'armed-capable' : gpuKernelProfiler.reason);
   device.addEventListener('uncapturederror', (event) => {
     log('webgpu uncaptured', event.error?.message || String(event.error));
   });
@@ -867,6 +948,23 @@ async function run() {
         const evalPositionTimings = fixtureResults.map((row) => row.timing);
         const evalTiming = timingStatsByKey(uniqueBatchTimings(evalPositionTimings));
         const evalPositionTiming = timingStatsByKey(evalPositionTimings, TVM_POSITION_TIMING_KEYS);
+        // Dedicated warm profiled invoke: arm per-pass timestamps for exactly
+        // one full physical batch so kernel attribution is not mixed with
+        // search or comparison traffic.
+        let gpuKernelProfile;
+        if (gpuKernelProfiler.supported) {
+          const profileFens = fixtureRows.map((row) => row.fen).slice(0, batch);
+          gpuKernelProfiler.arm();
+          try {
+            await runTvmBatchEvaluation(tvm, vmMod, profileFens, batch);
+          } finally {
+            gpuKernelProfiler.disarm();
+          }
+          gpuKernelProfile = await gpuKernelProfiler.collect();
+          log('gpu kernel profile', { passes: gpuKernelProfile.passes, totalGpuMs: gpuKernelProfile.totalGpuMs, top: gpuKernelProfile.kernels?.slice(0, 5).map((k) => `${k.name}:${k.totalMs?.toFixed(2)}ms`) });
+        } else {
+          gpuKernelProfile = { supported: false, reason: gpuKernelProfiler.reason };
+        }
         const ortComparisons = await runOrtComparisons(batch, fixtureRows, fixtureResults);
         const searchParity = await runSearchParity(tvm, vmMod, batch, fixtureRows);
         const summary = {
@@ -883,6 +981,7 @@ async function run() {
           maxMlhAbsDiffNative: definedMax(fixtureResults.map((row) => row.mlhAbsDiffNative)),
           evalTiming,
           evalPositionTiming,
+          gpuKernelProfile,
           ...(ortComparisons ? { ortComparisons } : {}),
           ...(searchParity ? { searchParity } : {}),
           results: fixtureResults,
