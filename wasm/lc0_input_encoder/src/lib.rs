@@ -7,6 +7,7 @@ const INPUT_CAP: usize = 32768;
 const PLANES: usize = 112;
 const SQUARES: usize = 64;
 const HISTORY: usize = 8;
+const MAX_EXPLICIT_HISTORY: usize = INPUT_CAP / 16;
 const PLANES_PER_HISTORY: usize = 13;
 const AUX_BASE: usize = HISTORY * PLANES_PER_HISTORY;
 
@@ -282,6 +283,16 @@ fn encode_board_pieces(board: &Board, history_slot: usize, perspective_turn: u8)
     }
 }
 
+fn same_repetition_key(a: &Board, b: &Board) -> bool {
+    if a.turn != b.turn || a.castling != b.castling || a.ep != b.ep { return false; }
+    let mut sq = 0usize;
+    while sq < 64 {
+        if a.squares[sq] != b.squares[sq] { return false; }
+        sq += 1;
+    }
+    true
+}
+
 fn encode_aux(board: &Board) {
     let us = board.turn;
     let them = 1 - us;
@@ -312,7 +323,20 @@ fn encode_history(boards: &[Board], fen_only_fill: bool) -> Result<(), i32> {
         let synthetic = board_before_ep_double_push(current);
         while count < HISTORY { history[count] = synthetic; count += 1; }
     }
-    for i in 0..count.min(HISTORY) { encode_board_pieces(&history[i], i, current.turn); }
+    for i in 0..count.min(HISTORY) {
+        encode_board_pieces(&history[i], i, current.turn);
+        if !fen_only_fill && boards.len() > 1 {
+            let source_idx = boards.len() - 1 - i;
+            let mut j = 0usize;
+            while j < source_idx {
+                if same_repetition_key(&boards[j], &history[i]) {
+                    set_all(i * PLANES_PER_HISTORY + 12, 1.0);
+                    break;
+                }
+                j += 1;
+            }
+        }
+    }
     encode_aux(&current);
     Ok(())
 }
@@ -331,7 +355,7 @@ pub extern "C" fn lc0_encode_fen(len: usize, history_fill: i32) -> i32 {
 pub extern "C" fn lc0_encode_fen_history(len: usize) -> i32 {
     if len > INPUT_CAP { return set_error(1); }
     let bytes = unsafe { &INPUT_BUF[..len] };
-    let mut boards: [Board; HISTORY] = [Board { squares: [EMPTY;64], turn: 0, castling: 0, ep: -1, halfmove: 0.0, fullmove: 1 }; HISTORY];
+    let mut boards: [Board; MAX_EXPLICIT_HISTORY] = [Board { squares: [EMPTY;64], turn: 0, castling: 0, ep: -1, halfmove: 0.0, fullmove: 1 }; MAX_EXPLICIT_HISTORY];
     let mut count = 0usize;
     let mut start = 0usize;
     let mut i = 0usize;
@@ -340,14 +364,9 @@ pub extern "C" fn lc0_encode_fen_history(len: usize) -> i32 {
             if i > start {
                 match parse_fen(&bytes[start..i]) {
                     Ok(board) => {
-                        if count < HISTORY {
-                            boards[count] = board;
-                            count += 1;
-                        } else {
-                            let mut j = 1usize;
-                            while j < HISTORY { boards[j - 1] = boards[j]; j += 1; }
-                            boards[HISTORY - 1] = board;
-                        }
+                        if count >= MAX_EXPLICIT_HISTORY { return set_error(21); }
+                        boards[count] = board;
+                        count += 1;
                     }
                     Err(code) => return set_error(code),
                 }

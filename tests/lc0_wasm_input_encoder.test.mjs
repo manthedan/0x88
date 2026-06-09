@@ -8,6 +8,7 @@ import { createLc0WasmInputEncoder } from '../src/lc0/wasmInputEncoder.ts';
 
 const fenFixtures = JSON.parse(readFileSync('fixtures/lc0/fen_only.json', 'utf8'));
 const historyFixtures = JSON.parse(readFileSync('fixtures/lc0/history.json', 'utf8'));
+const repetitionFixtures = JSON.parse(readFileSync('fixtures/lc0/repetition_history.json', 'utf8'));
 const wasmBytes = readFileSync('public/lc0/lc0_input_encoder.wasm');
 
 function maxAbsDiff(a, b) {
@@ -92,4 +93,23 @@ test('SIMD WASM LC0 input encoder does not synthetic-fill explicit single-FEN hi
   const expected = encodeLc0Classical112({ positions: [fen] }).planes;
   const actual = wasm.encodeFenHistory([fen]).planes;
   assert.equal(maxAbsDiff(actual, expected), 0);
+});
+
+test('SIMD WASM LC0 input encoder matches JS repetition-plane history encoding', async () => {
+  const wasm = await createLc0WasmInputEncoder(wasmBytes);
+  for (const fixture of repetitionFixtures) {
+    const positions = buildBoardHistoryFromMoves(fixture.moves, fixture.startFen);
+    const expected = encodeLc0Classical112({ positions });
+    const actual = wasm.encodeFenHistory(positions.map(boardToFen));
+    assertEncodedEqual(actual, expected, fixture.id);
+  }
+});
+
+test('SIMD WASM LC0 input encoder checks repetition against explicit history older than 64 plies', async () => {
+  const wasm = await createLc0WasmInputEncoder(wasmBytes);
+  const cycle = ['g1f3', 'g8f6', 'f3g1', 'f6g8'];
+  const positions = buildBoardHistoryFromMoves(Array.from({ length: 17 }, () => cycle).flat());
+  const expected = encodeLc0Classical112({ positions });
+  const actual = wasm.encodeFenHistory(positions.map(boardToFen));
+  assertEncodedEqual(actual, expected, 'long-repetition-history');
 });

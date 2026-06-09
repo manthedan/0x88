@@ -67,6 +67,17 @@ npm run productization:fast-gate -- --strict-browser-smoke
 
 That path drives `lc0-analysis.html` and `lc0-arena.html`, installs an audit-event collector, requests Tiny `runtime=custom-webgpu` with strict fallback disabled, and fails on missing `custom-webgpu` resolution or any ORT fallback event. Save evidence with `--out artifacts/productization_fast_gate.json`.
 
-Known exclusions from the fast gate are deliberate: full `npm test` remains noisy because some fixture/artifact-dependent tests are pre-existing productization blockers, and cross-browser/cross-GPU latency/lifecycle repeats remain release-candidate evidence rather than every-commit checks.
+Known exclusions from the fast gate are deliberate: full `npm test` remains noisy because some fixture/artifact-dependent tests are pre-existing productization blockers, and cross-browser/cross-GPU latency/lifecycle repeats remain release-candidate evidence rather than every-commit checks. Treat `npm run productization:fast-gate` as a targeted productization smoke, not a full shipped-path parity guarantee.
+
+For shipped LC0 WebGPU parity, run the browser CI smoke on a host where WebGPU is expected and fail closed on WebGPU unavailability:
+
+```sh
+npm run lc0:browser-ci-smoke
+```
+
+That smoke keeps two separate WGSL-heads comparisons:
+
+- `wgsl-heads-vs-ort-wasm-fixtures`: semantic baseline against ORT WASM, retained so custom WGSL heads stay anchored to the stable fallback path;
+- `wgsl-heads-vs-ort-webgpu-fixtures`: shipped-path comparison against ORT WebGPU with `strictWebGpu=1`, which fails if the browser lacks WebGPU, ORT WebGPU cannot be selected, or ORT silently falls back to WASM during the fixture run.
 
 See also: [Browser inference research lane: Rust-owned search, optional Rust-owned inference](browser_inference_research_lane_20260522.md). The current opinion there is that ORT-Web remains the production inference baseline, while RTen/tract/Lele/Burn/Candle are bounded research probes behind a Rust evaluator abstraction.

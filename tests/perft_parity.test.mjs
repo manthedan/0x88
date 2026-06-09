@@ -13,16 +13,16 @@ function perft(board, depth) {
 
 const cases = [
   {
-    name: 'startpos',
+    name: 'startpos d5',
     fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-    depth: 3,
-    expected: 8902,
+    depth: 5,
+    expected: 4865609,
   },
   {
-    name: 'kiwipete castling/check pins',
+    name: 'kiwipete castling/check pins d4',
     fen: 'r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1',
-    depth: 2,
-    expected: 2039,
+    depth: 4,
+    expected: 4085603,
   },
   {
     name: 'en-passant capture edge',

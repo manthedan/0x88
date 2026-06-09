@@ -74,6 +74,7 @@ test('LC0 classical 112 fen_only synthesizes non-start histories by repeating FE
   assert.equal(encoded.masks[LC0_AUX_PLANE_BASE + 5], ALL);
   assert.equal(encoded.values[LC0_AUX_PLANE_BASE + 5], 37);
   assert.equal(planeValue(encoded, LC0_AUX_PLANE_BASE + 5, 'a1'), 37);
+  for (let i = 0; i < 8; i++) assert.equal(encoded.masks[i * 13 + 12], 0n, `synthetic history does not set repetition plane ${i}`);
 });
 
 test('LC0 classical 112 castling auxiliary planes are side-relative', () => {
@@ -115,4 +116,13 @@ test('LC0 classical 112 explicit history preserves real en-passant prior boards'
   assert.equal((encoded.masks[13 + 6] & bit('d5')) !== 0n, false, 'previous board has not yet pushed d-pawn');
   assert.equal((encoded.masks[13 + 0] & bit('e5')) !== 0n, true, 'one ply back includes white pawn e5');
   assert.equal((encoded.masks[2 * 13 + 0] & bit('e4')) !== 0n, true, 'two plies back includes white pawn e4');
+});
+
+test('LC0 classical 112 explicit history sets repetition planes for repeated positions', () => {
+  const positions = buildBoardHistoryFromMoves(['g1f3', 'g8f6', 'f3g1', 'f6g8', 'g1f3', 'g8f6', 'f3g1', 'f6g8']);
+  const encoded = encodeLc0Classical112({ positions }, { historyFill: 'fen_only' });
+  assert.equal(encoded.masks[12], ALL, 'current repeated startpos sets current repetition plane');
+  assert.equal(encoded.masks[4 * 13 + 12], ALL, 'previous repeated startpos also sets its repetition plane');
+  assert.equal(encoded.masks[5 * 13 + 12], 0n, 'older non-repeated position leaves repetition plane empty');
+  assert.equal(planeValue(encoded, 12, 'a1'), 1, 'repetition plane is all ones');
 });
