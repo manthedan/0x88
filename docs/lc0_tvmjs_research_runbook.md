@@ -314,7 +314,24 @@ Next footprint work:
 1. Install the same `createBuffer` probe in the hybrid policy-only worker/device path and arena fixed-suite page.
 2. Add a wrapper summary comparing TVMJS vs hybrid buffer counts/bytes on strict same-FEN rows.
 3. Investigate whether ORT WebGPU exposes enough surface to patch the device it uses; otherwise record ORT as unknown/indirect.
-4. Add artifact/network footprint sidecars for raw/gzip/brotli staged bundle size.
+4. Expand artifact/network footprint sidecars across future model families and release candidates.
+
+Current bundle-footprint sidecar:
+
+```bash
+npm run lc0:tvmjs-webgpu-bundle-footprint -- \
+  --manifest public/runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json \
+  --out artifacts/tvm/lc0_tvmjs_webgpu_bundle_footprint_t1_f16_v1.json
+```
+
+Current default-family footprint sidecar summary:
+
+- Artifact: `artifacts/tvm/lc0_tvmjs_webgpu_bundle_footprint_t1_f16_v1.json`.
+- Files: `8`.
+- Raw bytes: `139,358,480`.
+- gzip level-9 bytes: `113,885,414` (`0.8172` ratio).
+- Brotli quality-11 bytes: `107,101,046` (`0.7685` ratio).
+- Caveat: these are Node zlib estimates and do not prove deployed `Content-Encoding` behavior.
 
 ## Recipes for additional net families
 
@@ -395,7 +412,21 @@ npm run lc0:tvmjs-webgpu-local-artifacts-check -- \
   --expected-batches "$LC0_TVMJS_BATCHES"
 ```
 
-Once family-specific evidence exists, drop `--no-evidence` and pass `--evidence <family-summary.json>` plus an appropriate `--min-search-rows` threshold.
+Once family-specific evidence exists, drop `--no-evidence` and pass `--evidence <family-summary.json>` plus appropriate thresholds:
+
+```bash
+npm run lc0:tvmjs-webgpu-local-artifacts-check -- \
+  --manifest "public/runtimes/lc0-tvmjs-webgpu/$LC0_TVMJS_MODEL_FAMILY/$LC0_TVMJS_DTYPE/$LC0_TVMJS_VERSION/manifest.json" \
+  --evidence artifacts/tvm/<family>_tvmjs_webgpu_search_smoke_summary.json \
+  --expected-model-family "$LC0_TVMJS_MODEL_FAMILY" \
+  --expected-dtype "$LC0_TVMJS_DTYPE" \
+  --expected-version "$LC0_TVMJS_VERSION" \
+  --expected-batches "$LC0_TVMJS_BATCHES" \
+  --min-search-rows 32 \
+  --min-fixed-suite-reports 1 \
+  --min-stockfish-scored-runs 1 \
+  --require-all-matches
+```
 
 ## Generated artifact release/hosting/cache policy
 

@@ -7,7 +7,7 @@ const DEFAULT_MANIFEST = 'public/runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-s
 const DEFAULT_EVIDENCE = 'artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_summary.json';
 
 function usage() {
-  console.log(`Usage: node scripts/check_lc0_tvmjs_webgpu_local_artifacts.mjs [options]\n\nChecks local generated TVMJS/WebGPU browser artifacts and evidence summaries.\nThese artifacts are intentionally ignored/local unless a release policy says otherwise.\n\nOptions:\n  --manifest PATH              Staged runtime manifest (default ${DEFAULT_MANIFEST})\n  --evidence PATH              Evidence summary JSON (default ${DEFAULT_EVIDENCE})\n  --no-evidence                Check only the staged manifest/files; useful before a new-family evidence summary exists\n  --min-search-rows N          Minimum evidence search rows (default 94)\n  --expected-model-family NAME Require manifest.modelFamily\n  --expected-dtype NAME        Require manifest.dtype, e.g. f16\n  --expected-version NAME      Require manifest.version when present in newly staged manifests\n  --expected-batches LIST      Require exactly these manifest model batches, e.g. 1,4,8\n  -h, --help                   Show help\n`);
+  console.log(`Usage: node scripts/check_lc0_tvmjs_webgpu_local_artifacts.mjs [options]\n\nChecks local generated TVMJS/WebGPU browser artifacts and evidence summaries.\nThese artifacts are intentionally ignored/local unless a release policy says otherwise.\n\nOptions:\n  --manifest PATH              Staged runtime manifest (default ${DEFAULT_MANIFEST})\n  --evidence PATH              Evidence summary JSON (default ${DEFAULT_EVIDENCE})\n  --no-evidence                Check only the staged manifest/files; useful before a new-family evidence summary exists\n  --min-search-rows N          Minimum evidence search rows (default 94)\n  --min-fixed-suite-reports N  Minimum fixed-suite-style report count (default 0)\n  --min-stockfish-scored-runs N\n                                Minimum Stockfish-scored evidence runs (default 0)\n  --require-all-matches        Fail unless evidence moveMatches equals searchRows (default behavior)\n  --expected-model-family NAME Require manifest.modelFamily\n  --expected-dtype NAME        Require manifest.dtype, e.g. f16\n  --expected-version NAME      Require manifest.version when present in newly staged manifests\n  --expected-batches LIST      Require exactly these manifest model batches, e.g. 1,4,8\n  -h, --help                   Show help\n`);
 }
 
 function parseBatches(raw) {
@@ -28,7 +28,7 @@ function sameNumberList(a, b) {
 }
 
 function parseArgs(argv) {
-  const args = { manifest: DEFAULT_MANIFEST, evidence: DEFAULT_EVIDENCE, checkEvidence: true, minSearchRows: 94, expectedModelFamily: '', expectedDtype: '', expectedVersion: '', expectedBatches: undefined };
+  const args = { manifest: DEFAULT_MANIFEST, evidence: DEFAULT_EVIDENCE, checkEvidence: true, minSearchRows: 94, minFixedSuiteReports: 0, minStockfishScoredRuns: 0, requireAllMatches: true, expectedModelFamily: '', expectedDtype: '', expectedVersion: '', expectedBatches: undefined };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`); return argv[++i]; };
@@ -36,6 +36,9 @@ function parseArgs(argv) {
     else if (arg === '--evidence') args.evidence = next();
     else if (arg === '--no-evidence') args.checkEvidence = false;
     else if (arg === '--min-search-rows') args.minSearchRows = Number(next());
+    else if (arg === '--min-fixed-suite-reports') args.minFixedSuiteReports = Number(next());
+    else if (arg === '--min-stockfish-scored-runs') args.minStockfishScoredRuns = Number(next());
+    else if (arg === '--require-all-matches') args.requireAllMatches = true;
     else if (arg === '--expected-model-family') args.expectedModelFamily = next();
     else if (arg === '--expected-dtype') args.expectedDtype = next();
     else if (arg === '--expected-version') args.expectedVersion = next();
@@ -44,6 +47,8 @@ function parseArgs(argv) {
     else throw new Error(`Unknown option: ${arg}`);
   }
   if (!Number.isFinite(args.minSearchRows) || args.minSearchRows < 0) throw new Error(`Invalid --min-search-rows ${args.minSearchRows}`);
+  if (!Number.isFinite(args.minFixedSuiteReports) || args.minFixedSuiteReports < 0) throw new Error(`Invalid --min-fixed-suite-reports ${args.minFixedSuiteReports}`);
+  if (!Number.isFinite(args.minStockfishScoredRuns) || args.minStockfishScoredRuns < 0) throw new Error(`Invalid --min-stockfish-scored-runs ${args.minStockfishScoredRuns}`);
   return args;
 }
 
@@ -127,7 +132,9 @@ async function main() {
       out.stockfishScoredRuns = evidence.stockfishScoredRuns?.length ?? 0;
       out.fixedSuiteStyleReports = evidence.fixedSuiteStyleReports?.length ?? 0;
       if ((evidence.searchRows ?? 0) < args.minSearchRows) failures.push(`evidence search rows ${evidence.searchRows ?? 0} < ${args.minSearchRows}`);
-      if (evidence.moveMatches !== evidence.searchRows) failures.push(`evidence move matches ${evidence.moveMatches}/${evidence.searchRows}`);
+      if (out.fixedSuiteStyleReports < args.minFixedSuiteReports) failures.push(`evidence fixed-suite reports ${out.fixedSuiteStyleReports} < ${args.minFixedSuiteReports}`);
+      if (out.stockfishScoredRuns < args.minStockfishScoredRuns) failures.push(`evidence Stockfish-scored runs ${out.stockfishScoredRuns} < ${args.minStockfishScoredRuns}`);
+      if (args.requireAllMatches && evidence.moveMatches !== evidence.searchRows) failures.push(`evidence move matches ${evidence.moveMatches}/${evidence.searchRows}`);
     } catch (error) {
       failures.push(`evidence check failed: ${error.message ?? error}`);
     }
