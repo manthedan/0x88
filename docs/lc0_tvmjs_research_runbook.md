@@ -352,7 +352,20 @@ Current visit-loop attribution result (`artifacts/tvm/lc0_tvmjs_visit_loop_profi
 - Search wall mean `52.88 ms`; in-evaluator mean `50.98 ms` (`96.4%`); JS search overhead (selection, PUCT, backup, context building) mean `1.90 ms` (`3.6%`).
 - Share of search wall: output readback/GPU-wait `86.6%`, VM submit `4.6%`, encode `1.5%`, f16 input convert `1.1%`, legal priors `1.1%`, output decode `0.9%`; tensor alloc, upload, `set_input`, and handle fetch each `<0.3%`.
 - Eval batches per search: `3`; mean logical batch size `4.83/8` (`60.4%` fill); per-search leaf-collision retries ranged `11–69`.
-- Reading: the visit loop is serialized on per-batch GPU completion (about `14 ms` per batch, of which about `2.4 ms` is CPU submit). The lever order is therefore (1) overlap/pipelining so encode/upload/submit of batch N+1 happens during batch N's GPU work (deferred readback, as in the ORT readback diagnostics lane), (2) batch fill / larger logical batches, (3) kernel tuning. JS search optimization is not a lever at ~`2 ms` per search.
+- Reading: the visit loop is serialized on per-batch GPU completion (about `14 ms` per batch, of which about `2.4 ms` is CPU submit). JS search optimization is not a lever at ~`2 ms` per search.
+
+### Pipelined evaluateBatchSequence A/B (negative result, 2026-06-09)
+
+The TVMJS provider now implements `evaluateBatchSequence` (submit every physical
+batch, then ONE shared `device.sync()`, then decode), and the search smoke
+accepts `--search-pipeline-depth N` (page param `searchPipelineDepth`, applied
+to both searchers so the search shape stays matched). A/B at v16/b8,
+4 fixtures × 2 repeats, parity 8/8 on both legs:
+
+- Depth 1 control (`artifacts/tvm/lc0_tvmjs_visit_loop_profile_b8_v16_pd1.json`): TVMJS search mean `54.30 ms`, batches/search `3`, fill `60.4%`.
+- Depth 2 (`artifacts/tvm/lc0_tvmjs_visit_loop_profile_b8_v16_pd2.json`): TVMJS search mean `68.81 ms` (**+27%**), batches/search `4.25`, fill `52.2%`.
+- Mechanism check: per-batch GPU-wait share was `15.58 ms` with a dedicated sync per batch versus `13.85 ms` as half of a 2-batch shared sync — a 2-batch flush syncs in roughly 2× a single batch. The "readback wait" is therefore **GPU compute (~13–15 ms per padded b8 invoke), not sync/readback overhead**, and pipelining cannot hide it. The depth-2 scheduler also fragments the small visit budget into more, worse-filled physical batches, each costing a full padded-b8 GPU pass.
+- Revised lever order: (1) per-batch GPU compute — kernel/schedule tuning (dlight rules, per-kernel timestamp-query attribution); (2) physical invoke count — batch fill (~40% of GPU work is padding at 60% fill) and visit budgets that fill b8; (3) pipelining only pays once per-batch GPU time shrinks or CPU encode grows. Keep `searchPipelineDepth=1` as the default; the pipelined path stays as an opt-in research knob.
 
 Strict same-FEN visit sweep samples now cover visits `16`, `32`, and `64`:
 

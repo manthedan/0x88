@@ -15,7 +15,7 @@ function usage() {
 }
 
 function parseArgs(argv) {
-  const args = { batch: 8, fixtures: true, fixtureOffset: 0, fixtureCount: undefined, fensFile: '', ortCompare: 'none', ortEp: 'webgpu', searchVisits: 0, searchFixtures: 2, searchRepeats: 1, stockfishScoreDepth: undefined, stockfishScoreMs: undefined, host: DEFAULT_HOST, port: DEFAULT_PORT, timeoutMs: DEFAULT_TIMEOUT_MS, agentBrowser: DEFAULT_AGENT_BROWSER, noServer: false };
+  const args = { batch: 8, fixtures: true, fixtureOffset: 0, fixtureCount: undefined, fensFile: '', ortCompare: 'none', ortEp: 'webgpu', searchVisits: 0, searchFixtures: 2, searchRepeats: 1, searchPipelineDepth: 1, stockfishScoreDepth: undefined, stockfishScoreMs: undefined, host: DEFAULT_HOST, port: DEFAULT_PORT, timeoutMs: DEFAULT_TIMEOUT_MS, agentBrowser: DEFAULT_AGENT_BROWSER, noServer: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`); return argv[++i]; };
@@ -30,6 +30,7 @@ function parseArgs(argv) {
     else if (arg === '--search-visits') args.searchVisits = Number(next());
     else if (arg === '--search-fixtures') args.searchFixtures = Number(next());
     else if (arg === '--search-repeats') args.searchRepeats = Number(next());
+    else if (arg === '--search-pipeline-depth') args.searchPipelineDepth = Number(next());
     else if (arg === '--stockfish-score-depth') args.stockfishScoreDepth = Number(next());
     else if (arg === '--stockfish-score-ms') args.stockfishScoreMs = Number(next());
     else if (arg === '--base-url') { args.baseUrl = next(); args.noServer = true; }
@@ -51,6 +52,7 @@ function parseArgs(argv) {
   if (!Number.isFinite(args.searchVisits) || args.searchVisits < 0) throw new Error(`Invalid --search-visits ${args.searchVisits}`);
   if (!Number.isFinite(args.searchFixtures) || args.searchFixtures <= 0) throw new Error(`Invalid --search-fixtures ${args.searchFixtures}`);
   if (!Number.isFinite(args.searchRepeats) || args.searchRepeats <= 0) throw new Error(`Invalid --search-repeats ${args.searchRepeats}`);
+  if (!Number.isFinite(args.searchPipelineDepth) || args.searchPipelineDepth <= 0) throw new Error(`Invalid --search-pipeline-depth ${args.searchPipelineDepth}`);
   if (args.stockfishScoreDepth !== undefined && (!Number.isFinite(args.stockfishScoreDepth) || args.stockfishScoreDepth <= 0)) throw new Error(`Invalid --stockfish-score-depth ${args.stockfishScoreDepth}`);
   if (args.stockfishScoreMs !== undefined && (!Number.isFinite(args.stockfishScoreMs) || args.stockfishScoreMs <= 0)) throw new Error(`Invalid --stockfish-score-ms ${args.stockfishScoreMs}`);
   if (!Number.isFinite(args.port) || args.port <= 0) throw new Error(`Invalid --port ${args.port}`);
@@ -185,6 +187,7 @@ async function main() {
       url.searchParams.set('searchVisits', String(Math.floor(args.searchVisits)));
       url.searchParams.set('searchFixtureCount', String(Math.floor(args.searchFixtures)));
       url.searchParams.set('searchRepeats', String(Math.floor(args.searchRepeats)));
+      if (args.searchPipelineDepth > 1) url.searchParams.set('searchPipelineDepth', String(Math.floor(args.searchPipelineDepth)));
       if (args.stockfishScoreDepth !== undefined) url.searchParams.set('stockfishScoreDepth', String(Math.floor(args.stockfishScoreDepth)));
       if (args.stockfishScoreMs !== undefined) url.searchParams.set('stockfishScoreMs', String(Math.floor(args.stockfishScoreMs)));
     }
@@ -207,6 +210,7 @@ async function main() {
         searchVisits: args.searchVisits,
         searchFixtures: args.searchFixtures,
         searchRepeats: args.searchRepeats,
+        searchPipelineDepth: args.searchPipelineDepth,
         stockfishScoreDepth: args.stockfishScoreDepth,
         stockfishScoreMs: args.stockfishScoreMs,
         ok: true,

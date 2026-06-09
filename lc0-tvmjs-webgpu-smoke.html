@@ -240,9 +240,12 @@ function currentBoardAndFen(input) {
   return { board, fen: typeof input === 'string' ? boardToFen(board) : boardToFen(board) };
 }
 let tvmBatchEvalSequence = 0;
-async function runTvmBatchEvaluation(tvm, vmMod, inputs, physicalBatchSize) {
-  if (!inputs.length) return [];
-  const totalStarted = performance.now();
+// Submit one physical batch (encode → upload → set_input → invoke) and enqueue
+// the GPU→CPU output copies WITHOUT awaiting GPU completion. The output copies
+// are enqueued before any later invoke can overwrite the VM's output storage;
+// WebGPU queue submission order protects the data, so multiple submitted
+// batches can be in flight before a single device sync.
+function submitTvmBatch(tvm, vmMod, inputs, physicalBatchSize) {
   const setInput = vmMod.getFunction('set_input');
   const invokeStateful = vmMod.getFunction('invoke_stateful');
   const getOutput = vmMod.getFunction('get_output');
@@ -277,42 +280,52 @@ async function runTvmBatchEvaluation(tvm, vmMod, inputs, physicalBatchSize) {
   invokeStateful('main');
   const invokeMs = performance.now() - phaseStarted;
   phaseStarted = performance.now();
-  const policyOut = getOutput('main', tvm.scalar(0, 'int32'));
-  const wdlOut = getOutput('main', tvm.scalar(1, 'int32'));
-  const mlhOut = getOutput('main', tvm.scalar(2, 'int32'));
+  const outs = [0, 1, 2].map((i) => getOutput('main', tvm.scalar(i, 'int32')));
   const outputHandleMs = performance.now() - phaseStarted;
   phaseStarted = performance.now();
-  const [policyRaw, wdlRaw, mlhRaw] = await Promise.all([outputRawBytes(tvm, policyOut), outputRawBytes(tvm, wdlOut), outputRawBytes(tvm, mlhOut)]);
-  const outputReadbackMs = performance.now() - phaseStarted;
+  const staged = outs.map((out) => {
+    const elementCount = out.shape.reduce((a, b) => a * b, 1);
+    const rawBytes = elementCount * (out.dtype === 'float16' ? 2 : out.dtype === 'float32' ? 4 : 1);
+    if (rawBytes % 4 !== 0) return null;
+    const cpu = tvm.empty(out.shape, out.dtype, tvm.cpu());
+    cpu.copyFrom(out);
+    return cpu;
+  });
+  const outputCopyEnqueueMs = performance.now() - phaseStarted;
+  return {
+    boards,
+    fens,
+    staged,
+    device: outs[0].device,
+    timing: { encodeMs, inputConvertMs, inputTensorAllocMs, inputUploadMs, setInputMs, tvmInvokeMs: invokeMs, outputHandleMs, outputCopyEnqueueMs },
+  };
+}
+// Decode a submitted batch after the device sync has completed. tvmBatchEvalMs
+// is defined as the sum of the per-batch phase buckets so per-search
+// reconciliation stays exact in both serial and pipelined modes.
+function finishTvmBatch(submitted, physicalBatchSize, timingExtra) {
+  const { boards, fens, staged, timing } = submitted;
+  const phaseStarted = performance.now();
+  const policyRaw = staged[0]?.toRawBytes();
   if (!policyRaw) throw new Error('TVMJS policy output readback unavailable');
-  phaseStarted = performance.now();
   const policy = f16BytesToFloat32Array(policyRaw);
-  const wdl = wdlRaw ? f16BytesToFloat32Array(wdlRaw) : undefined;
-  const mlh = mlhRaw ? f16BytesToFloat32Array(mlhRaw) : undefined;
+  const wdl = staged[1] ? f16BytesToFloat32Array(staged[1].toRawBytes()) : undefined;
+  const mlh = staged[2] ? f16BytesToFloat32Array(staged[2].toRawBytes()) : undefined;
   const outputDecodeMs = performance.now() - phaseStarted;
-  const batchEvalMs = performance.now() - totalStarted;
+  const phases = { ...timing, outputDecodeMs, ...timingExtra };
   const sharedTiming = {
     backend: 'tvmjs-webgpu',
-    timingScope: 'tvm-batch-invocation',
     tvmBatchEvalId: ++tvmBatchEvalSequence,
-    tvmBatchEvalMs: batchEvalMs,
-    encodeMs,
-    inputConvertMs,
-    inputTensorAllocMs,
-    inputUploadMs,
-    setInputMs,
-    tvmInvokeMs: invokeMs,
-    outputHandleMs,
-    outputReadbackMs,
-    outputDecodeMs,
+    tvmBatchEvalMs: sumFinite(TVM_EVAL_TIMING_KEYS.map((key) => key === 'tvmBatchEvalMs' ? undefined : phases[key])),
+    ...phases,
     physicalBatchSize,
-    logicalBatchSize: inputs.length,
+    logicalBatchSize: boards.length,
   };
-  return inputs.map((_, i) => {
+  return boards.map((board, i) => {
     const wdlSlice = wdl ? Array.from(wdl.subarray(i * 3, i * 3 + 3)) : [NaN, NaN, NaN];
     const logits = policy.subarray(i * LC0_POLICY_SIZE, (i + 1) * LC0_POLICY_SIZE);
     const legalStarted = performance.now();
-    const legalPriors = legalPolicyPriors(boards[i], logits);
+    const legalPriors = legalPolicyPriors(board, logits);
     const legalPriorsMs = performance.now() - legalStarted;
     return {
       fen: fens[i],
@@ -324,6 +337,36 @@ async function runTvmBatchEvaluation(tvm, vmMod, inputs, physicalBatchSize) {
       timing: { ...sharedTiming, legalPriorsMs, batchPosition: i },
     };
   });
+}
+async function runTvmBatchEvaluation(tvm, vmMod, inputs, physicalBatchSize) {
+  if (!inputs.length) return [];
+  const submitted = submitTvmBatch(tvm, vmMod, inputs, physicalBatchSize);
+  const syncStarted = performance.now();
+  await submitted.device.sync();
+  const outputReadbackMs = performance.now() - syncStarted;
+  return finishTvmBatch(submitted, physicalBatchSize, { timingScope: 'tvm-batch-invocation', outputReadbackMs });
+}
+// Pipelined multi-batch path: submit every batch (CPU encode/upload of batch
+// N+1 overlaps batch N's GPU work), then await ONE device sync, then decode.
+// The shared GPU-wait is split evenly across in-flight batches as
+// outputReadbackMs so per-search attribution still reconciles; the exact flush
+// totals are reported via pipelineFlushSyncMs/pipelineFlushBatches.
+async function runTvmBatchSequence(tvm, vmMod, batchesInputs, physicalBatchSize) {
+  const submitted = batchesInputs.map((inputs) => inputs.length ? submitTvmBatch(tvm, vmMod, inputs, physicalBatchSize) : null);
+  const device = submitted.find(Boolean)?.device;
+  let syncMs = 0;
+  if (device) {
+    const syncStarted = performance.now();
+    await device.sync();
+    syncMs = performance.now() - syncStarted;
+  }
+  const inFlight = submitted.filter(Boolean).length || 1;
+  return submitted.map((batch) => batch ? finishTvmBatch(batch, physicalBatchSize, {
+    timingScope: 'tvm-pipelined-batch',
+    outputReadbackMs: syncMs / inFlight,
+    pipelineFlushBatches: inFlight,
+    pipelineFlushSyncMs: syncMs,
+  }) : []);
 }
 function batchTimingFromRowTiming(timing) {
   if (!timing) return undefined;
@@ -346,6 +389,18 @@ function createTvmEvaluationProvider(tvm, vmMod, physicalBatchSize) {
     async evaluateBatch(inputs) {
       const out = [];
       for (let i = 0; i < inputs.length; i += physicalBatchSize) out.push(...remember(await runTvmBatchEvaluation(tvm, vmMod, inputs.slice(i, i + physicalBatchSize), physicalBatchSize)));
+      return out;
+    },
+    // Ordered multi-batch API used by the search's batchPipelineDepth>1 path:
+    // all physical chunks are submitted before one shared device sync.
+    async evaluateBatchSequence(batches) {
+      const chunks = [];
+      batches.forEach((inputs, batchIndex) => {
+        for (let i = 0; i < inputs.length; i += physicalBatchSize) chunks.push({ batchIndex, inputs: inputs.slice(i, i + physicalBatchSize) });
+      });
+      const chunkRows = await runTvmBatchSequence(tvm, vmMod, chunks.map((chunk) => chunk.inputs), physicalBatchSize);
+      const out = batches.map(() => []);
+      chunkRows.forEach((rows, i) => { out[chunks[i].batchIndex].push(...remember(rows)); });
       return out;
     },
   };
@@ -372,6 +427,7 @@ const TVM_EVAL_TIMING_KEYS = [
   'setInputMs',
   'tvmInvokeMs',
   'outputHandleMs',
+  'outputCopyEnqueueMs',
   'outputReadbackMs',
   'outputDecodeMs',
 ];
@@ -531,6 +587,9 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
   if (!visits || !fixtureRows.length) return undefined;
   const limit = Math.max(1, Math.min(fixtureRows.length, Number(params.get('searchFixtureCount') ?? Math.min(2, fixtureRows.length)) || 2));
   const repeats = Math.max(1, Number(params.get('searchRepeats') ?? 1) || 1);
+  // Applied to BOTH searchers so the search shape (virtual-visit pipelined
+  // batching) stays matched; only the TVMJS evaluator can actually overlap.
+  const pipelineDepth = Math.max(1, Math.floor(Number(params.get('searchPipelineDepth') ?? 1) || 1));
   const fens = fixtureRows.slice(0, limit).map((row) => row.fen);
   const tvmProvider = createTvmEvaluationProvider(tvm, vmMod, batch);
   const tvmSearcher = new Lc0PuctSearcher(tvmProvider);
@@ -543,7 +602,7 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
         const evalBatchStart = tvmProvider.evaluationTimings.length;
         const evalPositionStart = tvmProvider.positionTimings.length;
         const t0 = performance.now();
-        const tvmResult = await tvmSearcher.search(fen, { visits, batchSize: batch, temperature: 0 });
+        const tvmResult = await tvmSearcher.search(fen, { visits, batchSize: batch, temperature: 0, batchPipelineDepth: pipelineDepth });
         const tvmMs = performance.now() - t0;
         const tvmVisitLoop = visitLoopAttribution(
           tvmProvider.evaluationTimings.slice(evalBatchStart),
@@ -553,7 +612,7 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
         );
         const tvmStats = tvmResult.search?.stats;
         const o0 = performance.now();
-        const ortResult = await ortSearcher.search(fen, { visits, batchSize: batch, temperature: 0 });
+        const ortResult = await ortSearcher.search(fen, { visits, batchSize: batch, temperature: 0, batchPipelineDepth: pipelineDepth });
         const ortMs = performance.now() - o0;
         rows.push({
           repeat,
@@ -585,6 +644,7 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
     return {
       visits,
       repeats,
+      pipelineDepth,
       fixtureCount: fens.length,
       searchRows: rows.length,
       moveMatches: rows.filter((row) => row.moveMatches).length,
