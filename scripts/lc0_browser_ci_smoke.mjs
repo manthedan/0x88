@@ -10,7 +10,7 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_ci_smoke.mjs [options]\n\nRuns CI-style browser smokes for the stable hybrid backend, experimental WGSL heads, mapped-policy probe, WGSL-heads-vs-ORT fixtures, and a final leak check.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-smoke timeout (default ${DEFAULT_TIMEOUT_MS})\n  --fixture-limit N     WGSL heads vs ORT fixture limit (default 3)\n  --max-error N         Probe max abs error tolerance (default 0.001)\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --skip-leak-check     Skip final browser/process leak check\n  --dry-run             Print planned smokes and URLs without running\n  -h, --help            Show this help\n`);
+  console.log(`Usage: node scripts/lc0_browser_ci_smoke.mjs [options]\n\nRuns CI-style browser smokes for the stable hybrid backend, experimental WGSL heads, mapped-policy probe, WGSL-heads-vs-ORT fixtures against both WASM baseline and strict ORT WebGPU, and a final leak check.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-smoke timeout (default ${DEFAULT_TIMEOUT_MS})\n  --fixture-limit N     WGSL heads vs ORT fixture limit (default 3)\n  --max-error N         Probe max abs error tolerance (default 0.001)\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --skip-leak-check     Skip final browser/process leak check\n  --dry-run             Print planned smokes and URLs without running\n  -h, --help            Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -244,7 +244,7 @@ function smokePlan(args) {
     },
     {
       kind: 'url',
-      name: 'wgsl-heads-vs-ort-fixtures',
+      name: 'wgsl-heads-vs-ort-wasm-fixtures',
       doneText: 'WGSL_HEADS_VS_ORT_FIXTURES_DONE',
       params: { wgslHeadsVsOrt: 1, fixtureLimit: args.fixtureLimit, encoderLayers: 10, ep: 'wasm', packVerify: 0 },
       validate(result, runArgs) {
@@ -252,6 +252,18 @@ function smokePlan(args) {
         if (result.bestMoveMatches !== result.fixtures) throw new Error(`WGSL heads best moves matched ${result.bestMoveMatches}/${result.fixtures}`);
         if (Number(result.maxMappedPolicyAbsDiff) > runArgs.maxError) throw new Error(`mapped policy diff ${result.maxMappedPolicyAbsDiff} exceeds ${runArgs.maxError}`);
         if (Number(result.maxWdlAbsDiff) > runArgs.maxError) throw new Error(`WDL diff ${result.maxWdlAbsDiff} exceeds ${runArgs.maxError}`);
+      },
+    },
+    {
+      kind: 'url',
+      name: 'wgsl-heads-vs-ort-webgpu-fixtures',
+      doneText: 'WGSL_HEADS_VS_ORT_FIXTURES_DONE',
+      params: { wgslHeadsVsOrt: 1, fixtureLimit: args.fixtureLimit, encoderLayers: 10, ep: 'webgpu', strictWebGpu: 1, packVerify: 0 },
+      validate(result, runArgs) {
+        if (result.status !== 'WGSL_HEADS_VS_ORT_FIXTURES_DONE') throw new Error(`unexpected WGSL heads WebGPU fixture status ${result.status}`);
+        if (result.bestMoveMatches !== result.fixtures) throw new Error(`WGSL heads WebGPU best moves matched ${result.bestMoveMatches}/${result.fixtures}`);
+        if (Number(result.maxMappedPolicyAbsDiff) > runArgs.maxError) throw new Error(`WebGPU mapped policy diff ${result.maxMappedPolicyAbsDiff} exceeds ${runArgs.maxError}`);
+        if (Number(result.maxWdlAbsDiff) > runArgs.maxError) throw new Error(`WebGPU WDL diff ${result.maxWdlAbsDiff} exceeds ${runArgs.maxError}`);
       },
     },
   ];

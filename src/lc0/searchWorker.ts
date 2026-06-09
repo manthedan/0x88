@@ -379,6 +379,7 @@ type WgslHeadsVsOrtFixturesMessage = {
   verifyShards?: boolean;
   mappedPolicyTolerance?: number;
   wdlTolerance?: number;
+  strictWebGpu?: boolean;
 };
 
 type MappedPolicyProbeMessage = {
@@ -861,8 +862,26 @@ async function handleWgslHeadsProbe(message: WgslHeadsProbeMessage): Promise<voi
   post({ type: 'wgslHeadsProbeResult', id: message.id, result });
 }
 
+async function assertStrictWebGpuOrt(message: string, options: { probeAdapter?: boolean; requireSession?: boolean; minSessionAttemptIndex?: number } = {}) {
+  const diagnostics = await collectOrtRuntimeDiagnostics({ probeAdapter: options.probeAdapter });
+  const adapterOk = diagnostics.adapter?.ok !== false;
+  const sessionAttempts = diagnostics.sessionAttempts.slice(options.minSessionAttemptIndex ?? 0);
+  const latestSuccessfulSession = [...sessionAttempts].reverse().find((attempt) => attempt.ok);
+  const actualProviders = options.requireSession
+    ? latestSuccessfulSession?.providers ?? []
+    : diagnostics.resolvedExecutionProviders;
+  const providerOk = actualProviders.includes('webgpu');
+  if (!diagnostics.webgpuAvailable || !adapterOk || !providerOk || (options.requireSession && !latestSuccessfulSession)) {
+    throw new Error(`${message}: strict ORT WebGPU required but actual providers were ${actualProviders.join(',') || 'none'} (webgpuAvailable=${diagnostics.webgpuAvailable}, adapterOk=${adapterOk}, sessionsSince=${sessionAttempts.length}, sessionsTotal=${diagnostics.sessionAttempts.length})`);
+  }
+  return diagnostics;
+}
+
 async function handleWgslHeadsVsOrtFixtures(message: WgslHeadsVsOrtFixturesMessage): Promise<void> {
   setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  const strictPreflight = message.strictWebGpu
+    ? await assertStrictWebGpuOrt('WGSL heads vs ORT fixtures preflight', { probeAdapter: true })
+    : undefined;
   const result = await runLc0WebWgslHeadsVsOrtFixtures({
     packUrl: message.packUrl,
     fixtures: message.fixtures,
@@ -871,6 +890,7 @@ async function handleWgslHeadsVsOrtFixtures(message: WgslHeadsVsOrtFixturesMessa
     mappedPolicyTolerance: message.mappedPolicyTolerance,
     wdlTolerance: message.wdlTolerance,
   });
+  if (message.strictWebGpu) await assertStrictWebGpuOrt('WGSL heads vs ORT fixtures postrun', { requireSession: true, minSessionAttemptIndex: strictPreflight?.sessionAttempts.length ?? 0 });
   post({ type: 'wgslHeadsVsOrtFixturesResult', id: message.id, result });
 }
 

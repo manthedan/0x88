@@ -1952,6 +1952,7 @@ async function runWgslHeadsVsOrtFixtures(): Promise<void> {
       verifyShards: params.get('packVerify') !== '0',
       mappedPolicyTolerance: Number(params.get('mappedPolicyTolerance') ?? '0.001'),
       wdlTolerance: Number(params.get('wdlTolerance') ?? '0.001'),
+      strictWebGpu: params.get('strictWebGpu') === '1' || params.get('requireWebGpuOrt') === '1',
     });
     const rounded = {
       ...response.result,
