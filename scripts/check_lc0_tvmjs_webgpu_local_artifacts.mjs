@@ -110,6 +110,17 @@ async function main() {
         failures.push(`manifest file ${file.path} check failed: ${error.message ?? error}`);
       }
     }
+    if (manifest.tensorCache) {
+      out.tensorCache = manifest.tensorCache;
+      if (!manifest.tensorCache.manifest || !filesByPath.has(manifest.tensorCache.manifest)) failures.push('manifest tensorCache.manifest missing from files[]');
+      if (!Array.isArray(manifest.tensorCache.files) || manifest.tensorCache.files.length === 0) failures.push('manifest tensorCache.files missing or empty');
+      for (const path of manifest.tensorCache.files ?? []) {
+        if (!filesByPath.has(path)) failures.push(`manifest tensorCache file ${path} missing from files[]`);
+      }
+      const tensorCacheFiles = files.filter((file) => manifest.tensorCache.files?.includes(file.path));
+      const totalBytes = tensorCacheFiles.reduce((sum, file) => sum + file.bytes, 0);
+      if (Number.isFinite(manifest.tensorCache.totalBytes) && totalBytes !== manifest.tensorCache.totalBytes) failures.push(`manifest tensorCache totalBytes ${manifest.tensorCache.totalBytes} != files[] ${totalBytes}`);
+    }
     for (const model of manifest.models ?? []) {
       if (!model.wasm || !model.probe || !model.sha256 || !Number.isFinite(model.bytes)) failures.push(`manifest model batch ${model.batch} missing wasm/probe/bytes/sha256`);
       const wasmEntry = filesByPath.get(model.wasm);

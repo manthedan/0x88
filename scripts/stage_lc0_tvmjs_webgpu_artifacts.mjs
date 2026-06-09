@@ -18,6 +18,29 @@ function copyTracked(src, dst, root) {
   copyFileSync(src, dst);
   return { path: relative(root, dst).replaceAll('\\', '/'), bytes: statSync(dst).size, sha256: sha256(dst) };
 }
+function optionalArgPath(name, envName) {
+  const value = arg(name, process.env[envName] ?? '');
+  return value ? resolve(value) : undefined;
+}
+function tensorCacheFileNames(cacheDir) {
+  requireFile(join(cacheDir, 'tensor-cache.json'));
+  return readdirSync(cacheDir)
+    .filter((name) => name === 'tensor-cache.json' || name === 'tensor-cache-b16.json' || /^params_shard/.test(name))
+    .sort((a, b) => a.localeCompare(b));
+}
+function copyTensorCache(cacheDir, outDir, root) {
+  const fileNames = tensorCacheFileNames(cacheDir);
+  const copied = fileNames.map((name) => copyTracked(join(cacheDir, name), join(outDir, 'tensor-cache', name), root));
+  const manifest = copied.find((file) => file.path.endsWith('/tensor-cache.json'));
+  const shards = copied.filter((file) => /\/params_shard/.test(file.path));
+  return {
+    manifest: manifest?.path,
+    directory: 'tensor-cache',
+    shardCount: shards.length,
+    totalBytes: copied.reduce((sum, file) => sum + file.bytes, 0),
+    files: copied,
+  };
+}
 
 function parseBatches(raw) {
   const tokens = String(raw).split(',').map((item) => item.trim());
@@ -85,6 +108,7 @@ const tvmSrc = resolve(arg('tvm-src', '../.deps/tvm-webgpu-src'));
 const tvmjsBundle = resolve(arg('tvmjs-bundle', join(tvmSrc, 'web/dist/tvmjs.bundle.js')));
 const tvmjsRuntimeWasm = resolve(arg('tvmjs-runtime-wasm', join(tvmSrc, 'web/dist/wasm/tvmjs_runtime.wasm')));
 const manifestName = arg('manifest-name', 'manifest.json');
+const tensorCacheDir = optionalArgPath('tensor-cache-dir', 'LC0_TVMJS_TENSOR_CACHE_DIR');
 
 mkdirSync(out, { recursive: true });
 const files = [];
@@ -105,6 +129,8 @@ for (const batch of batches) {
     sha256: sha256(wasm),
   });
 }
+const tensorCache = tensorCacheDir ? copyTensorCache(tensorCacheDir, out, out) : undefined;
+if (tensorCache) files.push(...tensorCache.files);
 const manifest = {
   schema: 'lc0_browser.lc0_tvmjs_webgpu_bundle.v1',
   modelFamily,
@@ -120,13 +146,22 @@ const manifest = {
     note: 'TVMJS/WebGPU whole-model export bundle. Runtime/parity/perf still require browser validation.',
   },
   parameterStrategy: {
-    current: 'embedded-in-per-batch-wasm',
-    note: 'Current research staging embeds model weights in each batch-specific TVMJS wasm. Future release candidates should evaluate TVM tensor-cache weight separation before publication.',
+    current: tensorCache ? 'embedded-wasm-plus-staged-tensor-cache' : 'embedded-in-per-batch-wasm',
+    note: tensorCache
+      ? 'A TVM tensor-cache sidecar is staged for research comparison. Model wasm artifacts may still contain embedded params until the export flow detaches params before build.'
+      : 'Current research staging embeds model weights in each batch-specific TVMJS wasm. Future release candidates should evaluate TVM tensor-cache weight separation before publication.',
     tensorCacheApis: {
       pythonDumpTensorCache: 'tvm.contrib.tvmjs.dump_tensor_cache',
       browserFetchTensorCache: 'tvm.fetchTensorCache',
     },
   },
+  ...(tensorCache ? { tensorCache: {
+    manifest: tensorCache.manifest,
+    directory: tensorCache.directory,
+    shardCount: tensorCache.shardCount,
+    totalBytes: tensorCache.totalBytes,
+    files: tensorCache.files.map((file) => file.path),
+  } } : {}),
   compilerProvenance: tvmProvenance(tvmSrc),
   models,
   files,

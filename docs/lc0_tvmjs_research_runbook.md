@@ -421,8 +421,15 @@ Current default-family planning sidecar summary:
 Separated-params release-candidate recipe:
 
 1. Detach Relax parameters when possible before VM build, or otherwise emit f16 params through `tvm.contrib.tvmjs.dump_tensor_cache(..., encode_format="raw")`.
-2. Stage `tensor-cache.json` plus `params_shard_*` files under the immutable model-family/dtype/version path.
-3. Add manifest entries with bytes/SHA-256 for every tensor-cache shard and record whether params are embedded or detached.
+2. Stage `tensor-cache.json` plus `params_shard*` files under the immutable model-family/dtype/version path. The staging script has a research-only sidecar path:
+
+   ```bash
+   npm run lc0:stage-tvmjs-webgpu -- \
+     --tensor-cache-dir=artifacts/tvm/<model-id>.f16.tensor-cache
+   npm run lc0:tvmjs-webgpu-local-artifacts-check -- --no-evidence
+   ```
+
+3. Manifest entries must include bytes/SHA-256 for every tensor-cache shard and record whether params are embedded, staged as a sidecar, or truly detached before build. Current `--tensor-cache-dir` staging records `embedded-wasm-plus-staged-tensor-cache`; this is not yet proof of duplicate-weight removal.
 4. Load shared params in the browser through TVMJS `fetchTensorCache` before VM invocation; keep `shader-f16` gating and ORT fallback behavior unchanged.
 5. Compare embedded vs tensor-cache on cold start, repeat-load cache hit behavior, raw/gzip/Brotli footprint, search parity, and Stockfish-scored deltas before publication.
 
