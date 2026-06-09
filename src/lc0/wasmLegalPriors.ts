@@ -44,6 +44,26 @@ function packedUciToString(packed: number, promo: number): string {
   return promo ? `${text}${String.fromCharCode(promo)}` : text;
 }
 
+const WASM_LEGAL_ERROR_LABELS = new Map<number, string>([
+  [1, 'FEN exceeds input buffer'],
+  [2, 'invalid piece-placement rank separator'],
+  [3, 'too many squares in FEN rank'],
+  [4, 'piece after full FEN rank'],
+  [5, 'invalid FEN piece character'],
+  [6, 'incomplete FEN piece placement'],
+  [8, 'invalid FEN active color'],
+  [10, 'invalid FEN castling field'],
+  [12, 'truncated FEN en-passant field'],
+  [13, 'invalid FEN en-passant square'],
+  [14, 'invalid trailing FEN en-passant field'],
+]);
+
+function wasmLegalErrorDetail(status: number, lastError: number): string {
+  const code = lastError || status;
+  const label = WASM_LEGAL_ERROR_LABELS.get(code) ?? 'unknown error';
+  return status === lastError ? `${code} (${label})` : `status=${status}, last_error=${lastError} (${label})`;
+}
+
 export class Lc0WasmLegalPriors {
   private readonly exports: Lc0LegalPriorsExports;
   private readonly textEncoder = new TextEncoder();
@@ -72,7 +92,7 @@ export class Lc0WasmLegalPriors {
     const wasmRunStarted = nowMs();
     const status = this.exports.lc0_legal_priors_from_fen(bytes.byteLength, options.temperature ?? 1.359, options.topK ?? 0);
     const wasmRunMs = nowMs() - wasmRunStarted;
-    if (status !== 0) throw new Error(`LC0 WASM legal-prior failed: ${status || this.exports.lc0_legal_last_error()}`);
+    if (status !== 0) throw new Error(`LC0 WASM legal-prior failed: ${wasmLegalErrorDetail(status, this.exports.lc0_legal_last_error())}`);
     const outputReadStarted = nowMs();
     const count = this.exports.lc0_legal_count();
     const indices = new Uint16Array(this.exports.memory.buffer, this.exports.lc0_legal_indices_ptr(), count);
