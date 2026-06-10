@@ -75,7 +75,13 @@ Findings:
   the ratio as 10-19×. Honest comparison points: WebNN-f32 t3 ≈ 30 ms/b8
   ≈ TVMJS-f16 t3 per-batch; WebNN t1 ~3 ms vs TVMJS t1 ~14 ms (**4-5×** on
   small nets — ANE-class hardware really is faster there).
-- Synthesis worth pursuing: **QDQ int8 storage + DQL to f32 + WebNN EP** —
-  half-of-f16 download AND overflow-safe f32 compute AND CoreML speed.
+- Synthesis **tested same day and it works**: BT4 f32 export → QDQ int8 with
+  f32 scales (188.7 MB) → DQL converted to opset-21 *blocked* form (scale
+  [1,N], axis=0, block_size=K — ort-web's webnn EP rejects rank-1 per-axis
+  scales) → WebNN gpu: **numerics near-exact** (policy 5e-5 vs the same model
+  on webgpu EP) at **63.1 ms/b8-eval ≈ 7.9 ms/position** — about **25 %
+  faster than TVMJS f16 (84.9 ms/b8)**, with f32 accumulation quality, a
+  188 MB download, and 13 s one-time CoreML compile. At BT4 scale WebNN is a
+  real ~1.3× win, not t1's 4-5×; the gain shrinks as the GPU saturates.
 - Not shippable until WebNN rides without a flag; track Chrome's rollout.
   This is also effectively our first non-WebGPU coverage datapoint.

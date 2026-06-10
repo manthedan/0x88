@@ -46,14 +46,14 @@ for name, init in list(inits.items()):
     arr = numpy_helper.to_array(init)
     raw_bytes += arr.nbytes
     consumers = targets.get(name)
-    if not consumers or arr.dtype != np.float16 or arr.ndim != 2 or arr.size <= args.min_elements:
+    if not consumers or arr.dtype not in (np.float16, np.float32) or arr.ndim != 2 or arr.size <= args.min_elements:
         quant_bytes += arr.nbytes
         continue
     w = arr.astype(np.float32)
     amax = np.abs(w).max(axis=0)  # per output column of [K, N]
-    scale = np.where(amax > 0, amax / 127.0, 1.0).astype(np.float16)
+    scale = np.where(amax > 0, amax / 127.0, 1.0).astype(arr.dtype)
     q = np.clip(np.rint(w / scale.astype(np.float32)[None, :]), -127, 127).astype(np.int8)
-    dequant = (q.astype(np.float32) * scale.astype(np.float32)[None, :]).astype(np.float16)
+    dequant = (q.astype(np.float32) * scale.astype(np.float32)[None, :]).astype(arr.dtype)
     err = dequant.astype(np.float32) - arr.astype(np.float32)
     denom = float(np.sqrt(np.mean(w * w))) or 1.0
     report_rows.append({

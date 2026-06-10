@@ -15,7 +15,19 @@ import * as ortRuntime from '/src/nn/ortRuntime.ts';
 const PAGE_PARAMS = new URLSearchParams(location.search);
 // ?base=... selects the staged bundle; ?detached=1 loads weights from the
 // tensor-cache sidecar (detach-params build) instead of the embedded wasm.
-const BASE = PAGE_PARAMS.get('base') || '/runtimes/tiny-tvmjs-webgpu/bt4-anneal-muon-best/v0/';
+function sameOriginRuntimeBase(raw) {
+  const fallback = '/runtimes/tiny-tvmjs-webgpu/bt4-anneal-muon-best/v0/';
+  if (!raw) return fallback;
+  try {
+    const url = new URL(raw, location.origin);
+    if (url.origin !== location.origin || !url.pathname.startsWith('/runtimes/tiny-tvmjs-webgpu/')) throw new Error('unsafe base');
+    return url.pathname.endsWith('/') ? url.pathname : `${url.pathname}/`;
+  } catch {
+    console.warn('[tiny-tvmjs-smoke] ignoring unsafe base override', raw);
+    return fallback;
+  }
+}
+const BASE = sameOriginRuntimeBase(PAGE_PARAMS.get('base'));
 const DETACHED = PAGE_PARAMS.get('detached') === '1';
 const BATCH = 16;
 const TOKENS_SHAPE = [BATCH, 64, 24];
