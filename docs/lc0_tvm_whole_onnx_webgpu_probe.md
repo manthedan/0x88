@@ -380,10 +380,43 @@ nondeterministic**: identical scripts produce all-NaN outputs on some runs and
 finite ones on others; pinning `PYTHONHASHSEED` makes builds deterministic.
 Both issues are upstream-class TVM bugs.
 
-Next steps for this lane: per-op output bisection against ORT (add
-intermediate outputs to the ONNX, walk the first divergent node), and an
-upstream issue/minimal repro for the import nondeterminism. Until then the
-Tiny TVMJS lane is compile/runtime evidence only — no parity, no integration.
+### Numerics bisection result (2026-06-09, same day)
+
+The divergence was bisected to a **TVM compiler-pass bug in constant scalar
+Gather-index folding**, not the frontend and not fusion:
+
+- Coarse probes: the `/ReduceSum` piece-embedding sum is exact; the first wrong
+  tensor is in the embedding stem (`/Clip_2`, the rank-column clamp), with
+  integer-exact diffs.
+- Empirically, TVM's "rank" path computes `clamp(tokens[:,:,15], 0, 7)` — it
+  reads token column **15** (square) instead of column **12** (rank). The
+  imported Relax IR is verified correct (the scalar index wrap chains carry
+  `R.const 8/9/10/11/12` exactly as the ONNX specifies), so
+  LegalizeOps/FoldConstant/build mis-folds the `shape_to_tensor`/`take`/`where`
+  scalar-index chains. Reproduces identically with fusion on, with a forced
+  fusion boundary, and with FuseOps disabled (per-op kernels).
+- Deterministic repro: `artifacts/tvm-tiny/cut_add4_boundary.onnx` (45 nodes,
+  extracted via `onnx.utils.extract_model` to `/Add_4_output_0` +
+  `/Clip_2_output_0`) with `artifacts/tvm-tiny/repro_inputs.npz`; tiny cuts of
+  the same ops in isolation (2–3 nodes) are exact, so context (the constant
+  pool of the surrounding graph) is required.
+- Separately, larger programs built from the **byte-identical imported module**
+  show run-to-run output variance (one process produced four different outputs
+  from one build; others alternate clean/all-NaN per build) — an
+  uninitialized-memory-class bug in build/runtime. WebGPU's zero-initialized
+  buffers make the browser behavior deterministic (it matches the zero-heap CPU
+  outputs), which is why the browser smoke looked stably wrong.
+
+Practical consequences: the LC0 lane is structurally unaffected (no runtime
+scalar-index gather chains survive its import thanks to the gather patches, and
+its parity is gated against native fixtures per build), but per-build parity
+gating remains mandatory for ANY TVM export. The Tiny lane is blocked on the
+upstream pass bug; the repro above is the attachment for a TVM issue. A
+frontend-level workaround sketch (emit `R.const` scalar indices directly
+instead of wrap chains for in-range constant Gather indices) is already what
+`--trust-nonnegative-gather-indices` does — but the full patched model still
+diverges, so at least one more mis-folded pattern exists beyond the gather
+chains; finding it follows the same extract-and-cut method.
 
 ## Local artifact/release policy
 
