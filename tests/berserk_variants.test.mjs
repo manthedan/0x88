@@ -16,6 +16,7 @@ import {
   berserkVariantByKey,
   berserkVariantFromParams,
   checkBerserkVariantAsset,
+  defaultBerserkVariantKey,
   hasExplicitBerserkVariant,
   normalizeBerserkVariant,
   resolveDefaultBerserkVariantAssetFallback,
@@ -56,7 +57,8 @@ test('Berserk URL params support explicit and custom variants', () => {
   assert.equal(hasExplicitBerserkVariant(new URLSearchParams('berserk=simd')), true);
   assert.equal(hasExplicitBerserkVariant(new URLSearchParams('berserkJs=/berserk/custom.js')), true);
   assert.equal(hasExplicitBerserkVariant(new URLSearchParams('berserkNnue=/tmp/net.nn')), false);
-  assert.equal(berserkVariantFromParams(new URLSearchParams('')).key, 'emscripten');
+  // No-param default follows the relaxed > simd > scalar Emscripten ladder.
+  assert.equal(berserkVariantFromParams(new URLSearchParams('')).key, defaultBerserkVariantKey());
   assert.equal(berserkVariantFromParams(new URLSearchParams('berserk=simd')).key, 'simd');
   const builtInWithCustomNnue = berserkVariantFromParams(new URLSearchParams('berserk=simd&berserkNnue=/berserk/net.nn'));
   assert.equal(builtInWithCustomNnue.key, 'simd');
@@ -70,9 +72,9 @@ test('Berserk URL params support explicit and custom variants', () => {
   assert.equal(customJs.wasmUrl, '/berserk/custom.wasm');
   assert.equal(customJs.dataUrl, '/berserk/custom.data');
   const customWasi = berserkVariantFromParams(new URLSearchParams('berserkWasm=/berserk/custom.wasm&berserkNnue=/berserk/net.nn'));
-  assert.equal(customWasi.key, 'emscripten');
+  assert.equal(customWasi.key, defaultBerserkVariantKey());
   const rejectedCustom = berserkVariantFromParams(new URLSearchParams('berserkJs=https://evil.example/berserk.js&berserkWasm=/local/berserk.wasm'));
-  assert.equal(rejectedCustom.key, 'emscripten');
+  assert.equal(rejectedCustom.key, defaultBerserkVariantKey());
 });
 
 test('Berserk asset checks use Emscripten sidecars or WASI+NNUE assets', async () => {

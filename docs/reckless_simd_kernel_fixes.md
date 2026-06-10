@@ -106,13 +106,14 @@ artifact remains SIMD-free.
 
 ## Promotion posture
 
-- `reckless-simd128.wasm` (shuffle fix): safe to promote on the existing
-  evidence pattern once the browser benchmark confirms — value-exact, faster
-  on every measurement.
-- `reckless-relaxed-simd128.wasm` (relaxed dot): keep as the experimental
-  variant until the browser protocol (Apple Silicon + x86_64) confirms the
-  Node signal; runtime selection already feature-detects via
-  `supportsWasmRelaxedSimd()`.
+**Promoted 2026-06-10** (owner decision, `feature/promote-simd-defaults`):
+the default selection ladder is now relaxed dot > simd128 > scalar, gated by
+`supportsWasmRelaxedSimd()` / `supportsWasmSimd()` with asset fallback, and
+the release pipeline builds all three artifacts plus corresponding-source
+archives. Promotion rests on value-exactness (60/60 fixed-depth parity —
+worst case on unmeasured hardware is no speedup, never wrongness). x86_64
+Chromium browser numbers remain to be collected post-promotion; the relaxed
+dot should widen there via VPDPBUSD lowering.
 
 ## Not changed, deliberately
 

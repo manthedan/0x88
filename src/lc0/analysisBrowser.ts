@@ -25,9 +25,9 @@ import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
 import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, supportsWasmRelaxedSimd, type RecklessVariant } from './recklessVariants.ts';
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
-import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
+import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, hasExplicitViridithasVariant, normalizeViridithasVariant, resolveDefaultViridithasVariantAssetFallback, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
 import { BerserkEngine } from './berserkEngine.ts';
-import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, normalizeBerserkVariant, type BerserkVariant } from './berserkVariants.ts';
+import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, type PlentyChessVariant } from './plentychessVariants.ts';
 import { BT4_MODEL_NAME, BT4_MODEL_URL, BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH, BT4_RECOMMENDED_SEARCH_BATCH_SIZE, Bt4WorkerSearcher, bt4AssetStatusSync, bt4LoadWarning, bt4SupportedSync, checkBt4Asset, probeBt4Support } from './bt4Engine.ts';
@@ -49,8 +49,10 @@ const LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole-onnx-webgpu' as const;
 type Lc0AnalysisRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads' | typeof LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
-const REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantFromParams(params);
-const REQUESTED_BERSERK_VARIANT = berserkVariantFromParams(params);
+const REQUESTED_VIRIDITHAS_EXPLICIT = hasExplicitViridithasVariant(params);
+let REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantFromParams(params);
+const REQUESTED_BERSERK_EXPLICIT = hasExplicitBerserkVariant(params);
+let REQUESTED_BERSERK_VARIANT = berserkVariantFromParams(params);
 const REQUESTED_PLENTYCHESS_VARIANT = plentyChessVariantFromParams(params);
 
 function sameOriginPathParam(names: string[], fallback: string, allowedPrefixes: string[]): string {
@@ -1986,6 +1988,8 @@ async function reloadLc0Backend(forceAnalyzeAfterLoad = false): Promise<void> {
 
 async function init() {
   REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
+  REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, renderRecklessRuntimeInfo);
+  REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, renderRecklessRuntimeInfo);
   window.addEventListener('pagehide', (event) => {
     if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
   });

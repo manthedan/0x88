@@ -59,9 +59,9 @@ export const RECKLESS_SIMD_VARIANT: RecklessVariant = {
 
 export const RECKLESS_RELAXED_SIMD_VARIANT: RecklessVariant = {
   key: 'relaxed-simd',
-  label: 'Reckless Full Relaxed SIMD experimental',
+  label: 'Reckless Full Relaxed SIMD',
   wasmUrl: '/reckless/reckless-relaxed-simd128.wasm',
-  note: 'v60 full-size NNUE with wasm relaxed-simd enabled for selected relaxed FP ops; experimental until parity and browser benchmark results are proven.',
+  note: 'v60 full-size NNUE using the relaxed integer dot for dpbusd (exact: activations provably in 0..127). Default when the browser validates Relaxed SIMD; promoted on 60/60 fixed-depth parity and +24% NPS vs the old kernels.',
 };
 
 export const RECKLESS_LITE_VARIANT: RecklessVariant = {
@@ -111,6 +111,11 @@ export function normalizeRecklessVariant(raw: string | null | undefined): Reckle
 }
 
 export function defaultRecklessVariantKey(): RecklessVariantKey {
+  // Promotion order: relaxed integer dot > simd128 > scalar. All three are
+  // value-exact (60/60 fixed-depth parity), so selection is purely a speed
+  // ladder gated by WebAssembly feature validation, with asset fallback in
+  // resolveDefaultRecklessVariantAssetFallback.
+  if (supportsWasmRelaxedSimd()) return 'relaxed-simd';
   return supportsWasmSimd() ? 'simd' : 'full';
 }
 

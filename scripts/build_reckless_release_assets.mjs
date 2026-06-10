@@ -109,7 +109,7 @@ buildVariant({
 });
 
 buildVariant({
-  label: 'Reckless Full Relaxed SIMD experimental',
+  label: 'Reckless Full Relaxed SIMD',
   artifact: 'public/reckless/reckless-relaxed-simd128.wasm',
   sourceArchive: 'public/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz',
   workdir: '.local_engines/reckless-release-src-relaxed-simd',

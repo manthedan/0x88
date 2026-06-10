@@ -13,8 +13,8 @@ import {
   supportsWasmSimd,
 } from '../src/lc0/recklessVariants.ts';
 
-test('Reckless SIMD is the default when the browser supports WebAssembly SIMD', () => {
-  const expected = supportsWasmSimd() ? 'simd' : 'full';
+test('Reckless default follows the relaxed > simd > scalar speed ladder', () => {
+  const expected = supportsWasmRelaxedSimd() ? 'relaxed-simd' : supportsWasmSimd() ? 'simd' : 'full';
   assert.equal(defaultRecklessVariantKey(), expected);
   assert.equal(recklessVariantFromParams(new URLSearchParams()).key, expected);
 });
@@ -31,10 +31,10 @@ test('Reckless variant aliases keep full SIMD explicit and scalar as fallback', 
   assert.equal(recklessVariantFromParams(new URLSearchParams('recklessVariant=full')).key, 'full');
 });
 
-test('Reckless relaxed SIMD is explicit and separately feature-detected', () => {
+test('Reckless relaxed SIMD is the feature-detected default where supported', () => {
   assert.equal(typeof supportsWasmRelaxedSimd(), 'boolean');
   assert.equal(recklessVariantFromParams(new URLSearchParams('recklessVariant=relaxed-simd')).wasmUrl, RECKLESS_RELAXED_SIMD_VARIANT.wasmUrl);
-  assert.notEqual(defaultRecklessVariantKey(), 'relaxed-simd');
+  if (supportsWasmRelaxedSimd()) assert.equal(defaultRecklessVariantKey(), 'relaxed-simd');
   assert.equal(RECKLESS_VARIANTS.some((variant) => variant.key === 'relaxed-simd'), true);
 });
 

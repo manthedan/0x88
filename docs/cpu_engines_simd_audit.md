@@ -94,11 +94,14 @@ build with `-mrelaxed-simd`, and run a fixed-depth suite parity check.
 ## Validation posture (same as Reckless)
 
 All numbers above are Apple Silicon Node/V8, single rep per cell, exact-pair
-parity-gated. Browser promotion for any of these variants should follow the
-established `/reckless-benchmark.html`-style persistent-mode rotated-suite
-protocol on Apple Silicon and x86_64 Chromium. Relaxed artifacts require
-runtime feature detection (`supportsWasmRelaxedSimd()`); the new variants are
-registered as explicit experimental options, not defaults.
+parity-gated. **Promoted 2026-06-10** (owner decision,
+`feature/promote-simd-defaults`): Reckless, Viridithas, and Berserk now
+default through feature-detected speed ladders (relaxed > simd > scalar) with
+asset fallback; PlentyChess follows on its own worktree branch. The
+promotion case is value-exactness — every variant matched its baseline in
+40+/40+ fixed-depth pairs, so an unsupported or slow lowering can only cost
+speed, not correctness. x86_64 Chromium numbers remain to be collected
+post-promotion.
 
 ## Catalog/broker note
 

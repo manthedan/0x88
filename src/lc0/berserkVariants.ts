@@ -136,8 +136,12 @@ export function normalizeBerserkVariant(raw: string | null | undefined): Berserk
   return 'emscripten';
 }
 
+// Promotion order: relaxed integer dot > SSE4.1-emulation simd128 > scalar
+// Emscripten. All variants are value-exact (40/40 fixed-depth parity), so this
+// is a speed ladder gated by WebAssembly feature validation.
 export function defaultBerserkVariantKey(): BerserkVariantKey {
-  return 'emscripten';
+  if (supportsWasmRelaxedSimd()) return 'emscripten-relaxed';
+  return supportsBerserkWasmSimd() ? 'emscripten-simd' : 'emscripten';
 }
 
 export function berserkVariantByKey(key: string): BerserkVariant {
@@ -189,9 +193,13 @@ export function berserkVariantFromParams(params: URLSearchParams): BerserkVarian
 }
 
 export async function resolveDefaultBerserkVariantAssetFallback(variant: BerserkVariant, explicit: boolean, onChange?: () => void): Promise<BerserkVariant> {
-  if (explicit || variant.key !== 'simd') return variant;
+  if (explicit) return variant;
+  if (variant.key !== 'simd' && variant.key !== 'emscripten-relaxed' && variant.key !== 'emscripten-simd') return variant;
   const status = await checkBerserkVariantAsset(variant, onChange);
   if (status !== 'missing') return variant;
+  if (variant.key === 'emscripten-relaxed' && supportsBerserkWasmSimd()) {
+    return resolveDefaultBerserkVariantAssetFallback(BERSERK_EMSCRIPTEN_SIMD_VARIANT, false, onChange);
+  }
   return BERSERK_EMSCRIPTEN_VARIANT;
 }
 
