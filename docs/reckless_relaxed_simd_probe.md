@@ -2,6 +2,19 @@
 
 Status: experimental branch `feature/reckless-relaxed-simd`.
 
+> **2026-06-09 update** (`feature/reckless-simd-kernel-fixes`): the open
+> question below — whether the relaxed integer dot is usable — is resolved.
+> `activate_ft` output is provably in `[0, 127]`
+> (`FT_QUANT^2 >> FT_SHIFT = 255 * 255 >> 9 = 127`), so
+> `i32x4_relaxed_dot_i8x16_i7x16_add` is exact and now implements `dpbusd`
+> in relaxed builds; the relaxed f32 madd/min/max measured here are removed.
+> The probes below therefore describe a superseded artifact: their "relaxed
+> is slower" conclusion applied to relaxed f32 tail ops only, never to the
+> dot. New evidence (exact 60/60 parity, +24% NPS vs the old kernels on
+> Apple Silicon Node) is in
+> [`reckless_simd_kernel_fixes.md`](./reckless_simd_kernel_fixes.md).
+> The x86_64 Chromium re-run of the validation protocol is still pending.
+
 ## Report assessment
 
 The recommendation to compile an additional Relaxed SIMD artifact is directionally useful, but the claimed **2x-3x over standard SIMD128** is not safe to assume for Reckless.
