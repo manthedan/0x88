@@ -557,7 +557,9 @@ function strengthMeta(family: EngineFamily) {
 function defaultStrength(family: EngineFamily): number { return defaultEngineStrength(family, 'analysis'); }
 
 function availableRecklessVariants(): RecklessVariant[] {
-  return REQUESTED_RECKLESS_VARIANT.key === 'custom' ? [...RECKLESS_VARIANTS, REQUESTED_RECKLESS_VARIANT] : [...RECKLESS_VARIANTS];
+  const variants = [...RECKLESS_VARIANTS];
+  if (!variants.some((variant) => variant.key === REQUESTED_RECKLESS_VARIANT.key)) variants.push(REQUESTED_RECKLESS_VARIANT);
+  return variants;
 }
 
 function recklessVariantForKey(variantKey: string): RecklessVariant {

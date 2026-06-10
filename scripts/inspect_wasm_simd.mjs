@@ -63,6 +63,7 @@ const SIMD_NAMES = new Map([
   [84, 'v128.load8_lane'], [85, 'v128.load16_lane'], [86, 'v128.load32_lane'], [87, 'v128.load64_lane'], [88, 'v128.store8_lane'], [89, 'v128.store16_lane'], [90, 'v128.store32_lane'], [91, 'v128.store64_lane'], [92, 'v128.load32_zero'], [93, 'v128.load64_zero'],
   [94, 'f32x4.demote_f64x2_zero'], [95, 'f64x2.promote_low_f32x4'],
   [110, 'i8x16.add'], [113, 'i8x16.sub'], [142, 'i16x8.add'], [145, 'i16x8.sub'], [174, 'i32x4.add'], [177, 'i32x4.sub'], [228, 'f32x4.add'], [231, 'f32x4.sub'],
+  [257, 'i8x16.relaxed_swizzle'], [258, 'i32x4.relaxed_trunc_f32x4_s'], [259, 'i32x4.relaxed_trunc_f32x4_u'], [260, 'i32x4.relaxed_trunc_f64x2_s_zero'], [261, 'f32x4.relaxed_madd'], [262, 'f32x4.relaxed_nmadd'], [263, 'f64x2.relaxed_madd'], [264, 'f64x2.relaxed_nmadd'], [269, 'f32x4.relaxed_min'], [270, 'f32x4.relaxed_max'], [277, 'i16x8.relaxed_q15mulr_s'], [278, 'i16x8.relaxed_dot_i8x16_i7x16_s'], [279, 'i32x4.relaxed_dot_i8x16_i7x16_add_s'],
 ]);
 
 function simdFamily(op) {

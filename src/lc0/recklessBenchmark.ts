@@ -4,7 +4,7 @@ import { BERSERK_EMSCRIPTEN_VARIANT, berserkVariantAssetStatus, checkBerserkVari
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { PLENTYCHESS_EMSCRIPTEN_VARIANT, checkPlentyChessVariantAsset, plentyChessVariantAssetStatus, type PlentyChessVariant } from './plentychessVariants.ts';
 import { RecklessEngine, canUsePersistentRecklessWasi, type RecklessOptions } from './recklessEngine.ts';
-import { RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT, RECKLESS_SIMD_VARIANT, checkRecklessVariantAsset, recklessVariantAssetStatus, type RecklessVariant } from './recklessVariants.ts';
+import { RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT, RECKLESS_RELAXED_SIMD_VARIANT, RECKLESS_SIMD_VARIANT, checkRecklessVariantAsset, recklessVariantAssetStatus, supportsWasmRelaxedSimd, type RecklessVariant } from './recklessVariants.ts';
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_DEFAULT_VARIANT, VIRIDITHAS_SIMD_VARIANT, checkViridithasVariantAsset, viridithasVariantAssetStatus, type ViridithasVariant } from './viridithasVariants.ts';
 
@@ -147,6 +147,7 @@ function selectedVariants(): BenchVariant[] {
   const variants: BenchVariant[] = [];
   if (inputEl('benchFull').checked) variants.push({ ...RECKLESS_FULL_VARIANT, engine: 'reckless' });
   if (inputEl('benchSimd').checked) variants.push({ ...RECKLESS_SIMD_VARIANT, engine: 'reckless' });
+  if (inputEl('benchRelaxedSimd').checked) variants.push({ ...RECKLESS_RELAXED_SIMD_VARIANT, engine: 'reckless' });
   if (inputEl('benchBrowserApi').checked) variants.push({ ...RECKLESS_BROWSER_API_VARIANT, engine: 'reckless' });
   if (inputEl('benchBrowserApiSimd').checked) variants.push({ ...RECKLESS_BROWSER_API_SIMD_VARIANT, engine: 'reckless' });
   if (inputEl('benchBrowserApiSimdExternal').checked) variants.push({ ...RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, engine: 'reckless' });
@@ -215,6 +216,7 @@ function runtimeMetadata() {
     crossOriginIsolated: (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true,
     sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
     persistentAvailable: canUsePersistentRecklessWasi(),
+    relaxedSimdSupported: supportsWasmRelaxedSimd(),
     viridithasPersistentAvailable: canUsePersistentViridithasWasi(),
   };
 }
@@ -391,6 +393,11 @@ async function runBench(): Promise<void> {
       }
       for (const mode of config.modes) {
         if (abort.signal.aborted) return;
+        if (variant.engine === 'reckless' && variant.key === 'relaxed-simd' && !supportsWasmRelaxedSimd()) {
+          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'relaxed-simd', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'relaxed SIMD unsupported', wasmUrl: variant.wasmUrl });
+          render();
+          continue;
+        }
         if (mode === 'persistent' && variant.engine === 'viridithas' && !canUsePersistentViridithasWasi()) {
           rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'persistent unavailable', wasmUrl: variantArtifactUrl(variant) });
           render();
@@ -493,10 +500,10 @@ el('copyJson').addEventListener('click', () => { void copyText(JSON.stringify(re
 el('copyCsv').addEventListener('click', () => { void copyText(csvReport(), 'CSV'); });
 el('downloadJson').addEventListener('click', () => downloadText(JSON.stringify(report(), null, 2), 'reckless-benchmark-report.json', 'application/json'));
 el('downloadCsv').addEventListener('click', () => downloadText(csvReport(), 'reckless-benchmark-runs.csv', 'text/csv'));
-for (const variant of [RECKLESS_FULL_VARIANT, RECKLESS_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_LITE_VARIANT]) void checkRecklessVariantAsset(variant, render);
+for (const variant of [RECKLESS_FULL_VARIANT, RECKLESS_SIMD_VARIANT, RECKLESS_RELAXED_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_LITE_VARIANT]) void checkRecklessVariantAsset(variant, render);
 void checkViridithasVariantAsset(VIRIDITHAS_DEFAULT_VARIANT, render);
 void checkViridithasVariantAsset(VIRIDITHAS_SIMD_VARIANT, render);
 void checkBerserkVariantAsset(BERSERK_EMSCRIPTEN_VARIANT, render);
 void checkPlentyChessVariantAsset(PLENTYCHESS_EMSCRIPTEN_VARIANT, render);
-setStatus(`Ready. recklessPersistent=${canUsePersistentRecklessWasi()} · viridithasPersistent=${canUsePersistentViridithasWasi()} · Berserk Emscripten=${BERSERK_EMSCRIPTEN_VARIANT.jsUrl} · PlentyChess Emscripten=${PLENTYCHESS_EMSCRIPTEN_VARIANT.jsUrl} · SAB=${typeof SharedArrayBuffer !== 'undefined'}`);
+setStatus(`Ready. recklessPersistent=${canUsePersistentRecklessWasi()} · relaxedSIMD=${supportsWasmRelaxedSimd()} · viridithasPersistent=${canUsePersistentViridithasWasi()} · Berserk Emscripten=${BERSERK_EMSCRIPTEN_VARIANT.jsUrl} · PlentyChess Emscripten=${PLENTYCHESS_EMSCRIPTEN_VARIANT.jsUrl} · SAB=${typeof SharedArrayBuffer !== 'undefined'}`);
 render();

@@ -1,6 +1,6 @@
 import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
 
-export type RecklessVariantKey = 'full' | 'simd' | 'lite' | 'browser-api' | 'browser-api-simd' | 'browser-api-simd-external' | 'custom';
+export type RecklessVariantKey = 'full' | 'simd' | 'relaxed-simd' | 'lite' | 'browser-api' | 'browser-api-simd' | 'browser-api-simd-external' | 'custom';
 
 export interface RecklessVariant {
   key: RecklessVariantKey;
@@ -31,6 +31,18 @@ export function supportsWasmSimd(): boolean {
   ]));
 }
 
+export function supportsWasmRelaxedSimd(): boolean {
+  if (typeof WebAssembly === 'undefined' || typeof WebAssembly.validate !== 'function') return false;
+  // (module (func (result v128) (f32x4.relaxed_madd (f32x4.splat 1) (f32x4.splat 2) (f32x4.splat 3))))
+  return WebAssembly.validate(new Uint8Array([
+    0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96,
+    0, 1, 123, 3, 2, 1, 0, 10, 28, 1, 26, 0,
+    67, 0, 0, 128, 63, 253, 19, 67, 0, 0, 0, 64,
+    253, 19, 67, 0, 0, 64, 64, 253, 19, 253, 133,
+    2, 11,
+  ]));
+}
+
 export const RECKLESS_FULL_VARIANT: RecklessVariant = {
   key: 'full',
   label: 'Reckless Full scalar fallback',
@@ -43,6 +55,13 @@ export const RECKLESS_SIMD_VARIANT: RecklessVariant = {
   label: 'Reckless Full SIMD',
   wasmUrl: '/reckless/reckless-simd128.wasm',
   note: 'v60 full-size NNUE with integrated wasm simd128 backend; preferred default when supported.',
+};
+
+export const RECKLESS_RELAXED_SIMD_VARIANT: RecklessVariant = {
+  key: 'relaxed-simd',
+  label: 'Reckless Full Relaxed SIMD experimental',
+  wasmUrl: '/reckless/reckless-relaxed-simd128.wasm',
+  note: 'v60 full-size NNUE with wasm relaxed-simd enabled for selected relaxed FP ops; experimental until parity and browser benchmark results are proven.',
 };
 
 export const RECKLESS_LITE_VARIANT: RecklessVariant = {
@@ -85,6 +104,7 @@ export function normalizeRecklessVariant(raw: string | null | undefined): Reckle
   if (value === 'api-simd-external' || value === 'browser-api-simd-external' || value === 'direct-simd-external' || value === 'native-simd-external' || value === 'external-simd') return 'browser-api-simd-external';
   if (value === 'api-simd' || value === 'browser-api-simd' || value === 'direct-simd' || value === 'native-simd') return 'browser-api-simd';
   if (value === 'api' || value === 'browser-api' || value === 'direct' || value === 'native') return 'browser-api';
+  if (value === 'relaxed' || value === 'relaxed-simd' || value === 'relaxed-simd128' || value === 'full-relaxed-simd') return 'relaxed-simd';
   if (value === 'simd' || value === 'simd128' || value === 'full-simd') return 'simd';
   if (value === 'custom') return 'custom';
   return 'full';
@@ -99,6 +119,7 @@ export function recklessVariantByKey(key: RecklessVariantKey): RecklessVariant {
   if (key === 'browser-api') return RECKLESS_BROWSER_API_VARIANT;
   if (key === 'browser-api-simd') return RECKLESS_BROWSER_API_SIMD_VARIANT;
   if (key === 'browser-api-simd-external') return RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT;
+  if (key === 'relaxed-simd') return RECKLESS_RELAXED_SIMD_VARIANT;
   if (key === 'simd') return RECKLESS_SIMD_VARIANT;
   if (key === 'custom') return { key: 'custom', label: 'Reckless Custom', wasmUrl: DEFAULT_RECKLESS_WASM_URL, note: 'Custom Reckless WASM URL.' };
   return RECKLESS_FULL_VARIANT;
@@ -117,6 +138,12 @@ export function recklessVariantFromParams(params: URLSearchParams): RecklessVari
 }
 
 export async function resolveDefaultRecklessVariantAssetFallback(variant: RecklessVariant, explicit: boolean, onChange?: () => void): Promise<RecklessVariant> {
+  if (variant.key === 'relaxed-simd') {
+    if (!supportsWasmRelaxedSimd()) return supportsWasmSimd() ? RECKLESS_SIMD_VARIANT : RECKLESS_FULL_VARIANT;
+    if (explicit) return variant;
+    const status = await checkRecklessVariantAsset(variant, onChange);
+    return status === 'missing' ? (supportsWasmSimd() ? RECKLESS_SIMD_VARIANT : RECKLESS_FULL_VARIANT) : variant;
+  }
   if (explicit || variant.key !== 'simd') return variant;
   const status = await checkRecklessVariantAsset(variant, onChange);
   return status === 'missing' ? RECKLESS_FULL_VARIANT : variant;
