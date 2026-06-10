@@ -100,6 +100,20 @@ test('batched PUCT retries in-flight leaf collisions to keep evaluator batches f
   assert.equal(result.root?.edges.reduce((sum, edge) => sum + edge.virtualVisits, 0), 0, 'temporary virtual visits were unwound');
 });
 
+test('pipelined PUCT backup mode skips cross-batch in-flight leaf collisions', async () => {
+  const board = parseFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+  const result = await searchRoot(board, new DominantFirstMoveEvaluator(), {
+    visits: 8,
+    temperature: 1,
+    batchSize: 2,
+    batchPipelineDepth: 2,
+    batchCollisionMode: 'backup',
+  });
+  assert.equal(result.stats?.completedVisits, 8);
+  assert.ok((result.stats?.batchLeafCollisions ?? 0) > 0, 'cross-batch in-flight collision path was exercised');
+  assert.equal(result.root?.edges.reduce((sum, edge) => sum + edge.virtualVisits, 0), 0, 'temporary virtual visits were unwound');
+});
+
 test('PUCT can stop early when the best root move is stable', async () => {
   const board = parseFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
   const result = await searchRoot(board, new DominantFirstMoveEvaluator(), {

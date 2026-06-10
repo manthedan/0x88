@@ -1186,7 +1186,7 @@ interface PreparedLeafBatch {
 
 function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, stats: SearchStats, transpositionTable: Map<string, Node> | undefined, collisionMode: SearchBatchCollisionMode, collisionRetryLimit: number, inFlightEvalLeaves?: Set<Node>, generationId = 0): PreparedLeafBatch {
   const selected: SelectedLeaf[] = [];
-  const localInFlightEvalLeaves = inFlightEvalLeaves ?? new Set<Node>();
+  const batchInFlightEvalLeaves = new Set<Node>();
   const retryVirtualPaths: Edge[][] = [];
   let attempts = 0;
   const maxAttempts = collisionMode === 'retry'
@@ -1196,19 +1196,21 @@ function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: Search
     attempts += 1;
     const sel = selectLeaf(root, searchPolicy, context, [], transpositionTable, stats);
     if (!sel.node.expanded && sel.node.terminalValue === null) {
-      if (collisionMode === 'retry') {
-        if (localInFlightEvalLeaves.has(sel.node)) {
-          stats.batchLeafCollisions = (stats.batchLeafCollisions ?? 0) + 1;
-          stats.batchLeafRetries = (stats.batchLeafRetries ?? 0) + 1;
-          retryVirtualPaths.push(sel.path);
-          continue;
-        }
-        localInFlightEvalLeaves.add(sel.node);
-      } else if (inFlightEvalLeaves?.has(sel.node)) {
+      const sameBatchCollision = batchInFlightEvalLeaves.has(sel.node);
+      const crossBatchCollision = (inFlightEvalLeaves?.has(sel.node) ?? false) && !sameBatchCollision;
+      if (collisionMode === 'retry' && (sameBatchCollision || crossBatchCollision)) {
+        stats.batchLeafCollisions = (stats.batchLeafCollisions ?? 0) + 1;
+        stats.batchLeafRetries = (stats.batchLeafRetries ?? 0) + 1;
+        retryVirtualPaths.push(sel.path);
+        continue;
+      }
+      if (collisionMode !== 'retry' && crossBatchCollision) {
         stats.batchLeafCollisions = (stats.batchLeafCollisions ?? 0) + 1;
         unwindVirtualVisits(sel.path);
         continue;
       }
+      batchInFlightEvalLeaves.add(sel.node);
+      inFlightEvalLeaves?.add(sel.node);
     }
     selected.push(sel);
   }
@@ -1226,7 +1228,8 @@ function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: Search
     }
     const prep = prepareExpansion(sel.node, stats);
     if (typeof prep === 'number') {
-      localInFlightEvalLeaves.delete(sel.node);
+      batchInFlightEvalLeaves.delete(sel.node);
+      inFlightEvalLeaves?.delete(sel.node);
       prepared.push({ kind: 'terminal', sel, value: prep });
     } else {
       let slot = evalIndex.get(sel.node);
@@ -1235,7 +1238,6 @@ function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: Search
         evalIndex.set(sel.node, slot);
         evalNodes.push(sel.node);
         evalMoves.push(prep);
-        if (collisionMode !== 'retry') localInFlightEvalLeaves.add(sel.node);
       }
       prepared.push({ kind: 'eval', sel, slot });
     }

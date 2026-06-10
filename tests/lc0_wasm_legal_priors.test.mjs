@@ -49,6 +49,14 @@ test('SIMD WASM legal-prior path supports top-K candidate output', async () => {
   assertLegalPriorsClose(actual, expected, 'startpos-top5');
 });
 
+test('SIMD WASM legal-prior errors include last-error detail', async () => {
+  const wasm = await createLc0WasmLegalPriors(wasmBytes);
+  assert.throws(
+    () => wasm.evaluateFen('8/8/8/8/8/8/8/8 x - - 0 1', logits, { temperature }),
+    /LC0 WASM legal-prior failed: 8 \(invalid FEN active color\)/,
+  );
+});
+
 test('SIMD WASM legal-prior path rejects stale castling rights like JS movegen', async () => {
   const wasm = await createLc0WasmLegalPriors(wasmBytes);
   for (const [fen, invalidCastles] of [

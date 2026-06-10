@@ -25,6 +25,7 @@ export interface Lc0EncodedPlanes112 {
 
 const ALL_SQUARES_MASK = (1n << 64n) - 1n;
 const ROLE_TO_OFFSET: Record<PieceRole, number> = { p: 0, n: 1, b: 2, r: 3, q: 4, k: 5 };
+const START_BOARD = parseFen(START_FEN);
 
 function opposite(color: Color): Color {
   return color === 'w' ? 'b' : 'w';
@@ -73,13 +74,12 @@ function setPiecePlanes(board: BoardState, masks: bigint[], historySlot: number,
 }
 
 function isExactStartPosition(board: BoardState): boolean {
-  const start = parseFen(START_FEN);
-  return board.turn === start.turn &&
-    board.castling === start.castling &&
-    board.epSquare === start.epSquare &&
-    board.halfmove === start.halfmove &&
-    board.fullmove === start.fullmove &&
-    board.squares.every((piece, i) => piece === start.squares[i]);
+  return board.turn === START_BOARD.turn &&
+    board.castling === START_BOARD.castling &&
+    board.epSquare === START_BOARD.epSquare &&
+    board.halfmove === START_BOARD.halfmove &&
+    board.fullmove === START_BOARD.fullmove &&
+    board.squares.every((piece, i) => piece === START_BOARD.squares[i]);
 }
 
 function boardBeforeEpDoublePush(board: BoardState): BoardState {

@@ -1,8 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 
-test('student artifact can choose a legal playable move from the start position', () => {
+const STUDENT_ARTIFACT = new URL('../artifacts/student_distill_benchmark.json', import.meta.url);
+const studentArtifactSkip = existsSync(STUDENT_ARTIFACT) ? false : 'requires gitignored artifacts/student_distill_benchmark.json';
+
+async function stopChild(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+  child.kill('SIGTERM');
+  await exited;
+}
+
+test('student artifact can choose a legal playable move from the start position', { skip: studentArtifactSkip }, () => {
   const output = execFileSync('npm', ['run', 'play:student', '--silent', '--', '--json'], { encoding: 'utf8' });
   const result = JSON.parse(output);
   assert.equal(result.fen.startsWith('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP'), true);
@@ -10,14 +21,14 @@ test('student artifact can choose a legal playable move from the start position'
   assert.ok(result.legalMoves.some((entry) => entry.move === result.engineMove));
 });
 
-test('playable suite emits fixed infrastructure metrics', () => {
+test('playable suite emits fixed infrastructure metrics', { skip: studentArtifactSkip }, () => {
   const output = execFileSync('npm', ['run', 'eval:playable', '--silent'], { encoding: 'utf8' });
   assert.match(output, /METRIC playable_shell_ready=1/);
   assert.match(output, /METRIC legal_move_selection_rate=1\.000000/);
   assert.match(output, /METRIC selfplay_plies_completed=/);
 });
 
-test('student web UI serves board and API state', async () => {
+test('student web UI serves board and API state', { skip: studentArtifactSkip }, async () => {
   const child = spawn('node', ['--experimental-strip-types', 'scripts/serve_student_web.mjs', '--port=0'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -44,7 +55,6 @@ test('student web UI serves board and API state', async () => {
     assert.equal(state.fen.startsWith('rnbqkbnr/pppppppp'), true);
     assert.ok(state.legalMoves.length > 0);
   } finally {
-    child.kill('SIGTERM');
-    await new Promise((resolve) => child.once('exit', resolve));
+    await stopChild(child);
   }
 });
