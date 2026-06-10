@@ -342,6 +342,49 @@ Aggregate search smoke result:
 
 Covered positions include the current 10 `fixtures/lc0/fen_only.json` rows, including start, black-after-e4, rook moves, and white/black promotion-near fixtures, plus the first 16 rows from `../leelaweb-arena-diagnostics/eval/opening_suite_uho_lite_v1.fen`. The smoke page now chunks fixture evaluation through the TVMJS evaluation provider so `fixtureCount` can exceed the physical model batch size. This is still a **search smoke**, not promotion evidence: it uses small fixed-suite slices, warm browser state, and does not replace the matched fixed-suite throughput + drift/parity protocol.
 
+## Tiny Leela (squareformer_v2) TVMJS probe (2026-06-09)
+
+First attempt at the project's own model family
+(`public/models/bt4_anneal_muon_best.onnx`, squareformer_v2 6×128, uint8
+compact-token inputs, PyTorch export). Status: **compiles, loads, and runs on
+WebGPU; numerics are wrong; blocked on upstream TVM frontend bugs.**
+
+What it took to compile (new probe capabilities, all opt-in):
+
+1. onnxsim with `overwrite_input_shapes` (batch fixed to 16) — folds all
+   `Shape`/`Gather`/`Concat` dim arithmetic; the raw export fails Relax import.
+2. `--dtype '{"tokens":"int32"}'` (JSON per-input dtype) — i64 graph input.
+3. `--trust-runtime-gather-indices` — the runtime embedding gathers otherwise
+   emit i64 `shape_to_tensor` wrap logic; this model clamps indices in-graph.
+4. Gather patch now skips Shape-typed data (PyTorch `Shape→Gather` pattern).
+5. `--max-fuse-depth 6` (`relax.FuseOps.max_depth`) — the 21-term embedding
+   sum otherwise fuses into one kernel needing 12 storage buffers vs the
+   device's 10/stage limit. Relax FuseOps ignores target `max_function_args`
+   (hardcoded 0 at `fuse_ops.cc:1053`; webgpu target kind doesn't declare it) —
+   upstream gap. `--no-fuse-ops` also exists but unfused bool intermediates
+   become `array<i8>` WGSL buffers, which WGSL rejects — second upstream gap.
+6. Dlight rule crash fall-through (rfactor `bind` fails on the head-sum
+   reduction with both the default scheduler and `dl.gpu.Reduction`); crashed
+   functions now go straight to `Fallback`.
+
+Browser result (`tiny-tvmjs-webgpu-smoke.html`, b16, synthetic inputs vs ORT
+on the same fixed-batch ONNX): pipelines build (needs adapter
+`maxStorageBuffersPerShaderStage` in requiredLimits), invoke+readback of all
+four outputs ≈ `29.6 ms`, all outputs finite — but `maxAbsDiff` vs ORT is
+~`36` on policy/`8` on wdl. TVM is internally consistent (CPU llvm build
+produces the same wrong values as WebGPU), so this is a deterministic
+op-conversion divergence in the Relax ONNX frontend (suspects:
+`LayerNormalization`/`Gemm`/`BitwiseAnd`/`Slice`/Clip-isnan paths — ops the
+LC0 lane never exercised). Separately, **unseeded imports are
+nondeterministic**: identical scripts produce all-NaN outputs on some runs and
+finite ones on others; pinning `PYTHONHASHSEED` makes builds deterministic.
+Both issues are upstream-class TVM bugs.
+
+Next steps for this lane: per-op output bisection against ORT (add
+intermediate outputs to the ONNX, walk the first divergent node), and an
+upstream issue/minimal repro for the import nondeterminism. Until then the
+Tiny TVMJS lane is compile/runtime evidence only — no parity, no integration.
+
 ## Local artifact/release policy
 
 Source-of-truth files for this research lane are the scripts, smoke page, and docs. The following are generated local artifacts and remain ignored unless a separate release decision is made:
