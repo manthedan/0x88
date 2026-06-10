@@ -920,6 +920,32 @@ async function run() {
     if (manifest.parameterStrategy?.current === 'detached-tensor-cache' && manifest.tensorCache?.directory) {
       const cacheUrl = checkedStagedRuntimeUrl(`${manifest.tensorCache.directory}/`, base, 'tensor cache').toString();
       await timed('tensorCacheFetchMs', () => tvm.fetchTensorCache(cacheUrl, tvm.webgpu()));
+      // Repeat-load evidence: tvmjs persisted the shards into a Cache Storage
+      // bucket during fetchTensorCache. Reading them back from that bucket is
+      // the warm-load path a second page visit takes instead of the network.
+      // (The runtime tensor cache rejects same-instance re-insertion, so a
+      // second fetchTensorCache is not a valid repeat-load probe.)
+      try {
+        let cachedEntries = 0;
+        let cachedBytes = 0;
+        const warmStarted = performance.now();
+        for (const bucketName of await caches.keys()) {
+          const bucket = await caches.open(bucketName);
+          for (const request of await bucket.keys()) {
+            if (!request.url.startsWith(cacheUrl)) continue;
+            const hit = await bucket.match(request);
+            if (!hit) continue;
+            cachedEntries += 1;
+            cachedBytes += (await hit.arrayBuffer()).byteLength;
+          }
+        }
+        startupTimings.tensorCacheWarmReadMs = performance.now() - warmStarted;
+        startupTimings.tensorCacheCachedEntries = cachedEntries;
+        startupTimings.tensorCacheCachedBytes = cachedBytes;
+        log('tensor cache repeat-load', { cachedEntries, cachedBytes, warmReadMs: startupTimings.tensorCacheWarmReadMs });
+      } catch (cacheErr) {
+        log('tensor cache repeat-load probe failed', cacheErr?.message ?? String(cacheErr));
+      }
       const params = [];
       for (let i = 0; ; i++) {
         const tensor = tvm.tensorCacheGet(`param_${i}`);
@@ -928,7 +954,7 @@ async function run() {
       }
       if (!params.length) throw new Error('detached-tensor-cache manifest but no param_N tensors loaded');
       tvmDetachedParams = params;
-      log('tensor cache loaded', { params: params.length, fetchMs: startupTimings.tensorCacheFetchMs });
+      log('tensor cache loaded', { params: params.length, fetchMs: startupTimings.tensorCacheFetchMs, refetchMs: startupTimings.tensorCacheRefetchMs });
     }
     const vmCandidates = ['set_input', 'invoke_stateful', 'get_output', 'get_outputs', 'main', 'vm_initialization'];
     const vmAvailable = [];

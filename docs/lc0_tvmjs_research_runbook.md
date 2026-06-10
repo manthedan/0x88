@@ -555,7 +555,10 @@ b16 result (`f16/v3-detached`, `artifacts/tvm/lc0_tvmjs_detached_b16_v16.json`):
 - Native fixture parity `8/8` with bit-identical max top-prior diff to the embedded build; search parity `8/8`; search wall `41.6 ms` mean at v16/b16 vs `40.0 ms` embedded — within noise.
 - Startup shift: wasm fetch+verify `104 → 21 ms`, instantiate `41 → 27 ms`, tensor-cache fetch+GPU upload `238 ms` (first load; artifact-cached afterwards).
 - Why it matters: a multi-batch runtime (b1+b16+…) can share ONE weight sidecar instead of embedding `~44 MB` per batch wasm — e.g. five batches drop from `~223 MB` to `~60 MB` staged.
-- Still to verify before any release decision: repeat-load cache-hit behavior and compressed sizes.
+- Repeat-load cache behavior and compressed sizes are now measured (2026-06-09):
+  - Compressed footprint (`artifacts/tvm/lc0_tvmjs_v3_detached_footprint.json`, via `lc0:tvmjs-webgpu-bundle-footprint` against the `v3-detached` manifest): b1+b16 wasms + runtime + shared tensor-cache = `54.66 MB` raw, `39.71 MB` gzip, **`36.78 MB` Brotli** — two batch variants ship at roughly the compressed cost of one embedded model wasm.
+  - Repeat-load (`artifacts/tvm/lc0_tvmjs_detached_repeat_load.json`): `fetchTensorCache` persists all shards into a Cache Storage bucket (`3` entries, `40.2 MB`); reading them back from the bucket — the warm path a second visit takes instead of the network — costs **`21 ms`** versus `235 ms` cold fetch+GPU-upload. Note: the runtime tensor cache rejects same-instance re-insertion, so a second `fetchTensorCache` is not a valid repeat-load probe; the smoke measures the Cache Storage read directly (`tensorCacheWarmReadMs`/`tensorCacheCachedEntries`/`tensorCacheCachedBytes` in `startupTimings`).
+- Remaining before any release decision: non-Apple GPU coverage and a written hosting/cache-header policy (the compression sidecar does not prove production `Content-Encoding`).
 
 Cross-batch sharing is now **proven** (2026-06-09):
 
