@@ -714,6 +714,75 @@ async function scoreSearchRowsWithStockfish(rows) {
     } : undefined,
   };
 }
+const STARTPOS_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+// Game-sequence A/B for tree reuse: the fresh-tree leg plays a line from
+// gameStartFen choosing moves by search; the reuse leg replays the SAME line
+// (searching every position with reuseTree) so eval costs are comparable.
+// Visit budgets count inherited visits, so reuse savings show up directly in
+// eval batch/position counts and wall time.
+async function runGameSequence(tvm, vmMod, batch) {
+  const plies = Number(params.get('gamePlies') ?? 0) || 0;
+  if (!plies) return undefined;
+  const visits = Number(params.get('gameVisits') ?? params.get('searchVisits') ?? 16) || 16;
+  const startFen = params.get('gameStartFen') || STARTPOS_FEN;
+  const runLeg = async (reuseTree, moveLine) => {
+    const provider = createTvmEvaluationProvider(tvm, vmMod, batch);
+    const searcher = new Lc0PuctSearcher(provider);
+    let board = parseFen(startFen);
+    const positions = [startFen];
+    const rows = [];
+    const line = [];
+    for (let ply = 0; ply < plies; ply++) {
+      const batchStart = provider.evaluationTimings.length;
+      const positionStart = provider.positionTimings.length;
+      const t0 = performance.now();
+      const result = await searcher.search({ positions: positions.slice() }, { visits, batchSize: batch, temperature: 0, reuseTree });
+      const searchMs = performance.now() - t0;
+      const played = moveLine ? moveLine[ply] : result.move;
+      if (!played) break;
+      rows.push({
+        ply,
+        fen: result.fen,
+        move: played,
+        searchedMove: result.move,
+        matchesLine: !moveLine || result.move === played,
+        searchMs,
+        evalBatches: provider.evaluationTimings.length - batchStart,
+        evalPositions: provider.positionTimings.length - positionStart,
+        totalVisits: result.visits,
+        completedVisits: result.search.stats?.completedVisits,
+      });
+      board = makeMove(board, moveFromUci(played));
+      positions.push(boardToFen(board));
+      line.push(played);
+      if (!legalMoves(board).length) break;
+    }
+    const total = (key) => rows.reduce((sum, row) => sum + (row[key] ?? 0), 0);
+    return {
+      reuseTree,
+      rows,
+      line,
+      totals: { searchMs: total('searchMs'), evalBatches: total('evalBatches'), evalPositions: total('evalPositions'), completedVisits: total('completedVisits') },
+    };
+  };
+  log('game sequence start', { plies, visits, batch, startFen });
+  const fresh = await runLeg(false, undefined);
+  const reused = await runLeg(true, fresh.line);
+  const ratio = (key) => fresh.totals[key] > 0 ? reused.totals[key] / fresh.totals[key] : undefined;
+  const summary = {
+    plies: fresh.rows.length,
+    visits,
+    batch,
+    startFen,
+    line: fresh.line,
+    moveAgreement: reused.rows.filter((row) => row.matchesLine).length,
+    fresh,
+    reused,
+    reusedOverFresh: { searchMs: ratio('searchMs'), evalBatches: ratio('evalBatches'), evalPositions: ratio('evalPositions') },
+  };
+  log('game sequence done', { plies: summary.plies, moveAgreement: summary.moveAgreement, freshTotals: fresh.totals, reusedTotals: reused.totals, reusedOverFresh: summary.reusedOverFresh });
+  return summary;
+}
 async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
   const visits = Number(params.get('searchVisits') ?? 0) || 0;
   if (!visits || !fixtureRows.length) return undefined;
@@ -1088,6 +1157,7 @@ async function run() {
         }
         const ortComparisons = await runOrtComparisons(batch, fixtureRows, fixtureResults);
         const searchParity = await runSearchParity(tvm, vmMod, batch, fixtureRows);
+        const gameSequence = await runGameSequence(tvm, vmMod, batch);
         const summary = {
           batch,
           fixtureOffset: useFixtures ? Math.max(0, Number(params.get('fixtureOffset') ?? 0) || 0) : undefined,
@@ -1107,6 +1177,7 @@ async function run() {
           ...(passCoalescer ? { passCoalescing: passCoalescer.stats() } : {}),
           ...(ortComparisons ? { ortComparisons } : {}),
           ...(searchParity ? { searchParity } : {}),
+          ...(gameSequence ? { gameSequence } : {}),
           results: fixtureResults,
         };
         log('FIXTURE_RESULT', summary);

@@ -12,7 +12,7 @@ const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
 function usage() {
   console.log(`Usage: node scripts/lc0_tvmjs_webgpu_smoke.mjs [options]\n\nRuns the LC0 whole-model TVMJS/WebGPU browser smoke and saves JSON evidence.\n\nOptions:\n  --batch N           Batch artifact to test: 1, 4, or 8 (default 8)\n  --fixtures          Encode real fixtures and compare best moves (default true)\n  --no-fixtures       Run loader/zero-input invoke only\n  --fixture-offset N  First fixture index for real-fixture mode (default 0)\n  --fixture-count N   Number of fixtures/FEN rows to request (default batch)
   --tensor-cache      Fetch manifest tensor-cache sidecar before VM setup (research-only)
-  --fens PATH         Newline-separated FEN suite; implies --fixtures and bypasses fixtures/lc0/fen_only.json\n  --ort-compare MODE  Compare TVMJS outputs against ORT: none, f16, f32, both (default none)\n  --ort-ep EP         ORT execution provider for comparison: webgpu, wasm, webgpu,wasm (default webgpu)\n  --ort-model TPL     ORT comparison model path template with {batch}/{dtype} placeholders (default t1 family)\n  --fixture-baseline PATH  Native fixture baseline JSONL served path (default /fixtures/lc0/native_fen_only_blas.jsonl)\n  --tie-epsilon X     Tolerate best-move mismatches whose competing priors are within X (recorded as tieTolerated; default strict)\n  --search-visits N   Also run TVMJS-vs-ORT search parity with fixed visits\n  --search-fixtures N Number of fixtures for search parity (default 2)\n  --search-repeats N  Repeat search parity rows for timing stability (default 1)\n  --search-pipeline-depth N  Evaluate this many TVMJS batches concurrently during search parity (default 1)\n  --stockfish-score-depth N  Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N     Score TVMJS/ORT post-search moves by Stockfish movetime\n  --base-url URL      Use existing server instead of starting Vite\n  --host HOST         Vite host (default ${DEFAULT_HOST})\n  --port N            Vite port (default ${DEFAULT_PORT})\n  --timeout MS        Overall timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --out PATH          JSON artifact path\n  --no-server         Do not auto-start Vite\n  -h, --help          Show help\n`);
+  --fens PATH         Newline-separated FEN suite; implies --fixtures and bypasses fixtures/lc0/fen_only.json\n  --ort-compare MODE  Compare TVMJS outputs against ORT: none, f16, f32, both (default none)\n  --ort-ep EP         ORT execution provider for comparison: webgpu, wasm, webgpu,wasm (default webgpu)\n  --ort-model TPL     ORT comparison model path template with {batch}/{dtype} placeholders (default t1 family)\n  --fixture-baseline PATH  Native fixture baseline JSONL served path (default /fixtures/lc0/native_fen_only_blas.jsonl)\n  --tie-epsilon X     Tolerate best-move mismatches whose competing priors are within X (recorded as tieTolerated; default strict)\n  --game-plies N      Run a same-line tree-reuse A/B game sequence of N plies (fresh-tree leg defines the line)\n  --game-visits N     Visits per game-sequence search (default searchVisits or 16)\n  --game-start-fen F  Game-sequence start position (default startpos)\n  --search-visits N   Also run TVMJS-vs-ORT search parity with fixed visits\n  --search-fixtures N Number of fixtures for search parity (default 2)\n  --search-repeats N  Repeat search parity rows for timing stability (default 1)\n  --search-pipeline-depth N  Evaluate this many TVMJS batches concurrently during search parity (default 1)\n  --stockfish-score-depth N  Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N     Score TVMJS/ORT post-search moves by Stockfish movetime\n  --base-url URL      Use existing server instead of starting Vite\n  --host HOST         Vite host (default ${DEFAULT_HOST})\n  --port N            Vite port (default ${DEFAULT_PORT})\n  --timeout MS        Overall timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --out PATH          JSON artifact path\n  --no-server         Do not auto-start Vite\n  -h, --help          Show help\n`);
 }
 
 function parseArgs(argv) {
@@ -33,6 +33,9 @@ function parseArgs(argv) {
     else if (arg === '--ort-model') args.ortModel = next();
     else if (arg === '--fixture-baseline') args.fixtureBaseline = next();
     else if (arg === '--tie-epsilon') args.tieEpsilon = Number(next());
+    else if (arg === '--game-plies') args.gamePlies = Number(next());
+    else if (arg === '--game-visits') args.gameVisits = Number(next());
+    else if (arg === '--game-start-fen') args.gameStartFen = next();
     else if (arg === '--search-visits') args.searchVisits = Number(next());
     else if (arg === '--search-fixtures') args.searchFixtures = Number(next());
     else if (arg === '--search-repeats') args.searchRepeats = Number(next());
@@ -197,6 +200,9 @@ async function main() {
     if (args.ortEp) url.searchParams.set('ortEp', args.ortEp);
     if (args.ortModel) url.searchParams.set('ortModel', args.ortModel);
     if (args.fixtureBaseline) url.searchParams.set('fixtureBaseline', args.fixtureBaseline);
+    if (args.gamePlies) url.searchParams.set('gamePlies', String(Math.floor(args.gamePlies)));
+    if (args.gameVisits) url.searchParams.set('gameVisits', String(Math.floor(args.gameVisits)));
+    if (args.gameStartFen) url.searchParams.set('gameStartFen', args.gameStartFen);
     if (args.searchVisits > 0) {
       url.searchParams.set('searchVisits', String(Math.floor(args.searchVisits)));
       url.searchParams.set('searchFixtureCount', String(Math.floor(args.searchFixtures)));
@@ -224,6 +230,9 @@ async function main() {
         ortEp: args.ortEp,
         ortModel: args.ortModel,
         fixtureBaseline: args.fixtureBaseline,
+        gamePlies: args.gamePlies,
+        gameVisits: args.gameVisits,
+        gameStartFen: args.gameStartFen,
         fensFile: args.fensFile || undefined,
         searchVisits: args.searchVisits,
         searchFixtures: args.searchFixtures,

@@ -128,13 +128,39 @@ single-knob change is neutral-to-worse. Single-config tile tuning is now
 parked for BT4 too; anything further needs metaschedule-grade search or
 per-function config dispatch (to unlock vec2 on the big matmuls only).
 
+### Tree reuse measured in the TVMJS lane (run same day — the win)
+
+Tree reuse was already implemented (`Lc0PuctSearcher.reuseTree`, used by the
+arena with full `{positions}` history, inherited visits counted against the
+target budget in `puct.ts`), but the TVMJS lane only ever searched independent
+FENs, so it never engaged and its value at BT4 eval costs was unmeasured.
+
+New smoke game-sequence A/B (`--game-plies N --game-visits V
+[--game-start-fen F]`, page params `gamePlies`/`gameVisits`/`gameStartFen`):
+the fresh-tree leg plays a line from startpos choosing moves by search; the
+reuse leg replays the SAME line searching every position with `reuseTree`, so
+eval costs are directly comparable.
+
+| Protocol | wall/move fresh → reused | eval batches | eval positions | move agreement |
+| --- | --- | --- | --- | --- |
+| v16 × 12 plies (`bt4it332_tvmjs_game_reuse_ab_v16_p12.json`) | `234 → 137 ms` (**−41%**) | 36 → 21 (−42%) | 187 → 116 (−38%) | 10/12 |
+| v32 × 16 plies (`bt4it332_tvmjs_game_reuse_ab_v32_p16.json`) | `397 → 222 ms` (**−44%**) | 80 → 45 (−44%) | 504 → 289 (−43%) | 16/16 |
+
+Tree reuse engages cleanly through the TVMJS provider with growing
+full-history positions and roughly **halves BT4 game-play move cost** — by far
+the largest perf lever found this campaign, and it stacks with nothing dying:
+it's search-side and applies to every evaluator lane. In-game BT4 at v16 is
+~137 ms/move on this device.
+
 ### Remaining levers for BT4 perf
 
 Batching, pipelining, and single-config schedule tuning are all measured
-dead. What's left: evaluation-count reduction (tree reuse between moves),
-per-function dlight config dispatch / metaschedule (bounded, unproven), and
-accepting ~0.25 s/move at v16 as the BT4 operating point — it already matches
-ORT.
+dead; tree reuse is measured and already on in the arena paths (ensure any
+future TVMJS game integration passes `reuseTree: true`). What's left:
+per-function dlight config dispatch / metaschedule (bounded, unproven),
+quantization (q4f16/int8 — attacks both the 323 MB download and memory
+bandwidth; strength cost unknown), and accepting ~137 ms/move in-game at v16
+as the BT4 operating point.
 
 ## Known gaps / cautions
 
