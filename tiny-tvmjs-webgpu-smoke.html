@@ -12,7 +12,11 @@
 <script type="module">
 import * as ortRuntime from '/src/nn/ortRuntime.ts';
 
-const BASE = '/runtimes/tiny-tvmjs-webgpu/bt4-anneal-muon-best/v0/';
+const PAGE_PARAMS = new URLSearchParams(location.search);
+// ?base=... selects the staged bundle; ?detached=1 loads weights from the
+// tensor-cache sidecar (detach-params build) instead of the embedded wasm.
+const BASE = PAGE_PARAMS.get('base') || '/runtimes/tiny-tvmjs-webgpu/bt4-anneal-muon-best/v0/';
+const DETACHED = PAGE_PARAMS.get('detached') === '1';
 const BATCH = 16;
 const TOKENS_SHAPE = [BATCH, 64, 24];
 const ATTACK_SHAPE = [BATCH, 64, 28];
@@ -82,11 +86,25 @@ async function runTvm(inputs) {
     const setInput = vmMod.getFunction('set_input');
     const invokeStateful = vmMod.getFunction('invoke_stateful');
     const getOutput = vmMod.getFunction('get_output');
+    let detachedParams = [];
+    let tensorCacheMs = 0;
+    if (DETACHED) {
+      const c0 = performance.now();
+      await tvm.fetchTensorCache(`${location.origin}${BASE}tensor-cache/`, tvm.webgpu());
+      for (let i = 0; ; i++) {
+        const tensor = tvm.tensorCacheGet(`param_${i}`);
+        if (!tensor) break;
+        detachedParams.push(tensor);
+      }
+      tensorCacheMs = performance.now() - c0;
+      if (!detachedParams.length) throw new Error('detached=1 but no param_N tensors in tensor-cache');
+      log('tensor cache loaded', { params: detachedParams.length, tensorCacheMs });
+    }
     const tokensTensor = tvm.empty(TOKENS_SHAPE, 'int32', tvm.webgpu());
     tokensTensor.copyFromRawBytes(new Uint8Array(inputs.tokens.buffer));
     const attackTensor = tvm.empty(ATTACK_SHAPE, 'float32', tvm.webgpu());
     attackTensor.copyFromRawBytes(new Uint8Array(inputs.attack.buffer));
-    setInput('main', tokensTensor, attackTensor);
+    setInput('main', tokensTensor, attackTensor, ...detachedParams);
     const i0 = performance.now();
     invokeStateful('main');
     const out = {};
@@ -98,7 +116,7 @@ async function runTvm(inputs) {
       out[OUTPUTS[i].name] = { shape: tensor.shape, dtype: tensor.dtype, data: new Float32Array(cpu.toRawBytes().buffer.slice(0)) };
     }
     const invokeAndReadMs = performance.now() - i0;
-    return { outputs: out, pipelineMs, invokeAndReadMs };
+    return { outputs: out, pipelineMs, invokeAndReadMs, ...(DETACHED ? { detached: true, tensorCacheMs } : {}) };
   } finally {
     tvm.endScope();
   }
