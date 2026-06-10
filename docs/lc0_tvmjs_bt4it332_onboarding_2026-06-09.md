@@ -161,9 +161,11 @@ Staged as `f16/v4-int8` (`--params=detached-quant-int8`); the smoke page
 fetches, dequantizes on CPU (`Float16Array` fast path), and uploads f16 —
 **GPU compute unchanged**, only storage/transfer shrinks.
 
-- **Size: 370 → 186 MB raw (0.503)**; load path is also *faster* end-to-end
-  than f16 (fetch 360 ms + dequant+upload 458 ms ≈ 0.8 s vs 1.45 s) because
-  half the bytes move.
+- **Size: 370 → 186 MB raw (0.503)**; staged bundle compressed:
+  **155.6 MB Brotli vs 322.8 MB for the f16 bundle (−52%)**
+  (`bt4it332_tvmjs_bundle_footprint_v4_int8.json`). Load path is also
+  *faster* end-to-end than f16 (fetch 360 ms + dequant+upload 458 ms ≈ 0.8 s
+  vs 1.45 s) because half the bytes move.
 - Quantization error: median tensor relRMS 0.85%, worst 3.8% (the [256,8192]
   smolgen family); max abs weight err 0.055.
 - Drift vs f16 build: max native top-prior diff `0.0088 → 0.0172`; vs
@@ -187,16 +189,39 @@ near-tie reshuffling. Worth carrying forward as the default BT4 distribution
 format candidate, pending a game-level A/B (int8 vs f16 self-play) before any
 promotion decision.
 
+### Quantized kernels (goal 2) — speed thesis falsified by existing data
+
+The case for q4f16-style in-kernel dequant rests on matmuls being
+weight-bandwidth-bound. They are not, on this device: per-invoke GPU cost is
+**linear in batch** (b4 `40.8 ms` → b8 `84.9 ms`) while weight reads are
+constant per invoke (370 MB regardless of batch). If weight bandwidth
+dominated, doubling the batch would amortize it and cost far less than 2× —
+it costs exactly 2×. Time scales with activations/compute, i.e. the kernels
+are schedule-bound (consistent with the roofline gap finding), so int8/q4
+weights cannot meaningfully speed up invokes here. A naive in-graph dequant
+(astype×scale materialized per invoke) would *add* a ~370 MB round-trip and
+likely regress.
+
+What goal 2 still buys if implemented properly (dequant fused into matmul
+prologue, MLC-style decode TIR): **GPU weight residency 370 → 186 MB (or ~93
+at q4)** — relevant for low-memory devices and multi-model pages, not speed
+on this hardware. Cost: a relax rewrite changing `main`'s signature to
+(int8 weights + scales) on the ONNX import path, plus verifying dlight fuses
+the decode (TVM-side risk the Tiny lane showed is real). Parked as
+low-ROI-on-this-device with a written revisit trigger: pursue if (a) a
+weight-bandwidth-bound device shows up in coverage (check batch-linearity
+there first — it's a one-run test), or (b) GPU memory pressure becomes a
+product constraint.
+
 ### Remaining levers for BT4 perf
 
-Batching, pipelining, and single-config schedule tuning are all measured
-dead; tree reuse is measured (~halves in-game move cost) and already on in
-the arena paths (ensure any future TVMJS game integration passes
-`reuseTree: true`). What's left: true quantized kernels (q4f16-style — goal 2,
-attacks compute/bandwidth; requires relax-level weight transform on the ONNX
-import path, real TVM risk), per-function dlight config dispatch /
-metaschedule (bounded, unproven), and accepting ~137 ms/move in-game at v16
-as the BT4 operating point.
+Batching, pipelining, single-config schedule tuning, and quantized-kernel
+speedups are all measured dead on this device; tree reuse is measured
+(~halves in-game move cost) and already on in the arena paths (ensure any
+future TVMJS game integration passes `reuseTree: true`). What's left:
+per-function dlight config dispatch / metaschedule (bounded, unproven), and
+accepting ~137 ms/move in-game at v16 (int8-params build ≈ same) as the BT4
+operating point.
 
 ## Known gaps / cautions
 
