@@ -29,10 +29,10 @@ import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
-import { BT4_APPROX_MB, BT4_MODEL_NAME, BT4_MODEL_URL, BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH, BT4_RECOMMENDED_SEARCH_BATCH_SIZE, Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
+import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetLoadWarning, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig, type Bt4SearchResult } from './bt4Engine.ts';
 import { TournamentStandings, buildSchedule, tournamentPairings, type ScheduledGame, type TournamentMode } from './tournament.ts';
 import { hBarChartSvg, lineChartSvg, type ChartSeries } from './charts.ts';
-import { defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -177,6 +177,12 @@ const tinyEvaluatorPromises = new Map<string, Promise<Evaluator>>();
 let tinyHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 // Lc0 BT4 runs in its own worker (lazy, WebGPU-gated, disposable). See bt4Engine.ts.
 const bt4 = new Bt4WorkerSearcher();
+const t3BigNet = new Bt4WorkerSearcher(T3_NET);
+const bigNetSearchers: Record<'bt4' | 't3', Bt4WorkerSearcher> = { bt4, t3: t3BigNet };
+function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4WorkerSearcher } {
+  const key = variant === 't3' ? 't3' : 'bt4';
+  return { config: BIG_NETS[key], searcher: bigNetSearchers[key] };
+}
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
 let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
 
@@ -327,13 +333,14 @@ function lc0WholeModelRuntimeRequested(): boolean {
     || params.get('enableTvm' + 'js') === '1';
 }
 
-function installExperimentalLc0RuntimeOption(force = false): void {
-  if (!force && !lc0WholeModelRuntimeRequested()) return;
+function installExperimentalLc0RuntimeOption(_force = false): void {
+  // Promoted 2026-06-10 (release-owner decision): the whole-model WebGPU
+  // runtime is always listed. ORT remains the default and the fallback.
   const select = selectEl('lc0RuntimeSelect');
   if ([...select.options].some((option) => option.value === LC0_WHOLE_MODEL_WEBGPU_RUNTIME)) return;
   const option = document.createElement('option');
   option.value = LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
-  option.textContent = 'TVM whole-model WebGPU (research, opt-in)';
+  option.textContent = 'TVM whole-model WebGPU (fast, small net)';
   select.appendChild(option);
 }
 
@@ -815,8 +822,26 @@ function defaultVariant(family: EngineFamily): string {
   return defaultStaticEngineVariant(family);
 }
 
+function bigNetSelectableSync(config: BigNetConfig): boolean {
+  return bt4SupportedSync() && bigNetAssetStatusSync(config) === 'present';
+}
+
+function bigNetUnavailableText(config: BigNetConfig): string {
+  if (!bt4SupportedSync()) return `Lc0 ${config.name} needs WebGPU support.`;
+  if (bigNetAssetStatusSync(config) === 'missing') return `Lc0 ${config.name} model asset is missing at ${config.modelUrl}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
+  if (bigNetAssetStatusSync(config) === 'unknown') return `Lc0 ${config.name} model asset is still being checked.`;
+  return '';
+}
+
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
-  if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync());
+  if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync()).map((option) => {
+    if (!isLc0BigNetVariant(option.value)) return option;
+    const config = BIG_NETS[option.value];
+    const asset = bigNetAssetStatusSync(config);
+    if (bt4SupportedSync() && asset === 'unknown') void checkBigNetAsset(config, () => { renderSeatSelectors(); refreshSeatControls(); });
+    const suffix = !bt4SupportedSync() ? ' (WebGPU unavailable)' : asset === 'missing' ? ' (asset missing)' : asset === 'unknown' ? ' (checking asset)' : '';
+    return { ...option, label: `${option.label}${suffix}`, disabled: option.disabled || asset !== 'present' };
+  });
   if (family === 'tiny') return tinyVariantOptions().map((option) => option.value === 'bt4-custom' && tinyHybridManifestStatus === 'missing'
     ? { ...option, label: `${option.label} (bundle missing)`, disabled: true }
     : option);
@@ -1043,11 +1068,14 @@ function engineRuntimeDiagnosticsText(): string {
   const parts = ids.map((id) => {
     const row = rowForEngineId(id);
     const name = engines.get(id)?.name ?? id;
-    if (row?.family === 'lc0' && row.variant !== 'bt4') {
+    if (row?.family === 'lc0' && !isLc0BigNetVariant(row.variant)) {
       const hybrid = lc0HybridConfigLabel();
       return `${name}: ${budgetText(row)} · ${lc0RuntimeLabel()}${hybrid ? ` · ${hybrid}` : ''} · batch ${lc0BatchSize()} · pipeline depth ${lc0BatchPipelineDepth()} · ${cacheMetricsText(lc0Cache?.metrics())}`;
     }
-    if (row?.family === 'lc0' && row.variant === 'bt4') return `${name}: ${budgetText(row)} · ${bt4.loaded ? `loaded ${bt4.backend || 'WebGPU'}` : 'lazy WebGPU worker'} · ${BT4_MODEL_NAME} · batch ${BT4_RECOMMENDED_SEARCH_BATCH_SIZE} · pipeline depth ${BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH} · eval cache ${arenaCacheEntries()} · ~${BT4_APPROX_MB}MB net · ${BT4_MODEL_URL}`;
+    if (row?.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
+      const { config, searcher } = bigNetFor(row.variant);
+      return `${name}: ${budgetText(row)} · ${searcher.loaded ? `loaded ${searcher.backend || 'WebGPU'}` : 'lazy WebGPU worker'} · ${config.name} · batch ${config.recommendedBatchSize} · pipeline depth ${config.recommendedPipelineDepth} · eval cache ${arenaCacheEntries()} · ~${config.approxMb}MB net · ${config.modelUrl}`;
+    }
     if (row?.family === 'tiny') return `${name}: ${budgetText(row)} · SquareFormer ${tinyRuntimeForVariant(row.variant)} · ${tinyHybridManifestStatusText()}`;
     if (row?.family === 'sf') {
       const kind = row.variant === 'full' ? 'full' : 'lite';
@@ -1132,8 +1160,8 @@ function uciTelemetrySummary(t: UciEngineTelemetry): string {
   return `${t.engineName}: searches ${t.searches} · avg ${averageMs(t.totalElapsedMs, t.searches)} · last ${formatMs(t.lastElapsedMs)} · total nodes ${formatCount(t.totalNodes)} · ${last}${t.lastMultiPv && t.lastMultiPv > 1 ? ` · MultiPV ${t.lastMultiPv}` : ''}`;
 }
 
-function bt4TelemetrySummary(t: Bt4Telemetry): string {
-  return `${t.engineName}: searches ${t.searches} · avg ${averageMs(t.totalElapsedMs, t.searches)} · visits ${t.completedVisits} · evals ${t.evalCalls} · cache hits ${t.cacheHits} · last ${formatMs(t.lastElapsedMs)} · ${bt4.loaded ? `backend ${bt4.backend || 'WebGPU'}` : 'worker not loaded'}`;
+function bt4TelemetrySummary(t: Bt4Telemetry, searcher: Bt4WorkerSearcher): string {
+  return `${t.engineName}: searches ${t.searches} · avg ${averageMs(t.totalElapsedMs, t.searches)} · visits ${t.completedVisits} · evals ${t.evalCalls} · cache hits ${t.cacheHits} · last ${formatMs(t.lastElapsedMs)} · ${searcher.loaded ? `backend ${searcher.backend || 'WebGPU'}` : 'worker not loaded'}`;
 }
 
 function engineSearchDiagnosticsText(): string {
@@ -1142,13 +1170,14 @@ function engineSearchDiagnosticsText(): string {
   const parts = ids.map((id) => {
     const row = rowForEngineId(id);
     const name = engines.get(id)?.name ?? id;
-    if (row?.family === 'lc0' && row.variant !== 'bt4') {
+    if (row?.family === 'lc0' && !isLc0BigNetVariant(row.variant)) {
       const t = lc0TreeTelemetry.get(id);
       return t && (t.searches || t.replyChecks) ? lc0TreeTelemetrySummary(t) : `${name}: tree waiting for searches · ${cacheMetricsText(lc0Cache?.metrics())}`;
     }
-    if (row?.family === 'lc0' && row.variant === 'bt4') {
+    if (row?.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
       const t = bt4Telemetry.get(id);
-      return t?.searches ? bt4TelemetrySummary(t) : `${name}: BT4 search waiting${bt4.loaded ? ` · backend ${bt4.backend || 'WebGPU'}` : ''}`;
+      const { config, searcher } = bigNetFor(row.variant);
+      return t?.searches ? bt4TelemetrySummary(t, searcher) : `${name}: ${config.name} search waiting${searcher.loaded ? ` · backend ${searcher.backend || 'WebGPU'}` : ''}`;
     }
     if (row?.family === 'tiny') return engineOutputs.has(id) ? `${name}: Tiny SquareFormer search output ready` : `${name}: Tiny SquareFormer search waiting`;
     const uci = uciTelemetry.get(id);
@@ -1672,16 +1701,19 @@ function refreshStockfishControls(): void {
   inputEl('stockfishThreadsInput').title = `0 = auto (broker grants ${resourceBroker.cpuBudget()} on this device, ${resourceBroker.getDial()} dial)`;
 }
 
-// Lc0 BT4 is WebGPU-only; disable/downgrade its staged option when WebGPU is unusable.
+// Lc0 big nets are WebGPU-only and locally staged; disable/downgrade them
+// when WebGPU is unusable or their ONNX asset is missing.
 async function refreshBt4Availability(): Promise<void> {
-  const ok = await probeBt4Support();
-  if (!ok) {
-    for (const row of activeSeatRows()) if (row.family === 'lc0' && row.variant === 'bt4') row.variant = 'small';
-    buildEngines();
-    populateSeats();
-  } else {
-    renderSeatSelectors();
+  await Promise.all([
+    probeBt4Support(),
+    checkBigNetAsset(BIG_NETS.bt4, renderSeatSelectors),
+    checkBigNetAsset(BIG_NETS.t3, renderSeatSelectors),
+  ]);
+  for (const row of activeSeatRows()) {
+    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectableSync(bigNetFor(row.variant).config)) row.variant = 'small';
   }
+  buildEngines();
+  renderSeatSelectors();
   refreshSeatControls();
 }
 
@@ -1708,7 +1740,7 @@ async function renderRuntimeBadge(): Promise<void> {
 }
 
 function selectedSeatsNeedLc0Evaluator(): boolean {
-  return activeSeatRows().some((row) => row.family === 'lc0' && row.variant !== 'bt4');
+  return activeSeatRows().some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
 }
 
 function lc0SearcherFor(engineId: string): Lc0PuctSearcher {
@@ -1778,21 +1810,22 @@ function buildEngines() {
     recordLc0SearchOutput(engineId, engineName, result);
     return result.move ?? null;
   };
-  const lc0Bt4Move = (engineId: string, row: EngineRow): ArenaEngine['move'] => async (positions, signal) => {
-    const onAbort = () => bt4.cancel();
+  const lc0BigNetMove = (engineId: string, row: EngineRow): ArenaEngine['move'] => async (positions, signal) => {
+    const { config, searcher } = bigNetFor(row.variant);
+    const onAbort = () => searcher.cancel();
     signal.addEventListener('abort', onAbort, { once: true });
     try {
       const timed = arenaBudgetMode() === 'movetime';
-      const result = await bt4.search({ positions }, {
+      const result = await searcher.search({ positions }, {
         visits: timed ? undefined : row.strength,
         movetimeMs: timed ? arenaMovetimeMs() : undefined,
         reuseTree: true,
-        batchSize: BT4_RECOMMENDED_SEARCH_BATCH_SIZE,
-        batchPipelineDepth: BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH,
+        batchSize: config.recommendedBatchSize,
+        batchPipelineDepth: config.recommendedPipelineDepth,
         evalCacheEntries: arenaCacheEntries(),
       });
       if (result.cancelled) return null;
-      recordBt4SearchOutput(engineId, engines.get(engineId)?.name ?? `Lc0 ${BT4_MODEL_NAME}`, result);
+      recordBt4SearchOutput(engineId, engines.get(engineId)?.name ?? `Lc0 ${config.name}`, result);
       return result.move ?? null;
     } finally {
       signal.removeEventListener('abort', onAbort);
@@ -1881,12 +1914,13 @@ function buildEngines() {
     search.resetTree();
     renderCacheInfo();
   };
-  const lc0Bt4Warmup = async (signal: AbortSignal) => {
-    const onAbort = () => bt4.cancel();
+  const lc0BigNetWarmup = (variant: string) => async (signal: AbortSignal) => {
+    const { config, searcher } = bigNetFor(variant);
+    const onAbort = () => searcher.cancel();
     signal.addEventListener('abort', onAbort, { once: true });
     try {
-      await bt4.search({ positions: warmupPositions }, { visits: 1, batchSize: BT4_RECOMMENDED_SEARCH_BATCH_SIZE, batchPipelineDepth: BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH, evalCacheEntries: arenaCacheEntries() });
-      await bt4.resetTree();
+      await searcher.search({ positions: warmupPositions }, { visits: 1, batchSize: config.recommendedBatchSize, batchPipelineDepth: config.recommendedPipelineDepth, evalCacheEntries: arenaCacheEntries() });
+      await searcher.resetTree();
     } finally {
       signal.removeEventListener('abort', onAbort);
     }
@@ -1933,7 +1967,7 @@ function buildEngines() {
     const id = engineIdForRow(row);
     if (engines.has(id)) continue;
     if (row.family === 'lc0') {
-      if (row.variant === 'bt4') engines.set(id, { id, name: `${rowLabel(row)} v${row.strength}`, move: lc0Bt4Move(id, row), warmup: lc0Bt4Warmup });
+      if (isLc0BigNetVariant(row.variant)) engines.set(id, { id, name: `${rowLabel(row)} v${row.strength}`, move: lc0BigNetMove(id, row), warmup: lc0BigNetWarmup(row.variant) });
       else engines.set(id, { id, name: `${rowLabel(row)} v${row.strength}`, move: lc0Search(id, row), warmup: lc0SearchWarmup(id) });
     } else if (row.family === 'tiny') {
       engines.set(id, { id, name: `${rowLabel(row)} v${row.strength}`, move: tinyMove(id, row), warmup: tinyWarmup(row) });
@@ -2259,11 +2293,25 @@ async function startMatch() {
     return;
   }
   const byPid = new Map(participants.map((participant) => [participant.pid, participant]));
-  const usesBt4 = activeSeatRows().some((row) => row.family === 'lc0' && row.variant === 'bt4');
-  if (usesBt4 && !(await probeBt4Support())) {
-    el('message').textContent = `Lc0 ${BT4_MODEL_NAME} needs WebGPU, which is unavailable in this browser.`;
+  const bigNetRows = activeSeatRows().filter((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant));
+  if (bigNetRows.length && !(await probeBt4Support())) {
+    el('message').textContent = 'Lc0 big nets need WebGPU, which is unavailable in this browser.';
     clearStartPending();
     return;
+  }
+  const checkedBigNetVariants = new Set<string>();
+  for (const row of bigNetRows) {
+    if (!isLc0BigNetVariant(row.variant) || checkedBigNetVariants.has(row.variant)) continue;
+    checkedBigNetVariants.add(row.variant);
+    const { config } = bigNetFor(row.variant);
+    const status = await checkBigNetAsset(config, renderSeatSelectors);
+    if (status !== 'present') {
+      el('message').textContent = bigNetUnavailableText(config);
+      renderSeatSelectors();
+      refreshSeatControls();
+      clearStartPending();
+      return;
+    }
   }
   const engineA = participants[0].engine!;
   const engineB = participants[1].engine!;
@@ -2325,7 +2373,7 @@ async function startMatch() {
       // Reset trees per game (fresh game tree); within a game the shared tree is
       // reused across both sides' plies — i.e. self-play when both seats match.
       resetLc0SearchTrees(seatIds);
-      if (usesBt4 && bt4.loaded) await bt4.resetTree();
+      for (const searcher of Object.values(bigNetSearchers)) if (searcher.loaded) await searcher.resetTree();
       for (const engine of viridithasByVariant.values()) await engine.newGame(abort.signal);
       for (const engine of berserkByVariant.values()) await engine.newGame(abort.signal);
       for (const engine of plentyChessByVariant.values()) await engine.newGame(abort.signal);
@@ -2413,7 +2461,7 @@ function disposeRuntimeResources(): void {
   berserkByVariant.clear();
   for (const engine of plentyChessByVariant.values()) engine.dispose();
   plentyChessByVariant.clear();
-  bt4.dispose();
+  for (const searcher of Object.values(bigNetSearchers)) searcher.dispose();
 }
 
 async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHybridEvaluator | Lc0WholeOnnxWebgpuEvaluator> {
@@ -2470,7 +2518,7 @@ async function loadLc0Evaluator(): Promise<void> {
       resolvedRuntime: lc0ResolvedRuntime(runtime),
       runtimeConfigId: runtime === 'onnx' ? undefined : runtime,
       manifestUrl: runtime === 'onnx' ? undefined : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : PACK_URL,
-      searchBudget: activeSeatRows().filter((row) => row.family === 'lc0' && row.variant !== 'bt4').map((row) => budgetText(row)).join(', '),
+      searchBudget: activeSeatRows().filter((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant)).map((row) => budgetText(row)).join(', '),
       notes: [lc0RuntimeLabel(runtime), hybrid, runtime === 'onnx' ? undefined : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? 'whole-model runtime is research-only and opt-in' : 'hybrid runtime is pack-lazy until first evaluation succeeds'].filter((part): part is string => !!part),
     });
     lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
@@ -2747,13 +2795,13 @@ function wireEvents() {
       row.variant = defaultVariant(row.family);
       row.strength = strengthMeta(row.family).def;
     } else if (target.classList.contains('seat-var')) {
-      if (row.family === 'lc0' && target.value === 'bt4' && !window.confirm(`${bt4LoadWarning()}\n\nUse Lc0 BT4?`)) { target.value = row.variant; return; }
+      if (row.family === 'lc0' && isLc0BigNetVariant(target.value) && !window.confirm(`${bigNetLoadWarning(BIG_NETS[target.value])}\n\nUse Lc0 ${BIG_NETS[target.value].name}?`)) { target.value = row.variant; return; }
       row.variant = target.value;
     } else if (target.classList.contains('seat-strength')) {
       row.strength = Number(target.value);
       clampStrength(row);
     }
-    if (!activeSeatRows().some((r) => r.family === 'lc0' && r.variant === 'bt4')) bt4.dispose();
+    for (const key of ['bt4', 't3'] as const) if (!activeSeatRows().some((r) => r.family === 'lc0' && r.variant === key)) bigNetSearchers[key].dispose();
     buildEngines();
     populateSeats();
     if (selectedSeatsNeedLc0Evaluator() && !lc0Cache && !loadingLc0) void loadLc0Evaluator();

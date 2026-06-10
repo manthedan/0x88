@@ -116,8 +116,14 @@ export function engineResourceProfile(family: EngineFamily): EngineFamilyResourc
 
 export const LC0_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
   { value: 'small', label: 'Small' },
+  { value: 't3', label: 't3-512 distill' },
   { value: 'bt4', label: 'BT4-it332', experimental: true },
 ];
+
+/** Lc0 variants backed by the lazy WebGPU big-net worker (bt4Engine.ts). */
+export function isLc0BigNetVariant(variant: string): variant is 'bt4' | 't3' {
+  return variant === 'bt4' || variant === 't3';
+}
 
 export const TINY_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
   { value: 'bt4-auto', label: 'BT4 Anneal Muon Best · runtime auto' },
@@ -164,7 +170,8 @@ export function defaultEngineStrength(family: EngineFamily, surface: EngineSurfa
 }
 
 export function lc0VariantOptions(bt4Supported: boolean): EngineVariantOption[] {
-  return LC0_ENGINE_VARIANTS.map((option) => ({ ...option, disabled: option.value === 'bt4' ? !bt4Supported : option.disabled }));
+  // Both big-net variants need the same WebGPU support probe.
+  return LC0_ENGINE_VARIANTS.map((option) => ({ ...option, disabled: isLc0BigNetVariant(option.value) ? !bt4Supported : option.disabled }));
 }
 
 export function tinyVariantOptions(): EngineVariantOption[] {
@@ -183,7 +190,9 @@ export function defaultStaticEngineVariant(family: 'lc0' | 'tiny' | 'sf' | 'bers
 }
 
 export function lc0EngineLabel(variant: string): string {
-  return variant === 'bt4' ? 'Lc0 BT4-it332' : 'Lc0';
+  if (variant === 'bt4') return 'Lc0 BT4-it332';
+  if (variant === 't3') return 'Lc0 t3-512';
+  return 'Lc0';
 }
 
 export function stockfishEngineLabel(variant: string, surface: EngineSurface): string {
