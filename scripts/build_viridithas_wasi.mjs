@@ -38,7 +38,11 @@ fs.copyFileSync(netPath, path.join(engineDir, 'viridithas.nnue.zst'));
 
 run('git', ['apply', patchPath], { cwd: engineDir });
 run('rustup', ['target', 'add', 'wasm32-wasip1']);
-const targetFeatures = ['+bulk-memory', ...(process.env.VIRIDITHAS_WASM_SIMD === '1' ? ['+simd128'] : [])].join(',');
+const targetFeatures = [
+  '+bulk-memory',
+  ...(process.env.VIRIDITHAS_WASM_SIMD === '1' ? ['+simd128'] : []),
+  ...(process.env.VIRIDITHAS_WASM_RELAXED_SIMD === '1' ? ['+simd128', '+relaxed-simd'] : []),
+].join(',');
 run('cargo', ['build', '--release', '--target', 'wasm32-wasip1', '--no-default-features'], {
   cwd: engineDir,
   env: { ...process.env, RUSTFLAGS: `${process.env.RUSTFLAGS ?? ''} -C target-feature=${targetFeatures}`.trim() },

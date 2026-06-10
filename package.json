@@ -102,8 +102,11 @@
     "reckless:build-lite-wasi": "RECKLESS_BUILD_DIR=.local_engines/reckless-lite-wasi-src RECKLESS_EVALFILE=.local_engines/reckless-nets/v53-0ba42a8c.nnue RECKLESS_L1_SIZE=512 RECKLESS_WASM_OUT=public/reckless/reckless-v53-l1-512.wasm node scripts/build_reckless_wasi.mjs",
     "viridithas:build-wasi": "node scripts/build_viridithas_wasi.mjs",
     "viridithas:build-simd-wasi": "VIRIDITHAS_WASM_SIMD=1 VIRIDITHAS_WASM_OUT=public/viridithas/viridithas-simd128.wasm node scripts/build_viridithas_wasi.mjs",
+    "viridithas:build-relaxed-simd-wasi": "VIRIDITHAS_WASM_RELAXED_SIMD=1 VIRIDITHAS_WASM_OUT=public/viridithas/viridithas-relaxed-simd128.wasm node scripts/build_viridithas_wasi.mjs",
     "viridithas:smoke": "node scripts/viridithas_wasi_smoke.mjs --wasm public/viridithas/viridithas-simd128.wasm --depth 2 --repeat 2",
     "berserk:build-emscripten": "node scripts/build_berserk_emscripten.mjs",
+    "berserk:build-simd-emscripten": "BERSERK_WASM_SIMD=1 BERSERK_EMSCRIPTEN_JS_OUT=public/berserk/berserk-emscripten-simd128.js node scripts/build_berserk_emscripten.mjs",
+    "berserk:build-relaxed-simd-emscripten": "BERSERK_WASM_RELAXED_SIMD=1 BERSERK_EMSCRIPTEN_JS_OUT=public/berserk/berserk-emscripten-relaxed-simd128.js node scripts/build_berserk_emscripten.mjs",
     "berserk:smoke-emscripten": "node scripts/berserk_emscripten_smoke.mjs --js public/berserk/berserk-emscripten.js --depth 1",
     "lc0:battle": "node --experimental-strip-types scripts/lc0_engine_battle.mjs",
     "eval:search-arena-sharded": "node --experimental-strip-types eval/search_mode_arena_sharded.mjs"
