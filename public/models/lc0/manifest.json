@@ -57,6 +57,30 @@
       "source": "../models/lc0-bestnets/onnx/BT4-1024x15x32h-swa-6147500.batch1.f16.onnx",
       "bytes": 370635179,
       "sha256": "51ece3069ddd3e5c200a184f0dfca03d7b2a607398d704fec08d5d8a2f603da2"
+    },
+    {
+      "file": "BT4-1024x15x32h-swa-6147500-policytune-332.batch1.f16.onnx",
+      "url": "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch1.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/BT4-1024x15x32h-swa-6147500-policytune-332.batch1.f16.onnx",
+      "bytes": 370635164,
+      "sha256": "49910c82221dc8259279b7dc73eda9fe39d0f7c2a5c508ba495439d7e1659a98"
+    },
+    {
+      "file": "BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx",
+      "url": "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx",
+      "bytes": 370635164,
+      "sha256": "87df69e79dd0f8445e1c9d0ded3a84e72d5d1c31ac659c213d9bfe11696338b6"
+    },
+    {
+      "file": "BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.onnx",
+      "url": "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.onnx",
+      "bytes": 370635164,
+      "sha256": "480cbcb4863bdb63db962381a8dd736befbb172862508ca52bd72bcc2c990e02"
     }
   ],
   "packs": [

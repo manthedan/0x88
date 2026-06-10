@@ -31,6 +31,15 @@ const LC0_POLICY_TEMPERATURE = 1.359;
 const LC0_POLICY_SIZE = 1858;
 const LC0_INPUT_PLANES_SIZE = 112 * 8 * 8;
 const STAGED_TVMJS_RUNTIME_PREFIX = '/runtimes/lc0-tvmjs-webgpu/';
+const DEFAULT_ORT_MODEL_TEMPLATE = '/models/lc0/t1-256x10-distilled-swa-2432500.batch{batch}.{dtype}.onnx';
+const DEFAULT_FIXTURE_BASELINE = '/fixtures/lc0/native_fen_only_blas.jsonl';
+// Page params `ortModel` ({batch}/{dtype} template) and `fixtureBaseline`
+// retarget the ORT comparison model and native parity baseline per model family.
+function ortModelPath(batch, dtype) {
+  return (params.get('ortModel') || DEFAULT_ORT_MODEL_TEMPLATE)
+    .replaceAll('{batch}', String(batch))
+    .replaceAll('{dtype}', dtype);
+}
 const logEl = document.getElementById('log');
 function log(...args) {
   logEl.textContent += `${args.map((x) => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')}\n`;
@@ -309,7 +318,7 @@ function legalPolicyPriors(board, logits) {
   return legal.map((entry) => ({ ...entry, prior: Math.exp(entry.logit - max) / sum })).sort((a, b) => b.prior - a.prior);
 }
 async function loadNativeFixtureRows() {
-  const response = await fetch('/fixtures/lc0/native_fen_only_blas.jsonl');
+  const response = await fetch(params.get('fixtureBaseline') || DEFAULT_FIXTURE_BASELINE);
   if (!response.ok) return new Map();
   const text = await response.text();
   return new Map(text.trim().split('\n').filter(Boolean).map((line) => {
@@ -716,7 +725,7 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
   const fens = fixtureRows.slice(0, limit).map((row) => row.fen);
   const tvmProvider = createTvmEvaluationProvider(tvm, vmMod, batch);
   const tvmSearcher = new Lc0PuctSearcher(tvmProvider);
-  const ortEvaluator = await Lc0OnnxEvaluator.create(`/models/lc0/t1-256x10-distilled-swa-2432500.batch${batch}.f16.onnx`);
+  const ortEvaluator = await Lc0OnnxEvaluator.create(ortModelPath(batch, 'f16'));
   const ortSearcher = new Lc0PuctSearcher(ortEvaluator);
   try {
     const rows = [];
@@ -799,7 +808,7 @@ async function runOrtComparisons(batch, fixtureRows, tvmRows) {
         continue;
       }
       const modelBatch = dtype === 'f32' ? 1 : batch;
-      const modelPath = `/models/lc0/t1-256x10-distilled-swa-2432500.batch${modelBatch}.${dtype}.onnx`;
+      const modelPath = ortModelPath(modelBatch, dtype);
       const inputs = dtype === 'f32' ? fixtureRows.slice(0, 1).map((row) => row.fen) : fixtureRows.map((row) => row.fen);
       const compareRows = dtype === 'f32' ? tvmRows.slice(0, 1) : tvmRows;
       log('ort compare start', { dtype, ep, modelPath, inputs: inputs.length });

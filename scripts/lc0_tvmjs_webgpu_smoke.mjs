@@ -12,7 +12,7 @@ const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
 function usage() {
   console.log(`Usage: node scripts/lc0_tvmjs_webgpu_smoke.mjs [options]\n\nRuns the LC0 whole-model TVMJS/WebGPU browser smoke and saves JSON evidence.\n\nOptions:\n  --batch N           Batch artifact to test: 1, 4, or 8 (default 8)\n  --fixtures          Encode real fixtures and compare best moves (default true)\n  --no-fixtures       Run loader/zero-input invoke only\n  --fixture-offset N  First fixture index for real-fixture mode (default 0)\n  --fixture-count N   Number of fixtures/FEN rows to request (default batch)
   --tensor-cache      Fetch manifest tensor-cache sidecar before VM setup (research-only)
-  --fens PATH         Newline-separated FEN suite; implies --fixtures and bypasses fixtures/lc0/fen_only.json\n  --ort-compare MODE  Compare TVMJS outputs against ORT: none, f16, f32, both (default none)\n  --ort-ep EP         ORT execution provider for comparison: webgpu, wasm, webgpu,wasm (default webgpu)\n  --search-visits N   Also run TVMJS-vs-ORT search parity with fixed visits\n  --search-fixtures N Number of fixtures for search parity (default 2)\n  --search-repeats N  Repeat search parity rows for timing stability (default 1)\n  --search-pipeline-depth N  Evaluate this many TVMJS batches concurrently during search parity (default 1)\n  --stockfish-score-depth N  Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N     Score TVMJS/ORT post-search moves by Stockfish movetime\n  --base-url URL      Use existing server instead of starting Vite\n  --host HOST         Vite host (default ${DEFAULT_HOST})\n  --port N            Vite port (default ${DEFAULT_PORT})\n  --timeout MS        Overall timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --out PATH          JSON artifact path\n  --no-server         Do not auto-start Vite\n  -h, --help          Show help\n`);
+  --fens PATH         Newline-separated FEN suite; implies --fixtures and bypasses fixtures/lc0/fen_only.json\n  --ort-compare MODE  Compare TVMJS outputs against ORT: none, f16, f32, both (default none)\n  --ort-ep EP         ORT execution provider for comparison: webgpu, wasm, webgpu,wasm (default webgpu)\n  --ort-model TPL     ORT comparison model path template with {batch}/{dtype} placeholders (default t1 family)\n  --fixture-baseline PATH  Native fixture baseline JSONL served path (default /fixtures/lc0/native_fen_only_blas.jsonl)\n  --tie-epsilon X     Tolerate best-move mismatches whose competing priors are within X (recorded as tieTolerated; default strict)\n  --search-visits N   Also run TVMJS-vs-ORT search parity with fixed visits\n  --search-fixtures N Number of fixtures for search parity (default 2)\n  --search-repeats N  Repeat search parity rows for timing stability (default 1)\n  --search-pipeline-depth N  Evaluate this many TVMJS batches concurrently during search parity (default 1)\n  --stockfish-score-depth N  Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N     Score TVMJS/ORT post-search moves by Stockfish movetime\n  --base-url URL      Use existing server instead of starting Vite\n  --host HOST         Vite host (default ${DEFAULT_HOST})\n  --port N            Vite port (default ${DEFAULT_PORT})\n  --timeout MS        Overall timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --out PATH          JSON artifact path\n  --no-server         Do not auto-start Vite\n  -h, --help          Show help\n`);
 }
 
 function parseArgs(argv) {
@@ -30,6 +30,9 @@ function parseArgs(argv) {
     else if (arg === '--fens') { args.fensFile = next(); args.fixtures = true; }
     else if (arg === '--ort-compare') args.ortCompare = next();
     else if (arg === '--ort-ep') args.ortEp = next();
+    else if (arg === '--ort-model') args.ortModel = next();
+    else if (arg === '--fixture-baseline') args.fixtureBaseline = next();
+    else if (arg === '--tie-epsilon') args.tieEpsilon = Number(next());
     else if (arg === '--search-visits') args.searchVisits = Number(next());
     else if (arg === '--search-fixtures') args.searchFixtures = Number(next());
     else if (arg === '--search-repeats') args.searchRepeats = Number(next());
@@ -192,6 +195,8 @@ async function main() {
     if (args.tensorCache) url.searchParams.set('tensorCache', '1');
     if (args.ortCompare !== 'none') url.searchParams.set('ortCompare', args.ortCompare);
     if (args.ortEp) url.searchParams.set('ortEp', args.ortEp);
+    if (args.ortModel) url.searchParams.set('ortModel', args.ortModel);
+    if (args.fixtureBaseline) url.searchParams.set('fixtureBaseline', args.fixtureBaseline);
     if (args.searchVisits > 0) {
       url.searchParams.set('searchVisits', String(Math.floor(args.searchVisits)));
       url.searchParams.set('searchFixtureCount', String(Math.floor(args.searchFixtures)));
@@ -217,6 +222,8 @@ async function main() {
         tensorCache: args.tensorCache,
         ortCompare: args.ortCompare,
         ortEp: args.ortEp,
+        ortModel: args.ortModel,
+        fixtureBaseline: args.fixtureBaseline,
         fensFile: args.fensFile || undefined,
         searchVisits: args.searchVisits,
         searchFixtures: args.searchFixtures,
@@ -228,22 +235,63 @@ async function main() {
         result: status.result,
         logTail: String(status.log ?? '').split('\n').slice(-20),
       };
+      // --tie-epsilon: best-move mismatches whose competing priors sit within
+      // epsilon are recorded as tie-tolerated instead of failing the gate.
+      // Raw match counts stay untouched in the artifact; default (no flag) is
+      // the original strict behavior. This is the research-side expression of
+      // the f16 drift/tolerance policy the runbook lists as a promotion blocker.
+      const tieEps = args.tieEpsilon;
+      const priorOf = (list, uci) => (list ?? []).find((entry) => entry.uci === uci)?.prior;
+      artifact.tieEpsilon = tieEps;
+      artifact.tieTolerated = { native: [], ort: {}, search: [] };
       if (args.fixtures && artifact.result.nativeComparable > 0 && artifact.result.bestMoveMatches !== artifact.result.nativeComparable) {
-        artifact.ok = false;
-        artifact.error = `native best-move parity failed: ${artifact.result.bestMoveMatches}/${artifact.result.nativeComparable}`;
+        let tolerated = 0;
+        for (const row of artifact.result.results ?? []) {
+          if (!row.nativeBestMove || row.bestMove === row.nativeBestMove) continue;
+          const gap = (priorOf(row.topPriors, row.bestMove) ?? NaN) - (priorOf(row.topPriors, row.nativeBestMove) ?? NaN);
+          if (tieEps !== undefined && Number.isFinite(gap) && gap >= 0 && gap <= tieEps) {
+            tolerated++;
+            artifact.tieTolerated.native.push({ id: row.id, tvm: row.bestMove, native: row.nativeBestMove, priorGap: gap });
+          }
+        }
+        if (artifact.result.bestMoveMatches + tolerated !== artifact.result.nativeComparable) {
+          artifact.ok = false;
+          artifact.error = `native best-move parity failed: ${artifact.result.bestMoveMatches}/${artifact.result.nativeComparable}`;
+        }
       }
       for (const [dtype, comparison] of Object.entries(artifact.result.ortComparisons ?? {})) {
         if (comparison?.skipped) continue;
         if (comparison?.comparable > 0 && comparison.bestMoveMatches !== comparison.comparable) {
-          artifact.ok = false;
-          artifact.error = `${dtype} ORT best-move parity failed: ${comparison.bestMoveMatches}/${comparison.comparable}`;
+          const toleratedRows = (comparison.rows ?? []).filter((row) => row.tvmBestMove && row.ortBestMove
+            && row.tvmBestMove !== row.ortBestMove
+            && tieEps !== undefined && Number.isFinite(row.maxTopPriorAbsDiff) && row.maxTopPriorAbsDiff <= tieEps);
+          if (toleratedRows.length) artifact.tieTolerated.ort[dtype] = toleratedRows.map((row) => ({ id: row.id, tvm: row.tvmBestMove, ort: row.ortBestMove, maxTopPriorAbsDiff: row.maxTopPriorAbsDiff }));
+          if (comparison.bestMoveMatches + toleratedRows.length !== comparison.comparable) {
+            artifact.ok = false;
+            artifact.error = `${dtype} ORT best-move parity failed: ${comparison.bestMoveMatches}/${comparison.comparable}`;
+          }
         }
       }
       const search = artifact.result.searchParity;
       const searchComparable = search?.searchRows ?? search?.fixtureCount;
       if (searchComparable > 0 && search.moveMatches !== searchComparable) {
-        artifact.ok = false;
-        artifact.error = `search parity failed: ${search.moveMatches}/${searchComparable}`;
+        let tolerated = 0;
+        for (const row of search.rows ?? []) {
+          if (!row.tvmMove || !row.ortMove || row.tvmMove === row.ortMove) continue;
+          const gap = Math.abs((priorOf(row.tvmTop, row.tvmMove) ?? NaN) - (priorOf(row.tvmTop, row.ortMove) ?? NaN));
+          // Search picks by visit count; equal visits for both moves in the
+          // TVM row's own stats means the flip is pure tie-breaking.
+          const visitsOf = (uci) => (row.tvmTop ?? []).find((entry) => entry.uci === uci)?.visits;
+          const visitTie = visitsOf(row.tvmMove) !== undefined && visitsOf(row.tvmMove) === visitsOf(row.ortMove);
+          if (tieEps !== undefined && (visitTie || (Number.isFinite(gap) && gap <= tieEps))) {
+            tolerated++;
+            artifact.tieTolerated.search.push({ fen: row.fen, tvm: row.tvmMove, ort: row.ortMove, priorGap: Number.isFinite(gap) ? gap : undefined, visitTie });
+          }
+        }
+        if (search.moveMatches + tolerated !== searchComparable) {
+          artifact.ok = false;
+          artifact.error = `search parity failed: ${search.moveMatches}/${searchComparable}`;
+        }
       }
       if (args.out) {
         await mkdir(dirname(args.out), { recursive: true });
