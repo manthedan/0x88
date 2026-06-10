@@ -94,7 +94,7 @@ export const ENGINE_FAMILY_CATALOG: Record<EngineFamily, EngineFamilyCatalogEntr
 
 export const LC0_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
   { value: 'small', label: 'Small' },
-  { value: 'bt4', label: 'BT4', experimental: true },
+  { value: 'bt4', label: 'BT4-it332', experimental: true },
 ];
 
 export const TINY_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
@@ -161,7 +161,7 @@ export function defaultStaticEngineVariant(family: 'lc0' | 'tiny' | 'sf' | 'bers
 }
 
 export function lc0EngineLabel(variant: string): string {
-  return variant === 'bt4' ? 'Lc0 BT4' : 'Lc0';
+  return variant === 'bt4' ? 'Lc0 BT4-it332' : 'Lc0';
 }
 
 export function stockfishEngineLabel(variant: string, surface: EngineSurface): string {

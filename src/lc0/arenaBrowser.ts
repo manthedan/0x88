@@ -29,7 +29,7 @@ import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, normalizeBerserkVariant, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, type PlentyChessVariant } from './plentychessVariants.ts';
-import { BT4_APPROX_MB, Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
+import { BT4_APPROX_MB, BT4_MODEL_NAME, BT4_MODEL_URL, BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH, BT4_RECOMMENDED_SEARCH_BATCH_SIZE, Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
 import { defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -960,7 +960,7 @@ function engineRuntimeDiagnosticsText(): string {
     const hybrid = lc0HybridConfigLabel();
     return `${name}: ${budgetText(row)} · ${lc0RuntimeLabel()}${hybrid ? ` · ${hybrid}` : ''} · batch ${lc0BatchSize()} · pipeline depth ${lc0BatchPipelineDepth()} · ${cacheMetricsText(lc0Cache?.metrics())}`;
   }
-    if (row?.family === 'lc0' && row.variant === 'bt4') return `${name}: ${budgetText(row)} · ${bt4.loaded ? `loaded ${bt4.backend || 'WebGPU'}` : 'lazy WebGPU worker'} · ~${BT4_APPROX_MB}MB net`;
+    if (row?.family === 'lc0' && row.variant === 'bt4') return `${name}: ${budgetText(row)} · ${bt4.loaded ? `loaded ${bt4.backend || 'WebGPU'}` : 'lazy WebGPU worker'} · ${BT4_MODEL_NAME} · batch ${BT4_RECOMMENDED_SEARCH_BATCH_SIZE} · pipeline depth ${BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH} · eval cache ${arenaCacheEntries()} · ~${BT4_APPROX_MB}MB net · ${BT4_MODEL_URL}`;
     if (row?.family === 'tiny') return `${name}: ${budgetText(row)} · SquareFormer ${tinyRuntimeForVariant(row.variant)} · ${tinyHybridManifestStatusText()}`;
     if (row?.family === 'sf') {
       const kind = row.variant === 'full' ? 'full' : 'lite';
@@ -1673,9 +1673,12 @@ function buildEngines() {
         visits: timed ? undefined : row.strength,
         movetimeMs: timed ? arenaMovetimeMs() : undefined,
         reuseTree: true,
+        batchSize: BT4_RECOMMENDED_SEARCH_BATCH_SIZE,
+        batchPipelineDepth: BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH,
+        evalCacheEntries: arenaCacheEntries(),
       });
       if (result.cancelled) return null;
-      recordBt4SearchOutput(engineId, engines.get(engineId)?.name ?? 'Lc0 BT4', result);
+      recordBt4SearchOutput(engineId, engines.get(engineId)?.name ?? `Lc0 ${BT4_MODEL_NAME}`, result);
       return result.move ?? null;
     } finally {
       signal.removeEventListener('abort', onAbort);
@@ -1762,7 +1765,7 @@ function buildEngines() {
     const onAbort = () => bt4.cancel();
     signal.addEventListener('abort', onAbort, { once: true });
     try {
-      await bt4.search({ positions: warmupPositions }, { visits: 1 });
+      await bt4.search({ positions: warmupPositions }, { visits: 1, batchSize: BT4_RECOMMENDED_SEARCH_BATCH_SIZE, batchPipelineDepth: BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH, evalCacheEntries: arenaCacheEntries() });
       await bt4.resetTree();
     } finally {
       signal.removeEventListener('abort', onAbort);
@@ -2037,7 +2040,7 @@ async function startMatch() {
   if (!engineA || !engineB) { el('message').textContent = 'Pick two engines.'; clearStartPending(); return; }
   const usesBt4 = activeSeatRows().some((row) => row.family === 'lc0' && row.variant === 'bt4');
   if (usesBt4 && !(await probeBt4Support())) {
-    el('message').textContent = 'Lc0 BT4 needs WebGPU, which is unavailable in this browser.';
+    el('message').textContent = `Lc0 ${BT4_MODEL_NAME} needs WebGPU, which is unavailable in this browser.`;
     clearStartPending();
     return;
   }

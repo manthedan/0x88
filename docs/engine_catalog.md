@@ -61,7 +61,7 @@ Every engine family should have one card with these fields:
   - BT4: lazy dedicated `Bt4WorkerSearcher`, WebGPU-only by policy, disposable worker per searcher.
 - **UI variants:**
   - `small`: label `Lc0`, strength unit `visits`.
-  - `bt4`: label `Lc0 BT4`, strength unit `visits`, disabled until `probeBt4Support()` succeeds.
+  - `bt4`: label `Lc0 BT4-it332`, strength unit `visits`, disabled until `probeBt4Support()` succeeds. Browser Arena uses the policytune-332 fixed batch-4 f16 ONNX export with search tree reuse and batch-4 leaf evaluation.
 - **Strength knob:** visits in arena/analysis; movetime paths exist in lower-level search APIs but the staged UI currently uses visits.
 - **Artifact footprint:**
   - f32 batch1 ONNX: 80,895,900 bytes.

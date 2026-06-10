@@ -28,7 +28,7 @@ import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, normalizeBerserkVariant, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, type PlentyChessVariant } from './plentychessVariants.ts';
-import { BT4_MODEL_URL, Bt4WorkerSearcher, bt4AssetStatusSync, bt4LoadWarning, bt4SupportedSync, checkBt4Asset, probeBt4Support } from './bt4Engine.ts';
+import { BT4_MODEL_NAME, BT4_MODEL_URL, BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH, BT4_RECOMMENDED_SEARCH_BATCH_SIZE, Bt4WorkerSearcher, bt4AssetStatusSync, bt4LoadWarning, bt4SupportedSync, checkBt4Asset, probeBt4Support } from './bt4Engine.ts';
 import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -470,9 +470,9 @@ function bt4SelectableSync(): boolean {
   return bt4SupportedSync() && bt4AssetStatusSync() === 'present';
 }
 function bt4UnavailableText(): string {
-  if (!bt4SupportedSync()) return 'Lc0 BT4 needs WebGPU support.';
-  if (bt4AssetStatusSync() === 'missing') return `Lc0 BT4 model asset is missing at ${BT4_MODEL_URL}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
-  if (bt4AssetStatusSync() === 'unknown') return 'Lc0 BT4 model asset is still being checked.';
+  if (!bt4SupportedSync()) return `Lc0 ${BT4_MODEL_NAME} needs WebGPU support.`;
+  if (bt4AssetStatusSync() === 'missing') return `Lc0 ${BT4_MODEL_NAME} model asset is missing at ${BT4_MODEL_URL}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
+  if (bt4AssetStatusSync() === 'unknown') return `Lc0 ${BT4_MODEL_NAME} model asset is still being checked.`;
   return '';
 }
 function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): EngineRow[] {
@@ -693,8 +693,8 @@ function renderEngineList(): void {
 }
 
 async function workerBt4Lines(fen: string, visits: number): Promise<AnalysisLine[]> {
-  const result = await bt4.search({ positions: tree.historyBoards() }, { visits, multiPv: multiPv() });
-  return result.cancelled ? [] : lc0AnalysisLines(result, fen, 'Lc0 BT4');
+  const result = await bt4.search({ positions: tree.historyBoards() }, { visits, multiPv: multiPv(), batchSize: BT4_RECOMMENDED_SEARCH_BATCH_SIZE, batchPipelineDepth: BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH });
+  return result.cancelled ? [] : lc0AnalysisLines(result, fen, `Lc0 ${BT4_MODEL_NAME}`);
 }
 
 // Lc0 BT4 is WebGPU-only and requires the large local ONNX asset to be exposed.
@@ -712,7 +712,7 @@ function renderRecklessRuntimeInfo(): void {
   const bt4Asset = bt4AssetStatusSync();
   if (bt4Asset === 'unknown') void checkBt4Asset(renderRecklessRuntimeInfo);
   const bt4AssetText = bt4Asset === 'present' ? 'asset ok' : bt4Asset === 'missing' ? `asset missing · ${BT4_MODEL_URL} · run node scripts/lc0_prepare_model_assets.mjs` : 'checking asset';
-  const bt4Text = `Lc0 BT4: ${bt4SupportedSync() ? 'WebGPU ok' : 'WebGPU unavailable'} · ${bt4AssetText}`;
+  const bt4Text = `Lc0 ${BT4_MODEL_NAME}: ${bt4SupportedSync() ? 'WebGPU ok' : 'WebGPU unavailable'} · batch ${BT4_RECOMMENDED_SEARCH_BATCH_SIZE} · pipeline depth ${BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH} · ${bt4AssetText}`;
   const fallbackMode = (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) ? 'persistent available' : 'one-shot fallback';
   const tinyRows = activeEngineRows().filter((row) => row.family === 'tiny');
   const tinyParts = tinyRows.length ? tinyRows.map((row) => `${tinyEngineLabel(row.variant)} · SquareFormer ${tinyRuntimeForVariant(row.variant)} · ${tinyHybridManifestStatusText()}`) : [];

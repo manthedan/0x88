@@ -49,7 +49,7 @@ test('static LC0 and Stockfish variants expose labels and gating metadata', () =
   assert.equal(defaultStaticEngineVariant('berserk'), 'emscripten');
   assert.equal(defaultStaticEngineVariant('plentychess'), 'emscripten');
   assert.equal(lc0EngineLabel('small'), 'Lc0');
-  assert.equal(lc0EngineLabel('bt4'), 'Lc0 BT4');
+  assert.equal(lc0EngineLabel('bt4'), 'Lc0 BT4-it332');
   assert.equal(stockfishEngineLabel('lite', 'arena'), 'Stockfish Lite');
   assert.equal(stockfishEngineLabel('lite', 'analysis'), 'SF Lite');
   assert.equal(tinyEngineLabel('bt4-custom'), 'Tiny Leela · custom WebGPU');
