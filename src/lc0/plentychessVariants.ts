@@ -1,4 +1,4 @@
-export type PlentyChessVariantKey = 'emscripten' | 'custom';
+export type PlentyChessVariantKey = 'emscripten' | 'emscripten-sse41' | 'emscripten-relaxed' | 'custom';
 export type PlentyChessAssetStatus = 'unknown' | 'checking' | 'present' | 'missing';
 
 export interface PlentyChessVariant {
@@ -17,6 +17,12 @@ export interface PlentyChessVariant {
 export const PLENTYCHESS_EMSCRIPTEN_JS_URL = '/plentychess/plentychess-emscripten.js';
 export const PLENTYCHESS_EMSCRIPTEN_WASM_URL = '/plentychess/plentychess-emscripten.wasm';
 export const PLENTYCHESS_EMSCRIPTEN_DATA_URL = '/plentychess/plentychess-emscripten.data';
+export const PLENTYCHESS_EMSCRIPTEN_SSE41_JS_URL = '/plentychess/plentychess-emscripten-sse41.js';
+export const PLENTYCHESS_EMSCRIPTEN_SSE41_WASM_URL = '/plentychess/plentychess-emscripten-sse41.wasm';
+export const PLENTYCHESS_EMSCRIPTEN_SSE41_DATA_URL = '/plentychess/plentychess-emscripten-sse41.data';
+export const PLENTYCHESS_EMSCRIPTEN_RELAXED_JS_URL = '/plentychess/plentychess-emscripten-relaxed-simd128.js';
+export const PLENTYCHESS_EMSCRIPTEN_RELAXED_WASM_URL = '/plentychess/plentychess-emscripten-relaxed-simd128.wasm';
+export const PLENTYCHESS_EMSCRIPTEN_RELAXED_DATA_URL = '/plentychess/plentychess-emscripten-relaxed-simd128.data';
 export const PLENTYCHESS_MAIN_NETWORK = '0134-2r24-s0.bin';
 export const PLENTYCHESS_SOURCE_NETWORK_URL = `https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/${PLENTYCHESS_MAIN_NETWORK}`;
 
@@ -54,13 +60,37 @@ export const PLENTYCHESS_EMSCRIPTEN_VARIANT: PlentyChessVariant = {
   note: 'Smoked PlentyChess 7.0.66 single-thread Emscripten worker build with processed NNUE preloaded in .data.',
 };
 
+export const PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT: PlentyChessVariant = {
+  key: 'emscripten-sse41',
+  label: 'PlentyChess SSE4.1 Emscripten experimental',
+  jsUrl: PLENTYCHESS_EMSCRIPTEN_SSE41_JS_URL,
+  wasmUrl: PLENTYCHESS_EMSCRIPTEN_SSE41_WASM_URL,
+  dataUrl: PLENTYCHESS_EMSCRIPTEN_SSE41_DATA_URL,
+  sourceNetworkUrl: PLENTYCHESS_SOURCE_NETWORK_URL,
+  note: 'Default build plus -msse4.1: single-op convertEpi8Epi16 in the accumulator path (exact-equal semantics).',
+};
+
+export const PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT: PlentyChessVariant = {
+  key: 'emscripten-relaxed',
+  label: 'PlentyChess Relaxed SIMD Emscripten experimental',
+  jsUrl: PLENTYCHESS_EMSCRIPTEN_RELAXED_JS_URL,
+  wasmUrl: PLENTYCHESS_EMSCRIPTEN_RELAXED_WASM_URL,
+  dataUrl: PLENTYCHESS_EMSCRIPTEN_RELAXED_DATA_URL,
+  sourceNetworkUrl: PLENTYCHESS_SOURCE_NETWORK_URL,
+  note: 'SSE4.1 build whose dpbusd helpers use the relaxed integer dot (exact: INPUT_QUANT=255/INPUT_SHIFT=9 keep activations in 0..127) and whose f32 tail is vectorized with relaxed madd. Requires WebAssembly Relaxed SIMD.',
+};
+
 export const PLENTYCHESS_VARIANTS: readonly PlentyChessVariant[] = [
   PLENTYCHESS_EMSCRIPTEN_VARIANT,
+  PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT,
+  PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT,
 ];
 
 export function normalizePlentyChessVariant(raw: string | null | undefined): PlentyChessVariantKey {
   const value = String(raw ?? '').toLowerCase().replace(/[ _-]+/g, '');
   if (value === 'custom') return 'custom';
+  if (value === 'emscriptenrelaxed' || value === 'relaxed' || value === 'relaxedsimd' || value === 'relaxedsimd128') return 'emscripten-relaxed';
+  if (value === 'emscriptensse41' || value === 'sse41' || value === 'sse4') return 'emscripten-sse41';
   return 'emscripten';
 }
 
@@ -70,6 +100,8 @@ export function defaultPlentyChessVariantKey(): PlentyChessVariantKey {
 
 export function plentyChessVariantByKey(key: string): PlentyChessVariant {
   const normalized = normalizePlentyChessVariant(key);
+  if (normalized === 'emscripten-sse41') return PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT;
+  if (normalized === 'emscripten-relaxed') return PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT;
   if (normalized === 'custom') return {
     key: 'custom',
     label: 'PlentyChess Custom',

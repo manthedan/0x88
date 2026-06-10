@@ -20,7 +20,7 @@ import {
 test('PlentyChess variant metadata pins the smoked Emscripten sidecars', () => {
   assert.equal(PLENTYCHESS_MAIN_NETWORK, '0134-2r24-s0.bin');
   assert.equal(PLENTYCHESS_SOURCE_NETWORK_URL, 'https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/0134-2r24-s0.bin');
-  assert.deepEqual(PLENTYCHESS_VARIANTS.map((variant) => variant.key), ['emscripten']);
+  assert.deepEqual(PLENTYCHESS_VARIANTS.map((variant) => variant.key), ['emscripten', 'emscripten-sse41', 'emscripten-relaxed']);
   assert.equal(defaultPlentyChessVariantKey(), 'emscripten');
   assert.equal(PLENTYCHESS_EMSCRIPTEN_VARIANT.jsUrl, PLENTYCHESS_EMSCRIPTEN_JS_URL);
   assert.equal(PLENTYCHESS_EMSCRIPTEN_VARIANT.wasmUrl, PLENTYCHESS_EMSCRIPTEN_WASM_URL);

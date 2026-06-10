@@ -51,11 +51,16 @@ fs.mkdirSync(netDir, { recursive: true });
 fs.mkdirSync(path.dirname(jsOut), { recursive: true });
 
 if (!skipGit) {
+  // Shallow pinned-ref fetch (same pattern as build_reckless_wasi.mjs): the
+  // full clone + --tags fetch was flaky over slow links and pulls far more
+  // history than a pinned corresponding-source build needs.
   if (!fs.existsSync(path.join(engineDir, '.git'))) {
-    run('git', ['clone', repo, engineDir]);
+    fs.mkdirSync(engineDir, { recursive: true });
+    run('git', ['init'], { cwd: engineDir });
+    run('git', ['remote', 'add', 'origin', repo], { cwd: engineDir });
   }
-  run('git', ['fetch', '--tags', 'origin'], { cwd: engineDir });
-  run('git', ['checkout', ref], { cwd: engineDir });
+  run('git', ['fetch', '--depth=1', 'origin', ref], { cwd: engineDir });
+  run('git', ['checkout', '--detach', 'FETCH_HEAD'], { cwd: engineDir });
   run('git', ['reset', '--hard'], { cwd: engineDir });
   run('git', ['clean', '-fdx'], { cwd: engineDir });
 } else if (!fs.existsSync(path.join(engineDir, 'src')) || !fs.existsSync(path.join(engineDir, 'tools'))) {
@@ -102,6 +107,18 @@ const sources = [
   'src/fathom/src/tbprobe.c',
 ];
 
+// The default build keeps -mssse3 (the engine's SSSE3 dpbusd path). The SSE4.1
+// build additionally engages the patched convertEpi8Epi16 gate (exact-equal
+// single-op sign extension); the relaxed build adds the relaxed integer dot
+// for dpbusd and the relaxed-madd vectorized f32 tail (the FMA/AVX2/ARM gates
+// in nnue.cpp are never true under emcc, so the f32 layers otherwise run
+// scalar std::fma loops).
+const simdFlags = process.env.PLENTYCHESS_WASM_RELAXED_SIMD === '1'
+  ? ['-msse4.1', '-mrelaxed-simd']
+  : process.env.PLENTYCHESS_WASM_SSE41 === '1'
+    ? ['-msse4.1']
+    : [];
+
 const emccArgs = [
   '-std=c++17',
   process.env.PLENTYCHESS_EMSCRIPTEN_OPT ?? '-O2',
@@ -112,6 +129,7 @@ const emccArgs = [
   `-DEVALFILE="${processedName}"`,
   '-msimd128',
   '-mssse3',
+  ...simdFlags,
   '-s',
   'USE_PTHREADS=0',
   '-s',
