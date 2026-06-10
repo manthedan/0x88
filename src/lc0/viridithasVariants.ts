@@ -1,3 +1,4 @@
+import { supportsWasmRelaxedSimd, supportsWasmSimd } from './recklessVariants.ts';
 import { DEFAULT_VIRIDITHAS_WASM_URL } from './viridithasEngine.ts';
 
 export type ViridithasAssetStatus = 'unknown' | 'checking' | 'ok' | 'missing';
@@ -34,7 +35,7 @@ export const VIRIDITHAS_RELAXED_SIMD_VARIANT: ViridithasVariant = {
 export const VIRIDITHAS_VARIANTS: readonly ViridithasVariant[] = [
   VIRIDITHAS_DEFAULT_VARIANT,
   VIRIDITHAS_SIMD_VARIANT,
-  VIRIDITHAS_RELAXED_SIMD_VARIANT,
+  ...(supportsWasmRelaxedSimd() ? [VIRIDITHAS_RELAXED_SIMD_VARIANT] : []),
 ];
 
 export function normalizeViridithasVariant(raw: string | null | undefined): ViridithasVariant['key'] {
@@ -48,6 +49,7 @@ export function normalizeViridithasVariant(raw: string | null | undefined): Viri
 
 export function viridithasVariantByKey(key: string): ViridithasVariant {
   const normalized = normalizeViridithasVariant(key);
+  if (normalized === 'relaxed-simd' && !supportsWasmRelaxedSimd()) return supportsWasmSimd() ? VIRIDITHAS_SIMD_VARIANT : VIRIDITHAS_DEFAULT_VARIANT;
   return VIRIDITHAS_VARIANTS.find((variant) => variant.key === normalized) ?? VIRIDITHAS_DEFAULT_VARIANT;
 }
 

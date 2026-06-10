@@ -1,3 +1,5 @@
+import { supportsWasmRelaxedSimd } from './recklessVariants.ts';
+
 export type BerserkVariantKey = 'emscripten' | 'emscripten-simd' | 'emscripten-relaxed' | 'default' | 'simd' | 'custom';
 export type BerserkAssetStatus = 'unknown' | 'checking' | 'present' | 'missing';
 
@@ -105,7 +107,7 @@ export const BERSERK_SIMD_VARIANT: BerserkVariant = {
 export const BERSERK_VARIANTS: readonly BerserkVariant[] = [
   BERSERK_EMSCRIPTEN_VARIANT,
   BERSERK_EMSCRIPTEN_SIMD_VARIANT,
-  BERSERK_EMSCRIPTEN_RELAXED_VARIANT,
+  ...(supportsWasmRelaxedSimd() ? [BERSERK_EMSCRIPTEN_RELAXED_VARIANT] : []),
   BERSERK_DEFAULT_VARIANT,
   BERSERK_SIMD_VARIANT,
 ];
@@ -128,7 +130,7 @@ export function defaultBerserkVariantKey(): BerserkVariantKey {
 export function berserkVariantByKey(key: string): BerserkVariant {
   const normalized = normalizeBerserkVariant(key);
   if (normalized === 'emscripten-simd') return BERSERK_EMSCRIPTEN_SIMD_VARIANT;
-  if (normalized === 'emscripten-relaxed') return BERSERK_EMSCRIPTEN_RELAXED_VARIANT;
+  if (normalized === 'emscripten-relaxed') return supportsWasmRelaxedSimd() ? BERSERK_EMSCRIPTEN_RELAXED_VARIANT : supportsBerserkWasmSimd() ? BERSERK_EMSCRIPTEN_SIMD_VARIANT : BERSERK_EMSCRIPTEN_VARIANT;
   if (normalized === 'simd') return BERSERK_SIMD_VARIANT;
   if (normalized === 'default') return BERSERK_DEFAULT_VARIANT;
   if (normalized === 'custom') return {
