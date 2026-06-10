@@ -152,14 +152,50 @@ the largest perf lever found this campaign, and it stacks with nothing dying:
 it's search-side and applies to every evaluator lane. In-game BT4 at v16 is
 ~137 ms/move on this device.
 
+### Int8 weight-storage quantization (goal 1 of the quantization lane, same day)
+
+`scripts/lc0_quantize_tensor_cache.py` converts the detached f16 tensor-cache
+to symmetric per-output-channel int8 (`q = round(w/scale)`, f32 scales in the
+shard; tensors with ndim<2 or ≤4096 elements stay raw f16 — 46 of 195).
+Staged as `f16/v4-int8` (`--params=detached-quant-int8`); the smoke page
+fetches, dequantizes on CPU (`Float16Array` fast path), and uploads f16 —
+**GPU compute unchanged**, only storage/transfer shrinks.
+
+- **Size: 370 → 186 MB raw (0.503)**; load path is also *faster* end-to-end
+  than f16 (fetch 360 ms + dequant+upload 458 ms ≈ 0.8 s vs 1.45 s) because
+  half the bytes move.
+- Quantization error: median tensor relRMS 0.85%, worst 3.8% (the [256,8192]
+  smolgen family); max abs weight err 0.055.
+- Drift vs f16 build: max native top-prior diff `0.0088 → 0.0172`; vs
+  unquantized ORT f16 `0.0234`. Eval flips remain confined to near-tie rows
+  (one new: startpos g1f3/d2d4, gap 0.0066) — tie-epsilon 0.01 gate passes.
+- **Stockfish-scored UHO16×2 bridge: cp delta 0/0/0 on all 30 scored rows**
+  (`bt4it332_int8params_fixed_suite_bridge_uho16_v16_r2_sfdepth3.smoke.json`).
+  Search match 30/32; the 2 misses are the known-unstable FEN, and unlike the
+  f16 build they are NOT visit ties there (d7d5 reached 4 visits) — int8
+  drift genuinely moved that search to the ~40 cp-worse of two winning moves.
+  That is the entire measured strength cost so far.
+- **Mixed precision did not help**: `--max-rel-rms 0.02` (reverts the 18
+  worst tensors to f16, 222 MB) left drift unchanged-to-worse (max prior diff
+  0.021, ORT diff 0.0236). Per-tensor relRMS does not predict output drift —
+  the drift is distributed, not concentrated. v5-int8mx parked; v4-int8 is
+  the operating point.
+
+Verdict: int8 weight storage halves the download for a strength cost that is
+invisible to Stockfish depth-3 scoring on the fixed suite and visible only as
+near-tie reshuffling. Worth carrying forward as the default BT4 distribution
+format candidate, pending a game-level A/B (int8 vs f16 self-play) before any
+promotion decision.
+
 ### Remaining levers for BT4 perf
 
 Batching, pipelining, and single-config schedule tuning are all measured
-dead; tree reuse is measured and already on in the arena paths (ensure any
-future TVMJS game integration passes `reuseTree: true`). What's left:
-per-function dlight config dispatch / metaschedule (bounded, unproven),
-quantization (q4f16/int8 — attacks both the 323 MB download and memory
-bandwidth; strength cost unknown), and accepting ~137 ms/move in-game at v16
+dead; tree reuse is measured (~halves in-game move cost) and already on in
+the arena paths (ensure any future TVMJS game integration passes
+`reuseTree: true`). What's left: true quantized kernels (q4f16-style — goal 2,
+attacks compute/bandwidth; requires relax-level weight transform on the ONNX
+import path, real TVM risk), per-function dlight config dispatch /
+metaschedule (bounded, unproven), and accepting ~137 ms/move in-game at v16
 as the BT4 operating point.
 
 ## Known gaps / cautions

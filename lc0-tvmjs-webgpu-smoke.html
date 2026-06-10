@@ -1033,6 +1033,59 @@ async function run() {
       if (!params.length) throw new Error('detached-tensor-cache manifest but no param_N tensors loaded');
       tvmDetachedParams = params;
       log('tensor cache loaded', { params: params.length, fetchMs: startupTimings.tensorCacheFetchMs, refetchMs: startupTimings.tensorCacheRefetchMs });
+    } else if (manifest.parameterStrategy?.current === 'detached-quant-int8' && manifest.tensorCache?.directory) {
+      // int8 weight-storage sidecar (lc0_quantize_tensor_cache.py): fetch the
+      // quantized shards, dequantize to f16 on the CPU, upload f16 tensors.
+      // GPU compute is unchanged; only download/storage shrinks.
+      const cacheUrl = checkedStagedRuntimeUrl(`${manifest.tensorCache.directory}/`, base, 'tensor cache').toString();
+      const quantCache = await timed('tensorCacheFetchMs', async () => {
+        const meta = await (await fetch(`${cacheUrl}tensor-cache.json`)).json();
+        const shards = new Map();
+        for (const shard of meta.records) {
+          if (!shards.has(shard.dataPath)) {
+            shards.set(shard.dataPath, new Uint8Array(await (await fetch(cacheUrl + shard.dataPath)).arrayBuffer()));
+          }
+        }
+        return { meta, shards };
+      });
+      const hasF16Array = typeof Float16Array === 'function';
+      const ordered = [];
+      for (const shard of quantCache.meta.records) for (const record of shard.records) ordered.push([shard.dataPath, record]);
+      ordered.sort((a, b) => Number(a[1].name.split('_')[1]) - Number(b[1].name.split('_')[1]));
+      const params = [];
+      let quantTensors = 0;
+      const dequantStarted = performance.now();
+      for (const [dataPath, record] of ordered) {
+        const bytes = quantCache.shards.get(dataPath);
+        const tensor = tvm.empty(record.shape, 'float16', tvm.webgpu());
+        if (record.mode === 'int8-ch0') {
+          quantTensors += 1;
+          const q = new Int8Array(bytes.buffer, bytes.byteOffset + record.byteOffset, record.nbytes);
+          // slice() copies so the Float32Array view is always 4-byte aligned.
+          const scales = new Float32Array(bytes.slice(record.scaleByteOffset, record.scaleByteOffset + record.scaleNbytes).buffer);
+          const perChannel = record.nbytes / record.channels;
+          const out = hasF16Array ? new Float16Array(record.nbytes) : new Uint16Array(record.nbytes);
+          let idx = 0;
+          for (let c = 0; c < record.channels; c++) {
+            const scale = scales[c];
+            const end = idx + perChannel;
+            if (hasF16Array) for (; idx < end; idx++) out[idx] = q[idx] * scale;
+            else for (; idx < end; idx++) out[idx] = f32ToF16Bits(q[idx] * scale);
+          }
+          tensor.copyFromRawBytes(new Uint8Array(out.buffer));
+        } else {
+          tensor.copyFromRawBytes(bytes.subarray(record.byteOffset, record.byteOffset + record.nbytes));
+        }
+        params.push(tensor);
+      }
+      startupTimings.paramDequantUploadMs = performance.now() - dequantStarted;
+      if (!params.length) throw new Error('detached-quant-int8 manifest but no param tensors loaded');
+      tvmDetachedParams = params;
+      log('quant tensor cache loaded', {
+        params: params.length, quantTensors, float16ArrayFastPath: hasF16Array,
+        quantization: quantCache.meta.quantization,
+        fetchMs: startupTimings.tensorCacheFetchMs, dequantUploadMs: startupTimings.paramDequantUploadMs,
+      });
     }
     const vmCandidates = ['set_input', 'invoke_stateful', 'get_output', 'get_outputs', 'main', 'vm_initialization'];
     const vmAvailable = [];
