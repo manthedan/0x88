@@ -31,6 +31,7 @@ import { PlentyChessEngine } from './plentychessEngine.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
 import { BT4_APPROX_MB, BT4_MODEL_NAME, BT4_MODEL_URL, BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH, BT4_RECOMMENDED_SEARCH_BATCH_SIZE, Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
 import { TournamentStandings, buildSchedule, tournamentPairings, type ScheduledGame, type TournamentMode } from './tournament.ts';
+import { hBarChartSvg, lineChartSvg, type ChartSeries } from './charts.ts';
 import { defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 
@@ -198,6 +199,9 @@ resourceBroker.register('sf-full', { ...engineResourceProfile('sf') });
 const engines = new Map<string, ArenaEngine>();
 const lc0Searchers = new Map<string, Lc0PuctSearcher>();
 const lastLc0SearchResults = new Map<string, Lc0SearchResult>();
+interface GameChartSample { ply: number; engineId: string; whiteScore?: number; moveMs: number; nps?: number; }
+let gameChartSamples: GameChartSample[] = [];
+const CHART_COLORS = ['#4a7a2a', '#a5461b', '#1c5f8a', '#7a4a9a', '#8a7a1c', '#5a5a5a'];
 const pendingLc0ReplyProbes = new Map<string, PendingLc0ReplyProbe>();
 const lc0TreeTelemetry = new Map<string, Lc0TreeTelemetry>();
 const uciTelemetry = new Map<string, UciEngineTelemetry>();
@@ -2086,6 +2090,67 @@ function legalFromUci(current: BoardState, uci: string | null): Move | undefined
   return uci ? legalMoves(current).find((m) => moveToUci(m) === uci) : undefined;
 }
 
+function chartColorFor(engineId: string): string {
+  const index = Math.max(0, activeEngineIds.indexOf(engineId));
+  return CHART_COLORS[index % CHART_COLORS.length];
+}
+
+function formatCompactNumber(value: number): string {
+  if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+  if (value >= 1000) return `${Math.round(value / 1000)}k`;
+  return String(Math.round(value));
+}
+
+function resetGameCharts(): void {
+  gameChartSamples = [];
+  el('chartsPanel').hidden = false;
+  for (const id of ['evalChart', 'timeChart', 'npsChart', 'rootChart']) el(id).innerHTML = '';
+  el('rootChartTitle').textContent = 'LC0 root visits';
+  el('chartLegend').innerHTML = '';
+}
+
+function renderGameCharts(): void {
+  const ids = [...new Set(gameChartSamples.map((sample) => sample.engineId))];
+  const seriesFor = (value: (sample: GameChartSample) => number | undefined): ChartSeries[] => ids.map((id) => ({
+    label: engines.get(id)?.name ?? id,
+    color: chartColorFor(id),
+    points: gameChartSamples
+      .filter((sample) => sample.engineId === id)
+      .flatMap((sample) => {
+        const y = value(sample);
+        return y === undefined || !Number.isFinite(y) ? [] : [{ x: sample.ply, y }];
+      }),
+  }));
+  el('evalChart').innerHTML = lineChartSvg(seriesFor((sample) => sample.whiteScore), { yMin: 0, yMax: 1, midline: 0.5, formatY: (v) => `${Math.round(v * 100)}%` });
+  el('timeChart').innerHTML = lineChartSvg(seriesFor((sample) => sample.moveMs), { yMin: 0, formatY: formatCompactNumber });
+  el('npsChart').innerHTML = lineChartSvg(seriesFor((sample) => sample.nps), { yMin: 0, formatY: formatCompactNumber });
+  el('chartLegend').innerHTML = ids.map((id) => `<span><span class="swatch" style="background:${chartColorFor(id)}"></span>${htmlEscape(engines.get(id)?.name ?? id)}</span>`).join('');
+}
+
+/** Live PUCT-root distribution from the real search tree (Lc0SearchResult.children). */
+function renderRootChart(engineId: string): void {
+  const result = lastLc0SearchResults.get(engineId);
+  if (!result?.children?.length) return;
+  const top = [...result.children].sort((a, b) => b.visits - a.visits).slice(0, 8).filter((child) => child.visits > 0);
+  if (!top.length) return;
+  el('rootChartTitle').textContent = `${engines.get(engineId)?.name ?? engineId} root visits (Q from side to move)`;
+  el('rootChart').innerHTML = hBarChartSvg(top.map((child) => ({
+    label: child.uci,
+    value: child.visits,
+    detail: `Q ${signed(child.q, 2)} · P ${Math.round(child.prior * 100)}%`,
+    color: chartColorFor(engineId),
+  })));
+}
+
+function recordGameChartSample(ply: number, engine: ArenaEngine, moveMs: number): void {
+  const snapshot = engineOutputs.get(engine.id);
+  const lc0 = lastLc0SearchResults.get(engine.id);
+  const nps = snapshot?.nps ?? (lc0 && moveMs > 0 ? Math.round((lc0.visits / moveMs) * 1000) : undefined);
+  gameChartSamples.push({ ply, engineId: engine.id, whiteScore: snapshot?.evalBar?.whiteScore, moveMs: Math.round(moveMs), nps });
+  renderGameCharts();
+  renderRootChart(engine.id);
+}
+
 async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: ArenaOpening, signal: AbortSignal): Promise<{ result: GameResultCode; reason: string; tree: GameTree }> {
   pendingLc0ReplyProbes.clear();
   const tree = gameTreeFromOpening(opening);
@@ -2100,6 +2165,7 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
   setBoardSideEngines(white.id, white.name, black.id, black.name);
   renderBoard();
   renderEngineOutputs();
+  resetGameCharts();
   const priorFens: string[] = historyBoards.slice(0, -1).map(boardToFen);
   const delay = Math.max(0, Math.floor(Number(inputEl('delayInput').value) || 0));
   for (let ply = 0; ply < 300; ply++) {
@@ -2109,6 +2175,7 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
     const engine = board.turn === 'w' ? white : black;
     recordEngineThinking(engine);
     let uci: string | null;
+    const moveStarted = performance.now();
     try {
       uci = await engine.move(historyBoards, signal);
     } catch (error) {
@@ -2118,6 +2185,7 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
     if (signal.aborted) return { result: '1/2-1/2', reason: 'cancelled', tree };
     const move = legalFromUci(board, uci);
     if (!move) return { result: board.turn === 'w' ? '0-1' : '1-0', reason: uci ? `illegal ${uci}` : 'resigned', tree };
+    recordGameChartSample(ply, engine, performance.now() - moveStarted);
     recordPendingLc0ReplyProbes(engine, board, move);
     priorFens.push(boardToFen(board));
     board = makeMove(board, move);
