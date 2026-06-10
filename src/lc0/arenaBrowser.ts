@@ -827,7 +827,15 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const suffix = unsupported ? ' (unsupported by this browser)' : status === 'missing' ? ' (asset missing)' : needsGeneratedAsset && status !== 'present' ? ' (checking asset)' : '';
     return { value: v.key, label: `${v.label}${suffix}`, disabled };
   });
-  if (family === 'plentychess') return availablePlentyChessVariants().map((v) => ({ value: v.key, label: v.label }));
+  if (family === 'plentychess') return availablePlentyChessVariants().map((v) => {
+    const status = plentyChessVariantAssetStatus(v);
+    const unsupported = v.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd();
+    const needsGeneratedAsset = v.key === 'emscripten-sse41' || v.key === 'emscripten-relaxed';
+    if (!unsupported && needsGeneratedAsset && status === 'unknown') void checkPlentyChessVariantAsset(v, populateSeats);
+    const disabled = unsupported || (needsGeneratedAsset && status !== 'present') || status === 'missing';
+    const suffix = unsupported ? ' (unsupported by this browser)' : status === 'missing' ? ' (asset missing)' : needsGeneratedAsset && status !== 'present' ? ' (checking asset)' : '';
+    return { value: v.key, label: `${v.label}${suffix}`, disabled };
+  });
   return availableRecklessVariants().map((v) => {
     const status = recklessVariantAssetStatus(v);
     const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
@@ -1622,9 +1630,17 @@ function renderPlentyChessRuntimeInfo(): void {
 
 function refreshPlentyChessVariantUi(): void {
   const select = selectEl('plentychessVariantSelect');
-  if (!select.options.length) {
-    select.innerHTML = availablePlentyChessVariants().map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
-  }
+  const selected = select.value;
+  select.innerHTML = availablePlentyChessVariants().map((variant) => {
+    const status = plentyChessVariantAssetStatus(variant);
+    const unsupported = variant.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd();
+    const needsGeneratedAsset = variant.key === 'emscripten-sse41' || variant.key === 'emscripten-relaxed';
+    if (!unsupported && needsGeneratedAsset && status === 'unknown') void checkPlentyChessVariantAsset(variant, refreshPlentyChessVariantUi);
+    const disabled = unsupported || (needsGeneratedAsset && status !== 'present') || status === 'missing';
+    const suffix = unsupported ? ' (unsupported by this browser)' : status === 'missing' ? ' (asset missing)' : needsGeneratedAsset && status !== 'present' ? ' (checking asset)' : '';
+    return `<option value="${variant.key}"${disabled ? ' disabled' : ''}>${htmlEscape(`${variant.label}${suffix}`)}</option>`;
+  }).join('');
+  if (selected) select.value = selected;
   select.disabled = running;
   renderPlentyChessRuntimeInfo();
 }

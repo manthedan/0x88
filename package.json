@@ -154,6 +154,8 @@
     "berserk:artifact-manifest": "node scripts/write_engine_artifact_manifest.mjs berserk",
     "berserk:release-manifest": "node scripts/write_engine_artifact_manifest.mjs berserk --source-archive public/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz --source-url /berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz --out public/berserk/berserk-emscripten-single-thread.manifest.json",
     "plentychess:build-emscripten": "node scripts/build_plentychess_emscripten.mjs",
+    "plentychess:build-sse41-emscripten": "PLENTYCHESS_WASM_SSE41=1 PLENTYCHESS_EMSCRIPTEN_JS_OUT=public/plentychess/plentychess-emscripten-sse41.js node scripts/build_plentychess_emscripten.mjs",
+    "plentychess:build-relaxed-simd-emscripten": "PLENTYCHESS_WASM_RELAXED_SIMD=1 PLENTYCHESS_EMSCRIPTEN_JS_OUT=public/plentychess/plentychess-emscripten-relaxed-simd128.js node scripts/build_plentychess_emscripten.mjs",
     "plentychess:smoke-emscripten": "node scripts/plentychess_emscripten_smoke.mjs --js public/plentychess/plentychess-emscripten.js --depth 1",
     "plentychess:source-archive": "node scripts/write_engine_source_archive.mjs plentychess",
     "plentychess:artifact-manifest": "node scripts/write_engine_artifact_manifest.mjs plentychess",
