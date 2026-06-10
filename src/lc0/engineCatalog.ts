@@ -76,6 +76,26 @@ export const ENGINE_FAMILY_CATALOG: Record<EngineFamily, EngineFamilyCatalogEntr
   },
 };
 
+export interface EngineFamilyResourceProfile {
+  resourceClass: 'cpu' | 'gpu';
+  /** Max UCI threads the current browser build supports; the resource broker clamps grants to this. */
+  maxThreads: number;
+}
+
+// Single-threaded entries become elastic by shipping a threaded build and
+// raising maxThreads here; the broker needs no other change.
+export const ENGINE_RESOURCE_PROFILES: Record<EngineFamily, EngineFamilyResourceProfile> = {
+  lc0: { resourceClass: 'gpu', maxThreads: 1 },
+  sf: { resourceClass: 'cpu', maxThreads: 32 },
+  reckless: { resourceClass: 'cpu', maxThreads: 1 },
+  viridithas: { resourceClass: 'cpu', maxThreads: 1 },
+  berserk: { resourceClass: 'cpu', maxThreads: 1 },
+};
+
+export function engineResourceProfile(family: EngineFamily): EngineFamilyResourceProfile {
+  return ENGINE_RESOURCE_PROFILES[family];
+}
+
 export const LC0_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
   { value: 'small', label: 'Small' },
   { value: 'bt4', label: 'BT4', experimental: true },
