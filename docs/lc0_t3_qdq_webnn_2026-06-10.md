@@ -16,8 +16,18 @@ Cleanest gate of any net so far (`t3_tvmjs_smoke_b8_v16_ortf16.json`):
 **native 8/8 STRICT** (max prior diff 0.0044 — no tie tolerance needed),
 ORT f16 8/8, search 8/8; TVMJS 119.4 ms vs ORT 129.8 ms at v16/b8. The
 progressive ladder now reads: tiny → t1 (~40 ms) → t3 (~120, ~60-90 expected
-with tree reuse) → BT4 (~250/137). Remaining t3 follow-ups: batch sweep
-(b16 may win at 512-wide like t1), game-sequence A/B, footprint sidecar.
+with tree reuse) → BT4 (~250/137). Follow-ups run same day:
+
+- **Batch sweep: b8 wins for t3** (`t3_tvmjs_b16_v16.json`: b16 140.0 ms vs
+  b8 119.4 ms at v16, native 8/8). t1's b16 advantage does not transfer —
+  512-wide already saturates the GPU near b8, consistent with BT4 saturating
+  at b4. (That artifact's `ok:false` is a harness artifact: the run omitted
+  `--ort-model`, so its search comparison ran against the default t1 ORT
+  model; the timing and native-parity numbers are valid.)
+- **Tree-reuse game A/B** (`t3_tvmjs_game_reuse_ab_v16_p12.json`): fresh
+  114.8 → reused **73.8 ms/move (−36 %)**, 12 plies v16/b8, agreement 8/12.
+  In-game ladder: ~t1 40 / t3 74 / BT4 137 ms per move.
+- Still open: footprint sidecar for the t3 staging.
 
 ## 2. int8 QDQ ONNX for the ORT lane (stable-runtime download win)
 
