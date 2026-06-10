@@ -7,13 +7,13 @@ index c380952..94d15d4 100644
  #include <cassert>
  #include <cmath>
 +#include <cstdlib>
- 
+
  #include "nnue.h"
  #include "board.h"
 @@ -11,6 +12,7 @@
  #include <arm_neon.h>
  #endif
- 
+
 +#ifndef __EMSCRIPTEN__
  #ifdef _MSC_VER
  #define SP_MSVC
@@ -23,12 +23,12 @@ index c380952..94d15d4 100644
  #undef SP_MSVC
  #endif
 +#endif
- 
+
  NetworkData* globalNetworkData;
  alignas(ALIGNMENT) uint16_t nnzLookup[256][8];
 @@ -37,6 +40,30 @@ NNZ nnz;
  #endif
- 
+
  void initNetworkData() {
 +#ifdef __EMSCRIPTEN__
 +    std::ifstream netFile(EVALFILE, std::ios::binary | std::ios::ate);
@@ -55,42 +55,42 @@ index c380952..94d15d4 100644
 +#endif
 +
      ThreatInputs::initialise();
- 
+
      for (size_t i = 0; i < 256; i++) {
 @@ -47,7 +74,6 @@ void initNetworkData() {
          }
      }
- 
+
 -    globalNetworkData = (NetworkData*)gNETWORKData;
  }
- 
+
  void NNUE::reset(Board* board) {
 @@ -539,7 +565,7 @@ Eval NNUE::evaluate(Board* board) {
      // ---------------------- CONVERT TO FLOATS & ACTIVATE L1 ----------------------
- 
+
      alignas(ALIGNMENT) float l1Outputs[2 * L2_SIZE];
 -#if defined(__FMA__) || defined(__AVX2__) || (defined(__AVX512F__) && defined(__AVX512BW__)) || defined(ARCH_ARM)
 +#if defined(__FMA__) || defined(__AVX2__) || (defined(__AVX512F__) && defined(__AVX512BW__)) || defined(ARCH_ARM) || defined(__wasm_relaxed_simd__)
- 
+
      VecF psNorm = set1Ps(L1_NORMALISATION);
      VecF psZero = set1Ps(0.0f);
 @@ -567,7 +593,7 @@ Eval NNUE::evaluate(Board* board) {
      alignas(ALIGNMENT) float l2Outputs[L3_SIZE];
      memcpy(l2Outputs, networkData->l2Biases[bucket], sizeof(l2Outputs));
- 
+
 -#if defined(__FMA__) || defined(__AVX2__) || (defined(__AVX512F__) && defined(__AVX512BW__)) || defined(ARCH_ARM)
 +#if defined(__FMA__) || defined(__AVX2__) || (defined(__AVX512F__) && defined(__AVX512BW__)) || defined(ARCH_ARM) || defined(__wasm_relaxed_simd__)
      VecF* l2OutputsVec = reinterpret_cast<VecF*>(l2Outputs);
      for (int l1 = 0; l1 < 2 * L2_SIZE; l1++) {
          VecF l1Vec = set1Ps(l1Outputs[l1]);
 @@ -594,7 +620,7 @@ Eval NNUE::evaluate(Board* board) {
- 
+
      // ---------------------- L3 PROPAGATION ----------------------
- 
+
 -#if defined(__FMA__) || defined(__AVX2__) || (defined(__AVX512F__) && defined(__AVX512BW__)) || defined(ARCH_ARM)
 +#if defined(__FMA__) || defined(__AVX2__) || (defined(__AVX512F__) && defined(__AVX512BW__)) || defined(ARCH_ARM) || defined(__wasm_relaxed_simd__)
      constexpr int chunks = 64 / sizeof(VecF);
- 
+
      VecF resultSums[chunks];
 diff --git a/src/simd.h b/src/simd.h
 index cfe4323..3a42482 100644
@@ -99,7 +99,7 @@ index cfe4323..3a42482 100644
 @@ -300,7 +300,7 @@ inline VecI16 subEpi16(VecI16 x, VecI16 y) {
    return _mm_sub_epi16(x, y);
  }
- 
+
 -#if defined(__FMA__)
 +#if defined(__FMA__) || defined(__SSE4_1__)
  inline VecI16 convertEpi8Epi16(VecI16s x) {
@@ -108,7 +108,7 @@ index cfe4323..3a42482 100644
 @@ -350,7 +350,21 @@ inline void vecStoreI(VecI16* dest, VecI16 x) {
    _mm_store_si128(dest, x);
  }
- 
+
 -#if defined(__SSSE3__)
 +#if defined(__wasm_relaxed_simd__)
 +#include <wasm_simd128.h>
@@ -137,7 +137,7 @@ index cfe4323..3a42482 100644
 +  return (VecF) wasm_f32x4_relaxed_madd((v128_t) a, (v128_t) b, (v128_t) c);
 +}
  #endif
- 
+
  inline float reduceAddPsR(float* sums, int length) {
 diff --git a/src/thread.h b/src/thread.h
 index bcd5192..a21d003 100644
@@ -145,7 +145,7 @@ index bcd5192..a21d003 100644
 +++ b/src/thread.h
 @@ -245,6 +245,21 @@ public:
      }
- 
+
      void resize(size_t numThreads) {
 +#ifdef PLENTY_SYNC_SEARCH
 +        if (workers.size() == numThreads)
@@ -164,19 +164,19 @@ index bcd5192..a21d003 100644
 +#else
          if (threads.size() == numThreads)
              return;
-         
+
 @@ -301,6 +316,7 @@ public:
          }
- 
+
          while (startedThreads < numThreads) {}
 +#endif
      }
- 
+
      void startSearching(Board board, std::vector<Hash> boardHistory, SearchParameters parameters) {
 @@ -311,6 +327,15 @@ public:
          rootBoardHistory = std::move(boardHistory);
          searchParameters = std::move(parameters);
- 
+
 +#ifdef PLENTY_SYNC_SEARCH
 +        for (auto& worker : workers) {
 +            worker.get()->rootMoves.clear();
@@ -195,11 +195,11 @@ index bcd5192..a21d003 100644
          }
 +#endif
      }
- 
+
      void stopSearching() {
 @@ -330,9 +356,11 @@ public:
      }
- 
+
      void waitForSearchFinished() {
 +#ifndef PLENTY_SYNC_SEARCH
          for (auto& worker : workers) {
@@ -207,11 +207,11 @@ index bcd5192..a21d003 100644
          }
 +#endif
      }
- 
+
      void waitForHelpersFinished() {
 @@ -342,9 +370,22 @@ public:
      }
- 
+
      void exit() {
 +#ifdef PLENTY_SYNC_SEARCH
 +        workers.clear();
@@ -230,7 +230,7 @@ index bcd5192..a21d003 100644
 +        }
 +        return false;
      }
- 
+
      void ucinewgame() {
 diff --git a/src/tt.h b/src/tt.h
 index 03a53b8..4313154 100644
@@ -243,25 +243,25 @@ index 03a53b8..4313154 100644
 -    ptr = std::aligned_alloc(alignment, requiredBytes);
 +    ptr = aligned_alloc(alignment, requiredBytes);
  #endif
- 
+
  #if defined(__linux__)
 @@ -144,6 +144,9 @@ public:
      }
- 
+
      void clear() {
 +#ifdef PLENTY_SYNC_SEARCH
 +        std::memset(static_cast<void*>(table), 0, sizeof(TTCluster) * clusterCount);
 +#else
          size_t threadCount = UCI::Options.threads.value;
          std::vector<std::thread> ts;
- 
+
 @@ -158,6 +161,7 @@ public:
          for (auto& t : ts) {
              t.join();
          }
 +#endif
      }
- 
+
  };
 diff --git a/src/uci.cpp b/src/uci.cpp
 index ee335cd..83ab077 100644
@@ -272,13 +272,13 @@ index ee335cd..83ab077 100644
  #include <algorithm>
  #include <tuple>
 +#include <memory>
- 
+
  #include "board.h"
  #include "uci.h"
 @@ -451,6 +452,70 @@ struct printOptions
      }
  };
- 
+
 +static bool processUciCommand(std::string line, Board& board, std::vector<Hash>& boardHistory) {
 +    if (matchesToken(line, "quit")) {
 +        threads.stopSearching();
@@ -351,7 +351,7 @@ index ee335cd..83ab077 100644
          return;
      }
 -    for (std::string line = {};std::getline(std::cin, line);) {
- 
+
 -        if (matchesToken(line, "quit")) {
 -            threads.stopSearching();
 -            threads.exit();
@@ -413,7 +413,7 @@ index ee335cd..83ab077 100644
 -        }
 -        else std::cout << "Unknown command" << std::endl;
      }
- 
+
      std::cout << "UCI thread stopping" << std::endl;
 +#endif
 +}
@@ -447,5 +447,5 @@ index 9792653..1058d22 100644
              4096
 +#endif
          };
- 
+
          UCIOption<UCI_SPIN> multiPV = {

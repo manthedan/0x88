@@ -29,6 +29,18 @@ export const PLENTYCHESS_SOURCE_NETWORK_URL = `https://github.com/Yoshie2000/Ple
 const assetStatuses = new Map<string, PlentyChessAssetStatus>();
 const assetChecks = new Map<string, Promise<PlentyChessAssetStatus>>();
 
+export function supportsWasmRelaxedSimd(): boolean {
+  if (typeof WebAssembly === 'undefined' || typeof WebAssembly.validate !== 'function') return false;
+  // (module (func (result v128) (f32x4.relaxed_madd (f32x4.splat 1) (f32x4.splat 2) (f32x4.splat 3))))
+  return WebAssembly.validate(new Uint8Array([
+    0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96,
+    0, 1, 123, 3, 2, 1, 0, 10, 28, 1, 26, 0,
+    67, 0, 0, 128, 63, 253, 19, 67, 0, 0, 0, 64,
+    253, 19, 67, 0, 0, 64, 64, 253, 19, 253, 133,
+    2, 11,
+  ]));
+}
+
 function sameOriginPlentyChessAsset(raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
   try {
@@ -101,7 +113,7 @@ export function defaultPlentyChessVariantKey(): PlentyChessVariantKey {
 export function plentyChessVariantByKey(key: string): PlentyChessVariant {
   const normalized = normalizePlentyChessVariant(key);
   if (normalized === 'emscripten-sse41') return PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT;
-  if (normalized === 'emscripten-relaxed') return PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT;
+  if (normalized === 'emscripten-relaxed') return supportsWasmRelaxedSimd() ? PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT : PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT;
   if (normalized === 'custom') return {
     key: 'custom',
     label: 'PlentyChess Custom',
