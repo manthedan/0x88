@@ -1425,6 +1425,7 @@ function recklessMissingAssetMessage(variants: RecklessVariant[]): string {
 
 function renderRecklessRuntimeInfo(): void {
   const rows = activeSeatRows().filter((row) => row.family === 'reckless');
+  el('recklessRuntimeInfo').hidden = !rows.length;
   if (!rows.length) { el('recklessRuntimeInfo').textContent = 'Reckless: not selected'; return; }
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
   const parts = rows.map((row) => {
@@ -1477,6 +1478,7 @@ function getViridithasFor(variantKey: string): ViridithasEngine {
 
 function renderViridithasRuntimeInfo(): void {
   const rows = activeSeatRows().filter((row) => row.family === 'viridithas');
+  el('viridithasRuntimeInfo').hidden = !rows.length;
   if (!rows.length) { el('viridithasRuntimeInfo').textContent = 'Viridithas: not selected'; return; }
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
   const parts = rows.map((row) => {
@@ -1531,6 +1533,7 @@ function getBerserkFor(variantKey: string): BerserkEngine {
 
 function renderBerserkRuntimeInfo(): void {
   const rows = activeSeatRows().filter((row) => row.family === 'berserk');
+  el('berserkRuntimeInfo').hidden = !rows.length;
   if (!rows.length) { el('berserkRuntimeInfo').textContent = 'Berserk: not selected'; return; }
   const parts = rows.map((row) => {
     const variant = berserkVariantForKey(row.variant);
@@ -1942,10 +1945,15 @@ function setOpeningPreview(opening: ArenaOpening): void {
   renderBoard();
 }
 
+function refreshBudgetControls(): void {
+  el('movetimeField').hidden = arenaBudgetMode() !== 'movetime';
+}
+
 function refreshOpeningPreview(): void {
   const select = selectEl('startingPositionSelect');
   const textarea = el('openingText') as HTMLTextAreaElement;
   const custom = select.value === 'custom';
+  el('openingTextField').hidden = !custom;
   select.disabled = running;
   textarea.disabled = running || !custom;
   if (running) return;
@@ -2613,7 +2621,10 @@ function wireEvents() {
   for (const id of ['lc0InputBackendSelect', 'lc0EncoderKernelSelect', 'lc0LegalPriorsSelect']) {
     el(id).addEventListener('change', () => { markLc0PresetCustom(); renderCacheInfo(); if (!running && selectedLc0Runtime() !== 'onnx') void reloadLc0Evaluator(); });
   }
-  el('budgetModeSelect').addEventListener('change', () => resetLc0SearchTrees());
+  el('budgetModeSelect').addEventListener('change', () => {
+    refreshBudgetControls();
+    resetLc0SearchTrees();
+  });
   el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
   el('stockfishThreadsInput').addEventListener('input', () => {
     if (running) return;
@@ -2657,6 +2668,7 @@ async function init() {
   void refreshBt4Availability();
   void probeEngineLogos();
   wireEvents();
+  refreshBudgetControls();
   refreshOpeningPreview();
   await loadLc0Evaluator();
   void renderRuntimeBadge();

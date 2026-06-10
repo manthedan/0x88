@@ -37,8 +37,17 @@ textarea{width:100%;min-height:64px;font-family:var(--mono);font-size:12px;borde
 .lines .score.neg{color:#a5461b}.lines .score.pos{color:var(--accent)}
 .lines .pv{font-family:var(--mono);overflow-wrap:anywhere}.lines .eng{font-size:10px;color:var(--muted)}
 .lines li{padding-left:9px}
+.lines li.placeholder{display:block;color:var(--muted);border-left:none;cursor:default}
+.lines li.placeholder:hover{background:none}
 .compare-summary{margin-top:8px;padding:8px;border:1px solid var(--rule);border-radius:6px;background:#fff;font-size:12px;color:var(--muted)}
 table.engine-compare{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}table.engine-compare th,table.engine-compare td{text-align:left;padding:5px 7px;border-bottom:1px solid var(--rule);vertical-align:top}table.engine-compare th{color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase}table.engine-compare .mono{font-family:var(--mono)}table.engine-compare .pv{font-family:var(--mono);overflow-wrap:anywhere}table.engine-compare .agree{color:var(--accent);font-weight:700}.profile-row{align-items:end}.profile-row select{min-width:150px}.profile-row input[type=text]{min-width:130px}
+details.runtime-details{margin:6px 0}
+details.runtime-details summary{cursor:pointer;font-size:12px;color:var(--muted)}
+details.runtime-details summary:hover{color:inherit}
+.status-inline{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;margin:6px 0 2px}
+.status-inline dt{color:var(--muted);display:inline}
+.status-inline dd{margin:0 0 0 6px;font-family:var(--mono);display:inline;overflow-wrap:anywhere}
+.status-inline div{display:flex;align-items:baseline}
 .legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:12px;color:var(--muted)}
 .legend .key{display:inline-flex;align-items:center;gap:5px}
 .legend .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
@@ -60,6 +69,7 @@ table.opening .san{font-family:var(--mono);font-weight:700}
 .wdlbar{display:flex;height:14px;border-radius:3px;overflow:hidden;min-width:120px;border:1px solid var(--rule)}
 .wdlbar .w{background:#f4f1e8}.wdlbar .d{background:#b9b3a4}.wdlbar .b{background:#3a3a3a}
 @media(max-width:900px){main{grid-template-columns:1fr}}
+[hidden]{display:none !important}
 </style>
 </head>
 <body>
@@ -116,21 +126,23 @@ table.opening .san{font-family:var(--mono);font-weight:700}
       <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
         <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
     </div>
-    <div id="recklessRuntimeInfo" class="small">Reckless: detecting runtime…</div>
+    <details class="runtime-details"><summary>Engine runtime details</summary>
+      <div id="recklessRuntimeInfo" class="small">Reckless: detecting runtime…</div>
+    </details>
     <h2>Engine comparison</h2>
     <div id="engineConsensus" class="compare-summary">No analysis yet.</div>
     <table id="engineCompare" class="engine-compare"><thead><tr><th>Engine</th><th>Best</th><th>Eval</th><th>Δ</th><th>Search</th><th>PV</th></tr></thead><tbody></tbody></table>
     <h2>Engine lines</h2>
     <div id="engineLegend" class="legend"></div>
     <ol id="lines" class="lines"></ol>
+    <dl class="status-inline">
+      <div><dt>Side</dt><dd id="sideToMove">—</dd></div>
+      <div><dt>Eval</dt><dd id="posEval">—</dd></div>
+      <div><dt>Backend</dt><dd id="backend">—</dd></div>
+      <div><dt>LC0 audit</dt><dd id="runtimeAudit">—</dd></div>
+    </dl>
     <h2>Moves</h2>
     <div id="movelist" class="movelist"></div>
-    <dl class="status-grid">
-      <dt>Backend</dt><dd id="backend">—</dd>
-      <dt>Position</dt><dd id="posEval">—</dd>
-      <dt>Side</dt><dd id="sideToMove">—</dd>
-      <dt>LC0 audit</dt><dd id="runtimeAudit">—</dd>
-    </dl>
     <h2>Opening explorer</h2>
     <div class="row">
       <div class="field"><label for="importSite">Site</label>
