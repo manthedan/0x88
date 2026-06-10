@@ -1,20 +1,55 @@
-// Lc0 BT4-it332 (1024x15x32h attention net, ~353MB f16) browser integration.
+// Lc0 big-net (BT4-it332, t3-512 distill) browser integration.
 //
-// BT4 is large and attention-heavy, so it is handled with care:
-//   - WebGPU-gated: callers must check `probeBt4Support()` before exposing it.
+// Big nets are large and attention-heavy, so they are handled with care:
+//   - WebGPU-gated: callers must check `probeBt4Support()` before exposing them.
 //   - Lazy: the dedicated search worker is only created/initialized on first use
-//     (the first init fetches ~353MB, cached afterwards by the Cache API).
+//     (the first init fetches the model, cached afterwards by the Cache API).
 //   - Off the main thread: search runs entirely inside searchWorker.ts so heavy
 //     inference never blocks the UI.
 //   - Disposable: `dispose()` terminates the worker, freeing model memory.
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import type { Lc0EvaluatorInput } from './onnxEvaluator.ts';
 
-export const BT4_MODEL_NAME = 'BT4-it332';
-export const BT4_MODEL_URL = '/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx';
-export const BT4_APPROX_MB = 353;
-export const BT4_RECOMMENDED_SEARCH_BATCH_SIZE = 4;
-export const BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH = 1;
+export interface BigNetConfig {
+  key: 'bt4' | 't3';
+  name: string;
+  modelUrl: string;
+  approxMb: number;
+  recommendedBatchSize: number;
+  recommendedPipelineDepth: number;
+  /** Short export description for the one-time load warning. */
+  exportNote: string;
+}
+
+export const BT4_NET: BigNetConfig = {
+  key: 'bt4',
+  name: 'BT4-it332',
+  modelUrl: '/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx',
+  approxMb: 353,
+  recommendedBatchSize: 4,
+  recommendedPipelineDepth: 1,
+  exportNote: 'policytune-332 batch-4 f16 export',
+};
+
+// b8 is t3's measured sweet spot (b16 regressed 119 -> 140 ms at v16);
+// see docs/lc0_t3_qdq_webnn_2026-06-10.md.
+export const T3_NET: BigNetConfig = {
+  key: 't3',
+  name: 't3-512 distill',
+  modelUrl: '/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx',
+  approxMb: 163,
+  recommendedBatchSize: 8,
+  recommendedPipelineDepth: 1,
+  exportNote: 'distill-swa-2767500 batch-8 f16 export',
+};
+
+export const BIG_NETS: Record<BigNetConfig['key'], BigNetConfig> = { bt4: BT4_NET, t3: T3_NET };
+
+export const BT4_MODEL_NAME = BT4_NET.name;
+export const BT4_MODEL_URL = BT4_NET.modelUrl;
+export const BT4_APPROX_MB = BT4_NET.approxMb;
+export const BT4_RECOMMENDED_SEARCH_BATCH_SIZE = BT4_NET.recommendedBatchSize;
+export const BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH = BT4_NET.recommendedPipelineDepth;
 
 export interface Bt4SearchResult {
   fen: string;
@@ -43,8 +78,8 @@ export type Bt4AssetStatus = 'unknown' | 'present' | 'missing';
 
 let supportProbe: Promise<boolean> | null = null;
 let supportedCached: boolean | null = null;
-let assetProbe: Promise<Bt4AssetStatus> | null = null;
-let assetStatus: Bt4AssetStatus = 'unknown';
+const assetProbes = new Map<string, Promise<Bt4AssetStatus>>();
+const assetStatuses = new Map<string, Bt4AssetStatus>();
 
 /** WebGPU usable for BT4? Cached after the first probe. */
 export async function probeBt4Support(): Promise<boolean> {
@@ -66,47 +101,63 @@ export function bt4SupportedSync(): boolean {
   return supportedCached === true;
 }
 
-/** Last probed local BT4 model asset result without re-probing. */
-export function bt4AssetStatusSync(): Bt4AssetStatus {
-  return assetStatus;
+/** Last probed local model asset result without re-probing. */
+export function bigNetAssetStatusSync(config: BigNetConfig = BT4_NET): Bt4AssetStatus {
+  return assetStatuses.get(config.modelUrl) ?? 'unknown';
 }
 
-/** Browser-served BT4 ONNX asset availability. Cached after the first probe. */
-export async function checkBt4Asset(onStatus?: () => void): Promise<Bt4AssetStatus> {
-  if (assetProbe) return assetProbe;
-  assetProbe = (async () => {
+export function bt4AssetStatusSync(): Bt4AssetStatus {
+  return bigNetAssetStatusSync(BT4_NET);
+}
+
+/** Browser-served big-net ONNX asset availability. Cached after the first probe. */
+export async function checkBigNetAsset(config: BigNetConfig = BT4_NET, onStatus?: () => void): Promise<Bt4AssetStatus> {
+  const existing = assetProbes.get(config.modelUrl);
+  if (existing) return existing;
+  const probe = (async () => {
+    let status: Bt4AssetStatus;
     try {
-      const response = await fetch(BT4_MODEL_URL, { method: 'HEAD', cache: 'no-store' });
-      assetStatus = response.ok ? 'present' : 'missing';
+      const response = await fetch(config.modelUrl, { method: 'HEAD', cache: 'no-store' });
+      status = response.ok ? 'present' : 'missing';
     } catch {
-      assetStatus = 'missing';
+      status = 'missing';
     }
+    assetStatuses.set(config.modelUrl, status);
     onStatus?.();
-    return assetStatus;
+    return status;
   })();
-  return assetProbe;
+  assetProbes.set(config.modelUrl, probe);
+  return probe;
+}
+
+export async function checkBt4Asset(onStatus?: () => void): Promise<Bt4AssetStatus> {
+  return checkBigNetAsset(BT4_NET, onStatus);
 }
 
 /** A memory caution string when the device reports limited RAM, else null. */
-export function bt4MemoryCaution(): string | null {
+export function bigNetMemoryCaution(config: BigNetConfig = BT4_NET): string | null {
   const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory;
   if (typeof mem === 'number' && mem > 0 && mem <= 4) {
-    return `This device reports ~${mem}GB RAM; the Lc0 ${BT4_MODEL_NAME} net (~${BT4_APPROX_MB}MB) may strain memory.`;
+    return `This device reports ~${mem}GB RAM; the Lc0 ${config.name} net (~${config.approxMb}MB) may strain memory.`;
   }
   return null;
 }
 
-/** Human-readable one-time warning shown before the first BT4 load. */
-export function bt4LoadWarning(): string {
-  const caution = bt4MemoryCaution();
-  return `Lc0 ${BT4_MODEL_NAME} is a large net (~${BT4_APPROX_MB}MB download, cached after first load) and needs WebGPU. Arena uses the policytune-332 batch-4 f16 export with search tree reuse and leaf batching.${caution ? ` ${caution}` : ''}`;
+/** Human-readable one-time warning shown before the first big-net load. */
+export function bigNetLoadWarning(config: BigNetConfig = BT4_NET): string {
+  const caution = bigNetMemoryCaution(config);
+  return `Lc0 ${config.name} is a large net (~${config.approxMb}MB download, cached after first load) and needs WebGPU. Arena uses the ${config.exportNote} with search tree reuse and leaf batching.${caution ? ` ${caution}` : ''}`;
 }
 
+export function bt4MemoryCaution(): string | null { return bigNetMemoryCaution(BT4_NET); }
+export function bt4LoadWarning(): string { return bigNetLoadWarning(BT4_NET); }
+
 /**
- * A lazily-initialized, worker-backed Lc0 BT4-it332 searcher. One instance owns one
- * searchWorker (one resident BT4 net). Call `dispose()` to free its memory.
+ * A lazily-initialized, worker-backed Lc0 big-net searcher. One instance owns
+ * one searchWorker (one resident net). Call `dispose()` to free its memory.
  */
 export class Bt4WorkerSearcher {
+  readonly config: BigNetConfig;
   private worker: Worker | null = null;
   private ready = false;
   private initPromise: Promise<string> | null = null;
@@ -115,6 +166,10 @@ export class Bt4WorkerSearcher {
   private activeSearchId: number | null = null;
   private configuredEvalCacheEntries = -1;
   backend = '';
+
+  constructor(config: BigNetConfig = BT4_NET) {
+    this.config = config;
+  }
 
   get loaded(): boolean {
     return this.ready;
@@ -152,8 +207,8 @@ export class Bt4WorkerSearcher {
           this.pending.clear();
         });
       }
-      // BT4-it332 is WebGPU-only by policy; never fall back to WASM for this net.
-      const ready = await this.post<{ backend: string }>({ type: 'init', modelUrl: BT4_MODEL_URL, ep: 'webgpu', cacheModel: false, evalCacheEntries });
+      // Big nets are WebGPU-only by policy; never fall back to WASM for them.
+      const ready = await this.post<{ backend: string }>({ type: 'init', modelUrl: this.config.modelUrl, ep: 'webgpu', cacheModel: false, evalCacheEntries });
       this.ready = true;
       this.configuredEvalCacheEntries = evalCacheEntries;
       this.backend = ready.backend;
@@ -177,8 +232,8 @@ export class Bt4WorkerSearcher {
         visits: options.visits,
         movetimeMs: options.movetimeMs,
         multiPv: options.multiPv,
-        batchSize: Math.max(1, Math.floor(Number(options.batchSize ?? BT4_RECOMMENDED_SEARCH_BATCH_SIZE) || BT4_RECOMMENDED_SEARCH_BATCH_SIZE)),
-        batchPipelineDepth: Math.max(1, Math.floor(Number(options.batchPipelineDepth ?? BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH) || BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH)),
+        batchSize: Math.max(1, Math.floor(Number(options.batchSize ?? this.config.recommendedBatchSize) || this.config.recommendedBatchSize)),
+        batchPipelineDepth: Math.max(1, Math.floor(Number(options.batchPipelineDepth ?? this.config.recommendedPipelineDepth) || this.config.recommendedPipelineDepth)),
         reuseTree: options.reuseTree,
       },
       (id) => { this.activeSearchId = id; },

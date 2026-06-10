@@ -1,6 +1,15 @@
 # LC0 TVMJS/WebGPU research runbook
 
-Status: research-only. ORT ONNX/WebGPU remains the stable default. Do not add TVMJS to the runtime registry or default UI until promotion-grade evidence and artifact release policy exist.
+Status: **PROMOTED to visible non-default option 2026-06-10** (release-owner
+decision, self-hosted scope). The whole-model TVMJS/WebGPU runtime is now
+always listed in the arena/analysis LC0 runtime selector; ORT ONNX/WebGPU
+remains the default and the fallback, and the stable NN runtime plumbing
+(`src/nn/runtimeRegistry.ts`, `src/nn/browserRuntimeEvaluator.ts`) stays
+TVMJS-free. Accepted caveats at promotion: no non-Apple GPU datapoint yet and
+no public hosting/cache policy (artifacts remain local/gitignored). Evidence
+basis: t1 94/94 fixed-suite search matches vs ORT f16 + Stockfish cp deltas
+0/0/0; t3 native 8/8 strict; BT4-it332 gated with tie tolerance.
+`scripts/check_lc0_tvmjs_research_only.mjs` (v2) enforces the new policy.
 
 ## What is close to promotion
 

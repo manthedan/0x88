@@ -30,8 +30,8 @@ import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, type PlentyChessVariant } from './plentychessVariants.ts';
-import { BT4_MODEL_NAME, BT4_MODEL_URL, BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH, BT4_RECOMMENDED_SEARCH_BATCH_SIZE, Bt4WorkerSearcher, bt4AssetStatusSync, bt4LoadWarning, bt4SupportedSync, checkBt4Asset, probeBt4Support } from './bt4Engine.ts';
-import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetLoadWarning, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig } from './bt4Engine.ts';
+import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -123,6 +123,12 @@ function syncBrokerParticipants(rows: EngineRow[]): void {
 }
 // Lc0 BT4 runs in its own worker (lazy, WebGPU-gated, disposable). See bt4Engine.ts.
 const bt4 = new Bt4WorkerSearcher();
+const t3BigNet = new Bt4WorkerSearcher(T3_NET);
+const bigNetSearchers: Record<'bt4' | 't3', Bt4WorkerSearcher> = { bt4, t3: t3BigNet };
+function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4WorkerSearcher } {
+  const key = variant === 't3' ? 't3' : 'bt4';
+  return { config: BIG_NETS[key], searcher: bigNetSearchers[key] };
+}
 let ground: Ground | null = null;
 let orientation: 'white' | 'black' = 'white';
 let analysisAbort: AbortController | null = null;
@@ -145,6 +151,7 @@ const BUILT_IN_ENGINE_PROFILES: BuiltInEngineAnalysisProfile[] = [
   { id: 'lc0-stockfish', name: 'Built-in · Lc0 + Stockfish', note: 'Small LC0 plus Stockfish Lite baseline for quick agreement checks.', rows: [{ family: 'lc0', variant: 'small', strength: 400 }, { family: 'sf', variant: 'lite', strength: 14 }], multiPv: 3, lc0Runtime: 'onnx' },
   { id: 'browser-native-survey', name: 'Built-in · Browser-native survey', note: 'Small LC0 plus staged browser-native UCI engines; missing assets stay visible in runtime status.', rows: [{ family: 'lc0', variant: 'small', strength: 300 }, { family: 'viridithas', variant: 'simd', strength: 8 }, { family: 'berserk', variant: 'emscripten', strength: 8 }, { family: 'plentychess', variant: 'emscripten', strength: 8 }], multiPv: 2, lc0Runtime: 'onnx' },
   { id: 'lc0-wgsl-heads', name: 'Built-in · LC0 WGSL heads probe', note: 'Opt-in LC0 hybrid WGSL-head analysis lane; stable defaults remain unchanged.', rows: [{ family: 'lc0', variant: 'small', strength: 400 }], multiPv: 3, lc0Runtime: 'hybrid-wgsl-heads' },
+  { id: 'lc0-ladder', name: 'Built-in · Lc0 ladder (small/t3/BT4)', note: 'All three Lc0 nets side by side for strength/latency comparison; t3 and BT4 lazy-load in WebGPU workers with tree reuse.', rows: [{ family: 'lc0', variant: 'small', strength: 400 }, { family: 'lc0', variant: 't3', strength: 400 }, { family: 'lc0', variant: 'bt4', strength: 400 }], multiPv: 2, lc0Runtime: 'onnx' },
 ];
 let engineProfiles: EngineAnalysisProfile[] = [];
 let importedGames: ImportedGame[] = [];
@@ -226,12 +233,13 @@ function lc0WholeModelRuntimeRequested(): boolean {
 }
 
 function installExperimentalLc0RuntimeOption(): void {
-  if (!lc0WholeModelRuntimeRequested()) return;
+  // Promoted 2026-06-10 (release-owner decision): the whole-model WebGPU
+  // runtime is always listed. ORT remains the default and the fallback.
   const select = selectEl('lc0RuntimeSelect');
   if ([...select.options].some((option) => option.value === LC0_WHOLE_MODEL_WEBGPU_RUNTIME)) return;
   const option = document.createElement('option');
   option.value = LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
-  option.textContent = 'TVM whole-model WebGPU (research, opt-in)';
+  option.textContent = 'TVM whole-model WebGPU (fast, small net)';
   select.appendChild(option);
 }
 
@@ -514,22 +522,23 @@ function currentEngineProfile(name: string): EngineAnalysisProfile {
   };
 }
 function profileHasBt4(rows: EngineRow[]): boolean {
-  return rows.some((row) => row.family === 'lc0' && row.variant === 'bt4');
+  return rows.some((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant));
 }
-function bt4SelectableSync(): boolean {
-  return bt4SupportedSync() && bt4AssetStatusSync() === 'present';
+function bigNetSelectableSync(config: BigNetConfig): boolean {
+  return bt4SupportedSync() && bigNetAssetStatusSync(config) === 'present';
 }
-function bt4UnavailableText(): string {
-  if (!bt4SupportedSync()) return `Lc0 ${BT4_MODEL_NAME} needs WebGPU support.`;
-  if (bt4AssetStatusSync() === 'missing') return `Lc0 ${BT4_MODEL_NAME} model asset is missing at ${BT4_MODEL_URL}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
-  if (bt4AssetStatusSync() === 'unknown') return `Lc0 ${BT4_MODEL_NAME} model asset is still being checked.`;
+function bigNetUnavailableText(config: BigNetConfig): string {
+  if (!bt4SupportedSync()) return `Lc0 ${config.name} needs WebGPU support.`;
+  if (bigNetAssetStatusSync(config) === 'missing') return `Lc0 ${config.name} model asset is missing at ${config.modelUrl}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
+  if (bigNetAssetStatusSync(config) === 'unknown') return `Lc0 ${config.name} model asset is still being checked.`;
   return '';
 }
 function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): EngineRow[] {
   return rows.map((row) => {
     const next = { ...row, strength: clampStrengthForRow(row) };
-    if (next.family === 'lc0' && next.variant === 'bt4') {
-      const allowed = bt4SelectableSync() && allowBt4Prompt && window.confirm(`${bt4LoadWarning()}\n\nLoad the saved Lc0 BT4 profile row?`);
+    if (next.family === 'lc0' && isLc0BigNetVariant(next.variant)) {
+      const { config } = bigNetFor(next.variant);
+      const allowed = bigNetSelectableSync(config) && allowBt4Prompt && window.confirm(`${bigNetLoadWarning(config)}\n\nLoad the saved Lc0 ${config.name} profile row?`);
       if (!allowed) next.variant = 'small';
     }
     return next;
@@ -728,7 +737,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'tiny') return tinyVariantOptions().map((option) => option.value === 'bt4-custom' && tinyHybridManifestStatus === 'missing'
     ? { ...option, disabled: true, label: `${option.label} (bundle missing)` }
     : option);
-  if (family === 'lc0') return lc0VariantOptions(bt4SelectableSync());
+  if (family === 'lc0') return lc0VariantOptions(bigNetSelectableSync(BIG_NETS.bt4) || bigNetSelectableSync(BIG_NETS.t3));
   if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => {
     const status = viridithasVariantAssetStatus(v);
@@ -792,8 +801,8 @@ function activeEngineRows(): EngineRow[] {
   });
 }
 
-function usesBt4Row(): boolean {
-  return engineRows.some((r) => r.family === 'lc0' && r.variant === 'bt4');
+function usesBigNetRow(variant: 'bt4' | 't3'): boolean {
+  return engineRows.some((r) => r.family === 'lc0' && r.variant === variant);
 }
 
 function renderEngineList(): void {
@@ -807,16 +816,17 @@ function renderEngineList(): void {
   }).join('');
 }
 
-async function workerBt4Lines(fen: string, visits: number): Promise<AnalysisLine[]> {
-  const result = await bt4.search({ positions: tree.historyBoards() }, { visits, multiPv: multiPv(), batchSize: BT4_RECOMMENDED_SEARCH_BATCH_SIZE, batchPipelineDepth: BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH });
-  return result.cancelled ? [] : lc0AnalysisLines(result, fen, `Lc0 ${BT4_MODEL_NAME}`);
+async function workerBigNetLines(variant: string, fen: string, visits: number): Promise<AnalysisLine[]> {
+  const { config, searcher } = bigNetFor(variant);
+  const result = await searcher.search({ positions: tree.historyBoards() }, { visits, multiPv: multiPv(), batchSize: config.recommendedBatchSize, batchPipelineDepth: config.recommendedPipelineDepth });
+  return result.cancelled ? [] : lc0AnalysisLines(result, fen, `Lc0 ${config.name}`);
 }
 
-// Lc0 BT4 is WebGPU-only and requires the large local ONNX asset to be exposed.
+// Lc0 big nets are WebGPU-only and require the large local ONNX assets.
 async function refreshBt4Availability(): Promise<void> {
-  await Promise.all([probeBt4Support(), checkBt4Asset(renderRecklessRuntimeInfo)]);
-  if (!bt4SelectableSync()) {
-    for (const row of engineRows) if (row.family === 'lc0' && row.variant === 'bt4') row.variant = 'small';
+  await Promise.all([probeBt4Support(), checkBigNetAsset(BIG_NETS.bt4, renderRecklessRuntimeInfo), checkBigNetAsset(BIG_NETS.t3, renderRecklessRuntimeInfo)]);
+  for (const row of engineRows) {
+    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectableSync(bigNetFor(row.variant).config)) row.variant = 'small';
   }
   renderEngineList();
   renderRecklessRuntimeInfo();
@@ -824,10 +834,14 @@ async function refreshBt4Availability(): Promise<void> {
 
 function renderRecklessRuntimeInfo(): void {
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
-  const bt4Asset = bt4AssetStatusSync();
-  if (bt4Asset === 'unknown') void checkBt4Asset(renderRecklessRuntimeInfo);
-  const bt4AssetText = bt4Asset === 'present' ? 'asset ok' : bt4Asset === 'missing' ? `asset missing · ${BT4_MODEL_URL} · run node scripts/lc0_prepare_model_assets.mjs` : 'checking asset';
-  const bt4Text = `Lc0 ${BT4_MODEL_NAME}: ${bt4SupportedSync() ? 'WebGPU ok' : 'WebGPU unavailable'} · batch ${BT4_RECOMMENDED_SEARCH_BATCH_SIZE} · pipeline depth ${BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH} · ${bt4AssetText}`;
+  const bigNetTexts = (['bt4', 't3'] as const).map((key) => {
+    const config = BIG_NETS[key];
+    const asset = bigNetAssetStatusSync(config);
+    if (asset === 'unknown') void checkBigNetAsset(config, renderRecklessRuntimeInfo);
+    const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? `asset missing · ${config.modelUrl} · run node scripts/lc0_prepare_model_assets.mjs` : 'checking asset';
+    return `Lc0 ${config.name}: ${bt4SupportedSync() ? 'WebGPU ok' : 'WebGPU unavailable'} · batch ${config.recommendedBatchSize} · pipeline depth ${config.recommendedPipelineDepth} · ${assetText}`;
+  });
+  const bt4Text = bigNetTexts.join(' | ');
   const fallbackMode = (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) ? 'persistent available' : 'one-shot fallback';
   const tinyRows = activeEngineRows().filter((row) => row.family === 'tiny');
   const tinyParts = tinyRows.length ? tinyRows.map((row) => `${tinyEngineLabel(row.variant)} · SquareFormer ${tinyRuntimeForVariant(row.variant)} · ${tinyHybridManifestStatusText()}`) : [];
@@ -952,7 +966,7 @@ function getPlentyChessFor(variantKey: string): PlentyChessEngine {
 }
 
 function disposeUnusedEngines(): void {
-  if (!usesBt4Row()) bt4.dispose();
+  for (const key of ['bt4', 't3'] as const) if (!usesBigNetRow(key)) bigNetSearchers[key].dispose();
   disposeUnusedTinyEvaluators();
   const activeRows = activeEngineRows();
   const activeRecklessKeys = new Set(activeRows.filter((row) => row.family === 'reckless').map((row) => recklessCacheKey(recklessVariantForKey(row.variant))));
@@ -1610,8 +1624,8 @@ async function analyzeCurrent() {
   try {
     const tasks: Promise<AnalysisLine[]>[] = [];
     for (const row of rows) {
-      if (row.family === 'lc0' && row.variant === 'bt4') {
-        tasks.push(workerBt4Lines(fen, row.strength));
+      if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
+        tasks.push(workerBigNetLines(row.variant, fen, row.strength));
       } else if (row.family === 'lc0') {
         if (workerReady) tasks.push(workerLc0Lines(fen, row.strength));
         else if (searcher) tasks.push(searcher.search({ positions: tree.historyBoards() }, { visits: row.strength, multiPv: multiPv(), signal: controller.signal, yieldEveryMs: 16 })
@@ -1771,10 +1785,11 @@ function wireEvents() {
       engineRows[i].strength = defaultStrength(family);
       renderEngineList();
     } else if (target.classList.contains('row-var')) {
-      if (engineRows[i].family === 'lc0' && target.value === 'bt4') {
-        // One-time gate before the ~353MB lazy load.
-        if (!bt4SelectableSync()) { el('message').textContent = bt4UnavailableText(); target.value = engineRows[i].variant; return; }
-        if (!window.confirm(`${bt4LoadWarning()}\n\nUse Lc0 BT4?`)) { target.value = engineRows[i].variant; return; }
+      if (engineRows[i].family === 'lc0' && isLc0BigNetVariant(target.value)) {
+        // One-time gate before the large lazy load.
+        const { config } = bigNetFor(target.value);
+        if (!bigNetSelectableSync(config)) { el('message').textContent = bigNetUnavailableText(config); target.value = engineRows[i].variant; return; }
+        if (!window.confirm(`${bigNetLoadWarning(config)}\n\nUse Lc0 ${config.name}?`)) { target.value = engineRows[i].variant; return; }
       }
       engineRows[i].variant = target.value;
     } else if (target.classList.contains('row-strength')) {
@@ -1896,7 +1911,7 @@ function disposeRuntimeResources(): void {
   workerBackend = '';
   for (const pending of workerPending.values()) pending.reject(new Error('LC0 worker disposed'));
   workerPending.clear();
-  bt4.dispose();
+  for (const searcher of Object.values(bigNetSearchers)) searcher.dispose();
   stockfishLite?.dispose();
   stockfishLite = null;
   stockfishFull?.dispose();
