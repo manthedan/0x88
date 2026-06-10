@@ -26,6 +26,10 @@ npm run web:isolated:static
 
 Then open `http://localhost:5181/lc0-arena.html`.
 
+## Artifact inventory
+
+Hosted/deployable engine and model versions are tracked in `docs/hosted_artifacts.md`, with a compact machine-readable summary at `public/artifact-index.json`.
+
 ## Validation
 
 Common frontend checks:

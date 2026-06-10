@@ -1,0 +1,160 @@
+{
+  "schema": "lc0-webgpu.hosted-artifact-index.v1",
+  "generatedAt": "2026-06-10T00:00:00.000Z",
+  "documentationPath": "docs/hosted_artifacts.md",
+  "distributionPolicyPath": "docs/engine_artifact_distribution.md",
+  "notes": [
+    "deploymentStatus distinguishes committed/deployable artifacts from manifest-only or ignored local artifacts.",
+    "Do not treat a manifest entry as proof that a large model blob is committed; check deploymentStatus and the per-artifact notes.",
+    "Generated TVMJS and Reckless artifacts are intentionally ignored/local unless a release explicitly publishes them with the required policy artifacts."
+  ],
+  "entries": [
+    {
+      "id": "lc0-small-t1",
+      "family": "lc0",
+      "uiLabel": "Lc0 Small",
+      "status": "stable-default",
+      "versionOrSource": "t1-256x10-distilled-swa-2432500",
+      "deploymentStatus": "tracked-symlink-and-pack",
+      "manifestUrl": "/models/lc0/manifest.json",
+      "primaryUrls": [
+        "/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx",
+        "/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx",
+        "/models/lc0/t1-256x10-distilled-swa-2432500.batch4.f16.onnx",
+        "/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.onnx",
+        "/models/lc0/t1-256x10-distilled-swa-2432500.batch16.f16.onnx",
+        "/models/lc0/t1-256x10-distilled-swa-2432500.batch32.f16.onnx",
+        "/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json"
+      ],
+      "notes": "ORT WebGPU/WASM remains the default evaluator path. lc0web pack shards are tracked; ONNX entries are staged symlinks."
+    },
+    {
+      "id": "lc0-bt4-it332",
+      "family": "lc0",
+      "uiLabel": "Lc0 BT4-it332",
+      "status": "experimental-local-asset",
+      "versionOrSource": "BT4-1024x15x32h-swa-6147500-policytune-332",
+      "deploymentStatus": "tracked-manifest-only-local-blob",
+      "manifestUrl": "/models/lc0/manifest.json",
+      "primaryUrls": [
+        "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx"
+      ],
+      "additionalManifestUrls": [
+        "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch1.f16.onnx",
+        "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.onnx"
+      ],
+      "notes": "Current Arena BT4 option uses the batch-4 f16 export with WebGPU-only worker, leaf batch size 4, pipeline depth 1, and tree reuse. The large ONNX blobs are not tracked in git."
+    },
+    {
+      "id": "lc0-bt4-legacy",
+      "family": "lc0",
+      "uiLabel": "Lc0 BT4 legacy",
+      "status": "historical-research",
+      "versionOrSource": "BT4-1024x15x32h-swa-6147500",
+      "deploymentStatus": "tracked-manifest-only-local-blob",
+      "manifestUrl": "/models/lc0/manifest.json",
+      "primaryUrls": [
+        "/models/lc0/BT4-1024x15x32h-swa-6147500.batch1.f16.onnx"
+      ],
+      "notes": "Legacy BT4 manifest entry retained for compatibility/research; not the current Arena BT4 target."
+    },
+    {
+      "id": "lc0-tvmjs-webgpu",
+      "family": "lc0",
+      "uiLabel": "LC0 TVMJS whole-model WebGPU",
+      "status": "research-only",
+      "versionOrSource": "TVMJS exports for t1 and BT4-it332 when locally staged",
+      "deploymentStatus": "ignored-local-runtime-artifacts",
+      "manifestUrl": null,
+      "primaryUrls": [
+        "/runtimes/lc0-tvmjs-webgpu/"
+      ],
+      "notes": "Source/tooling exists in the repo, but public/runtimes/lc0-tvmjs-webgpu is ignored and no TVMJS runtime artifacts are tracked. Not in the stable runtime registry."
+    },
+    {
+      "id": "stockfish-18.0.7",
+      "family": "stockfish",
+      "uiLabel": "Stockfish",
+      "status": "release",
+      "versionOrSource": "stockfish@18.0.7; nmrugg/stockfish.js commit 32d4b5ae40c01db88219bfbe2b82dbe6dec93832",
+      "deploymentStatus": "tracked-deployable",
+      "manifestUrl": "/stockfish/stockfish-18.0.7.manifest.json",
+      "sourceArchiveUrl": "/stockfish/stockfish-18.0.7-corresponding-source.tar.gz",
+      "primaryUrls": [
+        "/stockfish/stockfish-18-lite-single.js",
+        "/stockfish/stockfish-18-lite.js",
+        "/stockfish/stockfish-18-single.js",
+        "/stockfish/stockfish-18.js"
+      ],
+      "notes": "Lite single-thread is the default Stockfish opponent; threaded variants require cross-origin isolation."
+    },
+    {
+      "id": "viridithas-wasip1",
+      "family": "viridithas",
+      "uiLabel": "Viridithas",
+      "status": "experimental",
+      "versionOrSource": "cosmobobak/viridithas commit 20d7402065cae084715183e019fdd18089e2dfac; atlantis-b800.nnue.zst v106",
+      "deploymentStatus": "tracked-deployable",
+      "manifestUrl": "/viridithas/viridithas-wasip1.manifest.json",
+      "sourceArchiveUrl": "/viridithas/viridithas-wasip1-corresponding-source.tar.gz",
+      "primaryUrls": [
+        "/viridithas/viridithas.wasm",
+        "/viridithas/viridithas-simd128.wasm"
+      ],
+      "notes": "Patched wasm32-wasip1 scalar/SIMD builds with embedded network."
+    },
+    {
+      "id": "berserk-emscripten-single-thread",
+      "family": "berserk",
+      "uiLabel": "Berserk Emscripten",
+      "status": "experimental",
+      "versionOrSource": "jhonnold/berserk tag 14 commit 8ae895a6151695be4a50d4fb65b0c131659c513a; network berserk-9b84c340af7e.nn",
+      "deploymentStatus": "tracked-deployable-with-provenance-caution",
+      "manifestUrl": "/berserk/berserk-emscripten-single-thread.manifest.json",
+      "sourceArchiveUrl": "/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz",
+      "primaryUrls": [
+        "/berserk/berserk-emscripten.js",
+        "/berserk/berserk-emscripten.wasm",
+        "/berserk/berserk-emscripten.data"
+      ],
+      "notes": "Single-thread Emscripten worker build. Distribution policy still flags network license/provenance confirmation as a release concern."
+    },
+    {
+      "id": "plentychess-emscripten-single-thread",
+      "family": "plentychess",
+      "uiLabel": "PlentyChess Emscripten",
+      "status": "experimental",
+      "versionOrSource": "Yoshie2000/PlentyChess commit 58d8ba2505ae2b49f48dd410d214a457d15c12c6, version 7.0.66; network 0134-2r24-s0.bin",
+      "deploymentStatus": "tracked-deployable",
+      "manifestUrl": "/plentychess/plentychess-emscripten-single-thread.manifest.json",
+      "sourceArchiveUrl": "/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz",
+      "primaryUrls": [
+        "/plentychess/plentychess-emscripten.js",
+        "/plentychess/plentychess-emscripten.wasm",
+        "/plentychess/plentychess-emscripten.data"
+      ],
+      "notes": "Single-thread Emscripten worker build with processed NNUE preloaded in .data."
+    },
+    {
+      "id": "reckless-wasi",
+      "family": "reckless",
+      "uiLabel": "Reckless",
+      "status": "experimental-local-asset",
+      "versionOrSource": "codedeliveryservice/Reckless commit 0010617448bd plus local browser/WASI patches; full v60 and lite v53 candidates",
+      "deploymentStatus": "ignored-local-generated-artifacts",
+      "manifestUrl": null,
+      "sourceArchiveUrl": null,
+      "primaryUrls": [
+        "/reckless/reckless.wasm",
+        "/reckless/reckless-simd128.wasm",
+        "/reckless/reckless-relaxed-simd128.wasm",
+        "/reckless/reckless-browser-api.wasm",
+        "/reckless/reckless-browser-api-simd128.wasm",
+        "/reckless/reckless-browser-api-simd128-external.wasm",
+        "/reckless/reckless-v60-7f587dfb.nnue",
+        "/reckless/reckless-v53-l1-512.wasm"
+      ],
+      "notes": "README/NOTICE are tracked, but generated WASM/NNUE/source archives are ignored. Production builds must publish scalar, SIMD, relaxed-SIMD artifacts and matching corresponding-source archives together. Relaxed SIMD remains explicit/experimental and never the default."
+    }
+  ]
+}
