@@ -569,6 +569,14 @@ def main() -> int:
 
     def build_relax_inner(relax: Any, target: Any) -> Any:
         build_mod = mod
+        if args.no_fuse_ops:
+            with tvm.target.Target(target):
+                build_mod = tvm.ir.transform.Sequential([
+                    relax.transform.LegalizeOps(),
+                    relax.transform.AnnotateTIROpPattern(),
+                    relax.transform.FoldConstant(),
+                ])(mod)
+            result["fuse_ops_skipped"] = True
         if args.dlight:
             try:
                 from tvm import dlight as dl  # type: ignore
@@ -623,14 +631,7 @@ def main() -> int:
             # functions; relax.build's default pipeline skips already-scheduled
             # functions in DefaultGPUSchedule.
             with tvm.target.Target(target):
-                if args.no_fuse_ops:
-                    build_mod = tvm.ir.transform.Sequential([
-                        relax.transform.LegalizeOps(),
-                        relax.transform.AnnotateTIROpPattern(),
-                        relax.transform.FoldConstant(),
-                    ])(mod)
-                    result["fuse_ops_skipped"] = True
-                else:
+                if not args.no_fuse_ops:
                     build_mod = relax.get_pipeline("zero")(mod)
                 prim_func_names = [
                     gv.name_hint
@@ -661,7 +662,8 @@ def main() -> int:
                 "functions": dict(sorted(rule_attribution.items())),
                 **({"ruleFailures": rule_failures} if rule_failures else {}),
             }
-        return relax.build(build_mod, target=target)
+        relax_pipeline = None if (args.no_fuse_ops or args.dlight) else "default"
+        return relax.build(build_mod, target=target, relax_pipeline=relax_pipeline)
 
     executable = run_step(result, "relax_build_target", build_relax) if mod is not None else None
     if executable is not None:
