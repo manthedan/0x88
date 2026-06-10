@@ -216,6 +216,19 @@ Every engine family should have one card with these fields:
 - **Validation:** `npm run viridithas:smoke`, browser persistent smoke JSON, arena smoke games, benchmark JSON artifacts.
 - **Open work:** graceful stop/abort, larger correctness gauntlet, repeated persistent benchmarks, direct browser API feasibility only if Viridithas remains interesting after SIMD/persistence tuning.
 
+## Next CPU engine inclusion backlog
+
+The next best browser CPU engine inclusions, after the already-integrated Berserk and Viridithas paths, are:
+
+1. **Koivisto** — top intake target. Independent, strong C++ UCI engine and a useful non-Stockfish comparison point. Start with an Emscripten single-thread UCI worker proof, then decide whether a persistent worker or SIMD follow-up is worth the artifact/runtime complexity. Source candidate: `https://github.com/Luecx/Koivisto`.
+2. **Patricia** — second target because it adds a differentiated playing style rather than just more strength coverage. Intake goal is an aggressive/personality engine card for Arena/Analysis, with depth/movetime behavior benchmarked separately from Elo claims. Source candidate: `https://github.com/Adam-Kulju/Patricia`.
+3. **Caissa** — third target. Strong from-scratch C++ UCI engine with custom neural evaluation; valuable if its network/model assets can be packaged cleanly for browser distribution. First pass should measure network size, initialization cost, and whether embedded vs sidecar assets are viable. Source candidate: `https://github.com/Witek902/Caissa`.
+4. **RubiChess** — fourth target. Mature C++ UCI engine and likely straightforward Emscripten intake; include after the more differentiated Koivisto/Patricia/Caissa candidates unless its build turns out materially easier. Source candidate: `https://github.com/Matthies/RubiChess`.
+
+Do **not** prioritize AsmFish for browser inclusion unless a special-purpose experiment needs it: its assembly-first implementation is a poor fit for WASM and overlaps the existing Stockfish.js baseline. Stockfish-family derivatives such as ShashChess, Crystal, and SugaR can be revisited later as named analysis/personality variants, but they are lower priority than the independent CPU engines above.
+
+Each backlog item still needs the normal onboarding card before selector/UI work: exact upstream pin, license and network provenance, expected artifact URLs, build command, source/archive policy, smoke plan, and benchmark protocol.
+
 ## Onboarding process for a new engine family
 
 Use this checklist before adding a family to the staged selectors.
