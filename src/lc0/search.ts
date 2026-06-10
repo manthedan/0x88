@@ -58,6 +58,7 @@ function lc0ToSearchEvaluation(board: BoardState, lc0: Lc0Evaluation, context?: 
     if (move) policy.set(moveToActionId(move), prior.prior);
   }
   const evaluation: Evaluation & { timing?: unknown } = { policy, wdl: lc0.wdl };
+  if (Number.isFinite(lc0.mlh)) evaluation.movesLeft = lc0.mlh;
   const timing = (lc0 as { timing?: unknown }).timing;
   if (timing !== undefined) evaluation.timing = timing;
   return evaluation;

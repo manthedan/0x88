@@ -152,15 +152,139 @@ the largest perf lever found this campaign, and it stacks with nothing dying:
 it's search-side and applies to every evaluator lane. In-game BT4 at v16 is
 ~137 ms/move on this device.
 
+### Int8 weight-storage quantization (goal 1 of the quantization lane, same day)
+
+`scripts/lc0_quantize_tensor_cache.py` converts the detached f16 tensor-cache
+to symmetric per-output-channel int8 (`q = round(w/scale)`, f32 scales in the
+shard; tensors with ndim<2 or ≤4096 elements stay raw f16 — 46 of 195).
+Staged as `f16/v4-int8` (`--params=detached-quant-int8`); the smoke page
+fetches, dequantizes on CPU (`Float16Array` fast path), and uploads f16 —
+**GPU compute unchanged**, only storage/transfer shrinks.
+
+- **Size: 370 → 186 MB raw (0.503)**; staged bundle compressed:
+  **155.6 MB Brotli vs 322.8 MB for the f16 bundle (−52%)**
+  (`bt4it332_tvmjs_bundle_footprint_v4_int8.json`). Load path is also
+  *faster* end-to-end than f16 (fetch 360 ms + dequant+upload 458 ms ≈ 0.8 s
+  vs 1.45 s) because half the bytes move.
+- Quantization error: median tensor relRMS 0.85%, worst 3.8% (the [256,8192]
+  smolgen family); max abs weight err 0.055.
+- Drift vs f16 build: max native top-prior diff `0.0088 → 0.0172`; vs
+  unquantized ORT f16 `0.0234`. Eval flips remain confined to near-tie rows
+  (one new: startpos g1f3/d2d4, gap 0.0066) — tie-epsilon 0.01 gate passes.
+- **Stockfish-scored UHO16×2 bridge: cp delta 0/0/0 on all 30 scored rows**
+  (`bt4it332_int8params_fixed_suite_bridge_uho16_v16_r2_sfdepth3.smoke.json`).
+  Search match 30/32; the 2 misses are the known-unstable FEN, and unlike the
+  f16 build they are NOT visit ties there (d7d5 reached 4 visits) — int8
+  drift genuinely moved that search to the ~40 cp-worse of two winning moves.
+  That is the entire measured strength cost so far.
+- **Mixed precision did not help**: `--max-rel-rms 0.02` (reverts the 18
+  worst tensors to f16, 222 MB) left drift unchanged-to-worse (max prior diff
+  0.021, ORT diff 0.0236). Per-tensor relRMS does not predict output drift —
+  the drift is distributed, not concentrated. v5-int8mx parked; v4-int8 is
+  the operating point.
+
+Verdict: int8 weight storage halves the download for a strength cost that is
+invisible to Stockfish depth-3 scoring on the fixed suite and visible only as
+near-tie reshuffling. Worth carrying forward as the default BT4 distribution
+format candidate, pending a game-level A/B (int8 vs f16 self-play) before any
+promotion decision.
+
+### Quantized kernels (goal 2) — speed thesis falsified by existing data
+
+The case for q4f16-style in-kernel dequant rests on matmuls being
+weight-bandwidth-bound. They are not, on this device: per-invoke GPU cost is
+**linear in batch** (b4 `40.8 ms` → b8 `84.9 ms`) while weight reads are
+constant per invoke (370 MB regardless of batch). If weight bandwidth
+dominated, doubling the batch would amortize it and cost far less than 2× —
+it costs exactly 2×. Time scales with activations/compute, i.e. the kernels
+are schedule-bound (consistent with the roofline gap finding), so int8/q4
+weights cannot meaningfully speed up invokes here. A naive in-graph dequant
+(astype×scale materialized per invoke) would *add* a ~370 MB round-trip and
+likely regress.
+
+What goal 2 still buys if implemented properly (dequant fused into matmul
+prologue, MLC-style decode TIR): **GPU weight residency 370 → 186 MB (or ~93
+at q4)** — relevant for low-memory devices and multi-model pages, not speed
+on this hardware. Cost: a relax rewrite changing `main`'s signature to
+(int8 weights + scales) on the ONNX import path, plus verifying dlight fuses
+the decode (TVM-side risk the Tiny lane showed is real). Parked as
+low-ROI-on-this-device with a written revisit trigger: pursue if (a) a
+weight-bandwidth-bound device shows up in coverage (check batch-linearity
+there first — it's a one-run test), or (b) GPU memory pressure becomes a
+product constraint.
+
 ### Remaining levers for BT4 perf
 
-Batching, pipelining, and single-config schedule tuning are all measured
-dead; tree reuse is measured and already on in the arena paths (ensure any
+Batching, pipelining, single-config schedule tuning, and quantized-kernel
+speedups are all measured dead on this device; tree reuse is measured
+(~halves in-game move cost) and already on in the arena paths (ensure any
 future TVMJS game integration passes `reuseTree: true`). What's left:
-per-function dlight config dispatch / metaschedule (bounded, unproven),
-quantization (q4f16/int8 — attacks both the 323 MB download and memory
-bandwidth; strength cost unknown), and accepting ~137 ms/move in-game at v16
-as the BT4 operating point.
+per-function dlight config dispatch / metaschedule (bounded, unproven), and
+accepting ~137 ms/move in-game at v16 (int8-params build ≈ same) as the BT4
+operating point.
+
+### int4 storage (2026-06-10) — not viable with symmetric linear quant
+
+Quantizer gained `--bits 4 --group-size G` (group-wise symmetric int4, packed
+offset-binary nibbles; page decodes them). Both legs parity-gated at b8/v16:
+
+| Leg | raw bytes | max native prior drift | maxQ drift | search vs ORT |
+| --- | ---: | ---: | ---: | --- |
+| f16 (reference) | 370 MB | 0.0088 | — | 8/8 |
+| int8-ch0 (v4) | 186 MB | 0.0172 | 0.0035 | 6/8 (ties) |
+| int4-g64 (v6) | 105 MB | **0.2334** | **0.102** | 4/8 |
+| int4-g32 (v7) | 116 MB | 0.122 | 0.0254 | 6/8 (gate fail) |
+
+int4 drift is 7–13× int8's and reaches Q/MLH outputs (g64: maxQ 0.10, MLH off
+by 14.7 moves) — real strength damage, not tie reshuffling. Halving the group
+size recovers only ~half the damage for +11 MB. **Verdict: int8-ch0 is the
+storage sweet spot; symmetric linear int4 is parked** (revisit only with
+codebook/NF4-style quant or outlier-aware schemes).
+
+### Small debts cleared (2026-06-10)
+
+- **"Stockfish scorer bug" was corrupt suite data**: UHO-lite row 9
+  (`r1bqkbnr/.../1b1PP3/...`) is an impossible position (three black bishops,
+  eight pawns — a mis-transcription of `r1bqk1nr`, the 1.e4 e5 2.Nf3 Nc6
+  3.Nc3 Bb4 4.d4 line). The browser Stockfish build rejects it (instant null
+  reply); native SF tolerates it; it is also why this exact row has been
+  search-unstable since the t1 campaign. Corrected suite staged at
+  `eval/opening_suite_uho_lite_v2.fen` (v1 left untouched in
+  leelaweb-arena-diagnostics for historical comparability); the page scorer
+  now annotates null replies with a reason.
+- **`requiredLimits` adopted** (Tiny-lane pattern): the smoke page now
+  requests the adapter's storage/buffer/workgroup limits ahead of non-Apple
+  coverage.
+- **b1 WDL/MLH readback fixed at the source**: patched the tvmjs runtime's
+  `deviceCopyFromGPU` to pad unaligned GPU→CPU copies to 4 bytes within the
+  source buffer (commit `044cbd0d4` in `.deps/tvm-webgpu-src`, bundle rebuilt,
+  runtimes restaged; page-side skip guards removed). b1 now reads WDL (6 B)
+  and MLH (2 B) and **b1 search parity is runnable** —
+  `bt4it332_tvmjs_b1_aligned_readback_smoke.json` (eval 4/4, search gate
+  green). The runbook's documented b1 limitation is closed.
+
+### MLH-aware move selection (2026-06-10, opt-in)
+
+The moves-left head was verified parity-accurate all campaign but dropped at
+`lc0ToSearchEvaluation` — selection never used it. Now plumbed:
+`Evaluation.movesLeft` → `Node.m` (set at expansion) → lc0-style utility in
+`ClassicPUCTPolicy.scoreEdge`:
+
+```
+utility = clamp(slope·(childM − parentM), ±maxEffect) · −sign(q)
+          · (scaledFactor·|q| + quadraticFactor·q²),  gated on |q| ≥ threshold
+```
+
+Defaults mirror lc0 (slope 0.0027, maxEffect 0.0345, threshold 0.8, scaled
+1.65, quadratic −0.65); **off by default** (`movesLeftMaxEffect: 0`).
+Approximation note: uses each node's own MLH estimate, not lc0's
+subtree-averaged M backup. Enabled via search option `movesLeftMaxEffect`,
+smoke page param `movesLeftEffect` / driver `--moves-left-effect` (applied to
+both searchers so comparisons stay matched). Unit test
+`tests/lc0_moves_left_utility.test.mjs` proves the shorter-win preference
+flips on with the flag; all 30 existing search tests pass. The |q| ≥ 0.8 gate
+means opening-suite evidence is unaffected by construction. Remaining:
+strength A/B in decisive endings before enabling anywhere by default.
 
 ## Known gaps / cautions
 

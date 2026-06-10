@@ -120,6 +120,13 @@ export interface SearchOptions {
   butterflyWeight?: number;
   butterflyDecay?: number;
   butterflyMaxBonus?: number;
+  /** Moves-left-head utility (lc0-style): prefer shorter wins / longer losses.
+   * 0 (default) disables. Requires an evaluator that reports movesLeft. */
+  movesLeftMaxEffect?: number;
+  movesLeftSlope?: number;
+  movesLeftThreshold?: number;
+  movesLeftScaledFactor?: number;
+  movesLeftQuadraticFactor?: number;
 }
 export interface GumbelRootOptions { candidateCount?: number; seed?: number; gumbelScale?: number; qWeight?: number; priorWeight?: number; visitPenalty?: number; }
 
@@ -228,6 +235,8 @@ export interface Node {
    * this preserves the inbound edge visit count so a target-visit search does
    * not add a full fresh budget on top of already-reached nodes. */
   visits?: number;
+  /** Moves-left-head estimate from this node's own evaluation (plies). */
+  m?: number;
   isRoot?: boolean;
 }
 
@@ -257,6 +266,11 @@ export interface SearchPolicyContext {
   butterflyDecay: number;
   butterflyMaxBonus: number;
   butterflyTable?: Map<string, number>;
+  movesLeftMaxEffect: number;
+  movesLeftSlope: number;
+  movesLeftThreshold: number;
+  movesLeftScaledFactor: number;
+  movesLeftQuadraticFactor: number;
 }
 
 export interface SearchPolicy {
@@ -372,6 +386,23 @@ export function edgeQForParentInNode(edge: Edge, node: Node | undefined, context
   return parentQForNode(node, context.fpu) - context.fpuReduction * Math.sqrt(visitedPolicyMass(node));
 }
 
+/** lc0-style moves-left utility: prefer shorter wins and longer losses in
+ * decided positions. Uses each node's own moves-left-head estimate (`node.m`
+ * from its expansion eval) rather than lc0's subtree-averaged M — a
+ * documented approximation. Zero for unvisited/unexpanded children, when the
+ * effect is disabled, or while |Q| is below the decisiveness threshold. */
+function movesLeftUtility(node: Node, edge: Edge, context: SearchPolicyContext): number {
+  if (context.movesLeftMaxEffect <= 0) return 0;
+  const childM = edge.child?.m;
+  const parentM = node.m;
+  if (childM === undefined || parentM === undefined || edge.visits <= 0) return 0;
+  const q = edgeQForParent(edge, 0);
+  if (Math.abs(q) < context.movesLeftThreshold) return 0;
+  const m = clamp(context.movesLeftSlope * (childM - parentM), -context.movesLeftMaxEffect, context.movesLeftMaxEffect);
+  const factor = context.movesLeftScaledFactor * Math.abs(q) + context.movesLeftQuadraticFactor * q * q;
+  return m * -Math.sign(q) * factor;
+}
+
 export class ClassicPUCTPolicy implements SearchPolicy {
   scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext): number {
     const parentVisits = node.edges.reduce((sum, e) => sum + edgeSelectVisits(e), 0);
@@ -379,7 +410,7 @@ export class ClassicPUCTPolicy implements SearchPolicy {
     const q = edgeQForParentInNode(edge, node, context);
     const sv = edgeSelectVisits(edge);
     const u = computeCpuct(context, parentVisits) * cpuctVarianceScale(edge, node.edges, context) * edge.prior * sqrtParent / (1 + sv);
-    return q + u + butterflyScore(edge, context);
+    return q + u + butterflyScore(edge, context) + movesLeftUtility(node, edge, context);
   }
 
   backup(path: Edge[], leafValue: number, context: SearchPolicyContext): void {
@@ -1122,6 +1153,7 @@ function finishExpansion(node: Node, moves: Move[], evaln: Evaluation, context: 
   const total = raw.reduce((a, b) => a + b, 0);
   const fallback = 1 / moves.length;
   node.evaluation = evaln;
+  if (Number.isFinite(evaln.movesLeft)) node.m = evaln.movesLeft;
   node.edges = moves.map((move, i) => {
     const actionId = moveToActionId(move);
     return {
@@ -1449,6 +1481,12 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     butterflyDecay: Math.max(0, Math.min(1, options.butterflyDecay ?? 0.995)),
     butterflyMaxBonus: Math.max(0, options.butterflyMaxBonus ?? 0.25),
     butterflyTable: (options.butterflyWeight ?? 0) === 0 ? undefined : new Map<string, number>(),
+    // lc0 search defaults: MovesLeftMaxEffect/Slope/Threshold/ScaledFactor/QuadraticFactor.
+    movesLeftMaxEffect: Math.max(0, options.movesLeftMaxEffect ?? 0),
+    movesLeftSlope: options.movesLeftSlope ?? 0.0027,
+    movesLeftThreshold: Math.max(0, options.movesLeftThreshold ?? 0.8),
+    movesLeftScaledFactor: options.movesLeftScaledFactor ?? 1.65,
+    movesLeftQuadraticFactor: options.movesLeftQuadraticFactor ?? -0.65,
   };
   const searchPolicy = options.searchPolicy ?? classicPuctPolicy;
   const stats = makeStats(visits);

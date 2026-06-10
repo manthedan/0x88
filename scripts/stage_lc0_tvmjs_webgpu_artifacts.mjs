@@ -110,8 +110,8 @@ const tvmjsRuntimeWasm = resolve(arg('tvmjs-runtime-wasm', join(tvmSrc, 'web/dis
 const manifestName = arg('manifest-name', 'manifest.json');
 const tensorCacheDir = optionalArgPath('tensor-cache-dir', 'LC0_TVMJS_TENSOR_CACHE_DIR');
 const paramsMode = arg('params', null);
-if (paramsMode === 'detached' && !tensorCacheDir) {
-  throw new Error('--params=detached requires --tensor-cache-dir so the staged manifest includes the tensor-cache sidecar required at runtime');
+if ((paramsMode === 'detached' || paramsMode === 'detached-quant-int8') && !tensorCacheDir) {
+  throw new Error(`--params=${paramsMode} requires --tensor-cache-dir so the staged manifest includes the tensor-cache sidecar required at runtime`);
 }
 
 mkdirSync(out, { recursive: true });
@@ -152,9 +152,13 @@ const manifest = {
   parameterStrategy: {
     current: paramsMode === 'detached'
       ? 'detached-tensor-cache'
+      : paramsMode === 'detached-quant-int8'
+      ? 'detached-quant-int8'
       : tensorCache ? 'embedded-wasm-plus-staged-tensor-cache' : 'embedded-in-per-batch-wasm',
     note: paramsMode === 'detached'
       ? 'Model wasm artifacts were built with --detach-params; weights live only in the tensor-cache sidecar and the browser must fetchTensorCache before invoking.'
+      : paramsMode === 'detached-quant-int8'
+      ? 'Detached params stored as int8-ch0 (+ raw f16 for small tensors) by lc0_quantize_tensor_cache.py; the browser fetches the sidecar, dequantizes to f16, and uploads before invoking. GPU compute is unchanged f16.'
       : tensorCache
       ? 'A TVM tensor-cache sidecar is staged for research comparison. Model wasm artifacts may still contain embedded params until the export flow detaches params before build.'
       : 'Current research staging embeds model weights in each batch-specific TVMJS wasm. Future release candidates should evaluate TVM tensor-cache weight separation before publication.',
