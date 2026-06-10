@@ -109,6 +109,10 @@ const tvmjsBundle = resolve(arg('tvmjs-bundle', join(tvmSrc, 'web/dist/tvmjs.bun
 const tvmjsRuntimeWasm = resolve(arg('tvmjs-runtime-wasm', join(tvmSrc, 'web/dist/wasm/tvmjs_runtime.wasm')));
 const manifestName = arg('manifest-name', 'manifest.json');
 const tensorCacheDir = optionalArgPath('tensor-cache-dir', 'LC0_TVMJS_TENSOR_CACHE_DIR');
+const paramsMode = arg('params', null);
+if (paramsMode === 'detached' && !tensorCacheDir) {
+  throw new Error('--params=detached requires --tensor-cache-dir so the staged manifest includes the tensor-cache sidecar required at runtime');
+}
 
 mkdirSync(out, { recursive: true });
 const files = [];
@@ -146,10 +150,10 @@ const manifest = {
     note: 'TVMJS/WebGPU whole-model export bundle. Runtime/parity/perf still require browser validation.',
   },
   parameterStrategy: {
-    current: arg('params', null) === 'detached'
+    current: paramsMode === 'detached'
       ? 'detached-tensor-cache'
       : tensorCache ? 'embedded-wasm-plus-staged-tensor-cache' : 'embedded-in-per-batch-wasm',
-    note: arg('params', null) === 'detached'
+    note: paramsMode === 'detached'
       ? 'Model wasm artifacts were built with --detach-params; weights live only in the tensor-cache sidecar and the browser must fetchTensorCache before invoking.'
       : tensorCache
       ? 'A TVM tensor-cache sidecar is staged for research comparison. Model wasm artifacts may still contain embedded params until the export flow detaches params before build.'
