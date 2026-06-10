@@ -973,14 +973,19 @@ async function run() {
   log('tvm instance initialized');
   const shouldFetchTensorCache = document.getElementById('tensorCache').checked || params.get('tensorCache') === '1';
   const tensorCacheBase = shouldFetchTensorCache ? tensorCacheUrl(manifest, base) : undefined;
+  const parameterStrategy = manifest.parameterStrategy?.current;
+  const genericTensorCacheFetch = shouldFetchTensorCache && parameterStrategy !== 'detached-quant-int8';
   let tensorCacheMetadata;
-  if (shouldFetchTensorCache) {
+  if (genericTensorCacheFetch) {
     if (!tensorCacheBase) throw new Error('tensorCache=1 requested but manifest.tensorCache is missing');
     await timed('tensorCacheFetchMs', () => tvm.fetchTensorCache(tensorCacheBase, tvm.webgpu()));
     tensorCacheMetadata = tvm.cacheMetadata ?? null;
     log('tensor cache fetched', { url: tensorCacheBase, metadata: tensorCacheMetadata });
+  } else if (shouldFetchTensorCache && parameterStrategy === 'detached-quant-int8') {
+    if (!tensorCacheBase) throw new Error('tensorCache=1 requested but manifest.tensorCache is missing');
+    log('generic tensor cache fetch skipped', { url: tensorCacheBase, reason: 'detached-quant-int8 sidecars require custom dequant loader' });
   }
-  const tensorCacheInfo = shouldFetchTensorCache ? { url: tensorCacheBase, metadata: tensorCacheMetadata ?? null } : undefined;
+  const tensorCacheInfo = shouldFetchTensorCache ? { url: tensorCacheBase, metadata: tensorCacheMetadata ?? null, genericFetchSkipped: !genericTensorCacheFetch && parameterStrategy === 'detached-quant-int8' } : undefined;
   tvm.beginScope();
   try {
     const sys = timedSync('systemLibMs', () => tvm.systemLib());
@@ -1006,7 +1011,7 @@ async function run() {
     const vm = timedSync('createVirtualMachineMs', () => tvm.createVirtualMachine(tvm.webgpu()));
     const vmMod = vm.getInternalModule();
     tvmDetachedParams = null;
-    if (manifest.parameterStrategy?.current === 'detached-tensor-cache' && manifest.tensorCache?.directory) {
+    if (parameterStrategy === 'detached-tensor-cache' && manifest.tensorCache?.directory) {
       const cacheUrl = checkedStagedRuntimeUrl(`${manifest.tensorCache.directory}/`, base, 'tensor cache').toString();
       await timed('tensorCacheFetchMs', () => tvm.fetchTensorCache(cacheUrl, tvm.webgpu()));
       // Repeat-load evidence: tvmjs persisted the shards into a Cache Storage
@@ -1044,7 +1049,7 @@ async function run() {
       if (!params.length) throw new Error('detached-tensor-cache manifest but no param_N tensors loaded');
       tvmDetachedParams = params;
       log('tensor cache loaded', { params: params.length, fetchMs: startupTimings.tensorCacheFetchMs, refetchMs: startupTimings.tensorCacheRefetchMs });
-    } else if (manifest.parameterStrategy?.current === 'detached-quant-int8' && manifest.tensorCache?.directory) {
+    } else if (parameterStrategy === 'detached-quant-int8' && manifest.tensorCache?.directory) {
       // int8 weight-storage sidecar (lc0_quantize_tensor_cache.py): fetch the
       // quantized shards, dequantize to f16 on the CPU, upload f16 tensors.
       // GPU compute is unchanged; only download/storage shrinks.

@@ -1,0 +1,43 @@
+From afea1003ecaad8cf8904ba5638b28c463e498c8b Mon Sep 17 00:00:00 2001
+From: manthedan <3868926+manthedan@users.noreply.github.com>
+Date: Wed, 10 Jun 2026 09:45:18 -0700
+Subject: [PATCH] fix: make StructuralEqual functor consistent with
+ StructuralHash on tensor content
+
+StructuralEqual::operator() passed skip_tensor_content=true while
+StructuralHash::operator() hashes tensor content. As an (hash, equal) pair
+for unordered containers this violates the map invariant: same-shape/dtype
+tensors with different data are 'equal' but hash differently. In the relax
+VM ExecBuilder constant pool this deduplicated distinct scalar constants
+(e.g. int64 0 vs 7) whenever buckets collided, producing wrong numerics in
+larger modules and run-to-run nondeterminism from byte-identical IR (bucket
+layout varies per process). Compare content in the functor.
+---
+ include/tvm/ffi/extra/structural_equal.h | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/include/tvm/ffi/extra/structural_equal.h b/include/tvm/ffi/extra/structural_equal.h
+index ec960a8..c3808cb 100644
+--- a/include/tvm/ffi/extra/structural_equal.h
++++ b/include/tvm/ffi/extra/structural_equal.h
+@@ -67,9 +67,17 @@ class StructuralEqual {
+    * \param lhs The left hand side Any object.
+    * \param rhs The right hand side Any object.
+    * \return True if the two Any values are structurally equal, false otherwise.
++   *
++   * \note This functor must stay consistent with ffi::StructuralHash, which
++   * hashes tensor CONTENT. Passing skip_tensor_content=true here made the
++   * (hash, equal) pair violate the unordered_map invariant: same-shape/dtype
++   * tensors with different data were "equal" but hashed differently, so
++   * bucket collisions in containers like the relax VM ExecBuilder constant
++   * pool deduplicated distinct constants (e.g. scalar 0 vs 7) into one slot,
++   * producing wrong numerics that vary with container layout across runs.
+    */
+   TVM_FFI_INLINE bool operator()(const Any& lhs, const Any& rhs) const {
+-    return Equal(lhs, rhs, false, true);
++    return Equal(lhs, rhs, false, false);
+   }
+ };
+
+--
+2.50.1 (Apple Git-155)

@@ -4,17 +4,21 @@
 > found and fixed in `3rdparty/tvm-ffi` (commit `afea100` in the tvm-ffi
 > checkout, bumped by `94398e51f` in `.deps/tvm-webgpu-src`):
 > `ffi::StructuralEqual::operator()` passed `skip_tensor_content=true` while
-> `ffi::StructuralHash::operator()` hashes tensor content. As the (hash,
-> equal) pair of the relax VM `ExecBuilder` constant-pool dedup map this
-> violates the unordered_map invariant — same-shape/dtype tensors with
-> different data are "equal" but hash differently — so on bucket collisions
-> distinct scalar constants deduplicated into one pool slot. The Tiny rank
-> clip executed `min(max(x, 7), 7)` (const 0 resolved to the const-7 tensor)
-> → constant 7s; the earlier "reads column 15" reading was an artifact of
-> periodic test data. Collisions only appear once the pool is large enough
-> (context-dependence) and depend on process-specific bucket layout (Bug B's
-> "byte-identical modules, varying outputs", incl. NaN when float consts
-> collided). The bisection method that localized it: companion-subgraph
+> `ffi::StructuralHash::operator()` hashes tensor content — an inconsistent
+> (hash, equal) functor pair, used by structural containers and direct
+> equality checks throughout the relax build path. Same-shape/dtype tensors
+> with different data compare "equal", so constant dedup somewhere in that
+> path merged distinct scalar constants: the Tiny rank clip executed
+> `min(max(x, 7), 7)` (const 0 resolved to a const-7 tensor) → constant 7s;
+> the earlier "reads column 15" reading was an artifact of periodic test
+> data. The merge only appears in large-enough modules (context-dependence)
+> and varies with process container layout (Bug B's "byte-identical modules,
+> varying outputs", incl. NaN when float consts collided). Note: a minimal
+> synthetic (512 distinct scalars through the VM const pool) does NOT
+> trigger on unpatched builds — libc++ maps pre-compare stored hashes before
+> key_eq, masking the broken equality there; the exact interior equality
+> path that bites in the 45-node cut was not pinpointed, but the revert
+> cycle proves causality end-to-end. The bisection method that localized it: companion-subgraph
 > binary search via `onnx.utils.extract_model` against a numpy oracle, then
 > instrumenting the surviving suspect with extra ONNX outputs (raw gather was
 > CORRECT, clip of those values was wrong → wrong const operand), then direct

@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { boardToFen, parseFen } from '../src/chess/board.ts';
 import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
+import { CachedEvaluator } from '../src/nn/evaluator.ts';
 import { searchRoot } from '../src/search/puct.ts';
 
 // Moves-left utility: in a decisively won position with two equal-Q,
@@ -44,7 +45,7 @@ function makeMockEvaluator() {
 }
 
 async function visitSplit(movesLeftMaxEffect) {
-  const result = await searchRoot(parseFen(ROOT_FEN), makeMockEvaluator(), {
+  const result = await searchRoot(parseFen(ROOT_FEN), new CachedEvaluator(makeMockEvaluator(), { maxEntries: 32 }), {
     visits: VISITS,
     temperature: 0,
     movesLeftMaxEffect,

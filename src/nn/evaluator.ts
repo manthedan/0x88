@@ -82,6 +82,7 @@ function cloneEvaluation(evaln: Evaluation): Evaluation {
     ...(evaln.regrets ? { regrets: new Map(evaln.regrets) } : {}),
     ...(evaln.risks ? { risks: new Map(evaln.risks) } : {}),
     ...(evaln.uncertainties ? { uncertainties: new Map(evaln.uncertainties) } : {}),
+    ...(Number.isFinite(evaln.movesLeft) ? { movesLeft: evaln.movesLeft } : {}),
   };
 }
 

@@ -1,0 +1,59 @@
+From 044cbd0d4c29768633fa958ec2be49b661f43afc Mon Sep 17 00:00:00 2001
+From: manthedan <3868926+manthedan@users.noreply.github.com>
+Date: Wed, 10 Jun 2026 08:53:01 -0700
+Subject: [PATCH] webgpu: pad unaligned GPU-to-CPU readback copies to 4 bytes
+
+WebGPU copyBufferToBuffer/getMappedRange require 4-byte-multiple sizes, which
+made small tensors (e.g. a 3-element f16 WDL head, 6 bytes) unreadable. Pad
+the copy within the source buffer's real size and store back only the
+requested bytes; throw the previous implicit failure explicitly when padding
+cannot fit.
+---
+ web/src/webgpu.ts | 21 ++++++++++++++++-----
+ 1 file changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/web/src/webgpu.ts b/web/src/webgpu.ts
+index 199fa1423..b42afc945 100644
+--- a/web/src/webgpu.ts
++++ b/web/src/webgpu.ts
+@@ -996,22 +996,33 @@ export class WebGPUContext {
+   ): void {
+     // Flush batched compute passes before the readback copy.
+     this.flushCommands();
+-    const gpuTemp = this.getOrCreateReadStagingBuffer(nbytes);
++    // WebGPU copy/map sizes must be 4-byte multiples, but small tensors
++    // (e.g. a 3-element f16 WDL head = 6 bytes) are not. Pad the copy within
++    // the source buffer's real size and store back only the requested bytes.
++    const fromBuffer = this.gpuBufferFromPtr(from);
++    const copyNbytes = Math.min((nbytes + 3) & ~3, fromBuffer.size - fromOffset);
++    if (copyNbytes % 4 !== 0 || copyNbytes < nbytes) {
++      throw new Error(
++        `GPU readback needs a 4-byte aligned copy; nbytes=${nbytes} cannot be padded ` +
++        `within the source buffer (size=${fromBuffer.size}, offset=${fromOffset})`
++      );
++    }
++    const gpuTemp = this.getOrCreateReadStagingBuffer(copyNbytes);
+
+     const copyEncoder = this.device.createCommandEncoder();
+     copyEncoder.copyBufferToBuffer(
+-      this.gpuBufferFromPtr(from),
++      fromBuffer,
+       fromOffset,
+       gpuTemp,
+       0,
+-      nbytes
++      copyNbytes
+     );
+     const copyCommands = copyEncoder.finish();
+     this.device.queue.submit([copyCommands]);
+
+     const readPromise = gpuTemp.mapAsync(GPUMapMode.READ).then(() => {
+-      const data = gpuTemp.getMappedRange(0, nbytes);
+-      this.memory.storeRawBytes(to, new Uint8Array(data));
++      const data = gpuTemp.getMappedRange(0, copyNbytes);
++      this.memory.storeRawBytes(to, new Uint8Array(data, 0, nbytes));
+       this.recycleReadStagingBuffer(gpuTemp);
+     });
+     // Chain with any existing pending read so sync() awaits all of them.
+--
+2.50.1 (Apple Git-155)
