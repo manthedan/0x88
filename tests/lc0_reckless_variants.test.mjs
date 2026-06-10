@@ -35,7 +35,7 @@ test('Reckless relaxed SIMD is explicit and separately feature-detected', () => 
   assert.equal(typeof supportsWasmRelaxedSimd(), 'boolean');
   assert.equal(recklessVariantFromParams(new URLSearchParams('recklessVariant=relaxed-simd')).wasmUrl, RECKLESS_RELAXED_SIMD_VARIANT.wasmUrl);
   assert.notEqual(defaultRecklessVariantKey(), 'relaxed-simd');
-  assert.equal(RECKLESS_VARIANTS.some((variant) => variant.key === 'relaxed-simd'), false);
+  assert.equal(RECKLESS_VARIANTS.some((variant) => variant.key === 'relaxed-simd'), true);
 });
 
 test('explicit relaxed SIMD falls back when the runtime cannot validate relaxed SIMD', async () => {

@@ -21,7 +21,7 @@ import { Lc0PuctSearcher } from './search.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
-import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
+import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, supportsWasmRelaxedSimd, type RecklessVariant } from './recklessVariants.ts';
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
 import { BerserkEngine } from './berserkEngine.ts';
@@ -641,7 +641,12 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
   if (family === 'berserk') return availableBerserkVariants().map((v) => ({ value: v.key, label: v.label }));
   if (family === 'plentychess') return availablePlentyChessVariants().map((v) => ({ value: v.key, label: v.label }));
-  return availableRecklessVariants().map((v) => ({ value: v.key, label: v.label }));
+  return availableRecklessVariants().map((v) => {
+    const status = recklessVariantAssetStatus(v);
+    const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
+    const suffix = unsupported ? ' (unsupported by this browser)' : status === 'missing' ? ' (asset missing)' : '';
+    return { value: v.key, label: `${v.label}${suffix}`, disabled: unsupported || status === 'missing' };
+  });
 }
 
 function defaultVariant(family: EngineFamily): string {
@@ -718,12 +723,12 @@ function renderRecklessRuntimeInfo(): void {
     const status = engine?.runtimeStatus();
     const mode = engine?.runtimeLabel() ?? fallbackMode;
     const asset = recklessVariantAssetStatus(variant);
-    if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
+    if (asset === 'unknown') void checkRecklessVariantAsset(variant, () => { renderEngineList(); renderRecklessRuntimeInfo(); });
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     const targetUrl = status?.wasmUrl ?? variant.wasmUrl;
     const assetUrlText = variant.nnueUrl ? `${targetUrl} + ${variant.nnueUrl}` : targetUrl;
     const loadText = formatRecklessBrowserApiLoadStatus(status?.browserApiLoad);
-    return `${variant.label} · ${mode} · ${sab} · ${assetText} · ${assetUrlText}${loadText ? ` · ${loadText}` : ''}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-browser-api-simd, reckless:build-browser-api-simd-external, or reckless:build-lite-wasi' : ''}`;
+    return `${variant.label} · ${mode} · ${sab} · ${assetText} · ${assetUrlText}${loadText ? ` · ${loadText}` : ''}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}${asset === 'missing' ? ' · build locally with npm run reckless:build-wasi, reckless:build-simd-wasi, reckless:build-relaxed-simd-wasi, reckless:build-browser-api-simd, reckless:build-browser-api-simd-external, or reckless:build-lite-wasi' : ''}`;
   });
   const viridithasRows = activeEngineRows().filter((row) => row.family === 'viridithas');
   const viridithasVariants = viridithasRows.length ? viridithasRows.map((row) => viridithasVariantForKey(row.variant)) : [REQUESTED_VIRIDITHAS_VARIANT];

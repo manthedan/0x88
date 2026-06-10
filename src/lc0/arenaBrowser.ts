@@ -22,7 +22,7 @@ import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { StockfishEngine, stockfishFlavorLabel, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
 import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
-import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
+import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, supportsWasmRelaxedSimd, type RecklessVariant } from './recklessVariants.ts';
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVariant, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
 import { BerserkEngine } from './berserkEngine.ts';
@@ -796,7 +796,9 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'plentychess') return availablePlentyChessVariants().map((v) => ({ value: v.key, label: v.label }));
   return availableRecklessVariants().map((v) => {
     const status = recklessVariantAssetStatus(v);
-    return { value: v.key, label: status === 'missing' ? `${v.label} (asset missing)` : v.label, disabled: status === 'missing' };
+    const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
+    const suffix = unsupported ? ' (unsupported by this browser)' : status === 'missing' ? ' (asset missing)' : '';
+    return { value: v.key, label: `${v.label}${suffix}`, disabled: unsupported || status === 'missing' };
   });
 }
 

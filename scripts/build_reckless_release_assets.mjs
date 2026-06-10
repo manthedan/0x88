@@ -108,8 +108,23 @@ buildVariant({
   },
 });
 
+buildVariant({
+  label: 'Reckless Full Relaxed SIMD experimental',
+  artifact: 'public/reckless/reckless-relaxed-simd128.wasm',
+  sourceArchive: 'public/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz',
+  workdir: '.local_engines/reckless-release-src-relaxed-simd',
+  command: 'npm run reckless:build-relaxed-simd-wasi',
+  cargoCommand: "RUSTFLAGS='-C target-feature=+simd128,+relaxed-simd' cargo build --release --no-default-features --target wasm32-wasip1",
+  env: {
+    RUSTFLAGS: `${process.env.RUSTFLAGS ? `${process.env.RUSTFLAGS} ` : ''}-C target-feature=+simd128,+relaxed-simd`,
+    RECKLESS_WASM_SIMD_NNUE: '1',
+  },
+});
+
 console.log('Reckless release assets ready:');
 console.log('  public/reckless/reckless.wasm');
 console.log('  public/reckless/reckless-simd128.wasm');
+console.log('  public/reckless/reckless-relaxed-simd128.wasm');
 console.log('  public/reckless/reckless-scalar-corresponding-source.tar.gz');
 console.log('  public/reckless/reckless-simd128-corresponding-source.tar.gz');
+console.log('  public/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz');
