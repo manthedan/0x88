@@ -21,7 +21,8 @@ import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVa
 import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, normalizeBerserkVariant, type BerserkVariant } from './berserkVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support } from './bt4Engine.ts';
-import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
@@ -41,6 +42,42 @@ let searcher: Lc0PuctSearcher | null = null;
 let mainEvaluator: Lc0OnnxEvaluator | null = null;
 let stockfishLite: StockfishEngine | null = null;
 let stockfishFull: StockfishEngine | null = null;
+
+function initialPerformanceDial(): PerformanceDial {
+  const raw = params.get('perfDial');
+  if (raw === 'eco' || raw === 'balanced' || raw === 'max') return raw;
+  try {
+    return loadPerformanceDial(typeof localStorage !== 'undefined' ? localStorage : undefined);
+  } catch {
+    return 'balanced';
+  }
+}
+
+// Multi-engine analysis runs all selected engines concurrently, so CPU budget
+// is split with the shared policy: every selected CPU engine is registered as
+// a participant before each run and threads divide deterministically (capped
+// single-thread engines pass their surplus to engines that can use it).
+const resourceBroker = new EngineResourceBroker({ policy: 'shared', dial: initialPerformanceDial() });
+const registeredBrokerEngines = new Set<string>();
+
+function syncBrokerParticipants(rows: EngineRow[]): void {
+  const desired = new Map<string, EngineFamily>();
+  for (const row of rows) {
+    if (engineResourceProfile(row.family).resourceClass !== 'cpu') continue;
+    desired.set(row.family === 'sf' ? `sf-${row.variant === 'full' ? 'full' : 'lite'}` : `${row.family}:${row.variant}`, row.family);
+  }
+  // Register the exact participant set for this run; stale entries skew shares.
+  for (const known of registeredBrokerEngines) {
+    if (!desired.has(known)) {
+      resourceBroker.unregister(known);
+      registeredBrokerEngines.delete(known);
+    }
+  }
+  for (const [engineId, family] of desired) {
+    resourceBroker.register(engineId, { ...engineResourceProfile(family) });
+    registeredBrokerEngines.add(engineId);
+  }
+}
 // Lc0 BT4 runs in its own worker (lazy, WebGPU-gated, disposable). See bt4Engine.ts.
 const bt4 = new Bt4WorkerSearcher();
 let ground: Ground | null = null;
@@ -347,13 +384,20 @@ function renderRecklessRuntimeInfo(): void {
   el('recklessRuntimeInfo').textContent = `Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'}`;
 }
 
+function threadedStockfishAvailable(): boolean {
+  return typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated === true && typeof SharedArrayBuffer !== 'undefined';
+}
+
 function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
-  // Constructor depth is just a default; each analyze() call passes the row depth.
+  // Constructor depth is just a default; each analyze() call passes the row
+  // depth and a broker-leased thread count. Analysis defaults to the threaded
+  // flavor whenever isolation allows it (flavor is fixed per page lifetime).
+  const threaded = threadedStockfishAvailable();
   if (kind === 'lite') {
-    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: 14 }, stockfishFlavorUrl('lite-single'));
+    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: 14 }, stockfishFlavorUrl(threaded ? 'lite-threaded' : 'lite-single'));
     return stockfishLite;
   }
-  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: 14 }, stockfishFlavorUrl('single'));
+  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: 14 }, stockfishFlavorUrl(threaded ? 'threaded' : 'single'));
   return stockfishFull;
 }
 
@@ -666,6 +710,7 @@ async function analyzeCurrent() {
   }
   const selectedLabels = rows.map((row) => row.family === 'lc0' ? `${rowLabel(row)} ${row.strength}v` : `${rowLabel(row)} d${row.strength}`).join(' + ');
   el('message').textContent = `Analyzing (${selectedLabels}, ${multiPv()} lines)…`;
+  syncBrokerParticipants(rows);
   try {
     const tasks: Promise<AnalysisLine[]>[] = [];
     for (const row of rows) {
@@ -678,8 +723,16 @@ async function analyzeCurrent() {
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
         const label = kind === 'lite' ? `SF Lite d${row.strength}` : `SF d${row.strength}`;
-        tasks.push(getStockfish(kind).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
-          .then((infos) => stockfishAnalysisLines(infos, fen, label)));
+        tasks.push(resourceBroker.acquire({ engineId: `sf-${kind}`, signal: controller.signal }).then(async (lease) => {
+          try {
+            const engine = getStockfish(kind);
+            engine.setOptions({ threads: lease.threads });
+            const infos = await engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal });
+            return stockfishAnalysisLines(infos, fen, label);
+          } finally {
+            lease.release();
+          }
+        }));
       } else if (row.family === 'viridithas') {
         const label = `${viridithasVariantForKey(row.variant).label} d${row.strength}`;
         const engine = getViridithasFor(row.variant);

@@ -23,7 +23,8 @@ import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, normalizeViridithasVa
 import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, normalizeBerserkVariant, type BerserkVariant } from './berserkVariants.ts';
 import { Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
-import { defaultStaticEngineVariant, engineFamilyOptions, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 type SeatId = 'A' | 'B';
@@ -110,6 +111,23 @@ const berserkByVariant = new Map<string, BerserkEngine>();
 const bt4 = new Bt4WorkerSearcher();
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
 let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
+
+function initialPerformanceDial(): PerformanceDial {
+  const raw = params.get('perfDial');
+  if (raw === 'eco' || raw === 'balanced' || raw === 'max') return raw;
+  try {
+    return loadPerformanceDial(typeof localStorage !== 'undefined' ? localStorage : undefined);
+  } catch {
+    return 'balanced';
+  }
+}
+
+// Arena turn-taking: the engine on move leases the full CPU budget; the idle
+// side holds zero threads. Threaded SF play stays opt-in via the threads cap
+// input (0 = auto/full broker grant, default 1 preserves rating-lane parity).
+const resourceBroker = new EngineResourceBroker({ policy: 'exclusive', dial: initialPerformanceDial() });
+resourceBroker.register('sf-lite', { ...engineResourceProfile('sf') });
+resourceBroker.register('sf-full', { ...engineResourceProfile('sf') });
 const engines = new Map<string, ArenaEngine>();
 const lc0Searchers = new Map<string, Lc0PuctSearcher>();
 const lastLc0SearchResults = new Map<string, Lc0SearchResult>();
@@ -498,9 +516,23 @@ function arenaCacheEntries(): number {
   return Math.max(0, Math.min(100000, Math.floor(Number(inputEl('cacheEntriesInput').value) || 0)));
 }
 
-function stockfishThreads(): number {
-  const requested = Math.max(1, Math.min(32, Math.floor(Number(inputEl('stockfishThreadsInput').value) || 1)));
+/** Manual SF threads cap from the UI; 0 means auto (resource broker decides). */
+function stockfishThreadsCap(): number {
+  const requested = Math.max(0, Math.min(32, Math.floor(Number(inputEl('stockfishThreadsInput').value) || 0)));
   return threadedStockfishAvailable() ? requested : 1;
+}
+
+/** Thread count to plan worker flavor/warmup around before any lease exists. */
+function stockfishThreadsPlanned(): number {
+  const cap = stockfishThreadsCap();
+  if (cap > 0) return cap;
+  return Math.max(1, Math.min(32, resourceBroker.cpuBudget()));
+}
+
+/** Per-search threads: the broker grant, narrowed by the manual cap when set. */
+function stockfishThreadsGranted(leaseThreads: number): number {
+  const cap = stockfishThreadsCap();
+  return Math.max(1, cap > 0 ? Math.min(cap, leaseThreads) : leaseThreads);
 }
 
 function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): string {
@@ -705,7 +737,7 @@ function threadedStockfishAvailable(): boolean {
 }
 
 function stockfishFlavorFor(kind: 'lite' | 'full'): StockfishFlavor {
-  const threaded = threadedStockfishAvailable() && stockfishThreads() > 1;
+  const threaded = threadedStockfishAvailable() && stockfishThreadsPlanned() > 1;
   if (kind === 'lite') return threaded ? 'lite-threaded' : 'lite-single';
   return threaded ? 'threaded' : 'single';
 }
@@ -714,10 +746,10 @@ function stockfishFlavorFor(kind: 'lite' | 'full'): StockfishFlavor {
 // each has its own lazily-created instance.
 function stockfishEngineFor(kind: 'lite' | 'full'): StockfishEngine {
   if (kind === 'lite') {
-    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: 4, threads: stockfishThreads() }, stockfishFlavorUrl(stockfishFlavorFor('lite')));
+    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: 4, threads: stockfishThreadsPlanned() }, stockfishFlavorUrl(stockfishFlavorFor('lite')));
     return stockfishLite;
   }
-  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: 4, threads: stockfishThreads() }, stockfishFlavorUrl(stockfishFlavorFor('full')));
+  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: 4, threads: stockfishThreadsPlanned() }, stockfishFlavorUrl(stockfishFlavorFor('full')));
   return stockfishFull;
 }
 
@@ -895,7 +927,8 @@ function refreshBerserkVariantUi(): void {
 
 function refreshStockfishControls(): void {
   inputEl('stockfishThreadsInput').disabled = running || !threadedStockfishAvailable();
-  inputEl('stockfishThreadsInput').value = String(stockfishThreads());
+  inputEl('stockfishThreadsInput').value = String(stockfishThreadsCap());
+  inputEl('stockfishThreadsInput').title = `0 = auto (broker grants ${resourceBroker.cpuBudget()} on this device, ${resourceBroker.getDial()} dial)`;
 }
 
 // Lc0 BT4 is WebGPU-only; disable/downgrade its staged option when WebGPU is unusable.
@@ -1011,12 +1044,18 @@ function buildEngines() {
   };
   const sf = (engineId: string, row: EngineRow, kind: 'lite' | 'full'): ArenaEngine['move'] => async (positions, signal) => {
     const engine = stockfishEngineFor(kind);
-    if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: stockfishThreads() });
-    else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: stockfishThreads() });
-    const fen = boardToFen(positions[positions.length - 1]);
-    const move = await engine.bestMove(fen, signal);
-    recordStockfishOutput(engineId, engines.get(engineId)?.name ?? (kind === 'lite' ? 'Stockfish Lite' : 'Stockfish'), fen, move, engine.lastInfo());
-    return move;
+    const lease = await resourceBroker.acquire({ engineId: `sf-${kind}`, signal });
+    try {
+      const threads = stockfishThreadsGranted(lease.threads);
+      if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads });
+      else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads });
+      const fen = boardToFen(positions[positions.length - 1]);
+      const move = await engine.bestMove(fen, signal);
+      recordStockfishOutput(engineId, engines.get(engineId)?.name ?? (kind === 'lite' ? 'Stockfish Lite' : 'Stockfish'), fen, move, engine.lastInfo());
+      return move;
+    } finally {
+      lease.release();
+    }
   };
   const recklessMove = (engineId: string, row: EngineRow, engine: RecklessEngine): ArenaEngine['move'] => async (positions, signal) => {
     if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
@@ -1063,7 +1102,8 @@ function buildEngines() {
   };
   const stockfishWarmup = (kind: 'lite' | 'full') => async (signal: AbortSignal) => {
     const engine = stockfishEngineFor(kind);
-    engine.setOptions({ depth: 1, movetimeMs: undefined, threads: stockfishThreads() });
+    // Planned (lease-free) threads so the pthread pool spawns before move one.
+    engine.setOptions({ depth: 1, movetimeMs: undefined, threads: stockfishThreadsPlanned() });
     await engine.bestMove(START_FEN, signal);
   };
   const recklessWarmup = (engine: RecklessEngine) => async (signal: AbortSignal) => {
@@ -1492,7 +1532,7 @@ function wireEvents() {
   el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
   el('stockfishThreadsInput').addEventListener('input', () => {
     if (running) return;
-    inputEl('stockfishThreadsInput').value = String(stockfishThreads());
+    inputEl('stockfishThreadsInput').value = String(stockfishThreadsCap());
     // Threads flips single<->threaded flavor (different wasm); rebuild on next use.
     disposeStockfish();
   });
@@ -1514,7 +1554,8 @@ async function init() {
   renderRecklessRuntimeInfo();
   renderViridithasRuntimeInfo();
   renderBerserkRuntimeInfo();
-  inputEl('stockfishThreadsInput').value = String(Math.max(1, Math.min(32, Math.floor(Number(params.get('sfThreads') ?? '1') || 1))));
+  // sfThreads=0 (or sfThreads=auto) hands thread selection to the resource broker.
+  inputEl('stockfishThreadsInput').value = String(Math.max(0, Math.min(32, Math.floor(Number(params.get('sfThreads') ?? '1') || 0))));
   refreshStockfishControls();
   void renderRuntimeBadge();
   buildEngines();

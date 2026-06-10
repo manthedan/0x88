@@ -77,6 +77,41 @@ function clampThreads(granted: number, profile: EngineResourceProfile): number {
   return Math.max(1, Math.min(Math.max(1, Math.floor(profile.maxThreads)), Math.floor(granted)));
 }
 
+export interface SharedParticipant {
+  engineId: string;
+  maxThreads: number;
+  weight?: number;
+}
+
+/**
+ * Deterministic shared-policy allocation: every participant with weight > 0
+ * gets a 1-thread baseline, then the remaining budget is dealt one thread at
+ * a time in weight-descending round-robin order to engines still under their
+ * `maxThreads` cap. Surplus stranded by capped engines (e.g. single-threaded
+ * WASI builds) therefore flows to engines that can use it.
+ */
+export function allocateSharedThreads(budget: number, participants: SharedParticipant[]): Map<string, number> {
+  const allocation = new Map<string, number>();
+  const eligible = participants.filter((participant) => (participant.weight ?? 1) > 0);
+  if (!eligible.length) return allocation;
+  for (const participant of eligible) allocation.set(participant.engineId, 1);
+  let remaining = Math.max(0, Math.floor(budget)) - eligible.length;
+  const order = [...eligible].sort((a, b) => (b.weight ?? 1) - (a.weight ?? 1) || a.engineId.localeCompare(b.engineId));
+  while (remaining > 0) {
+    let dealt = false;
+    for (const participant of order) {
+      if (remaining <= 0) break;
+      const current = allocation.get(participant.engineId)!;
+      if (current >= Math.max(1, Math.floor(participant.maxThreads))) continue;
+      allocation.set(participant.engineId, current + 1);
+      remaining -= 1;
+      dealt = true;
+    }
+    if (!dealt) break;
+  }
+  return allocation;
+}
+
 function abortError(): Error {
   const error = new Error('Resource lease request aborted');
   error.name = 'AbortError';
@@ -143,15 +178,14 @@ export class EngineResourceBroker {
     return count;
   }
 
-  private sharedGrant(profile: EngineResourceProfile): number {
-    const budget = this.cpuBudget();
-    let totalWeight = 0;
-    for (const candidate of this.profiles.values()) {
-      if (candidate.resourceClass === 'cpu') totalWeight += Math.max(0, candidate.weight ?? 1);
+  private sharedGrant(engineId: string, profile: EngineResourceProfile): number {
+    const participants: SharedParticipant[] = [];
+    for (const [id, candidate] of this.profiles) {
+      if (candidate.resourceClass !== 'cpu') continue;
+      participants.push({ engineId: id, maxThreads: candidate.maxThreads, weight: candidate.weight ?? 1 });
     }
-    const weight = Math.max(0, profile.weight ?? 1);
-    if (totalWeight <= 0 || weight <= 0) return 1;
-    return clampThreads(Math.floor((budget * weight) / totalWeight), profile);
+    const allocation = allocateSharedThreads(this.cpuBudget(), participants);
+    return clampThreads(allocation.get(engineId) ?? 1, profile);
   }
 
   private makeLease(engineId: string, profile: EngineResourceProfile, threads: number): ResourceLease {
@@ -179,7 +213,7 @@ export class EngineResourceBroker {
       const profile = this.profiles.get(next.engineId)!;
       const threads = this.policy === 'exclusive'
         ? clampThreads(this.cpuBudget(), profile)
-        : this.sharedGrant(profile);
+        : this.sharedGrant(next.engineId, profile);
       next.grant(this.makeLease(next.engineId, profile, threads));
     }
   }
@@ -201,7 +235,7 @@ export class EngineResourceBroker {
     }
 
     if (this.policy === 'shared') {
-      return this.makeLease(request.engineId, profile, this.sharedGrant(profile));
+      return this.makeLease(request.engineId, profile, this.sharedGrant(request.engineId, profile));
     }
 
     if (this.activeCpuLeases() === 0 && this.queue.length === 0) {

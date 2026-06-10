@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   EngineResourceBroker,
+  allocateSharedThreads,
   cpuThreadBudget,
   loadCalibratedThreads,
   loadPerformanceDial,
@@ -129,16 +130,47 @@ test('shared policy splits the budget across registered CPU participants', async
   b.release();
 });
 
-test('shared policy respects weights, profile clamps, and the 1-thread floor', async () => {
+test('shared policy redistributes surplus stranded by capped engines', async () => {
   const broker = new EngineResourceBroker({ policy: 'shared', environment: () => isolated(10) });
   broker.register('big', { resourceClass: 'cpu', maxThreads: 32, weight: 3 });
   broker.register('small', { resourceClass: 'cpu', maxThreads: 32, weight: 1 });
   broker.register('single', { resourceClass: 'cpu', maxThreads: 1, weight: 4 });
 
-  // budget 8, total weight 8 -> big floor(8*3/8)=3, small 1, single clamps to 1.
-  assert.equal((await broker.acquire({ engineId: 'big' })).threads, 3);
-  assert.equal((await broker.acquire({ engineId: 'small' })).threads, 1);
+  // budget 8: baseline 1 each, remainder 5 dealt weight-desc round-robin with
+  // 'single' capped at 1 -> big 4, small 3, single 1 (no stranded threads).
+  assert.equal((await broker.acquire({ engineId: 'big' })).threads, 4);
+  assert.equal((await broker.acquire({ engineId: 'small' })).threads, 3);
   assert.equal((await broker.acquire({ engineId: 'single' })).threads, 1);
+});
+
+test('allocateSharedThreads is deterministic, budget-conserving, and cap-aware', () => {
+  const allocation = allocateSharedThreads(8, [
+    { engineId: 'sf', maxThreads: 32 },
+    { engineId: 'reckless', maxThreads: 1 },
+    { engineId: 'viridithas', maxThreads: 1 },
+  ]);
+  assert.equal(allocation.get('sf'), 6);
+  assert.equal(allocation.get('reckless'), 1);
+  assert.equal(allocation.get('viridithas'), 1);
+
+  // Budget below participant count still grants the 1-thread baseline.
+  const tight = allocateSharedThreads(1, [
+    { engineId: 'a', maxThreads: 4 },
+    { engineId: 'b', maxThreads: 4 },
+  ]);
+  assert.equal(tight.get('a'), 1);
+  assert.equal(tight.get('b'), 1);
+
+  // All-capped participants stop the deal loop without spinning.
+  const capped = allocateSharedThreads(64, [
+    { engineId: 'a', maxThreads: 2 },
+    { engineId: 'b', maxThreads: 2 },
+  ]);
+  assert.equal(capped.get('a'), 2);
+  assert.equal(capped.get('b'), 2);
+
+  assert.equal(allocateSharedThreads(8, []).size, 0);
+  assert.equal(allocateSharedThreads(8, [{ engineId: 'mute', maxThreads: 8, weight: 0 }]).size, 0);
 });
 
 test('release is idempotent and drains at most one exclusive waiter', async () => {
