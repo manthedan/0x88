@@ -102,13 +102,39 @@ runbook lists as a promotion blocker; ratify thresholds before any promotion.
   124–150 ms. The progressive story (play on t1, swap to BT4) from the plan
   is clearly required for cold-start UX.
 
+### Dlight Matmul tile sweep at BT4 shapes (run same day — negative)
+
+`scripts/sweep_dlight_matmul_configs_bt4.sh` (BT4 variant of the t1 sweep:
+b8 detached-params builds, native-fixture parity with `--tie-epsilon 0.01`
+per leg, 5 profiled invokes — the timestamp-query profiler caps at 2048
+passes and BT4 is 341 passes/invoke, so 8 invokes overflows). Results in
+`artifacts/tvm/bt4it332_dlight_matmul_config_sweep.jsonl`; every leg parity
+7/8 + 1 tolerated tie:
+
+| Config | GPU ms/invoke | vs baseline |
+| --- | ---: | --- |
+| baseline (dlight default) | `84.80` | ≡ non-dlight `84.87` |
+| `vector_size=2` | build failed | same TIR legality wall as t1 (one config hits N=3/N=1858 heads) |
+| `micro_size_k=16` | `89.76` | +5.8% |
+| `block_size_y=16` | `92.48` | +9.1% |
+| `storage_align=true` | `102.92` | +21.4% |
+| `inner_x=true` | `90.86` | +7.1% |
+| `use_shared=false` | `143.96` | +69.8% |
+| `micro_size_x/y=8` | `87.31` | +3.0% |
+
+Verdict: the t1 "default config is a local optimum" result **transfers to
+1024-class shapes** — dlight defaults equal the naive schedule and every
+single-knob change is neutral-to-worse. Single-config tile tuning is now
+parked for BT4 too; anything further needs metaschedule-grade search or
+per-function config dispatch (to unlock vec2 on the big matmuls only).
+
 ### Remaining levers for BT4 perf
 
-Batching and pipelining are dead (GPU-saturated, linear). What's left:
-per-shape matmul schedule tuning at 1024-class shapes (the t1 dlight sweep
-verdict "parked low-ROI" was measured on 256-class shapes and does NOT
-automatically transfer — the 4 fused matmul families here are worth one
-metaschedule-grade attempt), and evaluation-count reduction (tree reuse).
+Batching, pipelining, and single-config schedule tuning are all measured
+dead. What's left: evaluation-count reduction (tree reuse between moves),
+per-function dlight config dispatch / metaschedule (bounded, unproven), and
+accepting ~0.25 s/move at v16 as the BT4 operating point — it already matches
+ORT.
 
 ## Known gaps / cautions
 
