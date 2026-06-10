@@ -1073,7 +1073,7 @@ function renderLines() {
     return `<li data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}">`
       + `<span class="score ${cls}">${htmlEscape(line.scoreText)}<br><span class="eng">${htmlEscape(line.engine)} · ${htmlEscape(line.detail)}</span></span>`
       + `<span class="pv">${htmlEscape(line.pvSan)}</span></li>`;
-  }).join('') || '<li class="small">no analysis yet</li>';
+  }).join('') || '<li class="small placeholder">No analysis yet — make a move or press Analyze.</li>';
 }
 
 function moveNumberPrefix(node: GameNode, force: boolean): string {

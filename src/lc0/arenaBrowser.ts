@@ -383,6 +383,7 @@ function applyLc0Preset(preset: Lc0ArenaPreset, options: { reload?: boolean } = 
     advanced.open = true;
   }
   setLc0PresetNote(preset);
+  refreshBudgetControls();
   refreshSeatControls();
   renderCacheInfo();
   resetLc0SearchTrees();
@@ -406,7 +407,7 @@ function installRuntimeAuditPanel(): void {
   window.addEventListener(BROWSER_RUNTIME_AUDIT_EVENT, (event) => {
     const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
     if (detail.family !== 'lc0') return;
-    el('runtimeAuditInfo').textContent = `LC0 runtime audit: ${formatBrowserRuntimeAudit(detail)}`;
+    el('runtimeAuditInfo').innerHTML = diagBlockHtml('LC0 audit', [htmlEscape(formatBrowserRuntimeAudit(detail))]);
   });
 }
 
@@ -968,6 +969,16 @@ function stockfishThreadsGranted(leaseThreads: number): number {
   return Math.max(1, cap > 0 ? Math.min(cap, leaseThreads) : leaseThreads);
 }
 
+/**
+ * One labeled diagnostics block: a muted label column plus mono/tabular-nums
+ * value lines, so live figures update in place instead of reflowing a long
+ * prose line. Lines are pre-escaped by callers via htmlEscape.
+ */
+function diagBlockHtml(label: string, valueLines: string[]): string {
+  const lines = valueLines.length ? valueLines : ['—'];
+  return lines.map((line, i) => `<span class="diag-label">${i === 0 ? htmlEscape(label) : ''}</span><span class="diag-value">${line}</span>`).join('');
+}
+
 function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): string {
   if (!metrics) return 'NN cache unavailable';
   return `NN cache ${metrics.entries}/${metrics.maxEntries} entries · ${metrics.hits} hit${metrics.hits === 1 ? '' : 's'} · ${metrics.misses} miss${metrics.misses === 1 ? '' : 'es'}`;
@@ -1004,9 +1015,9 @@ function engineRuntimeDiagnosticsText(): string {
     const row = rowForEngineId(id);
     const name = engines.get(id)?.name ?? id;
     if (row?.family === 'lc0' && row.variant !== 'bt4') {
-    const hybrid = lc0HybridConfigLabel();
-    return `${name}: ${budgetText(row)} · ${lc0RuntimeLabel()}${hybrid ? ` · ${hybrid}` : ''} · batch ${lc0BatchSize()} · pipeline depth ${lc0BatchPipelineDepth()} · ${cacheMetricsText(lc0Cache?.metrics())}`;
-  }
+      const hybrid = lc0HybridConfigLabel();
+      return `${name}: ${budgetText(row)} · ${lc0RuntimeLabel()}${hybrid ? ` · ${hybrid}` : ''} · batch ${lc0BatchSize()} · pipeline depth ${lc0BatchPipelineDepth()} · ${cacheMetricsText(lc0Cache?.metrics())}`;
+    }
     if (row?.family === 'lc0' && row.variant === 'bt4') return `${name}: ${budgetText(row)} · ${bt4.loaded ? `loaded ${bt4.backend || 'WebGPU'}` : 'lazy WebGPU worker'} · ${BT4_MODEL_NAME} · batch ${BT4_RECOMMENDED_SEARCH_BATCH_SIZE} · pipeline depth ${BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH} · eval cache ${arenaCacheEntries()} · ~${BT4_APPROX_MB}MB net · ${BT4_MODEL_URL}`;
     if (row?.family === 'tiny') return `${name}: ${budgetText(row)} · SquareFormer ${tinyRuntimeForVariant(row.variant)} · ${tinyHybridManifestStatusText()}`;
     if (row?.family === 'sf') {
@@ -1022,6 +1033,16 @@ function engineRuntimeDiagnosticsText(): string {
     if (row?.family === 'viridithas') {
       const variant = viridithasVariantForKey(row.variant);
       const engine = viridithasByVariant.get(viridithasCacheKey(variant));
+      return `${name}: ${budgetText(row)} · ${variant.label} · ${engine?.runtimeLabel() ?? 'not loaded'} · hash 16MB`;
+    }
+    if (row?.family === 'berserk') {
+      const variant = berserkVariantForKey(row.variant);
+      const engine = berserkByVariant.get(berserkCacheKey(variant));
+      return `${name}: ${budgetText(row)} · ${variant.label} · ${engine?.runtimeLabel() ?? 'not loaded'} · hash 16MB`;
+    }
+    if (row?.family === 'plentychess') {
+      const variant = plentyChessVariantForKey(row.variant);
+      const engine = plentyChessByVariant.get(plentyChessCacheKey(variant));
       return `${name}: ${budgetText(row)} · ${variant.label} · ${engine?.runtimeLabel() ?? 'not loaded'} · hash 16MB`;
     }
     return `${name}: diagnostics unavailable`;
@@ -1107,9 +1128,14 @@ function engineSearchDiagnosticsText(): string {
   return `Search diagnostics: ${parts.join(' | ')}`;
 }
 
+function diagnosticsHtml(label: string, text: string): string {
+  const value = text.replace(/^[^:]+:\s*/, '');
+  return diagBlockHtml(label, value.split(' | ').map(htmlEscape));
+}
+
 function renderEngineDiagnosticsInfo(): void {
-  el('cacheInfo').textContent = engineRuntimeDiagnosticsText();
-  el('searchTelemetryInfo').textContent = engineSearchDiagnosticsText();
+  el('cacheInfo').innerHTML = diagnosticsHtml('Engines', engineRuntimeDiagnosticsText());
+  el('searchTelemetryInfo').innerHTML = diagnosticsHtml('Search', engineSearchDiagnosticsText());
 }
 
 function searchTelemetryText(): string {
@@ -1425,8 +1451,8 @@ function recklessMissingAssetMessage(variants: RecklessVariant[]): string {
 
 function renderRecklessRuntimeInfo(): void {
   const rows = activeSeatRows().filter((row) => row.family === 'reckless');
-  if (!rows.length) { el('recklessRuntimeInfo').textContent = 'Reckless: not selected'; return; }
-  const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
+  el('recklessRuntimeInfo').hidden = !rows.length;
+  if (!rows.length) { el('recklessRuntimeInfo').textContent = ''; return; }
   const parts = rows.map((row) => {
     const variant = recklessVariantForKey(row.variant);
     const engine = recklessByVariant.get(recklessCacheKey(variant));
@@ -1436,9 +1462,9 @@ function renderRecklessRuntimeInfo(): void {
     if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     const loadText = formatRecklessBrowserApiLoadStatus(status?.browserApiLoad);
-    return `${variant.label} d${row.strength} · ${mode} · ${sab} · ${assetText}${loadText ? ` · ${loadText}` : ''}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
+    return `${variant.label} d${row.strength} · ${mode} · ${assetText}${loadText ? ` · ${loadText}` : ''}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
   });
-  el('recklessRuntimeInfo').textContent = `Reckless: ${[...new Set(parts)].join(' | ')}`;
+  el('recklessRuntimeInfo').innerHTML = diagBlockHtml('Reckless', [...new Set(parts)].map(htmlEscape));
 }
 
 function refreshRecklessVariantUi(): void {
@@ -1477,8 +1503,8 @@ function getViridithasFor(variantKey: string): ViridithasEngine {
 
 function renderViridithasRuntimeInfo(): void {
   const rows = activeSeatRows().filter((row) => row.family === 'viridithas');
-  if (!rows.length) { el('viridithasRuntimeInfo').textContent = 'Viridithas: not selected'; return; }
-  const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
+  el('viridithasRuntimeInfo').hidden = !rows.length;
+  if (!rows.length) { el('viridithasRuntimeInfo').textContent = ''; return; }
   const parts = rows.map((row) => {
     const variant = viridithasVariantForKey(row.variant);
     const engine = viridithasByVariant.get(viridithasCacheKey(variant));
@@ -1487,9 +1513,9 @@ function renderViridithasRuntimeInfo(): void {
     const asset = viridithasVariantAssetStatus(variant);
     if (asset === 'unknown') void checkViridithasVariantAsset(variant, renderViridithasRuntimeInfo);
     const assetText = asset === 'ok' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
-    return `${variant.label} d${row.strength} · ${mode} · ${sab} · ${assetText}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
+    return `${variant.label} d${row.strength} · ${mode} · ${assetText}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
   });
-  el('viridithasRuntimeInfo').textContent = `Viridithas: ${[...new Set(parts)].join(' | ')}`;
+  el('viridithasRuntimeInfo').innerHTML = diagBlockHtml('Viridithas', [...new Set(parts)].map(htmlEscape));
 }
 
 function refreshViridithasVariantUi(): void {
@@ -1531,16 +1557,17 @@ function getBerserkFor(variantKey: string): BerserkEngine {
 
 function renderBerserkRuntimeInfo(): void {
   const rows = activeSeatRows().filter((row) => row.family === 'berserk');
-  if (!rows.length) { el('berserkRuntimeInfo').textContent = 'Berserk: not selected'; return; }
+  el('berserkRuntimeInfo').hidden = !rows.length;
+  if (!rows.length) { el('berserkRuntimeInfo').textContent = ''; return; }
   const parts = rows.map((row) => {
     const variant = berserkVariantForKey(row.variant);
     const engine = berserkByVariant.get(berserkCacheKey(variant));
     const asset = berserkVariantAssetStatus(variant);
     if (asset === 'unknown') void checkBerserkVariantAsset(variant, renderBerserkRuntimeInfo);
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
-    return `${variant.label} d${row.strength} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
+    return `${variant.label} d${row.strength} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
-  el('berserkRuntimeInfo').textContent = `Berserk: ${[...new Set(parts)].join(' | ')}`;
+  el('berserkRuntimeInfo').innerHTML = diagBlockHtml('Berserk', [...new Set(parts)].map(htmlEscape));
 }
 
 function refreshBerserkVariantUi(): void {
@@ -1580,16 +1607,17 @@ function getPlentyChessFor(variantKey: string): PlentyChessEngine {
 
 function renderPlentyChessRuntimeInfo(): void {
   const rows = activeSeatRows().filter((row) => row.family === 'plentychess');
-  if (!rows.length) { el('plentychessRuntimeInfo').textContent = 'PlentyChess: not selected'; return; }
+  el('plentychessRuntimeInfo').hidden = !rows.length;
+  if (!rows.length) { el('plentychessRuntimeInfo').textContent = ''; return; }
   const parts = rows.map((row) => {
     const variant = plentyChessVariantForKey(row.variant);
     const engine = plentyChessByVariant.get(plentyChessCacheKey(variant));
     const asset = plentyChessVariantAssetStatus(variant);
     if (asset === 'unknown') void checkPlentyChessVariantAsset(variant, renderPlentyChessRuntimeInfo);
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
-    return `${variant.label} d${row.strength} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
+    return `${variant.label} d${row.strength} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
-  el('plentychessRuntimeInfo').textContent = `PlentyChess: ${[...new Set(parts)].join(' | ')}`;
+  el('plentychessRuntimeInfo').innerHTML = diagBlockHtml('PlentyChess', [...new Set(parts)].map(htmlEscape));
 }
 
 function refreshPlentyChessVariantUi(): void {
@@ -1942,10 +1970,19 @@ function setOpeningPreview(opening: ArenaOpening): void {
   renderBoard();
 }
 
+function refreshBudgetControls(): void {
+  const movetime = arenaBudgetMode() === 'movetime';
+  el('movetimeField').hidden = !movetime;
+  el('matchupNote').textContent = movetime
+    ? 'family → variant; every engine gets the same movetime per move (strength fields are ignored); colors alternate each game'
+    : 'family → variant → strength; colors alternate each game';
+}
+
 function refreshOpeningPreview(): void {
   const select = selectEl('startingPositionSelect');
   const textarea = el('openingText') as HTMLTextAreaElement;
   const custom = select.value === 'custom';
+  el('openingTextField').hidden = !custom;
   select.disabled = running;
   textarea.disabled = running || !custom;
   if (running) return;
@@ -2613,7 +2650,10 @@ function wireEvents() {
   for (const id of ['lc0InputBackendSelect', 'lc0EncoderKernelSelect', 'lc0LegalPriorsSelect']) {
     el(id).addEventListener('change', () => { markLc0PresetCustom(); renderCacheInfo(); if (!running && selectedLc0Runtime() !== 'onnx') void reloadLc0Evaluator(); });
   }
-  el('budgetModeSelect').addEventListener('change', () => resetLc0SearchTrees());
+  el('budgetModeSelect').addEventListener('change', () => {
+    refreshBudgetControls();
+    resetLc0SearchTrees();
+  });
   el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
   el('stockfishThreadsInput').addEventListener('input', () => {
     if (running) return;
@@ -2657,6 +2697,7 @@ async function init() {
   void refreshBt4Availability();
   void probeEngineLogos();
   wireEvents();
+  refreshBudgetControls();
   refreshOpeningPreview();
   await loadLc0Evaluator();
   void renderRuntimeBadge();
