@@ -57,6 +57,9 @@ h2{font-size:13px;margin:14px 0 0;text-transform:uppercase;letter-spacing:.04em;
 textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;border:1px solid var(--rule);border-radius:6px;padding:8px;margin-top:8px;resize:vertical}
 .small{font-size:12px;color:var(--muted)}
 @media(max-width:900px){main{grid-template-columns:1fr}}
+.diag-block{display:grid;grid-template-columns:84px 1fr;gap:2px 10px;margin:4px 0;font-size:12px;align-items:baseline}
+.diag-block .diag-label{color:var(--muted)}
+.diag-block .diag-value{font-family:var(--mono);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 details.runtime-details{margin:6px 0}
 details.runtime-details summary{cursor:pointer;font-size:12px;color:var(--muted)}
 details.runtime-details summary:hover{color:inherit}
@@ -87,7 +90,7 @@ details.runtime-details summary:hover{color:inherit}
     <h2>Matchup</h2>
     <select id="seatA" hidden></select><select id="seatB" hidden></select>
     <div id="arenaSeatList" class="engine-list" aria-label="Arena engine selectors"></div>
-    <div class="matchup-note small">family → variant → strength; colors alternate each game</div>
+    <div class="matchup-note small" id="matchupNote">family → variant → strength; colors alternate each game</div>
     <div class="row">
       <div class="field wide"><label for="lc0PresetSelect">LC0 engine preset</label>
         <select id="lc0PresetSelect"><option value="stable">Stable LC0 Small (ORT WebGPU/WASM fallback)</option><option value="benchmarked-small">Fast LC0 Small — best benchmarked eval path (research)</option><option value="custom">Custom / advanced</option></select></div>
@@ -114,8 +117,8 @@ details.runtime-details summary:hover{color:inherit}
       <div class="field"><label for="delayInput">Delay ms</label>
         <input id="delayInput" type="number" min="0" max="3000" step="50" value="250" /></div>
       <div class="field"><label for="budgetModeSelect">Budget</label>
-        <select id="budgetModeSelect"><option value="fixed">Fixed visits/depth</option><option value="movetime">Equal movetime</option></select></div>
-      <div class="field" id="movetimeField" hidden><label for="movetimeInput">Movetime ms</label>
+        <select id="budgetModeSelect"><option value="fixed">Fixed visits/depth</option><option value="movetime" selected>Equal movetime</option></select></div>
+      <div class="field" id="movetimeField"><label for="movetimeInput">Movetime ms</label>
         <input id="movetimeInput" type="number" min="10" max="60000" step="50" value="500" /></div>
       <div class="field"><label for="cacheEntriesInput">NN cache entries</label>
         <input id="cacheEntriesInput" type="number" min="0" max="100000" step="128" value="2048" /></div>
@@ -135,13 +138,13 @@ details.runtime-details summary:hover{color:inherit}
       <select id="plentychessVariantSelect"></select>
     </div>
     <details class="runtime-details"><summary>Runtime diagnostics</summary>
-      <div id="recklessRuntimeInfo" class="small">Reckless: detecting runtime…</div>
-      <div id="viridithasRuntimeInfo" class="small">Viridithas: detecting runtime…</div>
-      <div id="berserkRuntimeInfo" class="small">Berserk: detecting runtime…</div>
-      <div id="plentychessRuntimeInfo" class="small">PlentyChess: detecting runtime…</div>
-      <div id="cacheInfo" class="small">NN cache: loading…</div>
-      <div id="searchTelemetryInfo" class="small">LC0 tree: waiting for searches…</div>
-      <div id="runtimeAuditInfo" class="small">LC0 runtime audit: waiting for runtime selection…</div>
+      <div id="recklessRuntimeInfo" class="diag-block">Reckless: detecting runtime…</div>
+      <div id="viridithasRuntimeInfo" class="diag-block">Viridithas: detecting runtime…</div>
+      <div id="berserkRuntimeInfo" class="diag-block">Berserk: detecting runtime…</div>
+      <div id="plentychessRuntimeInfo" class="diag-block">PlentyChess: detecting runtime…</div>
+      <div id="cacheInfo" class="diag-block">NN cache: loading…</div>
+      <div id="searchTelemetryInfo" class="diag-block">LC0 tree: waiting for searches…</div>
+      <div id="runtimeAuditInfo" class="diag-block"><span class="diag-label">LC0 audit</span><span class="diag-value">waiting for runtime selection…</span></div>
     </details>
     <h2>Starting positions</h2>
     <div class="row">
