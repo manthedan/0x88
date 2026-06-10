@@ -3,7 +3,7 @@ import { DEFAULT_VIRIDITHAS_WASM_URL } from './viridithasEngine.ts';
 export type ViridithasAssetStatus = 'unknown' | 'checking' | 'ok' | 'missing';
 
 export interface ViridithasVariant {
-  key: 'default' | 'simd' | 'custom';
+  key: 'default' | 'simd' | 'relaxed-simd' | 'custom';
   label: string;
   wasmUrl: string;
   note: string;
@@ -24,13 +24,22 @@ export const VIRIDITHAS_SIMD_VARIANT: ViridithasVariant = {
   note: 'Experimental patched Viridithas wasm32-wasip1 build with wasm simd128 NNUE kernels and one-shot, persistent, and batch benchmark modes.',
 };
 
+export const VIRIDITHAS_RELAXED_SIMD_VARIANT: ViridithasVariant = {
+  key: 'relaxed-simd',
+  label: 'Viridithas Relaxed SIMD experimental',
+  wasmUrl: '/viridithas/viridithas-relaxed-simd128.wasm',
+  note: 'Experimental Viridithas build using the relaxed integer dot for the L1 NNUE kernels (exact: QA=255/FT_SHIFT=9 keep activations in 0..127). Requires WebAssembly Relaxed SIMD.',
+};
+
 export const VIRIDITHAS_VARIANTS: readonly ViridithasVariant[] = [
   VIRIDITHAS_DEFAULT_VARIANT,
   VIRIDITHAS_SIMD_VARIANT,
+  VIRIDITHAS_RELAXED_SIMD_VARIANT,
 ];
 
 export function normalizeViridithasVariant(raw: string | null | undefined): ViridithasVariant['key'] {
   const value = String(raw ?? '').toLowerCase().replace(/[ _-]+/g, '');
+  if (value === 'relaxedsimd' || value === 'relaxed' || value === 'relaxedsimd128') return 'relaxed-simd';
   if (value === 'simd' || value === 'simd128' || value === 'wasmsimd') return 'simd';
   if (value === 'scalar' || value === 'default') return 'default';
   if (value === 'custom') return 'custom';

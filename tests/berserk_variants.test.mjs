@@ -24,7 +24,7 @@ test('Berserk variants pin Emscripten smoke and planned WASI metadata', () => {
   assert.equal(BERSERK_MAIN_NETWORK, 'berserk-9b84c340af7e.nn');
   assert.equal(BERSERK_DEFAULT_NNUE_URL, '/berserk/berserk-9b84c340af7e.nn');
   assert.equal(BERSERK_SOURCE_NETWORK_URL, 'https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn');
-  assert.deepEqual(BERSERK_VARIANTS.map((variant) => variant.key), ['emscripten', 'default', 'simd']);
+  assert.deepEqual(BERSERK_VARIANTS.map((variant) => variant.key), ['emscripten', 'emscripten-simd', 'emscripten-relaxed', 'default', 'simd']);
   assert.equal(BERSERK_EMSCRIPTEN_VARIANT.jsUrl, BERSERK_EMSCRIPTEN_JS_URL);
   assert.equal(BERSERK_EMSCRIPTEN_VARIANT.wasmUrl, BERSERK_EMSCRIPTEN_WASM_URL);
   assert.equal(BERSERK_EMSCRIPTEN_VARIANT.dataUrl, BERSERK_EMSCRIPTEN_DATA_URL);
