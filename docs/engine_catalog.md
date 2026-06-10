@@ -44,6 +44,32 @@ Every engine family should have one card with these fields:
 | Berserk | `emscripten` (WASI `default`/`simd` planned only) | Experimental opt-in | Patched single-thread Emscripten UCI worker; WASI still unpromoted | Upstream `jhonnold/berserk` tag `14` commit `8ae895a6151695be4a50d4fb65b0c131659c513a` + network `berserk-9b84c340af7e.nn` | Emscripten emits JS glue + ~128 KB WASM + ~24 MB preload data; generated/local only | Strong GPL C UCI candidate; staged UI integration is experimental while lifecycle/benchmark data accumulates. |
 | PlentyChess | `emscripten` | Experimental opt-in | Patched single-thread Emscripten UCI worker | `Yoshie2000/PlentyChess` commit `58d8ba2505ae2b49f48dd410d214a457d15c12c6` + network `0134-2r24-s0.bin` | JS ~71 KB + WASM ~390 KB + data/processed NNUE ~63 MB raw; ~32-34 MB compressed transfer if `.data` is served with brotli/gzip; generated/local only | Node/browser lifecycle smoke and arena/analysis selector smoke pass; depth-7 rotated-FEN benchmark is ~718k NPS; large sidecar and source-archive release gate keep it experimental. |
 
+## Asset prep/check fast path
+
+Use one local check before browser analysis/arena smokes when optional engine assets may be missing:
+
+```bash
+npm run engine-artifacts:check-browser -- --allow-missing
+```
+
+The check reports every same-origin browser asset used by the staged BT4/Reckless/Viridithas/Berserk/PlentyChess selectors and prints the prep/build command for each missing family. To make missing assets fail a release/local packaging gate, omit `--allow-missing`:
+
+```bash
+npm run engine-artifacts:check-browser
+```
+
+Common prep commands:
+
+```bash
+npm run lc0:prepare-model-assets
+npm run reckless:build-production && npm run reckless:build-browser-api && npm run reckless:build-browser-api-simd && npm run reckless:build-browser-api-simd-external && npm run reckless:build-lite-wasi
+npm run viridithas:build-wasi && npm run viridithas:build-simd-wasi && npm run viridithas:build-relaxed-simd-wasi
+npm run berserk:build-emscripten && npm run berserk:build-simd-emscripten && npm run berserk:build-relaxed-simd-emscripten
+npm run plentychess:build-emscripten
+```
+
+Generated large/GPL/AGPL blobs remain local unless the release follows `docs/engine_artifact_distribution.md`; the browser UI must continue to treat missing assets as a selectable/runtime status, not as a silent failure.
+
 ## Family cards
 
 ### Lc0 family

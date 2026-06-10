@@ -40,7 +40,7 @@ textarea{width:100%;min-height:64px;font-family:var(--mono);font-size:12px;borde
 .lines li.placeholder{display:block;color:var(--muted);border-left:none;cursor:default}
 .lines li.placeholder:hover{background:none}
 .compare-summary{margin-top:8px;padding:8px;border:1px solid var(--rule);border-radius:6px;background:#fff;font-size:12px;color:var(--muted)}
-table.engine-compare{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}table.engine-compare th,table.engine-compare td{text-align:left;padding:5px 7px;border-bottom:1px solid var(--rule);vertical-align:top}table.engine-compare th{color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase}table.engine-compare .mono{font-family:var(--mono)}table.engine-compare .pv{font-family:var(--mono);overflow-wrap:anywhere}table.engine-compare .agree{color:var(--accent);font-weight:700}.profile-row{align-items:end}.profile-row select{min-width:150px}.profile-row input[type=text]{min-width:130px}
+table.engine-compare{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}table.engine-compare th,table.engine-compare td{text-align:left;padding:5px 7px;border-bottom:1px solid var(--rule);vertical-align:top}table.engine-compare th{color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase}table.engine-compare .mono{font-family:var(--mono)}table.engine-compare .pv{font-family:var(--mono);overflow-wrap:anywhere}table.engine-compare .agree{color:var(--accent);font-weight:700}.profile-row{align-items:end}.profile-row select{min-width:150px}.profile-row input[type=text]{min-width:130px}.profile-summary{margin-top:6px;padding:7px 8px;border:1px dashed var(--rule);border-radius:6px;background:#fff}
 details.runtime-details{margin:6px 0}
 details.runtime-details summary{cursor:pointer;font-size:12px;color:var(--muted)}
 details.runtime-details summary:hover{color:inherit}
@@ -60,6 +60,7 @@ details.runtime-details summary:hover{color:inherit}
 h2{font-size:13px;margin:14px 0 0;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
 #message{margin-top:10px;padding:8px;border:1px solid var(--rule);border-radius:6px;background:var(--soft);font-family:var(--mono);font-size:12px}
 .small{font-size:12px;color:var(--muted)}
+.pgn-db-list,.pgn-db-results{display:grid;gap:6px;margin-top:8px}.pgn-db-list .empty,.pgn-db-results .empty{padding:7px 8px;border:1px dashed var(--rule);border-radius:6px;background:#fff}.pgn-db-card{display:grid;grid-template-columns:1fr auto;gap:3px 8px;text-align:left;background:#fff}.pgn-db-card.selected{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}.pgn-db-card .name{font-weight:700;color:var(--ink)}.pgn-db-card .meta,.pgn-db-hit .meta{color:var(--muted);font-size:11px}.pgn-db-hit{padding:7px 8px;border:1px solid var(--rule);border-radius:6px;background:#fff}.pgn-db-hit .name{font-weight:700;color:var(--ink)}.pgn-db-hit .moves{font-family:var(--mono);color:var(--ink);margin-top:3px;overflow-wrap:anywhere}
 table.opening{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
 table.opening th,table.opening td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--rule)}
 table.opening th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase}
@@ -120,7 +121,11 @@ table.opening .san{font-family:var(--mono);font-weight:700}
         <input id="engineProfileName" type="text" spellcheck="false" autocomplete="off" placeholder="analysis profile" /></div>
       <button id="saveEngineProfile" type="button">Save profile</button>
       <button id="deleteEngineProfile" type="button">Delete</button>
+      <button id="exportEngineProfiles" type="button">Export profiles</button>
+      <button id="importEngineProfiles" type="button">Import profiles</button>
+      <input id="importEngineProfilesFile" type="file" accept="application/json,.json" style="display:none" />
     </div>
+    <div id="engineProfileSummary" class="profile-summary small">Manual engine setup.</div>
     <div class="row">
       <button id="addEngine" type="button">+ Add engine</button>
       <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
@@ -178,6 +183,8 @@ table.opening .san{font-family:var(--mono);font-weight:700}
       <button id="searchPgnDbPosition" type="button">Search position</button>
     </div>
     <div id="pgnDbInfo" class="small">Local PGN database: checking IndexedDB…</div>
+    <div id="pgnDbList" class="pgn-db-list small"></div>
+    <div id="pgnDbSearchResults" class="pgn-db-results small"></div>
     <table id="opening" class="opening"><thead><tr><th>Move</th><th class="num">Games</th><th>White / Draw / Black</th></tr></thead><tbody></tbody></table>
   </section>
 </main>
