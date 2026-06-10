@@ -96,6 +96,7 @@
     "reckless:inspect-sections": "node scripts/inspect_wasm_sections.mjs public/reckless/reckless.wasm public/reckless/reckless-simd128.wasm --out docs/reckless_wasm_section_breakdown_2026-06-04.json",
     "reckless:probe-nnue-accum-simd": "node scripts/reckless_wasm_nnue_accum_probe.mjs",
     "reckless:probe-nnue-activate-simd": "node scripts/reckless_wasm_nnue_activate_probe.mjs",
+    "reckless:probe-nnue-dot-simd": "node scripts/reckless_wasm_nnue_dot_probe.mjs",
     "reckless:probe-browser-api": "node scripts/probe_reckless_browser_api_facade.mjs",
     "reckless:wasm-opt-experiment": "node scripts/reckless_wasm_opt_experiment.mjs",
     "reckless:build-lite-wasi": "RECKLESS_BUILD_DIR=.local_engines/reckless-lite-wasi-src RECKLESS_EVALFILE=.local_engines/reckless-nets/v53-0ba42a8c.nnue RECKLESS_L1_SIZE=512 RECKLESS_WASM_OUT=public/reckless/reckless-v53-l1-512.wasm node scripts/build_reckless_wasi.mjs",
