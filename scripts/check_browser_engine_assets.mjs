@@ -61,9 +61,19 @@ const ASSET_GROUPS = [
     family: 'plentychess',
     label: 'PlentyChess Emscripten worker',
     status: 'experimental-selectable',
-    command: 'npm run plentychess:build-emscripten',
+    command: 'npm run plentychess:build-emscripten && npm run plentychess:build-sse41-emscripten && npm run plentychess:build-relaxed-simd-emscripten',
     docs: 'docs/engine_catalog.md#plentychess-family',
-    assets: ['/plentychess/plentychess-emscripten.js', '/plentychess/plentychess-emscripten.wasm', '/plentychess/plentychess-emscripten.data'],
+    assets: [
+      '/plentychess/plentychess-emscripten.js',
+      '/plentychess/plentychess-emscripten.wasm',
+      '/plentychess/plentychess-emscripten.data',
+      '/plentychess/plentychess-emscripten-sse41.js',
+      '/plentychess/plentychess-emscripten-sse41.wasm',
+      '/plentychess/plentychess-emscripten-sse41.data',
+      '/plentychess/plentychess-emscripten-relaxed-simd128.js',
+      '/plentychess/plentychess-emscripten-relaxed-simd128.wasm',
+      '/plentychess/plentychess-emscripten-relaxed-simd128.data',
+    ],
   },
 ];
 

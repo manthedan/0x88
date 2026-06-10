@@ -65,7 +65,7 @@ npm run lc0:prepare-model-assets
 npm run reckless:build-production && npm run reckless:build-browser-api && npm run reckless:build-browser-api-simd && npm run reckless:build-browser-api-simd-external && npm run reckless:build-lite-wasi
 npm run viridithas:build-wasi && npm run viridithas:build-simd-wasi && npm run viridithas:build-relaxed-simd-wasi
 npm run berserk:build-emscripten && npm run berserk:build-simd-emscripten && npm run berserk:build-relaxed-simd-emscripten
-npm run plentychess:build-emscripten
+npm run plentychess:build-emscripten && npm run plentychess:build-sse41-emscripten && npm run plentychess:build-relaxed-simd-emscripten
 ```
 
 Generated large/GPL/AGPL blobs remain local unless the release follows `docs/engine_artifact_distribution.md`; the browser UI must continue to treat missing assets as a selectable/runtime status, not as a silent failure.
