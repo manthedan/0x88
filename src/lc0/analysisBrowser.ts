@@ -16,8 +16,9 @@ import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameIm
 import { buildOpeningPositionIndex, mergeOpeningMoveStats, openingStatsFromIndex, openingStatsForPosition, openingSummary, positionKey, type ImportedGame, type OpeningMoveStat, type OpeningPositionIndex } from './openingStats.ts';
 import { defaultPgnCollectionName, deletePgnCollection, duplicatePgnCollection, exportPgnDatabaseBackup, formatPgnCollectionSummary, importPgnDatabaseBackup, listPgnCollections, loadPgnCollection, pgnDatabaseAvailable, pgnDatabaseBackupFilename, renamePgnCollection, savePgnCollection, searchPgnCollectionsByPosition, updatePgnCollectionPositionIndex, type PgnCollectionSource, type PgnCollectionSummary } from './pgnDatabase.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
-import { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { Lc0OnnxEvaluator, type Lc0EvaluationProvider } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
+import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
 import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
@@ -40,7 +41,9 @@ const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_U
 const DEFAULT_TINY_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
 const DEFAULT_TINY_META_URL = '/models/bt4_anneal_muon_best.meta.json';
 const DEFAULT_TINY_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
-type Lc0AnalysisRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads';
+const DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL = '/runtimes/lc0-' + 'tvm' + 'js-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json';
+const LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole-onnx-webgpu' as const;
+type Lc0AnalysisRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads' | typeof LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 const REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantFromParams(params);
@@ -65,10 +68,11 @@ function sameOriginPathParam(names: string[], fallback: string, allowedPrefixes:
 const TINY_MODEL_URL = sameOriginPathParam(['tinyModel', 'tinyOnnx'], DEFAULT_TINY_MODEL_URL, ['/models/']);
 const TINY_META_URL = sameOriginPathParam(['tinyMeta'], DEFAULT_TINY_META_URL, ['/models/']);
 const TINY_HYBRID_MANIFEST_URL = sameOriginPathParam(['tinyManifest', 'manifest', 'manifestUrl'], DEFAULT_TINY_HYBRID_MANIFEST_URL, ['/runtimes/']);
+const LC0_WHOLE_MODEL_MANIFEST_URL = sameOriginPathParam(['wholeModelManifest', 'wholeModelManifestUrl', 'tvm' + 'jsManifest'], DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL, ['/runtimes/lc0-' + 'tvm' + 'js-webgpu/']);
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
-let mainEvaluator: Lc0OnnxEvaluator | null = null;
+let mainEvaluator: Lc0EvaluationProvider | null = null;
 let stockfishLite: StockfishEngine | null = null;
 let stockfishFull: StockfishEngine | null = null;
 const tinyEvaluatorPromises = new Map<string, Promise<Evaluator>>();
@@ -150,6 +154,7 @@ function requestedEp(): string {
 
 function normalizeLc0Runtime(value: string | null): Lc0AnalysisRuntime {
   const raw = (value ?? '').toLowerCase();
+  if (raw === LC0_WHOLE_MODEL_WEBGPU_RUNTIME || raw === 'tvm' + 'js-webgpu' || raw === 'lc0-' + 'tvm' + 'js-webgpu') return LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
   if (raw === 'hybrid' || raw === 'lc0web' || raw === 'hybrid-ort-heads' || raw === 'wgsl-encoder') return 'hybrid-ort-heads';
   if (raw === 'hybrid-wgsl-heads' || raw === 'wgsl-heads' || raw === 'wgsl') return 'hybrid-wgsl-heads';
   return 'onnx';
@@ -164,8 +169,25 @@ function selectedLc0Runtime(): Lc0AnalysisRuntime {
   return normalizeLc0Runtime(selectEl('lc0RuntimeSelect').value);
 }
 
+function lc0WholeModelRuntimeRequested(): boolean {
+  return normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime')) === LC0_WHOLE_MODEL_WEBGPU_RUNTIME
+    || params.get('enableWholeModelWebgpu') === '1'
+    || params.get('enableTvm' + 'js') === '1';
+}
+
+function installExperimentalLc0RuntimeOption(): void {
+  if (!lc0WholeModelRuntimeRequested()) return;
+  const select = selectEl('lc0RuntimeSelect');
+  if ([...select.options].some((option) => option.value === LC0_WHOLE_MODEL_WEBGPU_RUNTIME)) return;
+  const option = document.createElement('option');
+  option.value = LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
+  option.textContent = 'TVM whole-model WebGPU (research, opt-in)';
+  select.appendChild(option);
+}
+
 function lc0ResolvedRuntime(runtime: Lc0AnalysisRuntime): string {
   if (runtime === 'onnx') return 'ort-worker';
+  if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) return 'whole-onnx-webgpu-worker-research';
   return `${runtime}-lazy`;
 }
 
@@ -178,6 +200,7 @@ function installRuntimeAuditPanel(): void {
 }
 
 function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
+  if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) return 'TVM whole-model WebGPU (research)';
   if (runtime === 'hybrid-wgsl-heads') return 'WGSL encoder + WGSL heads';
   if (runtime === 'hybrid-ort-heads') return 'WGSL encoder + ORT heads';
   return 'ORT ONNX';
@@ -187,9 +210,26 @@ function lc0EncoderLayers(): number {
   return Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10)));
 }
 
+function lc0WholeModelPhysicalBatch(): number {
+  const parsed = Math.floor(Number(params.get('wholeModelBatch') ?? params.get('tvmBatch') ?? params.get('compiledBatch') ?? '8'));
+  return Number.isFinite(parsed) ? Math.max(1, Math.min(64, parsed)) : 8;
+}
+
+function lc0WholeModelTensorCache(): boolean {
+  return params.get('wholeModelTensorCache') === '1' || params.get('tensorCache') === '1';
+}
+
 function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown> {
   const common = { type: 'init', modelUrl: MODEL_URL, ep: requestedEp(), cacheModel: false };
   if (runtime === 'onnx') return common;
+  if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) return {
+    ...common,
+    runtime: LC0_WHOLE_MODEL_WEBGPU_RUNTIME,
+    wholeModelManifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
+    wholeModelBatch: lc0WholeModelPhysicalBatch(),
+    wholeModelTensorCache: lc0WholeModelTensorCache(),
+    evalCacheEntries: 0,
+  };
   return {
     ...common,
     runtime: 'hybrid',
@@ -238,13 +278,13 @@ async function initWorker(): Promise<string> {
     family: 'lc0',
     engineLabel: 'LC0',
     modelId: 'lc0-default',
-    modelUrl: MODEL_URL,
+    modelUrl: runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : MODEL_URL,
     requestedRuntime: runtime,
     resolvedRuntime: lc0ResolvedRuntime(runtime),
     runtimeConfigId: runtime === 'onnx' ? undefined : runtime,
-    manifestUrl: runtime === 'onnx' ? undefined : PACK_URL,
+    manifestUrl: runtime === 'onnx' ? undefined : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : PACK_URL,
     searchBudget: `multipv=${multiPv()}`,
-    notes: runtime === 'onnx' ? [ready.backend] : [ready.backend, 'hybrid runtime is pack-lazy until first evaluation succeeds'],
+    notes: runtime === 'onnx' ? [ready.backend] : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? [ready.backend, 'whole-model runtime is research-only and opt-in'] : [ready.backend, 'hybrid runtime is pack-lazy until first evaluation succeeds'],
   });
   return workerBackend;
 }
@@ -1660,7 +1700,7 @@ function disposeRuntimeResources(): void {
   berserkByVariant.clear();
   for (const engine of plentyChessByVariant.values()) engine.dispose();
   plentyChessByVariant.clear();
-  void mainEvaluator?.dispose();
+  void mainEvaluator?.dispose?.();
   mainEvaluator = null;
   searcher = null;
 }
@@ -1679,7 +1719,7 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
     if (runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
     return true;
   } catch (workerError) {
-    if (runtime !== 'onnx') {
+    if (runtime !== 'onnx' && runtime !== LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(workerError as Error).message}`;
       return false;
@@ -1687,23 +1727,33 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
     // Fall back to a main-thread evaluator (analysis will block the UI, but works).
     console.warn('LC0 worker init failed; falling back to the main thread.', workerError);
     try {
-      const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
-      mainEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+      if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
+        mainEvaluator = await Lc0WholeOnnxWebgpuEvaluator.create({
+          manifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
+          batch: lc0WholeModelPhysicalBatch(),
+          fetchTensorCache: lc0WholeModelTensorCache(),
+          logger: (line) => console.info('[lc0 whole-model analysis]', line),
+        });
+      } else {
+        const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
+        mainEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+      }
       searcher = new Lc0PuctSearcher(mainEvaluator);
-      const diagnostics = await collectOrtRuntimeDiagnostics();
-      el('backend').textContent = `${diagnostics.describe} (main thread)`;
+      const diagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics() : undefined;
+      el('backend').textContent = `${diagnostics?.describe ?? 'whole-onnx-webgpu'} (main thread)`;
       publishBrowserRuntimeAudit({
         source: 'lc0-analysis-main-thread-fallback',
         surface: 'analysis',
         family: 'lc0',
         engineLabel: 'LC0',
         modelId: 'lc0-default',
-        modelUrl: MODEL_URL,
+        modelUrl: runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : MODEL_URL,
         requestedRuntime: runtime,
-        resolvedRuntime: 'ort-main-thread-fallback',
+        resolvedRuntime: runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? 'whole-onnx-webgpu-main-thread-fallback' : 'ort-main-thread-fallback',
+        manifestUrl: runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : undefined,
         fallbackReason: (workerError as Error).message,
         searchBudget: `multipv=${multiPv()}`,
-        notes: [diagnostics.describe],
+        notes: [diagnostics?.describe ?? 'whole-model runtime is research-only and opt-in'],
       });
       el('analyze').toggleAttribute('disabled', false);
       selectEl('lc0RuntimeSelect').disabled = false;
@@ -1732,6 +1782,7 @@ async function init() {
     if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
   });
   engineProfiles = loadEngineProfiles();
+  installExperimentalLc0RuntimeOption();
   selectEl('lc0RuntimeSelect').value = initialLc0Runtime();
   const storedLastProfile = engineProfiles.find((profile) => profile.name === storageGet(LAST_ENGINE_PROFILE_STORAGE_KEY));
   // Do not silently restore saved BT4 rows on page load: selecting that profile

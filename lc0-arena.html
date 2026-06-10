@@ -53,6 +53,7 @@ h2{font-size:13px;margin:14px 0 0;text-transform:uppercase;letter-spacing:.04em;
 #message{margin-top:6px;padding:7px 10px;border:1px solid var(--rule);border-radius:7px;background:var(--panel);color:var(--muted);font-family:var(--mono);font-size:11px}
 .eval-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin-top:8px}.eval-card{padding:8px;border:1px solid var(--rule);border-radius:6px;background:white;font-family:var(--mono);font-size:11px;color:var(--muted);overflow-wrap:anywhere}.eval-card strong{display:flex;justify-content:space-between;gap:8px;color:var(--ink);font-family:var(--sans);font-size:12px;margin-bottom:3px}.eval-card .eval-status{font-family:var(--mono);font-size:10px;color:var(--accent);font-weight:600;white-space:nowrap}.eval-card.active{border-color:#cbd8a6;background:var(--soft)}
 .runtime-badge{margin-top:8px;padding:7px 8px;border:1px solid var(--rule);border-radius:6px;background:white;font-family:var(--mono);font-size:11px;color:var(--muted);overflow-wrap:anywhere}.runtime-badge.ready{color:var(--accent);border-color:#cbd8a6;background:var(--soft)}.runtime-badge.warn{color:#a5461b;border-color:#e5b38d;background:#fff4e8}
+.advanced-runtime{flex:1 1 100%;border:1px solid var(--rule);border-radius:7px;background:#fff;padding:8px 10px}.advanced-runtime summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:700}.advanced-runtime[open] summary{margin-bottom:8px}.preset-note{flex:1 1 100%;margin-top:-2px;color:var(--muted)}
 textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;border:1px solid var(--rule);border-radius:6px;padding:8px;margin-top:8px;resize:vertical}
 .small{font-size:12px;color:var(--muted)}
 @media(max-width:900px){main{grid-template-columns:1fr}}
@@ -84,18 +85,26 @@ textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;borde
     <div id="arenaSeatList" class="engine-list" aria-label="Arena engine selectors"></div>
     <div class="matchup-note small">family → variant → strength; colors alternate each game</div>
     <div class="row">
-      <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
-        <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
-      <div class="field"><label for="lc0BatchSizeInput">LC0 batch</label>
-        <input id="lc0BatchSizeInput" type="number" min="1" max="64" step="1" value="1" /></div>
-      <div class="field"><label for="lc0BatchPipelineDepthInput">LC0 pipeline</label>
-        <input id="lc0BatchPipelineDepthInput" type="number" min="1" max="16" step="1" value="1" /></div>
-      <div class="field"><label for="lc0InputBackendSelect">LC0 input</label>
-        <select id="lc0InputBackendSelect"><option value="js">JS</option><option value="wasm">WASM</option><option value="wgsl">WGSL</option></select></div>
-      <div class="field"><label for="lc0EncoderKernelSelect">LC0 encoder</label>
-        <select id="lc0EncoderKernelSelect"><option value="hand">Hand WGSL</option><option value="mixed-tvm-ffn">Mixed TVM FFN</option><option value="mixed-tvm-ffn-outproj">Mixed TVM FFN+outproj</option><option value="mixed-tvm-ffn-smolgen-project">Mixed TVM FFN+smolgen project</option><option value="tvm-packed-f16">TVM packed f16</option></select></div>
-      <div class="field"><label for="lc0LegalPriorsSelect">LC0 legal priors</label>
-        <select id="lc0LegalPriorsSelect"><option value="js">JS</option><option value="wasm">WASM</option><option value="gpu">GPU legal (WGSL heads)</option></select></div>
+      <div class="field wide"><label for="lc0PresetSelect">LC0 engine preset</label>
+        <select id="lc0PresetSelect"><option value="stable">Stable LC0 Small (ORT WebGPU/WASM fallback)</option><option value="benchmarked-small">Fast LC0 Small — best benchmarked eval path (research)</option><option value="custom">Custom / advanced</option></select></div>
+      <div id="lc0PresetNote" class="preset-note small">Stable default. Use the fast preset to test whether faster eval helps fixed-time arena strength.</div>
+      <details id="lc0AdvancedRuntime" class="advanced-runtime">
+        <summary>Advanced LC0 runtime knobs</summary>
+        <div class="row">
+          <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
+            <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
+          <div class="field"><label for="lc0BatchSizeInput">LC0 search batch</label>
+            <input id="lc0BatchSizeInput" type="number" min="1" max="64" step="1" value="1" /></div>
+          <div class="field"><label for="lc0BatchPipelineDepthInput">LC0 pipeline</label>
+            <input id="lc0BatchPipelineDepthInput" type="number" min="1" max="16" step="1" value="1" /></div>
+          <div class="field"><label for="lc0InputBackendSelect">LC0 input</label>
+            <select id="lc0InputBackendSelect"><option value="js">JS</option><option value="wasm">WASM</option><option value="wgsl">WGSL</option></select></div>
+          <div class="field"><label for="lc0EncoderKernelSelect">LC0 encoder</label>
+            <select id="lc0EncoderKernelSelect"><option value="hand">Hand WGSL</option><option value="mixed-tvm-ffn">Mixed TVM FFN</option><option value="mixed-tvm-ffn-outproj">Mixed TVM FFN+outproj</option><option value="mixed-tvm-ffn-smolgen-project">Mixed TVM FFN+smolgen project</option><option value="tvm-packed-f16">TVM packed f16</option></select></div>
+          <div class="field"><label for="lc0LegalPriorsSelect">LC0 legal priors</label>
+            <select id="lc0LegalPriorsSelect"><option value="js">JS</option><option value="wasm">WASM</option><option value="gpu">GPU legal (WGSL heads)</option></select></div>
+        </div>
+      </details>
       <div class="field"><label for="gamesInput">Games/opening</label>
         <input id="gamesInput" type="number" min="1" max="20" step="1" value="2" /></div>
       <div class="field"><label for="delayInput">Delay ms</label>

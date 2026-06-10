@@ -18,6 +18,7 @@ import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0Evalu
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
 import { Lc0WebHybridEvaluator, type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint } from './wgslMatmulAddProbe.ts';
+import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { StockfishEngine, stockfishFlavorLabel, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
 import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
@@ -132,10 +133,14 @@ const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_U
 const DEFAULT_TINY_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
 const DEFAULT_TINY_META_URL = '/models/bt4_anneal_muon_best.meta.json';
 const DEFAULT_TINY_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
+const DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL = '/runtimes/lc0-' + 'tvm' + 'js-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json';
+const LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole-onnx-webgpu' as const;
 const TINY_MODEL_URL = params.get('tinyModel') ?? params.get('tinyOnnx') ?? DEFAULT_TINY_MODEL_URL;
 const TINY_META_URL = params.get('tinyMeta') ?? DEFAULT_TINY_META_URL;
 const TINY_HYBRID_MANIFEST_URL = params.get('tinyManifest') ?? params.get('manifest') ?? params.get('manifestUrl') ?? DEFAULT_TINY_HYBRID_MANIFEST_URL;
-type Lc0ArenaRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads';
+const LC0_WHOLE_MODEL_MANIFEST_URL = params.get('wholeModelManifest') ?? params.get('wholeModelManifestUrl') ?? params.get('tvm' + 'jsManifest') ?? DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL;
+type Lc0ArenaRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads' | typeof LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
+type Lc0ArenaPreset = 'stable' | 'benchmarked-small' | 'custom';
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 const REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantFromParams(params);
@@ -275,6 +280,7 @@ function tinyHistoryFens(positions: BoardState[]): string[] {
 
 function normalizeLc0Runtime(value: string | null): Lc0ArenaRuntime {
   const raw = (value ?? '').toLowerCase();
+  if (raw === LC0_WHOLE_MODEL_WEBGPU_RUNTIME || raw === 'tvm' + 'js-webgpu' || raw === 'lc0-' + 'tvm' + 'js-webgpu') return LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
   if (raw === 'hybrid' || raw === 'lc0web' || raw === 'hybrid-ort-heads' || raw === 'wgsl-encoder') return 'hybrid-ort-heads';
   if (raw === 'hybrid-wgsl-heads' || raw === 'wgsl-heads' || raw === 'wgsl') return 'hybrid-wgsl-heads';
   return 'onnx';
@@ -289,8 +295,91 @@ function selectedLc0Runtime(): Lc0ArenaRuntime {
   return normalizeLc0Runtime(selectEl('lc0RuntimeSelect').value);
 }
 
+function lc0WholeModelRuntimeRequested(): boolean {
+  return normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime')) === LC0_WHOLE_MODEL_WEBGPU_RUNTIME
+    || params.get('enableWholeModelWebgpu') === '1'
+    || params.get('enableTvm' + 'js') === '1';
+}
+
+function installExperimentalLc0RuntimeOption(force = false): void {
+  if (!force && !lc0WholeModelRuntimeRequested()) return;
+  const select = selectEl('lc0RuntimeSelect');
+  if ([...select.options].some((option) => option.value === LC0_WHOLE_MODEL_WEBGPU_RUNTIME)) return;
+  const option = document.createElement('option');
+  option.value = LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
+  option.textContent = 'TVM whole-model WebGPU (research, opt-in)';
+  select.appendChild(option);
+}
+
+function normalizeLc0Preset(value: string | null): Lc0ArenaPreset {
+  return value === 'benchmarked-small' || value === 'custom' ? value : 'stable';
+}
+
+function inferredLc0Preset(): Lc0ArenaPreset {
+  const explicit = params.get('lc0Preset') ?? params.get('preset');
+  if (explicit) return normalizeLc0Preset(explicit);
+  const requestedRuntime = normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime'));
+  if (requestedRuntime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME || lc0WholeModelRuntimeRequested()) return 'benchmarked-small';
+  if (requestedRuntime !== 'onnx' || params.has('inputBackend') || params.has('encoderKernel') || params.has('legalPriorsBackend') || params.has('lc0BatchSize') || params.has('batchPipelineDepth')) return 'custom';
+  return 'stable';
+}
+
+function selectedLc0Preset(): Lc0ArenaPreset {
+  return normalizeLc0Preset(selectEl('lc0PresetSelect').value);
+}
+
+function setLc0PresetNote(preset = selectedLc0Preset()): void {
+  const note = el('lc0PresetNote');
+  if (preset === 'benchmarked-small') {
+    note.textContent = `Fast preset: LC0 Small via whole-model WebGPU research path, compiled batch ${lc0WholeModelPhysicalBatch()}, search batch ${lc0WholeModelPhysicalBatch()}, pipeline depth 1. Arena budget is set to equal movetime so eval speed can affect strength.`;
+  } else if (preset === 'custom') {
+    note.textContent = 'Custom mode: advanced runtime knobs are open. Only use these for experiments or reproducing old benchmark cells.';
+  } else {
+    note.textContent = 'Stable default: LC0 Small via ORT with WebGPU/WASM fallback. Use the fast preset to test benchmarked eval speed in fixed-time arena games.';
+  }
+}
+
+function applyLc0Preset(preset: Lc0ArenaPreset, options: { reload?: boolean } = {}): void {
+  selectEl('lc0PresetSelect').value = preset;
+  const advanced = el('lc0AdvancedRuntime') as HTMLDetailsElement;
+  if (preset === 'benchmarked-small') {
+    installExperimentalLc0RuntimeOption(true);
+    selectEl('lc0RuntimeSelect').value = LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
+    inputEl('lc0BatchSizeInput').value = String(lc0WholeModelPhysicalBatch());
+    inputEl('lc0BatchPipelineDepthInput').value = '1';
+    selectEl('lc0InputBackendSelect').value = 'js';
+    selectEl('lc0EncoderKernelSelect').value = 'hand';
+    selectEl('lc0LegalPriorsSelect').value = 'js';
+    selectEl('budgetModeSelect').value = 'movetime';
+    advanced.open = false;
+  } else if (preset === 'stable') {
+    selectEl('lc0RuntimeSelect').value = 'onnx';
+    inputEl('lc0BatchSizeInput').value = '1';
+    inputEl('lc0BatchPipelineDepthInput').value = '1';
+    selectEl('lc0InputBackendSelect').value = 'js';
+    selectEl('lc0EncoderKernelSelect').value = 'hand';
+    selectEl('lc0LegalPriorsSelect').value = 'js';
+    advanced.open = false;
+  } else {
+    advanced.open = true;
+  }
+  setLc0PresetNote(preset);
+  refreshSeatControls();
+  renderCacheInfo();
+  resetLc0SearchTrees();
+  if (options.reload && !running) void reloadLc0Evaluator();
+}
+
+function markLc0PresetCustom(): void {
+  if (selectedLc0Preset() === 'custom') return;
+  selectEl('lc0PresetSelect').value = 'custom';
+  (el('lc0AdvancedRuntime') as HTMLDetailsElement).open = true;
+  setLc0PresetNote('custom');
+}
+
 function lc0ResolvedRuntime(runtime: Lc0ArenaRuntime): string {
   if (runtime === 'onnx') return 'ort-main-thread';
+  if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) return 'whole-onnx-webgpu-research';
   return `${runtime}-lazy`;
 }
 
@@ -303,6 +392,7 @@ function installRuntimeAuditPanel(): void {
 }
 
 function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
+  if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) return 'TVM whole-model WebGPU (research)';
   if (runtime === 'hybrid-wgsl-heads') return 'WGSL encoder + WGSL heads';
   if (runtime === 'hybrid-ort-heads') return 'WGSL encoder + ORT heads';
   return 'ORT ONNX';
@@ -341,6 +431,7 @@ function lc0EncoderKernelVariant(): Lc0WebEncoderKernelVariant {
 
 function lc0HybridConfigLabel(runtime = selectedLc0Runtime()): string {
   if (runtime === 'onnx') return '';
+  if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) return `manifest ${LC0_WHOLE_MODEL_MANIFEST_URL} · physical batch ${lc0WholeModelPhysicalBatch()}${lc0WholeModelTensorCache() ? ' · tensor cache' : ''}`;
   const legal = lc0HybridLegalPriorsBackend();
   const effectiveLegal = legal === 'gpu' && runtime !== 'hybrid-wgsl-heads' ? 'js' : legal;
   return `input ${lc0HybridInputBackend()} · encoder ${lc0EncoderKernelVariant()} · legal ${effectiveLegal}`;
@@ -359,6 +450,14 @@ function lc0BatchSize(): number {
 function lc0BatchPipelineDepth(): number {
   const node = document.getElementById('lc0BatchPipelineDepthInput') as HTMLInputElement | null;
   return boundedIntValue(node?.value ?? params.get('lc0BatchPipelineDepth') ?? params.get('batchPipelineDepth'), 1, 1, 16);
+}
+
+function lc0WholeModelPhysicalBatch(): number {
+  return boundedIntValue(params.get('wholeModelBatch') ?? params.get('tvmBatch') ?? params.get('compiledBatch'), 8, 1, 64);
+}
+
+function lc0WholeModelTensorCache(): boolean {
+  return params.get('wholeModelTensorCache') === '1' || params.get('tensorCache') === '1';
 }
 
 function intParam(name: string, fallback: number, min: number, max: number): number {
@@ -761,8 +860,10 @@ function populateSeats(): void {
 function refreshSeatControls(): void {
   selectEl('seatA').disabled = running;
   selectEl('seatB').disabled = running;
+  selectEl('lc0PresetSelect').disabled = running || loadingLc0;
   selectEl('lc0RuntimeSelect').disabled = running || loadingLc0;
-  const hybridControlsDisabled = running || loadingLc0 || selectedLc0Runtime() === 'onnx';
+  const runtime = selectedLc0Runtime();
+  const hybridControlsDisabled = running || loadingLc0 || (runtime !== 'hybrid-ort-heads' && runtime !== 'hybrid-wgsl-heads');
   selectEl('lc0InputBackendSelect').disabled = hybridControlsDisabled;
   selectEl('lc0EncoderKernelSelect').disabled = hybridControlsDisabled;
   selectEl('lc0LegalPriorsSelect').disabled = hybridControlsDisabled;
@@ -2031,11 +2132,19 @@ function disposeRuntimeResources(): void {
   bt4.dispose();
 }
 
-async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHybridEvaluator> {
+async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHybridEvaluator | Lc0WholeOnnxWebgpuEvaluator> {
   const runtime = selectedLc0Runtime();
   if (runtime === 'onnx') {
     const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
     return Lc0OnnxEvaluator.create(modelLoad.model);
+  }
+  if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
+    return Lc0WholeOnnxWebgpuEvaluator.create({
+      manifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
+      batch: lc0WholeModelPhysicalBatch(),
+      fetchTensorCache: lc0WholeModelTensorCache(),
+      logger: (line) => console.info('[lc0 whole-model arena]', line),
+    });
   }
   const headBackend = runtime === 'hybrid-wgsl-heads' ? 'wgsl' : 'ort';
   const legalPriorsBackend = lc0HybridLegalPriorsBackend();
@@ -2072,13 +2181,13 @@ async function loadLc0Evaluator(): Promise<void> {
       family: 'lc0',
       engineLabel: 'LC0',
       modelId: 'lc0-default',
-      modelUrl: runtime === 'onnx' ? MODEL_URL : PACK_URL,
+      modelUrl: runtime === 'onnx' ? MODEL_URL : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : PACK_URL,
       requestedRuntime: runtime,
       resolvedRuntime: lc0ResolvedRuntime(runtime),
       runtimeConfigId: runtime === 'onnx' ? undefined : runtime,
-      manifestUrl: runtime === 'onnx' ? undefined : PACK_URL,
+      manifestUrl: runtime === 'onnx' ? undefined : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : PACK_URL,
       searchBudget: activeSeatRows().filter((row) => row.family === 'lc0' && row.variant !== 'bt4').map((row) => budgetText(row)).join(', '),
-      notes: [lc0RuntimeLabel(runtime), hybrid, runtime === 'onnx' ? undefined : 'hybrid runtime is pack-lazy until first evaluation succeeds'].filter((part): part is string => !!part),
+      notes: [lc0RuntimeLabel(runtime), hybrid, runtime === 'onnx' ? undefined : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? 'whole-model runtime is research-only and opt-in' : 'hybrid runtime is pack-lazy until first evaluation succeeds'].filter((part): part is string => !!part),
     });
     lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
     lc0Searchers.clear();
@@ -2382,11 +2491,12 @@ function wireEvents() {
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
   el('openingText').addEventListener('input', refreshOpeningPreview);
   el('cacheEntriesInput').addEventListener('input', () => { renderCacheInfo(); resetLc0SearchTrees(); });
-  el('lc0BatchSizeInput').addEventListener('input', () => { inputEl('lc0BatchSizeInput').value = String(lc0BatchSize()); renderCacheInfo(); resetLc0SearchTrees(); });
-  el('lc0BatchPipelineDepthInput').addEventListener('input', () => { inputEl('lc0BatchPipelineDepthInput').value = String(lc0BatchPipelineDepth()); renderCacheInfo(); resetLc0SearchTrees(); });
-  el('lc0RuntimeSelect').addEventListener('change', () => { refreshSeatControls(); if (!running) void reloadLc0Evaluator(); });
+  el('lc0PresetSelect').addEventListener('change', () => applyLc0Preset(selectedLc0Preset(), { reload: true }));
+  el('lc0BatchSizeInput').addEventListener('input', () => { markLc0PresetCustom(); inputEl('lc0BatchSizeInput').value = String(lc0BatchSize()); renderCacheInfo(); resetLc0SearchTrees(); });
+  el('lc0BatchPipelineDepthInput').addEventListener('input', () => { markLc0PresetCustom(); inputEl('lc0BatchPipelineDepthInput').value = String(lc0BatchPipelineDepth()); renderCacheInfo(); resetLc0SearchTrees(); });
+  el('lc0RuntimeSelect').addEventListener('change', () => { markLc0PresetCustom(); refreshSeatControls(); if (!running) void reloadLc0Evaluator(); });
   for (const id of ['lc0InputBackendSelect', 'lc0EncoderKernelSelect', 'lc0LegalPriorsSelect']) {
-    el(id).addEventListener('change', () => { renderCacheInfo(); if (!running && selectedLc0Runtime() !== 'onnx') void reloadLc0Evaluator(); });
+    el(id).addEventListener('change', () => { markLc0PresetCustom(); renderCacheInfo(); if (!running && selectedLc0Runtime() !== 'onnx') void reloadLc0Evaluator(); });
   }
   el('budgetModeSelect').addEventListener('change', () => resetLc0SearchTrees());
   el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
@@ -2405,6 +2515,7 @@ async function init() {
   REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
   renderBoard();
   installRuntimeAuditPanel();
+  installExperimentalLc0RuntimeOption();
   selectEl('lc0RuntimeSelect').value = initialLc0Runtime();
   refreshRecklessVariantUi();
   refreshViridithasVariantUi();
@@ -2415,6 +2526,7 @@ async function init() {
   selectEl('berserkVariantSelect').value = REQUESTED_BERSERK_VARIANT.key;
   selectEl('plentychessVariantSelect').value = REQUESTED_PLENTYCHESS_VARIANT.key;
   applyArenaQueryParams();
+  applyLc0Preset(inferredLc0Preset());
   renderRecklessRuntimeInfo();
   renderViridithasRuntimeInfo();
   renderBerserkRuntimeInfo();

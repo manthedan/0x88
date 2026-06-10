@@ -65,6 +65,7 @@ import {
   type Lc0WebSoftmaxBenchmarkResult,
 } from './wgslMatmulAddProbe.ts';
 import { Lc0PuctSearcher, type Lc0SearchOptions, type Lc0SearchResult } from './search.ts';
+import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 
 type InitMessage = {
@@ -73,8 +74,11 @@ type InitMessage = {
   modelUrl: string;
   ep: OrtExecutionProviderPreference;
   cacheModel: boolean;
-  runtime?: 'onnx' | 'hybrid';
+  runtime?: 'onnx' | 'hybrid' | 'whole-onnx-webgpu';
   packUrl?: string;
+  wholeModelManifestUrl?: string;
+  wholeModelBatch?: number;
+  wholeModelTensorCache?: boolean;
   layers?: number;
   verifyShards?: boolean;
   headBackend?: 'ort' | 'wgsl';
@@ -611,6 +615,9 @@ async function handleInit(message: InitMessage): Promise<void> {
     ep: message.ep,
     cacheModel: message.cacheModel,
     packUrl: message.packUrl,
+    wholeModelManifestUrl: message.wholeModelManifestUrl,
+    wholeModelBatch: message.wholeModelBatch,
+    wholeModelTensorCache: message.wholeModelTensorCache,
     layers: message.layers,
     verifyShards: message.verifyShards,
     headBackend: message.headBackend,
@@ -630,6 +637,28 @@ async function handleInit(message: InitMessage): Promise<void> {
   const cacheLabel = evalCacheEntries > 0 ? ` · eval-cache ${evalCacheEntries}` : '';
   setRequestedOrtExecutionProviderForCurrentThread(message.ep);
   setOrtRuntimeDiagnosticOptionsForCurrentThread(message.ortDiagnostics ?? null);
+  if (message.runtime === 'whole-onnx-webgpu') {
+    if (!message.wholeModelManifestUrl) throw new Error('whole-model LC0 worker init requires manifest URL');
+    const baseEvaluator: WorkerEvaluator = await Lc0WholeOnnxWebgpuEvaluator.create({
+      manifestUrl: message.wholeModelManifestUrl,
+      batch: message.wholeModelBatch,
+      fetchTensorCache: message.wholeModelTensorCache,
+      logger: (line) => console.info('[lc0 whole-model worker]', line),
+    });
+    const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0
+      ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries })
+      : baseEvaluator;
+    const previousEvaluator = evaluator;
+    evaluator = nextEvaluator;
+    searcher = new Lc0PuctSearcher(nextEvaluator);
+    configuredModelUrl = message.wholeModelManifestUrl;
+    configuredInitKey = initKey;
+    configuredBackend = 'whole-onnx-webgpu';
+    configuredModelCacheStatus = `whole-model-webgpu${cacheLabel}`;
+    await previousEvaluator?.dispose?.();
+    post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
+    return;
+  }
   if (message.runtime === 'hybrid') {
     if (!message.packUrl) throw new Error('hybrid LC0 worker init requires packUrl');
     const baseEvaluator: WorkerEvaluator = new Lc0WebHybridEvaluator({
