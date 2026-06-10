@@ -2,7 +2,7 @@ import { Chessground } from 'chessground';
 import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
 import { boardToFen, parseFen, squareName, START_FEN, type BoardState } from '../chess/board.ts';
-import { legalMoves, makeMove } from '../chess/movegen.ts';
+import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
@@ -11,6 +11,8 @@ import { BROWSER_RUNTIME_AUDIT_EVENT, formatBrowserRuntimeAudit, publishBrowserR
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { ANALYSIS_DRAWABLE_BRUSHES, engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, tinyPuctAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
+import { annotatedPgn, reviewGame, type GameReview, type ReviewPosition, type ReviewedMove } from './gameReview.ts';
+import { lineChartSvg } from './charts.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { buildOpeningPositionIndex, mergeOpeningMoveStats, openingStatsFromIndex, openingStatsForPosition, openingSummary, positionKey, type ImportedGame, type OpeningMoveStat, type OpeningPositionIndex } from './openingStats.ts';
@@ -127,6 +129,10 @@ const bt4 = new Bt4WorkerSearcher();
 let ground: Ground | null = null;
 let orientation: 'white' | 'black' = 'white';
 let analysisAbort: AbortController | null = null;
+let reviewAbort: AbortController | null = null;
+let lastReview: GameReview | null = null;
+let lastReviewNodes: GameNode[] = [];
+let lastReviewSignature = '';
 let analyzing = false;
 const lineCache = new Map<string, AnalysisLine[]>();
 const nodeIndex = new Map<number, GameNode>();
@@ -1584,6 +1590,160 @@ function renderAll() {
   renderOpening();
 }
 
+function mainlineNodes(): GameNode[] {
+  const nodes: GameNode[] = [tree.root];
+  let node: GameNode | undefined = tree.root.children[0];
+  while (node) { nodes.push(node); node = node.children[0]; }
+  return nodes;
+}
+
+function reviewSignature(nodes = mainlineNodes()): string {
+  return nodes.map((node) => `${node.fen}\u0000${node.move ? moveToUci(node.move) : ''}`).join('\u0001');
+}
+
+function clearReviewState(message?: string): void {
+  lastReview = null;
+  lastReviewNodes = [];
+  lastReviewSignature = '';
+  el('reviewSummary').hidden = true;
+  el('reviewSummary').innerHTML = '';
+  el('reviewChart').hidden = true;
+  el('reviewChart').innerHTML = '';
+  el('reviewCritical').hidden = true;
+  el('reviewCritical').innerHTML = '';
+  el('reviewCopyPgn').hidden = true;
+  if (message) el('reviewStatus').textContent = message;
+}
+
+function clearReviewIfMainlineChanged(): void {
+  if (lastReview && reviewSignature() !== lastReviewSignature) clearReviewState('Review cleared after game changed.');
+}
+
+interface ReviewEngineChoice { engine: { analyze(fen: string, opts?: { multipv?: number; depth?: number; signal?: AbortSignal }): Promise<{ scoreCp?: number; mateIn?: number; pvUci: string[] }[]> }; label: string; depth: number; }
+
+/** First selected UCI-family engine reviews the game; SF Lite d12 is the fallback. */
+function reviewEngineChoice(): ReviewEngineChoice {
+  for (const row of activeEngineRows()) {
+    if (row.family === 'sf') return { engine: getStockfish(row.variant === 'full' ? 'full' : 'lite'), label: `SF ${row.variant} d${row.strength}`, depth: row.strength };
+    if (row.family === 'reckless') return { engine: getRecklessFor(row.variant), label: `Reckless d${row.strength}`, depth: row.strength };
+    if (row.family === 'viridithas') return { engine: getViridithasFor(row.variant), label: `Viridithas d${row.strength}`, depth: row.strength };
+    if (row.family === 'berserk') return { engine: getBerserkFor(row.variant), label: `Berserk d${row.strength}`, depth: row.strength };
+    if (row.family === 'plentychess') return { engine: getPlentyChessFor(row.variant), label: `PlentyChess d${row.strength}`, depth: row.strength };
+  }
+  return { engine: getStockfish('lite'), label: 'SF Lite d12', depth: 12 };
+}
+
+function winWhiteFromInfo(fen: string, info: { scoreCp?: number; mateIn?: number } | undefined): number {
+  if (!info) return 0.5;
+  const turn = parseFen(fen).turn;
+  const whiteCp = info.scoreCp === undefined ? undefined : turn === 'w' ? info.scoreCp : -info.scoreCp;
+  const whiteMate = info.mateIn === undefined ? undefined : turn === 'w' ? info.mateIn : -info.mateIn;
+  return evalBarWhitePercent(whiteCp, whiteMate) / 100;
+}
+
+const REVIEW_CLASS_LABEL: Record<ReviewedMove['class'], string> = {
+  best: 'Best', good: 'Good', inaccuracy: 'Inaccuracy', mistake: 'Mistake', blunder: 'Blunder', forced: 'Forced',
+};
+
+function reviewSummaryHtml(review: GameReview): string {
+  const side = (label: string, accuracy: number, counts: GameReview['counts']['white']) =>
+    `<div><div class="small">${label}</div><div class="acc">${accuracy.toFixed(1)}%</div>`
+    + `<div class="small">${counts.blunder}×<span class="review-badge blunder">??</span> ${counts.mistake}×<span class="review-badge mistake">?</span> ${counts.inaccuracy}×<span class="review-badge inaccuracy">?!</span></div></div>`;
+  return `<div class="review-summary">${side('White accuracy', review.accuracy.white, review.counts.white)}${side('Black accuracy', review.accuracy.black, review.counts.black)}</div>`;
+}
+
+function renderReview(review: GameReview, nodes: GameNode[]): void {
+  el('reviewSummary').hidden = false;
+  el('reviewSummary').innerHTML = reviewSummaryHtml(review);
+  el('reviewChart').hidden = false;
+  el('reviewChart').innerHTML = lineChartSvg([{
+    label: 'White win %',
+    color: '#4a7a2a',
+    points: review.moves.map((move) => ({ x: move.ply, y: move.winAfter })),
+  }], { yMin: 0, yMax: 1, midline: 0.5, formatY: (v) => `${Math.round(v * 100)}%`, height: 110 });
+  const critical = el('reviewCritical');
+  critical.hidden = review.criticalMoves.length === 0;
+  critical.innerHTML = review.criticalMoves.map((move) => {
+    const node = nodes[move.ply];
+    const moveNo = `${Math.ceil(move.ply / 2)}${move.side === 'w' ? '.' : '…'}`;
+    return `<li data-node="${node?.id ?? ''}"><span class="review-badge ${move.class}">${REVIEW_CLASS_LABEL[move.class]}</span> `
+      + `<span class="mono">${moveNo} ${htmlEscape(move.san)}</span> · win ${Math.round(move.winBefore * 100)}%→${Math.round(move.winAfter * 100)}%`
+      + `${move.bestUci ? ` · best <span class="mono">${htmlEscape(move.bestUci)}</span>` : ''}</li>`;
+  }).join('');
+}
+
+async function runGameReview(): Promise<void> {
+  if (reviewAbort) return;
+  const nodes = mainlineNodes();
+  if (nodes.length < 2) { el('reviewStatus').textContent = 'Load a PGN or play some moves first.'; return; }
+  const { engine, label, depth } = reviewEngineChoice();
+  const controller = new AbortController();
+  reviewAbort = controller;
+  el('reviewGame').toggleAttribute('disabled', true);
+  el('reviewStop').toggleAttribute('disabled', false);
+  el('reviewCopyPgn').hidden = true;
+  try {
+    const positions: ReviewPosition[] = [];
+    for (let i = 0; i < nodes.length; i++) {
+      if (controller.signal.aborted) break;
+      el('reviewStatus').textContent = `Reviewing with ${label}: position ${i + 1}/${nodes.length}…`;
+      const fen = nodes[i].fen;
+      const board = parseFen(fen);
+      const legal = legalMoves(board).length;
+      if (legal === 0) {
+        // Terminal: engines return no lines here. Checkmate scores the side to
+        // move as lost; stalemate is a draw.
+        positions.push({ winWhite: inCheck(board) ? (board.turn === 'w' ? 0 : 1) : 0.5, bestUci: null, legalMoves: 0 });
+        continue;
+      }
+      const lines = await engine.analyze(fen, { multipv: 1, depth, signal: controller.signal });
+      positions.push({
+        winWhite: winWhiteFromInfo(fen, lines[0]),
+        bestUci: lines[0]?.pvUci?.[0] ?? null,
+        legalMoves: legal,
+      });
+    }
+    if (controller.signal.aborted || positions.length !== nodes.length) {
+      el('reviewStatus').textContent = 'Review stopped.';
+      return;
+    }
+    const moves = nodes.slice(1).map((node) => ({ san: node.san ?? '?', uci: node.move ? moveToUci(node.move) : '' }));
+    lastReview = reviewGame(positions, moves, parseFen(nodes[0].fen).turn);
+    lastReviewNodes = nodes;
+    lastReviewSignature = reviewSignature(nodes);
+    renderReview(lastReview, nodes);
+    el('reviewCopyPgn').hidden = false;
+    el('reviewStatus').textContent = `Reviewed ${moves.length} moves with ${label}.`;
+  } catch (error) {
+    el('reviewStatus').textContent = (error as Error).name === 'AbortError' ? 'Review stopped.' : `Review failed: ${(error as Error).message}`;
+  } finally {
+    reviewAbort = null;
+    el('reviewGame').toggleAttribute('disabled', false);
+    el('reviewStop').toggleAttribute('disabled', true);
+  }
+}
+
+async function copyReviewPgn(): Promise<void> {
+  if (!lastReview || !lastReviewNodes.length) return;
+  if (reviewSignature() !== lastReviewSignature) {
+    clearReviewState('Review cleared after game changed; run review again before copying annotated PGN.');
+    return;
+  }
+  const start = parseFen(lastReviewNodes[0].fen);
+  const pgn = annotatedPgn(lastReview, {
+    tags: { Event: 'LC0 analysis review', ...(lastReviewNodes[0].fen === START_FEN ? {} : { SetUp: '1', FEN: lastReviewNodes[0].fen }) },
+    startFullmove: start.fullmove,
+    startTurn: start.turn,
+  });
+  try {
+    await navigator.clipboard.writeText(pgn);
+    el('reviewStatus').textContent = 'Annotated PGN copied to clipboard.';
+  } catch {
+    el('reviewStatus').textContent = 'Clipboard unavailable — annotated PGN logged to console.';
+    console.info(pgn);
+  }
+}
+
 async function analyzeCurrent() {
   const rows = activeEngineRows();
   if (!rows.length) { el('message').textContent = 'Add an engine to analyze.'; return; }
@@ -1688,6 +1848,7 @@ async function analyzeCurrent() {
 
 function afterNavigation() {
   clearStalePgnDatabaseSearchResults();
+  clearReviewIfMainlineChanged();
   renderAll();
   if (inputEl('autoAnalyze').checked && !lineCache.has(tree.current.fen)) void analyzeCurrent();
   else { renderEvalBar(); setShapes(bestShapes()); }
@@ -1820,6 +1981,15 @@ function wireEvents() {
   });
   el('lc0RuntimeSelect').addEventListener('change', () => { void reloadLc0Backend(); });
   el('multiPvInput').addEventListener('change', () => { lineCache.delete(tree.current.fen); void analyzeCurrent(); });
+  el('reviewGame').addEventListener('click', () => { void runGameReview(); });
+  el('reviewStop').addEventListener('click', () => reviewAbort?.abort());
+  el('reviewCopyPgn').addEventListener('click', () => { void copyReviewPgn(); });
+  el('reviewCritical').addEventListener('click', (event) => {
+    const target = (event.target as HTMLElement).closest('[data-node]');
+    if (!target) return;
+    const node = nodeIndex.get(Number(target.getAttribute('data-node')));
+    if (node) { tree.goTo(node); afterNavigation(); }
+  });
   el('movelist').addEventListener('click', (event) => {
     const target = (event.target as HTMLElement).closest('[data-node]');
     if (!target) return;
