@@ -11,6 +11,7 @@
 <label>Batch <select id="batch"><option>1</option><option>4</option><option>8</option><option>16</option><option>32</option></select></label>
 <label><input id="invoke" type="checkbox" /> Invoke zero-input VM</label>
 <label><input id="fixtures" type="checkbox" /> Use real LC0 fixtures</label>
+<label><input id="tensorCache" type="checkbox" /> Fetch manifest tensor-cache sidecar</label>
 <label>ORT compare <select id="ortCompare"><option value="none">none</option><option value="f16">f16</option><option value="f32">f32</option><option value="both">both</option></select></label>
 <label>ORT EP <select id="ortEp"><option value="webgpu">webgpu</option><option value="wasm">wasm</option><option value="webgpu,wasm">webgpu,wasm</option></select></label>
 <button id="run">Run smoke</button>
@@ -183,6 +184,13 @@ function checkedStagedRuntimeUrl(value, baseUrl, label) {
   if (url.origin !== location.origin) throw new Error(`${label} must be same-origin: ${url}`);
   if (!url.pathname.startsWith(STAGED_TVMJS_RUNTIME_PREFIX)) throw new Error(`${label} must stay under ${STAGED_TVMJS_RUNTIME_PREFIX}: ${url.pathname}`);
   return url;
+}
+function tensorCacheUrl(manifest, baseUrl) {
+  const tensorCache = manifest.tensorCache;
+  if (!tensorCache) return undefined;
+  const directory = tensorCache.directory ?? (tensorCache.manifest ? tensorCache.manifest.replace(/[^/]*$/, '') : 'tensor-cache/');
+  const path = String(directory).replace(/\/?$/, '/');
+  return checkedStagedRuntimeUrl(path, baseUrl, 'tensor cache').toString();
 }
 async function fetchChecked(baseUrl, rel, expected) {
   const url = checkedStagedRuntimeUrl(rel, baseUrl, `artifact ${rel}`).toString();
@@ -874,6 +882,16 @@ async function run() {
   const tvm = await timed('tvmjsInstantiateMs', () => tvmjs.instantiate(wasmBytes, tvmjs.createPolyfillWASI(), (message) => log('tvmjs', message)));
   timedSync('tvmInitWebGpuMs', () => tvm.initWebGPU(device));
   log('tvm instance initialized');
+  const shouldFetchTensorCache = document.getElementById('tensorCache').checked || params.get('tensorCache') === '1';
+  const tensorCacheBase = shouldFetchTensorCache ? tensorCacheUrl(manifest, base) : undefined;
+  let tensorCacheMetadata;
+  if (shouldFetchTensorCache) {
+    if (!tensorCacheBase) throw new Error('tensorCache=1 requested but manifest.tensorCache is missing');
+    await timed('tensorCacheFetchMs', () => tvm.fetchTensorCache(tensorCacheBase, tvm.webgpu()));
+    tensorCacheMetadata = tvm.cacheMetadata ?? null;
+    log('tensor cache fetched', { url: tensorCacheBase, metadata: tensorCacheMetadata });
+  }
+  const tensorCacheInfo = shouldFetchTensorCache ? { url: tensorCacheBase, metadata: tensorCacheMetadata ?? null } : undefined;
   tvm.beginScope();
   try {
     const sys = timedSync('systemLibMs', () => tvm.systemLib());
@@ -1042,6 +1060,7 @@ async function run() {
           invokeMs,
           startupTimings,
           gpuBufferAllocation: gpuAllocationProbe.snapshot(),
+          ...(tensorCacheInfo ? { tensorCache: tensorCacheInfo } : {}),
           bestMoveMatches: fixtureResults.filter((row) => row.bestMoveMatchesNative).length,
           nativeComparable: fixtureResults.filter((row) => row.nativeBestMove).length,
           maxNativeTopPriorAbsDiff: definedMax(fixtureResults.map((row) => row.maxNativeTopPriorAbsDiff)),
@@ -1064,6 +1083,7 @@ async function run() {
           invokeMs,
           startupTimings,
           gpuBufferAllocation: gpuAllocationProbe.snapshot(),
+          ...(tensorCacheInfo ? { tensorCache: tensorCacheInfo } : {}),
           inputMode: useFixtures ? 'fixtures' : 'zero',
           outputs: outputMetas,
           rawBytesRead: outputRaws.map((raw) => raw?.byteLength ?? null),
@@ -1083,6 +1103,7 @@ if (params.has('manifest')) document.getElementById('manifest').value = params.g
 if (params.has('batch')) document.getElementById('batch').value = params.get('batch');
 if (params.get('invoke') === '1') document.getElementById('invoke').checked = true;
 if (params.get('fixtures') === '1') document.getElementById('fixtures').checked = true;
+if (params.get('tensorCache') === '1') document.getElementById('tensorCache').checked = true;
 if (params.has('ortCompare')) document.getElementById('ortCompare').value = params.get('ortCompare');
 if (params.has('ortEp')) document.getElementById('ortEp').value = params.get('ortEp');
 if (params.get('autorun') === '1') setTimeout(() => document.getElementById('run').click(), 0);

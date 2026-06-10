@@ -11,11 +11,12 @@ const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
 
 function usage() {
   console.log(`Usage: node scripts/lc0_tvmjs_webgpu_smoke.mjs [options]\n\nRuns the LC0 whole-model TVMJS/WebGPU browser smoke and saves JSON evidence.\n\nOptions:\n  --batch N           Batch artifact to test: 1, 4, or 8 (default 8)\n  --fixtures          Encode real fixtures and compare best moves (default true)\n  --no-fixtures       Run loader/zero-input invoke only\n  --fixture-offset N  First fixture index for real-fixture mode (default 0)\n  --fixture-count N   Number of fixtures/FEN rows to request (default batch)
-  --fens PATH         Newline-separated FEN suite; implies --fixtures and bypasses fixtures/lc0/fen_only.json\n  --ort-compare MODE  Compare TVMJS outputs against ORT: none, f16, f32, both (default none)\n  --ort-ep EP         ORT execution provider for comparison: webgpu, wasm, webgpu,wasm (default webgpu)\n  --search-visits N   Also run TVMJS-vs-ORT search parity with fixed visits\n  --search-fixtures N Number of fixtures for search parity (default 2)\n  --search-repeats N  Repeat search parity rows for timing stability (default 1)\n  --stockfish-score-depth N  Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N     Score TVMJS/ORT post-search moves by Stockfish movetime\n  --base-url URL      Use existing server instead of starting Vite\n  --host HOST         Vite host (default ${DEFAULT_HOST})\n  --port N            Vite port (default ${DEFAULT_PORT})\n  --timeout MS        Overall timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --out PATH          JSON artifact path\n  --no-server         Do not auto-start Vite\n  -h, --help          Show help\n`);
+  --tensor-cache      Fetch manifest tensor-cache sidecar before VM setup (research-only)
+  --fens PATH         Newline-separated FEN suite; implies --fixtures and bypasses fixtures/lc0/fen_only.json\n  --ort-compare MODE  Compare TVMJS outputs against ORT: none, f16, f32, both (default none)\n  --ort-ep EP         ORT execution provider for comparison: webgpu, wasm, webgpu,wasm (default webgpu)\n  --search-visits N   Also run TVMJS-vs-ORT search parity with fixed visits\n  --search-fixtures N Number of fixtures for search parity (default 2)\n  --search-repeats N  Repeat search parity rows for timing stability (default 1)\n  --search-pipeline-depth N  Evaluate this many TVMJS batches concurrently during search parity (default 1)\n  --stockfish-score-depth N  Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N     Score TVMJS/ORT post-search moves by Stockfish movetime\n  --base-url URL      Use existing server instead of starting Vite\n  --host HOST         Vite host (default ${DEFAULT_HOST})\n  --port N            Vite port (default ${DEFAULT_PORT})\n  --timeout MS        Overall timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --out PATH          JSON artifact path\n  --no-server         Do not auto-start Vite\n  -h, --help          Show help\n`);
 }
 
 function parseArgs(argv) {
-  const args = { batch: 8, fixtures: true, fixtureOffset: 0, fixtureCount: undefined, fensFile: '', ortCompare: 'none', ortEp: 'webgpu', searchVisits: 0, searchFixtures: 2, searchRepeats: 1, searchPipelineDepth: 1, stockfishScoreDepth: undefined, stockfishScoreMs: undefined, host: DEFAULT_HOST, port: DEFAULT_PORT, timeoutMs: DEFAULT_TIMEOUT_MS, agentBrowser: DEFAULT_AGENT_BROWSER, noServer: false };
+  const args = { batch: 8, fixtures: true, fixtureOffset: 0, fixtureCount: undefined, tensorCache: false, fensFile: '', ortCompare: 'none', ortEp: 'webgpu', searchVisits: 0, searchFixtures: 2, searchRepeats: 1, searchPipelineDepth: 1, stockfishScoreDepth: undefined, stockfishScoreMs: undefined, host: DEFAULT_HOST, port: DEFAULT_PORT, timeoutMs: DEFAULT_TIMEOUT_MS, agentBrowser: DEFAULT_AGENT_BROWSER, noServer: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`); return argv[++i]; };
@@ -25,6 +26,7 @@ function parseArgs(argv) {
     else if (arg === '--no-fixtures') args.fixtures = false;
     else if (arg === '--fixture-offset') args.fixtureOffset = Number(next());
     else if (arg === '--fixture-count') args.fixtureCount = Number(next());
+    else if (arg === '--tensor-cache') args.tensorCache = true;
     else if (arg === '--fens') { args.fensFile = next(); args.fixtures = true; }
     else if (arg === '--ort-compare') args.ortCompare = next();
     else if (arg === '--ort-ep') args.ortEp = next();
@@ -187,6 +189,7 @@ async function main() {
         url.searchParams.set('fixedSuiteFens', fixedSuiteFens.slice(args.fixtureOffset, args.fixtureOffset + requestedCount).join('|'));
       } else if (args.fixtureCount !== undefined) url.searchParams.set('fixtureCount', String(Math.floor(args.fixtureCount)));
     }
+    if (args.tensorCache) url.searchParams.set('tensorCache', '1');
     if (args.ortCompare !== 'none') url.searchParams.set('ortCompare', args.ortCompare);
     if (args.ortEp) url.searchParams.set('ortEp', args.ortEp);
     if (args.searchVisits > 0) {
@@ -211,6 +214,7 @@ async function main() {
         fixtures: args.fixtures,
         fixtureOffset: args.fixtureOffset,
         fixtureCount: args.fixtureCount ?? args.batch,
+        tensorCache: args.tensorCache,
         ortCompare: args.ortCompare,
         ortEp: args.ortEp,
         fensFile: args.fensFile || undefined,
