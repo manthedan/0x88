@@ -48,11 +48,11 @@ for (let i = 2; i < process.argv.length; i += 1) {
   }
 }
 
-const jsPaths = (args.get('js') ?? [
-  'public/plentychess/plentychess-emscripten.js',
-  'public/plentychess/plentychess-emscripten-sse41.js',
-  'public/plentychess/plentychess-emscripten-relaxed-simd128.js',
-].join(',')).split(',').map((s) => s.trim()).filter(Boolean);
+const jsPaths = (args.get('js') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+if (!jsPaths.length) {
+  console.error('Usage: node scripts/emscripten_uci_bench.mjs --js <baseline.js>[,<candidate.js>...] [--depths 9,11] [--positions 20] [--json out.json]');
+  process.exit(2);
+}
 const depths = (args.get('depths') ?? '9').split(',').map((s) => Math.max(1, Math.floor(Number(s))));
 const positionCount = Math.max(1, Math.min(ROTATED_FEN_SUITE.length, Math.floor(Number(args.get('positions') ?? ROTATED_FEN_SUITE.length))));
 const timeoutMs = Math.max(1000, Math.floor(Number(args.get('timeout') ?? 120000)));

@@ -1,0 +1,23 @@
+{
+  "name": "reckless",
+  "upstream": {
+    "repo": "https://github.com/codedeliveryservice/Reckless.git",
+    "ref": "0010617448bdef4c8cd7d4f4825b7e42c8bc262a",
+    "version": "v60",
+    "license": "AGPL-3.0"
+  },
+  "patches": {
+    "wasiUci": "applied inline by scripts/build_reckless_wasi.mjs (UCI stdin loop, threadpool/NUMA/TT shims for wasm32)",
+    "nnueSimdWasm32": "engines/reckless/src/nnue_simd_wasm32.rs (module selection patched for wasm32+simd128; relaxed integer dot under relaxed-simd)",
+    "findNnzWasm32": "engines/reckless/src/find_nnz_wasm32.rs (NEON-shaped sparse index extraction appended to nnue/forward/vectorized.rs)"
+  },
+  "variants": {
+    "scalar": { "artifact": "public/reckless/reckless.wasm", "targetFeatures": [] },
+    "simd128": { "artifact": "public/reckless/reckless-simd128.wasm", "targetFeatures": ["+simd128"] },
+    "relaxed-simd128": { "artifact": "public/reckless/reckless-relaxed-simd128.wasm", "targetFeatures": ["+simd128", "+relaxed-simd"] }
+  },
+  "evidence": {
+    "parity": "docs/reckless_simd_kernel_fixes_node_bench_2026-06-09_depth7-9.json (60/60 exact)",
+    "kernelFixes": "docs/reckless_simd_kernel_fixes.md"
+  }
+}
