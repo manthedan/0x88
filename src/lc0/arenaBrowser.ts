@@ -157,6 +157,7 @@ let boardWhiteName: string | null = null;
 let boardBlackName: string | null = null;
 let loadingLc0 = false;
 let running = false;
+let startPending = false;
 let abort: AbortController | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
 let searcher: Lc0PuctSearcher | null = null;
@@ -793,7 +794,10 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'viridithas') return availableViridithasVariants().map((v) => ({ value: v.key, label: v.label }));
   if (family === 'berserk') return availableBerserkVariants().map((v) => ({ value: v.key, label: v.label }));
   if (family === 'plentychess') return availablePlentyChessVariants().map((v) => ({ value: v.key, label: v.label }));
-  return availableRecklessVariants().map((v) => ({ value: v.key, label: v.label }));
+  return availableRecklessVariants().map((v) => {
+    const status = recklessVariantAssetStatus(v);
+    return { value: v.key, label: status === 'missing' ? `${v.label} (asset missing)` : v.label, disabled: status === 'missing' };
+  });
 }
 
 function clampStrength(row: EngineRow): void {
@@ -1362,6 +1366,11 @@ function prewarmReckless(engine: RecklessEngine): void {
     });
 }
 
+function recklessMissingAssetMessage(variants: RecklessVariant[]): string {
+  const urls = variants.flatMap((variant) => [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])]);
+  return `Reckless asset missing: ${urls.join(', ')}. Build/publish Reckless artifacts with npm run reckless:build-production, or choose Stockfish/Tiny/LC0 instead.`;
+}
+
 function renderRecklessRuntimeInfo(): void {
   const rows = activeSeatRows().filter((row) => row.family === 'reckless');
   if (!rows.length) { el('recklessRuntimeInfo').textContent = 'Reckless: not selected'; return; }
@@ -1804,6 +1813,11 @@ function buildEngines() {
       const kind = row.variant === 'full' ? 'full' : 'lite';
       engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: sf(id, row, kind), warmup: stockfishWarmup(kind) });
     } else if (row.family === 'reckless') {
+      const variant = recklessVariantForKey(row.variant);
+      if (variant.key !== 'custom' && recklessVariantAssetStatus(variant) === 'missing') {
+        engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: async () => { throw new Error(recklessMissingAssetMessage([variant])); } });
+        continue;
+      }
       const engine = getRecklessFor(row.variant);
       prewarmReckless(engine);
       engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: recklessMove(id, row, engine), warmup: recklessWarmup(engine) });
@@ -1973,19 +1987,54 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
   return { result: '1/2-1/2', reason: 'max plies', tree };
 }
 
+async function ensureSelectedRecklessAssetsAvailable(): Promise<boolean> {
+  const variants = [...new Map(activeSeatRows()
+    .filter((row) => row.family === 'reckless')
+    .map((row) => {
+      const variant = recklessVariantForKey(row.variant);
+      return [recklessCacheKey(variant), variant] as const;
+    })).values()];
+  if (!variants.length) return true;
+  const missing: RecklessVariant[] = [];
+  for (const variant of variants) {
+    const status = await checkRecklessVariantAsset(variant, () => {
+      renderRecklessRuntimeInfo();
+      renderSeatSelectors();
+      refreshSeatControls();
+    });
+    if (status === 'missing' && variant.key !== 'custom') missing.push(variant);
+  }
+  if (!missing.length) return true;
+  renderRecklessRuntimeInfo();
+  renderSeatSelectors();
+  refreshSeatControls();
+  el('message').textContent = recklessMissingAssetMessage(missing);
+  return false;
+}
+
+function clearStartPending(): void {
+  startPending = false;
+  if (!running) el('start').toggleAttribute('disabled', false);
+}
+
 async function startMatch() {
-  if (running) return;
+  if (running || startPending) return;
+  startPending = true;
+  el('start').toggleAttribute('disabled', true);
   syncSeatRowsFromDom();
+  if (!(await ensureSelectedRecklessAssetsAvailable())) { clearStartPending(); return; }
+  if (running) { clearStartPending(); return; }
   buildEngines();
   populateSeats();
   const idA = seatEngineId('A');
   const idB = seatEngineId('B');
   const engineA = engines.get(idA);
   const engineB = engines.get(idB);
-  if (!engineA || !engineB) { el('message').textContent = 'Pick two engines.'; return; }
+  if (!engineA || !engineB) { el('message').textContent = 'Pick two engines.'; clearStartPending(); return; }
   const usesBt4 = activeSeatRows().some((row) => row.family === 'lc0' && row.variant === 'bt4');
   if (usesBt4 && !(await probeBt4Support())) {
     el('message').textContent = 'Lc0 BT4 needs WebGPU, which is unavailable in this browser.';
+    clearStartPending();
     return;
   }
   const sameEngine = idA === idB;
@@ -2001,10 +2050,12 @@ async function startMatch() {
     }
   } catch (error) {
     el('message').textContent = `Opening setup error: ${(error as Error).message}`;
+    clearStartPending();
     return;
   }
-  if (!schedule.length) { el('message').textContent = 'No games to play.'; return; }
+  if (!schedule.length) { el('message').textContent = 'No games to play.'; clearStartPending(); return; }
 
+  startPending = false;
   running = true;
   abort = new AbortController();
   refreshOpeningPreview();
@@ -2076,6 +2127,7 @@ async function startMatch() {
     }
   } finally {
     running = false;
+    startPending = false;
     abort = null;
     activeEngineIds = [];
     engineOutputs.clear();
@@ -2527,6 +2579,7 @@ async function init() {
   selectEl('plentychessVariantSelect').value = REQUESTED_PLENTYCHESS_VARIANT.key;
   applyArenaQueryParams();
   applyLc0Preset(inferredLc0Preset());
+  await ensureSelectedRecklessAssetsAvailable();
   renderRecklessRuntimeInfo();
   renderViridithasRuntimeInfo();
   renderBerserkRuntimeInfo();
