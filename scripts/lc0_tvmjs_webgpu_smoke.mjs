@@ -33,6 +33,7 @@ function parseArgs(argv) {
     else if (arg === '--search-repeats') args.searchRepeats = Number(next());
     else if (arg === '--search-pipeline-depth') args.searchPipelineDepth = Number(next());
     else if (arg === '--pass-coalesce') args.passCoalesce = true;
+    else if (arg === '--kernel-profile-invokes') args.kernelProfileInvokes = Number(next());
     else if (arg === '--stockfish-score-depth') args.stockfishScoreDepth = Number(next());
     else if (arg === '--stockfish-score-ms') args.stockfishScoreMs = Number(next());
     else if (arg === '--base-url') { args.baseUrl = next(); args.noServer = true; }
@@ -175,6 +176,7 @@ async function main() {
     url.searchParams.set('batch', String(args.batch));
     if (args.manifest) url.searchParams.set('manifest', args.manifest);
     if (args.passCoalesce) url.searchParams.set('passCoalesce', '1');
+    if (args.kernelProfileInvokes > 1) url.searchParams.set('kernelProfileInvokes', String(Math.floor(args.kernelProfileInvokes)));
     url.searchParams.set('invoke', '1');
     if (args.fixtures) {
       url.searchParams.set('fixtures', '1');

@@ -44,6 +44,9 @@ fi
 if [[ "${DETACH_PARAMS:-0}" == "1" ]]; then
   extra_args+=(--detach-params)
 fi
+if [[ -n "${DLIGHT_MATMUL_CONFIG:-}" ]]; then
+  extra_args+=(--dlight-matmul-config "$DLIGHT_MATMUL_CONFIG")
+fi
 
 MODEL_FAMILY="${LC0_TVMJS_MODEL_FAMILY:-t1-256x10-distilled-swa-2432500}"
 DTYPE="${LC0_TVMJS_DTYPE:-f16}"

@@ -1009,14 +1009,19 @@ async function run() {
         let gpuKernelProfile;
         if (gpuKernelProfiler.supported) {
           const profileFens = fixtureRows.map((row) => row.fen).slice(0, batch);
+          // Multiple profiled invokes amortize run-to-run GPU timing variance;
+          // per-invoke numbers are reported as totals divided by invoke count.
+          const profileInvokes = Math.max(1, Math.floor(Number(params.get('kernelProfileInvokes') ?? 1) || 1));
           gpuKernelProfiler.arm();
           try {
-            await runTvmBatchEvaluation(tvm, vmMod, profileFens, batch);
+            for (let i = 0; i < profileInvokes; i++) await runTvmBatchEvaluation(tvm, vmMod, profileFens, batch);
           } finally {
             gpuKernelProfiler.disarm();
           }
           gpuKernelProfile = await gpuKernelProfiler.collect();
-          log('gpu kernel profile', { passes: gpuKernelProfile.passes, totalGpuMs: gpuKernelProfile.totalGpuMs, top: gpuKernelProfile.kernels?.slice(0, 5).map((k) => `${k.name}:${k.totalMs?.toFixed(2)}ms`) });
+          gpuKernelProfile.profileInvokes = profileInvokes;
+          if (Number.isFinite(gpuKernelProfile.totalGpuMs)) gpuKernelProfile.gpuMsPerInvoke = gpuKernelProfile.totalGpuMs / profileInvokes;
+          log('gpu kernel profile', { passes: gpuKernelProfile.passes, totalGpuMs: gpuKernelProfile.totalGpuMs, profileInvokes, gpuMsPerInvoke: gpuKernelProfile.gpuMsPerInvoke, top: gpuKernelProfile.kernels?.slice(0, 5).map((k) => `${k.name}:${k.totalMs?.toFixed(2)}ms`) });
         } else {
           gpuKernelProfile = { supported: false, reason: gpuKernelProfiler.reason };
         }

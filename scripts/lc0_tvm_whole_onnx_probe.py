@@ -335,6 +335,11 @@ def main() -> int:
         help="Opt-in: apply dlight GPU schedule rules (Matmul/GEMV/Reduction/GeneralReduction/Fallback) instead of TVM's naive DefaultGPUSchedule thread binding",
     )
     parser.add_argument(
+        "--dlight-matmul-config",
+        default=None,
+        help='JSON dict of dlight gpu.Matmul.Config overrides for the webgpu default, e.g. {"vector_size":4,"micro_size_k":16}',
+    )
+    parser.add_argument(
         "--detach-params",
         action="store_true",
         help="Opt-in: import with keep_params_in_input, detach weights from the module, and dump them as a tensor-cache (param_0..param_N, raw encoding) so the exported wasm contains no embedded weights",
@@ -511,19 +516,66 @@ def main() -> int:
                 # This TVM checkout ships dlight under s_tir.
                 from tvm.s_tir import dlight as dl  # type: ignore
 
+            # Record which rule actually scheduled each TIR function so a weak
+            # dlight result can be attributed: the Matmul rule not firing is a
+            # very different problem from Matmul tile sizes being wrong.
+            rule_attribution: dict[str, str] = {}
+
+            def function_name(func: Any, fallback: str = "?") -> str:
+                # These PrimFuncs carry no global_symbol attr after the zero
+                # pipeline; identify them structurally via the module instead.
+                attr = func.attrs.get("global_symbol") if func.attrs is not None else None
+                if attr is not None:
+                    return str(attr)
+                for gv, candidate in build_mod.functions_items():
+                    if candidate.same_as(func):
+                        return gv.name_hint
+                return fallback
+
+            class _RecordingRule:
+                def __init__(self, rule: Any) -> None:
+                    self._rule = rule
+                    self._name = type(rule).__name__
+
+                def apply(self, func: Any, rule_target: Any, tunable: bool) -> Any:
+                    space = self._rule.apply(func, rule_target, tunable)
+                    if space is not None:
+                        rule_attribution[function_name(func)] = self._name
+                    return space
+
             # Lower relax ops to TIR first, then let dlight schedule the TIR
             # functions; relax.build's default pipeline skips already-scheduled
             # functions in DefaultGPUSchedule.
             with tvm.target.Target(target):
                 build_mod = relax.get_pipeline("zero")(mod)
+                prim_func_names = [
+                    gv.name_hint
+                    for gv, func in build_mod.functions_items()
+                    if type(func).__name__ == "PrimFunc"
+                ]
+                matmul_rule = dl.gpu.Matmul()
+                if args.dlight_matmul_config:
+                    overrides = json.loads(args.dlight_matmul_config)
+                    base_config = matmul_rule.get_configs(tvm.target.Target.current())
+                    for key, value in overrides.items():
+                        if not hasattr(base_config, key):
+                            raise ValueError(f"Unknown dlight Matmul.Config field: {key}")
+                        setattr(base_config, key, value)
+                    matmul_rule.get_configs = lambda _target, _config=base_config: _config
+                    result["dlight_matmul_config"] = {key: getattr(base_config, key) for key in vars(base_config)}
                 build_mod = dl.ApplyDefaultSchedule(
-                    dl.gpu.Matmul(),
-                    dl.gpu.GEMV(),
-                    dl.gpu.Reduction(),
-                    dl.gpu.GeneralReduction(),
-                    dl.gpu.Fallback(),
+                    _RecordingRule(matmul_rule),
+                    _RecordingRule(dl.gpu.GEMV()),
+                    _RecordingRule(dl.gpu.Reduction()),
+                    _RecordingRule(dl.gpu.GeneralReduction()),
+                    _RecordingRule(dl.gpu.Fallback()),
                 )(build_mod)
             result["dlight_applied"] = True
+            result["dlight_rule_attribution"] = {
+                "counts": dict(Counter(rule_attribution.values())),
+                "unscheduled": sorted(set(prim_func_names) - set(rule_attribution)),
+                "functions": dict(sorted(rule_attribution.items())),
+            }
         return relax.build(build_mod, target=target)
 
     executable = run_step(result, "relax_build_target", build_relax) if mod is not None else None

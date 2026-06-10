@@ -402,6 +402,43 @@ the 4 fused matmul families at 512×256-class shapes), larger physical batches
 (b16/b32) for visit budgets that can fill them, and evaluation-count reduction
 (cache/tree reuse) on the search side.
 
+### Dlight Matmul rule attribution and tile-config sweep (2026-06-09)
+
+Attribution fix first: the initial "dlight only scheduled 1 function" reading
+was an accounting bug — these PrimFuncs carry no `global_symbol` attr after the
+zero pipeline, so every rule hit was recorded under one key. With naming fixed
+(probe resolves names via the module's GlobalVars), the true attribution for
+the b16 module is **Matmul 19, GEMV 1, GeneralReduction 5, Fallback 14** — the
+Matmul rule does fire on every matmul kernel. The −8%-kernel/nil-end-to-end
+dlight result therefore means the default dlight schedules perform like the
+naive schedules here, not that dlight failed to apply.
+
+Tile-config sweep (`scripts/sweep_dlight_matmul_configs.sh`, env
+`DLIGHT_MATMUL_CONFIG` / probe `--dlight-matmul-config`, one config per build,
+8 profiled invokes per measurement via `--kernel-profile-invokes`, b16, all
+legs native parity 8/8; results in
+`artifacts/tvm/dlight_matmul_config_sweep.jsonl`):
+
+| Config | GPU ms/invoke | vs baseline |
+| --- | ---: | --- |
+| baseline (webgpu default: 8×8 threads, 4×4 micro, k8, vec1, shared) | `13.78` | — |
+| `vector_size=2` | build failed | TIR vectorize legality: one config applies to ALL matmuls incl. WDL `N=3` / policy `N=1858` heads |
+| `micro_size_k=16` | `13.10` | −5% (≈ noise margin) |
+| `block_size_y=16` | `20.19` | +47% |
+| `storage_align=true` | `14.84` | +8% |
+| `inner_x=true` | `13.90` | ~0 |
+| `use_shared=false` | `25.45` | +85% |
+| `micro_size_x/y=8` | `18.23` | +32% |
+
+Conclusion: dlight's default webgpu Matmul config is a local optimum for these
+512×256-class f16 shapes on Apple Silicon; every single-knob change is neutral
+or worse, and the one promising lever (vectorized loads) requires per-function
+config dispatch to stay legal on the head matmuls, for a bounded payoff
+(matmuls are 63% of ~`13.8 ms` at b16; a generous vec2 win on the big matmuls
+projects to low-single-digit percent of search wall). Per-shape schedule
+tuning is parked as low-ROI on this device; revisit only with
+metaschedule-grade search or evidence from a different GPU class.
+
 ### Batch-scaling sweep: b16/b32 exports (2026-06-09, the lever that worked)
 
 New fixed-batch f16 ONNX exports via native lc0
