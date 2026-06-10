@@ -46,7 +46,7 @@ function parseArgs(argv) {
     else throw new Error(`Unknown option: ${arg}`);
   }
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
-  if (![1, 4, 8].includes(args.batch)) throw new Error(`Invalid --batch ${args.batch}; expected 1, 4, or 8`);
+  if (![1, 4, 8, 16, 32].includes(args.batch)) throw new Error(`Invalid --batch ${args.batch}; expected 1, 4, 8, 16, or 32`);
   if (!Number.isFinite(args.fixtureOffset) || args.fixtureOffset < 0) throw new Error(`Invalid --fixture-offset ${args.fixtureOffset}`);
   if (args.fixtureCount !== undefined && (!Number.isFinite(args.fixtureCount) || args.fixtureCount <= 0)) throw new Error(`Invalid --fixture-count ${args.fixtureCount}`);
   if (!['none', 'f16', 'f32', 'both'].includes(args.ortCompare)) throw new Error(`Invalid --ort-compare ${args.ortCompare}`);

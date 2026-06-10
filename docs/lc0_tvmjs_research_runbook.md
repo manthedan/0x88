@@ -402,6 +402,37 @@ the 4 fused matmul families at 512×256-class shapes), larger physical batches
 (b16/b32) for visit budgets that can fill them, and evaluation-count reduction
 (cache/tree reuse) on the search side.
 
+### Batch-scaling sweep: b16/b32 exports (2026-06-09, the lever that worked)
+
+New fixed-batch f16 ONNX exports via native lc0
+(`lc0 leela2onnx --onnx-batch-size={16,32} --onnx-data-type=f16`, sha256
+sidecars in `../models/lc0-bestnets/onnx/`, exposed through
+`scripts/lc0_prepare_model_assets.mjs` symlinks), built into TVMJS wasms with
+the standard mitigations and staged into the v1 runtime
+(`stage_lc0_tvmjs_webgpu_artifacts.mjs --batches=1,4,8,16,32`). The smoke
+page/driver accept batches 16 and 32.
+
+Search-wall sweep (4 fixtures × 2 repeats, all legs native parity 8/8 and
+TVMJS-vs-ORT search move match 8/8; artifacts
+`artifacts/tvm/lc0_tvmjs_b{8,16,32}_v{16,32,64}.json`):
+
+| Visits | b8 mean | b16 mean | b32 mean | Best |
+| --- | ---: | ---: | ---: | --- |
+| 16 | `54.30 ms` | `39.95 ms` | — | **b16, −26%** |
+| 32 | `79.60 ms` | `61.74 ms` | `63.86 ms` | **b16, −22%** |
+| 64 | — | `99.63 ms` | `94.57 ms` | b32, −5% vs b16 |
+
+Mechanism: per-batch eval cost is strongly sublinear in physical batch size
+(`15.1 ms` b8 → `19.4 ms` b16 → `30.3 ms` b32; per-position at full fill
+`1.89 → 1.21 → 0.95 ms`), so fewer larger batches beat better-filled smaller
+ones even at `36–47%` fill. b16 is the recommended physical batch for the
+practical 16–32-visit browser budgets; the b16/b32 crossover begins around
+64 visits. ORT WebGPU f16 shows the same direction (its b16 model also beat
+its b8 model in the same sessions), so this is a batching effect, not a
+TVMJS-specific one. Footprint caveat: each extra fixed-batch wasm adds ~44 MB
+to the staged runtime; the separated-params/tensor-cache plan is what makes a
+multi-batch runtime distributable.
+
 Strict same-FEN visit sweep samples now cover visits `16`, `32`, and `64`:
 
 - `artifacts/tvm/lc0_tvmjs_vs_hybrid_uho_b8_hb4_v16_n1_r1_hybrid_alloc.json`: rows `1`, TVMJS-vs-hybrid `1/1`, TVMJS mean `78.205 ms`, hybrid mean `404.665 ms`.

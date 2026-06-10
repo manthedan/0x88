@@ -14,6 +14,10 @@ const files = [
   't1-256x10-distilled-swa-2432500.batch1.f16.onnx',
   't1-256x10-distilled-swa-2432500.batch4.f16.onnx',
   't1-256x10-distilled-swa-2432500.batch8.f16.onnx',
+  // batch16/32 exported 2026-06-09 for the TVMJS batch-scaling lane:
+  // lc0 leela2onnx --onnx-batch-size=N --onnx-data-type=f16
+  't1-256x10-distilled-swa-2432500.batch16.f16.onnx',
+  't1-256x10-distilled-swa-2432500.batch32.f16.onnx',
   // Lc0 BT4 (1024x15x32h attention net, ~353MB f16). Heavy: browser use is
   // WebGPU-gated and lazy-loaded; see src/lc0/bt4Engine.ts.
   'BT4-1024x15x32h-swa-6147500.batch1.f16.onnx',

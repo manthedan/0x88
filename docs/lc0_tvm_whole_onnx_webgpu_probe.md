@@ -380,3 +380,24 @@ Current passing schema: `lc0_browser.tvmjs_research_only_check.v1`.
 2. **Custom scheduler path**: use captured WGSL plus generated C wrapper metadata to reconstruct dispatch order, buffer bindings, and constants in TypeScript/WebGPU. This is more work but may fit the existing custom hybrid runtime architecture.
 
 Before any promotion/default change, require matched fixed-suite throughput and strict drift/parity checks. ONNX f16 WebGPU remains opt-in/research because ORT WebGPU f16 currently fails strict native-BLAS prior parity.
+
+## Visit-loop performance campaign (2026-06-09)
+
+The per-search bottleneck question ("where do ~50 ms of a 16-visit TVMJS search
+go?") was answered systematically; full details, commands, and artifact paths
+live in `docs/lc0_tvmjs_research_runbook.md` under "Visit-loop attribution",
+"Pipelined evaluateBatchSequence A/B", "Per-kernel GPU attribution", and
+"Dlight default-schedule rebuild / pass coalescing". Summary of measured
+verdicts at v16/b8 (all legs parity-clean):
+
+| Lever | Result |
+| --- | --- |
+| JS search overhead | ~`2 ms`/search (3.6%) — non-lever |
+| Pipelined submit + shared sync (`batchPipelineDepth=2`) | **+27% slower** — GPU-compute-bound, fragments batch fill |
+| Pass-boundary overhead (coalesce 5928 dispatches → 26 passes) | nil |
+| Dlight default GPU schedules (`--dlight` probe rebuild, `f16/v2-dlight`) | kernel time −8%, end-to-end nil |
+| Per-kernel attribution | 229 passes, `9.2 ms` kernel time per b8 invoke, no dominant kernel (top 4 fused matmul families ≈63%) |
+
+Remaining levers, in order: real per-shape schedule tuning of the fused matmul
+families, larger physical batches (b16+) for visit budgets that fill them, and
+search-side evaluation-count reduction (cache/tree reuse).

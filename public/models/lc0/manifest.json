@@ -35,6 +35,22 @@
       "sha256": "4a3d0b0ee3080c36d1f18c4a1acbdb0ef9751bb32fc33f28db032f4c230418eb"
     },
     {
+      "file": "t1-256x10-distilled-swa-2432500.batch16.f16.onnx",
+      "url": "/models/lc0/t1-256x10-distilled-swa-2432500.batch16.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch16.f16.onnx",
+      "bytes": 40491226,
+      "sha256": "b48c352ad589a6466e9834524768f0643a67e1bc5ad44c6277dc01c69e322f13"
+    },
+    {
+      "file": "t1-256x10-distilled-swa-2432500.batch32.f16.onnx",
+      "url": "/models/lc0/t1-256x10-distilled-swa-2432500.batch32.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch32.f16.onnx",
+      "bytes": 40491226,
+      "sha256": "c4b4b8dd9ad95b3d111dac851c06af88b3ca794e4953feb748cb678e65aedc46"
+    },
+    {
       "file": "BT4-1024x15x32h-swa-6147500.batch1.f16.onnx",
       "url": "/models/lc0/BT4-1024x15x32h-swa-6147500.batch1.f16.onnx",
       "mode": "symlink",

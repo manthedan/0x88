@@ -8,7 +8,7 @@
 <h1>LC0 TVMJS/WebGPU smoke</h1>
 <p>Loads the staged whole-model TVMJS/WebGPU wasm bundle and prebuilds WebGPU pipelines. This is a loader smoke, not parity/perf evidence.</p>
 <label>Manifest <input id="manifest" size="90" value="/runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json" /></label>
-<label>Batch <select id="batch"><option>1</option><option>4</option><option>8</option></select></label>
+<label>Batch <select id="batch"><option>1</option><option>4</option><option>8</option><option>16</option><option>32</option></select></label>
 <label><input id="invoke" type="checkbox" /> Invoke zero-input VM</label>
 <label><input id="fixtures" type="checkbox" /> Use real LC0 fixtures</label>
 <label>ORT compare <select id="ortCompare"><option value="none">none</option><option value="f16">f16</option><option value="f32">f32</option><option value="both">both</option></select></label>
