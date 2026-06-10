@@ -7,6 +7,8 @@ export interface Evaluation {
   wdl: [win: number, draw: number, loss: number];
   /** Optional auxiliary WDL heads keyed by ONNX/training head name, e.g. wdl_sf18. */
   auxiliaryWdls?: Record<string, [win: number, draw: number, loss: number]>;
+  /** Optional moves-left-head estimate (plies remaining) for the evaluated position. */
+  movesLeft?: number;
   /** Optional per-legal-action value from the current side-to-move perspective, usually in [-1, 1]. */
   actionValues?: Map<number, number>;
   /** Optional per-legal-action rank/regret/risk/uncertainty signals for experimental search policies. */

@@ -36,6 +36,7 @@ function parseArgs(argv) {
     else if (arg === '--game-plies') args.gamePlies = Number(next());
     else if (arg === '--game-visits') args.gameVisits = Number(next());
     else if (arg === '--game-start-fen') args.gameStartFen = next();
+    else if (arg === '--moves-left-effect') args.movesLeftEffect = Number(next());
     else if (arg === '--search-visits') args.searchVisits = Number(next());
     else if (arg === '--search-fixtures') args.searchFixtures = Number(next());
     else if (arg === '--search-repeats') args.searchRepeats = Number(next());
@@ -203,6 +204,7 @@ async function main() {
     if (args.gamePlies) url.searchParams.set('gamePlies', String(Math.floor(args.gamePlies)));
     if (args.gameVisits) url.searchParams.set('gameVisits', String(Math.floor(args.gameVisits)));
     if (args.gameStartFen) url.searchParams.set('gameStartFen', args.gameStartFen);
+    if (args.movesLeftEffect) url.searchParams.set('movesLeftEffect', String(args.movesLeftEffect));
     if (args.searchVisits > 0) {
       url.searchParams.set('searchVisits', String(Math.floor(args.searchVisits)));
       url.searchParams.set('searchFixtureCount', String(Math.floor(args.searchFixtures)));

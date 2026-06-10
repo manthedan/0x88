@@ -35,6 +35,10 @@ parser.add_argument("--shard-bytes", type=int, default=32 * 1024 * 1024, help="t
 parser.add_argument("--report", default=None, help="quality report JSON path (default <out>/quantization-report.json)")
 parser.add_argument("--max-rel-rms", type=float, default=None,
                     help="mixed precision: revert tensors whose int8 relative RMS error exceeds this back to raw f16")
+parser.add_argument("--bits", type=int, default=8, choices=(4, 8),
+                    help="8: per-output-channel int8 (default). 4: group-wise int4, two values per byte, offset-binary nibbles")
+parser.add_argument("--group-size", type=int, default=64,
+                    help="int4 group size along each row (scales are per channel x group)")
 args = parser.parse_args()
 
 src = Path(args.src)
@@ -90,10 +94,31 @@ for name, (record, raw) in ordered:
     if quantize:
         w = np.frombuffer(raw, dtype=np.float16).reshape(shape).astype(np.float32)
         flat = w.reshape(shape[0], -1)
-        amax = np.abs(flat).max(axis=1)
-        scale = np.where(amax > 0, amax / 127.0, 1.0).astype(np.float32)
-        q = np.clip(np.rint(flat / scale[:, None]), -127, 127).astype(np.int8)
-        dequant = (q.astype(np.float32) * scale[:, None]).astype(np.float16).astype(np.float32)
+        channels, cols = flat.shape
+        if args.bits == 8:
+            mode = "int8-ch0"
+            amax = np.abs(flat).max(axis=1)
+            scale = np.where(amax > 0, amax / 127.0, 1.0).astype(np.float32)
+            q = np.clip(np.rint(flat / scale[:, None]), -127, 127).astype(np.int8)
+            dequant = (q.astype(np.float32) * scale[:, None]).astype(np.float16).astype(np.float32)
+            qdata = q.tobytes()
+        else:
+            group = args.group_size
+            mode = f"int4-g{group}"
+            ngroups = -(-cols // group)
+            padded = np.zeros((channels, ngroups * group), dtype=np.float32)
+            padded[:, :cols] = flat
+            grouped = padded.reshape(channels, ngroups, group)
+            amax = np.abs(grouped).max(axis=2)
+            scale = np.where(amax > 0, amax / 7.0, 1.0).astype(np.float32)
+            q = np.clip(np.rint(grouped / scale[:, :, None]), -7, 7).astype(np.int8)
+            dequant = (q.astype(np.float32) * scale[:, :, None]).reshape(channels, -1)[:, :cols].astype(np.float16).astype(np.float32)
+            # Offset-binary nibbles packed two per byte, element-major over the
+            # unpadded row-major order (decoder skips pad columns).
+            nibbles = (q.reshape(channels, -1)[:, :cols].reshape(-1) + 8).astype(np.uint8)
+            if nibbles.size % 2:
+                nibbles = np.concatenate([nibbles, np.zeros(1, dtype=np.uint8)])
+            qdata = (nibbles[0::2] | (nibbles[1::2] << 4)).tobytes()
         err = dequant - flat.astype(np.float16).astype(np.float32)
         denom = float(np.sqrt(np.mean(flat * flat))) or 1.0
         rel_rms = float(np.sqrt(np.mean(err * err)) / denom)
@@ -103,18 +128,19 @@ for name, (record, raw) in ordered:
                                 "revertedRelRmsErr": rel_rms})
     if quantize:
         report_rows.append({
-            "name": name, "shape": shape, "mode": "int8-ch0",
+            "name": name, "shape": shape, "mode": mode,
             "maxAbsErr": float(np.abs(err).max()),
-            "relRmsErr": float(np.sqrt(np.mean(err * err)) / denom),
+            "relRmsErr": rel_rms,
         })
-        qdata = q.tobytes()
         sdata = scale.tobytes()
         entry = {
             "name": name, "shape": shape, "dtype": "float16", "format": "raw",
-            "mode": "int8-ch0", "channels": int(shape[0]),
+            "mode": mode, "channels": channels, "columns": cols,
             "byteOffset": len(current), "nbytes": len(qdata),
             "scaleByteOffset": len(current) + len(qdata), "scaleNbytes": len(sdata),
         }
+        if args.bits == 4:
+            entry["groupSize"] = args.group_size
         current.extend(qdata)
         current.extend(sdata)
         quant_bytes_total += len(qdata) + len(sdata)
@@ -132,7 +158,7 @@ for name, (record, raw) in ordered:
         flush_shard()
 flush_shard()
 
-quantized_rows = [r for r in report_rows if r["mode"] == "int8-ch0"]
+quantized_rows = [r for r in report_rows if r["mode"].startswith("int")]
 summary = {
     "schema": "lc0_browser.tvmjs_tensor_cache_int8.v1",
     "source": str(src),
@@ -147,7 +173,7 @@ summary = {
 }
 
 out_cache = {
-    "metadata": dict(cache.get("metadata") or {}, parameterStorage="int8-ch0+raw-f16"),
+    "metadata": dict(cache.get("metadata") or {}, parameterStorage=("int8-ch0+raw-f16" if args.bits == 8 else f"int4-g{args.group_size}+raw-f16")),
     "quantization": summary,
     "records": out_shards,
 }

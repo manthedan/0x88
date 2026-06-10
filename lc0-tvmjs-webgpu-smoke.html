@@ -416,9 +416,8 @@ function submitTvmBatch(tvm, vmMod, inputs, physicalBatchSize) {
   const outputHandleMs = performance.now() - phaseStarted;
   phaseStarted = performance.now();
   const staged = outs.map((out) => {
-    const elementCount = out.shape.reduce((a, b) => a * b, 1);
-    const rawBytes = elementCount * (out.dtype === 'float16' ? 2 : out.dtype === 'float32' ? 4 : 1);
-    if (rawBytes % 4 !== 0) return null;
+    // Unaligned (<4-byte multiple) tensors are handled by the patched tvmjs
+    // runtime readback (padded copy); no page-side skip needed anymore.
     const cpu = tvm.empty(out.shape, out.dtype, tvm.cpu());
     cpu.copyFrom(out);
     return cpu;
@@ -666,6 +665,10 @@ async function scoreSearchRowsWithStockfish(rows) {
       cache.set(fen, {
         fen,
         reply,
+        // A null reply with no info lines means the engine refused the
+        // position (seen with illegal/non-standard FENs, e.g. corrupt suite
+        // rows) — distinguish that from a scoring failure.
+        ...(reply === null ? { noReplyReason: info ? 'engine returned no best move' : 'engine rejected position (illegal/non-standard FEN?)' } : {}),
         whiteCp,
         mateInWhitePov: info?.mateIn === undefined ? undefined : (parseFen(fen).turn === 'w' ? info.mateIn : -info.mateIn),
         depth: info?.depth,
@@ -791,6 +794,9 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
   // Applied to BOTH searchers so the search shape (virtual-visit pipelined
   // batching) stays matched; only the TVMJS evaluator can actually overlap.
   const pipelineDepth = Math.max(1, Math.floor(Number(params.get('searchPipelineDepth') ?? 1) || 1));
+  // Applied to BOTH searchers so the lc0-style moves-left utility (opt-in)
+  // keeps the TVMJS-vs-ORT comparison matched.
+  const movesLeftMaxEffect = Math.max(0, Number(params.get('movesLeftEffect') ?? 0) || 0);
   const fens = fixtureRows.slice(0, limit).map((row) => row.fen);
   const tvmProvider = createTvmEvaluationProvider(tvm, vmMod, batch);
   const tvmSearcher = new Lc0PuctSearcher(tvmProvider);
@@ -803,7 +809,7 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
         const evalBatchStart = tvmProvider.evaluationTimings.length;
         const evalPositionStart = tvmProvider.positionTimings.length;
         const t0 = performance.now();
-        const tvmResult = await tvmSearcher.search(fen, { visits, batchSize: batch, temperature: 0, batchPipelineDepth: pipelineDepth });
+        const tvmResult = await tvmSearcher.search(fen, { visits, batchSize: batch, temperature: 0, batchPipelineDepth: pipelineDepth, movesLeftMaxEffect });
         const tvmMs = performance.now() - t0;
         const tvmVisitLoop = visitLoopAttribution(
           tvmProvider.evaluationTimings.slice(evalBatchStart),
@@ -813,7 +819,7 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
         );
         const tvmStats = tvmResult.search?.stats;
         const o0 = performance.now();
-        const ortResult = await ortSearcher.search(fen, { visits, batchSize: batch, temperature: 0, batchPipelineDepth: pipelineDepth });
+        const ortResult = await ortSearcher.search(fen, { visits, batchSize: batch, temperature: 0, batchPipelineDepth: pipelineDepth, movesLeftMaxEffect });
         const ortMs = performance.now() - o0;
         rows.push({
           repeat,
@@ -895,9 +901,7 @@ async function runOrtComparisons(batch, fixtureRows, tvmRows) {
   return comparisons;
 }
 async function outputRawBytes(tvm, out) {
-  const elementCount = out.shape.reduce((a, b) => a * b, 1);
-  const rawBytes = elementCount * (out.dtype === 'float16' ? 2 : out.dtype === 'float32' ? 4 : 1);
-  if (rawBytes % 4 !== 0) return null;
+  // Unaligned sizes are handled by the patched tvmjs runtime (padded copy).
   const cpu = tvm.empty(out.shape, out.dtype, tvm.cpu());
   cpu.copyFrom(out);
   await out.device.sync();
@@ -940,7 +944,14 @@ async function run() {
   }
   // timestamp-query is optional: used only for per-kernel GPU attribution.
   if (adapter.features.has('timestamp-query')) requiredFeatures.push('timestamp-query');
-  const device = await timed('requestDeviceMs', () => adapter.requestDevice({ requiredFeatures }));
+  // Request the adapter's actual limits (Tiny lane pattern): defaults like
+  // maxStorageBufferBindingSize=128MB are fine on Apple Silicon for d_model
+  // 1024, but non-Apple adapters may need explicit elevation for big nets.
+  const requiredLimits = {};
+  for (const key of ['maxStorageBuffersPerShaderStage', 'maxStorageBufferBindingSize', 'maxBufferSize', 'maxComputeWorkgroupStorageSize', 'maxComputeInvocationsPerWorkgroup']) {
+    if (adapter.limits[key] !== undefined) requiredLimits[key] = adapter.limits[key];
+  }
+  const device = await timed('requestDeviceMs', () => adapter.requestDevice({ requiredFeatures, requiredLimits }));
   const gpuAllocationProbe = installGpuBufferAllocationProbe(device);
   const passCoalesce = params.get('passCoalesce') === '1';
   const passCoalescer = passCoalesce ? installComputePassCoalescer(device) : null;
@@ -1071,6 +1082,28 @@ async function run() {
             const end = idx + perChannel;
             if (hasF16Array) for (; idx < end; idx++) out[idx] = q[idx] * scale;
             else for (; idx < end; idx++) out[idx] = f32ToF16Bits(q[idx] * scale);
+          }
+          tensor.copyFromRawBytes(new Uint8Array(out.buffer));
+        } else if (record.mode?.startsWith('int4-g')) {
+          quantTensors += 1;
+          const qbytes = new Uint8Array(bytes.buffer, bytes.byteOffset + record.byteOffset, record.nbytes);
+          const scales = new Float32Array(bytes.slice(record.scaleByteOffset, record.scaleByteOffset + record.scaleNbytes).buffer);
+          const { channels, columns, groupSize } = record;
+          const ngroups = Math.ceil(columns / groupSize);
+          const elements = channels * columns;
+          const out = hasF16Array ? new Float16Array(elements) : new Uint16Array(elements);
+          let idx = 0;
+          for (let c = 0; c < channels; c++) {
+            for (let g = 0; g < ngroups; g++) {
+              const scale = scales[c * ngroups + g];
+              const end = Math.min((g + 1) * groupSize, columns);
+              for (let col = g * groupSize; col < end; col++, idx++) {
+                const byte = qbytes[idx >> 1];
+                const nibble = (idx & 1) ? (byte >> 4) : (byte & 15);
+                if (hasF16Array) out[idx] = (nibble - 8) * scale;
+                else out[idx] = f32ToF16Bits((nibble - 8) * scale);
+              }
+            }
           }
           tensor.copyFromRawBytes(new Uint8Array(out.buffer));
         } else {
