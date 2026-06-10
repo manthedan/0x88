@@ -12,6 +12,7 @@ const STARTUP_KEYS = [
   'wasmFetchVerifyMs',
   'tvmjsInstantiateMs',
   'tvmInitWebGpuMs',
+  'tensorCacheFetchMs',
   'systemLibMs',
   'webgpuPipelinePrebuildMs',
   'createVirtualMachineMs',

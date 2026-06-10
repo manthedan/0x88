@@ -430,7 +430,17 @@ Separated-params release-candidate recipe:
    ```
 
 3. Manifest entries must include bytes/SHA-256 for every tensor-cache shard and record whether params are embedded, staged as a sidecar, or truly detached before build. Current `--tensor-cache-dir` staging records `embedded-wasm-plus-staged-tensor-cache`; this is not yet proof of duplicate-weight removal.
-4. Load shared params in the browser through TVMJS `fetchTensorCache` before VM invocation; keep `shader-f16` gating and ORT fallback behavior unchanged.
+4. Load shared params in the browser through TVMJS `fetchTensorCache` before VM invocation; keep `shader-f16` gating and ORT fallback behavior unchanged. The research smoke has an opt-in fetch path:
+
+   ```bash
+   npm run lc0:tvmjs-webgpu-smoke -- \
+     --batch 8 \
+     --no-fixtures \
+     --tensor-cache \
+     --out artifacts/tvm/lc0_tvmjs_webgpu_tensor_cache_fetch_smoke.json
+   ```
+
+   This validates browser fetch/cache plumbing and records `startupTimings.tensorCacheFetchMs`, but it does not prove duplicate weights were removed unless the export used detached params.
 5. Compare embedded vs tensor-cache on cold start, repeat-load cache hit behavior, raw/gzip/Brotli footprint, search parity, and Stockfish-scored deltas before publication.
 
 Local static `Content-Encoding` smoke:
