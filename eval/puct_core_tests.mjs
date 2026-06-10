@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseFen } from '../src/chess/board.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { moveToActionId, moveFromUci, moveToUci } from '../src/chess/moveCodec.ts';
-import { GumbelRootPolicy, actionValuePuctPolicy, searchRoot } from '../src/search/puct.ts';
+import { GumbelRootPolicy, actionValuePuctPolicy, classicPuctPolicy, searchRoot } from '../src/search/puct.ts';
 
 function moveEq(a,b){return a.from===b.from&&a.to===b.to&&(a.promotion??'')===(b.promotion??'');}
 function legalByUci(board, uci){const want=moveFromUci(uci); return legalMoves(board).find(m=>moveEq(m,want));}
@@ -13,6 +13,42 @@ function evaluator(fn){return { async evaluate(board, opts={}){ return fn(board,
 function batchEvaluator(fn){
   const calls={single:0,batch:0,batchBoards:0};
   return { calls, async evaluate(board, opts={}){ calls.single++; return fn(board, opts); }, async evaluateBatch(boards, opts=[]){ calls.batch++; calls.batchBoards += boards.length; return boards.map((b,i)=>fn(b, opts[i] ?? {})); } };
+}
+function sequenceEvaluator(fn){
+  const calls={single:0,batch:0,sequence:0,sequenceBatches:0,sequenceBoards:0};
+  return {
+    calls,
+    async evaluate(board, opts={}){ calls.single++; return fn(board, opts); },
+    async evaluateBatch(boards, opts=[]){ calls.batch++; return boards.map((b,i)=>fn(b, opts[i] ?? {})); },
+    async evaluateBatchSequence(batches){ calls.sequence++; calls.sequenceBatches += batches.length; calls.sequenceBoards += batches.reduce((sum,b)=>sum+b.boards.length,0); return batches.map((batch)=>batch.boards.map((b,i)=>fn(b, batch.contexts?.[i] ?? {}))); },
+  };
+}
+function searchContext(overrides={}){
+  return {
+    cpuct:1.5,
+    fpu:0,
+    temperature:1,
+    cpuctSchedule:'constant',
+    cpuctBase:38739,
+    cpuctFactor:3.894,
+    fpuStrategy:'constant',
+    fpuReduction:0.33,
+    avWeight:0,
+    rankWeight:0,
+    regretWeight:0,
+    riskWeight:0,
+    uncertaintyWeight:0,
+    valueWdlAuxWeight:0,
+    valueWdlBlendMode:'constant',
+    valueWdlBaseTemp:1,
+    valueWdlAuxTemp:1,
+    cpuctVarianceWeight:0,
+    cpuctVarianceMaxScale:2,
+    butterflyWeight:0,
+    butterflyDecay:0.995,
+    butterflyMaxBonus:0.25,
+    ...overrides,
+  };
 }
 const START='rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -93,7 +129,26 @@ async function testGumbelRootPolicyIsBoundedToCandidateSet(){
   assert.ok(g.move, 'Gumbel root should return a legal move');
 }
 
-const tests=[testPolicyIdentity,testAllZeroPolicyUniformFallback,testValuePerspectiveFlip,testTerminalNoLegalMoves,testTieBreakByQThenPrior,testBatchedEvaluatorPath,testBatchedDuplicateLeafDoesNotBackupZero,testActionValuePolicyGuidesSelection,testGumbelRootPolicyIsBoundedToCandidateSet];
+async function testLowTemperatureRootPolicyStaysFinite(){
+  const board=parseFen(START);
+  const edges=['g1f3','e2e4'].map((uci,i)=>({ move:legalByUci(board,uci), prior:i===0?0.6:0.4, child:null, visits:i===0?10000:9000, valueSum:0, virtualVisits:0, side:'w' }));
+  const policy=classicPuctPolicy.rootPolicy(edges, searchContext({temperature:0.01}), { board, historyFens:[], expanded:true, terminalValue:null, edges });
+  const total=policy.reduce((sum,entry)=>sum+entry.probability,0);
+  assert.ok(policy.every((entry)=>Number.isFinite(entry.probability)), `low-temperature probabilities should be finite: ${policy.map((e)=>e.probability).join(',')}`);
+  assert.ok(Math.abs(total-1)<1e-12, `low-temperature probabilities should normalize, got ${total}`);
+  assert.equal(moveToUci(classicPuctPolicy.chooseFinalMove(policy).move),'g1f3');
+}
+
+async function testPipelinedBackupCollisionModeDoesNotCrash(){
+  const ev=sequenceEvaluator((board)=>({ policy:policyFor(board,{e2e4:1.0,e7e5:1.0,g1f3:0.5,b8c6:0.5}), wdl:[0.5,0,0.5] }));
+  const r=await searchRoot(parseFen(START),ev,{visits:4,batchSize:1,batchPipelineDepth:2,batchCollisionMode:'backup',temperature:0});
+  assert.equal(r.visits,4, 'pipelined backup mode should complete requested visits');
+  assert.ok(r.move, 'pipelined backup mode should return a legal move');
+  assert.ok((r.stats?.batchLeafCollisions ?? 0)>0, 'pipelined backup mode should observe and dedupe an in-flight leaf collision');
+  assert.ok(ev.calls.sequence>0, 'test should exercise evaluateBatchSequence pipeline path');
+}
+
+const tests=[testPolicyIdentity,testAllZeroPolicyUniformFallback,testValuePerspectiveFlip,testTerminalNoLegalMoves,testTieBreakByQThenPrior,testBatchedEvaluatorPath,testBatchedDuplicateLeafDoesNotBackupZero,testActionValuePolicyGuidesSelection,testGumbelRootPolicyIsBoundedToCandidateSet,testLowTemperatureRootPolicyStaysFinite,testPipelinedBackupCollisionModeDoesNotCrash];
 for (const t of tests) {
   await t();
   console.log(`ok ${t.name}`);

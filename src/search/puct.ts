@@ -408,7 +408,8 @@ export class ClassicPUCTPolicy implements SearchPolicy {
       const best = edges.reduce((a, b) => better(a, b) ? b : a);
       return edges.map((edge) => ({ move: edge.move, visits: edge.visits, prior: edge.prior, q: edgeQForParentInNode(edge, node, context), probability: edge === best ? 1 : 0 }));
     }
-    const weights = edges.map((edge) => Math.pow(Math.max(edge.visits, 1e-9), 1 / tau));
+    const maxVisits = Math.max(...edges.map((edge) => Math.max(edge.visits, 1e-9)));
+    const weights = edges.map((edge) => Math.pow(Math.max(edge.visits, 1e-9) / maxVisits, 1 / tau));
     const total = weights.reduce((a, b) => a + b, 0) || 1;
     return edges.map((edge, i) => ({ move: edge.move, visits: edge.visits, prior: edge.prior, q: edgeQForParentInNode(edge, node, context), probability: weights[i] / total }));
   }
@@ -1162,18 +1163,23 @@ function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: Search
   while (selected.length < want && attempts < maxAttempts) {
     attempts += 1;
     const sel = selectLeaf(root, searchPolicy, context, [], transpositionTable, stats);
-    if (collisionMode === 'retry' && !sel.node.expanded && sel.node.terminalValue === null) {
-      if (localInFlightEvalLeaves.has(sel.node)) {
+    if (!sel.node.expanded && sel.node.terminalValue === null) {
+      if (collisionMode === 'retry') {
+        if (localInFlightEvalLeaves.has(sel.node)) {
+          stats.batchLeafCollisions = (stats.batchLeafCollisions ?? 0) + 1;
+          stats.batchLeafRetries = (stats.batchLeafRetries ?? 0) + 1;
+          retryVirtualPaths.push(sel.path);
+          continue;
+        }
+        localInFlightEvalLeaves.add(sel.node);
+      } else if (inFlightEvalLeaves?.has(sel.node)) {
         stats.batchLeafCollisions = (stats.batchLeafCollisions ?? 0) + 1;
-        stats.batchLeafRetries = (stats.batchLeafRetries ?? 0) + 1;
-        retryVirtualPaths.push(sel.path);
+        unwindVirtualVisits(sel.path);
         continue;
       }
-      localInFlightEvalLeaves.add(sel.node);
     }
     selected.push(sel);
   }
-  if (collisionMode !== 'retry') while (selected.length < want) selected.push(selectLeaf(root, searchPolicy, context, [], transpositionTable, stats));
   for (const path of retryVirtualPaths) unwindVirtualVisits(path);
 
   const evalNodes: Node[] = [];
@@ -1197,6 +1203,7 @@ function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: Search
         evalIndex.set(sel.node, slot);
         evalNodes.push(sel.node);
         evalMoves.push(prep);
+        if (collisionMode !== 'retry') localInFlightEvalLeaves.add(sel.node);
       }
       prepared.push({ kind: 'eval', sel, slot });
     }
