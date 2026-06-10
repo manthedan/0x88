@@ -21,6 +21,11 @@ const files = [
   // Lc0 BT4 (1024x15x32h attention net, ~353MB f16). Heavy: browser use is
   // WebGPU-gated and lazy-loaded; see src/lc0/bt4Engine.ts.
   'BT4-1024x15x32h-swa-6147500.batch1.f16.onnx',
+  // BT4-it332 (policytune-332) fixed-batch f16 exports for the TVMJS/WebGPU
+  // lane, 2026-06-09: lc0 leela2onnx --onnx-batch-size={1,4,8} --onnx-data-type=f16
+  'BT4-1024x15x32h-swa-6147500-policytune-332.batch1.f16.onnx',
+  'BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx',
+  'BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.onnx',
 ];
 
 const packDirs = [

@@ -31,6 +31,15 @@ const LC0_POLICY_TEMPERATURE = 1.359;
 const LC0_POLICY_SIZE = 1858;
 const LC0_INPUT_PLANES_SIZE = 112 * 8 * 8;
 const STAGED_TVMJS_RUNTIME_PREFIX = '/runtimes/lc0-tvmjs-webgpu/';
+const DEFAULT_ORT_MODEL_TEMPLATE = '/models/lc0/t1-256x10-distilled-swa-2432500.batch{batch}.{dtype}.onnx';
+const DEFAULT_FIXTURE_BASELINE = '/fixtures/lc0/native_fen_only_blas.jsonl';
+// Page params `ortModel` ({batch}/{dtype} template) and `fixtureBaseline`
+// retarget the ORT comparison model and native parity baseline per model family.
+function ortModelPath(batch, dtype) {
+  return (params.get('ortModel') || DEFAULT_ORT_MODEL_TEMPLATE)
+    .replaceAll('{batch}', String(batch))
+    .replaceAll('{dtype}', dtype);
+}
 const logEl = document.getElementById('log');
 function log(...args) {
   logEl.textContent += `${args.map((x) => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')}\n`;
@@ -309,7 +318,7 @@ function legalPolicyPriors(board, logits) {
   return legal.map((entry) => ({ ...entry, prior: Math.exp(entry.logit - max) / sum })).sort((a, b) => b.prior - a.prior);
 }
 async function loadNativeFixtureRows() {
-  const response = await fetch('/fixtures/lc0/native_fen_only_blas.jsonl');
+  const response = await fetch(params.get('fixtureBaseline') || DEFAULT_FIXTURE_BASELINE);
   if (!response.ok) return new Map();
   const text = await response.text();
   return new Map(text.trim().split('\n').filter(Boolean).map((line) => {
@@ -705,6 +714,75 @@ async function scoreSearchRowsWithStockfish(rows) {
     } : undefined,
   };
 }
+const STARTPOS_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+// Game-sequence A/B for tree reuse: the fresh-tree leg plays a line from
+// gameStartFen choosing moves by search; the reuse leg replays the SAME line
+// (searching every position with reuseTree) so eval costs are comparable.
+// Visit budgets count inherited visits, so reuse savings show up directly in
+// eval batch/position counts and wall time.
+async function runGameSequence(tvm, vmMod, batch) {
+  const plies = Number(params.get('gamePlies') ?? 0) || 0;
+  if (!plies) return undefined;
+  const visits = Number(params.get('gameVisits') ?? params.get('searchVisits') ?? 16) || 16;
+  const startFen = params.get('gameStartFen') || STARTPOS_FEN;
+  const runLeg = async (reuseTree, moveLine) => {
+    const provider = createTvmEvaluationProvider(tvm, vmMod, batch);
+    const searcher = new Lc0PuctSearcher(provider);
+    let board = parseFen(startFen);
+    const positions = [startFen];
+    const rows = [];
+    const line = [];
+    for (let ply = 0; ply < plies; ply++) {
+      const batchStart = provider.evaluationTimings.length;
+      const positionStart = provider.positionTimings.length;
+      const t0 = performance.now();
+      const result = await searcher.search({ positions: positions.slice() }, { visits, batchSize: batch, temperature: 0, reuseTree });
+      const searchMs = performance.now() - t0;
+      const played = moveLine ? moveLine[ply] : result.move;
+      if (!played) break;
+      rows.push({
+        ply,
+        fen: result.fen,
+        move: played,
+        searchedMove: result.move,
+        matchesLine: !moveLine || result.move === played,
+        searchMs,
+        evalBatches: provider.evaluationTimings.length - batchStart,
+        evalPositions: provider.positionTimings.length - positionStart,
+        totalVisits: result.visits,
+        completedVisits: result.search.stats?.completedVisits,
+      });
+      board = makeMove(board, moveFromUci(played));
+      positions.push(boardToFen(board));
+      line.push(played);
+      if (!legalMoves(board).length) break;
+    }
+    const total = (key) => rows.reduce((sum, row) => sum + (row[key] ?? 0), 0);
+    return {
+      reuseTree,
+      rows,
+      line,
+      totals: { searchMs: total('searchMs'), evalBatches: total('evalBatches'), evalPositions: total('evalPositions'), completedVisits: total('completedVisits') },
+    };
+  };
+  log('game sequence start', { plies, visits, batch, startFen });
+  const fresh = await runLeg(false, undefined);
+  const reused = await runLeg(true, fresh.line);
+  const ratio = (key) => fresh.totals[key] > 0 ? reused.totals[key] / fresh.totals[key] : undefined;
+  const summary = {
+    plies: fresh.rows.length,
+    visits,
+    batch,
+    startFen,
+    line: fresh.line,
+    moveAgreement: reused.rows.filter((row) => row.matchesLine).length,
+    fresh,
+    reused,
+    reusedOverFresh: { searchMs: ratio('searchMs'), evalBatches: ratio('evalBatches'), evalPositions: ratio('evalPositions') },
+  };
+  log('game sequence done', { plies: summary.plies, moveAgreement: summary.moveAgreement, freshTotals: fresh.totals, reusedTotals: reused.totals, reusedOverFresh: summary.reusedOverFresh });
+  return summary;
+}
 async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
   const visits = Number(params.get('searchVisits') ?? 0) || 0;
   if (!visits || !fixtureRows.length) return undefined;
@@ -716,7 +794,7 @@ async function runSearchParity(tvm, vmMod, batch, fixtureRows) {
   const fens = fixtureRows.slice(0, limit).map((row) => row.fen);
   const tvmProvider = createTvmEvaluationProvider(tvm, vmMod, batch);
   const tvmSearcher = new Lc0PuctSearcher(tvmProvider);
-  const ortEvaluator = await Lc0OnnxEvaluator.create(`/models/lc0/t1-256x10-distilled-swa-2432500.batch${batch}.f16.onnx`);
+  const ortEvaluator = await Lc0OnnxEvaluator.create(ortModelPath(batch, 'f16'));
   const ortSearcher = new Lc0PuctSearcher(ortEvaluator);
   try {
     const rows = [];
@@ -799,7 +877,7 @@ async function runOrtComparisons(batch, fixtureRows, tvmRows) {
         continue;
       }
       const modelBatch = dtype === 'f32' ? 1 : batch;
-      const modelPath = `/models/lc0/t1-256x10-distilled-swa-2432500.batch${modelBatch}.${dtype}.onnx`;
+      const modelPath = ortModelPath(modelBatch, dtype);
       const inputs = dtype === 'f32' ? fixtureRows.slice(0, 1).map((row) => row.fen) : fixtureRows.map((row) => row.fen);
       const compareRows = dtype === 'f32' ? tvmRows.slice(0, 1) : tvmRows;
       log('ort compare start', { dtype, ep, modelPath, inputs: inputs.length });
@@ -920,6 +998,32 @@ async function run() {
     if (manifest.parameterStrategy?.current === 'detached-tensor-cache' && manifest.tensorCache?.directory) {
       const cacheUrl = checkedStagedRuntimeUrl(`${manifest.tensorCache.directory}/`, base, 'tensor cache').toString();
       await timed('tensorCacheFetchMs', () => tvm.fetchTensorCache(cacheUrl, tvm.webgpu()));
+      // Repeat-load evidence: tvmjs persisted the shards into a Cache Storage
+      // bucket during fetchTensorCache. Reading them back from that bucket is
+      // the warm-load path a second page visit takes instead of the network.
+      // (The runtime tensor cache rejects same-instance re-insertion, so a
+      // second fetchTensorCache is not a valid repeat-load probe.)
+      try {
+        let cachedEntries = 0;
+        let cachedBytes = 0;
+        const warmStarted = performance.now();
+        for (const bucketName of await caches.keys()) {
+          const bucket = await caches.open(bucketName);
+          for (const request of await bucket.keys()) {
+            if (!request.url.startsWith(cacheUrl)) continue;
+            const hit = await bucket.match(request);
+            if (!hit) continue;
+            cachedEntries += 1;
+            cachedBytes += (await hit.arrayBuffer()).byteLength;
+          }
+        }
+        startupTimings.tensorCacheWarmReadMs = performance.now() - warmStarted;
+        startupTimings.tensorCacheCachedEntries = cachedEntries;
+        startupTimings.tensorCacheCachedBytes = cachedBytes;
+        log('tensor cache repeat-load', { cachedEntries, cachedBytes, warmReadMs: startupTimings.tensorCacheWarmReadMs });
+      } catch (cacheErr) {
+        log('tensor cache repeat-load probe failed', cacheErr?.message ?? String(cacheErr));
+      }
       const params = [];
       for (let i = 0; ; i++) {
         const tensor = tvm.tensorCacheGet(`param_${i}`);
@@ -928,7 +1032,7 @@ async function run() {
       }
       if (!params.length) throw new Error('detached-tensor-cache manifest but no param_N tensors loaded');
       tvmDetachedParams = params;
-      log('tensor cache loaded', { params: params.length, fetchMs: startupTimings.tensorCacheFetchMs });
+      log('tensor cache loaded', { params: params.length, fetchMs: startupTimings.tensorCacheFetchMs, refetchMs: startupTimings.tensorCacheRefetchMs });
     }
     const vmCandidates = ['set_input', 'invoke_stateful', 'get_output', 'get_outputs', 'main', 'vm_initialization'];
     const vmAvailable = [];
@@ -1053,6 +1157,7 @@ async function run() {
         }
         const ortComparisons = await runOrtComparisons(batch, fixtureRows, fixtureResults);
         const searchParity = await runSearchParity(tvm, vmMod, batch, fixtureRows);
+        const gameSequence = await runGameSequence(tvm, vmMod, batch);
         const summary = {
           batch,
           fixtureOffset: useFixtures ? Math.max(0, Number(params.get('fixtureOffset') ?? 0) || 0) : undefined,
@@ -1072,6 +1177,7 @@ async function run() {
           ...(passCoalescer ? { passCoalescing: passCoalescer.stats() } : {}),
           ...(ortComparisons ? { ortComparisons } : {}),
           ...(searchParity ? { searchParity } : {}),
+          ...(gameSequence ? { gameSequence } : {}),
           results: fixtureResults,
         };
         log('FIXTURE_RESULT', summary);

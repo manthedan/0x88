@@ -107,13 +107,18 @@ def sanitize_onnx_value_names(model: Any) -> dict[str, Any]:
     return {"changed_count": len(changed), "changed_head": dict(list(changed.items())[:200])}
 
 
-def install_nonnegative_gather_indices_patch() -> dict[str, Any]:
-    """Patch TVM's ONNX Gather converter for constant nonnegative indices.
+def install_nonnegative_gather_indices_patch(trust_runtime_indices: bool = False) -> dict[str, Any]:
+    """Patch TVM's ONNX Gather converter for nonnegative indices.
 
     Upstream TVM currently emits signed-index wrap support for every signed
     Gather indices tensor.  For LC0 policy mapping, the indices initializer is
     constant and strictly nonnegative, so the wrap branch is dead but still
     introduces shape_to_tensor/take(int64), which WebGPU codegen rejects.
+
+    trust_runtime_indices extends the same trust to non-constant indices.
+    This is model-specific: squareformer compact-token exports clamp token
+    indices into the embedding range in-graph (max/min) before every Gather,
+    so the wrap branch is dead there too.
     """
     from tvm import relax  # type: ignore
     import tvm.relax.frontend.onnx.onnx_frontend as onnx_frontend  # type: ignore
@@ -122,17 +127,24 @@ def install_nonnegative_gather_indices_patch() -> dict[str, Any]:
         return {"installed": False, "reason": "already_installed"}
 
     original = onnx_frontend.Gather._impl_v13.__func__
-    stats = {"constant_nonnegative_gathers": 0}
+    stats = {"constant_nonnegative_gathers": 0, "trusted_runtime_gathers": 0}
 
     def patched(cls: Any, bb: Any, inputs: list[Any], attr: dict[str, Any], params: dict[str, Any]) -> Any:
         data = inputs[0]
         indices = inputs[1]
         axis = attr.get("axis", 0)
-        if isinstance(indices, relax.Constant):
+        # relax.take requires a Tensor data argument. Shape->Gather dim
+        # extraction (common in PyTorch exports) passes a Shape expr here, so
+        # leave anything non-tensor to the original converter.
+        data_is_tensor = isinstance(getattr(data, "struct_info", None), relax.TensorStructInfo)
+        if data_is_tensor and isinstance(indices, relax.Constant):
             array = indices.data.numpy()
             if array.size == 0 or array.min() >= 0:
                 stats["constant_nonnegative_gathers"] += 1
                 return relax.op.take(data, indices, axis)
+        elif data_is_tensor and trust_runtime_indices:
+            stats["trusted_runtime_gathers"] += 1
+            return relax.op.take(data, indices, axis)
         return original(cls, bb, inputs, attr, params)
 
     onnx_frontend.Gather._impl_v13 = classmethod(patched)
@@ -335,6 +347,28 @@ def main() -> int:
         help="Opt-in: apply dlight GPU schedule rules (Matmul/GEMV/Reduction/GeneralReduction/Fallback) instead of TVM's naive DefaultGPUSchedule thread binding",
     )
     parser.add_argument(
+        "--no-fuse-ops",
+        action="store_true",
+        help="Skip relax FuseOps/FuseTIR (use per-op kernels). Works around WebGPU per-stage storage-buffer limits for fused kernels with many inputs; relax FuseOps currently ignores target max_function_args",
+    )
+    parser.add_argument(
+        "--max-fuse-depth",
+        type=int,
+        default=None,
+        help="Set PassContext config relax.FuseOps.max_depth to cap fused-group size; bounds storage buffers per WebGPU kernel (FuseOps ignores target max_function_args)",
+    )
+    parser.add_argument(
+        "--trust-runtime-gather-indices",
+        action="store_true",
+        help="Opt-in diagnostic: also skip Gather negative-index wrap for runtime indices; only valid for models that clamp indices in-graph (e.g. squareformer compact tokens)",
+    )
+    parser.add_argument(
+        "--fix-batch-dim",
+        type=int,
+        default=None,
+        help="Rewrite symbolic batch dims (dim_param) on graph inputs/outputs to this fixed value before import; WebGPU codegen needs static shapes",
+    )
+    parser.add_argument(
         "--dlight-matmul-config",
         default=None,
         help='JSON dict of dlight gpu.Matmul.Config overrides for the webgpu default, e.g. {"vector_size":4,"micro_size_k":16}',
@@ -409,6 +443,15 @@ def main() -> int:
     model = run_step(result, "onnx_load", lambda: onnx.load(str(model_path), load_external_data=False))
     if model is not None:
         result["onnx_before_mutation"] = summarize_onnx(model)
+        if args.fix_batch_dim is not None:
+            fixed = 0
+            for value_info in list(model.graph.input) + list(model.graph.output):
+                for dim in value_info.type.tensor_type.shape.dim:
+                    if dim.dim_param:
+                        dim.ClearField("dim_param")
+                        dim.dim_value = args.fix_batch_dim
+                        fixed += 1
+            result["onnx_fixed_batch_dims"] = {"value": args.fix_batch_dim, "dims_rewritten": fixed}
         if args.cast_int64_initializers_to_int32:
             result["onnx_mutation"] = cast_int64_initializers_to_int32(model)
         if args.sanitize_onnx_names:
@@ -452,13 +495,18 @@ def main() -> int:
         return stats
 
     def import_relax_onnx() -> Any:
-        if args.trust_nonnegative_gather_indices:
-            result["onnx_frontend_patch"] = install_nonnegative_gather_indices_patch()
+        if args.trust_nonnegative_gather_indices or args.trust_runtime_gather_indices:
+            result["onnx_frontend_patch"] = install_nonnegative_gather_indices_patch(trust_runtime_indices=args.trust_runtime_gather_indices)
         if args.detach_params:
             result["small_initializer_patch"] = install_small_initializer_constant_patch()
         from tvm.relax.frontend.onnx import from_onnx  # type: ignore
 
         dtype_arg = args.dtype if args.dtype else None
+        # JSON dict form maps individual input names to dtypes, e.g.
+        # '{"tokens":"int32"}' for integer-token models where only one input
+        # must be downcast away from int64 for WebGPU codegen.
+        if isinstance(dtype_arg, str) and dtype_arg.strip().startswith("{"):
+            dtype_arg = json.loads(dtype_arg)
         # This source build's signature advertises GraphProto, but the implementation
         # reads ModelProto fields such as ir_version/opset_import.
         imported = from_onnx(model, dtype_dict=dtype_arg, keep_params_in_input=args.detach_params)
@@ -505,10 +553,30 @@ def main() -> int:
 
     def build_relax() -> Any:
         from tvm import relax  # type: ignore
+        import contextlib
 
         target = tvm.target.Target(parse_target_spec(tvm, args.target), host=parse_target_spec(tvm, args.host_target)) if args.host_target else parse_target_spec(tvm, args.target)
         result["build_target"] = str(target)
+        fuse_depth_context = (
+            tvm.transform.PassContext(config={"relax.FuseOps.max_depth": args.max_fuse_depth})
+            if args.max_fuse_depth is not None
+            else contextlib.nullcontext()
+        )
+        if args.max_fuse_depth is not None:
+            result["max_fuse_depth"] = args.max_fuse_depth
+        with fuse_depth_context:
+            return build_relax_inner(relax, target)
+
+    def build_relax_inner(relax: Any, target: Any) -> Any:
         build_mod = mod
+        if args.no_fuse_ops:
+            with tvm.target.Target(target):
+                build_mod = tvm.ir.transform.Sequential([
+                    relax.transform.LegalizeOps(),
+                    relax.transform.AnnotateTIROpPattern(),
+                    relax.transform.FoldConstant(),
+                ])(mod)
+            result["fuse_ops_skipped"] = True
         if args.dlight:
             try:
                 from tvm import dlight as dl  # type: ignore
@@ -532,22 +600,39 @@ def main() -> int:
                         return gv.name_hint
                 return fallback
 
+            rule_failures: dict[str, str] = {}
+            crashed_functions: set[str] = set()
+
             class _RecordingRule:
                 def __init__(self, rule: Any) -> None:
                     self._rule = rule
                     self._name = type(rule).__name__
 
                 def apply(self, func: Any, rule_target: Any, tunable: bool) -> Any:
-                    space = self._rule.apply(func, rule_target, tunable)
+                    # A rule that crashes mid-schedule (e.g. rfactor bind on an
+                    # awkward reduction) should fall through — but straight to
+                    # Fallback (serial reduction, simple binding) rather than to
+                    # sibling reduction rules that share the same assumptions
+                    # and may emit subtly wrong cross-thread schedules.
+                    name = function_name(func)
+                    if name in crashed_functions and self._name != "Fallback":
+                        return None
+                    try:
+                        space = self._rule.apply(func, rule_target, tunable)
+                    except Exception as exc:  # noqa: BLE001
+                        rule_failures[f"{name}:{self._name}"] = repr(exc)[:200]
+                        crashed_functions.add(name)
+                        return None
                     if space is not None:
-                        rule_attribution[function_name(func)] = self._name
+                        rule_attribution[name] = self._name
                     return space
 
             # Lower relax ops to TIR first, then let dlight schedule the TIR
             # functions; relax.build's default pipeline skips already-scheduled
             # functions in DefaultGPUSchedule.
             with tvm.target.Target(target):
-                build_mod = relax.get_pipeline("zero")(mod)
+                if not args.no_fuse_ops:
+                    build_mod = relax.get_pipeline("zero")(mod)
                 prim_func_names = [
                     gv.name_hint
                     for gv, func in build_mod.functions_items()
@@ -575,8 +660,10 @@ def main() -> int:
                 "counts": dict(Counter(rule_attribution.values())),
                 "unscheduled": sorted(set(prim_func_names) - set(rule_attribution)),
                 "functions": dict(sorted(rule_attribution.items())),
+                **({"ruleFailures": rule_failures} if rule_failures else {}),
             }
-        return relax.build(build_mod, target=target)
+        relax_pipeline = None if (args.no_fuse_ops or args.dlight) else "default"
+        return relax.build(build_mod, target=target, relax_pipeline=relax_pipeline)
 
     executable = run_step(result, "relax_build_target", build_relax) if mod is not None else None
     if executable is not None:

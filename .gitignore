@@ -21,6 +21,7 @@ data/public_teacher_raw.local_moved_*
 data/public_teacher_overlays/
 artifacts/
 public/runtimes/lc0-tvmjs-webgpu/
+public/runtimes/tiny-tvmjs-webgpu/
 logs/
 dist-client/
 public/models/*.pt
