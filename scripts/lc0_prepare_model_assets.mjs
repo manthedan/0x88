@@ -26,6 +26,12 @@ const files = [
   'BT4-1024x15x32h-swa-6147500-policytune-332.batch1.f16.onnx',
   'BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx',
   'BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.onnx',
+  // t3-512x15x16h-distill, 2026-06-10: the mid-rung of the t1 -> t3 -> BT4
+  // progressive ladder. lc0 leela2onnx --onnx-batch-size={1,4,8,16} f16.
+  't3-512x15x16h-distill-swa-2767500.batch1.f16.onnx',
+  't3-512x15x16h-distill-swa-2767500.batch4.f16.onnx',
+  't3-512x15x16h-distill-swa-2767500.batch8.f16.onnx',
+  't3-512x15x16h-distill-swa-2767500.batch16.f16.onnx',
 ];
 
 const packDirs = [
