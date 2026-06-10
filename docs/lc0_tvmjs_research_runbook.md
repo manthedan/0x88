@@ -518,7 +518,20 @@ b16 result (`f16/v3-detached`, `artifacts/tvm/lc0_tvmjs_detached_b16_v16.json`):
 - Native fixture parity `8/8` with bit-identical max top-prior diff to the embedded build; search parity `8/8`; search wall `41.6 ms` mean at v16/b16 vs `40.0 ms` embedded — within noise.
 - Startup shift: wasm fetch+verify `104 → 21 ms`, instantiate `41 → 27 ms`, tensor-cache fetch+GPU upload `238 ms` (first load; artifact-cached afterwards).
 - Why it matters: a multi-batch runtime (b1+b16+…) can share ONE weight sidecar instead of embedding `~44 MB` per batch wasm — e.g. five batches drop from `~223 MB` to `~60 MB` staged.
-- Still to verify before any release decision: cross-batch sharing (one cache serving b1 and b16 wasms — param naming is positional and should match, but it is unproven), repeat-load cache-hit behavior, and compressed sizes.
+- Still to verify before any release decision: repeat-load cache-hit behavior and compressed sizes.
+
+Cross-batch sharing is now **proven** (2026-06-09):
+
+- b1 and b16 `--detach-params` builds dump **byte-identical** tensor-caches (matching sha256 for both `params_shard_*.bin` and `tensor-cache.json`).
+- `f16/v3-detached` now stages b1 + b16 wasms (`4.5 MB` each) with ONE shared sidecar (`55 MB` total staged versus `~89 MB` embedded for the same two batches).
+- End-to-end: the b1 wasm running against the b16-dumped sidecar passes native best-move parity `8/8` (`artifacts/tvm/lc0_tvmjs_detached_b1_shared_cache.json`; max top-prior abs diff `0.0059`). b1 search parity is not runnable due to the known b1 WDL/MLH 4-byte-alignment readback limitation; evaluator-level parity is the b1 evidence.
+
+Fixed-suite bridge evidence now covers the new configs (the bridge accepts
+`--batch 16/32` and `--manifest`):
+
+- `artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_bridge_uho16_b16_v16_sfdepth3.json`: embedded b16, 16 UHO positions, v16 — search move match `16/16` vs ORT f16, Stockfish depth-3 cp delta `0/0/0` over 15 comparable rows, TVMJS mean `39.07 ms` vs ORT `45.41 ms`.
+- `artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_bridge_uho16_b16detached_v16_sfdepth3.json`: detached b16 (`v3-detached` manifest), same protocol — `16/16`, cp delta `0/0/0`, TVMJS mean `38.68 ms` vs ORT `46.18 ms`.
+- Both `*_report.json` artifacts are discovered by `lc0:tvmjs-webgpu-evidence-summary` (6 fixed-suite-style reports total) and the combined research gate passes. Note: the summary's `searchRows` counter only scans `lc0_tvmjs_webgpu_search_smoke_*` filenames, so bridge rows are represented through the report list rather than that counter.
 
 Reproduce:
 

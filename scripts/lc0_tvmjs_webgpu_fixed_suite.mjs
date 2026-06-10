@@ -52,6 +52,7 @@ function parseArgs(argv) {
     else if (arg === '--max-positions') args.maxPositions = Number(next());
     else if (arg === '--skip-plies') args.skipPlies = Number(next());
     else if (arg === '--batch') args.batch = Number(next());
+    else if (arg === '--manifest') args.manifest = next();
     else if (arg === '--visits') args.visits = Number(next());
     else if (arg === '--repeats') args.repeats = Number(next());
     else if (arg === '--ort-compare') args.ortCompare = next();
@@ -79,7 +80,7 @@ function parseArgs(argv) {
     if (!Number.isFinite(args[name]) || args[name] <= 0) throw new Error(`Invalid ${name}: ${args[name]}`);
   }
   if (!Number.isFinite(args.skipPlies) || args.skipPlies < 0) throw new Error(`Invalid skipPlies: ${args.skipPlies}`);
-  if (![1, 4, 8].includes(args.batch)) throw new Error(`Invalid --batch ${args.batch}; expected 1, 4, or 8`);
+  if (![1, 4, 8, 16, 32].includes(args.batch)) throw new Error(`Invalid --batch ${args.batch}; expected 1, 4, 8, 16, or 32`);
   if (!['none', 'f16', 'f32', 'both'].includes(args.ortCompare)) throw new Error(`Invalid --ort-compare ${args.ortCompare}`);
   if (!['webgpu', 'wasm', 'webgpu,wasm'].includes(args.ortEp)) throw new Error(`Invalid --ort-ep ${args.ortEp}`);
   if (args.stockfishScoreDepth !== undefined && (!Number.isFinite(args.stockfishScoreDepth) || args.stockfishScoreDepth <= 0)) throw new Error(`Invalid --stockfish-score-depth ${args.stockfishScoreDepth}`);
@@ -151,6 +152,7 @@ function spawnCapture(command, commandArgs, options = {}) {
 
 function childCommands(args) {
   const smoke = ['scripts/lc0_tvmjs_webgpu_smoke.mjs', '--batch', String(args.batch), '--fixtures', '--fixture-count', String(args.fenCount), '--fens', args.suiteOut, '--ort-compare', args.ortCompare, '--ort-ep', args.ortEp, '--search-visits', String(args.visits), '--search-fixtures', String(args.fenCount), '--search-repeats', String(args.repeats), '--timeout', String(args.timeoutMs), '--agent-browser', args.agentBrowser, '--out', args.smokeOut];
+  if (args.manifest) smoke.push('--manifest', args.manifest);
   if (args.stockfishScoreDepth !== undefined) smoke.push('--stockfish-score-depth', String(args.stockfishScoreDepth));
   if (args.stockfishScoreMs !== undefined) smoke.push('--stockfish-score-ms', String(args.stockfishScoreMs));
   if (args.baseUrl) smoke.push('--base-url', args.baseUrl);
