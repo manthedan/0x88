@@ -334,6 +334,16 @@ def main() -> int:
         action="store_true",
         help="Opt-in: apply dlight GPU schedule rules (Matmul/GEMV/Reduction/GeneralReduction/Fallback) instead of TVM's naive DefaultGPUSchedule thread binding",
     )
+    parser.add_argument(
+        "--detach-params",
+        action="store_true",
+        help="Opt-in: import with keep_params_in_input, detach weights from the module, and dump them as a tensor-cache (param_0..param_N, raw encoding) so the exported wasm contains no embedded weights",
+    )
+    parser.add_argument(
+        "--tensor-cache-dir",
+        default=None,
+        help="Tensor-cache output directory for --detach-params; default <out>.tensor-cache",
+    )
     args = parser.parse_args()
 
     model_path = Path(args.model).resolve()
@@ -351,6 +361,7 @@ def main() -> int:
         "capture_module_sources": args.capture_module_sources,
         "export_tvmjs_wasm": args.export_tvmjs_wasm,
         "dlight": args.dlight,
+        "detach_params": args.detach_params,
         "env": {
             "python": sys.version,
             "executable": sys.executable,
@@ -399,15 +410,66 @@ def main() -> int:
             result["onnx_name_sanitization"] = sanitize_onnx_value_names(model)
         result["onnx"] = summarize_onnx(model)
 
+    detached_main_params: list[Any] = []
+
+    def install_small_initializer_constant_patch(max_elements: int = 4096) -> dict[str, Any]:
+        """Keep small ONNX initializers as inline relax constants under
+        keep_params_in_input.
+
+        Shape-feeding tensors (Reshape dims, Slice starts, the constant LC0
+        policy-mapping Gather indices) must keep constant *values* for shape
+        inference and the nonnegative-Gather patch; only large weight tensors
+        become detachable function params.
+        """
+        from tvm import relax  # type: ignore
+        from tvm.relax.frontend.onnx import onnx_frontend  # type: ignore
+
+        stats: dict[str, Any] = {"max_elements": max_elements, "params": 0, "inline_constants": 0}
+
+        import math
+
+        def patched(self: Any, graph: Any) -> None:
+            for init_tensor in graph.initializer:
+                if not init_tensor.name.strip():
+                    raise ValueError("Tensor's name is required.")
+                array = self._parse_array(init_tensor)
+                if self._keep_params_in_input and math.prod(array.shape) > max_elements:
+                    var_name = init_tensor.name.strip("onnx::")
+                    init_var = self._new_var(var_name, shape=array.shape, dtype=array.dtype)
+                    self._nodes[init_tensor.name] = init_var
+                    self._params[var_name] = (init_var, array)
+                    stats["params"] += 1
+                else:
+                    self._nodes[init_tensor.name] = relax.const(array)
+                    stats["inline_constants"] += 1
+
+        onnx_frontend.ONNXGraphImporter._parse_graph_initializers = patched
+        return stats
+
     def import_relax_onnx() -> Any:
         if args.trust_nonnegative_gather_indices:
             result["onnx_frontend_patch"] = install_nonnegative_gather_indices_patch()
+        if args.detach_params:
+            result["small_initializer_patch"] = install_small_initializer_constant_patch()
         from tvm.relax.frontend.onnx import from_onnx  # type: ignore
 
         dtype_arg = args.dtype if args.dtype else None
         # This source build's signature advertises GraphProto, but the implementation
         # reads ModelProto fields such as ir_version/opset_import.
-        return from_onnx(model, dtype_dict=dtype_arg)
+        imported = from_onnx(model, dtype_dict=dtype_arg, keep_params_in_input=args.detach_params)
+        if args.detach_params:
+            from tvm.relax.frontend import detach_params  # type: ignore
+
+            imported, params_dict = detach_params(imported)
+            detached_main_params.extend(params_dict.get("main", []))
+            import math
+
+            dtype_bytes = {"float16": 2, "bfloat16": 2, "float32": 4, "int32": 4, "int64": 8, "int8": 1, "uint8": 1}
+            result["detached_params"] = {
+                "count": len(detached_main_params),
+                "total_bytes": sum(math.prod(p.shape) * dtype_bytes.get(str(p.dtype), 4) for p in detached_main_params),
+            }
+        return imported
 
     mod = run_step(result, "relax_from_onnx", import_relax_onnx) if tvm is not None and model is not None else None
     if mod is not None:
@@ -505,6 +567,29 @@ def main() -> int:
 
             run_step(result, "export_tvmjs_wasm", export_tvmjs_wasm)
 
+        if args.detach_params:
+            def dump_tensor_cache_step() -> str:
+                from tvm.contrib import tvmjs as tvmjs_contrib  # type: ignore
+
+                if not detached_main_params:
+                    raise RuntimeError("detach-params produced no main params")
+                cache_dir = args.tensor_cache_dir or f"{out_path.with_suffix('')}.tensor-cache"
+                Path(cache_dir).mkdir(parents=True, exist_ok=True)
+                tvmjs_contrib.dump_tensor_cache(
+                    {f"param_{i}": p for i, p in enumerate(detached_main_params)},
+                    str(cache_dir),
+                    encode_format="raw",
+                    show_progress=False,
+                )
+                result["tensor_cache"] = {
+                    "dir": str(cache_dir),
+                    "param_count": len(detached_main_params),
+                    "bytes": sum(f.stat().st_size for f in Path(cache_dir).iterdir() if f.is_file()),
+                }
+                return str(cache_dir)
+
+            run_step(result, "dump_tensor_cache", dump_tensor_cache_step)
+
     def host_target_is_wasm_requested() -> bool:
         return bool(args.host_target and "wasm32" in args.host_target)
 
@@ -515,6 +600,8 @@ def main() -> int:
         required_steps.append("export_library")
     if args.export_tvmjs_wasm:
         required_steps.append("export_tvmjs_wasm")
+    if args.detach_params:
+        required_steps.append("dump_tensor_cache")
 
     required_failures = [
         step for step in required_steps

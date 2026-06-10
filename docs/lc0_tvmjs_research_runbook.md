@@ -499,6 +499,49 @@ Current default-family footprint sidecar summary:
 - Brotli quality-11 bytes: `107,101,046` (`0.7685` ratio).
 - Caveat: these are Node zlib estimates and do not prove deployed `Content-Encoding` behavior.
 
+### Detached-params export now works (2026-06-09)
+
+`scripts/lc0_tvm_whole_onnx_probe.py --detach-params` (env `DETACH_PARAMS=1`)
+imports with `keep_params_in_input`, keeps initializers ≤4096 elements as
+inline constants (shape-feeding tensors must keep constant values — a probe-side
+patch of `_parse_graph_initializers`, same style as the Gather patch), detaches
+the 100 large weight tensors via `relax.frontend.detach_params`, and dumps them
+as a raw-encoded tensor-cache (`param_0..param_99`). The smoke page detects
+`parameterStrategy.current === 'detached-tensor-cache'` in the staged manifest,
+loads weights via `tvm.fetchTensorCache` (which also gives Cache Storage
+caching of shards for repeat loads), and spreads them into
+`set_input('main', input, ...params)`.
+
+b16 result (`f16/v3-detached`, `artifacts/tvm/lc0_tvmjs_detached_b16_v16.json`):
+
+- Model wasm: `44.6 MB → 4.5 MB`; weights: `38 MB` tensor-cache sidecar (`40.2 MB` of params).
+- Native fixture parity `8/8` with bit-identical max top-prior diff to the embedded build; search parity `8/8`; search wall `41.6 ms` mean at v16/b16 vs `40.0 ms` embedded — within noise.
+- Startup shift: wasm fetch+verify `104 → 21 ms`, instantiate `41 → 27 ms`, tensor-cache fetch+GPU upload `238 ms` (first load; artifact-cached afterwards).
+- Why it matters: a multi-batch runtime (b1+b16+…) can share ONE weight sidecar instead of embedding `~44 MB` per batch wasm — e.g. five batches drop from `~223 MB` to `~60 MB` staged.
+- Still to verify before any release decision: cross-batch sharing (one cache serving b1 and b16 wasms — param naming is positional and should match, but it is unproven), repeat-load cache-hit behavior, and compressed sizes.
+
+Reproduce:
+
+```bash
+CAST_INT64_INITIALIZERS_TO_INT32=1 TRUST_NONNEGATIVE_GATHER_INDICES=1 \
+SANITIZE_ONNX_NAMES=1 EXPORT_TVMJS_WASM=1 DETACH_PARAMS=1 \
+TVM_BUILD_DIR=build-tvmjs \
+TVM_HOST_TARGET='{"kind":"llvm","mtriple":"wasm32-unknown-unknown-wasm"}' \
+LC0_TVMJS_BATCHES=16 OUT_DIR=$PWD/artifacts/tvm-detached \
+./scripts/run_lc0_tvm_whole_onnx_probe.sh
+
+node scripts/stage_lc0_tvmjs_webgpu_artifacts.mjs \
+  --artifacts=artifacts/tvm-detached --batches=16 \
+  --tensor-cache-dir=artifacts/tvm-detached/t1-256x10-distilled-swa-2432500.batch16.f16.webgpu.tvmjs-wasm.probe.tensor-cache \
+  --out=public/runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-swa-2432500/f16/v3-detached \
+  --params=detached
+
+node scripts/lc0_tvmjs_webgpu_smoke.mjs --batch 16 \
+  --manifest /runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-swa-2432500/f16/v3-detached/manifest.json \
+  --fixture-count 8 --search-visits 16 --search-fixtures 4 --search-repeats 2 \
+  --out artifacts/tvm/lc0_tvmjs_detached_b16_v16.json
+```
+
 ### Tensor-cache / separated-params planning probe
 
 Use the weight-cache planning sidecar before any release-candidate staging decision:

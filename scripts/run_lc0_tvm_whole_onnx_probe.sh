@@ -41,6 +41,9 @@ fi
 if [[ "${DLIGHT:-0}" == "1" ]]; then
   extra_args+=(--dlight)
 fi
+if [[ "${DETACH_PARAMS:-0}" == "1" ]]; then
+  extra_args+=(--detach-params)
+fi
 
 MODEL_FAMILY="${LC0_TVMJS_MODEL_FAMILY:-t1-256x10-distilled-swa-2432500}"
 DTYPE="${LC0_TVMJS_DTYPE:-f16}"

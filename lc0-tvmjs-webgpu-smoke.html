@@ -351,6 +351,9 @@ let tvmBatchEvalSequence = 0;
 // are enqueued before any later invoke can overwrite the VM's output storage;
 // WebGPU queue submission order protects the data, so multiple submitted
 // batches can be in flight before a single device sync.
+// Detached-params mode: weights live in the staged tensor-cache, not the wasm.
+// The VM's main() then takes (input, ...weights); spread the cached tensors.
+let tvmDetachedParams = null;
 function submitTvmBatch(tvm, vmMod, inputs, physicalBatchSize) {
   const setInput = vmMod.getFunction('set_input');
   const invokeStateful = vmMod.getFunction('invoke_stateful');
@@ -380,7 +383,8 @@ function submitTvmBatch(tvm, vmMod, inputs, physicalBatchSize) {
   input.copyFromRawBytes(inputBytes);
   const inputUploadMs = performance.now() - phaseStarted;
   phaseStarted = performance.now();
-  setInput('main', input);
+  if (tvmDetachedParams) setInput('main', input, ...tvmDetachedParams);
+  else setInput('main', input);
   const setInputMs = performance.now() - phaseStarted;
   phaseStarted = performance.now();
   invokeStateful('main');
@@ -889,6 +893,20 @@ async function run() {
     log('candidate functions', available);
     const vm = timedSync('createVirtualMachineMs', () => tvm.createVirtualMachine(tvm.webgpu()));
     const vmMod = vm.getInternalModule();
+    tvmDetachedParams = null;
+    if (manifest.parameterStrategy?.current === 'detached-tensor-cache' && manifest.tensorCache?.directory) {
+      const cacheUrl = checkedStagedRuntimeUrl(`${manifest.tensorCache.directory}/`, base, 'tensor cache').toString();
+      await timed('tensorCacheFetchMs', () => tvm.fetchTensorCache(cacheUrl, tvm.webgpu()));
+      const params = [];
+      for (let i = 0; ; i++) {
+        const tensor = tvm.tensorCacheGet(`param_${i}`);
+        if (!tensor) break;
+        params.push(tensor);
+      }
+      if (!params.length) throw new Error('detached-tensor-cache manifest but no param_N tensors loaded');
+      tvmDetachedParams = params;
+      log('tensor cache loaded', { params: params.length, fetchMs: startupTimings.tensorCacheFetchMs });
+    }
     const vmCandidates = ['set_input', 'invoke_stateful', 'get_output', 'get_outputs', 'main', 'vm_initialization'];
     const vmAvailable = [];
     for (const name of vmCandidates) {
@@ -929,7 +947,8 @@ async function run() {
       const invokeStateful = vmMod.getFunction('invoke_stateful');
       const getOutput = vmMod.getFunction('get_output');
       const t0 = performance.now();
-      setInput('main', input);
+      if (tvmDetachedParams) setInput('main', input, ...tvmDetachedParams);
+      else setInput('main', input);
       log('set_input ok');
       invokeStateful('main');
       const invokeMs = performance.now() - t0;

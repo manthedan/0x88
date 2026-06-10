@@ -146,8 +146,12 @@ const manifest = {
     note: 'TVMJS/WebGPU whole-model export bundle. Runtime/parity/perf still require browser validation.',
   },
   parameterStrategy: {
-    current: tensorCache ? 'embedded-wasm-plus-staged-tensor-cache' : 'embedded-in-per-batch-wasm',
-    note: tensorCache
+    current: arg('params', null) === 'detached'
+      ? 'detached-tensor-cache'
+      : tensorCache ? 'embedded-wasm-plus-staged-tensor-cache' : 'embedded-in-per-batch-wasm',
+    note: arg('params', null) === 'detached'
+      ? 'Model wasm artifacts were built with --detach-params; weights live only in the tensor-cache sidecar and the browser must fetchTensorCache before invoking.'
+      : tensorCache
       ? 'A TVM tensor-cache sidecar is staged for research comparison. Model wasm artifacts may still contain embedded params until the export flow detaches params before build.'
       : 'Current research staging embeds model weights in each batch-specific TVMJS wasm. Future release candidates should evaluate TVM tensor-cache weight separation before publication.',
     tensorCacheApis: {
