@@ -11,6 +11,7 @@ import {
   checkPlentyChessVariantAsset,
   defaultPlentyChessVariantKey,
   hasExplicitPlentyChessVariant,
+  supportsWasmRelaxedSimd,
   normalizePlentyChessVariant,
   plentyChessVariantAssetStatus,
   plentyChessVariantByKey,
@@ -21,7 +22,9 @@ test('PlentyChess variant metadata pins the smoked Emscripten sidecars', () => {
   assert.equal(PLENTYCHESS_MAIN_NETWORK, '0134-2r24-s0.bin');
   assert.equal(PLENTYCHESS_SOURCE_NETWORK_URL, 'https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/0134-2r24-s0.bin');
   assert.deepEqual(PLENTYCHESS_VARIANTS.map((variant) => variant.key), ['emscripten', 'emscripten-sse41', 'emscripten-relaxed']);
-  assert.equal(defaultPlentyChessVariantKey(), 'emscripten');
+  // Default follows the relaxed > sse41 ladder (all PlentyChess artifacts
+  // already require baseline wasm SIMD).
+  assert.equal(defaultPlentyChessVariantKey(), supportsWasmRelaxedSimd() ? 'emscripten-relaxed' : 'emscripten-sse41');
   assert.equal(PLENTYCHESS_EMSCRIPTEN_VARIANT.jsUrl, PLENTYCHESS_EMSCRIPTEN_JS_URL);
   assert.equal(PLENTYCHESS_EMSCRIPTEN_VARIANT.wasmUrl, PLENTYCHESS_EMSCRIPTEN_WASM_URL);
   assert.equal(PLENTYCHESS_EMSCRIPTEN_VARIANT.dataUrl, PLENTYCHESS_EMSCRIPTEN_DATA_URL);
@@ -40,7 +43,7 @@ test('PlentyChess URL params support explicit and custom Emscripten sidecars', (
   assert.equal(hasExplicitPlentyChessVariant(new URLSearchParams('')), false);
   assert.equal(hasExplicitPlentyChessVariant(new URLSearchParams('plentychess=emscripten')), true);
   assert.equal(hasExplicitPlentyChessVariant(new URLSearchParams('plentyChessJs=/plentychess/custom.js')), true);
-  assert.equal(plentyChessVariantFromParams(new URLSearchParams('')).key, 'emscripten');
+  assert.equal(plentyChessVariantFromParams(new URLSearchParams('')).key, defaultPlentyChessVariantKey());
   assert.equal(plentyChessVariantFromParams(new URLSearchParams('plentychess=custom')).key, 'custom');
   const custom = plentyChessVariantFromParams(new URLSearchParams('plentyChessJs=/plentychess/custom.js&plentyChessWasm=/plentychess/custom.wasm&plentyChessData=/plentychess/custom.data'));
   assert.equal(custom.key, 'custom');
@@ -48,7 +51,7 @@ test('PlentyChess URL params support explicit and custom Emscripten sidecars', (
   assert.equal(custom.wasmUrl, '/plentychess/custom.wasm');
   assert.equal(custom.dataUrl, '/plentychess/custom.data');
   const rejectedCustom = plentyChessVariantFromParams(new URLSearchParams('plentyChessJs=https://evil.example/plenty.js&plentyChessWasm=/local/plenty.wasm'));
-  assert.equal(rejectedCustom.key, 'emscripten');
+  assert.equal(rejectedCustom.key, defaultPlentyChessVariantKey());
 });
 
 test('PlentyChess asset checks require JS, WASM, and data sidecars', async () => {

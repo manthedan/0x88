@@ -53,7 +53,6 @@ function sameOriginPlentyChessAsset(raw: string | null | undefined): string | un
   }
 }
 
-
 function assetUrls(variant: PlentyChessVariant): string[] {
   return [variant.jsUrl, variant.wasmUrl, variant.dataUrl];
 }
@@ -74,7 +73,7 @@ export const PLENTYCHESS_EMSCRIPTEN_VARIANT: PlentyChessVariant = {
 
 export const PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT: PlentyChessVariant = {
   key: 'emscripten-sse41',
-  label: 'PlentyChess SSE4.1 Emscripten experimental',
+  label: 'PlentyChess SSE4.1 Emscripten',
   jsUrl: PLENTYCHESS_EMSCRIPTEN_SSE41_JS_URL,
   wasmUrl: PLENTYCHESS_EMSCRIPTEN_SSE41_WASM_URL,
   dataUrl: PLENTYCHESS_EMSCRIPTEN_SSE41_DATA_URL,
@@ -84,7 +83,7 @@ export const PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT: PlentyChessVariant = {
 
 export const PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT: PlentyChessVariant = {
   key: 'emscripten-relaxed',
-  label: 'PlentyChess Relaxed SIMD Emscripten experimental',
+  label: 'PlentyChess Relaxed SIMD Emscripten',
   jsUrl: PLENTYCHESS_EMSCRIPTEN_RELAXED_JS_URL,
   wasmUrl: PLENTYCHESS_EMSCRIPTEN_RELAXED_WASM_URL,
   dataUrl: PLENTYCHESS_EMSCRIPTEN_RELAXED_DATA_URL,
@@ -106,8 +105,28 @@ export function normalizePlentyChessVariant(raw: string | null | undefined): Ple
   return 'emscripten';
 }
 
+// Promotion order: relaxed (relaxed dot + vectorized f32 tail) > sse41 >
+// default. All variants are value-exact at fixed depth (40/40 parity), so
+// this is a speed ladder gated by WebAssembly feature validation. Every
+// PlentyChess artifact requires baseline wasm SIMD; browsers without it
+// cannot run the engine at all, so the ladder only branches on Relaxed SIMD.
 export function defaultPlentyChessVariantKey(): PlentyChessVariantKey {
-  return 'emscripten';
+  return supportsWasmRelaxedSimd() ? 'emscripten-relaxed' : 'emscripten-sse41';
+}
+
+/**
+ * Resolve the feature-detected default against deployed assets: a missing
+ * relaxed artifact falls back to sse41, and a missing sse41 artifact falls
+ * back to the base Emscripten build. Explicit selections are honored as-is.
+ */
+export async function resolveDefaultPlentyChessVariantAssetFallback(variant: PlentyChessVariant, explicit: boolean, onChange?: () => void): Promise<PlentyChessVariant> {
+  if (explicit || variant.key === 'emscripten' || variant.key === 'custom') return variant;
+  const status = await checkPlentyChessVariantAsset(variant, onChange);
+  if (status !== 'missing') return variant;
+  if (variant.key === 'emscripten-relaxed') {
+    return resolveDefaultPlentyChessVariantAssetFallback(PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT, false, onChange);
+  }
+  return PLENTYCHESS_EMSCRIPTEN_VARIANT;
 }
 
 export function plentyChessVariantByKey(key: string): PlentyChessVariant {

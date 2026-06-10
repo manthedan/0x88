@@ -68,10 +68,11 @@ loads, validates, and analyzes.
 
 ## Caveats / next
 
-- Same posture as the other engines: Apple Silicon Node numbers; browser
-  promotion needs the persistent-mode protocol on Apple Silicon + x86_64
-  Chromium. Relaxed variants need `supportsWasmRelaxedSimd()` gating if ever
-  made default.
+- **Promoted 2026-06-10** (owner decision): the default ladder is now
+  relaxed > sse41 with asset fallback to the base Emscripten build, gated by
+  `supportsWasmRelaxedSimd()`. The promotion case is value-exactness (40/40
+  fixed-depth parity); x86_64 Chromium numbers remain to be collected
+  post-promotion.
 - The relaxed f32 tail's exactness vs `std::fma` relies on relaxed madd
   lowering fused; on pre-FMA x86 hardware results may differ in ulps. Fine
   for an experimental variant; revisit before promotion.
