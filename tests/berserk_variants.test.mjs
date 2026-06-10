@@ -11,6 +11,7 @@ import {
   BERSERK_SIMD_VARIANT,
   BERSERK_SOURCE_NETWORK_URL,
   BERSERK_VARIANTS,
+  supportsBerserkWasmSimd,
   berserkVariantAssetStatus,
   berserkVariantByKey,
   berserkVariantFromParams,
@@ -19,12 +20,13 @@ import {
   normalizeBerserkVariant,
   resolveDefaultBerserkVariantAssetFallback,
 } from '../src/lc0/berserkVariants.ts';
+import { supportsWasmRelaxedSimd } from '../src/lc0/recklessVariants.ts';
 
 test('Berserk variants pin Emscripten smoke and planned WASI metadata', () => {
   assert.equal(BERSERK_MAIN_NETWORK, 'berserk-9b84c340af7e.nn');
   assert.equal(BERSERK_DEFAULT_NNUE_URL, '/berserk/berserk-9b84c340af7e.nn');
   assert.equal(BERSERK_SOURCE_NETWORK_URL, 'https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn');
-  assert.deepEqual(BERSERK_VARIANTS.map((variant) => variant.key), ['emscripten', 'default', 'simd']);
+  assert.deepEqual(BERSERK_VARIANTS.map((variant) => variant.key), ['emscripten', 'emscripten-simd', 'emscripten-relaxed', 'default', 'simd']);
   assert.equal(BERSERK_EMSCRIPTEN_VARIANT.jsUrl, BERSERK_EMSCRIPTEN_JS_URL);
   assert.equal(BERSERK_EMSCRIPTEN_VARIANT.wasmUrl, BERSERK_EMSCRIPTEN_WASM_URL);
   assert.equal(BERSERK_EMSCRIPTEN_VARIANT.dataUrl, BERSERK_EMSCRIPTEN_DATA_URL);
@@ -44,6 +46,8 @@ test('Berserk variant normalization and lookup are stable', () => {
   assert.equal(normalizeBerserkVariant('unknown'), 'emscripten');
   assert.equal(berserkVariantByKey('emscripten').label, 'Berserk Emscripten experimental');
   assert.equal(berserkVariantByKey('simd').label, 'Berserk SIMD WASI planned');
+  const relaxed = berserkVariantByKey('emscripten-relaxed');
+  assert.equal(relaxed.key, supportsWasmRelaxedSimd() ? 'emscripten-relaxed' : supportsBerserkWasmSimd() ? 'emscripten-simd' : 'emscripten');
   assert.equal(berserkVariantByKey('custom').key, 'custom');
 });
 

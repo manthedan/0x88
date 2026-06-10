@@ -87,12 +87,22 @@ const sources = [
   'nn/evaluate.c',
 ];
 
+// SIMD builds compile Berserk's own SSE4.1 NNUE path through Emscripten's SSE
+// intrinsic emulation headers; the relaxed build additionally swaps the
+// patched m128 dpbusd helpers to the relaxed integer dot.
+const simdFlags = process.env.BERSERK_WASM_RELAXED_SIMD === '1'
+  ? ['-msse4.1', '-msimd128', '-mrelaxed-simd']
+  : process.env.BERSERK_WASM_SIMD === '1'
+    ? ['-msse4.1', '-msimd128']
+    : [];
+
 const emccArgs = [
   '-std=gnu11',
   '-Wall',
   '-Wextra',
   '-Wshadow',
   process.env.BERSERK_EMSCRIPTEN_OPT ?? '-O2',
+  ...simdFlags,
   '-DNDEBUG',
   '-DVERSION="14"',
   `-DEVALFILE="${netName}"`,

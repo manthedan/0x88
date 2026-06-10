@@ -4,7 +4,7 @@ index 1f156ae..a273e7e 100644
 +++ b/src/main.rs
 @@ -51,7 +51,7 @@ pub static NAME: &str = "Viridithas";
  pub static VERSION: &str = env!("CARGO_PKG_VERSION");
-
+ 
  fn main() -> anyhow::Result<()> {
 -    if std::env::args_os().len() == 1 {
 +    if cfg!(target_arch = "wasm32") || std::env::args_os().len() == 1 {
@@ -18,7 +18,7 @@ index faae968..54dc82d 100644
 @@ -6,9 +6,14 @@ mod vbmi;
  #[cfg(target_feature = "avx512vbmi")]
  pub use vbmi::*;
-
+ 
 -#[cfg(not(any(target_feature = "neon", target_feature = "avx512vbmi")))]
 +#[cfg(target_arch = "wasm32")]
 +mod scalar;
@@ -30,7 +30,7 @@ index faae968..54dc82d 100644
 -#[cfg(not(any(target_feature = "neon", target_feature = "avx512vbmi")))]
 +#[cfg(all(not(target_arch = "wasm32"), not(any(target_feature = "neon", target_feature = "avx512vbmi"))))]
  pub use avx2::*;
-
+ 
  #[cfg(target_feature = "neon")]
 diff --git a/src/nnue/geometry/scalar.rs b/src/nnue/geometry/scalar.rs
 new file mode 100644
@@ -166,12 +166,12 @@ index aff6245..4559b62 100644
          static CACHED: OnceLock<Mmap> = OnceLock::new();
 +        #[cfg(target_arch = "wasm32")]
 +        static CACHED_WASM: OnceLock<&'static NNUEParams> = OnceLock::new();
-
+ 
          // If we’re under MIRI, this function is way too slow.
          if cfg!(miri) {
 @@ -811,6 +813,10 @@ impl NNUEParams {
          }
-
+ 
          let _guard = LOCK.lock().unwrap();
 +        #[cfg(target_arch = "wasm32")]
 +        if let Some(cached) = CACHED_WASM.get() {
@@ -183,7 +183,7 @@ index aff6245..4559b62 100644
 @@ -821,6 +827,33 @@ impl NNUEParams {
              return Ok(params);
          }
-
+ 
 +        #[cfg(target_arch = "wasm32")]
 +        {
 +            let mut net = QuantisedNetwork::zeroed();
@@ -221,7 +221,7 @@ index 2c23521..3b8da09 100644
 @@ -408,7 +408,15 @@ mod avx512 {
      pub const F32_CHUNK: usize = std::mem::size_of::<VecF32>() / std::mem::size_of::<f32>();
  }
-
+ 
 -#[cfg(not(any(target_feature = "neon", target_feature = "avx512f")))]
 +#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 +#[path = "simd_wasm.rs"]
@@ -238,7 +238,7 @@ index 2c23521..3b8da09 100644
 @@ -1163,7 +1171,13 @@ mod neon {
  #[cfg(target_feature = "avx512f")]
  pub use avx512::*;
-
+ 
 -#[cfg(not(any(target_feature = "neon", target_feature = "avx512f")))]
 +#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 +pub use wasm::*;
@@ -248,7 +248,7 @@ index 2c23521..3b8da09 100644
 +
 +#[cfg(all(not(target_arch = "wasm32"), not(any(target_feature = "neon", target_feature = "avx512f"))))]
  pub use avx2::*;
-
+ 
  #[cfg(target_feature = "neon")]
 diff --git a/src/nnue/simd_scalar.rs b/src/nnue/simd_scalar.rs
 new file mode 100644
@@ -380,16 +380,19 @@ index 0000000..a7b7999
 +pub const F32_CHUNK: usize = std::mem::size_of::<VecF32>() / std::mem::size_of::<f32>();
 diff --git a/src/nnue/simd_wasm.rs b/src/nnue/simd_wasm.rs
 new file mode 100644
-index 0000000..07d6db7
+index 0000000..23fa4bb
 --- /dev/null
 +++ b/src/nnue/simd_wasm.rs
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,234 @@
 +#![allow(clippy::all, clippy::nursery, clippy::pedantic, dead_code)]
 +#![allow(clippy::undocumented_unsafe_blocks)]
 +#![allow(unsafe_op_in_unsafe_fn)]
 +
 +use std::arch::wasm32::*;
 +
++#[cfg(target_feature = "relaxed-simd")]
++pub const INNER_ARCH: &str = "wasm-relaxed-simd128";
++#[cfg(not(target_feature = "relaxed-simd"))]
 +pub const INNER_ARCH: &str = "wasm-simd128";
 +
 +#[derive(Clone, Copy)]
@@ -530,7 +533,23 @@ index 0000000..07d6db7
 +    i32x4_add(even, odd)
 +}
 +
++// Activations fed to the L1 dot are provably in [0, 127]: QA = 255 and
++// FT_SHIFT = 9, so the clipped pairwise product maxes at 255 * 255 >> 9 = 127
++// (see layers.rs "keep our left-hand values in 0..127"). That satisfies the
++// relaxed i7x16 operand precondition, making the relaxed integer dot exact
++// (not implementation-defined) on every lowering; intermediate i16 pair sums
++// (max 2 * 127 * 127 = 32258) cannot saturate pmaddubsw-style lowerings.
 +#[inline(always)]
++#[cfg(target_feature = "relaxed-simd")]
++pub unsafe fn madd_u8_to_i32(sum: VecI32, a: VecI8, b: VecI8) -> VecI32 {
++    VecI32(
++        i32x4_relaxed_dot_i8x16_i7x16_add(b.0, a.0, sum.0),
++        i32x4_relaxed_dot_i8x16_i7x16_add(b.1, a.1, sum.1),
++    )
++}
++
++#[inline(always)]
++#[cfg(not(target_feature = "relaxed-simd"))]
 +pub unsafe fn madd_u8_to_i32(sum: VecI32, a: VecI8, b: VecI8) -> VecI32 {
 +    VecI32(
 +        i32x4_add(sum.0, dot_u8_i8_to_i32x4(a.0, b.0)),
@@ -671,7 +690,7 @@ index 45eefbd..52f90c1 100644
 --- a/src/uci.rs
 +++ b/src/uci.rs
 @@ -56,6 +56,8 @@ const BENCH_THREADS: usize = 1;
-
+ 
  static SET_TERM: Once = Once::new();
  static STDIN_READER_THREAD_KEEP_RUNNING: AtomicBool = AtomicBool::new(true);
 +#[cfg(target_arch = "wasm32")]
@@ -687,7 +706,7 @@ index 45eefbd..52f90c1 100644
 +    if should_poll_stdin_during_search() {
 +        thread_data[0].info.set_stdin(&stdin);
 +    }
-
+ 
      loop {
          std::io::stdout().flush()?;
 -        let Ok(line) = stdin
@@ -708,18 +727,18 @@ index 45eefbd..52f90c1 100644
 +                                t.info.set_stdin(&stdin);
 +                            }
                          }
-
+ 
                          let chess960 = control.chess960.load(Ordering::Relaxed);
 @@ -782,11 +784,53 @@ fn parse_setoption(
      Ok(out)
  }
-
+ 
 +#[cfg(not(target_arch = "wasm32"))]
  type StdinReader = (
      mpsc::Receiver<String>,
      std::thread::JoinHandle<Result<(), UciError>>,
  );
-
+ 
 +#[cfg(target_arch = "wasm32")]
 +struct WasmStdinReaderHandle;
 +
@@ -767,7 +786,7 @@ index 45eefbd..52f90c1 100644
 @@ -795,6 +839,21 @@ fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
      Ok((receiver, handle))
  }
-
+ 
 +#[cfg(target_arch = "wasm32")]
 +fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
 +    let (sender, receiver) = mpsc::channel();

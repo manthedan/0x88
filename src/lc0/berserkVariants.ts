@@ -1,4 +1,6 @@
-export type BerserkVariantKey = 'emscripten' | 'default' | 'simd' | 'custom';
+import { supportsWasmRelaxedSimd } from './recklessVariants.ts';
+
+export type BerserkVariantKey = 'emscripten' | 'emscripten-simd' | 'emscripten-relaxed' | 'default' | 'simd' | 'custom';
 export type BerserkAssetStatus = 'unknown' | 'checking' | 'present' | 'missing';
 
 export interface BerserkVariant {
@@ -19,6 +21,12 @@ export interface BerserkVariant {
 export const BERSERK_EMSCRIPTEN_JS_URL = '/berserk/berserk-emscripten.js';
 export const BERSERK_EMSCRIPTEN_WASM_URL = '/berserk/berserk-emscripten.wasm';
 export const BERSERK_EMSCRIPTEN_DATA_URL = '/berserk/berserk-emscripten.data';
+export const BERSERK_EMSCRIPTEN_SIMD_JS_URL = '/berserk/berserk-emscripten-simd128.js';
+export const BERSERK_EMSCRIPTEN_SIMD_WASM_URL = '/berserk/berserk-emscripten-simd128.wasm';
+export const BERSERK_EMSCRIPTEN_SIMD_DATA_URL = '/berserk/berserk-emscripten-simd128.data';
+export const BERSERK_EMSCRIPTEN_RELAXED_JS_URL = '/berserk/berserk-emscripten-relaxed-simd128.js';
+export const BERSERK_EMSCRIPTEN_RELAXED_WASM_URL = '/berserk/berserk-emscripten-relaxed-simd128.wasm';
+export const BERSERK_EMSCRIPTEN_RELAXED_DATA_URL = '/berserk/berserk-emscripten-relaxed-simd128.data';
 export const BERSERK_DEFAULT_WASM_URL = '/berserk/berserk.wasm';
 export const BERSERK_SIMD_WASM_URL = '/berserk/berserk-simd128.wasm';
 export const BERSERK_MAIN_NETWORK = 'berserk-9b84c340af7e.nn';
@@ -71,6 +79,26 @@ export const BERSERK_EMSCRIPTEN_VARIANT: BerserkVariant = {
   note: 'Smoked Berserk tag 14 single-thread Emscripten worker build with tablebases disabled and NNUE preloaded in .data.',
 };
 
+export const BERSERK_EMSCRIPTEN_SIMD_VARIANT: BerserkVariant = {
+  key: 'emscripten-simd',
+  label: 'Berserk SIMD Emscripten experimental',
+  jsUrl: BERSERK_EMSCRIPTEN_SIMD_JS_URL,
+  wasmUrl: BERSERK_EMSCRIPTEN_SIMD_WASM_URL,
+  dataUrl: BERSERK_EMSCRIPTEN_SIMD_DATA_URL,
+  sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
+  note: 'Berserk tag 14 Emscripten build compiling the engine SSE4.1 NNUE path via -msse4.1 -msimd128 intrinsic emulation. 40/40 fixed-depth parity with scalar; ~3.8x scalar NPS in Node.',
+};
+
+export const BERSERK_EMSCRIPTEN_RELAXED_VARIANT: BerserkVariant = {
+  key: 'emscripten-relaxed',
+  label: 'Berserk Relaxed SIMD Emscripten experimental',
+  jsUrl: BERSERK_EMSCRIPTEN_RELAXED_JS_URL,
+  wasmUrl: BERSERK_EMSCRIPTEN_RELAXED_WASM_URL,
+  dataUrl: BERSERK_EMSCRIPTEN_RELAXED_DATA_URL,
+  sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
+  note: 'SIMD Emscripten build whose m128 dpbusd helpers use the relaxed integer dot (exact: InputCReLU8 activations are in 0..127). Requires WebAssembly Relaxed SIMD.',
+};
+
 export const BERSERK_DEFAULT_VARIANT: BerserkVariant = {
   key: 'default',
   label: 'Berserk scalar WASI planned',
@@ -91,12 +119,16 @@ export const BERSERK_SIMD_VARIANT: BerserkVariant = {
 
 export const BERSERK_VARIANTS: readonly BerserkVariant[] = [
   BERSERK_EMSCRIPTEN_VARIANT,
+  BERSERK_EMSCRIPTEN_SIMD_VARIANT,
+  BERSERK_EMSCRIPTEN_RELAXED_VARIANT,
   BERSERK_DEFAULT_VARIANT,
   BERSERK_SIMD_VARIANT,
 ];
 
 export function normalizeBerserkVariant(raw: string | null | undefined): BerserkVariantKey {
   const value = String(raw ?? '').toLowerCase().replace(/[ _-]+/g, '');
+  if (value === 'emscriptenrelaxed' || value === 'relaxedsimd' || value === 'relaxed' || value === 'emscriptenrelaxedsimd128') return 'emscripten-relaxed';
+  if (value === 'emscriptensimd' || value === 'emscriptensimd128' || value === 'jssimd') return 'emscripten-simd';
   if (value === 'emscripten' || value === 'js' || value === 'worker' || value === 'browser') return 'emscripten';
   if (value === 'simd' || value === 'simd128' || value === 'wasmsimd') return 'simd';
   if (value === 'scalar' || value === 'default' || value === 'wasi' || value === 'full') return 'default';
@@ -110,6 +142,8 @@ export function defaultBerserkVariantKey(): BerserkVariantKey {
 
 export function berserkVariantByKey(key: string): BerserkVariant {
   const normalized = normalizeBerserkVariant(key);
+  if (normalized === 'emscripten-simd') return BERSERK_EMSCRIPTEN_SIMD_VARIANT;
+  if (normalized === 'emscripten-relaxed') return supportsWasmRelaxedSimd() ? BERSERK_EMSCRIPTEN_RELAXED_VARIANT : supportsBerserkWasmSimd() ? BERSERK_EMSCRIPTEN_SIMD_VARIANT : BERSERK_EMSCRIPTEN_VARIANT;
   if (normalized === 'simd') return BERSERK_SIMD_VARIANT;
   if (normalized === 'default') return BERSERK_DEFAULT_VARIANT;
   if (normalized === 'custom') return {
