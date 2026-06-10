@@ -482,7 +482,14 @@ def main() -> int:
                     raise ValueError("Tensor's name is required.")
                 array = self._parse_array(init_tensor)
                 if self._keep_params_in_input and math.prod(array.shape) > max_elements:
-                    var_name = init_tensor.name.strip("onnx::")
+                    # NOT str.strip("onnx::") — that strips the CHARACTER SET
+                    # {o,n,x,:} from both ends; on sanitized names like
+                    # "onnx__MatMul_1488" it leaves "__MatMul_1488", which
+                    # WGSL rejects (no leading double underscore).
+                    var_name = init_tensor.name
+                    if var_name.startswith("onnx::"):
+                        var_name = var_name[len("onnx::"):]
+                    var_name = var_name.lstrip("_") or f"param_{stats['params']}"
                     init_var = self._new_var(var_name, shape=array.shape, dtype=array.dtype)
                     self._nodes[init_tensor.name] = init_var
                     self._params[var_name] = (init_var, array)

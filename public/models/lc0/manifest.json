@@ -81,6 +81,38 @@
       "source": "../models/lc0-bestnets/onnx/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.onnx",
       "bytes": 370635164,
       "sha256": "480cbcb4863bdb63db962381a8dd736befbb172862508ca52bd72bcc2c990e02"
+    },
+    {
+      "file": "t3-512x15x16h-distill-swa-2767500.batch1.f16.onnx",
+      "url": "/models/lc0/t3-512x15x16h-distill-swa-2767500.batch1.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/t3-512x15x16h-distill-swa-2767500.batch1.f16.onnx",
+      "bytes": 171016323,
+      "sha256": "2cded25020d409ab5d3c26faedeea301ca14d3d00ecfde08b779bc1515421f7a"
+    },
+    {
+      "file": "t3-512x15x16h-distill-swa-2767500.batch4.f16.onnx",
+      "url": "/models/lc0/t3-512x15x16h-distill-swa-2767500.batch4.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/t3-512x15x16h-distill-swa-2767500.batch4.f16.onnx",
+      "bytes": 171016323,
+      "sha256": "a789589da42fffadaba7f8187adc9bc14e592a6abc5c1dd2cef4c5a422c5e279"
+    },
+    {
+      "file": "t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx",
+      "url": "/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx",
+      "bytes": 171016323,
+      "sha256": "fff9de3cb7e90ef113f87954156ab0cbb84973151471e3a22e36513994251cb1"
+    },
+    {
+      "file": "t3-512x15x16h-distill-swa-2767500.batch16.f16.onnx",
+      "url": "/models/lc0/t3-512x15x16h-distill-swa-2767500.batch16.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/t3-512x15x16h-distill-swa-2767500.batch16.f16.onnx",
+      "bytes": 171016323,
+      "sha256": "385639425f9519c4a295b3022ce12fbe7bdadc21e47ab4cc30258e7507529b25"
     }
   ],
   "packs": [
