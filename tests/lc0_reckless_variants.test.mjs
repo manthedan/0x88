@@ -60,6 +60,20 @@ test('implicit SIMD default falls back to scalar when the SIMD asset is unavaila
   }
 });
 
+test('implicit relaxed SIMD default falls through to scalar when both SIMD assets are unavailable', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalValidate = WebAssembly.validate;
+  globalThis.fetch = async () => ({ ok: false });
+  WebAssembly.validate = () => true;
+  try {
+    const resolved = await resolveDefaultRecklessVariantAssetFallback(RECKLESS_RELAXED_SIMD_VARIANT, false);
+    assert.equal(resolved, RECKLESS_FULL_VARIANT);
+  } finally {
+    globalThis.fetch = originalFetch;
+    WebAssembly.validate = originalValidate;
+  }
+});
+
 test('explicit SIMD does not silently downgrade during asset preflight', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ ok: false });

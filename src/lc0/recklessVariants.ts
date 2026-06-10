@@ -142,7 +142,10 @@ export async function resolveDefaultRecklessVariantAssetFallback(variant: Reckle
     if (!supportsWasmRelaxedSimd()) return supportsWasmSimd() ? RECKLESS_SIMD_VARIANT : RECKLESS_FULL_VARIANT;
     if (explicit) return variant;
     const status = await checkRecklessVariantAsset(variant, onChange);
-    return status === 'missing' ? (supportsWasmSimd() ? RECKLESS_SIMD_VARIANT : RECKLESS_FULL_VARIANT) : variant;
+    if (status !== 'missing') return variant;
+    if (!supportsWasmSimd()) return RECKLESS_FULL_VARIANT;
+    const simdStatus = await checkRecklessVariantAsset(RECKLESS_SIMD_VARIANT, onChange);
+    return simdStatus === 'missing' ? RECKLESS_FULL_VARIANT : RECKLESS_SIMD_VARIANT;
   }
   if (explicit || variant.key !== 'simd') return variant;
   const status = await checkRecklessVariantAsset(variant, onChange);
