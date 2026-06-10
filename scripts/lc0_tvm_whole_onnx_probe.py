@@ -662,8 +662,12 @@ def main() -> int:
                 "functions": dict(sorted(rule_attribution.items())),
                 **({"ruleFailures": rule_failures} if rule_failures else {}),
             }
-        relax_pipeline = None if (args.no_fuse_ops or args.dlight) else "default"
-        return relax.build(build_mod, target=target, relax_pipeline=relax_pipeline)
+        # Always build with the "default" pipeline: it contains the mandatory
+        # VM-lowering passes (ToNonDataflow/CallTIRRewrite/...) and NO FuseOps,
+        # so it preserves both the no-fuse intent and pre-applied dlight
+        # schedules. relax_pipeline=None skips lowering entirely and fails
+        # VMCodeGen with raw relax.call_tir.
+        return relax.build(build_mod, target=target, relax_pipeline="default")
 
     executable = run_step(result, "relax_build_target", build_relax) if mod is not None else None
     if executable is not None:

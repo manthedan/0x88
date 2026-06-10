@@ -1,5 +1,37 @@
 # Handoff: Tiny Leela TVMJS follow-ups (2026-06-09)
 
+> **RESOLVED 2026-06-10 — the lane is unblocked.** Bugs A and B were ONE bug,
+> found and fixed in `3rdparty/tvm-ffi` (commit `afea100` in the tvm-ffi
+> checkout, bumped by `94398e51f` in `.deps/tvm-webgpu-src`):
+> `ffi::StructuralEqual::operator()` passed `skip_tensor_content=true` while
+> `ffi::StructuralHash::operator()` hashes tensor content. As the (hash,
+> equal) pair of the relax VM `ExecBuilder` constant-pool dedup map this
+> violates the unordered_map invariant — same-shape/dtype tensors with
+> different data are "equal" but hash differently — so on bucket collisions
+> distinct scalar constants deduplicated into one pool slot. The Tiny rank
+> clip executed `min(max(x, 7), 7)` (const 0 resolved to the const-7 tensor)
+> → constant 7s; the earlier "reads column 15" reading was an artifact of
+> periodic test data. Collisions only appear once the pool is large enough
+> (context-dependence) and depend on process-specific bucket layout (Bug B's
+> "byte-identical modules, varying outputs", incl. NaN when float consts
+> collided). The bisection method that localized it: companion-subgraph
+> binary search via `onnx.utils.extract_model` against a numpy oracle, then
+> instrumenting the surviving suspect with extra ONNX outputs (raw gather was
+> CORRECT, clip of those values was wrong → wrong const operand), then direct
+> kernel calls (compiled kernels correct) → VM bytecode constant args → pool
+> dedup code.
+> Validation: 45-node cut now bit-exact vs ORT (`maxdiff 0.0`); full
+> `bt4_anneal_muon_best.batch16.sim.onnx` matches ORT CPU at ≤4e-5 across
+> policy/wdl/q/hidden and is stable across build×2/run×2; rebuilt
+> WebGPU wasm matches ORT in-browser at ≤4.6e-5 all outputs
+> (`tiny-tvmjs-webgpu-smoke.html`, SMOKE_OK, ~39 ms/b16 invoke incl.
+> readback). BT4-it332 rebuilt with the fixed compiler shows identical
+> healthy parity (no regression). Caveat: the probe's dlight/no-fuse builds
+> must use `relax_pipeline="default"` (contains the VM-lowering passes and no
+> FuseOps); `relax_pipeline=None` fails VMCodeGen on raw `call_tir`.
+> Items below kept for historical context; Item 1 is now an upstream PR
+> opportunity (tvm-ffi fix + repro) rather than a bug report.
+
 Status snapshot for a fresh session. Two independent work items, both unblocked
 and well-scoped. Full investigation narrative: "Tiny Leela (squareformer_v2)
 TVMJS probe" + "Numerics bisection result" sections in
