@@ -30,11 +30,12 @@ import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berse
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
 import { BT4_APPROX_MB, BT4_MODEL_NAME, BT4_MODEL_URL, BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH, BT4_RECOMMENDED_SEARCH_BATCH_SIZE, Bt4WorkerSearcher, bt4LoadWarning, bt4SupportedSync, probeBt4Support, type Bt4SearchResult } from './bt4Engine.ts';
+import { TournamentStandings, buildSchedule, tournamentPairings, type ScheduledGame, type TournamentMode } from './tournament.ts';
 import { defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 
 type Ground = ReturnType<typeof Chessground>;
-type SeatId = 'A' | 'B';
+// Seats are array indices into seatRows; tournament pids are String(index).
 interface ArenaEngine {
   id: string;
   name: string;
@@ -42,7 +43,6 @@ interface ArenaEngine {
   warmup?(signal: AbortSignal): Promise<void>;
 }
 interface GameRecord { pgn: string; }
-interface MatchGame { whiteSeat: SeatId; opening: ArenaOpening; }
 interface MatchScore { a: number; b: number; aWins: number; bWins: number; draws: number; games: number; }
 interface Lc0TreeTelemetry {
   engineName: string;
@@ -209,10 +209,10 @@ const MAX_ENGINE_OUTPUT_HISTORY = 1000;
 const thinkingEngineIds = new Set<string>();
 let activeEngineIds: string[] = [];
 const games: GameRecord[] = [];
-const seatRows: Record<SeatId, EngineRow> = {
-  A: { family: 'lc0', variant: 'small', strength: 100 },
-  B: { family: 'sf', variant: 'lite', strength: 8 },
-};
+const seatRows: EngineRow[] = [
+  { family: 'lc0', variant: 'small', strength: 100 },
+  { family: 'sf', variant: 'lite', strength: 8 },
+];
 
 function el(id: string): HTMLElement {
   const node = document.getElementById(id);
@@ -502,23 +502,27 @@ function parseSeatSpec(value: string | null): EngineRow | undefined {
 }
 
 function applyArenaQueryParams(): void {
+  const requestedMode = params.get('arenaMode') ?? params.get('tournament');
+  if (requestedMode === 'round-robin' || requestedMode === 'gauntlet' || requestedMode === 'match') {
+    selectEl('tournamentModeSelect').value = requestedMode;
+  }
   const seatA = parseSeatSpec(params.get('seatA') ?? params.get('engineA'));
   const seatB = parseSeatSpec(params.get('seatB') ?? params.get('engineB'));
-  if (seatA) seatRows.A = seatA;
-  if (seatB) seatRows.B = seatB;
+  if (seatA) seatRows[0] = seatA;
+  if (seatB) seatRows[1] = seatB;
 
   if (params.has('lc0Strength')) {
-    seatRows.A.family = 'lc0';
-    seatRows.A.variant = 'small';
-    seatRows.A.strength = Number(params.get('lc0Strength'));
-    clampStrength(seatRows.A);
+    seatRows[0].family = 'lc0';
+    seatRows[0].variant = 'small';
+    seatRows[0].strength = Number(params.get('lc0Strength'));
+    clampStrength(seatRows[0]);
   }
   const opponentFamily = params.get('opponentFamily');
   if (opponentFamily && isEngineFamily(opponentFamily)) {
-    seatRows.B.family = opponentFamily;
-    seatRows.B.variant = params.get('opponentVariant') ?? defaultVariant(opponentFamily);
-    seatRows.B.strength = Number(params.get('opponentStrength') ?? strengthMeta(opponentFamily).def);
-    clampStrength(seatRows.B);
+    seatRows[1].family = opponentFamily;
+    seatRows[1].variant = params.get('opponentVariant') ?? defaultVariant(opponentFamily);
+    seatRows[1].strength = Number(params.get('opponentStrength') ?? strengthMeta(opponentFamily).def);
+    clampStrength(seatRows[1]);
   }
 
   inputEl('gamesInput').value = String(intParam('gamesPerOpening', intParam('games', Number(inputEl('gamesInput').value) || 2, 1, 20), 1, 20));
@@ -721,7 +725,7 @@ function renderEvalBars(): void {
 }
 
 function renderEngineOutputs(): void {
-  const ids = activeEngineIds.length ? activeEngineIds : [...new Set([seatEngineId('A'), seatEngineId('B')])].filter((id) => engines.has(id));
+  const ids = activeEngineIds.length ? activeEngineIds : [...new Set([seatEngineId(0), seatEngineId(1)])].filter((id) => engines.has(id));
   const cards = ids.map((id) => {
     const snapshot = engineOutputs.get(id);
     const name = snapshot?.engineName ?? engines.get(id)?.name ?? id;
@@ -866,36 +870,44 @@ function engineIdForRow(row: EngineRow): string {
   return `${row.family}:${row.variant}:${row.strength}`;
 }
 
-function activeSeatRows(): EngineRow[] {
-  return [seatRows.A, seatRows.B];
+function arenaTournamentMode(): TournamentMode {
+  const value = selectEl('tournamentModeSelect').value;
+  return value === 'round-robin' || value === 'gauntlet' ? value : 'match';
 }
 
-function seatEngineId(seat: SeatId): string {
-  return engineIdForRow(seatRows[seat]);
+/** Seats participating under the current mode (match uses only the first two). */
+function activeSeatRows(): EngineRow[] {
+  return arenaTournamentMode() === 'match' ? seatRows.slice(0, 2) : [...seatRows];
+}
+
+function seatEngineId(index: number): string {
+  return engineIdForRow(seatRows[index]);
 }
 
 function renderSeatSelectors(): void {
   const families = engineFamilyOptions();
-  el('arenaSeatList').innerHTML = (['A', 'B'] as const).map((seat) => {
-    const row = seatRows[seat];
+  const matchMode = arenaTournamentMode() === 'match';
+  el('arenaSeatList').innerHTML = seatRows.map((row, index) => {
     const meta = strengthMeta(row.family);
     const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
     const varSel = variantOptions(row.family).map((option) => `<option value="${option.value}"${row.variant === option.value ? ' selected' : ''}${option.disabled ? ' disabled' : ''}>${htmlEscape(option.label)}</option>`).join('');
-    const label = `Engine ${seat === 'A' ? '1' : '2'}`;
-    return `<div class="engine-row seat-row" data-seat="${seat}"><span class="seat-name">${label}</span><select class="seat-fam" data-seat="${seat}" aria-label="${label} family">${famSel}</select><span class="arrow">→</span><select class="seat-var" data-seat="${seat}" aria-label="${label} variant">${varSel}</select><span class="arrow">→</span><input class="seat-strength row-strength" data-seat="${seat}" aria-label="${label} strength" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span></div>`;
+    const label = `Engine ${index + 1}`;
+    const inactive = matchMode && index >= 2 ? ' seat-inactive' : '';
+    const remove = seatRows.length > 2 ? `<button type="button" class="seat-remove" data-seat="${index}" title="Remove ${label}" aria-label="Remove ${label}">×</button>` : '';
+    return `<div class="engine-row seat-row${inactive}" data-seat="${index}"><span class="seat-name">${label}</span><select class="seat-fam" data-seat="${index}" aria-label="${label} family">${famSel}</select><span class="arrow">→</span><select class="seat-var" data-seat="${index}" aria-label="${label} variant">${varSel}</select><span class="arrow">→</span><input class="seat-strength row-strength" data-seat="${index}" aria-label="${label} strength" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
   }).join('');
 }
 
 function syncSeatRowsFromDom(): void {
-  for (const seat of ['A', 'B'] as const) {
-    const host = el('arenaSeatList');
-    const family = host.querySelector<HTMLSelectElement>(`.seat-fam[data-seat="${seat}"]`)?.value;
-    if (family && isEngineFamily(family)) seatRows[seat].family = family;
-    const variant = host.querySelector<HTMLSelectElement>(`.seat-var[data-seat="${seat}"]`)?.value;
-    if (variant) seatRows[seat].variant = variant;
-    const strength = host.querySelector<HTMLInputElement>(`.seat-strength[data-seat="${seat}"]`)?.value;
-    if (strength != null) seatRows[seat].strength = Number(strength);
-    clampStrength(seatRows[seat]);
+  const host = el('arenaSeatList');
+  for (let index = 0; index < seatRows.length; index++) {
+    const family = host.querySelector<HTMLSelectElement>(`.seat-fam[data-seat="${index}"]`)?.value;
+    if (family && isEngineFamily(family)) seatRows[index].family = family;
+    const variant = host.querySelector<HTMLSelectElement>(`.seat-var[data-seat="${index}"]`)?.value;
+    if (variant) seatRows[index].variant = variant;
+    const strength = host.querySelector<HTMLInputElement>(`.seat-strength[data-seat="${index}"]`)?.value;
+    if (strength != null) seatRows[index].strength = Number(strength);
+    clampStrength(seatRows[index]);
   }
 }
 
@@ -903,8 +915,8 @@ function populateSeats(): void {
   const options = [...engines.values()].map((engine) => `<option value="${htmlEscape(engine.id)}">${htmlEscape(engine.name)}</option>`).join('');
   selectEl('seatA').innerHTML = options;
   selectEl('seatB').innerHTML = options;
-  selectEl('seatA').value = seatEngineId('A');
-  selectEl('seatB').value = seatEngineId('B');
+  selectEl('seatA').value = seatEngineId(0);
+  selectEl('seatB').value = seatEngineId(1);
   renderSeatSelectors();
 }
 
@@ -920,9 +932,11 @@ function refreshSeatControls(): void {
   selectEl('lc0LegalPriorsSelect').disabled = hybridControlsDisabled;
   inputEl('lc0BatchSizeInput').disabled = running;
   inputEl('lc0BatchPipelineDepthInput').disabled = running;
-  for (const selector of ['.seat-fam', '.seat-var', '.seat-strength']) {
+  for (const selector of ['.seat-fam', '.seat-var', '.seat-strength', '.seat-remove']) {
     for (const node of el('arenaSeatList').querySelectorAll<HTMLInputElement | HTMLSelectElement>(selector)) node.disabled = running;
   }
+  el('addSeat').toggleAttribute('disabled', running);
+  selectEl('tournamentModeSelect').disabled = running;
 }
 
 function arenaBudgetMode(): 'fixed' | 'movetime' {
@@ -1004,7 +1018,7 @@ function lc0CacheFootprint(): Lc0EvaluationCacheFootprint | undefined {
 }
 
 function diagnosticEngineIds(): string[] {
-  const ids = activeEngineIds.length ? activeEngineIds : [seatEngineId('A'), seatEngineId('B')];
+  const ids = activeEngineIds.length ? activeEngineIds : [seatEngineId(0), seatEngineId(1)];
   return [...new Set(ids)].filter((id) => engines.has(id));
 }
 
@@ -2026,6 +2040,17 @@ function renderMatchScore(nameA: string, nameB: string, sameEngine: boolean, sco
     : `${nameA} ${formatScoreHalf(score.a)} – ${formatScoreHalf(score.b)} ${nameB} · ${score.aWins}W ${score.draws}D ${score.bWins}L over ${games}`;
 }
 
+function renderStandings(standings: TournamentStandings, scheduledGames: number): void {
+  const rows = standings.table();
+  const elo = (row: ReturnType<TournamentStandings['table']>[number]) => row.eloDiff === null
+    ? '—'
+    : `${row.eloDiff >= 0 ? '+' : ''}${Math.round(row.eloDiff)}${row.eloError !== null ? ` ±${Math.round(row.eloError)}` : ''}`;
+  const body = rows.map((row, i) =>
+    `<tr><td>${i + 1}</td><td>${htmlEscape(row.name)}</td><td>${elo(row)}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td><td>${formatScoreHalf(row.points) || '0'}</td><td>${row.games}</td></tr>`).join('');
+  el('matchScore').innerHTML = `<div class="small">${standings.totalGames()}/${scheduledGames} games · Elo vs pool, ±95% approx</div>`
+    + `<table class="standings"><thead><tr><th>#</th><th>Engine</th><th>Elo</th><th>W</th><th>D</th><th>L</th><th>Pts</th><th>G</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+
 function appendLog(text: string) {
   const div = document.createElement('div');
   div.textContent = text;
@@ -2145,28 +2170,43 @@ async function startMatch() {
   if (running) { clearStartPending(); return; }
   buildEngines();
   populateSeats();
-  const idA = seatEngineId('A');
-  const idB = seatEngineId('B');
-  const engineA = engines.get(idA);
-  const engineB = engines.get(idB);
-  if (!engineA || !engineB) { el('message').textContent = 'Pick two engines.'; clearStartPending(); return; }
+  const mode = arenaTournamentMode();
+  const participantIdx = mode === 'match' ? [0, 1] : seatRows.map((_, index) => index);
+  const idCounts = new Map<string, number>();
+  for (const index of participantIdx) {
+    const engineId = seatEngineId(index);
+    idCounts.set(engineId, (idCounts.get(engineId) ?? 0) + 1);
+  }
+  const participants = participantIdx.map((index) => {
+    const engineId = seatEngineId(index);
+    const engine = engines.get(engineId);
+    // Duplicate engine configs are legal (mirror/self-play pools); standings
+    // key on seat pids and names get a seat suffix to stay distinguishable.
+    const name = engine && (idCounts.get(engineId) ?? 0) > 1 && mode !== 'match' ? `${engine.name} (seat ${index + 1})` : engine?.name ?? engineId;
+    return { pid: String(index), index, engineId, engine, name };
+  });
+  if (participants.length < 2 || participants.some((participant) => !participant.engine)) {
+    el('message').textContent = 'Pick at least two engines.';
+    clearStartPending();
+    return;
+  }
+  const byPid = new Map(participants.map((participant) => [participant.pid, participant]));
   const usesBt4 = activeSeatRows().some((row) => row.family === 'lc0' && row.variant === 'bt4');
   if (usesBt4 && !(await probeBt4Support())) {
     el('message').textContent = `Lc0 ${BT4_MODEL_NAME} needs WebGPU, which is unavailable in this browser.`;
     clearStartPending();
     return;
   }
-  const sameEngine = idA === idB;
-  const seatIds = sameEngine ? [idA] : [idA, idB];
+  const engineA = participants[0].engine!;
+  const engineB = participants[1].engine!;
+  const sameEngine = mode === 'match' && participants[0].engineId === participants[1].engineId;
+  const seatIds = [...new Set(participants.map((participant) => participant.engineId))];
   const gamesPerOpening = Math.max(1, Math.floor(Number(inputEl('gamesInput').value) || 2));
-  let schedule: MatchGame[];
+  const standings = new TournamentStandings(participants.map((participant) => ({ id: participant.pid, name: participant.name })));
+  let schedule: ScheduledGame<ArenaOpening>[];
   try {
-    const openings = selectedOpenings();
-    schedule = [];
-    // Alternate colors each game so a full set is color-balanced.
-    for (let g = 0; g < gamesPerOpening; g++) {
-      for (const opening of openings) schedule.push({ whiteSeat: g % 2 === 0 ? 'A' : 'B', opening });
-    }
+    // Colors alternate per game index within each pairing (see tournament.ts).
+    schedule = buildSchedule(tournamentPairings(mode, participants.map((participant) => participant.pid)), selectedOpenings(), gamesPerOpening);
   } catch (error) {
     el('message').textContent = `Opening setup error: ${(error as Error).message}`;
     clearStartPending();
@@ -2201,16 +2241,19 @@ async function startMatch() {
   el('start').toggleAttribute('disabled', true);
   el('stop').toggleAttribute('disabled', false);
   const score: MatchScore = { a: 0, b: 0, aWins: 0, bWins: 0, draws: 0, games: 0 };
-  renderMatchScore(engineA.name, engineB.name, sameEngine, score);
+  if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
+  else renderStandings(standings, schedule.length);
   try {
     resetLc0SearchTrees(seatIds);
     await warmUpSelectedEngines(seatIds, abort.signal);
     if (abort.signal.aborted) return;
     for (let i = 0; i < schedule.length; i++) {
       if (abort.signal.aborted) break;
-      const { whiteSeat, opening } = schedule[i];
-      const whiteEngine = whiteSeat === 'A' ? engineA : engineB;
-      const blackEngine = whiteSeat === 'A' ? engineB : engineA;
+      const { whiteId, blackId, opening } = schedule[i];
+      const white = byPid.get(whiteId)!;
+      const black = byPid.get(blackId)!;
+      const whiteEngine = white.engine!;
+      const blackEngine = black.engine!;
       // Reset trees per game (fresh game tree); within a game the shared tree is
       // reused across both sides' plies — i.e. self-play when both seats match.
       resetLc0SearchTrees(seatIds);
@@ -2224,16 +2267,18 @@ async function startMatch() {
       const { result, reason, tree } = await playArenaGame(whiteEngine, blackEngine, opening, abort.signal);
       if (reason === 'cancelled') break;
       score.games += 1;
+      standings.record(whiteId, blackId, result);
       if (result === '1/2-1/2') { score.draws += 1; score.a += 0.5; score.b += 0.5; }
       else {
-        const winnerIsA = (whiteSeat === 'A') === (result === '1-0');
+        const winnerIsA = (whiteId === participants[0].pid) === (result === '1-0');
         if (winnerIsA) { score.a += 1; score.aWins += 1; } else { score.b += 1; score.bWins += 1; }
       }
-      const tags: Record<string, string> = { Event: 'LC0 arena', White: whiteEngine.name, Black: blackEngine.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
+      const tags: Record<string, string> = { Event: 'LC0 arena', White: white.name, Black: black.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
       games.push({ pgn: gameTreeToPgn(tree, tags, result) });
       renderCacheInfo();
       appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason}) · ${engineRuntimeDiagnosticsText()} · ${searchTelemetryText()}`);
-      renderMatchScore(engineA.name, engineB.name, sameEngine, score);
+      if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
+      else renderStandings(standings, schedule.length);
     }
     el('message').textContent = abort.signal.aborted ? `Stopped after ${score.games} game(s).` : `Match done (${score.games} game${score.games === 1 ? '' : 's'}).`;
     el('pairing').textContent = abort.signal.aborted ? 'Match stopped.' : 'Match finished.';
@@ -2435,19 +2480,19 @@ async function runFixedSuiteBenchAutorun(): Promise<void> {
     uciTelemetry.clear();
     bt4Telemetry.clear();
     buildEngines();
-    const lc0Id = seatEngineId('A');
-    const lc0Row = seatRows.A;
+    const lc0Id = seatEngineId(0);
+    const lc0Row = seatRows[0];
     if (lc0Row.family !== 'lc0') throw new Error('fixed suite expects seat A to be LC0');
     const lc0Name = engines.get(lc0Id)?.name ?? rowLabel(lc0Row);
-    const sfKind = seatRows.B.family === 'sf' && seatRows.B.variant === 'full' ? 'full' : 'lite';
-    const sfId = seatRows.B.family === 'sf' ? seatEngineId('B') : 'sf:lite:8';
-    const sfName = seatRows.B.family === 'sf' ? (engines.get(sfId)?.name ?? rowLabel(seatRows.B)) : 'Stockfish Lite d8';
+    const sfKind = seatRows[1].family === 'sf' && seatRows[1].variant === 'full' ? 'full' : 'lite';
+    const sfId = seatRows[1].family === 'sf' ? seatEngineId(1) : 'sf:lite:8';
+    const sfName = seatRows[1].family === 'sf' ? (engines.get(sfId)?.name ?? rowLabel(seatRows[1])) : 'Stockfish Lite d8';
     await warmUpSelectedEngines([lc0Id, sfId], controller.signal);
     const sfEngine = stockfishEngineFor(sfKind);
     const timed = arenaBudgetMode() === 'movetime';
     const scoreMs = stockfishScoreMs();
     const scoreDepth = stockfishScoreDepth();
-    sfEngine.setOptions({ depth: scoreDepth ?? (timed ? undefined : seatRows.B.strength), movetimeMs: scoreDepth === undefined && timed ? scoreMs : undefined, threads: stockfishThreadsPlanned() });
+    sfEngine.setOptions({ depth: scoreDepth ?? (timed ? undefined : seatRows[1].strength), movetimeMs: scoreDepth === undefined && timed ? scoreMs : undefined, threads: stockfishThreadsPlanned() });
     resetLc0SearchTrees([lc0Id]);
     const positions = [];
     for (let i = 0; i < fens.length; i++) {
@@ -2524,7 +2569,7 @@ async function runFixedSuiteBenchAutorun(): Promise<void> {
       runtimeLabel: lc0RuntimeLabel(),
       elapsedMs: Math.round(performance.now() - started),
       configuration: {
-        seatA: { ...seatRows.A, id: lc0Id, label: rowLabel(seatRows.A) },
+        seatA: { ...seatRows[0], id: lc0Id, label: rowLabel(seatRows[0]) },
         stockfish: { id: sfId, label: sfName, scoreMovetimeMs: scoreDepth === undefined ? scoreMs : undefined, scoreDepth, threads: stockfishThreadsPlanned() },
         budgetMode: arenaBudgetMode(),
         movetimeMs: arenaMovetimeMs(),
@@ -2577,8 +2622,8 @@ async function runArenaBenchAutorun(): Promise<void> {
       runtimeLabel: lc0RuntimeLabel(),
       elapsedMs: Math.round(performance.now() - started),
       configuration: {
-        seatA: { ...seatRows.A, id: seatEngineId('A'), label: rowLabel(seatRows.A) },
-        seatB: { ...seatRows.B, id: seatEngineId('B'), label: rowLabel(seatRows.B) },
+        seatA: { ...seatRows[0], id: seatEngineId(0), label: rowLabel(seatRows[0]) },
+        seatB: { ...seatRows[1], id: seatEngineId(1), label: rowLabel(seatRows[1]) },
         budgetMode: arenaBudgetMode(),
         movetimeMs: arenaMovetimeMs(),
         gamesPerOpening: Math.max(1, Math.floor(Number(inputEl('gamesInput').value) || 2)),
@@ -2626,8 +2671,8 @@ function wireEvents() {
   el('arenaSeatList').addEventListener('change', (event) => {
     if (running) return;
     const target = event.target as HTMLInputElement | HTMLSelectElement;
-    const seat = target.dataset.seat as SeatId | undefined;
-    if (seat !== 'A' && seat !== 'B') return;
+    const seat = Number(target.dataset.seat);
+    if (!Number.isInteger(seat) || !seatRows[seat]) return;
     const row = seatRows[seat];
     if (target.classList.contains('seat-fam')) {
       row.family = target.value as EngineFamily;
@@ -2649,8 +2694,8 @@ function wireEvents() {
   el('arenaSeatList').addEventListener('input', (event) => {
     if (running) return;
     const target = event.target as HTMLInputElement;
-    const seat = target.dataset.seat as SeatId | undefined;
-    if ((seat === 'A' || seat === 'B') && target.classList.contains('seat-strength')) {
+    const seat = Number(target.dataset.seat);
+    if (Number.isInteger(seat) && seatRows[seat] && target.classList.contains('seat-strength')) {
       seatRows[seat].strength = Number(target.value);
       clampStrength(seatRows[seat]);
       renderRecklessRuntimeInfo();
@@ -2658,6 +2703,34 @@ function wireEvents() {
       renderBerserkRuntimeInfo();
       renderPlentyChessRuntimeInfo();
     }
+  });
+  el('arenaSeatList').addEventListener('click', (event) => {
+    if (running) return;
+    const target = event.target as HTMLElement;
+    if (!target.classList.contains('seat-remove')) return;
+    const index = Number(target.dataset.seat);
+    if (!Number.isInteger(index) || seatRows.length <= 2) return;
+    syncSeatRowsFromDom();
+    seatRows.splice(index, 1);
+    buildEngines();
+    populateSeats();
+  });
+  el('addSeat').addEventListener('click', () => {
+    if (running) return;
+    syncSeatRowsFromDom();
+    seatRows.push({ family: 'sf', variant: 'lite', strength: 8 });
+    buildEngines();
+    populateSeats();
+  });
+  el('tournamentModeSelect').addEventListener('change', () => {
+    if (running) return;
+    syncSeatRowsFromDom();
+    buildEngines();
+    populateSeats();
+    renderRecklessRuntimeInfo();
+    renderViridithasRuntimeInfo();
+    renderBerserkRuntimeInfo();
+    renderPlentyChessRuntimeInfo();
   });
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
   el('openingText').addEventListener('input', refreshOpeningPreview);
