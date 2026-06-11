@@ -22,6 +22,9 @@ const GAMES = Number(args.get('games') ?? 6);
 const VISITS = Number(args.get('visits') ?? 24);
 const MAIA = String(args.get('maia') ?? '1500');
 const DRAW_SCORES = String(args.get('draw-scores') ?? '0,-0.4').split(',').map(Number);
+// Zipped with draw-scores to form per-arm (drawScore, scLimit) configs;
+// a single value applies to every arm.
+const SC_LIMITS = String(args.get('sc-limits') ?? '0').split(',').map(Number);
 const ODDS = String(args.get('odds') ?? 'queen');
 const MAX_PLIES = Number(args.get('max-plies') ?? 180);
 
@@ -65,21 +68,22 @@ const maia = {
 
 const lc0Evaluator = new CachedLc0Evaluator(await Lc0OnnxEvaluator.create(readFileSync(LC0_MODEL)), { maxEntries: 50000 });
 
-function lc0Engine(drawScore) {
+function lc0Engine(drawScore, scLimit) {
   const searcher = new Lc0PuctSearcher(lc0Evaluator);
   return {
-    name: `Lc0 v${VISITS} ds=${drawScore}`,
+    name: `Lc0 v${VISITS} ds=${drawScore}${scLimit ? ` sc=${scLimit}` : ''}`,
     searcher,
     async chooseMove(positions) {
-      const result = await searcher.search({ positions }, { visits: VISITS, reuseTree: true, drawScore });
+      const result = await searcher.search({ positions }, { visits: VISITS, reuseTree: true, drawScore, searchContemptLimit: scLimit });
       return result.move ?? null;
     },
   };
 }
 
-console.log(`contempt A/B vs ${maia.name} · ${GAMES} games/arm · v${VISITS} · odds=${ODDS} · maxPlies=${MAX_PLIES}`);
-for (const drawScore of DRAW_SCORES) {
-  const lc0 = lc0Engine(drawScore);
+const arms = DRAW_SCORES.map((drawScore, i) => ({ drawScore, scLimit: SC_LIMITS[Math.min(i, SC_LIMITS.length - 1)] }));
+console.log(`contempt A/B vs ${maia.name} · ${GAMES} games/arm · v${VISITS} · odds=${ODDS} · maxPlies=${MAX_PLIES} · arms=${arms.map((a) => `ds${a.drawScore}/sc${a.scLimit}`).join(' ')}`);
+for (const { drawScore, scLimit } of arms) {
+  const lc0 = lc0Engine(drawScore, scLimit);
   let wins = 0, draws = 0, losses = 0, plies = 0;
   const reasons = new Map();
   for (let game = 0; game < GAMES; game++) {
@@ -91,8 +95,8 @@ for (const drawScore of DRAW_SCORES) {
     if (lc0Result === 'win') wins++; else if (lc0Result === 'draw') draws++; else losses++;
     plies += out.plies;
     reasons.set(out.reason, (reasons.get(out.reason) ?? 0) + 1);
-    console.log(`  ds=${drawScore} game ${game + 1}/${GAMES} (lc0=${lc0IsWhite ? 'W' : 'B'}): ${out.result} ${out.reason} in ${out.plies} plies -> ${lc0Result}`);
+    console.log(`  ds=${drawScore}/sc=${scLimit} game ${game + 1}/${GAMES} (lc0=${lc0IsWhite ? 'W' : 'B'}): ${out.result} ${out.reason} in ${out.plies} plies -> ${lc0Result}`);
   }
   const score = wins + draws / 2;
-  console.log(`drawScore=${drawScore}: +${wins} =${draws} -${losses} · score ${score}/${GAMES} (${Math.round((score / GAMES) * 100)}%) · avg ${Math.round(plies / GAMES)} plies · ${[...reasons].map(([reason, count]) => `${reason}x${count}`).join(' ')}`);
+  console.log(`drawScore=${drawScore} scLimit=${scLimit}: +${wins} =${draws} -${losses} · score ${score}/${GAMES} (${Math.round((score / GAMES) * 100)}%) · avg ${Math.round(plies / GAMES)} plies · ${[...reasons].map(([reason, count]) => `${reason}x${count}`).join(' ')}`);
 }

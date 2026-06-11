@@ -47,7 +47,8 @@ export const T3_NET: BigNetConfig = {
 // the Lichess queen-odds bot, fine-tuned to win against humans from a queen
 // down. Note: it evaluates the queen-odds start as equal — odds play only,
 // not a general analysis net. The Lichess bot runs it with search-contempt
-// (ScLimit) at 12-15k nodes; we run plain PUCT, so expect a softer version.
+// (ScLimit) at 12-15k nodes; our PUCT applies drawScore + searchContemptLimit
+// (see SearchOptions) scaled down to browser visit budgets.
 export const LQO_NET: BigNetConfig = {
   key: 'lqo',
   name: 'Queen Odds',
@@ -90,6 +91,8 @@ export interface Bt4SearchOptions {
   /** WDL draw contempt for the searching side ([-1,1], 0 = off); see SearchOptions.drawScore. */
   drawScore?: number;
   cpuct?: number;
+  /** ScLimit-style search contempt (opponent visit budget, 0 = off). */
+  searchContemptLimit?: number;
 }
 
 export type Bt4AssetStatus = 'unknown' | 'present' | 'missing';
@@ -261,6 +264,7 @@ export class Bt4WorkerSearcher {
         reuseTree: options.reuseTree,
         drawScore: options.drawScore,
         cpuct: options.cpuct,
+        searchContemptLimit: options.searchContemptLimit,
       },
       (id) => { this.activeSearchId = id; },
     );

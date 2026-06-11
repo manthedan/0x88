@@ -48,6 +48,16 @@ export interface SearchOptions {
    * (q' = q + drawScore_side * d) and terminal draws. 0 disables (default).
    */
   drawScore?: number;
+  /**
+   * ScLimit-style search contempt: model the opponent as a budget-limited
+   * searcher. Opponent nodes explore normally for their first N visits; after
+   * that their child choice is frozen to the visit distribution found so far
+   * and further descents sample from it, so deep refutations the modeled
+   * opponent "wouldn't find" stop dominating backed-up values. Inspired by
+   * the lc0 search-contempt fork used by the Leela odds bots (patterns only).
+   * 0/undefined disables.
+   */
+  searchContemptLimit?: number;
   /** Experimental LC0-style cpuct growth. Default constant preserves classic Tiny Leela PUCT. */
   cpuctSchedule?: CpuctSchedule;
   cpuctBase?: number;
@@ -188,6 +198,9 @@ export interface SearchStats {
   batchPipelineDepth?: number;
   /** Number of multi-batch pipeline flushes evaluated by the search loop. */
   batchPipelineFlushes?: number;
+  /** Search contempt: opponent nodes frozen / selections sampled from frozen weights. */
+  scFrozenNodes?: number;
+  scSampledSelections?: number;
   /** Largest number of physical batches submitted through one sequence call. */
   maxBatchPipelineBatches?: number;
   /** Number of backend timing records observed from evaluation results. Physical WGSL batches count once. */
@@ -245,6 +258,8 @@ export interface Node {
   /** Moves-left-head estimate from this node's own evaluation (plies). */
   m?: number;
   isRoot?: boolean;
+  /** Search-contempt frozen child-visit weights (opponent nodes past ScLimit). */
+  scFrozenWeights?: number[];
 }
 
 export interface SearchPolicyContext {
@@ -281,6 +296,9 @@ export interface SearchPolicyContext {
   /** Draw contempt for the root side ([-1,1], 0 = off) and whose side that is. */
   drawScore: number;
   rootSideToMove: 'w' | 'b' | null;
+  /** Search contempt: opponent-node visit budget before freezing (0 = off). */
+  searchContemptLimit: number;
+  scCounters?: { frozenNodes: number; sampledSelections: number };
 }
 
 export interface SearchPolicy {
@@ -954,7 +972,40 @@ export function advanceSearchRoot(root: Node | null | undefined, move: Move, nex
   return null;
 }
 
+/**
+ * Search-contempt selection at opponent nodes past the ScLimit budget: freeze
+ * the child-visit distribution at the moment the budget is exceeded and
+ * sample from it, instead of letting PUCT keep sharpening toward the
+ * opponent's best refutation. Returns null when normal selection applies.
+ */
+function searchContemptEdge(node: Node, context: SearchPolicyContext): Edge | null {
+  const limit = context.searchContemptLimit;
+  if (!limit || node.isRoot || !context.rootSideToMove) return null;
+  if (node.board.turn === context.rootSideToMove) return null;
+  if ((node.visits ?? 0) < limit) return null;
+  if (!node.scFrozenWeights) {
+    const visits = node.edges.map((edge) => edge.visits);
+    node.scFrozenWeights = visits.some((v) => v > 0) ? visits : node.edges.map((edge) => edge.prior);
+    if (context.scCounters) context.scCounters.frozenNodes += 1;
+  }
+  const weights = node.scFrozenWeights;
+  let total = 0;
+  for (const weight of weights) total += weight;
+  if (!(total > 0)) return null;
+  let r = Math.random() * total;
+  for (let i = 0; i < weights.length; i++) {
+    r -= weights[i];
+    if (r <= 0) {
+      if (context.scCounters) context.scCounters.sampledSelections += 1;
+      return node.edges[i];
+    }
+  }
+  return node.edges[weights.length - 1];
+}
+
 function selectBestEdge(node: Node, searchPolicy: SearchPolicy, context: SearchPolicyContext): Edge {
+  const frozen = searchContemptEdge(node, context);
+  if (frozen) return frozen;
   let best = node.edges[0];
   let bestScore = -Infinity;
   for (const edge of node.edges) {
@@ -1510,6 +1561,8 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     movesLeftQuadraticFactor: options.movesLeftQuadraticFactor ?? -0.65,
     drawScore: clamp(options.drawScore ?? 0, -1, 1),
     rootSideToMove: board.turn,
+    searchContemptLimit: Math.max(0, Math.floor(options.searchContemptLimit ?? 0)),
+    scCounters: (options.searchContemptLimit ?? 0) > 0 ? { frozenNodes: 0, sampledSelections: 0 } : undefined,
   };
   const searchPolicy = options.searchPolicy ?? classicPuctPolicy;
   const stats = makeStats(visits);
@@ -1672,6 +1725,10 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     if (!stats.stopReason) stats.stopReason = deadlineExpired(deadlineMs) && stats.completedVisits < visitsToRun ? 'movetime' : 'visit-budget';
   }
   root.visits = priorRootVisits + stats.completedVisits;
+  if (context.scCounters) {
+    stats.scFrozenNodes = context.scCounters.frozenNodes;
+    stats.scSampledSelections = context.scCounters.sampledSelections;
+  }
   const policy = searchPolicy.rootPolicy(root.edges, context, root);
   const bestEntry = searchPolicy.chooseFinalMove(policy, context);
   const pvDepth = options.pvDepth ?? 12;

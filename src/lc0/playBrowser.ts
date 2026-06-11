@@ -87,8 +87,9 @@ const BIG_NET_LEVELS = [4, 16, 64, 256, 800];
  */
 const PLAY_DRAW_SCORE = -0.25;
 const LQO_DRAW_SCORE = -0.5;
-/** LeelaQueenOdds README search settings (CPuct 1.5). */
+/** LeelaQueenOdds README search settings (CPuct 1.5, ScLimit scaled to browser visit budgets). */
 const LQO_CPUCT = 1.5;
+const LQO_SEARCH_CONTEMPT_LIMIT = 24;
 
 function maiaModelUrl(elo: string): string {
   return `/models/lc0/maia-${elo}.f32.onnx`;
@@ -363,7 +364,7 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
         batchPipelineDepth: searcher.config.recommendedPipelineDepth,
         evalCacheEntries: 2048,
         drawScore: option.variant === 'lqo' ? LQO_DRAW_SCORE : PLAY_DRAW_SCORE,
-        ...(option.variant === 'lqo' ? { cpuct: LQO_CPUCT } : {}),
+        ...(option.variant === 'lqo' ? { cpuct: LQO_CPUCT, searchContemptLimit: LQO_SEARCH_CONTEMPT_LIMIT } : {}),
       });
       hideDownloadProgress();
       setEngineNote('');
