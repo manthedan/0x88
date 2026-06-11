@@ -167,6 +167,10 @@ const finishedTrails: GameTrail[] = [];
 let reviewTrail: GameTrail | null = null;
 let reviewIndex = 0;
 let reviewing = false;
+/** Candidate-move arrows shown instead of the last-move arrow while reviewing a search. */
+let reviewShapes: DrawShape[] | null = null;
+/** What the root-visits chart currently shows, for click-to-board. */
+let rootChartContext: { fen: string; top: { uci: string; visits: number }[] } | null = null;
 let boardWhiteId: string | null = null;
 let boardBlackId: string | null = null;
 let boardWhiteName: string | null = null;
@@ -818,6 +822,8 @@ function renderBoard() {
     drawable: { enabled: false, brushes: {
       moveWhite: { key: 'moveWhite', color: '#2f6e7d', opacity: 0.9, lineWidth: 14 },
       moveBlack: { key: 'moveBlack', color: '#b15c2b', opacity: 0.9, lineWidth: 14 },
+      candidate: { key: 'candidate', color: '#5a6e2a', opacity: 0.95, lineWidth: 14 },
+      candidateDim: { key: 'candidateDim', color: '#8a8474', opacity: 0.5, lineWidth: 9 },
     } },
   };
   // Cast: chessground's DrawBrushes type has fixed keys, but custom brush keys
@@ -827,8 +833,10 @@ function renderBoard() {
   else ground.set(cfg);
   // The mover is the side NOT to move now; tint the arrow with their identity hue.
   const moverBrush = fenTurn(shown.fen) === 'w' ? 'moveBlack' : 'moveWhite';
-  const shapes: DrawShape[] = shownUci && shownUci.length >= 4
-    ? [{ orig: shownUci.slice(0, 2) as Key, dest: shownUci.slice(2, 4) as Key, brush: moverBrush }] : [];
+  const shapes: DrawShape[] = reviewing && reviewShapes
+    ? reviewShapes
+    : shownUci && shownUci.length >= 4
+      ? [{ orig: shownUci.slice(0, 2) as Key, dest: shownUci.slice(2, 4) as Key, brush: moverBrush }] : [];
   ground.setAutoShapes(shapes);
   renderSideLabels();
   renderEngineOutputs();
@@ -847,10 +855,11 @@ function trailFromTree(tree: GameTree, label: string, openingPlies: number): Gam
   return { label, entries, openingPlies };
 }
 
-function enterReview(trail: GameTrail, index: number): void {
+function enterReview(trail: GameTrail, index: number, shapes: DrawShape[] | null = null): void {
   reviewTrail = trail;
   reviewIndex = Math.max(0, Math.min(index, trail.entries.length - 1));
   reviewing = true;
+  reviewShapes = shapes;
   renderBoard();
 }
 
@@ -859,12 +868,14 @@ function stepReview(delta: number | 'start' | 'end'): void {
   if (delta === 'start') reviewIndex = 0;
   else if (delta === 'end') reviewIndex = reviewTrail.entries.length - 1;
   else reviewIndex = Math.max(0, Math.min(reviewIndex + delta, reviewTrail.entries.length - 1));
+  reviewShapes = null;
   renderBoard();
 }
 
 function exitReview(): void {
   reviewing = false;
   reviewTrail = null;
+  reviewShapes = null;
   renderBoard();
 }
 
@@ -894,6 +905,37 @@ function renderMoveStrip(): void {
   strip.innerHTML = parts.join(' ');
   const current = strip.querySelector('.mv.current');
   if (current) (current as HTMLElement).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+/**
+ * Click on the root-visits bar chart: jump to the position that search was
+ * made from and draw the candidate moves — the clicked bar bold, the rest dim.
+ */
+function reviewRootChartClick(event: MouseEvent): void {
+  if (!rootChartContext || !liveTrail) return;
+  const svg = el('rootChart').querySelector('svg');
+  if (!svg) return;
+  // Find the searched position in the current game's trail (latest match wins;
+  // exact FEN strings, both produced by boardToFen of the same board).
+  let index = -1;
+  for (let i = liveTrail.entries.length - 1; i >= 0; i--) {
+    if (liveTrail.entries[i].fen === rootChartContext.fen) { index = i; break; }
+  }
+  if (index < 0) return;
+  // Mirror hBarChartSvg's layout: each bar row is 14 viewBox units high.
+  const rect = svg.getBoundingClientRect();
+  const viewH = rootChartContext.top.length * 14 + 2;
+  const row = Math.floor((((event.clientY - rect.top) / rect.height) * viewH - 1) / 14);
+  const clicked = rootChartContext.top[Math.max(0, Math.min(row, rootChartContext.top.length - 1))];
+  const shapes: DrawShape[] = rootChartContext.top.slice(0, 5).map((child) => ({
+    orig: child.uci.slice(0, 2) as Key,
+    dest: child.uci.slice(2, 4) as Key,
+    brush: child.uci === clicked.uci ? 'candidate' : 'candidateDim',
+  }));
+  if (!shapes.some((shape) => shape.brush === 'candidate')) {
+    shapes.push({ orig: clicked.uci.slice(0, 2) as Key, dest: clicked.uci.slice(2, 4) as Key, brush: 'candidate' });
+  }
+  enterReview(liveTrail, index, shapes);
 }
 
 /** Map a click on a per-ply line chart back to the chart's ply index. */
@@ -2246,6 +2288,7 @@ function formatCompactNumber(value: number): string {
 
 function resetGameCharts(): void {
   gameChartSamples = [];
+  rootChartContext = null;
   el('chartsPanel').hidden = false;
   for (const id of ['evalChart', 'timeChart', 'npsChart', 'rootChart']) el(id).innerHTML = '';
   el('rootChartTitle').textContent = 'LC0 root visits';
@@ -2276,6 +2319,7 @@ function renderRootChart(engineId: string): void {
   if (!result?.children?.length) return;
   const top = [...result.children].sort((a, b) => b.visits - a.visits).slice(0, 8).filter((child) => child.visits > 0);
   if (!top.length) return;
+  rootChartContext = { fen: result.fen, top: top.map((child) => ({ uci: child.uci, visits: child.visits })) };
   el('rootChartTitle').textContent = `${engines.get(engineId)?.name ?? engineId} root visits (Q from side to move)`;
   el('rootChart').innerHTML = hBarChartSvg(top.map((child) => ({
     label: child.uci,
@@ -2916,6 +2960,7 @@ function wireEvents() {
       enterReview(liveTrail, liveTrail.openingPlies + ply + 1);
     });
   }
+  el('rootChart').addEventListener('click', (event) => reviewRootChartClick(event as MouseEvent));
   el('gameMoves').addEventListener('click', (event) => {
     const span = (event.target as HTMLElement).closest('.mv') as HTMLElement | null;
     if (!span) return;
