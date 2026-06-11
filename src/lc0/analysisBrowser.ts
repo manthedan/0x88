@@ -744,7 +744,14 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'tiny') return tinyVariantOptions().map((option) => option.value === 'bt4-custom' && tinyHybridManifestStatus === 'missing'
     ? { ...option, disabled: true, label: `${option.label} (bundle missing)` }
     : option);
-  if (family === 'lc0') return lc0VariantOptions(bigNetSelectableSync(BIG_NETS.bt4) || bigNetSelectableSync(BIG_NETS.t3));
+  if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync()).map((option) => {
+    if (!isLc0BigNetVariant(option.value)) return option;
+    const config = BIG_NETS[option.value];
+    const asset = bigNetAssetStatusSync(config);
+    if (bt4SupportedSync() && asset === 'unknown') void checkBigNetAsset(config, renderEngineList);
+    const suffix = !bt4SupportedSync() ? ' (WebGPU unavailable)' : asset === 'missing' ? ' (asset missing)' : asset === 'unknown' ? ' (checking asset)' : '';
+    return { ...option, label: `${option.label}${suffix}`, disabled: option.disabled || asset !== 'present' };
+  });
   if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => {
     const status = viridithasVariantAssetStatus(v);
