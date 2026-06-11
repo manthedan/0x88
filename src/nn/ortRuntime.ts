@@ -197,6 +197,10 @@ export function sessionOptions(executionProviders = resolvedOrtExecutionProvider
   return opts;
 }
 
+export function shouldFallbackToWasmAfterOrtFailure(requested: OrtExecutionProviderPreference, providers: string[]): boolean {
+  return requested !== 'webgpu' && providers.includes('webgpu');
+}
+
 function recordSessionAttempt(providers: string[], ok: boolean, ms: number, error?: string) {
   sessionAttempts.push({ at: new Date().toISOString(), providers: [...providers], ok, ms, ...(error ? { error } : {}) });
   while (sessionAttempts.length > 32) sessionAttempts.shift();
@@ -337,7 +341,7 @@ export async function createOrtSession(modelPath: string | Uint8Array | ArrayBuf
     const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
     const message = err instanceof Error ? err.message : String(err);
     recordSessionAttempt(providers, false, t1 - t0, message);
-    if (!providers.includes('webgpu')) throw err;
+    if (!shouldFallbackToWasmAfterOrtFailure(requestedOrtExecutionProvider(), providers)) throw err;
     console.warn(`Tiny Leela: ORT WebGPU session failed; falling back to WASM. ${message}`);
     const fallbackT0 = typeof performance === 'undefined' ? Date.now() : performance.now();
     const session = await ort.InferenceSession.create(modelPath as never, sessionOptions(['wasm']));

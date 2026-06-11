@@ -11,7 +11,9 @@ import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import type { Lc0EvaluatorInput } from './onnxEvaluator.ts';
 
 export const BT4_MODEL_URL = '/models/lc0/BT4-1024x15x32h-swa-6147500.batch1.f16.onnx';
+export const BT4_EXPECTED_BYTES = 370_635_179;
 export const BT4_APPROX_MB = 353;
+export const BT4_CACHE_MODEL = true;
 
 export interface Bt4SearchResult {
   fen: string;
@@ -36,13 +38,28 @@ export interface Bt4SearchOptions {
 let supportProbe: Promise<boolean> | null = null;
 let supportedCached: boolean | null = null;
 
-/** WebGPU usable for BT4? Cached after the first probe. */
+export async function probeBt4ModelAsset(fetchFn: typeof fetch | undefined = globalThis.fetch): Promise<boolean> {
+  try {
+    if (typeof fetchFn !== 'function') return false;
+    const response = await fetchFn(BT4_MODEL_URL, { method: 'HEAD', cache: 'no-cache' });
+    if (!response.ok) return false;
+    const contentLength = response.headers.get('content-length');
+    if (!contentLength) return true;
+    const bytes = Number(contentLength);
+    return Number.isFinite(bytes) && bytes === BT4_EXPECTED_BYTES;
+  } catch {
+    return false;
+  }
+}
+
+/** WebGPU usable for BT4 and the local BT4 asset is present? Cached after the first probe. */
 export async function probeBt4Support(): Promise<boolean> {
   if (supportProbe) return supportProbe;
   supportProbe = (async () => {
     try {
       const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
-      supportedCached = diag.webgpuAvailable === true && diag.adapter?.ok !== false;
+      const modelAssetAvailable = await probeBt4ModelAsset();
+      supportedCached = diag.webgpuAvailable === true && diag.adapter?.ok !== false && modelAssetAvailable;
     } catch {
       supportedCached = false;
     }
@@ -118,8 +135,10 @@ export class Bt4WorkerSearcher {
           this.pending.clear();
         });
       }
-      // BT4 is WebGPU-only by policy; never fall back to WASM for this net.
-      const ready = await this.post<{ backend: string }>({ type: 'init', modelUrl: BT4_MODEL_URL, ep: 'webgpu', cacheModel: false });
+      // BT4 is WebGPU-only by policy and should be loaded from validated bytes
+      // (not a raw URL), otherwise ORT-web can try to resolve the ONNX URL as
+      // external data when creating the WebGPU session.
+      const ready = await this.post<{ backend: string }>({ type: 'init', modelUrl: BT4_MODEL_URL, ep: 'webgpu', cacheModel: BT4_CACHE_MODEL });
       this.ready = true;
       this.backend = ready.backend;
       return this.backend;
