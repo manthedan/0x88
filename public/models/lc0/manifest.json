@@ -115,6 +115,14 @@
       "sha256": "385639425f9519c4a295b3022ce12fbe7bdadc21e47ab4cc30258e7507529b25"
     },
     {
+      "file": "lqo_v2.f16.onnx",
+      "url": "/models/lc0/lqo_v2.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/odds/onnx/lqo_v2.f16.onnx",
+      "bytes": 189397245,
+      "sha256": "bbf9f08e995b7ed552e902c332f09daf79d761f383cde31036720553312fee03"
+    },
+    {
       "file": "maia-1100.f32.onnx",
       "url": "/models/lc0/maia-1100.f32.onnx",
       "mode": "symlink",

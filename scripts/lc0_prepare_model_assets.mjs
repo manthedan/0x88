@@ -42,6 +42,14 @@ const packDirs = [
 // converted 2026-06-11 with: lc0 leela2onnx --input=maia-NNNN.pb.gz (f32,
 // dynamic batch; ~3.5MB each, WDL head, no MLH). Played at nodes=1 (pure
 // policy) so they match the human Elo they were trained on.
+// LeelaQueenOdds v2 (notune/LeelaQueenOdds, the public net behind the Lichess
+// queen-odds bot). T-era attention net; converted 2026-06-11 with:
+// lc0 leela2onnx --onnx-data-type=f16. WebGPU-gated big-net (bt4Engine.ts).
+const oddsSourceDir = resolve(workspaceRoot, 'models/odds/onnx');
+const oddsFiles = [
+  'lqo_v2.f16.onnx',
+];
+
 const maiaSourceDir = resolve(workspaceRoot, 'models/maia/onnx');
 const maiaFiles = [
   'maia-1100.f32.onnx',
@@ -69,6 +77,22 @@ const models = [];
 for (const file of files) {
   const source = resolve(sourceDir, file);
   if (!existsSync(source)) throw new Error(`Missing LC0 ONNX source model: ${source}`);
+  const target = resolve(publicDir, file);
+  exposeAsset(source, target);
+  const stat = lstatSync(target);
+  models.push({
+    file,
+    url: `/models/lc0/${file}`,
+    mode: stat.isSymbolicLink() ? 'symlink' : 'copy',
+    source: relative(repoRoot, source),
+    bytes: lstatSync(source).size,
+    sha256: sha256(source),
+  });
+}
+
+for (const file of oddsFiles) {
+  const source = resolve(oddsSourceDir, file);
+  if (!existsSync(source)) throw new Error(`Missing odds ONNX source model: ${source}`);
   const target = resolve(publicDir, file);
   exposeAsset(source, target);
   const stat = lstatSync(target);

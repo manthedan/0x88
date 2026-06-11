@@ -13,7 +13,7 @@ import { loadLc0ModelForOrt } from './modelCache.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher } from './search.ts';
-import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetMemoryCaution, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig } from './bt4Engine.ts';
+import { BIG_NETS, Bt4WorkerSearcher, LQO_NET, T3_NET, bigNetAssetStatusSync, bigNetMemoryCaution, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig } from './bt4Engine.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { RecklessEngine } from './recklessEngine.ts';
 import { defaultRecklessVariantKey, recklessVariantByKey, resolveDefaultRecklessVariantAssetFallback } from './recklessVariants.ts';
@@ -34,9 +34,9 @@ interface PlayEngineOption {
   id: string;
   label: string;
   family: PlayFamily;
-  /** Family-specific: Maia Elo, lc0 net key ('small' | 't3' | 'bt4'), or stockfish kind. */
+  /** Family-specific: Maia Elo, lc0 net key ('small' | 't3' | 'bt4' | 'lqo'), or stockfish kind. */
   variant: string;
-  group: 'human' | 'engine';
+  group: 'human' | 'odds' | 'engine';
 }
 
 const ENGINE_OPTIONS: PlayEngineOption[] = [
@@ -45,6 +45,7 @@ const ENGINE_OPTIONS: PlayEngineOption[] = [
   { id: 'maia-1500', label: 'Maia 1500', family: 'maia', variant: '1500', group: 'human' },
   { id: 'maia-1700', label: 'Maia 1700', family: 'maia', variant: '1700', group: 'human' },
   { id: 'maia-1900', label: 'Maia 1900', family: 'maia', variant: '1900', group: 'human' },
+  { id: 'leela-queen-odds', label: 'Leela Queen Odds (WebGPU)', family: 'lc0', variant: 'lqo', group: 'odds' },
   { id: 'sf-lite', label: 'Stockfish Lite', family: 'sf', variant: 'lite', group: 'engine' },
   { id: 'sf-full', label: 'Stockfish', family: 'sf', variant: 'full', group: 'engine' },
   { id: 'lc0-small', label: 'Lc0 · Small net', family: 'lc0', variant: 'small', group: 'engine' },
@@ -115,6 +116,7 @@ function buttonEl(id: string): HTMLButtonElement { return el(id) as HTMLButtonEl
 // ---------------------------------------------------------------------------
 // Game state
 // ---------------------------------------------------------------------------
+let startFen: string = START_FEN;
 let board: BoardState = parseFen(START_FEN);
 let positions: BoardState[] = [board];
 let moves: Move[] = [];
@@ -133,10 +135,20 @@ let pendingPromotion: Move[] | null = null;
 // ---------------------------------------------------------------------------
 let lc0Searcher: Lc0PuctSearcher | null = null;
 let lc0LoadPromise: Promise<Lc0PuctSearcher> | null = null;
-const bigNetSearchers: Record<'bt4' | 't3', Bt4WorkerSearcher> = {
+type BigNetKey = 'bt4' | 't3' | 'lqo';
+const bigNetSearchers: Record<BigNetKey, Bt4WorkerSearcher> = {
   bt4: new Bt4WorkerSearcher(BIG_NETS.bt4),
   t3: new Bt4WorkerSearcher(T3_NET),
+  lqo: new Bt4WorkerSearcher(LQO_NET),
 };
+
+/** Start FEN for the current game; odds opponents remove their own queen. */
+function startFenFor(option: PlayEngineOption, human: Color): string {
+  if (option.variant !== 'lqo') return START_FEN;
+  return human === 'w'
+    ? 'rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
+    : 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1';
+}
 interface CpuEngine {
   setOptions(options: { depth?: number; movetimeMs?: number; threads?: number; skillLevel?: number }): void;
   bestMove(fen: string, signal?: AbortSignal): Promise<string | null>;
@@ -191,6 +203,7 @@ function strengthCaption(): string {
     return sf.skill >= 20 ? `full strength · depth ${sf.depth}` : `UCI skill ${sf.skill} · depth ${sf.depth}`;
   }
   const value = strengthFor(option, level);
+  if (option.variant === 'lqo') return `≈ ${value} visits per move — higher levels press harder for tricks`;
   const base = option.family === 'lc0' ? `≈ ${value} visits per move` : `search depth ${value}`;
   return option.family === 'lc0' ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent` : base;
 }
@@ -325,7 +338,7 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
     return result.move ?? null;
   }
   if (option.family === 'lc0') {
-    const searcher = bigNetSearchers[option.variant as 'bt4' | 't3'];
+    const searcher = bigNetSearchers[option.variant as BigNetKey];
     if (!searcher.loaded) {
       setEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
       searcher.onDownloadProgress = (loaded, total) => showDownloadProgress(`Lc0 ${searcher.config.name}`, loaded, total);
@@ -451,7 +464,8 @@ function newGame(): void {
   const colorChoice = selectEl('colorSelect').value;
   humanColor = colorChoice === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : colorChoice === 'black' ? 'b' : 'w';
   orientation = humanColor === 'w' ? 'white' : 'black';
-  board = parseFen(START_FEN);
+  startFen = startFenFor(selectedEngine(), humanColor);
+  board = parseFen(startFen);
   positions = [board];
   moves = [];
   sans = [];
@@ -493,8 +507,8 @@ function resign(): void {
 }
 
 function exportPgn(): string {
-  const tree = new GameTree();
-  let replay = parseFen(START_FEN);
+  const tree = new GameTree(startFen);
+  let replay = parseFen(startFen);
   for (const move of moves) {
     tree.addMove(move);
     replay = makeMove(replay, move);
@@ -507,6 +521,7 @@ function exportPgn(): string {
     Date: date,
     White: humanColor === 'w' ? 'You' : engineName,
     Black: humanColor === 'b' ? 'You' : engineName,
+    ...(startFen === START_FEN ? {} : { SetUp: '1', FEN: startFen }),
   }, gameOver?.result ?? '*');
 }
 
@@ -565,7 +580,7 @@ function engineOptionHtml(option: PlayEngineOption): string {
   let disabled = false;
   let suffix = '';
   if (option.family === 'lc0' && option.variant !== 'small') {
-    const config: BigNetConfig = option.variant === 'bt4' ? BIG_NETS.bt4 : BIG_NETS.t3;
+    const config: BigNetConfig = BIG_NETS[option.variant as BigNetKey];
     const asset = bigNetAssetStatusSync(config);
     if (!bt4SupportedSync()) { disabled = true; suffix = ' (needs WebGPU)'; }
     else if (asset === 'missing') { disabled = true; suffix = ' (net not hosted here)'; }
@@ -576,10 +591,10 @@ function engineOptionHtml(option: PlayEngineOption): string {
 function refreshEngineOptions(): void {
   const select = selectEl('engineSelect');
   const selected = select.value;
-  const humans = ENGINE_OPTIONS.filter((option) => option.group === 'human').map(engineOptionHtml).join('');
-  const engines = ENGINE_OPTIONS.filter((option) => option.group === 'engine').map(engineOptionHtml).join('');
-  select.innerHTML = `<optgroup label="Human-like (Maia, plays like a rated human)">${humans}</optgroup>`
-    + `<optgroup label="Engines (strong at any level)">${engines}</optgroup>`;
+  const group = (key: PlayEngineOption['group']) => ENGINE_OPTIONS.filter((option) => option.group === key).map(engineOptionHtml).join('');
+  select.innerHTML = `<optgroup label="Human-like (Maia, plays like a rated human)">${group('human')}</optgroup>`
+    + `<optgroup label="Odds bots (give you material, then hunt for tricks)">${group('odds')}</optgroup>`
+    + `<optgroup label="Engines (strong at any level)">${group('engine')}</optgroup>`;
   if (selected && ENGINE_OPTIONS.some((option) => option.id === selected)) select.value = selected;
   renderEngineCaution();
 }
@@ -588,9 +603,11 @@ function renderEngineCaution(): void {
   const option = selectedEngine();
   const caution = el('engineCaution');
   if (option.family === 'lc0' && option.variant !== 'small') {
-    const config = option.variant === 'bt4' ? BIG_NETS.bt4 : BIG_NETS.t3;
+    const config = BIG_NETS[option.variant as BigNetKey];
     const memory = bigNetMemoryCaution(config);
-    caution.textContent = `First move downloads the ~${config.approxMb}MB net.${memory ? ` ${memory}` : ''}`;
+    const odds = option.variant === 'lqo'
+      ? ' The bot starts without its queen and plays for traps — the Lichess LeelaQueenOdds net. ' : ' ';
+    caution.textContent = `First move downloads the ~${config.approxMb}MB net.${odds}${memory ?? ''}`.trimEnd();
     caution.hidden = false;
   } else {
     caution.hidden = true;
@@ -640,11 +657,24 @@ function init(): void {
   el('flip').addEventListener('click', () => { orientation = orientation === 'white' ? 'black' : 'white'; render(); });
   el('exportPgn').addEventListener('click', () => { el('pgnOut').textContent = exportPgn(); });
   el('copyPgn').addEventListener('click', () => { void navigator.clipboard.writeText(exportPgn()); });
-  selectEl('engineSelect').addEventListener('change', () => { renderLevelOptions(); renderEngineCaution(); render(); });
+  selectEl('engineSelect').addEventListener('change', () => {
+    renderLevelOptions();
+    renderEngineCaution();
+    // Before any move is played, apply the opponent's start position (odds
+    // bots remove their queen) without starting the engine's clock.
+    if (!moves.length && !engineThinking) {
+      startFen = startFenFor(selectedEngine(), humanColor);
+      board = parseFen(startFen);
+      positions = [board];
+      gameOver = null;
+    }
+    render();
+  });
   selectEl('levelSelect').addEventListener('change', render);
   void probeBt4Support().then(refreshEngineOptions);
   void checkBigNetAsset(BIG_NETS.bt4, refreshEngineOptions);
   void checkBigNetAsset(T3_NET, refreshEngineOptions);
+  void checkBigNetAsset(LQO_NET, refreshEngineOptions);
   render();
 }
 
