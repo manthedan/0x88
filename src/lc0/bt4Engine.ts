@@ -166,6 +166,8 @@ export class Bt4WorkerSearcher {
   private activeSearchId: number | null = null;
   private configuredEvalCacheEntries = -1;
   backend = '';
+  /** Model download progress during the first init (not called on reloads). */
+  onDownloadProgress: ((loadedBytes: number, totalBytes?: number) => void) | null = null;
 
   constructor(config: BigNetConfig = BT4_NET) {
     this.config = config;
@@ -195,7 +197,11 @@ export class Bt4WorkerSearcher {
       if (!this.worker) {
         this.worker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
         this.worker.addEventListener('message', (event: MessageEvent) => {
-          const message = event.data as { id: number; type: string; error?: string };
+          const message = event.data as { id: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number };
+          if (message.type === 'downloadProgress') {
+            this.onDownloadProgress?.(message.loadedBytes ?? 0, message.totalBytes);
+            return;
+          }
           const pending = this.pending.get(message.id);
           if (!pending) return;
           this.pending.delete(message.id);
@@ -208,7 +214,7 @@ export class Bt4WorkerSearcher {
         });
       }
       // Big nets are WebGPU-only by policy; never fall back to WASM for them.
-      const ready = await this.post<{ backend: string }>({ type: 'init', modelUrl: this.config.modelUrl, ep: 'webgpu', cacheModel: false, evalCacheEntries });
+      const ready = await this.post<{ backend: string }>({ type: 'init', modelUrl: this.config.modelUrl, ep: 'webgpu', cacheModel: false, evalCacheEntries, reportDownloadProgress: true });
       this.ready = true;
       this.configuredEvalCacheEntries = evalCacheEntries;
       this.backend = ready.backend;

@@ -4,6 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>LC0 analysis board</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<meta name="description" content="Multi-engine chess analysis in your browser: compare Leela Chess Zero and Stockfish lines side by side, review games with accuracy scores, and explore openings from your own games." />
 <link rel="stylesheet" href="/chessground.base.css" />
 <link rel="stylesheet" href="/chessground.brown.css" />
 <link rel="stylesheet" href="/chessground.cburnett.css" />
@@ -13,7 +15,7 @@
 header{padding:12px 20px;border-bottom:1px solid var(--rule);background:var(--panel);display:flex;align-items:baseline;gap:16px}
 header h1{margin:0;font-size:19px}header nav a{color:var(--muted);text-decoration:none;font-size:13px;margin-right:12px}header nav a.active{color:var(--accent);font-weight:700}
 main{display:grid;grid-template-columns:minmax(320px,540px) minmax(340px,1fr);gap:20px;align-items:start;padding:18px}
-.panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:12px}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:12px;min-width:0}
 .board-wrap{display:flex;gap:8px}
 .evalbar{width:18px;border:1px solid var(--rule);border-radius:4px;overflow:hidden;background:#3a3a3a;position:relative;flex:0 0 auto}
 .evalbar .white{position:absolute;left:0;right:0;bottom:0;background:#f4f1e8;transition:height .25s}
@@ -25,7 +27,7 @@ button{border:1px solid var(--rule);border-radius:6px;background:white;color:var
 button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:700}button:disabled{opacity:.55;cursor:not-allowed}
 .nav button{flex:1 1 auto}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px}
-.engine-list{display:grid;gap:6px;margin-top:10px}.engine-row{display:flex;align-items:center;gap:6px}.engine-row select{flex:1 1 0;min-width:0;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;background:white}.engine-row .arrow{color:var(--muted);font-weight:700}.engine-row .row-strength{flex:0 0 72px;width:72px;font:inherit;font-size:13px;font-family:var(--mono);padding:6px 8px;border:1px solid var(--rule);border-radius:6px}.engine-row .row-unit{flex:0 0 auto;color:var(--muted);font-size:11px}.engine-row .row-rm{flex:0 0 auto;padding:4px 9px;line-height:1;color:var(--muted)}
+.engine-list{display:grid;gap:6px;margin-top:10px}.engine-row{display:flex;align-items:center;gap:6px;min-width:0}.engine-row select{flex:1 1 0;min-width:0;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;background:white}.engine-row .arrow{color:var(--muted);font-weight:700}.engine-row .row-strength{flex:0 0 72px;width:72px;font:inherit;font-size:13px;font-family:var(--mono);padding:6px 8px;border:1px solid var(--rule);border-radius:6px}.engine-row .row-unit{flex:0 0 auto;color:var(--muted);font-size:11px}.engine-row .row-rm{flex:0 0 auto;padding:4px 9px;line-height:1;color:var(--muted)}
 .field{display:grid;gap:3px}.field label{font-size:11px;color:var(--muted)}
 input,select{font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink)}
 input[type=number]{width:80px;font-family:var(--mono)}
@@ -55,6 +57,7 @@ table.engine-compare{width:100%;border-collapse:collapse;font-size:12px;margin-t
 details.runtime-details{margin:6px 0}
 details.runtime-details summary{cursor:pointer;font-size:12px;color:var(--muted)}
 details.runtime-details summary:hover{color:inherit}
+.advanced-settings{margin-top:10px;border:1px solid var(--rule);border-radius:7px;background:#fff;padding:8px 10px}.advanced-settings>summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}.advanced-settings>summary:hover{color:inherit}.advanced-settings[open]>summary{margin-bottom:4px}
 .status-inline{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;margin:6px 0 2px}
 .status-inline dt{color:var(--muted);display:inline}
 .status-inline dd{margin:0 0 0 6px;font-family:var(--mono);display:inline;overflow-wrap:anywhere}
@@ -87,7 +90,7 @@ table.opening .san{font-family:var(--mono);font-weight:700}
 <body>
 <header>
   <h1>LC0 analysis board</h1>
-  <nav><a href="/lc0-policy-only.html">Single engine</a><a href="/lc0-arena.html">Arena</a><a class="active" href="/lc0-analysis.html">Analysis</a></nav>
+  <nav><a href="/">Home</a><a href="/lc0-play.html">Play</a><a class="active" href="/lc0-analysis.html">Analysis</a><a href="/lc0-arena.html">Arena</a></nav>
 </header>
 <main>
   <section class="panel" aria-label="Board">
@@ -125,25 +128,34 @@ table.opening .san{font-family:var(--mono);font-weight:700}
         <input id="multiPvInput" type="number" min="1" max="10" step="1" value="3" /></div>
     </div>
     <div id="engineList" class="engine-list"></div>
-    <div class="row profile-row">
-      <div class="field"><label for="engineProfileSelect">Profile</label>
-        <select id="engineProfileSelect"><option value="">default</option></select></div>
-      <div class="field"><label for="engineProfileName">Name</label>
-        <input id="engineProfileName" type="text" spellcheck="false" autocomplete="off" placeholder="analysis profile" /></div>
-      <button id="saveEngineProfile" type="button">Save profile</button>
-      <button id="deleteEngineProfile" type="button">Delete</button>
-      <button id="exportEngineProfiles" type="button">Export profiles</button>
-      <button id="importEngineProfiles" type="button">Import profiles</button>
-      <input id="importEngineProfilesFile" type="file" accept="application/json,.json" style="display:none" />
-    </div>
-    <div id="engineProfileSummary" class="profile-summary small">Manual engine setup.</div>
     <div class="row">
       <button id="addEngine" type="button">+ Add engine</button>
-      <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
-        <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
+      <div class="field"><label for="engineProfileSelect">Profile</label>
+        <select id="engineProfileSelect"><option value="">default</option></select></div>
     </div>
-    <details class="runtime-details"><summary>Engine runtime details</summary>
-      <div id="recklessRuntimeInfo" class="small">Reckless: detecting runtime…</div>
+    <details class="advanced-settings">
+      <summary>Profiles &amp; engine settings</summary>
+      <div class="row profile-row">
+        <div class="field"><label for="engineProfileName">Name</label>
+          <input id="engineProfileName" type="text" spellcheck="false" autocomplete="off" placeholder="analysis profile" /></div>
+        <button id="saveEngineProfile" type="button">Save profile</button>
+        <button id="deleteEngineProfile" type="button">Delete</button>
+        <button id="exportEngineProfiles" type="button">Export profiles</button>
+        <button id="importEngineProfiles" type="button">Import profiles</button>
+        <input id="importEngineProfilesFile" type="file" accept="application/json,.json" style="display:none" />
+      </div>
+      <div id="engineProfileSummary" class="profile-summary small">Manual engine setup.</div>
+      <div class="row">
+        <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
+          <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
+      </div>
+      <details class="runtime-details"><summary>Engine runtime details</summary>
+        <dl class="status-inline">
+          <div><dt>Backend</dt><dd id="backend">—</dd></div>
+          <div><dt>LC0 audit</dt><dd id="runtimeAudit">—</dd></div>
+        </dl>
+        <div id="recklessRuntimeInfo" class="small">Reckless: detecting runtime…</div>
+      </details>
     </details>
     <h2>Engine comparison</h2>
     <div id="engineConsensus" class="compare-summary">No analysis yet.</div>
@@ -154,8 +166,6 @@ table.opening .san{font-family:var(--mono);font-weight:700}
     <dl class="status-inline">
       <div><dt>Side</dt><dd id="sideToMove">—</dd></div>
       <div><dt>Eval</dt><dd id="posEval">—</dd></div>
-      <div><dt>Backend</dt><dd id="backend">—</dd></div>
-      <div><dt>LC0 audit</dt><dd id="runtimeAudit">—</dd></div>
     </dl>
     <h2>Moves</h2>
     <div id="movelist" class="movelist"></div>
