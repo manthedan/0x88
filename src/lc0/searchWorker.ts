@@ -88,6 +88,8 @@ type InitMessage = {
   encoderKernelVariant?: Lc0WebEncoderKernelVariant;
   evalCacheEntries?: number;
   ortDiagnostics?: OrtRuntimeDiagnosticOptions;
+  /** Stream model download progress back as 'downloadProgress' messages. */
+  reportDownloadProgress?: boolean;
 };
 
 type SearchMessage = {
@@ -491,6 +493,7 @@ type WorkerResponse =
   | { type: 'mappedPolicyProbeResult'; id: number; result: Lc0WebMappedPolicyProbeResult }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'searchReset'; id: number }
+  | { type: 'downloadProgress'; id: number; loadedBytes: number; totalBytes?: number }
   | { type: 'error'; id: number; error: string };
 
 type WorkerEvaluator = Lc0EvaluationProvider & {
@@ -685,7 +688,19 @@ async function handleInit(message: InitMessage): Promise<void> {
     post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
     return;
   }
-  const modelLoad = await loadLc0ModelForOrt(message.modelUrl, { cache: message.cacheModel });
+  // Throttle progress posts to ~2MB steps so a large net does not flood the
+  // main thread with one message per network chunk.
+  let lastReportedBytes = -Infinity;
+  const modelLoad = await loadLc0ModelForOrt(message.modelUrl, {
+    cache: message.cacheModel,
+    onProgress: message.reportDownloadProgress
+      ? (loadedBytes, totalBytes) => {
+          if (loadedBytes - lastReportedBytes < 2_000_000 && loadedBytes !== totalBytes) return;
+          lastReportedBytes = loadedBytes;
+          post({ type: 'downloadProgress', id: message.id, loadedBytes, totalBytes });
+        }
+      : undefined,
+  });
   const baseEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
   const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0
     ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries })

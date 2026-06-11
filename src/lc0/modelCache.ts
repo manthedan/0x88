@@ -1,4 +1,4 @@
-export type Lc0ModelCacheMode = 'url' | 'cache';
+export type Lc0ModelCacheMode = 'url' | 'cache' | 'memory';
 
 export interface Lc0ModelManifestEntry {
   file: string;
@@ -32,6 +32,14 @@ export interface Lc0ModelLoadOptions {
   cache?: boolean;
   cacheName?: string;
   manifestUrl?: string;
+  /**
+   * Network download progress. Providing it forces the load to fetch the bytes
+   * itself (streamed) even when cache=false, so the caller gets bytes in
+   * memory ('memory' mode) instead of a URL for the runtime to fetch opaquely.
+   * Not called for cache hits. `total` comes from Content-Length or the
+   * manifest and may be undefined.
+   */
+  onProgress?: (loadedBytes: number, totalBytes?: number) => void;
 }
 
 const DEFAULT_CACHE_NAME = 'lc0-browser-models-v1';
@@ -112,10 +120,59 @@ export async function verifyLc0ModelBytes(
   return { ok: true, byteLength, sha256, sha256Checked: true };
 }
 
+/** Fetch model bytes, streaming chunks through onProgress when possible. */
+async function fetchModelBytes(
+  request: Request,
+  modelUrl: string,
+  expectedBytes: number | undefined,
+  onProgress: Lc0ModelLoadOptions['onProgress'],
+): Promise<ArrayBuffer> {
+  const response = await fetch(request);
+  if (!response.ok) throw new Error(`LC0 model fetch failed for ${modelUrl}: ${response.status}`);
+  if (!onProgress || !response.body) return response.arrayBuffer();
+  const headerLength = Number(response.headers.get('content-length') ?? '');
+  // A content-encoded response's Content-Length counts compressed bytes, not
+  // the decoded stream measured here; fall back to the manifest size then.
+  const encoded = !!response.headers.get('content-encoding');
+  const total = !encoded && Number.isFinite(headerLength) && headerLength > 0 ? headerLength : expectedBytes;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let loaded = 0;
+  onProgress(0, total);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.byteLength;
+    onProgress(loaded, total);
+  }
+  const bytes = new Uint8Array(loaded);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes.buffer;
+}
+
 export async function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoadOptions = {}): Promise<Lc0ModelLoadResult> {
   const started = nowMs();
   if (!options.cache) {
-    return { model: modelUrl, url: modelUrl, mode: 'url', cacheStatus: 'disabled', elapsedMs: nowMs() - started };
+    if (!options.onProgress) {
+      return { model: modelUrl, url: modelUrl, mode: 'url', cacheStatus: 'disabled', elapsedMs: nowMs() - started };
+    }
+    // Progress requires owning the fetch: download (with normal HTTP caching),
+    // validate, and hand the bytes over without persisting to Cache Storage.
+    const manifestEntry = await fetchManifestEntry(modelUrl, options.manifestUrl ?? DEFAULT_MANIFEST_URL);
+    const expectation: Lc0ModelBytesExpectation = { expectedBytes: manifestEntry?.bytes, expectedSha256: manifestEntry?.sha256 };
+    const bytes = await fetchModelBytes(new Request(modelUrl), modelUrl, expectation.expectedBytes, options.onProgress);
+    const check = await verifyLc0ModelBytes(bytes, expectation);
+    if (!check.ok) throw new Error(`LC0 model validation failed for ${modelUrl}: ${check.reason}`);
+    return {
+      model: bytes, url: modelUrl, mode: 'memory', cacheStatus: 'disabled', bytes: bytes.byteLength,
+      expectedBytes: expectation.expectedBytes, sha256: check.sha256, expectedSha256: expectation.expectedSha256,
+      sha256Valid: check.sha256Checked ? true : undefined, elapsedMs: nowMs() - started,
+    };
   }
   if (!cacheApiAvailable()) {
     return { model: modelUrl, url: modelUrl, mode: 'url', cacheStatus: 'unavailable', elapsedMs: nowMs() - started };
@@ -140,11 +197,11 @@ export async function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoad
     // A stale or corrupt cache entry (e.g. the model content changed and the
     // manifest sha256 was bumped): evict it and refetch from the network.
     await cache.delete(request);
-    const result = await fetchAndCacheModel(cache, request, modelUrl, expectation, started);
+    const result = await fetchAndCacheModel(cache, request, modelUrl, expectation, started, options.onProgress);
     return { ...result, revalidated: true };
   }
 
-  return fetchAndCacheModel(cache, request, modelUrl, expectation, started);
+  return fetchAndCacheModel(cache, request, modelUrl, expectation, started, options.onProgress);
 }
 
 async function fetchAndCacheModel(
@@ -153,10 +210,9 @@ async function fetchAndCacheModel(
   modelUrl: string,
   expectation: Lc0ModelBytesExpectation,
   started: number,
+  onProgress?: Lc0ModelLoadOptions['onProgress'],
 ): Promise<Lc0ModelLoadResult> {
-  const response = await fetch(request);
-  if (!response.ok) throw new Error(`LC0 model fetch failed for ${modelUrl}: ${response.status}`);
-  const bytes = await response.arrayBuffer();
+  const bytes = await fetchModelBytes(request, modelUrl, expectation.expectedBytes, onProgress);
   const check = await verifyLc0ModelBytes(bytes, expectation);
   if (!check.ok) throw new Error(`LC0 model validation failed for ${modelUrl}: ${check.reason}`);
   // Only validated bytes are written to the cache, so a corrupt download is

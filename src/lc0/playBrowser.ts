@@ -127,18 +127,48 @@ function setEngineNote(text: string, warn = false): void {
   note.classList.toggle('warn', warn);
 }
 
+function mb(bytes: number): string {
+  return `${(bytes / 1_000_000).toFixed(0)} MB`;
+}
+
+function showDownloadProgress(label: string, loadedBytes: number, totalBytes?: number): void {
+  const wrap = el('dlProgress');
+  wrap.hidden = false;
+  const bar = wrap.querySelector('progress') as HTMLProgressElement;
+  const text = wrap.querySelector('.dl-label') as HTMLElement;
+  if (totalBytes && totalBytes > 0) {
+    bar.max = totalBytes;
+    bar.value = Math.min(loadedBytes, totalBytes);
+    text.textContent = `${label} · ${mb(loadedBytes)} / ${mb(totalBytes)}`;
+  } else {
+    bar.removeAttribute('value');
+    text.textContent = `${label} · ${mb(loadedBytes)}`;
+  }
+}
+
+function hideDownloadProgress(): void {
+  el('dlProgress').hidden = true;
+}
+
 function ensureLc0Small(): Promise<Lc0PuctSearcher> {
   if (lc0Searcher) return Promise.resolve(lc0Searcher);
   if (!lc0LoadPromise) {
-    setEngineNote('Loading Lc0 small net (first use downloads the model)…');
+    setEngineNote('Loading Lc0 small net…');
     lc0LoadPromise = (async () => {
-      const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
+      // cache:true persists the validated net in Cache Storage, so the
+      // download (with progress) happens once per browser.
+      const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
+        cache: true,
+        onProgress: (loaded, total) => showDownloadProgress('Lc0 small net', loaded, total),
+      });
+      hideDownloadProgress();
       const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
       lc0Searcher = new Lc0PuctSearcher(new CachedLc0Evaluator(evaluator, { maxEntries: 2048 }));
       setEngineNote('');
       return lc0Searcher;
     })().catch((error: Error) => {
       lc0LoadPromise = null;
+      hideDownloadProgress();
       setEngineNote(`Lc0 load failed: ${error.message}`, true);
       throw error;
     });
@@ -198,7 +228,10 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
   }
   if (option.family === 'lc0') {
     const searcher = bigNetSearchers[option.variant as 'bt4' | 't3'];
-    if (!searcher.loaded) setEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
+    if (!searcher.loaded) {
+      setEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
+      searcher.onDownloadProgress = (loaded, total) => showDownloadProgress(`Lc0 ${searcher.config.name}`, loaded, total);
+    }
     const onAbort = () => searcher.cancel();
     signal.addEventListener('abort', onAbort, { once: true });
     try {
@@ -209,10 +242,12 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
         batchPipelineDepth: searcher.config.recommendedPipelineDepth,
         evalCacheEntries: 2048,
       });
+      hideDownloadProgress();
       setEngineNote('');
       return result.cancelled ? null : result.move ?? null;
     } finally {
       signal.removeEventListener('abort', onAbort);
+      hideDownloadProgress();
     }
   }
   const engine = await cpuEngineFor(option);
