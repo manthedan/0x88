@@ -41,6 +41,13 @@ export interface SearchOptions {
   cpuct?: number;
   fpu?: number;
   temperature?: number;
+  /**
+   * WDL draw contempt: the value of a draw for the ROOT side, in [-1, 1].
+   * Negative makes the engine avoid draws (press for a win); the opponent is
+   * assumed to value draws oppositely. Applied to both neural draw mass
+   * (q' = q + drawScore_side * d) and terminal draws. 0 disables (default).
+   */
+  drawScore?: number;
   /** Experimental LC0-style cpuct growth. Default constant preserves classic Tiny Leela PUCT. */
   cpuctSchedule?: CpuctSchedule;
   cpuctBase?: number;
@@ -271,6 +278,9 @@ export interface SearchPolicyContext {
   movesLeftThreshold: number;
   movesLeftScaledFactor: number;
   movesLeftQuadraticFactor: number;
+  /** Draw contempt for the root side ([-1,1], 0 = off) and whose side that is. */
+  drawScore: number;
+  rootSideToMove: 'w' | 'b' | null;
 }
 
 export interface SearchPolicy {
@@ -298,19 +308,28 @@ function wdlConfidence(wdl: [number, number, number]): number {
   return Math.max(0, Math.min(1, 1 - h / Math.log(3)));
 }
 
-function valueFromEvaluation(evaln: Evaluation, context: SearchPolicyContext): number {
+/**
+ * Draw value at a node from that node's side-to-move perspective: the root
+ * side scores draws at drawScore, the opponent at -drawScore (zero-sum).
+ */
+function contemptDrawValue(context: SearchPolicyContext, turn: 'w' | 'b'): number {
+  if (!context.drawScore || !context.rootSideToMove) return 0;
+  return turn === context.rootSideToMove ? context.drawScore : -context.drawScore;
+}
+
+function valueFromEvaluation(evaln: Evaluation, context: SearchPolicyContext, turn: 'w' | 'b'): number {
   const baseWdl = normalizeWdl(evaln.wdl, context.valueWdlBaseTemp);
-  const baseValue = valueFromWdl(baseWdl);
+  const baseValue = valueFromWdl(baseWdl) + contemptDrawValue(context, turn) * baseWdl[1];
   const auxHead = context.valueWdlAuxHead;
   const aux = auxHead ? evaln.auxiliaryWdls?.[auxHead] : undefined;
   const maxAlpha = Math.max(0, Math.min(1, context.valueWdlAuxWeight));
-  if (!aux || maxAlpha <= 0) return baseValue;
+  if (!aux || maxAlpha <= 0) return clamp(baseValue, -1, 1);
   const auxWdl = normalizeWdl(aux, context.valueWdlAuxTemp);
   const auxValue = valueFromWdl(auxWdl);
   const alpha = context.valueWdlBlendMode === 'confidence'
     ? maxAlpha * wdlConfidence(auxWdl) * (1 - wdlConfidence(baseWdl))
     : maxAlpha;
-  return (1 - alpha) * baseValue + alpha * auxValue;
+  return clamp((1 - alpha) * baseValue + alpha * auxValue, -1, 1);
 }
 
 export function edgeQForParent(edge: Edge, fpu = 0): number {
@@ -1006,14 +1025,14 @@ async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyCon
   if (!moves.length) {
     node.expanded = true;
     // No legal moves: checkmate is loss for the side to move, stalemate is draw.
-    node.terminalValue = inCheck(node.board) ? -1 : 0;
+    node.terminalValue = inCheck(node.board) ? -1 : contemptDrawValue(context, node.board.turn);
     node.edges = [];
     if (stats) { stats.expansions += 1; stats.terminalHits += 1; }
     return node.terminalValue;
   }
   if (automaticDrawReason(node.board, node.historyFens)) {
     node.expanded = true;
-    node.terminalValue = 0;
+    node.terminalValue = contemptDrawValue(context, node.board.turn);
     node.edges = [];
     if (stats) { stats.expansions += 1; stats.terminalHits += 1; }
     return node.terminalValue;
@@ -1127,11 +1146,11 @@ function selectLeaf(node: Node, searchPolicy: SearchPolicy, context: SearchPolic
   return selectLeaf(best.child, searchPolicy, context, [...path, best], transpositionTable, stats);
 }
 
-function prepareExpansion(node: Node, stats: SearchStats): Move[] | number {
+function prepareExpansion(node: Node, stats: SearchStats, context: SearchPolicyContext): Move[] | number {
   const moves = legalMoves(node.board);
   if (!moves.length) {
     node.expanded = true;
-    node.terminalValue = inCheck(node.board) ? -1 : 0;
+    node.terminalValue = inCheck(node.board) ? -1 : contemptDrawValue(context, node.board.turn);
     node.edges = [];
     stats.expansions += 1;
     stats.terminalHits += 1;
@@ -1139,7 +1158,7 @@ function prepareExpansion(node: Node, stats: SearchStats): Move[] | number {
   }
   if (automaticDrawReason(node.board, node.historyFens)) {
     node.expanded = true;
-    node.terminalValue = 0;
+    node.terminalValue = contemptDrawValue(context, node.board.turn);
     node.edges = [];
     stats.expansions += 1;
     stats.terminalHits += 1;
@@ -1173,7 +1192,7 @@ function finishExpansion(node: Node, moves: Move[], evaln: Evaluation, context: 
   });
   node.expanded = true;
   node.terminalValue = null;
-  return valueFromEvaluation(evaln, context);
+  return valueFromEvaluation(evaln, context, node.board.turn);
 }
 
 interface PreparedLeafBatch {
@@ -1226,7 +1245,7 @@ function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: Search
       unwindVirtualVisits(sel.path);
       throw new Error('selectLeaf returned an expanded non-terminal node');
     }
-    const prep = prepareExpansion(sel.node, stats);
+    const prep = prepareExpansion(sel.node, stats, context);
     if (typeof prep === 'number') {
       batchInFlightEvalLeaves.delete(sel.node);
       inFlightEvalLeaves?.delete(sel.node);
@@ -1316,7 +1335,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
         unwindVirtualVisits(sel.path);
         throw new Error('selectLeaf returned an expanded non-terminal node');
       }
-      const prep = prepareExpansion(sel.node, stats);
+      const prep = prepareExpansion(sel.node, stats, context);
       if (typeof prep === 'number') prepared.push({ kind: 'terminal', sel, value: prep });
       else {
         let slot = evalIndex.get(sel.node);
@@ -1489,6 +1508,8 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     movesLeftThreshold: Math.max(0, options.movesLeftThreshold ?? 0.8),
     movesLeftScaledFactor: options.movesLeftScaledFactor ?? 1.65,
     movesLeftQuadraticFactor: options.movesLeftQuadraticFactor ?? -0.65,
+    drawScore: clamp(options.drawScore ?? 0, -1, 1),
+    rootSideToMove: board.turn,
   };
   const searchPolicy = options.searchPolicy ?? classicPuctPolicy;
   const stats = makeStats(visits);
@@ -1505,18 +1526,18 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   } else if (options.rootMoves) {
     if (!options.rootMoves.length) {
       root.expanded = true;
-      root.terminalValue = inCheck(root.board) ? -1 : 0;
+      root.terminalValue = inCheck(root.board) ? -1 : contemptDrawValue(context, root.board.turn);
       root.edges = [];
       stats.expansions += 1;
       stats.terminalHits += 1;
       rootValue = root.terminalValue;
     } else if (automaticDrawReason(root.board, root.historyFens)) {
       root.expanded = true;
-      root.terminalValue = 0;
+      root.terminalValue = contemptDrawValue(context, root.board.turn);
       root.edges = [];
       stats.expansions += 1;
       stats.terminalHits += 1;
-      rootValue = 0;
+      rootValue = root.terminalValue;
     } else {
       const beforeMetrics = evaluatorMetrics(evaluator);
       stats.evalCalls += 1;

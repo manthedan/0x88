@@ -87,6 +87,9 @@ export interface Bt4SearchOptions {
   batchSize?: number;
   batchPipelineDepth?: number;
   evalCacheEntries?: number;
+  /** WDL draw contempt for the searching side ([-1,1], 0 = off); see SearchOptions.drawScore. */
+  drawScore?: number;
+  cpuct?: number;
 }
 
 export type Bt4AssetStatus = 'unknown' | 'present' | 'missing';
@@ -256,6 +259,8 @@ export class Bt4WorkerSearcher {
         batchSize: Math.max(1, Math.floor(Number(options.batchSize ?? this.config.recommendedBatchSize) || this.config.recommendedBatchSize)),
         batchPipelineDepth: Math.max(1, Math.floor(Number(options.batchPipelineDepth ?? this.config.recommendedPipelineDepth) || this.config.recommendedPipelineDepth)),
         reuseTree: options.reuseTree,
+        drawScore: options.drawScore,
+        cpuct: options.cpuct,
       },
       (id) => { this.activeSearchId = id; },
     );

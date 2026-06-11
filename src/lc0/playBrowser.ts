@@ -80,6 +80,16 @@ const LEVELS: Record<Exclude<PlayFamily, 'maia' | 'sf'>, number[]> = {
 /** Big nets are far slower per visit; keep upper levels playable. */
 const BIG_NET_LEVELS = [4, 16, 64, 256, 800];
 
+/**
+ * WDL draw contempt vs the human (negative = avoid draws and press for the
+ * win). The odds bot presses hardest — its Lichess incarnation runs DrawScore
+ * around ±0.4-0.6 — while regular Lc0 opponents get a milder anti-draw lean.
+ */
+const PLAY_DRAW_SCORE = -0.25;
+const LQO_DRAW_SCORE = -0.5;
+/** LeelaQueenOdds README search settings (CPuct 1.5). */
+const LQO_CPUCT = 1.5;
+
 function maiaModelUrl(elo: string): string {
   return `/models/lc0/maia-${elo}.f32.onnx`;
 }
@@ -334,7 +344,7 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
   }
   if (option.family === 'lc0' && option.variant === 'small') {
     const searcher = await ensureLc0Small();
-    const result = await searcher.search({ positions }, { visits: visitsOrDepth, signal, yieldEveryMs: 16, reuseTree: true });
+    const result = await searcher.search({ positions }, { visits: visitsOrDepth, signal, yieldEveryMs: 16, reuseTree: true, drawScore: PLAY_DRAW_SCORE });
     return result.move ?? null;
   }
   if (option.family === 'lc0') {
@@ -352,6 +362,8 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
         batchSize: searcher.config.recommendedBatchSize,
         batchPipelineDepth: searcher.config.recommendedPipelineDepth,
         evalCacheEntries: 2048,
+        drawScore: option.variant === 'lqo' ? LQO_DRAW_SCORE : PLAY_DRAW_SCORE,
+        ...(option.variant === 'lqo' ? { cpuct: LQO_CPUCT } : {}),
       });
       hideDownloadProgress();
       setEngineNote('');
