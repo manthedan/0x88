@@ -1,0 +1,38 @@
+{
+  "name": "berserk-wasm",
+  "upstream": {
+    "repo": "https://github.com/jhonnold/berserk.git",
+    "ref": "8ae895a6151695be4a50d4fb65b0c131659c513a",
+    "version": "14",
+    "license": "GPL-3.0"
+  },
+  "network": {
+    "name": "berserk-9b84c340af7e.nn",
+    "url": "https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn",
+    "sha256Prefix12AsName": true
+  },
+  "patches": {
+    "emscripten": "patches/berserk-emscripten.patch (UCI command facade, sync search, TB disabled; relaxed m128 dpbusd under __wasm_relaxed_simd__)"
+  },
+  "variants": {
+    "base": {
+      "base": "berserk-emscripten",
+      "flags": []
+    },
+    "simd128": {
+      "base": "berserk-emscripten-simd128",
+      "flags": [
+        "-msse4.1",
+        "-msimd128"
+      ]
+    },
+    "relaxed-simd128": {
+      "base": "berserk-emscripten-relaxed-simd128",
+      "flags": [
+        "-msse4.1",
+        "-msimd128",
+        "-mrelaxed-simd"
+      ]
+    }
+  }
+}

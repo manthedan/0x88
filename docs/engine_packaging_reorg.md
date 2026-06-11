@@ -87,7 +87,15 @@ Mechanics:
       patched tree). Bench harness renamed to `emscripten_uci_bench.mjs`.
 - [x] Stage 3 seed: `reckless-wasm` template repo drafted as a sibling repo
       and verified standalone (see its README).
-- [ ] Stage 1 for Viridithas/Berserk/PlentyChess (PlentyChess needs the
-      branch merge first).
-- [ ] Stage 2 toolkit extraction.
-- [ ] Releases + leelaweb fetch swap.
+- [x] Stage 1 for Viridithas/Berserk/PlentyChess: PlentyChess branch merged;
+      `engines/<name>/upstream.lock.json` mirrors each sibling repo's lock.
+- [x] Stage 3: `viridithas-wasm`, `berserk-wasm`, `plentychess-wasm` sibling
+      repos extracted from the template; each verified standalone with
+      byte-identical artifacts (where monorepo artifacts exist) and exact
+      parity gates.
+- [ ] Stage 2 toolkit extraction (bench harnesses/inspector are currently
+      copied per repo; dedupe once an org/registry exists to publish to).
+- [ ] GitHub org + push + first tagged releases.
+- [ ] leelaweb `engines.lock.json` + fetch-from-releases swap (delete
+      in-repo builds last; note this changes the deliberate
+      track-GPL-artifacts-in-git policy).

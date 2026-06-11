@@ -1,0 +1,39 @@
+{
+  "name": "viridithas-wasm",
+  "upstream": {
+    "repo": "https://github.com/cosmobobak/viridithas.git",
+    "ref": "20d7402065cae084715183e019fdd18089e2dfac",
+    "version": "v20.0.0",
+    "license": "AGPL-3.0"
+  },
+  "network": {
+    "url": "https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst",
+    "embeddedAs": "viridithas.nnue.zst"
+  },
+  "patches": {
+    "wasip1": "patches/viridithas-wasip1.patch (UCI stdin loop, threadpool shim, scalar+simd128 NNUE modules with exact relaxed integer dot under relaxed-simd)"
+  },
+  "variants": {
+    "scalar": {
+      "artifact": "dist/viridithas.wasm",
+      "targetFeatures": [
+        "+bulk-memory"
+      ]
+    },
+    "simd128": {
+      "artifact": "dist/viridithas-simd128.wasm",
+      "targetFeatures": [
+        "+bulk-memory",
+        "+simd128"
+      ]
+    },
+    "relaxed-simd128": {
+      "artifact": "dist/viridithas-relaxed-simd128.wasm",
+      "targetFeatures": [
+        "+bulk-memory",
+        "+simd128",
+        "+relaxed-simd"
+      ]
+    }
+  }
+}
