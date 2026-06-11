@@ -156,6 +156,17 @@ let ground: Ground | null = null;
 let board: BoardState = parseFen(START_FEN);
 let historyBoards: BoardState[] = [board];
 let lastUci: string | null = null;
+
+// Game-history review: clicking a chart, the move strip, or a finished game in
+// the log flips the board into a read-only replay; "Live" returns to the
+// running game (which keeps playing in the background meanwhile).
+interface TrailEntry { fen: string; uci: string | null; san: string | null }
+interface GameTrail { label: string; entries: TrailEntry[]; openingPlies: number }
+let liveTrail: GameTrail | null = null;
+const finishedTrails: GameTrail[] = [];
+let reviewTrail: GameTrail | null = null;
+let reviewIndex = 0;
+let reviewing = false;
 let boardWhiteId: string | null = null;
 let boardBlackId: string | null = null;
 let boardWhiteName: string | null = null;
@@ -783,15 +794,25 @@ function setBoardSideEngines(whiteId: string | null, whiteName: string | null, b
   renderSideLabels();
 }
 
+function shownPosition(): { fen: string; uci: string | null } {
+  if (reviewing && reviewTrail) {
+    const entry = reviewTrail.entries[Math.max(0, Math.min(reviewIndex, reviewTrail.entries.length - 1))];
+    if (entry) return { fen: entry.fen, uci: entry.uci };
+  }
+  return { fen: boardToFen(board), uci: lastUci };
+}
+
 function renderBoard() {
+  const shown = shownPosition();
+  const shownUci = shown.uci;
   const config = {
     orientation: 'white' as const,
-    fen: boardToFen(board).split(' ')[0],
+    fen: shown.fen.split(' ')[0],
     coordinates: true,
     viewOnly: true,
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 140 },
-    lastMove: lastUci ? [lastUci.slice(0, 2) as Key, lastUci.slice(2, 4) as Key] : undefined,
+    lastMove: shownUci ? [shownUci.slice(0, 2) as Key, shownUci.slice(2, 4) as Key] : undefined,
     // Custom brushes in the two side identity colors so the last-move arrow also
     // shows which side just moved — a calm alternative to per-ply "to move" flashing.
     drawable: { enabled: false, brushes: {
@@ -805,12 +826,90 @@ function renderBoard() {
   if (!ground) ground = Chessground(el('ground'), cfg);
   else ground.set(cfg);
   // The mover is the side NOT to move now; tint the arrow with their identity hue.
-  const moverBrush = board.turn === 'w' ? 'moveBlack' : 'moveWhite';
-  const shapes: DrawShape[] = lastUci && lastUci.length >= 4
-    ? [{ orig: lastUci.slice(0, 2) as Key, dest: lastUci.slice(2, 4) as Key, brush: moverBrush }] : [];
+  const moverBrush = fenTurn(shown.fen) === 'w' ? 'moveBlack' : 'moveWhite';
+  const shapes: DrawShape[] = shownUci && shownUci.length >= 4
+    ? [{ orig: shownUci.slice(0, 2) as Key, dest: shownUci.slice(2, 4) as Key, brush: moverBrush }] : [];
   ground.setAutoShapes(shapes);
   renderSideLabels();
   renderEngineOutputs();
+  renderReviewBar();
+  renderMoveStrip();
+}
+
+// ---------------------------------------------------------------------------
+// Game-history review
+// ---------------------------------------------------------------------------
+function trailFromTree(tree: GameTree, label: string, openingPlies: number): GameTrail {
+  const entries: TrailEntry[] = [{ fen: tree.root.fen, uci: null, san: null }];
+  for (const node of tree.mainlineFrom(tree.root)) {
+    entries.push({ fen: node.fen, uci: node.move ? moveToUci(node.move) : null, san: node.san });
+  }
+  return { label, entries, openingPlies };
+}
+
+function enterReview(trail: GameTrail, index: number): void {
+  reviewTrail = trail;
+  reviewIndex = Math.max(0, Math.min(index, trail.entries.length - 1));
+  reviewing = true;
+  renderBoard();
+}
+
+function stepReview(delta: number | 'start' | 'end'): void {
+  if (!reviewing || !reviewTrail) return;
+  if (delta === 'start') reviewIndex = 0;
+  else if (delta === 'end') reviewIndex = reviewTrail.entries.length - 1;
+  else reviewIndex = Math.max(0, Math.min(reviewIndex + delta, reviewTrail.entries.length - 1));
+  renderBoard();
+}
+
+function exitReview(): void {
+  reviewing = false;
+  reviewTrail = null;
+  renderBoard();
+}
+
+function renderReviewBar(): void {
+  const bar = el('reviewBar');
+  bar.hidden = !reviewing || !reviewTrail;
+  if (bar.hidden || !reviewTrail) return;
+  el('reviewLabel').textContent = `${reviewTrail.label} · move ${reviewIndex}/${reviewTrail.entries.length - 1}`;
+  (el('revPrev') as HTMLButtonElement).disabled = reviewIndex <= 0;
+  (el('revStart') as HTMLButtonElement).disabled = reviewIndex <= 0;
+  (el('revNext') as HTMLButtonElement).disabled = reviewIndex >= reviewTrail.entries.length - 1;
+  (el('revEnd') as HTMLButtonElement).disabled = reviewIndex >= reviewTrail.entries.length - 1;
+}
+
+function renderMoveStrip(): void {
+  const strip = el('gameMoves');
+  const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+  if (!trail || trail.entries.length <= 1) { strip.hidden = true; strip.innerHTML = ''; return; }
+  strip.hidden = false;
+  const shownIndex = reviewing && reviewTrail === trail ? reviewIndex : trail.entries.length - 1;
+  const parts: string[] = [];
+  for (let i = 1; i < trail.entries.length; i++) {
+    const entry = trail.entries[i];
+    if (i % 2 === 1) parts.push(`<span class="num">${(i + 1) >> 1}.</span>`);
+    parts.push(`<span class="mv${i === shownIndex ? ' current' : ''}" data-idx="${i}">${htmlEscape(entry.san ?? entry.uci ?? '?')}</span>`);
+  }
+  strip.innerHTML = parts.join(' ');
+  const current = strip.querySelector('.mv.current');
+  if (current) (current as HTMLElement).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+/** Map a click on a per-ply line chart back to the chart's ply index. */
+function chartPlyFromClick(target: HTMLElement, event: MouseEvent): number | null {
+  const svg = target.closest('.chart-card')?.querySelector('svg');
+  if (!svg || !gameChartSamples.length) return null;
+  const rect = svg.getBoundingClientRect();
+  if (!rect.width) return null;
+  // Mirror lineChartSvg's layout: viewBox width 360, plot area between
+  // pad.left=36 and width-pad.right=352, x spanning [xMin..xMax] linearly.
+  const viewX = ((event.clientX - rect.left) / rect.width) * 360;
+  const plies = gameChartSamples.map((sample) => sample.ply);
+  const xMin = Math.min(...plies);
+  const xMax = Math.max(...plies);
+  const frac = Math.max(0, Math.min(1, (viewX - 36) / (352 - 36)));
+  return Math.round(xMin + frac * (xMax - xMin));
 }
 
 // The arena is a two-seat head-to-head. Each seat uses the same staged selector
@@ -2094,9 +2193,14 @@ function renderStandings(standings: TournamentStandings, scheduledGames: number)
     + `<table class="standings"><thead><tr><th>#</th><th>Engine</th><th>Elo</th><th>W</th><th>D</th><th>L</th><th>Pts</th><th>G</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
-function appendLog(text: string) {
+function appendLog(text: string, gameIndex?: number) {
   const div = document.createElement('div');
   div.textContent = text;
+  if (gameIndex !== undefined) {
+    div.dataset.game = String(gameIndex);
+    div.classList.add('replayable');
+    div.title = 'Click to replay this game on the board';
+  }
   el('log').prepend(div);
 }
 
@@ -2202,6 +2306,7 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
   thinkingEngineIds.delete(white.id);
   thinkingEngineIds.delete(black.id);
   setBoardSideEngines(white.id, white.name, black.id, black.name);
+  liveTrail = trailFromTree(tree, `${white.name} vs ${black.name}`, historyBoards.length - 1);
   renderBoard();
   renderEngineOutputs();
   resetGameCharts();
@@ -2231,7 +2336,8 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
     noteLc0MoveForReplyProbe(engine, move, board);
     historyBoards.push(board);
     lastUci = moveToUci(move);
-    tree.addUci(lastUci);
+    const node = tree.addUci(lastUci);
+    liveTrail?.entries.push({ fen: boardToFen(board), uci: lastUci, san: node?.san ?? null });
     renderBoard();
     await sleep(delay, signal);
   }
@@ -2357,6 +2463,8 @@ async function startMatch() {
   uciTelemetry.clear();
   bt4Telemetry.clear();
   el('log').innerHTML = '';
+  finishedTrails.length = 0;
+  exitReview();
   renderEngineOutputs();
   renderSearchTelemetryInfo();
   el('start').toggleAttribute('disabled', true);
@@ -2396,8 +2504,12 @@ async function startMatch() {
       }
       const tags: Record<string, string> = { Event: 'LC0 arena', White: white.name, Black: black.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
       games.push({ pgn: gameTreeToPgn(tree, tags, result) });
+      if (liveTrail) {
+        liveTrail.label = `Game ${i + 1}: ${whiteEngine.name} vs ${blackEngine.name} (${result})`;
+        finishedTrails[i] = liveTrail;
+      }
       renderCacheInfo();
-      appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason}) · ${engineRuntimeDiagnosticsText()} · ${searchTelemetryText()}`);
+      appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason}) · ${engineRuntimeDiagnosticsText()} · ${searchTelemetryText()}`, i);
       if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
       else renderStandings(standings, schedule.length);
     }
@@ -2789,6 +2901,40 @@ function wireEvents() {
   el('start').addEventListener('click', () => { void startMatch(); });
   el('stop').addEventListener('click', () => { abort?.abort(); el('message').textContent = 'Stopping…'; });
   el('exportPgn').addEventListener('click', exportPgn);
+  // History review: charts, move strip, and finished-game log rows jump the
+  // board to a past position; Live (or Escape) returns to the running game.
+  el('revStart').addEventListener('click', () => stepReview('start'));
+  el('revPrev').addEventListener('click', () => stepReview(-1));
+  el('revNext').addEventListener('click', () => stepReview(1));
+  el('revEnd').addEventListener('click', () => stepReview('end'));
+  el('revLive').addEventListener('click', exitReview);
+  for (const id of ['evalChart', 'timeChart', 'npsChart']) {
+    el(id).addEventListener('click', (event) => {
+      if (!liveTrail) return;
+      const ply = chartPlyFromClick(event.target as HTMLElement, event as MouseEvent);
+      if (ply === null) return;
+      enterReview(liveTrail, liveTrail.openingPlies + ply + 1);
+    });
+  }
+  el('gameMoves').addEventListener('click', (event) => {
+    const span = (event.target as HTMLElement).closest('.mv') as HTMLElement | null;
+    if (!span) return;
+    const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+    if (trail) enterReview(trail, Number(span.dataset.idx));
+  });
+  el('log').addEventListener('click', (event) => {
+    const row = (event.target as HTMLElement).closest('[data-game]') as HTMLElement | null;
+    const trail = row ? finishedTrails[Number(row.dataset.game)] : undefined;
+    if (trail) enterReview(trail, trail.entries.length - 1);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (!reviewing) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest?.('input,textarea,select')) return;
+    if (event.key === 'ArrowLeft') { event.preventDefault(); stepReview(-1); }
+    else if (event.key === 'ArrowRight') { event.preventDefault(); stepReview(1); }
+    else if (event.key === 'Escape') exitReview();
+  });
   el('arenaSeatList').addEventListener('change', (event) => {
     if (running) return;
     const target = event.target as HTMLInputElement | HTMLSelectElement;

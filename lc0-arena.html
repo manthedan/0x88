@@ -51,6 +51,14 @@ tr.leader td{background:var(--soft)}
 h2{font-size:13px;margin:14px 0 0;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
 .log{font-family:var(--mono);font-size:12px;max-height:180px;overflow:auto;margin-top:8px}
 .log div{padding:2px 0;border-top:1px solid var(--rule)}
+.log div.replayable{cursor:pointer}.log div.replayable:hover{background:var(--soft)}
+.review-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px auto 0;max-width:680px;padding:7px 10px;border:1px solid #cbd8a6;border-radius:7px;background:var(--soft);font-size:12px;font-weight:600}
+.review-bar .review-nav{display:flex;gap:5px}.review-bar button{padding:4px 9px;font-size:12px}
+.movestrip{margin:8px auto 0;max-width:680px;font-family:var(--mono);font-size:12px;line-height:1.9;max-height:72px;overflow:auto;padding:6px 8px;border:1px solid var(--rule);border-radius:7px;background:white}
+.movestrip .num{color:var(--muted)}
+.movestrip .mv{cursor:pointer;padding:1px 3px;border-radius:4px}.movestrip .mv:hover{background:var(--soft)}
+.movestrip .mv.current{background:var(--accent);color:white}
+.chart-card svg{cursor:pointer}
 #pairing{font-size:14px;margin-top:14px;font-weight:700;color:var(--ink)}
 #message{margin-top:6px;padding:7px 10px;border:1px solid var(--rule);border-radius:7px;background:var(--panel);color:var(--muted);font-family:var(--mono);font-size:11px}
 .eval-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin-top:8px}.eval-card{padding:8px;border:1px solid var(--rule);border-radius:6px;background:white;font-family:var(--mono);font-size:11px;color:var(--muted);overflow-wrap:anywhere}.eval-card strong{display:flex;justify-content:space-between;gap:8px;color:var(--ink);font-family:var(--sans);font-size:12px;margin-bottom:3px}.eval-card .eval-status{font-family:var(--mono);font-size:10px;color:var(--accent);font-weight:600;white-space:nowrap}.eval-card.active{border-color:#cbd8a6;background:var(--soft)}
@@ -98,6 +106,17 @@ details.runtime-details summary:hover{color:inherit}
       <div id="blackEngineEvalBar" class="engine-eval-bar empty" aria-label="Black engine evaluation bar"></div>
     </div>
     <div id="whiteSideLabel" class="side-label" aria-label="White side"></div>
+    <div id="reviewBar" class="review-bar" hidden>
+      <span id="reviewLabel"></span>
+      <span class="review-nav">
+        <button id="revStart" type="button" title="First move">|◀</button>
+        <button id="revPrev" type="button" title="Previous move (←)">◀</button>
+        <button id="revNext" type="button" title="Next move (→)">▶</button>
+        <button id="revEnd" type="button" title="Last move">▶|</button>
+        <button id="revLive" type="button" class="primary" title="Back to the live game (Esc)">⏵ Live</button>
+      </span>
+    </div>
+    <div id="gameMoves" class="movestrip" hidden></div>
     <div id="pairing">Select engines and start a tournament.</div>
     <div id="message">Loading model…</div>
     <div id="engineEvalInfo" class="eval-grid" aria-label="Engine evaluation outputs"><div class="eval-card">Engine outputs: waiting for a move…</div></div>
