@@ -83,6 +83,27 @@ function maiaModelUrl(elo: string): string {
   return `/models/lc0/maia-${elo}.f32.onnx`;
 }
 
+/**
+ * Sample a move in proportion to Maia's human-move distribution instead of
+ * always playing the argmax, so games vary the way human opponents do. The
+ * deep tail (moves under 10% of the top prior) is dropped: the policy gives
+ * rare-blunder moves small but nonzero mass, and over a long game those
+ * one-in-twenty picks would dominate the experience.
+ */
+function sampleHumanMove(legalPriors: { uci: string; prior: number }[]): string | undefined {
+  if (!legalPriors.length) return undefined;
+  const floor = legalPriors[0].prior * 0.1;
+  const pool = legalPriors.filter((entry) => entry.prior >= floor);
+  const total = pool.reduce((sum, entry) => sum + entry.prior, 0);
+  if (!(total > 0)) return legalPriors[0].uci;
+  let r = Math.random() * total;
+  for (const entry of pool) {
+    r -= entry.prior;
+    if (r <= 0) return entry.uci;
+  }
+  return pool[pool.length - 1].uci;
+}
+
 function el(id: string): HTMLElement {
   const found = document.getElementById(id);
   if (!found) throw new Error(`missing element #${id}`);
@@ -163,7 +184,7 @@ function strengthCaption(): string {
   const option = selectedEngine();
   const level = selectedLevel();
   if (option.family === 'maia') {
-    return `Plays the move a ~${option.variant}-rated human would — no search, just the trained policy.`;
+    return `Plays like a ~${option.variant}-rated human — moves are sampled from its human-move predictions, so games vary.`;
   }
   if (option.family === 'sf') {
     const sf = SF_LEVELS[level];
@@ -296,7 +317,7 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
     const player = await ensureMaia(option.variant);
     if (signal.aborted) return null;
     const choice = await player.chooseMove({ positions });
-    return choice.move ?? null;
+    return sampleHumanMove(choice.evaluation.legalPriors) ?? choice.move ?? null;
   }
   if (option.family === 'lc0' && option.variant === 'small') {
     const searcher = await ensureLc0Small();
