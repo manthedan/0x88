@@ -11,7 +11,7 @@ import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import type { Lc0EvaluatorInput } from './onnxEvaluator.ts';
 
 export interface BigNetConfig {
-  key: 'bt4' | 't3';
+  key: 'bt4' | 't3' | 'lqo';
   name: string;
   modelUrl: string;
   approxMb: number;
@@ -43,7 +43,23 @@ export const T3_NET: BigNetConfig = {
   exportNote: 'distill-swa-2767500 batch-8 f16 export',
 };
 
-export const BIG_NETS: Record<BigNetConfig['key'], BigNetConfig> = { bt4: BT4_NET, t3: T3_NET };
+// LeelaQueenOdds v2 (github.com/notune/LeelaQueenOdds): the public net behind
+// the Lichess queen-odds bot, fine-tuned to win against humans from a queen
+// down. Note: it evaluates the queen-odds start as equal — odds play only,
+// not a general analysis net. The Lichess bot runs it with search-contempt
+// (ScLimit) at 12-15k nodes; our PUCT applies drawScore + searchContemptLimit
+// (see SearchOptions) scaled down to browser visit budgets.
+export const LQO_NET: BigNetConfig = {
+  key: 'lqo',
+  name: 'Queen Odds',
+  modelUrl: '/models/lc0/lqo_v2.f16.onnx',
+  approxMb: 189,
+  recommendedBatchSize: 8,
+  recommendedPipelineDepth: 1,
+  exportNote: 'LeelaQueenOdds v2 f16 export (dynamic batch)',
+};
+
+export const BIG_NETS: Record<BigNetConfig['key'], BigNetConfig> = { bt4: BT4_NET, t3: T3_NET, lqo: LQO_NET };
 
 export const BT4_MODEL_NAME = BT4_NET.name;
 export const BT4_MODEL_URL = BT4_NET.modelUrl;
@@ -72,6 +88,11 @@ export interface Bt4SearchOptions {
   batchSize?: number;
   batchPipelineDepth?: number;
   evalCacheEntries?: number;
+  /** WDL draw contempt for the searching side ([-1,1], 0 = off); see SearchOptions.drawScore. */
+  drawScore?: number;
+  cpuct?: number;
+  /** ScLimit-style search contempt (opponent visit budget, 0 = off). */
+  searchContemptLimit?: number;
 }
 
 export type Bt4AssetStatus = 'unknown' | 'present' | 'missing';
@@ -241,6 +262,9 @@ export class Bt4WorkerSearcher {
         batchSize: Math.max(1, Math.floor(Number(options.batchSize ?? this.config.recommendedBatchSize) || this.config.recommendedBatchSize)),
         batchPipelineDepth: Math.max(1, Math.floor(Number(options.batchPipelineDepth ?? this.config.recommendedPipelineDepth) || this.config.recommendedPipelineDepth)),
         reuseTree: options.reuseTree,
+        drawScore: options.drawScore,
+        cpuct: options.cpuct,
+        searchContemptLimit: options.searchContemptLimit,
       },
       (id) => { this.activeSearchId = id; },
     );

@@ -438,10 +438,12 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     const ortRunMs = ort.tinyLeelaNowMs() - ortRunStarted;
     const downloadTiming: Record<string, number> = {};
     const allGetDataStarted = ort.tinyLeelaNowMs();
+    // Older/smaller nets (e.g. Maia) have no moves-left head; treat MLH as 0.
+    const hasMlh = LC0_ONNX_OUTPUT_MLH in outputs;
     const [policy, wdlRaw, mlhRaw] = await Promise.all([
       tensorDataTimed(outputs, LC0_ONNX_OUTPUT_POLICY, 'ortPolicy', downloadTiming),
       tensorDataTimed(outputs, LC0_ONNX_OUTPUT_WDL, 'ortWdl', downloadTiming),
-      tensorDataTimed(outputs, LC0_ONNX_OUTPUT_MLH, 'ortMlh', downloadTiming),
+      hasMlh ? tensorDataTimed(outputs, LC0_ONNX_OUTPUT_MLH, 'ortMlh', downloadTiming) : Promise.resolve(undefined),
     ]);
     const allGetDataMs = ort.tinyLeelaNowMs() - allGetDataStarted;
     await ort.waitForOrtWebGpuDiagnostics();
@@ -485,7 +487,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
         fen: fens[i],
         wdl,
         q: wdl[0] - wdl[2],
-        mlh: Number(arraySlice(mlhRaw, i * LC0_MLH_SIZE, LC0_MLH_SIZE)[0]),
+        mlh: mlhRaw === undefined ? 0 : Number(arraySlice(mlhRaw, i * LC0_MLH_SIZE, LC0_MLH_SIZE)[0]),
         legalPriors,
         bestMove: legalPriors[0]?.uci,
         timing: { ...baseTiming, batchPosition: i, legalPriorsMs },

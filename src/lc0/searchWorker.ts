@@ -110,6 +110,8 @@ type SearchMessage = {
   fpuStrategy?: FpuStrategy;
   fpuReduction?: number;
   temperature?: number;
+  drawScore?: number;
+  searchContemptLimit?: number;
 };
 
 type ResetSearchMessage = {
@@ -1088,6 +1090,8 @@ async function handleSearch(message: SearchMessage): Promise<void> {
       fpuStrategy: message.fpuStrategy,
       fpuReduction: message.fpuReduction,
       temperature: message.temperature,
+      drawScore: message.drawScore,
+      searchContemptLimit: message.searchContemptLimit,
       signal: controller.signal,
       yieldEveryMs: 16,
     };

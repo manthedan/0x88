@@ -41,6 +41,23 @@ export interface SearchOptions {
   cpuct?: number;
   fpu?: number;
   temperature?: number;
+  /**
+   * WDL draw contempt: the value of a draw for the ROOT side, in [-1, 1].
+   * Negative makes the engine avoid draws (press for a win); the opponent is
+   * assumed to value draws oppositely. Applied to both neural draw mass
+   * (q' = q + drawScore_side * d) and terminal draws. 0 disables (default).
+   */
+  drawScore?: number;
+  /**
+   * ScLimit-style search contempt: model the opponent as a budget-limited
+   * searcher. Opponent nodes explore normally for their first N visits; after
+   * that their child choice is frozen to the visit distribution found so far
+   * and further descents sample from it, so deep refutations the modeled
+   * opponent "wouldn't find" stop dominating backed-up values. Inspired by
+   * the lc0 search-contempt fork used by the Leela odds bots (patterns only).
+   * 0/undefined disables.
+   */
+  searchContemptLimit?: number;
   /** Experimental LC0-style cpuct growth. Default constant preserves classic Tiny Leela PUCT. */
   cpuctSchedule?: CpuctSchedule;
   cpuctBase?: number;
@@ -181,6 +198,9 @@ export interface SearchStats {
   batchPipelineDepth?: number;
   /** Number of multi-batch pipeline flushes evaluated by the search loop. */
   batchPipelineFlushes?: number;
+  /** Search contempt: opponent nodes frozen / selections sampled from frozen weights. */
+  scFrozenNodes?: number;
+  scSampledSelections?: number;
   /** Largest number of physical batches submitted through one sequence call. */
   maxBatchPipelineBatches?: number;
   /** Number of backend timing records observed from evaluation results. Physical WGSL batches count once. */
@@ -237,7 +257,11 @@ export interface Node {
   visits?: number;
   /** Moves-left-head estimate from this node's own evaluation (plies). */
   m?: number;
+  /** Search-context compatibility key for reusable trees (draw/search contempt). */
+  searchValueKey?: string;
   isRoot?: boolean;
+  /** Search-contempt frozen child-visit weights (opponent nodes past ScLimit). */
+  scFrozenWeights?: number[];
 }
 
 export interface SearchPolicyContext {
@@ -271,6 +295,12 @@ export interface SearchPolicyContext {
   movesLeftThreshold: number;
   movesLeftScaledFactor: number;
   movesLeftQuadraticFactor: number;
+  /** Draw contempt for the root side ([-1,1], 0 = off) and whose side that is. */
+  drawScore: number;
+  rootSideToMove: 'w' | 'b' | null;
+  /** Search contempt: opponent-node visit budget before freezing (0 = off). */
+  searchContemptLimit: number;
+  scCounters?: { frozenNodes: number; sampledSelections: number };
 }
 
 export interface SearchPolicy {
@@ -298,19 +328,28 @@ function wdlConfidence(wdl: [number, number, number]): number {
   return Math.max(0, Math.min(1, 1 - h / Math.log(3)));
 }
 
-function valueFromEvaluation(evaln: Evaluation, context: SearchPolicyContext): number {
+/**
+ * Draw value at a node from that node's side-to-move perspective: the root
+ * side scores draws at drawScore, the opponent at -drawScore (zero-sum).
+ */
+function contemptDrawValue(context: SearchPolicyContext, turn: 'w' | 'b'): number {
+  if (!context.drawScore || !context.rootSideToMove) return 0;
+  return turn === context.rootSideToMove ? context.drawScore : -context.drawScore;
+}
+
+function valueFromEvaluation(evaln: Evaluation, context: SearchPolicyContext, turn: 'w' | 'b'): number {
   const baseWdl = normalizeWdl(evaln.wdl, context.valueWdlBaseTemp);
-  const baseValue = valueFromWdl(baseWdl);
+  const baseValue = valueFromWdl(baseWdl) + contemptDrawValue(context, turn) * baseWdl[1];
   const auxHead = context.valueWdlAuxHead;
   const aux = auxHead ? evaln.auxiliaryWdls?.[auxHead] : undefined;
   const maxAlpha = Math.max(0, Math.min(1, context.valueWdlAuxWeight));
-  if (!aux || maxAlpha <= 0) return baseValue;
+  if (!aux || maxAlpha <= 0) return clamp(baseValue, -1, 1);
   const auxWdl = normalizeWdl(aux, context.valueWdlAuxTemp);
   const auxValue = valueFromWdl(auxWdl);
   const alpha = context.valueWdlBlendMode === 'confidence'
     ? maxAlpha * wdlConfidence(auxWdl) * (1 - wdlConfidence(baseWdl))
     : maxAlpha;
-  return (1 - alpha) * baseValue + alpha * auxValue;
+  return clamp((1 - alpha) * baseValue + alpha * auxValue, -1, 1);
 }
 
 export function edgeQForParent(edge: Edge, fpu = 0): number {
@@ -906,17 +945,27 @@ function makeSearchRoot(board: BoardState, historyFens: string[] = []): Node {
   return { board, historyFens, expanded: false, terminalValue: null, edges: [], visits: 0, isRoot: true };
 }
 
+function searchValueKey(context: SearchPolicyContext): string {
+  if (context.drawScore === 0 && context.searchContemptLimit === 0) return 'drawScore=0;scLimit=0';
+  return `drawScore=${context.drawScore};scLimit=${context.searchContemptLimit};rootSide=${context.rootSideToMove ?? ''}`;
+}
+
+function nodeSearchValueCompatible(node: Node, key: string): boolean {
+  // Pre-key/default trees are compatible only with the historical neutral default.
+  return node.searchValueKey === key || (node.searchValueKey === undefined && key === 'drawScore=0;scLimit=0');
+}
+
 function makeChild(parent: Node, move: Move, transpositionTable?: Map<string, Node>, stats?: SearchStats): Node {
   const childBoard = makeMove(parent.board, move);
   const childHistory = [boardToFen(parent.board), ...parent.historyFens];
   const key = searchNodeKey(childBoard, childHistory);
   const cached = transpositionTable?.get(key);
-  if (cached) {
+  if (cached && (!parent.searchValueKey || nodeSearchValueCompatible(cached, parent.searchValueKey))) {
     if (stats) stats.transpositionHits = (stats.transpositionHits ?? 0) + 1;
     cached.isRoot = false;
     return cached;
   }
-  const child = { board: childBoard, historyFens: childHistory, expanded: false, terminalValue: null, edges: [], visits: 0, isRoot: false };
+  const child = { board: childBoard, historyFens: childHistory, expanded: false, terminalValue: null, edges: [], visits: 0, searchValueKey: parent.searchValueKey, isRoot: false };
   transpositionTable?.set(key, child);
   return child;
 }
@@ -935,7 +984,40 @@ export function advanceSearchRoot(root: Node | null | undefined, move: Move, nex
   return null;
 }
 
+/**
+ * Search-contempt selection at opponent nodes past the ScLimit budget: freeze
+ * the child-visit distribution at the moment the budget is exceeded and
+ * sample from it, instead of letting PUCT keep sharpening toward the
+ * opponent's best refutation. Returns null when normal selection applies.
+ */
+function searchContemptEdge(node: Node, context: SearchPolicyContext): Edge | null {
+  const limit = context.searchContemptLimit;
+  if (!limit || node.isRoot || !context.rootSideToMove) return null;
+  if (node.board.turn === context.rootSideToMove) return null;
+  if ((node.visits ?? 0) < limit) return null;
+  if (!node.scFrozenWeights) {
+    const visits = node.edges.map((edge) => edge.visits);
+    node.scFrozenWeights = visits.some((v) => v > 0) ? visits : node.edges.map((edge) => edge.prior);
+    if (context.scCounters) context.scCounters.frozenNodes += 1;
+  }
+  const weights = node.scFrozenWeights;
+  let total = 0;
+  for (const weight of weights) total += weight;
+  if (!(total > 0)) return null;
+  let r = Math.random() * total;
+  for (let i = 0; i < weights.length; i++) {
+    r -= weights[i];
+    if (r <= 0) {
+      if (context.scCounters) context.scCounters.sampledSelections += 1;
+      return node.edges[i];
+    }
+  }
+  return node.edges[weights.length - 1];
+}
+
 function selectBestEdge(node: Node, searchPolicy: SearchPolicy, context: SearchPolicyContext): Edge {
+  const frozen = searchContemptEdge(node, context);
+  if (frozen) return frozen;
   let best = node.edges[0];
   let bestScore = -Infinity;
   for (const edge of node.edges) {
@@ -1006,14 +1088,14 @@ async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyCon
   if (!moves.length) {
     node.expanded = true;
     // No legal moves: checkmate is loss for the side to move, stalemate is draw.
-    node.terminalValue = inCheck(node.board) ? -1 : 0;
+    node.terminalValue = inCheck(node.board) ? -1 : contemptDrawValue(context, node.board.turn);
     node.edges = [];
     if (stats) { stats.expansions += 1; stats.terminalHits += 1; }
     return node.terminalValue;
   }
   if (automaticDrawReason(node.board, node.historyFens)) {
     node.expanded = true;
-    node.terminalValue = 0;
+    node.terminalValue = contemptDrawValue(context, node.board.turn);
     node.edges = [];
     if (stats) { stats.expansions += 1; stats.terminalHits += 1; }
     return node.terminalValue;
@@ -1127,11 +1209,11 @@ function selectLeaf(node: Node, searchPolicy: SearchPolicy, context: SearchPolic
   return selectLeaf(best.child, searchPolicy, context, [...path, best], transpositionTable, stats);
 }
 
-function prepareExpansion(node: Node, stats: SearchStats): Move[] | number {
+function prepareExpansion(node: Node, stats: SearchStats, context: SearchPolicyContext): Move[] | number {
   const moves = legalMoves(node.board);
   if (!moves.length) {
     node.expanded = true;
-    node.terminalValue = inCheck(node.board) ? -1 : 0;
+    node.terminalValue = inCheck(node.board) ? -1 : contemptDrawValue(context, node.board.turn);
     node.edges = [];
     stats.expansions += 1;
     stats.terminalHits += 1;
@@ -1139,7 +1221,7 @@ function prepareExpansion(node: Node, stats: SearchStats): Move[] | number {
   }
   if (automaticDrawReason(node.board, node.historyFens)) {
     node.expanded = true;
-    node.terminalValue = 0;
+    node.terminalValue = contemptDrawValue(context, node.board.turn);
     node.edges = [];
     stats.expansions += 1;
     stats.terminalHits += 1;
@@ -1173,7 +1255,7 @@ function finishExpansion(node: Node, moves: Move[], evaln: Evaluation, context: 
   });
   node.expanded = true;
   node.terminalValue = null;
-  return valueFromEvaluation(evaln, context);
+  return valueFromEvaluation(evaln, context, node.board.turn);
 }
 
 interface PreparedLeafBatch {
@@ -1226,7 +1308,7 @@ function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: Search
       unwindVirtualVisits(sel.path);
       throw new Error('selectLeaf returned an expanded non-terminal node');
     }
-    const prep = prepareExpansion(sel.node, stats);
+    const prep = prepareExpansion(sel.node, stats, context);
     if (typeof prep === 'number') {
       batchInFlightEvalLeaves.delete(sel.node);
       inFlightEvalLeaves?.delete(sel.node);
@@ -1316,7 +1398,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
         unwindVirtualVisits(sel.path);
         throw new Error('selectLeaf returned an expanded non-terminal node');
       }
-      const prep = prepareExpansion(sel.node, stats);
+      const prep = prepareExpansion(sel.node, stats, context);
       if (typeof prep === 'number') prepared.push({ kind: 'terminal', sel, value: prep });
       else {
         let slot = evalIndex.get(sel.node);
@@ -1489,13 +1571,19 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     movesLeftThreshold: Math.max(0, options.movesLeftThreshold ?? 0.8),
     movesLeftScaledFactor: options.movesLeftScaledFactor ?? 1.65,
     movesLeftQuadraticFactor: options.movesLeftQuadraticFactor ?? -0.65,
+    drawScore: clamp(options.drawScore ?? 0, -1, 1),
+    rootSideToMove: board.turn,
+    searchContemptLimit: Math.max(0, Math.floor(options.searchContemptLimit ?? 0)),
+    scCounters: (options.searchContemptLimit ?? 0) > 0 ? { frozenNodes: 0, sampledSelections: 0 } : undefined,
   };
   const searchPolicy = options.searchPolicy ?? classicPuctPolicy;
   const stats = makeStats(visits);
   if (options.traceSearchVisits) stats.searchTrace = [];
   const requestedHistory = options.historyFens ?? [];
-  const reusableRoot = !options.rootMoves && options.root && boardToFen(options.root.board) === boardToFen(board) && sameHistory(options.root.historyFens, requestedHistory) ? options.root : null;
+  const currentSearchValueKey = searchValueKey(context);
+  const reusableRoot = !options.rootMoves && options.root && boardToFen(options.root.board) === boardToFen(board) && sameHistory(options.root.historyFens, requestedHistory) && nodeSearchValueCompatible(options.root, currentSearchValueKey) ? options.root : null;
   const root: Node = reusableRoot ?? makeSearchRoot(board, requestedHistory);
+  root.searchValueKey = currentSearchValueKey;
   root.isRoot = true;
   stats.rootReused = !!reusableRoot;
   options.transpositionTable?.set(searchNodeKey(root.board, root.historyFens), root);
@@ -1505,18 +1593,18 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   } else if (options.rootMoves) {
     if (!options.rootMoves.length) {
       root.expanded = true;
-      root.terminalValue = inCheck(root.board) ? -1 : 0;
+      root.terminalValue = inCheck(root.board) ? -1 : contemptDrawValue(context, root.board.turn);
       root.edges = [];
       stats.expansions += 1;
       stats.terminalHits += 1;
       rootValue = root.terminalValue;
     } else if (automaticDrawReason(root.board, root.historyFens)) {
       root.expanded = true;
-      root.terminalValue = 0;
+      root.terminalValue = contemptDrawValue(context, root.board.turn);
       root.edges = [];
       stats.expansions += 1;
       stats.terminalHits += 1;
-      rootValue = 0;
+      rootValue = root.terminalValue;
     } else {
       const beforeMetrics = evaluatorMetrics(evaluator);
       stats.evalCalls += 1;
@@ -1651,6 +1739,10 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     if (!stats.stopReason) stats.stopReason = deadlineExpired(deadlineMs) && stats.completedVisits < visitsToRun ? 'movetime' : 'visit-budget';
   }
   root.visits = priorRootVisits + stats.completedVisits;
+  if (context.scCounters) {
+    stats.scFrozenNodes = context.scCounters.frozenNodes;
+    stats.scSampledSelections = context.scCounters.sampledSelections;
+  }
   const policy = searchPolicy.rootPolicy(root.edges, context, root);
   const bestEntry = searchPolicy.chooseFinalMove(policy, context);
   const pvDepth = options.pvDepth ?? 12;

@@ -113,6 +113,54 @@
       "source": "../models/lc0-bestnets/onnx/t3-512x15x16h-distill-swa-2767500.batch16.f16.onnx",
       "bytes": 171016323,
       "sha256": "385639425f9519c4a295b3022ce12fbe7bdadc21e47ab4cc30258e7507529b25"
+    },
+    {
+      "file": "lqo_v2.f16.onnx",
+      "url": "/models/lc0/lqo_v2.f16.onnx",
+      "mode": "symlink",
+      "source": "../models/odds/onnx/lqo_v2.f16.onnx",
+      "bytes": 189397245,
+      "sha256": "bbf9f08e995b7ed552e902c332f09daf79d761f383cde31036720553312fee03"
+    },
+    {
+      "file": "maia-1100.f32.onnx",
+      "url": "/models/lc0/maia-1100.f32.onnx",
+      "mode": "symlink",
+      "source": "../models/maia/onnx/maia-1100.f32.onnx",
+      "bytes": 3483872,
+      "sha256": "27d476fd308b62974f321270e0c4149ebb6c7e381fc796a65d85d92dcab487fa"
+    },
+    {
+      "file": "maia-1300.f32.onnx",
+      "url": "/models/lc0/maia-1300.f32.onnx",
+      "mode": "symlink",
+      "source": "../models/maia/onnx/maia-1300.f32.onnx",
+      "bytes": 3483872,
+      "sha256": "e7eabae14e718ecba1572284fe9c5d1aa095c9eecce4a054d84c1884600eabed"
+    },
+    {
+      "file": "maia-1500.f32.onnx",
+      "url": "/models/lc0/maia-1500.f32.onnx",
+      "mode": "symlink",
+      "source": "../models/maia/onnx/maia-1500.f32.onnx",
+      "bytes": 3483872,
+      "sha256": "5dcbcf9badb4202846e1f2fcade9c6d066f175552e74468ecd4c769aa8a16fb9"
+    },
+    {
+      "file": "maia-1700.f32.onnx",
+      "url": "/models/lc0/maia-1700.f32.onnx",
+      "mode": "symlink",
+      "source": "../models/maia/onnx/maia-1700.f32.onnx",
+      "bytes": 3483872,
+      "sha256": "7090704723221ddbe104bc1a08d9cd1d218235328f5ddfcfa23fde0b193c8155"
+    },
+    {
+      "file": "maia-1900.f32.onnx",
+      "url": "/models/lc0/maia-1900.f32.onnx",
+      "mode": "symlink",
+      "source": "../models/maia/onnx/maia-1900.f32.onnx",
+      "bytes": 3483872,
+      "sha256": "f72492271f6476cd249546b3d790b35db50107a0623a5a08066bf7b28ea04e72"
     }
   ],
   "packs": [
