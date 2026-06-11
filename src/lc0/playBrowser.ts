@@ -11,6 +11,7 @@ import { GameTree } from './gameTree.ts';
 import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetMemoryCaution, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig } from './bt4Engine.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
@@ -27,34 +28,49 @@ const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL_URL;
 
-type PlayFamily = 'lc0' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
+type PlayFamily = 'maia' | 'lc0' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
 
 interface PlayEngineOption {
   id: string;
   label: string;
   family: PlayFamily;
-  /** lc0 net key ('small' | 't3' | 'bt4') or stockfish kind ('lite' | 'full'). */
+  /** Family-specific: Maia Elo, lc0 net key ('small' | 't3' | 'bt4'), or stockfish kind. */
   variant: string;
+  group: 'human' | 'engine';
 }
 
 const ENGINE_OPTIONS: PlayEngineOption[] = [
-  { id: 'lc0-small', label: 'Lc0 · Small net', family: 'lc0', variant: 'small' },
-  { id: 'lc0-t3', label: 'Lc0 · t3-512 distill (WebGPU)', family: 'lc0', variant: 't3' },
-  { id: 'lc0-bt4', label: 'Lc0 · BT4-it332 (WebGPU)', family: 'lc0', variant: 'bt4' },
-  { id: 'sf-lite', label: 'Stockfish Lite', family: 'sf', variant: 'lite' },
-  { id: 'sf-full', label: 'Stockfish', family: 'sf', variant: 'full' },
-  { id: 'reckless', label: 'Reckless', family: 'reckless', variant: 'default' },
-  { id: 'viridithas', label: 'Viridithas', family: 'viridithas', variant: 'default' },
-  { id: 'berserk', label: 'Berserk', family: 'berserk', variant: 'default' },
-  { id: 'plentychess', label: 'PlentyChess', family: 'plentychess', variant: 'default' },
+  { id: 'maia-1100', label: 'Maia 1100', family: 'maia', variant: '1100', group: 'human' },
+  { id: 'maia-1300', label: 'Maia 1300', family: 'maia', variant: '1300', group: 'human' },
+  { id: 'maia-1500', label: 'Maia 1500', family: 'maia', variant: '1500', group: 'human' },
+  { id: 'maia-1700', label: 'Maia 1700', family: 'maia', variant: '1700', group: 'human' },
+  { id: 'maia-1900', label: 'Maia 1900', family: 'maia', variant: '1900', group: 'human' },
+  { id: 'sf-lite', label: 'Stockfish Lite', family: 'sf', variant: 'lite', group: 'engine' },
+  { id: 'sf-full', label: 'Stockfish', family: 'sf', variant: 'full', group: 'engine' },
+  { id: 'lc0-small', label: 'Lc0 · Small net', family: 'lc0', variant: 'small', group: 'engine' },
+  { id: 'lc0-t3', label: 'Lc0 · t3-512 distill (WebGPU)', family: 'lc0', variant: 't3', group: 'engine' },
+  { id: 'lc0-bt4', label: 'Lc0 · BT4-it332 (WebGPU)', family: 'lc0', variant: 'bt4', group: 'engine' },
+  { id: 'reckless', label: 'Reckless', family: 'reckless', variant: 'default', group: 'engine' },
+  { id: 'viridithas', label: 'Viridithas', family: 'viridithas', variant: 'default', group: 'engine' },
+  { id: 'berserk', label: 'Berserk', family: 'berserk', variant: 'default', group: 'engine' },
+  { id: 'plentychess', label: 'PlentyChess', family: 'plentychess', variant: 'default', group: 'engine' },
 ];
 
-const LEVEL_NAMES = ['Beginner', 'Casual', 'Club', 'Strong', 'Expert'] as const;
+const LEVEL_COUNT = 5;
+/** Search-effort labels. Deliberately not "Beginner": engine play is strong at any setting. */
+const EFFORT_LEVEL_NAMES = ['Fastest', 'Quick', 'Standard', 'Strong', 'Deep'] as const;
+/** Stockfish handicap ladder: UCI Skill Level plus a depth cap per level. */
+const SF_LEVELS = [
+  { skill: 0, depth: 5, label: '1 · Weakest (skill 0)' },
+  { skill: 5, depth: 6, label: '2 · Casual (skill 5)' },
+  { skill: 10, depth: 8, label: '3 · Club (skill 10)' },
+  { skill: 15, depth: 12, label: '4 · Strong (skill 15)' },
+  { skill: 20, depth: 18, label: '5 · Full strength' },
+] as const;
 
 /** Per-family strength ladders indexed by level (0-4): visits for lc0, depth otherwise. */
-const LEVELS: Record<PlayFamily, number[]> = {
+const LEVELS: Record<Exclude<PlayFamily, 'maia' | 'sf'>, number[]> = {
   lc0: [8, 32, 100, 400, 1600],
-  sf: [2, 4, 6, 10, 14],
   reckless: [2, 4, 6, 10, 14],
   viridithas: [2, 4, 6, 9, 12],
   berserk: [2, 4, 6, 9, 12],
@@ -62,6 +78,10 @@ const LEVELS: Record<PlayFamily, number[]> = {
 };
 /** Big nets are far slower per visit; keep upper levels playable. */
 const BIG_NET_LEVELS = [4, 16, 64, 256, 800];
+
+function maiaModelUrl(elo: string): string {
+  return `/models/lc0/maia-${elo}.f32.onnx`;
+}
 
 function el(id: string): HTMLElement {
   const found = document.getElementById(id);
@@ -97,27 +117,78 @@ const bigNetSearchers: Record<'bt4' | 't3', Bt4WorkerSearcher> = {
   t3: new Bt4WorkerSearcher(T3_NET),
 };
 interface CpuEngine {
-  setOptions(options: { depth?: number; movetimeMs?: number; threads?: number }): void;
+  setOptions(options: { depth?: number; movetimeMs?: number; threads?: number; skillLevel?: number }): void;
   bestMove(fen: string, signal?: AbortSignal): Promise<string | null>;
 }
 const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
+const maiaPlayerPromises = new Map<string, Promise<Lc0PolicyOnlyPlayer>>();
+
+function ensureMaia(elo: string): Promise<Lc0PolicyOnlyPlayer> {
+  const existing = maiaPlayerPromises.get(elo);
+  if (existing) return existing;
+  const created = (async () => {
+    setEngineNote(`Loading Maia ${elo}…`);
+    const modelLoad = await loadLc0ModelForOrt(maiaModelUrl(elo), {
+      cache: true,
+      onProgress: (loaded, total) => showDownloadProgress(`Maia ${elo}`, loaded, total),
+    });
+    hideDownloadProgress();
+    const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+    setEngineNote('');
+    return new Lc0PolicyOnlyPlayer(evaluator);
+  })().catch((error: Error) => {
+    maiaPlayerPromises.delete(elo);
+    hideDownloadProgress();
+    setEngineNote(`Maia ${elo} load failed: ${error.message}`, true);
+    throw error;
+  });
+  maiaPlayerPromises.set(elo, created);
+  return created;
+}
 
 function selectedEngine(): PlayEngineOption {
   const id = selectEl('engineSelect').value;
   return ENGINE_OPTIONS.find((option) => option.id === id) ?? ENGINE_OPTIONS[0];
 }
 function selectedLevel(): number {
-  return Math.max(0, Math.min(LEVEL_NAMES.length - 1, Number(selectEl('levelSelect').value) || 0));
+  return Math.max(0, Math.min(LEVEL_COUNT - 1, Number(selectEl('levelSelect').value) || 0));
 }
 function strengthFor(option: PlayEngineOption, level: number): number {
+  if (option.family === 'maia') return 1;
+  if (option.family === 'sf') return SF_LEVELS[level].depth;
   if (option.family === 'lc0' && option.variant !== 'small') return BIG_NET_LEVELS[level];
   return LEVELS[option.family][level];
 }
 function strengthCaption(): string {
   const option = selectedEngine();
   const level = selectedLevel();
+  if (option.family === 'maia') {
+    return `Plays the move a ~${option.variant}-rated human would — no search, just the trained policy.`;
+  }
+  if (option.family === 'sf') {
+    const sf = SF_LEVELS[level];
+    return sf.skill >= 20 ? `full strength · depth ${sf.depth}` : `UCI skill ${sf.skill} · depth ${sf.depth}`;
+  }
   const value = strengthFor(option, level);
-  return option.family === 'lc0' ? `≈ ${value} visits per move` : `search depth ${value}`;
+  const base = option.family === 'lc0' ? `≈ ${value} visits per move` : `search depth ${value}`;
+  return option.family === 'lc0' ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent` : base;
+}
+
+function renderLevelOptions(): void {
+  const select = selectEl('levelSelect');
+  const previous = select.value;
+  const option = selectedEngine();
+  const field = select.closest('.field') as HTMLElement;
+  if (option.family === 'maia') {
+    field.hidden = true;
+    return;
+  }
+  field.hidden = false;
+  const labels = option.family === 'sf'
+    ? SF_LEVELS.map((sf) => sf.label)
+    : EFFORT_LEVEL_NAMES.map((name, i) => `${i + 1} · ${name}`);
+  select.innerHTML = labels.map((label, i) => `<option value="${i}">${label}</option>`).join('');
+  select.value = previous && Number(previous) < LEVEL_COUNT ? previous : '2';
 }
 
 function setEngineNote(text: string, warn = false): void {
@@ -221,6 +292,12 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
   const option = selectedEngine();
   const level = selectedLevel();
   const visitsOrDepth = strengthFor(option, level);
+  if (option.family === 'maia') {
+    const player = await ensureMaia(option.variant);
+    if (signal.aborted) return null;
+    const choice = await player.chooseMove({ positions });
+    return choice.move ?? null;
+  }
   if (option.family === 'lc0' && option.variant === 'small') {
     const searcher = await ensureLc0Small();
     const result = await searcher.search({ positions }, { visits: visitsOrDepth, signal, yieldEveryMs: 16, reuseTree: true });
@@ -251,7 +328,11 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
     }
   }
   const engine = await cpuEngineFor(option);
-  engine.setOptions({ depth: visitsOrDepth, movetimeMs: undefined });
+  if (option.family === 'sf') {
+    engine.setOptions({ depth: visitsOrDepth, movetimeMs: undefined, skillLevel: SF_LEVELS[level].skill });
+  } else {
+    engine.setOptions({ depth: visitsOrDepth, movetimeMs: undefined });
+  }
   return engine.bestMove(boardToFen(board), signal);
 }
 
@@ -459,20 +540,25 @@ function renderPromotionPicker(): void {
   }
 }
 
+function engineOptionHtml(option: PlayEngineOption): string {
+  let disabled = false;
+  let suffix = '';
+  if (option.family === 'lc0' && option.variant !== 'small') {
+    const config: BigNetConfig = option.variant === 'bt4' ? BIG_NETS.bt4 : BIG_NETS.t3;
+    const asset = bigNetAssetStatusSync(config);
+    if (!bt4SupportedSync()) { disabled = true; suffix = ' (needs WebGPU)'; }
+    else if (asset === 'missing') { disabled = true; suffix = ' (net not hosted here)'; }
+  }
+  return `<option value="${option.id}"${disabled ? ' disabled' : ''}>${option.label}${suffix}</option>`;
+}
+
 function refreshEngineOptions(): void {
   const select = selectEl('engineSelect');
   const selected = select.value;
-  select.innerHTML = ENGINE_OPTIONS.map((option) => {
-    let disabled = false;
-    let suffix = '';
-    if (option.family === 'lc0' && option.variant !== 'small') {
-      const config: BigNetConfig = option.variant === 'bt4' ? BIG_NETS.bt4 : BIG_NETS.t3;
-      const asset = bigNetAssetStatusSync(config);
-      if (!bt4SupportedSync()) { disabled = true; suffix = ' (needs WebGPU)'; }
-      else if (asset === 'missing') { disabled = true; suffix = ' (net not hosted here)'; }
-    }
-    return `<option value="${option.id}"${disabled ? ' disabled' : ''}>${option.label}${suffix}</option>`;
-  }).join('');
+  const humans = ENGINE_OPTIONS.filter((option) => option.group === 'human').map(engineOptionHtml).join('');
+  const engines = ENGINE_OPTIONS.filter((option) => option.group === 'engine').map(engineOptionHtml).join('');
+  select.innerHTML = `<optgroup label="Human-like (Maia, plays like a rated human)">${humans}</optgroup>`
+    + `<optgroup label="Engines (strong at any level)">${engines}</optgroup>`;
   if (selected && ENGINE_OPTIONS.some((option) => option.id === selected)) select.value = selected;
   renderEngineCaution();
 }
@@ -524,22 +610,20 @@ function render(): void {
 }
 
 function init(): void {
-  selectEl('engineSelect').innerHTML = ENGINE_OPTIONS.map((option) => `<option value="${option.id}">${option.label}</option>`).join('');
-  selectEl('engineSelect').value = 'sf-lite';
-  selectEl('levelSelect').innerHTML = LEVEL_NAMES.map((name, i) => `<option value="${i}">${i + 1} · ${name}</option>`).join('');
-  selectEl('levelSelect').value = '2';
+  refreshEngineOptions();
+  selectEl('engineSelect').value = 'maia-1500';
+  renderLevelOptions();
   el('newGame').addEventListener('click', newGame);
   el('takeback').addEventListener('click', takeback);
   el('resign').addEventListener('click', resign);
   el('flip').addEventListener('click', () => { orientation = orientation === 'white' ? 'black' : 'white'; render(); });
   el('exportPgn').addEventListener('click', () => { el('pgnOut').textContent = exportPgn(); });
   el('copyPgn').addEventListener('click', () => { void navigator.clipboard.writeText(exportPgn()); });
-  selectEl('engineSelect').addEventListener('change', () => { renderEngineCaution(); render(); });
+  selectEl('engineSelect').addEventListener('change', () => { renderLevelOptions(); renderEngineCaution(); render(); });
   selectEl('levelSelect').addEventListener('change', render);
   void probeBt4Support().then(refreshEngineOptions);
   void checkBigNetAsset(BIG_NETS.bt4, refreshEngineOptions);
   void checkBigNetAsset(T3_NET, refreshEngineOptions);
-  refreshEngineOptions();
   render();
 }
 
