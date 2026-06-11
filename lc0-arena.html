@@ -4,6 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>LC0 arena</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<meta name="description" content="Run chess engine tournaments in your browser: head-to-head matches, round-robins, and gauntlets with standings, Elo estimates, and per-game charts." />
 <link rel="stylesheet" href="/chessground.base.css" />
 <link rel="stylesheet" href="/chessground.brown.css" />
 <link rel="stylesheet" href="/chessground.cburnett.css" />
@@ -54,6 +56,7 @@ h2{font-size:13px;margin:14px 0 0;text-transform:uppercase;letter-spacing:.04em;
 .eval-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin-top:8px}.eval-card{padding:8px;border:1px solid var(--rule);border-radius:6px;background:white;font-family:var(--mono);font-size:11px;color:var(--muted);overflow-wrap:anywhere}.eval-card strong{display:flex;justify-content:space-between;gap:8px;color:var(--ink);font-family:var(--sans);font-size:12px;margin-bottom:3px}.eval-card .eval-status{font-family:var(--mono);font-size:10px;color:var(--accent);font-weight:600;white-space:nowrap}.eval-card.active{border-color:#cbd8a6;background:var(--soft)}
 .runtime-badge{margin-top:8px;padding:7px 8px;border:1px solid var(--rule);border-radius:6px;background:white;font-family:var(--mono);font-size:11px;color:var(--muted);overflow-wrap:anywhere}.runtime-badge.ready{color:var(--accent);border-color:#cbd8a6;background:var(--soft)}.runtime-badge.warn{color:#a5461b;border-color:#e5b38d;background:#fff4e8}
 .advanced-runtime{flex:1 1 100%;border:1px solid var(--rule);border-radius:7px;background:#fff;padding:8px 10px}.advanced-runtime summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:700}.advanced-runtime[open] summary{margin-bottom:8px}.preset-note{flex:1 1 100%;margin-top:-2px;color:var(--muted)}
+.advanced-settings{margin-top:14px;border:1px solid var(--rule);border-radius:7px;background:#fff;padding:8px 10px}.advanced-settings>summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}.advanced-settings>summary:hover{color:inherit}.advanced-settings[open]>summary{margin-bottom:4px}
 textarea{width:100%;min-height:80px;font-family:var(--mono);font-size:11px;border:1px solid var(--rule);border-radius:6px;padding:8px;margin-top:8px;resize:vertical}
 .small{font-size:12px;color:var(--muted)}
 @media(max-width:900px){main{grid-template-columns:1fr}}
@@ -107,7 +110,9 @@ details.runtime-details summary:hover{color:inherit}
       </div>
       <div id="chartLegend" class="chart-legend"></div>
     </section>
-    <div id="runtimeBadge" class="runtime-badge">Runtime: detecting browser isolation and GPU…</div>
+    <details class="runtime-details"><summary>Runtime status</summary>
+      <div id="runtimeBadge" class="runtime-badge">Runtime: detecting browser isolation and GPU…</div>
+    </details>
   </section>
   <section class="panel" aria-label="Tournament">
     <h2>Matchup</h2>
@@ -118,40 +123,15 @@ details.runtime-details summary:hover{color:inherit}
       <button id="addSeat" type="button" title="Add another engine seat">+ Add engine</button>
     </div>
     <div id="arenaSeatList" class="engine-list" aria-label="Arena engine selectors"></div>
-    <div class="matchup-note small" id="matchupNote">family → variant → strength; colors alternate each game</div>
+    <div class="matchup-note small" id="matchupNote">Pick an engine and strength for each seat; colors alternate each game.</div>
+    <h2>Time control</h2>
     <div class="row">
-      <div class="field wide"><label for="lc0PresetSelect">LC0 engine preset</label>
-        <select id="lc0PresetSelect"><option value="stable">Stable LC0 Small (ORT WebGPU/WASM fallback)</option><option value="benchmarked-small">Fast LC0 Small — best benchmarked eval path (research)</option><option value="custom">Custom / advanced</option></select></div>
-      <div id="lc0PresetNote" class="preset-note small">Stable default. Use the fast preset to test whether faster eval helps fixed-time arena strength.</div>
-      <details id="lc0AdvancedRuntime" class="advanced-runtime">
-        <summary>Advanced LC0 runtime knobs</summary>
-        <div class="row">
-          <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
-            <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
-          <div class="field"><label for="lc0BatchSizeInput">LC0 search batch</label>
-            <input id="lc0BatchSizeInput" type="number" min="1" max="64" step="1" value="1" /></div>
-          <div class="field"><label for="lc0BatchPipelineDepthInput">LC0 pipeline</label>
-            <input id="lc0BatchPipelineDepthInput" type="number" min="1" max="16" step="1" value="1" /></div>
-          <div class="field"><label for="lc0InputBackendSelect">LC0 input</label>
-            <select id="lc0InputBackendSelect"><option value="js">JS</option><option value="wasm">WASM</option><option value="wgsl">WGSL</option></select></div>
-          <div class="field"><label for="lc0EncoderKernelSelect">LC0 encoder</label>
-            <select id="lc0EncoderKernelSelect"><option value="hand">Hand WGSL</option><option value="mixed-tvm-ffn">Mixed TVM FFN</option><option value="mixed-tvm-ffn-outproj">Mixed TVM FFN+outproj</option><option value="mixed-tvm-ffn-smolgen-project">Mixed TVM FFN+smolgen project</option><option value="tvm-packed-f16">TVM packed f16</option></select></div>
-          <div class="field"><label for="lc0LegalPriorsSelect">LC0 legal priors</label>
-            <select id="lc0LegalPriorsSelect"><option value="js">JS</option><option value="wasm">WASM</option><option value="gpu">GPU legal (WGSL heads)</option></select></div>
-        </div>
-      </details>
-      <div class="field"><label for="gamesInput">Games/opening</label>
-        <input id="gamesInput" type="number" min="1" max="20" step="1" value="2" /></div>
-      <div class="field"><label for="delayInput">Delay ms</label>
-        <input id="delayInput" type="number" min="0" max="3000" step="50" value="250" /></div>
       <div class="field"><label for="budgetModeSelect">Budget</label>
         <select id="budgetModeSelect"><option value="fixed">Fixed visits/depth</option><option value="movetime" selected>Equal movetime</option></select></div>
       <div class="field" id="movetimeField"><label for="movetimeInput">Movetime ms</label>
         <input id="movetimeInput" type="number" min="10" max="60000" step="50" value="500" /></div>
-      <div class="field"><label for="cacheEntriesInput">NN cache entries</label>
-        <input id="cacheEntriesInput" type="number" min="0" max="100000" step="128" value="2048" /></div>
-      <div class="field"><label for="stockfishThreadsInput">SF threads (0 = auto)</label>
-        <input id="stockfishThreadsInput" type="number" min="0" max="32" step="1" value="1" /></div>
+      <div class="field"><label for="gamesInput">Games per opening</label>
+        <input id="gamesInput" type="number" min="1" max="20" step="1" value="2" /></div>
     </div>
     <div hidden>
       <input id="lc0VisitsInput" type="number" value="100" />
@@ -165,15 +145,6 @@ details.runtime-details summary:hover{color:inherit}
       <input id="plentychessDepthInput" type="number" value="4" />
       <select id="plentychessVariantSelect"></select>
     </div>
-    <details class="runtime-details"><summary>Runtime diagnostics</summary>
-      <div id="recklessRuntimeInfo" class="diag-block">Reckless: detecting runtime…</div>
-      <div id="viridithasRuntimeInfo" class="diag-block">Viridithas: detecting runtime…</div>
-      <div id="berserkRuntimeInfo" class="diag-block">Berserk: detecting runtime…</div>
-      <div id="plentychessRuntimeInfo" class="diag-block">PlentyChess: detecting runtime…</div>
-      <div id="cacheInfo" class="diag-block">NN cache: loading…</div>
-      <div id="searchTelemetryInfo" class="diag-block">LC0 tree: waiting for searches…</div>
-      <div id="runtimeAuditInfo" class="diag-block"><span class="diag-label">LC0 audit</span><span class="diag-value">waiting for runtime selection…</span></div>
-    </details>
     <h2>Starting positions</h2>
     <div class="row">
       <div class="field"><label for="startingPositionSelect">Suite</label>
@@ -186,6 +157,46 @@ details.runtime-details summary:hover{color:inherit}
       <button id="start" class="primary" type="button" disabled>Start match</button>
       <button id="stop" type="button" disabled>Stop</button>
     </div>
+    <details class="advanced-settings">
+      <summary>Advanced settings &amp; diagnostics</summary>
+      <div class="row">
+        <div class="field wide"><label for="lc0PresetSelect">LC0 engine preset</label>
+          <select id="lc0PresetSelect"><option value="stable">Stable LC0 Small (ORT WebGPU/WASM fallback)</option><option value="benchmarked-small">Fast LC0 Small — best benchmarked eval path (research)</option><option value="custom">Custom / advanced</option></select></div>
+        <div id="lc0PresetNote" class="preset-note small">Stable default. Use the fast preset to test whether faster eval helps fixed-time arena strength.</div>
+        <details id="lc0AdvancedRuntime" class="advanced-runtime">
+          <summary>Advanced LC0 runtime knobs</summary>
+          <div class="row">
+            <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
+              <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
+            <div class="field"><label for="lc0BatchSizeInput">LC0 search batch</label>
+              <input id="lc0BatchSizeInput" type="number" min="1" max="64" step="1" value="1" /></div>
+            <div class="field"><label for="lc0BatchPipelineDepthInput">LC0 pipeline</label>
+              <input id="lc0BatchPipelineDepthInput" type="number" min="1" max="16" step="1" value="1" /></div>
+            <div class="field"><label for="lc0InputBackendSelect">LC0 input</label>
+              <select id="lc0InputBackendSelect"><option value="js">JS</option><option value="wasm">WASM</option><option value="wgsl">WGSL</option></select></div>
+            <div class="field"><label for="lc0EncoderKernelSelect">LC0 encoder</label>
+              <select id="lc0EncoderKernelSelect"><option value="hand">Hand WGSL</option><option value="mixed-tvm-ffn">Mixed TVM FFN</option><option value="mixed-tvm-ffn-outproj">Mixed TVM FFN+outproj</option><option value="mixed-tvm-ffn-smolgen-project">Mixed TVM FFN+smolgen project</option><option value="tvm-packed-f16">TVM packed f16</option></select></div>
+            <div class="field"><label for="lc0LegalPriorsSelect">LC0 legal priors</label>
+              <select id="lc0LegalPriorsSelect"><option value="js">JS</option><option value="wasm">WASM</option><option value="gpu">GPU legal (WGSL heads)</option></select></div>
+          </div>
+        </details>
+        <div class="field"><label for="delayInput">Delay ms</label>
+          <input id="delayInput" type="number" min="0" max="3000" step="50" value="250" /></div>
+        <div class="field"><label for="cacheEntriesInput">NN cache entries</label>
+          <input id="cacheEntriesInput" type="number" min="0" max="100000" step="128" value="2048" /></div>
+        <div class="field"><label for="stockfishThreadsInput">SF threads (0 = auto)</label>
+          <input id="stockfishThreadsInput" type="number" min="0" max="32" step="1" value="1" /></div>
+      </div>
+      <details class="runtime-details"><summary>Runtime diagnostics</summary>
+        <div id="recklessRuntimeInfo" class="diag-block">Reckless: detecting runtime…</div>
+        <div id="viridithasRuntimeInfo" class="diag-block">Viridithas: detecting runtime…</div>
+        <div id="berserkRuntimeInfo" class="diag-block">Berserk: detecting runtime…</div>
+        <div id="plentychessRuntimeInfo" class="diag-block">PlentyChess: detecting runtime…</div>
+        <div id="cacheInfo" class="diag-block">NN cache: loading…</div>
+        <div id="searchTelemetryInfo" class="diag-block">LC0 tree: waiting for searches…</div>
+        <div id="runtimeAuditInfo" class="diag-block"><span class="diag-label">LC0 audit</span><span class="diag-value">waiting for runtime selection…</span></div>
+      </details>
+    </details>
     <h2>Result</h2>
     <div id="matchScore" class="small">No games played yet.</div>
     <h2>Games</h2>

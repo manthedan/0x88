@@ -395,6 +395,8 @@ function applyLc0Preset(preset: Lc0ArenaPreset, options: { reload?: boolean } = 
     advanced.open = false;
   } else {
     advanced.open = true;
+    const container = advanced.closest('details.advanced-settings') as HTMLDetailsElement | null;
+    if (container) container.open = true;
   }
   setLc0PresetNote(preset);
   refreshBudgetControls();
@@ -407,7 +409,10 @@ function applyLc0Preset(preset: Lc0ArenaPreset, options: { reload?: boolean } = 
 function markLc0PresetCustom(): void {
   if (selectedLc0Preset() === 'custom') return;
   selectEl('lc0PresetSelect').value = 'custom';
-  (el('lc0AdvancedRuntime') as HTMLDetailsElement).open = true;
+  const advanced = el('lc0AdvancedRuntime') as HTMLDetailsElement;
+  advanced.open = true;
+  const container = advanced.closest('details.advanced-settings') as HTMLDetailsElement | null;
+  if (container) container.open = true;
   setLc0PresetNote('custom');
 }
 
@@ -2045,8 +2050,8 @@ function refreshBudgetControls(): void {
   const movetime = arenaBudgetMode() === 'movetime';
   el('movetimeField').hidden = !movetime;
   el('matchupNote').textContent = movetime
-    ? 'family → variant; every engine gets the same movetime per move (strength fields are ignored); colors alternate each game'
-    : 'family → variant → strength; colors alternate each game';
+    ? 'Every engine gets the same time per move (strength fields are ignored); colors alternate each game.'
+    : 'Each engine searches to its configured strength; colors alternate each game.';
 }
 
 function refreshOpeningPreview(): void {
