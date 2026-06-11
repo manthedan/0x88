@@ -257,6 +257,8 @@ export interface Node {
   visits?: number;
   /** Moves-left-head estimate from this node's own evaluation (plies). */
   m?: number;
+  /** Search-context compatibility key for reusable trees (draw/search contempt). */
+  searchValueKey?: string;
   isRoot?: boolean;
   /** Search-contempt frozen child-visit weights (opponent nodes past ScLimit). */
   scFrozenWeights?: number[];
@@ -943,17 +945,27 @@ function makeSearchRoot(board: BoardState, historyFens: string[] = []): Node {
   return { board, historyFens, expanded: false, terminalValue: null, edges: [], visits: 0, isRoot: true };
 }
 
+function searchValueKey(context: SearchPolicyContext): string {
+  if (context.drawScore === 0 && context.searchContemptLimit === 0) return 'drawScore=0;scLimit=0';
+  return `drawScore=${context.drawScore};scLimit=${context.searchContemptLimit};rootSide=${context.rootSideToMove ?? ''}`;
+}
+
+function nodeSearchValueCompatible(node: Node, key: string): boolean {
+  // Pre-key/default trees are compatible only with the historical neutral default.
+  return node.searchValueKey === key || (node.searchValueKey === undefined && key === 'drawScore=0;scLimit=0');
+}
+
 function makeChild(parent: Node, move: Move, transpositionTable?: Map<string, Node>, stats?: SearchStats): Node {
   const childBoard = makeMove(parent.board, move);
   const childHistory = [boardToFen(parent.board), ...parent.historyFens];
   const key = searchNodeKey(childBoard, childHistory);
   const cached = transpositionTable?.get(key);
-  if (cached) {
+  if (cached && (!parent.searchValueKey || nodeSearchValueCompatible(cached, parent.searchValueKey))) {
     if (stats) stats.transpositionHits = (stats.transpositionHits ?? 0) + 1;
     cached.isRoot = false;
     return cached;
   }
-  const child = { board: childBoard, historyFens: childHistory, expanded: false, terminalValue: null, edges: [], visits: 0, isRoot: false };
+  const child = { board: childBoard, historyFens: childHistory, expanded: false, terminalValue: null, edges: [], visits: 0, searchValueKey: parent.searchValueKey, isRoot: false };
   transpositionTable?.set(key, child);
   return child;
 }
@@ -1568,8 +1580,10 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   const stats = makeStats(visits);
   if (options.traceSearchVisits) stats.searchTrace = [];
   const requestedHistory = options.historyFens ?? [];
-  const reusableRoot = !options.rootMoves && options.root && boardToFen(options.root.board) === boardToFen(board) && sameHistory(options.root.historyFens, requestedHistory) ? options.root : null;
+  const currentSearchValueKey = searchValueKey(context);
+  const reusableRoot = !options.rootMoves && options.root && boardToFen(options.root.board) === boardToFen(board) && sameHistory(options.root.historyFens, requestedHistory) && nodeSearchValueCompatible(options.root, currentSearchValueKey) ? options.root : null;
   const root: Node = reusableRoot ?? makeSearchRoot(board, requestedHistory);
+  root.searchValueKey = currentSearchValueKey;
   root.isRoot = true;
   stats.rootReused = !!reusableRoot;
   options.transpositionTable?.set(searchNodeKey(root.board, root.historyFens), root);

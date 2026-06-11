@@ -2957,7 +2957,7 @@ function wireEvents() {
       if (!liveTrail) return;
       const ply = chartPlyFromClick(event.target as HTMLElement, event as MouseEvent);
       if (ply === null) return;
-      enterReview(liveTrail, liveTrail.openingPlies + ply + 1);
+      enterReview(liveTrail, liveTrail.openingPlies + ply);
     });
   }
   el('rootChart').addEventListener('click', (event) => reviewRootChartClick(event as MouseEvent));

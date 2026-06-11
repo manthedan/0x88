@@ -55,3 +55,16 @@ test('zero drawScore scores the repetition as a plain draw', async () => {
   const neutral = await repeatPreference(0);
   assert.ok(Math.abs(neutral.q) < 0.05, `repetition Q should be ~0, got ${neutral.q}`);
 });
+
+test('changed contempt settings do not reuse stale search tree', async () => {
+  const { board, historyFens } = shuffleHistory();
+  const pro = await searchRoot(board, flatEvaluator, { visits: 200, historyFens, drawScore: 0.5 });
+  assert.equal(moveToUci(pro.move), 'f6g8');
+  const anti = await searchRoot(board, flatEvaluator, { visits: 200, historyFens, drawScore: -0.5, root: pro.root });
+  assert.equal(anti.stats?.rootReused, false);
+  assert.notEqual(moveToUci(anti.move), 'f6g8', 'draw-avoiding search must not reuse the draw-seeking root values');
+
+  const baseline = await searchRoot(board, flatEvaluator, { visits: 80, historyFens });
+  const scLimit = await searchRoot(board, flatEvaluator, { visits: 80, historyFens, searchContemptLimit: 8, root: baseline.root });
+  assert.equal(scLimit.stats?.rootReused, false, 'search-contempt limit changes must not reuse a tree with different frozen-node semantics');
+});
