@@ -85,3 +85,13 @@ Findings:
   real ~1.3× win, not t1's 4-5×; the gain shrinks as the GPU saturates.
 - Not shippable until WebNN rides without a flag; track Chrome's rollout.
   This is also effectively our first non-WebGPU coverage datapoint.
+- **Tiny squareformer probed too (2026-06-10, `tiny-ort-webnn-probe.html`)**:
+  WebNN needs static shapes + no int64 anywhere, so
+  `scripts/convert_tiny_onnx_fixed_i32.py` produces fixed-batch int32 exports
+  (bit-exact vs the original on ORT CPU; spec-mandated int64 axes/shape
+  operands preserved). Results vs webgpu EP, same inputs: **b1 1.93 ms/eval,
+  near-exact (2.7e-5) — 4.8× faster than webgpu EP and ~1.75× faster than
+  the hybrid runtime's 3.4 ms/eval**; b16 15.3 vs 22.3 ms (1.46×) but with
+  f16-class drift (policy logit maxdiff 0.88 — CoreML apparently runs that
+  shape at reduced precision; b1 is clean). The dynamic-batch model hangs
+  webnn session creation entirely — fixed shapes are mandatory.
