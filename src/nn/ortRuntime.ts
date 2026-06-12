@@ -182,7 +182,7 @@ function webgpuUsableForProviderSelection(): boolean {
 
 export function resolvedOrtExecutionProviders(): string[] {
   const requested = requestedOrtExecutionProvider();
-  if (requested === 'webgpu') return webgpuUsableForProviderSelection() ? ['webgpu'] : ['wasm'];
+  if (requested === 'webgpu') return ['webgpu'];
   if (requested === 'webgpu,wasm') return webgpuUsableForProviderSelection() ? ['webgpu', 'wasm'] : ['wasm'];
   if (requested === 'auto') return webgpuUsableForProviderSelection() ? ['webgpu', 'wasm'] : ['wasm'];
   return ['wasm'];
