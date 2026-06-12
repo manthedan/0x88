@@ -1,11 +1,18 @@
 # Contempt in the LC0 browser PUCT search
 
-Status, 2026-06-11: both mechanisms shipped (`src/search/puct.ts`), wired
-through the search worker to every Lc0-family opponent on the Play page,
-and validated against Maia as a human stand-in. Inspired by the lc0
-search-contempt fork used by the Leela odds bots and by Monty's calibrated
-contempt — patterns only, no code from either (both AGPL; so are we not,
-hence the clean-room rule).
+Status, 2026-06-11: all three mechanisms shipped (`src/search/puct.ts`),
+wired through the search worker to every Lc0-family opponent on the Play
+page, and validated against Maia as a human stand-in. **Every contempt
+benefit runs without the ~1GB Monty dependency**: the search side is
+native to our PUCT, and the human-modeling side (rating-conditioned
+outcomes, rating inference, opponent modeling) runs on Maia3 (45.7MB).
+
+Provenance: mechanisms 1–2 take *patterns only* from the lc0
+search-contempt fork and Monty (both AGPL) — no code. Mechanism 3
+(`applyEloContempt`) is an independent TypeScript re-expression of the
+math in Monty's `apply_contempt` (the logistic-latent fit and the
+`s²·elo·ln10/(400·16)` shift), written from reading that AGPL source —
+noted here for provenance transparency.
 
 ## Why
 
@@ -268,25 +275,36 @@ opponent**:
   contempt onto a 2024-era small-net Monty or training our own small
   value net with their in-repo trainer are real projects, not tweaks.
 
-Decision — Monty's three roles split by where they run:
+Decision — Monty's three roles split by where they run, with outcomes
+(updated 2026-06-11, after Maia3 landed):
 
-1. **Calibration oracle — native binary, the active lane.** Use Monty's
-   Elo→WDL contempt rescaling as ground truth to calibrate our PUCT
-   `drawScore`/`searchContemptLimit` (so settings become "opponent ≈
-   Maia 1500" instead of raw constants). Zero download cost; this is
-   what we actually wanted Monty for, and our own PUCT contempt is what
-   ships to users.
-2. **Browser lane — lab only, never product.** `monty-smoke.html` /
-   `MontyEngine` stay lab-scoped (excluded from the product build). If
-   ever surfaced, it is behind an explicit ~950MB opt-in and needs an
-   AGPL corresponding-source archive first. Deferred hardening if that
-   day comes: stream nets directly into wasm memory and drop the
-   worker-side byte cache (halves peak memory).
-3. **Contempt_Analysis as a product idea — rehost on our PUCT.** The
-   practical-vs-objective-move lane is worth having, but our scLimit
-   already models "best move against a budget-limited opponent" at zero
-   extra MB; Monty serves as the native reference implementation.
-   Revisit only if upstream publishes a small contempt-era net pair.
+1. **Calibration oracle — COMPLETE, dependency retired.** Monty's
+   Elo→WDL rescaling was ported as `applyEloContempt` and verified once
+   against the native binary; those 15 oracle samples are frozen into
+   `tests/puct_elo_contempt.test.mjs`, so the port stays honest without
+   Monty present. The deeper calibration question ("does the transform
+   match real human outcomes?") is now answered by **Maia3**, not Monty
+   — see the learned-vs-analytic table above.
+2. **Browser lane — lab only, never product** (unchanged).
+   `monty-smoke.html` / `MontyEngine` stay lab-scoped. If ever surfaced:
+   explicit ~950MB opt-in + AGPL corresponding-source archive +
+   stream-into-wasm memory hardening.
+3. **Contempt_Analysis — rehosted Monty-free, in a stronger form.** The
+   practical-vs-objective lane is covered by (a) our own PUCT with
+   `contemptElo`/`scLimit` (the Elo-shifted abstraction, same shape as
+   Monty's mode) and (b) the planned mixed-policy search where opponent
+   nodes take **Maia3 priors at the actual user's rating** — "best move
+   against this human", which Monty's formula-based opponent model
+   cannot express. User-facing outcome estimates query Maia3's value
+   head directly (more faithful than the analytic transform by 2–12×).
+
+**Net result: every contempt benefit ships without the ~1GB Monty
+dependency.** The human-modeling side runs on Maia3 (45.7MB, cached,
+already shipping); the search side is native to our PUCT (0MB). The
+native Monty binary and extracted nets (`models/monty/`, ~947MB) are
+archival — re-extractable from the GitHub release binary if a
+re-validation is ever needed — and the wasm port remains a lab
+curiosity.
 
 Note: contempt cannot be injected into the classical UCI engines —
 modern Stockfish removed its Contempt option and the others never had
