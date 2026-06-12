@@ -66,6 +66,12 @@ details.runtime-details summary:hover{color:inherit}
 .legend .key{display:inline-flex;align-items:center;gap:5px}
 .legend .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
 .movelist{font-family:var(--mono);font-size:13px;line-height:1.7;margin-top:8px;max-height:240px;overflow:auto}
+.maia3-grid{margin-top:8px;font-size:13px}
+.maia3-grid .maia3-row{display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid var(--rule)}
+.maia3-grid .maia3-elo{font-family:var(--mono);width:48px;color:var(--muted)}
+.maia3-grid .maia3-score{font-family:var(--mono);width:44px}
+.maia3-grid .maia3-move{display:inline-flex;align-items:center;gap:4px;margin-right:10px;font-family:var(--mono)}
+.maia3-grid .maia3-bar{display:inline-block;height:8px;background:#5a6e2a;border-radius:2px;opacity:0.75}
 .movelist .mv{cursor:pointer;padding:0 3px;border-radius:4px}.movelist .mv:hover{background:var(--soft)}
 .movelist .mv.current{background:var(--accent);color:white}
 .movelist .var{color:var(--muted)}
@@ -167,6 +173,13 @@ table.opening .san{font-family:var(--mono);font-weight:700}
       <div><dt>Side</dt><dd id="sideToMove">—</dd></div>
       <div><dt>Eval</dt><dd id="posEval">—</dd></div>
     </dl>
+    <h2>Human moves · Maia3</h2>
+    <div class="row">
+      <button id="maia3Enable" type="button">Load Maia3 (~28MB, cached)</button>
+      <span id="maia3PanelStatus" class="small"></span>
+    </div>
+    <div id="maia3Grid" class="maia3-grid" hidden></div>
+    <div id="maia3Caption" class="small" hidden>What rated humans actually play here (Maia3 move predictions; score = expected points for White in a human game at that rating, not an engine eval). ✓ = matches the current best engine move.</div>
     <h2>Moves</h2>
     <div id="movelist" class="movelist"></div>
     <h2>Game review</h2>

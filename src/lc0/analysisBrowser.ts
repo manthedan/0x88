@@ -5,6 +5,8 @@ import { boardToFen, parseFen, squareName, START_FEN, type BoardState } from '..
 import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { boardCheck, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
+import { moveToSan } from '../chess/san.ts';
+import { Maia3BrowserEvaluator, maia3WinProbability } from './maia3.ts';
 import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
@@ -1843,8 +1845,89 @@ function afterNavigation() {
   clearStalePgnDatabaseSearchResults();
   clearReviewIfMainlineChanged();
   renderAll();
+  scheduleMaia3Panel();
   if (inputEl('autoAnalyze').checked && !lineCache.has(tree.current.fen)) void analyzeCurrent();
   else { renderEvalBar(); setShapes(bestShapes()); }
+}
+
+// ---------------------------------------------------------------------------
+// Human moves · Maia3: rating-conditioned move predictions for the current
+// position. One batched evaluateConditions run per navigation (≈50ms on
+// WebGPU for the whole grid), so it can follow the board live.
+// ---------------------------------------------------------------------------
+const MAIA3_PANEL_RATINGS = [1100, 1300, 1500, 1700, 1900, 2200];
+let maia3PanelEvaluator: Maia3BrowserEvaluator | null = null;
+let maia3PanelLoading = false;
+let maia3PanelSeq = 0;
+let maia3PanelTimer: ReturnType<typeof setTimeout> | null = null;
+
+function maia3PanelStatus(text: string): void {
+  el('maia3PanelStatus').textContent = text;
+}
+
+async function enableMaia3Panel(): Promise<void> {
+  if (maia3PanelEvaluator || maia3PanelLoading) return;
+  maia3PanelLoading = true;
+  (el('maia3Enable') as HTMLButtonElement).disabled = true;
+  try {
+    maia3PanelStatus('Loading Maia3…');
+    maia3PanelEvaluator = await Maia3BrowserEvaluator.create({
+      onProgress: (loaded, total) => maia3PanelStatus(`Downloading Maia3 ${(loaded / 1e6).toFixed(0)}/${total ? (total / 1e6).toFixed(0) : '?'}MB…`),
+    });
+    el('maia3Enable').hidden = true;
+    el('maia3Grid').hidden = false;
+    el('maia3Caption').hidden = false;
+    maia3PanelStatus('');
+    scheduleMaia3Panel();
+  } catch (error) {
+    maia3PanelStatus(`Maia3 load failed: ${(error as Error).message}`);
+    (el('maia3Enable') as HTMLButtonElement).disabled = false;
+  } finally {
+    maia3PanelLoading = false;
+  }
+}
+
+function scheduleMaia3Panel(): void {
+  if (!maia3PanelEvaluator) return;
+  if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
+  maia3PanelTimer = setTimeout(() => { void renderMaia3Panel(); }, 120);
+}
+
+/** Best engine move for the current position, for the agreement marks. */
+function bestEngineUci(fen: string): string | null {
+  const lines = lineCache.get(fen) ?? [];
+  const first = lines.find((line) => line.multipv === 1) ?? lines[0];
+  return first?.pvUci[0] ?? null;
+}
+
+async function renderMaia3Panel(): Promise<void> {
+  const evaluator = maia3PanelEvaluator;
+  if (!evaluator) return;
+  const seq = ++maia3PanelSeq;
+  const fen = tree.current.fen || START_FEN;
+  const board = parseFen(fen);
+  if (!legalMoves(board).length) { el('maia3Grid').innerHTML = '<div class="small">Game over — no moves to predict.</div>'; return; }
+  let evaluations;
+  try {
+    evaluations = await evaluator.evaluateConditions(board, MAIA3_PANEL_RATINGS.map((elo) => ({ selfElo: elo, oppoElo: elo })));
+  } catch (error) {
+    maia3PanelStatus(`Maia3 evaluation failed: ${(error as Error).message}`);
+    return;
+  }
+  if (seq !== maia3PanelSeq) return;
+  const engineUci = bestEngineUci(fen);
+  const sanByUci = new Map(legalMoves(board).map((move) => [moveToUci(move), moveToSan(board, move)]));
+  const rows = evaluations.map((evaluation, i) => {
+    const score = maia3WinProbability(evaluation);
+    const top = evaluation.legalPriors.slice(0, 3).map((entry) => {
+      const san = sanByUci.get(entry.uci) ?? entry.uci;
+      const agree = engineUci && entry.uci === engineUci ? ' ✓' : '';
+      const width = Math.max(3, Math.round(entry.prior * 70));
+      return `<span class="maia3-move">${san}${agree} <span class="maia3-bar" style="width:${width}px"></span> ${(entry.prior * 100).toFixed(0)}%</span>`;
+    }).join('');
+    return `<div class="maia3-row"><span class="maia3-elo">${MAIA3_PANEL_RATINGS[i]}</span><span class="maia3-score" title="Expected points for White in a human game at this rating">${score.toFixed(2)}</span>${top}</div>`;
+  });
+  el('maia3Grid').innerHTML = rows.join('');
 }
 
 // Test hook for automated browser checks: synthetic chessground drags are
@@ -1917,6 +2000,7 @@ function hoverLine(pvUci: string[], engine: string) {
 }
 
 function wireEvents() {
+  el('maia3Enable').addEventListener('click', () => { void enableMaia3Panel(); });
   el('navStart').addEventListener('click', () => { tree.toStart(); afterNavigation(); });
   el('navBack').addEventListener('click', () => { tree.back(); afterNavigation(); });
   el('navForward').addEventListener('click', () => { tree.forward(); afterNavigation(); });
