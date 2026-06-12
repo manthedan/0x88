@@ -729,7 +729,12 @@ function engineLogoHtml(name: string): string {
 
 async function probeEngineLogos(): Promise<void> {
   await Promise.all(['lc0', 'stockfish', 'reckless', 'viridithas'].map(async (family) => {
-    try { if ((await fetch(`/engine-logos/${family}.png`, { method: 'HEAD', cache: 'no-store' })).ok) availableEngineLogos.add(family); } catch { /* absent */ }
+    try {
+      const response = await fetch(`/engine-logos/${family}.png`, { method: 'HEAD', cache: 'no-store' });
+      // Demand an image content-type: preview/SPA-fallback servers answer 200
+      // text/html for missing files, which made every chip a broken <img>.
+      if (response.ok && (response.headers.get('content-type') ?? '').startsWith('image/')) availableEngineLogos.add(family);
+    } catch { /* absent */ }
   }));
   if (availableEngineLogos.size) renderSideLabels();
 }
