@@ -111,6 +111,7 @@ type SearchMessage = {
   fpuReduction?: number;
   temperature?: number;
   drawScore?: number;
+  contemptElo?: number;
   searchContemptLimit?: number;
 };
 
@@ -1091,6 +1092,7 @@ async function handleSearch(message: SearchMessage): Promise<void> {
       fpuReduction: message.fpuReduction,
       temperature: message.temperature,
       drawScore: message.drawScore,
+      contemptElo: message.contemptElo,
       searchContemptLimit: message.searchContemptLimit,
       signal: controller.signal,
       yieldEveryMs: 16,

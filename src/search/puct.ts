@@ -49,6 +49,17 @@ export interface SearchOptions {
    */
   drawScore?: number;
   /**
+   * Monty-style calibrated contempt: the assumed Elo advantage of the ROOT
+   * side over the opponent, in [-1000, 1000]. Each evaluated WDL is fitted to
+   * a logistic latent model (mean mu, sharpness s) and the mean is shifted by
+   * delta_mu = s^2 * elo * ln(10) / (400 * 16), so the effect naturally fades
+   * in decided positions (s small) and never touches near-certain or terminal
+   * WDLs. Sign flips at opponent nodes (same absolute side parity as
+   * drawScore). Port of official-monty/Monty src/chess.rs apply_contempt;
+   * validated against the native binary's `eval` output. 0 disables.
+   */
+  contemptElo?: number;
+  /**
    * ScLimit-style search contempt: model the opponent as a budget-limited
    * searcher. Opponent nodes explore normally for their first N visits; after
    * that their child choice is frozen to the visit distribution found so far
@@ -297,6 +308,8 @@ export interface SearchPolicyContext {
   movesLeftQuadraticFactor: number;
   /** Draw contempt for the root side ([-1,1], 0 = off) and whose side that is. */
   drawScore: number;
+  /** Monty-style Elo-diff contempt for the root side ([-1000,1000], 0 = off). */
+  contemptElo: number;
   rootSideToMove: 'w' | 'b' | null;
   /** Search contempt: opponent-node visit budget before freezing (0 = off). */
   searchContemptLimit: number;
@@ -337,8 +350,50 @@ function contemptDrawValue(context: SearchPolicyContext, turn: 'w' | 'b'): numbe
   return turn === context.rootSideToMove ? context.drawScore : -context.drawScore;
 }
 
+/**
+ * Monty's calibrated Elo-diff contempt rescaling (port of apply_contempt in
+ * official-monty/Monty src/chess.rs, oracle-tested against the native binary).
+ *
+ * The WDL triple is interpreted as a logistic latent performance x with mean
+ * mu and scale s, where win = sigma((mu-1)/s) and loss = sigma((-mu-1)/s);
+ * contempt shifts mu by s^2 * elo * ln(10)/(400*16) (clamped to +-0.8) and
+ * the triple is re-derived. The s^2 factor makes contempt fade out in
+ * decided positions, and near-certain WDLs are returned untouched — the two
+ * properties a flat drawScore lacks.
+ */
+export function applyEloContempt(wdl: [number, number, number], contempt: number): [number, number, number] {
+  if (contempt === 0) return wdl;
+  const [w, , l] = wdl;
+  const EPS = 1e-4;
+  if (w <= EPS || l <= EPS || w >= 1 - EPS || l >= 1 - EPS) return wdl;
+
+  const a = Math.log(1 / l - 1);
+  const b = Math.log(1 / w - 1);
+  const denom = a + b;
+  if (!Number.isFinite(denom) || Math.abs(denom) < 1e-6) return wdl;
+
+  const s = 2 / denom;
+  const mu = (a - b) / denom;
+  const deltaMu = clamp((s * s * contempt * Math.LN10) / (400 * 16), -0.8, 0.8);
+  const muNew = mu + deltaMu;
+
+  const logistic = (x: number) => 1 / (1 + Math.exp(-x));
+  const wNew = logistic((-1 + muNew) / s);
+  const lNew = logistic((-1 - muNew) / s);
+  const dNew = clamp(1 - wNew - lNew, 0, 1);
+  const sum = wNew + dNew + lNew;
+  if (!(sum > 0)) return wdl;
+  return [wNew / sum, dNew / sum, lNew / sum];
+}
+
+/** Signed contemptElo at a node: root side presses, the opponent is deflated. */
+function contemptEloFor(context: SearchPolicyContext, turn: 'w' | 'b'): number {
+  if (!context.contemptElo || !context.rootSideToMove) return 0;
+  return turn === context.rootSideToMove ? context.contemptElo : -context.contemptElo;
+}
+
 function valueFromEvaluation(evaln: Evaluation, context: SearchPolicyContext, turn: 'w' | 'b'): number {
-  const baseWdl = normalizeWdl(evaln.wdl, context.valueWdlBaseTemp);
+  const baseWdl = applyEloContempt(normalizeWdl(evaln.wdl, context.valueWdlBaseTemp), contemptEloFor(context, turn));
   const baseValue = valueFromWdl(baseWdl) + contemptDrawValue(context, turn) * baseWdl[1];
   const auxHead = context.valueWdlAuxHead;
   const aux = auxHead ? evaln.auxiliaryWdls?.[auxHead] : undefined;
@@ -946,8 +1001,8 @@ function makeSearchRoot(board: BoardState, historyFens: string[] = []): Node {
 }
 
 function searchValueKey(context: SearchPolicyContext): string {
-  if (context.drawScore === 0 && context.searchContemptLimit === 0) return 'drawScore=0;scLimit=0';
-  return `drawScore=${context.drawScore};scLimit=${context.searchContemptLimit};rootSide=${context.rootSideToMove ?? ''}`;
+  if (context.drawScore === 0 && context.searchContemptLimit === 0 && context.contemptElo === 0) return 'drawScore=0;scLimit=0';
+  return `drawScore=${context.drawScore};scLimit=${context.searchContemptLimit};contemptElo=${context.contemptElo};rootSide=${context.rootSideToMove ?? ''}`;
 }
 
 function nodeSearchValueCompatible(node: Node, key: string): boolean {
@@ -1572,6 +1627,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     movesLeftScaledFactor: options.movesLeftScaledFactor ?? 1.65,
     movesLeftQuadraticFactor: options.movesLeftQuadraticFactor ?? -0.65,
     drawScore: clamp(options.drawScore ?? 0, -1, 1),
+    contemptElo: clamp(options.contemptElo ?? 0, -1000, 1000),
     rootSideToMove: board.turn,
     searchContemptLimit: Math.max(0, Math.floor(options.searchContemptLimit ?? 0)),
     scCounters: (options.searchContemptLimit ?? 0) > 0 ? { frozenNodes: 0, sampledSelections: 0 } : undefined,

@@ -90,6 +90,8 @@ export interface Bt4SearchOptions {
   evalCacheEntries?: number;
   /** WDL draw contempt for the searching side ([-1,1], 0 = off); see SearchOptions.drawScore. */
   drawScore?: number;
+  /** Monty-style Elo-diff contempt ([-1000,1000], 0 = off); see SearchOptions.contemptElo. */
+  contemptElo?: number;
   cpuct?: number;
   /** ScLimit-style search contempt (opponent visit budget, 0 = off). */
   searchContemptLimit?: number;
@@ -263,6 +265,7 @@ export class Bt4WorkerSearcher {
         batchPipelineDepth: Math.max(1, Math.floor(Number(options.batchPipelineDepth ?? this.config.recommendedPipelineDepth) || this.config.recommendedPipelineDepth)),
         reuseTree: options.reuseTree,
         drawScore: options.drawScore,
+        contemptElo: options.contemptElo,
         cpuct: options.cpuct,
         searchContemptLimit: options.searchContemptLimit,
       },
