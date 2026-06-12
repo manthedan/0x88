@@ -87,6 +87,13 @@ const BIG_NET_LEVELS = [4, 16, 64, 256, 800];
  */
 const PLAY_DRAW_SCORE = -0.25;
 const LQO_DRAW_SCORE = -0.5;
+/**
+ * Model the human opponent as a budget-limited searcher (see
+ * docs/search_contempt_design.md). The limit reflects the opponent's search
+ * ability, not ours, so it stays fixed across the visit ladder; 16 is the
+ * A/B-validated point (92% vs 58% baseline at queen odds vs Maia 1900).
+ */
+const PLAY_SEARCH_CONTEMPT_LIMIT = 16;
 /** LeelaQueenOdds README search settings (CPuct 1.5, ScLimit scaled to browser visit budgets). */
 const LQO_CPUCT = 1.5;
 const LQO_SEARCH_CONTEMPT_LIMIT = 24;
@@ -345,7 +352,7 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
   }
   if (option.family === 'lc0' && option.variant === 'small') {
     const searcher = await ensureLc0Small();
-    const result = await searcher.search({ positions }, { visits: visitsOrDepth, signal, yieldEveryMs: 16, reuseTree: true, drawScore: PLAY_DRAW_SCORE });
+    const result = await searcher.search({ positions }, { visits: visitsOrDepth, signal, yieldEveryMs: 16, reuseTree: true, drawScore: PLAY_DRAW_SCORE, searchContemptLimit: PLAY_SEARCH_CONTEMPT_LIMIT });
     return result.move ?? null;
   }
   if (option.family === 'lc0') {
@@ -364,7 +371,8 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
         batchPipelineDepth: searcher.config.recommendedPipelineDepth,
         evalCacheEntries: 2048,
         drawScore: option.variant === 'lqo' ? LQO_DRAW_SCORE : PLAY_DRAW_SCORE,
-        ...(option.variant === 'lqo' ? { cpuct: LQO_CPUCT, searchContemptLimit: LQO_SEARCH_CONTEMPT_LIMIT } : {}),
+        searchContemptLimit: option.variant === 'lqo' ? LQO_SEARCH_CONTEMPT_LIMIT : PLAY_SEARCH_CONTEMPT_LIMIT,
+        ...(option.variant === 'lqo' ? { cpuct: LQO_CPUCT } : {}),
       });
       hideDownloadProgress();
       setEngineNote('');
