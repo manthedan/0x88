@@ -31,7 +31,10 @@ const BUILTIN_ARENA_OPENING_DEFS: ArenaOpeningDefinition[] = [
   { name: 'French Advance', moves: ['e2e4', 'e7e6', 'd2d4', 'd7d5', 'e4e5'] },
   { name: 'Caro-Kann Advance', moves: ['e2e4', 'c7c6', 'd2d4', 'd7d5', 'e4e5'] },
   { name: "Queen's Gambit Declined", moves: ['d2d4', 'd7d5', 'c2c4'] },
-  { name: "King's Indian", moves: ['d2d4', 'g8f6', 'c2c4', 'g7g6', 'e2e4'] },
+  // Main line needs 3.Nc3 before e4: the old ['d2d4','g8f6','c2c4','g7g6','e2e4']
+  // hung the e-pawn to 3...Nxe4 (Stockfish d18: −0.8 for White after the capture),
+  // so every KID game effectively started a pawn down for White.
+  { name: "King's Indian", moves: ['d2d4', 'g8f6', 'c2c4', 'g7g6', 'b1c3', 'f8g7', 'e2e4'] },
   { name: 'English Opening', moves: ['c2c4'] },
   { name: 'Reti Opening', moves: ['g1f3'] },
   { name: 'Scandinavian Defense', moves: ['e2e4', 'd7d5'] },
