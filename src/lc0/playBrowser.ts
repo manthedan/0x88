@@ -13,7 +13,6 @@ import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromo
 import { sampleHumanMove } from './humanSampling.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
-import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Maia3BrowserEvaluator, MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle } from './maia3.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { BIG_NETS, Bt4WorkerSearcher, LQO_NET, T3_NET, bigNetMemoryCaution, bigNetOptionState, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig } from './bt4Engine.ts';
@@ -103,10 +102,6 @@ const PLAY_SEARCH_CONTEMPT_LIMIT = 16;
 const LQO_CPUCT = 1.5;
 const LQO_SEARCH_CONTEMPT_LIMIT = 24;
 
-function maiaModelUrl(elo: string): string {
-  return `/models/lc0/maia-${elo}.f32.onnx`;
-}
-
 function el(id: string): HTMLElement {
   const found = document.getElementById(id);
   if (!found) throw new Error(`missing element #${id}`);
@@ -156,33 +151,9 @@ interface CpuEngine {
   bestMove(fen: string, signal?: AbortSignal): Promise<string | null>;
 }
 const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
-const maiaPlayerPromises = new Map<string, Promise<Lc0PolicyOnlyPlayer>>();
 let maia3Promise: Promise<Maia3BrowserEvaluator> | null = null;
 /** One-line model/cache status shown in the caption once Maia3 has loaded. */
 let maia3Status: string | null = null;
-
-function ensureMaia(elo: string): Promise<Lc0PolicyOnlyPlayer> {
-  const existing = maiaPlayerPromises.get(elo);
-  if (existing) return existing;
-  const created = (async () => {
-    setEngineNote(`Loading Maia ${elo}…`);
-    const modelLoad = await loadLc0ModelForOrt(maiaModelUrl(elo), {
-      cache: true,
-      onProgress: (loaded, total) => showDownloadProgress(`Maia ${elo}`, loaded, total),
-    });
-    hideDownloadProgress();
-    const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
-    setEngineNote('');
-    return new Lc0PolicyOnlyPlayer(evaluator);
-  })().catch((error: Error) => {
-    maiaPlayerPromises.delete(elo);
-    hideDownloadProgress();
-    setEngineNote(`Maia ${elo} load failed: ${error.message}`, true);
-    throw error;
-  });
-  maiaPlayerPromises.set(elo, created);
-  return created;
-}
 
 function ensureMaia3(): Promise<Maia3BrowserEvaluator> {
   if (maia3Promise) return maia3Promise;
@@ -246,7 +217,7 @@ function strengthCaption(): string {
   const option = selectedEngine();
   const level = selectedLevel();
   if (option.family === 'maia') {
-    return `Plays like a ~${option.variant}-rated human — moves are sampled from its human-move predictions, so games vary.`;
+    return `Plays like a ~${option.variant}-rated human — Maia3 conditioned at this rating, moves sampled from its predictions so games vary.`;
   }
   if (option.family === 'maia3') {
     const style = selectedMaia3Style();
@@ -392,10 +363,16 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
   const level = selectedLevel();
   const visitsOrDepth = strengthFor(option, level);
   if (option.family === 'maia') {
-    const player = await ensureMaia(option.variant);
+    // Fixed-rating human opponents are Maia3 conditioned at the level's Elo
+    // (the old per-level Maia-1 nets were retired: Maia3(1500) beat sampled
+    // Maia-1500 +7 =1 -0, i.e. the old labels under sampling ran well below
+    // their nominal strength — Maia3's conditioning is the better-calibrated
+    // label, and one 28MB model replaces five 3.5MB nets).
+    const evaluator = await ensureMaia3();
     if (signal.aborted) return null;
-    const choice = await player.chooseMove({ positions });
-    return sampleHumanMove(choice.evaluation.legalPriors) ?? choice.move ?? null;
+    const elo = Number(option.variant);
+    const evaluation = await evaluator.evaluate({ positions }, { selfElo: elo, oppoElo: elo });
+    return sampleHumanMove(evaluation.legalPriors) ?? evaluation.legalPriors[0]?.uci ?? null;
   }
   if (option.family === 'maia3') {
     const player = await ensureMaia3();

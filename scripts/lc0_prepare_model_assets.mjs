@@ -42,10 +42,6 @@ const packDirs = [
   't1-256x10-distilled-swa-2432500.batch8.f16.lc0web',
 ];
 
-// Maia human-like sparring nets (CSSLab, https://github.com/CSSLab/maia-chess),
-// converted 2026-06-11 with: lc0 leela2onnx --input=maia-NNNN.pb.gz (f32,
-// dynamic batch; ~3.5MB each, WDL head, no MLH). Played at nodes=1 (pure
-// policy) so they match the human Elo they were trained on.
 // LeelaQueenOdds v2 (notune/LeelaQueenOdds, the public net behind the Lichess
 // queen-odds bot). T-era attention net; converted 2026-06-11 with:
 // lc0 leela2onnx --onnx-data-type=f16. WebGPU-gated big-net (bt4Engine.ts).
@@ -54,14 +50,13 @@ const oddsFiles = [
   'lqo_v2.f16.onnx',
 ];
 
+// The Maia-1 per-level nets (maia-NNNN.f32.onnx) were retired 2026-06-12:
+// the Play page's fixed-rating human opponents now run on Maia3 conditioned
+// at each level (one 28MB model instead of five 3.5MB nets; head-to-head
+// Maia3(1500) beat sampled Maia-1500 +7 =1 -0). The source nets remain in
+// models/maia/onnx for the calibration scripts.
 const maiaSourceDir = resolve(workspaceRoot, 'models/maia/onnx');
-const maiaFiles = [
-  'maia-1100.f32.onnx',
-  'maia-1300.f32.onnx',
-  'maia-1500.f32.onnx',
-  'maia-1700.f32.onnx',
-  'maia-1900.f32.onnx',
-];
+const maiaFiles = [];
 
 function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
