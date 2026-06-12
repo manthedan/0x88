@@ -48,18 +48,45 @@ activity. `tests/puct_search_contempt.test.mjs` proves the mechanism with
 a synthetic trap (one refutation among 20 uniform replies: plain search
 refutes the trap move, scLimit keeps it alive).
 
+## Mechanism 3: Elo-calibrated contempt (`contemptElo`)
+
+Port of Monty's `apply_contempt` (src/chess.rs, the native-oracle lane
+from the verdict below): the assumed **Elo advantage of the root side**,
+in [-1000, 1000]. Each evaluated WDL triple is fitted to a logistic
+latent model — win = σ((μ−1)/s), loss = σ((−μ−1)/s), giving mean μ and
+sharpness s — then μ is shifted by `Δμ = s²·elo·ln10/(400·16)` (clamped
+to ±0.8) and the triple re-derived.
+
+Why this is the principled successor to a flat `drawScore`:
+
+- the **s² factor fades contempt out in decided positions** (a flat
+  drawScore keeps pushing even in lost ones — the exact failure we
+  measured at queen odds);
+- near-certain WDLs (and therefore terminal draws) are guarded and
+  returned untouched;
+- the knob has units: `contemptElo 600` means "treat the opponent as
+  600 Elo weaker", directly comparable to Maia ladder ratings.
+
+Sign flips at opponent nodes by the same absolute side parity as
+`drawScore`; the setting is part of `searchValueKey`, and `0` is exact
+identity (same array, no float ops). Implemented in `applyEloContempt`
+(src/search/puct.ts), plumbed through searchWorker/Bt4SearchOptions.
+`tests/puct_elo_contempt.test.mjs` checks the transform against 15
+samples captured from the native Monty binary's `eval` command (matches
+within print precision), plus sign/guard/parity/tree-reuse behavior.
+
 ## Tree reuse safety
 
 Backed-up node values depend on the contempt settings that produced them,
 so a tree built under one setting must not seed a search under another.
 `searchValueKey(context)` fingerprints `drawScore`/`searchContemptLimit`/
-`rootSideToMove`; root reuse and transposition-table hits require a
-matching key (`nodeSearchValueCompatible`), with pre-key trees compatible
-only with the neutral default. Covered by
+`contemptElo`/`rootSideToMove`; root reuse and transposition-table hits
+require a matching key (`nodeSearchValueCompatible`), with pre-key trees
+compatible only with the neutral default. Covered by
 `tests/puct_contempt.test.mjs` ("changed contempt settings do not reuse
-stale search tree").
+stale search tree") and `tests/puct_elo_contempt.test.mjs`.
 
-Both mechanisms off (`0`) ⇒ bit-identical search (puct/lc0 parity suites).
+All mechanisms off (`0`) ⇒ bit-identical search (puct/lc0 parity suites).
 
 ## Empirical results (Maia as the human stand-in)
 
