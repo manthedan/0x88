@@ -1,0 +1,38 @@
+{
+  "name": "plentychess-wasm",
+  "upstream": {
+    "repo": "https://github.com/Yoshie2000/PlentyChess.git",
+    "ref": "58d8ba2505ae2b49f48dd410d214a457d15c12c6",
+    "version": "7.0.66",
+    "license": "GPL-3.0"
+  },
+  "network": {
+    "id": "0134-2r24-s0",
+    "name": "0134-2r24-s0.bin",
+    "url": "https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/0134-2r24-s0.bin",
+    "sha256": "550a0b664b68113fd228f501524b25e0cea1be500a608bb0f26d42a6255c8061",
+    "processedSha256": "691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4"
+  },
+  "patches": {
+    "emscripten": "patches/plentychess-emscripten.patch (UCI facade, preloaded processed net, relaxed dpbusd + relaxed-madd f32 tail under __wasm_relaxed_simd__, SSE4.1-aware convertEpi8Epi16)"
+  },
+  "variants": {
+    "base": {
+      "base": "plentychess-emscripten",
+      "flags": []
+    },
+    "sse41": {
+      "base": "plentychess-emscripten-sse41",
+      "flags": [
+        "-msse4.1"
+      ]
+    },
+    "relaxed-simd128": {
+      "base": "plentychess-emscripten-relaxed-simd128",
+      "flags": [
+        "-msse4.1",
+        "-mrelaxed-simd"
+      ]
+    }
+  }
+}

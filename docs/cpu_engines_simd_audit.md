@@ -74,7 +74,7 @@ vectorized NNUE with zero new kernel code:
 
 Evidence
 ([`berserk_simd_emscripten_node_bench_2026-06-09_depth9-11.json`](./berserk_simd_emscripten_node_bench_2026-06-09_depth9-11.json),
-new `scripts/berserk_emscripten_bench.mjs` suite harness):
+new `scripts/emscripten_uci_bench.mjs` suite harness):
 
 - Parity: 40/40 exact for simd128 and relaxed vs scalar at depths 9/11.
 - Speed (depth-11 medians): scalar 365k NPS → simd128 1.38M (**3.8x**) →
