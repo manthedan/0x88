@@ -1,3 +1,0 @@
-{"id":"opening_start_e4","fen":"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1","policy":{"e2e4":0.42,"d2d4":0.28,"g1f3":0.18,"c2c4":0.12},"wdl":[0.34,0.33,0.33],"q":0.01,"teacher":"phase_b_fixture","nodes":0}
-{"id":"reply_to_e4","fen":"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1","policy":{"c7c5":0.36,"e7e5":0.34,"e7e6":0.16,"c7c6":0.14},"wdl":[0.33,0.34,0.33],"q":0.0,"teacher":"phase_b_fixture","nodes":0}
-{"id":"simple_tactic_back_rank","fen":"6k1/5ppp/8/8/8/8/5PPP/4R1K1 w - - 0 1","policy":{"e1e8":0.8,"e1a1":0.08,"g2g3":0.06,"h2h3":0.06},"wdl":[0.82,0.1,0.08],"q":0.74,"teacher":"phase_b_fixture","nodes":0}
