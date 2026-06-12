@@ -785,7 +785,7 @@ type EvalBenchResult = {
 type EngineReplyMode = 'policy' | 'search';
 
 const params = new URLSearchParams(location.search);
-const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
+const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
 const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
 const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;

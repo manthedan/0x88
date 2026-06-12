@@ -29,7 +29,7 @@ import { defaultPlentyChessVariantKey, plentyChessVariantByKey, resolveDefaultPl
 import { createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine } from './engineProvision.ts';
 
 const params = new URLSearchParams(location.search);
-const DEFAULT_MODEL_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
+const DEFAULT_MODEL_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL_URL;
 
 type PlayFamily = 'maia' | 'maia3' | 'lc0' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';

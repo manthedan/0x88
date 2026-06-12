@@ -11,6 +11,10 @@ const packSourceDir = resolve(workspaceRoot, 'models/lc0-bestnets/lc0web');
 const publicDir = resolve(repoRoot, 'public/models/lc0');
 const files = [
   't1-256x10-distilled-swa-2432500.batch1.f32.onnx',
+  // Default Play/analysis small-net model: weight-only int8 QDQ of the f16
+  // batch1 export (81MB f32 -> 20.6MB; parity 38/40 top-1, drift <=0.026;
+  // ~15-20% slower on WebGPU, ~2x on the wasm fallback — a download trade).
+  't1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx',
   't1-256x10-distilled-swa-2432500.batch1.f16.onnx',
   't1-256x10-distilled-swa-2432500.batch4.f16.onnx',
   't1-256x10-distilled-swa-2432500.batch8.f16.onnx',
