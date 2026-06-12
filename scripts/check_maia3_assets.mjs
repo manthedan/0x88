@@ -51,5 +51,8 @@ async function main() {
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.stack ?? error.message : error);
+  if (error?.code === 'ENOENT' || /ENOENT/.test(String(error))) {
+    console.error('\nMaia3 model is not staged (clean checkout?). Run: npm run maia3:stage-assets');
+  }
   process.exitCode = 1;
 });
