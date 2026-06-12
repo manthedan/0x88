@@ -26,6 +26,14 @@ const BASES = String(args.get('bases') ?? '1500,2000').split(',').map(Number);
 const GAPS = String(args.get('gaps') ?? '200,400,800').split(',').map(Number);
 const POSITIONS = Number(args.get('positions') ?? 120);
 const MAX_PLIES = Number(args.get('max-plies') ?? 60);
+if (!Number.isFinite(POSITIONS) || POSITIONS < 1) {
+  console.error('--positions must be a positive integer');
+  process.exit(1);
+}
+if (!Number.isFinite(MAX_PLIES) || (POSITIONS > 1 && MAX_PLIES < 7)) {
+  console.error('--max-plies must be at least 7 when generating more than one position');
+  process.exit(1);
+}
 
 // Deterministic playout corpus (same xorshift seed as the tensor parity script).
 let rngState = 0x9e3779b9;
