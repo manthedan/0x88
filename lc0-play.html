@@ -22,8 +22,8 @@ main{display:grid;grid-template-columns:minmax(320px,620px) minmax(300px,400px);
 #status.over{border-color:var(--accent);font-weight:700}
 h2{font-size:13px;margin:16px 0 0;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
 .field{display:grid;gap:3px;margin-top:10px}.field label{font-size:11px;color:var(--muted)}
-select,button{font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink)}
-select{width:100%}
+select,button,input{font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink)}
+select,input{width:100%}
 button{cursor:pointer}button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:700}
 button:disabled{opacity:.55;cursor:not-allowed}
 .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.row button{flex:1 1 auto}
@@ -59,6 +59,19 @@ button:disabled{opacity:.55;cursor:not-allowed}
       <select id="engineSelect"></select></div>
     <div class="field"><label for="levelSelect">Strength</label>
       <select id="levelSelect"></select></div>
+    <div id="maia3Controls" hidden>
+      <div class="field"><label for="maia3Elo">Maia3 rating <span id="maia3EloValue">1500</span></label>
+        <input id="maia3Elo" type="range" min="600" max="2600" step="100" value="1500" /></div>
+      <div class="field"><label for="maia3Style">Maia3 move style</label>
+        <select id="maia3Style">
+          <option value="sample">Human sampling</option>
+          <option value="argmax">Deterministic top move</option>
+        </select></div>
+      <div class="field" id="maia3TemperatureField"><label for="maia3Temperature">Temperature</label>
+        <input id="maia3Temperature" type="number" min="0.01" max="5" step="0.05" value="1" /></div>
+      <div class="field" id="maia3TopPField"><label for="maia3TopP">Top-p</label>
+        <input id="maia3TopP" type="number" min="0.01" max="1" step="0.05" value="1" /></div>
+    </div>
     <div id="levelCaption" class="small"></div>
     <div id="engineCaution" class="small" hidden></div>
     <div id="engineNote" hidden></div>

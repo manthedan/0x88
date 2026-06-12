@@ -1,0 +1,11 @@
+{
+  "models": [
+    {
+      "file": "maia3_simplified.onnx",
+      "url": "/models/maia3/maia3_simplified.onnx",
+      "bytes": 45683686,
+      "sha256": "405bf76c15727dad8728b352c06a8f3c1b80fb2760e8d666b32485c63d75b856",
+      "source": "CSSLab/maia-platform-frontend public/maia3/maia3_simplified.onnx"
+    }
+  ]
+}
