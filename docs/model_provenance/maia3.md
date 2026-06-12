@@ -79,6 +79,17 @@ to input/post-processing parity. Status: **covered**.
 - Lifecycle: 25 create/evaluate/dispose worker cycles green (1 cache miss +
   24 Cache API hits, sha256 valid on all loads, no browser errors).
 
+## Regression gating decision (2026-06-11)
+
+- `npm run maia3:gate` (= `maia3:check-assets` + `maia3:upstream-tensor-parity`)
+  is the pre-merge/productization gate for Maia3 changes.
+- It is intentionally NOT part of `npm test`: the asset check fails on clean
+  checkouts without the staged model, and the repo already has one
+  missing-artifact `npm test` failure mode we do not want to add to.
+- `maia3:upstream-move-map-parity` needs a local upstream checkout
+  (`--upstream-dir`) and `maia3:browser-smoke` needs a browser + the 45MB
+  model; both stay manual/release checks.
+
 ## Integration policy
 
 - Maia3 is a policy/value human model. Do not route it through Lc0 PUCT by
