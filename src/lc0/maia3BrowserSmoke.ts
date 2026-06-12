@@ -89,6 +89,7 @@ async function main(): Promise<void> {
   const topP = parseFloatParam(params.get('topP'), 1);
   const epParam = params.get('ortEp');
   const ep = epParam === 'wasm' || epParam === 'webgpu' || epParam === 'webgpu,wasm' || epParam === 'auto' ? epParam : undefined;
+  const modelUrl = params.get('model') ?? undefined;
   const started = performance.now();
   const result = {
     ok: false,
@@ -114,7 +115,7 @@ async function main(): Promise<void> {
   };
   for (let cycle = 0; cycle < cycles; cycle++) {
     el('status').textContent = `Loading Maia3 cycle ${cycle + 1}/${cycles}…`;
-    const evaluator = await Maia3BrowserEvaluator.create({ selfElo, oppoElo, ep });
+    const evaluator = await Maia3BrowserEvaluator.create({ selfElo, oppoElo, ep, modelUrl });
     result.backend = evaluator.backend;
     result.model ??= {
       url: evaluator.modelLoad.url,
