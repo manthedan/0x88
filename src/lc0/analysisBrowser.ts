@@ -532,10 +532,10 @@ function profileHasBt4(rows: EngineRow[]): boolean {
   return rows.some((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant));
 }
 function bigNetSelectableSync(config: BigNetConfig): boolean {
-  return bt4SupportedSync() && bigNetAssetStatusSync(config) === 'present';
+  // WebGPU no longer gates selection: 'auto' falls back to wasm-CPU (slow).
+  return bigNetAssetStatusSync(config) === 'present';
 }
 function bigNetUnavailableText(config: BigNetConfig): string {
-  if (!bt4SupportedSync()) return `Lc0 ${config.name} needs WebGPU support.`;
   if (bigNetAssetStatusSync(config) === 'missing') return `Lc0 ${config.name} model asset is missing at ${config.modelUrl}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
   if (bigNetAssetStatusSync(config) === 'unknown') return `Lc0 ${config.name} model asset is still being checked.`;
   return '';
@@ -744,12 +744,12 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'tiny') return tinyVariantOptions().map((option) => option.value === 'bt4-custom' && tinyHybridManifestStatus === 'missing'
     ? { ...option, disabled: true, label: `${option.label} (bundle missing)` }
     : option);
-  if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync()).map((option) => {
+  if (family === 'lc0') return lc0VariantOptions(true).map((option) => {
     if (!isLc0BigNetVariant(option.value)) return option;
     const config = BIG_NETS[option.value];
     const asset = bigNetAssetStatusSync(config);
-    if (bt4SupportedSync() && asset === 'unknown') void checkBigNetAsset(config, renderEngineList);
-    const suffix = !bt4SupportedSync() ? ' (WebGPU unavailable)' : asset === 'missing' ? ' (asset missing)' : asset === 'unknown' ? ' (checking asset)' : '';
+    if (asset === 'unknown') void checkBigNetAsset(config, renderEngineList);
+    const suffix = !bt4SupportedSync() ? ' (CPU fallback — slow)' : asset === 'missing' ? ' (asset missing)' : asset === 'unknown' ? ' (checking asset)' : '';
     return { ...option, label: `${option.label}${suffix}`, disabled: option.disabled || asset !== 'present' };
   });
   if (family === 'sf') return stockfishVariantOptions();

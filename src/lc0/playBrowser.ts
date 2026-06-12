@@ -47,12 +47,12 @@ const ENGINE_OPTIONS: PlayEngineOption[] = [
   { id: 'maia-1700', label: 'Maia 1700', family: 'maia', variant: '1700', group: 'human' },
   { id: 'maia-1900', label: 'Maia 1900', family: 'maia', variant: '1900', group: 'human' },
   { id: 'maia3', label: 'Maia3 · Elo-conditioned human model', family: 'maia3', variant: 'maia3', group: 'human' },
-  { id: 'leela-queen-odds', label: 'Leela Queen Odds (WebGPU)', family: 'lc0', variant: 'lqo', group: 'odds' },
+  { id: 'leela-queen-odds', label: 'Leela Queen Odds', family: 'lc0', variant: 'lqo', group: 'odds' },
   { id: 'sf-lite', label: 'Stockfish Lite', family: 'sf', variant: 'lite', group: 'engine' },
   { id: 'sf-full', label: 'Stockfish', family: 'sf', variant: 'full', group: 'engine' },
   { id: 'lc0-small', label: 'Lc0 · Small net', family: 'lc0', variant: 'small', group: 'engine' },
-  { id: 'lc0-t3', label: 'Lc0 · t3-512 distill (WebGPU)', family: 'lc0', variant: 't3', group: 'engine' },
-  { id: 'lc0-bt4', label: 'Lc0 · BT4-it332 (WebGPU)', family: 'lc0', variant: 'bt4', group: 'engine' },
+  { id: 'lc0-t3', label: 'Lc0 · t3-512 distill', family: 'lc0', variant: 't3', group: 'engine' },
+  { id: 'lc0-bt4', label: 'Lc0 · BT4-it332', family: 'lc0', variant: 'bt4', group: 'engine' },
   { id: 'reckless', label: 'Reckless', family: 'reckless', variant: 'default', group: 'engine' },
   { id: 'viridithas', label: 'Viridithas', family: 'viridithas', variant: 'default', group: 'engine' },
   { id: 'berserk', label: 'Berserk', family: 'berserk', variant: 'default', group: 'engine' },
@@ -252,7 +252,12 @@ function selectedMaia3TopP(): number {
 function strengthFor(option: PlayEngineOption, level: number): number {
   if (option.family === 'maia' || option.family === 'maia3') return 1;
   if (option.family === 'sf') return SF_LEVELS[level].depth;
-  if (option.family === 'lc0' && option.variant !== 'small') return BIG_NET_LEVELS[level];
+  if (option.family === 'lc0' && option.variant !== 'small') {
+    // Without WebGPU the big nets run on the wasm-CPU fallback: keep them
+    // available but at per-net reduced visit ladders (seconds-per-move).
+    if (!bt4SupportedSync()) return BIG_NETS[option.variant as BigNetKey].wasmLevels[level];
+    return BIG_NET_LEVELS[level];
+  }
   return LEVELS[option.family][level];
 }
 function strengthCaption(): string {
@@ -272,9 +277,12 @@ function strengthCaption(): string {
     return sf.skill >= 20 ? `full strength · depth ${sf.depth}` : `UCI skill ${sf.skill} · depth ${sf.depth}`;
   }
   const value = strengthFor(option, level);
-  if (option.variant === 'lqo') return `≈ ${value} visits per move — higher levels press harder for tricks`;
+  const cpuNote = option.family === 'lc0' && option.variant !== 'small' && !bt4SupportedSync()
+    ? ' · CPU fallback (no WebGPU): expect several seconds per move'
+    : '';
+  if (option.variant === 'lqo') return `≈ ${value} visits per move — higher levels press harder for tricks${cpuNote}`;
   const base = option.family === 'lc0' ? `≈ ${value} visits per move` : `search depth ${value}`;
-  return option.family === 'lc0' ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent` : base;
+  return option.family === 'lc0' ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent${cpuNote}` : base;
 }
 
 function renderLevelOptions(): void {
@@ -680,8 +688,8 @@ function engineOptionHtml(option: PlayEngineOption): string {
   if (option.family === 'lc0' && option.variant !== 'small') {
     const config: BigNetConfig = BIG_NETS[option.variant as BigNetKey];
     const asset = bigNetAssetStatusSync(config);
-    if (!bt4SupportedSync()) { disabled = true; suffix = ' (needs WebGPU)'; }
-    else if (asset === 'missing') { disabled = true; suffix = ' (net not hosted here)'; }
+    if (asset === 'missing') { disabled = true; suffix = ' (net not hosted here)'; }
+    else if (!bt4SupportedSync()) suffix = ' (CPU fallback — slow)';
   }
   return `<option value="${option.id}"${disabled ? ' disabled' : ''}>${option.label}${suffix}</option>`;
 }
@@ -705,7 +713,8 @@ function renderEngineCaution(): void {
     const memory = bigNetMemoryCaution(config);
     const odds = option.variant === 'lqo'
       ? ' The bot starts without its queen and plays for traps — the Lichess LeelaQueenOdds net. ' : ' ';
-    caution.textContent = `First move downloads the ~${config.approxMb}MB net.${odds}${memory ?? ''}`.trimEnd();
+    const cpu = bt4SupportedSync() ? '' : ' No WebGPU here: runs on the CPU (wasm) fallback with reduced visit budgets — expect several seconds per move.';
+    caution.textContent = `First move downloads the ~${config.approxMb}MB net.${odds}${memory ?? ''}${cpu}`.trimEnd();
     caution.hidden = false;
   } else {
     caution.hidden = true;

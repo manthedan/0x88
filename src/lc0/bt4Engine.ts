@@ -7,7 +7,7 @@
 //   - Off the main thread: search runs entirely inside searchWorker.ts so heavy
 //     inference never blocks the UI.
 //   - Disposable: `dispose()` terminates the worker, freeing model memory.
-import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
+import { collectOrtRuntimeDiagnostics, requestedOrtExecutionProvider } from '../nn/ortRuntime.ts';
 import type { Lc0EvaluatorInput } from './onnxEvaluator.ts';
 
 export interface BigNetConfig {
@@ -19,6 +19,12 @@ export interface BigNetConfig {
   recommendedPipelineDepth: number;
   /** Short export description for the one-time load warning. */
   exportNote: string;
+  /**
+   * Play-page visit ladder when running on the wasm-CPU fallback (per-level,
+   * 5 entries). Sized from measured wasm eval latency (lqo ~210ms/eval,
+   * t3 ~1.1s, BT4 ~1.5s) to keep worst-case moves in the seconds range.
+   */
+  wasmLevels: number[];
 }
 
 export const BT4_NET: BigNetConfig = {
@@ -29,6 +35,7 @@ export const BT4_NET: BigNetConfig = {
   recommendedBatchSize: 4,
   recommendedPipelineDepth: 1,
   exportNote: 'policytune-332 batch-4 f16 export',
+  wasmLevels: [2, 3, 4, 6, 8],
 };
 
 // b8 is t3's measured sweet spot (b16 regressed 119 -> 140 ms at v16);
@@ -41,6 +48,7 @@ export const T3_NET: BigNetConfig = {
   recommendedBatchSize: 8,
   recommendedPipelineDepth: 1,
   exportNote: 'distill-swa-2767500 batch-8 f16 export',
+  wasmLevels: [2, 4, 6, 8, 12],
 };
 
 // LeelaQueenOdds v2 (github.com/notune/LeelaQueenOdds): the public net behind
@@ -57,6 +65,7 @@ export const LQO_NET: BigNetConfig = {
   recommendedBatchSize: 8,
   recommendedPipelineDepth: 1,
   exportNote: 'LeelaQueenOdds v2 f16 export (dynamic batch)',
+  wasmLevels: [4, 8, 16, 32, 64],
 };
 
 export const BIG_NETS: Record<BigNetConfig['key'], BigNetConfig> = { bt4: BT4_NET, t3: T3_NET, lqo: LQO_NET };
@@ -109,6 +118,12 @@ export async function probeBt4Support(): Promise<boolean> {
   if (supportProbe) return supportProbe;
   supportProbe = (async () => {
     try {
+      // An explicit ?ortEp=wasm override counts as "no WebGPU" so the UI and
+      // visit ladders match the engine's actual (forced) backend.
+      if (requestedOrtExecutionProvider() === 'wasm') {
+        supportedCached = false;
+        return supportedCached;
+      }
       const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
       supportedCached = diag.webgpuAvailable === true && diag.adapter?.ok !== false;
     } catch {
@@ -236,8 +251,13 @@ export class Bt4WorkerSearcher {
           this.pending.clear();
         });
       }
-      // Big nets are WebGPU-only by policy; never fall back to WASM for them.
-      const ready = await this.post<{ backend: string }>({ type: 'init', modelUrl: this.config.modelUrl, ep: 'webgpu', cacheModel: false, evalCacheEntries, reportDownloadProgress: true });
+      // WebGPU-first with wasm-CPU fallback: 'auto' resolves to
+      // ['webgpu','wasm'] when an adapter is usable and ['wasm'] otherwise,
+      // so big nets stay playable (slowly) without WebGPU — callers read
+      // `backend` and scale visit budgets via config.wasmLevels. An explicit
+      // ?ortEp=wasm page override forces the CPU path end to end.
+      const ep = requestedOrtExecutionProvider() === 'wasm' ? 'wasm' : 'auto';
+      const ready = await this.post<{ backend: string }>({ type: 'init', modelUrl: this.config.modelUrl, ep, cacheModel: false, evalCacheEntries, reportDownloadProgress: true });
       this.ready = true;
       this.configuredEvalCacheEntries = evalCacheEntries;
       this.backend = ready.backend;
