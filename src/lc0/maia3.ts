@@ -3,7 +3,14 @@ import { legalMoves } from '../chess/movegen.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { loadLc0ModelForOrt, type Lc0ModelLoadResult } from './modelCache.ts';
 
-export const MAIA3_DEFAULT_MODEL_URL = '/models/maia3/maia3_simplified.onnx';
+/**
+ * Default browser model: the locally derived weight-only int8 QDQ variant
+ * (28.1MB vs 45.7MB fp16; parity 159/160 top-1, drift <=0.021; speed neutral
+ * or better on both EPs). The loader falls back to the upstream fp16 file
+ * when the QDQ artifact is not staged.
+ */
+export const MAIA3_DEFAULT_MODEL_URL = '/models/maia3/maia3_simplified.qdq8.onnx';
+export const MAIA3_FP16_MODEL_URL = '/models/maia3/maia3_simplified.onnx';
 export const MAIA3_MODEL_MANIFEST_URL = '/models/maia3/manifest.json';
 export const MAIA3_MIN_ELO = 600;
 export const MAIA3_MAX_ELO = 2600;
@@ -250,12 +257,23 @@ export class Maia3BrowserEvaluator {
   static async create(options: Maia3BrowserEvaluatorOptions = {}): Promise<Maia3BrowserEvaluator> {
     const selfElo = clampElo(options.selfElo ?? MAIA3_DEFAULT_ELO);
     const oppoElo = clampElo(options.oppoElo ?? selfElo);
-    const modelLoad = await loadLc0ModelForOrt(options.modelUrl ?? MAIA3_DEFAULT_MODEL_URL, {
+    const load = (url: string) => loadLc0ModelForOrt(url, {
       cache: true,
       manifestUrl: MAIA3_MODEL_MANIFEST_URL,
       cacheName: 'maia3-browser-models-v1',
       onProgress: options.onProgress,
     });
+    let modelLoad: Lc0ModelLoadResult;
+    if (options.modelUrl) {
+      modelLoad = await load(options.modelUrl);
+    } else {
+      try {
+        modelLoad = await load(MAIA3_DEFAULT_MODEL_URL);
+      } catch (error) {
+        console.warn(`Maia3 QDQ model unavailable (${error instanceof Error ? error.message : String(error)}); falling back to fp16`);
+        modelLoad = await load(MAIA3_FP16_MODEL_URL);
+      }
+    }
     const worker = new Worker(new URL('./maia3Worker.ts', import.meta.url), { type: 'module', name: 'maia3-evaluator' });
     const init = Maia3BrowserEvaluator.postInit(worker, modelLoad.model, options.ep);
     return new Maia3BrowserEvaluator(worker, modelLoad, selfElo, oppoElo, await init);

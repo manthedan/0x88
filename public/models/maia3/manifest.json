@@ -1,6 +1,14 @@
 {
   "models": [
     {
+      "file": "maia3_simplified.qdq8.onnx",
+      "url": "/models/maia3/maia3_simplified.qdq8.onnx",
+      "bytes": 28138813,
+      "sha256": "4141faeca4b0aa9f99073d70abb43211264ed2eb04cb96214ba85a86dd455a10",
+      "source": "derived locally from maia3_simplified.onnx (opset 17->21 + scripts/lc0_quantize_onnx_weights_qdq.py); default browser model",
+      "derivedFrom": "maia3_simplified.onnx"
+    },
+    {
       "file": "maia3_simplified.onnx",
       "url": "/models/maia3/maia3_simplified.onnx",
       "bytes": 45683686,

@@ -15,21 +15,27 @@ async function sha256(path) {
 async function main() {
   const manifest = JSON.parse(await readFile(MANIFEST, 'utf8'));
   const entries = Array.isArray(manifest.models) ? manifest.models : [];
-  if (entries.length !== 1) throw new Error(`Expected exactly one Maia3 model entry in ${MANIFEST}`);
-  const entry = entries[0];
-  const localPath = `public/models/maia3/${entry.file}`;
-  const stat = await lstat(localPath);
-  const resolved = await realpath(localPath);
-  await access(resolved, constants.R_OK);
-  const bytes = await readFile(resolved);
-  const digest = createHash('sha256').update(bytes).digest('hex');
+  if (entries.length < 1) throw new Error(`Expected at least one Maia3 model entry in ${MANIFEST}`);
   const errors = [];
-  if (entry.bytes !== bytes.byteLength) errors.push(`byte mismatch: manifest=${entry.bytes} actual=${bytes.byteLength}`);
-  if (entry.sha256 !== digest) errors.push(`sha256 mismatch: manifest=${entry.sha256} actual=${digest}`);
-  if (!/^\/models\/maia3\//.test(entry.url)) errors.push(`unexpected public URL: ${entry.url}`);
+  const checked = [];
+  const fileNames = new Set(entries.map((entry) => entry.file));
+  for (const entry of entries) {
+    const localPath = `public/models/maia3/${entry.file}`;
+    const stat = await lstat(localPath);
+    const resolved = await realpath(localPath);
+    await access(resolved, constants.R_OK);
+    const bytes = await readFile(resolved);
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    if (entry.bytes !== bytes.byteLength) errors.push(`${entry.file}: byte mismatch: manifest=${entry.bytes} actual=${bytes.byteLength}`);
+    if (entry.sha256 !== digest) errors.push(`${entry.file}: sha256 mismatch: manifest=${entry.sha256} actual=${digest}`);
+    if (!/^\/models\/maia3\//.test(entry.url)) errors.push(`${entry.file}: unexpected public URL: ${entry.url}`);
+    if (entry.derivedFrom && !fileNames.has(entry.derivedFrom)) errors.push(`${entry.file}: derivedFrom ${entry.derivedFrom} is not in the manifest`);
+    checked.push({ file: entry.file, symlink: stat.isSymbolicLink(), resolved, bytes: bytes.byteLength, sha256: digest, derivedFrom: entry.derivedFrom });
+  }
   const provenance = await readFile(PROVENANCE, 'utf8');
   const readme = await readFile(README, 'utf8');
-  for (const token of ['CSSLab/maia3', 'CSSLab/maia-platform-frontend', entry.sha256, 'AGPL', 'GPL']) {
+  const provenanceTokens = ['CSSLab/maia3', 'CSSLab/maia-platform-frontend', 'AGPL', 'GPL', ...entries.map((entry) => entry.sha256)];
+  for (const token of provenanceTokens) {
     if (!provenance.includes(token)) errors.push(`${PROVENANCE} missing ${token}`);
   }
   for (const token of ['CSSLab/maia3', 'CSSLab/maia-platform-frontend', 'AGPL', 'GPL']) {
@@ -38,11 +44,7 @@ async function main() {
   const result = {
     ok: errors.length === 0,
     manifest: MANIFEST,
-    localPath,
-    symlink: stat.isSymbolicLink(),
-    resolved,
-    bytes: bytes.byteLength,
-    sha256: digest,
+    models: checked,
     errors,
   };
   if (!result.ok) throw new Error(JSON.stringify(result, null, 2));
