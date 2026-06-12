@@ -259,11 +259,10 @@ function browserOrtWasmPaths(): string | Record<string, string> {
     && (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true;
   if (builtBrowser) return '/ort/';
   // Dev server: a '/ort/' prefix is blocked for source-mode module imports,
-  // so let the glue resolve from the bundled module and only pin the binary;
-  // the flavor must match the glue the resolved EP loads (webgpu -> jsep,
-  // plain wasm -> asyncify).
-  const flavor = resolvedOrtExecutionProviders().includes('webgpu') ? 'jsep' : 'asyncify';
-  return { wasm: `/ort/ort-wasm-simd-threaded.${flavor}.wasm` };
+  // so let the glue resolve from node_modules and only pin the .wasm binary.
+  // (Empirically the jsep glue resolves its own binary in dev and tolerates
+  // this asyncify-named pin; a jsep-named pin breaks its init instead.)
+  return { wasm: '/ort/ort-wasm-simd-threaded.asyncify.wasm' };
 }
 
 function requestedOrtPreferredOutputLocation(): OrtRuntimeDiagnosticOptions['preferredOutputLocation'] | undefined {
