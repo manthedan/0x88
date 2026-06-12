@@ -53,6 +53,7 @@ function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run']>>, 
       if (message.type === 'init') {
         if (session) await releaseOrtSession(session);
         if (message.ep) setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+        post({ type: 'progress', id: message.id, stage: 'creating-session' });
         session = await createOrtSession(message.model);
         post({ type: 'ready', id: message.id, inputNames: session.inputNames, outputNames: session.outputNames, backend: describeOrtBackendConfig() });
         return;

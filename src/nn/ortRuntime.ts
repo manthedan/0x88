@@ -224,11 +224,19 @@ function defaultAutoThreads(): number {
 }
 
 function requestedOrtWasmThreads(isBrowserMainThread: boolean, isNode: boolean): number {
+  // In production builds, ORT's threaded wasm boot inside a bundled worker
+  // deadlocks: the emscripten pthread helpers are spawned from the chunk's
+  // own import.meta.url, which re-executes our worker module instead of the
+  // pthread stub, so the boot handshake never completes (dev serves the glue
+  // from node_modules and is unaffected). Default built workers to a single
+  // thread; an explicit ?ortThreads=N on the worker URL still overrides.
+  const builtWorker = !isBrowserMainThread && !isNode && typeof document === 'undefined'
+    && (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true;
   const raw = browserParam('ortThreads')
     ?? browserParam('wasmThreads')
     ?? envValue('ORT_INTRA_OP_NUM_THREADS')
     ?? envValue('ORT_NUM_THREADS')
-    ?? (isBrowserMainThread || isNode ? '1' : '0');
+    ?? (isBrowserMainThread || isNode || builtWorker ? '1' : '0');
   if (String(raw).toLowerCase() === 'auto') return browserThreadedWasmAvailable() ? defaultAutoThreads() : 1;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
@@ -239,10 +247,23 @@ function requestedOrtWasmThreads(isBrowserMainThread: boolean, isNode: boolean):
 function browserOrtWasmPaths(): string | Record<string, string> {
   const override = browserParam('ortWasmPath');
   if (override) return override;
-  // Give ORT a public .wasm sidecar while letting its JS glue resolve from the
-  // bundled onnxruntime-web module. A plain '/ort/' prefix makes ORT dynamically
-  // import '/ort/*.mjs' from Vite public/, which dev-server blocks for source imports.
-  return { wasm: '/ort/ort-wasm-simd-threaded.asyncify.wasm' };
+  // Production builds: Vite/rolldown does not emit ORT's dynamic-import glue
+  // (.mjs sidecars) into /assets/, so the runtime's import() resolves to the
+  // SPA-fallback HTML and initWasm fails ("no available backend found").
+  // Hand ORT a plain '/ort/' prefix instead: it imports BOTH the glue .mjs
+  // and the matching .wasm binary from the staged public copies (public/ort/
+  // carries every flavor, served as text/javascript + application/wasm).
+  // `location` (not `document`) detects browser-ness so this also applies
+  // inside workers.
+  const builtBrowser = typeof location !== 'undefined'
+    && (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true;
+  if (builtBrowser) return '/ort/';
+  // Dev server: a '/ort/' prefix is blocked for source-mode module imports,
+  // so let the glue resolve from the bundled module and only pin the binary;
+  // the flavor must match the glue the resolved EP loads (webgpu -> jsep,
+  // plain wasm -> asyncify).
+  const flavor = resolvedOrtExecutionProviders().includes('webgpu') ? 'jsep' : 'asyncify';
+  return { wasm: `/ort/ort-wasm-simd-threaded.${flavor}.wasm` };
 }
 
 function requestedOrtPreferredOutputLocation(): OrtRuntimeDiagnosticOptions['preferredOutputLocation'] | undefined {
