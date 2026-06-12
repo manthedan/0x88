@@ -4,6 +4,7 @@ import type { Key } from 'chessground/types';
 import { boardToFen, parseFen, squareName, START_FEN, type BoardState } from '../chess/board.ts';
 import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
+import { boardCheck, showPromotionOverlay } from './boardUx.ts';
 import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
@@ -1022,16 +1023,6 @@ function legalDests(board: BoardState) {
   }
   return dests;
 }
-function legalMoveFromDrag(board: BoardState, from: Key, to: Key): Move | undefined {
-  const base = `${from}${to}`;
-  const all = legalMoves(board);
-  return all.find((m) => moveToUci(m) === base)
-    ?? all.find((m) => moveToUci(m) === `${base}q`)
-    ?? all.find((m) => moveToUci(m) === `${base}r`)
-    ?? all.find((m) => moveToUci(m) === `${base}b`)
-    ?? all.find((m) => moveToUci(m) === `${base}n`);
-}
-
 // Board arrows, colored by source and de-duplicated by move so the board stays
 // readable: each engine's best move (solid engine color) and the opening book's
 // most-played move (yellow) take priority over engines' alternative MultiPV
@@ -1068,6 +1059,9 @@ function renderBoard() {
     fen: tree.current.fen.split(' ')[0],
     turnColor: board.turn === 'w' ? 'white' as const : 'black' as const,
     coordinates: true,
+    // Allows synthetic pointer events so automated browser checks can move pieces.
+    trustAllEvents: true,
+    check: boardCheck(board),
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 160 },
     movable: {
@@ -1875,11 +1869,28 @@ function afterNavigation() {
   else { renderEvalBar(); setShapes(bestShapes()); }
 }
 
+// Test hook for automated browser checks: synthetic chessground drags are
+// unreliable, so smokes call this to route through the real user-move path.
+(globalThis as unknown as { __analysisUserMove?: (from: string, to: string) => void }).__analysisUserMove
+  = (from, to) => { void onUserMove(from as Key, to as Key); };
+
 async function onUserMove(from: Key, to: Key) {
   const board = tree.current.fen ? parseFen(tree.current.fen) : parseFen(START_FEN);
-  const move = legalMoveFromDrag(board, from, to);
-  if (!move) { renderBoard(); return; }
-  tree.addMove(move);
+  const matching = legalMoves(board).filter((m) => moveToUci(m).startsWith(`${from}${to}`));
+  if (!matching.length) { renderBoard(); return; }
+  if (matching.length > 1) {
+    // Promotion: let the user pick instead of silently auto-queening.
+    showPromotionOverlay({
+      boardContainer: el('ground'),
+      orientation,
+      color: board.turn,
+      choices: matching,
+      onPick: (move) => { tree.addMove(move); afterNavigation(); },
+      onCancel: () => renderBoard(),
+    });
+    return;
+  }
+  tree.addMove(matching[0]);
   afterNavigation();
 }
 

@@ -544,6 +544,11 @@ function legalDests(): Map<Key, Key[]> {
   return dests;
 }
 
+// Test hook for automated browser checks: synthetic chessground drags are
+// unreliable, so smokes call this to route through the real user-move path.
+(globalThis as unknown as { __playUserMove?: (from: string, to: string) => void }).__playUserMove
+  = (from, to) => onUserMove(from as Key, to as Key);
+
 function onUserMove(from: Key, to: Key): void {
   if (engineThinking || gameOver || board.turn !== humanColor) { render(); return; }
   const matching = legalMoves(board).filter((move) => squareName(move.from) === from && squareName(move.to) === to);

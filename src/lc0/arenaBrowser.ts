@@ -2,6 +2,7 @@ import { Chessground } from 'chessground';
 import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
 import { boardToFen, parseFen, START_FEN, type BoardState } from '../chess/board.ts';
+import { boardCheck } from './boardUx.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
@@ -809,9 +810,14 @@ function shownPosition(): { fen: string; uci: string | null } {
 function renderBoard() {
   const shown = shownPosition();
   const shownUci = shown.uci;
+  const shownBoard = parseFen(shown.fen);
   const config = {
     orientation: 'white' as const,
     fen: shown.fen.split(' ')[0],
+    // turnColor matters even in viewOnly mode: `check: true` highlights the
+    // king of turnColor, which must be the side to move in the shown position.
+    turnColor: shownBoard.turn === 'w' ? 'white' as const : 'black' as const,
+    check: boardCheck(shownBoard),
     coordinates: true,
     viewOnly: true,
     highlight: { lastMove: true, check: true },
