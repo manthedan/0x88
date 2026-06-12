@@ -242,8 +242,9 @@ rather than the objective one.
   which opens the raw nets by canonical name from the WASI preopened cwd
   (`nn-09da29a4b6ed.network` value ~661MB, `nn-6e49a41bd7c0.network`
   policy ~286MB; extracted from the 0950aff1 release binary since
-  tests.montychess.org was down). They ship as separate cacheable assets
-  (`public/models/monty/`, symlinks to `../models/monty/`).
+  tests.montychess.org was down). They are **not committed**; local lab
+  runs may stage them under `public/models/monty/`, but product builds
+  must not copy the ~950MB pair.
 - Loader: `recklessWasiWorker.ts` gained generic `preopenFiles`
   (fetch + cache + progress); `MontyEngine` (montyEngine.ts) is a
   persistent-preferred `BrowserUciEngine` with a `contempt` option.
@@ -286,7 +287,9 @@ Decision — Monty's three roles split by where they run, with outcomes
    match real human outcomes?") is now answered by **Maia3**, not Monty
    — see the learned-vs-analytic table above.
 2. **Browser lane — lab only, never product** (unchanged).
-   `monty-smoke.html` / `MontyEngine` stay lab-scoped. If ever surfaced:
+   `monty-smoke.html` / `MontyEngine` stay lab-scoped. The raw network
+   files were removed from tracked public assets; local tests must stage
+   ignored copies/symlinks under `public/models/monty/`. If ever surfaced:
    explicit ~950MB opt-in + AGPL corresponding-source archive +
    stream-into-wasm memory hardening.
 3. **Contempt_Analysis — rehosted Monty-free, in a stronger form.** The
