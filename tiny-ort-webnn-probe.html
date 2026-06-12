@@ -10,8 +10,8 @@
 import * as ort from 'onnxruntime-web';
 
 const params = new URLSearchParams(location.search);
-const MODEL = params.get('model') || '/models/bt4_anneal_muon_best.batch16.sim.i32.onnx';
 const BATCH = Number(params.get('batch') || 16);
+const MODEL = params.get('model') || `/models/bt4_anneal_muon_best.batch${BATCH}.sim.i32.onnx`;
 const DEVICE = params.get('device') || 'gpu';
 const ITERS = Number(params.get('iters') || 20);
 const WARMUP = Number(params.get('warmup') || 3);
