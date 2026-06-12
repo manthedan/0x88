@@ -172,6 +172,20 @@ export async function checkBt4Asset(onStatus?: () => void): Promise<Bt4AssetStat
   return checkBigNetAsset(BT4_NET, onStatus);
 }
 
+/**
+ * Selector-option decoration for a big net from the cached probes — shared by
+ * the play and analysis engine pickers so their wording and disabled states
+ * cannot drift (they previously implemented this in parallel, which is how
+ * analysis ended up hiding big nets entirely without WebGPU).
+ */
+export function bigNetOptionState(config: BigNetConfig): { disabled: boolean; suffix: string } {
+  const asset = bigNetAssetStatusSync(config);
+  if (asset === 'unknown') return { disabled: true, suffix: ' (checking net)' };
+  if (asset === 'missing') return { disabled: true, suffix: ' (net not hosted here)' };
+  if (!bt4SupportedSync()) return { disabled: false, suffix: ' (CPU fallback — slow)' };
+  return { disabled: false, suffix: '' };
+}
+
 /** A memory caution string when the device reports limited RAM, else null. */
 export function bigNetMemoryCaution(config: BigNetConfig = BT4_NET): string | null {
   const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory;

@@ -34,7 +34,7 @@ import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berse
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
-import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetLoadWarning, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig } from './bt4Engine.ts';
+import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetLoadWarning, bigNetOptionState, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig } from './bt4Engine.ts';
 import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 
@@ -735,10 +735,9 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'lc0') return lc0VariantOptions(true).map((option) => {
     if (!isLc0BigNetVariant(option.value)) return option;
     const config = BIG_NETS[option.value];
-    const asset = bigNetAssetStatusSync(config);
-    if (asset === 'unknown') void checkBigNetAsset(config, renderEngineList);
-    const suffix = !bt4SupportedSync() ? ' (CPU fallback — slow)' : asset === 'missing' ? ' (asset missing)' : asset === 'unknown' ? ' (checking asset)' : '';
-    return { ...option, label: `${option.label}${suffix}`, disabled: option.disabled || asset !== 'present' };
+    if (bigNetAssetStatusSync(config) === 'unknown') void checkBigNetAsset(config, renderEngineList);
+    const state = bigNetOptionState(config);
+    return { ...option, label: `${option.label}${state.suffix}`, disabled: option.disabled || state.disabled };
   });
   if (family === 'sf') return stockfishVariantOptions();
   if (family === 'viridithas') return availableViridithasVariants().map((v) => {

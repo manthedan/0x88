@@ -16,7 +16,7 @@ import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Maia3BrowserEvaluator, MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle } from './maia3.ts';
 import { Lc0PuctSearcher } from './search.ts';
-import { BIG_NETS, Bt4WorkerSearcher, LQO_NET, T3_NET, bigNetAssetStatusSync, bigNetMemoryCaution, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig } from './bt4Engine.ts';
+import { BIG_NETS, Bt4WorkerSearcher, LQO_NET, T3_NET, bigNetMemoryCaution, bigNetOptionState, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig } from './bt4Engine.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import type { RecklessEngine } from './recklessEngine.ts';
 import { defaultRecklessVariantKey, recklessVariantByKey, resolveDefaultRecklessVariantAssetFallback } from './recklessVariants.ts';
@@ -651,12 +651,7 @@ function renderPromotionPicker(): void {
 
 function engineOptionState(option: PlayEngineOption): { disabled: boolean; suffix: string } {
   if (option.family !== 'lc0' || option.variant === 'small') return { disabled: false, suffix: '' };
-  const config: BigNetConfig = BIG_NETS[option.variant as BigNetKey];
-  const asset = bigNetAssetStatusSync(config);
-  if (asset === 'unknown') return { disabled: true, suffix: ' (checking net)' };
-  if (asset === 'missing') return { disabled: true, suffix: ' (net not hosted here)' };
-  if (!bt4SupportedSync()) return { disabled: false, suffix: ' (CPU fallback — slow)' };
-  return { disabled: false, suffix: '' };
+  return bigNetOptionState(BIG_NETS[option.variant as BigNetKey]);
 }
 
 function engineOptionHtml(option: PlayEngineOption): string {
