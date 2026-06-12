@@ -22,6 +22,18 @@ Lc0 network and not as a PUCT/search default.
   upstream notices and provide corresponding source for the covered components
   and any local modifications.
 
+## Verification hooks
+
+- `npm run maia3:check-assets` verifies the staged symlink target, byte length,
+  SHA-256, manifest, and provenance-notice tokens.
+- `npm run maia3:upstream-move-map-parity -- --upstream-dir /path/to/maia-platform-frontend`
+  compares the local algorithmic 4352-move indexer against upstream
+  `all_moves_maia3*.json` without vendoring those JSON files.
+- `npm run maia3:browser-smoke` runs a real browser/ORT worker smoke over
+  normal, mirrored-black, castling, en-passant, promotion, checkmate, and
+  stalemate positions; it records top-5 legal human-policy moves and WDL
+  probabilities to an optional JSON artifact.
+
 ## Integration policy
 
 - Maia3 is a policy/value human model. Do not route it through Lc0 PUCT by

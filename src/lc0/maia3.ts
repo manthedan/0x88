@@ -1,4 +1,4 @@
-import { boardToFen, parseFen, squareName, type BoardState, type Color, type Piece, type PieceRole } from '../chess/board.ts';
+import { boardToFen, parseFen, type BoardState, type Piece, type PieceRole } from '../chess/board.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { loadLc0ModelForOrt, type Lc0ModelLoadResult } from './modelCache.ts';

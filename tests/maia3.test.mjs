@@ -41,6 +41,24 @@ test('Maia3 legal moves are mirrored back for black to move', () => {
   assert.equal(promo.index, 4132);
 });
 
+test('Maia3 legal mask includes castling, en passant, and all promotion pieces', () => {
+  const castling = maia3InternalsForTests.legalMaia3Moves(parseFen('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1')).map((entry) => entry.uci);
+  assert.ok(castling.includes('e1g1'));
+  assert.ok(castling.includes('e1c1'));
+
+  const enPassant = maia3InternalsForTests.legalMaia3Moves(parseFen('rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3')).map((entry) => entry.uci);
+  assert.ok(enPassant.includes('e5f6'));
+
+  const whitePromos = maia3InternalsForTests.legalMaia3Moves(parseFen('8/1P5k/8/8/8/8/8/K7 w - - 0 1'));
+  assert.deepEqual(whitePromos.filter((entry) => entry.uci.startsWith('b7b8')).map((entry) => entry.uci).sort(), ['b7b8b', 'b7b8n', 'b7b8q', 'b7b8r']);
+  assert.deepEqual(whitePromos.filter((entry) => entry.uci.startsWith('b7b8')).map((entry) => entry.index).sort((a, b) => a - b), [4132, 4133, 4134, 4135]);
+});
+
+test('Maia3 legal mask is empty for terminal no-legal positions', () => {
+  assert.equal(maia3InternalsForTests.legalMaia3Moves(parseFen('7k/6Q1/6K1/8/8/8/8/8 b - - 0 1')).length, 0);
+  assert.equal(maia3InternalsForTests.legalMaia3Moves(parseFen('7k/5K2/6Q1/8/8/8/8/8 b - - 0 1')).length, 0);
+});
+
 test('Maia3 choice helper supports argmax and top-p sampling pool', () => {
   const policy = [
     { uci: 'e2e4', prior: 0.7, logit: 3, index: 796 },
