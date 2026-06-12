@@ -75,6 +75,65 @@ identity (same array, no float ops). Implemented in `applyEloContempt`
 samples captured from the native Monty binary's `eval` command (matches
 within print precision), plus sign/guard/parity/tree-reuse behavior.
 
+### Calibration vs Maia3's learned contempt (2026-06-11)
+
+`scripts/maia3_vs_elo_contempt.mjs` compares the analytic transform with
+Maia3's rating-conditioned value head — the *learned* expected outcome
+between players of the conditioned ratings — over 120 playout positions,
+mean rating held fixed:
+
+| base | gap | Maia3 shift | transform shift | ratio |
+| ---: | ---: | ---: | ---: | ---: |
+| 1500 | +200 / −200 | +0.046 / −0.121 | +0.023 / −0.023 | 2.0 / 5.2 |
+| 1500 | +400 / −400 | +0.104 / −0.170 | +0.030 / −0.031 | 3.4 / 5.5 |
+| 1500 | +800 / −800 | +0.181 / −0.218 | +0.038 / −0.038 | 4.8 / 5.7 |
+| 2000 | +200 / −200 | +0.066 / −0.140 | +0.016 / −0.017 | 4.0 / 8.4 |
+| 2000 | +400 / −400 | +0.129 / −0.224 | +0.020 / −0.020 | 6.5 / 11.1 |
+| 2000 | +800 / −800 | +0.189 / −0.283 | +0.022 / −0.023 | 8.6 / 12.5 |
+
+Findings:
+
+1. **Monty's 16× damping (the `400·16` denominator) heavily undershoots
+   real human outcome statistics** — by ~2–6× at base 1500 and ~4–12×
+   at 2000. The constant was evidently tuned for engine search behavior
+   (where the rescale compounds over the tree), not for matching human
+   game outcomes per evaluation.
+2. **Human rating gaps are asymmetric**: being outrated costs far more
+   than outrating gains (the weaker side's blunders dominate), and the
+   analytic transform is symmetric by construction.
+3. Caveats: random-playout positions are not human-game positions
+   (distribution shift for Maia3's value head), and per-eval shift size
+   is not the same thing as best *search* behavior — the search A/B
+   remains the arbiter for the contemptElo knob itself.
+
+Practical reading: keep `contemptElo` as the cheap search-side rescale
+(the A/B says it is safe), but where the actual rating-conditioned
+outcome matters — the analysis lane, user-facing win estimates — query
+Maia3 directly rather than scaling a strong-engine WDL.
+
+### Rating inference status (for the Elo-contempt Play mode)
+
+`scripts/maia_elo_probe.mjs` infers a player's rating from their moves.
+Two scorers:
+
+- `--scorer ladder` (5 discrete Maia nets): 3/3 correct buckets by ~20
+  moves — but partly self-referential, since the simulated players ARE
+  sampled Maia nets of the same model family.
+- `--scorer maia3` (one session, continuous selfElo grid + parabolic
+  MLE, oppoElo conditioned on the known opponent): cross-model test.
+  Simulated Maia 1100 → ≈1073 (−27), Maia 1500 → ≈1379 (−121), both
+  stable from ~20 moves. Simulated Maia 1900 → ≈1362 (−538) with a
+  nearly flat likelihood profile above 1400.
+
+The 1900 miss is confounded: Play-page tail-trimmed *sampling* from old
+Maia-1900 may genuinely play below 1900 (an observation that also
+applies to our "Maia 1900" opponent as shipped!), and/or Maia3's
+discrimination weakens toward the top of the range. Resolving needs
+real rated human games (e.g. lichess PGNs) as ground truth. For the
+product mode: self-reported rating remains the primary input; the
+Maia3 estimator is a refinement that is currently trustworthy in the
+1000–1600 band where most human players live.
+
 ## Tree reuse safety
 
 Backed-up node values depend on the contempt settings that produced them,
