@@ -29,6 +29,7 @@ import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, hasExplicitViridithas
 import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
+import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
 import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetLoadWarning, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig, type Bt4SearchResult } from './bt4Engine.ts';
 import { TournamentStandings, buildSchedule, tournamentPairings, type ScheduledGame, type TournamentMode } from './tournament.ts';
@@ -1637,16 +1638,12 @@ function recklessVariantForKey(variantKey: string): RecklessVariant {
   return recklessVariantByKey(key);
 }
 
-function recklessCacheKey(variant: RecklessVariant): string {
-  return `${variant.key}:${variant.wasmUrl}:${variant.nnueUrl ?? ''}:${variant.backend ?? 'wasi'}`;
-}
-
 function getRecklessFor(variantKey: string): RecklessEngine {
   const variant = recklessVariantForKey(variantKey);
   const key = recklessCacheKey(variant);
   let engine = recklessByVariant.get(key);
   if (!engine) {
-    engine = new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, onStatus: renderRecklessRuntimeInfo });
+    engine = createRecklessEngine(variant, renderRecklessRuntimeInfo);
     recklessByVariant.set(key, engine);
   }
   return engine;
@@ -1703,16 +1700,12 @@ function viridithasVariantForKey(variantKey: string): ViridithasVariant {
   return viridithasVariantByKey(key);
 }
 
-function viridithasCacheKey(variant: ViridithasVariant): string {
-  return `${variant.key}:${variant.wasmUrl}`;
-}
-
 function getViridithasFor(variantKey: string): ViridithasEngine {
   const variant = viridithasVariantForKey(variantKey);
   const key = viridithasCacheKey(variant);
   let engine = viridithasByVariant.get(key);
   if (!engine) {
-    engine = new ViridithasEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl);
+    engine = createViridithasEngine(variant);
     viridithasByVariant.set(key, engine);
   }
   return engine;
@@ -1757,16 +1750,12 @@ function berserkVariantForKey(variantKey: string): BerserkVariant {
   return variant.jsUrl ? variant : BERSERK_VARIANTS.find((entry) => entry.jsUrl)!;
 }
 
-function berserkCacheKey(variant: BerserkVariant): string {
-  return `${variant.key}:${variant.jsUrl ?? ''}:${variant.wasmUrl}:${variant.dataUrl ?? ''}`;
-}
-
 function getBerserkFor(variantKey: string): BerserkEngine {
   const variant = berserkVariantForKey(variantKey);
   const key = berserkCacheKey(variant);
   let engine = berserkByVariant.get(key);
   if (!engine) {
-    engine = new BerserkEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
+    engine = createBerserkEngine(variant);
     berserkByVariant.set(key, engine);
   }
   return engine;
@@ -1807,16 +1796,12 @@ function plentyChessVariantForKey(variantKey: string): PlentyChessVariant {
   return plentyChessVariantByKey(key);
 }
 
-function plentyChessCacheKey(variant: PlentyChessVariant): string {
-  return `${variant.key}:${variant.jsUrl}:${variant.wasmUrl}:${variant.dataUrl}`;
-}
-
 function getPlentyChessFor(variantKey: string): PlentyChessEngine {
   const variant = plentyChessVariantForKey(variantKey);
   const key = plentyChessCacheKey(variant);
   let engine = plentyChessByVariant.get(key);
   if (!engine) {
-    engine = new PlentyChessEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
+    engine = createPlentyChessEngine(variant);
     plentyChessByVariant.set(key, engine);
   }
   return engine;

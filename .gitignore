@@ -52,3 +52,4 @@ data/training_streams/squareformer_lc0_lite_1m_h*_v1.json
 tiny-leela-netlify-sfaux-512.zip
 Nibbler.standalone.html
 dist/
+public/models/monty/*.network

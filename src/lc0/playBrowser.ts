@@ -18,14 +18,15 @@ import { Maia3BrowserEvaluator, MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO,
 import { Lc0PuctSearcher } from './search.ts';
 import { BIG_NETS, Bt4WorkerSearcher, LQO_NET, T3_NET, bigNetAssetStatusSync, bigNetMemoryCaution, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig } from './bt4Engine.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
-import { RecklessEngine } from './recklessEngine.ts';
+import type { RecklessEngine } from './recklessEngine.ts';
 import { defaultRecklessVariantKey, recklessVariantByKey, resolveDefaultRecklessVariantAssetFallback } from './recklessVariants.ts';
-import { ViridithasEngine } from './viridithasEngine.ts';
+import type { ViridithasEngine } from './viridithasEngine.ts';
 import { defaultViridithasVariantKey, resolveDefaultViridithasVariantAssetFallback, viridithasVariantByKey } from './viridithasVariants.ts';
-import { BerserkEngine } from './berserkEngine.ts';
+import type { BerserkEngine } from './berserkEngine.ts';
 import { berserkVariantByKey, defaultBerserkVariantKey, resolveDefaultBerserkVariantAssetFallback } from './berserkVariants.ts';
-import { PlentyChessEngine } from './plentychessEngine.ts';
+import type { PlentyChessEngine } from './plentychessEngine.ts';
 import { defaultPlentyChessVariantKey, plentyChessVariantByKey, resolveDefaultPlentyChessVariantAssetFallback } from './plentychessVariants.ts';
+import { createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine } from './engineProvision.ts';
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
@@ -363,22 +364,14 @@ function cpuEngineFor(option: PlayEngineOption): Promise<CpuEngine> {
       switch (option.family) {
         case 'sf':
           return new StockfishEngine({ depth: 4, threads: 1 }, stockfishFlavorUrl(option.variant === 'lite' ? 'lite-single' : 'single'));
-        case 'reckless': {
-          const variant = await resolveDefaultRecklessVariantAssetFallback(recklessVariantByKey(defaultRecklessVariantKey()), false);
-          return new RecklessEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl });
-        }
-        case 'viridithas': {
-          const variant = await resolveDefaultViridithasVariantAssetFallback(viridithasVariantByKey(defaultViridithasVariantKey()), false);
-          return new ViridithasEngine({ depth: 4, hashMb: 16 }, variant.wasmUrl);
-        }
-        case 'berserk': {
-          const variant = await resolveDefaultBerserkVariantAssetFallback(berserkVariantByKey(defaultBerserkVariantKey()), false);
-          return new BerserkEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
-        }
-        case 'plentychess': {
-          const variant = await resolveDefaultPlentyChessVariantAssetFallback(plentyChessVariantByKey(defaultPlentyChessVariantKey()), false);
-          return new PlentyChessEngine({ depth: 4, hashMb: 16, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
-        }
+        case 'reckless':
+          return createRecklessEngine(await resolveDefaultRecklessVariantAssetFallback(recklessVariantByKey(defaultRecklessVariantKey()), false));
+        case 'viridithas':
+          return createViridithasEngine(await resolveDefaultViridithasVariantAssetFallback(viridithasVariantByKey(defaultViridithasVariantKey()), false));
+        case 'berserk':
+          return createBerserkEngine(await resolveDefaultBerserkVariantAssetFallback(berserkVariantByKey(defaultBerserkVariantKey()), false));
+        case 'plentychess':
+          return createPlentyChessEngine(await resolveDefaultPlentyChessVariantAssetFallback(plentyChessVariantByKey(defaultPlentyChessVariantKey()), false));
         default:
           throw new Error(`unsupported engine family ${option.family}`);
       }
