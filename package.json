@@ -99,6 +99,7 @@
     "maia3:stage-assets": "node scripts/stage_maia3_assets.mjs",
     "maia3:check-assets": "node scripts/check_maia3_assets.mjs",
     "maia3:upstream-move-map-parity": "node --experimental-strip-types scripts/maia3_upstream_move_map_parity.mjs",
+    "maia3:upstream-tensor-parity": "node --experimental-strip-types scripts/maia3_upstream_tensor_parity.mjs",
     "maia3:browser-smoke": "node scripts/maia3_browser_smoke.mjs",
     "lc0:browser-wgsl-vs-ort-webgpu": "node --experimental-strip-types scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs",
     "lc0:browser-ort-readback-profile": "node scripts/lc0_browser_ort_readback_profile.mjs",

@@ -52,10 +52,32 @@ If a deployed build serves `/models/maia3/maia3_simplified.onnx`:
 - `npm run maia3:upstream-move-map-parity -- --upstream-dir /path/to/maia-platform-frontend`
   compares the local algorithmic 4352-move indexer against upstream
   `all_moves_maia3*.json` without vendoring those JSON files.
+- `npm run maia3:upstream-tensor-parity` compares our (64, 12) board-token
+  encoding (including the mirror-to-white transform) against upstream
+  `tensor.ts` extracted from the pinned commit, across handcrafted edge cases
+  and random playouts.
 - `npm run maia3:browser-smoke` runs a real browser/ORT worker smoke over
   normal, mirrored-black, castling, en-passant, promotion, checkmate, and
   stalemate positions; it records top-5 legal human-policy moves and WDL
   probabilities to an optional JSON artifact.
+
+## Upstream output-parity audit (2026-06-11)
+
+Because the staged model is byte-identical to upstream, output parity reduces
+to input/post-processing parity. Status: **covered**.
+
+- Board tokens: `maia3:upstream-tensor-parity` — 370 positions, 0 mismatches.
+- Move-index map: `maia3:upstream-move-map-parity` (existing).
+- Elo inputs: both sides pass **raw floats** as `[1]`-shaped float32 tensors
+  named `elo_self`/`elo_oppo` (no normalization, no categories) — verified by
+  inspection of upstream `maia.ts` `evaluateMaia3` vs our `maia3Worker.ts`.
+- Outputs: both read `logits_move`/`logits_value`; our legal-move softmax is
+  identical to upstream at temperature 1. `logits_value` channel order is
+  **[Loss, Draw, Win] for the side to move** (the reverse of the LC0 [W,D,L]
+  convention used elsewhere in this repo) — documented on `Maia3Evaluation`,
+  with `maia3WinProbability` reproducing upstream's white-perspective score.
+- Lifecycle: 25 create/evaluate/dispose worker cycles green (1 cache miss +
+  24 Cache API hits, sha256 valid on all loads, no browser errors).
 
 ## Integration policy
 

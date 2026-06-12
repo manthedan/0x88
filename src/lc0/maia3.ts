@@ -24,9 +24,29 @@ export interface Maia3Evaluation {
   selfElo: number;
   oppoElo: number;
   legalPriors: Maia3MovePolicyEntry[];
+  /**
+   * Raw `logits_value` in MODEL ORDER, which is [Loss, Draw, Win] for the
+   * side to move (upstream maia-platform-frontend processOutputsMaia3).
+   * NOTE: this is the reverse of the [W, D, L] convention used by the LC0
+   * evaluators in this repo — use maia3WinProbability for a safe scalar.
+   */
   valueLogits: number[];
-  /** Softmax over logits_value when the model exposes WDL-like logits. */
+  /** Softmax over valueLogits; same [Loss, Draw, Win] side-to-move order. */
   valueProbabilities: number[];
+}
+
+/**
+ * White-perspective expected score from a Maia3 evaluation — the prediction
+ * of the HUMAN game outcome between players of the conditioned ratings, not
+ * an engine eval. Mirrors upstream's processOutputsMaia3: P(win) + 0.5·P(draw)
+ * for the side to move, flipped for black.
+ */
+export function maia3WinProbability(evaluation: Maia3Evaluation): number {
+  const [loss, draw, win] = evaluation.valueProbabilities;
+  if (!Number.isFinite(win) || !Number.isFinite(draw) || !Number.isFinite(loss)) return 0.5;
+  const sideToMoveScore = win + 0.5 * draw;
+  const blackToMove = evaluation.fen.split(' ')[1] === 'b';
+  return blackToMove ? 1 - sideToMoveScore : sideToMoveScore;
 }
 
 export interface Maia3ChooseOptions {
