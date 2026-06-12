@@ -176,6 +176,8 @@ interface CpuEngine {
 const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
 const maiaPlayerPromises = new Map<string, Promise<Lc0PolicyOnlyPlayer>>();
 let maia3Promise: Promise<Maia3BrowserEvaluator> | null = null;
+/** One-line model/cache status shown in the caption once Maia3 has loaded. */
+let maia3Status: string | null = null;
 
 function ensureMaia(elo: string): Promise<Lc0PolicyOnlyPlayer> {
   const existing = maiaPlayerPromises.get(elo);
@@ -210,6 +212,10 @@ function ensureMaia3(): Promise<Maia3BrowserEvaluator> {
       onProgress: (loaded, total) => showDownloadProgress('Maia3', loaded, total),
     });
     hideDownloadProgress();
+    const load = evaluator.modelLoad;
+    const origin = load.cacheStatus === 'hit' ? 'from cache' : load.cacheStatus === 'miss' ? 'downloaded' : 'loaded';
+    const integrity = load.sha256Valid === true ? ', sha256 ✓' : load.sha256Valid === false ? ', sha256 MISMATCH' : '';
+    maia3Status = `Model ${origin} (${((load.bytes ?? 0) / 1e6).toFixed(0)}MB${integrity})`;
     setEngineNote('');
     return evaluator;
   })().catch((error: Error) => {
@@ -258,7 +264,8 @@ function strengthCaption(): string {
   if (option.family === 'maia3') {
     const style = selectedMaia3Style();
     const suffix = style === 'argmax' ? 'deterministic top human move' : `sampled, temperature ${selectedMaia3Temperature().toFixed(2)}, top-p ${selectedMaia3TopP().toFixed(2)}`;
-    return `Maia3 predicts human moves at Elo ${selectedMaia3Elo()} — ${suffix}. No LC0/PUCT search.`;
+    const status = maia3Status ? ` ${maia3Status}.` : '';
+    return `Maia3 predicts human moves at Elo ${selectedMaia3Elo()} — ${suffix}. No LC0/PUCT search; its WDL output predicts the human game outcome, not an engine eval.${status}`;
   }
   if (option.family === 'sf') {
     const sf = SF_LEVELS[level];
@@ -292,9 +299,13 @@ function renderMaia3Controls(): void {
   el('maia3Controls').hidden = !isMaia3;
   const elo = selectedMaia3Elo();
   el('maia3EloValue').textContent = String(elo);
+  // Disabled (not hidden) in argmax mode so the sampling knobs stay
+  // discoverable; values are preserved for when sampling is re-selected.
   const sample = selectedMaia3Style() === 'sample';
-  (el('maia3TemperatureField') as HTMLElement).hidden = !sample;
-  (el('maia3TopPField') as HTMLElement).hidden = !sample;
+  (el('maia3Temperature') as HTMLInputElement).disabled = !sample;
+  (el('maia3TopP') as HTMLInputElement).disabled = !sample;
+  (el('maia3TemperatureField') as HTMLElement).style.opacity = sample ? '' : '0.5';
+  (el('maia3TopPField') as HTMLElement).style.opacity = sample ? '' : '0.5';
 }
 
 function setEngineNote(text: string, warn = false): void {
@@ -735,6 +746,8 @@ function render(): void {
   else ground.set(config);
 }
 
+let lastEngineId = 'maia-1500';
+
 function init(): void {
   refreshEngineOptions();
   selectEl('engineSelect').value = 'maia-1500';
@@ -746,6 +759,16 @@ function init(): void {
   el('exportPgn').addEventListener('click', () => { el('pgnOut').textContent = exportPgn(); });
   el('copyPgn').addEventListener('click', () => { void navigator.clipboard.writeText(exportPgn()); });
   selectEl('engineSelect').addEventListener('change', () => {
+    const option = selectedEngine();
+    // Switching from a fixed Maia level to Maia3 carries the rating over, so
+    // "Maia 1700 → Maia3" plays at 1700 instead of snapping back to 1500.
+    if (option.family === 'maia3' && lastEngineId.startsWith('maia-')) {
+      const carried = Number(lastEngineId.slice('maia-'.length));
+      if (Number.isFinite(carried)) {
+        (el('maia3Elo') as HTMLInputElement).value = String(Math.max(MAIA3_MIN_ELO, Math.min(MAIA3_MAX_ELO, carried)));
+      }
+    }
+    lastEngineId = option.id;
     renderLevelOptions();
     renderMaia3Controls();
     renderEngineCaution();
