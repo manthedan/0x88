@@ -96,7 +96,7 @@ overrule it.
 
 | Opponent | drawScore | scLimit | cpuct |
 | --- | ---: | ---: | ---: |
-| Lc0 small / t3 / BT4 | −0.25 | — | default |
+| Lc0 small / t3 / BT4 | −0.25 | 16 | default |
 | Leela Queen Odds | −0.5 | 24 | 1.5 |
 | Maia (human model) | — | — | — |
 
@@ -104,18 +104,52 @@ LQO mirrors its README (DrawScore ±0.4–0.6, CPuct 1.5, ScLimit 32–40 at
 12–15k nodes) scaled to browser visit budgets; unlike t1, its value head
 is odds-calibrated, which is why drawScore stays on for it.
 
-## Roadmap: Monty-style calibrated contempt
+Regular Lc0 opponents get the A/B-validated `scLimit 16` as well: the
+limit models the *opponent's* search ability, not ours, so it stays fixed
+across the visit ladder. Their drawScore −0.25 stays on because, unlike
+the queen-odds arm where it dragged the score down, equal-material play
+is the scenario the guidance above recommends it for (engine
+equal-or-better). Validated by an equal-material harness run
+(`--odds none`, see below).
+
+## Monty: calibrated contempt in the browser (port DONE)
 
 [Monty](https://github.com/official-monty/Monty) (AGPL, Rust MCTS,
 CPU policy+value nets) parameterizes contempt as the **Elo difference vs
 the opponent** (validated across ±1000) and has a `Contempt_Analysis`
 mode that reports the *practical* best move against that opponent model
-rather than the objective one. Planned uses, in order:
+rather than the objective one.
 
-1. Port Monty to WASM as an opponent (recipe: viridithas-wasm template —
-   single-thread spawn shim for `std::thread::scope`, patch out runtime
-   zstd/mmap in the embed path, ship the ~500MB nets as separate cacheable
-   assets via WASI preopened files, not embedded).
+**The wasm32-wasip1 port is built and gated** (2026-06-11):
+
+- `patches/monty-wasip1.patch` (~130 lines on upstream `0950aff1`):
+  inline-execution shims for the four `std::thread::scope` sites
+  (search loop, go/stop stdin poll, tree init/clear), zstd+memmap2 moved
+  to non-wasm target deps, a wasm `read_into_struct_unchecked` that reads
+  nets into a leaked aligned box, and argv-seeded UCI commands for the
+  one-shot worker mode. Build: `scripts/build_monty_wasi.mjs` →
+  `public/monty/monty.wasm` (~560KB).
+- Networks are **not embedded**: the build uses Monty's non-embed path,
+  which opens the raw nets by canonical name from the WASI preopened cwd
+  (`nn-09da29a4b6ed.network` value ~661MB, `nn-6e49a41bd7c0.network`
+  policy ~286MB; extracted from the 0950aff1 release binary since
+  tests.montychess.org was down). They ship as separate cacheable assets
+  (`public/models/monty/`, symlinks to `../models/monty/`).
+- Loader: `recklessWasiWorker.ts` gained generic `preopenFiles`
+  (fetch + cache + progress); `MontyEngine` (montyEngine.ts) is a
+  persistent-preferred `BrowserUciEngine` with a `contempt` option.
+- Gates: `scripts/monty_wasi_smoke.mjs` (browser_wasi_shim + real nets);
+  `monty-smoke.html` click-tested in Chromium (persistent mode).
+  Search parity vs the native release binary is **bit-identical** at
+  fixed nodes (same node counts/scores/PVs, contempt WDL rescaling
+  identical to the 0.01%), browser ~50-60k nps. Contempt visibly works:
+  at +400 the startpos choice shifts d2d4 → e2e4 with cp 22 → 46.
+
+Remaining roadmap, in order:
+
+1. Wire Monty into the engine catalog / Play page as an opponent (needs
+   AGPL corresponding-source archive before public deploy, like the other
+   GPL engines; download UX for the ~950MB net pair).
 2. Expose `Contempt_Analysis` as an analysis-page lane: objective best
    (Stockfish) vs practical best vs a ~N-rated human (Monty).
 3. Adopt its Elo→WDL-rescaling calibration in our PUCT so the raw

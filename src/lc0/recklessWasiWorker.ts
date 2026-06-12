@@ -1,11 +1,15 @@
 import { WASI, File, OpenFile, ConsoleStdout, PreopenDirectory, Fd, wasi } from '@bjorn3/browser_wasi_shim';
 
+/** Extra file fetched over HTTP and exposed to the engine via the WASI preopened cwd (e.g. Monty's detached networks). */
+type PreopenFileSpec = { name: string; url: string };
+
 type OneShotWorkerRequest = {
   type: 'run';
   id: number;
   wasmUrl: string;
   executableName?: string;
   commands: string[];
+  preopenFiles?: PreopenFileSpec[];
 };
 
 type PersistentWorkerRequest = {
@@ -13,6 +17,7 @@ type PersistentWorkerRequest = {
   wasmUrl: string;
   inputBuffer: SharedArrayBuffer;
   executableName?: string;
+  preopenFiles?: PreopenFileSpec[];
 };
 
 type WorkerRequest = OneShotWorkerRequest | PersistentWorkerRequest;
@@ -23,9 +28,11 @@ type WorkerResponse =
   | { type: 'persistent-ready' }
   | { type: 'persistent-line'; stream: 'stdout' | 'stderr'; line: string }
   | { type: 'persistent-exit'; exitCode: number }
-  | { type: 'persistent-error'; error: string };
+  | { type: 'persistent-error'; error: string }
+  | { type: 'preopen-progress'; url: string; loadedBytes: number; totalBytes: number };
 
 const moduleCache = new Map<string, Promise<WebAssembly.Module>>();
+const preopenBytesCache = new Map<string, Promise<Uint8Array>>();
 const SHARED_STDIN_HEADER_INTS = 4;
 const SHARED_STDIN_HEADER_BYTES = SHARED_STDIN_HEADER_INTS * Int32Array.BYTES_PER_ELEMENT;
 
@@ -120,7 +127,57 @@ async function compileModule(wasmUrl: string): Promise<WebAssembly.Module> {
   return cached;
 }
 
-async function runWasiUci(wasmUrl: string, executableName: string, commands: string[]): Promise<{ stdout: string[]; stderr: string[]; exitCode: number }> {
+async function fetchPreopenBytes(url: string): Promise<Uint8Array> {
+  let cached = preopenBytesCache.get(url);
+  if (!cached) {
+    cached = (async () => {
+      const response = await fetch(url, { cache: 'force-cache' });
+      if (!response.ok) throw new Error(`failed to fetch preopen asset ${url}: HTTP ${response.status}`);
+      const totalBytes = Number(response.headers.get('content-length') ?? 0);
+      if (!response.body) {
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        post({ type: 'preopen-progress', url, loadedBytes: bytes.byteLength, totalBytes: bytes.byteLength });
+        return bytes;
+      }
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let loadedBytes = 0;
+      let lastReport = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loadedBytes += value.byteLength;
+        const now = Date.now();
+        if (now - lastReport > 250) {
+          lastReport = now;
+          post({ type: 'preopen-progress', url, loadedBytes, totalBytes });
+        }
+      }
+      const bytes = new Uint8Array(loadedBytes);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      post({ type: 'preopen-progress', url, loadedBytes, totalBytes: totalBytes || loadedBytes });
+      return bytes;
+    })();
+    preopenBytesCache.set(url, cached);
+    cached.catch(() => preopenBytesCache.delete(url));
+  }
+  return cached;
+}
+
+async function buildPreopenDirectory(preopenFiles: PreopenFileSpec[] | undefined): Promise<PreopenDirectory> {
+  const entries = new Map<string, File>();
+  for (const spec of preopenFiles ?? []) {
+    entries.set(spec.name, new File(await fetchPreopenBytes(spec.url)));
+  }
+  return new PreopenDirectory('.', entries);
+}
+
+async function runWasiUci(wasmUrl: string, executableName: string, commands: string[], preopenFiles?: PreopenFileSpec[]): Promise<{ stdout: string[]; stderr: string[]; exitCode: number }> {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const wasiInstance = new WASI(
@@ -130,7 +187,7 @@ async function runWasiUci(wasmUrl: string, executableName: string, commands: str
       new OpenFile(new File([])),
       lineCollector(stdout, undefined, isUsefulUciStdoutLine),
       lineCollector(stderr),
-      new PreopenDirectory('.', new Map()),
+      await buildPreopenDirectory(preopenFiles),
     ],
     { debug: false },
   );
@@ -141,7 +198,7 @@ async function runWasiUci(wasmUrl: string, executableName: string, commands: str
   return { stdout, stderr, exitCode };
 }
 
-async function runPersistentWasiUci(wasmUrl: string, inputBuffer: SharedArrayBuffer, executableName = 'reckless'): Promise<void> {
+async function runPersistentWasiUci(wasmUrl: string, inputBuffer: SharedArrayBuffer, executableName = 'reckless', preopenFiles?: PreopenFileSpec[]): Promise<void> {
   const wasiInstance = new WASI(
     [executableName],
     [],
@@ -149,7 +206,7 @@ async function runPersistentWasiUci(wasmUrl: string, inputBuffer: SharedArrayBuf
       new SharedStdin(inputBuffer),
       lineCollector(null, (line) => post({ type: 'persistent-line', stream: 'stdout', line }), isUsefulUciStdoutLine),
       lineCollector(null, (line) => post({ type: 'persistent-line', stream: 'stderr', line })),
-      new PreopenDirectory('.', new Map()),
+      await buildPreopenDirectory(preopenFiles),
     ],
     { debug: false },
   );
@@ -164,13 +221,13 @@ async function runPersistentWasiUci(wasmUrl: string, inputBuffer: SharedArrayBuf
 self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
   const message = event.data;
   if (message.type === 'run') {
-    void runWasiUci(message.wasmUrl, message.executableName ?? 'reckless', message.commands)
+    void runWasiUci(message.wasmUrl, message.executableName ?? 'reckless', message.commands, message.preopenFiles)
       .then((result) => post({ type: 'result', id: message.id, ...result }))
       .catch((error) => post({ type: 'error', id: message.id, error: (error as Error).message }));
     return;
   }
   if (message.type === 'start-persistent') {
-    void runPersistentWasiUci(message.wasmUrl, message.inputBuffer, message.executableName)
+    void runPersistentWasiUci(message.wasmUrl, message.inputBuffer, message.executableName, message.preopenFiles)
       .catch((error) => post({ type: 'persistent-error', error: (error as Error).message }));
   }
 });

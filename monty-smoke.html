@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Monty WASI Worker Smoke</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; background: #111827; color: #e5e7eb; }
+    .ok { color: #86efac; }
+    .fail { color: #fca5a5; }
+    pre { background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 1rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Monty WASI Worker Smoke</h1>
+  <p>Downloads the detached Monty networks (~950MB raw, HTTP-cached) into a WASI preopened cwd and runs calibrated-contempt searches.</p>
+  <p id="status">Starting…</p>
+  <p id="progress"></p>
+  <pre id="output"></pre>
+  <script type="module" src="/src/lc0/montySmoke.ts"></script>
+</body>
+</html>
