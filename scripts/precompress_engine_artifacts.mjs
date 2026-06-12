@@ -7,8 +7,13 @@ import { dirname, extname, join, relative, resolve } from 'node:path';
 const root = resolve(process.argv[2] ?? 'public');
 const allowMissing = process.argv.includes('--allow-missing');
 const force = process.argv.includes('--force');
-const engines = ['berserk', 'plentychess'];
-const compressibleExts = new Set(['.js', '.wasm', '.data', '.nn', '.nnue', '.bin']);
+// All directories that serve large fetchable artifacts. Missing dirs are
+// skipped under --allow-missing (e.g. monty is excluded from product builds).
+const engines = ['berserk', 'plentychess', 'stockfish', 'viridithas', 'reckless', 'ort', 'models', 'monty'];
+// .onnx: f16/int8 model weights only compress ~0.90, but at current sizes
+// that is still ~2MB (t1 qdq) to ~35MB (BT4) per asset. .mjs covers ORT's
+// glue sidecars in /ort/.
+const compressibleExts = new Set(['.js', '.mjs', '.wasm', '.data', '.nn', '.nnue', '.bin', '.onnx']);
 
 function walk(dir, out = []) {
   if (!existsSync(dir)) return out;
@@ -62,7 +67,10 @@ if (!sources.length) {
 for (const source of sources) {
   const input = await readFile(source);
   const gzip = gzipSync(input, { level: 9 });
-  const brotli = brotliCompressSync(input, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 } });
+  // Brotli q11 takes minutes on the multi-hundred-MB nets for ~1% extra over
+  // q5; use fast quality past 64MB so deploy builds stay quick.
+  const brotliQuality = input.byteLength > 64 * 1024 * 1024 ? 5 : 11;
+  const brotli = brotliCompressSync(input, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: brotliQuality } });
   const gz = await writeIfNeeded(source, '.gz', gzip);
   const br = await writeIfNeeded(source, '.br', brotli);
   const rel = relative(process.cwd(), source);

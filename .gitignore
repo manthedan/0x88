@@ -32,10 +32,10 @@ public/reckless/*corresponding-source*.tar.gz
 # are intentionally trackable so deployed GPL binaries and their corresponding
 # source archives/manifests cannot be hidden by ignore rules. Keep generated
 # precompressed sidecars ignored; they are rebuilt for dist deploys.
-public/berserk/*.br
-public/berserk/*.gz
-public/plentychess/*.br
-public/plentychess/*.gz
+public/**/*.br
+public/**/*.gz
+# ...but GPL corresponding-source archives must never be hidden by ignores.
+!public/**/*.tar.gz
 rust/**/target/
 node_modules/
 __pycache__/
