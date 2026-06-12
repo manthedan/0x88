@@ -4,10 +4,11 @@
     "repo": "https://github.com/cosmobobak/viridithas.git",
     "ref": "20d7402065cae084715183e019fdd18089e2dfac",
     "version": "v20.0.0",
-    "license": "AGPL-3.0"
+    "license": "MIT"
   },
   "network": {
     "url": "https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst",
+    "sha256": "2d387407b926df4dbda441cdc3e2288fee2e6a2afa8e1bd22262309ec0fb668a",
     "embeddedAs": "viridithas.nnue.zst"
   },
   "patches": {
