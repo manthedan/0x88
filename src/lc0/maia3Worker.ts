@@ -1,10 +1,12 @@
 import * as ort from '../nn/ortRuntime.ts';
-import { createOrtSession, releaseOrtSession } from '../nn/ortRuntime.ts';
+import { createOrtSession, releaseOrtSession, describeOrtBackendConfig, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
 
 type InitMessage = {
   type: 'init';
   id: number;
   model: string | ArrayBuffer;
+  /** ORT execution-provider preference; default 'auto' (WebGPU first, wasm fallback). */
+  ep?: OrtExecutionProviderPreference;
 };
 
 type EvaluateMessage = {
@@ -15,12 +17,21 @@ type EvaluateMessage = {
   eloOppo: number;
 };
 
+/** One position evaluated under many (eloSelf, eloOppo) conditions in one run (rating-inference grids). */
+type EvaluateConditionsMessage = {
+  type: 'evaluateConditions';
+  id: number;
+  tokens: ArrayBuffer;
+  eloSelfs: number[];
+  eloOppos: number[];
+};
+
 type DisposeMessage = {
   type: 'dispose';
   id: number;
 };
 
-type Maia3WorkerMessage = InitMessage | EvaluateMessage | DisposeMessage;
+type Maia3WorkerMessage = InitMessage | EvaluateMessage | EvaluateConditionsMessage | DisposeMessage;
 
 let session: ort.InferenceSession | null = null;
 
@@ -41,8 +52,9 @@ function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run']>>, 
     try {
       if (message.type === 'init') {
         if (session) await releaseOrtSession(session);
+        if (message.ep) setRequestedOrtExecutionProviderForCurrentThread(message.ep);
         session = await createOrtSession(message.model);
-        post({ type: 'ready', id: message.id, inputNames: session.inputNames, outputNames: session.outputNames });
+        post({ type: 'ready', id: message.id, inputNames: session.inputNames, outputNames: session.outputNames, backend: describeOrtBackendConfig() });
         return;
       }
 
@@ -54,6 +66,28 @@ function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run']>>, 
       }
 
       if (!session) throw new Error('Maia3 worker is not initialized');
+
+      if (message.type === 'evaluateConditions') {
+        const single = new Float32Array(message.tokens);
+        const n = message.eloSelfs.length;
+        const batch = new Float32Array(n * single.length);
+        for (let i = 0; i < n; i += 1) batch.set(single, i * single.length);
+        const feeds: Record<string, ort.Tensor> = {
+          tokens: new ort.Tensor('float32', batch, [n, 64, 12]),
+          elo_self: new ort.Tensor('float32', Float32Array.from(message.eloSelfs), [n]),
+          elo_oppo: new ort.Tensor('float32', Float32Array.from(message.eloOppos), [n]),
+        };
+        const outputs = await session.run(feeds);
+        const logitsMove = firstOutput(outputs, 'logits_move', 0);
+        const logitsValue = firstOutput(outputs, 'logits_value', 1);
+        post({
+          type: 'result',
+          id: message.id,
+          logitsMove: logitsMove.buffer,
+          logitsValue: logitsValue.buffer,
+        }, [logitsMove.buffer, logitsValue.buffer]);
+        return;
+      }
 
       const feeds: Record<string, ort.Tensor> = {
         tokens: new ort.Tensor('float32', new Float32Array(message.tokens), [1, 64, 12]),

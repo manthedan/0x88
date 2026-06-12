@@ -87,6 +87,8 @@ async function main(): Promise<void> {
   const style: Maia3MoveStyle = params.get('style') === 'sample' ? 'sample' : 'argmax';
   const temperature = parseFloatParam(params.get('temperature'), 1);
   const topP = parseFloatParam(params.get('topP'), 1);
+  const epParam = params.get('ortEp');
+  const ep = epParam === 'wasm' || epParam === 'webgpu' || epParam === 'webgpu,wasm' || epParam === 'auto' ? epParam : undefined;
   const started = performance.now();
   const result = {
     ok: false,
@@ -96,6 +98,12 @@ async function main(): Promise<void> {
     style,
     temperature,
     topP,
+    requestedEp: ep ?? 'auto',
+    backend: 'unknown',
+    evalCount: 0,
+    evalElapsedMs: 0,
+    gridSize: 0,
+    gridMsPerBatch: 0,
     model: null as null | { url: string; bytes?: number; sha256?: string; sha256Valid?: boolean; cacheStatus: string; mode: string },
     loads: [] as Array<{ cycle: number; bytes?: number; sha256?: string; sha256Valid?: boolean; cacheStatus: string; mode: string; elapsedMs: number }>,
     inputNames: [] as string[],
@@ -106,7 +114,8 @@ async function main(): Promise<void> {
   };
   for (let cycle = 0; cycle < cycles; cycle++) {
     el('status').textContent = `Loading Maia3 cycle ${cycle + 1}/${cycles}…`;
-    const evaluator = await Maia3BrowserEvaluator.create({ selfElo, oppoElo });
+    const evaluator = await Maia3BrowserEvaluator.create({ selfElo, oppoElo, ep });
+    result.backend = evaluator.backend;
     result.model ??= {
       url: evaluator.modelLoad.url,
       bytes: evaluator.modelLoad.bytes,
@@ -130,7 +139,10 @@ async function main(): Promise<void> {
       for (const fixture of FIXTURES) {
         el('status').textContent = `Evaluating ${fixture.name} (${cycle + 1}/${cycles})…`;
         const expectedLegal = legalUcis(fixture.fen);
+        const evalStarted = performance.now();
         const choice = await evaluator.chooseMove(fixture.fen, { selfElo, oppoElo, style, temperature, topP });
+        result.evalElapsedMs += performance.now() - evalStarted;
+        result.evalCount += 1;
         const valueSum = sum(choice.evaluation.valueProbabilities);
         if (choice.evaluation.valueProbabilities.length && Math.abs(valueSum - 1) > 1e-4) {
           result.errors.push(`${fixture.name}: value probabilities sum to ${valueSum}`);
@@ -139,6 +151,7 @@ async function main(): Promise<void> {
         result.rows.push({
           cycle,
           name: fixture.name,
+          evalMs: Math.round((performance.now() - evalStarted) * 10) / 10,
           fen: fixture.fen,
           legalCount: expectedLegal.length,
           move: choice.move,
@@ -148,7 +161,26 @@ async function main(): Promise<void> {
         });
       }
     } finally {
-      await evaluator.dispose();
+      if (cycle < cycles - 1) await evaluator.dispose();
+      else {
+        // Optional batched-grid benchmark (rating-inference workload) on the
+        // last live session: one position under gridSize (selfElo, oppoElo)
+        // conditions per run; first run dropped as warmup.
+        const gridSize = parsePositiveInt(params.get('gridSize'), 0);
+        if (gridSize > 0) {
+          const conditions = Array.from({ length: gridSize }, (_, i) => ({ selfElo: 600 + ((2000 / Math.max(1, gridSize - 1)) * i | 0), oppoElo: 1500 }));
+          const runs = 6;
+          let total = 0;
+          for (let run = 0; run < runs; run += 1) {
+            const t0 = performance.now();
+            await evaluator.evaluateConditions(FIXTURES[0].fen, conditions);
+            if (run > 0) total += performance.now() - t0;
+          }
+          result.gridSize = gridSize;
+          result.gridMsPerBatch = Math.round((total / (runs - 1)) * 10) / 10;
+        }
+        await evaluator.dispose();
+      }
     }
   }
   result.elapsedMs = performance.now() - started;

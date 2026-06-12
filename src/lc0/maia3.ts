@@ -220,6 +220,8 @@ export interface Maia3BrowserEvaluatorOptions {
   selfElo?: number;
   oppoElo?: number;
   onProgress?: (loadedBytes: number, totalBytes?: number) => void;
+  /** ORT execution-provider preference; default 'auto' (WebGPU first, wasm fallback). */
+  ep?: 'auto' | 'webgpu' | 'webgpu,wasm' | 'wasm';
 }
 
 export class Maia3BrowserEvaluator {
@@ -231,14 +233,17 @@ export class Maia3BrowserEvaluator {
   readonly oppoElo: number;
   readonly inputNames: string[];
   readonly outputNames: string[];
+  /** Resolved ORT backend, e.g. 'auto->webgpu' or 'wasm' (from the worker). */
+  readonly backend: string;
 
-  private constructor(worker: Worker, modelLoad: Lc0ModelLoadResult, selfElo: number, oppoElo: number, names: { inputNames: string[]; outputNames: string[] }) {
+  private constructor(worker: Worker, modelLoad: Lc0ModelLoadResult, selfElo: number, oppoElo: number, names: { inputNames: string[]; outputNames: string[]; backend: string }) {
     this.worker = worker;
     this.modelLoad = modelLoad;
     this.selfElo = selfElo;
     this.oppoElo = oppoElo;
     this.inputNames = names.inputNames;
     this.outputNames = names.outputNames;
+    this.backend = names.backend;
     this.worker.addEventListener('message', (event: MessageEvent) => this.onMessage(event));
   }
 
@@ -252,11 +257,11 @@ export class Maia3BrowserEvaluator {
       onProgress: options.onProgress,
     });
     const worker = new Worker(new URL('./maia3Worker.ts', import.meta.url), { type: 'module', name: 'maia3-evaluator' });
-    const init = Maia3BrowserEvaluator.postInit(worker, modelLoad.model);
+    const init = Maia3BrowserEvaluator.postInit(worker, modelLoad.model, options.ep);
     return new Maia3BrowserEvaluator(worker, modelLoad, selfElo, oppoElo, await init);
   }
 
-  private static postInit(worker: Worker, model: string | ArrayBuffer): Promise<{ inputNames: string[]; outputNames: string[] }> {
+  private static postInit(worker: Worker, model: string | ArrayBuffer, ep?: Maia3BrowserEvaluatorOptions['ep']): Promise<{ inputNames: string[]; outputNames: string[]; backend: string }> {
     return new Promise((resolve, reject) => {
       const id = 0;
       const cleanup = () => {
@@ -268,11 +273,11 @@ export class Maia3BrowserEvaluator {
         reject(new Error(event.message || 'Maia3 worker failed to initialize'));
       };
       const onMessage = (event: MessageEvent) => {
-        const data = event.data as { type?: string; id?: number; message?: string; inputNames?: string[]; outputNames?: string[] };
+        const data = event.data as { type?: string; id?: number; message?: string; inputNames?: string[]; outputNames?: string[]; backend?: string };
         if (data.id !== id) return;
         if (data.type === 'ready') {
           cleanup();
-          resolve({ inputNames: data.inputNames ?? [], outputNames: data.outputNames ?? [] });
+          resolve({ inputNames: data.inputNames ?? [], outputNames: data.outputNames ?? [], backend: data.backend ?? 'unknown' });
         } else if (data.type === 'error') {
           cleanup();
           reject(new Error(data.message ?? 'Maia3 worker initialization failed'));
@@ -280,8 +285,8 @@ export class Maia3BrowserEvaluator {
       };
       worker.addEventListener('message', onMessage);
       worker.addEventListener('error', onError);
-      if (typeof model === 'string') worker.postMessage({ type: 'init', id, model });
-      else worker.postMessage({ type: 'init', id, model }, [model]);
+      if (typeof model === 'string') worker.postMessage({ type: 'init', id, model, ep });
+      else worker.postMessage({ type: 'init', id, model, ep }, [model]);
     });
   }
 
@@ -330,6 +335,41 @@ export class Maia3BrowserEvaluator {
   async chooseMove(input: Maia3EvaluateInput, options: Maia3ChooseOptions & { selfElo?: number; oppoElo?: number } = {}): Promise<Maia3Choice> {
     const evaluation = await this.evaluate(input, options);
     return { move: chooseFromMaia3Policy(evaluation.legalPriors, options), evaluation };
+  }
+
+  /**
+   * Evaluate ONE position under many (selfElo, oppoElo) conditions in a
+   * single batched run — the rating-inference grid workload. Each condition
+   * gets the full legal-policy + value treatment of evaluate().
+   */
+  async evaluateConditions(input: Maia3EvaluateInput, conditions: Array<{ selfElo: number; oppoElo: number }>, options: { temperature?: number } = {}): Promise<Maia3Evaluation[]> {
+    if (!conditions.length) return [];
+    const board = boardFromInput(input);
+    const fen = boardToFen(board);
+    const tokens = boardToMaia3Tokens(board);
+    const response = await this.post<{ logitsMove: ArrayBuffer; logitsValue: ArrayBuffer }>(
+      {
+        type: 'evaluateConditions',
+        tokens: tokens.buffer,
+        eloSelfs: conditions.map((c) => clampElo(c.selfElo)),
+        eloOppos: conditions.map((c) => clampElo(c.oppoElo)),
+      },
+      [tokens.buffer],
+    );
+    const logitsMove = new Float32Array(response.logitsMove);
+    const logitsValue = new Float32Array(response.logitsValue);
+    return conditions.map((condition, i) => {
+      const moveSlice = logitsMove.subarray(i * MAIA3_POLICY_SIZE, (i + 1) * MAIA3_POLICY_SIZE);
+      const valueLogits = Array.from(logitsValue.subarray(i * 3, (i + 1) * 3));
+      return {
+        fen,
+        selfElo: clampElo(condition.selfElo),
+        oppoElo: clampElo(condition.oppoElo),
+        legalPriors: legalPolicyFromLogits(board, moveSlice as Float32Array, normalizeTemperature(options.temperature)),
+        valueLogits,
+        valueProbabilities: softmax(valueLogits),
+      };
+    });
   }
 
   async dispose(): Promise<void> {

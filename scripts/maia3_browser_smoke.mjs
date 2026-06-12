@@ -32,6 +32,8 @@ function parseArgs(argv) {
     else if (arg === '--style') args.style = next();
     else if (arg === '--temperature') args.temperature = Number(next());
     else if (arg === '--top-p') args.topP = Number(next());
+    else if (arg === '--ort-ep') args.ortEp = next();
+    else if (arg === '--grid-size') args.gridSize = Number(next());
     else if (arg === '--out') args.out = next();
     else if (arg === '--no-server') args.noServer = true;
     else if (arg === '--dry-run') args.dryRun = true;
@@ -188,6 +190,8 @@ function smokeUrl(args) {
   url.searchParams.set('style', args.style);
   url.searchParams.set('temperature', String(args.temperature));
   url.searchParams.set('topP', String(args.topP));
+  if (args.ortEp) url.searchParams.set('ortEp', args.ortEp);
+  if (args.gridSize) url.searchParams.set('gridSize', String(args.gridSize));
   return url;
 }
 
