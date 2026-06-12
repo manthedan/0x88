@@ -145,16 +145,46 @@ rather than the objective one.
   identical to the 0.01%), browser ~50-60k nps. Contempt visibly works:
   at +400 the startpos choice shifts d2d4 → e2e4 with cp 22 → 46.
 
-Remaining roadmap, in order:
+### The 950MB verdict (decided 2026-06-11)
 
-1. Wire Monty into the engine catalog / Play page as an opponent (needs
-   AGPL corresponding-source archive before public deploy, like the other
-   GPL engines; download UX for the ~950MB net pair).
-2. Expose `Contempt_Analysis` as an analysis-page lane: objective best
-   (Stockfish) vs practical best vs a ~N-rated human (Monty).
-3. Adopt its Elo→WDL-rescaling calibration in our PUCT so the raw
-   `drawScore` constant becomes "opponent ≈ Maia 1500", and use its
-   contempt analysis as ground truth to tune `searchContemptLimit`.
+The net pair does not get smaller, so Monty is **not a product
+opponent**:
+
+- Both nets are **already int8-quantized**. The value net is one giant
+  sparse layer (~80k threat features × 8192 hidden, i8) ≈ 660MB of
+  1-byte weights; there is no f16/quantization halving left. The size is
+  architectural — sized for ~5000-Elo TCEC play, not for beating humans.
+- Max-level zstd (what the release binaries embed) only reaches ~505MB
+  transfer, and does nothing about the ~1GB resident in wasm memory plus
+  JS-side copies — tab-OOM territory on 8GB machines. Our shipping
+  ceiling so far is LQO at 189MB, and even the ~330MB BT4 lane is heavy.
+- Every contempt-capable commit (contempt landed 2025-11, #134/#135)
+  uses this same 661MB value net. Only the policy net was ever smaller
+  (16384-wide, ~115MB), which doesn't change the verdict — and old nets
+  are only on the dead tests.montychess.org (upstream keeps one rolling
+  prerelease; old binaries to carve nets from are deleted). Backporting
+  contempt onto a 2024-era small-net Monty or training our own small
+  value net with their in-repo trainer are real projects, not tweaks.
+
+Decision — Monty's three roles split by where they run:
+
+1. **Calibration oracle — native binary, the active lane.** Use Monty's
+   Elo→WDL contempt rescaling as ground truth to calibrate our PUCT
+   `drawScore`/`searchContemptLimit` (so settings become "opponent ≈
+   Maia 1500" instead of raw constants). Zero download cost; this is
+   what we actually wanted Monty for, and our own PUCT contempt is what
+   ships to users.
+2. **Browser lane — lab only, never product.** `monty-smoke.html` /
+   `MontyEngine` stay lab-scoped (excluded from the product build). If
+   ever surfaced, it is behind an explicit ~950MB opt-in and needs an
+   AGPL corresponding-source archive first. Deferred hardening if that
+   day comes: stream nets directly into wasm memory and drop the
+   worker-side byte cache (halves peak memory).
+3. **Contempt_Analysis as a product idea — rehost on our PUCT.** The
+   practical-vs-objective-move lane is worth having, but our scLimit
+   already models "best move against a budget-limited opponent" at zero
+   extra MB; Monty serves as the native reference implementation.
+   Revisit only if upstream publishes a small contempt-era net pair.
 
 Note: contempt cannot be injected into the classical UCI engines —
 modern Stockfish removed its Contempt option and the others never had
