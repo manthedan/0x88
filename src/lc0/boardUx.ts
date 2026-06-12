@@ -1,8 +1,9 @@
 // Shared board UX for the play / arena / analysis pages so the three boards
 // behave identically: live check highlighting and a lichess-style in-board
 // promotion overlay (instead of auto-queening or detached buttons).
+import type { Key } from 'chessground/types';
 import { squareName, type BoardState, type Color } from '../chess/board.ts';
-import { inCheck } from '../chess/movegen.ts';
+import { inCheck, legalMoves } from '../chess/movegen.ts';
 import type { Move } from '../chess/moveCodec.ts';
 
 /**
@@ -13,6 +14,25 @@ import type { Move } from '../chess/moveCodec.ts';
  */
 export function boardCheck(board: BoardState): boolean {
   return inCheck(board, board.turn);
+}
+
+/** Chessground movable.dests map for the side to move. */
+export function legalDests(board: BoardState): Map<Key, Key[]> {
+  const dests = new Map<Key, Key[]>();
+  for (const move of legalMoves(board)) {
+    const from = squareName(move.from) as Key;
+    dests.set(from, [...(dests.get(from) ?? []), squareName(move.to) as Key]);
+  }
+  return dests;
+}
+
+/**
+ * All legal moves matching a chessground drag/click (from, to). Length 0 =
+ * illegal; 1 = play it; 4 = a promotion, show the overlay and let the user
+ * pick (never auto-queen).
+ */
+export function matchUserMoves(board: BoardState, from: Key, to: Key): Move[] {
+  return legalMoves(board).filter((move) => squareName(move.from) === from && squareName(move.to) === to);
 }
 
 const PROMO_PIECE_CLASS: Record<string, string> = { q: 'queen', r: 'rook', b: 'bishop', n: 'knight' };

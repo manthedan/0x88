@@ -4,7 +4,7 @@ import type { Key } from 'chessground/types';
 import { boardToFen, parseFen, squareName, START_FEN, type BoardState } from '../chess/board.ts';
 import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
-import { boardCheck, showPromotionOverlay } from './boardUx.ts';
+import { boardCheck, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
@@ -1015,14 +1015,6 @@ function disposeUnusedEngines(): void {
   renderRecklessRuntimeInfo();
 }
 
-function legalDests(board: BoardState) {
-  const dests = new Map<Key, Key[]>();
-  for (const move of legalMoves(board)) {
-    const from = squareName(move.from) as Key;
-    dests.set(from, [...(dests.get(from) ?? []), squareName(move.to) as Key]);
-  }
-  return dests;
-}
 // Board arrows, colored by source and de-duplicated by move so the board stays
 // readable: each engine's best move (solid engine color) and the opening book's
 // most-played move (yellow) take priority over engines' alternative MultiPV
@@ -1876,7 +1868,7 @@ function afterNavigation() {
 
 async function onUserMove(from: Key, to: Key) {
   const board = tree.current.fen ? parseFen(tree.current.fen) : parseFen(START_FEN);
-  const matching = legalMoves(board).filter((m) => moveToUci(m).startsWith(`${from}${to}`));
+  const matching = matchUserMoves(board, from, to);
   if (!matching.length) { renderBoard(); return; }
   if (matching.length > 1) {
     // Promotion: let the user pick instead of silently auto-queening.

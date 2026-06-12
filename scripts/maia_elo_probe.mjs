@@ -22,6 +22,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { playGame } from '../src/lc0/engineBattle.ts';
 import { MAIA3_MIN_ELO, MAIA3_MAX_ELO } from '../src/lc0/maia3.ts';
+import { sampleHumanMove } from '../src/lc0/humanSampling.ts';
 import { createMaia3NodeEvaluator } from './maia3_node_evaluator.mjs';
 
 const args = new Map();
@@ -64,21 +65,6 @@ function interpolatedPeak(loglik) {
   const denom = y0 - 2 * y1 + y2;
   if (!(denom < 0)) return x1;
   return x1 + (GRID_STEP * (y0 - y2)) / (2 * denom);
-}
-
-// Same sampling as the Play page: proportional to the human-move distribution
-// with the deep tail (<10% of the top prior) dropped.
-function sampleHumanMove(legalPriors) {
-  if (!legalPriors.length) return undefined;
-  const floor = legalPriors[0].prior * 0.1;
-  const pool = legalPriors.filter((entry) => entry.prior >= floor);
-  const total = pool.reduce((sum, entry) => sum + entry.prior, 0);
-  let r = Math.random() * total;
-  for (const entry of pool) {
-    r -= entry.prior;
-    if (r <= 0) return entry.uci;
-  }
-  return pool[pool.length - 1].uci;
 }
 
 function player(elo, sampled, onMove) {

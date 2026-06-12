@@ -9,7 +9,8 @@ import { moveToSan } from '../chess/san.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
 import { GameTree } from './gameTree.ts';
 import { gameOutcome, type GameResultCode } from './engineBattle.ts';
-import { boardCheck, hidePromotionOverlay, showPromotionOverlay } from './boardUx.ts';
+import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
+import { sampleHumanMove } from './humanSampling.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
@@ -103,27 +104,6 @@ const LQO_SEARCH_CONTEMPT_LIMIT = 24;
 
 function maiaModelUrl(elo: string): string {
   return `/models/lc0/maia-${elo}.f32.onnx`;
-}
-
-/**
- * Sample a move in proportion to Maia's human-move distribution instead of
- * always playing the argmax, so games vary the way human opponents do. The
- * deep tail (moves under 10% of the top prior) is dropped: the policy gives
- * rare-blunder moves small but nonzero mass, and over a long game those
- * one-in-twenty picks would dominate the experience.
- */
-function sampleHumanMove(legalPriors: { uci: string; prior: number }[]): string | undefined {
-  if (!legalPriors.length) return undefined;
-  const floor = legalPriors[0].prior * 0.1;
-  const pool = legalPriors.filter((entry) => entry.prior >= floor);
-  const total = pool.reduce((sum, entry) => sum + entry.prior, 0);
-  if (!(total > 0)) return legalPriors[0].uci;
-  let r = Math.random() * total;
-  for (const entry of pool) {
-    r -= entry.prior;
-    if (r <= 0) return entry.uci;
-  }
-  return pool[pool.length - 1].uci;
 }
 
 function el(id: string): HTMLElement {
@@ -534,16 +514,6 @@ async function engineTurn(): Promise<void> {
   render();
 }
 
-function legalDests(): Map<Key, Key[]> {
-  const dests = new Map<Key, Key[]>();
-  for (const move of legalMoves(board)) {
-    const from = squareName(move.from) as Key;
-    const to = squareName(move.to) as Key;
-    dests.set(from, [...(dests.get(from) ?? []), to]);
-  }
-  return dests;
-}
-
 // Test hook for automated browser checks: synthetic chessground drags are
 // unreliable, so smokes call this to route through the real user-move path.
 (globalThis as unknown as { __playUserMove?: (from: string, to: string) => void }).__playUserMove
@@ -551,7 +521,7 @@ function legalDests(): Map<Key, Key[]> {
 
 function onUserMove(from: Key, to: Key): void {
   if (engineThinking || gameOver || board.turn !== humanColor) { render(); return; }
-  const matching = legalMoves(board).filter((move) => squareName(move.from) === from && squareName(move.to) === to);
+  const matching = matchUserMoves(board, from, to);
   if (!matching.length) { render(); return; }
   if (matching.length > 1) {
     // Promotion: every matching move carries a promotion piece; let the user pick.
@@ -755,7 +725,7 @@ function render(): void {
     movable: {
       free: false,
       color: humanCanMove ? (humanColor === 'w' ? 'white' as const : 'black' as const) : undefined,
-      dests: humanCanMove ? legalDests() : new Map<Key, Key[]>(),
+      dests: humanCanMove ? legalDests(board) : new Map<Key, Key[]>(),
       showDests: humanCanMove,
       events: { after: onUserMove },
     },

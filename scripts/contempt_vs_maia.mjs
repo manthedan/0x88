@@ -15,6 +15,7 @@ import { parseFen, START_FEN } from '../src/chess/board.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { Lc0PuctSearcher } from '../src/lc0/search.ts';
 import { playGame } from '../src/lc0/engineBattle.ts';
+import { sampleHumanMove } from '../src/lc0/humanSampling.ts';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 2) args.set(process.argv[i].replace(/^--/, ''), process.argv[i + 1]);
@@ -41,21 +42,6 @@ function startFenFor(lc0IsWhite) {
   return lc0IsWhite
     ? 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1'
     : 'rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-}
-
-// Same sampling as the Play page: proportional to the human-move
-// distribution with the deep tail (<10% of the top prior) dropped.
-function sampleHumanMove(legalPriors) {
-  if (!legalPriors.length) return undefined;
-  const floor = legalPriors[0].prior * 0.1;
-  const pool = legalPriors.filter((entry) => entry.prior >= floor);
-  const total = pool.reduce((sum, entry) => sum + entry.prior, 0);
-  let r = Math.random() * total;
-  for (const entry of pool) {
-    r -= entry.prior;
-    if (r <= 0) return entry.uci;
-  }
-  return pool[pool.length - 1].uci;
 }
 
 const maiaEvaluator = await Lc0OnnxEvaluator.create(readFileSync(MAIA_MODEL));
