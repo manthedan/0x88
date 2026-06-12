@@ -39,11 +39,15 @@ function post(message: unknown, transfers: Transferable[] = []): void {
   (globalThis as unknown as { postMessage: (message: unknown, transfers?: Transferable[]) => void }).postMessage(message, transfers);
 }
 
-function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run']>>, preferred: string, fallbackIndex: number): Float32Array {
+async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run']>>, preferred: string, fallbackIndex: number): Promise<Float32Array> {
   const byName = outputs[preferred];
   const tensor = byName ?? Object.values(outputs)[fallbackIndex];
   if (!tensor) throw new Error(`Maia3 output ${preferred} missing`);
-  return new Float32Array(tensor.data as Float32Array | number[]);
+  const maybeGpuTensor = tensor as ort.Tensor & { location?: string; getData?: (releaseData?: boolean) => Promise<unknown> };
+  const rawData = maybeGpuTensor.location === 'gpu-buffer' && typeof maybeGpuTensor.getData === 'function'
+    ? await maybeGpuTensor.getData(true)
+    : tensor.data;
+  return new Float32Array(rawData as Float32Array | number[]);
 }
 
 (globalThis as unknown as { onmessage: ((event: MessageEvent<Maia3WorkerMessage>) => void) | null }).onmessage = (event) => {
@@ -79,8 +83,8 @@ function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run']>>, 
           elo_oppo: new ort.Tensor('float32', Float32Array.from(message.eloOppos), [n]),
         };
         const outputs = await session.run(feeds);
-        const logitsMove = firstOutput(outputs, 'logits_move', 0);
-        const logitsValue = firstOutput(outputs, 'logits_value', 1);
+        const logitsMove = await firstOutput(outputs, 'logits_move', 0);
+        const logitsValue = await firstOutput(outputs, 'logits_value', 1);
         post({
           type: 'result',
           id: message.id,
@@ -96,8 +100,8 @@ function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run']>>, 
         elo_oppo: new ort.Tensor('float32', new Float32Array([message.eloOppo]), [1]),
       };
       const outputs = await session.run(feeds);
-      const logitsMove = firstOutput(outputs, 'logits_move', 0);
-      const logitsValue = firstOutput(outputs, 'logits_value', 1);
+      const logitsMove = await firstOutput(outputs, 'logits_move', 0);
+      const logitsValue = await firstOutput(outputs, 'logits_value', 1);
       post({
         type: 'result',
         id: message.id,
