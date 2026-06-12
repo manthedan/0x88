@@ -257,7 +257,10 @@ export class Bt4WorkerSearcher {
       // `backend` and scale visit budgets via config.wasmLevels. An explicit
       // ?ortEp=wasm page override forces the CPU path end to end.
       const ep = requestedOrtExecutionProvider() === 'wasm' ? 'wasm' : 'auto';
-      const ready = await this.post<{ backend: string }>({ type: 'init', modelUrl: this.config.modelUrl, ep, cacheModel: false, evalCacheEntries, reportDownloadProgress: true });
+      // Keep large nets on ORT's URL-loading path. Streaming progress would
+      // force a full JS ArrayBuffer copy before ORT creates the session, which
+      // is too memory-heavy for 160–350MB models.
+      const ready = await this.post<{ backend: string }>({ type: 'init', modelUrl: this.config.modelUrl, ep, cacheModel: false, evalCacheEntries, reportDownloadProgress: false });
       this.ready = true;
       this.configuredEvalCacheEntries = evalCacheEntries;
       this.backend = ready.backend;

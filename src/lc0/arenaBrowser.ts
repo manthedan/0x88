@@ -938,16 +938,23 @@ function reviewRootChartClick(event: MouseEvent): void {
   enterReview(liveTrail, index, shapes);
 }
 
+function chartDrawnPlies(chartId: 'evalChart' | 'timeChart' | 'npsChart'): number[] {
+  return gameChartSamples.flatMap((sample) => {
+    const value = chartId === 'evalChart' ? sample.whiteScore : chartId === 'timeChart' ? sample.moveMs : sample.nps;
+    return value === undefined || !Number.isFinite(value) ? [] : [sample.ply];
+  });
+}
+
 /** Map a click on a per-ply line chart back to the chart's ply index. */
-function chartPlyFromClick(target: HTMLElement, event: MouseEvent): number | null {
+function chartPlyFromClick(chartId: 'evalChart' | 'timeChart' | 'npsChart', target: HTMLElement, event: MouseEvent): number | null {
   const svg = target.closest('.chart-card')?.querySelector('svg');
-  if (!svg || !gameChartSamples.length) return null;
+  const plies = chartDrawnPlies(chartId);
+  if (!svg || !plies.length) return null;
   const rect = svg.getBoundingClientRect();
   if (!rect.width) return null;
   // Mirror lineChartSvg's layout: viewBox width 360, plot area between
-  // pad.left=36 and width-pad.right=352, x spanning [xMin..xMax] linearly.
+  // pad.left=36 and width-pad.right=352, x spanning the actually drawn points.
   const viewX = ((event.clientX - rect.left) / rect.width) * 360;
-  const plies = gameChartSamples.map((sample) => sample.ply);
   const xMin = Math.min(...plies);
   const xMax = Math.max(...plies);
   const frac = Math.max(0, Math.min(1, (viewX - 36) / (352 - 36)));
@@ -2952,10 +2959,10 @@ function wireEvents() {
   el('revNext').addEventListener('click', () => stepReview(1));
   el('revEnd').addEventListener('click', () => stepReview('end'));
   el('revLive').addEventListener('click', exitReview);
-  for (const id of ['evalChart', 'timeChart', 'npsChart']) {
+  for (const id of ['evalChart', 'timeChart', 'npsChart'] as const) {
     el(id).addEventListener('click', (event) => {
       if (!liveTrail) return;
-      const ply = chartPlyFromClick(event.target as HTMLElement, event as MouseEvent);
+      const ply = chartPlyFromClick(id, event.target as HTMLElement, event as MouseEvent);
       if (ply === null) return;
       enterReview(liveTrail, liveTrail.openingPlies + ply);
     });

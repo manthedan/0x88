@@ -2,6 +2,7 @@
 
 const KNOWN_CACHES = [
   { name: 'lc0-browser-models-v1', label: 'Leela networks', detail: 'sha256-validated model cache' },
+  { name: 'maia3-browser-models-v1', label: 'Maia3 human model', detail: 'sha256-validated Maia3 model cache' },
   { name: 'lc0-app-shell-v1', label: 'App & engine files', detail: 'offline cache: pages, WASM engines, runtimes' },
 ];
 

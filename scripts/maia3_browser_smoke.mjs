@@ -167,6 +167,7 @@ function isActionable(entry) {
   const text = typeof entry === 'string' ? entry : JSON.stringify(entry);
   if (!text) return false;
   if (/\[vite\] connecting|\[vite\] connected|favicon\.ico/i.test(text)) return false;
+  if (/ORT WebGPU session failed; falling back to WASM/i.test(text)) return false;
   return /error|pageerror|uncaught|failed|exception/i.test(text);
 }
 

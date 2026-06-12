@@ -9,6 +9,7 @@ import { moveToSan } from '../chess/san.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
 import { GameTree } from './gameTree.ts';
 import { gameOutcome, type GameResultCode } from './engineBattle.ts';
+import { boardCheck, hidePromotionOverlay, showPromotionOverlay } from './boardUx.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
@@ -665,32 +666,33 @@ function renderMoveList(): void {
 }
 
 function renderPromotionPicker(): void {
-  const picker = el('promoPicker');
-  picker.hidden = !pendingPromotion;
-  if (!pendingPromotion) return;
-  const glyphs: Record<string, string> = { q: '♛ Queen', r: '♜ Rook', b: '♝ Bishop', n: '♞ Knight' };
-  picker.innerHTML = pendingPromotion
-    .map((move) => `<button data-promo="${move.promotion}">${glyphs[move.promotion ?? 'q']}</button>`)
-    .join('') + '<button data-promo="">Cancel</button>';
-  for (const button of picker.querySelectorAll('button')) {
-    button.addEventListener('click', () => {
-      const promo = (button as HTMLButtonElement).dataset.promo;
-      const choice = pendingPromotion?.find((move) => move.promotion === promo);
-      if (choice) applyHumanMove(choice);
-      else { pendingPromotion = null; render(); }
-    });
+  el('promoPicker').hidden = true;
+  if (!pendingPromotion) {
+    hidePromotionOverlay(el('ground'));
+    return;
   }
+  showPromotionOverlay({
+    boardContainer: el('ground'),
+    orientation,
+    color: humanColor,
+    choices: pendingPromotion,
+    onPick: (move) => applyHumanMove(move),
+    onCancel: () => { pendingPromotion = null; render(); },
+  });
+}
+
+function engineOptionState(option: PlayEngineOption): { disabled: boolean; suffix: string } {
+  if (option.family !== 'lc0' || option.variant === 'small') return { disabled: false, suffix: '' };
+  const config: BigNetConfig = BIG_NETS[option.variant as BigNetKey];
+  const asset = bigNetAssetStatusSync(config);
+  if (asset === 'unknown') return { disabled: true, suffix: ' (checking net)' };
+  if (asset === 'missing') return { disabled: true, suffix: ' (net not hosted here)' };
+  if (!bt4SupportedSync()) return { disabled: false, suffix: ' (CPU fallback — slow)' };
+  return { disabled: false, suffix: '' };
 }
 
 function engineOptionHtml(option: PlayEngineOption): string {
-  let disabled = false;
-  let suffix = '';
-  if (option.family === 'lc0' && option.variant !== 'small') {
-    const config: BigNetConfig = BIG_NETS[option.variant as BigNetKey];
-    const asset = bigNetAssetStatusSync(config);
-    if (asset === 'missing') { disabled = true; suffix = ' (net not hosted here)'; }
-    else if (!bt4SupportedSync()) suffix = ' (CPU fallback — slow)';
-  }
+  const { disabled, suffix } = engineOptionState(option);
   return `<option value="${option.id}"${disabled ? ' disabled' : ''}>${option.label}${suffix}</option>`;
 }
 
@@ -701,7 +703,9 @@ function refreshEngineOptions(): void {
   select.innerHTML = `<optgroup label="Human-like (Maia, plays like a rated human)">${group('human')}</optgroup>`
     + `<optgroup label="Odds bots (give you material, then hunt for tricks)">${group('odds')}</optgroup>`
     + `<optgroup label="Engines (strong at any level)">${group('engine')}</optgroup>`;
-  if (selected && ENGINE_OPTIONS.some((option) => option.id === selected)) select.value = selected;
+  const selectedOption = ENGINE_OPTIONS.find((option) => option.id === selected);
+  if (selectedOption && !engineOptionState(selectedOption).disabled) select.value = selected;
+  else select.value = 'maia3';
   renderEngineCaution();
 }
 
@@ -740,6 +744,7 @@ function render(): void {
     coordinates: true,
     // Allows synthetic pointer events so automated browser checks can move pieces.
     trustAllEvents: true,
+    check: boardCheck(board),
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 160 },
     movable: {
@@ -755,11 +760,11 @@ function render(): void {
   else ground.set(config);
 }
 
-let lastEngineId = 'maia-1500';
+let lastEngineId = 'maia3';
 
 function init(): void {
   refreshEngineOptions();
-  selectEl('engineSelect').value = 'maia-1500';
+  selectEl('engineSelect').value = 'maia3';
   renderLevelOptions();
   el('newGame').addEventListener('click', newGame);
   el('takeback').addEventListener('click', takeback);
