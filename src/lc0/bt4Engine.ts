@@ -113,7 +113,7 @@ let supportedCached: boolean | null = null;
 const assetProbes = new Map<string, Promise<Bt4AssetStatus>>();
 const assetStatuses = new Map<string, Bt4AssetStatus>();
 
-/** WebGPU usable for BT4? Cached after the first probe. */
+/** WebGPU usable for big-net search? Cached after the first probe. Asset probes are tracked separately per net. */
 export async function probeBt4Support(): Promise<boolean> {
   if (supportProbe) return supportProbe;
   supportProbe = (async () => {
