@@ -8,7 +8,7 @@ const crossOriginIsolationHeaders = {
 // The deployed product is the first set; the lab/benchmark pages are only
 // built locally (BUILD_SCOPE=product, used by build:netlify, omits them).
 const productPages = ['index.html', 'lc0-play.html', 'lc0-analysis.html', 'lc0-arena.html', 'lc0-policy-only.html'];
-const labPages = ['client-demo.html', 'berserk-smoke.html', 'plentychess-smoke.html', 'monty-smoke.html', 'reckless-benchmark.html', 'browser-benchmark.html', 'browser-ort-bridge-benchmark.html', 'browser-rust-wasm-webgpu-benchmark.html', 'browser-eval-broker-prototype.html', 'browser-wasm-selfplay-broker.html', 'browser-two-model-arena.html', 'browser-multimodel-arena.html'];
+const labPages = ['client-demo.html', 'lc0-maia3-smoke.html', 'berserk-smoke.html', 'plentychess-smoke.html', 'monty-smoke.html', 'reckless-benchmark.html', 'browser-benchmark.html', 'browser-ort-bridge-benchmark.html', 'browser-rust-wasm-webgpu-benchmark.html', 'browser-eval-broker-prototype.html', 'browser-wasm-selfplay-broker.html', 'browser-two-model-arena.html', 'browser-multimodel-arena.html'];
 
 export default defineConfig({
   server: {

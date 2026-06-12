@@ -12,6 +12,7 @@ import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
+import { Maia3BrowserEvaluator, MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle } from './maia3.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { BIG_NETS, Bt4WorkerSearcher, LQO_NET, T3_NET, bigNetAssetStatusSync, bigNetMemoryCaution, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig } from './bt4Engine.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
@@ -28,7 +29,7 @@ const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL_URL;
 
-type PlayFamily = 'maia' | 'lc0' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
+type PlayFamily = 'maia' | 'maia3' | 'lc0' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
 
 interface PlayEngineOption {
   id: string;
@@ -45,6 +46,7 @@ const ENGINE_OPTIONS: PlayEngineOption[] = [
   { id: 'maia-1500', label: 'Maia 1500', family: 'maia', variant: '1500', group: 'human' },
   { id: 'maia-1700', label: 'Maia 1700', family: 'maia', variant: '1700', group: 'human' },
   { id: 'maia-1900', label: 'Maia 1900', family: 'maia', variant: '1900', group: 'human' },
+  { id: 'maia3', label: 'Maia3 · Elo-conditioned human model', family: 'maia3', variant: 'maia3', group: 'human' },
   { id: 'leela-queen-odds', label: 'Leela Queen Odds (WebGPU)', family: 'lc0', variant: 'lqo', group: 'odds' },
   { id: 'sf-lite', label: 'Stockfish Lite', family: 'sf', variant: 'lite', group: 'engine' },
   { id: 'sf-full', label: 'Stockfish', family: 'sf', variant: 'full', group: 'engine' },
@@ -70,7 +72,7 @@ const SF_LEVELS = [
 ] as const;
 
 /** Per-family strength ladders indexed by level (0-4): visits for lc0, depth otherwise. */
-const LEVELS: Record<Exclude<PlayFamily, 'maia' | 'sf'>, number[]> = {
+const LEVELS: Record<Exclude<PlayFamily, 'maia' | 'maia3' | 'sf'>, number[]> = {
   lc0: [8, 32, 100, 400, 1600],
   reckless: [2, 4, 6, 10, 14],
   viridithas: [2, 4, 6, 9, 12],
@@ -173,6 +175,9 @@ interface CpuEngine {
 }
 const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
 const maiaPlayerPromises = new Map<string, Promise<Lc0PolicyOnlyPlayer>>();
+let maia3Promise: Promise<Maia3BrowserEvaluator> | null = null;
+/** One-line model/cache status shown in the caption once Maia3 has loaded. */
+let maia3Status: string | null = null;
 
 function ensureMaia(elo: string): Promise<Lc0PolicyOnlyPlayer> {
   const existing = maiaPlayerPromises.get(elo);
@@ -197,6 +202,31 @@ function ensureMaia(elo: string): Promise<Lc0PolicyOnlyPlayer> {
   return created;
 }
 
+function ensureMaia3(): Promise<Maia3BrowserEvaluator> {
+  if (maia3Promise) return maia3Promise;
+  maia3Promise = (async () => {
+    setEngineNote('Loading Maia3 human model…');
+    const evaluator = await Maia3BrowserEvaluator.create({
+      selfElo: selectedMaia3Elo(),
+      oppoElo: selectedMaia3Elo(),
+      onProgress: (loaded, total) => showDownloadProgress('Maia3', loaded, total),
+    });
+    hideDownloadProgress();
+    const load = evaluator.modelLoad;
+    const origin = load.cacheStatus === 'hit' ? 'from cache' : load.cacheStatus === 'miss' ? 'downloaded' : 'loaded';
+    const integrity = load.sha256Valid === true ? ', sha256 ✓' : load.sha256Valid === false ? ', sha256 MISMATCH' : '';
+    maia3Status = `Model ${origin} (${((load.bytes ?? 0) / 1e6).toFixed(0)}MB${integrity})`;
+    setEngineNote('');
+    return evaluator;
+  })().catch((error: Error) => {
+    maia3Promise = null;
+    hideDownloadProgress();
+    setEngineNote(`Maia3 load failed: ${error.message}`, true);
+    throw error;
+  });
+  return maia3Promise;
+}
+
 function selectedEngine(): PlayEngineOption {
   const id = selectEl('engineSelect').value;
   return ENGINE_OPTIONS.find((option) => option.id === id) ?? ENGINE_OPTIONS[0];
@@ -204,8 +234,23 @@ function selectedEngine(): PlayEngineOption {
 function selectedLevel(): number {
   return Math.max(0, Math.min(LEVEL_COUNT - 1, Number(selectEl('levelSelect').value) || 0));
 }
+function selectedMaia3Elo(): number {
+  const input = el('maia3Elo') as HTMLInputElement;
+  return Math.max(MAIA3_MIN_ELO, Math.min(MAIA3_MAX_ELO, Number(input.value) || MAIA3_DEFAULT_ELO));
+}
+function selectedMaia3Style(): Maia3MoveStyle {
+  return selectEl('maia3Style').value === 'argmax' ? 'argmax' : 'sample';
+}
+function selectedMaia3Temperature(): number {
+  const input = el('maia3Temperature') as HTMLInputElement;
+  return Math.max(0.01, Math.min(5, Number(input.value) || 1));
+}
+function selectedMaia3TopP(): number {
+  const input = el('maia3TopP') as HTMLInputElement;
+  return Math.max(0.01, Math.min(1, Number(input.value) || 1));
+}
 function strengthFor(option: PlayEngineOption, level: number): number {
-  if (option.family === 'maia') return 1;
+  if (option.family === 'maia' || option.family === 'maia3') return 1;
   if (option.family === 'sf') return SF_LEVELS[level].depth;
   if (option.family === 'lc0' && option.variant !== 'small') return BIG_NET_LEVELS[level];
   return LEVELS[option.family][level];
@@ -215,6 +260,12 @@ function strengthCaption(): string {
   const level = selectedLevel();
   if (option.family === 'maia') {
     return `Plays like a ~${option.variant}-rated human — moves are sampled from its human-move predictions, so games vary.`;
+  }
+  if (option.family === 'maia3') {
+    const style = selectedMaia3Style();
+    const suffix = style === 'argmax' ? 'deterministic top human move' : `sampled, temperature ${selectedMaia3Temperature().toFixed(2)}, top-p ${selectedMaia3TopP().toFixed(2)}`;
+    const status = maia3Status ? ` ${maia3Status}.` : '';
+    return `Maia3 predicts human moves at Elo ${selectedMaia3Elo()} — ${suffix}. No LC0/PUCT search; its WDL output predicts the human game outcome, not an engine eval.${status}`;
   }
   if (option.family === 'sf') {
     const sf = SF_LEVELS[level];
@@ -231,7 +282,7 @@ function renderLevelOptions(): void {
   const previous = select.value;
   const option = selectedEngine();
   const field = select.closest('.field') as HTMLElement;
-  if (option.family === 'maia') {
+  if (option.family === 'maia' || option.family === 'maia3') {
     field.hidden = true;
     return;
   }
@@ -241,6 +292,20 @@ function renderLevelOptions(): void {
     : EFFORT_LEVEL_NAMES.map((name, i) => `${i + 1} · ${name}`);
   select.innerHTML = labels.map((label, i) => `<option value="${i}">${label}</option>`).join('');
   select.value = previous && Number(previous) < LEVEL_COUNT ? previous : '2';
+}
+
+function renderMaia3Controls(): void {
+  const isMaia3 = selectedEngine().family === 'maia3';
+  el('maia3Controls').hidden = !isMaia3;
+  const elo = selectedMaia3Elo();
+  el('maia3EloValue').textContent = String(elo);
+  // Disabled (not hidden) in argmax mode so the sampling knobs stay
+  // discoverable; values are preserved for when sampling is re-selected.
+  const sample = selectedMaia3Style() === 'sample';
+  (el('maia3Temperature') as HTMLInputElement).disabled = !sample;
+  (el('maia3TopP') as HTMLInputElement).disabled = !sample;
+  (el('maia3TemperatureField') as HTMLElement).style.opacity = sample ? '' : '0.5';
+  (el('maia3TopPField') as HTMLElement).style.opacity = sample ? '' : '0.5';
 }
 
 function setEngineNote(text: string, warn = false): void {
@@ -349,6 +414,18 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
     if (signal.aborted) return null;
     const choice = await player.chooseMove({ positions });
     return sampleHumanMove(choice.evaluation.legalPriors) ?? choice.move ?? null;
+  }
+  if (option.family === 'maia3') {
+    const player = await ensureMaia3();
+    if (signal.aborted) return null;
+    const choice = await player.chooseMove({ positions }, {
+      selfElo: selectedMaia3Elo(),
+      oppoElo: selectedMaia3Elo(),
+      style: selectedMaia3Style(),
+      temperature: selectedMaia3Temperature(),
+      topP: selectedMaia3TopP(),
+    });
+    return choice.move;
   }
   if (option.family === 'lc0' && option.variant === 'small') {
     const searcher = await ensureLc0Small();
@@ -638,6 +715,7 @@ function renderEngineCaution(): void {
 function render(): void {
   el('status').textContent = statusText();
   el('status').classList.toggle('over', !!gameOver);
+  renderMaia3Controls();
   el('levelCaption').textContent = strengthCaption();
   buttonEl('takeback').disabled = !moves.length || !!pendingPromotion;
   buttonEl('resign').disabled = !!gameOver || !moves.length;
@@ -668,6 +746,8 @@ function render(): void {
   else ground.set(config);
 }
 
+let lastEngineId = 'maia-1500';
+
 function init(): void {
   refreshEngineOptions();
   selectEl('engineSelect').value = 'maia-1500';
@@ -679,7 +759,18 @@ function init(): void {
   el('exportPgn').addEventListener('click', () => { el('pgnOut').textContent = exportPgn(); });
   el('copyPgn').addEventListener('click', () => { void navigator.clipboard.writeText(exportPgn()); });
   selectEl('engineSelect').addEventListener('change', () => {
+    const option = selectedEngine();
+    // Switching from a fixed Maia level to Maia3 carries the rating over, so
+    // "Maia 1700 → Maia3" plays at 1700 instead of snapping back to 1500.
+    if (option.family === 'maia3' && lastEngineId.startsWith('maia-')) {
+      const carried = Number(lastEngineId.slice('maia-'.length));
+      if (Number.isFinite(carried)) {
+        (el('maia3Elo') as HTMLInputElement).value = String(Math.max(MAIA3_MIN_ELO, Math.min(MAIA3_MAX_ELO, carried)));
+      }
+    }
+    lastEngineId = option.id;
     renderLevelOptions();
+    renderMaia3Controls();
     renderEngineCaution();
     // Before any move is played, apply the opponent's start position (odds
     // bots remove their queen) without starting the engine's clock.
@@ -692,6 +783,10 @@ function init(): void {
     render();
   });
   selectEl('levelSelect').addEventListener('change', render);
+  selectEl('maia3Style').addEventListener('change', render);
+  el('maia3Elo').addEventListener('input', render);
+  el('maia3Temperature').addEventListener('input', render);
+  el('maia3TopP').addEventListener('input', render);
   void probeBt4Support().then(refreshEngineOptions);
   void checkBigNetAsset(BIG_NETS.bt4, refreshEngineOptions);
   void checkBigNetAsset(T3_NET, refreshEngineOptions);
