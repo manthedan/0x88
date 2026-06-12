@@ -109,6 +109,22 @@ Earlier drawScore-only runs (8–16 games, v8–16): ds −0.4 scored 50% vs
 correctly believes a queen-down position is lost and drawScore cannot
 overrule it.
 
+A second queen-odds run (12 games/arm, v16, vs Maia 1900) after
+`contemptElo` landed:
+
+| Arm | Score | Record | Note |
+| --- | ---: | --- | --- |
+| scLimit 16 | 71% | +7 =3 −2 | 92% last run ⇒ 12-game arms are noisy |
+| scLimit 16 + contemptElo 600 | 71% | +8 =1 −3 | more decisive (11 mates, 1 draw) |
+| contemptElo 600 alone | 63% | +6 =3 −3 | vs 58% baseline last run |
+
+Reading both runs together: `searchContemptLimit` remains the lever;
+`contemptElo` is neutral-to-mildly-positive and — unlike raw `drawScore`,
+which dragged the scLimit arm from 92% to 63% — **safe to stack on top**
+(its s² fade keeps it from fighting the pessimistic value head in lost
+positions). Its real value is semantic: an interpretable, user-facing
+knob denominated in Elo. Play-page defaults stay scLimit-based.
+
 **Guidance**
 - `searchContemptLimit` is the big lever for beating humans from worse
   positions; it works *with* a pessimistic value head, not against it.
