@@ -841,6 +841,10 @@ function init(): void {
   el('dismissRestart').addEventListener('click', dismissRestart);
   selectEl('colorSelect').addEventListener('change', () => {
     if (!moves.length) {
+      // Cancel any in-flight opening search before resetting, so a rapid
+      // color change cannot start a second concurrent engine turn.
+      gameSeq += 1;
+      cancelEngineTurn();
       const choice = selectEl('colorSelect').value;
       humanColor = choice === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : (choice === 'black' ? 'b' : 'w');
       orientation = humanColor === 'w' ? 'white' : 'black';
@@ -875,8 +879,10 @@ function init(): void {
     // bots remove their queen). Do not re-resolve humanColor here: color is
     // only (re)resolved by newGame or the colorSelect handler, so changing
     // the engine does not re-roll a random color. If the human is Black the
-    // engine must open the game.
-    if (!moves.length && !engineThinking) {
+    // engine must open the game. Cancel any in-flight opening search first.
+    if (!moves.length) {
+      gameSeq += 1;
+      cancelEngineTurn();
       orientation = humanColor === 'w' ? 'white' : 'black';
       startFen = startFenFor(selectedEngine(), humanColor);
       board = parseFen(startFen);
