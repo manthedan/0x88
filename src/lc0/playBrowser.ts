@@ -461,6 +461,12 @@ function checkGameOver(): void {
 }
 
 function applyMove(move: Move): void {
+  // First ply of a game locks in the active engine/color so a later
+  // mid-game select change can be restored on a dismissed restart.
+  if (!moves.length) {
+    activeEngineId = selectEl('engineSelect').value;
+    activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
+  }
   sans.push(moveToSan(board, move));
   moves.push(move);
   board = makeMove(board, move);
@@ -554,6 +560,9 @@ function newGame(): void {
     if (searcher.loaded) void searcher.resetTree();
   }
   setEngineNote('');
+  disarmResign();
+  activeEngineId = selectEl('engineSelect').value;
+  activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
   render();
   if (humanColor === 'b') void engineTurn();
 }
@@ -562,6 +571,7 @@ function takeback(): void {
   if (!moves.length) return;
   gameSeq += 1;
   cancelEngineTurn();
+  disarmResign();
   // Undo plies until it is the human's move again (one ply if the engine had
   // not replied yet, two plies after an engine reply).
   do {
@@ -763,14 +773,12 @@ function render(): void {
 
 let lastEngineId = 'maia3';
 // Inline confirm banner state: shown when engine/color changes mid-game so
-// the user can start fresh instead of silently keeping the old line.
+// the user can start fresh instead of silently keeping the old line. The
+// active* snapshots record the engine/color the in-progress game is actually
+// using, so a dismissed restart restores the selects to match the live game.
 let pendingRestart: { engine: string; color: 'white' | 'black' | 'random' } | null = null;
-
-function syncOrientation(): void {
-  const choice = selectEl('colorSelect').value;
-  const newHuman = choice === 'random' ? humanColor : (choice === 'black' ? 'b' : 'w');
-  orientation = newHuman === 'w' ? 'white' : 'black';
-}
+let activeEngineId = 'maia3';
+let activeColor: 'white' | 'black' | 'random' = 'white';
 
 function maybeQueueRestart(): void {
   // When the user changes opponent or color after at least one ply, do not
@@ -794,13 +802,23 @@ function confirmRestart(): void {
 }
 
 function dismissRestart(): void {
+  // Restore the selects to the engine/color the live game is actually using,
+  // so the dismissed change does not leak into the next engine move or labels.
+  selectEl('engineSelect').value = activeEngineId;
+  selectEl('colorSelect').value = activeColor;
   pendingRestart = null;
+  // Re-render derived controls so captions/cautions match the restored selects.
+  renderLevelOptions();
+  renderMaia3Controls();
+  renderEngineCaution();
   render();
 }
 
 function init(): void {
   refreshEngineOptions();
   selectEl('engineSelect').value = 'maia3';
+  activeEngineId = 'maia3';
+  activeColor = 'white';
   renderLevelOptions();
   el('newGame').addEventListener('click', newGame);
   el('takeback').addEventListener('click', takeback);
@@ -820,10 +838,13 @@ function init(): void {
   el('dismissRestart').addEventListener('click', dismissRestart);
   selectEl('colorSelect').addEventListener('change', () => {
     if (!moves.length) {
-      syncOrientation();
+      const choice = selectEl('colorSelect').value;
+      humanColor = choice === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : (choice === 'black' ? 'b' : 'w');
+      orientation = humanColor === 'w' ? 'white' : 'black';
       startFen = startFenFor(selectedEngine(), humanColor);
       board = parseFen(startFen);
       positions = [board];
+      gameOver = null;
       render();
     } else {
       maybeQueueRestart();
@@ -845,10 +866,10 @@ function init(): void {
     renderEngineCaution();
     // Before any move is played, apply the opponent's start position (odds
     // bots remove their queen) without starting the engine's clock. Also
-    // re-sync orientation in case color changed via its select first.
+    // re-sync humanColor/orientation in case color changed via its select.
     if (!moves.length && !engineThinking) {
-      syncOrientation();
-      humanColor = selectEl('colorSelect').value === 'black' ? 'b' : 'w';
+      const choice = selectEl('colorSelect').value;
+      humanColor = choice === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : (choice === 'black' ? 'b' : 'w');
       orientation = humanColor === 'w' ? 'white' : 'black';
       startFen = startFenFor(selectedEngine(), humanColor);
       board = parseFen(startFen);

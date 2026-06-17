@@ -99,7 +99,7 @@ export function showPromotionOverlay(options: PromotionOverlayOptions): void {
     tile.setAttribute('aria-label', `Promote to ${PROMO_PIECE_CLASS[move.promotion ?? 'q']}`);
     const piece = document.createElement('piece');
     piece.className = `${options.color === 'w' ? 'white' : 'black'} ${PROMO_PIECE_CLASS[move.promotion ?? 'q']}`;
-    tile.setAttribute('aria-hidden', 'true');
+    piece.setAttribute('aria-hidden', 'true');
     tile.appendChild(piece);
     tile.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -116,7 +116,7 @@ export function showPromotionOverlay(options: PromotionOverlayOptions): void {
   const onKeydown = (event: KeyboardEvent) => {
     if (event.key === 'Escape') {
       event.preventDefault();
-      cleanup();
+      close();
       options.onCancel();
     } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
       event.preventDefault();
@@ -126,15 +126,15 @@ export function showPromotionOverlay(options: PromotionOverlayOptions): void {
       tiles[next].focus();
     }
   };
-  const cleanup = (): void => {
+  const close = (): void => {
     overlay.removeEventListener('keydown', onKeydown);
+    overlay.remove();
   };
   overlay.addEventListener('keydown', onKeydown);
   overlay.tabIndex = -1;
 
   overlay.addEventListener('click', () => {
-    cleanup();
-    overlay.remove();
+    close();
     options.onCancel();
   });
   host.appendChild(overlay);
