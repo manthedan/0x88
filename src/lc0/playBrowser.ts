@@ -26,9 +26,10 @@ import { berserkVariantByKey, defaultBerserkVariantKey, resolveDefaultBerserkVar
 import type { PlentyChessEngine } from './plentychessEngine.ts';
 import { defaultPlentyChessVariantKey, plentyChessVariantByKey, resolveDefaultPlentyChessVariantAssetFallback } from './plentychessVariants.ts';
 import { createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine } from './engineProvision.ts';
+import { resolvePublicAssetUrl } from './assetUrls.ts';
 
 const params = new URLSearchParams(location.search);
-const DEFAULT_MODEL_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';
+const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL_URL;
 
 type PlayFamily = 'maia' | 'maia3' | 'lc0' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
@@ -154,6 +155,26 @@ const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
 let maia3Promise: Promise<Maia3BrowserEvaluator> | null = null;
 /** One-line model/cache status shown in the caption once Maia3 has loaded. */
 let maia3Status: string | null = null;
+
+// ---------------------------------------------------------------------------
+// Screen wake lock (best-effort): keeps the screen on while the engine is
+// thinking so a sleeping laptop does not abandon the move.
+// ---------------------------------------------------------------------------
+type WakeLockSentinelLike = { release: () => Promise<void> };
+let wakeLock: WakeLockSentinelLike | null = null;
+async function requestWakeLock(): Promise<void> {
+  try {
+    const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<WakeLockSentinelLike> } };
+    wakeLock = await nav.wakeLock?.request('screen');
+  } catch {
+    // Surface API missing or denied; play continues without the lock.
+  }
+}
+function releaseWakeLock(): void {
+  if (!wakeLock) return;
+  void wakeLock.release().catch(() => {});
+  wakeLock = null;
+}
 
 function ensureMaia3(): Promise<Maia3BrowserEvaluator> {
   if (maia3Promise) return maia3Promise;
@@ -450,6 +471,7 @@ function cancelEngineTurn(): void {
   abort?.abort();
   abort = null;
   engineThinking = false;
+  releaseWakeLock();
 }
 
 async function engineTurn(): Promise<void> {
@@ -458,6 +480,7 @@ async function engineTurn(): Promise<void> {
   engineThinking = true;
   abort = new AbortController();
   const signal = abort.signal;
+  await requestWakeLock();
   render();
   let uci: string | null = null;
   try {
@@ -465,9 +488,12 @@ async function engineTurn(): Promise<void> {
   } catch (error) {
     if (seq !== gameSeq || signal.aborted) return;
     engineThinking = false;
+    releaseWakeLock();
     setEngineNote(`Engine error: ${(error as Error).message}`, true);
     render();
     return;
+  } finally {
+    releaseWakeLock();
   }
   if (seq !== gameSeq || signal.aborted) return;
   engineThinking = false;
@@ -550,12 +576,37 @@ function takeback(): void {
   if (board.turn !== humanColor) void engineTurn();
 }
 
+let resignArmed = false;
+let resignArmTimer: ReturnType<typeof setTimeout> | null = null;
+
 function resign(): void {
   if (gameOver || !moves.length) return;
+  // Two-click confirm: the first click arms and relabels the button, the
+  // second within 4s confirms. Cancelling any other action disarms.
+  if (!resignArmed) {
+    resignArmed = true;
+    const btn = buttonEl('resign');
+    btn.textContent = 'Click again to resign';
+    btn.classList.add('danger');
+    if (resignArmTimer) clearTimeout(resignArmTimer);
+    resignArmTimer = setTimeout(disarmResign, 4000);
+    return;
+  }
+  disarmResign();
   gameSeq += 1;
   cancelEngineTurn();
   gameOver = { result: humanColor === 'w' ? '0-1' : '1-0', reason: 'resignation' };
   render();
+}
+
+function disarmResign(): void {
+  resignArmed = false;
+  if (resignArmTimer) { clearTimeout(resignArmTimer); resignArmTimer = null; }
+  const btn = buttonEl('resign');
+  if (btn.classList.contains('danger')) {
+    btn.classList.remove('danger');
+    btn.textContent = 'Resign';
+  }
 }
 
 function exportPgn(): string {
@@ -608,6 +659,15 @@ function renderMoveList(): void {
   }
   list.innerHTML = parts.join(' ');
   list.scrollTop = list.scrollHeight;
+}
+
+function renderRestartBanner(): void {
+  const banner = el('restartBanner');
+  if (!pendingRestart) { banner.hidden = true; return; }
+  banner.hidden = false;
+  const engineLabel = ENGINE_OPTIONS.find((o) => o.id === pendingRestart?.engine)?.label ?? 'the new engine';
+  const colorLabel = pendingRestart.color === 'random' ? 'random side' : `as ${pendingRestart.color}`;
+  el('restartMessage').textContent = `Start a new game vs ${engineLabel}, ${colorLabel}? The current game will be discarded.`;
 }
 
 function renderPromotionPicker(): void {
@@ -674,6 +734,7 @@ function render(): void {
   buttonEl('resign').disabled = !!gameOver || !moves.length;
   renderMoveList();
   renderPromotionPicker();
+  renderRestartBanner();
   el('pgnOut').textContent = '';
   const humanCanMove = !engineThinking && !gameOver && !pendingPromotion && board.turn === humanColor;
   const lastUci = moves.length ? moveToUci(moves[moves.length - 1]) : undefined;
@@ -701,6 +762,41 @@ function render(): void {
 }
 
 let lastEngineId = 'maia3';
+// Inline confirm banner state: shown when engine/color changes mid-game so
+// the user can start fresh instead of silently keeping the old line.
+let pendingRestart: { engine: string; color: 'white' | 'black' | 'random' } | null = null;
+
+function syncOrientation(): void {
+  const choice = selectEl('colorSelect').value;
+  const newHuman = choice === 'random' ? humanColor : (choice === 'black' ? 'b' : 'w');
+  orientation = newHuman === 'w' ? 'white' : 'black';
+}
+
+function maybeQueueRestart(): void {
+  // When the user changes opponent or color after at least one ply, do not
+  // silently swap state mid-game. Queue a restart that they can accept or
+  // dismiss; the existing game continues untouched until they confirm.
+  if (!moves.length || gameOver || engineThinking) {
+    pendingRestart = null;
+    render();
+    return;
+  }
+  pendingRestart = {
+    engine: selectEl('engineSelect').value,
+    color: selectEl('colorSelect').value as 'white' | 'black' | 'random',
+  };
+  render();
+}
+
+function confirmRestart(): void {
+  pendingRestart = null;
+  void newGame();
+}
+
+function dismissRestart(): void {
+  pendingRestart = null;
+  render();
+}
 
 function init(): void {
   refreshEngineOptions();
@@ -711,7 +807,28 @@ function init(): void {
   el('resign').addEventListener('click', resign);
   el('flip').addEventListener('click', () => { orientation = orientation === 'white' ? 'black' : 'white'; render(); });
   el('exportPgn').addEventListener('click', () => { el('pgnOut').textContent = exportPgn(); });
-  el('copyPgn').addEventListener('click', () => { void navigator.clipboard.writeText(exportPgn()); });
+  el('copyPgn').addEventListener('click', () => {
+    void navigator.clipboard.writeText(exportPgn()).then(() => {
+      const btn = buttonEl('copyPgn');
+      const original = btn.textContent;
+      btn.textContent = 'Copied';
+      btn.disabled = true;
+      setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1500);
+    });
+  });
+  el('confirmRestart').addEventListener('click', confirmRestart);
+  el('dismissRestart').addEventListener('click', dismissRestart);
+  selectEl('colorSelect').addEventListener('change', () => {
+    if (!moves.length) {
+      syncOrientation();
+      startFen = startFenFor(selectedEngine(), humanColor);
+      board = parseFen(startFen);
+      positions = [board];
+      render();
+    } else {
+      maybeQueueRestart();
+    }
+  });
   selectEl('engineSelect').addEventListener('change', () => {
     const option = selectedEngine();
     // Switching from a fixed Maia level to Maia3 carries the rating over, so
@@ -727,12 +844,18 @@ function init(): void {
     renderMaia3Controls();
     renderEngineCaution();
     // Before any move is played, apply the opponent's start position (odds
-    // bots remove their queen) without starting the engine's clock.
+    // bots remove their queen) without starting the engine's clock. Also
+    // re-sync orientation in case color changed via its select first.
     if (!moves.length && !engineThinking) {
+      syncOrientation();
+      humanColor = selectEl('colorSelect').value === 'black' ? 'b' : 'w';
+      orientation = humanColor === 'w' ? 'white' : 'black';
       startFen = startFenFor(selectedEngine(), humanColor);
       board = parseFen(startFen);
       positions = [board];
       gameOver = null;
+    } else if (!gameOver && !engineThinking) {
+      maybeQueueRestart();
     }
     render();
   });

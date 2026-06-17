@@ -40,6 +40,8 @@ h2.sec{font-size:13px;margin:32px 0 10px;text-transform:uppercase;letter-spacing
 footer{border-top:1px solid var(--rule);margin-top:40px;padding:16px 20px;font-size:12px;color:var(--muted)}
 footer a{color:var(--muted)}
 @media(max-width:760px){.cards{grid-template-columns:1fr}.hero h2{font-size:24px}}
+:where(button,select,input,textarea,a):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}.card:hover{box-shadow:none}}
 </style>
 </head>
 <body>
@@ -55,17 +57,17 @@ footer a{color:var(--muted)}
   <div class="cards">
     <a class="card" href="/lc0-play.html">
       <span class="tag">Play</span>
-      <h3>Play a game <span class="go">→</span></h3>
+      <h3>Play a game <span class="go" aria-hidden="true">→</span></h3>
       <p>Play the human-like Maia nets (rated 1100–1900, trained on real human games) or take on the engines. Takebacks and PGN export included.</p>
     </a>
     <a class="card" href="/lc0-analysis.html">
       <span class="tag">Analyze</span>
-      <h3>Analysis board <span class="go">→</span></h3>
+      <h3>Analysis board <span class="go" aria-hidden="true">→</span></h3>
       <p>Multi-engine analysis with side-by-side comparison, game review with accuracy and critical moments, PGN import, and an opening explorer over your own games.</p>
     </a>
     <a class="card" href="/lc0-arena.html">
       <span class="tag">Compete</span>
-      <h3>Engine arena <span class="go">→</span></h3>
+      <h3>Engine arena <span class="go" aria-hidden="true">→</span></h3>
       <p>Engine-vs-engine matches and round-robin or gauntlet tournaments with standings, Elo estimates, and per-game eval charts.</p>
     </a>
   </div>

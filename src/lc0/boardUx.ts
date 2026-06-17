@@ -46,6 +46,7 @@ function injectOverlayStyles(): void {
 .promotion-overlay{position:absolute;inset:0;z-index:20;background:rgba(0,0,0,0.35)}
 .promotion-overlay .promo-tile{position:absolute;width:12.5%;height:12.5%;background:#f0f0f0;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.5);cursor:pointer;padding:0;border:0}
 .promotion-overlay .promo-tile:hover{background:#ffd966;border-radius:12%}
+.promotion-overlay .promo-tile:focus-visible{outline:3px solid #5a6e2a;outline-offset:2px}
 .promotion-overlay .promo-tile piece{display:block;width:100%;height:100%;background-size:cover}
 `;
   document.head.appendChild(style);
@@ -87,14 +88,18 @@ export function showPromotionOverlay(options: PromotionOverlayOptions): void {
   // Stable piece order: queen first, then rook/bishop/knight.
   const order = ['q', 'r', 'b', 'n'];
   const sorted = [...options.choices].sort((a, b) => order.indexOf(a.promotion ?? 'q') - order.indexOf(b.promotion ?? 'q'));
+  const tiles: HTMLButtonElement[] = [];
   sorted.forEach((move, i) => {
     const tile = document.createElement('button');
     tile.className = 'promo-tile';
     tile.style.left = `${col * 12.5}%`;
     tile.style.top = `${(startRow + i * dir) * 12.5}%`;
     tile.dataset.promo = move.promotion ?? 'q';
+    tile.type = 'button';
+    tile.setAttribute('aria-label', `Promote to ${PROMO_PIECE_CLASS[move.promotion ?? 'q']}`);
     const piece = document.createElement('piece');
     piece.className = `${options.color === 'w' ? 'white' : 'black'} ${PROMO_PIECE_CLASS[move.promotion ?? 'q']}`;
+    tile.setAttribute('aria-hidden', 'true');
     tile.appendChild(piece);
     tile.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -102,12 +107,39 @@ export function showPromotionOverlay(options: PromotionOverlayOptions): void {
       options.onPick(move);
     });
     overlay.appendChild(tile);
+    tiles.push(tile);
   });
+
+  // Keyboard: Escape cancels, Up/Down cycle through tiles in display order.
+  // Tiles are placed along the promotion file; display order matches the
+  // sorted array (index 0 = topmost tile shown).
+  const onKeydown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cleanup();
+      options.onCancel();
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      const current = tiles.indexOf(document.activeElement as HTMLButtonElement);
+      const dirKey = event.key === 'ArrowDown' ? 1 : -1;
+      const next = (current + dirKey + tiles.length) % tiles.length;
+      tiles[next].focus();
+    }
+  };
+  const cleanup = (): void => {
+    overlay.removeEventListener('keydown', onKeydown);
+  };
+  overlay.addEventListener('keydown', onKeydown);
+  overlay.tabIndex = -1;
+
   overlay.addEventListener('click', () => {
+    cleanup();
     overlay.remove();
     options.onCancel();
   });
   host.appendChild(overlay);
+  // Autofocus the queen tile so keyboard users can pick immediately.
+  requestAnimationFrame(() => tiles[0]?.focus());
 }
 
 export function hidePromotionOverlay(boardContainer: HTMLElement): void {

@@ -71,7 +71,9 @@ async function renderStorage(): Promise<void> {
   }
   root.innerHTML = '<p class="capnote">Measuring…</p>';
   const usages = await Promise.all(KNOWN_CACHES.map(({ name, label, detail }) => measureCache(name, label, detail)));
-  const estimate = await navigator.storage?.estimate?.().catch(() => undefined);
+  // Wrap in Promise.resolve so a missing storage.estimate() doesn't throw
+  // on `?.catch` (undefined.catch is a TypeError).
+  const estimate = await Promise.resolve(navigator.storage?.estimate?.()).catch(() => undefined);
   const rows = usages.map((usage) => `
     <div class="store-row" data-cache="${usage.name}">
       <div class="store-info"><b>${usage.label}</b><span>${usage.detail}</span></div>

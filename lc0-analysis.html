@@ -91,6 +91,8 @@ table.opening .san{font-family:var(--mono);font-weight:700}
 .wdlbar .w{background:#f4f1e8}.wdlbar .d{background:#b9b3a4}.wdlbar .b{background:#3a3a3a}
 @media(max-width:900px){main{grid-template-columns:1fr}}
 [hidden]{display:none !important}
+:where(button,select,input,textarea,a):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}.evalbar .white{transition:none}.lines li:hover{background:none}}
 </style>
 </head>
 <body>
@@ -123,7 +125,7 @@ table.opening .san{font-family:var(--mono);font-weight:700}
       <button id="loadPgn" type="button">Load PGN</button>
       <button id="copyPgn" type="button">Copy PGN</button>
     </div>
-    <div id="message">Loading model…</div>
+    <div id="message" aria-live="polite">Loading model…</div>
   </section>
   <section class="panel" aria-label="Analysis">
     <div class="row">
