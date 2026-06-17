@@ -806,6 +806,9 @@ function dismissRestart(): void {
   // so the dismissed change does not leak into the next engine move or labels.
   selectEl('engineSelect').value = activeEngineId;
   selectEl('colorSelect').value = activeColor;
+  // lastEngineId is updated by the engine change handler before the banner is
+  // shown; restore it so a later Maia -> Maia3 switch still carries the rating.
+  lastEngineId = activeEngineId;
   pendingRestart = null;
   // Re-render derived controls so captions/cautions match the restored selects.
   renderLevelOptions();
@@ -845,7 +848,11 @@ function init(): void {
       board = parseFen(startFen);
       positions = [board];
       gameOver = null;
+      activeEngineId = selectEl('engineSelect').value;
+      activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
       render();
+      // If the human is now Black, the engine (White) must open the game.
+      if (humanColor === 'b') void engineTurn();
     } else {
       maybeQueueRestart();
     }
@@ -865,20 +872,26 @@ function init(): void {
     renderMaia3Controls();
     renderEngineCaution();
     // Before any move is played, apply the opponent's start position (odds
-    // bots remove their queen) without starting the engine's clock. Also
-    // re-sync humanColor/orientation in case color changed via its select.
+    // bots remove their queen). Do not re-resolve humanColor here: color is
+    // only (re)resolved by newGame or the colorSelect handler, so changing
+    // the engine does not re-roll a random color. If the human is Black the
+    // engine must open the game.
     if (!moves.length && !engineThinking) {
-      const choice = selectEl('colorSelect').value;
-      humanColor = choice === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : (choice === 'black' ? 'b' : 'w');
       orientation = humanColor === 'w' ? 'white' : 'black';
       startFen = startFenFor(selectedEngine(), humanColor);
       board = parseFen(startFen);
       positions = [board];
       gameOver = null;
+      activeEngineId = selectEl('engineSelect').value;
+      activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
+      render();
+      if (humanColor === 'b') void engineTurn();
     } else if (!gameOver && !engineThinking) {
       maybeQueueRestart();
+      render();
+    } else {
+      render();
     }
-    render();
   });
   selectEl('levelSelect').addEventListener('change', render);
   selectEl('maia3Style').addEventListener('change', render);
