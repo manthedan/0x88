@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
 import { parseFen } from '../src/chess/board.ts';
 import { legalMoves, makeMove } from '../src/chess/movegen.ts';
@@ -39,18 +38,5 @@ const cases = [
 test('TypeScript perft matches known reference nodes', () => {
   for (const c of cases.filter((item) => item.expected !== undefined)) {
     assert.equal(perft(parseFen(c.fen), c.depth), c.expected, c.name);
-  }
-});
-
-test('Rust and TypeScript perft agree on representative FENs', { skip: process.env.TINY_LEELA_RUN_RUST_PERFT !== '1' }, () => {
-  for (const c of cases) {
-    const tsNodes = perft(parseFen(c.fen), c.depth);
-    const stdout = execFileSync('cargo', [
-      'run', '--quiet', '--manifest-path', 'rust/tiny_leela_core/Cargo.toml', '--bin', 'tiny-leela-rust-eval', '--',
-      '--perft', String(c.depth), '--fen', c.fen,
-    ], { encoding: 'utf8' });
-    const match = /^nodes=(\d+)$/m.exec(stdout);
-    assert.ok(match, `missing rust nodes output for ${c.name}: ${stdout}`);
-    assert.equal(Number(match[1]), tsNodes, c.name);
   }
 });

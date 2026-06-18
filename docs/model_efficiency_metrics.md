@@ -2,7 +2,7 @@
 
 We optimize Tiny Leela as a Pareto problem, not as one absolute Elo number. A model is only unambiguously better when it is stronger, smaller/simpler, and faster, or at least no worse on every axis. Do not reduce "tiny" to a hard MB cap: params, FLOPs/MACs, ONNX/export bytes, memory, latency, and strength per real wall-clock move are separate axes.
 
-For the current model-family plan — Tiny Leela transformers first, then larger LC0 browser packs — see [`tiny_leela_lc0_browser_model_roadmap.md`](tiny_leela_lc0_browser_model_roadmap.md). For cross-engine runtime recipes, benchmark artifacts, and footprint object shapes, use [`browser_runtime_configuration_and_benchmark_schema.md`](browser_runtime_configuration_and_benchmark_schema.md).
+For current engine-family and browser-productization context, see [`engine_catalog.md`](engine_catalog.md). For cross-engine runtime recipes, benchmark artifacts, and footprint object shapes, use [`browser_runtime_configuration_and_benchmark_schema.md`](browser_runtime_configuration_and_benchmark_schema.md).
 
 ## Official comparison axes
 

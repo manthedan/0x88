@@ -38,5 +38,3 @@ Common frontend checks:
 npm run typecheck
 npm run build:client
 ```
-
-Some older scripts, Rust crates, schemas, and research notes still use inherited `tiny_leela` names. Treat those as legacy/stability paths unless a cleanup pass explicitly renames and validates them.

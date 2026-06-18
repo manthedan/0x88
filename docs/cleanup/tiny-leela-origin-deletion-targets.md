@@ -2,7 +2,7 @@
 
 Branch/worktree: `audit/tiny-origin-deletion-targets` at `/Users/macthedan/projects/lc0_browser/leelaweb-tiny-cleanup-audit`.
 
-This file is an evaluation list only: no deletions and no renames are made on this branch yet. The first cleanup pass should remove files that are clearly inherited from the old Tiny Leela repo or its old agent/research/operator workflow. Renames of active product concepts can come later under a better name.
+This file began as an evaluation list. The follow-up deletion pass on this branch applies the approved removals while intentionally leaving active product/runtime names for a later naming migration. Renames of active product concepts can come later under a better name.
 
 ## Guardrails
 
