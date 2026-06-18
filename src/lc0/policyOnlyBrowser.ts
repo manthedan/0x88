@@ -10,6 +10,7 @@ import { publishBrowserRuntimeAudit } from '../nn/runtimeAudit.ts';
 import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
 import { clearLc0ModelCache, describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
+import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchOptions, type Lc0SearchResult } from './search.ts';
@@ -785,9 +786,9 @@ type EvalBenchResult = {
 type EngineReplyMode = 'policy' | 'search';
 
 const params = new URLSearchParams(location.search);
-const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';
+const DEFAULT_MODEL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
-const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
+const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
 const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
 const ENCODER_PREFIX = params.get('encoderPrefix') ?? undefined;
 const SOFTMAX_BENCH_REQUESTED = params.get('softmaxBench') === '1' || params.get('attentionSoftmaxBench') === '1';

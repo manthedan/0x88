@@ -1,3 +1,6 @@
+import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
+export { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
+
 export type PlentyChessVariantKey = 'emscripten' | 'emscripten-sse41' | 'emscripten-relaxed' | 'custom';
 export type PlentyChessAssetStatus = 'unknown' | 'checking' | 'present' | 'missing';
 
@@ -28,18 +31,6 @@ export const PLENTYCHESS_SOURCE_NETWORK_URL = `https://github.com/Yoshie2000/Ple
 
 const assetStatuses = new Map<string, PlentyChessAssetStatus>();
 const assetChecks = new Map<string, Promise<PlentyChessAssetStatus>>();
-
-export function supportsWasmRelaxedSimd(): boolean {
-  if (typeof WebAssembly === 'undefined' || typeof WebAssembly.validate !== 'function') return false;
-  // (module (func (result v128) (f32x4.relaxed_madd (f32x4.splat 1) (f32x4.splat 2) (f32x4.splat 3))))
-  return WebAssembly.validate(new Uint8Array([
-    0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96,
-    0, 1, 123, 3, 2, 1, 0, 10, 28, 1, 26, 0,
-    67, 0, 0, 128, 63, 253, 19, 67, 0, 0, 0, 64,
-    253, 19, 67, 0, 0, 64, 64, 253, 19, 253, 133,
-    2, 11,
-  ]));
-}
 
 function sameOriginPlentyChessAsset(raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
@@ -105,21 +96,35 @@ export function normalizePlentyChessVariant(raw: string | null | undefined): Ple
   return 'emscripten';
 }
 
+export function plentyChessVariantUnsupportedReason(variant: PlentyChessVariant): string | null {
+  if (variant.key === 'custom') return null;
+  if (!supportsWasmSimd()) return 'requires WebAssembly SIMD';
+  if (variant.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd()) return 'requires WebAssembly Relaxed SIMD';
+  return null;
+}
+
+export function supportsPlentyChessVariant(variant: PlentyChessVariant): boolean {
+  return plentyChessVariantUnsupportedReason(variant) === null;
+}
+
 // Promotion order: relaxed (relaxed dot + vectorized f32 tail) > sse41 >
 // default. All variants are value-exact at fixed depth (40/40 parity), so
 // this is a speed ladder gated by WebAssembly feature validation. Every
-// PlentyChess artifact requires baseline wasm SIMD; browsers without it
-// cannot run the engine at all, so the ladder only branches on Relaxed SIMD.
+// bundled PlentyChess artifact requires baseline wasm SIMD; browsers without
+// it keep the base option selected but disabled rather than attempting a load.
 export function defaultPlentyChessVariantKey(): PlentyChessVariantKey {
+  if (!supportsWasmSimd()) return 'emscripten';
   return supportsWasmRelaxedSimd() ? 'emscripten-relaxed' : 'emscripten-sse41';
 }
 
 /**
- * Resolve the feature-detected default against deployed assets: a missing
- * relaxed artifact falls back to sse41, and a missing sse41 artifact falls
- * back to the base Emscripten build. Explicit selections are honored as-is.
+ * Resolve the feature-detected default against deployed assets: an unsupported
+ * SIMD tier falls back to the base disabled option, a missing relaxed artifact
+ * falls back to sse41, and a missing sse41 artifact falls back to the base
+ * Emscripten build. Supported explicit selections are honored as-is.
  */
 export async function resolveDefaultPlentyChessVariantAssetFallback(variant: PlentyChessVariant, explicit: boolean, onChange?: () => void): Promise<PlentyChessVariant> {
+  if (!supportsPlentyChessVariant(variant)) return PLENTYCHESS_EMSCRIPTEN_VARIANT;
   if (explicit || variant.key === 'emscripten' || variant.key === 'custom') return variant;
   const status = await checkPlentyChessVariantAsset(variant, onChange);
   if (status !== 'missing') return variant;
@@ -131,8 +136,8 @@ export async function resolveDefaultPlentyChessVariantAssetFallback(variant: Ple
 
 export function plentyChessVariantByKey(key: string): PlentyChessVariant {
   const normalized = normalizePlentyChessVariant(key);
-  if (normalized === 'emscripten-sse41') return PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT;
-  if (normalized === 'emscripten-relaxed') return supportsWasmRelaxedSimd() ? PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT : PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT;
+  if (normalized === 'emscripten-sse41') return supportsWasmSimd() ? PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT : PLENTYCHESS_EMSCRIPTEN_VARIANT;
+  if (normalized === 'emscripten-relaxed') return supportsWasmRelaxedSimd() ? PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT : supportsWasmSimd() ? PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT : PLENTYCHESS_EMSCRIPTEN_VARIANT;
   if (normalized === 'custom') return {
     key: 'custom',
     label: 'PlentyChess Custom',

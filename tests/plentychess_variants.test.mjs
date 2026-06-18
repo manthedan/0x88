@@ -12,19 +12,22 @@ import {
   defaultPlentyChessVariantKey,
   hasExplicitPlentyChessVariant,
   supportsWasmRelaxedSimd,
+  supportsWasmSimd,
   normalizePlentyChessVariant,
   plentyChessVariantAssetStatus,
   plentyChessVariantByKey,
   plentyChessVariantFromParams,
+  plentyChessVariantUnsupportedReason,
 } from '../src/lc0/plentychessVariants.ts';
 
 test('PlentyChess variant metadata pins the smoked Emscripten sidecars', () => {
   assert.equal(PLENTYCHESS_MAIN_NETWORK, '0134-2r24-s0.bin');
   assert.equal(PLENTYCHESS_SOURCE_NETWORK_URL, 'https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/0134-2r24-s0.bin');
   assert.deepEqual(PLENTYCHESS_VARIANTS.map((variant) => variant.key), ['emscripten', 'emscripten-sse41', 'emscripten-relaxed']);
-  // Default follows the relaxed > sse41 ladder (all PlentyChess artifacts
-  // already require baseline wasm SIMD).
-  assert.equal(defaultPlentyChessVariantKey(), supportsWasmRelaxedSimd() ? 'emscripten-relaxed' : 'emscripten-sse41');
+  // Default follows the relaxed > sse41 ladder after explicitly validating
+  // baseline wasm SIMD support; without SIMD, the base option stays selected
+  // but disabled by the browser UI.
+  assert.equal(defaultPlentyChessVariantKey(), !supportsWasmSimd() ? 'emscripten' : supportsWasmRelaxedSimd() ? 'emscripten-relaxed' : 'emscripten-sse41');
   assert.equal(PLENTYCHESS_EMSCRIPTEN_VARIANT.jsUrl, PLENTYCHESS_EMSCRIPTEN_JS_URL);
   assert.equal(PLENTYCHESS_EMSCRIPTEN_VARIANT.wasmUrl, PLENTYCHESS_EMSCRIPTEN_WASM_URL);
   assert.equal(PLENTYCHESS_EMSCRIPTEN_VARIANT.dataUrl, PLENTYCHESS_EMSCRIPTEN_DATA_URL);
@@ -37,6 +40,7 @@ test('PlentyChess variant normalization and lookup are stable', () => {
   assert.equal(normalizePlentyChessVariant('unknown'), 'emscripten');
   assert.equal(plentyChessVariantByKey('emscripten').label, 'PlentyChess Emscripten experimental');
   assert.equal(plentyChessVariantByKey('custom').key, 'custom');
+  assert.equal(plentyChessVariantUnsupportedReason(PLENTYCHESS_EMSCRIPTEN_VARIANT), supportsWasmSimd() ? null : 'requires WebAssembly SIMD');
 });
 
 test('PlentyChess URL params support explicit and custom Emscripten sidecars', () => {

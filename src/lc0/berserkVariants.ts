@@ -1,4 +1,4 @@
-import { supportsWasmRelaxedSimd } from './recklessVariants.ts';
+import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
 export type BerserkVariantKey = 'emscripten' | 'emscripten-simd' | 'emscripten-relaxed' | 'default' | 'simd' | 'custom';
 export type BerserkAssetStatus = 'unknown' | 'checking' | 'present' | 'missing';
@@ -59,14 +59,7 @@ function assetKey(variant: BerserkVariant): string {
 }
 
 export function supportsBerserkWasmSimd(): boolean {
-  if (typeof WebAssembly === 'undefined' || typeof WebAssembly.validate !== 'function') return false;
-  // (module (func (result v128) i32.const 0 i8x16.splat))
-  return WebAssembly.validate(new Uint8Array([
-    0, 97, 115, 109, 1, 0, 0, 0, 1,
-    5, 1, 96, 0, 1, 123, 3, 2, 1,
-    0, 10, 8, 1, 6, 0, 65, 0, 253,
-    15, 11,
-  ]));
+  return supportsWasmSimd();
 }
 
 export const BERSERK_EMSCRIPTEN_VARIANT: BerserkVariant = {

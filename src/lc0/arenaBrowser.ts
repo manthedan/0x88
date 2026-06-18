@@ -30,12 +30,13 @@ import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
-import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
+import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
 import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetLoadWarning, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig, type Bt4SearchResult } from './bt4Engine.ts';
 import { TournamentStandings, buildSchedule, tournamentPairings, type ScheduledGame, type TournamentMode } from './tournament.ts';
 import { hBarChartSvg, lineChartSvg, type ChartSeries } from './charts.ts';
 import { defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
+import { resolvePublicAssetUrl } from './assetUrls.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 // Seats are array indices into seatRows; tournament pids are String(index).
@@ -130,9 +131,9 @@ interface EngineOutputSnapshot {
 }
 
 const params = new URLSearchParams(location.search);
-const DEFAULT_MODEL_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';
+const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL_URL;
-const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
+const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
 const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
 const DEFAULT_TINY_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
 const DEFAULT_TINY_META_URL = '/models/bt4_anneal_muon_best.meta.json';
@@ -1030,11 +1031,11 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   });
   if (family === 'plentychess') return availablePlentyChessVariants().map((v) => {
     const status = plentyChessVariantAssetStatus(v);
-    const unsupported = v.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd();
+    const unsupportedReason = plentyChessVariantUnsupportedReason(v);
     const needsGeneratedAsset = v.key === 'emscripten-sse41' || v.key === 'emscripten-relaxed';
-    if (!unsupported && needsGeneratedAsset && status === 'unknown') void checkPlentyChessVariantAsset(v, populateSeats);
-    const disabled = unsupported || (needsGeneratedAsset && status !== 'present') || status === 'missing';
-    const suffix = unsupported ? ' (unsupported by this browser)' : status === 'missing' ? ' (asset missing)' : needsGeneratedAsset && status !== 'present' ? ' (checking asset)' : '';
+    if (!unsupportedReason && needsGeneratedAsset && status === 'unknown') void checkPlentyChessVariantAsset(v, populateSeats);
+    const disabled = Boolean(unsupportedReason) || (needsGeneratedAsset && status !== 'present') || status === 'missing';
+    const suffix = unsupportedReason ? ` (${unsupportedReason})` : status === 'missing' ? ' (asset missing)' : needsGeneratedAsset && status !== 'present' ? ' (checking asset)' : '';
     return { value: v.key, label: `${v.label}${suffix}`, disabled };
   });
   return availableRecklessVariants().map((v) => {
@@ -1820,8 +1821,9 @@ function renderPlentyChessRuntimeInfo(): void {
     const variant = plentyChessVariantForKey(row.variant);
     const engine = plentyChessByVariant.get(plentyChessCacheKey(variant));
     const asset = plentyChessVariantAssetStatus(variant);
-    if (asset === 'unknown') void checkPlentyChessVariantAsset(variant, renderPlentyChessRuntimeInfo);
-    const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+    const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
+    if (!unsupportedReason && asset === 'unknown') void checkPlentyChessVariantAsset(variant, renderPlentyChessRuntimeInfo);
+    const assetText = unsupportedReason ? unsupportedReason : asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} d${row.strength} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
   el('plentychessRuntimeInfo').innerHTML = diagBlockHtml('PlentyChess', [...new Set(parts)].map(htmlEscape));
@@ -1832,11 +1834,11 @@ function refreshPlentyChessVariantUi(): void {
   const selected = select.value;
   select.innerHTML = availablePlentyChessVariants().map((variant) => {
     const status = plentyChessVariantAssetStatus(variant);
-    const unsupported = variant.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd();
+    const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
     const needsGeneratedAsset = variant.key === 'emscripten-sse41' || variant.key === 'emscripten-relaxed';
-    if (!unsupported && needsGeneratedAsset && status === 'unknown') void checkPlentyChessVariantAsset(variant, refreshPlentyChessVariantUi);
-    const disabled = unsupported || (needsGeneratedAsset && status !== 'present') || status === 'missing';
-    const suffix = unsupported ? ' (unsupported by this browser)' : status === 'missing' ? ' (asset missing)' : needsGeneratedAsset && status !== 'present' ? ' (checking asset)' : '';
+    if (!unsupportedReason && needsGeneratedAsset && status === 'unknown') void checkPlentyChessVariantAsset(variant, refreshPlentyChessVariantUi);
+    const disabled = Boolean(unsupportedReason) || (needsGeneratedAsset && status !== 'present') || status === 'missing';
+    const suffix = unsupportedReason ? ` (${unsupportedReason})` : status === 'missing' ? ' (asset missing)' : needsGeneratedAsset && status !== 'present' ? ' (checking asset)' : '';
     return `<option value="${variant.key}"${disabled ? ' disabled' : ''}>${htmlEscape(`${variant.label}${suffix}`)}</option>`;
   }).join('');
   if (selected) select.value = selected;
@@ -2139,6 +2141,12 @@ function buildEngines() {
       const engine = getBerserkFor(row.variant);
       engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: berserkMove(id, row, engine), warmup: berserkWarmup(engine) });
     } else {
+      const variant = plentyChessVariantForKey(row.variant);
+      const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
+      if (unsupportedReason) {
+        engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: async () => { throw new Error(`${variant.label} ${unsupportedReason}.`); } });
+        continue;
+      }
       const engine = getPlentyChessFor(row.variant);
       engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: plentyChessMove(id, row, engine), warmup: plentyChessWarmup(engine) });
     }

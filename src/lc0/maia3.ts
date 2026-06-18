@@ -2,6 +2,7 @@ import { boardToFen, parseFen, type BoardState, type Piece, type PieceRole } fro
 import { legalMoves } from '../chess/movegen.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { loadLc0ModelForOrt, type Lc0ModelLoadResult } from './modelCache.ts';
+import { resolvePublicAssetUrl } from './assetUrls.ts';
 
 /**
  * Default browser model: the locally derived weight-only int8 QDQ variant
@@ -9,9 +10,9 @@ import { loadLc0ModelForOrt, type Lc0ModelLoadResult } from './modelCache.ts';
  * or better on both EPs). The loader falls back to the upstream fp16 file
  * when the QDQ artifact is not staged.
  */
-export const MAIA3_DEFAULT_MODEL_URL = '/models/maia3/maia3_simplified.qdq8.onnx';
-export const MAIA3_FP16_MODEL_URL = '/models/maia3/maia3_simplified.onnx';
-export const MAIA3_MODEL_MANIFEST_URL = '/models/maia3/manifest.json';
+export const MAIA3_DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/maia3/maia3_simplified.qdq8.onnx');
+export const MAIA3_FP16_MODEL_URL = resolvePublicAssetUrl('/models/maia3/maia3_simplified.onnx');
+export const MAIA3_MODEL_MANIFEST_URL = resolvePublicAssetUrl('/models/maia3/manifest.json');
 export const MAIA3_MIN_ELO = 600;
 export const MAIA3_MAX_ELO = 2600;
 export const MAIA3_DEFAULT_ELO = 1500;

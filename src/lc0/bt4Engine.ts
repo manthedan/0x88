@@ -9,6 +9,7 @@
 //   - Disposable: `dispose()` terminates the worker, freeing model memory.
 import { collectOrtRuntimeDiagnostics, requestedOrtExecutionProvider } from '../nn/ortRuntime.ts';
 import type { Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { resolvePublicAssetUrl } from './assetUrls.ts';
 
 export interface BigNetConfig {
   key: 'bt4' | 't3' | 'lqo';
@@ -30,7 +31,7 @@ export interface BigNetConfig {
 export const BT4_NET: BigNetConfig = {
   key: 'bt4',
   name: 'BT4-it332',
-  modelUrl: '/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx',
+  modelUrl: resolvePublicAssetUrl('/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx'),
   approxMb: 353,
   recommendedBatchSize: 4,
   recommendedPipelineDepth: 1,
@@ -43,7 +44,7 @@ export const BT4_NET: BigNetConfig = {
 export const T3_NET: BigNetConfig = {
   key: 't3',
   name: 't3-512 distill',
-  modelUrl: '/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx',
+  modelUrl: resolvePublicAssetUrl('/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx'),
   approxMb: 163,
   recommendedBatchSize: 8,
   recommendedPipelineDepth: 1,
@@ -60,7 +61,7 @@ export const T3_NET: BigNetConfig = {
 export const LQO_NET: BigNetConfig = {
   key: 'lqo',
   name: 'Queen Odds',
-  modelUrl: '/models/lc0/lqo_v2.f16.onnx',
+  modelUrl: resolvePublicAssetUrl('/models/lc0/lqo_v2.f16.onnx'),
   approxMb: 189,
   recommendedBatchSize: 8,
   recommendedPipelineDepth: 1,

@@ -21,6 +21,8 @@
     "web:isolated:static": "node scripts/serve_isolated_static.mjs dist-client 5181",
     "build:client": "vite build --outDir dist-client",
     "build:netlify": "BUILD_SCOPE=product npm run build:client && npm run engine-artifacts:precompress-dist",
+    "build:netlify:r2": "BUILD_SCOPE=product npm run build:client && npm run deploy:prune-external-model-assets && npm run engine-artifacts:precompress-dist",
+    "deploy:prune-external-model-assets": "node scripts/prune_external_model_assets.mjs dist-client",
     "engine-artifacts:precompress": "node scripts/precompress_engine_artifacts.mjs public --allow-missing",
     "engine-artifacts:precompress-dist": "node scripts/precompress_engine_artifacts.mjs dist-client --allow-missing",
     "engine-artifacts:check-browser": "node scripts/check_browser_engine_assets.mjs",

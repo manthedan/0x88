@@ -1,4 +1,6 @@
 import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
+import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
+export { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
 export type RecklessVariantKey = 'full' | 'simd' | 'relaxed-simd' | 'lite' | 'browser-api' | 'browser-api-simd' | 'browser-api-simd-external' | 'custom';
 
@@ -18,29 +20,6 @@ const assetChecks = new Map<string, Promise<RecklessAssetStatus>>();
 
 function assetKey(variant: RecklessVariant): string {
   return variant.nnueUrl ? `${variant.wasmUrl}\n${variant.nnueUrl}` : variant.wasmUrl;
-}
-
-export function supportsWasmSimd(): boolean {
-  if (typeof WebAssembly === 'undefined' || typeof WebAssembly.validate !== 'function') return false;
-  // (module (func (result v128) i32.const 0 i8x16.splat))
-  return WebAssembly.validate(new Uint8Array([
-    0, 97, 115, 109, 1, 0, 0, 0, 1,
-    5, 1, 96, 0, 1, 123, 3, 2, 1,
-    0, 10, 8, 1, 6, 0, 65, 0, 253,
-    15, 11,
-  ]));
-}
-
-export function supportsWasmRelaxedSimd(): boolean {
-  if (typeof WebAssembly === 'undefined' || typeof WebAssembly.validate !== 'function') return false;
-  // (module (func (result v128) (f32x4.relaxed_madd (f32x4.splat 1) (f32x4.splat 2) (f32x4.splat 3))))
-  return WebAssembly.validate(new Uint8Array([
-    0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96,
-    0, 1, 123, 3, 2, 1, 0, 10, 28, 1, 26, 0,
-    67, 0, 0, 128, 63, 253, 19, 67, 0, 0, 0, 64,
-    253, 19, 67, 0, 0, 64, 64, 253, 19, 253, 133,
-    2, 11,
-  ]));
 }
 
 export const RECKLESS_FULL_VARIANT: RecklessVariant = {

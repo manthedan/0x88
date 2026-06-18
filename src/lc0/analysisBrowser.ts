@@ -35,17 +35,18 @@ import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
-import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
+import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
 import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetLoadWarning, bigNetOptionState, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig } from './bt4Engine.ts';
 import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
+import { resolvePublicAssetUrl } from './assetUrls.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
 const params = new URLSearchParams(location.search);
-const DEFAULT_MODEL_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';
+const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 const MODEL_URL = params.get('model') ?? DEFAULT_MODEL_URL;
-const DEFAULT_PACK_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json';
+const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
 const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
 const DEFAULT_TINY_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
 const DEFAULT_TINY_META_URL = '/models/bt4_anneal_muon_best.meta.json';
@@ -761,11 +762,11 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   });
   if (family === 'plentychess') return availablePlentyChessVariants().map((v) => {
     const status = plentyChessVariantAssetStatus(v);
-    const unsupported = v.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd();
+    const unsupportedReason = plentyChessVariantUnsupportedReason(v);
     const needsGeneratedAsset = v.key === 'emscripten-sse41' || v.key === 'emscripten-relaxed';
-    if (!unsupported && needsGeneratedAsset && status === 'unknown') void checkPlentyChessVariantAsset(v, renderEngineList);
-    const disabled = unsupported || (needsGeneratedAsset && status !== 'present') || status === 'missing';
-    const suffix = unsupported ? ' (unsupported by this browser)' : status === 'missing' ? ' (asset missing)' : needsGeneratedAsset && status !== 'present' ? ' (checking asset)' : '';
+    if (!unsupportedReason && needsGeneratedAsset && status === 'unknown') void checkPlentyChessVariantAsset(v, renderEngineList);
+    const disabled = Boolean(unsupportedReason) || (needsGeneratedAsset && status !== 'present') || status === 'missing';
+    const suffix = unsupportedReason ? ` (${unsupportedReason})` : status === 'missing' ? ' (asset missing)' : needsGeneratedAsset && status !== 'present' ? ' (checking asset)' : '';
     return { value: v.key, label: `${v.label}${suffix}`, disabled };
   });
   return availableRecklessVariants().map((v) => {
@@ -887,8 +888,9 @@ function renderRecklessRuntimeInfo(): void {
   const plentyParts = plentyVariants.map((variant) => {
     const engine = plentyChessByVariant.get(plentyChessCacheKey(variant));
     const asset = plentyChessVariantAssetStatus(variant);
-    if (asset === 'unknown') void checkPlentyChessVariantAsset(variant, renderRecklessRuntimeInfo);
-    const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
+    const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
+    if (!unsupportedReason && asset === 'unknown') void checkPlentyChessVariantAsset(variant, renderRecklessRuntimeInfo);
+    const assetText = unsupportedReason ? unsupportedReason : asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
   });
   el('recklessRuntimeInfo').textContent = `${bt4Text} · Tiny: ${tinyParts.join(' | ') || 'not selected'} · Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'}`;
@@ -958,6 +960,8 @@ function getBerserkFor(variantKey: string): BerserkEngine {
 
 function getPlentyChessFor(variantKey: string): PlentyChessEngine {
   const variant = plentyChessVariantForKey(variantKey);
+  const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
+  if (unsupportedReason) throw new Error(`${variant.label} ${unsupportedReason}.`);
   const key = plentyChessCacheKey(variant);
   let engine = plentyChessByVariant.get(key);
   if (!engine) {
@@ -2007,6 +2011,7 @@ function wireEvents() {
   el('navEnd').addEventListener('click', () => { tree.toEnd(); afterNavigation(); });
   el('flip').addEventListener('click', () => { orientation = orientation === 'white' ? 'black' : 'white'; renderBoard(); });
   el('loadFen').addEventListener('click', loadFen);
+  inputEl('fenInput').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') loadFen(); });
   el('reset').addEventListener('click', () => { tree = new GameTree(); lineCache.clear(); el('message').textContent = 'Reset.'; afterNavigation(); });
   el('loadPgn').addEventListener('click', loadPgn);
   el('copyPgn').addEventListener('click', copyPgn);
