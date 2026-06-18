@@ -5,7 +5,7 @@ dataset manifests, training logs, arena results, and frontier cards. The project
 manifest makes those pieces queryable from one place.
 
 For the Tiny Leela transformer -> larger LC0 browser deployment ladder, see
-[`tiny_leela_lc0_browser_model_roadmap.md`](tiny_leela_lc0_browser_model_roadmap.md). That roadmap defines the additional `architecture`, `browser_runtime`, and `quality_gates` fields we should add before treating a model as browser-productizable.
+the current browser-productization docs. Future model cards should define `architecture`, `browser_runtime`, and `quality_gates` fields before a model is treated as browser-productizable.
 
 ## Files
 

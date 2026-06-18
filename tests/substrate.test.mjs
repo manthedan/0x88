@@ -11,9 +11,3 @@ test('minimum engine substrate files exist with stable interfaces', () => {
   assert.match(read('../src/nn/evaluator.ts'), /interface Evaluator/);
   assert.match(read('../src/search/puct.ts'), /chooseMove/);
 });
-
-test('research ideas distinguish foundation from lanes', () => {
-  const ideas = read('../dovetail.ideas.jsonl');
-  assert.match(ideas, /Foundation milestone/);
-  assert.match(ideas, /True research lane/);
-});

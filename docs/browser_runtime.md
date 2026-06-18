@@ -82,4 +82,4 @@ That smoke keeps two separate WGSL-heads comparisons:
 - `wgsl-heads-vs-ort-wasm-fixtures`: semantic baseline against ORT WASM, retained so custom WGSL heads stay anchored to the stable fallback path;
 - `wgsl-heads-vs-ort-webgpu-fixtures`: shipped-path comparison against ORT WebGPU with `strictWebGpu=1`, which fails if the browser lacks WebGPU, ORT WebGPU cannot be selected, or ORT silently falls back to WASM during the fixture run.
 
-See also: [Browser inference research lane: Rust-owned search, optional Rust-owned inference](browser_inference_research_lane_20260522.md). The current opinion there is that ORT-Web remains the production inference baseline, while RTen/tract/Lele/Burn/Candle are bounded research probes behind a Rust evaluator abstraction.
+Current policy: ORT-Web remains the production inference baseline. Alternative inference runtimes are bounded research probes behind explicit runtime selection and evidence gates.
