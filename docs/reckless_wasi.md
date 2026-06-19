@@ -8,7 +8,7 @@ This branch adds an optional browser path:
 - Runtime: `@bjorn3/browser_wasi_shim` inside a dedicated Web Worker.
 - Protocol: isolated browsers use a persistent UCI process fed through a small `SharedArrayBuffer` stdin ring; non-isolated browsers fall back to one-shot UCI argv commands (`setoption`, `position`, `go`) per search. The one-shot adapter skips redundant `uci`/`isready`/`quit` commands because the patched CLI mode exits automatically after the final argv command.
 - UI: optional Reckless engines in `lc0-arena.html` and `lc0-analysis.html`, with Full/Lite variant selectors and runtime status labels.
-- Benchmarking: `/reckless-benchmark.html` compares Full vs Lite and persistent vs one-shot browser paths across one or more positions and depth/movetime budgets. It emits raw rows, warm-run summaries, CSV, and a JSON report with browser runtime metadata.
+- Benchmarking: `/lab/reckless-benchmark.html` compares Full vs Lite and persistent vs one-shot browser paths across one or more positions and depth/movetime budgets. It emits raw rows, warm-run summaries, CSV, and a JSON report with browser runtime metadata.
 
 ## Build
 

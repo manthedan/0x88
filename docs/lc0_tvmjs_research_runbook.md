@@ -39,7 +39,7 @@ It is **not promotion-ready** yet because the evidence is still smoke-derived an
 ## Promotion blockers
 
 - Expand direct same-session full-model TVMJS vs custom hybrid TVM/WGSL comparison beyond smoke-sized rows.
-- Production-style fixed-suite integration, not only `lc0-tvmjs-webgpu-smoke.html`.
+- Production-style fixed-suite integration, not only `lab/lc0-tvmjs-webgpu-smoke.html`.
 - Repeated throughput and startup/pipeline compile amortization evidence.
 - Broader cross-runtime GPU allocation/footprint instrumentation and interpretation, including ORT WebGPU API diagnostics limits.
 - Release/hosting/cache policy for generated model/runtime wasm artifacts.
@@ -180,7 +180,7 @@ The combined research gate verifies evidence, local artifacts, and research-only
 
 The next required research artifact should run these in one browser/dev-server session against the same FEN rows:
 
-1. TVMJS full-model WebGPU via `lc0-tvmjs-webgpu-smoke.html`.
+1. TVMJS full-model WebGPU via `lab/lc0-tvmjs-webgpu-smoke.html`.
 2. Custom hybrid piecemeal TVM/WGSL via `lc0-policy-only.html` / hybrid search fixture harness.
 3. Optional ORT f16 WebGPU baseline for triangulation.
 
@@ -489,7 +489,7 @@ Strict same-FEN visit sweep samples now cover visits `16`, `32`, and `64`:
 
 Current prototypes:
 
-- `lc0-tvmjs-webgpu-smoke.html` wraps the acquired TVMJS `GPUDevice.createBuffer` before TVM initialization and model execution. Results report total allocation calls/bytes, max buffer size, mapped-at-creation count, and categories decoded from `GPUBufferUsage` flags.
+- `lab/lc0-tvmjs-webgpu-smoke.html` wraps the acquired TVMJS `GPUDevice.createBuffer` before TVM initialization and model execution. Results report total allocation calls/bytes, max buffer size, mapped-at-creation count, and categories decoded from `GPUBufferUsage` flags.
 - The hybrid policy-only worker now installs a worker-side `navigator.gpu.requestAdapter`/`requestDevice`/`GPUDevice.createBuffer` patch before initializing the custom WGSL evaluator. Hybrid search fixture artifacts include `gpuBufferAllocation` on each row and at the aggregate top level.
 - `scripts/lc0_tvmjs_vs_hybrid_matrix.mjs` forwards the latest hybrid allocation snapshot into `summary.hybrid.gpuBufferAllocation`, next to `summary.tvmjs.gpuBufferAllocation`, for strict same-FEN comparisons.
 - ORT already has opt-in WebGPU API instrumentation in `src/nn/ortRuntime.ts` when ORT diagnostics/API tracing are requested; `src/lc0/onnxEvaluator.ts` records per-eval deltas such as `webgpuCreateBufferCount` and `webgpuCreateBufferBytes`. This is patchable only when browser WebGPU prototypes are visible before ORT creates/uses the device.

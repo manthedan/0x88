@@ -8,7 +8,7 @@ Environment: Vite dev server with cross-origin isolation headers, HeadlessChrome
 
 Adapter: `BerserkEngine` over `/berserk/berserk-emscripten.js`, `/berserk/berserk-emscripten.wasm`, and `/berserk/berserk-emscripten.data`.
 
-Checks passed via `berserk-smoke.html?depth=1&abortDepth=8`:
+Checks passed via `lab/berserk-smoke.html?depth=1&abortDepth=8`:
 
 - `prewarm()` UCI handshake and `isready` completed.
 - `newGame()` before searches completed.
@@ -28,7 +28,7 @@ UI lifecycle checks:
 
 ## 2026-06-05 rotated-FEN benchmark capture
 
-Harness: `reckless-benchmark.html`, extended to include Berserk Emscripten as a resident-worker benchmark variant.
+Harness: `lab/reckless-benchmark.html`, extended to include Berserk Emscripten as a resident-worker benchmark variant.
 
 Protocol:
 

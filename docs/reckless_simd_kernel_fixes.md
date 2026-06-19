@@ -93,7 +93,7 @@ kernels (activations in `[0, 127]`, full-range i8 weights):
 Caveats: Node/V8 on one machine, one-shot mode, single rep per cell. Engine
 NPS at shallow depths sits near the 1 ms UCI timer granularity; prefer the
 depth 11/12 numbers. Browser promotion still requires the established
-`/reckless-benchmark.html` persistent-mode rotated-suite protocol, including
+`/lab/reckless-benchmark.html` persistent-mode rotated-suite protocol, including
 an x86_64 Chromium run (the relaxed dot should help *more* there when V8
 lowers to VPDPBUSD, but that is unmeasured).
 

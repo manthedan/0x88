@@ -139,7 +139,7 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(new URL('/lc0-tvmjs-webgpu-smoke.html', baseUrl), { cache: 'no-store' });
+      const response = await fetch(new URL('/lab/lc0-tvmjs-webgpu-smoke.html', baseUrl), { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
     } catch (error) { lastError = error; }
@@ -181,7 +181,7 @@ async function main() {
     await waitForServer(args.baseUrl);
     const fixedSuiteFens = await loadFenSuite(args);
     const session = `lc0-tvmjs-${process.pid}`;
-    const url = new URL('/lc0-tvmjs-webgpu-smoke.html', args.baseUrl);
+    const url = new URL('/lab/lc0-tvmjs-webgpu-smoke.html', args.baseUrl);
     url.searchParams.set('batch', String(args.batch));
     if (args.manifest) url.searchParams.set('manifest', args.manifest);
     if (args.passCoalesce) url.searchParams.set('passCoalesce', '1');

@@ -50,7 +50,7 @@ TVMJS detached-int8 sidecar.
 This de-risks TVM dependence: the stable ORT lane now has its own ~2×
 download reduction.
 
-## 3. ORT WebNN EP probe (`lc0-ort-webnn-probe.html`) — big, with a catch
+## 3. ORT WebNN EP probe (`lab/lc0-ort-webnn-probe.html`) — big, with a catch
 
 WebNN requires Chrome launched with
 `--enable-features=WebMachineLearningNeuralNetwork` (agent-browser:

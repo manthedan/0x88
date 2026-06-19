@@ -18,7 +18,7 @@ Generated artifacts are intentionally ignored under `public/plentychess/`.
 Browser worker smoke page:
 
 ```text
-/plentychess-smoke.html
+/lab/plentychess-smoke.html
 ```
 
 ## Source and assets
@@ -81,7 +81,7 @@ info depth 1 seldepth 3 score cp 143 multipv 1 nodes 37 tbhits 0 time 1 nps 3700
 
 ### Browser worker lifecycle
 
-`plentychess-smoke.html?depth=1&abortDepth=16` passed locally with:
+`lab/plentychess-smoke.html?depth=1&abortDepth=16` passed locally with:
 
 - startpos: `c2c4`
 - non-startpos FEN: `e1g1`
@@ -122,7 +122,7 @@ Analysis smoke passed after selecting `PlentyChess → Emscripten`:
 
 ## First rotated-FEN benchmark
 
-The shared browser UCI benchmark harness (`reckless-benchmark.html`) now includes a `PlentyChess Emscripten experimental` checkbox. A depth-7, 20-position rotated-FEN run with cold + 1 warm pass completed in persistent worker mode.
+The shared browser UCI benchmark harness (`lab/reckless-benchmark.html`) now includes a `PlentyChess Emscripten experimental` checkbox. A depth-7, 20-position rotated-FEN run with cold + 1 warm pass completed in persistent worker mode.
 
 Raw ignored artifact:
 
