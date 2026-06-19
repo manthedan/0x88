@@ -286,6 +286,21 @@ function requestedOrtWebGpuApiInstrumentation(): boolean {
   return ortDiagnosticsParamEnabled('ortMonkeyPatchWebGpu', 'ortWebGpuApiTrace', 'ortReadbackProfile');
 }
 
+function requestedOrtLogSeverityLevel(): 0 | 1 | 2 | 3 | 4 {
+  const raw = browserParam('ortLogSeverity') ?? browserParam('ortLogLevel') ?? envValue('ORT_LOG_SEVERITY_LEVEL') ?? envValue('ORT_LOG_LEVEL');
+  const normalized = String(raw ?? '').trim().toLowerCase();
+  if (normalized === 'verbose') return 0;
+  if (normalized === 'info') return 1;
+  if (normalized === 'warning' || normalized === 'warn') return 2;
+  if (normalized === 'fatal') return 4;
+  const parsed = Number(normalized);
+  if (Number.isFinite(parsed)) {
+    const value = Math.max(0, Math.min(4, Math.floor(parsed)));
+    if (value === 0 || value === 1 || value === 2 || value === 3 || value === 4) return value;
+  }
+  return 3;
+}
+
 type OrtWebGpuProfileRecord = { programName: string; kernelName: string; kernelType: string; gpuMs: number };
 const ortWebGpuProfileRecords: OrtWebGpuProfileRecord[] = [];
 let ortWebGpuProfileEventCount = 0;
@@ -493,7 +508,7 @@ function configureOrtRuntime() {
 export function sessionOptions(executionProviders = resolvedOrtExecutionProviders()): ort.InferenceSession.SessionOptions {
   configureOrtRuntime();
   const threads = requestedOrtWasmThreads(typeof document !== 'undefined', typeof document === 'undefined' && !!globalThis.process?.versions?.node);
-  const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all', executionProviders };
+  const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all', executionProviders, logSeverityLevel: requestedOrtLogSeverityLevel() };
   const preferredOutputLocation = requestedOrtPreferredOutputLocation();
   if (preferredOutputLocation && executionProviders.includes('webgpu')) opts.preferredOutputLocation = preferredOutputLocation;
   if (threads > 0) {

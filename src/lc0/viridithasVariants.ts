@@ -1,5 +1,6 @@
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './recklessVariants.ts';
 import { DEFAULT_VIRIDITHAS_WASM_URL } from './viridithasEngine.ts';
+import { resolvePublicAssetUrl } from './assetUrls.ts';
 
 export type ViridithasAssetStatus = 'unknown' | 'checking' | 'ok' | 'missing';
 
@@ -21,14 +22,14 @@ export const VIRIDITHAS_DEFAULT_VARIANT: ViridithasVariant = {
 export const VIRIDITHAS_SIMD_VARIANT: ViridithasVariant = {
   key: 'simd',
   label: 'Viridithas SIMD',
-  wasmUrl: '/viridithas/viridithas-simd128.wasm',
+  wasmUrl: resolvePublicAssetUrl('/viridithas/viridithas-simd128.wasm'),
   note: 'Patched Viridithas wasm32-wasip1 build with wasm simd128 NNUE kernels. Default when the browser validates wasm SIMD but not Relaxed SIMD; 40/40 fixed-depth parity with scalar, 5.4-5.8x scalar NPS.',
 };
 
 export const VIRIDITHAS_RELAXED_SIMD_VARIANT: ViridithasVariant = {
   key: 'relaxed-simd',
   label: 'Viridithas Relaxed SIMD',
-  wasmUrl: '/viridithas/viridithas-relaxed-simd128.wasm',
+  wasmUrl: resolvePublicAssetUrl('/viridithas/viridithas-relaxed-simd128.wasm'),
   note: 'Viridithas build using the relaxed integer dot for the L1 NNUE kernels (exact: QA=255/FT_SHIFT=9 keep activations in 0..127). Default when the browser validates Relaxed SIMD; +14% NPS over simd128 at 40/40 parity.',
 };
 

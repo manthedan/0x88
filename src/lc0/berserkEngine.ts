@@ -1,5 +1,6 @@
 import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
 import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
+import { isTrustedExecutableAssetUrl } from './assetUrls.ts';
 
 export interface BerserkOptions {
   /** Fixed search depth. */
@@ -46,12 +47,29 @@ function postError(id, error) {
 function resolveUrl(url) {
   return new URL(url, self.location.href).href;
 }
-async function init(id, jsUrl, wasmUrl, dataUrl) {
+async function importEmscriptenGlue(resolvedJsUrl, trustedJsUrl) {
+  const sameOrigin = new URL(resolvedJsUrl).origin === self.location.origin;
+  if (sameOrigin) {
+    importScripts(resolvedJsUrl);
+    return;
+  }
+  if (!trustedJsUrl) throw new Error('Refusing to execute untrusted Berserk Emscripten glue: ' + resolvedJsUrl);
+  const response = await fetch(resolvedJsUrl, { mode: 'cors', credentials: 'omit', cache: 'force-cache' });
+  if (!response.ok) throw new Error('Failed to fetch Berserk Emscripten glue: ' + response.status + ' ' + resolvedJsUrl);
+  const source = await response.text();
+  const blobUrl = URL.createObjectURL(new Blob([source + '\n//# sourceURL=' + resolvedJsUrl], { type: 'text/javascript' }));
+  try {
+    importScripts(blobUrl);
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+async function init(id, jsUrl, wasmUrl, dataUrl, trustedJsUrl) {
   if (!modulePromise) {
     const resolvedJsUrl = resolveUrl(jsUrl);
     const resolvedWasmUrl = wasmUrl ? resolveUrl(wasmUrl) : null;
     const resolvedDataUrl = dataUrl ? resolveUrl(dataUrl) : null;
-    importScripts(resolvedJsUrl);
+    await importEmscriptenGlue(resolvedJsUrl, trustedJsUrl);
     factory = self.Berserk || (typeof Berserk !== 'undefined' ? Berserk : null);
     if (!factory) throw new Error('Berserk Emscripten factory was not found after importScripts()');
     modulePromise = factory({
@@ -75,11 +93,11 @@ self.onmessage = (event) => {
   const id = message.id;
   Promise.resolve().then(async () => {
     if (message.type === 'init') {
-      await init(id, message.jsUrl, message.wasmUrl, message.dataUrl);
+      await init(id, message.jsUrl, message.wasmUrl, message.dataUrl, message.trustedJsUrl);
       return;
     }
     if (message.type === 'command') {
-      await init(id, message.jsUrl, message.wasmUrl, message.dataUrl);
+      await init(id, message.jsUrl, message.wasmUrl, message.dataUrl, message.trustedJsUrl);
       engine.ccall('command', null, ['string'], [String(message.command)]);
       self.postMessage({ type: 'commandDone', id });
       return;
@@ -212,6 +230,10 @@ export class BerserkEngine implements BrowserUciEngine {
     return new URL(this.jsUrl, location.href).href;
   }
 
+  private trustedJsUrl(): boolean {
+    return isTrustedExecutableAssetUrl(this.resolvedJsUrl());
+  }
+
   private resolvedWasmUrl(): string | undefined {
     return this.wasmUrl ? new URL(this.wasmUrl, location.href).href : undefined;
   }
@@ -233,7 +255,7 @@ export class BerserkEngine implements BrowserUciEngine {
       const cleanup = () => signal?.removeEventListener('abort', onAbort);
       this.pending.set(id, { resolve, reject, cleanup });
       signal?.addEventListener('abort', onAbort, { once: true });
-      worker.postMessage({ type, id, jsUrl: this.resolvedJsUrl(), wasmUrl: this.resolvedWasmUrl(), dataUrl: this.resolvedDataUrl(), ...payload });
+      worker.postMessage({ type, id, jsUrl: this.resolvedJsUrl(), wasmUrl: this.resolvedWasmUrl(), dataUrl: this.resolvedDataUrl(), trustedJsUrl: this.trustedJsUrl(), ...payload });
     });
   }
 

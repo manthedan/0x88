@@ -61,11 +61,11 @@ export const T3_NET: BigNetConfig = {
 export const LQO_NET: BigNetConfig = {
   key: 'lqo',
   name: 'Queen Odds',
-  modelUrl: resolvePublicAssetUrl('/models/lc0/lqo_v2.f16.onnx'),
-  approxMb: 189,
+  modelUrl: resolvePublicAssetUrl('/models/lc0/lqo_v2.f16.qdq8.onnx'),
+  approxMb: 96,
   recommendedBatchSize: 8,
   recommendedPipelineDepth: 1,
-  exportNote: 'LeelaQueenOdds v2 f16 export (dynamic batch)',
+  exportNote: 'LeelaQueenOdds v2 f16 QDQ int8-weight export (dynamic batch)',
   wasmLevels: [4, 8, 16, 32, 64],
 };
 

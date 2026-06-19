@@ -37,17 +37,18 @@ import { PlentyChessEngine } from './plentychessEngine.ts';
 import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
 import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetLoadWarning, bigNetOptionState, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig } from './bt4Engine.ts';
-import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
-const MODEL_URL = params.get('model') ?? DEFAULT_MODEL_URL;
+const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
-const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
+const PACK_URL = isV0DeployProfile() ? DEFAULT_PACK_URL : resolvePublicAssetUrl(params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL);
 const DEFAULT_TINY_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
 const DEFAULT_TINY_META_URL = '/models/bt4_anneal_muon_best.meta.json';
 const DEFAULT_TINY_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
@@ -222,6 +223,7 @@ function requestedEp(): string {
 }
 
 function normalizeLc0Runtime(value: string | null): Lc0AnalysisRuntime {
+  if (isV0DeployProfile()) return 'onnx';
   const raw = (value ?? '').toLowerCase();
   if (raw === LC0_WHOLE_MODEL_WEBGPU_RUNTIME || raw === 'tvm' + 'js-webgpu' || raw === 'lc0-' + 'tvm' + 'js-webgpu') return LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
   if (raw === 'hybrid' || raw === 'lc0web' || raw === 'hybrid-ort-heads' || raw === 'wgsl-encoder') return 'hybrid-ort-heads';
@@ -230,6 +232,7 @@ function normalizeLc0Runtime(value: string | null): Lc0AnalysisRuntime {
 }
 
 function initialLc0Runtime(): Lc0AnalysisRuntime {
+  if (isV0DeployProfile()) return 'onnx';
   if (params.get('headBackend') === 'wgsl' || params.get('hybridHeads') === 'wgsl') return 'hybrid-wgsl-heads';
   return normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime'));
 }
@@ -239,6 +242,7 @@ function selectedLc0Runtime(): Lc0AnalysisRuntime {
 }
 
 function lc0WholeModelRuntimeRequested(): boolean {
+  if (isV0DeployProfile()) return false;
   return normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime')) === LC0_WHOLE_MODEL_WEBGPU_RUNTIME
     || params.get('enableWholeModelWebgpu') === '1'
     || params.get('enableTvm' + 'js') === '1';
@@ -290,7 +294,7 @@ function lc0WholeModelTensorCache(): boolean {
 }
 
 function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown> {
-  const common = { type: 'init', modelUrl: MODEL_URL, ep: requestedEp(), cacheModel: false };
+  const common = { type: 'init', modelUrl: MODEL_URL, ep: requestedEp(), cacheModel: false, reportDownloadProgress: MODEL_URL === DEFAULT_MODEL_URL };
   if (runtime === 'onnx') return common;
   if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) return {
     ...common,
@@ -327,7 +331,11 @@ async function initWorker(): Promise<string> {
   if (searchWorker && workerReady) return workerBackend;
   if (!searchWorker) searchWorker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
   searchWorker.addEventListener('message', (event: MessageEvent) => {
-    const message = event.data as { id: number; type: string; error?: string };
+    const message = event.data as { id: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number };
+    if (message.type === 'downloadProgress') {
+      showModelProgress('Lc0 small net', message.loadedBytes ?? 0, message.totalBytes, 'Downloading');
+      return;
+    }
     const pending = workerPending.get(message.id);
     if (!pending) return;
     workerPending.delete(message.id);
@@ -376,6 +384,26 @@ function inputEl(id: string): HTMLInputElement { return el(id) as HTMLInputEleme
 function selectEl(id: string): HTMLSelectElement { return el(id) as HTMLSelectElement; }
 function htmlEscape(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+function modelProgressEl(): HTMLElement {
+  let node = document.getElementById('modelLoadProgress');
+  if (!node) {
+    node = document.createElement('div');
+    node.id = 'modelLoadProgress';
+    node.className = 'model-load-progress';
+    node.hidden = true;
+    el('message').insertAdjacentElement('afterend', node);
+  }
+  return node;
+}
+
+function showModelProgress(label: string, loadedBytes?: number, totalBytes?: number, phase = 'Loading'): void {
+  renderLoadingProgress(modelProgressEl(), { label, loadedBytes, totalBytes, phase });
+}
+
+function hideModelProgress(): void {
+  hideLoadingProgress(modelProgressEl());
 }
 function storageGet(key: string): string | null {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -515,15 +543,14 @@ function clampStrengthForRow(row: EngineRow): number {
   const meta = strengthMeta(row.family);
   return Math.max(meta.min, Math.min(meta.max, Math.floor(Number(row.strength) || meta.def)));
 }
-function sanitizeEngineRow(value: unknown): EngineRow | null {
+function sanitizeEngineRow(value: unknown, index = 0): EngineRow | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Partial<EngineRow>;
   if (!isEngineFamily(String(raw.family))) return null;
   const family = raw.family as EngineFamily;
   if (raw.variant === 'custom') return null;
   const row = { family, variant: String(raw.variant || defaultVariant(family)), strength: Number(raw.strength) || defaultStrength(family) };
-  row.strength = clampStrengthForRow(row);
-  return row;
+  return normalizeDeployEngineRow({ ...row, strength: clampStrengthForRow(row) }, 'analysis', index);
 }
 function currentEngineProfile(name: string): EngineAnalysisProfile {
   return {
@@ -546,8 +573,8 @@ function bigNetUnavailableText(config: BigNetConfig): string {
   return '';
 }
 function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): EngineRow[] {
-  return rows.map((row) => {
-    const next = { ...row, strength: clampStrengthForRow(row) };
+  return rows.map((row, index) => {
+    const next = normalizeDeployEngineRow({ ...row, strength: clampStrengthForRow(row) }, 'analysis', index);
     if (next.family === 'lc0' && isLc0BigNetVariant(next.variant)) {
       const { config } = bigNetFor(next.variant);
       const allowed = bigNetSelectableSync(config) && allowBt4Prompt && window.confirm(`${bigNetLoadWarning(config)}\n\nLoad the saved Lc0 ${config.name} profile row?`);
@@ -565,7 +592,7 @@ function normalizeEngineProfiles(parsed: unknown): EngineAnalysisProfile[] {
     const raw = entry as Partial<EngineAnalysisProfile>;
     const name = String(raw.name ?? '').trim();
     if (!name || name.startsWith(BUILT_IN_PROFILE_VALUE_PREFIX) || !Array.isArray(raw.rows)) return [];
-    const rows = raw.rows.map(sanitizeEngineRow).filter((row): row is EngineRow => !!row);
+    const rows = raw.rows.map((row, index) => sanitizeEngineRow(row, index)).filter((row): row is EngineRow => !!row);
     if (!rows.length) return [];
     return [{ name, rows, multiPv: Math.max(1, Math.min(10, Math.floor(Number(raw.multiPv) || 3))), lc0Runtime: normalizeLc0Runtime(raw.lc0Runtime ?? 'onnx') }];
   }).sort((a, b) => a.name.localeCompare(b.name));
@@ -722,7 +749,8 @@ function plentyChessVariantForKey(variantKey: string): PlentyChessVariant {
 // falling back to the top priority when all families are present.
 function nextEngineFamily(): EngineFamily {
   const present = new Set(engineRows.map((row) => row.family));
-  return ENGINE_FAMILY_PRIORITY.find((family) => !present.has(family)) ?? ENGINE_FAMILY_PRIORITY[0];
+  const priority = analysisEngineFamilyOptions().map((option) => option.value);
+  return priority.find((family) => !present.has(family)) ?? priority[0] ?? ENGINE_FAMILY_PRIORITY[0];
 }
 
 let engineRows: EngineRow[] = [{ family: 'lc0', variant: 'small', strength: 400 }];
@@ -732,6 +760,7 @@ function analysisEngineFamilyOptions(): { value: EngineFamily; label: string }[]
 }
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
+  if (isV0DeployProfile() && !['lc0', 'sf', 'berserk', 'viridithas', 'plentychess'].includes(family)) return [];
   if (family === 'tiny') return tinyVariantOptions().map((option) => option.value === 'bt4-custom' && tinyHybridManifestStatus === 'missing'
     ? { ...option, disabled: true, label: `${option.label} (bundle missing)` }
     : option);
@@ -797,7 +826,7 @@ function rowLabel(row: EngineRow): string {
 
 function activeEngineRows(): EngineRow[] {
   const seen = new Set<string>();
-  return engineRows.filter((r) => {
+  return engineRows.map((row, index) => normalizeDeployEngineRow(row, 'analysis', index)).filter((r) => {
     const k = `${r.family}:${r.variant}`;
     if (seen.has(k)) return false;
     seen.add(k);
@@ -810,6 +839,7 @@ function usesBigNetRow(variant: 'bt4' | 't3'): boolean {
 }
 
 function renderEngineList(): void {
+  engineRows = engineRows.map((row, index) => normalizeDeployEngineRow(row, 'analysis', index));
   const families = analysisEngineFamilyOptions();
   el('engineList').innerHTML = engineRows.map((row, i) => {
     const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
@@ -828,6 +858,7 @@ async function workerBigNetLines(variant: string, fen: string, visits: number): 
 
 // Lc0 big nets are WebGPU-only and require the large local ONNX assets.
 async function refreshBt4Availability(): Promise<void> {
+  if (isV0DeployProfile()) return;
   await Promise.all([probeBt4Support(), checkBigNetAsset(BIG_NETS.bt4, renderRecklessRuntimeInfo), checkBigNetAsset(BIG_NETS.t3, renderRecklessRuntimeInfo)]);
   for (const row of engineRows) {
     if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectableSync(bigNetFor(row.variant).config)) row.variant = 'small';
@@ -837,6 +868,10 @@ async function refreshBt4Availability(): Promise<void> {
 }
 
 function renderRecklessRuntimeInfo(): void {
+  if (isV0DeployProfile()) {
+    el('recklessRuntimeInfo').textContent = 'v0 deploy: Lc0 small, Maia3, Stockfish Lite, Berserk, Viridithas, and PlentyChess are available; Reckless and larger model engines remain external or disabled.';
+    return;
+  }
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
   const bigNetTexts = (['bt4', 't3'] as const).map((key) => {
     const config = BIG_NETS[key];
@@ -2043,6 +2078,7 @@ function wireEvents() {
       const meta = strengthMeta(engineRows[i].family);
       engineRows[i].strength = Math.max(meta.min, Math.min(meta.max, Math.floor(Number(target.value) || meta.def)));
     }
+    engineRows[i] = normalizeDeployEngineRow(engineRows[i], 'analysis', i);
     disposeUnusedEngines();
     lineCache.delete(tree.current.fen);
     void analyzeCurrent();
@@ -2192,8 +2228,10 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
   selectEl('lc0RuntimeSelect').disabled = true;
   el('backend').textContent = `loading ${lc0RuntimeLabel(runtime)}…`;
   el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)} in a worker…`;
+  showModelProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
   try {
     el('backend').textContent = await initWorker();
+    hideModelProgress();
     el('analyze').toggleAttribute('disabled', false);
     selectEl('lc0RuntimeSelect').disabled = false;
     el('message').textContent = 'Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.';
@@ -2203,6 +2241,7 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
     if (runtime !== 'onnx' && runtime !== LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(workerError as Error).message}`;
+      hideModelProgress();
       return false;
     }
     // Fall back to a main-thread evaluator (analysis will block the UI, but works).
@@ -2216,7 +2255,10 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
           logger: (line) => console.info('[lc0 whole-model analysis]', line),
         });
       } else {
-        const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
+        const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
+          cache: false,
+          onProgress: (loaded, total) => showModelProgress('Lc0 small net', loaded, total, 'Downloading'),
+        });
         mainEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
       }
       searcher = new Lc0PuctSearcher(mainEvaluator);
@@ -2239,11 +2281,13 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
       el('analyze').toggleAttribute('disabled', false);
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
+      hideModelProgress();
       if (runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
       return true;
     } catch (error) {
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `Model load failed: ${(error as Error).message}`;
+      hideModelProgress();
       return false;
     }
   }
@@ -2258,7 +2302,9 @@ async function reloadLc0Backend(forceAnalyzeAfterLoad = false): Promise<void> {
 }
 
 async function init() {
-  REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
+  if (!isV0DeployProfile()) {
+    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
+  }
   REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, renderRecklessRuntimeInfo);
   REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, renderRecklessRuntimeInfo);
   REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, renderRecklessRuntimeInfo);
@@ -2284,8 +2330,10 @@ async function init() {
   renderRecklessRuntimeInfo();
   wireEvents();
   void refreshPgnDatabaseCollections();
-  void refreshBt4Availability();
-  void refreshTinyHybridManifestStatus();
+  if (!isV0DeployProfile()) {
+    void refreshBt4Availability();
+    void refreshTinyHybridManifestStatus();
+  }
   await loadLc0Backend();
 }
 
