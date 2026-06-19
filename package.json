@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Browser LC0/WebGPU chess engine research prototype.",
+  "description": "0x88.app — browser chess engines (LC0/WebGPU + NNUE/WASM), zero installs.",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && node --experimental-strip-types --test --test-timeout=120000",

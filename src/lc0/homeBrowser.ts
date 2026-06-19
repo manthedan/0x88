@@ -81,8 +81,8 @@ async function renderStorage(): Promise<void> {
       <button type="button" data-clear="${usage.name}" ${usage.present ? '' : 'disabled'}>Clear</button>
     </div>`).join('');
   const totalLine = estimate?.usage !== undefined
-    ? `<p class="capnote">This site uses ${mb(estimate.usage)}${estimate.quota ? ` of the ${mb(estimate.quota)} the browser allows` : ''}. R2-hosted engine files such as Berserk, Viridithas, and PlentyChess are Brotli-compressed and live in the browser HTTP cache, so they may not appear in these Cache Storage rows. Everything re-downloads automatically when needed.</p>`
-    : '<p class="capnote">R2-hosted engine files such as Berserk, Viridithas, and PlentyChess are Brotli-compressed and live in the browser HTTP cache, so they may not appear in these Cache Storage rows. Cleared files re-download automatically when needed.</p>';
+    ? `<p class="capnote">This site uses ${mb(estimate.usage)}${estimate.quota ? ` of the ${mb(estimate.quota)} the browser allows` : ''}. R2-hosted engine files such as Reckless, Berserk, Viridithas, and PlentyChess are Brotli-compressed and live in the browser HTTP cache, so they may not appear in these Cache Storage rows. Everything re-downloads automatically when needed.</p>`
+    : '<p class="capnote">R2-hosted engine files such as Reckless, Berserk, Viridithas, and PlentyChess are Brotli-compressed and live in the browser HTTP cache, so they may not appear in these Cache Storage rows. Cleared files re-download automatically when needed.</p>';
   root.innerHTML = rows + totalLine;
   for (const button of root.querySelectorAll<HTMLButtonElement>('button[data-clear]')) {
     button.addEventListener('click', async () => {

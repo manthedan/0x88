@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Browser Chess Engines — state-of-the-art chess, zero installs</title>
+<title>0x88.app — state-of-the-art chess, zero installs</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <meta name="description" content="State-of-the-art chess engines running entirely in your browser. Leela Chess Zero on WebGPU, plus Stockfish, Berserk, Viridithas, PlentyChess and more on WebAssembly. No installs, no servers — democratizing chess technology and pushing browser deep-learning deployment." />
 <style>
@@ -80,11 +80,12 @@ h1,h2,h3,h4{font-family:var(--serif); font-weight:600; letter-spacing:-.005em; c
 .brand:hover{text-decoration:none}
 .brand-mark{
   width:32px; height:32px; border-radius:8px; background:var(--accent);
-  display:grid; place-items:center; color:#f4f1e8; font-size:20px; line-height:1;
-  font-family:var(--serif); flex-shrink:0;
+  display:grid; place-items:center; color:#f4f1e8;
+  font-family:var(--mono); font-size:12px; font-weight:700; letter-spacing:-.02em;
+  flex-shrink:0;
   box-shadow:inset 0 -2px 0 rgba(0,0,0,.15), 0 2px 6px rgba(0,0,0,.15);
 }
-.brand-name{font-family:var(--serif); font-size:17px; font-weight:600; letter-spacing:-.01em}
+.brand-name{font-family:var(--mono); font-size:16px; font-weight:700; letter-spacing:-.01em}
 .brand-tag{font-size:11px; color:var(--muted); font-family:var(--mono); letter-spacing:.02em}
 nav.primary{display:flex; gap:4px; margin-left:auto}
 nav.primary a{
@@ -342,11 +343,11 @@ footer.site-footer{background:var(--bg-2); border-top:1px solid var(--rule); pad
 
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="/" aria-label="Browser Chess Engines — home">
-      <span class="brand-mark" aria-hidden="true">♞</span>
+    <a class="brand" href="/" aria-label="0x88.app — home">
+      <span class="brand-mark" aria-hidden="true">0x88</span>
       <span>
-        <span class="brand-name">Browser Chess Engines</span><br>
-        <span class="brand-tag">WebGPU · WASM · zero installs</span>
+        <span class="brand-name">0x88.app</span><br>
+        <span class="brand-tag">browser chess · zero installs</span>
       </span>
     </a>
     <nav class="primary" aria-label="Primary">
@@ -493,9 +494,9 @@ footer.site-footer{background:var(--bg-2); border-top:1px solid var(--rule); pad
         <div class="meta"><span>C++ / Emscripten</span><span>SIMD</span></div>
       </div>
       <div class="engine" data-family="nnue">
-        <div class="engine-head"><b>Reckless</b><span class="rt">NNUE · WASM (Rust, lab)</span></div>
-        <span class="desc">Experimental local/lab engine. Not in the public v0 picker until its WASM and NNUE assets are published to R2.</span>
-        <div class="meta"><span>Rust</span><span>experimental</span></div>
+        <div class="engine-head"><b>Reckless</b><span class="rt">NNUE · WASM (Rust)</span></div>
+        <span class="desc">Rust NNUE engine shipped with scalar, SIMD, and relaxed SIMD WASI builds for Play, Analysis, and Arena.</span>
+        <div class="meta"><span>Rust</span><span>SIMD / relaxed SIMD</span></div>
       </div>
     </div>
   </div>
@@ -549,11 +550,11 @@ footer.site-footer{background:var(--bg-2); border-top:1px solid var(--rule); pad
   <div class="wrap">
     <div class="footer-grid">
       <div class="footer-brand">
-        <a class="brand" href="/" aria-label="Browser Chess Engines — home">
-          <span class="brand-mark" aria-hidden="true">♞</span>
+        <a class="brand" href="/" aria-label="0x88.app — home">
+          <span class="brand-mark" aria-hidden="true">0x88</span>
           <span>
-            <span class="brand-name">Browser Chess Engines</span><br>
-            <span class="brand-tag">WebGPU · WASM · zero installs</span>
+            <span class="brand-name">0x88.app</span><br>
+            <span class="brand-tag">browser chess · zero installs</span>
           </span>
         </a>
         <p>State-of-the-art chess engines, running entirely in your browser. An open-source project to democratize chess technology and push browser deep-learning deployment.</p>
@@ -576,7 +577,7 @@ footer.site-footer{background:var(--bg-2); border-top:1px solid var(--rule); pad
     </div>
     <div class="footer-bottom">
       <span>Everything runs client-side. Engine binaries and networks are downloaded on first use and cached locally.</span>
-      <span><code>v0 · main</code></span>
+      <span><code>0x88.app · v0</code></span>
     </div>
   </div>
 </footer>
