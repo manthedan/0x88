@@ -28,19 +28,19 @@
 .doc-body .wrap{
   padding:48px 24px 64px;
   display:grid;
-  grid-template-columns:1fr 220px;
+  grid-template-columns:220px 1fr;
   gap:56px;
   align-items:start;
 }
 
-/* TOC rail (right side) */
+/* TOC rail (left side) */
 .toc{
   position:sticky; top:88px;
   font-size:13px;
   max-height:calc(100vh - 100px);
   overflow-y:auto;
-  padding-left:16px;
-  border-left:1px solid var(--rule);
+  padding-right:16px;
+  border-right:1px solid var(--rule);
 }
 .toc h4{
   font-family:var(--sans); font-size:11px;
@@ -294,6 +294,37 @@
 <div class="doc-body">
 <div class="wrap">
 
+<!-- ===== TOC (left rail) ===== -->
+<aside class="toc" aria-label="On this page">
+  <h4>On this page</h4>
+  <ul>
+    <li><a href="#pages">The pages</a>
+      <ul>
+        <li><a href="#pages-play">Play</a></li>
+        <li><a href="#pages-analysis">Analysis</a></li>
+        <li><a href="#pages-arena">Arena</a></li>
+      </ul>
+    </li>
+    <li><a href="#engines">The engines</a>
+      <ul>
+        <li><a href="#engines-lc0">Leela Chess Zero</a></li>
+        <li><a href="#engines-lqo">Leela Queen Odds (LQO)</a></li>
+        <li><a href="#engines-maia3">Maia3</a></li>
+        <li><a href="#engines-stockfish">Stockfish 18</a></li>
+        <li><a href="#engines-berserk">Berserk</a></li>
+        <li><a href="#engines-viridithas">Viridithas</a></li>
+        <li><a href="#engines-plentychess">PlentyChess</a></li>
+        <li><a href="#engines-reckless">Reckless</a></li>
+      </ul>
+    </li>
+    <li><a href="#licenses">Licenses &amp; source</a>
+      <ul>
+        <li><a href="#licenses-per-engine">Per-engine source links</a></li>
+      </ul>
+    </li>
+  </ul>
+</aside>
+
 <div class="doc-content">
 
 <!-- ===== PAGES ===== -->
@@ -352,7 +383,7 @@
       <dt>Manifest</dt><dd><a href="/models/lc0/manifest.json">/models/lc0/manifest.json</a></dd>
       <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (browser runtime, ONNX export &amp; quantization scripts)</dd>
     </dl>
-    <p>A neural-network engine trained from scratch by self-play, in the tradition of AlphaZero. The networks here (t1, t3, BT4, and the Leela Queen Odds bot) are real LC0 weights running on the browser's GPU through ONNX Runtime WebGPU. <strong>This project's headline research effort</strong> &mdash; exploring how far browser WebGPU can go as a deep-learning inference runtime, with quantized ONNX, custom WGSL kernels, and a progressive ladder of net sizes.</p>
+    <p>A neural-network engine trained from scratch by self-play, in the tradition of AlphaZero. The networks here (t1, t3, and BT4) are real LC0 weights running on the browser's GPU through ONNX Runtime WebGPU. <strong>This project's headline research effort</strong> &mdash; exploring how far browser WebGPU can go as a deep-learning inference runtime, with quantized ONNX, custom WGSL kernels, and a progressive ladder of net sizes. The related Leela Queen Odds net (used for the Play page's queen-odds bot) is listed separately below.</p>
     <details>
       <summary>Architecture &amp; packaging details</summary>
       <div class="details-body">
@@ -362,17 +393,36 @@
   </div>
 
   <div class="engine-entry">
+    <h3 id="engines-lqo">Leela Queen Odds (LQO) <a class="anchor-link" href="#engines-lqo" aria-label="Link to this section">#</a></h3>
+    <dl class="engine-meta">
+      <dt>Author</dt><dd>notune &middot; <a href="https://github.com/notune/LeelaQueenOdds" rel="noopener">github.com/notune/LeelaQueenOdds</a></dd>
+      <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span> (derived from LC0)</dd>
+      <dt>Artifact</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/models/lc0/lqo_v2.f16.qdq8.onnx">/models/lc0/lqo_v2.f16.qdq8.onnx</a> (~96 MB, QDQ int8)</dd>
+      <dt>Derived from</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/models/lc0/lqo_v2.f16.onnx">lqo_v2.f16.onnx</a> (fp16 source export)</dd>
+      <dt>Manifest</dt><dd><a href="/models/lc0/manifest.json">/models/lc0/manifest.json</a></dd>
+    </dl>
+    <p>The public net behind the Lichess queen-odds bot: a Leela Chess Zero network fine-tuned to win against humans from a <strong>queen-down</strong> starting position. Selecting it on the Play page removes your queen before move one, and the bot then presses hardest for tricks &mdash; the same dynamic the Lichess bot is famous for. Not a general analysis net (it evaluates the queen-odds start as equal), but a uniquely instructive opponent for practicing from behind.</p>
+    <details>
+      <summary>Search parameters &amp; packaging details</summary>
+      <div class="details-body">
+        <p>The Lichess bot runs the upstream net with search-contempt at 12&ndash;15k nodes. The browser deployment scales that down to visit budgets and applies three README-derived knobs: <code>cpuct 1.5</code>, <code>drawScore -0.5</code> (aggressive anti-draw lean), and <code>searchContemptLimit 24</code>. These were A/B-validated at queen odds vs Maia 1900 (92% vs 58% baseline).</p>
+        <p>The served artifact is a QDQ int8 quantization of the fp16 export, derived in-tree and shipped from the LC0 manifest alongside the other big nets (BT4, t3).</p>
+      </div>
+    </details>
+  </div>
+
+  <div class="engine-entry">
     <h3 id="engines-maia3">Maia3 <a class="anchor-link" href="#engines-maia3" aria-label="Link to this section">#</a></h3>
     <dl class="engine-meta">
       <dt>Author</dt><dd>CSSLab (Jon Klein, Reid McIlroy-Young, et al.) &middot; <a href="https://github.com/CSSLab/maia3" rel="noopener">github.com/CSSLab/maia3</a></dd>
       <dt>License</dt><dd><span class="lic agpl">AGPL-3.0</span></dd>
-      <dt>Provenance</dt><dd><a href="/docs/model_provenance/maia3.md">/docs/model_provenance/maia3.md</a></dd>
+      <dt>Provenance</dt><dd><a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">/docs/model_provenance/maia3.md</a></dd>
       <dt>Frontend</dt><dd><a href="https://github.com/CSSLab/maia-platform-frontend" rel="noopener">github.com/CSSLab/maia-platform-frontend</a> (byte-identical upstream fp16 model)</dd>
     </dl>
     <p>A human-move-prediction model trained on millions of real Lichess games. Where Stockfish asks "what's best?", Maia asks "what would a 1500-rated human actually play here?" &mdash; and answers it surprisingly well, across the whole rating ladder. The Play page uses it to give you an opponent that feels like a person, not a sandboxed grandmaster.</p>
     <div class="callout info">
       <h4>AGPL source offer</h4>
-      <p>The default browser artifact is a local int8 quantization of the upstream fp16 file. Because Maia3 is AGPL-3.0, the <a href="/docs/model_provenance/maia3.md">derivation recipe</a> is part of the source offer, not just the upstream link.</p>
+      <p>The default browser artifact is a local int8 quantization of the upstream fp16 file. Because Maia3 is AGPL-3.0, the <a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">derivation recipe</a> is part of the source offer, not just the upstream link.</p>
     </div>
   </div>
 
@@ -381,8 +431,8 @@
     <dl class="engine-meta">
       <dt>Author</dt><dd>official-stockfish &middot; via <a href="https://github.com/nmrugg/stockfish.js" rel="noopener">github.com/nmrugg/stockfish.js</a></dd>
       <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
-      <dt>Manifest</dt><dd><a href="/stockfish/stockfish-18.0.7.manifest.json">/stockfish/stockfish-18.0.7.manifest.json</a></dd>
-      <dt>Source</dt><dd><a href="/stockfish/stockfish-18.0.7-corresponding-source.tar.gz">stockfish-18.0.7-corresponding-source.tar.gz</a></dd>
+      <dt>Manifest</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/stockfish/stockfish-18.0.7.manifest.json">/stockfish/stockfish-18.0.7.manifest.json</a></dd>
+      <dt>Source</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/stockfish/stockfish-18.0.7-corresponding-source.tar.gz">stockfish-18.0.7-corresponding-source.tar.gz</a></dd>
     </dl>
     <p>The strongest classical chess engine in the world, and has been for years. A community project with hundreds of contributors, continually refined through distributed testing (FishCooking). The NNUE evaluation lets it calculate god-like evaluations with a forward pass cheap enough to search hundreds of millions of nodes per second on a CPU. We ship Stockfish.js 18 in Lite and full-network flavors.</p>
     <details>
@@ -398,8 +448,8 @@
     <dl class="engine-meta">
       <dt>Author</dt><dd>Jay Honnold &middot; <a href="https://github.com/jhonnold/berserk" rel="noopener">github.com/jhonnold/berserk</a></dd>
       <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
-      <dt>Manifest</dt><dd><a href="/berserk/berserk-emscripten-single-thread.manifest.json">/berserk/berserk-emscripten-single-thread.manifest.json</a></dd>
-      <dt>Source</dt><dd><a href="/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz">berserk-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
+      <dt>Manifest</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/berserk/berserk-emscripten-single-thread.manifest.json">/berserk/berserk-emscripten-single-thread.manifest.json</a></dd>
+      <dt>Source</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz">berserk-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
     </dl>
     <p>A remarkably strong, remarkably compact engine written in C. Jay Honnold's work is a textbook example of how far clean code and a well-tuned NNUE can go &mdash; Berserk consistently outranks engines with far larger codebases. Compiled here with Emscripten for the browser.</p>
   </div>
@@ -409,8 +459,8 @@
     <dl class="engine-meta">
       <dt>Author</dt><dd>Cosmo Bobak &middot; <a href="https://github.com/cosmobobak/viridithas" rel="noopener">github.com/cosmobobak/viridithas</a></dd>
       <dt>License</dt><dd><span class="lic mit">MIT</span></dd>
-      <dt>Manifest</dt><dd><a href="/viridithas/viridithas-wasip1.manifest.json">/viridithas/viridithas-wasip1.manifest.json</a></dd>
-      <dt>Source</dt><dd><a href="/viridithas/viridithas-wasip1-corresponding-source.tar.gz">viridithas-wasip1-corresponding-source.tar.gz</a></dd>
+      <dt>Manifest</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/viridithas/viridithas-wasip1.manifest.json">/viridithas/viridithas-wasip1.manifest.json</a></dd>
+      <dt>Source</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/viridithas/viridithas-wasip1-corresponding-source.tar.gz">viridithas-wasip1-corresponding-source.tar.gz</a></dd>
     </dl>
     <p>A modern Rust engine and a consistent top-tier competitor in computer-chess tournaments. Rust's safety guarantees plus Cosmo Bobak's tuning make it both fast and approachable. The browser build here uses relaxed-SIMD for the heavy NNUE inner loops, which WebAssembly finally exposes to engines.</p>
   </div>
@@ -420,8 +470,8 @@
     <dl class="engine-meta">
       <dt>Author</dt><dd>Yoshie2000 &middot; <a href="https://github.com/Yoshie2000/PlentyChess" rel="noopener">github.com/Yoshie2000/PlentyChess</a></dd>
       <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
-      <dt>Manifest</dt><dd><a href="/plentychess/plentychess-emscripten-single-thread.manifest.json">/plentychess/plentychess-emscripten-single-thread.manifest.json</a></dd>
-      <dt>Source</dt><dd><a href="/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz">plentychess-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
+      <dt>Manifest</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/plentychess/plentychess-emscripten-single-thread.manifest.json">/plentychess/plentychess-emscripten-single-thread.manifest.json</a></dd>
+      <dt>Source</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz">plentychess-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
     </dl>
     <p>A top-tier C++ engine and frequent contender at the top of rating lists. PlentyChess ships its own NNUE architecture and a feature-detected SIMD build so the browser picks the fastest instruction set the device supports. Compiled here with Emscripten, with the processed NNUE network embedded.</p>
   </div>
@@ -432,12 +482,13 @@
       <dt>Author</dt><dd>CodeDeliveryService &middot; <a href="https://github.com/codedeliveryservice/Reckless" rel="noopener">github.com/codedeliveryservice/Reckless</a></dd>
       <dt>License</dt><dd><span class="lic agpl">AGPL-3.0</span></dd>
       <dt>Notice</dt><dd><a href="/reckless/NOTICE.md">/reckless/NOTICE.md</a></dd>
+      <dt>Source</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-scalar-corresponding-source.tar.gz">reckless-scalar-corresponding-source.tar.gz</a></dd>
       <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (build scripts &amp; release policy)</dd>
     </dl>
     <p>An aggressive, sacrificial Rust engine that lives up to its name &mdash; it plays sharp, entertaining chess and is a favorite in the computer-chess streaming scene.</p>
-    <div class="callout warn">
-      <h4>Lab-only, not yet on the public CDN</h4>
-      <p>Reckless is currently a lab/local-only engine on this site. Its WASM and NNUE assets are not in the public v0 picker until they are published to the project CDN. Source archives ship on release.</p>
+    <div class="callout info">
+      <h4>Public v0 engine</h4>
+      <p>Reckless is published through the project CDN for Play, Analysis, and Arena. The browser selects relaxed SIMD or SIMD when supported, and falls back to the scalar WASI build otherwise. Matching source archives are hosted beside the binaries.</p>
     </div>
   </div>
 </section>
@@ -450,8 +501,8 @@
   <div class="callout info">
     <h4>The short version</h4>
     <p>Every GPL- or AGPL-licensed engine we redistribute ships with a matching <strong>corresponding-source archive</strong> from the same deployment as the binary. The archive contains the exact upstream source at the pinned commit, our local patches, the build script that produced the browser artifact, and the toolchain used. This is what the GPL means by "the scripts used to control compilation and installation of the executable."</p>
-    <p>Upstream GitHub links are <em>not</em> a sufficient corresponding-source offer on their own &mdash; the FSF position and our own policy agree on this &mdash; so each engine has a real <code>*-corresponding-source.tar.gz</code> sitting next to its <code>.wasm</code>. The Maia3 model is under AGPL-3.0, and the default browser artifact is a local int8 quantization of the upstream fp16 file, so the <a href="/docs/model_provenance/maia3.md">derivation recipe</a> is part of the source offer.</p>
-    <p><strong>Full policy:</strong> <a href="/docs/engine_artifact_distribution.md">docs/engine_artifact_distribution.md</a> &middot; <strong>Hosted artifact index:</strong> <a href="/docs/hosted_artifacts.md">docs/hosted_artifacts.md</a> &middot; <strong>This project's source:</strong> <a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a></p>
+    <p>Upstream GitHub links are <em>not</em> a sufficient corresponding-source offer on their own &mdash; the FSF position and our own policy agree on this &mdash; so each engine has a real <code>*-corresponding-source.tar.gz</code> sitting next to its <code>.wasm</code>. The Maia3 model is under AGPL-3.0, and the default browser artifact is a local int8 quantization of the upstream fp16 file, so the <a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">derivation recipe</a> is part of the source offer.</p>
+    <p><strong>Full policy:</strong> <a href="https://github.com/manthedan/0x88/blob/main/docs/engine_artifact_distribution.md">docs/engine_artifact_distribution.md</a> &middot; <strong>Hosted artifact index:</strong> <a href="https://github.com/manthedan/0x88/blob/main/docs/hosted_artifacts.md">docs/hosted_artifacts.md</a> &middot; <strong>This project's source:</strong> <a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a></p>
   </div>
 
   <h3 id="licenses-per-engine" style="font-size:20px">Per-engine source links <a class="anchor-link" href="#licenses-per-engine" aria-label="Link to this section">#</a></h3>
@@ -476,37 +527,37 @@
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Maia3</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">AGPL-3.0</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/CSSLab/maia3" rel="noopener">CSSLab/maia3</a></td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="/docs/model_provenance/maia3.md">Provenance doc</a> + <a href="https://github.com/CSSLab/maia-platform-frontend" rel="noopener">upstream frontend</a></td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">Provenance doc</a> + <a href="https://github.com/CSSLab/maia-platform-frontend" rel="noopener">upstream frontend</a></td>
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Stockfish 18</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/nmrugg/stockfish.js" rel="noopener">nmrugg/stockfish.js</a></td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="/stockfish/stockfish-18.0.7-corresponding-source.tar.gz">stockfish-18.0.7-corresponding-source.tar.gz</a></td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/stockfish/stockfish-18.0.7-corresponding-source.tar.gz">stockfish-18.0.7-corresponding-source.tar.gz</a></td>
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Berserk</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/jhonnold/berserk" rel="noopener">jhonnold/berserk</a></td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz">berserk-emscripten-single-thread-corresponding-source.tar.gz</a></td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz">berserk-emscripten-single-thread-corresponding-source.tar.gz</a></td>
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Viridithas</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">MIT</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/cosmobobak/viridithas" rel="noopener">cosmobobak/viridithas</a></td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="/viridithas/viridithas-wasip1-corresponding-source.tar.gz">viridithas-wasip1-corresponding-source.tar.gz</a> (license still honored)</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/viridithas/viridithas-wasip1-corresponding-source.tar.gz">viridithas-wasip1-corresponding-source.tar.gz</a> (license still honored)</td>
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">PlentyChess</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/Yoshie2000/PlentyChess" rel="noopener">Yoshie2000/PlentyChess</a></td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz">plentychess-emscripten-single-thread-corresponding-source.tar.gz</a></td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz">plentychess-emscripten-single-thread-corresponding-source.tar.gz</a></td>
       </tr>
       <tr>
         <td style="padding:10px; font-weight:600">Reckless</td>
         <td style="padding:10px; font-family:var(--mono); font-size:12px">AGPL-3.0</td>
         <td style="padding:10px"><a href="https://github.com/codedeliveryservice/Reckless" rel="noopener">codedeliveryservice/Reckless</a></td>
-        <td style="padding:10px"><a href="/reckless/NOTICE.md">NOTICE.md</a> + source archives on release</td>
+        <td style="padding:10px"><a href="/reckless/NOTICE.md">NOTICE.md</a> + <a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-scalar-corresponding-source.tar.gz">source archive</a></td>
       </tr>
     </tbody>
   </table>
@@ -517,36 +568,6 @@
 </section>
 
 </div><!-- /doc-content -->
-
-<!-- ===== TOC (right rail) ===== -->
-<aside class="toc" aria-label="On this page">
-  <h4>On this page</h4>
-  <ul>
-    <li><a href="#pages">The pages</a>
-      <ul>
-        <li><a href="#pages-play">Play</a></li>
-        <li><a href="#pages-analysis">Analysis</a></li>
-        <li><a href="#pages-arena">Arena</a></li>
-      </ul>
-    </li>
-    <li><a href="#engines">The engines</a>
-      <ul>
-        <li><a href="#engines-lc0">Leela Chess Zero</a></li>
-        <li><a href="#engines-maia3">Maia3</a></li>
-        <li><a href="#engines-stockfish">Stockfish 18</a></li>
-        <li><a href="#engines-berserk">Berserk</a></li>
-        <li><a href="#engines-viridithas">Viridithas</a></li>
-        <li><a href="#engines-plentychess">PlentyChess</a></li>
-        <li><a href="#engines-reckless">Reckless</a></li>
-      </ul>
-    </li>
-    <li><a href="#licenses">Licenses &amp; source</a>
-      <ul>
-        <li><a href="#licenses-per-engine">Per-engine source links</a></li>
-      </ul>
-    </li>
-  </ul>
-</aside>
 
 </div><!-- /wrap -->
 </div><!-- /doc-body -->
