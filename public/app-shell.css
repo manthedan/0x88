@@ -141,9 +141,18 @@ textarea{width:100%; resize:vertical; line-height:1.5}
 
 /* ===== Responsive header ===== */
 @media (max-width:680px){
-  .site-header .wrap{gap:12px; padding-top:10px; padding-bottom:10px}
+  .site-header .wrap{gap:10px; padding-top:10px; padding-bottom:10px}
   .brand-tag{display:none}
   nav.primary{gap:0}
   nav.primary a{padding:7px 8px; font-size:12.5px}
   .page-title{font-size:16px}
+}
+/* Tight mobile header (<=420px): brand collapses to mark + short name,
+   page title is hidden, nav gets minimal padding. Without this the
+   brand + title + 4 nav links overflow narrow viewports. */
+@media (max-width:420px){
+  .site-header .wrap{gap:8px; padding-left:14px; padding-right:14px}
+  .brand-name{font-size:14px}
+  .page-title{display:none}
+  nav.primary a{padding:6px 6px; font-size:12px}
 }
