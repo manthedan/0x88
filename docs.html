@@ -242,7 +242,7 @@
   .doc-body .wrap{grid-template-columns:1fr; gap:0}
   .toc{
     position:static; max-height:none; padding:0 0 16px;
-    margin-bottom:24px; border-left:none;
+    margin-bottom:24px; border:none;
     border-bottom:1px solid var(--rule);
   }
   .toc details{padding:0}
@@ -482,13 +482,13 @@
       <dt>Author</dt><dd>CodeDeliveryService &middot; <a href="https://github.com/codedeliveryservice/Reckless" rel="noopener">github.com/codedeliveryservice/Reckless</a></dd>
       <dt>License</dt><dd><span class="lic agpl">AGPL-3.0</span></dd>
       <dt>Notice</dt><dd><a href="/reckless/NOTICE.md">/reckless/NOTICE.md</a></dd>
-      <dt>Source</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-scalar-corresponding-source.tar.gz">reckless-scalar-corresponding-source.tar.gz</a></dd>
+      <dt>Source</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-scalar-corresponding-source.tar.gz">scalar</a>, <a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-simd128-corresponding-source.tar.gz">SIMD</a>, and <a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz">relaxed SIMD</a></dd>
       <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (build scripts &amp; release policy)</dd>
     </dl>
     <p>An aggressive, sacrificial Rust engine that lives up to its name &mdash; it plays sharp, entertaining chess and is a favorite in the computer-chess streaming scene.</p>
     <div class="callout info">
       <h4>Public v0 engine</h4>
-      <p>Reckless is published through the project CDN for Play, Analysis, and Arena. The browser selects relaxed SIMD or SIMD when supported, and falls back to the scalar WASI build otherwise. Matching source archives are hosted beside the binaries.</p>
+      <p>Reckless is published through the project CDN for Play, Analysis, and Arena. The browser selects relaxed SIMD or SIMD when supported, and falls back to the scalar WASI build otherwise. Matching source archives for the scalar, SIMD, and relaxed SIMD builds are hosted beside the binaries.</p>
     </div>
   </div>
 </section>
@@ -524,6 +524,12 @@
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/manthedan/0x88" rel="noopener">0x88 repo</a> (browser runtime + export scripts)</td>
       </tr>
       <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Leela Queen Odds (LQO)</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/notune/LeelaQueenOdds" rel="noopener">notune/LeelaQueenOdds</a></td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/models/lc0/lqo_v2.f16.onnx">fp16 source export</a> + <a href="https://github.com/manthedan/0x88" rel="noopener">0x88 repo</a> (QDQ int8 derivation scripts)</td>
+      </tr>
+      <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Maia3</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">AGPL-3.0</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/CSSLab/maia3" rel="noopener">CSSLab/maia3</a></td>
@@ -557,7 +563,7 @@
         <td style="padding:10px; font-weight:600">Reckless</td>
         <td style="padding:10px; font-family:var(--mono); font-size:12px">AGPL-3.0</td>
         <td style="padding:10px"><a href="https://github.com/codedeliveryservice/Reckless" rel="noopener">codedeliveryservice/Reckless</a></td>
-        <td style="padding:10px"><a href="/reckless/NOTICE.md">NOTICE.md</a> + <a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-scalar-corresponding-source.tar.gz">source archive</a></td>
+        <td style="padding:10px"><a href="/reckless/NOTICE.md">NOTICE.md</a> + <a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-scalar-corresponding-source.tar.gz">scalar</a>, <a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-simd128-corresponding-source.tar.gz">SIMD</a>, and <a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz">relaxed SIMD</a> source archives</td>
       </tr>
     </tbody>
   </table>
