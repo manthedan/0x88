@@ -127,7 +127,7 @@ select, input, textarea{
   background:var(--panel); color:var(--ink);
 }
 input[type=number]{font-family:var(--mono)}
-textarea{resize:vertical; line-height:1.5}
+textarea{width:100%; resize:vertical; line-height:1.5}
 
 /* App pages use `background:white` directly on some surfaces; in dark mode
    flip those to the panel color so they don't become a bright blob. We
