@@ -249,7 +249,7 @@ rather than the objective one.
   (fetch + cache + progress); `MontyEngine` (montyEngine.ts) is a
   persistent-preferred `BrowserUciEngine` with a `contempt` option.
 - Gates: `scripts/monty_wasi_smoke.mjs` (browser_wasi_shim + real nets);
-  `monty-smoke.html` click-tested in Chromium (persistent mode).
+  `lab/monty-smoke.html` click-tested in Chromium (persistent mode).
   Search parity vs the native release binary is **bit-identical** at
   fixed nodes (same node counts/scores/PVs, contempt WDL rescaling
   identical to the 0.01%), browser ~50-60k nps. Contempt visibly works:
@@ -287,7 +287,7 @@ Decision — Monty's three roles split by where they run, with outcomes
    match real human outcomes?") is now answered by **Maia3**, not Monty
    — see the learned-vs-analytic table above.
 2. **Browser lane — lab only, never product** (unchanged).
-   `monty-smoke.html` / `MontyEngine` stay lab-scoped. The raw network
+   `lab/monty-smoke.html` / `MontyEngine` stay lab-scoped. The raw network
    files were removed from tracked public assets; local tests must stage
    ignored copies/symlinks under `public/models/monty/`. If ever surfaced:
    explicit ~950MB opt-in + AGPL corresponding-source archive +

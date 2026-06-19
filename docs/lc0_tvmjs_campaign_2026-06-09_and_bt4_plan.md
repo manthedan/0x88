@@ -104,7 +104,7 @@ per eval (1024 d_model × 15 layers × 32 heads vs 256×10).
    (the existing generation scripts are t1-pointed; parametrize the model).
    Without this, there is no parity gate — do not skip.
 5. **De-hardcode the smoke page/driver model family** (3 t1 references in
-   `lc0-tvmjs-webgpu-smoke.html`: default manifest + the ORT comparison model
+   `lab/lc0-tvmjs-webgpu-smoke.html`: default manifest + the ORT comparison model
    path template + fixture baseline path). Make family/manifest/ORT-model
    page params; the driver already passes `--manifest`.
 6. **Memory/startup telemetry first runs**: GPU buffer allocation probe and

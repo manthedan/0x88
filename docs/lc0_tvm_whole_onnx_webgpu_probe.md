@@ -152,7 +152,7 @@ Current generated whole-model f16 TVMJS/WebGPU wasm artifacts:
 Browser loader smoke now passes for batches 1/4/8 using:
 
 ```text
-lc0-tvmjs-webgpu-smoke.html
+lab/lc0-tvmjs-webgpu-smoke.html
 ```
 
 The smoke verifies:
@@ -196,7 +196,7 @@ npm run lc0:tvmjs-webgpu-smoke -- \
   --out artifacts/tvm/lc0_tvmjs_webgpu_smoke_batch8.json
 ```
 
-It opens `lc0-tvmjs-webgpu-smoke.html?batch=8&invoke=1&fixtures=1&autorun=1`, encodes `fixtures/lc0/fen_only.json` with the existing `encodeLc0Classical112(..., {historyFill: "fen_only"})`, converts planes to f16 bytes, invokes the TVMJS VM, decodes f16 policy/WDL/MLH, computes legal priors, and compares against `fixtures/lc0/native_fen_only_blas.jsonl`.
+It opens `lab/lc0-tvmjs-webgpu-smoke.html?batch=8&invoke=1&fixtures=1&autorun=1`, encodes `fixtures/lc0/fen_only.json` with the existing `encodeLc0Classical112(..., {historyFill: "fen_only"})`, converts planes to f16 bytes, invokes the TVMJS VM, decodes f16 policy/WDL/MLH, computes legal priors, and compares against `fixtures/lc0/native_fen_only_blas.jsonl`.
 
 Current batch-8 fixture smoke result against native BLAS fixture rows:
 
@@ -257,7 +257,7 @@ Current decision: **TVMJS remains research-only**. It is now a credible evaluato
 
 ## Search parity smoke
 
-`lc0-tvmjs-webgpu-smoke.html` now includes a narrow TVMJS-backed `Lc0EvaluationProvider` and can run existing `Lc0PuctSearcher` against both TVMJS and ORT f16 WebGPU in the same browser page. The automated smoke accepts:
+`lab/lc0-tvmjs-webgpu-smoke.html` now includes a narrow TVMJS-backed `Lc0EvaluationProvider` and can run existing `Lc0PuctSearcher` against both TVMJS and ORT f16 WebGPU in the same browser page. The automated smoke accepts:
 
 ```bash
 --search-visits N

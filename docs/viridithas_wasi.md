@@ -32,7 +32,7 @@ The WASI patch is intentionally narrow and prototype-oriented:
 
 ## Browser status
 
-`/reckless-benchmark.html` is now a small WASI UCI benchmark page and includes opt-in **Viridithas scalar experimental** and **Viridithas SIMD experimental** checkboxes. The experimental variants are also selectable in `/lc0-arena.html` and `/lc0-analysis.html` for shallow smoke games/lines, with runtime/asset status shown next to the Reckless status. Viridithas now supports the same broad browser modes as the Reckless WASI path:
+`/lab/reckless-benchmark.html` is now a small WASI UCI benchmark page and includes opt-in **Viridithas scalar experimental** and **Viridithas SIMD experimental** checkboxes. The experimental variants are also selectable in `/lc0-arena.html` and `/lc0-analysis.html` for shallow smoke games/lines, with runtime/asset status shown next to the Reckless status. Viridithas now supports the same broad browser modes as the Reckless WASI path:
 
 - **persistent**: one patched WASI process remains alive and receives UCI commands through the shared stdin ring buffer when `SharedArrayBuffer` and `crossOriginIsolated` are available;
 - **one-shot**: argv-driven fallback for non-isolated contexts and for apples-to-apples startup-cost measurements;

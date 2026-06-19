@@ -111,7 +111,7 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(new URL('/lc0-maia3-smoke.html', baseUrl), { cache: 'no-store' });
+      const response = await fetch(new URL('/lab/lc0-maia3-smoke.html', baseUrl), { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
     } catch (error) {
@@ -185,7 +185,7 @@ async function browserErrors(args, session) {
 }
 
 function smokeUrl(args) {
-  const url = new URL('/lc0-maia3-smoke.html', args.baseUrl);
+  const url = new URL('/lab/lc0-maia3-smoke.html', args.baseUrl);
   url.searchParams.set('cycles', String(args.cycles));
   url.searchParams.set('selfElo', String(args.selfElo));
   url.searchParams.set('oppoElo', String(args.oppoElo));
