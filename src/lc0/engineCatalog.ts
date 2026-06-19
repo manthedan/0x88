@@ -35,7 +35,8 @@ export interface EngineFamilyCatalogEntry {
 }
 
 export const ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'tiny', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess'];
-const V0_ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'sf', 'berserk', 'viridithas', 'plentychess'];
+const V0_ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'];
+const V0_RECKLESS_VARIANTS = new Set(['full', 'simd', 'relaxed-simd']);
 const V0_BERSERK_VARIANTS = new Set(['emscripten', 'emscripten-simd', 'emscripten-relaxed']);
 const V0_VIRIDITHAS_VARIANTS = new Set(['default', 'simd', 'relaxed-simd']);
 const V0_PLENTYCHESS_VARIANTS = new Set(['emscripten', 'emscripten-sse41', 'emscripten-relaxed']);
@@ -187,6 +188,8 @@ export function normalizeDeployEngineRow(row: EngineRow, surface: EngineSurface,
       ? { ...row, family: 'lc0', variant: 'small' }
       : row.family === 'sf'
         ? { ...row, family: 'sf', variant: 'lite' }
+        : row.family === 'reckless'
+          ? { ...row, family: 'reckless', variant: V0_RECKLESS_VARIANTS.has(row.variant) ? row.variant : 'full' }
         : row.family === 'berserk'
           ? { ...row, family: 'berserk', variant: V0_BERSERK_VARIANTS.has(row.variant) ? row.variant : 'emscripten' }
         : row.family === 'viridithas'

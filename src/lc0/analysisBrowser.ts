@@ -760,7 +760,7 @@ function analysisEngineFamilyOptions(): { value: EngineFamily; label: string }[]
 }
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
-  if (isV0DeployProfile() && !['lc0', 'sf', 'berserk', 'viridithas', 'plentychess'].includes(family)) return [];
+  if (isV0DeployProfile() && !['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'].includes(family)) return [];
   if (family === 'tiny') return tinyVariantOptions().map((option) => option.value === 'bt4-custom' && tinyHybridManifestStatus === 'missing'
     ? { ...option, disabled: true, label: `${option.label} (bundle missing)` }
     : option);
@@ -798,7 +798,8 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const suffix = unsupportedReason ? ` (${unsupportedReason})` : status === 'missing' ? ' (asset missing)' : needsGeneratedAsset && status !== 'present' ? ' (checking asset)' : '';
     return { value: v.key, label: `${v.label}${suffix}`, disabled };
   });
-  return availableRecklessVariants().map((v) => {
+  const recklessVariants = availableRecklessVariants().filter((v) => !isV0DeployProfile() || ['full', 'simd', 'relaxed-simd'].includes(v.key));
+  return recklessVariants.map((v) => {
     const status = recklessVariantAssetStatus(v);
     const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
     const suffix = unsupported ? ' (unsupported by this browser)' : status === 'missing' ? ' (asset missing)' : '';

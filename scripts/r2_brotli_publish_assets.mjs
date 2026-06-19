@@ -29,6 +29,10 @@ const targets = [
   ['models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.000.bin', 'public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.000.bin', 'application/octet-stream', immutable],
   ['models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.001.bin', 'public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.001.bin', 'application/octet-stream', immutable],
   ['models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.002.bin', 'public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.002.bin', 'application/octet-stream', immutable],
+  ['stockfish/stockfish-18.0.7.manifest.json', 'public/stockfish/stockfish-18.0.7.manifest.json', 'application/json', immutable],
+  ['stockfish/stockfish-18.0.7-corresponding-source.tar.gz', 'public/stockfish/stockfish-18.0.7-corresponding-source.tar.gz', 'application/gzip', immutable],
+  ['berserk/berserk-emscripten-single-thread.manifest.json', 'public/berserk/berserk-emscripten-single-thread.manifest.json', 'application/json', immutable],
+  ['berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz', 'public/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz', 'application/gzip', immutable],
   ...['berserk-emscripten', 'berserk-emscripten-simd128', 'berserk-emscripten-relaxed-simd128'].flatMap((base) => [
     [`berserk/${base}.js`, `public/berserk/${base}.js`, 'text/javascript; charset=utf-8', immutable],
     [`berserk/${base}.wasm`, `public/berserk/${base}.wasm`, 'application/wasm', immutable],
@@ -39,10 +43,27 @@ const targets = [
     [`plentychess/${base}.wasm`, `public/plentychess/${base}.wasm`, 'application/wasm', immutable],
     [`plentychess/${base}.data`, `public/plentychess/${base}.data`, 'application/octet-stream', immutable],
   ]),
+  ['plentychess/plentychess-emscripten-single-thread.manifest.json', 'public/plentychess/plentychess-emscripten-single-thread.manifest.json', 'application/json', immutable],
+  ['plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz', 'public/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz', 'application/gzip', immutable],
   ...['viridithas.wasm', 'viridithas-simd128.wasm', 'viridithas-relaxed-simd128.wasm'].map((name) => [
     `viridithas/${name}`,
     `public/viridithas/${name}`,
     'application/wasm',
+    immutable,
+  ]),
+  ['viridithas/viridithas-wasip1.manifest.json', 'public/viridithas/viridithas-wasip1.manifest.json', 'application/json', immutable],
+  ['viridithas/viridithas-wasip1-corresponding-source.tar.gz', 'public/viridithas/viridithas-wasip1-corresponding-source.tar.gz', 'application/gzip', immutable],
+  ['reckless/NOTICE.md', 'public/reckless/NOTICE.md', 'text/markdown; charset=utf-8', immutable],
+  ...['reckless.wasm', 'reckless-simd128.wasm', 'reckless-relaxed-simd128.wasm'].map((name) => [
+    `reckless/${name}`,
+    `public/reckless/${name}`,
+    'application/wasm',
+    immutable,
+  ]),
+  ...['reckless-scalar-corresponding-source.tar.gz', 'reckless-simd128-corresponding-source.tar.gz', 'reckless-relaxed-simd128-corresponding-source.tar.gz'].map((name) => [
+    `reckless/${name}`,
+    `public/reckless/${name}`,
+    'application/gzip',
     immutable,
   ]),
 ];

@@ -1005,7 +1005,7 @@ function bigNetUnavailableText(config: BigNetConfig): string {
 }
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
-  if (isV0DeployProfile() && !['lc0', 'sf', 'berserk', 'viridithas', 'plentychess'].includes(family)) return [];
+  if (isV0DeployProfile() && !['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'].includes(family)) return [];
   if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync()).map((option) => {
     if (!isLc0BigNetVariant(option.value)) return option;
     const config = BIG_NETS[option.value];
@@ -1044,7 +1044,8 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const suffix = unsupportedReason ? ` (${unsupportedReason})` : status === 'missing' ? ' (asset missing)' : needsGeneratedAsset && status !== 'present' ? ' (checking asset)' : '';
     return { value: v.key, label: `${v.label}${suffix}`, disabled };
   });
-  return availableRecklessVariants().map((v) => {
+  const recklessVariants = availableRecklessVariants().filter((v) => !isV0DeployProfile() || ['full', 'simd', 'relaxed-simd'].includes(v.key));
+  return recklessVariants.map((v) => {
     const status = recklessVariantAssetStatus(v);
     const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
     const suffix = unsupported ? ' (unsupported by this browser)' : status === 'missing' ? ' (asset missing)' : '';
