@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && node --experimental-strip-types --test --test-timeout=120000",
     "bench:movegen": "node --experimental-strip-types scripts/bench_movegen.mjs",
+    "bench:model-cache-streaming": "node --experimental-strip-types scripts/bench_model_cache_streaming.mjs",
     "web:client": "vite --host 0.0.0.0",
     "web:isolated:static": "node scripts/serve_isolated_static.mjs dist-client 5181",
     "build:client": "vite build --outDir dist-client",

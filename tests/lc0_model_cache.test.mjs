@@ -72,7 +72,7 @@ async function withMockedEnv(run, { serveBytes, manifestSha256, manifestBytes })
   const prev = { caches: globalThis.caches, fetch: globalThis.fetch, location: globalThis.location };
   globalThis.caches = new FakeCacheStorage();
   globalThis.location = { href: 'http://localhost/' };
-  const fetchLog = { model: 0 };
+  const fetchLog = { model: 0, modelRequestCaches: [] };
   globalThis.fetch = async (input) => {
     const url = typeof input === 'string' ? input : input.url;
     if (url === MANIFEST_URL) {
@@ -81,7 +81,9 @@ async function withMockedEnv(run, { serveBytes, manifestSha256, manifestBytes })
     }
     if (url === MODEL_URL) {
       fetchLog.model += 1;
-      return new Response(serveBytes());
+      fetchLog.modelRequestCaches.push(typeof input === 'string' ? undefined : input.cache);
+      const served = serveBytes(input);
+      return served instanceof Response ? served : new Response(served);
     }
     return new Response(null, { status: 404 });
   };
@@ -100,11 +102,21 @@ test('loadLc0ModelForOrt caches on miss then serves a validated hit', async () =
     assert.equal(miss.cacheStatus, 'miss');
     assert.equal(miss.sha256Valid, true);
     assert.equal(miss.sha256, ABC_SHA256);
+    assert.equal(miss.telemetry.source, 'network');
+    assert.equal(miss.telemetry.requestCache, 'force-cache');
+    assert.equal(miss.telemetry.preallocatedDownload, true);
+    assert.equal(typeof miss.telemetry.downloadMs, 'number');
+    assert.equal(typeof miss.telemetry.hashMs, 'number');
+    assert.equal(typeof miss.telemetry.cacheWriteMs, 'number');
     assert.equal(fetchLog.model, 1);
+    assert.deepEqual(fetchLog.modelRequestCaches, ['force-cache']);
 
     const hit = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL });
     assert.equal(hit.cacheStatus, 'hit');
     assert.equal(hit.sha256Valid, true);
+    assert.equal(hit.telemetry.source, 'cache-storage');
+    assert.equal(typeof hit.telemetry.cacheReadMs, 'number');
+    assert.equal(typeof hit.telemetry.hashMs, 'number');
     assert.equal(fetchLog.model, 1, 'a validated cache hit does not refetch');
   }, { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 });
 });
@@ -132,6 +144,7 @@ test('loadLc0ModelForOrt evicts and revalidates a stale cache entry when the mod
     // Now the model content changes: the manifest sha256 is bumped and the
     // server returns the new bytes. The stale cached "abc" must be evicted.
     let phase = 0;
+    const requestCaches = [];
     const prevFetch = globalThis.fetch;
     globalThis.fetch = async (input) => {
       const url = typeof input === 'string' ? input : input.url;
@@ -139,7 +152,11 @@ test('loadLc0ModelForOrt evicts and revalidates a stale cache entry when the mod
         const manifest = { models: [{ file: 'test.onnx', url: MODEL_URL, bytes: 4, sha256: await sha256Hex(bytesOf('abcd')) }] };
         return new Response(JSON.stringify(manifest), { headers: { 'content-type': 'application/json' } });
       }
-      if (url === MODEL_URL) { phase += 1; return new Response(bytesOf('abcd')); }
+      if (url === MODEL_URL) {
+        phase += 1;
+        requestCaches.push(typeof input === 'string' ? undefined : input.cache);
+        return new Response(bytesOf('abcd'));
+      }
       return new Response(null, { status: 404 });
     };
     globalThis.caches = seededCaches;
@@ -148,9 +165,41 @@ test('loadLc0ModelForOrt evicts and revalidates a stale cache entry when the mod
     assert.equal(revalidated.cacheStatus, 'miss');
     assert.equal(revalidated.revalidated, true);
     assert.equal(revalidated.sha256, await sha256Hex(bytesOf('abcd')));
+    assert.equal(revalidated.telemetry.requestCache, 'reload');
+    assert.deepEqual(requestCaches, ['reload'], 'stale-cache recovery bypasses the browser HTTP cache');
     assert.equal(phase, 1, 'the new content is fetched exactly once after eviction');
     globalThis.fetch = prevFetch;
   }, { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 });
+});
+
+test('loadLc0ModelForOrt streams progress downloads into a preallocated buffer', async () => {
+  const progress = [];
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('a'));
+      controller.enqueue(new TextEncoder().encode('b'));
+      controller.enqueue(new TextEncoder().encode('c'));
+      controller.close();
+    },
+  });
+  await withMockedEnv(async () => {
+    const loaded = await loadLc0ModelForOrt(MODEL_URL, {
+      cache: false,
+      manifestUrl: MANIFEST_URL,
+      onProgress: (loadedBytes, totalBytes) => progress.push([loadedBytes, totalBytes]),
+    });
+    assert.equal(loaded.mode, 'memory');
+    assert.equal(loaded.cacheStatus, 'disabled');
+    assert.equal(loaded.telemetry.source, 'memory');
+    assert.equal(loaded.telemetry.preallocatedDownload, true);
+    assert.equal(typeof loaded.telemetry.downloadMs, 'number');
+    assert.deepEqual(new Uint8Array(loaded.model), new TextEncoder().encode('abc'));
+    assert.deepEqual(progress, [[0, 3], [1, 3], [2, 3], [3, 3]]);
+  }, {
+    serveBytes: () => new Response(stream, { headers: { 'content-length': '3' } }),
+    manifestSha256: ABC_SHA256,
+    manifestBytes: 3,
+  });
 });
 
 test('clearLc0ModelCache reports removed entries and is safe when empty', async () => {
