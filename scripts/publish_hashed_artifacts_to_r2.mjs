@@ -72,7 +72,13 @@ async function main() {
   if (args.execute) {
     for (const item of planned) {
       const target = `${args.bucket}/${item.key}`;
-      const child = spawnSync(args.wranglerBin, ['r2', 'object', 'put', target, '--file', item.localPath, '--content-type', item.contentType], { stdio: 'inherit' });
+      const child = spawnSync(args.wranglerBin, [
+        'r2', 'object', 'put', target,
+        '--file', item.localPath,
+        '--content-type', item.contentType,
+        '--cache-control', 'public, max-age=31536000, immutable',
+        '--remote',
+      ], { stdio: 'inherit' });
       if (child.status !== 0) throw new Error(`wrangler failed for ${target}`);
     }
   }
