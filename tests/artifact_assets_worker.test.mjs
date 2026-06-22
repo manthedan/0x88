@@ -4,25 +4,41 @@ import { handleArtifactRequest } from '../cloudflare/artifact-assets-worker.mjs'
 
 const KEY = 'artifacts/sha256/abc/test.bin';
 const ESCAPED_KEY = 'artifacts/sha256/abc/model%20v1.onnx';
+const RELEASE_KEY = 'releases/2026-06-22.test.json';
+const CHANNEL_KEY = 'channels/stable.json';
 const BODY = new TextEncoder().encode('abcdefghijklmnopqrstuvwxyz');
+const RELEASE_BODY = new TextEncoder().encode('{"schema":"release"}');
+const CHANNEL_BODY = new TextEncoder().encode('{"schema":"channel"}');
 
 function fakeEnv() {
-  const object = {
-    size: BODY.byteLength,
-    httpEtag: '"fake-etag"',
-    httpMetadata: { contentType: 'application/octet-stream', cacheControl: 'public, max-age=31536000, immutable' },
-  };
+  const entries = new Map([
+    [KEY, { body: BODY, contentType: 'application/octet-stream', cacheControl: 'public, max-age=31536000, immutable' }],
+    [ESCAPED_KEY, { body: BODY, contentType: 'application/octet-stream', cacheControl: 'public, max-age=31536000, immutable' }],
+    [RELEASE_KEY, { body: RELEASE_BODY, contentType: 'application/json; charset=utf-8', cacheControl: 'public, max-age=31536000, immutable' }],
+    [CHANNEL_KEY, { body: CHANNEL_BODY, contentType: 'application/json; charset=utf-8', cacheControl: 'public, max-age=31536000, immutable' }],
+  ]);
   return {
     TIMING_ALLOW_ORIGIN: 'https://0x88.app',
     ARTIFACTS: {
       async head(key) {
-        return key === KEY || key === ESCAPED_KEY ? object : null;
+        const entry = entries.get(key);
+        return entry ? {
+          size: entry.body.byteLength,
+          httpEtag: '"fake-etag"',
+          httpMetadata: { contentType: entry.contentType, cacheControl: entry.cacheControl },
+        } : null;
       },
       async get(key, options) {
-        if (key !== KEY && key !== ESCAPED_KEY) return null;
+        const entry = entries.get(key);
+        if (!entry) return null;
         const range = options?.range;
-        const body = range ? BODY.slice(range.offset, range.offset + range.length) : BODY;
-        return { ...object, body };
+        const body = range ? entry.body.slice(range.offset, range.offset + range.length) : entry.body;
+        return {
+          size: entry.body.byteLength,
+          httpEtag: '"fake-etag"',
+          httpMetadata: { contentType: entry.contentType, cacheControl: entry.cacheControl },
+          body,
+        };
       },
     },
   };
@@ -144,6 +160,60 @@ test('artifact assets worker still serves when cache population fails', async ()
   } finally {
     globalThis.caches = previous;
   }
+});
+
+test('artifact assets worker serves release and channel manifests without immutable artifact policy', async () => {
+  const release = await handleArtifactRequest(new Request(`https://assets.example/${RELEASE_KEY}`), fakeEnv());
+  assert.equal(release.status, 200);
+  assert.equal(release.headers.get('Content-Type'), 'application/json; charset=utf-8');
+  assert.equal(release.headers.get('Cache-Control'), 'public, max-age=300, stale-while-revalidate=86400');
+  assert.equal(release.headers.get('X-Artifact-Content-Length'), null);
+  assert.equal(await text(release), '{"schema":"release"}');
+
+  const channel = await handleArtifactRequest(new Request(`https://assets.example/${CHANNEL_KEY}`), fakeEnv());
+  assert.equal(channel.status, 200);
+  assert.equal(channel.headers.get('Cache-Control'), 'no-cache');
+  assert.equal(channel.headers.get('X-Artifact-Content-Length'), null);
+  assert.equal(await text(channel), '{"schema":"channel"}');
+});
+
+test('artifact assets worker uses GET metadata for mutable manifest bodies', async () => {
+  const oldBody = new TextEncoder().encode('{"schema":"old"}');
+  const newBody = new TextEncoder().encode('{"schema":"new-channel"}');
+  const env = {
+    TIMING_ALLOW_ORIGIN: 'https://0x88.app',
+    ARTIFACTS: {
+      async head() {
+        return {
+          size: oldBody.byteLength,
+          httpEtag: '"old"',
+          httpMetadata: { contentType: 'application/json; charset=utf-8', cacheControl: 'public, max-age=31536000, immutable' },
+        };
+      },
+      async get() {
+        return {
+          size: newBody.byteLength,
+          httpEtag: '"new"',
+          httpMetadata: { contentType: 'application/json; charset=utf-8', cacheControl: 'public, max-age=31536000, immutable' },
+          body: newBody,
+        };
+      },
+    },
+  };
+  const response = await handleArtifactRequest(new Request(`https://assets.example/${CHANNEL_KEY}`), env);
+  assert.equal(response.headers.get('ETag'), '"new"');
+  assert.equal(response.headers.get('Content-Length'), String(newBody.byteLength));
+  assert.equal(await text(response), '{"schema":"new-channel"}');
+});
+
+test('artifact assets worker does not edge-cache mutable channel manifests', async () => {
+  await withFakeEdgeCache(async () => {
+    const request = new Request(`https://assets.example/${CHANNEL_KEY}`);
+    const first = await handleArtifactRequest(request, fakeEnv());
+    assert.equal(first.headers.get('Cache-Status'), 'lc0-artifact-worker; fwd');
+    const second = await handleArtifactRequest(request, fakeEnv());
+    assert.equal(second.headers.get('Cache-Status'), 'lc0-artifact-worker; fwd');
+  });
 });
 
 test('artifact assets worker preserves percent-encoded R2 keys', async () => {

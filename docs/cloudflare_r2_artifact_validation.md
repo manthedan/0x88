@@ -45,7 +45,7 @@ If direct R2 custom-domain responses cannot provide all required CORS/CORP/timin
 npm run deploy:artifact-worker
 ```
 
-The Worker config in `cloudflare/artifacts.wrangler.toml` binds `browser-chess-models` as `ARTIFACTS` and serves only `/artifacts/sha256/*` keys. It preserves percent-encoded object keys, supports `GET`/`HEAD`/`OPTIONS`, handles bounded byte ranges through R2 range reads, and caches immutable full-body/HEAD metadata responses without caching errors. Cloudflare Workers may normalize cached synthetic `HEAD` responses to `Content-Length: 0`; the Worker also exposes `X-Artifact-Content-Length` so validation can compare range totals against the original artifact byte length.
+The Worker config in `cloudflare/artifacts.wrangler.toml` binds `browser-chess-models` as `ARTIFACTS` and serves `/artifacts/sha256/*`, `/releases/*.json`, and `/channels/*.json` keys. It preserves percent-encoded object keys, supports `GET`/`HEAD`/`OPTIONS`, handles bounded byte ranges through R2 range reads, and caches immutable artifact full-body/HEAD metadata responses without caching errors. Release manifests use short CDN/browser TTLs, and mutable channel manifests use revalidation-oriented headers instead of immutable caching. Cloudflare Workers may normalize cached synthetic `HEAD` responses to `Content-Length: 0`; the Worker also exposes `X-Artifact-Content-Length` so validation can compare range totals against the original artifact byte length.
 
 ## Validation command
 

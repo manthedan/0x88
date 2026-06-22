@@ -60,7 +60,7 @@ function validateRow(row) {
   if (row.firstHead.status < 200 || row.firstHead.status >= 400) failures.push(`first HEAD status ${row.firstHead.status}`);
   if (row.secondHead.status < 200 || row.secondHead.status >= 400) failures.push(`second HEAD status ${row.secondHead.status}`);
   if (row.firstHead.headers['set-cookie'] || row.secondHead.headers['set-cookie'] || row.range.headers['set-cookie']) failures.push('artifact response must not set cookies');
-  if (!row.firstHead.headers['content-length']) failures.push('missing Content-Length on HEAD');
+  if (!row.firstHead.headers['content-length'] && !row.firstHead.headers['x-artifact-content-length']) failures.push('missing Content-Length or X-Artifact-Content-Length on HEAD');
   if (!row.firstHead.headers.etag) failures.push('missing ETag on HEAD');
   if (!row.secondHead.headers.age) failures.push('missing Age on repeated HEAD');
   const cfCacheStatus = row.secondHead.headers['cf-cache-status']?.toUpperCase();

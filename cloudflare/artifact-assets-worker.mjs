@@ -1,5 +1,7 @@
 const DEFAULT_APP_ORIGIN = 'https://0x88.app';
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+const RELEASE_CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate=86400';
+const CHANNEL_CACHE_CONTROL = 'no-cache';
 const EXPOSED_HEADERS = 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, Content-Range, Accept-Ranges';
 
 function artifactHeaders(env, extra = {}) {
@@ -57,19 +59,34 @@ function keyFromRequest(request) {
   // R2 publish keys are derived from manifest artifact URLs after encodeURIComponent(file),
   // so keep the URL path's percent-encoded form for object lookup.
   const key = url.pathname.replace(/^\/+/, '');
-  return key.startsWith('artifacts/sha256/') ? key : undefined;
+  if (key.startsWith('artifacts/sha256/')) return key;
+  if (key.startsWith('releases/') && key.endsWith('.json')) return key;
+  if (key.startsWith('channels/') && key.endsWith('.json')) return key;
+  return undefined;
 }
 
-function objectHeaders(object, env, range) {
-  const contentType = object.httpMetadata?.contentType || 'application/octet-stream';
-  const cacheControl = object.httpMetadata?.cacheControl || IMMUTABLE_CACHE_CONTROL;
+function isImmutableArtifactKey(key) {
+  return key.startsWith('artifacts/sha256/');
+}
+
+function cacheControlForKey(key) {
+  if (isImmutableArtifactKey(key)) return IMMUTABLE_CACHE_CONTROL;
+  if (key.startsWith('releases/')) return RELEASE_CACHE_CONTROL;
+  if (key.startsWith('channels/')) return CHANNEL_CACHE_CONTROL;
+  return 'no-store';
+}
+
+function objectHeaders(key, object, env, range) {
+  const contentType = object.httpMetadata?.contentType || (key.endsWith('.json') ? 'application/json; charset=utf-8' : 'application/octet-stream');
+  // Cache policy is path-controlled so stale R2 metadata cannot make mutable channels immutable.
+  const cacheControl = cacheControlForKey(key);
   const headers = artifactHeaders(env, {
     'Content-Type': contentType,
     'Cache-Control': cacheControl,
     ETag: object.httpEtag || object.etag || '',
   });
   headers.set('Accept-Ranges', 'bytes');
-  headers.set('X-Artifact-Content-Length', String(object.size));
+  if (isImmutableArtifactKey(key)) headers.set('X-Artifact-Content-Length', String(object.size));
   if (range) {
     headers.set('Content-Length', String(range.length));
     headers.set('Content-Range', `bytes ${range.start}-${range.end}/${object.size}`);
@@ -85,35 +102,35 @@ function scheduleCachePut(cache, request, response, ctx) {
   else void operation;
 }
 
-async function cachedHeadResponse(request, env, head, range, ctx) {
+async function cachedHeadResponse(key, request, env, head, range, ctx) {
   const cache = immutableCache();
   const cacheRequest = metadataCacheRequest(request);
-  if (!range && cache) {
+  if (!range && cache && isImmutableArtifactKey(key)) {
     const cached = await cache.match(cacheRequest);
     if (cached) return withCacheStatus(cached, 'hit');
   }
-  const response = new Response(null, { status: range ? 206 : 200, headers: objectHeaders(head, env, range) });
-  if (!range && cache) scheduleCachePut(cache, cacheRequest, response, ctx);
-  return withCacheStatus(response, cache ? 'miss' : 'fwd');
+  const response = new Response(null, { status: range ? 206 : 200, headers: objectHeaders(key, head, env, range) });
+  if (!range && cache && isImmutableArtifactKey(key)) await cache.put(cacheRequest, response.clone()).catch(() => undefined);
+  return withCacheStatus(response, cache && isImmutableArtifactKey(key) ? 'miss' : 'fwd');
 }
 
-async function cachedFullBodyResponse(request, env, head, ctx) {
+async function cachedFullBodyResponse(key, request, env, ctx) {
   const cache = immutableCache();
   const cacheRequest = fullBodyCacheRequest(request);
-  if (cache) {
+  if (cache && isImmutableArtifactKey(key)) {
     const cached = await cache.match(cacheRequest);
     if (cached) return withCacheStatus(cached, 'hit');
   }
-  const object = await env.ARTIFACTS.get(keyFromRequest(request));
+  const object = await env.ARTIFACTS.get(key);
   if (!object) return new Response('Not found', { status: 404, headers: artifactHeaders(env) });
-  const response = new Response(object.body, { status: 200, headers: objectHeaders(head, env) });
-  if (cache) scheduleCachePut(cache, cacheRequest, response, ctx);
-  return withCacheStatus(response, cache ? 'miss' : 'fwd');
+  const response = new Response(object.body, { status: 200, headers: objectHeaders(key, object, env) });
+  if (cache && isImmutableArtifactKey(key)) scheduleCachePut(cache, cacheRequest, response, ctx);
+  return withCacheStatus(response, cache && isImmutableArtifactKey(key) ? 'miss' : 'fwd');
 }
 
-async function cachedNoRangeResponse(request) {
+async function cachedNoRangeResponse(key, request) {
   const cache = immutableCache();
-  if (!cache || request.headers.get('Range')) return undefined;
+  if (!cache || !isImmutableArtifactKey(key) || request.headers.get('Range')) return undefined;
   if (request.method === 'HEAD') {
     const cached = await cache.match(metadataCacheRequest(request));
     return cached ? withCacheStatus(cached, 'hit') : undefined;
@@ -125,12 +142,12 @@ async function cachedNoRangeResponse(request) {
   return undefined;
 }
 
-async function rangeResponse(request, env, head, range) {
+async function rangeResponse(key, request, env, head, range) {
   // Do not slice a cached full-body response in Worker memory. Some artifacts are hundreds
   // of MiB, so range requests must stay bounded and use R2's range reader directly.
-  const object = await env.ARTIFACTS.get(keyFromRequest(request), { range: { offset: range.start, length: range.length } });
+  const object = await env.ARTIFACTS.get(key, { range: { offset: range.start, length: range.length } });
   if (!object) return new Response('Not found', { status: 404, headers: artifactHeaders(env) });
-  return withCacheStatus(new Response(object.body, { status: 206, headers: objectHeaders(head, env, range) }), 'fwd');
+  return withCacheStatus(new Response(object.body, { status: 206, headers: objectHeaders(key, head, env, range) }), 'fwd');
 }
 
 export async function handleArtifactRequest(request, env, ctx) {
@@ -151,7 +168,7 @@ export async function handleArtifactRequest(request, env, ctx) {
   const key = keyFromRequest(request);
   if (!key) return new Response('Not found', { status: 404, headers: artifactHeaders(env) });
 
-  const cached = await cachedNoRangeResponse(request);
+  const cached = await cachedNoRangeResponse(key, request);
   if (cached) return cached;
 
   const head = await env.ARTIFACTS.head(key);
@@ -165,9 +182,9 @@ export async function handleArtifactRequest(request, env, ctx) {
     });
   }
 
-  if (request.method === 'HEAD') return cachedHeadResponse(request, env, head, range, ctx);
-  if (range) return rangeResponse(request, env, head, range);
-  return cachedFullBodyResponse(request, env, head, ctx);
+  if (request.method === 'HEAD') return cachedHeadResponse(key, request, env, head, range, ctx);
+  if (range) return rangeResponse(key, request, env, head, range);
+  return cachedFullBodyResponse(key, request, env, ctx);
 }
 
 export default {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -62,6 +62,148 @@ test('write_artifact_release_manifests creates channel and content-addressed rel
     '--check',
   ], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(check.status, 0, check.stderr);
+});
+
+test('publish_hashed_artifacts_to_r2 plans release and channel manifest uploads', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-manifests-'));
+  await mkdir(join(root, 'public/models/lc0'), { recursive: true });
+  await writeFile(join(root, 'public/models/lc0/test.onnx'), 'abc');
+  const releasePath = join(root, 'public/releases/test-release.json');
+  const channelPath = join(root, 'public/channels/stable.json');
+  await writeJson(releasePath, {
+    schema: 'lc0_browser.artifact_release_manifest.v1',
+    releaseId: 'test-release',
+    artifacts: [{
+      logicalUrl: '/models/lc0/test.onnx',
+      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
+      sha256: ABC_SHA256,
+      bytes: 3,
+      file: 'test.onnx',
+      kind: 'model',
+      sourceManifest: 'test',
+      localPath: 'public/models/lc0/test.onnx',
+    }],
+  });
+  await writeJson(channelPath, {
+    schema: 'lc0_browser.artifact_channel_manifest.v1',
+    channel: 'stable',
+    releaseId: 'test-release',
+    releaseManifestUrl: '/releases/test-release.json',
+  });
+  const result = spawnSync(process.execPath, [
+    'scripts/publish_hashed_artifacts_to_r2.mjs',
+    '--root', root,
+    '--release', releasePath,
+    '--channel-manifest', channelPath,
+    '--bucket', 'test-bucket',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.deepEqual(parsed.manifests.map((item) => [item.type, item.key, item.cacheControl]), [
+    ['release-manifest', 'releases/test-release.json', 'public, max-age=300, stale-while-revalidate=86400'],
+    ['channel-manifest', 'channels/stable.json', 'no-cache'],
+  ]);
+});
+
+test('publish_hashed_artifacts_to_r2 rejects a stale channel manifest', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-stale-channel-'));
+  await mkdir(join(root, 'public/models/lc0'), { recursive: true });
+  await writeFile(join(root, 'public/models/lc0/test.onnx'), 'abc');
+  const releasePath = join(root, 'public/releases/test-release.json');
+  const channelPath = join(root, 'public/channels/stable.json');
+  await writeJson(releasePath, {
+    schema: 'lc0_browser.artifact_release_manifest.v1',
+    releaseId: 'test-release',
+    artifacts: [{
+      logicalUrl: '/models/lc0/test.onnx',
+      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
+      sha256: ABC_SHA256,
+      bytes: 3,
+      file: 'test.onnx',
+      kind: 'model',
+      sourceManifest: 'test',
+      localPath: 'public/models/lc0/test.onnx',
+    }],
+  });
+  await writeJson(channelPath, {
+    schema: 'lc0_browser.artifact_channel_manifest.v1',
+    channel: 'stable',
+    releaseId: 'old-release',
+    releaseManifestUrl: '/releases/old-release.json',
+  });
+  const result = spawnSync(process.execPath, [
+    'scripts/publish_hashed_artifacts_to_r2.mjs',
+    '--root', root,
+    '--release', releasePath,
+    '--channel-manifest', channelPath,
+    '--bucket', 'test-bucket',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /does not match release test-release/);
+});
+
+test('publish_hashed_artifacts_to_r2 refuses to overwrite release manifests', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-existing-release-'));
+  await mkdir(join(root, 'public/models/lc0'), { recursive: true });
+  await writeFile(join(root, 'public/models/lc0/test.onnx'), 'abc');
+  const releasePath = join(root, 'public/releases/test-release.json');
+  await writeJson(releasePath, {
+    schema: 'lc0_browser.artifact_release_manifest.v1',
+    releaseId: 'test-release',
+    artifacts: [{
+      logicalUrl: '/models/lc0/test.onnx',
+      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
+      sha256: ABC_SHA256,
+      bytes: 3,
+      file: 'test.onnx',
+      kind: 'model',
+      sourceManifest: 'test',
+      localPath: 'public/models/lc0/test.onnx',
+    }],
+  });
+  const wrangler = join(root, 'fake-wrangler.sh');
+  await writeFile(wrangler, '#!/bin/sh\nif [ "$1 $2 $3" = "r2 object get" ]; then exit 0; fi\nexit 0\n');
+  await chmod(wrangler, 0o755);
+  const result = spawnSync(process.execPath, [
+    'scripts/publish_hashed_artifacts_to_r2.mjs',
+    '--root', root,
+    '--release', releasePath,
+    '--bucket', 'test-bucket',
+    '--execute',
+    '--wrangler-bin', wrangler,
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Refusing to overwrite immutable release manifest/);
+});
+
+test('publish_hashed_artifacts_to_r2 refuses execute when artifacts are skipped', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-skipped-'));
+  const releasePath = join(root, 'public/releases/test-release.json');
+  await writeJson(releasePath, {
+    schema: 'lc0_browser.artifact_release_manifest.v1',
+    releaseId: 'test-release',
+    artifacts: [{
+      logicalUrl: '/models/lc0/missing.onnx',
+      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/missing.onnx`,
+      sha256: ABC_SHA256,
+      bytes: 3,
+      file: 'missing.onnx',
+      kind: 'model',
+      sourceManifest: 'test',
+      localPath: 'public/models/lc0/missing.onnx',
+    }],
+  });
+  const result = spawnSync(process.execPath, [
+    'scripts/publish_hashed_artifacts_to_r2.mjs',
+    '--root', root,
+    '--release', releasePath,
+    '--bucket', 'test-bucket',
+    '--allow-missing',
+    '--execute',
+    '--wrangler-bin', process.execPath,
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Refusing to publish release\/channel manifests when artifacts were skipped/);
 });
 
 test('publish_hashed_artifacts_to_r2 rejects artifactUrl hash mismatches', async () => {

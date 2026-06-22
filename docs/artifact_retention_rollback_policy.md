@@ -56,7 +56,7 @@ A safe cleanup candidate must satisfy all of the following:
 ## Tooling hooks
 
 - `scripts/write_artifact_release_manifests.mjs` verifies local file byte counts and SHA-256 before emitting a release entry.
-- `scripts/publish_hashed_artifacts_to_r2.mjs` verifies local bytes and requires the `/artifacts/sha256/<sha>/...` key hash to match the file hash before planning/uploading.
+- `scripts/publish_hashed_artifacts_to_r2.mjs` verifies local bytes, requires the `/artifacts/sha256/<sha>/...` key hash to match the file hash before planning/uploading, and publishes release/channel manifest JSON after blob uploads when `--channel-manifest` is provided.
 - `scripts/validate_artifact_cdn_headers.mjs` validates HEAD, repeated HEAD, range, CORS/CORP, timing, no-cookie, cache-status, and encoding behavior.
 
 Actual production uploads should use an R2 role that can put new objects but should be treated operationally as write-once for `/artifacts/sha256/*`.
