@@ -869,12 +869,8 @@ async function refreshBt4Availability(): Promise<void> {
 }
 
 function renderRecklessRuntimeInfo(): void {
-  if (isV0DeployProfile()) {
-    el('recklessRuntimeInfo').textContent = 'v0 deploy: Lc0 small, Maia3, Stockfish Lite, Berserk, Viridithas, and PlentyChess are available; Reckless and larger model engines remain external or disabled.';
-    return;
-  }
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
-  const bigNetTexts = (['bt4', 't3'] as const).map((key) => {
+  const bigNetTexts = isV0DeployProfile() ? [] : (['bt4', 't3'] as const).map((key) => {
     const config = BIG_NETS[key];
     const asset = bigNetAssetStatusSync(config);
     if (asset === 'unknown') void checkBigNetAsset(config, renderRecklessRuntimeInfo);

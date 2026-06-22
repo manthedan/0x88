@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>0x88.app — play chess vs an engine in your browser</title>
+<title>0x88 Chess — play chess vs an engine in your browser</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <meta name="description" content="Play chess against Leela Chess Zero, Stockfish, and four more engines running entirely in your browser. Five strength levels, takebacks, and PGN export." />
 <link rel="stylesheet" href="/chessground.base.css" />
@@ -15,7 +15,7 @@
    come from app-shell.css. */
 main{display:grid;grid-template-columns:minmax(320px,620px) minmax(300px,400px);gap:20px;align-items:start;justify-content:center;padding:18px}
 .panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:14px}
-.board-shell{width:100%;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 14px 38px -26px #000}
+.board-shell{width:100%;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 14px 38px -26px #000;background:#f0d9b5}@media(prefers-color-scheme:dark){#ground{background:#6f8736}}
 .cg-wrap{width:100%!important;height:100%!important}
 #status{margin-top:12px;padding:10px 12px;border:1px solid var(--rule);border-radius:6px;background:var(--soft);font-size:14px}
 #status.over{border-color:var(--accent);font-weight:700}
@@ -48,10 +48,7 @@ button.danger{background:var(--warn);border-color:var(--warn);color:#fff;font-we
   <div class="wrap">
     <a class="brand" href="/" aria-label="0x88.app — home">
       <span class="brand-mark" aria-hidden="true">0x88</span>
-      <span>
-        <span class="brand-name">0x88.app</span><br>
-        <span class="brand-tag">browser chess · zero installs</span>
-      </span>
+      <span class="brand-name">0x88.app</span>
     </a>
     <span class="page-title">Play</span>
     <nav class="primary" aria-label="Primary">

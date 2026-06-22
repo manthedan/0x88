@@ -135,6 +135,17 @@ textarea{width:100%; resize:vertical; line-height:1.5}
    because those have to stay high-contrast. */
 @media (prefers-color-scheme: dark){
   .panel{background:var(--panel) !important; border-color:var(--rule) !important}
+  button:not(.primary):not(.danger),
+  select,
+  input,
+  textarea,
+  .engine-row select,
+  .engine-row .row-strength{
+    background:var(--panel-2) !important;
+    color:var(--ink) !important;
+    border-color:var(--rule) !important;
+  }
+  select option{background:var(--panel); color:var(--ink)}
   /* Keep .soft status boxes legible */
   #status, #message, #matchScore, .review-bar{background:var(--accent-soft) !important; border-color:color-mix(in srgb, var(--accent) 25%, var(--rule)) !important}
 }

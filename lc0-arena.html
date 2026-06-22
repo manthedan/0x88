@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>0x88.app — engine arena</title>
+<title>0x88 Chess — engine arena</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <meta name="description" content="Run chess engine tournaments in your browser: head-to-head matches, round-robins, and gauntlets with standings, Elo estimates, and per-game charts." />
 <link rel="stylesheet" href="/chessground.base.css" />
@@ -17,7 +17,7 @@
 *{box-sizing:border-box}
 main{display:grid;grid-template-columns:minmax(0,1fr) minmax(330px,400px);gap:20px;align-items:start;padding:18px}
 .panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:12px}
-.board-with-evals{display:grid;grid-template-columns:18px minmax(0,1fr) 18px;gap:10px;align-items:stretch;max-width:680px;margin:0 auto}.board-shell{width:100%;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 14px 38px -26px #000}
+.board-with-evals{display:grid;grid-template-columns:18px minmax(0,1fr) 18px;gap:10px;align-items:stretch;max-width:680px;margin:0 auto}.board-shell{width:100%;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 14px 38px -26px #000;background:#f0d9b5}@media(prefers-color-scheme:dark){#ground{background:#6f8736}}
 .engine-eval-bar{position:relative;min-height:100%;border:1px solid var(--rule);border-radius:4px;background:#3a3a3a;overflow:hidden}
 .engine-eval-bar .eval-fill{position:absolute;left:0;right:0;bottom:0;height:50%;background:#f4f1e8;transition:height .25s}
 .engine-eval-bar .eval-midline{position:absolute;left:0;right:0;top:50%;height:1px;background:var(--accent);opacity:.6;border:0}
@@ -100,10 +100,7 @@ details.runtime-details summary:hover{color:inherit}
   <div class="wrap">
     <a class="brand" href="/" aria-label="0x88.app — home">
       <span class="brand-mark" aria-hidden="true">0x88</span>
-      <span>
-        <span class="brand-name">0x88.app</span><br>
-        <span class="brand-tag">browser chess · zero installs</span>
-      </span>
+      <span class="brand-name">0x88.app</span>
     </a>
     <span class="page-title">Arena</span>
     <nav class="primary" aria-label="Primary">

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>0x88.app — analysis board</title>
+<title>0x88 Chess — analysis board</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <meta name="description" content="Multi-engine chess analysis in your browser: compare Leela Chess Zero and Stockfish lines side by side, review games with accuracy scores, and explore openings from your own games." />
 <link rel="stylesheet" href="/chessground.base.css" />
@@ -20,7 +20,7 @@ main{display:grid;grid-template-columns:minmax(320px,540px) minmax(340px,1fr);ga
 .evalbar{width:18px;border:1px solid var(--rule);border-radius:4px;overflow:hidden;background:#3a3a3a;position:relative;flex:0 0 auto}
 .evalbar .white{position:absolute;left:0;right:0;bottom:0;background:#f4f1e8;transition:height .25s}
 .evalbar .mid{position:absolute;left:0;right:0;top:50%;height:1px;background:var(--accent);opacity:.6}
-.board-shell{flex:1 1 auto;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 14px 38px -26px #000}
+.board-shell{flex:1 1 auto;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 14px 38px -26px #000;background:#f0d9b5}@media(prefers-color-scheme:dark){#ground{background:#6f8736}}
 .cg-wrap{width:100%!important;height:100%!important}
 .nav{display:flex;gap:6px;margin-top:10px}
 button{border:1px solid var(--rule);border-radius:6px;padding:8px 10px}
@@ -100,10 +100,7 @@ table.opening .san{font-family:var(--mono);font-weight:700}
   <div class="wrap">
     <a class="brand" href="/" aria-label="0x88.app — home">
       <span class="brand-mark" aria-hidden="true">0x88</span>
-      <span>
-        <span class="brand-name">0x88.app</span><br>
-        <span class="brand-tag">browser chess · zero installs</span>
-      </span>
+      <span class="brand-name">0x88.app</span>
     </a>
     <span class="page-title">Analysis</span>
     <nav class="primary" aria-label="Primary">
