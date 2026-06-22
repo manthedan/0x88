@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://0x88.app/schemas/lc0-artifact-channel-manifest.v1.schema.json",
+  "title": "LC0 browser artifact channel manifest",
+  "type": "object",
+  "required": ["schema", "channel", "releaseId", "releaseManifestUrl", "generatedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "lc0_browser.artifact_channel_manifest.v1" },
+    "channel": { "type": "string", "minLength": 1 },
+    "releaseId": { "type": "string", "minLength": 1 },
+    "releaseManifestUrl": { "type": "string", "pattern": "^/releases/" },
+    "generatedAt": { "type": "string", "format": "date-time" }
+  }
+}

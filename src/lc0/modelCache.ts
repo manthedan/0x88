@@ -1,11 +1,16 @@
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 
+type ImportMetaWithEnv = ImportMeta & { env?: Record<string, string | undefined> };
+const env = (import.meta as ImportMetaWithEnv).env ?? {};
+
 export type Lc0ModelCacheMode = 'url' | 'cache' | 'memory';
 export type Lc0ModelLoadSource = 'url' | 'memory' | 'cache-storage' | 'network';
 
 export interface Lc0ModelManifestEntry {
   file: string;
   url: string;
+  /** Optional immutable/content-addressed URL for the bytes named by `url`. */
+  artifactUrl?: string;
   bytes?: number;
   sha256?: string;
 }
@@ -31,7 +36,10 @@ export interface Lc0ModelLoadTelemetry {
 
 export interface Lc0ModelLoadResult {
   model: string | ArrayBuffer;
+  /** URL handed to ORT or used for byte fetches; may be content-addressed. */
   url: string;
+  /** Stable/logical URL requested by the caller when different from `url`. */
+  logicalUrl?: string;
   mode: Lc0ModelCacheMode;
   cacheStatus: 'disabled' | 'unavailable' | 'hit' | 'miss';
   bytes?: number;
@@ -51,6 +59,8 @@ export interface Lc0ModelLoadOptions {
   cache?: boolean;
   cacheName?: string;
   manifestUrl?: string;
+  /** Optional channel manifest whose release manifest maps stable URLs to immutable artifact URLs. */
+  channelUrl?: string | null;
   /**
    * Network download progress. Providing it forces the load to fetch the bytes
    * itself (streamed) even when cache=false, so the caller gets bytes in
@@ -102,10 +112,91 @@ async function fetchManifestEntry(modelUrl: string, manifestUrl: string): Promis
   }
 }
 
-async function fetchManifestEntryWithTiming(modelUrl: string, manifestUrl: string): Promise<{ entry?: Lc0ModelManifestEntry; elapsedMs: number }> {
+async function fetchManifestEntryWithTiming(modelUrl: string, manifestUrl: string): Promise<{ entry?: Lc0ModelManifestEntry; manifestUrl: string; elapsedMs: number }> {
   const started = nowMs();
   const entry = await fetchManifestEntry(modelUrl, manifestUrl);
-  return { entry, elapsedMs: nowMs() - started };
+  return { entry, manifestUrl, elapsedMs: nowMs() - started };
+}
+
+function manifestArtifactUrl(entry: Lc0ModelManifestEntry | undefined, manifestUrl: string): string | undefined {
+  if (!entry?.artifactUrl) return undefined;
+  return new URL(entry.artifactUrl, new URL(manifestUrl, location.href)).href;
+}
+
+function logicalUrlField(modelUrl: string, resolvedUrl: string): string | undefined {
+  return resolvedUrl === modelUrl ? undefined : modelUrl;
+}
+
+interface Lc0ArtifactChannelManifest {
+  releaseManifestUrl?: string;
+}
+
+interface Lc0ArtifactReleaseManifest {
+  artifacts?: Array<{ logicalUrl: string; artifactUrl: string; bytes?: number; sha256?: string }>;
+}
+
+interface ResolvedModelArtifact {
+  url: string;
+  expectedBytes?: number;
+  expectedSha256?: string;
+}
+
+function cleanChannelUrl(raw: string | null | undefined): string | undefined {
+  const trimmed = raw?.trim();
+  if (!trimmed) return undefined;
+  try {
+    return new URL(trimmed, location.href).href;
+  } catch {
+    return undefined;
+  }
+}
+
+function configuredChannelUrl(): string | undefined {
+  const globals = globalThis as { LC0_BROWSER_ARTIFACT_CHANNEL_URL?: string };
+  // Channel manifests are a deployment control plane. Do not accept query-param
+  // overrides here: URL-mode callers hand the resolved artifact URL to ORT, so
+  // the channel source must come from trusted build/global configuration.
+  return cleanChannelUrl(globals.LC0_BROWSER_ARTIFACT_CHANNEL_URL)
+    ?? cleanChannelUrl(env.VITE_LC0_ARTIFACT_CHANNEL_URL);
+}
+
+function logicalPathForReleaseLookup(modelUrl: string): string | undefined {
+  try {
+    return new URL(modelUrl, location.href).pathname;
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveChannelArtifactUrl(modelUrl: string, channelUrl: string | undefined): Promise<ResolvedModelArtifact | undefined> {
+  if (!channelUrl) return undefined;
+  const logicalPath = logicalPathForReleaseLookup(modelUrl);
+  if (!logicalPath) return undefined;
+  try {
+    const channelResponse = await fetch(channelUrl, { cache: 'no-cache' });
+    if (!channelResponse.ok) return undefined;
+    const channel = await channelResponse.json() as Lc0ArtifactChannelManifest;
+    if (!channel.releaseManifestUrl) return undefined;
+    const releaseUrl = new URL(channel.releaseManifestUrl, channelUrl).href;
+    const releaseResponse = await fetch(releaseUrl, { cache: 'force-cache' });
+    if (!releaseResponse.ok) return undefined;
+    const release = await releaseResponse.json() as Lc0ArtifactReleaseManifest;
+    const artifact = release.artifacts?.find((entry) => entry.logicalUrl === logicalPath);
+    return artifact?.artifactUrl ? {
+      url: new URL(artifact.artifactUrl, releaseUrl).href,
+      expectedBytes: artifact.bytes,
+      expectedSha256: artifact.sha256,
+    } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveArtifactUrl(modelUrl: string, manifest: { entry?: Lc0ModelManifestEntry; manifestUrl: string }, channelUrl: string | undefined): Promise<ResolvedModelArtifact> {
+  const manifestUrl = manifestArtifactUrl(manifest.entry, manifest.manifestUrl);
+  if (manifestUrl) return { url: manifestUrl, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
+  return await resolveChannelArtifactUrl(modelUrl, channelUrl)
+    ?? { url: modelUrl, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
 }
 
 export interface Lc0ModelBytesExpectation {
@@ -228,19 +319,29 @@ async function fetchModelBytes(
 
 export async function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoadOptions = {}): Promise<Lc0ModelLoadResult> {
   const started = nowMs();
+  const channelUrl = options.channelUrl === null ? undefined : cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl();
   if (!options.cache) {
+    const manifest = await fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl));
+    const resolved = await resolveArtifactUrl(modelUrl, manifest, channelUrl);
     if (!options.onProgress) {
-      return { model: modelUrl, url: modelUrl, mode: 'url', cacheStatus: 'disabled', elapsedMs: nowMs() - started, telemetry: telemetry(started, 'url') };
+      return {
+        model: resolved.url,
+        url: resolved.url,
+        logicalUrl: logicalUrlField(modelUrl, resolved.url),
+        mode: 'url',
+        cacheStatus: 'disabled',
+        elapsedMs: nowMs() - started,
+        telemetry: telemetry(started, 'url', { manifestMs: manifest.elapsedMs }),
+      };
     }
     // Progress requires owning the fetch: download (with normal HTTP caching),
     // validate, and hand the bytes over without persisting to Cache Storage.
-    const manifest = await fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl));
-    const expectation: Lc0ModelBytesExpectation = { expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
-    const fetched = await fetchModelBytes(new Request(modelUrl), modelUrl, expectation.expectedBytes, options.onProgress);
+    const expectation: Lc0ModelBytesExpectation = { expectedBytes: resolved.expectedBytes, expectedSha256: resolved.expectedSha256 };
+    const fetched = await fetchModelBytes(new Request(resolved.url), resolved.url, expectation.expectedBytes, options.onProgress);
     const check = await verifyLc0ModelBytes(fetched.bytes, expectation);
     if (!check.ok) throw new Error(`LC0 model validation failed for ${modelUrl}: ${check.reason}`);
     return {
-      model: fetched.bytes, url: modelUrl, mode: 'memory', cacheStatus: 'disabled', bytes: fetched.bytes.byteLength,
+      model: fetched.bytes, url: resolved.url, logicalUrl: logicalUrlField(modelUrl, resolved.url), mode: 'memory', cacheStatus: 'disabled', bytes: fetched.bytes.byteLength,
       expectedBytes: expectation.expectedBytes, sha256: check.sha256, expectedSha256: expectation.expectedSha256,
       sha256Valid: check.sha256Checked ? true : undefined, elapsedMs: nowMs() - started,
       telemetry: telemetry(started, 'memory', {
@@ -251,14 +352,22 @@ export async function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoad
       }),
     };
   }
-  if (!cacheApiAvailable()) {
-    return { model: modelUrl, url: modelUrl, mode: 'url', cacheStatus: 'unavailable', elapsedMs: nowMs() - started, telemetry: telemetry(started, 'url') };
-  }
-
   const manifest = await fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl));
-  const expectation: Lc0ModelBytesExpectation = { expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
-  const cacheKey = new Request(modelUrl);
-  const fetchRequest = new Request(modelUrl, { cache: 'force-cache' });
+  const resolved = await resolveArtifactUrl(modelUrl, manifest, channelUrl);
+  if (!cacheApiAvailable()) {
+    return {
+      model: resolved.url,
+      url: resolved.url,
+      logicalUrl: logicalUrlField(modelUrl, resolved.url),
+      mode: 'url',
+      cacheStatus: 'unavailable',
+      elapsedMs: nowMs() - started,
+      telemetry: telemetry(started, 'url', { manifestMs: manifest.elapsedMs }),
+    };
+  }
+  const expectation: Lc0ModelBytesExpectation = { expectedBytes: resolved.expectedBytes, expectedSha256: resolved.expectedSha256 };
+  const cacheKey = new Request(resolved.url);
+  const fetchRequest = new Request(resolved.url, { cache: 'force-cache' });
   const cache = await caches.open(options.cacheName ?? DEFAULT_CACHE_NAME);
 
   const cached = await cache.match(cacheKey);
@@ -269,7 +378,7 @@ export async function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoad
     const check = await verifyLc0ModelBytes(bytes, expectation);
     if (check.ok) {
       return {
-        model: bytes, url: modelUrl, mode: 'cache', cacheStatus: 'hit', bytes: bytes.byteLength,
+        model: bytes, url: resolved.url, logicalUrl: logicalUrlField(modelUrl, resolved.url), mode: 'cache', cacheStatus: 'hit', bytes: bytes.byteLength,
         expectedBytes: expectation.expectedBytes, sha256: check.sha256, expectedSha256: expectation.expectedSha256,
         sha256Valid: check.sha256Checked ? true : undefined, elapsedMs: nowMs() - started,
         telemetry: telemetry(started, 'cache-storage', {
@@ -283,8 +392,8 @@ export async function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoad
     // the browser HTTP cache; otherwise an unchanged mutable URL can return the
     // same obsolete bytes and fail integrity until the HTTP entry expires.
     await cache.delete(cacheKey);
-    const reloadRequest = new Request(modelUrl, { cache: 'reload' });
-    const result = await fetchAndCacheModel(cache, cacheKey, reloadRequest, modelUrl, expectation, started, options.onProgress, {
+    const reloadRequest = new Request(resolved.url, { cache: 'reload' });
+    const result = await fetchAndCacheModel(cache, cacheKey, reloadRequest, modelUrl, resolved.url, expectation, started, options.onProgress, {
       manifestMs: manifest.elapsedMs,
       cacheReadMs,
       hashMs: check.hashMs,
@@ -292,29 +401,30 @@ export async function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoad
     return { ...result, revalidated: true };
   }
 
-  return fetchAndCacheModel(cache, cacheKey, fetchRequest, modelUrl, expectation, started, options.onProgress, { manifestMs: manifest.elapsedMs });
+  return fetchAndCacheModel(cache, cacheKey, fetchRequest, modelUrl, resolved.url, expectation, started, options.onProgress, { manifestMs: manifest.elapsedMs });
 }
 
 async function fetchAndCacheModel(
   cache: Cache,
   cacheKey: Request,
   fetchRequest: Request,
-  modelUrl: string,
+  logicalModelUrl: string,
+  fetchModelUrl: string,
   expectation: Lc0ModelBytesExpectation,
   started: number,
   onProgress: Lc0ModelLoadOptions['onProgress'],
   inheritedTelemetry: Pick<Lc0ModelLoadTelemetry, 'manifestMs' | 'cacheReadMs' | 'hashMs'> = {},
 ): Promise<Lc0ModelLoadResult> {
-  const fetched = await fetchModelBytes(fetchRequest, modelUrl, expectation.expectedBytes, onProgress);
+  const fetched = await fetchModelBytes(fetchRequest, fetchModelUrl, expectation.expectedBytes, onProgress);
   const check = await verifyLc0ModelBytes(fetched.bytes, expectation);
-  if (!check.ok) throw new Error(`LC0 model validation failed for ${modelUrl}: ${check.reason}`);
+  if (!check.ok) throw new Error(`LC0 model validation failed for ${fetchModelUrl}: ${check.reason}`);
   // Only validated bytes are written to the cache, so a corrupt download is
   // never persisted for future loads.
   const cacheWriteStarted = nowMs();
   await cache.put(cacheKey, new Response(fetched.bytes));
   const cacheWriteMs = nowMs() - cacheWriteStarted;
   return {
-    model: fetched.bytes, url: modelUrl, mode: 'cache', cacheStatus: 'miss', bytes: fetched.bytes.byteLength,
+    model: fetched.bytes, url: fetchModelUrl, logicalUrl: logicalUrlField(logicalModelUrl, fetchModelUrl), mode: 'cache', cacheStatus: 'miss', bytes: fetched.bytes.byteLength,
     expectedBytes: expectation.expectedBytes, sha256: check.sha256, expectedSha256: expectation.expectedSha256,
     sha256Valid: check.sha256Checked ? true : undefined, elapsedMs: nowMs() - started,
     telemetry: telemetry(started, 'network', {

@@ -19,6 +19,8 @@
     "engine-artifacts:precompress-dist": "node scripts/precompress_engine_artifacts.mjs dist-client --allow-missing",
     "engine-artifacts:check-browser": "node scripts/check_browser_engine_assets.mjs",
     "deploy:cache-policy-check": "node scripts/check_deploy_cache_policy.mjs",
+    "deploy:write-release-manifests": "node scripts/write_artifact_release_manifests.mjs",
+    "deploy:publish-r2-artifacts": "node scripts/publish_hashed_artifacts_to_r2.mjs",
     "stockfish:source-archive": "node scripts/write_engine_source_archive.mjs stockfish",
     "stockfish:artifact-manifest": "node scripts/write_engine_artifact_manifest.mjs stockfish",
     "stockfish:release-manifest": "node scripts/write_engine_artifact_manifest.mjs stockfish --source-archive public/stockfish/stockfish-18.0.7-corresponding-source.tar.gz --source-url /stockfish/stockfish-18.0.7-corresponding-source.tar.gz --out public/stockfish/stockfish-18.0.7.manifest.json",

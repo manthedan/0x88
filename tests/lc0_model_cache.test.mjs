@@ -66,20 +66,29 @@ class FakeCacheStorage {
 }
 
 const MODEL_URL = 'http://localhost/models/lc0/test.onnx';
+const MODEL_ARTIFACT_URL = 'http://localhost/artifacts/sha256/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad/test.onnx';
 const MANIFEST_URL = 'http://localhost/models/lc0/manifest.json';
+const CHANNEL_URL = 'http://localhost/channels/stable.json';
+const RELEASE_URL = 'http://localhost/releases/test-release.json';
 
-async function withMockedEnv(run, { serveBytes, manifestSha256, manifestBytes }) {
+async function withMockedEnv(run, { serveBytes, manifestSha256, manifestBytes, manifestArtifactUrl, channelArtifacts }) {
   const prev = { caches: globalThis.caches, fetch: globalThis.fetch, location: globalThis.location };
   globalThis.caches = new FakeCacheStorage();
   globalThis.location = { href: 'http://localhost/' };
   const fetchLog = { model: 0, modelRequestCaches: [] };
   globalThis.fetch = async (input) => {
     const url = typeof input === 'string' ? input : input.url;
-    if (url === MANIFEST_URL) {
-      const manifest = { models: [{ file: 'test.onnx', url: MODEL_URL, bytes: manifestBytes, sha256: manifestSha256 }] };
+    if (url === MANIFEST_URL || url === '/models/lc0/manifest.json') {
+      const manifest = { models: [{ file: 'test.onnx', url: MODEL_URL, artifactUrl: manifestArtifactUrl, bytes: manifestBytes, sha256: manifestSha256 }] };
       return new Response(JSON.stringify(manifest), { headers: { 'content-type': 'application/json' } });
     }
-    if (url === MODEL_URL) {
+    if (url === CHANNEL_URL) {
+      return new Response(JSON.stringify({ schema: 'lc0_browser.artifact_channel_manifest.v1', releaseManifestUrl: '/releases/test-release.json' }), { headers: { 'content-type': 'application/json' } });
+    }
+    if (url === RELEASE_URL) {
+      return new Response(JSON.stringify({ schema: 'lc0_browser.artifact_release_manifest.v1', artifacts: channelArtifacts ?? [] }), { headers: { 'content-type': 'application/json' } });
+    }
+    if (url === MODEL_URL || url === MODEL_ARTIFACT_URL) {
       fetchLog.model += 1;
       fetchLog.modelRequestCaches.push(typeof input === 'string' ? undefined : input.cache);
       const served = serveBytes(input);
@@ -119,6 +128,75 @@ test('loadLc0ModelForOrt caches on miss then serves a validated hit', async () =
     assert.equal(typeof hit.telemetry.hashMs, 'number');
     assert.equal(fetchLog.model, 1, 'a validated cache hit does not refetch');
   }, { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 });
+});
+
+test('loadLc0ModelForOrt resolves stable model URLs through manifest artifactUrl', async () => {
+  await withMockedEnv(async (fetchLog) => {
+    const direct = await loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: '/models/lc0/manifest.json' });
+    assert.equal(direct.mode, 'url');
+    assert.equal(direct.model, MODEL_ARTIFACT_URL);
+    assert.equal(direct.url, MODEL_ARTIFACT_URL);
+    assert.equal(direct.logicalUrl, MODEL_URL);
+    assert.equal(fetchLog.model, 0, 'URL mode resolves the immutable URL without downloading bytes');
+
+    const cached = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL });
+    assert.equal(cached.url, MODEL_ARTIFACT_URL);
+    assert.equal(cached.logicalUrl, MODEL_URL);
+    assert.equal(cached.telemetry.requestCache, 'force-cache');
+    assert.deepEqual(fetchLog.modelRequestCaches, ['force-cache']);
+  }, { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3, manifestArtifactUrl: '/artifacts/sha256/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad/test.onnx' });
+});
+
+test('loadLc0ModelForOrt resolves stable model URLs through channel release manifests when configured', async () => {
+  await withMockedEnv(async (fetchLog) => {
+    const direct = await loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: MANIFEST_URL, channelUrl: '/channels/stable.json' });
+    assert.equal(direct.model, MODEL_ARTIFACT_URL);
+    assert.equal(direct.logicalUrl, MODEL_URL);
+
+    const cached = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
+    assert.equal(cached.url, MODEL_ARTIFACT_URL);
+    assert.equal(cached.logicalUrl, MODEL_URL);
+    assert.deepEqual(fetchLog.modelRequestCaches, ['force-cache']);
+  }, {
+    serveBytes: () => bytesOf('abc'),
+    manifestSha256: ABC_SHA256,
+    manifestBytes: 3,
+    channelArtifacts: [{ logicalUrl: '/models/lc0/test.onnx', artifactUrl: '/artifacts/sha256/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad/test.onnx', bytes: 3, sha256: ABC_SHA256 }],
+  });
+});
+
+test('loadLc0ModelForOrt validates channel artifacts against release metadata', async () => {
+  await withMockedEnv(async () => {
+    const result = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
+    assert.equal(result.sha256Valid, true);
+    assert.equal(result.sha256, ABC_SHA256);
+    assert.equal(result.expectedSha256, ABC_SHA256);
+  }, {
+    serveBytes: () => bytesOf('abc'),
+    manifestSha256: EMPTY_SHA256,
+    manifestBytes: 0,
+    channelArtifacts: [{ logicalUrl: '/models/lc0/test.onnx', artifactUrl: '/artifacts/sha256/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad/test.onnx', bytes: 3, sha256: ABC_SHA256 }],
+  });
+});
+
+test('loadLc0ModelForOrt resolves artifact URLs even when Cache Storage is unavailable', async () => {
+  await withMockedEnv(async () => {
+    const savedCaches = globalThis.caches;
+    try {
+      delete globalThis.caches;
+      const result = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
+      assert.equal(result.cacheStatus, 'unavailable');
+      assert.equal(result.model, MODEL_ARTIFACT_URL);
+      assert.equal(result.logicalUrl, MODEL_URL);
+    } finally {
+      globalThis.caches = savedCaches;
+    }
+  }, {
+    serveBytes: () => bytesOf('abc'),
+    manifestSha256: ABC_SHA256,
+    manifestBytes: 3,
+    channelArtifacts: [{ logicalUrl: '/models/lc0/test.onnx', artifactUrl: '/artifacts/sha256/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad/test.onnx', bytes: 3, sha256: ABC_SHA256 }],
+  });
 });
 
 test('loadLc0ModelForOrt rejects a corrupt download and does not cache it', async () => {
