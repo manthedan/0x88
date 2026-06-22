@@ -3,60 +3,29 @@
   Cross-Origin-Embedder-Policy: require-corp
   Cross-Origin-Resource-Policy: same-origin
 
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+/channels/*
+  Cache-Control: public, max-age=0, no-cache
+  Netlify-CDN-Cache-Control: public, max-age=60, stale-if-error=86400
+  CDN-Cache-Control: public, max-age=60, stale-if-error=86400
+  Cloudflare-CDN-Cache-Control: public, max-age=60, stale-if-error=86400
+
+/artifacts/sha256/*
+  Cache-Control: public, max-age=31536000, immutable
+  Netlify-CDN-Cache-Control: public, max-age=31536000
+  CDN-Cache-Control: public, max-age=31536000
+  Cloudflare-CDN-Cache-Control: public, max-age=31536000
+
 /reckless/*.wasm
   Content-Type: application/wasm
   Cache-Control: public, max-age=3600
 
 /reckless/*.nnue
   Content-Type: application/octet-stream
-  Cache-Control: public, max-age=31536000, immutable
+  Cache-Control: public, max-age=3600
 
 /reckless/*corresponding-source*.tar.gz
   Content-Type: application/gzip
-  Cache-Control: public, max-age=31536000, immutable
-
-/berserk/*.js.br
-  Content-Type: text/javascript; charset=utf-8
-  Content-Encoding: br
-  Vary: Accept-Encoding
-  Cache-Control: public, max-age=31536000, immutable
-
-/berserk/*.wasm.br
-  Content-Type: application/wasm
-  Content-Encoding: br
-  Vary: Accept-Encoding
-  Cache-Control: public, max-age=31536000, immutable
-
-/berserk/*.data.br
-  Content-Type: application/octet-stream
-  Content-Encoding: br
-  Vary: Accept-Encoding
-  Cache-Control: public, max-age=31536000, immutable
-
-/plentychess/*.js.br
-  Content-Type: text/javascript; charset=utf-8
-  Content-Encoding: br
-  Vary: Accept-Encoding
-  Cache-Control: public, max-age=31536000, immutable
-
-/plentychess/*.wasm.br
-  Content-Type: application/wasm
-  Content-Encoding: br
-  Vary: Accept-Encoding
-  Cache-Control: public, max-age=31536000, immutable
-
-/plentychess/*.data.br
-  Content-Type: application/octet-stream
-  Content-Encoding: br
-  Vary: Accept-Encoding
-  Cache-Control: public, max-age=31536000, immutable
-
-/berserk/*.gz
-  Content-Encoding: gzip
-  Vary: Accept-Encoding
-  Cache-Control: public, max-age=31536000, immutable
-
-/plentychess/*.gz
-  Content-Encoding: gzip
-  Vary: Accept-Encoding
-  Cache-Control: public, max-age=31536000, immutable
+  Cache-Control: public, max-age=3600
