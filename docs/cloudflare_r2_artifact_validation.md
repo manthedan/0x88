@@ -32,10 +32,20 @@ The R2/Worker/custom-domain response should include:
 Access-Control-Allow-Origin: *
 Cross-Origin-Resource-Policy: cross-origin
 Timing-Allow-Origin: https://0x88.app
-Access-Control-Expose-Headers: CF-Cache-Status, Cache-Status, Age, ETag, Content-Length
+Access-Control-Expose-Headers: CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length
 ```
 
 Do not set cookies on the asset hostname. App requests should be credential-free.
+
+## Optional Worker front door
+
+If direct R2 custom-domain responses cannot provide all required CORS/CORP/timing headers, deploy the checked-in Worker front door:
+
+```sh
+npm run deploy:artifact-worker
+```
+
+The Worker config in `cloudflare/artifacts.wrangler.toml` binds `browser-chess-models` as `ARTIFACTS` and serves only `/artifacts/sha256/*` keys. It preserves percent-encoded object keys, supports `GET`/`HEAD`/`OPTIONS`, handles bounded byte ranges through R2 range reads, and caches immutable full-body/HEAD metadata responses without caching errors. Cloudflare Workers may normalize cached synthetic `HEAD` responses to `Content-Length: 0`; the Worker also exposes `X-Artifact-Content-Length` so validation can compare range totals against the original artifact byte length.
 
 ## Validation command
 
@@ -57,6 +67,6 @@ The validator checks:
 - `Range: bytes=0-1023`
 - `Accept-Encoding: identity`
 - `Accept-Encoding: br`
-- `Content-Length`, `Content-Range`, `ETag`, `Age`, `CF-Cache-Status`, and related cache headers
+- `Content-Length`, `X-Artifact-Content-Length`, `Content-Range`, `ETag`, `Age`, `CF-Cache-Status`, and related cache headers
 
 Range probes should return `206 Partial Content`. A cached range request returning `200` is alert-worthy for large artifacts.

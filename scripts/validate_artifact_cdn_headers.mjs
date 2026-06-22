@@ -23,7 +23,7 @@ function parseArgs(argv) {
 }
 
 function pickHeaders(headers) {
-  const keys = ['cache-control', 'cdn-cache-control', 'cloudflare-cdn-cache-control', 'cf-cache-status', 'cache-status', 'age', 'etag', 'content-length', 'content-type', 'content-encoding', 'accept-ranges', 'content-range', 'vary', 'access-control-allow-origin', 'cross-origin-resource-policy', 'timing-allow-origin', 'access-control-expose-headers', 'set-cookie'];
+  const keys = ['cache-control', 'cdn-cache-control', 'cloudflare-cdn-cache-control', 'cf-cache-status', 'cache-status', 'age', 'etag', 'content-length', 'x-artifact-content-length', 'content-type', 'content-encoding', 'accept-ranges', 'content-range', 'vary', 'access-control-allow-origin', 'cross-origin-resource-policy', 'timing-allow-origin', 'access-control-expose-headers', 'set-cookie'];
   const out = {};
   for (const key of keys) {
     const value = headers.get(key);
@@ -76,7 +76,7 @@ function validateRow(row) {
     failures.push('Timing-Allow-Origin does not include https://0x88.app');
   }
   const exposed = new Set((row.firstHead.headers['access-control-expose-headers']?.toLowerCase() ?? '').split(',').map((value) => value.trim()).filter(Boolean));
-  for (const required of ['cf-cache-status', 'cache-status', 'age', 'etag', 'content-length']) {
+  for (const required of ['cf-cache-status', 'cache-status', 'age', 'etag', 'content-length', 'x-artifact-content-length']) {
     if (!exposed.has(required)) failures.push(`Access-Control-Expose-Headers missing ${required}`);
   }
   if (row.range.status !== 206) failures.push(`Range probe returned ${row.range.status}, expected 206`);
@@ -89,10 +89,10 @@ function validateRow(row) {
     const end = Number(contentRangeMatch[2]);
     const total = Number(contentRangeMatch[3]);
     const expectedBodyBytes = end - start + 1;
-    const headBytes = Number(row.firstHead.headers['content-length']);
+    const headBytes = Number(row.firstHead.headers['x-artifact-content-length'] ?? row.firstHead.headers['content-length']);
     if (start !== 0) failures.push(`range response starts at ${start}, expected 0`);
     if (expectedBodyBytes !== row.range.bodyBytes) failures.push(`range body length ${row.range.bodyBytes} does not match Content-Range length ${expectedBodyBytes}`);
-    if (Number.isFinite(headBytes) && total !== headBytes) failures.push(`Content-Range total ${total} does not match HEAD Content-Length ${headBytes}`);
+    if (Number.isFinite(headBytes) && total !== headBytes) failures.push(`Content-Range total ${total} does not match HEAD artifact length ${headBytes}`);
   }
   if (row.identityHead.status < 200 || row.identityHead.status >= 400) failures.push(`identity HEAD status ${row.identityHead.status}`);
   const identityEncoding = row.identityHead.headers['content-encoding'];

@@ -28,7 +28,7 @@ test('validate_artifact_cdn_headers accepts cacheable ranged artifacts', async (
       'Access-Control-Allow-Origin': '*',
       'Cross-Origin-Resource-Policy': 'cross-origin',
       'Timing-Allow-Origin': 'https://0x88.app',
-      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length',
+      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length',
     };
     if (req.method === 'HEAD') {
       res.writeHead(200, headers).end();

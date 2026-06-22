@@ -22,6 +22,7 @@
     "deploy:write-release-manifests": "node scripts/write_artifact_release_manifests.mjs",
     "deploy:publish-r2-artifacts": "node scripts/publish_hashed_artifacts_to_r2.mjs",
     "deploy:validate-cdn-artifacts": "node scripts/validate_artifact_cdn_headers.mjs",
+    "deploy:artifact-worker": "wrangler deploy --config cloudflare/artifacts.wrangler.toml",
     "deploy:retention-policy-check": "node scripts/check_artifact_retention_policy.mjs",
     "stockfish:source-archive": "node scripts/write_engine_source_archive.mjs stockfish",
     "stockfish:artifact-manifest": "node scripts/write_engine_artifact_manifest.mjs stockfish",
@@ -132,7 +133,8 @@
   "devDependencies": {
     "binaryen": "^130.0.0",
     "typescript": "^5.4.0",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "wrangler": "^4.102.0"
   },
   "dependencies": {
     "@bjorn3/browser_wasi_shim": "^0.4.2",
