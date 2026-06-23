@@ -104,19 +104,19 @@ function scheduleCachePut(cache, request, response, ctx) {
   else void operation;
 }
 
-async function cachedHeadResponse(key, request, env, head, range, ctx) {
+async function cachedHeadResponse(key, request, env, head, range, ctx, cacheControlOverride) {
   const cache = immutableCache();
   const cacheRequest = metadataCacheRequest(request);
   if (!range && cache && isImmutableArtifactKey(key)) {
     const cached = await cache.match(cacheRequest);
     if (cached) return withCacheStatus(cached, 'hit');
   }
-  const response = new Response(null, { status: range ? 206 : 200, headers: objectHeaders(key, head, env, range) });
+  const response = new Response(null, { status: range ? 206 : 200, headers: objectHeaders(key, head, env, range, cacheControlOverride) });
   if (!range && cache && isImmutableArtifactKey(key)) await cache.put(cacheRequest, response.clone()).catch(() => undefined);
   return withCacheStatus(response, cache && isImmutableArtifactKey(key) ? 'miss' : 'fwd');
 }
 
-async function cachedFullBodyResponse(key, request, env, ctx) {
+async function cachedFullBodyResponse(key, request, env, ctx, cacheControlOverride) {
   const cache = immutableCache();
   const cacheRequest = fullBodyCacheRequest(request);
   if (cache && isImmutableArtifactKey(key)) {
@@ -125,7 +125,7 @@ async function cachedFullBodyResponse(key, request, env, ctx) {
   }
   const object = await env.ARTIFACTS.get(key);
   if (!object) return new Response('Not found', { status: 404, headers: artifactHeaders(env) });
-  const response = new Response(object.body, { status: 200, headers: objectHeaders(key, object, env) });
+  const response = new Response(object.body, { status: 200, headers: objectHeaders(key, object, env, undefined, cacheControlOverride) });
   if (cache && isImmutableArtifactKey(key)) scheduleCachePut(cache, cacheRequest, response, ctx);
   return withCacheStatus(response, cache && isImmutableArtifactKey(key) ? 'miss' : 'fwd');
 }
@@ -225,7 +225,7 @@ export async function handleArtifactRequest(request, env, ctx) {
     logicalAlias = Boolean(key);
   }
   if (!key) return new Response('Not found', { status: 404, headers: artifactHeaders(env) });
-  if (logicalAlias) return uncachedResponseForKey(key, request, env, LOGICAL_ALIAS_CACHE_CONTROL);
+  const cacheControlOverride = logicalAlias ? LOGICAL_ALIAS_CACHE_CONTROL : undefined;
 
   const cached = await cachedNoRangeResponse(key, request);
   if (cached) return cached;
@@ -241,9 +241,9 @@ export async function handleArtifactRequest(request, env, ctx) {
     });
   }
 
-  if (request.method === 'HEAD') return cachedHeadResponse(key, request, env, head, range, ctx);
-  if (range) return rangeResponse(key, request, env, head, range);
-  return cachedFullBodyResponse(key, request, env, ctx);
+  if (request.method === 'HEAD') return cachedHeadResponse(key, request, env, head, range, ctx, cacheControlOverride);
+  if (range) return rangeResponse(key, request, env, head, range, cacheControlOverride);
+  return cachedFullBodyResponse(key, request, env, ctx, cacheControlOverride);
 }
 
 export default {

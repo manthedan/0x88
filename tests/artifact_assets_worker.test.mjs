@@ -251,12 +251,19 @@ test('artifact assets worker serves stable logical asset paths through the chann
       },
     },
   };
-  const response = await handleArtifactRequest(new Request('https://assets.example/stockfish/stockfish-18-lite.js'), env);
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get('Cache-Control'), 'public, max-age=300, stale-while-revalidate=86400');
-  assert.equal(response.headers.get('X-Artifact-Content-Length'), String(BODY.byteLength));
-  assert.equal(response.headers.get('Content-Type'), 'text/javascript; charset=utf-8');
-  assert.equal(await text(response), 'abcdefghijklmnopqrstuvwxyz');
+  await withFakeEdgeCache(async () => {
+    const request = new Request('https://assets.example/stockfish/stockfish-18-lite.js');
+    const response = await handleArtifactRequest(request, env);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('Cache-Control'), 'public, max-age=300, stale-while-revalidate=86400');
+    assert.equal(response.headers.get('Cache-Status'), 'lc0-artifact-worker; miss');
+    assert.equal(response.headers.get('X-Artifact-Content-Length'), String(BODY.byteLength));
+    assert.equal(response.headers.get('Content-Type'), 'text/javascript; charset=utf-8');
+    assert.equal(await text(response), 'abcdefghijklmnopqrstuvwxyz');
+    const cached = await handleArtifactRequest(request, env);
+    assert.equal(cached.headers.get('Cache-Status'), 'lc0-artifact-worker; hit');
+    assert.equal(await text(cached), 'abcdefghijklmnopqrstuvwxyz');
+  });
 });
 
 test('artifact assets worker rejects non-artifact paths and invalid ranges', async () => {
