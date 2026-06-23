@@ -6,12 +6,14 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
+const DEFAULT_ARTIFACT_BASE = 'https://assets.0x88.app';
+
 function usage() {
-  console.log(`Usage: node scripts/publish_hashed_artifacts_to_r2.mjs --release public/releases/ID.json --bucket BUCKET [options]\n\nOptions:\n  --root DIR          Repository root (default .)\n  --execute           Actually call wrangler; default is dry-run\n  --allow-missing     Skip artifacts whose localPath is absent\n  --wrangler-bin BIN  Wrangler binary (default wrangler)\n  --channel-manifest PATH  Optional generated channel manifest to publish after the release\n  -h, --help          Show help\n\nThe script publishes each local artifact to artifacts/sha256/<sha>/<file>. It verifies\nlocal size and SHA-256 before upload and intentionally has no overwrite flag. It also\npublishes the release manifest to releases/<file> and, when provided, the mutable channel\nmanifest to channels/<file> after artifact/release uploads. Configure R2 lifecycle/retention\nseparately; routine releases should never replace existing hashed keys.\n`);
+  console.log(`Usage: node scripts/publish_hashed_artifacts_to_r2.mjs --release public/releases/ID.json --bucket BUCKET [options]\n\nOptions:\n  --root DIR          Repository root (default .)\n  --execute           Actually call wrangler; default is dry-run\n  --allow-missing     Skip artifacts whose localPath is absent\n  --wrangler-bin BIN  Wrangler binary (default wrangler)\n  --channel-manifest PATH  Optional generated channel manifest to publish after the release\n  --artifact-base URL Public artifact origin used to probe relative artifactUrl values (default https://assets.0x88.app)\n  --probe-existing    In dry-run mode, validate artifact URLs and mark existing uploads as skipped\n  -h, --help          Show help\n\nThe script publishes each local artifact to artifacts/sha256/<sha>/<file>. It verifies\nlocal size and SHA-256 before upload and intentionally has no overwrite flag. It also\npublishes the release manifest to releases/<file> and, when provided, the mutable channel\nmanifest to channels/<file> after artifact/release uploads. Configure R2 lifecycle/retention\nseparately; routine releases should never replace existing hashed keys.\n`);
 }
 
 function parseArgs(argv) {
-  const args = { root: '.', execute: false, allowMissing: false, wranglerBin: 'wrangler' };
+  const args = { root: '.', execute: false, allowMissing: false, wranglerBin: 'wrangler', probeExisting: false, artifactBase: process.env.LC0_ARTIFACT_BASE_URL ?? DEFAULT_ARTIFACT_BASE };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = argv[i + 1];
@@ -20,6 +22,8 @@ function parseArgs(argv) {
     if (arg === '--bucket' && next) { args.bucket = next; i += 1; continue; }
     if (arg === '--wrangler-bin' && next) { args.wranglerBin = next; i += 1; continue; }
     if (arg === '--channel-manifest' && next) { args.channelManifest = next; i += 1; continue; }
+    if (arg === '--artifact-base' && next) { args.artifactBase = next; i += 1; continue; }
+    if (arg === '--probe-existing') { args.probeExisting = true; continue; }
     if (arg === '--execute') { args.execute = true; continue; }
     if (arg === '--allow-missing') { args.allowMissing = true; continue; }
     if (arg === '-h' || arg === '--help') { usage(); process.exit(0); }
@@ -46,6 +50,78 @@ function keyFromArtifact(artifact) {
 function sha256FromArtifactKey(key) {
   const match = key.match(/^artifacts\/sha256\/([a-f0-9]{64})\//);
   return match?.[1];
+}
+
+function publicArtifactUrl(args, artifact) {
+  try {
+    const parsed = new URL(artifact.artifactUrl);
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return parsed.href;
+  } catch {
+    // Resolve relative artifact URLs below when a public artifact base is supplied.
+  }
+  if (!args.artifactBase) return undefined;
+  return new URL(artifact.artifactUrl, args.artifactBase).href;
+}
+
+function headerValue(headers, name) {
+  return headers.get(name) ?? headers.get(name.toLowerCase());
+}
+
+function cacheControlDirective(cacheControl, directive, expectedValue) {
+  const wanted = directive.toLowerCase();
+  for (const part of cacheControl.split(',')) {
+    const [rawName, rawValue] = part.trim().split('=', 2);
+    if (rawName?.toLowerCase() !== wanted) continue;
+    if (expectedValue === undefined) return true;
+    return rawValue?.replace(/^"|"$/g, '') === expectedValue;
+  }
+  return false;
+}
+
+async function sha256RemoteUrl(url) {
+  const response = await fetch(url, { cache: 'no-cache' });
+  if (!response.ok) throw new Error(`Artifact hash fetch failed for ${url}: HTTP ${response.status}`);
+  const hash = createHash('sha256');
+  let bytes = 0;
+  if (!response.body) {
+    const body = new Uint8Array(await response.arrayBuffer());
+    hash.update(body);
+    bytes = body.byteLength;
+  } else {
+    const reader = response.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      hash.update(value);
+      bytes += value.byteLength;
+    }
+  }
+  return { bytes, sha256: hash.digest('hex') };
+}
+
+async function probeExistingArtifact(args, artifact) {
+  const url = publicArtifactUrl(args, artifact);
+  if (!url) return { state: 'unchecked', reason: 'no public artifact URL; pass --artifact-base for relative artifactUrl values' };
+  const response = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
+  if (response.status === 404) return { state: 'missing', url, status: response.status };
+  if (!response.ok) throw new Error(`Artifact probe failed for ${url}: HTTP ${response.status}`);
+  const lengthHeader = headerValue(response.headers, 'x-artifact-content-length') ?? headerValue(response.headers, 'content-length');
+  const length = Number(lengthHeader ?? '');
+  if (!Number.isFinite(length) || length !== artifact.bytes) {
+    throw new Error(`Remote artifact size mismatch for ${artifact.logicalUrl}: got ${lengthHeader ?? 'missing'}, expected ${artifact.bytes}`);
+  }
+  const cacheControl = headerValue(response.headers, 'cache-control') ?? '';
+  if (!cacheControlDirective(cacheControl, 'immutable') || !cacheControlDirective(cacheControl, 'max-age', '31536000')) {
+    throw new Error(`Remote artifact cache policy is not immutable for ${artifact.logicalUrl}: ${cacheControl || 'missing'}`);
+  }
+  const actual = await sha256RemoteUrl(url);
+  if (actual.bytes !== artifact.bytes) {
+    throw new Error(`Remote artifact body size mismatch for ${artifact.logicalUrl}: got ${actual.bytes}, expected ${artifact.bytes}`);
+  }
+  if (actual.sha256 !== artifact.sha256.toLowerCase()) {
+    throw new Error(`Remote artifact SHA-256 mismatch for ${artifact.logicalUrl}: got ${actual.sha256}, expected ${artifact.sha256.toLowerCase()}`);
+  }
+  return { state: 'existing', url, status: response.status, bytes: length, sha256: actual.sha256 };
 }
 
 async function assertRemoteObjectMissing(args, target) {
@@ -107,7 +183,19 @@ async function main() {
     if (keySha256 !== artifact.sha256.toLowerCase()) {
       throw new Error(`Content-addressed key mismatch for ${artifact.logicalUrl}: key has ${keySha256 ?? 'no sha256'}, manifest has ${artifact.sha256}`);
     }
-    planned.push({ logicalUrl: artifact.logicalUrl, localPath, key, bytes: artifact.bytes, sha256: artifact.sha256, contentType: artifact.contentType ?? 'application/octet-stream' });
+    const probe = (args.probeExisting || args.execute) ? await probeExistingArtifact(args, artifact) : undefined;
+    planned.push({
+      logicalUrl: artifact.logicalUrl,
+      localPath,
+      key,
+      bytes: artifact.bytes,
+      sha256: artifact.sha256,
+      contentType: artifact.contentType ?? 'application/octet-stream',
+      artifactUrl: publicArtifactUrl(args, artifact),
+      remoteState: probe?.state ?? 'not-probed',
+      uploadAction: probe?.state === 'existing' ? 'skip-existing' : 'upload',
+      remoteProbe: probe,
+    });
   }
 
   const manifests = await manifestPublishItems(args, release);
@@ -119,6 +207,10 @@ async function main() {
   if (args.execute) {
     for (const item of planned) {
       const target = `${args.bucket}/${item.key}`;
+      if (item.remoteState === 'existing') continue;
+      if (item.remoteState === 'unchecked') {
+        throw new Error(`Cannot safely publish ${item.logicalUrl}: ${item.remoteProbe?.reason ?? 'remote artifact existence was not checked'}`);
+      }
       const child = spawnSync(args.wranglerBin, [
         'r2', 'object', 'put', target,
         '--file', item.localPath,

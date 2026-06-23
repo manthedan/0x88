@@ -1,5 +1,5 @@
 [build]
-  command = "npm run build:netlify"
+  command = "VITE_LC0_ARTIFACT_CHANNEL_URL=https://assets.0x88.app/channels/stable.json npm run build:netlify:r2"
   publish = "dist-client"
 
 # Keep engine pages eligible for WebAssembly threads/SAB experiments and WebGPU
