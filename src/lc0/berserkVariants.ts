@@ -37,6 +37,34 @@ export const BERSERK_SOURCE_NETWORK_URL = `https://github.com/jhonnold/berserk-n
 const assetStatuses = new Map<string, BerserkAssetStatus>();
 const assetChecks = new Map<string, Promise<BerserkAssetStatus>>();
 
+const DEPLOYED_BERSERK_PATHS = new Set([
+  '/berserk/berserk-emscripten.js',
+  '/berserk/berserk-emscripten.wasm',
+  '/berserk/berserk-emscripten.data',
+]);
+
+function isLocalDevelopmentOrigin(): boolean {
+  if (typeof location === 'undefined') return true;
+  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
+}
+
+function assetPathname(raw: string): string {
+  try {
+    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
+    return new URL(raw, base).pathname;
+  } catch {
+    return raw;
+  }
+}
+
+function shouldSkipKnownUnshippedProbe(variant: BerserkVariant): boolean {
+  if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;
+  return assetUrls(variant).some((url) => {
+    const pathname = assetPathname(url);
+    return pathname.startsWith('/berserk/') && !DEPLOYED_BERSERK_PATHS.has(pathname);
+  });
+}
+
 function sameOriginBerserkAsset(raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
   try {
@@ -207,6 +235,11 @@ export function checkBerserkVariantAsset(variant: BerserkVariant, onChange?: () 
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
   const existing = assetChecks.get(key);
   if (existing) return existing;
+  if (shouldSkipKnownUnshippedProbe(variant)) {
+    assetStatuses.set(key, 'missing');
+    onChange?.();
+    return Promise.resolve('missing');
+  }
   assetStatuses.set(key, 'checking');
   onChange?.();
   const promise = Promise.all(assetUrls(variant).map((url) => fetch(url, { method: 'HEAD', cache: 'no-store' }).then((response) => response.ok).catch(() => false)))
