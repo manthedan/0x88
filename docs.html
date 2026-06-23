@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>0x88 Chess — docs: pages, engines, licenses</title>
+<script>(()=>{try{var t=localStorage.getItem('0x88-theme');if(t==='dark')document.documentElement.dataset.theme='dark';else if(t==='light')document.documentElement.dataset.theme='light';var b=localStorage.getItem('0x88-board');if(['night','blue','green'].includes(b))document.documentElement.dataset.board=b;}catch(e){}})();</script>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <meta name="description" content="What each 0x88.app page does, the chess engines running in your browser, who built them, how we package them, and our GPL/AGPL corresponding-source commitments." />
 <link rel="stylesheet" href="/app-shell.css" />
@@ -273,6 +274,13 @@
       <a href="/lc0-arena.html">Arena</a>
       <a class="active" href="/docs.html">Docs</a>
     </nav>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle night mode">&#9790;</button>
+    <select id="boardStyleSelect" class="board-style-select" aria-label="Board style" title="Board style">
+      <option value="brown">Brown</option>
+      <option value="night">Night</option>
+      <option value="blue">Blue</option>
+      <option value="green">Green</option>
+    </select>
   </div>
 </header>
 
@@ -617,5 +625,6 @@
   headings.forEach(function(h){ observer.observe(h); });
 })();
 </script>
+<script src="/theme.js"></script>
 </body>
 </html>

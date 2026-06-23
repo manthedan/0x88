@@ -12,6 +12,7 @@
    ===================================================================== */
 
 :root{
+  color-scheme:light;
   --bg:#f3eee4; --bg-2:#ece4d2;
   --panel:#fbf8f0; --panel-2:#f6efde;
   --ink:#1f1c17; --ink-soft:#3a342a;
@@ -22,6 +23,8 @@
   --soft:#e8efd3; /* legacy alias used by app pages */
   --warn:#a5461b; --warn-soft:#f7e6db;
   --gold:#b5882f;
+  --board-light:#f0d9b5; --board-dark:#b58863;
+  --coord-light:rgba(255,255,255,.82); --coord-dark:rgba(72,72,72,.82);
   --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
   --sans:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   --serif:"Iowan Old Style","Apple Garamond",Baskerville,Georgia,serif;
@@ -30,8 +33,29 @@
   --shadow:0 10px 30px -22px rgba(31,28,23,.35);
   --shadow-lg:0 30px 60px -32px rgba(31,28,23,.45);
 }
+
+/* Explicit dark theme via data-theme="dark" on <html> */
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#15130f; --bg-2:#1c1914;
+  --panel:#211d17; --panel-2:#28231b;
+  --ink:#f0ead9; --ink-soft:#d8d0bd;
+  --muted:#a59c89; --muted-2:#847c6c;
+  --rule:#332e25; --rule-soft:#2a2620;
+  --accent:#a3c456; --accent-2:#b8d574; --accent-deep:#768f2f;
+  --accent-soft:#2b3416; --soft:#2b3416;
+  --warn:#e08147; --warn-soft:#3a2418;
+  --gold:#d9b46a;
+  --board-light:#d7c0a0; --board-dark:#8a6648;
+  --coord-light:rgba(245,238,222,.86); --coord-dark:rgba(34,29,24,.72);
+  --shadow:0 10px 30px -22px rgba(0,0,0,.6);
+  --shadow-lg:0 30px 60px -32px rgba(0,0,0,.75);
+}
+
+/* OS-preference dark mode (when no explicit data-theme is set) */
 @media (prefers-color-scheme: dark){
-  :root{
+  :root:not([data-theme]){
+    color-scheme:dark;
     --bg:#15130f; --bg-2:#1c1914;
     --panel:#211d17; --panel-2:#28231b;
     --ink:#f0ead9; --ink-soft:#d8d0bd;
@@ -41,10 +65,17 @@
     --accent-soft:#2b3416; --soft:#2b3416;
     --warn:#e08147; --warn-soft:#3a2418;
     --gold:#d9b46a;
+    --board-light:#d7c0a0; --board-dark:#8a6648;
+    --coord-light:rgba(245,238,222,.86); --coord-dark:rgba(34,29,24,.72);
     --shadow:0 10px 30px -22px rgba(0,0,0,.6);
     --shadow-lg:0 30px 60px -32px rgba(0,0,0,.75);
   }
 }
+
+/* Board style overrides (set via data-board on <html>) */
+:root[data-board="night"]{--board-light:#6f7784;--board-dark:#343a44;--coord-light:rgba(235,240,247,.82);--coord-dark:rgba(15,18,22,.72)}
+:root[data-board="blue"]{--board-light:#d7e2ec;--board-dark:#7895aa;--coord-light:rgba(255,255,255,.86);--coord-dark:rgba(39,61,76,.74)}
+:root[data-board="green"]{--board-light:#d7dfc2;--board-dark:#7f9564;--coord-light:rgba(255,255,255,.86);--coord-dark:rgba(48,65,36,.72)}
 
 /* ===== Reset / base ===== */
 *{box-sizing:border-box}
@@ -134,21 +165,53 @@ textarea{width:100%; resize:vertical; line-height:1.5}
    intentionally do NOT do this for .cg-wrap / board squares / eval bars
    because those have to stay high-contrast. */
 @media (prefers-color-scheme: dark){
-  .panel{background:var(--panel) !important; border-color:var(--rule) !important}
-  button:not(.primary):not(.danger),
-  select,
-  input,
-  textarea,
-  .engine-row select,
-  .engine-row .row-strength{
+  :root:not([data-theme]) .panel{background:var(--panel) !important; border-color:var(--rule) !important}
+  :root:not([data-theme]) button:not(.primary):not(.danger),
+  :root:not([data-theme]) select,
+  :root:not([data-theme]) input,
+  :root:not([data-theme]) textarea,
+  :root:not([data-theme]) .engine-row select,
+  :root:not([data-theme]) .engine-row .row-strength{
     background:var(--panel-2) !important;
     color:var(--ink) !important;
     border-color:var(--rule) !important;
   }
-  select option{background:var(--panel); color:var(--ink)}
-  /* Keep .soft status boxes legible */
-  #status, #message, #matchScore, .review-bar{background:var(--accent-soft) !important; border-color:color-mix(in srgb, var(--accent) 25%, var(--rule)) !important}
+  :root:not([data-theme]) select option{background:var(--panel); color:var(--ink)}
+  :root:not([data-theme]) #status,
+  :root:not([data-theme]) #message,
+  :root:not([data-theme]) #matchScore,
+  :root:not([data-theme]) .review-bar{background:var(--accent-soft) !important; border-color:color-mix(in srgb, var(--accent) 25%, var(--rule)) !important}
 }
+:root[data-theme="dark"] .panel{background:var(--panel) !important; border-color:var(--rule) !important}
+:root[data-theme="dark"] button:not(.primary):not(.danger),
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] textarea,
+:root[data-theme="dark"] .engine-row select,
+:root[data-theme="dark"] .engine-row .row-strength{
+  background:var(--panel-2) !important;
+  color:var(--ink) !important;
+  border-color:var(--rule) !important;
+}
+:root[data-theme="dark"] select option{background:var(--panel); color:var(--ink)}
+:root[data-theme="dark"] #status,
+:root[data-theme="dark"] #message,
+:root[data-theme="dark"] #matchScore,
+:root[data-theme="dark"] .review-bar{background:var(--accent-soft) !important; border-color:color-mix(in srgb, var(--accent) 25%, var(--rule)) !important}
+
+/* ===== Theme toggle button ===== */
+.theme-toggle{
+  padding:6px 9px; border:1px solid var(--rule); border-radius:999px;
+  background:var(--bg-2); color:var(--muted); font-size:14px; line-height:1;
+  cursor:pointer; transition:background .12s, color .12s;
+}
+.theme-toggle:hover{background:var(--panel-2); color:var(--ink)}
+.board-style-select{
+  font-size:11px; padding:5px 8px; border:1px solid var(--rule);
+  border-radius:999px; background:var(--bg-2); color:var(--muted);
+  cursor:pointer; max-width:90px;
+}
+.board-style-select:hover{border-color:var(--accent)}
 
 /* ===== Responsive header ===== */
 @media (max-width:680px){
@@ -166,4 +229,5 @@ textarea{width:100%; resize:vertical; line-height:1.5}
   .brand-name{font-size:14px}
   .page-title{display:none}
   nav.primary a{padding:6px 6px; font-size:12px}
+  .board-style-select{display:none}
 }

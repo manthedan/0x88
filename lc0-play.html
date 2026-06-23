@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>0x88 Chess — play chess vs an engine in your browser</title>
+<script>(()=>{try{var t=localStorage.getItem('0x88-theme');if(t==='dark')document.documentElement.dataset.theme='dark';else if(t==='light')document.documentElement.dataset.theme='light';var b=localStorage.getItem('0x88-board');if(['night','blue','green'].includes(b))document.documentElement.dataset.board=b;}catch(e){}})();</script>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <meta name="description" content="Play chess against Leela Chess Zero, Stockfish, and four more engines running entirely in your browser. Five strength levels, takebacks, and PGN export." />
 <link rel="stylesheet" href="/chessground.base.css" />
@@ -15,7 +16,7 @@
    come from app-shell.css. */
 main{display:grid;grid-template-columns:minmax(320px,620px) minmax(300px,400px);gap:20px;align-items:start;justify-content:center;padding:18px}
 .panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:14px}
-.board-shell{width:100%;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 14px 38px -26px #000;background:#f0d9b5}@media(prefers-color-scheme:dark){#ground{background:#6f8736}}
+.board-shell{width:100%;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 14px 38px -26px #000;background:var(--board-dark)}
 .cg-wrap{width:100%!important;height:100%!important}
 #status{margin-top:12px;padding:10px 12px;border:1px solid var(--rule);border-radius:6px;background:var(--soft);font-size:14px}
 #status.over{border-color:var(--accent);font-weight:700}
@@ -58,6 +59,13 @@ button.danger{background:var(--warn);border-color:var(--warn);color:#fff;font-we
       <a href="/lc0-arena.html">Arena</a>
       <a href="/docs.html">Docs</a>
     </nav>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle night mode">&#9790;</button>
+    <select id="boardStyleSelect" class="board-style-select" aria-label="Board style" title="Board style">
+      <option value="brown">Brown</option>
+      <option value="night">Night</option>
+      <option value="blue">Blue</option>
+      <option value="green">Green</option>
+    </select>
   </div>
 </header>
 <main id="main">
@@ -131,5 +139,6 @@ button.danger{background:var(--warn);border-color:var(--warn);color:#fff;font-we
   </div>
 </footer>
 <script type="module" src="/src/lc0/playBrowser.ts"></script>
+<script src="/theme.js"></script>
 </body>
 </html>

@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>0x88 Chess — state-of-the-art chess, zero installs</title>
+<script>(()=>{try{var t=localStorage.getItem('0x88-theme');if(t==='dark')document.documentElement.dataset.theme='dark';else if(t==='light')document.documentElement.dataset.theme='light';var b=localStorage.getItem('0x88-board');if(['night','blue','green'].includes(b))document.documentElement.dataset.board=b;}catch(e){}})();</script>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <meta name="description" content="State-of-the-art chess engines running entirely in your browser. Leela Chess Zero on WebGPU, plus Stockfish, Berserk, Viridithas, PlentyChess and more on WebAssembly. No installs, no servers — democratizing chess technology and pushing browser deep-learning deployment." />
 <style>
@@ -22,6 +23,8 @@
   --accent-deep:#3f4f1d; --accent-soft:#e8efd3;
   --warn:#a5461b; --warn-soft:#f7e6db;
   --gold:#b5882f;
+  --board-light:#f0d9b5; --board-dark:#b58863;
+  --coord-light:rgba(255,255,255,.82); --coord-dark:rgba(72,72,72,.82);
   --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
   --sans:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   --serif:"Iowan Old Style","Apple Garamond",Baskerville,Georgia,serif;
@@ -30,8 +33,24 @@
   --shadow:0 10px 30px -22px rgba(31,28,23,.35);
   --shadow-lg:0 30px 60px -32px rgba(31,28,23,.45);
 }
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#15130f; --bg-2:#1c1914;
+  --panel:#211d17; --panel-2:#28231b;
+  --ink:#f0ead9; --ink-soft:#d8d0bd;
+  --muted:#a59c89; --muted-2:#847c6c;
+  --rule:#332e25; --rule-soft:#2a2620;
+  --accent:#a3c456; --accent-2:#b8d574; --accent-deep:#768f2f;
+  --accent-soft:#2b3416; --warn:#e08147; --warn-soft:#3a2418;
+  --gold:#d9b46a;
+  --board-light:#d7c0a0; --board-dark:#8a6648;
+  --coord-light:rgba(245,238,222,.86); --coord-dark:rgba(34,29,24,.72);
+  --shadow:0 10px 30px -22px rgba(0,0,0,.6);
+  --shadow-lg:0 30px 60px -32px rgba(0,0,0,.75);
+}
 @media (prefers-color-scheme: dark){
-  :root{
+  :root:not([data-theme]){
+    color-scheme:dark;
     --bg:#15130f; --bg-2:#1c1914;
     --panel:#211d17; --panel-2:#28231b;
     --ink:#f0ead9; --ink-soft:#d8d0bd;
@@ -40,10 +59,15 @@
     --accent:#a3c456; --accent-2:#b8d574; --accent-deep:#768f2f;
     --accent-soft:#2b3416; --warn:#e08147; --warn-soft:#3a2418;
     --gold:#d9b46a;
+    --board-light:#d7c0a0; --board-dark:#8a6648;
+    --coord-light:rgba(245,238,222,.86); --coord-dark:rgba(34,29,24,.72);
     --shadow:0 10px 30px -22px rgba(0,0,0,.6);
     --shadow-lg:0 30px 60px -32px rgba(0,0,0,.75);
   }
 }
+:root[data-board="night"]{--board-light:#6f7784;--board-dark:#343a44;--coord-light:rgba(235,240,247,.82);--coord-dark:rgba(15,18,22,.72)}
+:root[data-board="blue"]{--board-light:#d7e2ec;--board-dark:#7895aa;--coord-light:rgba(255,255,255,.86);--coord-dark:rgba(39,61,76,.74)}
+:root[data-board="green"]{--board-light:#d7dfc2;--board-dark:#7f9564;--coord-light:rgba(255,255,255,.86);--coord-dark:rgba(48,65,36,.72)}
 /* ===== Reset / base ===== */
 *{box-sizing:border-box}
 html,body{margin:0}
@@ -94,6 +118,18 @@ nav.primary a{
 }
 nav.primary a:hover{color:var(--ink); background:var(--rule-soft); text-decoration:none}
 nav.primary a.active{color:var(--accent); background:var(--accent-soft)}
+.theme-toggle{
+  padding:6px 9px; border:1px solid var(--rule); border-radius:999px;
+  background:var(--bg-2); color:var(--muted); font-size:14px; line-height:1;
+  cursor:pointer; transition:background .12s, color .12s;
+}
+.theme-toggle:hover{background:var(--panel-2); color:var(--ink)}
+.board-style-select{
+  font-size:11px; padding:5px 8px; border:1px solid var(--rule);
+  border-radius:999px; background:var(--bg-2); color:var(--muted);
+  cursor:pointer; max-width:90px;
+}
+.board-style-select:hover{border-color:var(--accent)}
 
 /* ===== Hero ===== */
 .hero{
@@ -331,6 +367,7 @@ footer.site-footer{background:var(--bg-2); border-top:1px solid var(--rule); pad
   nav.primary{gap:0}
   nav.primary a{padding:7px 8px; font-size:12.5px}
   .brand-tag{display:none}
+  .board-style-select{display:none}
   section.block{padding:48px 0}
   .footer-grid{grid-template-columns:1fr}
   .footer-bottom{flex-direction:column; gap:6px}
@@ -354,6 +391,13 @@ footer.site-footer{background:var(--bg-2); border-top:1px solid var(--rule); pad
       <a href="/lc0-arena.html">Arena</a>
       <a href="/docs.html">Docs</a>
     </nav>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle night mode">&#9790;</button>
+    <select id="boardStyleSelect" class="board-style-select" aria-label="Board style" title="Board style">
+      <option value="brown">Brown</option>
+      <option value="night">Night</option>
+      <option value="blue">Blue</option>
+      <option value="green">Green</option>
+    </select>
   </div>
 </header>
 
@@ -602,5 +646,6 @@ footer.site-footer{background:var(--bg-2); border-top:1px solid var(--rule); pad
   });
 })();
 </script>
+<script src="/theme.js"></script>
 </body>
 </html>
