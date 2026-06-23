@@ -914,6 +914,7 @@ let historyBoards: BoardState[] = [board];
 let ground: Ground | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
 let searcher: Lc0PuctSearcher | null = null;
+let policyPagehideHandler: ((event: PageTransitionEvent) => void) | null = null;
 let mainEvaluator: Lc0OnnxEvaluator | null = null;
 let searchWorker: Worker | null = null;
 let useSearchWorker = SEARCH_WORKER_REQUESTED;
@@ -4110,9 +4111,11 @@ function disposeRuntimeResources(): void {
 }
 
 async function init() {
-  window.addEventListener('pagehide', (event) => {
-    if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
-  });
+  if (policyPagehideHandler) window.removeEventListener('pagehide', policyPagehideHandler);
+  policyPagehideHandler = (event: PageTransitionEvent) => {
+    if (!event.persisted) disposeRuntimeResources();
+  };
+  window.addEventListener('pagehide', policyPagehideHandler);
   el('message').textContent = SHADER_F16_PROBE_REQUESTED ? 'Preparing WebGPU shader-f16 probe…' : PACK_PROBE_REQUESTED ? 'Preparing dedicated worker for lc0web pack probe…' : WORKER_ONLY_MODEL ? 'Loading LC0 model in dedicated worker…' : 'Loading LC0 ONNX model…';
   renderStatic();
   try {
@@ -4371,5 +4374,11 @@ export function mountPolicyOnlyBrowser(): () => void {
   wireEvents();
   registerAppServiceWorker();
   void init();
-  return () => undefined;
+  return () => {
+    disposeRuntimeResources();
+    if (policyPagehideHandler) window.removeEventListener('pagehide', policyPagehideHandler);
+    policyPagehideHandler = null;
+    (ground as { destroy?: () => void } | null)?.destroy?.();
+    ground = null;
+  };
 }

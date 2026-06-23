@@ -157,6 +157,8 @@ let REQUESTED_PLENTYCHESS_VARIANT = plentyChessVariantFromParams(params);
 
 let ground: Ground | null = null;
 let arenaKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
+let arenaAuditHandler: ((event: Event) => void) | null = null;
+let arenaPagehideHandler: ((event: PageTransitionEvent) => void) | null = null;
 let board: BoardState = parseFen(START_FEN);
 let historyBoards: BoardState[] = [board];
 let lastUci: string | null = null;
@@ -446,13 +448,15 @@ function lc0ResolvedRuntime(runtime: Lc0ArenaRuntime): string {
 }
 
 function installRuntimeAuditPanel(): void {
-  window.addEventListener(BROWSER_RUNTIME_AUDIT_EVENT, (event) => {
+  if (arenaAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, arenaAuditHandler);
+  arenaAuditHandler = (event: Event) => {
     const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
     if (detail.family !== 'lc0') return;
     const target = document.getElementById('runtimeAuditInfo');
     if (!target) return;
     target.innerHTML = diagBlockHtml('LC0 audit', [htmlEscape(formatBrowserRuntimeAudit(detail))]);
-  });
+  };
+  window.addEventListener(BROWSER_RUNTIME_AUDIT_EVENT, arenaAuditHandler);
 }
 
 function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
@@ -3105,9 +3109,11 @@ function wireEvents() {
     // Threads flips single<->threaded flavor (different wasm); rebuild on next use.
     disposeStockfish();
   });
-  window.addEventListener('pagehide', (event) => {
-    if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
-  });
+  if (arenaPagehideHandler) window.removeEventListener('pagehide', arenaPagehideHandler);
+  arenaPagehideHandler = (event: PageTransitionEvent) => {
+    if (!event.persisted) disposeRuntimeResources();
+  };
+  window.addEventListener('pagehide', arenaPagehideHandler);
 }
 
 async function init() {
@@ -3160,6 +3166,10 @@ export function mountArenaBrowser(): () => void {
     disposeRuntimeResources();
     if (arenaKeydownHandler) document.removeEventListener('keydown', arenaKeydownHandler);
     arenaKeydownHandler = null;
+    if (arenaAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, arenaAuditHandler);
+    arenaAuditHandler = null;
+    if (arenaPagehideHandler) window.removeEventListener('pagehide', arenaPagehideHandler);
+    arenaPagehideHandler = null;
     (ground as { destroy?: () => void } | null)?.destroy?.();
     ground = null;
   };

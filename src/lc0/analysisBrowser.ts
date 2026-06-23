@@ -142,6 +142,7 @@ let ground: Ground | null = null;
 let analysisPageMounted = false;
 let analysisKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
 let analysisPagehideHandler: ((event: PageTransitionEvent) => void) | null = null;
+let analysisAuditHandler: ((event: Event) => void) | null = null;
 let orientation: 'white' | 'black' = 'white';
 let analysisAbort: AbortController | null = null;
 let reviewAbort: AbortController | null = null;
@@ -269,13 +270,15 @@ function lc0ResolvedRuntime(runtime: Lc0AnalysisRuntime): string {
 }
 
 function installRuntimeAuditPanel(): void {
-  window.addEventListener(BROWSER_RUNTIME_AUDIT_EVENT, (event) => {
+  if (analysisAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, analysisAuditHandler);
+  analysisAuditHandler = (event: Event) => {
     const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
     if (detail.family !== 'lc0') return;
     const target = document.getElementById('runtimeAudit');
     if (!target) return;
     target.textContent = formatBrowserRuntimeAudit(detail);
-  });
+  };
+  window.addEventListener(BROWSER_RUNTIME_AUDIT_EVENT, analysisAuditHandler);
 }
 
 function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
@@ -2238,6 +2241,8 @@ function disposePageResources(): void {
   analysisKeydownHandler = null;
   if (analysisPagehideHandler) window.removeEventListener('pagehide', analysisPagehideHandler);
   analysisPagehideHandler = null;
+  if (analysisAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, analysisAuditHandler);
+  analysisAuditHandler = null;
   (ground as { destroy?: () => void } | null)?.destroy?.();
   ground = null;
 }

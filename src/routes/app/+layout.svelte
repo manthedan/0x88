@@ -8,10 +8,10 @@
     <span class="page-title">App</span>
     <nav class="primary" aria-label="Primary">
       <a href="/">Home</a>
-      <a href="/app/play">Play</a>
-      <a href="/app/analysis">Analysis</a>
-      <a href="/app/arena">Arena</a>
-      <a href="/docs" data-sveltekit-reload>Docs</a>
+      <a href="/app/play/">Play</a>
+      <a href="/app/analysis/">Analysis</a>
+      <a href="/app/arena/">Arena</a>
+      <a href="/docs/">Docs</a>
     </nav>
     <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle night mode">&#9790;</button>
     <select id="boardStyleSelect" class="board-style-select" aria-label="Board style" title="Board style">
@@ -28,9 +28,9 @@
     <span>Engines run entirely in your browser. Nothing is sent to a server.</span>
     <span class="footer-links">
       <a href="/">Home</a>
-      <a href="/app/play">Play</a>
-      <a href="/app/analysis">Analysis</a>
-      <a href="/app/arena">Arena</a>
+      <a href="/app/play/">Play</a>
+      <a href="/app/analysis/">Analysis</a>
+      <a href="/app/arena/">Arena</a>
       <code>0x88.app · v0</code>
     </span>
   </div>
