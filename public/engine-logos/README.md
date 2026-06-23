@@ -1,29 +1,22 @@
-# Engine logos (drop-in)
+# Engine logos
 
-Small (favicon-sized) engine marks shown next to engine names and in the eval-bar
-chips. The UI loads these by fixed filename and **falls back to the text chip**
-(e.g. "Lc0", "SF") when a file is missing — so the app looks unchanged until you
-add them.
+Small decorative engine marks used next to engine names in the Arena and Analysis pages.
+The browser probes these files once and only renders an `<img>` when the file exists
+with an image content type, so missing logos fall back to text-only labels.
 
-Expected files (PNG or SVG; ~16–64px square, transparent background preferred):
+| File | Engine family | Used for |
+|---|---|---|
+| `lc0.svg` | Lc0 / Leela-family nets | Lc0 small, t3, BT4, LQO labels |
+| `stockfish.png` | Stockfish | Stockfish Lite and full Stockfish labels |
+| `reckless.png` | Reckless | Reckless labels |
+| `viridithas.png` | Viridithas | Viridithas labels |
+| `berserk.jpg` | Berserk | Berserk labels |
 
-| File             | Engine            | Used for                          |
-|------------------|-------------------|-----------------------------------|
-| `lc0.png`        | Lc0 (and Lc0 BT4) | Lc0 / Lc0 BT4 chips + names        |
-| `stockfish.png`  | Stockfish         | Stockfish Lite + Stockfish         |
-| `reckless.png`   | Reckless          | Reckless                           |
+No PlentyChess or Maia3 mark is bundled yet; those remain text-only.
 
-To use SVG instead, save as `lc0.svg` etc. and update the extension in
-`logoUrlForEngine()` (src/lc0/arenaBrowser.ts) / the analysis equivalent.
+## Branding note
 
-## Sourcing (official marks — not committed here)
-
-These are project **trademarks**, separate from the engines' code licenses. Using
-them to identify the actual engines in the UI is normally nominative use, but don't
-imply endorsement or alter them; check each project's branding guidance.
-
-- **Lc0 / Leela Chess Zero** — lczero.org / github.com/LeelaChessZero (GPLv3 code).
-- **Stockfish** — stockfishchess.org / github.com/official-stockfish/Stockfish (GPLv3).
-- **Reckless** — github.com/codedeliveryservice/Reckless (AGPL-3.0).
-
-Like the engine `*.wasm` binaries, logo files are intentionally not committed.
+Engine names and marks are trademarks of their respective projects, separate from
+the engines' code/model licenses. We use them only to identify the actual engines
+available in the UI and do not claim endorsement. Keep these assets unmodified and
+replace/remove them if an upstream project asks us to follow different branding guidance.

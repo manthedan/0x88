@@ -35,6 +35,7 @@ import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetLoadW
 import { TournamentStandings, buildSchedule, tournamentPairings, type ScheduledGame, type TournamentMode } from './tournament.ts';
 import { hBarChartSvg, lineChartSvg, type ChartSeries } from './charts.ts';
 import { defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 
@@ -724,38 +725,6 @@ function shortEngineTag(name: string): string {
   return name.split(/[\s·|]+/)[0] || name;
 }
 
-// Optional favicon-sized engine logos (public/engine-logos/, not bundled by
-// default). We probe once which files exist and only emit an <img> for those, so
-// when a logo is absent the markup is unchanged — no per-render insert/remove jitter.
-const availableEngineLogos = new Set<string>();
-
-function engineLogoFamily(name: string): string {
-  const n = name.toLowerCase();
-  if (n.includes('tiny leela')) return '';
-  if (n.includes('bt4') || n.includes('lc0') || n.includes('leela')) return 'lc0';
-  if (n.includes('reckless')) return 'reckless';
-  if (n.includes('viridithas')) return 'viridithas';
-  if (n.includes('stockfish') || /\bsf\b/.test(n)) return 'stockfish';
-  return '';
-}
-
-function engineLogoHtml(name: string): string {
-  const family = engineLogoFamily(name);
-  return family && availableEngineLogos.has(family) ? `<img class="engine-logo" src="/engine-logos/${family}.png" alt="">` : '';
-}
-
-async function probeEngineLogos(): Promise<void> {
-  await Promise.all(['lc0', 'stockfish', 'reckless', 'viridithas'].map(async (family) => {
-    try {
-      const response = await fetch(`/engine-logos/${family}.png`, { method: 'HEAD', cache: 'no-store' });
-      // Demand an image content-type: preview/SPA-fallback servers answer 200
-      // text/html for missing files, which made every chip a broken <img>.
-      if (response.ok && (response.headers.get('content-type') ?? '').startsWith('image/')) availableEngineLogos.add(family);
-    } catch { /* absent */ }
-  }));
-  if (availableEngineLogos.size) renderSideLabels();
-}
-
 function renderEvalBars(): void {
   const render = (id: string, color: 'White' | 'Black', engineId: string | null, engineName: string | null) => {
     const node = el(id);
@@ -770,7 +739,7 @@ function renderEvalBars(): void {
     node.innerHTML = `<div class="eval-fill" style="height:${(100 * whiteScore).toFixed(1)}%"></div><div class="eval-midline"></div><div class="eval-bar-caption">${color[0]}</div><div class="eval-bar-value">${htmlEscape(label)}</div>`;
     const chip = document.getElementById(id.replace('EvalBar', 'Chip'));
     if (chip) {
-      chip.innerHTML = engineName ? `${engineLogoHtml(engineName)}<span>${htmlEscape(shortEngineTag(engineName))}</span>` : '';
+      chip.innerHTML = engineName ? `${engineLogoHtmlForName(engineName)}<span>${htmlEscape(shortEngineTag(engineName))}</span>` : '';
       chip.title = engineName ? `${color} engine: ${engineName}` : '';
       chip.style.display = engineName ? '' : 'none';
     }
@@ -807,7 +776,7 @@ function renderSideLabels() {
     const thinking = engineId ? thinkingEngineIds.has(engineId) : false;
     const evalText = output?.shortEval ?? (thinking ? 'thinking…' : 'eval —');
     node.classList.remove('active');
-    node.innerHTML = `<span class="side-main"><span class="color">${color}</span> ${engineName ? engineLogoHtml(engineName) : ''}<span class="engine">${htmlEscape(engineName ?? '—')}</span> <span class="side-eval">${htmlEscape(evalText)}</span></span>`;
+    node.innerHTML = `<span class="side-main"><span class="color">${color}</span> ${engineName ? engineLogoHtmlForName(engineName) : ''}<span class="engine">${htmlEscape(engineName ?? '—')}</span> <span class="side-eval">${htmlEscape(evalText)}</span></span>`;
   };
   update('blackSideLabel', 'Black', boardBlackId, boardBlackName);
   update('whiteSideLabel', 'White', boardWhiteId, boardWhiteName);
@@ -1115,7 +1084,7 @@ function renderSeatSelectors(): void {
     const label = `Engine ${index + 1}`;
     const inactive = matchMode && index >= 2 ? ' seat-inactive' : '';
     const remove = seatRows.length > 2 ? `<button type="button" class="seat-remove" data-seat="${index}" title="Remove ${label}" aria-label="Remove ${label}">×</button>` : '';
-    return `<div class="engine-row seat-row${inactive}" data-seat="${index}"><span class="seat-name">${label}</span><select class="seat-fam" data-seat="${index}" aria-label="${label} family">${famSel}</select><span class="arrow">→</span><select class="seat-var" data-seat="${index}" aria-label="${label} variant">${varSel}</select><span class="arrow">→</span><input class="seat-strength row-strength" data-seat="${index}" aria-label="${label} strength" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
+    return `<div class="engine-row seat-row${inactive}" data-seat="${index}"><span class="seat-name">${label}</span>${engineLogoHtml(engineLogoFamilyForEngineFamily(row.family))}<select class="seat-fam" data-seat="${index}" aria-label="${label} family">${famSel}</select><span class="arrow">→</span><select class="seat-var" data-seat="${index}" aria-label="${label} variant">${varSel}</select><span class="arrow">→</span><input class="seat-strength row-strength" data-seat="${index}" aria-label="${label} strength" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
   }).join('');
 }
 
@@ -3168,7 +3137,7 @@ async function init(mountSignal: AbortSignal) {
   buildEngines();
   populateSeats();
   if (!isV0DeployProfile()) void refreshBt4Availability();
-  if (!isV0DeployProfile()) void probeEngineLogos();
+  if (!isV0DeployProfile()) void probeEngineLogos(() => { renderSeatSelectors(); refreshSeatControls(); renderSideLabels(); });
   wireEvents();
   refreshBudgetControls();
   refreshOpeningPreview();

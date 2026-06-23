@@ -38,6 +38,7 @@ import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRe
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
 import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetLoadWarning, bigNetOptionState, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig } from './bt4Engine.ts';
 import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
@@ -858,7 +859,7 @@ function renderEngineList(): void {
     const varSel = variantOptions(row.family).map((o) => `<option value="${o.value}"${row.variant === o.value ? ' selected' : ''}${o.disabled ? ' disabled' : ''}>${htmlEscape(o.label)}</option>`).join('');
     const meta = strengthMeta(row.family);
     const remove = engineRows.length > 1 ? `<button class="row-rm" data-i="${i}" type="button" title="Remove engine">×</button>` : '';
-    return `<div class="engine-row"><select class="row-fam" data-i="${i}">${famSel}</select><span class="arrow">→</span><select class="row-var" data-i="${i}">${varSel}</select><span class="arrow">→</span><input class="row-strength" data-i="${i}" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
+    return `<div class="engine-row">${engineLogoHtml(engineLogoFamilyForEngineFamily(row.family))}<select class="row-fam" data-i="${i}">${famSel}</select><span class="arrow">→</span><select class="row-var" data-i="${i}">${varSel}</select><span class="arrow">→</span><input class="row-strength" data-i="${i}" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
   }).join('');
 }
 
@@ -1121,7 +1122,7 @@ function renderLegend(lines: AnalysisLine[]) {
   const keys = [...new Set(lines.map((line) => line.engine))].map((engine) => ({ label: engine, swatch: engineBrushes(engine).swatch }));
   if (currentBookStats().length) keys.push({ label: 'Book (most played)', swatch: BOOK_SWATCH });
   el('engineLegend').innerHTML = keys.map((key) =>
-    `<span class="key"><span class="dot" style="background:${key.swatch}"></span>${htmlEscape(key.label)}</span>`).join('');
+    `<span class="key"><span class="dot" style="background:${key.swatch}"></span>${engineLogoHtmlForName(key.label)}${htmlEscape(key.label)}</span>`).join('');
 }
 
 function firstSanMove(line: AnalysisLine): string {
@@ -1165,7 +1166,7 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     const delta = reference === undefined || line.scoreCp === undefined ? '—' : signedCp(line.scoreCp - reference);
     const agreed = line.pvUci[0] === consensusUci && (consensus?.[1].count ?? 0) > 1;
     return `<tr style="border-left:3px solid ${swatch}">`
-      + `<td>${htmlEscape(line.engine)}</td>`
+      + `<td><span class="engine-name-with-logo">${engineLogoHtmlForName(line.engine)}${htmlEscape(line.engine)}</span></td>`
       + `<td class="mono ${agreed ? 'agree' : ''}">${htmlEscape(firstSanMove(line))}<br><span class="small">${htmlEscape(line.pvUci[0] ?? '')}</span></td>`
       + `<td class="mono">${htmlEscape(line.scoreText)}</td>`
       + `<td class="mono">${htmlEscape(delta)}</td>`
@@ -1183,7 +1184,7 @@ function renderLines() {
     const cls = line.scoreCp === undefined ? '' : line.scoreCp > 0 ? 'pos' : line.scoreCp < 0 ? 'neg' : '';
     const swatch = engineBrushes(line.engine).swatch;
     return `<li data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}">`
-      + `<span class="score ${cls}">${htmlEscape(line.scoreText)}<br><span class="eng">${htmlEscape(line.engine)} · ${htmlEscape(line.detail)}</span></span>`
+      + `<span class="score ${cls}">${htmlEscape(line.scoreText)}<br><span class="eng">${engineLogoHtmlForName(line.engine)}${htmlEscape(line.engine)} · ${htmlEscape(line.detail)}</span></span>`
       + `<span class="pv">${htmlEscape(line.pvSan)}</span></li>`;
   }).join('') || '<li class="small placeholder">No analysis yet — make a move or press Analyze.</li>';
 }
@@ -2365,6 +2366,7 @@ async function init(mountSignal: AbortSignal) {
   renderAll();
   renderEngineList();
   renderRecklessRuntimeInfo();
+  if (!isV0DeployProfile()) void probeEngineLogos(() => { renderEngineList(); renderAll(); });
   wireEvents();
   void refreshPgnDatabaseCollections();
   if (!isV0DeployProfile()) {
