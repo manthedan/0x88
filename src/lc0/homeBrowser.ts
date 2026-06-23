@@ -115,5 +115,8 @@ async function renderStorage(): Promise<void> {
   }
 }
 
-void detectCapabilities();
-void renderStorage();
+export function mountHomeBrowser(): () => void {
+  void detectCapabilities();
+  void renderStorage();
+  return () => undefined;
+}

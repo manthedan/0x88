@@ -156,6 +156,7 @@ const REQUESTED_PLENTYCHESS_EXPLICIT = hasExplicitPlentyChessVariant(params);
 let REQUESTED_PLENTYCHESS_VARIANT = plentyChessVariantFromParams(params);
 
 let ground: Ground | null = null;
+let arenaKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
 let board: BoardState = parseFen(START_FEN);
 let historyBoards: BoardState[] = [board];
 let lastUci: string | null = null;
@@ -448,7 +449,9 @@ function installRuntimeAuditPanel(): void {
   window.addEventListener(BROWSER_RUNTIME_AUDIT_EVENT, (event) => {
     const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
     if (detail.family !== 'lc0') return;
-    el('runtimeAuditInfo').innerHTML = diagBlockHtml('LC0 audit', [htmlEscape(formatBrowserRuntimeAudit(detail))]);
+    const target = document.getElementById('runtimeAuditInfo');
+    if (!target) return;
+    target.innerHTML = diagBlockHtml('LC0 audit', [htmlEscape(formatBrowserRuntimeAudit(detail))]);
   });
 }
 
@@ -3006,14 +3009,16 @@ function wireEvents() {
     const trail = row ? finishedTrails[Number(row.dataset.game)] : undefined;
     if (trail) enterReview(trail, trail.entries.length - 1);
   });
-  document.addEventListener('keydown', (event) => {
+  if (arenaKeydownHandler) document.removeEventListener('keydown', arenaKeydownHandler);
+  arenaKeydownHandler = (event: KeyboardEvent) => {
     if (!reviewing) return;
     const target = event.target as HTMLElement | null;
     if (target?.closest?.('input,textarea,select')) return;
     if (event.key === 'ArrowLeft') { event.preventDefault(); stepReview(-1); }
     else if (event.key === 'ArrowRight') { event.preventDefault(); stepReview(1); }
     else if (event.key === 'Escape') exitReview();
-  });
+  };
+  document.addEventListener('keydown', arenaKeydownHandler);
   el('arenaSeatList').addEventListener('change', (event) => {
     if (running) return;
     const target = event.target as HTMLInputElement | HTMLSelectElement;
@@ -3149,4 +3154,13 @@ async function init() {
   void runArenaBenchAutorun();
 }
 
-void init();
+export function mountArenaBrowser(): () => void {
+  void init();
+  return () => {
+    disposeRuntimeResources();
+    if (arenaKeydownHandler) document.removeEventListener('keydown', arenaKeydownHandler);
+    arenaKeydownHandler = null;
+    (ground as { destroy?: () => void } | null)?.destroy?.();
+    ground = null;
+  };
+}

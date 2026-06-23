@@ -4266,6 +4266,7 @@ function seedSettingsInputs() {
   selectEl('modeSelect').value = engineReplyMode;
 }
 
+function wireEvents(): void {
 el('engineMove').addEventListener('click', () => { void engineMove(); });
 el('searchMove').addEventListener('click', () => { void searchRootPosition(); });
 el('stopSearch').addEventListener('click', stopSearch);
@@ -4352,6 +4353,7 @@ selectEl('modeSelect').addEventListener('change', () => {
   engineReplyMode = selectEl('modeSelect').value === 'search' ? 'search' : 'policy';
   el('message').textContent = `Engine reply mode: ${engineReplyMode === 'search' ? 'PUCT search' : 'policy-only'}.`;
 });
+}
 
 function registerAppServiceWorker() {
   if (!SW_ENABLED || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
@@ -4364,6 +4366,10 @@ function registerAppServiceWorker() {
   });
 }
 
-seedSettingsInputs();
-registerAppServiceWorker();
-void init();
+export function mountPolicyOnlyBrowser(): () => void {
+  seedSettingsInputs();
+  wireEvents();
+  registerAppServiceWorker();
+  void init();
+  return () => undefined;
+}

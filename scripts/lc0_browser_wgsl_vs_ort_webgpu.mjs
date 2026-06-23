@@ -100,7 +100,7 @@ async function waitForServer(baseUrl, timeoutMs) {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/lc0-policy-only.html`, { cache: 'no-store' });
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/single-engine`, { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
     } catch (error) {
@@ -165,7 +165,7 @@ function runPlan(args) {
 
 function runUrl(baseUrl, args, kind) {
   const variant = VARIANTS[kind];
-  return `${baseUrl.replace(/\/$/, '')}/lc0-policy-only.html?${variant.query(args)}`;
+  return `${baseUrl.replace(/\/$/, '')}/single-engine?${variant.query(args)}`;
 }
 
 function waitForText(args, session, text) {

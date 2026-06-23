@@ -787,11 +787,32 @@ function dismissRestart(): void {
   render();
 }
 
+function resetGameStateForMount(): void {
+  gameSeq += 1;
+  cancelEngineTurn();
+  selectEl('colorSelect').value = 'white';
+  humanColor = 'w';
+  orientation = 'white';
+  startFen = startFenFor(selectedEngine(), humanColor);
+  board = parseFen(startFen);
+  positions = [board];
+  moves = [];
+  sans = [];
+  gameOver = null;
+  pendingPromotion = null;
+  pendingRestart = null;
+  activeEngineId = selectEl('engineSelect').value;
+  activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
+  setEngineNote('');
+  disarmResign();
+}
+
 function init(): void {
   refreshEngineOptions();
   selectEl('engineSelect').value = 'maia3';
   activeEngineId = 'maia3';
   activeColor = 'white';
+  resetGameStateForMount();
   renderLevelOptions();
   el('newGame').addEventListener('click', newGame);
   el('takeback').addEventListener('click', takeback);
@@ -886,4 +907,12 @@ function init(): void {
   render();
 }
 
-init();
+export function mountPlayBrowser(): () => void {
+  init();
+  return () => {
+    gameSeq += 1;
+    cancelEngineTurn();
+    (ground as { destroy?: () => void } | null)?.destroy?.();
+    ground = null;
+  };
+}

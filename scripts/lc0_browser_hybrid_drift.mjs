@@ -129,7 +129,7 @@ async function waitForServer(baseUrl, timeoutMs) {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/lc0-policy-only.html`, { cache: 'no-store' });
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/single-engine`, { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
     } catch (error) {
@@ -205,7 +205,7 @@ async function f32Baselines(args, records) {
 }
 
 async function browserHybrid(args) {
-  const url = new URL(`${args.baseUrl.replace(/\/$/, '')}/lc0-policy-only.html`);
+  const url = new URL(`${args.baseUrl.replace(/\/$/, '')}/single-engine`);
   url.searchParams.set('hybridDrift', '1');
   url.searchParams.set('encoderLayers', String(args.layers));
   url.searchParams.set('hybridDriftLimit', String(args.limit));

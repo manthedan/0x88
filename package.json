@@ -5,7 +5,7 @@
   "type": "module",
   "description": "0x88.app — browser chess engines (LC0/WebGPU + NNUE/WASM), zero installs.",
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "npm run typecheck && node --experimental-strip-types --test --test-timeout=120000",
     "test:rust-ts-perft": "TINY_LEELA_RUN_RUST_PERFT=1 node --experimental-strip-types --test tests/perft_parity.test.mjs",
     "bench:movegen": "node --experimental-strip-types scripts/bench_movegen.mjs",
@@ -19,7 +19,7 @@
     "elo:arena": "node --experimental-strip-types scripts/elo_arena_parallel.mjs",
     "web:client": "vite --host 0.0.0.0",
     "web:isolated:static": "node scripts/serve_isolated_static.mjs dist-client 5181",
-    "build:client": "vite build --outDir dist-client",
+    "build:client": "vite build",
     "build:netlify": "BUILD_SCOPE=product npm run build:client && npm run engine-artifacts:precompress-dist",
     "build:netlify:r2": "VITE_LC0_BROWSER_ASSET_BASE_URL=${VITE_LC0_BROWSER_ASSET_BASE_URL:-https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev} VITE_BROWSER_CHESS_DEPLOY_PROFILE=v0 BUILD_SCOPE=product npm run build:client && npm run deploy:prune-external-model-assets && npm run deploy:prune-v0-assets",
     "deploy:prune-external-model-assets": "node scripts/prune_external_model_assets.mjs dist-client",
@@ -133,10 +133,15 @@
     "lc0:battle": "node --experimental-strip-types scripts/lc0_engine_battle.mjs",
     "lc0:tiny-strict-custom-webgpu-smoke": "node scripts/lc0_tiny_strict_custom_webgpu_smoke.mjs",
     "productization:targeted-smoke": "node scripts/productization_fast_gate.mjs",
-    "productization:fast-gate": "node scripts/productization_fast_gate.mjs"
+    "productization:fast-gate": "node scripts/productization_fast_gate.mjs",
+    "prepare": "svelte-kit sync"
   },
   "devDependencies": {
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.67.0",
     "binaryen": "^130.0.0",
+    "svelte": "^5.56.3",
+    "svelte-check": "^4.6.0",
     "typescript": "^5.4.0",
     "vite": "^8.0.10"
   },

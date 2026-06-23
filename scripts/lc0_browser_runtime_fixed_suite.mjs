@@ -135,7 +135,7 @@ async function loadFixedFens(args) {
 }
 
 function arenaUrl(args, runtime, fens) {
-  const url = new URL('/lc0-arena.html', args.baseUrl);
+  const url = new URL('/app/arena', args.baseUrl);
   url.searchParams.set('fixedSuiteBench', '1');
   url.searchParams.set('lc0Runtime', runtime);
   url.searchParams.set('seatA', 'lc0:small:100');
@@ -209,7 +209,7 @@ async function waitForServer(baseUrl, timeoutMs) {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(new URL('/lc0-arena.html', baseUrl), { cache: 'no-store' });
+      const response = await fetch(new URL('/app/arena', baseUrl), { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
     } catch (error) { lastError = error; }

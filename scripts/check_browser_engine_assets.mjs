@@ -78,7 +78,7 @@ const ASSET_GROUPS = [
 ];
 
 function usage() {
-  console.log(`Usage: node scripts/check_browser_engine_assets.mjs [options]\n\nChecks local public/ browser engine assets used by lc0-analysis.html and lc0-arena.html, then prints the prep/build command for each missing family.\n\nOptions:\n  --only LIST       Comma-separated family ids to check (default all)\n  --allow-missing   Exit 0 even when assets are missing\n  --json            Print JSON only\n  -h, --help        Show this help\n`);
+  console.log(`Usage: node scripts/check_browser_engine_assets.mjs [options]\n\nChecks local public/ browser engine assets used by /app/analysis and /app/arena, then prints the prep/build command for each missing family.\n\nOptions:\n  --only LIST       Comma-separated family ids to check (default all)\n  --allow-missing   Exit 0 even when assets are missing\n  --json            Print JSON only\n  -h, --help        Show this help\n`);
 }
 
 function parseArgs(argv) {

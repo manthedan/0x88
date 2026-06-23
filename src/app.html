@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>(()=>{try{var t=localStorage.getItem('0x88-theme');if(t==='dark')document.documentElement.dataset.theme='dark';else if(t==='light')document.documentElement.dataset.theme='light';var b=localStorage.getItem('0x88-board');if(['night','blue','green'].includes(b))document.documentElement.dataset.board=b;}catch(e){}try{if(!/[?&](ortNativeLogs|ortVerbose)=1(?:&|$)/.test(location.search)&&!window.__lc0OrtConsoleNoiseFilterInstalled){window.__lc0OrtConsoleNoiseFilterInstalled=true;var n=function(v){v=String(v||'');return /^(?:\\d{4}-\\d{2}-\\d{2} .*)?\\[[VI]:onnxruntime[:\\],]/.test(v)||/^\\d{4}-\\d{2}-\\d{2} .* \\[[VI]:onnxruntime:/.test(v)};['log','warn','error'].forEach(function(k){var o=console[k].bind(console);console[k]=function(){if(n(arguments[0]))return;o.apply(console,arguments)}})}}catch(e){}})();</script>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/chessground.base.css" />
+    <link rel="stylesheet" href="/chessground.brown.css" />
+    <link rel="stylesheet" href="/chessground.cburnett.css" />
+    <link rel="stylesheet" href="/app-shell.css" />
+    %sveltekit.head%
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">%sveltekit.body%</div>
+    <script src="/theme.js"></script>
+  </body>
+</html>

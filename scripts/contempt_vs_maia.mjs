@@ -36,7 +36,7 @@ for (const path of [LC0_MODEL, MAIA_MODEL]) {
   if (!existsSync(path)) { console.error(`missing model: ${path}`); process.exit(1); }
 }
 
-// Queen odds: the Lc0 side plays without its queen (mirrors lc0-play.html).
+// Queen odds: the Lc0 side plays without its queen (mirrors /app/play).
 function startFenFor(lc0IsWhite) {
   if (ODDS !== 'queen') return START_FEN;
   return lc0IsWhite

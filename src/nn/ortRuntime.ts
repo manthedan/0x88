@@ -1,5 +1,8 @@
+import './ortConsoleFilter.ts';
 export * from 'onnxruntime-web/webgpu';
 import * as ort from 'onnxruntime-web/webgpu';
+
+(ort.env as unknown as { logLevel?: 'fatal' }).logLevel = 'fatal';
 
 export type OrtExecutionProviderPreference = 'wasm' | 'webgpu' | 'webgpu,wasm' | 'auto';
 
@@ -289,6 +292,7 @@ function requestedOrtWebGpuApiInstrumentation(): boolean {
 function requestedOrtLogSeverityLevel(): 0 | 1 | 2 | 3 | 4 {
   const raw = browserParam('ortLogSeverity') ?? browserParam('ortLogLevel') ?? envValue('ORT_LOG_SEVERITY_LEVEL') ?? envValue('ORT_LOG_LEVEL');
   const normalized = String(raw ?? '').trim().toLowerCase();
+  if (!normalized) return 4;
   if (normalized === 'verbose') return 0;
   if (normalized === 'info') return 1;
   if (normalized === 'warning' || normalized === 'warn') return 2;
@@ -298,7 +302,16 @@ function requestedOrtLogSeverityLevel(): 0 | 1 | 2 | 3 | 4 {
     const value = Math.max(0, Math.min(4, Math.floor(parsed)));
     if (value === 0 || value === 1 || value === 2 || value === 3 || value === 4) return value;
   }
-  return 3;
+  return 4;
+}
+
+function requestedOrtLogLevelName(): 'verbose' | 'info' | 'warning' | 'error' | 'fatal' {
+  const severity = requestedOrtLogSeverityLevel();
+  if (severity <= 0) return 'verbose';
+  if (severity === 1) return 'info';
+  if (severity === 2) return 'warning';
+  if (severity === 4) return 'fatal';
+  return 'error';
 }
 
 type OrtWebGpuProfileRecord = { programName: string; kernelName: string; kernelType: string; gpuMs: number };
@@ -486,6 +499,8 @@ export function subtractOrtWebGpuDiagnosticsSnapshot(after: OrtWebGpuDiagnostics
 }
 
 function configureOrtRuntime() {
+  const env = ort.env as unknown as { logLevel?: 'verbose' | 'info' | 'warning' | 'error' | 'fatal' };
+  env.logLevel = requestedOrtLogLevelName();
   const wasm = ort.env.wasm as unknown as { numThreads?: number; proxy?: boolean; wasmBinary?: ArrayBufferLike | Uint8Array; wasmPaths?: string | Record<string, string> };
   configureNodeOrtWasmBinary(wasm);
   const isBrowserMainThread = typeof document !== 'undefined';
