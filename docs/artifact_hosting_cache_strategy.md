@@ -191,17 +191,15 @@ The UI should not clone every cached response and materialize each body as a blo
 ## Release sequence
 
 1. Generate hashes and the immutable release manifest in CI.
-2. Probe content-hashed artifact URLs and upload only missing hashes. Existing hashes must validate byte length, SHA-256, and immutable cache headers; mismatches fail the release.
+2. Upload every new artifact under its content-hashed key.
 3. Verify size, content type, hash, and a small range request through Cloudflare.
 4. Publish the immutable release manifest.
 5. Update `/channels/stable.json`.
-6. Build the Netlify app shell only when its release-build stamp is missing or stale for the git commit/build inputs/channel URL. The R2/pruned build must remove large model blobs before deployment.
-7. Deploy the verified `dist-client` with `netlify deploy --no-build`; do not let deploy rebuild or re-upload large model assets.
-8. Purge only the channel pointer when immediate propagation matters.
-9. Retain old release manifests and blobs for at least one app-release cycle, preferably 30–90 days.
-10. Remove obsolete browser cache entries lazily after the new release has loaded successfully.
+6. Purge only the channel pointer when immediate propagation matters.
+7. Retain old release manifests and blobs for at least one app-release cycle, preferably 30–90 days.
+8. Remove obsolete browser cache entries lazily after the new release has loaded successfully.
 
-Rollback should only repoint the channel manifest. Use `npm run release:netlify-r2` for the app-shell release path; it rebuilds only when the `dist-client/release-build.json` stamp is stale, rejects pruned model blobs in `dist-client/models`, and invokes Netlify with `--no-build`.
+Rollback should only repoint the channel manifest.
 
 ## Observability
 

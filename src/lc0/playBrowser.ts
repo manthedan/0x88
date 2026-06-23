@@ -736,6 +736,7 @@ function ctxRenderEngineCaution(ctx: PlayContext): void {
 }
 
 function ctxRender(ctx: PlayContext): void {
+  if (ctx.disposed) return;
   el('status').textContent = ctxStatusText(ctx);
   el('status').classList.toggle('over', !!ctx.gameOver);
   ctxRenderMaia3Controls(ctx);
@@ -945,7 +946,8 @@ export function mountPlayBrowser(): () => void {
   return () => {
     ctx.disposed = true;
     ctxCancelEngineTurn(ctx);
-    ctxDisarmResign(ctx);
+    ctx.abort.abort();
+    if (ctx.resignArmTimer) { clearTimeout(ctx.resignArmTimer); ctx.resignArmTimer = null; }
     (ctx.ground as { destroy?: () => void } | null)?.destroy?.();
     ctx.ground = null;
     for (const { target, type, fn } of ctx.listeners) {
