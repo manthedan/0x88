@@ -51,7 +51,7 @@ exact.
 
 Node suite via the new generic `scripts/emscripten_uci_bench.mjs`
 (20-position rotated FEN suite; raw record
-`plentychess_simd_emscripten_node_bench_2026-06-10_depth9-11.json`):
+`.local-dev-artifacts/docs/plentychess_simd_emscripten_node_bench_2026-06-10_depth9-11.json`):
 
 - **Parity: 40/40 exact** (bestmove, score, nodes, PV) for both sse41 and
   relaxed vs the current default at depths 9/11. The relaxed result also

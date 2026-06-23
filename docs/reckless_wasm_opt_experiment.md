@@ -6,7 +6,7 @@ Generated with:
 npm run reckless:wasm-opt-experiment
 ```
 
-The script uses the npm `binaryen` package's `wasm-opt`, validates outputs by compiling them with Node `WebAssembly.compile()`, writes optimized artifacts under ignored `.local_engines/reckless-wasm-opt/`, and records byte/gzip size plus compile timings in [`reckless_wasm_opt_experiment_2026-06-04.json`](./reckless_wasm_opt_experiment_2026-06-04.json).
+The script uses the npm `binaryen` package's `wasm-opt`, validates outputs by compiling them with Node `WebAssembly.compile()`, writes optimized artifacts under ignored `.local_engines/reckless-wasm-opt/`, and records byte/gzip size plus compile timings in local-dev artifact: `.local-dev-artifacts/docs/reckless_wasm_opt_experiment_2026-06-04.json`.
 
 ## 2026-06-04 results
 
@@ -28,7 +28,7 @@ Takeaways:
 
 ## Browser cold one-shot smoke
 
-For a quick browser cold-start/NPS check, the scalar `-O3` and `-O4` artifacts were copied into ignored `/reckless/reckless-wasmopt-O3.wasm` and `/reckless/reckless-wasmopt-O4.wasm`, then run through the existing Reckless WASI worker in an isolated browser, depth 5, startpos. Raw smoke report: [`reckless_wasm_opt_browser_smoke_2026-06-04.json`](./reckless_wasm_opt_browser_smoke_2026-06-04.json).
+For a quick browser cold-start/NPS check, the scalar `-O3` and `-O4` artifacts were copied into ignored `/reckless/reckless-wasmopt-O3.wasm` and `/reckless/reckless-wasmopt-O4.wasm`, then run through the existing Reckless WASI worker in an isolated browser, depth 5, startpos. Raw smoke report: local-dev artifact: `.local-dev-artifacts/docs/reckless_wasm_opt_browser_smoke_2026-06-04.json`.
 
 | Variant | Cold wall ms | Nodes | NPS | Bestmove |
 | --- | ---: | ---: | ---: | --- |

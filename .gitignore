@@ -23,6 +23,9 @@ artifacts/
 public/runtimes/lc0-tvmjs-webgpu/
 public/runtimes/tiny-tvmjs-webgpu/
 logs/
+.local-dev-docs/
+.local-dev-artifacts/
+.ralph/
 dist-client/
 .svelte-kit/
 public/models/*.pt
@@ -39,6 +42,7 @@ public/**/*.gz
 !public/**/*.tar.gz
 rust/**/target/
 node_modules/
+node_modules
 __pycache__/
 **/__pycache__/
 *.pyc
@@ -48,6 +52,12 @@ awscliv2.zip
 aws/
 .pi/schedule-prompts.json
 tmp_check_*.mjs
+# Local/generated documentation workbench files. Tracked docs should be durable
+# product, runtime, provenance, or license documentation.
+docs/**/*.local.*
+docs/**/*_benchmark_*.json
+docs/**/*_smoke_*.json
+docs/**/*_probe_*.json
 data/training_streams/squareformer_lc0_lite_1m_h*_v1.json
 
 tiny-leela-netlify-sfaux-512.zip

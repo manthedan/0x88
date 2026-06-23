@@ -46,7 +46,7 @@ Fast local smoke:
 npm run viridithas:smoke
 ```
 
-This runs an argv-driven depth-2 two-search WASI smoke against `public/viridithas/viridithas-simd128.wasm` and verifies two `bestmove` lines plus at least one `info` line. A browser persistent smoke also succeeded on the isolated static server for startpos depths 6 and 8; see `docs/viridithas_persistent_browser_smoke_2026-06-05_startpos_depth6-8.json`.
+This runs an argv-driven depth-2 two-search WASI smoke against `public/viridithas/viridithas-simd128.wasm` and verifies two `bestmove` lines plus at least one `info` line. A browser persistent smoke also succeeded on the isolated static server for startpos depths 6 and 8; raw JSON smoke artifacts are local-dev only rather than published in `docs/`.
 
 ## Caveats
 

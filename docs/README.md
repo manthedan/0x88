@@ -40,4 +40,4 @@ This directory now favors current browser-product/runtime docs over inherited Ti
 
 ## Cleanup records
 
-- [`cleanup/tiny-leela-origin-deletion-targets.md`](cleanup/tiny-leela-origin-deletion-targets.md) — inventory used for the first deletion pass.
+One-off cleanup inventories and agent handoff notes are local-dev artifacts. Keep them under `.local-dev-docs/` instead of publishing them in the repository.

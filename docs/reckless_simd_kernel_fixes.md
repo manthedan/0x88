@@ -87,8 +87,8 @@ kernels (activations in `[0, 127]`, full-range i8 weights):
   Node): old kernels 395k NPS → shuffle fix 469k (**+19%**) → relaxed dot
   489k (**+24%**). Depth-11 same-process run showed +22%/+33%.
   Raw records:
-  [`reckless_simd_kernel_fixes_node_bench_2026-06-09_depth7-9.json`](./reckless_simd_kernel_fixes_node_bench_2026-06-09_depth7-9.json),
-  [`reckless_simd_kernel_fixes_node_bench_2026-06-09_depth11-12_headtohead.json`](./reckless_simd_kernel_fixes_node_bench_2026-06-09_depth11-12_headtohead.json).
+  local-dev artifact: `.local-dev-artifacts/docs/reckless_simd_kernel_fixes_node_bench_2026-06-09_depth7-9.json`,
+  local-dev artifact: `.local-dev-artifacts/docs/reckless_simd_kernel_fixes_node_bench_2026-06-09_depth11-12_headtohead.json`.
 
 Caveats: Node/V8 on one machine, one-shot mode, single rep per cell. Engine
 NPS at shallow depths sits near the 1 ms UCI timer granularity; prefer the

@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 
 const ROOT = process.cwd();
 const OUT_DIR = path.join(ROOT, '.local_engines', 'reckless-wasm-opt');
-const DEFAULT_REPORT = path.join(ROOT, 'docs', 'reckless_wasm_opt_experiment_2026-06-04.json');
+const DEFAULT_REPORT = path.join(ROOT, '.local-dev-artifacts', 'docs', 'reckless_wasm_opt_experiment_2026-06-04.json');
 
 const INPUTS = [
   { key: 'scalar', path: path.join(ROOT, 'public', 'reckless', 'reckless.wasm'), simd: false },

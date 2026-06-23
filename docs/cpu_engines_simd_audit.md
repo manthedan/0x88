@@ -34,7 +34,7 @@ bugs found. Two notes:
   `INNER_ARCH` reports `wasm-relaxed-simd128` for diagnosability.
 
 Build: `npm run viridithas:build-relaxed-simd-wasi` (new); evidence in
-[`viridithas_simd_kernel_node_bench_2026-06-09_depth7-8.json`](./viridithas_simd_kernel_node_bench_2026-06-09_depth7-8.json)
+local-dev artifact: `.local-dev-artifacts/docs/viridithas_simd_kernel_node_bench_2026-06-09_depth7-8.json`
 via the generic `reckless_wasi_node_bench.mjs` harness (`--wasm` accepts any
 WASI UCI artifact):
 
@@ -73,7 +73,7 @@ vectorized NNUE with zero new kernel code:
   in 40/40 pairs.
 
 Evidence
-([`berserk_simd_emscripten_node_bench_2026-06-09_depth9-11.json`](./berserk_simd_emscripten_node_bench_2026-06-09_depth9-11.json),
+(local-dev artifact: `.local-dev-artifacts/docs/berserk_simd_emscripten_node_bench_2026-06-09_depth9-11.json`,
 new `scripts/emscripten_uci_bench.mjs` suite harness):
 
 - Parity: 40/40 exact for simd128 and relaxed vs scalar at depths 9/11.

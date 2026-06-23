@@ -8,7 +8,7 @@ Section breakdown was generated with:
 npm run reckless:inspect-sections
 ```
 
-Raw report: [`reckless_wasm_section_breakdown_2026-06-04.json`](./reckless_wasm_section_breakdown_2026-06-04.json).
+Raw report: local-dev artifact: `.local-dev-artifacts/docs/reckless_wasm_section_breakdown_2026-06-04.json`.
 
 | Artifact | Total bytes | Code bytes | Data payload bytes | Data payload ratio | Data segments | Largest segment |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -57,7 +57,7 @@ npm run reckless:build-browser-api-simd-external
 
 The first externalized option is `Reckless Full browser API SIMD external NNUE experimental`, using `/reckless/reckless-browser-api-simd128-external.wasm` plus `/reckless/reckless-v60-7f587dfb.nnue`. The embedded SIMD WASI/UCI artifact remains the default because it is faster in corrected benchmarks and is a simpler fallback.
 
-Initial smoke/build evidence: [`reckless_external_nnue_smoke_2026-06-04.json`](./reckless_external_nnue_smoke_2026-06-04.json).
+Initial smoke/build evidence: local-dev artifact: `.local-dev-artifacts/docs/reckless_external_nnue_smoke_2026-06-04.json`.
 
 | Artifact | Bytes | Notes |
 | --- | ---: | --- |
@@ -65,7 +65,7 @@ Initial smoke/build evidence: [`reckless_external_nnue_smoke_2026-06-04.json`](.
 | `reckless-browser-api-simd128-external.wasm` | 1,260,734 | External-NNUE browser API SIMD artifact; `simdOpcodeCount=1279`, `codeBytes=238,447`. |
 | `reckless-v60-7f587dfb.nnue` | 63,266,880 | Separate cacheable full NNUE payload. |
 
-Depth-4 browser smoke on startpos loaded the external NNUE artifact successfully and returned `c2c4` with 210 nodes for both cold and warm runs. A deeper rotated-FEN validation then matched embedded browser API SIMD exactly for best move, score/mate fields, and full PV across 1260/1260 fixed-depth pairs at depths 7/8/9; see [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md) and raw report [`reckless_external_nnue_benchmark_2026-06-04_api_simd_depth7-9.json`](./reckless_external_nnue_benchmark_2026-06-04_api_simd_depth7-9.json). The external path remains experimental because it is a delivery/cache improvement for the browser API path, not a reason to replace the faster default SIMD WASI/UCI path.
+Depth-4 browser smoke on startpos loaded the external NNUE artifact successfully and returned `c2c4` with 210 nodes for both cold and warm runs. A deeper rotated-FEN validation then matched embedded browser API SIMD exactly for best move, score/mate fields, and full PV across 1260/1260 fixed-depth pairs at depths 7/8/9; see [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md) and raw report local-dev artifact: `.local-dev-artifacts/docs/reckless_external_nnue_benchmark_2026-06-04_api_simd_depth7-9.json`. The external path remains experimental because it is a delivery/cache improvement for the browser API path, not a reason to replace the faster default SIMD WASI/UCI path.
 
 ## Delivery notes
 
@@ -73,4 +73,4 @@ Depth-4 browser smoke on startpos loaded the external NNUE artifact successfully
 - Keep generated `.wasm` URLs versioned before using very long cache lifetimes; the local isolated static server uses a shorter cache lifetime for non-`assets/` `.wasm` files to avoid stale rebuilds during experiments.
 - The external variant reduces repeat-update download pressure: a browser that already has the full NNUE cached only needs the ~1.26 MB WASM when browser-API code changes.
 - First-use download bytes remain roughly unchanged versus embedded full artifacts unless the page lazy-loads Reckless only after the user selects it, or serves a smaller model.
-- Local cache probe evidence is saved in [`reckless_external_nnue_cache_probe_2026-06-04.json`](./reckless_external_nnue_cache_probe_2026-06-04.json): on the local static server, the 1.26 MB external WASM fetched in ~4.48 ms with `cache: reload` and ~2.32 ms with `force-cache`; the 63.27 MB NNUE fetched in ~67.51 ms with `reload` and ~49.27 ms with `force-cache`. Treat these as local delivery/cache sanity numbers, not internet download estimates.
+- Local cache probe evidence is saved in local-dev artifact: `.local-dev-artifacts/docs/reckless_external_nnue_cache_probe_2026-06-04.json`: on the local static server, the 1.26 MB external WASM fetched in ~4.48 ms with `cache: reload` and ~2.32 ms with `force-cache`; the 63.27 MB NNUE fetched in ~67.51 ms with `reload` and ~49.27 ms with `force-cache`. Treat these as local delivery/cache sanity numbers, not internet download estimates.

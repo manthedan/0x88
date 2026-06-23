@@ -17,7 +17,7 @@
     "relaxed-simd128": { "artifact": "public/reckless/reckless-relaxed-simd128.wasm", "targetFeatures": ["+simd128", "+relaxed-simd"] }
   },
   "evidence": {
-    "parity": "docs/reckless_simd_kernel_fixes_node_bench_2026-06-09_depth7-9.json (60/60 exact)",
+    "parity": "2026-06-09 node bench, 60/60 exact (raw JSON artifact kept local-dev only)",
     "kernelFixes": "docs/reckless_simd_kernel_fixes.md"
   }
 }

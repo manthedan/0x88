@@ -17,7 +17,7 @@ The harness also has a `Load 20-position rotated FEN suite` preset. Its run orde
 
 Command surface: `/lab/reckless-benchmark.html` after rebuilding browser API artifacts with corrected `new_game` history reset. Full scalar WASI/UCI, Full SIMD WASI/UCI, browser API scalar, and browser API SIMD variants; persistent mode only; 20-position rotated suite; depths 7/8/9; 20 warm rotated passes; clear-hash reset enabled. To avoid long-session browser tab loss, each variant was run in a fresh browser session and the extracted rows were combined.
 
-Raw report: [`reckless_browser_benchmark_2026-06-04_rotated_fen_depth7-9_api_simd_corrected.json`](./reckless_browser_benchmark_2026-06-04_rotated_fen_depth7-9_api_simd_corrected.json).
+Raw report: local-dev artifact: `.local-dev-artifacts/docs/reckless_browser_benchmark_2026-06-04_rotated_fen_depth7-9_api_simd_corrected.json`.
 
 Validation notes:
 
@@ -35,7 +35,7 @@ Validation notes:
 
 Command surface: `/lab/reckless-benchmark.html?external-nnue-api-simd-validation=1` on the isolated static server after `npm run build:client`, with embedded browser API SIMD and external-NNUE browser API SIMD variants. Persistent/browser-API mode only, 20-position rotated suite, depths 7/8/9, 20 warm rotated passes, and clear-hash reset enabled.
 
-Raw report: [`reckless_external_nnue_benchmark_2026-06-04_api_simd_depth7-9.json`](./reckless_external_nnue_benchmark_2026-06-04_api_simd_depth7-9.json). Summary metrics: [`reckless_external_nnue_benchmark_summary_2026-06-04.json`](./reckless_external_nnue_benchmark_summary_2026-06-04.json).
+Raw report: local-dev artifact: `.local-dev-artifacts/docs/reckless_external_nnue_benchmark_2026-06-04_api_simd_depth7-9.json`. Summary metrics: local-dev artifact: `.local-dev-artifacts/docs/reckless_external_nnue_benchmark_summary_2026-06-04.json`.
 
 Validation notes:
 
@@ -62,7 +62,7 @@ Validation notes:
 
 Command surface: `/lab/reckless-benchmark.html` after rebuilding scalar and SIMD browser API artifacts with the corrected direct-API `new_game` implementation. Full scalar WASI/UCI, Full SIMD WASI/UCI, browser API scalar, and browser API SIMD variants; persistent mode only; 20-position rotated suite; depths 7/8/9; one warm rotated pass; clear-hash reset enabled.
 
-Raw report: [`reckless_browser_api_history_reset_smoke_2026-06-04.json`](./reckless_browser_api_history_reset_smoke_2026-06-04.json).
+Raw report: local-dev artifact: `.local-dev-artifacts/docs/reckless_browser_api_history_reset_smoke_2026-06-04.json`.
 
 Validation notes:
 
@@ -80,7 +80,7 @@ Validation notes:
 
 Command surface: `/lab/reckless-benchmark.html` on the isolated static server after `npm run build:client`, with Full scalar WASI/UCI and Full integrated wasm NNUE SIMD WASI/UCI. Persistent mode only, 20-position rotated Ruy Lopez suite, depth budgets 7/8/9, movetime budgets 100/250/500ms, one warm rotated pass, and default-on clear-hash reset.
 
-Raw report: [`reckless_simd_parity_validation_2026-06-04_depth7-9_movetime100-500.json`](./reckless_simd_parity_validation_2026-06-04_depth7-9_movetime100-500.json).
+Raw report: local-dev artifact: `.local-dev-artifacts/docs/reckless_simd_parity_validation_2026-06-04_depth7-9_movetime100-500.json`.
 
 Validation notes:
 
@@ -101,13 +101,13 @@ Validation notes:
 
 Command surface: isolated static server, Full scalar artifact, persistent mode, 20-position Ruy Lopez suite, depth 1, one warm rotated pass, default-on clear-hash reset. This is a harness-validation smoke, not a final performance comparison.
 
-Raw report: [`reckless_browser_benchmark_2026-06-04_rotated_fen_smoke.json`](./reckless_browser_benchmark_2026-06-04_rotated_fen_smoke.json). The report has 40 raw rows and 20 summary rows, with nodes and NPS captured for every position.
+Raw report: local-dev artifact: `.local-dev-artifacts/docs/reckless_browser_benchmark_2026-06-04_rotated_fen_smoke.json`. The report has 40 raw rows and 20 summary rows, with nodes and NPS captured for every position.
 
 ## 2026-06-04 rotated-FEN browser API + integrated SIMD NNUE depth 7/8/9
 
 Command surface: `/lab/reckless-benchmark.html` on the isolated static server (`crossOriginIsolated=true`, `SharedArrayBuffer=true`) after `npm run build:client`, with Full scalar WASI/UCI, Full integrated wasm NNUE SIMD WASI/UCI, and Full browser API artifacts. Persistent mode only, 20-position rotated Ruy Lopez suite, depth budgets 7/8/9, 20 warm rotated passes, and default-on clear-hash reset. The table aggregates all warm rows for each variant/budget: 20 positions × 20 warm passes = 400 warm rows per line.
 
-Raw report: [`reckless_browser_benchmark_2026-06-04_rotated_fen_depth7-9_api_simd.json`](./reckless_browser_benchmark_2026-06-04_rotated_fen_depth7-9_api_simd.json).
+Raw report: local-dev artifact: `.local-dev-artifacts/docs/reckless_browser_benchmark_2026-06-04_rotated_fen_depth7-9_api_simd.json`.
 
 | Budget | Variant | Runtime | Warm avg ms | Warm median ms | Avg nodes | Avg NPS | Wall ratio vs scalar | NPS ratio vs scalar |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -131,7 +131,7 @@ Notes:
 
 Command surface: `/lab/reckless-benchmark.html` on the isolated static server (`crossOriginIsolated=true`, `SharedArrayBuffer=true`) after `npm run build:client`, with Full scalar and Full `+simd128` artifacts, persistent and one-shot modes, depth budgets 7/8/9, 20 warm repeats plus one cold run, and the default-on persistent clear-hash reset enabled. Positions: `startpos`, an early Italian-like position, and a middlegame position. The table below aggregates warm averages across all three positions; the raw report has per-position rows.
 
-Raw report: [`reckless_browser_benchmark_2026-06-04_clean_depth7-9.json`](./reckless_browser_benchmark_2026-06-04_clean_depth7-9.json).
+Raw report: local-dev artifact: `.local-dev-artifacts/docs/reckless_browser_benchmark_2026-06-04_clean_depth7-9.json`.
 
 | Budget | Mode | Variant | Warm avg ms | Avg NPS | Wall ratio vs scalar | NPS ratio vs scalar |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
@@ -158,7 +158,7 @@ Notes:
 
 Command surface: `/lab/reckless-benchmark.html` on the isolated static server (`crossOriginIsolated=true`, `SharedArrayBuffer=true`) with Full scalar and Full `+simd128` artifacts, persistent and one-shot modes, `startpos`, depth budgets 7/8/9, 20 warm repeats plus one cold run.
 
-Raw report: [`reckless_browser_benchmark_2026-06-04_depth7-9.json`](./reckless_browser_benchmark_2026-06-04_depth7-9.json).
+Raw report: local-dev artifact: `.local-dev-artifacts/docs/reckless_browser_benchmark_2026-06-04_depth7-9.json`.
 
 | Variant | Mode | Budget | Runs | Cold ms | Warm avg ms | Warm min ms | Warm max ms | Avg NPS |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |

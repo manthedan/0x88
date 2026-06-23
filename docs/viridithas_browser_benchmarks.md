@@ -2,7 +2,7 @@
 
 ## 2026-06-04 rotated-FEN WASI/browser comparison
 
-Raw report: [`viridithas_reckless_browser_benchmark_2026-06-04_rotated_depth6-10_movetime100-500.json`](./viridithas_reckless_browser_benchmark_2026-06-04_rotated_depth6-10_movetime100-500.json)
+Raw report: local-dev artifact: `.local-dev-artifacts/docs/viridithas_reckless_browser_benchmark_2026-06-04_rotated_depth6-10_movetime100-500.json`
 
 Run configuration:
 
@@ -58,7 +58,7 @@ Takeaways:
 
 ## 2026-06-04 Viridithas scalar vs SIMD experiment
 
-Raw report: [`viridithas_simd_browser_benchmark_2026-06-04_rotated_depth6-10_movetime100-500.json`](./viridithas_simd_browser_benchmark_2026-06-04_rotated_depth6-10_movetime100-500.json)
+Raw report: local-dev artifact: `.local-dev-artifacts/docs/viridithas_simd_browser_benchmark_2026-06-04_rotated_depth6-10_movetime100-500.json`
 
 This run used the same 20-FEN suite, budgets, warm repeats, and one-shot mode, comparing only:
 
@@ -87,7 +87,7 @@ Takeaways:
 
 ## 2026-06-05 Viridithas SIMD batch one-process probe
 
-Raw report: [`viridithas_batch_browser_benchmark_2026-06-05_rotated_depth6-10_movetime100-500.json`](./viridithas_batch_browser_benchmark_2026-06-05_rotated_depth6-10_movetime100-500.json)
+Raw report: local-dev artifact: `.local-dev-artifacts/docs/viridithas_batch_browser_benchmark_2026-06-05_rotated_depth6-10_movetime100-500.json`
 
 This run used the same 20-FEN suite, budgets, and warm repeats as the prior runs, but selected only **Viridithas SIMD experimental** in the new benchmark-only **batch one-process** mode. Batch mode feeds the full 20-position sweep to one WASI invocation, with `ucinewgame` before each search when hash clearing is enabled. It is not interactive persistence, but it estimates the upside from paying wasm startup and NNUE decompression once per sweep instead of once per position.
 
@@ -110,7 +110,7 @@ Takeaways:
 
 ## 2026-06-05 Viridithas SIMD persistent browser smoke
 
-Raw smoke report: [`viridithas_persistent_browser_smoke_2026-06-05_startpos_depth6-8.json`](./viridithas_persistent_browser_smoke_2026-06-05_startpos_depth6-8.json)
+Raw smoke report: local-dev artifact: `.local-dev-artifacts/docs/viridithas_persistent_browser_smoke_2026-06-05_startpos_depth6-8.json`
 
 After the batch probe, the wasm patch was extended so non-argv wasm runs read stdin synchronously instead of relying on Viridithas' native stdin-reader thread. The existing shared-stdin WASI worker can now keep a Viridithas process resident in browser contexts where `SharedArrayBuffer` and `crossOriginIsolated` are available.
 

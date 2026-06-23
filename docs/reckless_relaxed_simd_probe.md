@@ -53,7 +53,7 @@ Inspection with `node scripts/inspect_wasm_simd.mjs public/reckless/reckless-sim
 - relaxed SIMD: 64,579,272 bytes; 1,554 SIMD opcodes
 - relaxed top ops include `f32x4.relaxed_madd:36`, `f32x4.relaxed_max:21`, and `f32x4.relaxed_min:20`
 
-A very small browser smoke on `http://localhost:5205/lab/reckless-benchmark.html` compared persistent startpos depth 7 with 5 warm repeats. Raw report: [`reckless_relaxed_simd_smoke_2026-06-05_startpos_depth7.json`](./reckless_relaxed_simd_smoke_2026-06-05_startpos_depth7.json).
+A very small browser smoke on `http://localhost:5205/lab/reckless-benchmark.html` compared persistent startpos depth 7 with 5 warm repeats. Raw report: local-dev artifact: `.local-dev-artifacts/docs/reckless_relaxed_simd_smoke_2026-06-05_startpos_depth7.json`.
 
 - standard SIMD warm wall avg: 3.577 ms; avg NPS: 844,531
 - relaxed SIMD warm wall avg: 3.643 ms; avg NPS: 887,411
@@ -65,7 +65,7 @@ This smoke is not sufficient for promotion; it mainly proves the artifact compil
 
 A remote Crabbox run on `yukon` used HeadlessChrome 148 on Linux x86_64. Note: `yukon` reported an AMD Ryzen 9 3900XT rather than Intel, so this is an x86_64/Chrome data point, not an Intel-specific one.
 
-Raw report: [`reckless_relaxed_simd_yukon_chromium_2026-06-05_depth7-8_warm10.json`](./reckless_relaxed_simd_yukon_chromium_2026-06-05_depth7-8_warm10.json). Summary: [`reckless_relaxed_simd_yukon_chromium_2026-06-05_depth7-8_warm10_summary.json`](./reckless_relaxed_simd_yukon_chromium_2026-06-05_depth7-8_warm10_summary.json).
+Raw report: local-dev artifact: `.local-dev-artifacts/docs/reckless_relaxed_simd_yukon_chromium_2026-06-05_depth7-8_warm10.json`. Summary: local-dev artifact: `.local-dev-artifacts/docs/reckless_relaxed_simd_yukon_chromium_2026-06-05_depth7-8_warm10_summary.json`.
 
 Configuration:
 
@@ -89,7 +89,7 @@ Interpretation: the x86_64 browser probe supports parity, but not promotion. Rel
 
 A local Apple Silicon run used HeadlessChrome 149 on macOS. `navigator.userAgentData` reported `architecture: "arm"`, `bitness: "64"`; the legacy UA string still says `Macintosh; Intel Mac OS X`, which is Chromium compatibility text.
 
-Summary: [`reckless_relaxed_simd_mchip_chromium_2026-06-05_depth7-8_warm10_summary.json`](./reckless_relaxed_simd_mchip_chromium_2026-06-05_depth7-8_warm10_summary.json).
+Summary: local-dev artifact: `.local-dev-artifacts/docs/reckless_relaxed_simd_mchip_chromium_2026-06-05_depth7-8_warm10_summary.json`.
 
 Configuration matched the Yukon reduced run: persistent mode only, 20-position rotated FEN suite, depths 7 and 8, 10 warm repeats, hash clearing enabled.
 
