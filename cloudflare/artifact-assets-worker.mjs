@@ -2,7 +2,7 @@ const DEFAULT_APP_ORIGIN = 'https://0x88.app';
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 const RELEASE_CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate=86400';
 const CHANNEL_CACHE_CONTROL = 'no-cache';
-const LOGICAL_ALIAS_CACHE_CONTROL = 'no-cache';
+const LOGICAL_ALIAS_CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate=86400';
 const DEFAULT_CHANNEL_KEY = 'channels/stable.json';
 const EXPOSED_HEADERS = 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, Content-Range, Accept-Ranges';
 

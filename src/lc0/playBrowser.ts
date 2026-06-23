@@ -347,6 +347,24 @@ function ctxSearchProgressText(label: string, progress: { completedVisits?: numb
   return `${label}: ${completed}/${requested} visits${pct} · best ${progress.move ?? '—'} · Q ${progress.value.toFixed(3)}${speed}`;
 }
 
+function ctxShowSearchProgress(label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number }): void {
+  const completed = progress.completedVisits ?? progress.visits;
+  const requested = Math.max(1, progress.requestedVisits ?? progress.visits);
+  const container = el('dlProgress');
+  const row = document.createElement('div');
+  row.className = 'loading-progress-row';
+  const bar = document.createElement('progress');
+  bar.max = requested;
+  bar.value = Math.max(0, Math.min(requested, completed));
+  const text = document.createElement('div');
+  text.className = 'dl-label small';
+  text.textContent = ctxSearchProgressText(label, progress);
+  row.append(bar, text);
+  container.replaceChildren(row);
+  container.hidden = false;
+  ctxSetEngineNote(text.textContent);
+}
+
 function ctxShowDownloadProgress(label: string, loadedBytes?: number, totalBytes?: number, phase = 'Downloading'): void {
   renderLoadingProgress(el('dlProgress'), { label, phase, loadedBytes, totalBytes });
 }
@@ -437,6 +455,28 @@ function ctxCpuEngineFor(ctx: PlayContext, option: PlayEngineOption): Promise<Cp
   return created;
 }
 
+function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal): boolean {
+  const searcher = bigNetSearchers.lqo;
+  if (searcher.loaded) return false;
+  const label = `Lc0 ${searcher.config.name}`;
+  ctxShowDownloadProgress(label, undefined, undefined, 'Loading in background');
+  searcher.onDownloadProgress = (loaded, total) => {
+    if (!signal.aborted && !ctxIsDisposed(ctx)) ctxShowDownloadProgress(label, loaded, total);
+  };
+  void searcher.init({ evalCacheEntries: 2048 }).then(() => {
+    if (signal.aborted || ctxIsDisposed(ctx)) return;
+    if (ctx.engineThinking) return;
+    ctxHideDownloadProgress();
+    ctxSetEngineNote('LQO model ready for post-book search.');
+  }).catch((error: Error) => {
+    if (signal.aborted || ctxIsDisposed(ctx)) return;
+    if (ctx.engineThinking) return;
+    ctxHideDownloadProgress();
+    ctxSetEngineNote(`LQO background load failed: ${error.message}`, true);
+  });
+  return true;
+}
+
 async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Promise<string | null> {
   const option = ctxSelectedEngine(ctx);
   const level = ctxSelectedLevel();
@@ -446,7 +486,8 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     if (ctx.humanColor === 'w') {
       const bookMove = lqoBlackBookMove(ctx.board, ctx.moves.length, historyUcis);
       if (bookMove) {
-        ctxSetEngineNote(`LQO opening book: ${bookMove}`);
+        const preloading = ctxPreloadLqoAfterBookMove(ctx, signal);
+        ctxSetEngineNote(`LQO opening book: ${bookMove}${preloading ? ' · loading model in background' : ''}`);
         return bookMove;
       }
     } else if (ctx.moves.length === 0) {
@@ -474,7 +515,8 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     } else {
       const bookMove = lqoWhiteBookMove(ctx.board, ctx.moves.length, historyUcis);
       if (bookMove) {
-        ctxSetEngineNote(`LQO opening book: ${bookMove}`);
+        const preloading = ctxPreloadLqoAfterBookMove(ctx, signal);
+        ctxSetEngineNote(`LQO opening book: ${bookMove}${preloading ? ' · loading model in background' : ''}`);
         return bookMove;
       }
     }
@@ -493,18 +535,22 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
   }
   if (option.family === 'lc0' && option.variant === 'small') {
     const searcher = await ctxEnsureLc0Small(ctx);
-    const result = await searcher.search({ positions: ctx.positions }, {
-      visits: visitsOrDepth,
-      signal,
-      yieldEveryMs: 16,
-      reuseTree: true,
-      drawScore: PLAY_DRAW_SCORE,
-      searchContemptLimit: PLAY_SEARCH_CONTEMPT_LIMIT,
-      onProgress: (progress) => {
-        if (!signal.aborted) ctxSetEngineNote(ctxSearchProgressText('Lc0 search', progress));
-      },
-    });
-    return result.move ?? null;
+    try {
+      const result = await searcher.search({ positions: ctx.positions }, {
+        visits: visitsOrDepth,
+        signal,
+        yieldEveryMs: 16,
+        reuseTree: true,
+        drawScore: PLAY_DRAW_SCORE,
+        searchContemptLimit: PLAY_SEARCH_CONTEMPT_LIMIT,
+        onProgress: (progress) => {
+          if (!signal.aborted) ctxShowSearchProgress('Lc0 search', progress);
+        },
+      });
+      return result.move ?? null;
+    } finally {
+      ctxHideDownloadProgress();
+    }
   }
   if (option.family === 'lc0') {
     const searcher = bigNetSearchers[option.variant as BigNetKey];
@@ -525,7 +571,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
         searchContemptLimit: lqoOptions?.searchContemptLimit ?? PLAY_SEARCH_CONTEMPT_LIMIT,
         signal,
         onProgress: (progress) => {
-          if (!signal.aborted) ctxSetEngineNote(ctxSearchProgressText(`Lc0 ${searcher.config.name} search`, progress));
+          if (!signal.aborted) ctxShowSearchProgress(`Lc0 ${searcher.config.name} search`, progress);
         },
         ...(lqoOptions ?? {}),
       });

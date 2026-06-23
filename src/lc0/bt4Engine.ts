@@ -23,6 +23,8 @@ export interface BigNetConfig {
   recommendedPipelineDepth: number;
   /** Short export description for the one-time load warning. */
   exportNote: string;
+  /** Fetch through the worker so the UI can show byte-level download progress. */
+  streamDownloadProgress?: boolean;
   /**
    * Play-page visit ladder when running on the wasm-CPU fallback (per-level,
    * 5 entries). Sized from measured wasm eval latency (lqo ~210ms/eval,
@@ -69,6 +71,7 @@ export const LQO_NET: BigNetConfig = {
   recommendedBatchSize: 8,
   recommendedPipelineDepth: 1,
   exportNote: 'LeelaQueenOdds v2 f16 QDQ int8-weight export (dynamic batch)',
+  streamDownloadProgress: true,
   wasmLevels: [4, 8, 16, 32, 64],
 };
 
@@ -359,10 +362,10 @@ export class Bt4WorkerSearcher {
       // `backend` and scale visit budgets via config.wasmLevels. An explicit
       // ?ortEp=wasm page override forces the CPU path end to end.
       const ep = requestedOrtExecutionProvider() === 'wasm' ? 'wasm' : 'auto';
-      // Keep large nets on ORT's URL-loading path. Streaming progress would
-      // force a full JS ArrayBuffer copy before ORT creates the session, which
-      // is too memory-heavy for 160–350MB models.
-      const ready = await this.post<{ backend: string }>({ type: 'init', modelUrl: this.config.modelUrl, ep, cacheModel: false, evalCacheEntries, reportDownloadProgress: false });
+      // Keep the largest nets on ORT's URL-loading path. Streaming progress
+      // forces a JS ArrayBuffer copy before ORT creates the session, so only
+      // smaller opt-in big nets like LQO use it.
+      const ready = await this.post<{ backend: string }>({ type: 'init', modelUrl: this.config.modelUrl, ep, cacheModel: false, evalCacheEntries, reportDownloadProgress: this.config.streamDownloadProgress === true });
       this.ready = true;
       this.configuredEvalCacheEntries = evalCacheEntries;
       this.backend = ready.backend;

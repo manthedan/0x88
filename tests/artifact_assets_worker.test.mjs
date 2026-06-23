@@ -222,7 +222,7 @@ test('artifact assets worker preserves percent-encoded R2 keys', async () => {
   assert.equal(await text(response), 'abcdefghijklmnopqrstuvwxyz');
 });
 
-test('artifact assets worker serves stable logical asset paths through the channel release manifest without immutable caching', async () => {
+test('artifact assets worker serves stable logical asset paths through the channel release manifest with short caching', async () => {
   const channelBody = new TextEncoder().encode(JSON.stringify({ releaseManifestUrl: '/releases/stable-test.json' }));
   const releaseBody = new TextEncoder().encode(JSON.stringify({
     artifacts: [{
@@ -253,7 +253,7 @@ test('artifact assets worker serves stable logical asset paths through the chann
   };
   const response = await handleArtifactRequest(new Request('https://assets.example/stockfish/stockfish-18-lite.js'), env);
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get('Cache-Control'), 'no-cache');
+  assert.equal(response.headers.get('Cache-Control'), 'public, max-age=300, stale-while-revalidate=86400');
   assert.equal(response.headers.get('X-Artifact-Content-Length'), String(BODY.byteLength));
   assert.equal(response.headers.get('Content-Type'), 'text/javascript; charset=utf-8');
   assert.equal(await text(response), 'abcdefghijklmnopqrstuvwxyz');
