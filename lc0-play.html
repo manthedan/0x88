@@ -3,29 +3,26 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Play chess vs an engine — in your browser</title>
+<title>0x88 Chess — play chess vs an engine in your browser</title>
+<script>(()=>{try{var t=localStorage.getItem('0x88-theme');if(t==='dark')document.documentElement.dataset.theme='dark';else if(t==='light')document.documentElement.dataset.theme='light';var b=localStorage.getItem('0x88-board');if(['night','blue','green'].includes(b))document.documentElement.dataset.board=b;}catch(e){}})();</script>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <meta name="description" content="Play chess against Leela Chess Zero, Stockfish, and four more engines running entirely in your browser. Five strength levels, takebacks, and PGN export." />
 <link rel="stylesheet" href="/chessground.base.css" />
 <link rel="stylesheet" href="/chessground.brown.css" />
 <link rel="stylesheet" href="/chessground.cburnett.css" />
+<link rel="stylesheet" href="/app-shell.css" />
 <style>
-:root{--bg:#f3eee4;--panel:#fbf8f0;--ink:#1f1c17;--muted:#6e665c;--rule:#d8cfbe;--accent:#5a6e2a;--soft:#e8efd3;--warn:#a5461b;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;--sans:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans)}
-header{padding:12px 20px;border-bottom:1px solid var(--rule);background:var(--panel);display:flex;align-items:baseline;gap:16px}
-header h1{margin:0;font-size:19px}header nav a{color:var(--muted);text-decoration:none;font-size:13px;margin-right:12px}header nav a.active{color:var(--accent);font-weight:700}
+/* Page-specific layout only; tokens, base typography, header, and footer
+   come from app-shell.css. */
 main{display:grid;grid-template-columns:minmax(320px,620px) minmax(300px,400px);gap:20px;align-items:start;justify-content:center;padding:18px}
 .panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:14px}
-.board-shell{width:100%;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 14px 38px -26px #000}
+.board-shell{width:100%;aspect-ratio:1}#ground{width:100%;height:100%;border-radius:6px;overflow:hidden;box-shadow:0 14px 38px -26px #000;background:var(--board-dark)}
 .cg-wrap{width:100%!important;height:100%!important}
 #status{margin-top:12px;padding:10px 12px;border:1px solid var(--rule);border-radius:6px;background:var(--soft);font-size:14px}
 #status.over{border-color:var(--accent);font-weight:700}
 h2{font-size:13px;margin:16px 0 0;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
 .field{display:grid;gap:3px;margin-top:10px}.field label{font-size:11px;color:var(--muted)}
-select,button,input{font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink)}
 select,input{width:100%}
-button{cursor:pointer}button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:700}
-button:disabled{opacity:.55;cursor:not-allowed}
 button.danger{background:var(--warn);border-color:var(--warn);color:#fff;font-weight:700}
 .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.row button{flex:1 1 auto}
 .small{font-size:12px;color:var(--muted);line-height:1.5}
@@ -47,11 +44,31 @@ button.danger{background:var(--warn);border-color:var(--warn);color:#fff;font-we
 </style>
 </head>
 <body>
-<header>
-  <h1>Play</h1>
-  <nav><a href="/">Home</a><a class="active" href="/lc0-play.html">Play</a><a href="/lc0-analysis.html">Analysis</a><a href="/lc0-arena.html">Arena</a></nav>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="0x88.app — home">
+      <span class="brand-mark" aria-hidden="true">0x88</span>
+      <span class="brand-name">0x88.app</span>
+    </a>
+    <span class="page-title">Play</span>
+    <nav class="primary" aria-label="Primary">
+      <a href="/">Home</a>
+      <a class="active" href="/lc0-play.html">Play</a>
+      <a href="/lc0-analysis.html">Analysis</a>
+      <a href="/lc0-arena.html">Arena</a>
+      <a href="/docs.html">Docs</a>
+    </nav>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle night mode">&#9790;</button>
+    <select id="boardStyleSelect" class="board-style-select" aria-label="Board style" title="Board style">
+      <option value="brown">Brown</option>
+      <option value="night">Night</option>
+      <option value="blue">Blue</option>
+      <option value="green">Green</option>
+    </select>
+  </div>
 </header>
-<main>
+<main id="main">
   <section class="panel" aria-label="Board">
     <div class="board-shell"><div id="ground"></div></div>
     <div id="status" aria-live="polite">Loading…</div>
@@ -110,6 +127,18 @@ button.danger{background:var(--warn);border-color:var(--warn);color:#fff;font-we
     <p class="small">Engines run entirely in your browser — nothing is sent to a server. The first move against a new engine downloads it (a few MB for CPU engines, up to a few hundred MB for the big Lc0 nets).</p>
   </section>
 </main>
+<footer class="site-footer">
+  <div class="wrap">
+    <span>Engines run entirely in your browser. Nothing is sent to a server.</span>
+    <span class="footer-links">
+      <a href="/">Home</a>
+      <a href="/lc0-analysis.html">Analysis</a>
+      <a href="/lc0-arena.html">Arena</a>
+      <code>0x88.app · v0</code>
+    </span>
+  </div>
+</footer>
 <script type="module" src="/src/lc0/playBrowser.ts"></script>
+<script src="/theme.js"></script>
 </body>
 </html>

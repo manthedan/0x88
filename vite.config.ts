@@ -7,7 +7,7 @@ const crossOriginIsolationHeaders = {
 
 // The deployed product is the first set; the lab/benchmark pages are only
 // built locally (BUILD_SCOPE=product, used by build:netlify, omits them).
-const productPages = ['index.html', 'lc0-play.html', 'lc0-analysis.html', 'lc0-arena.html', 'lc0-policy-only.html'];
+const productPages = ['index.html', 'lc0-play.html', 'lc0-analysis.html', 'lc0-arena.html', 'lc0-policy-only.html', 'docs.html'];
 const labPages = ['lab/lc0-maia3-smoke.html', 'lab/berserk-smoke.html', 'lab/plentychess-smoke.html', 'lab/monty-smoke.html', 'lab/reckless-benchmark.html'];
 
 export default defineConfig({

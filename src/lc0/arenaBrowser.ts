@@ -34,7 +34,7 @@ import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyCh
 import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetLoadWarning, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig, type Bt4SearchResult } from './bt4Engine.ts';
 import { TournamentStandings, buildSchedule, tournamentPairings, type ScheduledGame, type TournamentMode } from './tournament.ts';
 import { hBarChartSvg, lineChartSvg, type ChartSeries } from './charts.ts';
-import { defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, lc0EngineLabel, lc0VariantOptions, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 
@@ -132,9 +132,9 @@ interface EngineOutputSnapshot {
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
-const MODEL_URL = params.get('model') ?? DEFAULT_MODEL_URL;
+const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
-const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
+const PACK_URL = isV0DeployProfile() ? DEFAULT_PACK_URL : resolvePublicAssetUrl(params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL);
 const DEFAULT_TINY_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
 const DEFAULT_TINY_META_URL = '/models/bt4_anneal_muon_best.meta.json';
 const DEFAULT_TINY_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
@@ -329,6 +329,7 @@ function tinyHistoryFens(positions: BoardState[]): string[] {
 }
 
 function normalizeLc0Runtime(value: string | null): Lc0ArenaRuntime {
+  if (isV0DeployProfile()) return 'onnx';
   const raw = (value ?? '').toLowerCase();
   if (raw === LC0_WHOLE_MODEL_WEBGPU_RUNTIME || raw === 'tvm' + 'js-webgpu' || raw === 'lc0-' + 'tvm' + 'js-webgpu') return LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
   if (raw === 'hybrid' || raw === 'lc0web' || raw === 'hybrid-ort-heads' || raw === 'wgsl-encoder') return 'hybrid-ort-heads';
@@ -337,6 +338,7 @@ function normalizeLc0Runtime(value: string | null): Lc0ArenaRuntime {
 }
 
 function initialLc0Runtime(): Lc0ArenaRuntime {
+  if (isV0DeployProfile()) return 'onnx';
   if (params.get('headBackend') === 'wgsl' || params.get('hybridHeads') === 'wgsl') return 'hybrid-wgsl-heads';
   return normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime'));
 }
@@ -346,6 +348,7 @@ function selectedLc0Runtime(): Lc0ArenaRuntime {
 }
 
 function lc0WholeModelRuntimeRequested(): boolean {
+  if (isV0DeployProfile()) return false;
   return normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime')) === LC0_WHOLE_MODEL_WEBGPU_RUNTIME
     || params.get('enableWholeModelWebgpu') === '1'
     || params.get('enableTvm' + 'js') === '1';
@@ -367,6 +370,7 @@ function normalizeLc0Preset(value: string | null): Lc0ArenaPreset {
 }
 
 function inferredLc0Preset(): Lc0ArenaPreset {
+  if (isV0DeployProfile()) return 'stable';
   const explicit = params.get('lc0Preset') ?? params.get('preset');
   if (explicit) return normalizeLc0Preset(explicit);
   const requestedRuntime = normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime'));
@@ -558,6 +562,7 @@ function applyArenaQueryParams(): void {
     seatRows[1].strength = Number(params.get('opponentStrength') ?? strengthMeta(opponentFamily).def);
     clampStrength(seatRows[1]);
   }
+  normalizeSeatRowsForDeploy();
 
   inputEl('gamesInput').value = String(intParam('gamesPerOpening', intParam('games', Number(inputEl('gamesInput').value) || 2, 1, 20), 1, 20));
   inputEl('delayInput').value = String(intParam('delayMs', intParam('delay', Number(inputEl('delayInput').value) || 0, 0, 3000), 0, 3000));
@@ -1000,6 +1005,7 @@ function bigNetUnavailableText(config: BigNetConfig): string {
 }
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
+  if (isV0DeployProfile() && !['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'].includes(family)) return [];
   if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync()).map((option) => {
     if (!isLc0BigNetVariant(option.value)) return option;
     const config = BIG_NETS[option.value];
@@ -1038,7 +1044,8 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const suffix = unsupportedReason ? ` (${unsupportedReason})` : status === 'missing' ? ' (asset missing)' : needsGeneratedAsset && status !== 'present' ? ' (checking asset)' : '';
     return { value: v.key, label: `${v.label}${suffix}`, disabled };
   });
-  return availableRecklessVariants().map((v) => {
+  const recklessVariants = availableRecklessVariants().filter((v) => !isV0DeployProfile() || ['full', 'simd', 'relaxed-simd'].includes(v.key));
+  return recklessVariants.map((v) => {
     const status = recklessVariantAssetStatus(v);
     const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
     const suffix = unsupported ? ' (unsupported by this browser)' : status === 'missing' ? ' (asset missing)' : '';
@@ -1049,6 +1056,14 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
 function clampStrength(row: EngineRow): void {
   const meta = strengthMeta(row.family);
   row.strength = Math.max(meta.min, Math.min(meta.max, Math.floor(Number(row.strength) || meta.def)));
+}
+
+function normalizeSeatRowForDeploy(index: number): void {
+  seatRows[index] = normalizeDeployEngineRow(seatRows[index], 'arena', index);
+}
+
+function normalizeSeatRowsForDeploy(): void {
+  for (let index = 0; index < seatRows.length; index++) normalizeSeatRowForDeploy(index);
 }
 
 function rowLabel(row: EngineRow): string {
@@ -1103,6 +1118,7 @@ function syncSeatRowsFromDom(): void {
     const strength = host.querySelector<HTMLInputElement>(`.seat-strength[data-seat="${index}"]`)?.value;
     if (strength != null) seatRows[index].strength = Number(strength);
     clampStrength(seatRows[index]);
+    normalizeSeatRowForDeploy(index);
   }
 }
 
@@ -1855,6 +1871,7 @@ function refreshStockfishControls(): void {
 // Lc0 big nets are WebGPU-only and locally staged; disable/downgrade them
 // when WebGPU is unusable or their ONNX asset is missing.
 async function refreshBt4Availability(): Promise<void> {
+  if (isV0DeployProfile()) return;
   await Promise.all([
     probeBt4Support(),
     checkBigNetAsset(BIG_NETS.bt4, renderSeatSelectors),
@@ -1870,6 +1887,12 @@ async function refreshBt4Availability(): Promise<void> {
 
 async function renderRuntimeBadge(): Promise<void> {
   const badge = el('runtimeBadge');
+  if (isV0DeployProfile()) {
+    badge.textContent = 'Runtime: v0 deploy · Lc0 small + Stockfish Lite';
+    badge.classList.add('ready');
+    badge.classList.remove('warn');
+    return;
+  }
   try {
     const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
     runtimeIsolation = diag.crossOriginIsolated === true;
@@ -3008,6 +3031,7 @@ function wireEvents() {
       row.strength = Number(target.value);
       clampStrength(row);
     }
+    normalizeSeatRowForDeploy(seat);
     for (const key of ['bt4', 't3'] as const) if (!activeSeatRows().some((r) => r.family === 'lc0' && r.variant === key)) bigNetSearchers[key].dispose();
     buildEngines();
     populateSeats();
@@ -3082,7 +3106,9 @@ function wireEvents() {
 }
 
 async function init() {
-  REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
+  if (!isV0DeployProfile()) {
+    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
+  }
   REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, renderRecklessRuntimeInfo);
   REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, renderRecklessRuntimeInfo);
   REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, renderRecklessRuntimeInfo);
@@ -3090,7 +3116,7 @@ async function init() {
   installRuntimeAuditPanel();
   installExperimentalLc0RuntimeOption();
   selectEl('lc0RuntimeSelect').value = initialLc0Runtime();
-  refreshRecklessVariantUi();
+  if (!isV0DeployProfile()) refreshRecklessVariantUi();
   refreshViridithasVariantUi();
   refreshBerserkVariantUi();
   refreshPlentyChessVariantUi();
@@ -3100,7 +3126,7 @@ async function init() {
   selectEl('plentychessVariantSelect').value = REQUESTED_PLENTYCHESS_VARIANT.key;
   applyArenaQueryParams();
   applyLc0Preset(inferredLc0Preset());
-  await ensureSelectedRecklessAssetsAvailable();
+  if (!isV0DeployProfile()) await ensureSelectedRecklessAssetsAvailable();
   renderRecklessRuntimeInfo();
   renderViridithasRuntimeInfo();
   renderBerserkRuntimeInfo();
@@ -3109,11 +3135,11 @@ async function init() {
   inputEl('stockfishThreadsInput').value = String(Math.max(0, Math.min(32, Math.floor(Number(params.get('sfThreads') ?? '1') || 0))));
   refreshStockfishControls();
   void renderRuntimeBadge();
-  await refreshTinyHybridManifestStatus();
+  if (!isV0DeployProfile()) await refreshTinyHybridManifestStatus();
   buildEngines();
   populateSeats();
-  void refreshBt4Availability();
-  void probeEngineLogos();
+  if (!isV0DeployProfile()) void refreshBt4Availability();
+  if (!isV0DeployProfile()) void probeEngineLogos();
   wireEvents();
   refreshBudgetControls();
   refreshOpeningPreview();

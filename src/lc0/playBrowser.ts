@@ -10,7 +10,6 @@ import { gameTreeToPgn } from '../chess/pgn.ts';
 import { GameTree } from './gameTree.ts';
 import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
-import { sampleHumanMove } from './humanSampling.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Maia3BrowserEvaluator, MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle } from './maia3.ts';
@@ -27,12 +26,14 @@ import type { PlentyChessEngine } from './plentychessEngine.ts';
 import { defaultPlentyChessVariantKey, plentyChessVariantByKey, resolveDefaultPlentyChessVariantAssetFallback } from './plentychessVariants.ts';
 import { createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine } from './engineProvision.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { isV0DeployProfile } from './engineCatalog.ts';
+import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
-const MODEL_URL = params.get('model') ?? DEFAULT_MODEL_URL;
+const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
 
-type PlayFamily = 'maia' | 'maia3' | 'lc0' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
+type PlayFamily = 'maia3' | 'lc0' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
 
 interface PlayEngineOption {
   id: string;
@@ -43,12 +44,7 @@ interface PlayEngineOption {
   group: 'human' | 'odds' | 'engine';
 }
 
-const ENGINE_OPTIONS: PlayEngineOption[] = [
-  { id: 'maia-1100', label: 'Maia 1100', family: 'maia', variant: '1100', group: 'human' },
-  { id: 'maia-1300', label: 'Maia 1300', family: 'maia', variant: '1300', group: 'human' },
-  { id: 'maia-1500', label: 'Maia 1500', family: 'maia', variant: '1500', group: 'human' },
-  { id: 'maia-1700', label: 'Maia 1700', family: 'maia', variant: '1700', group: 'human' },
-  { id: 'maia-1900', label: 'Maia 1900', family: 'maia', variant: '1900', group: 'human' },
+const ALL_ENGINE_OPTIONS: PlayEngineOption[] = [
   { id: 'maia3', label: 'Maia3 · Elo-conditioned human model', family: 'maia3', variant: 'maia3', group: 'human' },
   { id: 'leela-queen-odds', label: 'Leela Queen Odds', family: 'lc0', variant: 'lqo', group: 'odds' },
   { id: 'sf-lite', label: 'Stockfish Lite', family: 'sf', variant: 'lite', group: 'engine' },
@@ -61,6 +57,9 @@ const ENGINE_OPTIONS: PlayEngineOption[] = [
   { id: 'berserk', label: 'Berserk', family: 'berserk', variant: 'default', group: 'engine' },
   { id: 'plentychess', label: 'PlentyChess', family: 'plentychess', variant: 'default', group: 'engine' },
 ];
+const ENGINE_OPTIONS: PlayEngineOption[] = isV0DeployProfile()
+  ? ALL_ENGINE_OPTIONS.filter((option) => option.family === 'maia3' || option.id === 'leela-queen-odds' || option.id === 'sf-lite' || option.id === 'lc0-small' || option.id === 'reckless' || option.id === 'berserk' || option.id === 'viridithas' || option.id === 'plentychess')
+  : ALL_ENGINE_OPTIONS;
 
 const LEVEL_COUNT = 5;
 /** Search-effort labels. Deliberately not "Beginner": engine play is strong at any setting. */
@@ -75,7 +74,7 @@ const SF_LEVELS = [
 ] as const;
 
 /** Per-family strength ladders indexed by level (0-4): visits for lc0, depth otherwise. */
-const LEVELS: Record<Exclude<PlayFamily, 'maia' | 'maia3' | 'sf'>, number[]> = {
+const LEVELS: Record<Exclude<PlayFamily, 'maia3' | 'sf'>, number[]> = {
   lc0: [8, 32, 100, 400, 1600],
   reckless: [2, 4, 6, 10, 14],
   viridithas: [2, 4, 6, 9, 12],
@@ -224,7 +223,7 @@ function selectedMaia3TopP(): number {
   return Math.max(0.01, Math.min(1, Number(input.value) || 1));
 }
 function strengthFor(option: PlayEngineOption, level: number): number {
-  if (option.family === 'maia' || option.family === 'maia3') return 1;
+  if (option.family === 'maia3') return 1;
   if (option.family === 'sf') return SF_LEVELS[level].depth;
   if (option.family === 'lc0' && option.variant !== 'small') {
     // Without WebGPU the big nets run on the wasm-CPU fallback: keep them
@@ -237,9 +236,6 @@ function strengthFor(option: PlayEngineOption, level: number): number {
 function strengthCaption(): string {
   const option = selectedEngine();
   const level = selectedLevel();
-  if (option.family === 'maia') {
-    return `Plays like a ~${option.variant}-rated human — Maia3 conditioned at this rating, moves sampled from its predictions so games vary.`;
-  }
   if (option.family === 'maia3') {
     const style = selectedMaia3Style();
     const suffix = style === 'argmax' ? 'deterministic top human move' : `sampled, temperature ${selectedMaia3Temperature().toFixed(2)}, top-p ${selectedMaia3TopP().toFixed(2)}`;
@@ -264,7 +260,7 @@ function renderLevelOptions(): void {
   const previous = select.value;
   const option = selectedEngine();
   const field = select.closest('.field') as HTMLElement;
-  if (option.family === 'maia' || option.family === 'maia3') {
+  if (option.family === 'maia3') {
     field.hidden = true;
     return;
   }
@@ -297,27 +293,12 @@ function setEngineNote(text: string, warn = false): void {
   note.classList.toggle('warn', warn);
 }
 
-function mb(bytes: number): string {
-  return `${(bytes / 1_000_000).toFixed(0)} MB`;
-}
-
-function showDownloadProgress(label: string, loadedBytes: number, totalBytes?: number): void {
-  const wrap = el('dlProgress');
-  wrap.hidden = false;
-  const bar = wrap.querySelector('progress') as HTMLProgressElement;
-  const text = wrap.querySelector('.dl-label') as HTMLElement;
-  if (totalBytes && totalBytes > 0) {
-    bar.max = totalBytes;
-    bar.value = Math.min(loadedBytes, totalBytes);
-    text.textContent = `${label} · ${mb(loadedBytes)} / ${mb(totalBytes)}`;
-  } else {
-    bar.removeAttribute('value');
-    text.textContent = `${label} · ${mb(loadedBytes)}`;
-  }
+function showDownloadProgress(label: string, loadedBytes?: number, totalBytes?: number, phase = 'Downloading'): void {
+  renderLoadingProgress(el('dlProgress'), { label, phase, loadedBytes, totalBytes });
 }
 
 function hideDownloadProgress(): void {
-  el('dlProgress').hidden = true;
+  hideLoadingProgress(el('dlProgress'));
 }
 
 function ensureLc0Small(): Promise<Lc0PuctSearcher> {
@@ -383,18 +364,6 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
   const option = selectedEngine();
   const level = selectedLevel();
   const visitsOrDepth = strengthFor(option, level);
-  if (option.family === 'maia') {
-    // Fixed-rating human opponents are Maia3 conditioned at the level's Elo
-    // (the old per-level Maia-1 nets were retired: Maia3(1500) beat sampled
-    // Maia-1500 +7 =1 -0, i.e. the old labels under sampling ran well below
-    // their nominal strength — Maia3's conditioning is the better-calibrated
-    // label, and one 28MB model replaces five 3.5MB nets).
-    const evaluator = await ensureMaia3();
-    if (signal.aborted) return null;
-    const elo = Number(option.variant);
-    const evaluation = await evaluator.evaluate({ positions }, { selfElo: elo, oppoElo: elo });
-    return sampleHumanMove(evaluation.legalPriors) ?? evaluation.legalPriors[0]?.uci ?? null;
-  }
   if (option.family === 'maia3') {
     const player = await ensureMaia3();
     if (signal.aborted) return null;
@@ -416,6 +385,7 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
     const searcher = bigNetSearchers[option.variant as BigNetKey];
     if (!searcher.loaded) {
       setEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
+      showDownloadProgress(`Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
       searcher.onDownloadProgress = (loaded, total) => showDownloadProgress(`Lc0 ${searcher.config.name}`, loaded, total);
     }
     const onAbort = () => searcher.cancel();
@@ -904,10 +874,15 @@ function init(): void {
   el('maia3Elo').addEventListener('input', render);
   el('maia3Temperature').addEventListener('input', render);
   el('maia3TopP').addEventListener('input', render);
-  void probeBt4Support().then(refreshEngineOptions);
-  void checkBigNetAsset(BIG_NETS.bt4, refreshEngineOptions);
-  void checkBigNetAsset(T3_NET, refreshEngineOptions);
-  void checkBigNetAsset(LQO_NET, refreshEngineOptions);
+  if (!isV0DeployProfile()) {
+    void probeBt4Support().then(refreshEngineOptions);
+    void checkBigNetAsset(BIG_NETS.bt4, refreshEngineOptions);
+    void checkBigNetAsset(T3_NET, refreshEngineOptions);
+    void checkBigNetAsset(LQO_NET, refreshEngineOptions);
+  } else {
+    void probeBt4Support().then(refreshEngineOptions);
+    void checkBigNetAsset(LQO_NET, refreshEngineOptions);
+  }
   render();
 }
 

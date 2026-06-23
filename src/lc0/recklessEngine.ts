@@ -1,4 +1,5 @@
 import type { BrowserUciEngine } from './browserUciEngine.ts';
+import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
 
 export interface RecklessOptions {
@@ -42,7 +43,7 @@ export interface RecklessRuntimeStatus {
   browserApiLoad?: RecklessBrowserApiLoadStatus;
 }
 
-export const DEFAULT_RECKLESS_WASM_URL = '/reckless/reckless.wasm';
+export const DEFAULT_RECKLESS_WASM_URL = resolvePublicAssetUrl('/reckless/reckless.wasm');
 
 const SHARED_STDIN_HEADER_INTS = 4;
 const SHARED_STDIN_HEADER_BYTES = SHARED_STDIN_HEADER_INTS * Int32Array.BYTES_PER_ELEMENT;

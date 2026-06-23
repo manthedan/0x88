@@ -1,9 +1,9 @@
 // Landing page: browser capability badges and the downloads/storage manager.
 
 const KNOWN_CACHES = [
-  { name: 'lc0-browser-models-v1', label: 'Leela networks', detail: 'sha256-validated model cache' },
+  { name: 'lc0-browser-models-v1', label: 'Leela networks', detail: 'sha256-validated LC0 small and Queen Odds model cache' },
   { name: 'maia3-browser-models-v1', label: 'Maia3 human model', detail: 'sha256-validated Maia3 model cache' },
-  { name: 'lc0-app-shell-v1', label: 'App & engine files', detail: 'offline cache: pages, WASM engines, runtimes' },
+  { name: 'lc0-app-shell-v1', label: 'App shell', detail: 'offline cache: pages and local runtime files' },
 ];
 
 function el(id: string): HTMLElement {
@@ -81,14 +81,35 @@ async function renderStorage(): Promise<void> {
       <button type="button" data-clear="${usage.name}" ${usage.present ? '' : 'disabled'}>Clear</button>
     </div>`).join('');
   const totalLine = estimate?.usage !== undefined
-    ? `<p class="capnote">This site uses ${mb(estimate.usage)}${estimate.quota ? ` of the ${mb(estimate.quota)} the browser allows` : ''}. Everything re-downloads automatically when needed.</p>`
-    : '<p class="capnote">Cleared files re-download automatically when needed.</p>';
+    ? `<p class="capnote">This site uses ${mb(estimate.usage)}${estimate.quota ? ` of the ${mb(estimate.quota)} the browser allows` : ''}. R2-hosted engine files such as Reckless, Berserk, Viridithas, and PlentyChess are Brotli-compressed and live in the browser HTTP cache, so they may not appear in these Cache Storage rows. Everything re-downloads automatically when needed.</p>`
+    : '<p class="capnote">R2-hosted engine files such as Reckless, Berserk, Viridithas, and PlentyChess are Brotli-compressed and live in the browser HTTP cache, so they may not appear in these Cache Storage rows. Cleared files re-download automatically when needed.</p>';
   root.innerHTML = rows + totalLine;
   for (const button of root.querySelectorAll<HTMLButtonElement>('button[data-clear]')) {
     button.addEventListener('click', async () => {
+      const cacheName = button.dataset.clear ?? '';
+      const row = button.closest('.store-row');
+      const sizeText = row?.querySelector('.store-size')?.textContent ?? '';
+      const label = row?.querySelector('b')?.textContent ?? 'this cache';
+      // UX audit P2 #14: confirm before clearing, since the big net re-download
+      // is multi-minute. Inline confirm swaps the button label rather than
+      // using window.confirm, which is jarring and blocks the page.
+      if (button.dataset.confirming !== '1') {
+        button.dataset.confirming = '1';
+        button.textContent = `Clear ${sizeText ? `(${sizeText})` : ''}?`;
+        button.classList.add('clearing');
+        const reset = (): void => {
+          button.dataset.confirming = '0';
+          button.textContent = 'Clear';
+          button.classList.remove('clearing');
+        };
+        // Revert on blur or after a timeout if user doesn't confirm.
+        button.addEventListener('blur', reset, { once: true });
+        setTimeout(() => { if (button.dataset.confirming === '1') reset(); }, 4000);
+        return;
+      }
       button.disabled = true;
-      button.textContent = 'Clearing…';
-      await caches.delete(button.dataset.clear ?? '');
+      button.textContent = `Clearing ${label}…`;
+      await caches.delete(cacheName);
       await renderStorage();
     });
   }

@@ -1,3 +1,4 @@
+import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
 export type BerserkVariantKey = 'emscripten' | 'emscripten-simd' | 'emscripten-relaxed' | 'default' | 'simd' | 'custom';
@@ -18,19 +19,19 @@ export interface BerserkVariant {
   sourceNetworkUrl?: string;
 }
 
-export const BERSERK_EMSCRIPTEN_JS_URL = '/berserk/berserk-emscripten.js';
-export const BERSERK_EMSCRIPTEN_WASM_URL = '/berserk/berserk-emscripten.wasm';
-export const BERSERK_EMSCRIPTEN_DATA_URL = '/berserk/berserk-emscripten.data';
-export const BERSERK_EMSCRIPTEN_SIMD_JS_URL = '/berserk/berserk-emscripten-simd128.js';
-export const BERSERK_EMSCRIPTEN_SIMD_WASM_URL = '/berserk/berserk-emscripten-simd128.wasm';
-export const BERSERK_EMSCRIPTEN_SIMD_DATA_URL = '/berserk/berserk-emscripten-simd128.data';
-export const BERSERK_EMSCRIPTEN_RELAXED_JS_URL = '/berserk/berserk-emscripten-relaxed-simd128.js';
-export const BERSERK_EMSCRIPTEN_RELAXED_WASM_URL = '/berserk/berserk-emscripten-relaxed-simd128.wasm';
-export const BERSERK_EMSCRIPTEN_RELAXED_DATA_URL = '/berserk/berserk-emscripten-relaxed-simd128.data';
-export const BERSERK_DEFAULT_WASM_URL = '/berserk/berserk.wasm';
-export const BERSERK_SIMD_WASM_URL = '/berserk/berserk-simd128.wasm';
+export const BERSERK_EMSCRIPTEN_JS_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten.js');
+export const BERSERK_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten.wasm');
+export const BERSERK_EMSCRIPTEN_DATA_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten.data');
+export const BERSERK_EMSCRIPTEN_SIMD_JS_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-simd128.js');
+export const BERSERK_EMSCRIPTEN_SIMD_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-simd128.wasm');
+export const BERSERK_EMSCRIPTEN_SIMD_DATA_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-simd128.data');
+export const BERSERK_EMSCRIPTEN_RELAXED_JS_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-relaxed-simd128.js');
+export const BERSERK_EMSCRIPTEN_RELAXED_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-relaxed-simd128.wasm');
+export const BERSERK_EMSCRIPTEN_RELAXED_DATA_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-relaxed-simd128.data');
+export const BERSERK_DEFAULT_WASM_URL = resolvePublicAssetUrl('/berserk/berserk.wasm');
+export const BERSERK_SIMD_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-simd128.wasm');
 export const BERSERK_MAIN_NETWORK = 'berserk-9b84c340af7e.nn';
-export const BERSERK_DEFAULT_NNUE_URL = `/berserk/${BERSERK_MAIN_NETWORK}`;
+export const BERSERK_DEFAULT_NNUE_URL = resolvePublicAssetUrl(`/berserk/${BERSERK_MAIN_NETWORK}`);
 export const BERSERK_SOURCE_NETWORK_URL = `https://github.com/jhonnold/berserk-networks/releases/download/networks/${BERSERK_MAIN_NETWORK}`;
 
 const assetStatuses = new Map<string, BerserkAssetStatus>();

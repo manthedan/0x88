@@ -1,8 +1,9 @@
 import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
 import type { RecklessOptions } from './recklessEngine.ts';
+import { resolvePublicAssetUrl } from './assetUrls.ts';
 
-export const DEFAULT_VIRIDITHAS_WASM_URL = '/viridithas/viridithas.wasm';
+export const DEFAULT_VIRIDITHAS_WASM_URL = resolvePublicAssetUrl('/viridithas/viridithas.wasm');
 
 interface RunResult {
   stdout: string[];

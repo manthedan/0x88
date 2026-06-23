@@ -1,7 +1,10 @@
-/** Colored board squares as an embedded SVG */
+/** Board squares using CSS variables (set in app-shell.css).
+    Supports light/dark themes and board styles via data-theme/data-board
+    on <html>. Pure CSS conic-gradient replaces the old base64 SVG. */
 cg-board {
-  background-color: #f0d9b5;
-  background-image: url('data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+CjxzdmcgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4PSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIgogICAgIHZpZXdCb3g9IjAgMCA4IDgiIHNoYXBlLXJlbmRlcmluZz0iY3Jpc3BFZGdlcyI+CjxnIGlkPSJhIj4KICA8ZyBpZD0iYiI+CiAgICA8ZyBpZD0iYyI+CiAgICAgIDxnIGlkPSJkIj4KICAgICAgICA8cmVjdCB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBpZD0iZSIgb3BhY2l0eT0iMCIvPgogICAgICAgIDx1c2UgeD0iMSIgeT0iMSIgaHJlZj0iI2UiIHg6aHJlZj0iI2UiLz4KICAgICAgICA8cmVjdCB5PSIxIiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBpZD0iZiIgb3BhY2l0eT0iMC4yIi8+CiAgICAgICAgPHVzZSB4PSIxIiB5PSItMSIgaHJlZj0iI2YiIHg6aHJlZj0iI2YiLz4KICAgICAgPC9nPgogICAgICA8dXNlIHg9IjIiIGhyZWY9IiNkIiB4OmhyZWY9IiNkIi8+CiAgICA8L2c+CiAgICA8dXNlIHg9IjQiIGhyZWY9IiNjIiB4OmhyZWY9IiNjIi8+CiAgPC9nPgogIDx1c2UgeT0iMiIgaHJlZj0iI2IiIHg6aHJlZj0iI2IiLz4KPC9nPgo8dXNlIHk9IjQiIGhyZWY9IiNhIiB4OmhyZWY9IiNhIi8+Cjwvc3ZnPg==');
+  background-color: var(--board-light, #f0d9b5);
+  background-image: repeating-conic-gradient(var(--board-dark, #b58863) 0% 25%, var(--board-light, #f0d9b5) 0% 50%);
+  background-size: 25% 25%;
 }
 
 /** Interactive board square colors */
@@ -49,7 +52,7 @@ cg-board square.current-premove {
 .orientation-black .files :nth-child(odd),
 coords.squares:nth-of-type(odd) :nth-child(even),
 coords.squares:nth-of-type(even) :nth-child(odd) {
-  color: rgba(72, 72, 72, 0.8);
+  color: var(--coord-dark, rgba(72, 72, 72, 0.8));
 }
 
 .orientation-white .ranks :nth-child(even),
@@ -58,5 +61,5 @@ coords.squares:nth-of-type(even) :nth-child(odd) {
 .orientation-black .files :nth-child(even),
 coords.squares:nth-of-type(odd) :nth-child(odd),
 coords.squares:nth-of-type(even) :nth-child(even) {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--coord-light, rgba(255, 255, 255, 0.8));
 }

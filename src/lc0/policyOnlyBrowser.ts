@@ -15,6 +15,7 @@ import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchOptions, type Lc0SearchResult } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
+import { isV0DeployProfile } from './engineCatalog.ts';
 import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -787,9 +788,9 @@ type EngineReplyMode = 'policy' | 'search';
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
-const MODEL_URL = params.get('model') ?? DEFAULT_MODEL;
+const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL);
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
-const PACK_URL = params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL;
+const PACK_URL = isV0DeployProfile() ? DEFAULT_PACK_URL : resolvePublicAssetUrl(params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL);
 const ENCODER_PREFIX = params.get('encoderPrefix') ?? undefined;
 const SOFTMAX_BENCH_REQUESTED = params.get('softmaxBench') === '1' || params.get('attentionSoftmaxBench') === '1';
 const ATTENTION_VALUE_BENCH_REQUESTED = params.get('attentionValueBench') === '1' || params.get('valueBench') === '1';

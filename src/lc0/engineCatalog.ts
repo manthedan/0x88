@@ -2,6 +2,9 @@ export type EngineFamily = 'lc0' | 'tiny' | 'sf' | 'reckless' | 'viridithas' | '
 export type EngineSurface = 'arena' | 'analysis';
 export type EngineStrengthUnit = 'visits' | 'depth';
 
+type ImportMetaWithEnv = ImportMeta & { env?: Record<string, string | undefined> };
+const env = (import.meta as ImportMetaWithEnv).env ?? {};
+
 export interface EngineRow {
   family: EngineFamily;
   variant: string;
@@ -32,6 +35,11 @@ export interface EngineFamilyCatalogEntry {
 }
 
 export const ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'tiny', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess'];
+const V0_ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'];
+const V0_RECKLESS_VARIANTS = new Set(['full', 'simd', 'relaxed-simd']);
+const V0_BERSERK_VARIANTS = new Set(['emscripten', 'emscripten-simd', 'emscripten-relaxed']);
+const V0_VIRIDITHAS_VARIANTS = new Set(['default', 'simd', 'relaxed-simd']);
+const V0_PLENTYCHESS_VARIANTS = new Set(['emscripten', 'emscripten-sse41', 'emscripten-relaxed']);
 
 export const ENGINE_FAMILY_CATALOG: Record<EngineFamily, EngineFamilyCatalogEntry> = {
   lc0: {
@@ -158,7 +166,12 @@ const ENGINE_STRENGTH: Record<EngineSurface, Record<EngineFamily, EngineStrength
 };
 
 export function engineFamilyOptions(): { value: EngineFamily; label: string }[] {
-  return ENGINE_FAMILY_PRIORITY.map((family) => ({ value: family, label: ENGINE_FAMILY_CATALOG[family].label }));
+  const families = isV0DeployProfile() ? V0_ENGINE_FAMILY_PRIORITY : ENGINE_FAMILY_PRIORITY;
+  return families.map((family) => ({ value: family, label: ENGINE_FAMILY_CATALOG[family].label }));
+}
+
+export function isV0DeployProfile(): boolean {
+  return env.VITE_BROWSER_CHESS_DEPLOY_PROFILE === 'v0';
 }
 
 export function engineStrengthMeta(family: EngineFamily, surface: EngineSurface): EngineStrengthMeta {
@@ -169,9 +182,33 @@ export function defaultEngineStrength(family: EngineFamily, surface: EngineSurfa
   return engineStrengthMeta(family, surface).def;
 }
 
+export function normalizeDeployEngineRow(row: EngineRow, surface: EngineSurface, index = 0): EngineRow {
+  const next: EngineRow = isV0DeployProfile()
+    ? row.family === 'lc0'
+      ? { ...row, family: 'lc0', variant: 'small' }
+      : row.family === 'sf'
+        ? { ...row, family: 'sf', variant: 'lite' }
+        : row.family === 'reckless'
+          ? { ...row, family: 'reckless', variant: V0_RECKLESS_VARIANTS.has(row.variant) ? row.variant : 'full' }
+        : row.family === 'berserk'
+          ? { ...row, family: 'berserk', variant: V0_BERSERK_VARIANTS.has(row.variant) ? row.variant : 'emscripten' }
+        : row.family === 'viridithas'
+          ? { ...row, family: 'viridithas', variant: V0_VIRIDITHAS_VARIANTS.has(row.variant) ? row.variant : 'default' }
+        : row.family === 'plentychess'
+          ? { ...row, family: 'plentychess', variant: V0_PLENTYCHESS_VARIANTS.has(row.variant) ? row.variant : 'emscripten' }
+        : index % 2 === 0
+          ? { family: 'lc0', variant: 'small', strength: defaultEngineStrength('lc0', surface) }
+          : { family: 'sf', variant: 'lite', strength: defaultEngineStrength('sf', surface) }
+    : { ...row };
+  const meta = engineStrengthMeta(next.family, surface);
+  next.strength = Math.max(meta.min, Math.min(meta.max, Math.floor(Number(next.strength) || meta.def)));
+  return next;
+}
+
 export function lc0VariantOptions(bt4Supported: boolean): EngineVariantOption[] {
   // Both big-net variants need the same WebGPU support probe.
-  return LC0_ENGINE_VARIANTS.map((option) => ({ ...option, disabled: isLc0BigNetVariant(option.value) ? !bt4Supported : option.disabled }));
+  const variants = isV0DeployProfile() ? LC0_ENGINE_VARIANTS.filter((option) => option.value === 'small') : LC0_ENGINE_VARIANTS;
+  return variants.map((option) => ({ ...option, disabled: isLc0BigNetVariant(option.value) ? !bt4Supported : option.disabled }));
 }
 
 export function tinyVariantOptions(): EngineVariantOption[] {
@@ -179,13 +216,15 @@ export function tinyVariantOptions(): EngineVariantOption[] {
 }
 
 export function stockfishVariantOptions(): EngineVariantOption[] {
-  return STOCKFISH_ENGINE_VARIANTS.map((option) => ({ ...option }));
+  const variants = isV0DeployProfile() ? STOCKFISH_ENGINE_VARIANTS.filter((option) => option.value === 'lite') : STOCKFISH_ENGINE_VARIANTS;
+  return variants.map((option) => ({ ...option }));
 }
 
-export function defaultStaticEngineVariant(family: 'lc0' | 'tiny' | 'sf' | 'berserk' | 'plentychess'): string {
+export function defaultStaticEngineVariant(family: 'lc0' | 'tiny' | 'sf' | 'berserk' | 'plentychess' | 'viridithas'): string {
   if (family === 'tiny') return TINY_ENGINE_VARIANTS[0].value;
   if (family === 'sf') return STOCKFISH_ENGINE_VARIANTS[0].value;
   if (family === 'berserk' || family === 'plentychess') return 'emscripten';
+  if (family === 'viridithas') return 'default';
   return LC0_ENGINE_VARIANTS[0].value;
 }
 
