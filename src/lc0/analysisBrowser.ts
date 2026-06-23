@@ -139,7 +139,10 @@ function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4Worker
   return { config: BIG_NETS[key], searcher: bigNetSearchers[key] };
 }
 let ground: Ground | null = null;
-let analysisPageMounted = false;
+let mountAbort = new AbortController();
+function isStaleMount(signal: AbortSignal = mountAbort.signal): boolean {
+  return signal.aborted || signal !== mountAbort.signal;
+}
 let analysisKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
 let analysisPagehideHandler: ((event: PageTransitionEvent) => void) | null = null;
 let analysisAuditHandler: ((event: Event) => void) | null = null;
@@ -1784,7 +1787,7 @@ async function copyReviewPgn(): Promise<void> {
 }
 
 async function analyzeCurrent() {
-  if (!analysisPageMounted) return;
+  if (mountAbort.signal.aborted) return;
   const rows = activeEngineRows();
   if (!rows.length) { el('message').textContent = 'Add an engine to analyze.'; return; }
   // Interrupt any in-flight analysis: abort the Stockfish signal and cancel the
@@ -1870,16 +1873,16 @@ async function analyzeCurrent() {
       }
     }
     const grouped = await Promise.all(tasks);
-    if (controller.signal.aborted || !analysisPageMounted) return;
+    if (controller.signal.aborted || mountAbort.signal.aborted) return;
     lineCache.set(fen, grouped.flat());
     if (tree.current.fen === fen) { renderLines(); renderEvalBar(); setShapes(bestShapes()); }
     const message = document.getElementById('message');
     if (message) message.textContent = `Analyzed: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`;
   } catch (error) {
     const message = document.getElementById('message');
-    if ((error as Error).name !== 'AbortError' && analysisPageMounted && message) message.textContent = `Analysis failed: ${(error as Error).message}`;
+    if ((error as Error).name !== 'AbortError' && !mountAbort.signal.aborted && message) message.textContent = `Analysis failed: ${(error as Error).message}`;
   } finally {
-    if (analysisAbort === controller && analysisPageMounted) {
+    if (analysisAbort === controller && !mountAbort.signal.aborted) {
       analyzing = false;
       analysisAbort = null;
       document.getElementById('stop')?.toggleAttribute('disabled', true);
@@ -1976,11 +1979,6 @@ async function renderMaia3Panel(): Promise<void> {
   });
   el('maia3Grid').innerHTML = rows.join('');
 }
-
-// Test hook for automated browser checks: synthetic chessground drags are
-// unreliable, so smokes call this to route through the real user-move path.
-(globalThis as unknown as { __analysisUserMove?: (from: string, to: string) => void }).__analysisUserMove
-  = (from, to) => { void onUserMove(from as Key, to as Key); };
 
 async function onUserMove(from: Key, to: Key) {
   const board = tree.current.fen ? parseFen(tree.current.fen) : parseFen(START_FEN);
@@ -2247,8 +2245,8 @@ function disposePageResources(): void {
   ground = null;
 }
 
-async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
-  if (!analysisPageMounted) return false;
+async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = mountAbort.signal): Promise<boolean> {
+  if (isStaleMount(mountSignal)) return false;
   const runtime = selectedLc0Runtime();
   el('analyze').toggleAttribute('disabled', true);
   selectEl('lc0RuntimeSelect').disabled = true;
@@ -2257,7 +2255,7 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
   showModelProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
   try {
     el('backend').textContent = await initWorker();
-    if (!analysisPageMounted) return false;
+    if (isStaleMount(mountSignal)) return false;
     hideModelProgress();
     el('analyze').toggleAttribute('disabled', false);
     selectEl('lc0RuntimeSelect').disabled = false;
@@ -2265,7 +2263,7 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
     if (runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
     return true;
   } catch (workerError) {
-    if (!analysisPageMounted) return false;
+    if (isStaleMount(mountSignal)) return false;
     if (runtime !== 'onnx' && runtime !== LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(workerError as Error).message}`;
@@ -2275,8 +2273,9 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
     // Fall back to a main-thread evaluator (analysis will block the UI, but works).
     console.warn('LC0 worker init failed; falling back to the main thread.', workerError);
     try {
+      let nextEvaluator: Lc0EvaluationProvider | null = null;
       if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
-        mainEvaluator = await Lc0WholeOnnxWebgpuEvaluator.create({
+        nextEvaluator = await Lc0WholeOnnxWebgpuEvaluator.create({
           manifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
           batch: lc0WholeModelPhysicalBatch(),
           fetchTensorCache: lc0WholeModelTensorCache(),
@@ -2287,11 +2286,16 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
           cache: false,
           onProgress: (loaded, total) => showModelProgress('Lc0 small net', loaded, total, 'Downloading'),
         });
-        mainEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+        nextEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
       }
-      searcher = new Lc0PuctSearcher(mainEvaluator);
+      const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
       const diagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics() : undefined;
-      if (!analysisPageMounted) return false;
+      if (isStaleMount(mountSignal)) {
+        void nextEvaluator.dispose?.();
+        return false;
+      }
+      mainEvaluator = nextEvaluator;
+      searcher = nextSearcher;
       el('backend').textContent = `${diagnostics?.describe ?? 'whole-onnx-webgpu'} (main thread)`;
       publishBrowserRuntimeAudit({
         source: 'lc0-analysis-main-thread-fallback',
@@ -2311,10 +2315,10 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
       hideModelProgress();
-      if (analysisPageMounted && runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
+      if (!isStaleMount(mountSignal) && runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
       return true;
     } catch (error) {
-      if (!analysisPageMounted) return false;
+      if (isStaleMount(mountSignal)) return false;
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `Model load failed: ${(error as Error).message}`;
       hideModelProgress();
@@ -2331,14 +2335,14 @@ async function reloadLc0Backend(forceAnalyzeAfterLoad = false): Promise<void> {
   if (loaded && forceAnalyzeAfterLoad) void analyzeCurrent();
 }
 
-async function init() {
+async function init(mountSignal: AbortSignal) {
   if (!isV0DeployProfile()) {
     REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
   }
   REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, renderRecklessRuntimeInfo);
   REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, renderRecklessRuntimeInfo);
   REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, renderRecklessRuntimeInfo);
-  if (!analysisPageMounted) return;
+  if (isStaleMount(mountSignal)) return;
   if (analysisPagehideHandler) window.removeEventListener('pagehide', analysisPagehideHandler);
   analysisPagehideHandler = (event: PageTransitionEvent) => {
     if (!event.persisted) disposeRuntimeResources();
@@ -2367,14 +2371,23 @@ async function init() {
     void refreshBt4Availability();
     void refreshTinyHybridManifestStatus();
   }
-  await loadLc0Backend();
+  await loadLc0Backend(true, mountSignal);
 }
 
 export function mountAnalysisBrowser(): () => void {
-  analysisPageMounted = true;
-  void init();
+  const controller = new AbortController();
+  mountAbort = controller;
+  // Test hook for automated browser checks: synthetic chessground drags are
+  // unreliable, so smokes call this to route through the real user-move path.
+  const hook = (from: string, to: string) => { void onUserMove(from as Key, to as Key); };
+  (globalThis as unknown as { __analysisUserMove?: (from: string, to: string) => void }).__analysisUserMove = hook;
+  void init(controller.signal);
   return () => {
-    analysisPageMounted = false;
-    disposePageResources();
+    controller.abort();
+    if (mountAbort === controller) disposePageResources();
+    // Only clear the test hook if it is still ours (a newer mount may have
+    // installed its own).
+    const g = globalThis as unknown as { __analysisUserMove?: (from: string, to: string) => void };
+    if (g.__analysisUserMove === hook) delete g.__analysisUserMove;
   };
 }

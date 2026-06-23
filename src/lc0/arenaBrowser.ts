@@ -156,6 +156,10 @@ const REQUESTED_PLENTYCHESS_EXPLICIT = hasExplicitPlentyChessVariant(params);
 let REQUESTED_PLENTYCHESS_VARIANT = plentyChessVariantFromParams(params);
 
 let ground: Ground | null = null;
+let mountAbort = new AbortController();
+function isStaleMount(signal: AbortSignal = mountAbort.signal): boolean {
+  return signal.aborted || signal !== mountAbort.signal;
+}
 let arenaKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
 let arenaAuditHandler: ((event: Event) => void) | null = null;
 let arenaPagehideHandler: ((event: PageTransitionEvent) => void) | null = null;
@@ -2694,7 +2698,8 @@ async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHy
   });
 }
 
-async function loadLc0Evaluator(): Promise<void> {
+async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): Promise<void> {
+  if (isStaleMount(mountSignal)) return;
   const runtime = selectedLc0Runtime();
   if (!selectedSeatsNeedLc0Evaluator()) {
     el('start').toggleAttribute('disabled', false);
@@ -2709,6 +2714,10 @@ async function loadLc0Evaluator(): Promise<void> {
   el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)}${hybrid ? ` (${hybrid})` : ''}…`;
   try {
     const evaluator = await createSelectedLc0Evaluator();
+    if (isStaleMount(mountSignal)) {
+      void evaluator.dispose?.();
+      return;
+    }
     publishBrowserRuntimeAudit({
       source: 'lc0-arena-evaluator',
       surface: 'arena',
@@ -2731,6 +2740,7 @@ async function loadLc0Evaluator(): Promise<void> {
     el('start').toggleAttribute('disabled', false);
     el('message').textContent = `Ready (${lc0RuntimeLabel(runtime)}${hybrid ? ` · ${hybrid}` : ''}). Pick engines and start a tournament.`;
   } catch (error) {
+    if (isStaleMount(mountSignal)) return;
     if (!selectedSeatsNeedLc0Evaluator()) {
       el('start').toggleAttribute('disabled', false);
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed, but current non-LC0 matchup is ready: ${(error as Error).message}`;
@@ -2738,8 +2748,10 @@ async function loadLc0Evaluator(): Promise<void> {
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(error as Error).message}`;
     }
   } finally {
-    loadingLc0 = false;
-    refreshSeatControls();
+    if (!isStaleMount(mountSignal)) {
+      loadingLc0 = false;
+      refreshSeatControls();
+    }
   }
 }
 
@@ -3116,13 +3128,17 @@ function wireEvents() {
   window.addEventListener('pagehide', arenaPagehideHandler);
 }
 
-async function init() {
+async function init(mountSignal: AbortSignal) {
   if (!isV0DeployProfile()) {
     REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
   }
+  if (isStaleMount(mountSignal)) return;
   REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, renderRecklessRuntimeInfo);
+  if (isStaleMount(mountSignal)) return;
   REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, renderRecklessRuntimeInfo);
+  if (isStaleMount(mountSignal)) return;
   REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, renderRecklessRuntimeInfo);
+  if (isStaleMount(mountSignal)) return;
   renderBoard();
   installRuntimeAuditPanel();
   installExperimentalLc0RuntimeOption();
@@ -3138,6 +3154,7 @@ async function init() {
   applyArenaQueryParams();
   applyLc0Preset(inferredLc0Preset());
   if (!isV0DeployProfile()) await ensureSelectedRecklessAssetsAvailable();
+  if (isStaleMount(mountSignal)) return;
   renderRecklessRuntimeInfo();
   renderViridithasRuntimeInfo();
   renderBerserkRuntimeInfo();
@@ -3147,6 +3164,7 @@ async function init() {
   refreshStockfishControls();
   void renderRuntimeBadge();
   if (!isV0DeployProfile()) await refreshTinyHybridManifestStatus();
+  if (isStaleMount(mountSignal)) return;
   buildEngines();
   populateSeats();
   if (!isV0DeployProfile()) void refreshBt4Availability();
@@ -3154,15 +3172,19 @@ async function init() {
   wireEvents();
   refreshBudgetControls();
   refreshOpeningPreview();
-  await loadLc0Evaluator();
+  await loadLc0Evaluator(mountSignal);
   void renderRuntimeBadge();
   void runFixedSuiteBenchAutorun();
   void runArenaBenchAutorun();
 }
 
 export function mountArenaBrowser(): () => void {
-  void init();
+  const controller = new AbortController();
+  mountAbort = controller;
+  void init(controller.signal);
   return () => {
+    controller.abort();
+    if (mountAbort !== controller) return;
     disposeRuntimeResources();
     if (arenaKeydownHandler) document.removeEventListener('keydown', arenaKeydownHandler);
     arenaKeydownHandler = null;

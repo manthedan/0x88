@@ -105,6 +105,10 @@ export interface Bt4SearchOptions {
   cpuct?: number;
   /** ScLimit-style search contempt (opponent visit budget, 0 = off). */
   searchContemptLimit?: number;
+  /** Optional caller-owned cancellation signal; cancels only this search request. */
+  signal?: AbortSignal;
+  /** Accepted for parity with main-thread search options; worker search yields internally. */
+  yieldEveryMs?: number;
 }
 
 export type Bt4AssetStatus = 'unknown' | 'present' | 'missing';
@@ -291,25 +295,41 @@ export class Bt4WorkerSearcher {
   }
 
   async search(input: Lc0EvaluatorInput, options: Bt4SearchOptions): Promise<Bt4SearchResult> {
+    if (options.signal?.aborted) return { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
     await this.init({ evalCacheEntries: options.evalCacheEntries });
-    const response = await this.post<{ result: Bt4SearchResult }>(
-      {
-        type: 'search',
-        input,
-        visits: options.visits,
-        movetimeMs: options.movetimeMs,
-        multiPv: options.multiPv,
-        batchSize: Math.max(1, Math.floor(Number(options.batchSize ?? this.config.recommendedBatchSize) || this.config.recommendedBatchSize)),
-        batchPipelineDepth: Math.max(1, Math.floor(Number(options.batchPipelineDepth ?? this.config.recommendedPipelineDepth) || this.config.recommendedPipelineDepth)),
-        reuseTree: options.reuseTree,
-        drawScore: options.drawScore,
-        contemptElo: options.contemptElo,
-        cpuct: options.cpuct,
-        searchContemptLimit: options.searchContemptLimit,
-      },
-      (id) => { this.activeSearchId = id; },
-    );
-    return response.result;
+    if (options.signal?.aborted) return { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
+    let searchId: number | null = null;
+    const onAbort = () => {
+      if (searchId !== null) this.cancelSearch(searchId);
+    };
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const response = await this.post<{ result: Bt4SearchResult }>(
+        {
+          type: 'search',
+          input,
+          visits: options.visits,
+          movetimeMs: options.movetimeMs,
+          multiPv: options.multiPv,
+          batchSize: Math.max(1, Math.floor(Number(options.batchSize ?? this.config.recommendedBatchSize) || this.config.recommendedBatchSize)),
+          batchPipelineDepth: Math.max(1, Math.floor(Number(options.batchPipelineDepth ?? this.config.recommendedPipelineDepth) || this.config.recommendedPipelineDepth)),
+          reuseTree: options.reuseTree,
+          drawScore: options.drawScore,
+          contemptElo: options.contemptElo,
+          cpuct: options.cpuct,
+          searchContemptLimit: options.searchContemptLimit,
+        },
+        (id) => {
+          searchId = id;
+          this.activeSearchId = id;
+          if (options.signal?.aborted) this.cancelSearch(id);
+        },
+      );
+      return response.result;
+    } finally {
+      options.signal?.removeEventListener('abort', onAbort);
+      if (this.activeSearchId === searchId) this.activeSearchId = null;
+    }
   }
 
   async resetTree(): Promise<void> {
@@ -317,8 +337,12 @@ export class Bt4WorkerSearcher {
     await this.post({ type: 'resetSearch' });
   }
 
+  private cancelSearch(id: number): void {
+    if (this.worker) this.worker.postMessage({ type: 'cancel', target: id });
+  }
+
   cancel(): void {
-    if (this.activeSearchId !== null && this.worker) this.worker.postMessage({ type: 'cancel', target: this.activeSearchId });
+    if (this.activeSearchId !== null) this.cancelSearch(this.activeSearchId);
   }
 
   /** Terminate the worker and free the resident BT4 net. */

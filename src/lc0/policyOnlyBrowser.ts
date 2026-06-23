@@ -914,6 +914,13 @@ let historyBoards: BoardState[] = [board];
 let ground: Ground | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
 let searcher: Lc0PuctSearcher | null = null;
+// Per-mount stale-write guard: reassigned fresh in mountPolicyOnlyBrowser() and
+// aborted on cleanup so async callbacks from a stale mount cannot clobber the
+// shared evaluator/player/searcher or the DOM of a newer mount.
+let mountAbort = new AbortController();
+function isStaleMount(signal: AbortSignal = mountAbort.signal): boolean {
+  return signal.aborted || signal !== mountAbort.signal;
+}
 let policyPagehideHandler: ((event: PageTransitionEvent) => void) | null = null;
 let mainEvaluator: Lc0OnnxEvaluator | null = null;
 let searchWorker: Worker | null = null;
@@ -4110,7 +4117,7 @@ function disposeRuntimeResources(): void {
   searcher = null;
 }
 
-async function init() {
+async function init(mountSignal: AbortSignal) {
   if (policyPagehideHandler) window.removeEventListener('pagehide', policyPagehideHandler);
   policyPagehideHandler = (event: PageTransitionEvent) => {
     if (!event.persisted) disposeRuntimeResources();
@@ -4163,15 +4170,21 @@ async function init() {
       mainModelCacheStatus = 'worker-only (not loaded on main thread)';
       useSearchWorker = true;
       await initSearchWorker();
+      if (isStaleMount(mountSignal)) return;
       renderWorkerGpuStatus(searchWorkerBackend);
     } else {
       const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: CACHE_MODEL });
+      if (isStaleMount(mountSignal)) return;
       mainModelCacheStatus = describeLc0ModelLoad(modelLoad);
       const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
-      mainEvaluator = evaluator;
-      player = new Lc0PolicyOnlyPlayer(evaluator);
-      searcher = new Lc0PuctSearcher(evaluator);
+      if (isStaleMount(mountSignal)) { void evaluator.dispose(); return; }
+      const nextPlayer = new Lc0PolicyOnlyPlayer(evaluator);
+      const nextSearcher = new Lc0PuctSearcher(evaluator);
       const diagnostics = await collectOrtRuntimeDiagnostics();
+      if (isStaleMount(mountSignal)) { void evaluator.dispose(); return; }
+      mainEvaluator = evaluator;
+      player = nextPlayer;
+      searcher = nextSearcher;
       el('backend').textContent = diagnostics.describe;
       renderGpuStatus(diagnostics);
       publishBrowserRuntimeAudit({
@@ -4370,11 +4383,15 @@ function registerAppServiceWorker() {
 }
 
 export function mountPolicyOnlyBrowser(): () => void {
+  const controller = new AbortController();
+  mountAbort = controller;
   seedSettingsInputs();
   wireEvents();
   registerAppServiceWorker();
-  void init();
+  void init(controller.signal);
   return () => {
+    controller.abort();
+    if (mountAbort !== controller) return;
     disposeRuntimeResources();
     if (policyPagehideHandler) window.removeEventListener('pagehide', policyPagehideHandler);
     policyPagehideHandler = null;

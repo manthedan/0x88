@@ -171,6 +171,7 @@ function startFenFor(option: PlayEngineOption, human: Color): string {
 // ---------------------------------------------------------------------------
 interface PlayContext {
   abort: AbortController;
+  disposed: boolean;
   ground: ReturnType<typeof Chessground> | null;
   startFen: string;
   board: BoardState;
@@ -195,6 +196,7 @@ interface PlayContext {
 function createPlayContext(): PlayContext {
   return {
     abort: new AbortController(),
+    disposed: false,
     ground: null,
     startFen: START_FEN,
     board: parseFen(START_FEN),
@@ -219,6 +221,10 @@ function createPlayContext(): PlayContext {
 function trackListener(ctx: PlayContext, target: EventTarget, type: string, fn: EventListenerOrEventListenerObject): void {
   target.addEventListener(type, fn);
   ctx.listeners.push({ type, target, fn });
+}
+
+function ctxIsDisposed(ctx: PlayContext): boolean {
+  return ctx.disposed;
 }
 
 // ---------------------------------------------------------------------------
@@ -434,8 +440,6 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
       ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
       searcher.onDownloadProgress = (loaded, total) => ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, loaded, total);
     }
-    const onAbort = () => searcher.cancel();
-    signal.addEventListener('abort', onAbort, { once: true });
     try {
       const result = await searcher.search({ positions: ctx.positions }, {
         visits: visitsOrDepth,
@@ -445,13 +449,13 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
         evalCacheEntries: 2048,
         drawScore: option.variant === 'lqo' ? LQO_DRAW_SCORE : PLAY_DRAW_SCORE,
         searchContemptLimit: option.variant === 'lqo' ? LQO_SEARCH_CONTEMPT_LIMIT : PLAY_SEARCH_CONTEMPT_LIMIT,
+        signal,
         ...(option.variant === 'lqo' ? { cpuct: LQO_CPUCT } : {}),
       });
       ctxHideDownloadProgress();
       ctxSetEngineNote('');
       return result.cancelled ? null : result.move ?? null;
     } finally {
-      signal.removeEventListener('abort', onAbort);
       ctxHideDownloadProgress();
     }
   }
@@ -899,14 +903,17 @@ function ctxInit(ctx: PlayContext): void {
   trackListener(ctx, el('maia3Elo'), 'input', () => ctxRender(ctx));
   trackListener(ctx, el('maia3Temperature'), 'input', () => ctxRender(ctx));
   trackListener(ctx, el('maia3TopP'), 'input', () => ctxRender(ctx));
+  const refreshIfMounted = () => {
+    if (!ctxIsDisposed(ctx)) ctxRefreshEngineOptions(ctx);
+  };
   if (!isV0DeployProfile()) {
-    void probeBt4Support().then(() => ctxRefreshEngineOptions(ctx));
-    void checkBigNetAsset(BIG_NETS.bt4, () => ctxRefreshEngineOptions(ctx));
-    void checkBigNetAsset(T3_NET, () => ctxRefreshEngineOptions(ctx));
-    void checkBigNetAsset(LQO_NET, () => ctxRefreshEngineOptions(ctx));
+    void probeBt4Support().then(refreshIfMounted);
+    void checkBigNetAsset(BIG_NETS.bt4, refreshIfMounted);
+    void checkBigNetAsset(T3_NET, refreshIfMounted);
+    void checkBigNetAsset(LQO_NET, refreshIfMounted);
   } else {
-    void probeBt4Support().then(() => ctxRefreshEngineOptions(ctx));
-    void checkBigNetAsset(LQO_NET, () => ctxRefreshEngineOptions(ctx));
+    void probeBt4Support().then(refreshIfMounted);
+    void checkBigNetAsset(LQO_NET, refreshIfMounted);
   }
   ctxRender(ctx);
 }
@@ -921,6 +928,7 @@ export function mountPlayBrowser(): () => void {
   (globalThis as unknown as { __playUserMove?: (from: string, to: string) => void }).__playUserMove = hook;
 
   return () => {
+    ctx.disposed = true;
     ctxCancelEngineTurn(ctx);
     ctxDisarmResign(ctx);
     (ctx.ground as { destroy?: () => void } | null)?.destroy?.();
