@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://0x88.app/schemas/lc0-artifact-release-manifest.v1.schema.json",
+  "title": "LC0 browser artifact release manifest",
+  "type": "object",
+  "required": ["schema", "releaseId", "generatedAt", "artifacts"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "lc0_browser.artifact_release_manifest.v1" },
+    "releaseId": { "type": "string", "minLength": 1 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "channel": { "type": "string", "minLength": 1 },
+    "sourceManifests": { "type": "array", "items": { "type": "string" } },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["logicalUrl", "artifactUrl", "sha256", "bytes", "file", "kind", "sourceManifest"],
+        "additionalProperties": false,
+        "properties": {
+          "logicalUrl": { "type": "string", "pattern": "^/" },
+          "artifactUrl": { "type": "string", "pattern": "^(/|https?://)" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "file": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "enum": ["model", "engine", "source", "runtime", "other"] },
+          "contentType": { "type": "string" },
+          "sourceManifest": { "type": "string", "minLength": 1 },
+          "localPath": { "type": "string" },
+          "status": { "type": "string" }
+        }
+      }
+    }
+  }
+}

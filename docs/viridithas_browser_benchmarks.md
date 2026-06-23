@@ -6,7 +6,7 @@ Raw report: [`viridithas_reckless_browser_benchmark_2026-06-04_rotated_depth6-10
 
 Run configuration:
 
-- Browser/static server: `http://localhost:5181/reckless-benchmark.html`
+- Browser/static server: `http://localhost:5181/lab/reckless-benchmark.html`
 - Cross-origin isolated: true; SharedArrayBuffer available: true
 - Positions: 20-position rotated Ruy Lopez FEN suite
 - Budgets: depths 6/8/10 plus movetimes 100/250/500 ms
@@ -116,7 +116,7 @@ After the batch probe, the wasm patch was extended so non-argv wasm runs read st
 
 Fast smoke configuration:
 
-- Browser/static server: `http://localhost:5181/reckless-benchmark.html?runtime=1`
+- Browser/static server: `http://localhost:5181/lab/reckless-benchmark.html?runtime=1`
 - Cross-origin isolated: true; SharedArrayBuffer available: true
 - Variant: Viridithas SIMD experimental
 - Modes: persistent and one-shot

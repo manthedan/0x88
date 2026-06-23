@@ -5,8 +5,10 @@ import {
   RECKLESS_RELAXED_SIMD_VARIANT,
   RECKLESS_SIMD_VARIANT,
   RECKLESS_VARIANTS,
+  checkRecklessVariantAsset,
   defaultRecklessVariantKey,
   normalizeRecklessVariant,
+  recklessVariantAssetStatus,
   recklessVariantFromParams,
   resolveDefaultRecklessVariantAssetFallback,
   supportsWasmRelaxedSimd,
@@ -82,5 +84,47 @@ test('explicit SIMD does not silently downgrade during asset preflight', async (
     assert.equal(resolved, RECKLESS_SIMD_VARIANT);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test('IPv6 loopback still probes local generated Reckless assets', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; return { ok: false }; };
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { hostname: '[::1]' },
+  });
+  try {
+    const localVariant = { ...RECKLESS_FULL_VARIANT, wasmUrl: '/reckless/local-ipv6-reckless.wasm' };
+    assert.equal(await checkRecklessVariantAsset(localVariant), 'missing');
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);
+    else delete globalThis.location;
+  }
+});
+
+test('production skips known-unshipped Reckless asset probes', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; return { ok: false }; };
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { hostname: '0x88.app' },
+  });
+  try {
+    assert.equal(await checkRecklessVariantAsset(RECKLESS_FULL_VARIANT), 'missing');
+    assert.equal(recklessVariantAssetStatus(RECKLESS_FULL_VARIANT), 'missing');
+    const r2Variant = { ...RECKLESS_FULL_VARIANT, wasmUrl: 'https://assets.0x88.app/reckless/reckless.wasm' };
+    assert.equal(await checkRecklessVariantAsset(r2Variant), 'missing');
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);
+    else delete globalThis.location;
   }
 });

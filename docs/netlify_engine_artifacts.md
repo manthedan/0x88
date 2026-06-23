@@ -1,6 +1,6 @@
 # Netlify engine artifact deployment
 
-This repo has a Netlify-oriented path for large generated browser-engine sidecars.
+This repo has a Netlify-oriented path for generated browser-engine sidecars, but Netlify is no longer responsible for forcing stable engine URLs to precompressed `.br` files.
 
 ## Build path
 
@@ -26,15 +26,17 @@ It currently targets generated `.js`, `.wasm`, `.data`, `.nn`, `.nnue`, and `.bi
 
 ## Runtime behavior on Netlify
 
-The app still asks Emscripten for the normal raw URLs, for example:
+The app asks Emscripten for normal raw URLs, for example:
 
 - `/plentychess/plentychess-emscripten.js`
 - `/plentychess/plentychess-emscripten.wasm`
 - `/plentychess/plentychess-emscripten.data`
 
-`netlify.toml` force-rewrites those engine URLs to their `.br` sidecars and sets `Content-Encoding: br` plus the original content type. The browser transparently decodes the response, so Emscripten receives the original JS/WASM/data bytes while the transfer uses the precompressed artifact.
+Netlify no longer force-rewrites those stable URLs to `.br` sidecars and no longer declares `Content-Encoding` in `netlify.toml` or `public/_headers`. Stable URLs may return different bytes across releases, so they must not receive a one-year `immutable` browser policy.
 
-For PlentyChess, the current local estimates are:
+If a production host serves precompressed sidecars, it must do so through proven `Accept-Encoding` negotiation, object metadata, or edge/Worker code that reliably sets `Content-Encoding` and `Vary: Accept-Encoding`. Long-lived immutable caching is reserved for content-addressed paths such as `/artifacts/sha256/<hash>/...`.
+
+For PlentyChess, prior local estimates were:
 
 - raw total: 63,484,805 bytes / 60.54 MiB
 - brotli total: 32,587,527 bytes / 31.08 MiB
@@ -58,7 +60,13 @@ npm run web:isolated:static
 curl -I -H 'Accept-Encoding: br' http://localhost:5181/plentychess/plentychess-emscripten.data
 ```
 
-The local isolated static server will serve `.br`/`.gz` sidecars through normal `Accept-Encoding` negotiation when they exist. Netlify uses the explicit rewrite/header rules in `netlify.toml`.
+The local isolated static server can serve `.br`/`.gz` sidecars through normal `Accept-Encoding` negotiation when they exist. Netlify should not rely on unconditional stable-URL rewrites for compressed sidecars.
+
+Run the deploy cache-policy check before release:
+
+```sh
+npm run deploy:cache-policy-check
+```
 
 ## Release-policy reminder
 

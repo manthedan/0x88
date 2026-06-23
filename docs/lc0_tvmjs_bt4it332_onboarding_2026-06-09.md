@@ -29,7 +29,7 @@ disk). Same M-chip Mac WebGPU scope as the t1 campaign.
 
 ## Harness de-hardcoding (now multi-family)
 
-- `lc0-tvmjs-webgpu-smoke.html`: new page params `ortModel`
+- `lab/lc0-tvmjs-webgpu-smoke.html`: new page params `ortModel`
   (`{batch}`/`{dtype}` path template) and `fixtureBaseline` (native JSONL
   path); defaults preserve t1 behavior.
 - `scripts/lc0_tvmjs_webgpu_smoke.mjs`: `--ort-model`, `--fixture-baseline`,

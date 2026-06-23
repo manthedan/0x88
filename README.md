@@ -6,9 +6,13 @@ The current trunk is `main` and is intentionally based on the browser LC0 arena/
 
 ## Browser entry points
 
+- `index.html` — landing page.
+- `lc0-play.html` — focused LC0 play surface.
 - `lc0-arena.html` — LC0 vs Stockfish arena UI.
 - `lc0-policy-only.html` — LC0 policy/eval browser playground.
 - `lc0-analysis.html` — LC0 analysis UI.
+
+Smoke/probe/benchmark-only pages live under `lab/` so the root stays limited to product-facing entry points.
 
 ## Local development
 
@@ -38,5 +42,3 @@ Common frontend checks:
 npm run typecheck
 npm run build:client
 ```
-
-Some older scripts, Rust crates, schemas, and research notes still use inherited `tiny_leela` names. Treat those as legacy/stability paths unless a cleanup pass explicitly renames and validates them.

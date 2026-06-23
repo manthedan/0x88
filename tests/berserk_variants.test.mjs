@@ -77,6 +77,30 @@ test('Berserk URL params support explicit and custom variants', () => {
   assert.equal(rejectedCustom.key, defaultBerserkVariantKey());
 });
 
+test('production skips known-unshipped Berserk asset probes', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; return { ok: false }; };
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { hostname: '0x88.app' },
+  });
+  try {
+    const r2Simd = {
+      ...BERSERK_SIMD_VARIANT,
+      wasmUrl: 'https://assets.0x88.app/berserk/berserk-simd128.wasm',
+      nnueUrl: 'https://assets.0x88.app/berserk/berserk-9b84c340af7e.nn',
+    };
+    assert.equal(await checkBerserkVariantAsset(r2Simd), 'missing');
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);
+    else delete globalThis.location;
+  }
+});
+
 test('Berserk asset checks use Emscripten sidecars or WASI+NNUE assets', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];

@@ -1,0 +1,49 @@
+{
+  "schema": "lc0_browser.r2_stable_present_manifest.v1",
+  "generatedBy": "manual subset of public/models/lc0/manifest.json for R2 stable bootstrap continuity",
+  "note": "Only artifacts known present in the initial R2 stable bootstrap channel; used when publishing app-shell engine assets without requiring every local research model blob.",
+  "models": [
+    {
+      "file": "t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx",
+      "url": "/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx",
+      "bytes": 20558031,
+      "sha256": "9396c11226de7f29dbad8c60147b1082b8093adc7a0b77819cd0fb33103a095f"
+    }
+  ],
+  "packs": [
+    {
+      "id": "t1-256x10-distilled-swa-2432500.batch8.f16.lc0web",
+      "url": "/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/lc0web/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web",
+      "format": "lc0web",
+      "version": 1,
+      "sourceSha256": "4a3d0b0ee3080c36d1f18c4a1acbdb0ef9751bb32fc33f28db032f4c230418eb",
+      "packSha256": "39e77b84729a0ba950de10747e56f19e39a147b25239341bc8d90f25edbdcb1b",
+      "metadataBytes": 296585,
+      "shardBytes": 40418450,
+      "tensorCount": 375,
+      "shards": [
+        {
+          "bytes": 16565504,
+          "file": "weights.000.bin",
+          "sha256": "d9161c21403eabdf9ac719525b2c6d61bb31b3eee8434cb110b1912dec093928"
+        },
+        {
+          "bytes": 15766736,
+          "file": "weights.001.bin",
+          "sha256": "28510f27906b225a4560dd4cc1060f6458ecb0885cb724d1fa26aed0f857615b"
+        },
+        {
+          "bytes": 8086210,
+          "file": "weights.002.bin",
+          "sha256": "b64b32bd06835c0f1cee05f99880e80c31c45c0a75c14bb239879d6804640509"
+        }
+      ],
+      "recommendedRuntime": "custom-webgpu",
+      "layout": "raw-f16"
+    }
+  ]
+}

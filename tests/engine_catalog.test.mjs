@@ -22,8 +22,7 @@ test('engine family catalog covers the staged selector families in UI order', ()
   for (const family of ENGINE_FAMILY_PRIORITY) {
     assert.equal(ENGINE_FAMILY_CATALOG[family].id, family);
     assert.ok(ENGINE_FAMILY_CATALOG[family].label.length > 0);
-    if (family === 'tiny') assert.ok(ENGINE_FAMILY_CATALOG[family].docHref.includes('tiny_leela'));
-    else assert.ok(ENGINE_FAMILY_CATALOG[family].docHref.includes('engine_catalog.md'));
+    assert.ok(ENGINE_FAMILY_CATALOG[family].docHref.includes('engine_catalog.md'));
   }
 });
 

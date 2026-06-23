@@ -119,6 +119,10 @@ export interface Bt4SearchOptions {
   /** Throttled partial snapshots while deep searches run. */
   onProgress?: (progress: Bt4SearchProgress) => void;
   progressEveryMs?: number;
+  /** Optional caller-owned cancellation signal; cancels only this search request. */
+  signal?: AbortSignal;
+  /** Accepted for parity with main-thread search options; worker search yields internally. */
+  yieldEveryMs?: number;
 }
 
 function latestBoard(input: Lc0EvaluatorInput): BoardState {
@@ -161,6 +165,28 @@ let supportedCached: boolean | null = null;
 const assetProbes = new Map<string, Promise<Bt4AssetStatus>>();
 const assetStatuses = new Map<string, Bt4AssetStatus>();
 
+function isLocalDevelopmentOrigin(): boolean {
+  if (typeof location === 'undefined') return true;
+  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
+}
+
+function assetPathname(raw: string): string {
+  try {
+    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
+    return new URL(raw, base).pathname;
+  } catch {
+    return raw;
+  }
+}
+
+function shouldSkipKnownUnhostedBigNetProbe(config: BigNetConfig): boolean {
+  // The large BT4/T3/LQO ONNX blobs are intentionally pruned from the Netlify
+  // app shell and may not be part of the current R2 channel. Avoid issuing
+  // guaranteed-failing production HEAD probes; localhost still probes so local
+  // generated/staged assets work during development.
+  return !isLocalDevelopmentOrigin() && assetPathname(config.modelUrl).startsWith('/models/lc0/');
+}
+
 /** WebGPU usable for big-net search? Cached after the first probe. Asset probes are tracked separately per net. */
 export async function probeBt4Support(): Promise<boolean> {
   if (supportProbe) return supportProbe;
@@ -198,8 +224,15 @@ export function bt4AssetStatusSync(): Bt4AssetStatus {
 
 /** Browser-served big-net ONNX asset availability. Cached after the first probe. */
 export async function checkBigNetAsset(config: BigNetConfig = BT4_NET, onStatus?: () => void): Promise<Bt4AssetStatus> {
+  const existingStatus = assetStatuses.get(config.modelUrl);
+  if (existingStatus === 'present' || existingStatus === 'missing') return existingStatus;
   const existing = assetProbes.get(config.modelUrl);
   if (existing) return existing;
+  if (shouldSkipKnownUnhostedBigNetProbe(config)) {
+    assetStatuses.set(config.modelUrl, 'missing');
+    onStatus?.();
+    return 'missing';
+  }
   const probe = (async () => {
     let status: Bt4AssetStatus;
     try {
@@ -343,32 +376,48 @@ export class Bt4WorkerSearcher {
   }
 
   async search(input: Lc0EvaluatorInput, options: Bt4SearchOptions): Promise<Bt4SearchResult> {
+    if (options.signal?.aborted) return { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
     await this.init({ evalCacheEntries: options.evalCacheEntries });
+    if (options.signal?.aborted) return { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
     const workerInput = options.swapColors ? swapColorsInput(input) : input;
-    const response = await this.post<{ result: Bt4SearchResult }>(
-      {
-        type: 'search',
-        input: workerInput,
-        visits: options.visits,
-        movetimeMs: options.movetimeMs,
-        multiPv: options.multiPv,
-        batchSize: Math.max(1, Math.floor(Number(options.batchSize ?? this.config.recommendedBatchSize) || this.config.recommendedBatchSize)),
-        batchPipelineDepth: Math.max(1, Math.floor(Number(options.batchPipelineDepth ?? this.config.recommendedPipelineDepth) || this.config.recommendedPipelineDepth)),
-        reuseTree: options.reuseTree,
-        drawScore: options.drawScore,
-        contemptElo: options.contemptElo,
-        cpuct: options.cpuct,
-        fpu: options.fpu,
-        searchContemptLimit: options.searchContemptLimit,
-        reportProgress: !!options.onProgress,
-        progressEveryMs: options.progressEveryMs,
-      },
-      (id) => { this.activeSearchId = id; },
-      options.onProgress
-        ? (progress) => options.onProgress!(options.swapColors ? swapColorsResult(progress, input) : progress)
-        : undefined,
-    );
-    return options.swapColors ? swapColorsResult(response.result, input) : response.result;
+    let searchId: number | null = null;
+    const onAbort = () => {
+      if (searchId !== null) this.cancelSearch(searchId);
+    };
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const response = await this.post<{ result: Bt4SearchResult }>(
+        {
+          type: 'search',
+          input: workerInput,
+          visits: options.visits,
+          movetimeMs: options.movetimeMs,
+          multiPv: options.multiPv,
+          batchSize: Math.max(1, Math.floor(Number(options.batchSize ?? this.config.recommendedBatchSize) || this.config.recommendedBatchSize)),
+          batchPipelineDepth: Math.max(1, Math.floor(Number(options.batchPipelineDepth ?? this.config.recommendedPipelineDepth) || this.config.recommendedPipelineDepth)),
+          reuseTree: options.reuseTree,
+          drawScore: options.drawScore,
+          contemptElo: options.contemptElo,
+          cpuct: options.cpuct,
+          fpu: options.fpu,
+          searchContemptLimit: options.searchContemptLimit,
+          reportProgress: !!options.onProgress,
+          progressEveryMs: options.progressEveryMs,
+        },
+        (id) => {
+          searchId = id;
+          this.activeSearchId = id;
+          if (options.signal?.aborted) this.cancelSearch(id);
+        },
+        options.onProgress
+          ? (progress) => options.onProgress!(options.swapColors ? swapColorsResult(progress, input) : progress)
+          : undefined,
+      );
+      return options.swapColors ? swapColorsResult(response.result, input) : response.result;
+    } finally {
+      options.signal?.removeEventListener('abort', onAbort);
+      if (this.activeSearchId === searchId) this.activeSearchId = null;
+    }
   }
 
   async evaluate(input: Lc0EvaluatorInput, options: { evalCacheEntries?: number } = {}): Promise<Lc0Evaluation> {
@@ -382,8 +431,12 @@ export class Bt4WorkerSearcher {
     await this.post({ type: 'resetSearch' });
   }
 
+  private cancelSearch(id: number): void {
+    if (this.worker) this.worker.postMessage({ type: 'cancel', target: id });
+  }
+
   cancel(): void {
-    if (this.activeSearchId !== null && this.worker) this.worker.postMessage({ type: 'cancel', target: this.activeSearchId });
+    if (this.activeSearchId !== null) this.cancelSearch(this.activeSearchId);
   }
 
   /** Terminate the worker and free the resident BT4 net. */

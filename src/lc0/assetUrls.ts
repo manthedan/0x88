@@ -43,6 +43,7 @@ const R2_RESOLVED_PREFIXES = [
   '/plentychess/',
   '/viridithas/',
   '/reckless/',
+  '/stockfish/',
   '/runtimes/squareformer-tvm-hybrid/',
 ];
 

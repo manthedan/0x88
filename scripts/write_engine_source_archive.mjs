@@ -21,7 +21,7 @@ const CONFIGS = {
     patch: 'patches/berserk-emscripten.patch',
     buildScript: 'scripts/build_berserk_emscripten.mjs',
     smokeScript: 'scripts/berserk_emscripten_smoke.mjs',
-    smokeHtml: 'berserk-smoke.html',
+    smokeHtml: 'lab/berserk-smoke.html',
     adapterFiles: [
       'src/lc0/berserkEngine.ts',
       'src/lc0/berserkSmoke.ts',
@@ -54,7 +54,7 @@ const CONFIGS = {
     patch: 'patches/plentychess-emscripten.patch',
     buildScript: 'scripts/build_plentychess_emscripten.mjs',
     smokeScript: 'scripts/plentychess_emscripten_smoke.mjs',
-    smokeHtml: 'plentychess-smoke.html',
+    smokeHtml: 'lab/plentychess-smoke.html',
     adapterFiles: [
       'src/lc0/plentychessEngine.ts',
       'src/lc0/plentychessSmoke.ts',

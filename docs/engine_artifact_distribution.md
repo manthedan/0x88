@@ -95,7 +95,7 @@ If the selector is visible in a public deployment but assets are intentionally a
 - Pin: tag `14`, commit `8ae895a6151695be4a50d4fb65b0c131659c513a`
 - Patch: `patches/berserk-emscripten.patch`
 - Build: `npm run berserk:build-emscripten`
-- Smoke: `npm run berserk:smoke-emscripten`, `berserk-smoke.html`
+- Smoke: `npm run berserk:smoke-emscripten`, `lab/berserk-smoke.html`
 - Network: `berserk-9b84c340af7e.nn`
 - Network license/provenance: unresolved; no standalone license file found in `jhonnold/berserk-networks` during intake. Do not publicly distribute the network/data bundle until that is resolved or confirmed as covered by the engine release.
 - Distribution status: source-archive/manifest tooling exists, but public distribution remains blocked on network license/provenance confirmation.
@@ -108,7 +108,7 @@ If the selector is visible in a public deployment but assets are intentionally a
 - Version: `7.0.66`
 - Patch: `patches/plentychess-emscripten.patch`
 - Build: `npm run plentychess:build-emscripten`
-- Smoke: `npm run plentychess:smoke-emscripten`, `plentychess-smoke.html`
+- Smoke: `npm run plentychess:smoke-emscripten`, `lab/plentychess-smoke.html`
 - Network: `0134-2r24-s0.bin`
 - Network license/provenance: `Yoshie2000/PlentyNetworks` GPL-3.0.
 - Raw network SHA-256: `550a0b664b68113fd228f501524b25e0cea1be500a608bb0f26d42a6255c8061`

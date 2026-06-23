@@ -23,7 +23,7 @@ Observed local headers included raw `Content-Length` and no `Content-Encoding`:
 - `model.lc0web.json`: `Content-Length: 296585`, `Content-Type: application/json`
 - `weights.000.bin`: `Content-Length: 16565504`, `Content-Type: application/octet-stream`
 
-The repo's deploy path is Netlify (`netlify.toml`). Existing explicit `.br` rewrites are limited to generated Berserk/PlentyChess engine bundles. LC0 pack serving should not copy that pattern blindly: if a host cannot reliably attach `Content-Encoding: br` to rewritten sidecars, browsers can receive raw Brotli bytes and fail JSON/shard loading.
+The repo's deploy path is Netlify (`netlify.toml`). Stable engine/model URLs are no longer force-rewritten to `.br` sidecars. LC0 pack serving should not copy that old pattern: if a host cannot reliably attach `Content-Encoding: br` to rewritten sidecars, browsers can receive raw Brotli bytes and fail JSON/shard loading.
 
 ## Compression estimates
 
@@ -41,7 +41,7 @@ The JSON manifest compresses very well. F16 binary shards are already entropy-de
 
 ## Recommendation
 
-No runtime or Netlify rewrite change was made in this audit.
+No runtime compression change was made in this audit. Follow-up deployment policy removed the old Netlify forced sidecar rewrite pattern for stable URLs.
 
 Recommended serving policy:
 

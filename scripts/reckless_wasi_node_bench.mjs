@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Node browser_wasi_shim harness for Reckless WASI artifacts: runs one-shot
 // fixed-depth searches over the same 20-position rotated FEN suite as
-// /reckless-benchmark.html, checks cross-artifact fixed-depth parity
+// /lab/reckless-benchmark.html, checks cross-artifact fixed-depth parity
 // (bestmove, score, nodes, PV), and reports wall/engine timing. One-shot
 // process startup is included in wall ms, so engine-reported nodes/NPS is the
 // compute-comparison signal; wall ms is still useful artifact-vs-artifact at

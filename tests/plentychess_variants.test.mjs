@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   PLENTYCHESS_EMSCRIPTEN_DATA_URL,
   PLENTYCHESS_EMSCRIPTEN_JS_URL,
+  PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT,
   PLENTYCHESS_EMSCRIPTEN_VARIANT,
   PLENTYCHESS_EMSCRIPTEN_WASM_URL,
   PLENTYCHESS_MAIN_NETWORK,
@@ -18,6 +19,7 @@ import {
   plentyChessVariantByKey,
   plentyChessVariantFromParams,
   plentyChessVariantUnsupportedReason,
+  resolveDefaultPlentyChessVariantAssetFallback,
 } from '../src/lc0/plentychessVariants.ts';
 
 test('PlentyChess variant metadata pins the smoked Emscripten sidecars', () => {
@@ -56,6 +58,59 @@ test('PlentyChess URL params support explicit and custom Emscripten sidecars', (
   assert.equal(custom.dataUrl, '/plentychess/custom.data');
   const rejectedCustom = plentyChessVariantFromParams(new URLSearchParams('plentyChessJs=https://evil.example/plenty.js&plentyChessWasm=/local/plenty.wasm'));
   assert.equal(rejectedCustom.key, defaultPlentyChessVariantKey());
+});
+
+test('IPv6 loopback still probes local generated PlentyChess assets', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; return { ok: false }; };
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { hostname: '[::1]' },
+  });
+  try {
+    const localVariant = {
+      ...PLENTYCHESS_EMSCRIPTEN_VARIANT,
+      jsUrl: '/plentychess/local-ipv6.js',
+      wasmUrl: '/plentychess/local-ipv6.wasm',
+      dataUrl: '/plentychess/local-ipv6.data',
+    };
+    assert.equal(await checkPlentyChessVariantAsset(localVariant), 'missing');
+    assert.equal(calls, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);
+    else delete globalThis.location;
+  }
+});
+
+test('production skips known-unshipped PlentyChess asset probes', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; return { ok: false }; };
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { hostname: '0x88.app' },
+  });
+  try {
+    assert.equal(await checkPlentyChessVariantAsset(PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT), 'missing');
+    assert.equal(plentyChessVariantAssetStatus(PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT), 'missing');
+    assert.equal(await resolveDefaultPlentyChessVariantAssetFallback(PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT, false), PLENTYCHESS_EMSCRIPTEN_VARIANT);
+    const r2Variant = {
+      ...PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT,
+      jsUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-sse41.js',
+      wasmUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-sse41.wasm',
+      dataUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-sse41.data',
+    };
+    assert.equal(await checkPlentyChessVariantAsset(r2Variant), 'missing');
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);
+    else delete globalThis.location;
+  }
 });
 
 test('PlentyChess asset checks require JS, WASM, and data sidecars', async () => {

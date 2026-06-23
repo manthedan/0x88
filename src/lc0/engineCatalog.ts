@@ -55,7 +55,7 @@ export const ENGINE_FAMILY_CATALOG: Record<EngineFamily, EngineFamilyCatalogEntr
     label: 'Tiny Leela',
     shortLabel: 'TL',
     status: 'mixed',
-    docHref: 'docs/tiny_leela_research.md',
+    docHref: 'docs/engine_catalog.md#tiny-family',
     note: 'Tiny SquareFormer family; ORT is baseline and promoted custom WebGPU can be selected separately from LC0.',
   },
   sf: {

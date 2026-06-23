@@ -1,6 +1,6 @@
 import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
 import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
-import { isTrustedExecutableAssetUrl } from './assetUrls.ts';
+import { isTrustedExecutableAssetUrl, resolvePublicAssetUrl } from './assetUrls.ts';
 
 export interface BerserkOptions {
   /** Fixed search depth. */
@@ -15,7 +15,7 @@ export interface BerserkOptions {
 
 export interface BerserkInfoLine extends BrowserUciInfoLine {}
 
-export const DEFAULT_BERSERK_EMSCRIPTEN_JS_URL = '/berserk/berserk-emscripten.js';
+export const DEFAULT_BERSERK_EMSCRIPTEN_JS_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten.js');
 
 export function berserkGoCommand(options: BerserkOptions): string {
   if (options.movetimeMs && options.movetimeMs > 0) return `go movetime ${Math.floor(options.movetimeMs)}`;

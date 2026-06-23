@@ -26,10 +26,29 @@ function removeMatchingFiles(dir, predicate) {
   }
 }
 
-// The R2 deployment serves model blobs from an external /models origin. Keep
-// lightweight manifests/docs in dist for diagnostics, but remove local blobs and
-// packs so Netlify only hosts the app shell and small engine assets.
+function isExternalArtifact(name) {
+  return name.endsWith('.onnx')
+    || name.endsWith('.lc0web')
+    || name.endsWith('.wasm')
+    || name.endsWith('.data')
+    || name.endsWith('.nn')
+    || name.endsWith('.nnue')
+    || name.endsWith('.bin')
+    || name.endsWith('.tar.gz')
+    || name.endsWith('.gz')
+    || name.endsWith('.br')
+    || name.endsWith('.js')
+    || name.endsWith('.mjs');
+}
+
+// The R2 deployment serves model and engine blobs from the artifact host. Keep
+// lightweight manifests/docs in dist for diagnostics, but remove local blobs,
+// generated sidecars, source archives, and precompressed copies so Netlify only
+// hosts the app shell.
 removeMatchingFiles(join(root, 'models', 'lc0'), (name, _path, isDir) => isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx'));
 removeMatchingFiles(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDir && name.endsWith('.onnx'));
+for (const dir of ['berserk', 'plentychess', 'reckless', 'stockfish', 'viridithas', 'runtimes']) {
+  removeMatchingFiles(join(root, dir), (name, _path, isDir) => isDir ? false : isExternalArtifact(name));
+}
 
-console.log(JSON.stringify({ status: 'EXTERNAL_MODEL_ASSET_PRUNE_DONE', root: relative(process.cwd(), root) || '.', removed }, null, 2));
+console.log(JSON.stringify({ status: 'EXTERNAL_DEPLOY_ASSET_PRUNE_DONE', root: relative(process.cwd(), root) || '.', removed }, null, 2));

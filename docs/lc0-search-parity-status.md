@@ -64,5 +64,5 @@ These are intentionally left outside this browser-facing milestone:
 See also:
 
 - [Native LC0 Search Feature Gap](native-lc0-search-gap.md)
-- [Browser-Safe Parallel MCTS Boundary](browser-safe-parallel-mcts.md)
+- Browser-safe parallel MCTS remains bounded to the current single-worker browser search model.
 - [LC0 Search Parity Strictness](lc0_search_parity_strictness.md)

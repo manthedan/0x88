@@ -26,6 +26,50 @@ test('big-net asset probe uses a lightweight HEAD request and records present as
   }
 });
 
+test('production skips known-unhosted big-net asset probes', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  const config = testConfig('/models/lc0/unit-unhosted-big-net.onnx');
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; return new Response(null, { status: 200 }); };
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { hostname: '0x88.app' },
+  });
+  try {
+    assert.equal(await checkBigNetAsset(config), 'missing');
+    assert.equal(bigNetAssetStatusSync(config), 'missing');
+    const r2Config = testConfig('https://assets.0x88.app/models/lc0/unit-unhosted-big-net-r2.onnx');
+    assert.equal(await checkBigNetAsset(r2Config), 'missing');
+    assert.equal(bigNetAssetStatusSync(r2Config), 'missing');
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);
+    else delete globalThis.location;
+  }
+});
+
+test('IPv6 loopback still probes local big-net assets', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  const config = testConfig('/models/lc0/unit-local-big-net.onnx');
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; return new Response(null, { status: 404 }); };
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { hostname: '[::1]' },
+  });
+  try {
+    assert.equal(await checkBigNetAsset(config), 'missing');
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);
+    else delete globalThis.location;
+  }
+});
+
 test('big-net asset probe records missing assets', async () => {
   const originalFetch = globalThis.fetch;
   const config = testConfig('/unit/big-net-missing.onnx');
