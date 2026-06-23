@@ -1,7 +1,7 @@
 {
   "schema": "lc0_browser.r2_v0_present_manifest.v1",
   "generatedBy": "manual subset of public/models/lc0/manifest.json for V0 R2 asset release",
-  "note": "V0 release subset excludes BT4 ONNX files above Wrangler single-object upload limits; publish those later through a multipart path or smaller export.",
+  "note": "V0 release subset excludes BT4 f16 ONNX files above Wrangler single-object upload limits; BT4-it332 is published through the smaller QDQ8 export.",
   "models": [
     {
       "file": "t1-256x10-distilled-swa-2432500.batch1.f32.onnx",
@@ -98,6 +98,15 @@
       "source": "../models/lc0-bestnets/onnx/t3-512x15x16h-distill-swa-2767500.batch16.f16.onnx",
       "bytes": 171016323,
       "sha256": "385639425f9519c4a295b3022ce12fbe7bdadc21e47ab4cc30258e7507529b25"
+    },
+    {
+      "file": "BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx",
+      "url": "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx",
+      "bytes": 186676343,
+      "sha256": "af5319e8aa5a240c26311c3f52f58b3e190734e028b081ac78432e652eb80b7a",
+      "derivedFrom": "BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.onnx"
     },
     {
       "file": "lqo_v2.f16.qdq8.onnx",

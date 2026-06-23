@@ -32,18 +32,19 @@
       "id": "lc0-bt4-it332",
       "family": "lc0",
       "uiLabel": "Lc0 BT4-it332",
-      "status": "experimental-local-asset",
+      "status": "experimental-hosted-warning",
       "versionOrSource": "BT4-1024x15x32h-swa-6147500-policytune-332",
-      "deploymentStatus": "tracked-manifest-only-local-blob",
+      "deploymentStatus": "r2-hosted-qdq8",
       "manifestUrl": "/models/lc0/manifest.json",
       "primaryUrls": [
-        "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx"
+        "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx"
       ],
       "additionalManifestUrls": [
         "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch1.f16.onnx",
+        "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx",
         "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.onnx"
       ],
-      "notes": "Current Arena BT4 option uses the batch-4 f16 export with WebGPU-only worker, leaf batch size 4, pipeline depth 1, and tree reuse. The large ONNX blobs are not tracked in git."
+      "notes": "Current Arena BT4 option uses the batch-8 f16 QDQ8 export with WebGPU-first worker, leaf batch size 8, pipeline depth 1, tree reuse, and one-time large-net warnings. The f16 ONNX blobs remain local-only because they exceed Wrangler single-object upload limits."
     },
     {
       "id": "lc0-bt4-legacy",

@@ -34,11 +34,11 @@ export interface BigNetConfig {
 export const BT4_NET: BigNetConfig = {
   key: 'bt4',
   name: 'BT4-it332',
-  modelUrl: resolvePublicAssetUrl('/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx'),
-  approxMb: 353,
-  recommendedBatchSize: 4,
+  modelUrl: resolvePublicAssetUrl('/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx'),
+  approxMb: 178,
+  recommendedBatchSize: 8,
   recommendedPipelineDepth: 1,
-  exportNote: 'policytune-332 batch-4 f16 export',
+  exportNote: 'experimental policytune-332 batch-8 f16 QDQ int8-weight export',
   wasmLevels: [2, 3, 4, 6, 8],
 };
 
@@ -165,6 +165,7 @@ let supportedCached: boolean | null = null;
 const assetProbes = new Map<string, Promise<Bt4AssetStatus>>();
 const assetStatuses = new Map<string, Bt4AssetStatus>();
 const DEPLOYED_BIG_NET_URLS = new Set<string>([
+  '/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx',
   '/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx',
   '/models/lc0/lqo_v2.f16.qdq8.onnx',
 ]);
@@ -321,7 +322,7 @@ export class Bt4WorkerSearcher {
     });
   }
 
-  /** Create + init the worker on first call (fetches ~353MB, then cached). */
+  /** Create + init the worker on first call (fetches the large net, then cached). */
   async init(options: { evalCacheEntries?: number } = {}): Promise<string> {
     const evalCacheEntries = Math.max(0, Math.floor(Number(options.evalCacheEntries ?? 0) || 0));
     if (this.ready && this.configuredEvalCacheEntries === evalCacheEntries) return this.backend;

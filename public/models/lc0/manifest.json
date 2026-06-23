@@ -99,6 +99,14 @@
       "sha256": "480cbcb4863bdb63db962381a8dd736befbb172862508ca52bd72bcc2c990e02"
     },
     {
+      "file": "BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx",
+      "url": "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx",
+      "bytes": 186676343,
+      "sha256": "af5319e8aa5a240c26311c3f52f58b3e190734e028b081ac78432e652eb80b7a"
+    },
+    {
       "file": "t3-512x15x16h-distill-swa-2767500.batch1.f16.onnx",
       "url": "/models/lc0/t3-512x15x16h-distill-swa-2767500.batch1.f16.onnx",
       "mode": "symlink",

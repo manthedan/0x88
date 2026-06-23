@@ -12,7 +12,7 @@ const ASSET_GROUPS = [
     status: 'optional-gated',
     command: 'npm run lc0:prepare-model-assets',
     docs: 'docs/engine_catalog.md#lc0-family',
-    assets: ['/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx'],
+    assets: ['/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx'],
   },
   {
     family: 'reckless',
