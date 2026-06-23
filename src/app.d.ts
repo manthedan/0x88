@@ -8,6 +8,5 @@ interface ProcessLike {
 declare var process: ProcessLike | undefined;
 
 interface Window {
-  __0x88SyncThemeControls?: () => void;
   __0x88ThemeControlsInstalled?: boolean;
 }

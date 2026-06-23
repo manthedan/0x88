@@ -1,7 +1,8 @@
-/* Shared theme toggle + board style logic. Loaded after DOM ready.
+/* Shared theme toggle + board style logic for pages that render the
+   header via {@html} strings (landing, docs, single-engine). The app
+   layout uses Svelte stores directly; this file handles the rest.
    The early inline script in <head> applies the saved theme before
-   first paint to prevent FOUC; this file wires up the toggle button
-   and board-style selector. */
+   first paint to prevent FOUC. */
 (function () {
   var root = document.documentElement;
   var boards = ['brown', 'night', 'blue', 'green'];
@@ -24,8 +25,6 @@
       select.value = boards.indexOf(current) >= 0 ? current : 'brown';
     });
   }
-
-  window.__0x88SyncThemeControls = sync;
 
   if (!window.__0x88ThemeControlsInstalled) {
     window.__0x88ThemeControlsInstalled = true;
