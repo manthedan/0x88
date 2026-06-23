@@ -1,5 +1,6 @@
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './recklessVariants.ts';
-import { DEFAULT_VIRIDITHAS_WASM_URL } from './viridithasEngine.ts';
+
+export const DEFAULT_VIRIDITHAS_WASM_URL = '/viridithas/viridithas.wasm';
 
 export type ViridithasAssetStatus = 'unknown' | 'checking' | 'ok' | 'missing';
 
@@ -31,6 +32,21 @@ export const VIRIDITHAS_RELAXED_SIMD_VARIANT: ViridithasVariant = {
   wasmUrl: '/viridithas/viridithas-relaxed-simd128.wasm',
   note: 'Viridithas build using the relaxed integer dot for the L1 NNUE kernels (exact: QA=255/FT_SHIFT=9 keep activations in 0..127). Default when the browser validates Relaxed SIMD; +14% NPS over simd128 at 40/40 parity.',
 };
+
+const DEPLOYED_VIRIDITHAS_URLS = new Set([
+  DEFAULT_VIRIDITHAS_WASM_URL,
+  VIRIDITHAS_SIMD_VARIANT.wasmUrl,
+]);
+
+function isLocalDevelopmentOrigin(): boolean {
+  if (typeof location === 'undefined') return true;
+  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
+}
+
+function shouldSkipKnownUnshippedProbe(variant: ViridithasVariant): boolean {
+  if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;
+  return variant.wasmUrl.startsWith('/viridithas/') && !DEPLOYED_VIRIDITHAS_URLS.has(variant.wasmUrl);
+}
 
 // Promotion order: relaxed integer dot > simd128 > scalar. All variants are
 // value-exact (40/40 fixed-depth parity), so this is a speed ladder gated by
@@ -105,6 +121,11 @@ export function viridithasVariantAssetStatus(variant: ViridithasVariant): Viridi
 
 export async function checkViridithasVariantAsset(variant: ViridithasVariant, onChange?: () => void): Promise<ViridithasAssetStatus> {
   if (variant.assetStatus === 'ok' || variant.assetStatus === 'missing') return variant.assetStatus;
+  if (shouldSkipKnownUnshippedProbe(variant)) {
+    variant.assetStatus = 'missing';
+    onChange?.();
+    return variant.assetStatus;
+  }
   variant.assetStatus = 'checking';
   onChange?.();
   try {

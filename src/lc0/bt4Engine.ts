@@ -114,6 +114,19 @@ let supportedCached: boolean | null = null;
 const assetProbes = new Map<string, Promise<Bt4AssetStatus>>();
 const assetStatuses = new Map<string, Bt4AssetStatus>();
 
+function isLocalDevelopmentOrigin(): boolean {
+  if (typeof location === 'undefined') return true;
+  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
+}
+
+function shouldSkipKnownUnhostedBigNetProbe(config: BigNetConfig): boolean {
+  // The large BT4/T3 ONNX blobs are intentionally pruned from the Netlify app
+  // shell and are not part of the current R2 bootstrap channel. Avoid issuing
+  // guaranteed-failing production HEAD probes; localhost still probes so local
+  // generated/staged assets work during development.
+  return !isLocalDevelopmentOrigin() && config.modelUrl.startsWith('/models/lc0/');
+}
+
 /** WebGPU usable for big-net search? Cached after the first probe. Asset probes are tracked separately per net. */
 export async function probeBt4Support(): Promise<boolean> {
   if (supportProbe) return supportProbe;
@@ -151,8 +164,15 @@ export function bt4AssetStatusSync(): Bt4AssetStatus {
 
 /** Browser-served big-net ONNX asset availability. Cached after the first probe. */
 export async function checkBigNetAsset(config: BigNetConfig = BT4_NET, onStatus?: () => void): Promise<Bt4AssetStatus> {
+  const existingStatus = assetStatuses.get(config.modelUrl);
+  if (existingStatus === 'present' || existingStatus === 'missing') return existingStatus;
   const existing = assetProbes.get(config.modelUrl);
   if (existing) return existing;
+  if (shouldSkipKnownUnhostedBigNetProbe(config)) {
+    assetStatuses.set(config.modelUrl, 'missing');
+    onStatus?.();
+    return 'missing';
+  }
   const probe = (async () => {
     let status: Bt4AssetStatus;
     try {
