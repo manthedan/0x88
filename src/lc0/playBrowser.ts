@@ -14,7 +14,7 @@ import { loadLc0ModelForOrt } from './modelCache.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Maia3BrowserEvaluator, MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle } from './maia3.ts';
 import { Lc0PuctSearcher } from './search.ts';
-import { BIG_NETS, Bt4WorkerSearcher, LQO_NET, T3_NET, bigNetMemoryCaution, bigNetOptionState, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig } from './bt4Engine.ts';
+import { BIG_NETS, Bt4WorkerSearcher, LQO_NET, T3_NET, bigNetMemoryCaution, bigNetOptionState, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig, type Bt4SearchOptions } from './bt4Engine.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import type { RecklessEngine } from './recklessEngine.ts';
 import { defaultRecklessVariantKey, recklessVariantByKey, resolveDefaultRecklessVariantAssetFallback } from './recklessVariants.ts';
@@ -28,6 +28,7 @@ import { createBerserkEngine, createPlentyChessEngine, createRecklessEngine, cre
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { isV0DeployProfile } from './engineCatalog.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
+import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
@@ -90,7 +91,6 @@ const BIG_NET_LEVELS = [4, 16, 64, 256, 800];
  * around ±0.4-0.6 — while regular Lc0 opponents get a milder anti-draw lean.
  */
 const PLAY_DRAW_SCORE = -0.25;
-const LQO_DRAW_SCORE = -0.5;
 /**
  * Model the human opponent as a budget-limited searcher (see
  * docs/search_contempt_design.md). The limit reflects the opponent's search
@@ -98,9 +98,13 @@ const LQO_DRAW_SCORE = -0.5;
  * A/B-validated point (92% vs 58% baseline at queen odds vs Maia 1900).
  */
 const PLAY_SEARCH_CONTEMPT_LIMIT = 16;
-/** LeelaQueenOdds README search settings (CPuct 1.5, ScLimit scaled to browser visit budgets). */
+/** LeelaQueenOdds README search settings, including SwapColors when LQO plays Black. */
 const LQO_CPUCT = 1.5;
-const LQO_SEARCH_CONTEMPT_LIMIT = 24;
+const LQO_FPU_VALUE = 0.4;
+const LQO_WHITE_DRAW_SCORE = -0.4;
+const LQO_BLACK_DRAW_SCORE = 0.6;
+const LQO_WHITE_SEARCH_CONTEMPT_LIMIT = 40;
+const LQO_BLACK_SEARCH_CONTEMPT_LIMIT = 32;
 
 function el(id: string): HTMLElement {
   const found = document.getElementById(id);
@@ -255,6 +259,17 @@ function strengthCaption(): string {
   return option.family === 'lc0' ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent${cpuNote}` : base;
 }
 
+function lqoSearchOptions(): Pick<Bt4SearchOptions, 'drawScore' | 'searchContemptLimit' | 'cpuct' | 'fpu' | 'swapColors'> {
+  const lqoPlaysBlack = humanColor === 'w';
+  return {
+    drawScore: lqoPlaysBlack ? LQO_BLACK_DRAW_SCORE : LQO_WHITE_DRAW_SCORE,
+    searchContemptLimit: lqoPlaysBlack ? LQO_BLACK_SEARCH_CONTEMPT_LIMIT : LQO_WHITE_SEARCH_CONTEMPT_LIMIT,
+    cpuct: LQO_CPUCT,
+    fpu: LQO_FPU_VALUE,
+    swapColors: lqoPlaysBlack,
+  };
+}
+
 function renderLevelOptions(): void {
   const select = selectEl('levelSelect');
   const previous = select.value;
@@ -291,6 +306,16 @@ function setEngineNote(text: string, warn = false): void {
   note.textContent = text;
   note.hidden = !text;
   note.classList.toggle('warn', warn);
+}
+
+function searchProgressText(label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number }): string {
+  const completed = progress.completedVisits ?? progress.visits;
+  const requested = progress.requestedVisits ?? progress.visits;
+  const pct = requested > 0 ? ` ${(100 * completed / requested).toFixed(0)}%` : '';
+  const speed = progress.elapsedMs && progress.elapsedMs > 0
+    ? ` · ${(completed / Math.max(1e-9, progress.elapsedMs / 1000)).toFixed(1)} v/s`
+    : '';
+  return `${label}: ${completed}/${requested} visits${pct} · best ${progress.move ?? '—'} · Q ${progress.value.toFixed(3)}${speed}`;
 }
 
 function showDownloadProgress(label: string, loadedBytes?: number, totalBytes?: number, phase = 'Downloading'): void {
@@ -364,6 +389,37 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
   const option = selectedEngine();
   const level = selectedLevel();
   const visitsOrDepth = strengthFor(option, level);
+  if (option.family === 'lc0' && option.variant === 'lqo') {
+    const historyUcis = moves.map(moveToUci);
+    if (humanColor === 'w') {
+      const bookMove = lqoBlackBookMove(board, moves.length, historyUcis);
+      if (bookMove) {
+        setEngineNote(`LQO opening book: ${bookMove}`);
+        return bookMove;
+      }
+    } else if (moves.length === 0) {
+      const searcher = bigNetSearchers.lqo;
+      if (!searcher.loaded) {
+        setEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
+        showDownloadProgress(`Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
+        searcher.onDownloadProgress = (loaded, total) => showDownloadProgress(`Lc0 ${searcher.config.name}`, loaded, total);
+      }
+      const evaluation = await searcher.evaluate({ positions }, { evalCacheEntries: 2048 });
+      hideDownloadProgress();
+      if (signal.aborted) return null;
+      const bookMove = lqoWhiteFirstPolicyBookMove(board, moves.length, historyUcis, evaluation.legalPriors, Math.random, 8);
+      if (bookMove) {
+        setEngineNote(`LQO policy book: ${bookMove}`);
+        return bookMove;
+      }
+    } else {
+      const bookMove = lqoWhiteBookMove(board, moves.length, historyUcis);
+      if (bookMove) {
+        setEngineNote(`LQO opening book: ${bookMove}`);
+        return bookMove;
+      }
+    }
+  }
   if (option.family === 'maia3') {
     const player = await ensureMaia3();
     if (signal.aborted) return null;
@@ -378,7 +434,17 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
   }
   if (option.family === 'lc0' && option.variant === 'small') {
     const searcher = await ensureLc0Small();
-    const result = await searcher.search({ positions }, { visits: visitsOrDepth, signal, yieldEveryMs: 16, reuseTree: true, drawScore: PLAY_DRAW_SCORE, searchContemptLimit: PLAY_SEARCH_CONTEMPT_LIMIT });
+    const result = await searcher.search({ positions }, {
+      visits: visitsOrDepth,
+      signal,
+      yieldEveryMs: 16,
+      reuseTree: true,
+      drawScore: PLAY_DRAW_SCORE,
+      searchContemptLimit: PLAY_SEARCH_CONTEMPT_LIMIT,
+      onProgress: (progress) => {
+        if (!signal.aborted) setEngineNote(searchProgressText('Lc0 search', progress));
+      },
+    });
     return result.move ?? null;
   }
   if (option.family === 'lc0') {
@@ -391,15 +457,19 @@ async function requestEngineMove(signal: AbortSignal): Promise<string | null> {
     const onAbort = () => searcher.cancel();
     signal.addEventListener('abort', onAbort, { once: true });
     try {
+      const lqoOptions = option.variant === 'lqo' ? lqoSearchOptions() : null;
       const result = await searcher.search({ positions }, {
         visits: visitsOrDepth,
         reuseTree: true,
         batchSize: searcher.config.recommendedBatchSize,
         batchPipelineDepth: searcher.config.recommendedPipelineDepth,
         evalCacheEntries: 2048,
-        drawScore: option.variant === 'lqo' ? LQO_DRAW_SCORE : PLAY_DRAW_SCORE,
-        searchContemptLimit: option.variant === 'lqo' ? LQO_SEARCH_CONTEMPT_LIMIT : PLAY_SEARCH_CONTEMPT_LIMIT,
-        ...(option.variant === 'lqo' ? { cpuct: LQO_CPUCT } : {}),
+        drawScore: lqoOptions?.drawScore ?? PLAY_DRAW_SCORE,
+        searchContemptLimit: lqoOptions?.searchContemptLimit ?? PLAY_SEARCH_CONTEMPT_LIMIT,
+        onProgress: (progress) => {
+          if (!signal.aborted) setEngineNote(searchProgressText(`Lc0 ${searcher.config.name} search`, progress));
+        },
+        ...(lqoOptions ?? {}),
       });
       hideDownloadProgress();
       setEngineNote('');

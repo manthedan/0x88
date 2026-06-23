@@ -206,7 +206,7 @@ let searchWorker: Worker | null = null;
 let workerReady = false;
 let workerBackend = '';
 let workerSeq = 0;
-const workerPending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+const workerPending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; onProgress?: (progress: WorkerSearchProgress) => void }>();
 let activeWorkerSearchId: number | null = null;
 
 interface WorkerSearchResult {
@@ -216,6 +216,11 @@ interface WorkerSearchResult {
   multiPv?: string[][];
   children: { uci: string; visits: number; q: number }[];
   cancelled?: boolean;
+}
+
+interface WorkerSearchProgress extends WorkerSearchResult {
+  requestedVisits: number;
+  completedVisits: number;
 }
 
 function requestedEp(): string {
@@ -325,12 +330,12 @@ function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown>
   };
 }
 
-function postWorker<T>(message: Record<string, unknown>, onId?: (id: number) => void): Promise<T> {
+function postWorker<T>(message: Record<string, unknown>, onId?: (id: number) => void, onProgress?: (progress: WorkerSearchProgress) => void): Promise<T> {
   if (!searchWorker) return Promise.reject(new Error('LC0 worker unavailable'));
   const id = ++workerSeq;
   onId?.(id);
   return new Promise<T>((resolve, reject) => {
-    workerPending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+    workerPending.set(id, { resolve: resolve as (value: unknown) => void, reject, onProgress });
     searchWorker!.postMessage({ ...message, id });
   });
 }
@@ -346,6 +351,10 @@ async function initWorker(): Promise<string> {
     }
     const pending = workerPending.get(message.id);
     if (!pending) return;
+    if (message.type === 'searchProgress') {
+      pending.onProgress?.((message as unknown as { progress: WorkerSearchProgress }).progress);
+      return;
+    }
     workerPending.delete(message.id);
     if (message.type === 'error') pending.reject(new Error(message.error ?? 'worker error'));
     else pending.resolve(message);
@@ -375,10 +384,26 @@ async function initWorker(): Promise<string> {
   return workerBackend;
 }
 
+function analysisProgressText(label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number }): string {
+  const completed = progress.completedVisits ?? progress.visits;
+  const requested = progress.requestedVisits ?? progress.visits;
+  const pct = requested > 0 ? ` ${(100 * completed / requested).toFixed(0)}%` : '';
+  const speed = progress.elapsedMs && progress.elapsedMs > 0
+    ? ` · ${(completed / Math.max(1e-9, progress.elapsedMs / 1000)).toFixed(1)} v/s`
+    : '';
+  return `${label}: ${completed}/${requested} visits${pct} · best ${progress.move ?? '—'} · Q ${progress.value.toFixed(3)}${speed}`;
+}
+
+function showAnalysisProgress(fen: string, label: string, progress: WorkerSearchProgress): void {
+  if (!analysisPageMounted || !analyzing || tree.current.fen !== fen) return;
+  el('message').textContent = analysisProgressText(label, progress);
+}
+
 async function workerLc0Lines(fen: string, visits: number): Promise<AnalysisLine[]> {
   const response = await postWorker<{ result: WorkerSearchResult }>(
-    { type: 'search', input: { positions: tree.historyBoards() }, visits, batchSize: 1, multiPv: multiPv() },
+    { type: 'search', input: { positions: tree.historyBoards() }, visits, batchSize: 1, multiPv: multiPv(), reportProgress: true },
     (id) => { activeWorkerSearchId = id; },
+    (progress) => showAnalysisProgress(fen, 'Lc0 search', progress),
   );
   return response.result.cancelled ? [] : lc0AnalysisLines(response.result, fen, 'Lc0');
 }
@@ -861,7 +886,14 @@ function renderEngineList(): void {
 
 async function workerBigNetLines(variant: string, fen: string, visits: number): Promise<AnalysisLine[]> {
   const { config, searcher } = bigNetFor(variant);
-  const result = await searcher.search({ positions: tree.historyBoards() }, { visits, multiPv: multiPv(), batchSize: config.recommendedBatchSize, batchPipelineDepth: config.recommendedPipelineDepth });
+  const label = `Lc0 ${config.name}`;
+  const result = await searcher.search({ positions: tree.historyBoards() }, {
+    visits,
+    multiPv: multiPv(),
+    batchSize: config.recommendedBatchSize,
+    batchPipelineDepth: config.recommendedPipelineDepth,
+    onProgress: (progress) => showAnalysisProgress(fen, `${label} search`, progress),
+  });
   return result.cancelled ? [] : lc0AnalysisLines(result, fen, `Lc0 ${config.name}`);
 }
 
@@ -1815,7 +1847,13 @@ async function analyzeCurrent() {
         tasks.push(workerBigNetLines(row.variant, fen, row.strength));
       } else if (row.family === 'lc0') {
         if (workerReady) tasks.push(workerLc0Lines(fen, row.strength));
-        else if (searcher) tasks.push(searcher.search({ positions: tree.historyBoards() }, { visits: row.strength, multiPv: multiPv(), signal: controller.signal, yieldEveryMs: 16 })
+        else if (searcher) tasks.push(searcher.search({ positions: tree.historyBoards() }, {
+          visits: row.strength,
+          multiPv: multiPv(),
+          signal: controller.signal,
+          yieldEveryMs: 16,
+          onProgress: (progress) => showAnalysisProgress(fen, 'Lc0 search', progress),
+        })
           .then((result) => lc0AnalysisLines(result, fen, 'Lc0')));
       } else if (row.family === 'tiny') {
         const positions = tree.historyBoards();

@@ -30,6 +30,18 @@ export interface ProgressiveWideningOptions {
   maxExploreScale?: number;
 }
 export interface SearchResult { move: Move | null; visits: number; value: number; policy: SearchPolicyEntry[]; principalVariation?: PrincipalVariationEntry[]; multiPvLines?: PrincipalVariationEntry[][]; stats?: SearchStats; root?: Node; }
+export interface SearchProgress {
+  move: Move | null;
+  visits: number;
+  requestedVisits: number;
+  completedVisits: number;
+  value: number;
+  policy: SearchPolicyEntry[];
+  principalVariation?: PrincipalVariationEntry[];
+  multiPvLines?: PrincipalVariationEntry[][];
+  stats?: SearchStats;
+  elapsedMs: number;
+}
 export type CpuctSchedule = 'constant' | 'lc0-log';
 export type FpuStrategy = 'constant' | 'lc0-reduction';
 export type SearchBudgetMode = 'visits' | 'neural';
@@ -124,6 +136,10 @@ export interface SearchOptions {
   transpositionTable?: Map<string, Node>;
   /** Opt-in diagnostic trace for batched/pipelined visit selection and backup order. */
   traceSearchVisits?: boolean;
+  /** Throttled partial root snapshots for UI progress while long searches run. */
+  onProgress?: (progress: SearchProgress) => void;
+  /** Minimum interval between progress callbacks. Default 250ms. */
+  progressEveryMs?: number;
   /** Budget fixed visits or paid neural/backend eval misses when a cache-aware evaluator is present. */
   budgetMode?: SearchBudgetMode;
   /** Adaptive neural mode cap: max additional root visits = visits * multiplier. */
@@ -1138,6 +1154,31 @@ function extractMultiPv(root: Node, context: SearchPolicyContext, searchPolicy: 
   });
 }
 
+function buildSearchProgress(root: Node, searchPolicy: SearchPolicy, context: SearchPolicyContext, stats: SearchStats, options: SearchOptions, requestedVisits: number, startedMs: number): SearchProgress {
+  const policy = searchPolicy.rootPolicy(root.edges, context, root);
+  const bestEntry = searchPolicy.chooseFinalMove(policy, context);
+  const pvDepth = options.pvDepth ?? 12;
+  const pvSelector = options.pvSelector ?? 'visits';
+  const principalVariation = options.includePv === false ? undefined : extractPrincipalVariation(root, context, searchPolicy, pvDepth, pvSelector);
+  const multiPvCount = Math.max(0, Math.floor(options.multiPv ?? 0));
+  const multiPvLines = options.includePv === false || multiPvCount <= 1
+    ? undefined
+    : extractMultiPv(root, context, searchPolicy, pvDepth, pvSelector, multiPvCount);
+  const realizedVisits = Math.max(root.visits ?? 0, rootVisitCount(root));
+  return {
+    move: bestEntry?.move ?? null,
+    visits: realizedVisits,
+    requestedVisits,
+    completedVisits: stats.completedVisits,
+    value: bestEntry?.q ?? root.terminalValue ?? 0,
+    policy,
+    ...(principalVariation ? { principalVariation } : {}),
+    ...(multiPvLines ? { multiPvLines } : {}),
+    stats,
+    elapsedMs: nowMs() - startedMs,
+  };
+}
+
 async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyContext, stats?: SearchStats): Promise<number> {
   const moves = legalMoves(node.board);
   if (!moves.length) {
@@ -1411,7 +1452,7 @@ function finishPreparedLeafBatch(batch: PreparedLeafBatch, evals: Evaluation[], 
   }
 }
 
-async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>, deadlineMs?: number, collisionMode: SearchBatchCollisionMode = 'retry', collisionRetryLimit = batchSize * 4) {
+async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>, deadlineMs?: number, collisionMode: SearchBatchCollisionMode = 'retry', collisionRetryLimit = batchSize * 4, onProgress?: () => void) {
   let done = 0;
   let lastYield = nowMs();
   while (done < visits && !deadlineExpired(deadlineMs)) {
@@ -1502,6 +1543,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
       recordBackupTrace(stats, root, searchPolicy, context, traceBatch, item, itemIndex, value, 1, 0);
     }
     done += want;
+    onProgress?.();
     throwIfAborted(signal);
     if (deadlineExpired(deadlineMs)) break;
     if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
@@ -1554,7 +1596,7 @@ async function evaluatePreparedLeafBatches(evaluator: Evaluator, batches: Prepar
   return out;
 }
 
-async function runPipelinedBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, pipelineDepth: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>, deadlineMs?: number, collisionMode: SearchBatchCollisionMode = 'retry', collisionRetryLimit = batchSize * 4) {
+async function runPipelinedBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, pipelineDepth: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>, deadlineMs?: number, collisionMode: SearchBatchCollisionMode = 'retry', collisionRetryLimit = batchSize * 4, onProgress?: () => void) {
   let scheduled = 0;
   let lastYield = nowMs();
   const inFlightEvalLeaves = new Set<Node>();
@@ -1582,6 +1624,7 @@ async function runPipelinedBatchedVisits(root: Node, evaluator: Evaluator, visit
       for (const node of batches[i].evalNodes) inFlightEvalLeaves.delete(node);
       finishPreparedLeafBatch(batches[i], evalResults[i], searchPolicy, context, stats, root, pipelineDepth, i);
     }
+    onProgress?.();
     throwIfAborted(signal);
     if (deadlineExpired(deadlineMs)) break;
     if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
@@ -1692,6 +1735,15 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   const kldState: KldEarlyStopState = { stableChecks: 0 };
   const bestStableState: BestStableEarlyStopState = { stableChecks: 0 };
   const fixedVisitTarget = Math.max(visits, rootVisitCount(root));
+  const progressEveryMs = Math.max(50, Math.floor(options.progressEveryMs ?? 250));
+  let lastProgressMs = -Infinity;
+  const emitProgress = (force = false) => {
+    if (!options.onProgress) return;
+    const now = nowMs();
+    if (!force && now - lastProgressMs < progressEveryMs) return;
+    lastProgressMs = now;
+    options.onProgress(buildSearchProgress(root, searchPolicy, context, stats, options, visits, tSearch0));
+  };
   throwIfAborted(signal);
   if (budgetMode === 'neural') {
     stats.requestedNeuralEvals = visits;
@@ -1701,8 +1753,8 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     if (!cacheAware) {
       stats.stopReason = 'no-cache-metrics-fixed-visits';
       if (batchSize > 1 || batchPipelineDepth > 1) {
-        if (batchPipelineDepth > 1) await runPipelinedBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, batchPipelineDepth, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
-        else await runBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
+        if (batchPipelineDepth > 1) await runPipelinedBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, batchPipelineDepth, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit, emitProgress);
+        else await runBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit, emitProgress);
       }
       else {
         let lastYield = nowMs();
@@ -1712,6 +1764,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
           stats.completedVisits += 1;
           if (deadlineExpired(deadlineMs)) break;
           if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
+            emitProgress();
             await yieldToUi();
             lastYield = nowMs();
             throwIfAborted(signal);
@@ -1732,8 +1785,8 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
         const chunk = Math.max(1, Math.min(batchSize * batchPipelineDepth, room, Math.max(batchSize, remainingMissBudget)));
         const beforeCompleted = stats.completedVisits;
         if (batchSize > 1 || batchPipelineDepth > 1) {
-          if (batchPipelineDepth > 1) await runPipelinedBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, batchPipelineDepth, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
-          else await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
+          if (batchPipelineDepth > 1) await runPipelinedBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, batchPipelineDepth, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit, emitProgress);
+          else await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit, emitProgress);
         }
         else {
           await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
@@ -1750,6 +1803,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
           break;
         }
         if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
+          emitProgress();
           await yieldToUi();
           lastYield = nowMs();
           throwIfAborted(signal);
@@ -1762,8 +1816,8 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     while (done < visitsToRun && !deadlineExpired(deadlineMs)) {
       const chunk = Math.min(batchSize * batchPipelineDepth, visitsToRun - done);
       const beforeCompleted = stats.completedVisits;
-      if (batchPipelineDepth > 1) await runPipelinedBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, batchPipelineDepth, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
-      else await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit);
+      if (batchPipelineDepth > 1) await runPipelinedBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, batchPipelineDepth, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit, emitProgress);
+      else await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit, emitProgress);
       done += Math.max(0, stats.completedVisits - beforeCompleted);
       if (stats.completedVisits === beforeCompleted) break;
       if (deadlineExpired(deadlineMs)) break;
@@ -1787,6 +1841,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
         break;
       }
       if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
+        emitProgress();
         await yieldToUi();
         lastYield = nowMs();
         throwIfAborted(signal);

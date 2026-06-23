@@ -65,7 +65,7 @@ import {
   type Lc0WebQkvProjectionProbeResult,
   type Lc0WebSoftmaxBenchmarkResult,
 } from './wgslMatmulAddProbe.ts';
-import { Lc0PuctSearcher, type Lc0SearchOptions, type Lc0SearchResult } from './search.ts';
+import { Lc0PuctSearcher, type Lc0SearchOptions, type Lc0SearchProgress, type Lc0SearchResult } from './search.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 
@@ -107,6 +107,7 @@ type SearchMessage = {
   reuseTree?: boolean;
   earlyStop?: SearchEarlyStop;
   cpuct?: number;
+  fpu?: number;
   cpuctSchedule?: CpuctSchedule;
   fpuStrategy?: FpuStrategy;
   fpuReduction?: number;
@@ -114,6 +115,8 @@ type SearchMessage = {
   drawScore?: number;
   contemptElo?: number;
   searchContemptLimit?: number;
+  reportProgress?: boolean;
+  progressEveryMs?: number;
 };
 
 type ResetSearchMessage = {
@@ -437,6 +440,8 @@ type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   gpuBufferAllocation?: WebGpuBufferAllocationTelemetry;
 };
 
+type SearchWorkerProgress = Lc0SearchProgress;
+
 type PackFootprint = {
   declaredTensorBytes: number;
   loadedTensorBytes: number;
@@ -495,6 +500,7 @@ type WorkerResponse =
   | { type: 'wgslHeadsProbeResult'; id: number; result: Lc0WebWgslHeadsProbeResult }
   | { type: 'wgslHeadsVsOrtFixturesResult'; id: number; result: Lc0WebWgslHeadsVsOrtFixturesResult }
   | { type: 'mappedPolicyProbeResult'; id: number; result: Lc0WebMappedPolicyProbeResult }
+  | { type: 'searchProgress'; id: number; progress: SearchWorkerProgress }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'searchReset'; id: number }
   | { type: 'downloadProgress'; id: number; loadedBytes: number; totalBytes?: number }
@@ -1088,6 +1094,7 @@ async function handleSearch(message: SearchMessage): Promise<void> {
       reuseTree: message.reuseTree,
       earlyStop: message.earlyStop,
       cpuct: message.cpuct,
+      fpu: message.fpu,
       cpuctSchedule: message.cpuctSchedule,
       fpuStrategy: message.fpuStrategy,
       fpuReduction: message.fpuReduction,
@@ -1095,6 +1102,10 @@ async function handleSearch(message: SearchMessage): Promise<void> {
       drawScore: message.drawScore,
       contemptElo: message.contemptElo,
       searchContemptLimit: message.searchContemptLimit,
+      progressEveryMs: message.progressEveryMs,
+      onProgress: message.reportProgress
+        ? (progress) => post({ type: 'searchProgress', id: message.id, progress })
+        : undefined,
       signal: controller.signal,
       yieldEveryMs: 16,
     };

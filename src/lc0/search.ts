@@ -1,16 +1,17 @@
 import { boardToFen, parseFen, type BoardState } from '../chess/board.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { moveToActionId, moveToUci, type Move } from '../chess/moveCodec.ts';
-import { searchRoot, type Node as PuctNode, type SearchOptions, type SearchResult } from '../search/puct.ts';
+import { searchRoot, type Node as PuctNode, type SearchOptions, type SearchProgress, type SearchResult } from '../search/puct.ts';
 import type { Evaluation, EvaluationBatchRequest, EvaluationContext, Evaluator } from '../nn/evaluator.ts';
 import { Lc0OnnxEvaluator, type Lc0EvaluationCacheMetrics, type Lc0EvaluationProvider, type Lc0EvaluatorInput, type Lc0Evaluation, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
 import type { Lc0PositionHistoryInput } from './encoder112.ts';
 
-export interface Lc0SearchOptions extends SearchOptions {
+export interface Lc0SearchOptions extends Omit<SearchOptions, 'onProgress'> {
   /** Fixed PUCT visits. Kept explicit here because Phase 2 starts with fixed-visit search parity. */
   visits?: number;
   /** Reuse the previous compatible search subtree, mirroring native LC0's practical tree reuse between moves. */
   reuseTree?: boolean;
+  onProgress?: (progress: Lc0SearchProgress) => void;
 }
 
 export interface Lc0SearchResult {
@@ -32,6 +33,20 @@ export interface Lc0SearchChild {
   prior: number;
   q: number;
   probability: number;
+}
+
+export interface Lc0SearchProgress {
+  fen: string;
+  move?: string;
+  visits: number;
+  requestedVisits: number;
+  completedVisits: number;
+  value: number;
+  children: Lc0SearchChild[];
+  pv: string[];
+  multiPv?: string[][];
+  stats?: SearchResult['stats'];
+  elapsedMs: number;
 }
 
 function currentBoardAndHistory(input: Lc0EvaluatorInput): { board: BoardState; historyFens: string[] } {
@@ -145,12 +160,32 @@ export class Lc0PuctSearcher {
 
   async search(input: Lc0EvaluatorInput, options: Lc0SearchOptions = {}): Promise<Lc0SearchResult> {
     const { board, historyFens } = currentBoardAndHistory(input);
-    const { reuseTree = false, ...searchOptions } = options;
+    const { reuseTree = false, onProgress, ...searchOptions } = options;
     const hasExplicitRoot = Object.prototype.hasOwnProperty.call(searchOptions, 'root');
     const useInternalTree = reuseTree && !hasExplicitRoot && !searchOptions.rootMoves;
     const root = hasExplicitRoot
       ? searchOptions.root
       : useInternalTree ? this.compatibleCachedRoot(board, historyFens) : undefined;
+    const convertProgress = (progress: SearchProgress): Lc0SearchProgress => {
+      const children = progress.policy
+        .map((entry) => ({ uci: moveToUci(entry.move), visits: entry.visits, prior: entry.prior, q: entry.q, probability: entry.probability }))
+        .sort((a, b) => b.visits - a.visits || b.prior - a.prior);
+      const pv = (progress.principalVariation ?? []).map((entry) => moveToUci(entry.move));
+      const multiPv = progress.multiPvLines?.map((line) => line.map((entry) => moveToUci(entry.move)));
+      return {
+        fen: boardToFen(board),
+        move: progress.move ? moveToUci(progress.move) : undefined,
+        visits: progress.visits,
+        requestedVisits: progress.requestedVisits,
+        completedVisits: progress.completedVisits,
+        value: progress.value,
+        children,
+        pv,
+        ...(multiPv ? { multiPv } : {}),
+        stats: progress.stats,
+        elapsedMs: progress.elapsedMs,
+      };
+    };
     const result = await searchRoot(board, this.evaluator, {
       ...searchOptions,
       visits: options.visits ?? (options.movetimeMs && options.movetimeMs > 0 ? Number.MAX_SAFE_INTEGER : 32),
@@ -162,6 +197,7 @@ export class Lc0PuctSearcher {
       // History belongs to the LC0 input. Do not let generic SearchOptions
       // accidentally replace it and desynchronize the 112-plane encoder.
       historyFens,
+      onProgress: onProgress ? (progress) => onProgress(convertProgress(progress)) : undefined,
     });
     if (useInternalTree) this.cachedRoot = result.root ?? null;
     const children = result.policy

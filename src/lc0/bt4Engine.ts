@@ -8,7 +8,10 @@
 //     inference never blocks the UI.
 //   - Disposable: `dispose()` terminates the worker, freeing model memory.
 import { collectOrtRuntimeDiagnostics, requestedOrtExecutionProvider } from '../nn/ortRuntime.ts';
-import type { Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { boardToFen, parseFen, type BoardState } from '../chess/board.ts';
+import { moveFromUci, moveToUci } from '../chess/moveCodec.ts';
+import { rankFlipColorSwapBoard, rankFlipMove } from '../chess/boardNormalization.ts';
+import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 
 export interface BigNetConfig {
@@ -90,6 +93,11 @@ export interface Bt4SearchResult {
   cancelled?: boolean;
 }
 
+export interface Bt4SearchProgress extends Bt4SearchResult {
+  requestedVisits: number;
+  completedVisits: number;
+}
+
 export interface Bt4SearchOptions {
   visits?: number;
   movetimeMs?: number;
@@ -103,8 +111,47 @@ export interface Bt4SearchOptions {
   /** Monty-style Elo-diff contempt ([-1000,1000], 0 = off); see SearchOptions.contemptElo. */
   contemptElo?: number;
   cpuct?: number;
+  fpu?: number;
   /** ScLimit-style search contempt (opponent visit budget, 0 = off). */
   searchContemptLimit?: number;
+  /** LC0 SwapColors parity for odds nets that were trained from one color's perspective. */
+  swapColors?: boolean;
+  /** Throttled partial snapshots while deep searches run. */
+  onProgress?: (progress: Bt4SearchProgress) => void;
+  progressEveryMs?: number;
+}
+
+function latestBoard(input: Lc0EvaluatorInput): BoardState {
+  if (typeof input === 'object' && input !== null && 'positions' in input) {
+    if (input.positions.length === 0) throw new Error('LC0 search history input requires at least one position');
+    const last = input.positions[input.positions.length - 1];
+    return typeof last === 'string' ? parseFen(last) : last;
+  }
+  return typeof input === 'string' ? parseFen(input) : input;
+}
+
+function swapColorsInput(input: Lc0EvaluatorInput): Lc0EvaluatorInput {
+  if (typeof input === 'object' && input !== null && 'positions' in input) {
+    return {
+      positions: input.positions.map((position) => rankFlipColorSwapBoard(typeof position === 'string' ? parseFen(position) : position)),
+    };
+  }
+  return rankFlipColorSwapBoard(latestBoard(input));
+}
+
+function swapColorsUci(uci: string): string {
+  return moveToUci(rankFlipMove(moveFromUci(uci)));
+}
+
+function swapColorsResult<T extends Bt4SearchResult>(result: T, originalInput: Lc0EvaluatorInput): T {
+  return {
+    ...result,
+    fen: boardToFen(latestBoard(originalInput)),
+    move: result.move ? swapColorsUci(result.move) : result.move,
+    children: result.children.map((child) => ({ ...child, uci: swapColorsUci(child.uci) })),
+    pv: result.pv.map(swapColorsUci),
+    multiPv: result.multiPv?.map((line) => line.map(swapColorsUci)),
+  };
 }
 
 export type Bt4AssetStatus = 'unknown' | 'present' | 'missing';
@@ -215,7 +262,7 @@ export class Bt4WorkerSearcher {
   private ready = false;
   private initPromise: Promise<string> | null = null;
   private seq = 0;
-  private pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  private pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; onProgress?: (progress: Bt4SearchProgress) => void }>();
   private activeSearchId: number | null = null;
   private configuredEvalCacheEntries = -1;
   backend = '';
@@ -230,12 +277,12 @@ export class Bt4WorkerSearcher {
     return this.ready;
   }
 
-  private post<T>(message: Record<string, unknown>, onId?: (id: number) => void): Promise<T> {
+  private post<T>(message: Record<string, unknown>, onId?: (id: number) => void, onProgress?: (progress: Bt4SearchProgress) => void): Promise<T> {
     if (!this.worker) return Promise.reject(new Error('Lc0 BT4 worker unavailable'));
     const id = ++this.seq;
     onId?.(id);
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, onProgress });
       this.worker!.postMessage({ ...message, id });
     });
   }
@@ -257,6 +304,11 @@ export class Bt4WorkerSearcher {
           }
           const pending = this.pending.get(message.id);
           if (!pending) return;
+          if (message.type === 'searchProgress') {
+            const progress = (message as unknown as { progress: Bt4SearchProgress }).progress;
+            pending.onProgress?.(progress);
+            return;
+          }
           this.pending.delete(message.id);
           if (message.type === 'error') pending.reject(new Error(message.error ?? 'Lc0 BT4 worker error'));
           else pending.resolve(message);
@@ -292,10 +344,11 @@ export class Bt4WorkerSearcher {
 
   async search(input: Lc0EvaluatorInput, options: Bt4SearchOptions): Promise<Bt4SearchResult> {
     await this.init({ evalCacheEntries: options.evalCacheEntries });
+    const workerInput = options.swapColors ? swapColorsInput(input) : input;
     const response = await this.post<{ result: Bt4SearchResult }>(
       {
         type: 'search',
-        input,
+        input: workerInput,
         visits: options.visits,
         movetimeMs: options.movetimeMs,
         multiPv: options.multiPv,
@@ -305,10 +358,22 @@ export class Bt4WorkerSearcher {
         drawScore: options.drawScore,
         contemptElo: options.contemptElo,
         cpuct: options.cpuct,
+        fpu: options.fpu,
         searchContemptLimit: options.searchContemptLimit,
+        reportProgress: !!options.onProgress,
+        progressEveryMs: options.progressEveryMs,
       },
       (id) => { this.activeSearchId = id; },
+      options.onProgress
+        ? (progress) => options.onProgress!(options.swapColors ? swapColorsResult(progress, input) : progress)
+        : undefined,
     );
+    return options.swapColors ? swapColorsResult(response.result, input) : response.result;
+  }
+
+  async evaluate(input: Lc0EvaluatorInput, options: { evalCacheEntries?: number } = {}): Promise<Lc0Evaluation> {
+    await this.init({ evalCacheEntries: options.evalCacheEntries });
+    const response = await this.post<{ result: Lc0Evaluation }>({ type: 'evaluate', input });
     return response.result;
   }
 
