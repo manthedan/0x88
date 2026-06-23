@@ -1,3 +1,4 @@
+import { isTrustedExecutableAssetUrl, resolvePublicAssetUrl } from './assetUrls.ts';
 import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
 
 /**
@@ -23,7 +24,7 @@ export interface StockfishOptions {
 export type StockfishFlavor = 'lite-single' | 'single' | 'lite-threaded' | 'threaded';
 
 export const DEFAULT_STOCKFISH_FLAVOR: StockfishFlavor = 'lite-single';
-export const DEFAULT_STOCKFISH_URL = '/stockfish/stockfish-18-lite-single.js';
+export const DEFAULT_STOCKFISH_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite-single.js');
 
 export function normalizeStockfishFlavor(raw: string | null | undefined): StockfishFlavor {
   const value = String(raw ?? '').toLowerCase().replace(/[ _]/g, '-');
@@ -48,11 +49,47 @@ export function stockfishFlavorLabel(flavor: StockfishFlavor): string {
 
 export function stockfishFlavorUrl(flavor: StockfishFlavor): string {
   switch (flavor) {
-    case 'single': return '/stockfish/stockfish-18-single.js';
-    case 'lite-threaded': return '/stockfish/stockfish-18-lite.js';
-    case 'threaded': return '/stockfish/stockfish-18.js';
+    case 'single': return resolvePublicAssetUrl('/stockfish/stockfish-18-single.js');
+    case 'lite-threaded': {
+      const url = resolvePublicAssetUrl('/stockfish/stockfish-18-lite.js');
+      // The pthread builds derive helper-worker URLs from self.location. That
+      // is incompatible with the cross-origin blob wrapper used for R2-hosted
+      // Stockfish scripts, so hosted builds fall back to the single-threaded
+      // artifact until a dedicated pthread wrapper is promoted.
+      return sameOriginUrl(url) ? url : DEFAULT_STOCKFISH_URL;
+    }
+    case 'threaded': {
+      const url = resolvePublicAssetUrl('/stockfish/stockfish-18.js');
+      return sameOriginUrl(url) ? url : DEFAULT_STOCKFISH_URL;
+    }
     default: return DEFAULT_STOCKFISH_URL;
   }
+}
+
+function sameOriginUrl(raw: string): boolean {
+  try {
+    if (typeof location === 'undefined') return true;
+    return new URL(raw, location.href).origin === location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function stockfishWasmUrl(jsUrl: string): string {
+  return jsUrl.replace(/\.js(?:[?#].*)?$/, '.wasm');
+}
+
+function stockfishWorkerUrl(jsUrl: string): { url: string; objectUrl?: string } {
+  if (sameOriginUrl(jsUrl)) return { url: jsUrl };
+  if (!isTrustedExecutableAssetUrl(jsUrl)) throw new Error(`Refusing untrusted Stockfish worker URL: ${jsUrl}`);
+  const wasmUrl = stockfishWasmUrl(jsUrl);
+  // nmrugg/stockfish.js workers read self.location.hash as
+  // "<wasm-url>,worker". A same-origin blob wrapper satisfies the Worker()
+  // same-origin rule while preserving the R2 wasm URL in the hash for the
+  // imported Stockfish script.
+  const script = `importScripts(${JSON.stringify(jsUrl)});`;
+  const objectUrl = URL.createObjectURL(new Blob([script], { type: 'text/javascript' }));
+  return { url: `${objectUrl}#${encodeURIComponent(wasmUrl)},worker`, objectUrl };
 }
 
 /** Parse a UCI `bestmove` line into a UCI move, or null for `(none)`/no match. */
@@ -120,6 +157,7 @@ export class StockfishEngine implements BrowserUciEngine {
   private queueTail: Promise<void> = Promise.resolve();
   private options: StockfishOptions;
   private readonly url: string;
+  private workerObjectUrl: string | null = null;
 
   constructor(options: StockfishOptions = {}, url: string = DEFAULT_STOCKFISH_URL) {
     this.options = options;
@@ -150,6 +188,12 @@ export class StockfishEngine implements BrowserUciEngine {
     }
   }
 
+  private revokeWorkerObjectUrl(): void {
+    if (!this.workerObjectUrl) return;
+    URL.revokeObjectURL(this.workerObjectUrl);
+    this.workerObjectUrl = null;
+  }
+
   private failActive(error: Error): void {
     const rejectMove = this.rejectMove;
     const rejectAnalyze = this.rejectAnalyze;
@@ -164,6 +208,7 @@ export class StockfishEngine implements BrowserUciEngine {
     this.lastInfoLines = [];
     this.worker?.terminate();
     this.worker = null;
+    this.revokeWorkerObjectUrl();
     this.readyPromise = null;
     rejectMove?.(error);
     rejectAnalyze?.(error);
@@ -174,7 +219,9 @@ export class StockfishEngine implements BrowserUciEngine {
     if (this.readyPromise) return this.readyPromise;
     this.readyPromise = new Promise<void>((resolve, reject) => {
       try {
-        const worker = new Worker(this.url);
+        const workerUrl = stockfishWorkerUrl(this.url);
+        this.workerObjectUrl = workerUrl.objectUrl ?? null;
+        const worker = new Worker(workerUrl.url);
         this.worker = worker;
         worker.onmessage = (event: MessageEvent) => {
           const line = typeof event.data === 'string' ? event.data : String(event.data);
@@ -224,6 +271,7 @@ export class StockfishEngine implements BrowserUciEngine {
         };
         worker.postMessage('uci');
       } catch (error) {
+        this.revokeWorkerObjectUrl();
         reject(error as Error);
       }
     });
@@ -354,6 +402,7 @@ export class StockfishEngine implements BrowserUciEngine {
   dispose(): void {
     this.worker?.terminate();
     this.worker = null;
+    this.revokeWorkerObjectUrl();
     this.readyPromise = null;
     this.resolveMove = null;
     this.rejectMove = null;

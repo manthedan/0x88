@@ -98,6 +98,13 @@ test('production skips known-unshipped PlentyChess asset probes', async () => {
     assert.equal(await checkPlentyChessVariantAsset(PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT), 'missing');
     assert.equal(plentyChessVariantAssetStatus(PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT), 'missing');
     assert.equal(await resolveDefaultPlentyChessVariantAssetFallback(PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT, false), PLENTYCHESS_EMSCRIPTEN_VARIANT);
+    const r2Variant = {
+      ...PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT,
+      jsUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-sse41.js',
+      wasmUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-sse41.wasm',
+      dataUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-sse41.data',
+    };
+    assert.equal(await checkPlentyChessVariantAsset(r2Variant), 'missing');
     assert.equal(calls, 0);
   } finally {
     globalThis.fetch = originalFetch;

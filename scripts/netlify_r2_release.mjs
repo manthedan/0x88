@@ -5,17 +5,19 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, relative, resolve } from 'node:path';
 
-const DEFAULT_CHANNEL_URL = 'https://assets.0x88.app/channels/stable.json';
+const DEFAULT_ASSET_BASE_URL = 'https://assets.0x88.app';
+const DEFAULT_CHANNEL_URL = `${DEFAULT_ASSET_BASE_URL}/channels/stable.json`;
 const STAMP_FILE = 'release-build.json';
 
 function usage() {
-  console.log(`Usage: node scripts/netlify_r2_release.mjs [options]\n\nOptions:\n  --dist DIR          Built dist directory (default dist-client)\n  --channel-url URL   Artifact channel URL baked into the app shell\n  --build-if-needed   Run the R2/pruned build when the dist stamp is missing/stale\n  --check             Verify the current dist is stamped and pruned; do not build/deploy\n  --deploy            Deploy the verified dist with netlify deploy --no-build\n  --prod              Pass --prod to netlify deploy\n  --message TEXT      Netlify deploy message\n  --npm-bin BIN       npm executable (default npm)\n  --netlify-bin BIN   netlify executable (default netlify)\n  --json              Print machine-readable summary\n  -h, --help          Show help\n`);
+  console.log(`Usage: node scripts/netlify_r2_release.mjs [options]\n\nOptions:\n  --dist DIR          Built dist directory (default dist-client)\n  --channel-url URL   Artifact channel URL baked into the app shell\n  --asset-base URL    R2/Worker origin for engine/model asset URLs (default https://assets.0x88.app)\n  --build-if-needed   Run the R2/pruned build when the dist stamp is missing/stale\n  --check             Verify the current dist is stamped and pruned; do not build/deploy\n  --deploy            Deploy the verified dist with netlify deploy --no-build\n  --prod              Pass --prod to netlify deploy\n  --message TEXT      Netlify deploy message\n  --npm-bin BIN       npm executable (default npm)\n  --netlify-bin BIN   netlify executable (default netlify)\n  --json              Print machine-readable summary\n  -h, --help          Show help\n`);
 }
 
 function parseArgs(argv) {
   const args = {
     dist: 'dist-client',
     channelUrl: process.env.VITE_LC0_ARTIFACT_CHANNEL_URL || DEFAULT_CHANNEL_URL,
+    assetBase: process.env.VITE_LC0_BROWSER_ASSET_BASE_URL || DEFAULT_ASSET_BASE_URL,
     buildIfNeeded: false,
     check: false,
     deploy: false,
@@ -30,6 +32,7 @@ function parseArgs(argv) {
     const next = argv[i + 1];
     if (arg === '--dist' && next) { args.dist = next; i += 1; continue; }
     if (arg === '--channel-url' && next) { args.channelUrl = next; i += 1; continue; }
+    if (arg === '--asset-base' && next) { args.assetBase = next.replace(/\/+$/, ''); i += 1; continue; }
     if (arg === '--message' && next) { args.message = next; i += 1; continue; }
     if (arg === '--npm-bin' && next) { args.npmBin = next; i += 1; continue; }
     if (arg === '--netlify-bin' && next) { args.netlifyBin = next; i += 1; continue; }
@@ -90,7 +93,7 @@ async function desiredStamp(args) {
     buildScope: 'product',
     artifactChannelUrl: args.channelUrl,
     viteEnv: {
-      VITE_LC0_BROWSER_ASSET_BASE_URL: process.env.VITE_LC0_BROWSER_ASSET_BASE_URL ?? '',
+      VITE_LC0_BROWSER_ASSET_BASE_URL: args.assetBase ?? '',
       VITE_LC0_MODEL_BASE_URL: process.env.VITE_LC0_MODEL_BASE_URL ?? '',
     },
     inputs: {
@@ -121,32 +124,53 @@ async function writeStamp(dist, stamp) {
   await writeFile(path, `${JSON.stringify({ generatedAt: new Date().toISOString(), ...stamp }, null, 2)}\n`);
 }
 
-function findForbiddenModelAssets(root) {
+function isForbiddenExternalArtifact(name) {
+  return name.endsWith('.onnx')
+    || name.endsWith('.lc0web')
+    || name.endsWith('.wasm')
+    || name.endsWith('.data')
+    || name.endsWith('.nn')
+    || name.endsWith('.nnue')
+    || name.endsWith('.bin')
+    || name.endsWith('.tar.gz')
+    || name.endsWith('.gz')
+    || name.endsWith('.br')
+    || name.endsWith('.js')
+    || name.endsWith('.mjs');
+}
+
+function findForbiddenExternalAssets(root) {
   const forbidden = [];
-  function walk(dir) {
+  function push(path, kind) {
+    forbidden.push({ path, kind, ...(kind === 'file' ? { bytes: statSync(path).size } : {}) });
+  }
+  function walk(dir, predicate) {
     if (!existsSync(dir)) return;
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name.endsWith('.lc0web')) forbidden.push({ path, kind: 'directory' });
-        else walk(path);
-      } else if (entry.name.endsWith('.onnx')) {
-        forbidden.push({ path, kind: 'file', bytes: statSync(path).size });
+        if (predicate(entry.name, path, true)) push(path, 'directory');
+        else walk(path, predicate);
+      } else if (predicate(entry.name, path, false)) {
+        push(path, 'file');
       }
     }
   }
-  walk(join(root, 'models', 'lc0'));
-  walk(join(root, 'models', 'maia3'));
+  walk(join(root, 'models', 'lc0'), (name, _path, isDir) => isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx'));
+  walk(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDir && name.endsWith('.onnx'));
+  for (const dir of ['berserk', 'plentychess', 'reckless', 'stockfish', 'viridithas', 'runtimes']) {
+    walk(join(root, dir), (name, _path, isDir) => !isDir && isForbiddenExternalArtifact(name));
+  }
   return forbidden.map((item) => ({ ...item, path: relative(process.cwd(), item.path) }));
 }
 
 function verifyPrunedDist(dist) {
   if (!existsSync(dist)) throw new Error(`Dist directory does not exist: ${dist}`);
-  const forbidden = findForbiddenModelAssets(dist);
+  const forbidden = findForbiddenExternalAssets(dist);
   if (forbidden.length) {
-    throw new Error(`R2 Netlify dist contains pruned model artifacts: ${forbidden.map((item) => item.path).join(', ')}`);
+    throw new Error(`R2 Netlify dist contains pruned external artifacts: ${forbidden.map((item) => item.path).join(', ')}`);
   }
-  return { forbiddenModelAssets: forbidden };
+  return { forbiddenExternalAssets: forbidden };
 }
 
 async function main() {
@@ -162,7 +186,7 @@ async function main() {
       throw new Error(`Dist build stamp is ${existing ? 'stale' : 'missing'}; rerun with --build-if-needed to rebuild once`);
     }
     run(args.npmBin, ['run', 'build:netlify:r2'], {
-      env: { ...process.env, BUILD_SCOPE: 'product', VITE_LC0_ARTIFACT_CHANNEL_URL: args.channelUrl, NETLIFY_R2_RELEASE_DIST: dist },
+      env: { ...process.env, BUILD_SCOPE: 'product', VITE_LC0_ARTIFACT_CHANNEL_URL: args.channelUrl, VITE_LC0_BROWSER_ASSET_BASE_URL: args.assetBase, NETLIFY_R2_RELEASE_DIST: dist },
     });
     verifyPrunedDist(dist);
     await writeStamp(dist, desired);
@@ -185,6 +209,7 @@ async function main() {
     built,
     deployed: args.deploy,
     artifactChannelUrl: args.channelUrl,
+    assetBaseUrl: args.assetBase,
     verification,
   };
   if (args.json) console.log(JSON.stringify(summary, null, 2));

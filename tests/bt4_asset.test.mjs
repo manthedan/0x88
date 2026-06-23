@@ -39,6 +39,9 @@ test('production skips known-unhosted big-net asset probes', async () => {
   try {
     assert.equal(await checkBigNetAsset(config), 'missing');
     assert.equal(bigNetAssetStatusSync(config), 'missing');
+    const r2Config = testConfig('https://assets.0x88.app/models/lc0/unit-unhosted-big-net-r2.onnx');
+    assert.equal(await checkBigNetAsset(r2Config), 'missing');
+    assert.equal(bigNetAssetStatusSync(r2Config), 'missing');
     assert.equal(calls, 0);
   } finally {
     globalThis.fetch = originalFetch;

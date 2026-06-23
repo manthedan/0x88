@@ -1,6 +1,6 @@
 import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
 import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
-import { isTrustedExecutableAssetUrl } from './assetUrls.ts';
+import { isTrustedExecutableAssetUrl, resolvePublicAssetUrl } from './assetUrls.ts';
 
 export interface PlentyChessOptions {
   /** Fixed search depth. */
@@ -15,7 +15,7 @@ export interface PlentyChessOptions {
 
 export interface PlentyChessInfoLine extends BrowserUciInfoLine {}
 
-export const DEFAULT_PLENTYCHESS_EMSCRIPTEN_JS_URL = '/plentychess/plentychess-emscripten.js';
+export const DEFAULT_PLENTYCHESS_EMSCRIPTEN_JS_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten.js');
 
 export function plentyChessGoCommand(options: PlentyChessOptions): string {
   if (options.movetimeMs && options.movetimeMs > 0) return `go movetime ${Math.floor(options.movetimeMs)}`;

@@ -32,9 +32,21 @@ function isLocalDevelopmentOrigin(): boolean {
   return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
 }
 
+function assetPathname(raw: string): string {
+  try {
+    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
+    return new URL(raw, base).pathname;
+  } catch {
+    return raw;
+  }
+}
+
 function shouldSkipKnownUnshippedProbe(variant: RecklessVariant): boolean {
   if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;
-  return [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])].some((url) => url.startsWith('/reckless/') && !DEPLOYED_RECKLESS_URLS.has(url));
+  return [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])].some((url) => {
+    const pathname = assetPathname(url);
+    return pathname.startsWith('/reckless/') && !DEPLOYED_RECKLESS_URLS.has(pathname);
+  });
 }
 
 function assetKey(variant: RecklessVariant): string {

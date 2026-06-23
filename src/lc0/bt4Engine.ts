@@ -119,12 +119,21 @@ function isLocalDevelopmentOrigin(): boolean {
   return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
 }
 
+function assetPathname(raw: string): string {
+  try {
+    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
+    return new URL(raw, base).pathname;
+  } catch {
+    return raw;
+  }
+}
+
 function shouldSkipKnownUnhostedBigNetProbe(config: BigNetConfig): boolean {
-  // The large BT4/T3 ONNX blobs are intentionally pruned from the Netlify app
-  // shell and are not part of the current R2 bootstrap channel. Avoid issuing
+  // The large BT4/T3/LQO ONNX blobs are intentionally pruned from the Netlify
+  // app shell and may not be part of the current R2 channel. Avoid issuing
   // guaranteed-failing production HEAD probes; localhost still probes so local
   // generated/staged assets work during development.
-  return !isLocalDevelopmentOrigin() && config.modelUrl.startsWith('/models/lc0/');
+  return !isLocalDevelopmentOrigin() && assetPathname(config.modelUrl).startsWith('/models/lc0/');
 }
 
 /** WebGPU usable for big-net search? Cached after the first probe. Asset probes are tracked separately per net. */

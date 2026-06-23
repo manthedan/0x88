@@ -34,7 +34,7 @@ test('netlify_r2_release builds once, stamps dist, then deploys with no-build wi
   assert.equal(stamp.schema, 'lc0_browser.netlify_r2_release_build.v1');
   assert.equal(stamp.artifactChannelUrl, 'https://assets.0x88.app/channels/stable.json');
   assert.deepEqual(stamp.viteEnv, {
-    VITE_LC0_BROWSER_ASSET_BASE_URL: '',
+    VITE_LC0_BROWSER_ASSET_BASE_URL: 'https://assets.0x88.app',
     VITE_LC0_MODEL_BASE_URL: '',
   });
 
@@ -68,11 +68,13 @@ test('netlify_r2_release check mode rejects side-effect flags', async () => {
   assert.match(result.stderr, /--check is verification-only/);
 });
 
-test('netlify_r2_release rejects a dist that still contains pruned model blobs', async () => {
+test('netlify_r2_release rejects a dist that still contains pruned external blobs', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-netlify-r2-bad-dist-'));
   const dist = join(root, 'dist-client');
   await mkdir(join(dist, 'models/lc0'), { recursive: true });
+  await mkdir(join(dist, 'stockfish'), { recursive: true });
   await writeFile(join(dist, 'models/lc0/test.onnx'), 'abc');
+  await writeFile(join(dist, 'stockfish/stockfish-18-lite.js'), 'abc');
   const npm = join(root, 'fake-npm.sh');
   await fakeBin(npm, 'exit 0');
   const result = spawnSync(process.execPath, [
@@ -82,13 +84,16 @@ test('netlify_r2_release rejects a dist that still contains pruned model blobs',
     '--npm-bin', npm,
   ], { cwd: process.cwd(), encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /R2 Netlify dist contains pruned model artifacts/);
+  assert.match(result.stderr, /R2 Netlify dist contains pruned external artifacts/);
+  assert.match(result.stderr, /models\/lc0\/test\.onnx/);
+  assert.match(result.stderr, /stockfish\/stockfish-18-lite\.js/);
 });
 
 test('netlify.toml and package scripts use the R2-pruned build path', async () => {
   const netlifyToml = await readFile('netlify.toml', 'utf8');
   assert.match(netlifyToml, /build:netlify:r2/);
   assert.match(netlifyToml, /VITE_LC0_ARTIFACT_CHANNEL_URL=https:\/\/assets\.0x88\.app\/channels\/stable\.json/);
+  assert.match(netlifyToml, /VITE_LC0_BROWSER_ASSET_BASE_URL=https:\/\/assets\.0x88\.app/);
   const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
   assert.match(packageJson.scripts['build:netlify:r2'], /NETLIFY_R2_RELEASE_DIST:-dist-client/);
   assert.match(packageJson.scripts['build:netlify:r2'], /prune_external_model_assets/);

@@ -21,6 +21,8 @@ test('production skips known-unshipped Viridithas relaxed asset probes', async (
   try {
     assert.equal(await checkViridithasVariantAsset(variant), 'missing');
     assert.equal(viridithasVariantAssetStatus(variant), 'missing');
+    const r2Variant = { ...VIRIDITHAS_RELAXED_SIMD_VARIANT, wasmUrl: 'https://assets.0x88.app/viridithas/viridithas-relaxed-simd128.wasm' };
+    assert.equal(await checkViridithasVariantAsset(r2Variant), 'missing');
     assert.equal(calls, 0);
   } finally {
     globalThis.fetch = originalFetch;

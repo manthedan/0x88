@@ -222,6 +222,43 @@ test('artifact assets worker preserves percent-encoded R2 keys', async () => {
   assert.equal(await text(response), 'abcdefghijklmnopqrstuvwxyz');
 });
 
+test('artifact assets worker serves stable logical asset paths through the channel release manifest without immutable caching', async () => {
+  const channelBody = new TextEncoder().encode(JSON.stringify({ releaseManifestUrl: '/releases/stable-test.json' }));
+  const releaseBody = new TextEncoder().encode(JSON.stringify({
+    artifacts: [{
+      logicalUrl: '/stockfish/stockfish-18-lite.js',
+      artifactUrl: `https://assets.example/${KEY}`,
+    }],
+  }));
+  const entries = new Map([
+    [KEY, { body: BODY, contentType: 'text/javascript; charset=utf-8' }],
+    ['channels/stable.json', { body: channelBody, contentType: 'application/json; charset=utf-8' }],
+    ['releases/stable-test.json', { body: releaseBody, contentType: 'application/json; charset=utf-8' }],
+  ]);
+  const env = {
+    TIMING_ALLOW_ORIGIN: 'https://0x88.app',
+    ARTIFACTS: {
+      async head(key) {
+        const entry = entries.get(key);
+        return entry ? { size: entry.body.byteLength, httpEtag: '"etag"', httpMetadata: { contentType: entry.contentType } } : null;
+      },
+      async get(key, options) {
+        const entry = entries.get(key);
+        if (!entry) return null;
+        const range = options?.range;
+        const body = range ? entry.body.slice(range.offset, range.offset + range.length) : entry.body;
+        return { size: entry.body.byteLength, httpEtag: '"etag"', httpMetadata: { contentType: entry.contentType }, body };
+      },
+    },
+  };
+  const response = await handleArtifactRequest(new Request('https://assets.example/stockfish/stockfish-18-lite.js'), env);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Cache-Control'), 'no-cache');
+  assert.equal(response.headers.get('X-Artifact-Content-Length'), String(BODY.byteLength));
+  assert.equal(response.headers.get('Content-Type'), 'text/javascript; charset=utf-8');
+  assert.equal(await text(response), 'abcdefghijklmnopqrstuvwxyz');
+});
+
 test('artifact assets worker rejects non-artifact paths and invalid ranges', async () => {
   const notFound = await handleArtifactRequest(new Request('https://assets.example/models/raw.onnx'), fakeEnv());
   assert.equal(notFound.status, 404);

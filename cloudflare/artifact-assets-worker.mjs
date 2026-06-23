@@ -2,6 +2,8 @@ const DEFAULT_APP_ORIGIN = 'https://0x88.app';
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 const RELEASE_CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate=86400';
 const CHANNEL_CACHE_CONTROL = 'no-cache';
+const LOGICAL_ALIAS_CACHE_CONTROL = 'no-cache';
+const DEFAULT_CHANNEL_KEY = 'channels/stable.json';
 const EXPOSED_HEADERS = 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, Content-Range, Accept-Ranges';
 
 function artifactHeaders(env, extra = {}) {
@@ -76,10 +78,10 @@ function cacheControlForKey(key) {
   return 'no-store';
 }
 
-function objectHeaders(key, object, env, range) {
+function objectHeaders(key, object, env, range, cacheControlOverride) {
   const contentType = object.httpMetadata?.contentType || (key.endsWith('.json') ? 'application/json; charset=utf-8' : 'application/octet-stream');
   // Cache policy is path-controlled so stale R2 metadata cannot make mutable channels immutable.
-  const cacheControl = cacheControlForKey(key);
+  const cacheControl = cacheControlOverride || cacheControlForKey(key);
   const headers = artifactHeaders(env, {
     'Content-Type': contentType,
     'Cache-Control': cacheControl,
@@ -142,12 +144,63 @@ async function cachedNoRangeResponse(key, request) {
   return undefined;
 }
 
-async function rangeResponse(key, request, env, head, range) {
+async function rangeResponse(key, request, env, head, range, cacheControlOverride) {
   // Do not slice a cached full-body response in Worker memory. Some artifacts are hundreds
   // of MiB, so range requests must stay bounded and use R2's range reader directly.
   const object = await env.ARTIFACTS.get(key, { range: { offset: range.start, length: range.length } });
   if (!object) return new Response('Not found', { status: 404, headers: artifactHeaders(env) });
-  return withCacheStatus(new Response(object.body, { status: 206, headers: objectHeaders(key, head, env, range) }), 'fwd');
+  return withCacheStatus(new Response(object.body, { status: 206, headers: objectHeaders(key, head, env, range, cacheControlOverride) }), 'fwd');
+}
+
+async function readJsonObject(env, key) {
+  const object = await env.ARTIFACTS.get(key);
+  if (!object) return undefined;
+  const text = await new Response(object.body).text();
+  return JSON.parse(text);
+}
+
+function artifactKeyFromUrl(raw) {
+  try {
+    const url = new URL(raw, 'https://assets.invalid');
+    const key = url.pathname.replace(/^\/+/, '');
+    return key.startsWith('artifacts/sha256/') ? key : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function keyFromStableReleaseLogicalPath(request, env) {
+  const url = new URL(request.url);
+  const logicalUrl = url.pathname;
+  if (!logicalUrl.startsWith('/models/') && !logicalUrl.startsWith('/stockfish/') && !logicalUrl.startsWith('/berserk/') && !logicalUrl.startsWith('/plentychess/') && !logicalUrl.startsWith('/viridithas/') && !logicalUrl.startsWith('/monty/') && !logicalUrl.startsWith('/reckless/') && !logicalUrl.startsWith('/runtimes/')) return undefined;
+  const channelKey = env.ARTIFACT_CHANNEL_KEY || DEFAULT_CHANNEL_KEY;
+  const channel = await readJsonObject(env, channelKey);
+  const releasePath = channel?.releaseManifestUrl;
+  if (!releasePath) return undefined;
+  const releaseKey = String(releasePath).replace(/^\/+/, '');
+  if (!releaseKey.startsWith('releases/') || !releaseKey.endsWith('.json')) return undefined;
+  const release = await readJsonObject(env, releaseKey);
+  const artifact = release?.artifacts?.find((entry) => entry.logicalUrl === logicalUrl);
+  return artifact?.artifactUrl ? artifactKeyFromUrl(artifact.artifactUrl) : undefined;
+}
+
+async function uncachedResponseForKey(key, request, env, cacheControlOverride) {
+  const head = await env.ARTIFACTS.head(key);
+  if (!head) return new Response('Not found', { status: 404, headers: artifactHeaders(env) });
+  const range = parseRange(request.headers.get('Range'), head.size);
+  if (range === 'invalid') {
+    return new Response('Invalid range', {
+      status: 416,
+      headers: artifactHeaders(env, { 'Content-Range': `bytes */${head.size}` }),
+    });
+  }
+  if (request.method === 'HEAD') {
+    return withCacheStatus(new Response(null, { status: range ? 206 : 200, headers: objectHeaders(key, head, env, range, cacheControlOverride) }), 'fwd');
+  }
+  if (range) return rangeResponse(key, request, env, head, range, cacheControlOverride);
+  const object = await env.ARTIFACTS.get(key);
+  if (!object) return new Response('Not found', { status: 404, headers: artifactHeaders(env) });
+  return withCacheStatus(new Response(object.body, { status: 200, headers: objectHeaders(key, object, env, undefined, cacheControlOverride) }), 'fwd');
 }
 
 export async function handleArtifactRequest(request, env, ctx) {
@@ -165,8 +218,14 @@ export async function handleArtifactRequest(request, env, ctx) {
     return new Response('Method not allowed', { status: 405, headers: artifactHeaders(env, { Allow: 'GET, HEAD, OPTIONS' }) });
   }
 
-  const key = keyFromRequest(request);
+  let key = keyFromRequest(request);
+  let logicalAlias = false;
+  if (!key) {
+    key = await keyFromStableReleaseLogicalPath(request, env);
+    logicalAlias = Boolean(key);
+  }
   if (!key) return new Response('Not found', { status: 404, headers: artifactHeaders(env) });
+  if (logicalAlias) return uncachedResponseForKey(key, request, env, LOGICAL_ALIAS_CACHE_CONTROL);
 
   const cached = await cachedNoRangeResponse(key, request);
   if (cached) return cached;

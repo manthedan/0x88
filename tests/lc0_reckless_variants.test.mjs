@@ -119,6 +119,8 @@ test('production skips known-unshipped Reckless asset probes', async () => {
   try {
     assert.equal(await checkRecklessVariantAsset(RECKLESS_FULL_VARIANT), 'missing');
     assert.equal(recklessVariantAssetStatus(RECKLESS_FULL_VARIANT), 'missing');
+    const r2Variant = { ...RECKLESS_FULL_VARIANT, wasmUrl: 'https://assets.0x88.app/reckless/reckless.wasm' };
+    assert.equal(await checkRecklessVariantAsset(r2Variant), 'missing');
     assert.equal(calls, 0);
   } finally {
     globalThis.fetch = originalFetch;

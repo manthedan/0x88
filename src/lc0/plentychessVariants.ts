@@ -37,10 +37,10 @@ const assetChecks = new Map<string, Promise<PlentyChessAssetStatus>>();
 // sidecars. The SSE4.1/relaxed variants remain selectable for local generated
 // assets, but production should not issue doomed HEAD probes for known-unshipped
 // files because devtools reports those handled fallbacks as 404 errors.
-const DEPLOYED_PLENTYCHESS_URLS = new Set([
-  PLENTYCHESS_EMSCRIPTEN_JS_URL,
-  PLENTYCHESS_EMSCRIPTEN_WASM_URL,
-  PLENTYCHESS_EMSCRIPTEN_DATA_URL,
+const DEPLOYED_PLENTYCHESS_PATHS = new Set([
+  '/plentychess/plentychess-emscripten.js',
+  '/plentychess/plentychess-emscripten.wasm',
+  '/plentychess/plentychess-emscripten.data',
 ]);
 
 function isLocalDevelopmentOrigin(): boolean {
@@ -48,9 +48,21 @@ function isLocalDevelopmentOrigin(): boolean {
   return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
 }
 
+function assetPathname(raw: string): string {
+  try {
+    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
+    return new URL(raw, base).pathname;
+  } catch {
+    return raw;
+  }
+}
+
 function shouldSkipKnownUnshippedProbe(variant: PlentyChessVariant): boolean {
   if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;
-  return assetUrls(variant).some((url) => url.startsWith('/plentychess/') && !DEPLOYED_PLENTYCHESS_URLS.has(url));
+  return assetUrls(variant).some((url) => {
+    const pathname = assetPathname(url);
+    return pathname.startsWith('/plentychess/') && !DEPLOYED_PLENTYCHESS_PATHS.has(pathname);
+  });
 }
 
 function sameOriginPlentyChessAsset(raw: string | null | undefined): string | undefined {

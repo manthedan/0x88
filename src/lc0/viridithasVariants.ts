@@ -1,6 +1,7 @@
+import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './recklessVariants.ts';
 
-export const DEFAULT_VIRIDITHAS_WASM_URL = '/viridithas/viridithas.wasm';
+export const DEFAULT_VIRIDITHAS_WASM_URL = resolvePublicAssetUrl('/viridithas/viridithas.wasm');
 
 export type ViridithasAssetStatus = 'unknown' | 'checking' | 'ok' | 'missing';
 
@@ -22,20 +23,20 @@ export const VIRIDITHAS_DEFAULT_VARIANT: ViridithasVariant = {
 export const VIRIDITHAS_SIMD_VARIANT: ViridithasVariant = {
   key: 'simd',
   label: 'Viridithas SIMD',
-  wasmUrl: '/viridithas/viridithas-simd128.wasm',
+  wasmUrl: resolvePublicAssetUrl('/viridithas/viridithas-simd128.wasm'),
   note: 'Patched Viridithas wasm32-wasip1 build with wasm simd128 NNUE kernels. Default when the browser validates wasm SIMD but not Relaxed SIMD; 40/40 fixed-depth parity with scalar, 5.4-5.8x scalar NPS.',
 };
 
 export const VIRIDITHAS_RELAXED_SIMD_VARIANT: ViridithasVariant = {
   key: 'relaxed-simd',
   label: 'Viridithas Relaxed SIMD',
-  wasmUrl: '/viridithas/viridithas-relaxed-simd128.wasm',
+  wasmUrl: resolvePublicAssetUrl('/viridithas/viridithas-relaxed-simd128.wasm'),
   note: 'Viridithas build using the relaxed integer dot for the L1 NNUE kernels (exact: QA=255/FT_SHIFT=9 keep activations in 0..127). Default when the browser validates Relaxed SIMD; +14% NPS over simd128 at 40/40 parity.',
 };
 
-const DEPLOYED_VIRIDITHAS_URLS = new Set([
-  DEFAULT_VIRIDITHAS_WASM_URL,
-  VIRIDITHAS_SIMD_VARIANT.wasmUrl,
+const DEPLOYED_VIRIDITHAS_PATHS = new Set([
+  '/viridithas/viridithas.wasm',
+  '/viridithas/viridithas-simd128.wasm',
 ]);
 
 function isLocalDevelopmentOrigin(): boolean {
@@ -43,9 +44,19 @@ function isLocalDevelopmentOrigin(): boolean {
   return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
 }
 
+function assetPathname(raw: string): string {
+  try {
+    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
+    return new URL(raw, base).pathname;
+  } catch {
+    return raw;
+  }
+}
+
 function shouldSkipKnownUnshippedProbe(variant: ViridithasVariant): boolean {
   if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;
-  return variant.wasmUrl.startsWith('/viridithas/') && !DEPLOYED_VIRIDITHAS_URLS.has(variant.wasmUrl);
+  const pathname = assetPathname(variant.wasmUrl);
+  return pathname.startsWith('/viridithas/') && !DEPLOYED_VIRIDITHAS_PATHS.has(pathname);
 }
 
 // Promotion order: relaxed integer dot > simd128 > scalar. All variants are
