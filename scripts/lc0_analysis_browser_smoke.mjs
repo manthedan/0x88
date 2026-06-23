@@ -12,7 +12,7 @@ const REQUIRED_FAMILIES = ['lc0', 'tiny', 'sf', 'reckless', 'viridithas', 'berse
 const REQUIRED_RUNTIME_TOKENS = ['Lc0 BT4:', 'Tiny:', 'Reckless:', 'Viridithas:', 'Berserk:', 'PlentyChess:'];
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_analysis_browser_smoke.mjs [options]\n\nRuns a fast browser smoke for lc0-analysis.html UI wiring. It verifies the multi-engine selector, profile controls, local PGN database controls, runtime status text, and actionable browser console errors.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --dry-run             Print planned smoke URL without running\n  -h, --help            Show this help\n`);
+  console.log(`Usage: node scripts/lc0_analysis_browser_smoke.mjs [options]\n\nRuns a fast browser smoke for /app/analysis UI wiring. It verifies the multi-engine selector, profile controls, local PGN database controls, runtime status text, and actionable browser console errors.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --dry-run             Print planned smoke URL without running\n  -h, --help            Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -102,7 +102,7 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(new URL('/lc0-analysis.html', baseUrl), { cache: 'no-store' });
+      const response = await fetch(new URL('/app/analysis', baseUrl), { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
     } catch (error) {
@@ -178,7 +178,7 @@ async function consoleErrors(args, session) {
 
 async function runSmoke(args) {
   const session = `lc0-analysis-smoke-${process.pid}`;
-  const url = new URL('/lc0-analysis.html', args.baseUrl);
+  const url = new URL('/app/analysis', args.baseUrl);
   process.stderr.write(`[analysis-smoke] ${url}\n`);
   try {
     await runAgent(args, ['open', String(url)], 30_000, session);
@@ -232,7 +232,7 @@ async function runSmoke(args) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) return usage();
-  const smokeUrl = new URL('/lc0-analysis.html', args.baseUrl);
+  const smokeUrl = new URL('/app/analysis', args.baseUrl);
   if (args.dryRun) {
     console.log(JSON.stringify({ status: 'LC0_ANALYSIS_BROWSER_SMOKE_DRY_RUN', url: String(smokeUrl) }, null, 2));
     return;

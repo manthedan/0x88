@@ -101,7 +101,7 @@ function parseArgs(argv) {
 }
 
 function probeUrl(args) {
-  const url = new URL('/lc0-policy-only.html', args.baseUrl);
+  const url = new URL('/single-engine', args.baseUrl);
   url.searchParams.set('gpuLegalParity', '1');
   url.searchParams.set('runtime', 'hybrid-wgsl-heads');
   url.searchParams.set('headBackend', 'wgsl');
@@ -186,7 +186,7 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(new URL('/lc0-policy-only.html', baseUrl), { cache: 'no-store' });
+      const response = await fetch(new URL('/single-engine', baseUrl), { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
     } catch (error) { lastError = error; }

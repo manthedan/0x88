@@ -139,6 +139,13 @@ function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4Worker
   return { config: BIG_NETS[key], searcher: bigNetSearchers[key] };
 }
 let ground: Ground | null = null;
+let mountAbort = new AbortController();
+function isStaleMount(signal: AbortSignal = mountAbort.signal): boolean {
+  return signal.aborted || signal !== mountAbort.signal;
+}
+let analysisKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
+let analysisPagehideHandler: ((event: PageTransitionEvent) => void) | null = null;
+let analysisAuditHandler: ((event: Event) => void) | null = null;
 let orientation: 'white' | 'black' = 'white';
 let analysisAbort: AbortController | null = null;
 let reviewAbort: AbortController | null = null;
@@ -266,11 +273,15 @@ function lc0ResolvedRuntime(runtime: Lc0AnalysisRuntime): string {
 }
 
 function installRuntimeAuditPanel(): void {
-  window.addEventListener(BROWSER_RUNTIME_AUDIT_EVENT, (event) => {
+  if (analysisAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, analysisAuditHandler);
+  analysisAuditHandler = (event: Event) => {
     const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
     if (detail.family !== 'lc0') return;
-    el('runtimeAudit').textContent = formatBrowserRuntimeAudit(detail);
-  });
+    const target = document.getElementById('runtimeAudit');
+    if (!target) return;
+    target.textContent = formatBrowserRuntimeAudit(detail);
+  };
+  window.addEventListener(BROWSER_RUNTIME_AUDIT_EVENT, analysisAuditHandler);
 }
 
 function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
@@ -1776,6 +1787,7 @@ async function copyReviewPgn(): Promise<void> {
 }
 
 async function analyzeCurrent() {
+  if (mountAbort.signal.aborted) return;
   const rows = activeEngineRows();
   if (!rows.length) { el('message').textContent = 'Add an engine to analyze.'; return; }
   // Interrupt any in-flight analysis: abort the Stockfish signal and cancel the
@@ -1861,18 +1873,20 @@ async function analyzeCurrent() {
       }
     }
     const grouped = await Promise.all(tasks);
-    if (controller.signal.aborted) return;
+    if (controller.signal.aborted || mountAbort.signal.aborted) return;
     lineCache.set(fen, grouped.flat());
     if (tree.current.fen === fen) { renderLines(); renderEvalBar(); setShapes(bestShapes()); }
-    el('message').textContent = `Analyzed: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`;
+    const message = document.getElementById('message');
+    if (message) message.textContent = `Analyzed: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`;
   } catch (error) {
-    if ((error as Error).name !== 'AbortError') el('message').textContent = `Analysis failed: ${(error as Error).message}`;
+    const message = document.getElementById('message');
+    if ((error as Error).name !== 'AbortError' && !mountAbort.signal.aborted && message) message.textContent = `Analysis failed: ${(error as Error).message}`;
   } finally {
-    if (analysisAbort === controller) {
+    if (analysisAbort === controller && !mountAbort.signal.aborted) {
       analyzing = false;
       analysisAbort = null;
-      el('stop').toggleAttribute('disabled', true);
-      el('analyze').toggleAttribute('disabled', false);
+      document.getElementById('stop')?.toggleAttribute('disabled', true);
+      document.getElementById('analyze')?.toggleAttribute('disabled', false);
     }
   }
 }
@@ -1965,11 +1979,6 @@ async function renderMaia3Panel(): Promise<void> {
   });
   el('maia3Grid').innerHTML = rows.join('');
 }
-
-// Test hook for automated browser checks: synthetic chessground drags are
-// unreliable, so smokes call this to route through the real user-move path.
-(globalThis as unknown as { __analysisUserMove?: (from: string, to: string) => void }).__analysisUserMove
-  = (from, to) => { void onUserMove(from as Key, to as Key); };
 
 async function onUserMove(from: Key, to: Key) {
   const board = tree.current.fen ? parseFen(tree.current.fen) : parseFen(START_FEN);
@@ -2179,7 +2188,8 @@ function wireEvents() {
     const uci = row?.getAttribute('data-uci');
     if (uci && tree.addUci(uci)) afterNavigation();
   });
-  document.addEventListener('keydown', (event) => {
+  if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
+  analysisKeydownHandler = (event: KeyboardEvent) => {
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
     if (event.key === 'ArrowLeft') { tree.back(); afterNavigation(); }
     else if (event.key === 'ArrowRight') { tree.forward(); afterNavigation(); }
@@ -2187,11 +2197,13 @@ function wireEvents() {
     else if (event.key === 'ArrowDown') { tree.toEnd(); afterNavigation(); }
     else return;
     event.preventDefault();
-  });
+  };
+  document.addEventListener('keydown', analysisKeydownHandler);
 }
 
 function disposeRuntimeResources(): void {
   analysisAbort?.abort();
+  analysisAbort = null;
   if (activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
   activeWorkerSearchId = null;
   searchWorker?.terminate();
@@ -2219,7 +2231,22 @@ function disposeRuntimeResources(): void {
   searcher = null;
 }
 
-async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
+function disposePageResources(): void {
+  disposeRuntimeResources();
+  if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
+  maia3PanelTimer = null;
+  if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
+  analysisKeydownHandler = null;
+  if (analysisPagehideHandler) window.removeEventListener('pagehide', analysisPagehideHandler);
+  analysisPagehideHandler = null;
+  if (analysisAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, analysisAuditHandler);
+  analysisAuditHandler = null;
+  (ground as { destroy?: () => void } | null)?.destroy?.();
+  ground = null;
+}
+
+async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = mountAbort.signal): Promise<boolean> {
+  if (isStaleMount(mountSignal)) return false;
   const runtime = selectedLc0Runtime();
   el('analyze').toggleAttribute('disabled', true);
   selectEl('lc0RuntimeSelect').disabled = true;
@@ -2228,6 +2255,7 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
   showModelProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
   try {
     el('backend').textContent = await initWorker();
+    if (isStaleMount(mountSignal)) return false;
     hideModelProgress();
     el('analyze').toggleAttribute('disabled', false);
     selectEl('lc0RuntimeSelect').disabled = false;
@@ -2235,6 +2263,7 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
     if (runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
     return true;
   } catch (workerError) {
+    if (isStaleMount(mountSignal)) return false;
     if (runtime !== 'onnx' && runtime !== LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(workerError as Error).message}`;
@@ -2244,8 +2273,9 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
     // Fall back to a main-thread evaluator (analysis will block the UI, but works).
     console.warn('LC0 worker init failed; falling back to the main thread.', workerError);
     try {
+      let nextEvaluator: Lc0EvaluationProvider | null = null;
       if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
-        mainEvaluator = await Lc0WholeOnnxWebgpuEvaluator.create({
+        nextEvaluator = await Lc0WholeOnnxWebgpuEvaluator.create({
           manifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
           batch: lc0WholeModelPhysicalBatch(),
           fetchTensorCache: lc0WholeModelTensorCache(),
@@ -2256,10 +2286,16 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
           cache: false,
           onProgress: (loaded, total) => showModelProgress('Lc0 small net', loaded, total, 'Downloading'),
         });
-        mainEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+        nextEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
       }
-      searcher = new Lc0PuctSearcher(mainEvaluator);
+      const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
       const diagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics() : undefined;
+      if (isStaleMount(mountSignal)) {
+        void nextEvaluator.dispose?.();
+        return false;
+      }
+      mainEvaluator = nextEvaluator;
+      searcher = nextSearcher;
       el('backend').textContent = `${diagnostics?.describe ?? 'whole-onnx-webgpu'} (main thread)`;
       publishBrowserRuntimeAudit({
         source: 'lc0-analysis-main-thread-fallback',
@@ -2279,9 +2315,10 @@ async function loadLc0Backend(runAutoAnalyze = true): Promise<boolean> {
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
       hideModelProgress();
-      if (runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
+      if (!isStaleMount(mountSignal) && runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
       return true;
     } catch (error) {
+      if (isStaleMount(mountSignal)) return false;
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `Model load failed: ${(error as Error).message}`;
       hideModelProgress();
@@ -2298,16 +2335,19 @@ async function reloadLc0Backend(forceAnalyzeAfterLoad = false): Promise<void> {
   if (loaded && forceAnalyzeAfterLoad) void analyzeCurrent();
 }
 
-async function init() {
+async function init(mountSignal: AbortSignal) {
   if (!isV0DeployProfile()) {
     REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
   }
   REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, renderRecklessRuntimeInfo);
   REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, renderRecklessRuntimeInfo);
   REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, renderRecklessRuntimeInfo);
-  window.addEventListener('pagehide', (event) => {
-    if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
-  });
+  if (isStaleMount(mountSignal)) return;
+  if (analysisPagehideHandler) window.removeEventListener('pagehide', analysisPagehideHandler);
+  analysisPagehideHandler = (event: PageTransitionEvent) => {
+    if (!event.persisted) disposeRuntimeResources();
+  };
+  window.addEventListener('pagehide', analysisPagehideHandler);
   engineProfiles = loadEngineProfiles();
   installExperimentalLc0RuntimeOption();
   selectEl('lc0RuntimeSelect').value = initialLc0Runtime();
@@ -2331,7 +2371,23 @@ async function init() {
     void refreshBt4Availability();
     void refreshTinyHybridManifestStatus();
   }
-  await loadLc0Backend();
+  await loadLc0Backend(true, mountSignal);
 }
 
-void init();
+export function mountAnalysisBrowser(): () => void {
+  const controller = new AbortController();
+  mountAbort = controller;
+  // Test hook for automated browser checks: synthetic chessground drags are
+  // unreliable, so smokes call this to route through the real user-move path.
+  const hook = (from: string, to: string) => { void onUserMove(from as Key, to as Key); };
+  (globalThis as unknown as { __analysisUserMove?: (from: string, to: string) => void }).__analysisUserMove = hook;
+  void init(controller.signal);
+  return () => {
+    controller.abort();
+    if (mountAbort === controller) disposePageResources();
+    // Only clear the test hook if it is still ours (a newer mount may have
+    // installed its own).
+    const g = globalThis as unknown as { __analysisUserMove?: (from: string, to: string) => void };
+    if (g.__analysisUserMove === hook) delete g.__analysisUserMove;
+  };
+}

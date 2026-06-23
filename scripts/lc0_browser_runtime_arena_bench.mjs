@@ -95,7 +95,7 @@ function parseArgs(argv) {
 }
 
 function arenaUrl(args, runtime) {
-  const url = new URL('/lc0-arena.html', args.baseUrl);
+  const url = new URL('/app/arena', args.baseUrl);
   url.searchParams.set('arenaBench', '1');
   url.searchParams.set('lc0Runtime', runtime);
   url.searchParams.set('seatA', `lc0:small:${args.lc0Strength}`);
@@ -173,7 +173,7 @@ async function waitForServer(baseUrl, timeoutMs) {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(new URL('/lc0-arena.html', baseUrl), { cache: 'no-store' });
+      const response = await fetch(new URL('/app/arena', baseUrl), { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
     } catch (error) {

@@ -1,289 +1,41 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>0x88 Chess — docs: pages, engines, licenses</title>
-<script>(()=>{try{var t=localStorage.getItem('0x88-theme');if(t==='dark')document.documentElement.dataset.theme='dark';else if(t==='light')document.documentElement.dataset.theme='light';var b=localStorage.getItem('0x88-board');if(['night','blue','green'].includes(b))document.documentElement.dataset.board=b;}catch(e){}})();</script>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-<meta name="description" content="What each 0x88.app page does, the chess engines running in your browser, who built them, how we package them, and our GPL/AGPL corresponding-source commitments." />
-<link rel="stylesheet" href="/app-shell.css" />
-<style>
-/* Page-specific layout only; tokens, base typography, header, and footer
-   come from app-shell.css. Docs-as-prose layout: sticky right-side TOC,
-   narrow readable column, heading anchors, callout boxes. */
-*{box-sizing:border-box}
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import SiteHeader from '$lib/components/SiteHeader.svelte';
+  const title = "0x88 Chess — docs: pages, engines, licenses";
+  const description = "What each 0x88.app page does, the chess engines running in your browser, who built them, how we package them, and our GPL/AGPL corresponding-source commitments.";
+  const styles = "/* Page-specific layout only; tokens, base typography, header, and footer\n   come from app-shell.css. Docs-as-prose layout: sticky right-side TOC,\n   narrow readable column, heading anchors, callout boxes. */\n*{box-sizing:border-box}\n\n/* ===== Hero ===== */\n.doc-hero{border-bottom:1px solid var(--rule);\n  background:\n    radial-gradient(ellipse 70% 60% at 50% 0%, color-mix(in srgb, var(--accent-soft) 55%, transparent), transparent 65%),\n    var(--panel);}\n.doc-hero .wrap{padding:48px 24px 40px}\n.doc-hero .kicker{font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--accent); margin:0 0 10px}\n.doc-hero h1{font-size:clamp(28px,5vw,42px); margin:0 0 14px; line-height:1.1; letter-spacing:-.015em}\n.doc-hero p{margin:0; color:var(--ink-soft); font-size:16px; max-width:62ch; line-height:1.6}\n.doc-hero p strong{color:var(--ink)}\n\n/* ===== Body grid: content | TOC ===== */\n.doc-body .wrap{\n  padding:48px 24px 64px;\n  display:grid;\n  grid-template-columns:220px 1fr;\n  gap:56px;\n  align-items:start;\n}\n\n/* TOC rail (left side) */\n.toc{\n  position:sticky; top:88px;\n  font-size:13px;\n  max-height:calc(100vh - 100px);\n  overflow-y:auto;\n  padding-right:16px;\n  border-right:1px solid var(--rule);\n}\n.toc h4{\n  font-family:var(--sans); font-size:11px;\n  text-transform:uppercase; letter-spacing:.07em;\n  color:var(--muted-2); margin:0 0 12px; font-weight:600;\n}\n.toc ul{list-style:none; padding:0; margin:0; display:grid; gap:2px}\n.toc a{\n  color:var(--muted); text-decoration:none;\n  display:block; padding:4px 10px; border-radius:5px;\n  line-height:1.35; font-size:13px;\n  border-left:2px solid transparent; margin-left:-2px;\n}\n.toc a:hover{color:var(--ink); background:var(--rule-soft)}\n.toc a.active{\n  color:var(--accent); font-weight:500;\n  background:var(--accent-soft);\n  border-left-color:var(--accent);\n}\n.toc ul ul{margin:2px 0 4px 12px; gap:1px}\n.toc ul ul a{font-size:12px; padding:3px 8px}\n\n/* ===== Content column ===== */\n.doc-content{max-width:760px}\n\n.doc-content section{scroll-margin-top:88px; padding:0 0 48px}\n.doc-content section:last-child{padding-bottom:0}\n\n/* Headings with anchor link affordance */\n.doc-content h2{\n  font-size:28px; margin:8px 0 14px;\n  line-height:1.2; letter-spacing:-.01em;\n  display:flex; align-items:center; gap:10px;\n}\n.doc-content h2::before{\n  content:\"\"; display:block; width:28px; height:3px;\n  background:var(--accent); border-radius:2px;\n}\n.doc-content h2 .anchor-link,\n.doc-content h3 .anchor-link{\n  margin-left:8px; opacity:0;\n  color:var(--muted-2); font-size:.7em;\n  text-decoration:none; font-family:var(--mono);\n  transition:opacity .12s;\n}\n.doc-content h2:hover .anchor-link,\n.doc-content h3:hover .anchor-link{opacity:1}\n.doc-content h2 .anchor-link:hover,\n.doc-content h3 .anchor-link:hover{color:var(--accent); opacity:1}\n\n.doc-content h3{\n  font-size:20px; margin:36px 0 10px;\n  line-height:1.25;\n}\n.doc-content h3 .anchor-link{font-size:.6em; vertical-align:middle}\n\n.doc-content > section > p.lead{\n  color:var(--muted); margin:0 0 28px;\n  font-size:16px; max-width:64ch; line-height:1.65;\n}\n.doc-content p{\n  margin:0 0 14px; line-height:1.7;\n  color:var(--ink-soft); max-width:72ch;\n}\n.doc-content ul, .doc-content ol{\n  margin:0 0 16px; padding-left:24px;\n  line-height:1.7; color:var(--ink-soft); max-width:70ch;\n}\n.doc-content ul li::marker{color:var(--accent)}\n.doc-content ol li::marker{color:var(--accent); font-weight:600}\n.doc-content code{\n  font-family:var(--mono); font-size:.88em;\n  background:var(--rule-soft); padding:1px 6px;\n  border-radius:4px; color:var(--ink);\n}\n.doc-content a{font-weight:500}\n\n/* Page block (for the pages section) */\n.page-block{\n  background:var(--panel); border:1px solid var(--rule);\n  border-radius:var(--radius); padding:24px 28px;\n  margin-bottom:20px;\n}\n.page-block h3{margin:0 0 6px; font-size:20px; display:flex; align-items:center; gap:12px}\n.page-block h3 .pn{\n  font-family:var(--mono); font-size:11px;\n  color:var(--accent-deep); background:var(--accent-soft);\n  padding:3px 10px; border-radius:99px;\n  font-weight:700; letter-spacing:.04em; text-transform:uppercase;\n}\n.page-block .pg-url{\n  font-family:var(--mono); font-size:12px;\n  color:var(--muted); margin:0 0 14px; display:block;\n}\n.page-block p{margin:0 0 12px}\n.page-block p:last-child{margin-bottom:0}\n.page-block ul{margin:0 0 12px}\n.page-block ul li::marker{color:var(--accent)}\n\n/* Engine subsection prose block */\n.engine-entry{\n  padding:8px 0 32px;\n  border-bottom:1px solid var(--rule-soft);\n}\n.engine-entry:last-of-type{border-bottom:none}\n\n/* Metadata table for each engine */\n.engine-meta{\n  display:grid; grid-template-columns:auto 1fr;\n  gap:4px 16px; margin:10px 0 16px;\n  font-size:13px; max-width:100%;\n  border-collapse:collapse;\n}\n.engine-meta dt{\n  font-family:var(--mono); font-size:11px;\n  text-transform:uppercase; letter-spacing:.05em;\n  color:var(--muted-2); font-weight:600;\n  white-space:nowrap; padding:4px 0; vertical-align:top;\n}\n.engine-meta dd{margin:0; padding:4px 0; color:var(--ink-soft); vertical-align:top}\n.engine-meta dd a{font-weight:500}\n.engine-meta .lic{\n  font-family:var(--mono); font-size:11px; font-weight:700;\n  padding:2px 9px; border-radius:99px;\n  white-space:nowrap; display:inline-block;\n}\n.engine-meta .lic.gpl{background:color-mix(in srgb, var(--gold) 16%, transparent); color:var(--gold)}\n.engine-meta .lic.agpl{background:var(--warn-soft); color:var(--warn)}\n.engine-meta .lic.mit{background:var(--accent-soft); color:var(--accent-deep)}\n\n/* Expandable technical details */\n.engine-entry details{\n  margin-top:8px; border:1px solid var(--rule);\n  border-radius:var(--radius-sm); background:var(--panel);\n  overflow:hidden;\n}\n.engine-entry details summary{\n  cursor:pointer; padding:10px 16px;\n  font-family:var(--mono); font-size:12px;\n  color:var(--muted); font-weight:600;\n  letter-spacing:.03em; text-transform:uppercase;\n  list-style:none; user-select:none;\n}\n.engine-entry details summary::-webkit-details-marker{display:none}\n.engine-entry details summary::before{content:\"▸ \"; color:var(--accent); transition:transform .12s; display:inline-block}\n.engine-entry details[open] summary::before{content:\"▾ \"}\n.engine-entry details summary:hover{color:var(--ink); background:var(--rule-soft)}\n.engine-entry details .details-body{padding:0 16px 14px}\n.engine-entry details .details-body p:last-child{margin-bottom:0}\n\n/* Callout boxes */\n.callout{\n  border-radius:var(--radius); padding:22px 26px;\n  margin:20px 0; border:1px solid var(--rule);\n}\n.callout.info{\n  background:var(--accent-soft);\n  border-color:color-mix(in srgb, var(--accent) 30%, var(--rule));\n}\n.callout.warn{\n  background:var(--warn-soft);\n  border-color:color-mix(in srgb, var(--warn) 30%, var(--rule));\n}\n.callout h4{\n  margin:0 0 10px; font-size:14px;\n  font-family:var(--sans); letter-spacing:.02em;\n  display:flex; align-items:center; gap:8px;\n}\n.callout.info h4{color:var(--accent-deep)}\n.callout.warn h4{color:var(--warn)}\n.callout h4::before{\n  font-family:var(--mono); font-size:14px;\n  width:20px; height:20px; border-radius:4px;\n  display:inline-flex; align-items:center; justify-content:center;\n}\n.callout.info h4::before{content:\"i\"; background:var(--accent); color:var(--panel); font-style:italic}\n.callout.warn h4::before{content:\"!\"; background:var(--warn); color:var(--panel); font-weight:700}\n.callout p{margin:0 0 10px; line-height:1.65; font-size:14px; max-width:64ch}\n.callout p:last-child{margin:0}\n.callout code{\n  font-family:var(--mono); font-size:12px;\n  background:var(--panel); padding:1px 6px;\n  border-radius:4px; border:1px solid var(--rule);\n}\n.callout a{font-weight:500}\n\n/* Blockquote (trademark note) */\n.doc-content blockquote{\n  margin:24px 0; padding:16px 22px;\n  border-left:3px solid var(--rule);\n  background:var(--bg-2); border-radius:0 var(--radius-sm) var(--radius-sm) 0;\n  color:var(--muted); font-size:14px; line-height:1.65;\n  max-width:68ch;\n}\n.doc-content blockquote p{margin:0; color:var(--muted)}\n\n/* ===== Mobile ===== */\n@media(max-width:860px){\n  .doc-body .wrap{grid-template-columns:1fr; gap:0}\n  .toc{\n    position:static; max-height:none; padding:0 0 16px;\n    margin-bottom:24px; border:none;\n    border-bottom:1px solid var(--rule);\n  }\n  .toc details{padding:0}\n  .toc details summary{\n    cursor:pointer; padding:8px 0;\n    font-family:var(--sans); font-size:13px; font-weight:600;\n    color:var(--ink); list-style:none;\n  }\n  .toc details summary::-webkit-details-marker{display:none}\n  .toc details summary::after{content:\" ▾\"; color:var(--muted); font-weight:400}\n  .toc details[open] summary::after{content:\" ▴\"}\n}";
+  ;
 
-/* ===== Hero ===== */
-.doc-hero{border-bottom:1px solid var(--rule);
-  background:
-    radial-gradient(ellipse 70% 60% at 50% 0%, color-mix(in srgb, var(--accent-soft) 55%, transparent), transparent 65%),
-    var(--panel);}
-.doc-hero .wrap{padding:48px 24px 40px}
-.doc-hero .kicker{font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--accent); margin:0 0 10px}
-.doc-hero h1{font-size:clamp(28px,5vw,42px); margin:0 0 14px; line-height:1.1; letter-spacing:-.015em}
-.doc-hero p{margin:0; color:var(--ink-soft); font-size:16px; max-width:62ch; line-height:1.6}
-.doc-hero p strong{color:var(--ink)}
+  onMount(() => {
+    const headings = document.querySelectorAll('.doc-content section[id], .doc-content h3[id]');
+    const tocLinks = document.querySelectorAll<HTMLAnchorElement>('.toc a[href^="#"]');
+    if (!('IntersectionObserver' in window) || !headings.length) return;
+    const linkMap = new Map<string, HTMLAnchorElement>();
+    tocLinks.forEach((link) => {
+      const href = link.getAttribute('href');
+      if (href) linkMap.set(href.slice(1), link);
+    });
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const id = entry.target.getAttribute('id');
+        const link = id ? linkMap.get(id) : undefined;
+        if (!link) return;
+        tocLinks.forEach((item) => item.classList.remove('active'));
+        link.classList.add('active');
+      });
+    }, { rootMargin: '-88px 0px -70% 0px', threshold: 0 });
+    headings.forEach((heading) => observer.observe(heading));
+    return () => observer.disconnect();
+  });
+</script>
 
-/* ===== Body grid: content | TOC ===== */
-.doc-body .wrap{
-  padding:48px 24px 64px;
-  display:grid;
-  grid-template-columns:220px 1fr;
-  gap:56px;
-  align-items:start;
-}
-
-/* TOC rail (left side) */
-.toc{
-  position:sticky; top:88px;
-  font-size:13px;
-  max-height:calc(100vh - 100px);
-  overflow-y:auto;
-  padding-right:16px;
-  border-right:1px solid var(--rule);
-}
-.toc h4{
-  font-family:var(--sans); font-size:11px;
-  text-transform:uppercase; letter-spacing:.07em;
-  color:var(--muted-2); margin:0 0 12px; font-weight:600;
-}
-.toc ul{list-style:none; padding:0; margin:0; display:grid; gap:2px}
-.toc a{
-  color:var(--muted); text-decoration:none;
-  display:block; padding:4px 10px; border-radius:5px;
-  line-height:1.35; font-size:13px;
-  border-left:2px solid transparent; margin-left:-2px;
-}
-.toc a:hover{color:var(--ink); background:var(--rule-soft)}
-.toc a.active{
-  color:var(--accent); font-weight:500;
-  background:var(--accent-soft);
-  border-left-color:var(--accent);
-}
-.toc ul ul{margin:2px 0 4px 12px; gap:1px}
-.toc ul ul a{font-size:12px; padding:3px 8px}
-
-/* ===== Content column ===== */
-.doc-content{max-width:760px}
-
-.doc-content section{scroll-margin-top:88px; padding:0 0 48px}
-.doc-content section:last-child{padding-bottom:0}
-
-/* Headings with anchor link affordance */
-.doc-content h2{
-  font-size:28px; margin:8px 0 14px;
-  line-height:1.2; letter-spacing:-.01em;
-  display:flex; align-items:center; gap:10px;
-}
-.doc-content h2::before{
-  content:""; display:block; width:28px; height:3px;
-  background:var(--accent); border-radius:2px;
-}
-.doc-content h2 .anchor-link,
-.doc-content h3 .anchor-link{
-  margin-left:8px; opacity:0;
-  color:var(--muted-2); font-size:.7em;
-  text-decoration:none; font-family:var(--mono);
-  transition:opacity .12s;
-}
-.doc-content h2:hover .anchor-link,
-.doc-content h3:hover .anchor-link{opacity:1}
-.doc-content h2 .anchor-link:hover,
-.doc-content h3 .anchor-link:hover{color:var(--accent); opacity:1}
-
-.doc-content h3{
-  font-size:20px; margin:36px 0 10px;
-  line-height:1.25;
-}
-.doc-content h3 .anchor-link{font-size:.6em; vertical-align:middle}
-
-.doc-content > section > p.lead{
-  color:var(--muted); margin:0 0 28px;
-  font-size:16px; max-width:64ch; line-height:1.65;
-}
-.doc-content p{
-  margin:0 0 14px; line-height:1.7;
-  color:var(--ink-soft); max-width:72ch;
-}
-.doc-content ul, .doc-content ol{
-  margin:0 0 16px; padding-left:24px;
-  line-height:1.7; color:var(--ink-soft); max-width:70ch;
-}
-.doc-content ul li::marker{color:var(--accent)}
-.doc-content ol li::marker{color:var(--accent); font-weight:600}
-.doc-content code{
-  font-family:var(--mono); font-size:.88em;
-  background:var(--rule-soft); padding:1px 6px;
-  border-radius:4px; color:var(--ink);
-}
-.doc-content a{font-weight:500}
-
-/* Page block (for the pages section) */
-.page-block{
-  background:var(--panel); border:1px solid var(--rule);
-  border-radius:var(--radius); padding:24px 28px;
-  margin-bottom:20px;
-}
-.page-block h3{margin:0 0 6px; font-size:20px; display:flex; align-items:center; gap:12px}
-.page-block h3 .pn{
-  font-family:var(--mono); font-size:11px;
-  color:var(--accent-deep); background:var(--accent-soft);
-  padding:3px 10px; border-radius:99px;
-  font-weight:700; letter-spacing:.04em; text-transform:uppercase;
-}
-.page-block .pg-url{
-  font-family:var(--mono); font-size:12px;
-  color:var(--muted); margin:0 0 14px; display:block;
-}
-.page-block p{margin:0 0 12px}
-.page-block p:last-child{margin-bottom:0}
-.page-block ul{margin:0 0 12px}
-.page-block ul li::marker{color:var(--accent)}
-
-/* Engine subsection prose block */
-.engine-entry{
-  padding:8px 0 32px;
-  border-bottom:1px solid var(--rule-soft);
-}
-.engine-entry:last-of-type{border-bottom:none}
-
-/* Metadata table for each engine */
-.engine-meta{
-  display:grid; grid-template-columns:auto 1fr;
-  gap:4px 16px; margin:10px 0 16px;
-  font-size:13px; max-width:100%;
-  border-collapse:collapse;
-}
-.engine-meta dt{
-  font-family:var(--mono); font-size:11px;
-  text-transform:uppercase; letter-spacing:.05em;
-  color:var(--muted-2); font-weight:600;
-  white-space:nowrap; padding:4px 0; vertical-align:top;
-}
-.engine-meta dd{margin:0; padding:4px 0; color:var(--ink-soft); vertical-align:top}
-.engine-meta dd a{font-weight:500}
-.engine-meta .lic{
-  font-family:var(--mono); font-size:11px; font-weight:700;
-  padding:2px 9px; border-radius:99px;
-  white-space:nowrap; display:inline-block;
-}
-.engine-meta .lic.gpl{background:color-mix(in srgb, var(--gold) 16%, transparent); color:var(--gold)}
-.engine-meta .lic.agpl{background:var(--warn-soft); color:var(--warn)}
-.engine-meta .lic.mit{background:var(--accent-soft); color:var(--accent-deep)}
-
-/* Expandable technical details */
-.engine-entry details{
-  margin-top:8px; border:1px solid var(--rule);
-  border-radius:var(--radius-sm); background:var(--panel);
-  overflow:hidden;
-}
-.engine-entry details summary{
-  cursor:pointer; padding:10px 16px;
-  font-family:var(--mono); font-size:12px;
-  color:var(--muted); font-weight:600;
-  letter-spacing:.03em; text-transform:uppercase;
-  list-style:none; user-select:none;
-}
-.engine-entry details summary::-webkit-details-marker{display:none}
-.engine-entry details summary::before{content:"▸ "; color:var(--accent); transition:transform .12s; display:inline-block}
-.engine-entry details[open] summary::before{content:"▾ "}
-.engine-entry details summary:hover{color:var(--ink); background:var(--rule-soft)}
-.engine-entry details .details-body{padding:0 16px 14px}
-.engine-entry details .details-body p:last-child{margin-bottom:0}
-
-/* Callout boxes */
-.callout{
-  border-radius:var(--radius); padding:22px 26px;
-  margin:20px 0; border:1px solid var(--rule);
-}
-.callout.info{
-  background:var(--accent-soft);
-  border-color:color-mix(in srgb, var(--accent) 30%, var(--rule));
-}
-.callout.warn{
-  background:var(--warn-soft);
-  border-color:color-mix(in srgb, var(--warn) 30%, var(--rule));
-}
-.callout h4{
-  margin:0 0 10px; font-size:14px;
-  font-family:var(--sans); letter-spacing:.02em;
-  display:flex; align-items:center; gap:8px;
-}
-.callout.info h4{color:var(--accent-deep)}
-.callout.warn h4{color:var(--warn)}
-.callout h4::before{
-  font-family:var(--mono); font-size:14px;
-  width:20px; height:20px; border-radius:4px;
-  display:inline-flex; align-items:center; justify-content:center;
-}
-.callout.info h4::before{content:"i"; background:var(--accent); color:var(--panel); font-style:italic}
-.callout.warn h4::before{content:"!"; background:var(--warn); color:var(--panel); font-weight:700}
-.callout p{margin:0 0 10px; line-height:1.65; font-size:14px; max-width:64ch}
-.callout p:last-child{margin:0}
-.callout code{
-  font-family:var(--mono); font-size:12px;
-  background:var(--panel); padding:1px 6px;
-  border-radius:4px; border:1px solid var(--rule);
-}
-.callout a{font-weight:500}
-
-/* Blockquote (trademark note) */
-.doc-content blockquote{
-  margin:24px 0; padding:16px 22px;
-  border-left:3px solid var(--rule);
-  background:var(--bg-2); border-radius:0 var(--radius-sm) var(--radius-sm) 0;
-  color:var(--muted); font-size:14px; line-height:1.65;
-  max-width:68ch;
-}
-.doc-content blockquote p{margin:0; color:var(--muted)}
-
-/* ===== Mobile ===== */
-@media(max-width:860px){
-  .doc-body .wrap{grid-template-columns:1fr; gap:0}
-  .toc{
-    position:static; max-height:none; padding:0 0 16px;
-    margin-bottom:24px; border:none;
-    border-bottom:1px solid var(--rule);
-  }
-  .toc details{padding:0}
-  .toc details summary{
-    cursor:pointer; padding:8px 0;
-    font-family:var(--sans); font-size:13px; font-weight:600;
-    color:var(--ink); list-style:none;
-  }
-  .toc details summary::-webkit-details-marker{display:none}
-  .toc details summary::after{content:" ▾"; color:var(--muted); font-weight:400}
-  .toc details[open] summary::after{content:" ▴"}
-}
-</style>
-</head>
-<body>
-<a class="skip" href="#main">Skip to content</a>
-<header class="site-header">
-  <div class="wrap">
-    <a class="brand" href="/" aria-label="0x88.app — home">
-      <span class="brand-mark" aria-hidden="true">0x88</span>
-      <span class="brand-name">0x88.app</span>
-    </a>
-    <span class="page-title">Docs</span>
-    <nav class="primary" aria-label="Primary">
-      <a href="/">Home</a>
-      <a href="/lc0-play.html">Play</a>
-      <a href="/lc0-analysis.html">Analysis</a>
-      <a href="/lc0-arena.html">Arena</a>
-      <a class="active" href="/docs.html">Docs</a>
-    </nav>
-    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle night mode">&#9790;</button>
-    <select id="boardStyleSelect" class="board-style-select" aria-label="Board style" title="Board style">
-      <option value="brown">Brown</option>
-      <option value="night">Night</option>
-      <option value="blue">Blue</option>
-      <option value="green">Green</option>
-    </select>
-  </div>
-</header>
-
+<svelte:head>
+  <title>{title}</title>
+  <meta name="description" content={description} />
+</svelte:head>
+<div>{@html `<style>${styles}</style>`}</div>
+<SiteHeader pageTitle="Docs" />
 <main id="main">
 
 <section class="doc-hero" aria-labelledby="doc-h1">
@@ -339,7 +91,7 @@
 
   <div class="page-block">
     <h3 id="pages-play"><span class="pn">Play</span> Play a game <a class="anchor-link" href="#pages-play" aria-label="Link to this section">#</a></h3>
-    <span class="pg-url">/lc0-play.html</span>
+    <span class="pg-url">/app/play</span>
     <p>Play chess against the engine of your choice, or against the human-like Maia3 model that imitates how real players at any rating actually play. Pick your color, pick your opponent, pick a strength level, and the rest is a normal game of chess &mdash; takebacks and PGN export included.</p>
     <ul>
       <li><strong>Maia3 rating slider (600&ndash;2600)</strong> &mdash; trained on millions of human games; matches the move distribution of players at a chosen Elo rather than playing the objectively best move.</li>
@@ -351,7 +103,7 @@
 
   <div class="page-block">
     <h3 id="pages-analysis"><span class="pn">Analysis</span> Analysis board <a class="anchor-link" href="#pages-analysis" aria-label="Link to this section">#</a></h3>
-    <span class="pg-url">/lc0-analysis.html</span>
+    <span class="pg-url">/app/analysis</span>
     <p>The analysis board is the power-user surface. Load a position by FEN or a full game by PGN, then run <em>multiple engines side by side</em> on it. Each engine's evaluation, principal variation, and best move are shown in a comparison table so you can see where engines agree and where they disagree &mdash; that disagreement is often the most interesting thing in a position.</p>
     <ul>
       <li><strong>Multi-engine comparison</strong> &mdash; add as many engines as your machine can handle; each contributes its eval, PV, and best move to a shared table.</li>
@@ -364,7 +116,7 @@
 
   <div class="page-block">
     <h3 id="pages-arena"><span class="pn">Arena</span> Engine arena <a class="anchor-link" href="#pages-arena" aria-label="Link to this section">#</a></h3>
-    <span class="pg-url">/lc0-arena.html</span>
+    <span class="pg-url">/app/arena</span>
     <p>The arena is where engines play each other. Schedule head-to-head matches, gauntlets (one engine vs a field), or round-robin tournaments, and watch games play out on the board in real time with live evaluation bars and per-move scoring. It's part spectacle, part testbed &mdash; the same interface the project uses internally to benchmark new Leela Chess Zero networks.</p>
     <ul>
       <li><strong>Tournament formats</strong> &mdash; head-to-head, gauntlet, round-robin, with configurable games-per-pairing and color alternation.</li>
@@ -584,7 +336,6 @@
 </div><!-- /doc-body -->
 
 </main>
-
 <footer class="site-footer">
   <div class="wrap">
     <span>Engine binaries and source archives are linked above. Everything runs client-side.</span>
@@ -595,36 +346,3 @@
     </span>
   </div>
 </footer>
-
-<script>
-/* Scroll-spy: highlight the active TOC entry based on scroll position.
-   Progressive enhancement — TOC links work as plain anchors without JS. */
-(function(){
-  var headings = document.querySelectorAll('.doc-content section[id], .doc-content h3[id]');
-  var tocLinks = document.querySelectorAll('.toc a[href^="#"]');
-  if (!('IntersectionObserver' in window) || !headings.length) return;
-
-  var linkMap = {};
-  tocLinks.forEach(function(l){
-    linkMap[l.getAttribute('href').slice(1)] = l;
-  });
-
-  var observer = new IntersectionObserver(function(entries){
-    entries.forEach(function(entry){
-      if (!entry.isIntersecting) return;
-      var id = entry.target.getAttribute('id');
-      if (!id || !linkMap[id]) return;
-      tocLinks.forEach(function(l){ l.classList.remove('active'); });
-      linkMap[id].classList.add('active');
-    });
-  }, {
-    rootMargin: '-88px 0px -70% 0px',
-    threshold: 0
-  });
-
-  headings.forEach(function(h){ observer.observe(h); });
-})();
-</script>
-<script src="/theme.js"></script>
-</body>
-</html>

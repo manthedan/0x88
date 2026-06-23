@@ -864,11 +864,6 @@ function requestedKernelVariant(): KernelVariant {
   const value = params.get('kernelVariant') ?? params.get('variant');
   return value === 'tiled16' || value === 'scalar-transposed' || value === 'scalar-shader-f16-accum-f32' ? value : 'scalar';
 }
-// Register the offline app-shell SW in production builds, or opt in with ?sw=1.
-// Disabled in dev by default so it never serves stale HMR modules.
-const SW_ENABLED = params.get('sw') === '1'
-  || (params.get('sw') !== '0' && (import.meta as { env?: { PROD?: boolean } }).env?.PROD === true);
-
 function parseEarlyStop(raw: string | null): SearchEarlyStop {
   const normalized = (raw ?? 'none').toLowerCase().replace(/[ _]/g, '-');
   if (normalized === 'root-dominance' || normalized === 'best-stable' || normalized === 'kld-stable') return normalized;
@@ -914,6 +909,14 @@ let historyBoards: BoardState[] = [board];
 let ground: Ground | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
 let searcher: Lc0PuctSearcher | null = null;
+// Per-mount stale-write guard: reassigned fresh in mountPolicyOnlyBrowser() and
+// aborted on cleanup so async callbacks from a stale mount cannot clobber the
+// shared evaluator/player/searcher or the DOM of a newer mount.
+let mountAbort = new AbortController();
+function isStaleMount(signal: AbortSignal = mountAbort.signal): boolean {
+  return signal.aborted || signal !== mountAbort.signal;
+}
+let policyPagehideHandler: ((event: PageTransitionEvent) => void) | null = null;
 let mainEvaluator: Lc0OnnxEvaluator | null = null;
 let searchWorker: Worker | null = null;
 let useSearchWorker = SEARCH_WORKER_REQUESTED;
@@ -4109,10 +4112,12 @@ function disposeRuntimeResources(): void {
   searcher = null;
 }
 
-async function init() {
-  window.addEventListener('pagehide', (event) => {
-    if (!(event as PageTransitionEvent).persisted) disposeRuntimeResources();
-  });
+async function init(mountSignal: AbortSignal) {
+  if (policyPagehideHandler) window.removeEventListener('pagehide', policyPagehideHandler);
+  policyPagehideHandler = (event: PageTransitionEvent) => {
+    if (!event.persisted) disposeRuntimeResources();
+  };
+  window.addEventListener('pagehide', policyPagehideHandler);
   el('message').textContent = SHADER_F16_PROBE_REQUESTED ? 'Preparing WebGPU shader-f16 probe…' : PACK_PROBE_REQUESTED ? 'Preparing dedicated worker for lc0web pack probe…' : WORKER_ONLY_MODEL ? 'Loading LC0 model in dedicated worker…' : 'Loading LC0 ONNX model…';
   renderStatic();
   try {
@@ -4160,15 +4165,21 @@ async function init() {
       mainModelCacheStatus = 'worker-only (not loaded on main thread)';
       useSearchWorker = true;
       await initSearchWorker();
+      if (isStaleMount(mountSignal)) return;
       renderWorkerGpuStatus(searchWorkerBackend);
     } else {
       const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: CACHE_MODEL });
+      if (isStaleMount(mountSignal)) return;
       mainModelCacheStatus = describeLc0ModelLoad(modelLoad);
       const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
-      mainEvaluator = evaluator;
-      player = new Lc0PolicyOnlyPlayer(evaluator);
-      searcher = new Lc0PuctSearcher(evaluator);
+      if (isStaleMount(mountSignal)) { void evaluator.dispose(); return; }
+      const nextPlayer = new Lc0PolicyOnlyPlayer(evaluator);
+      const nextSearcher = new Lc0PuctSearcher(evaluator);
       const diagnostics = await collectOrtRuntimeDiagnostics();
+      if (isStaleMount(mountSignal)) { void evaluator.dispose(); return; }
+      mainEvaluator = evaluator;
+      player = nextPlayer;
+      searcher = nextSearcher;
       el('backend').textContent = diagnostics.describe;
       renderGpuStatus(diagnostics);
       publishBrowserRuntimeAudit({
@@ -4266,6 +4277,7 @@ function seedSettingsInputs() {
   selectEl('modeSelect').value = engineReplyMode;
 }
 
+function wireEvents(): void {
 el('engineMove').addEventListener('click', () => { void engineMove(); });
 el('searchMove').addEventListener('click', () => { void searchRootPosition(); });
 el('stopSearch').addEventListener('click', stopSearch);
@@ -4352,18 +4364,21 @@ selectEl('modeSelect').addEventListener('change', () => {
   engineReplyMode = selectEl('modeSelect').value === 'search' ? 'search' : 'policy';
   el('message').textContent = `Engine reply mode: ${engineReplyMode === 'search' ? 'PUCT search' : 'policy-only'}.`;
 });
-
-function registerAppServiceWorker() {
-  if (!SW_ENABLED || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/lc0-sw.js').then((registration) => {
-      console.info('LC0 app shell service worker registered.', registration.scope);
-    }).catch((error) => {
-      console.warn('LC0 app shell service worker registration failed.', error);
-    });
-  });
 }
 
-seedSettingsInputs();
-registerAppServiceWorker();
-void init();
+export function mountPolicyOnlyBrowser(): () => void {
+  const controller = new AbortController();
+  mountAbort = controller;
+  seedSettingsInputs();
+  wireEvents();
+  void init(controller.signal);
+  return () => {
+    controller.abort();
+    if (mountAbort !== controller) return;
+    disposeRuntimeResources();
+    if (policyPagehideHandler) window.removeEventListener('pagehide', policyPagehideHandler);
+    policyPagehideHandler = null;
+    (ground as { destroy?: () => void } | null)?.destroy?.();
+    ground = null;
+  };
+}

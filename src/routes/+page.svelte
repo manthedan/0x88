@@ -1,0 +1,246 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import SiteHeader from '$lib/components/SiteHeader.svelte';
+  const title = "0x88 Chess \u2014 state-of-the-art chess, zero installs";
+  const description = "State-of-the-art chess engines running entirely in your browser. Leela Chess Zero on WebGPU, plus Stockfish, Berserk, Viridithas, PlentyChess and more on WebAssembly. No installs, no servers \u2014 democratizing chess technology and pushing browser deep-learning deployment.";
+  const styles = "/* ===== Hero ===== */\n.hero{\n  position:relative; overflow:hidden;\n  background:\n    radial-gradient(ellipse 80% 60% at 70% 0%, color-mix(in srgb, var(--accent-soft) 70%, transparent), transparent 60%),\n    radial-gradient(ellipse 60% 50% at 20% 100%, color-mix(in srgb, var(--accent-soft) 40%, transparent), transparent 60%),\n    linear-gradient(180deg, var(--bg-2), var(--bg));\n  border-bottom:1px solid var(--rule);\n}\n/* Subtle chessboard motif in the hero background.\n   Two repeating gradients produce an 8x8 board at low opacity. */\n.hero::before{\n  content:\"\"; position:absolute; inset:0; pointer-events:none; opacity:.06;\n  background-image:\n    repeating-linear-gradient(90deg, var(--ink) 0 6.25%, transparent 6.25% 12.5%),\n    repeating-linear-gradient(0deg, var(--ink) 0 6.25%, transparent 6.25% 12.5%);\n  background-size:64px 64px; background-position:top right;\n  -webkit-mask-image:radial-gradient(ellipse 60% 80% at 80% 20%, black, transparent 70%);\n          mask-image:radial-gradient(ellipse 60% 80% at 80% 20%, black, transparent 70%);\n}\n.hero .wrap{position:relative; padding:64px 24px 72px}\n.hero .eyebrow{\n  display:inline-flex; align-items:center; gap:8px;\n  font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase;\n  color:var(--accent-deep); background:var(--accent-soft);\n  padding:6px 12px; border-radius:99px; border:1px solid color-mix(in srgb, var(--accent) 25%, transparent);\n  margin:0 0 20px;\n}\n.hero .eyebrow .dot{width:6px; height:6px; border-radius:50%; background:var(--accent); animation:pulse 2.4s ease-in-out infinite}\n@keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}\n@media (prefers-reduced-motion: reduce){.hero .eyebrow .dot{animation:none}}\n.hero h1{\n  font-size:clamp(34px, 6vw, 56px); line-height:1.05; margin:0 0 18px;\n  max-width:18ch; letter-spacing:-.02em;\n}\n.hero h1 .accent{color:var(--accent); font-style:italic}\n.hero .lede{\n  font-size:clamp(15px, 2vw, 18px); color:var(--ink-soft); max-width:62ch;\n  line-height:1.6; margin:0 0 12px;\n}\n.hero .lede strong{color:var(--ink); font-weight:600}\n.hero .cta-row{display:flex; flex-wrap:wrap; gap:12px; margin-top:28px}\n.btn{\n  display:inline-flex; align-items:center; gap:8px;\n  padding:13px 22px; border-radius:10px; font-weight:600; font-size:14.5px;\n  text-decoration:none; border:1px solid transparent; cursor:pointer;\n  transition:transform .15s ease, box-shadow .15s ease, background .15s;\n}\n.btn:hover{text-decoration:none}\n.btn-primary{\n  background:var(--accent); color:#fbf8f0;\n  box-shadow:0 6px 20px -10px color-mix(in srgb, var(--accent) 80%, black);\n}\n.btn-primary:hover{background:var(--accent-2); transform:translateY(-1px)}\n.btn-ghost{background:var(--panel); color:var(--ink); border-color:var(--rule)}\n.btn-ghost:hover{border-color:var(--accent); transform:translateY(-1px)}\n.btn .arrow{transition:transform .15s ease}\n.btn:hover .arrow{transform:translateX(3px)}\n\n/* ===== Stats strip ===== */\n.stats{\n  display:grid; grid-template-columns:repeat(4,1fr); gap:1px;\n  background:var(--rule); border:1px solid var(--rule);\n  border-radius:var(--radius); overflow:hidden; margin-top:40px;\n}\n.stat{background:var(--panel); padding:18px 20px}\n.stat .v{font-family:var(--serif); font-size:26px; font-weight:600; color:var(--accent-deep); line-height:1}\n.stat .l{font-size:12px; color:var(--muted); margin-top:4px; letter-spacing:.01em}\n\n/* ===== Section primitives ===== */\nsection.block{padding:64px 0; border-bottom:1px solid var(--rule)}\nsection.block:last-of-type{border-bottom:none}\n.section-head{margin-bottom:32px; max-width:72ch}\n.section-head .kicker{\n  font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.1em;\n  color:var(--accent); margin:0 0 10px;\n}\n.section-head h2{font-size:clamp(26px,4vw,36px); margin:0 0 10px; line-height:1.15}\n.section-head p{color:var(--muted); font-size:15.5px; margin:0; max-width:60ch; line-height:1.6}\n\n/* ===== Action cards ===== */\n.cards-3{display:grid; grid-template-columns:repeat(3,1fr); gap:18px}\n.action-card{\n  position:relative; display:flex; flex-direction:column; gap:10px;\n  background:var(--panel); border:1px solid var(--rule); border-radius:var(--radius-lg);\n  padding:24px; text-decoration:none; color:inherit; overflow:hidden;\n  transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;\n}\n.action-card::after{\n  content:\"\"; position:absolute; left:0; right:0; top:0; height:3px;\n  background:linear-gradient(90deg, var(--accent), var(--accent-2));\n  transform:scaleX(0); transform-origin:left; transition:transform .25s ease;\n}\n.action-card:hover{\n  border-color:color-mix(in srgb, var(--accent) 35%, var(--rule));\n  box-shadow:var(--shadow-lg); transform:translateY(-3px); text-decoration:none;\n}\n.action-card:hover::after{transform:scaleX(1)}\n.action-card .ac-head{display:flex; align-items:center; justify-content:space-between; gap:12px}\n.action-card .ac-tag{\n  font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.08em;\n  color:var(--accent-deep); background:var(--accent-soft);\n  padding:4px 10px; border-radius:99px;\n}\n.action-card .ac-icon{\n  width:36px; height:36px; border-radius:10px;\n  background:var(--accent-soft); color:var(--accent-deep);\n  display:grid; place-items:center; font-size:18px;\n}\n.action-card h3{font-size:20px; margin:4px 0 0; line-height:1.2}\n.action-card p{color:var(--muted); margin:0; font-size:14px; line-height:1.6}\n.action-card .ac-arrow{margin-top:auto; padding-top:8px; font-weight:600; font-size:13px; color:var(--accent); display:flex; align-items:center; gap:6px}\n.action-card .ac-arrow .a{transition:transform .15s ease}\n.action-card:hover .ac-arrow .a{transform:translateX(3px)}\n\n/* ===== Capabilities panel ===== */\n.caps-panel{\n  background:var(--panel); border:1px solid var(--rule); border-radius:var(--radius-lg);\n  padding:28px; display:grid; grid-template-columns:1.1fr 1fr; gap:32px; align-items:start;\n}\n.caps-left h3{margin:0 0 8px; font-size:19px}\n.caps-left p{margin:0 0 16px; color:var(--muted); font-size:14px; line-height:1.6}\n#caps{display:flex; flex-wrap:wrap; gap:8px}\n.cap{\n  font-family:var(--mono); font-size:12px; border:1px solid var(--rule);\n  border-radius:99px; padding:7px 14px; background:var(--bg); color:var(--muted);\n  display:inline-flex; align-items:center; gap:6px;\n}\n.cap.ok{border-color:color-mix(in srgb, var(--accent) 40%, transparent); color:var(--accent-deep); background:var(--accent-soft)}\n.cap.ok::before{content:\"\\u2713\"; font-weight:700}\n.cap.no{border-color:color-mix(in srgb, var(--warn) 40%, transparent); color:var(--warn); background:var(--warn-soft)}\n.cap.no::before{content:\"\\u2715\"}\n.cap:not(.ok):not(.no)::before{content:\"\\u2022\"; opacity:.5}\n.capnote{font-size:13px; color:var(--muted); margin:14px 0 0; line-height:1.55; max-width:50ch}\n\n.caps-right h4{margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted)}\n#storage{display:grid; gap:10px}\n.store-row{\n  display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:14px;\n  background:var(--bg); border:1px solid var(--rule); border-radius:var(--radius-sm);\n  padding:12px 14px; font-size:13px;\n}\n.store-row .store-info{display:grid; gap:2px; min-width:0}\n.store-row .store-info b{font-weight:600; font-size:13.5px}\n.store-row .store-info span{color:var(--muted); font-size:12px; line-height:1.4}\n.store-row .store-size{font-family:var(--mono); font-size:11.5px; color:var(--muted-2); white-space:nowrap}\n.store-row button{\n  font:inherit; font-size:12px; padding:7px 12px; border:1px solid var(--rule);\n  border-radius:6px; background:var(--panel); cursor:pointer; color:var(--ink-soft);\n  transition:border-color .15s, color .15s, background .15s;\n}\n.store-row button:disabled{opacity:.45; cursor:not-allowed}\n.store-row button:hover:not(:disabled){border-color:var(--warn); color:var(--warn); background:var(--warn-soft)}\n.store-row button.clearing{opacity:.7}\n\n/* ===== Engines grid ===== */\n.engine-filters{\n  display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px;\n}\n.engine-filter{\n  font:inherit; font-size:13px; padding:7px 14px; border-radius:99px;\n  background:var(--panel); border:1px solid var(--rule); color:var(--muted);\n  cursor:pointer; transition:all .15s;\n}\n.engine-filter:hover{color:var(--ink); border-color:var(--accent)}\n.engine-filter.active{background:var(--accent); color:#fbf8f0; border-color:var(--accent)}\n.engines{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px}\n.engine{\n  background:var(--panel); border:1px solid var(--rule); border-radius:var(--radius);\n  padding:18px 20px; display:flex; flex-direction:column; gap:8px;\n  transition:border-color .15s, box-shadow .15s;\n}\n.engine:hover{border-color:color-mix(in srgb, var(--accent) 30%, var(--rule)); box-shadow:var(--shadow-sm)}\n.engine-head{display:flex; align-items:baseline; justify-content:space-between; gap:10px}\n.engine b{font-size:16px; font-family:var(--serif)}\n.engine .rt{\n  font-family:var(--mono); font-size:10.5px; color:var(--accent-deep);\n  background:var(--accent-soft); padding:3px 8px; border-radius:99px; white-space:nowrap;\n}\n.engine[data-family=\"nnue\"] .rt{color:var(--gold); background:color-mix(in srgb, var(--gold) 12%, transparent)}\n.engine span.desc{color:var(--muted); font-size:13px; line-height:1.5}\n.engine .meta{display:flex; gap:10px; flex-wrap:wrap; margin-top:4px}\n.engine .meta span{font-family:var(--mono); font-size:10.5px; color:var(--muted-2)}\n\n/* ===== Mission block ===== */\n.mission{\n  background:\n    radial-gradient(ellipse 70% 50% at 50% 0%, color-mix(in srgb, var(--accent-soft) 60%, transparent), transparent 70%),\n    var(--panel);\n  border-top:1px solid var(--rule); border-bottom:1px solid var(--rule);\n}\n.mission .wrap{padding:72px 24px}\n.mission-grid{display:grid; grid-template-columns:1.2fr 1fr; gap:56px; align-items:center}\n.mission h2{font-size:clamp(26px,4vw,38px); margin:0 0 18px; line-height:1.15}\n.mission p{color:var(--ink-soft); font-size:16px; line-height:1.7; margin:0 0 14px; max-width:54ch}\n.mission p strong{color:var(--ink)}\n.principles{display:grid; gap:18px}\n.principle{display:flex; gap:16px; align-items:start}\n.principle .pn{\n  flex-shrink:0; width:36px; height:36px; border-radius:10px;\n  background:var(--accent); color:#fbf8f0; display:grid; place-items:center;\n  font-family:var(--serif); font-weight:600; font-size:16px;\n}\n.principle h4{margin:0 0 4px; font-size:15.5px; font-family:var(--sans)}\n.principle p{margin:0; color:var(--muted); font-size:13.5px; line-height:1.55}\n\n/* ===== Footer ===== */\nfooter.site-footer{background:var(--bg-2); border-top:1px solid var(--rule); padding:48px 0 32px; margin-top:0}\n.footer-grid{display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:40px; margin-bottom:32px}\n.footer-brand .brand{margin-bottom:14px}\n.footer-brand p{color:var(--muted); font-size:13.5px; line-height:1.6; margin:0; max-width:42ch}\n.footer-col h4{font-family:var(--sans); font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted-2); margin:0 0 12px; font-weight:600}\n.footer-col ul{list-style:none; padding:0; margin:0; display:grid; gap:8px}\n.footer-col a{color:var(--ink-soft); font-size:14px}\n.footer-col a:hover{color:var(--accent)}\n.footer-bottom{\n  border-top:1px solid var(--rule); padding-top:20px;\n  display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap;\n  font-size:12px; color:var(--muted);\n}\n.footer-bottom code{font-family:var(--mono); font-size:11px; background:var(--panel); padding:2px 6px; border-radius:4px; border:1px solid var(--rule)}\n\n/* ===== Responsive ===== */\n@media (max-width:900px){\n  .stats{grid-template-columns:repeat(2,1fr)}\n  .caps-panel{grid-template-columns:1fr}\n  .mission-grid{grid-template-columns:1fr; gap:32px}\n  .footer-grid{grid-template-columns:1fr 1fr}\n  .footer-brand{grid-column:1 / -1}\n}\n@media (max-width:680px){\n  .cards-3{grid-template-columns:1fr}\n  .hero .wrap{padding:44px 20px 52px}\n  nav.primary{gap:0}\n  nav.primary a{padding:7px 8px; font-size:12.5px}\n  .brand-tag{display:none}\n  .board-style-select{display:none}\n  section.block{padding:48px 0}\n  .footer-grid{grid-template-columns:1fr}\n  .footer-bottom{flex-direction:column; gap:6px}\n  .stats{grid-template-columns:1fr 1fr; gap:1px}\n}";
+  ;
+  onMount(() => {
+    let cleanup: () => void = () => undefined;
+    let mounted = true;
+    void import('../lc0/homeBrowser').then((module) => {
+      if (!mounted) return;
+      cleanup = module.mountHomeBrowser();
+    });
+    return () => {
+      mounted = false;
+      cleanup();
+    };
+  });
+</script>
+
+<svelte:head>
+  <title>{title}</title>
+  <meta name="description" content={description} />
+</svelte:head>
+<div>{@html `<style>${styles}</style>`}</div>
+<SiteHeader />
+<main id="main">
+
+<!-- ===== Hero ===== -->
+<section class="hero" aria-labelledby="hero-h1">
+  <div class="wrap">
+    <p class="eyebrow"><span class="dot" aria-hidden="true"></span> Open source · runs entirely client-side</p>
+    <h1 id="hero-h1">State-of-the-art chess, <span class="accent">zero installs.</span></h1>
+    <p class="lede">
+      The strongest neural networks and classical engines — <strong>Leela Chess Zero on WebGPU</strong>,
+      Stockfish, Berserk, Viridithas, and PlentyChess on WebAssembly — running in a single browser tab.
+      No downloads. No servers. No technical setup. Just open a page and play.
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="/app/play/">Play now <span class="arrow" aria-hidden="true">→</span></a>
+      <a class="btn btn-ghost" href="/app/analysis/">Analyze a game</a>
+      <a class="btn btn-ghost" href="/app/arena/">Watch engines duel</a>
+    </div>
+
+    <div class="stats" role="list">
+      <div class="stat" role="listitem"><div class="v">7+</div><div class="l">engines, ready to play</div></div>
+      <div class="stat" role="listitem"><div class="v">WebGPU</div><div class="l">deep-learning inference</div></div>
+      <div class="stat" role="listitem"><div class="v">100%</div><div class="l">client-side, private</div></div>
+      <div class="stat" role="listitem"><div class="v">0</div><div class="l">servers in the loop</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Three actions ===== -->
+<section class="block" aria-labelledby="actions-h">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="kicker">What you can do right now</p>
+      <h2 id="actions-h">Three doors in. Pick one.</h2>
+      <p>Everything below loads the engine inside your browser on first use and caches it for next time. Nothing leaves your machine.</p>
+    </div>
+    <div class="cards-3">
+      <a class="action-card" href="/app/play/">
+        <div class="ac-head">
+          <span class="ac-tag">Play</span>
+          <span class="ac-icon" aria-hidden="true">♟</span>
+        </div>
+        <h3>Play a game</h3>
+        <p>Face the human-like Maia nets trained on millions of real games (1100–1900 Elo), or take on the strongest engines directly. Takebacks, undo, and PGN export included.</p>
+        <span class="ac-arrow">Start playing <span class="a" aria-hidden="true">→</span></span>
+      </a>
+      <a class="action-card" href="/app/analysis/">
+        <div class="ac-head">
+          <span class="ac-tag">Analyze</span>
+          <span class="ac-icon" aria-hidden="true">🔍</span>
+        </div>
+        <h3>Analyze any position</h3>
+        <p>Run multiple engines side by side on your games. Get accuracy scores, critical moments, and an opening explorer built from your own PGNs. Import a game and dig in.</p>
+        <span class="ac-arrow">Open analysis board <span class="a" aria-hidden="true">→</span></span>
+      </a>
+      <a class="action-card" href="/app/arena/">
+        <div class="ac-head">
+          <span class="ac-tag">Compete</span>
+          <span class="ac-icon" aria-hidden="true">⚔</span>
+        </div>
+        <h3>Engine arena</h3>
+        <p>Stage engine-vs-engine matches, gauntlets, and round-robin tournaments. Live standings, Elo estimates, and per-game eval charts — watch the strongest players in chess fight it out.</p>
+        <span class="ac-arrow">Enter the arena <span class="a" aria-hidden="true">→</span></span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Capabilities & storage ===== -->
+<section class="block" aria-labelledby="caps-h">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="kicker">Live diagnostics</p>
+      <h2 id="caps-h">What's running in your browser</h2>
+      <p>This site uses the browser as a deep-learning runtime. Here's what your device currently supports, and what's stored locally from past visits.</p>
+    </div>
+    <div class="caps-panel">
+      <div class="caps-left">
+        <h3>Capabilities</h3>
+        <p>WebGPU unlocks the large Leela Chess Zero neural nets (t3, BT4) at GPU speed. WebAssembly runs every classical NNUE engine. Threads accelerate the WASM builds when the page is cross-origin isolated.</p>
+        <div id="caps" aria-live="polite"><span class="cap">Checking capabilities…</span></div>
+        <p class="capnote" id="capNote"></p>
+      </div>
+      <div class="caps-right">
+        <h4>Downloads &amp; storage</h4>
+        <div id="storage" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Engines ===== -->
+<section class="block" aria-labelledby="engines-h">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="kicker">The roster</p>
+      <h2 id="engines-h">The engines</h2>
+      <p>Two distinct families of chess AI live here. <strong>Neural networks</strong> evaluate positions with deep learning on WebGPU. <strong>NNUE engines</strong> evaluate efficiently on CPU via WebAssembly. All are state-of-the-art in their class.</p>
+    </div>
+    <div class="engine-filters" role="tablist" aria-label="Filter engines">
+      <button class="engine-filter active" data-filter="all" role="tab" aria-selected="true">All</button>
+      <button class="engine-filter" data-filter="neural" role="tab" aria-selected="false">Neural · WebGPU</button>
+      <button class="engine-filter" data-filter="nnue" role="tab" aria-selected="false">NNUE · WebAssembly</button>
+    </div>
+    <div class="engines" id="engineGrid">
+      <div class="engine" data-family="neural">
+        <div class="engine-head"><b>Maia3</b><span class="rt">neural · WASM</span></div>
+        <span class="desc">A single Elo-conditioned human-like model with a 600–2600 rating slider. Trained on real human games to play like a person at any level.</span>
+        <div class="meta"><span>human-like</span><span>rating-conditioned</span></div>
+      </div>
+      <div class="engine" data-family="neural">
+        <div class="engine-head"><b>Leela Chess Zero</b><span class="rt">neural · WebGPU / WASM</span></div>
+        <span class="desc">The open-source neural-network project. Small t1 net for fast play, plus Leela Queen Odds, with large nets (t3, BT4) available on analysis/arena builds when hosted.</span>
+        <div class="meta"><span>policy + WDL + MLH</span><span>smolgen attention</span></div>
+      </div>
+      <div class="engine" data-family="nnue">
+        <div class="engine-head"><b>Stockfish 18</b><span class="rt">NNUE · WASM</span></div>
+        <span class="desc">The strongest classical chess engine. Shipped in Lite and full-network flavors, with threaded builds available on cross-origin-isolated pages.</span>
+        <div class="meta"><span>open source</span><span>SIMD + threads</span></div>
+      </div>
+      <div class="engine" data-family="nnue">
+        <div class="engine-head"><b>Viridithas</b><span class="rt">NNUE · WASM (Rust)</span></div>
+        <span class="desc">A modern Rust engine with relaxed-SIMD acceleration. Consistent top-tier strength in computer chess tournaments.</span>
+        <div class="meta"><span>Rust</span><span>relaxed-SIMD</span></div>
+      </div>
+      <div class="engine" data-family="nnue">
+        <div class="engine-head"><b>Berserk</b><span class="rt">NNUE · WASM (C)</span></div>
+        <span class="desc">A very strong C engine compiled with Emscripten. Proven contender in the engine chess scene.</span>
+        <div class="meta"><span>C / Emscripten</span><span>single-thread</span></div>
+      </div>
+      <div class="engine" data-family="nnue">
+        <div class="engine-head"><b>PlentyChess</b><span class="rt">NNUE · WASM (C++)</span></div>
+        <span class="desc">A top-tier C++ engine with feature-detected SIMD builds. Ships with its processed NNUE network embedded.</span>
+        <div class="meta"><span>C++ / Emscripten</span><span>SIMD</span></div>
+      </div>
+      <div class="engine" data-family="nnue">
+        <div class="engine-head"><b>Reckless</b><span class="rt">NNUE · WASM (Rust)</span></div>
+        <span class="desc">Rust NNUE engine shipped with scalar, SIMD, and relaxed SIMD WASI builds for Play, Analysis, and Arena.</span>
+        <div class="meta"><span>Rust</span><span>SIMD / relaxed SIMD</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Mission ===== -->
+<section class="mission" aria-labelledby="mission-h">
+  <div class="wrap">
+    <div class="mission-grid">
+      <div>
+        <p class="kicker" style="font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--accent); margin:0 0 10px;">Why this exists</p>
+        <h2 id="mission-h">Democratizing chess technology.</h2>
+        <p>
+          The best chess software has historically lived behind compile steps, GUI installs, UCI configurations, and a quiet wall of technical knowledge.
+          <strong>This project tears that wall down.</strong> Every engine here — from the neural networks that learn from self-play to the hand-tuned NNUE evaluators — runs in a browser tab, the same way a webpage does.
+        </p>
+        <p>
+          It's also a research platform. Running Leela Chess Zero on <strong>WebGPU</strong> pushes the browser as a first-class deep-learning runtime: quantized ONNX inference, custom WGSL kernels, and a progressive ladder of network sizes (t1 → t3 → BT4) that explores how far client-side GPU compute can go.
+        </p>
+      </div>
+      <div class="principles">
+        <div class="principle">
+          <div class="pn" aria-hidden="true">1</div>
+          <div>
+            <h4>Privacy by architecture</h4>
+            <p>Your games, your analysis, your moves never leave your device. There is no server to ship them to — the engines run locally, full stop.</p>
+          </div>
+        </div>
+        <div class="principle">
+          <div class="pn" aria-hidden="true">2</div>
+          <div>
+            <h4>Zero install</h4>
+            <p>No downloads, no setup, no accounts. Open a URL, play the strongest engines in the world. That's the whole experience.</p>
+          </div>
+        </div>
+        <div class="principle">
+          <div class="pn" aria-hidden="true">3</div>
+          <div>
+            <h4>Open and remixable</h4>
+            <p>The engines are open source. The browser runtime, the quantization pipeline, and the model packs are all documented here for anyone to learn from or build on.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="/" aria-label="0x88.app — home">
+          <span class="brand-mark" aria-hidden="true">0x88</span>
+          <span class="brand-name">0x88.app</span>
+        </a>
+        <p>State-of-the-art chess engines, running entirely in your browser. An open-source project to democratize chess technology and push browser deep-learning deployment.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Play &amp; analyze</h4>
+        <ul>
+          <li><a href="/app/play/">Play</a></li>
+          <li><a href="/app/analysis/">Analysis</a></li>
+          <li><a href="/app/arena/">Arena</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Learn more</h4>
+        <ul>
+          <li><a href="/docs/">Docs: pages, engines &amp; licenses</a></li>
+          <li><a href="/single-engine/">Developer / single-engine console</a></li>
+          <li><span>Browser benchmark (lab)</span></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>Everything runs client-side. Engine binaries and networks are downloaded on first use and cached locally.</span>
+      <span><code>0x88.app · v0</code></span>
+    </div>
+  </div>
+</footer>

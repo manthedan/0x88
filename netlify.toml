@@ -2,6 +2,46 @@
   command = "VITE_LC0_ARTIFACT_CHANNEL_URL=https://assets.0x88.app/channels/stable.json VITE_LC0_BROWSER_ASSET_BASE_URL=https://assets.0x88.app npm run build:netlify:r2"
   publish = "dist-client"
 
+[[redirects]]
+  from = "/lc0-play.html"
+  to = "/app/play"
+  status = 301
+
+[[redirects]]
+  from = "/lc0-analysis.html"
+  to = "/app/analysis"
+  status = 301
+
+[[redirects]]
+  from = "/lc0-arena.html"
+  to = "/app/arena"
+  status = 301
+
+[[redirects]]
+  from = "/play"
+  to = "/app/play"
+  status = 301
+
+[[redirects]]
+  from = "/analysis"
+  to = "/app/analysis"
+  status = 301
+
+[[redirects]]
+  from = "/arena"
+  to = "/app/arena"
+  status = 301
+
+[[redirects]]
+  from = "/docs.html"
+  to = "/docs"
+  status = 301
+
+[[redirects]]
+  from = "/lc0-policy-only.html"
+  to = "/single-engine"
+  status = 301
+
 # Keep engine pages eligible for WebAssembly threads/SAB experiments and WebGPU
 # runtime probes. Engine artifacts are loaded lazily after selector opt-in.
 [[headers]]

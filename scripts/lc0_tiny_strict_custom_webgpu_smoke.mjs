@@ -11,7 +11,7 @@ const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
 const AUDIT_EVENT = 'lc0-browser-runtime-audit';
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_tiny_strict_custom_webgpu_smoke.mjs [options]\n\nRuns strict Tiny Leela custom WebGPU browser smokes for lc0-analysis.html and lc0-arena.html. The gate fails if the Tiny runtime audit does not resolve runtime=custom-webgpu without fallback.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-surface timeout (default ${DEFAULT_TIMEOUT_MS})\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --skip-analysis       Skip lc0-analysis.html smoke\n  --skip-arena          Skip lc0-arena.html smoke\n  --dry-run             Print planned URLs without running\n  -h, --help            Show this help\n`);
+  console.log(`Usage: node scripts/lc0_tiny_strict_custom_webgpu_smoke.mjs [options]\n\nRuns strict Tiny Leela custom WebGPU browser smokes for /app/analysis and /app/arena. The gate fails if the Tiny runtime audit does not resolve runtime=custom-webgpu without fallback.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-surface timeout (default ${DEFAULT_TIMEOUT_MS})\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --skip-analysis       Skip /app/analysis smoke\n  --skip-arena          Skip /app/arena smoke\n  --dry-run             Print planned URLs without running\n  -h, --help            Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -83,7 +83,7 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(new URL('/lc0-analysis.html', baseUrl), { cache: 'no-store' });
+      const response = await fetch(new URL('/app/analysis', baseUrl), { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
     } catch (error) { lastError = error; }
@@ -159,7 +159,7 @@ function validateStrictCustomAudit(label, status) {
 
 async function runAnalysisSmoke(args) {
   const session = `lc0-tiny-strict-${process.pid}-analysis`;
-  const url = new URL('/lc0-analysis.html', args.baseUrl);
+  const url = new URL('/app/analysis', args.baseUrl);
   url.searchParams.set('ep', 'wasm');
   url.searchParams.set('tinyBatch', '1');
   process.stderr.write(`[lc0-tiny-strict] analysis ${url}\n`);
@@ -198,7 +198,7 @@ async function runAnalysisSmoke(args) {
 
 async function runArenaSmoke(args) {
   const session = `lc0-tiny-strict-${process.pid}-arena`;
-  const url = new URL('/lc0-arena.html', args.baseUrl);
+  const url = new URL('/app/arena', args.baseUrl);
   Object.entries({ seatA: 'tiny:bt4-custom:1', seatB: 'tiny:bt4-custom:1', games: 1, delayMs: 0, cacheEntries: 64 }).forEach(([k, v]) => url.searchParams.set(k, String(v)));
   process.stderr.write(`[lc0-tiny-strict] arena ${url}\n`);
   try {
@@ -225,8 +225,8 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) { usage(); return; }
   const plan = [];
-  if (!args.skipAnalysis) plan.push({ name: 'analysis', url: `${args.baseUrl}/lc0-analysis.html?tinyBatch=1` });
-  if (!args.skipArena) plan.push({ name: 'arena', url: `${args.baseUrl}/lc0-arena.html?seatA=tiny:bt4-custom:1&seatB=tiny:bt4-custom:1&games=1` });
+  if (!args.skipAnalysis) plan.push({ name: 'analysis', url: `${args.baseUrl}/app/analysis?tinyBatch=1` });
+  if (!args.skipArena) plan.push({ name: 'arena', url: `${args.baseUrl}/app/arena?seatA=tiny:bt4-custom:1&seatB=tiny:bt4-custom:1&games=1` });
   if (args.dryRun) { console.log(JSON.stringify({ baseUrl: args.baseUrl, plan }, null, 2)); return; }
   const server = startServer(args);
   const rows = [];

@@ -1,3 +1,4 @@
+import '../nn/ortConsoleFilter.ts';
 import { collectOrtRuntimeDiagnostics, setOrtRuntimeDiagnosticOptionsForCurrentThread, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference, type OrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
 import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { loadLc0WebModelPack } from './modelPack.ts';

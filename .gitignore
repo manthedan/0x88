@@ -24,6 +24,7 @@ public/runtimes/lc0-tvmjs-webgpu/
 public/runtimes/tiny-tvmjs-webgpu/
 logs/
 dist-client/
+.svelte-kit/
 public/models/*.pt
 public/reckless/*.wasm
 public/reckless/*.nnue

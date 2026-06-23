@@ -286,6 +286,7 @@ function optionalFloatOutput(outputs: Record<string, ort.Tensor>, ...names: stri
 }
 
 function configureOrtWasmRuntime() {
+  (ort.env as unknown as { logLevel?: 'fatal' }).logLevel = 'fatal';
   const wasm = ort.env.wasm as unknown as { numThreads?: number; proxy?: boolean };
   const isBrowserMainThread = typeof document !== 'undefined';
   const threads = Number(globalThis.process?.env?.ORT_INTRA_OP_NUM_THREADS ?? globalThis.process?.env?.ORT_NUM_THREADS ?? (isBrowserMainThread ? '1' : '0'));

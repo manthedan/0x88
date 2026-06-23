@@ -145,7 +145,7 @@ const SMOKES = [
 ];
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_smokes.mjs [options]\n\nRuns lc0-policy-only.html WebGPU smoke benchmarks through agent-browser.\n\nOptions:\n  --base-url URL        Use an existing dev server, e.g. http://127.0.0.1:5179\n  --port N             Port for the auto-started Vite dev server (default ${DEFAULT_PORT})\n  --host HOST          Host for the auto-started Vite dev server (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name (default: lc0-wgsl-smokes-PID)\n  --timeout MS         Per-smoke wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --max-error N        Max accepted maxAbsError across outputs (default ${DEFAULT_MAX_ERROR})\n  --only a,b,c         Comma-separated smoke names to run\n  --list               Print smoke names and URLs, then exit
+  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_smokes.mjs [options]\n\nRuns /single-engine WebGPU smoke benchmarks through agent-browser.\n\nOptions:\n  --base-url URL        Use an existing dev server, e.g. http://127.0.0.1:5179\n  --port N             Port for the auto-started Vite dev server (default ${DEFAULT_PORT})\n  --host HOST          Host for the auto-started Vite dev server (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name (default: lc0-wgsl-smokes-PID)\n  --timeout MS         Per-smoke wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --max-error N        Max accepted maxAbsError across outputs (default ${DEFAULT_MAX_ERROR})\n  --only a,b,c         Comma-separated smoke names to run\n  --list               Print smoke names and URLs, then exit
                        Heavy smokes such as encoder-stack-10-wasm and encoder-stack-heads-2-wasm are listed but excluded from the default run.\n  --no-server          Do not auto-start Vite; requires --base-url or an already-running default URL\n  -h, --help           Show this help\n`);
 }
 
@@ -202,7 +202,7 @@ function selectedSmokes(args) {
 }
 
 function smokeUrl(baseUrl, smoke) {
-  return `${baseUrl.replace(/\/$/, '')}/lc0-policy-only.html?${smoke.query}`;
+  return `${baseUrl.replace(/\/$/, '')}/single-engine?${smoke.query}`;
 }
 
 async function waitForServer(baseUrl, timeoutMs) {
@@ -210,7 +210,7 @@ async function waitForServer(baseUrl, timeoutMs) {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/lc0-policy-only.html`, { cache: 'no-store' });
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/single-engine`, { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
     } catch (error) {
