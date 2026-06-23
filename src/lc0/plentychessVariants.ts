@@ -32,6 +32,26 @@ export const PLENTYCHESS_SOURCE_NETWORK_URL = `https://github.com/Yoshie2000/Ple
 const assetStatuses = new Map<string, PlentyChessAssetStatus>();
 const assetChecks = new Map<string, Promise<PlentyChessAssetStatus>>();
 
+// Current production only ships the smoked baseline Emscripten PlentyChess
+// sidecars. The SSE4.1/relaxed variants remain selectable for local generated
+// assets, but production should not issue doomed HEAD probes for known-unshipped
+// files because devtools reports those handled fallbacks as 404 errors.
+const DEPLOYED_PLENTYCHESS_URLS = new Set([
+  PLENTYCHESS_EMSCRIPTEN_JS_URL,
+  PLENTYCHESS_EMSCRIPTEN_WASM_URL,
+  PLENTYCHESS_EMSCRIPTEN_DATA_URL,
+]);
+
+function isLocalDevelopmentOrigin(): boolean {
+  if (typeof location === 'undefined') return true;
+  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
+}
+
+function shouldSkipKnownUnshippedProbe(variant: PlentyChessVariant): boolean {
+  if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;
+  return assetUrls(variant).some((url) => url.startsWith('/plentychess/') && !DEPLOYED_PLENTYCHESS_URLS.has(url));
+}
+
 function sameOriginPlentyChessAsset(raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
   try {
@@ -182,6 +202,11 @@ export function checkPlentyChessVariantAsset(variant: PlentyChessVariant, onChan
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
   const existing = assetChecks.get(key);
   if (existing) return existing;
+  if (shouldSkipKnownUnshippedProbe(variant)) {
+    assetStatuses.set(key, 'missing');
+    onChange?.();
+    return Promise.resolve('missing');
+  }
   assetStatuses.set(key, 'checking');
   onChange?.();
   const promise = Promise.all(assetUrls(variant).map((url) => fetch(url, { method: 'HEAD', cache: 'no-store' }).then((response) => response.ok).catch(() => false)))

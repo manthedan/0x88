@@ -18,6 +18,23 @@ export type RecklessAssetStatus = 'unknown' | 'checking' | 'present' | 'missing'
 const assetStatuses = new Map<string, RecklessAssetStatus>();
 const assetChecks = new Map<string, Promise<RecklessAssetStatus>>();
 
+// Reckless generated WASM/NNUE files are intentionally not part of the current
+// production deploy. Avoid probing these known-unshipped same-origin URLs on
+// production pages: browser devtools reports failed HEAD preflights as noisy
+// 404 errors even when the app handles the fallback correctly. Localhost keeps
+// probing so developers with generated ignored artifacts can still use them.
+const DEPLOYED_RECKLESS_URLS = new Set<string>();
+
+function isLocalDevelopmentOrigin(): boolean {
+  if (typeof location === 'undefined') return true;
+  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
+}
+
+function shouldSkipKnownUnshippedProbe(variant: RecklessVariant): boolean {
+  if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;
+  return [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])].some((url) => url.startsWith('/reckless/') && !DEPLOYED_RECKLESS_URLS.has(url));
+}
+
 function assetKey(variant: RecklessVariant): string {
   return variant.nnueUrl ? `${variant.wasmUrl}\n${variant.nnueUrl}` : variant.wasmUrl;
 }
@@ -146,6 +163,11 @@ export function checkRecklessVariantAsset(variant: RecklessVariant, onChange?: (
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
   const existing = assetChecks.get(key);
   if (existing) return existing;
+  if (shouldSkipKnownUnshippedProbe(variant)) {
+    assetStatuses.set(key, 'missing');
+    onChange?.();
+    return Promise.resolve('missing');
+  }
   assetStatuses.set(key, 'checking');
   const urls = [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
   const promise = Promise.all(urls.map((url) => fetch(url, { method: 'HEAD', cache: 'no-store' }).then((response) => response.ok).catch(() => false)))
