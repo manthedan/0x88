@@ -18,6 +18,7 @@ const files = [
   't1-256x10-distilled-swa-2432500.batch1.f16.onnx',
   't1-256x10-distilled-swa-2432500.batch4.f16.onnx',
   't1-256x10-distilled-swa-2432500.batch8.f16.onnx',
+  't1-256x10-distilled-swa-2432500.batch8.f16.qdq8.onnx',
   // batch16/32 exported 2026-06-09 for the TVMJS batch-scaling lane:
   // lc0 leela2onnx --onnx-batch-size=N --onnx-data-type=f16
   't1-256x10-distilled-swa-2432500.batch16.f16.onnx',
@@ -47,6 +48,7 @@ const packDirs = [
 // lc0 leela2onnx --onnx-data-type=f16. WebGPU-gated big-net (bt4Engine.ts).
 const oddsSourceDir = resolve(workspaceRoot, 'models/odds/onnx');
 const oddsFiles = [
+  'lqo_v2.f16.qdq8.onnx',
   'lqo_v2.f16.onnx',
 ];
 
@@ -102,6 +104,7 @@ for (const file of oddsFiles) {
     source: relative(repoRoot, source),
     bytes: lstatSync(source).size,
     sha256: sha256(source),
+    ...(file === 'lqo_v2.f16.qdq8.onnx' ? { derivedFrom: 'lqo_v2.f16.onnx' } : {}),
   });
 }
 

@@ -18,7 +18,7 @@ const ASSET_GROUPS = [
     family: 'reckless',
     label: 'Reckless WASI/browser variants',
     status: 'experimental-selectable',
-    command: 'npm run reckless:build-production && npm run reckless:build-browser-api && npm run reckless:build-browser-api-simd && npm run reckless:build-browser-api-simd-external && npm run reckless:build-lite-wasi',
+    command: 'npm run reckless:build-production && npm run reckless:build-browser-api && npm run reckless:build-browser-api-simd && npm run reckless:build-browser-api-simd-external',
     docs: 'docs/engine_catalog.md#reckless-family',
     assets: [
       '/reckless/reckless.wasm',
@@ -28,7 +28,6 @@ const ASSET_GROUPS = [
       '/reckless/reckless-browser-api-simd128.wasm',
       '/reckless/reckless-browser-api-simd128-external.wasm',
       '/reckless/reckless-v60-7f587dfb.nnue',
-      '/reckless/reckless-v53-l1-512.wasm',
     ],
   },
   {

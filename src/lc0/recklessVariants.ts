@@ -20,12 +20,15 @@ const assetStatuses = new Map<string, RecklessAssetStatus>();
 const assetChecks = new Map<string, Promise<RecklessAssetStatus>>();
 const recklessAsset = (path: string) => resolvePublicAssetUrl(path);
 
-// Reckless generated WASM/NNUE files are intentionally not part of the current
-// production deploy. Avoid probing these known-unshipped same-origin URLs on
-// production pages: browser devtools reports failed HEAD preflights as noisy
-// 404 errors even when the app handles the fallback correctly. Localhost keeps
-// probing so developers with generated ignored artifacts can still use them.
-const DEPLOYED_RECKLESS_URLS = new Set<string>();
+const DEPLOYED_RECKLESS_URLS = new Set<string>([
+  '/reckless/reckless.wasm',
+  '/reckless/reckless-simd128.wasm',
+  '/reckless/reckless-relaxed-simd128.wasm',
+  '/reckless/reckless-browser-api.wasm',
+  '/reckless/reckless-browser-api-simd128.wasm',
+  '/reckless/reckless-browser-api-simd128-external.wasm',
+  '/reckless/reckless-v60-7f587dfb.nnue',
+]);
 
 function isLocalDevelopmentOrigin(): boolean {
   if (typeof location === 'undefined') return true;

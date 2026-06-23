@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   RECKLESS_FULL_VARIANT,
+  RECKLESS_LITE_VARIANT,
   RECKLESS_RELAXED_SIMD_VARIANT,
   RECKLESS_SIMD_VARIANT,
   RECKLESS_VARIANTS,
@@ -107,21 +108,22 @@ test('IPv6 loopback still probes local generated Reckless assets', async () => {
   }
 });
 
-test('production skips known-unshipped Reckless asset probes', async () => {
+test('production probes deployed Reckless assets and skips known-unshipped probes', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   let calls = 0;
-  globalThis.fetch = async () => { calls += 1; return { ok: false }; };
+  globalThis.fetch = async () => { calls += 1; return { ok: true }; };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
     value: { hostname: '0x88.app' },
   });
   try {
-    assert.equal(await checkRecklessVariantAsset(RECKLESS_FULL_VARIANT), 'missing');
-    assert.equal(recklessVariantAssetStatus(RECKLESS_FULL_VARIANT), 'missing');
+    assert.equal(await checkRecklessVariantAsset(RECKLESS_FULL_VARIANT), 'present');
+    assert.equal(recklessVariantAssetStatus(RECKLESS_FULL_VARIANT), 'present');
     const r2Variant = { ...RECKLESS_FULL_VARIANT, wasmUrl: 'https://assets.0x88.app/reckless/reckless.wasm' };
-    assert.equal(await checkRecklessVariantAsset(r2Variant), 'missing');
-    assert.equal(calls, 0);
+    assert.equal(await checkRecklessVariantAsset(r2Variant), 'present');
+    assert.equal(await checkRecklessVariantAsset(RECKLESS_LITE_VARIANT), 'missing');
+    assert.equal(calls, 2);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);

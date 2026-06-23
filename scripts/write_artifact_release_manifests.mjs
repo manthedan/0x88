@@ -6,12 +6,10 @@ import { basename, dirname, join, posix, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const DEFAULT_SOURCE_MANIFESTS = [
-  // Stable R2 releases intentionally publish the product LC0 subset; the full
-  // local manifest also lists research-only large blobs that are not present in
-  // every staging environment.
-  'public/models/lc0/r2-stable-present.manifest.json',
+  'public/models/lc0/r2-v0-present.manifest.json',
   'public/models/maia3/manifest.json',
   'public/stockfish/stockfish-18.0.7.manifest.json',
+  'public/reckless/reckless-wasip1.manifest.json',
   'public/viridithas/viridithas-wasip1.manifest.json',
   'public/berserk/berserk-emscripten-single-thread.manifest.json',
   'public/plentychess/plentychess-emscripten-single-thread.manifest.json',

@@ -164,6 +164,10 @@ let supportProbe: Promise<boolean> | null = null;
 let supportedCached: boolean | null = null;
 const assetProbes = new Map<string, Promise<Bt4AssetStatus>>();
 const assetStatuses = new Map<string, Bt4AssetStatus>();
+const DEPLOYED_BIG_NET_URLS = new Set<string>([
+  '/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx',
+  '/models/lc0/lqo_v2.f16.qdq8.onnx',
+]);
 
 function isLocalDevelopmentOrigin(): boolean {
   if (typeof location === 'undefined') return true;
@@ -180,11 +184,8 @@ function assetPathname(raw: string): string {
 }
 
 function shouldSkipKnownUnhostedBigNetProbe(config: BigNetConfig): boolean {
-  // The large BT4/T3/LQO ONNX blobs are intentionally pruned from the Netlify
-  // app shell and may not be part of the current R2 channel. Avoid issuing
-  // guaranteed-failing production HEAD probes; localhost still probes so local
-  // generated/staged assets work during development.
-  return !isLocalDevelopmentOrigin() && assetPathname(config.modelUrl).startsWith('/models/lc0/');
+  const pathname = assetPathname(config.modelUrl);
+  return !isLocalDevelopmentOrigin() && pathname.startsWith('/models/lc0/') && !DEPLOYED_BIG_NET_URLS.has(pathname);
 }
 
 /** WebGPU usable for big-net search? Cached after the first probe. Asset probes are tracked separately per net. */

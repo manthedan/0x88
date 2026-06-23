@@ -71,6 +71,43 @@ const CONFIGS = {
       },
     ],
   },
+  reckless: {
+    engine: 'reckless',
+    flavor: 'wasip1-browser',
+    status: 'experimental',
+    upstream: {
+      repo: 'https://github.com/codedeliveryservice/Reckless.git',
+      commit: '0010617448bdef4c8cd7d4f4825b7e42c8bc262a',
+      license: 'AGPL-3.0',
+    },
+    build: {
+      script: 'scripts/build_reckless_release_assets.mjs',
+      command: 'npm run reckless:build-production && npm run reckless:build-browser-api && npm run reckless:build-browser-api-simd && npm run reckless:build-browser-api-simd-external',
+      patches: [],
+      toolchain: 'Rust cargo with wasm32-wasip1 target; scalar, SIMD, relaxed-SIMD, and browser-API builds from the pinned Reckless source.',
+    },
+    artifacts: [
+      'public/reckless/reckless.wasm',
+      'public/reckless/reckless-simd128.wasm',
+      'public/reckless/reckless-relaxed-simd128.wasm',
+      'public/reckless/reckless-browser-api.wasm',
+      'public/reckless/reckless-browser-api-simd128.wasm',
+      'public/reckless/reckless-browser-api-simd128-external.wasm',
+      'public/reckless/reckless-v60-7f587dfb.nnue',
+      'public/reckless/reckless-scalar-corresponding-source.tar.gz',
+      'public/reckless/reckless-simd128-corresponding-source.tar.gz',
+      'public/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz',
+    ],
+    assets: [
+      {
+        name: 'v60-7f587dfb.nnue',
+        sourceUrl: 'https://github.com/codedeliveryservice/Reckless.git',
+        rawSha256: '7f587dfb1fe5d74d53909328afa6fd51650c8c7f45907602db7fbb1e52948c61',
+        licenseNote: 'Reckless embeds and distributes this NNUE with the AGPL-3.0 engine source; preserve corresponding source archives with public WASM distribution.',
+        embeddedIn: 'public/reckless/reckless.wasm, public/reckless/reckless-simd128.wasm, public/reckless/reckless-relaxed-simd128.wasm, public/reckless/reckless-browser-api.wasm, public/reckless/reckless-browser-api-simd128.wasm, and public/reckless/reckless-v60-7f587dfb.nnue for the external-NNUE browser API build',
+      },
+    ],
+  },
   viridithas: {
     engine: 'viridithas',
     flavor: 'wasip1-scalar-simd128',
@@ -131,7 +168,7 @@ const CONFIGS = {
 };
 
 function usage() {
-  console.error('Usage: node scripts/write_engine_artifact_manifest.mjs <berserk|plentychess|viridithas|stockfish> [--out path] [--allow-missing]');
+  console.error('Usage: node scripts/write_engine_artifact_manifest.mjs <berserk|plentychess|reckless|viridithas|stockfish> [--out path] [--allow-missing]');
 }
 
 function argValue(name) {
