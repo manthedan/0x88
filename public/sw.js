@@ -4,7 +4,8 @@ const APP_SHELL_FALLBACK = '/app/play/';
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(SHELL_CACHE)
-      .then((cache) => cache.add(APP_SHELL_FALLBACK).catch(() => undefined)),
+      .then((cache) => cache.add(APP_SHELL_FALLBACK).catch(() => undefined))
+      .then(() => self.skipWaiting()),
   );
 });
 
@@ -12,9 +13,12 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then((names) => Promise.all(
-        names.filter((name) => name.startsWith('0x88-app-shell-') && name !== SHELL_CACHE)
-          .map((name) => caches.delete(name)),
-      )),
+        names.filter((name) => (
+          (name.startsWith('0x88-app-shell-') && name !== SHELL_CACHE)
+          || name.startsWith('lc0-app-shell-')
+        )).map((name) => caches.delete(name)),
+      ))
+      .then(() => self.clients.claim()),
   );
 });
 

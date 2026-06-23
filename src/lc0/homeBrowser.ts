@@ -3,7 +3,8 @@
 const KNOWN_CACHES = [
   { name: 'lc0-browser-models-v1', label: 'Leela networks', detail: 'sha256-validated LC0 small and Queen Odds model cache' },
   { name: 'maia3-browser-models-v1', label: 'Maia3 human model', detail: 'sha256-validated Maia3 model cache' },
-  { name: 'lc0-app-shell-v1', label: 'App shell', detail: 'offline cache: pages and local runtime files' },
+  { name: '0x88-app-shell-v1', label: 'App shell', detail: 'offline cache: pages and local runtime files' },
+  { name: 'lc0-app-shell-v1', label: 'Legacy app shell', detail: 'old offline cache, safe to clear after the SPA migration' },
 ];
 
 function el(id: string): HTMLElement {

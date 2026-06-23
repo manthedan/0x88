@@ -75,9 +75,10 @@ async function withMockedEnv(run, { serveBytes, manifestSha256, manifestBytes, m
   const prev = { caches: globalThis.caches, fetch: globalThis.fetch, location: globalThis.location };
   globalThis.caches = new FakeCacheStorage();
   globalThis.location = { href: 'http://localhost/' };
-  const fetchLog = { model: 0, modelRequestCaches: [] };
+  const fetchLog = { model: 0, modelRequestCaches: [], urls: [] };
   globalThis.fetch = async (input) => {
     const url = typeof input === 'string' ? input : input.url;
+    fetchLog.urls.push(url);
     if (url === MANIFEST_URL || url === '/models/lc0/manifest.json') {
       const manifest = { models: [{ file: 'test.onnx', url: MODEL_URL, artifactUrl: manifestArtifactUrl, bytes: manifestBytes, sha256: manifestSha256 }] };
       return new Response(JSON.stringify(manifest), { headers: { 'content-type': 'application/json' } });
@@ -145,6 +146,21 @@ test('loadLc0ModelForOrt resolves stable model URLs through manifest artifactUrl
     assert.equal(cached.telemetry.requestCache, 'force-cache');
     assert.deepEqual(fetchLog.modelRequestCaches, ['force-cache']);
   }, { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3, manifestArtifactUrl: '/artifacts/sha256/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad/test.onnx' });
+});
+
+test('loadLc0ModelForOrt keeps default model manifest lookups on the app shell origin', async () => {
+  await withMockedEnv(async (fetchLog) => {
+    const assetModelUrl = 'https://assets.0x88.app/models/lc0/test.onnx';
+    const direct = await loadLc0ModelForOrt(assetModelUrl, { cache: false, channelUrl: '/channels/stable.json' });
+    assert.equal(direct.model, MODEL_ARTIFACT_URL);
+    assert(fetchLog.urls.includes('/models/lc0/manifest.json'));
+    assert(!fetchLog.urls.includes('https://assets.0x88.app/models/lc0/manifest.json'));
+  }, {
+    serveBytes: () => bytesOf('abc'),
+    manifestSha256: ABC_SHA256,
+    manifestBytes: 3,
+    channelArtifacts: [{ logicalUrl: '/models/lc0/test.onnx', artifactUrl: '/artifacts/sha256/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad/test.onnx', bytes: 3, sha256: ABC_SHA256 }],
+  });
 });
 
 test('loadLc0ModelForOrt resolves stable model URLs through channel release manifests when configured', async () => {

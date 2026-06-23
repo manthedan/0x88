@@ -1,5 +1,3 @@
-import { resolvePublicAssetUrl } from './assetUrls.ts';
-
 type ImportMetaWithEnv = ImportMeta & { env?: Record<string, string | undefined> };
 const env = (import.meta as ImportMetaWithEnv).env ?? {};
 
@@ -72,13 +70,17 @@ export interface Lc0ModelLoadOptions {
 }
 
 const DEFAULT_CACHE_NAME = 'lc0-browser-models-v1';
-const DEFAULT_MANIFEST_URL = resolvePublicAssetUrl('/models/lc0/manifest.json');
+const DEFAULT_MANIFEST_URL = '/models/lc0/manifest.json';
 
 function defaultManifestUrlForModel(modelUrl: string): string {
   try {
     const url = new URL(modelUrl, location.href);
-    if (url.pathname.startsWith('/models/lc0/')) return new URL('/models/lc0/manifest.json', url).href;
-    if (url.pathname.startsWith('/models/maia3/')) return new URL('/models/maia3/manifest.json', url).href;
+    // Model bytes may be served from the configured R2 asset origin, but the
+    // small manifests are part of the Netlify app shell. Keeping manifest
+    // lookups same-origin avoids guaranteed 404s on assets.0x88.app while the
+    // release-channel resolver below still maps logical model paths to R2.
+    if (url.pathname.startsWith('/models/lc0/')) return '/models/lc0/manifest.json';
+    if (url.pathname.startsWith('/models/maia3/')) return '/models/maia3/manifest.json';
   } catch {
     // Fall through to the configured local/default manifest.
   }

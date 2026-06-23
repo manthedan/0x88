@@ -918,7 +918,22 @@ function ctxInit(ctx: PlayContext): void {
   ctxRender(ctx);
 }
 
+function hasPlayBrowserDom(): boolean {
+  const required = [
+    'ground', 'status', 'restartBanner', 'restartMessage', 'confirmRestart', 'dismissRestart', 'promoPicker',
+    'engineSelect', 'levelSelect', 'maia3Controls', 'maia3Elo', 'maia3EloValue', 'maia3Style',
+    'maia3TemperatureField', 'maia3Temperature', 'maia3TopPField', 'maia3TopP', 'levelCaption',
+    'engineCaution', 'engineNote', 'dlProgress', 'colorSelect', 'newGame', 'takeback', 'resign',
+    'flip', 'moveList', 'exportPgn', 'copyPgn', 'pgnOut',
+  ];
+  const missing = required.filter((id) => !document.getElementById(id));
+  if (!missing.length) return true;
+  console.warn(`Play browser mount skipped; missing required DOM element(s): ${missing.map((id) => `#${id}`).join(', ')}`);
+  return false;
+}
+
 export function mountPlayBrowser(): () => void {
+  if (!hasPlayBrowserDom()) return () => undefined;
   const ctx = createPlayContext();
   ctxInit(ctx);
 
