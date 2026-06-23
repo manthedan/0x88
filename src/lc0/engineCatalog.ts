@@ -40,6 +40,7 @@ const V0_RECKLESS_VARIANTS = new Set(['full', 'simd', 'relaxed-simd']);
 const V0_BERSERK_VARIANTS = new Set(['emscripten', 'emscripten-simd', 'emscripten-relaxed']);
 const V0_VIRIDITHAS_VARIANTS = new Set(['default', 'simd', 'relaxed-simd']);
 const V0_PLENTYCHESS_VARIANTS = new Set(['emscripten', 'emscripten-sse41', 'emscripten-relaxed']);
+const V0_LC0_VARIANTS = new Set(['small', 'bt4']);
 
 export const ENGINE_FAMILY_CATALOG: Record<EngineFamily, EngineFamilyCatalogEntry> = {
   lc0: {
@@ -185,7 +186,7 @@ export function defaultEngineStrength(family: EngineFamily, surface: EngineSurfa
 export function normalizeDeployEngineRow(row: EngineRow, surface: EngineSurface, index = 0): EngineRow {
   const next: EngineRow = isV0DeployProfile()
     ? row.family === 'lc0'
-      ? { ...row, family: 'lc0', variant: 'small' }
+      ? { ...row, family: 'lc0', variant: V0_LC0_VARIANTS.has(row.variant) ? row.variant : 'small' }
       : row.family === 'sf'
         ? { ...row, family: 'sf', variant: 'lite' }
         : row.family === 'reckless'
@@ -207,7 +208,7 @@ export function normalizeDeployEngineRow(row: EngineRow, surface: EngineSurface,
 
 export function lc0VariantOptions(bt4Supported: boolean): EngineVariantOption[] {
   // Both big-net variants need the same WebGPU support probe.
-  const variants = isV0DeployProfile() ? LC0_ENGINE_VARIANTS.filter((option) => option.value === 'small') : LC0_ENGINE_VARIANTS;
+  const variants = isV0DeployProfile() ? LC0_ENGINE_VARIANTS.filter((option) => V0_LC0_VARIANTS.has(option.value)) : LC0_ENGINE_VARIANTS;
   return variants.map((option) => ({ ...option, disabled: isLc0BigNetVariant(option.value) ? !bt4Supported : option.disabled }));
 }
 

@@ -59,7 +59,7 @@ const ALL_ENGINE_OPTIONS: PlayEngineOption[] = [
   { id: 'plentychess', label: 'PlentyChess', family: 'plentychess', variant: 'default', group: 'engine' },
 ];
 const ENGINE_OPTIONS: PlayEngineOption[] = isV0DeployProfile()
-  ? ALL_ENGINE_OPTIONS.filter((option) => option.family === 'maia3' || option.id === 'leela-queen-odds' || option.id === 'sf-lite' || option.id === 'lc0-small' || option.id === 'reckless' || option.id === 'berserk' || option.id === 'viridithas' || option.id === 'plentychess')
+  ? ALL_ENGINE_OPTIONS.filter((option) => option.family === 'maia3' || option.id === 'leela-queen-odds' || option.id === 'sf-lite' || option.id === 'lc0-small' || option.id === 'lc0-bt4' || option.id === 'reckless' || option.id === 'berserk' || option.id === 'viridithas' || option.id === 'plentychess')
   : ALL_ENGINE_OPTIONS;
 
 const LEVEL_COUNT = 5;
