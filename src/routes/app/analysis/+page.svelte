@@ -47,6 +47,7 @@
       <button id="copyPgn" type="button">Copy PGN</button>
     </div>
     <div id="message" aria-live="polite">Loading model…</div>
+    <div id="downloadProgress" class="model-load-progress" hidden></div>
   </section>
   <section class="panel app-sidebar" aria-label="Analysis">
     <div class="row">
@@ -89,6 +90,7 @@
     <details class="section-block" open>
       <summary>Engine comparison</summary>
       <div id="engineConsensus" class="compare-summary">No analysis yet.</div>
+      <div id="analysisSearchProgress" class="search-progress-grid" hidden></div>
       <table id="engineCompare" class="engine-compare"><thead><tr><th>Engine</th><th>Best</th><th>Eval</th><th>Δ</th><th>Search</th><th>PV</th></tr></thead><tbody></tbody></table>
     </details>
     <details class="section-block" open>
@@ -252,6 +254,16 @@
   :global(table.engine-compare .mono){font-family:var(--mono)}
   :global(table.engine-compare .pv){font-family:var(--mono); overflow-wrap:anywhere}
   :global(table.engine-compare .agree){color:var(--accent); font-weight:700}
+  :global(.model-load-progress), :global(.search-progress-grid){
+    margin-top:8px; padding:8px; border:1px solid var(--rule);
+    border-radius:6px; background:#fff;
+  }
+  :global(.model-load-progress progress), :global(.search-progress-grid progress), :global(.search-progress-cell progress){
+    width:100%; height:9px; accent-color:var(--accent);
+  }
+  :global(.loading-progress-row), :global(.search-progress-row){display:grid; gap:3px; margin:4px 0}
+  :global(.dl-label), :global(.search-progress-text){font-family:var(--mono); font-size:11px; color:var(--muted)}
+  :global(.search-progress-cell){display:grid; gap:3px; min-width:120px}
   .profile-row{align-items:end}
   .profile-row select{min-width:150px}
   .profile-row input[type=text]{min-width:130px}

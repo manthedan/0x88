@@ -154,6 +154,18 @@ let lastReviewNodes: GameNode[] = [];
 let lastReviewSignature = '';
 let analyzing = false;
 const lineCache = new Map<string, AnalysisLine[]>();
+interface SearchProgressSnapshot {
+  label: string;
+  completed?: number;
+  requested?: number;
+  elapsedMs?: number;
+  nps?: number;
+  best?: string | null;
+  value?: number;
+  units: 'visits' | 'nodes' | 'search';
+  indeterminate?: boolean;
+}
+const searchProgressByEngine = new Map<string, SearchProgressSnapshot>();
 const nodeIndex = new Map<number, GameNode>();
 const ENGINE_PROFILE_STORAGE_KEY = 'lc0-analysis-engine-profiles-v1';
 const LAST_ENGINE_PROFILE_STORAGE_KEY = 'lc0-analysis-last-engine-profile-v1';
@@ -213,11 +225,13 @@ const workerPending = new Map<number, { resolve: (value: unknown) => void; rejec
 let activeWorkerSearchId: number | null = null;
 
 interface WorkerSearchResult {
+  move?: string | null;
   value: number;
   visits: number;
   pv: string[];
   multiPv?: string[][];
   children: { uci: string; visits: number; q: number }[];
+  elapsedMs?: number;
   cancelled?: boolean;
 }
 
@@ -397,16 +411,86 @@ function analysisProgressText(label: string, progress: { completedVisits?: numbe
   return `${label}: ${completed}/${requested} visits${pct} · best ${progress.move ?? '—'} · Q ${progress.value.toFixed(3)}${speed}`;
 }
 
+function searchProgressText(progress: SearchProgressSnapshot): string {
+  if (progress.indeterminate) return `${progress.label}: searching…`;
+  const completed = progress.completed ?? 0;
+  const requested = progress.requested ?? completed;
+  const pct = requested > 0 ? ` ${(100 * completed / requested).toFixed(0)}%` : '';
+  const elapsed = progress.elapsedMs && progress.elapsedMs > 0 ? ` · ${(progress.elapsedMs / 1000).toFixed(1)}s` : '';
+  const nps = progress.nps && progress.nps > 0 ? ` · ${progress.nps.toFixed(1)} ${progress.units}/s` : '';
+  const best = progress.best ? ` · best ${progress.best}` : '';
+  const value = progress.value !== undefined ? ` · Q ${progress.value.toFixed(3)}` : '';
+  return `${progress.label}: ${completed}/${requested} ${progress.units}${pct}${elapsed}${nps}${best}${value}`;
+}
+
+function searchProgressHtml(progress: SearchProgressSnapshot): string {
+  const value = progress.indeterminate || progress.completed === undefined ? '' : ` value="${Math.max(0, Math.floor(progress.completed))}"`;
+  const max = progress.indeterminate || progress.requested === undefined || progress.requested <= 0 ? '' : ` max="${Math.max(1, Math.floor(progress.requested))}"`;
+  return `<div class="search-progress-row"><progress${value}${max}></progress><div class="search-progress-text">${htmlEscape(searchProgressText(progress))}</div></div>`;
+}
+
+function renderAnalysisSearchProgress(): void {
+  const node = document.getElementById('analysisSearchProgress');
+  if (!node) return;
+  const items = [...searchProgressByEngine.values()];
+  node.hidden = items.length === 0;
+  node.innerHTML = items.map(searchProgressHtml).join('');
+}
+
+function clearAnalysisSearchProgress(): void {
+  searchProgressByEngine.clear();
+  renderAnalysisSearchProgress();
+}
+
 function showAnalysisProgress(fen: string, label: string, progress: WorkerSearchProgress): void {
   if (mountAbort.signal.aborted || !analyzing || tree.current.fen !== fen) return;
+  const completed = progress.completedVisits ?? progress.visits;
+  const elapsedMs = progress.elapsedMs ?? 0;
+  searchProgressByEngine.set(label, {
+    label,
+    completed,
+    requested: progress.requestedVisits ?? progress.visits,
+    elapsedMs,
+    nps: elapsedMs > 0 ? completed / Math.max(1e-9, elapsedMs / 1000) : undefined,
+    best: progress.move ?? null,
+    value: progress.value,
+    units: 'visits',
+  });
+  renderAnalysisSearchProgress();
+  renderEngineComparison(lineCache.get(fen) ?? []);
   el('message').textContent = analysisProgressText(label, progress);
 }
 
-async function workerLc0Lines(fen: string, visits: number): Promise<AnalysisLine[]> {
+function showMoveSearchProgress(fen: string, label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: Move | null; value: number; elapsedMs?: number }): void {
+  showAnalysisProgress(fen, label, {
+    visits: progress.visits,
+    requestedVisits: progress.requestedVisits ?? progress.visits,
+    completedVisits: progress.completedVisits ?? progress.visits,
+    value: progress.value,
+    elapsedMs: progress.elapsedMs,
+    move: progress.move ? moveToUci(progress.move) : null,
+    children: [],
+    pv: [],
+  });
+}
+
+function showIndeterminateSearchProgress(fen: string, label: string): void {
+  if (mountAbort.signal.aborted || !analyzing || tree.current.fen !== fen) return;
+  searchProgressByEngine.set(label, { label, units: 'search', indeterminate: true });
+  renderAnalysisSearchProgress();
+  renderEngineComparison(lineCache.get(fen) ?? []);
+}
+
+function clearEngineSearchProgress(label: string): void {
+  searchProgressByEngine.delete(label);
+  renderAnalysisSearchProgress();
+}
+
+async function workerLc0Lines(fen: string, visits: number, label = 'Lc0'): Promise<AnalysisLine[]> {
   const response = await postWorker<{ result: WorkerSearchResult }>(
     { type: 'search', input: { positions: tree.historyBoards() }, visits, batchSize: 1, multiPv: multiPv(), reportProgress: true },
     (id) => { activeWorkerSearchId = id; },
-    (progress) => showAnalysisProgress(fen, 'Lc0 search', progress),
+    (progress) => showAnalysisProgress(fen, label, progress),
   );
   return response.result.cancelled ? [] : lc0AnalysisLines(response.result, fen, 'Lc0');
 }
@@ -416,6 +500,7 @@ function el(id: string): HTMLElement {
   if (!node) throw new Error(`Missing #${id}`);
   return node;
 }
+function maybeEl(id: string): HTMLElement | null { return document.getElementById(id); }
 function inputEl(id: string): HTMLInputElement { return el(id) as HTMLInputElement; }
 function selectEl(id: string): HTMLSelectElement { return el(id) as HTMLSelectElement; }
 function htmlEscape(value: unknown): string {
@@ -423,7 +508,9 @@ function htmlEscape(value: unknown): string {
 }
 
 function modelProgressEl(): HTMLElement {
-  let node = document.getElementById('modelLoadProgress');
+  let node = document.getElementById('downloadProgress');
+  if (node) return node;
+  node = document.getElementById('modelLoadProgress');
   if (!node) {
     node = document.createElement('div');
     node.id = 'modelLoadProgress';
@@ -890,14 +977,19 @@ function renderEngineList(): void {
 async function workerBigNetLines(variant: string, fen: string, visits: number): Promise<AnalysisLine[]> {
   const { config, searcher } = bigNetFor(variant);
   const label = `Lc0 ${config.name}`;
-  const result = await searcher.search({ positions: tree.historyBoards() }, {
-    visits,
-    multiPv: multiPv(),
-    batchSize: config.recommendedBatchSize,
-    batchPipelineDepth: config.recommendedPipelineDepth,
-    onProgress: (progress) => showAnalysisProgress(fen, `${label} search`, progress),
-  });
-  return result.cancelled ? [] : lc0AnalysisLines(result, fen, `Lc0 ${config.name}`);
+  searcher.onDownloadProgress = (loaded, total) => showModelProgress(label, loaded, total, 'Downloading');
+  try {
+    const result = await searcher.search({ positions: tree.historyBoards() }, {
+      visits,
+      multiPv: multiPv(),
+      batchSize: config.recommendedBatchSize,
+      batchPipelineDepth: config.recommendedPipelineDepth,
+      onProgress: (progress) => showAnalysisProgress(fen, label, progress),
+    });
+    return result.cancelled ? [] : lc0AnalysisLines(result, fen, `Lc0 ${config.name}`);
+  } finally {
+    hideModelProgress();
+  }
 }
 
 // Lc0 big nets are WebGPU-only and require the large local ONNX assets.
@@ -1176,7 +1268,8 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
   const body = el('engineCompare').querySelector('tbody')!;
   if (!bestByEngine.length) {
     el('engineConsensus').textContent = 'No analysis yet.';
-    body.innerHTML = '<tr><td colspan="6" class="small">Run analysis to compare selected engines.</td></tr>';
+    const progressRows = [...searchProgressByEngine.values()].map((progress) => `<tr><td>${htmlEscape(progress.label)}</td><td colspan="3" class="small">searching</td><td colspan="2">${searchProgressHtml(progress)}</td></tr>`);
+    body.innerHTML = progressRows.length ? progressRows.join('') : '<tr><td colspan="6" class="small">Run analysis to compare selected engines.</td></tr>';
     return;
   }
   const finiteScores = bestByEngine.map((line) => line.scoreCp).filter((score): score is number => score !== undefined);
@@ -1200,12 +1293,14 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     const swatch = engineBrushes(line.engine).swatch;
     const delta = reference === undefined || line.scoreCp === undefined ? '—' : signedCp(line.scoreCp - reference);
     const agreed = line.pvUci[0] === consensusUci && (consensus?.[1].count ?? 0) > 1;
+    const progress = searchProgressByEngine.get(line.engine);
+    const searchDetail = progress ? searchProgressHtml(progress) : htmlEscape(line.detail);
     return `<tr style="border-left:3px solid ${swatch}">`
       + `<td><span class="engine-name-with-logo">${engineLogoHtmlForName(line.engine)}${htmlEscape(line.engine)}</span></td>`
       + `<td class="mono ${agreed ? 'agree' : ''}">${htmlEscape(firstSanMove(line))}<br><span class="small">${htmlEscape(line.pvUci[0] ?? '')}</span></td>`
       + `<td class="mono">${htmlEscape(line.scoreText)}</td>`
       + `<td class="mono">${htmlEscape(delta)}</td>`
-      + `<td class="mono">${htmlEscape(line.detail)}</td>`
+      + `<td class="mono search-progress-cell">${searchDetail}</td>`
       + `<td class="pv">${htmlEscape(line.pvSan)}</td>`
       + '</tr>';
   }).join('');
@@ -1846,26 +1941,33 @@ async function analyzeCurrent() {
   }
   const selectedLabels = rows.map((row) => (row.family === 'lc0' || row.family === 'tiny') ? `${rowLabel(row)} ${row.strength}v` : `${rowLabel(row)} d${row.strength}`).join(' + ');
   el('message').textContent = `Analyzing (${selectedLabels}, ${multiPv()} lines)…`;
+  clearAnalysisSearchProgress();
   syncBrokerParticipants(rows);
   try {
     const tasks: Promise<AnalysisLine[]>[] = [];
+    const pushTask = (label: string, task: Promise<AnalysisLine[]>) => {
+      showIndeterminateSearchProgress(fen, label);
+      tasks.push(task.finally(() => clearEngineSearchProgress(label)));
+    };
     for (const row of rows) {
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
-        tasks.push(workerBigNetLines(row.variant, fen, row.strength));
+        pushTask(`Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, workerBigNetLines(row.variant, fen, row.strength));
       } else if (row.family === 'lc0') {
-        if (workerReady) tasks.push(workerLc0Lines(fen, row.strength));
-        else if (searcher) tasks.push(searcher.search({ positions: tree.historyBoards() }, {
+        const label = 'Lc0';
+        if (workerReady) pushTask(label, workerLc0Lines(fen, row.strength, label));
+        else if (searcher) pushTask(label, searcher.search({ positions: tree.historyBoards() }, {
           visits: row.strength,
           multiPv: multiPv(),
           signal: controller.signal,
           yieldEveryMs: 16,
-          onProgress: (progress) => showAnalysisProgress(fen, 'Lc0 search', progress),
+          onProgress: (progress) => showAnalysisProgress(fen, label, progress),
         })
           .then((result) => lc0AnalysisLines(result, fen, 'Lc0')));
       } else if (row.family === 'tiny') {
         const positions = tree.historyBoards();
         const current = positions[positions.length - 1];
-        tasks.push(tinyEvaluator(row.variant)
+        const label = tinyEngineLabel(row.variant);
+        pushTask(label, tinyEvaluator(row.variant)
           .then((evaluator) => chooseMove(current, evaluator, {
             visits: row.strength,
             batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('tinyBatch') ?? '32') || 32))),
@@ -1875,12 +1977,13 @@ async function analyzeCurrent() {
             includePv: true,
             multiPv: multiPv(),
             pvDepth: 12,
+            onProgress: (progress) => showMoveSearchProgress(fen, label, progress),
           }))
-          .then((result) => tinyPuctAnalysisLines(result, fen, tinyEngineLabel(row.variant))));
+          .then((result) => tinyPuctAnalysisLines(result, fen, label)));
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
         const label = kind === 'lite' ? `SF Lite d${row.strength}` : `SF d${row.strength}`;
-        tasks.push(resourceBroker.acquire({ engineId: `sf-${kind}`, signal: controller.signal }).then(async (lease) => {
+        pushTask(label, resourceBroker.acquire({ engineId: `sf-${kind}`, signal: controller.signal }).then(async (lease) => {
           try {
             const engine = getStockfish(kind);
             engine.setOptions({ threads: lease.threads });
@@ -1893,24 +1996,24 @@ async function analyzeCurrent() {
       } else if (row.family === 'viridithas') {
         const label = `${viridithasVariantForKey(row.variant).label} d${row.strength}`;
         const engine = getViridithasFor(row.variant);
-        tasks.push(engine.newGame(controller.signal)
+        pushTask(label, engine.newGame(controller.signal)
           .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       } else if (row.family === 'berserk') {
         const label = `${berserkVariantForKey(row.variant).label} d${row.strength}`;
         const engine = getBerserkFor(row.variant);
-        tasks.push(engine.newGame(controller.signal)
+        pushTask(label, engine.newGame(controller.signal)
           .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       } else if (row.family === 'plentychess') {
         const label = `${plentyChessVariantForKey(row.variant).label} d${row.strength}`;
         const engine = getPlentyChessFor(row.variant);
-        tasks.push(engine.newGame(controller.signal)
+        pushTask(label, engine.newGame(controller.signal)
           .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       } else {
         const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label} d${row.strength}`;
-        tasks.push(getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
+        pushTask(label, getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       }
     }
@@ -1927,6 +2030,7 @@ async function analyzeCurrent() {
     if (analysisAbort === controller && !mountAbort.signal.aborted) {
       analyzing = false;
       analysisAbort = null;
+      clearAnalysisSearchProgress();
       document.getElementById('stop')?.toggleAttribute('disabled', true);
       document.getElementById('analyze')?.toggleAttribute('disabled', false);
     }
@@ -1963,9 +2067,14 @@ async function enableMaia3Panel(): Promise<void> {
   (el('maia3Enable') as HTMLButtonElement).disabled = true;
   try {
     maia3PanelStatus('Loading Maia3…');
+    showModelProgress('Maia3', undefined, undefined, 'Preparing');
     maia3PanelEvaluator = await Maia3BrowserEvaluator.create({
-      onProgress: (loaded, total) => maia3PanelStatus(`Downloading Maia3 ${(loaded / 1e6).toFixed(0)}/${total ? (total / 1e6).toFixed(0) : '?'}MB…`),
+      onProgress: (loaded, total) => {
+        maia3PanelStatus(`Downloading Maia3 ${(loaded / 1e6).toFixed(0)}/${total ? (total / 1e6).toFixed(0) : '?'}MB…`);
+        showModelProgress('Maia3', loaded, total, 'Downloading');
+      },
     });
+    hideModelProgress();
     el('maia3Enable').hidden = true;
     el('maia3Grid').hidden = false;
     el('maia3Caption').hidden = false;
@@ -1975,6 +2084,7 @@ async function enableMaia3Panel(): Promise<void> {
     maia3PanelStatus(`Maia3 load failed: ${(error as Error).message}`);
     (el('maia3Enable') as HTMLButtonElement).disabled = false;
   } finally {
+    hideModelProgress();
     maia3PanelLoading = false;
   }
 }

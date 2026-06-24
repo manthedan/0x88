@@ -44,6 +44,7 @@
     <div id="gameMoves" class="movestrip" hidden></div>
     <div id="pairing">Select engines and start a tournament.</div>
     <div id="message" aria-live="polite">Loading model…</div>
+    <div id="downloadProgress" class="model-load-progress" hidden></div>
     <div id="engineEvalInfo" class="eval-grid" aria-label="Engine evaluation outputs"><div class="eval-card">Engine outputs: waiting for a move…</div></div>
     <section id="chartsPanel" aria-label="Game charts" hidden>
       <div class="chart-grid">
@@ -278,6 +279,15 @@
     border-radius:7px; background:var(--panel); color:var(--muted);
     font-family:var(--mono); font-size:11px;
   }
+  :global(.model-load-progress){
+    margin-top:6px; padding:8px; border:1px solid var(--rule);
+    border-radius:7px; background:white;
+  }
+  :global(.model-load-progress progress), :global(.eval-card progress){
+    width:100%; height:9px; accent-color:var(--accent);
+  }
+  :global(.loading-progress-row), :global(.search-progress-row){display:grid; gap:3px; margin:4px 0}
+  :global(.dl-label), :global(.search-progress-text){font-family:var(--mono); font-size:11px; color:var(--muted)}
   :global(.eval-grid){display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:8px; margin-top:8px}
   :global(.eval-card){
     padding:8px; border:1px solid var(--rule); border-radius:6px;

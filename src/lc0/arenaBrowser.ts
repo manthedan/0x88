@@ -17,7 +17,7 @@ import { BROWSER_RUNTIME_AUDIT_EVENT, formatBrowserRuntimeAudit, publishBrowserR
 import { chooseMove, montyLitePuctPolicy, type SearchResult as TinySearchResult } from '../search/puct.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
-import { Lc0PuctSearcher, type Lc0SearchResult } from './search.ts';
+import { Lc0PuctSearcher, type Lc0SearchProgress, type Lc0SearchResult } from './search.ts';
 import { Lc0WebHybridEvaluator, type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint } from './wgslMatmulAddProbe.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
@@ -39,6 +39,7 @@ import { defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile,
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 // Seats are array indices into seatRows; tournament pids are String(index).
@@ -241,6 +242,18 @@ const engineOutputHistory: EngineOutputSnapshot[] = [];
 let engineOutputTotalCount = 0;
 const MAX_ENGINE_OUTPUT_HISTORY = 1000;
 const thinkingEngineIds = new Set<string>();
+interface ArenaSearchProgress {
+  label: string;
+  completed?: number;
+  requested?: number;
+  elapsedMs?: number;
+  nps?: number;
+  best?: string | null;
+  value?: number;
+  units: 'visits' | 'nodes' | 'search';
+  indeterminate?: boolean;
+}
+const arenaSearchProgress = new Map<string, ArenaSearchProgress>();
 let activeEngineIds: string[] = [];
 const games: GameRecord[] = [];
 const seatRows: EngineRow[] = [
@@ -260,6 +273,65 @@ function inputEl(id: string): HTMLInputElement { return el(id) as HTMLInputEleme
 function selectEl(id: string): HTMLSelectElement { return el(id) as HTMLSelectElement; }
 function htmlEscape(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+function downloadProgressEl(): HTMLElement | null {
+  return document.getElementById('downloadProgress');
+}
+
+function showDownloadProgress(label: string, loadedBytes?: number, totalBytes?: number, phase = 'Loading'): void {
+  const node = downloadProgressEl();
+  if (!node) return;
+  renderLoadingProgress(node, { label, loadedBytes, totalBytes, phase });
+}
+
+function hideDownloadProgress(): void {
+  const node = downloadProgressEl();
+  if (!node) return;
+  hideLoadingProgress(node);
+}
+
+function arenaSearchProgressText(progress: ArenaSearchProgress): string {
+  if (progress.indeterminate) return `${progress.label}: searching…`;
+  const completed = progress.completed ?? 0;
+  const requested = progress.requested ?? completed;
+  const pct = requested > 0 ? ` ${(100 * completed / requested).toFixed(0)}%` : '';
+  const elapsed = progress.elapsedMs && progress.elapsedMs > 0 ? ` · ${(progress.elapsedMs / 1000).toFixed(1)}s` : '';
+  const nps = progress.nps && progress.nps > 0 ? ` · ${progress.nps.toFixed(1)} ${progress.units}/s` : '';
+  const best = progress.best ? ` · best ${progress.best}` : '';
+  const value = progress.value !== undefined ? ` · Q ${progress.value.toFixed(3)}` : '';
+  return `${progress.label}: ${completed}/${requested} ${progress.units}${pct}${elapsed}${nps}${best}${value}`;
+}
+
+function arenaSearchProgressHtml(progress: ArenaSearchProgress): string {
+  const value = progress.indeterminate || progress.completed === undefined ? '' : ` value="${Math.max(0, Math.floor(progress.completed))}"`;
+  const max = progress.indeterminate || progress.requested === undefined || progress.requested <= 0 ? '' : ` max="${Math.max(1, Math.floor(progress.requested))}"`;
+  return `<div class="search-progress-row"><progress${value}${max}></progress><div class="search-progress-text">${htmlEscape(arenaSearchProgressText(progress))}</div></div>`;
+}
+
+function setArenaSearchProgress(engineId: string, label: string, progress: ArenaSearchProgress): void {
+  arenaSearchProgress.set(engineId, { ...progress, label });
+  renderEngineOutputs();
+}
+
+function setArenaVisitProgress(engineId: string, label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number }): void {
+  const completed = progress.completedVisits ?? progress.visits;
+  const elapsedMs = progress.elapsedMs ?? 0;
+  setArenaSearchProgress(engineId, label, {
+    label,
+    completed,
+    requested: progress.requestedVisits ?? progress.visits,
+    elapsedMs,
+    nps: elapsedMs > 0 ? completed / Math.max(1e-9, elapsedMs / 1000) : undefined,
+    best: progress.move ?? null,
+    value: progress.value,
+    units: 'visits',
+  });
+}
+
+function clearArenaSearchProgress(engineId: string): void {
+  arenaSearchProgress.delete(engineId);
+  renderEngineOutputs();
 }
 
 function tinyRuntimeForVariant(variant: string): 'auto' | 'ort' | 'custom-webgpu' {
@@ -706,6 +778,7 @@ function searchWdlText(wdl: [number, number, number], q: number, fen: string): s
 
 function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
   thinkingEngineIds.delete(snapshot.engineId);
+  arenaSearchProgress.delete(snapshot.engineId);
   engineOutputs.set(snapshot.engineId, snapshot);
   engineOutputTotalCount += 1;
   engineOutputHistory.push(snapshot);
@@ -755,14 +828,16 @@ function renderEngineOutputs(): void {
     const snapshot = engineOutputs.get(id);
     const name = snapshot?.engineName ?? engines.get(id)?.name ?? id;
     const thinking = thinkingEngineIds.has(id);
+    const progress = arenaSearchProgress.get(id);
+    const progressHtml = progress ? arenaSearchProgressHtml(progress) : '';
     // No per-ply "active" highlight here: at fast movetimes it strobes. Whose turn
     // it is is shown calmly by the last-move arrow on the board instead.
-    if (!snapshot) return `<div class="eval-card"><strong>${htmlEscape(name)}</strong>${thinking ? 'thinking on current position…' : 'waiting for output…'}</div>`;
+    if (!snapshot) return `<div class="eval-card"><strong>${htmlEscape(name)}</strong>${thinking ? 'thinking on current position…' : 'waiting for output…'}${progressHtml}</div>`;
     const status = thinking ? '<span class="eval-status">thinking… keeping last eval</span>' : '';
     const detail = snapshot.detail ? `<br>${htmlEscape(snapshot.detail)}` : '';
     const pv = snapshot.pv?.length ? `<br>${htmlEscape(pvText(snapshot.pv))}` : '';
     const move = snapshot.move ? ` · move ${snapshot.move}` : '';
-    return `<div class="eval-card"><strong>${htmlEscape(name)}${status}</strong>${htmlEscape(snapshot.summary)}${htmlEscape(move)}${detail}${pv}</div>`;
+    return `<div class="eval-card"><strong>${htmlEscape(name)}${status}</strong>${htmlEscape(snapshot.summary)}${htmlEscape(move)}${progressHtml}${detail}${pv}</div>`;
   });
   el('engineEvalInfo').innerHTML = cards.length ? cards.join('') : '<div class="eval-card">Engine outputs: waiting for a move…</div>';
 }
@@ -1568,6 +1643,7 @@ function recordPlentyChessOutput(engineId: string, engineName: string, fen: stri
 
 function recordEngineThinking(engine: ArenaEngine): void {
   thinkingEngineIds.add(engine.id);
+  arenaSearchProgress.set(engine.id, { label: engine.name, units: 'search', indeterminate: true });
   renderSideLabels();
   renderEngineOutputs();
 }
@@ -1961,6 +2037,7 @@ function buildEngines() {
       reuseTree: true,
       batchSize: lc0BatchSize(),
       batchPipelineDepth: lc0BatchPipelineDepth(),
+      onProgress: (progress: Lc0SearchProgress) => setArenaVisitProgress(engineId, engines.get(engineId)?.name ?? engineId, progress),
     });
     const elapsedMs = performance.now() - started;
     const engineName = engines.get(engineId)?.name ?? engineId;
@@ -1972,6 +2049,8 @@ function buildEngines() {
     const { config, searcher } = bigNetFor(row.variant);
     const onAbort = () => searcher.cancel();
     signal.addEventListener('abort', onAbort, { once: true });
+    const label = engines.get(engineId)?.name ?? `Lc0 ${config.name}`;
+    searcher.onDownloadProgress = (loaded, total) => showDownloadProgress(label, loaded, total, 'Downloading');
     try {
       const timed = arenaBudgetMode() === 'movetime';
       const result = await searcher.search({ positions }, {
@@ -1981,12 +2060,16 @@ function buildEngines() {
         batchSize: config.recommendedBatchSize,
         batchPipelineDepth: config.recommendedPipelineDepth,
         evalCacheEntries: arenaCacheEntries(),
+        signal,
+        onProgress: (progress) => setArenaVisitProgress(engineId, label, progress),
       });
       if (result.cancelled) return null;
       recordBt4SearchOutput(engineId, engines.get(engineId)?.name ?? `Lc0 ${config.name}`, result);
       return result.move ?? null;
     } finally {
       signal.removeEventListener('abort', onAbort);
+      hideDownloadProgress();
+      clearArenaSearchProgress(engineId);
     }
   };
   const tinyMove = (engineId: string, row: EngineRow): ArenaEngine['move'] => async (positions, signal) => {
@@ -2001,6 +2084,20 @@ function buildEngines() {
       signal,
       historyFens: tinyHistoryFens(positions),
       searchPolicy: montyLitePuctPolicy,
+      onProgress: (progress) => {
+        const completed = progress.completedVisits ?? progress.visits;
+        const elapsedMs = progress.elapsedMs ?? 0;
+        setArenaSearchProgress(engineId, engines.get(engineId)?.name ?? tinyEngineLabel(row.variant), {
+          label: engines.get(engineId)?.name ?? tinyEngineLabel(row.variant),
+          completed,
+          requested: progress.requestedVisits ?? progress.visits,
+          elapsedMs,
+          nps: elapsedMs > 0 ? completed / Math.max(1e-9, elapsedMs / 1000) : undefined,
+          best: progress.move ? moveToUci(progress.move) : null,
+          value: progress.value,
+          units: 'visits',
+        });
+      },
     });
     recordTinySearchOutput(engineId, engines.get(engineId)?.name ?? tinyEngineLabel(row.variant), fen, result);
     return result.move ? moveToUci(result.move) : null;
@@ -2076,11 +2173,13 @@ function buildEngines() {
     const { config, searcher } = bigNetFor(variant);
     const onAbort = () => searcher.cancel();
     signal.addEventListener('abort', onAbort, { once: true });
+    searcher.onDownloadProgress = (loaded, total) => showDownloadProgress(`Lc0 ${config.name}`, loaded, total, 'Downloading');
     try {
       await searcher.search({ positions: warmupPositions }, { visits: 1, batchSize: config.recommendedBatchSize, batchPipelineDepth: config.recommendedPipelineDepth, evalCacheEntries: arenaCacheEntries() });
       await searcher.resetTree();
     } finally {
       signal.removeEventListener('abort', onAbort);
+      hideDownloadProgress();
     }
   };
   const tinyWarmup = (row: EngineRow) => async (signal: AbortSignal) => {
@@ -2385,9 +2484,11 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
     try {
       uci = await engine.move(historyBoards, signal);
     } catch (error) {
+      clearArenaSearchProgress(engine.id);
       if (isAbortError(error)) return { result: '1/2-1/2', reason: 'cancelled', tree };
       throw error;
     }
+    clearArenaSearchProgress(engine.id);
     if (signal.aborted) return { result: '1/2-1/2', reason: 'cancelled', tree };
     const move = legalFromUci(board, uci);
     if (!move) return { result: board.turn === 'w' ? '0-1' : '1-0', reason: uci ? `illegal ${uci}` : 'resigned', tree };
@@ -2633,6 +2734,8 @@ function disposeLc0Resources(): void {
 function disposeRuntimeResources(): void {
   abort?.abort();
   abort = null;
+  arenaSearchProgress.clear();
+  hideDownloadProgress();
   disposeLc0Resources();
   tinyEvaluatorPromises.clear();
   disposeStockfish();
@@ -2653,7 +2756,10 @@ function disposeRuntimeResources(): void {
 async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHybridEvaluator | Lc0WholeOnnxWebgpuEvaluator> {
   const runtime = selectedLc0Runtime();
   if (runtime === 'onnx') {
-    const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: false });
+    const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
+      cache: false,
+      onProgress: (loaded, total) => showDownloadProgress('Lc0 small net', loaded, total, 'Downloading'),
+    });
     return Lc0OnnxEvaluator.create(modelLoad.model);
   }
   if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
@@ -2692,6 +2798,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
   refreshSeatControls();
   const hybrid = lc0HybridConfigLabel(runtime);
   el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)}${hybrid ? ` (${hybrid})` : ''}…`;
+  showDownloadProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
   try {
     const evaluator = await createSelectedLc0Evaluator();
     if (isStaleMount(mountSignal)) {
@@ -2717,10 +2824,12 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
     player = new Lc0PolicyOnlyPlayer(lc0Cache);
     searcher = new Lc0PuctSearcher(lc0Cache);
     renderCacheInfo();
+    hideDownloadProgress();
     el('start').toggleAttribute('disabled', false);
     el('message').textContent = `Ready (${lc0RuntimeLabel(runtime)}${hybrid ? ` · ${hybrid}` : ''}). Pick engines and start a tournament.`;
   } catch (error) {
     if (isStaleMount(mountSignal)) return;
+    hideDownloadProgress();
     if (!selectedSeatsNeedLc0Evaluator()) {
       el('start').toggleAttribute('disabled', false);
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed, but current non-LC0 matchup is ready: ${(error as Error).message}`;
