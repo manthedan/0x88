@@ -1206,6 +1206,7 @@ function refreshSeatControls(): void {
   for (const node of el('arenaSeatList').querySelectorAll<HTMLElement>('.seat-strength, .seat-row .row-unit')) {
     node.hidden = !fixedBudget;
   }
+  el('addSeat').toggleAttribute('hidden', arenaTournamentMode() === 'match');
   el('addSeat').toggleAttribute('disabled', running);
   selectEl('tournamentModeSelect').disabled = running;
 }
@@ -3196,6 +3197,7 @@ function wireEvents() {
     syncSeatRowsFromDom();
     buildEngines();
     populateSeats();
+    refreshSeatControls();
     renderRecklessRuntimeInfo();
     renderViridithasRuntimeInfo();
     renderBerserkRuntimeInfo();
