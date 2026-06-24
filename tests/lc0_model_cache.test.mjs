@@ -215,6 +215,38 @@ test('loadLc0ModelForOrt resolves artifact URLs even when Cache Storage is unava
   });
 });
 
+test('loadLc0ModelForOrt skips Cache Storage admission when quota is too low', async () => {
+  await withMockedEnv(async (fetchLog) => {
+    const prevNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    let persistCalls = 0;
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {
+        storage: {
+          estimate: async () => ({ usage: 900, quota: 1000 }),
+          persist: async () => { persistCalls += 1; return true; },
+        },
+      },
+    });
+    try {
+      const result = await loadLc0ModelForOrt(MODEL_URL, {
+        cache: true,
+        manifestUrl: MANIFEST_URL,
+        requestPersistentStorage: true,
+        minimumFreeBytesAfterCache: 128,
+      });
+      assert.equal(result.mode, 'url');
+      assert.equal(result.cacheStatus, 'quota-limited');
+      assert.equal(result.model, MODEL_URL);
+      assert.equal(fetchLog.model, 0, 'quota fallback does not fetch bytes into memory');
+      assert.equal(persistCalls, 1);
+    } finally {
+      if (prevNavigator) Object.defineProperty(globalThis, 'navigator', prevNavigator);
+      else delete globalThis.navigator;
+    }
+  }, { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 });
+});
+
 test('loadLc0ModelForOrt rejects a corrupt download and does not cache it', async () => {
   await withMockedEnv(async (fetchLog) => {
     await assert.rejects(

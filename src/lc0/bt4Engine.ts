@@ -82,6 +82,7 @@ export const BT4_MODEL_URL = BT4_NET.modelUrl;
 export const BT4_APPROX_MB = BT4_NET.approxMb;
 export const BT4_RECOMMENDED_SEARCH_BATCH_SIZE = BT4_NET.recommendedBatchSize;
 export const BT4_RECOMMENDED_BATCH_PIPELINE_DEPTH = BT4_NET.recommendedPipelineDepth;
+const BIG_NET_MODEL_CACHE_FREE_RESERVE_BYTES = 64 * 1024 * 1024;
 
 export interface Bt4SearchResult {
   fen: string;
@@ -362,10 +363,19 @@ export class Bt4WorkerSearcher {
       // `backend` and scale visit budgets via config.wasmLevels. An explicit
       // ?ortEp=wasm page override forces the CPU path end to end.
       const ep = requestedOrtExecutionProvider() === 'wasm' ? 'wasm' : 'auto';
-      // Keep the largest nets on ORT's URL-loading path. Streaming progress
-      // forces a JS ArrayBuffer copy before ORT creates the session, so only
-      // smaller opt-in big nets like LQO use it.
-      const ready = await this.post<{ backend: string }>({ type: 'init', modelUrl: this.config.modelUrl, ep, cacheModel: false, evalCacheEntries, reportDownloadProgress: this.config.streamDownloadProgress === true });
+      // Big nets opt into app-owned Cache Storage so immutable model bytes
+      // survive route changes even when the browser HTTP cache skips large
+      // entries. Quota-limited browsers fall back to URL-loading in the worker.
+      const ready = await this.post<{ backend: string }>({
+        type: 'init',
+        modelUrl: this.config.modelUrl,
+        ep,
+        cacheModel: true,
+        evalCacheEntries,
+        reportDownloadProgress: this.config.streamDownloadProgress === true,
+        requestPersistentModelStorage: true,
+        minimumFreeBytesAfterModelCache: BIG_NET_MODEL_CACHE_FREE_RESERVE_BYTES,
+      });
       this.ready = true;
       this.configuredEvalCacheEntries = evalCacheEntries;
       this.backend = ready.backend;

@@ -14,7 +14,8 @@ import { loadLc0ModelForOrt } from './modelCache.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { Maia3BrowserEvaluator, MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle } from './maia3.ts';
 import { Lc0PuctSearcher } from './search.ts';
-import { BIG_NETS, Bt4WorkerSearcher, LQO_NET, T3_NET, bigNetMemoryCaution, bigNetOptionState, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig, type Bt4SearchOptions } from './bt4Engine.ts';
+import { BIG_NETS, LQO_NET, T3_NET, bigNetMemoryCaution, bigNetOptionState, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig, type Bt4SearchOptions } from './bt4Engine.ts';
+import { acquireBigNetSearcher, peekBigNetSearcher, releaseUnusedBigNetSearchers, type BigNetKey } from './bigNetSessionPool.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import type { RecklessEngine } from './recklessEngine.ts';
 import { defaultRecklessVariantKey, recklessVariantByKey, resolveDefaultRecklessVariantAssetFallback } from './recklessVariants.ts';
@@ -110,12 +111,7 @@ const LQO_BLACK_SEARCH_CONTEMPT_LIMIT = 32;
 // Module-level engine caches (intentionally persistent across mount/unmount
 // to avoid re-downloading engines on navigation)
 // ---------------------------------------------------------------------------
-type BigNetKey = 'bt4' | 't3' | 'lqo';
-const bigNetSearchers: Record<BigNetKey, Bt4WorkerSearcher> = {
-  bt4: new Bt4WorkerSearcher(BIG_NETS.bt4),
-  t3: new Bt4WorkerSearcher(T3_NET),
-  lqo: new Bt4WorkerSearcher(LQO_NET),
-};
+const BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3', 'lqo'];
 let lc0Searcher: Lc0PuctSearcher | null = null;
 let lc0LoadPromise: Promise<Lc0PuctSearcher> | null = null;
 const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
@@ -456,7 +452,7 @@ function ctxCpuEngineFor(ctx: PlayContext, option: PlayEngineOption): Promise<Cp
 }
 
 function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal): boolean {
-  const searcher = bigNetSearchers.lqo;
+  const searcher = acquireBigNetSearcher('lqo');
   if (searcher.loaded) return false;
   const label = `Lc0 ${searcher.config.name}`;
   ctxShowDownloadProgress(label, undefined, undefined, 'Loading in background');
@@ -491,7 +487,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
         return bookMove;
       }
     } else if (ctx.moves.length === 0) {
-      const searcher = bigNetSearchers.lqo;
+      const searcher = acquireBigNetSearcher('lqo');
       let progressShown = false;
       if (!searcher.loaded) {
         ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
@@ -553,7 +549,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     }
   }
   if (option.family === 'lc0') {
-    const searcher = bigNetSearchers[option.variant as BigNetKey];
+    const searcher = acquireBigNetSearcher(option.variant as BigNetKey);
     if (!searcher.loaded) {
       ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
       ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
@@ -688,7 +684,9 @@ function ctxNewGame(ctx: PlayContext): void {
   ctx.gameOver = null;
   ctx.pendingPromotion = null;
   lc0Searcher?.resetTree();
-  for (const searcher of Object.values(bigNetSearchers)) {
+  for (const key of BIG_NET_KEYS) {
+    const searcher = peekBigNetSearcher(key);
+    if (!searcher) continue;
     if (searcher.loaded) void searcher.resetTree();
   }
   ctxSetEngineNote('');
@@ -1071,6 +1069,7 @@ export function mountPlayBrowser(): () => void {
     ctx.disposed = true;
     ctxCancelEngineTurn(ctx);
     ctx.abort.abort();
+    releaseUnusedBigNetSearchers([]);
     if (ctx.resignArmTimer) { clearTimeout(ctx.resignArmTimer); ctx.resignArmTimer = null; }
     (ctx.ground as { destroy?: () => void } | null)?.destroy?.();
     ctx.ground = null;

@@ -31,7 +31,8 @@ import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berse
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
-import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetLoadWarning, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig, type Bt4SearchResult } from './bt4Engine.ts';
+import { BIG_NETS, bigNetAssetStatusSync, bigNetLoadWarning, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig, type Bt4SearchResult, type Bt4WorkerSearcher } from './bt4Engine.ts';
+import { acquireBigNetSearcher, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher, type BigNetKey } from './bigNetSessionPool.ts';
 import { TournamentStandings, buildSchedule, tournamentPairings, type ScheduledGame, type TournamentMode } from './tournament.ts';
 import { hBarChartSvg, lineChartSvg, type ChartSeries } from './charts.ts';
 import { defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
@@ -201,13 +202,10 @@ const berserkByVariant = new Map<string, BerserkEngine>();
 const plentyChessByVariant = new Map<string, PlentyChessEngine>();
 const tinyEvaluatorPromises = new Map<string, Promise<Evaluator>>();
 let tinyHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
-// Lc0 BT4 runs in its own worker (lazy, WebGPU-gated, disposable). See bt4Engine.ts.
-const bt4 = new Bt4WorkerSearcher();
-const t3BigNet = new Bt4WorkerSearcher(T3_NET);
-const bigNetSearchers: Record<'bt4' | 't3', Bt4WorkerSearcher> = { bt4, t3: t3BigNet };
+const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
 function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4WorkerSearcher } {
-  const key = variant === 't3' ? 't3' : 'bt4';
-  return { config: BIG_NETS[key], searcher: bigNetSearchers[key] };
+  const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
+  return { config: BIG_NETS[key], searcher: acquireBigNetSearcher(key) };
 }
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
 let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
@@ -2544,7 +2542,11 @@ async function startMatch() {
       // Reset trees per game (fresh game tree); within a game the shared tree is
       // reused across both sides' plies — i.e. self-play when both seats match.
       resetLc0SearchTrees(seatIds);
-      for (const searcher of Object.values(bigNetSearchers)) if (searcher.loaded) await searcher.resetTree();
+      for (const key of ARENA_BIG_NET_KEYS) {
+        const searcher = peekBigNetSearcher(key);
+        if (!searcher) continue;
+        if (searcher.loaded) await searcher.resetTree();
+      }
       for (const engine of viridithasByVariant.values()) await engine.newGame(abort.signal);
       for (const engine of berserkByVariant.values()) await engine.newGame(abort.signal);
       for (const engine of plentyChessByVariant.values()) await engine.newGame(abort.signal);
@@ -2636,7 +2638,10 @@ function disposeRuntimeResources(): void {
   berserkByVariant.clear();
   for (const engine of plentyChessByVariant.values()) engine.dispose();
   plentyChessByVariant.clear();
-  for (const searcher of Object.values(bigNetSearchers)) searcher.dispose();
+  for (const key of ARENA_BIG_NET_KEYS) {
+    peekBigNetSearcher(key)?.cancel();
+    releaseBigNetSearcher(key);
+  }
 }
 
 async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHybridEvaluator | Lc0WholeOnnxWebgpuEvaluator> {
@@ -3022,7 +3027,11 @@ function wireEvents() {
       clampStrength(row);
     }
     normalizeSeatRowForDeploy(seat);
-    for (const key of ['bt4', 't3'] as const) if (!activeSeatRows().some((r) => r.family === 'lc0' && r.variant === key)) bigNetSearchers[key].dispose();
+    for (const key of ARENA_BIG_NET_KEYS) {
+      if (activeSeatRows().some((r) => r.family === 'lc0' && r.variant === key)) continue;
+      peekBigNetSearcher(key)?.cancel();
+      releaseBigNetSearcher(key);
+    }
     buildEngines();
     populateSeats();
     if (selectedSeatsNeedLc0Evaluator() && !lc0Cache && !loadingLc0) void loadLc0Evaluator();
@@ -3092,7 +3101,10 @@ function wireEvents() {
   });
   if (arenaPagehideHandler) window.removeEventListener('pagehide', arenaPagehideHandler);
   arenaPagehideHandler = (event: PageTransitionEvent) => {
-    if (!event.persisted) disposeRuntimeResources();
+    if (!event.persisted) {
+      for (const key of ARENA_BIG_NET_KEYS) disposeBigNetSearcherNow(key);
+      disposeRuntimeResources();
+    }
   };
   window.addEventListener('pagehide', arenaPagehideHandler);
 }

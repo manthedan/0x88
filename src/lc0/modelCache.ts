@@ -39,7 +39,7 @@ export interface Lc0ModelLoadResult {
   /** Stable/logical URL requested by the caller when different from `url`. */
   logicalUrl?: string;
   mode: Lc0ModelCacheMode;
-  cacheStatus: 'disabled' | 'unavailable' | 'hit' | 'miss';
+  cacheStatus: 'disabled' | 'unavailable' | 'quota-limited' | 'hit' | 'miss';
   bytes?: number;
   expectedBytes?: number;
   /** Computed sha256 of the loaded bytes, when SubtleCrypto was available. */
@@ -67,10 +67,21 @@ export interface Lc0ModelLoadOptions {
    * manifest and may be undefined.
    */
   onProgress?: (loadedBytes: number, totalBytes?: number) => void;
+  /**
+   * Ask the browser for persistent storage before admitting a model into Cache
+   * Storage. Browsers may still deny it, so callers must tolerate fallback.
+   */
+  requestPersistentStorage?: boolean;
+  /**
+   * Minimum free quota to leave after caching this model. If the browser reports
+   * less, the loader falls back to URL mode instead of materializing bytes.
+   */
+  minimumFreeBytesAfterCache?: number;
 }
 
 const DEFAULT_CACHE_NAME = 'lc0-browser-models-v1';
 const DEFAULT_MANIFEST_URL = '/models/lc0/manifest.json';
+const DEFAULT_CACHE_FREE_BYTES_RESERVE = 64 * 1024 * 1024;
 
 function defaultManifestUrlForModel(modelUrl: string): string {
   try {
@@ -93,6 +104,31 @@ function nowMs(): number {
 
 function cacheApiAvailable(): boolean {
   return typeof caches !== 'undefined' && typeof fetch !== 'undefined' && typeof Response !== 'undefined';
+}
+
+async function cacheQuotaAllows(expectedBytes: number | undefined, options: Lc0ModelLoadOptions): Promise<boolean> {
+  if (expectedBytes === undefined || expectedBytes <= 0) return true;
+  if (typeof navigator === 'undefined') return true;
+  const storage = (navigator as Navigator & {
+    storage?: {
+      estimate?: () => Promise<{ usage?: number; quota?: number }>;
+      persist?: () => Promise<boolean>;
+    };
+  }).storage;
+  if (!storage?.estimate) return true;
+  if (options.requestPersistentStorage && storage.persist) {
+    try { await storage.persist(); } catch { /* best effort only */ }
+  }
+  try {
+    const estimate = await storage.estimate();
+    const quota = Number(estimate.quota);
+    const usage = Number(estimate.usage);
+    if (!Number.isFinite(quota) || !Number.isFinite(usage) || quota <= 0) return true;
+    const reserve = Math.max(0, Math.floor(Number(options.minimumFreeBytesAfterCache ?? DEFAULT_CACHE_FREE_BYTES_RESERVE) || 0));
+    return quota - usage - expectedBytes >= reserve;
+  } catch {
+    return true;
+  }
 }
 
 function telemetry(started: number, source: Lc0ModelLoadSource, values: Omit<Lc0ModelLoadTelemetry, 'source' | 'totalMs'> = {}): Lc0ModelLoadTelemetry {
@@ -394,6 +430,22 @@ export async function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoad
     // the browser HTTP cache; otherwise an unchanged mutable URL can return the
     // same obsolete bytes and fail integrity until the HTTP entry expires.
     await cache.delete(cacheKey);
+    if (!(await cacheQuotaAllows(expectation.expectedBytes, options))) {
+      return {
+        model: resolved.url,
+        url: resolved.url,
+        logicalUrl: logicalUrlField(modelUrl, resolved.url),
+        mode: 'url',
+        cacheStatus: 'quota-limited',
+        elapsedMs: nowMs() - started,
+        telemetry: telemetry(started, 'url', {
+          manifestMs: manifest.elapsedMs,
+          cacheReadMs,
+          hashMs: check.hashMs,
+        }),
+        revalidated: true,
+      };
+    }
     const reloadRequest = new Request(resolved.url, { cache: 'reload' });
     const result = await fetchAndCacheModel(cache, cacheKey, reloadRequest, modelUrl, resolved.url, expectation, started, options.onProgress, {
       manifestMs: manifest.elapsedMs,
@@ -401,6 +453,18 @@ export async function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoad
       hashMs: check.hashMs,
     });
     return { ...result, revalidated: true };
+  }
+
+  if (!(await cacheQuotaAllows(expectation.expectedBytes, options))) {
+    return {
+      model: resolved.url,
+      url: resolved.url,
+      logicalUrl: logicalUrlField(modelUrl, resolved.url),
+      mode: 'url',
+      cacheStatus: 'quota-limited',
+      elapsedMs: nowMs() - started,
+      telemetry: telemetry(started, 'url', { manifestMs: manifest.elapsedMs }),
+    };
   }
 
   return fetchAndCacheModel(cache, cacheKey, fetchRequest, modelUrl, resolved.url, expectation, started, options.onProgress, { manifestMs: manifest.elapsedMs });
@@ -465,6 +529,7 @@ export function describeLc0ModelLoad(result: Lc0ModelLoadResult): string {
   const timing = ` · ${result.elapsedMs.toFixed(0)} ms`;
   if (result.cacheStatus === 'disabled') return `disabled${timing}`;
   if (result.cacheStatus === 'unavailable') return `unavailable${timing}`;
+  if (result.cacheStatus === 'quota-limited') return `quota-limited${timing}`;
   const integrity = result.expectedSha256 === undefined
     ? ''
     : result.sha256Valid === true ? ' · sha256 ok'

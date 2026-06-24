@@ -91,6 +91,8 @@ type InitMessage = {
   ortDiagnostics?: OrtRuntimeDiagnosticOptions;
   /** Stream model download progress back as 'downloadProgress' messages. */
   reportDownloadProgress?: boolean;
+  requestPersistentModelStorage?: boolean;
+  minimumFreeBytesAfterModelCache?: number;
 };
 
 type SearchMessage = {
@@ -639,6 +641,8 @@ async function handleInit(message: InitMessage): Promise<void> {
     legalPriorsBackend: message.legalPriorsBackend,
     encoderKernelVariant: message.encoderKernelVariant,
     evalCacheEntries: message.evalCacheEntries ?? 0,
+    requestPersistentModelStorage: message.requestPersistentModelStorage === true,
+    minimumFreeBytesAfterModelCache: message.minimumFreeBytesAfterModelCache ?? null,
     ortDiagnostics: message.ortDiagnostics ?? null,
   });
   if (evaluator && configuredInitKey === initKey) {
@@ -703,6 +707,8 @@ async function handleInit(message: InitMessage): Promise<void> {
   let lastReportedBytes = -Infinity;
   const modelLoad = await loadLc0ModelForOrt(message.modelUrl, {
     cache: message.cacheModel,
+    requestPersistentStorage: message.requestPersistentModelStorage,
+    minimumFreeBytesAfterCache: message.minimumFreeBytesAfterModelCache,
     onProgress: message.reportDownloadProgress
       ? (loadedBytes, totalBytes) => {
           if (loadedBytes - lastReportedBytes < 2_000_000 && loadedBytes !== totalBytes) return;

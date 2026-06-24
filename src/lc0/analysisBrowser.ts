@@ -36,7 +36,8 @@ import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berse
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
-import { BIG_NETS, Bt4WorkerSearcher, T3_NET, bigNetAssetStatusSync, bigNetLoadWarning, bigNetOptionState, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig } from './bt4Engine.ts';
+import { BIG_NETS, bigNetAssetStatusSync, bigNetLoadWarning, bigNetOptionState, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig, type Bt4WorkerSearcher } from './bt4Engine.ts';
+import { acquireBigNetSearcher, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher, type BigNetKey } from './bigNetSessionPool.ts';
 import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
@@ -131,13 +132,11 @@ function syncBrokerParticipants(rows: EngineRow[]): void {
     registeredBrokerEngines.add(engineId);
   }
 }
-// Lc0 BT4 runs in its own worker (lazy, WebGPU-gated, disposable). See bt4Engine.ts.
-const bt4 = new Bt4WorkerSearcher();
-const t3BigNet = new Bt4WorkerSearcher(T3_NET);
-const bigNetSearchers: Record<'bt4' | 't3', Bt4WorkerSearcher> = { bt4, t3: t3BigNet };
+type AnalysisBigNetKey = Extract<BigNetKey, 'bt4' | 't3'>;
+const ANALYSIS_BIG_NET_KEYS: readonly AnalysisBigNetKey[] = ['bt4', 't3'];
 function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4WorkerSearcher } {
-  const key = variant === 't3' ? 't3' : 'bt4';
-  return { config: BIG_NETS[key], searcher: bigNetSearchers[key] };
+  const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
+  return { config: BIG_NETS[key], searcher: acquireBigNetSearcher(key) };
 }
 let ground: Ground | null = null;
 let mountAbort = new AbortController();
@@ -1049,7 +1048,11 @@ function getPlentyChessFor(variantKey: string): PlentyChessEngine {
 }
 
 function disposeUnusedEngines(): void {
-  for (const key of ['bt4', 't3'] as const) if (!usesBigNetRow(key)) bigNetSearchers[key].dispose();
+  for (const key of ANALYSIS_BIG_NET_KEYS) {
+    if (usesBigNetRow(key)) continue;
+    peekBigNetSearcher(key)?.cancel();
+    releaseBigNetSearcher(key);
+  }
   disposeUnusedTinyEvaluators();
   const activeRows = activeEngineRows();
   const activeRecklessKeys = new Set(activeRows.filter((row) => row.family === 'reckless').map((row) => recklessCacheKey(recklessVariantForKey(row.variant))));
@@ -1827,7 +1830,7 @@ async function analyzeCurrent() {
   // worker LC0 / big-net searches, so a new position takes over immediately.
   analysisAbort?.abort();
   if (activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
-  for (const searcher of Object.values(bigNetSearchers)) searcher.cancel();
+  for (const key of ANALYSIS_BIG_NET_KEYS) peekBigNetSearcher(key)?.cancel();
   const controller = new AbortController();
   analysisAbort = controller;
   analyzing = true;
@@ -2099,7 +2102,7 @@ function wireEvents() {
   el('stop').addEventListener('click', () => {
     analysisAbort?.abort();
     if (activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
-    for (const searcher of Object.values(bigNetSearchers)) searcher.cancel();
+    for (const key of ANALYSIS_BIG_NET_KEYS) peekBigNetSearcher(key)?.cancel();
   });
   el('engineList').addEventListener('change', (event) => {
     const target = event.target as HTMLInputElement | HTMLSelectElement;
@@ -2251,7 +2254,10 @@ function disposeRuntimeResources(): void {
   workerBackend = '';
   for (const pending of workerPending.values()) pending.reject(new Error('LC0 worker disposed'));
   workerPending.clear();
-  for (const searcher of Object.values(bigNetSearchers)) searcher.dispose();
+  for (const key of ANALYSIS_BIG_NET_KEYS) {
+    peekBigNetSearcher(key)?.cancel();
+    releaseBigNetSearcher(key);
+  }
   stockfishLite?.dispose();
   stockfishLite = null;
   stockfishFull?.dispose();
@@ -2384,7 +2390,10 @@ async function init(mountSignal: AbortSignal) {
   if (isStaleMount(mountSignal)) return;
   if (analysisPagehideHandler) window.removeEventListener('pagehide', analysisPagehideHandler);
   analysisPagehideHandler = (event: PageTransitionEvent) => {
-    if (!event.persisted) disposeRuntimeResources();
+    if (!event.persisted) {
+      for (const key of ANALYSIS_BIG_NET_KEYS) disposeBigNetSearcherNow(key);
+      disposeRuntimeResources();
+    }
   };
   window.addEventListener('pagehide', analysisPagehideHandler);
   engineProfiles = loadEngineProfiles();
