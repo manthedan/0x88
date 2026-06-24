@@ -1202,6 +1202,10 @@ function refreshSeatControls(): void {
   for (const selector of ['.seat-fam', '.seat-var', '.seat-strength', '.seat-remove']) {
     for (const node of el('arenaSeatList').querySelectorAll<HTMLInputElement | HTMLSelectElement>(selector)) node.disabled = running;
   }
+  const fixedBudget = arenaBudgetMode() === 'fixed';
+  for (const node of el('arenaSeatList').querySelectorAll<HTMLElement>('.seat-strength, .seat-row .row-unit')) {
+    node.hidden = !fixedBudget;
+  }
   el('addSeat').toggleAttribute('disabled', running);
   selectEl('tournamentModeSelect').disabled = running;
 }
@@ -1755,7 +1759,7 @@ function renderRecklessRuntimeInfo(): void {
     if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     const loadText = formatRecklessBrowserApiLoadStatus(status?.browserApiLoad);
-    return `${variant.label} d${row.strength} · ${mode} · ${assetText}${loadText ? ` · ${loadText}` : ''}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
+    return `${variant.label} · ${mode} · ${assetText}${loadText ? ` · ${loadText}` : ''}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
   });
   el('recklessRuntimeInfo').innerHTML = diagBlockHtml('Reckless', [...new Set(parts)].map(htmlEscape));
 }
@@ -1802,7 +1806,7 @@ function renderViridithasRuntimeInfo(): void {
     const asset = viridithasVariantAssetStatus(variant);
     if (asset === 'unknown') void checkViridithasVariantAsset(variant, renderViridithasRuntimeInfo);
     const assetText = asset === 'ok' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
-    return `${variant.label} d${row.strength} · ${mode} · ${assetText}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
+    return `${variant.label} · ${mode} · ${assetText}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
   });
   el('viridithasRuntimeInfo').innerHTML = diagBlockHtml('Viridithas', [...new Set(parts)].map(htmlEscape));
 }
@@ -1850,7 +1854,7 @@ function renderBerserkRuntimeInfo(): void {
     const asset = berserkVariantAssetStatus(variant);
     if (asset === 'unknown') void checkBerserkVariantAsset(variant, renderBerserkRuntimeInfo);
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
-    return `${variant.label} d${row.strength} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
+    return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
   el('berserkRuntimeInfo').innerHTML = diagBlockHtml('Berserk', [...new Set(parts)].map(htmlEscape));
 }
@@ -1897,7 +1901,7 @@ function renderPlentyChessRuntimeInfo(): void {
     const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
     if (!unsupportedReason && asset === 'unknown') void checkPlentyChessVariantAsset(variant, renderPlentyChessRuntimeInfo);
     const assetText = unsupportedReason ? unsupportedReason : asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
-    return `${variant.label} d${row.strength} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
+    return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
   el('plentychessRuntimeInfo').innerHTML = diagBlockHtml('PlentyChess', [...new Set(parts)].map(htmlEscape));
 }
@@ -2223,38 +2227,42 @@ function buildEngines() {
   for (const row of activeSeatRows()) {
     const id = engineIdForRow(row);
     if (engines.has(id)) continue;
+    const meta = strengthMeta(row.family);
+    const fixedBudget = arenaBudgetMode() === 'fixed';
+    const suffix = fixedBudget ? ` ${row.strength}${meta.unit}` : '';
+    const name = `${rowLabel(row)}${suffix}`;
     if (row.family === 'lc0') {
-      if (isLc0BigNetVariant(row.variant)) engines.set(id, { id, name: `${rowLabel(row)} v${row.strength}`, move: lc0BigNetMove(id, row), warmup: lc0BigNetWarmup(row.variant) });
-      else engines.set(id, { id, name: `${rowLabel(row)} v${row.strength}`, move: lc0Search(id, row), warmup: lc0SearchWarmup(id) });
+      if (isLc0BigNetVariant(row.variant)) engines.set(id, { id, name, move: lc0BigNetMove(id, row), warmup: lc0BigNetWarmup(row.variant) });
+      else engines.set(id, { id, name, move: lc0Search(id, row), warmup: lc0SearchWarmup(id) });
     } else if (row.family === 'tiny') {
-      engines.set(id, { id, name: `${rowLabel(row)} v${row.strength}`, move: tinyMove(id, row), warmup: tinyWarmup(row) });
+      engines.set(id, { id, name, move: tinyMove(id, row), warmup: tinyWarmup(row) });
     } else if (row.family === 'sf') {
       const kind = row.variant === 'full' ? 'full' : 'lite';
-      engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: sf(id, row, kind), warmup: stockfishWarmup(kind) });
+      engines.set(id, { id, name, move: sf(id, row, kind), warmup: stockfishWarmup(kind) });
     } else if (row.family === 'reckless') {
       const variant = recklessVariantForKey(row.variant);
       if (variant.key !== 'custom' && recklessVariantAssetStatus(variant) === 'missing') {
-        engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: async () => { throw new Error(recklessMissingAssetMessage([variant])); } });
+        engines.set(id, { id, name, move: async () => { throw new Error(recklessMissingAssetMessage([variant])); } });
         continue;
       }
       const engine = getRecklessFor(row.variant);
       prewarmReckless(engine);
-      engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: recklessMove(id, row, engine), warmup: recklessWarmup(engine) });
+      engines.set(id, { id, name, move: recklessMove(id, row, engine), warmup: recklessWarmup(engine) });
     } else if (row.family === 'viridithas') {
       const engine = getViridithasFor(row.variant);
-      engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: viridithasMove(id, row, engine), warmup: viridithasWarmup(engine) });
+      engines.set(id, { id, name, move: viridithasMove(id, row, engine), warmup: viridithasWarmup(engine) });
     } else if (row.family === 'berserk') {
       const engine = getBerserkFor(row.variant);
-      engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: berserkMove(id, row, engine), warmup: berserkWarmup(engine) });
+      engines.set(id, { id, name, move: berserkMove(id, row, engine), warmup: berserkWarmup(engine) });
     } else {
       const variant = plentyChessVariantForKey(row.variant);
       const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
       if (unsupportedReason) {
-        engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: async () => { throw new Error(`${variant.label} ${unsupportedReason}.`); } });
+        engines.set(id, { id, name, move: async () => { throw new Error(`${variant.label} ${unsupportedReason}.`); } });
         continue;
       }
       const engine = getPlentyChessFor(row.variant);
-      engines.set(id, { id, name: `${rowLabel(row)} d${row.strength}`, move: plentyChessMove(id, row, engine), warmup: plentyChessWarmup(engine) });
+      engines.set(id, { id, name, move: plentyChessMove(id, row, engine), warmup: plentyChessWarmup(engine) });
     }
   }
   renderRecklessRuntimeInfo();
@@ -3205,6 +3213,7 @@ function wireEvents() {
   }
   el('budgetModeSelect').addEventListener('change', () => {
     refreshBudgetControls();
+    refreshSeatControls();
     resetLc0SearchTrees();
   });
   el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());

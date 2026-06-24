@@ -1294,13 +1294,15 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     const delta = reference === undefined || line.scoreCp === undefined ? '—' : signedCp(line.scoreCp - reference);
     const agreed = line.pvUci[0] === consensusUci && (consensus?.[1].count ?? 0) > 1;
     const progress = searchProgressByEngine.get(line.engine);
-    const searchDetail = progress ? searchProgressHtml(progress) : htmlEscape(line.detail);
+    const searchText = progress
+      ? (progress.indeterminate ? '...' : `${progress.completed ?? 0}/${progress.requested ?? 0}`)
+      : htmlEscape(line.detail);
     return `<tr style="border-left:3px solid ${swatch}">`
       + `<td><span class="engine-name-with-logo">${engineLogoHtmlForName(line.engine)}${htmlEscape(line.engine)}</span></td>`
-      + `<td class="mono ${agreed ? 'agree' : ''}">${htmlEscape(firstSanMove(line))}<br><span class="small">${htmlEscape(line.pvUci[0] ?? '')}</span></td>`
+      + `<td class="mono ${agreed ? 'agree' : ''}">${htmlEscape(firstSanMove(line))}</td>`
       + `<td class="mono">${htmlEscape(line.scoreText)}</td>`
       + `<td class="mono">${htmlEscape(delta)}</td>`
-      + `<td class="mono search-progress-cell">${searchDetail}</td>`
+      + `<td class="mono">${searchText}</td>`
       + `<td class="pv">${htmlEscape(line.pvSan)}</td>`
       + '</tr>';
   }).join('');
@@ -1314,8 +1316,9 @@ function renderLines() {
     const cls = line.scoreCp === undefined ? '' : line.scoreCp > 0 ? 'pos' : line.scoreCp < 0 ? 'neg' : '';
     const swatch = engineBrushes(line.engine).swatch;
     return `<li data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}">`
-      + `<span class="score ${cls}">${htmlEscape(line.scoreText)}<br><span class="eng">${engineLogoHtmlForName(line.engine)}${htmlEscape(line.engine)} · ${htmlEscape(line.detail)}</span></span>`
-      + `<span class="pv">${htmlEscape(line.pvSan)}</span></li>`;
+      + `<span class="score ${cls}">${htmlEscape(line.scoreText)}</span>`
+      + `<span class="pv">${htmlEscape(line.pvSan)}</span>`
+      + `<span class="eng">${engineLogoHtmlForName(line.engine)}${htmlEscape(line.engine)} · ${htmlEscape(line.detail)}</span></li>`;
   }).join('') || '<li class="small placeholder">No analysis yet — make a move or press Analyze.</li>';
 }
 
@@ -1797,13 +1800,13 @@ interface ReviewEngineChoice { engine: { analyze(fen: string, opts?: { multipv?:
 /** First selected UCI-family engine reviews the game; SF Lite d12 is the fallback. */
 function reviewEngineChoice(): ReviewEngineChoice {
   for (const row of activeEngineRows()) {
-    if (row.family === 'sf') return { engine: getStockfish(row.variant === 'full' ? 'full' : 'lite'), label: `SF ${row.variant} d${row.strength}`, depth: row.strength };
-    if (row.family === 'reckless') return { engine: getRecklessFor(row.variant), label: `Reckless d${row.strength}`, depth: row.strength };
-    if (row.family === 'viridithas') return { engine: getViridithasFor(row.variant), label: `Viridithas d${row.strength}`, depth: row.strength };
-    if (row.family === 'berserk') return { engine: getBerserkFor(row.variant), label: `Berserk d${row.strength}`, depth: row.strength };
-    if (row.family === 'plentychess') return { engine: getPlentyChessFor(row.variant), label: `PlentyChess d${row.strength}`, depth: row.strength };
+    if (row.family === 'sf') return { engine: getStockfish(row.variant === 'full' ? 'full' : 'lite'), label: row.variant === 'full' ? 'SF' : 'SF Lite', depth: row.strength };
+    if (row.family === 'reckless') return { engine: getRecklessFor(row.variant), label: recklessVariantByKey(normalizeRecklessVariant(row.variant)).label, depth: row.strength };
+    if (row.family === 'viridithas') return { engine: getViridithasFor(row.variant), label: viridithasVariantForKey(row.variant).label, depth: row.strength };
+    if (row.family === 'berserk') return { engine: getBerserkFor(row.variant), label: berserkVariantForKey(row.variant).label, depth: row.strength };
+    if (row.family === 'plentychess') return { engine: getPlentyChessFor(row.variant), label: plentyChessVariantForKey(row.variant).label, depth: row.strength };
   }
-  return { engine: getStockfish('lite'), label: 'SF Lite d12', depth: 12 };
+  return { engine: getStockfish('lite'), label: 'SF Lite', depth: 12 };
 }
 
 function winWhiteFromInfo(fen: string, info: { scoreCp?: number; mateIn?: number } | undefined): number {
@@ -1939,7 +1942,7 @@ async function analyzeCurrent() {
     el('analyze').toggleAttribute('disabled', false);
     return;
   }
-  const selectedLabels = rows.map((row) => (row.family === 'lc0' || row.family === 'tiny') ? `${rowLabel(row)} ${row.strength}v` : `${rowLabel(row)} d${row.strength}`).join(' + ');
+  const selectedLabels = rows.map((row) => rowLabel(row)).join(' + ');
   el('message').textContent = `Analyzing (${selectedLabels}, ${multiPv()} lines)…`;
   clearAnalysisSearchProgress();
   syncBrokerParticipants(rows);
@@ -1982,7 +1985,7 @@ async function analyzeCurrent() {
           .then((result) => tinyPuctAnalysisLines(result, fen, label)));
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
-        const label = kind === 'lite' ? `SF Lite d${row.strength}` : `SF d${row.strength}`;
+        const label = kind === 'lite' ? 'SF Lite' : 'SF';
         pushTask(label, resourceBroker.acquire({ engineId: `sf-${kind}`, signal: controller.signal }).then(async (lease) => {
           try {
             const engine = getStockfish(kind);
@@ -1994,25 +1997,25 @@ async function analyzeCurrent() {
           }
         }));
       } else if (row.family === 'viridithas') {
-        const label = `${viridithasVariantForKey(row.variant).label} d${row.strength}`;
+        const label = `${viridithasVariantForKey(row.variant).label}`;
         const engine = getViridithasFor(row.variant);
         pushTask(label, engine.newGame(controller.signal)
           .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       } else if (row.family === 'berserk') {
-        const label = `${berserkVariantForKey(row.variant).label} d${row.strength}`;
+        const label = `${berserkVariantForKey(row.variant).label}`;
         const engine = getBerserkFor(row.variant);
         pushTask(label, engine.newGame(controller.signal)
           .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       } else if (row.family === 'plentychess') {
-        const label = `${plentyChessVariantForKey(row.variant).label} d${row.strength}`;
+        const label = `${plentyChessVariantForKey(row.variant).label}`;
         const engine = getPlentyChessFor(row.variant);
         pushTask(label, engine.newGame(controller.signal)
           .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       } else {
-        const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label} d${row.strength}`;
+        const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label}`;
         pushTask(label, getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       }

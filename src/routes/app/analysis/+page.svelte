@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import SiteHeader from '$lib/components/SiteHeader.svelte';
   const title = "0x88 Chess — analysis board";
   const description = "Multi-engine chess analysis in your browser: compare Leela Chess Zero and Stockfish lines side by side, review games with accuracy scores, and explore openings from your own games.";
   onMount(() => {
@@ -21,6 +22,7 @@
   <meta name="description" content={description} />
 </svelte:head>
 
+<SiteHeader pageTitle="Analysis" />
 <main id="main">
   <section class="panel" aria-label="Board">
     <div class="board-wrap">
@@ -48,6 +50,7 @@
     </div>
     <div id="message" aria-live="polite">Loading model…</div>
     <div id="downloadProgress" class="model-load-progress" hidden></div>
+    <div id="movelist" class="movelist move-panel"></div>
   </section>
   <section class="panel app-sidebar" aria-label="Analysis">
     <div class="row">
@@ -111,11 +114,8 @@
       <div id="maia3Grid" class="maia3-grid" hidden></div>
       <div id="maia3Caption" class="small" hidden>What rated humans actually play here (Maia3 move predictions; score = expected points for White in a human game at that rating, not an engine eval). ✓ = matches the current best engine move.</div>
     </details>
-    <details class="section-block" open>
-      <summary>Moves</summary>
-      <div id="movelist" class="movelist"></div>
-    </details>
-    <details class="section-block">
+    <!-- Parked: features below are intentionally hidden. Remove hidden to re-enable. -->
+    <details class="section-block" hidden>
       <summary>Game review</summary>
       <div class="row">
         <button id="reviewGame" type="button">Review game</button>
@@ -127,7 +127,7 @@
       <div id="reviewChart" class="review-chart" hidden></div>
       <ol id="reviewCritical" class="review-critical" hidden></ol>
     </details>
-    <details class="section-block">
+    <details class="section-block" hidden>
       <summary>Opening explorer</summary>
       <div class="row">
         <div class="field"><label for="importSite">Site</label>
@@ -173,46 +173,56 @@
 <style>
   main{
     display:grid;
-    grid-template-columns:minmax(320px,680px) minmax(360px,460px);
-    gap:20px; align-items:start; justify-content:center; padding:18px;
+    grid-template-columns:minmax(0,1fr) minmax(360px,460px);
+    gap:24px; align-items:start; justify-content:center; padding:26px 28px 56px;
+    max-width:1280px; margin:0 auto;
   }
   .app-sidebar{
     position:sticky; top:72px;
     max-height:calc(100vh - 84px); overflow-y:auto;
   }
-  .board-wrap{display:flex; gap:8px}
+  .board-wrap{display:grid; grid-template-columns:18px 1fr; gap:12px}
   .evalbar{
-    width:18px; border:1px solid var(--rule); border-radius:4px;
-    overflow:hidden; background:#3a3a3a; position:relative; flex:0 0 auto;
+    width:18px; border:1px solid var(--border-input); border-radius:6px;
+    overflow:hidden; background:var(--eval-black); position:relative; flex:0 0 auto;
   }
   .evalbar .white{
     position:absolute; left:0; right:0; bottom:0;
-    background:#f4f1e8; transition:height .25s;
+    background:var(--eval-white); transition:height .25s;
   }
   .evalbar .mid{
     position:absolute; left:0; right:0; top:50%;
     height:1px; background:var(--accent); opacity:.6;
   }
-  .board-shell{flex:1 1 auto}
-  .nav{display:flex; gap:6px; margin-top:10px}
-  .nav button{flex:1 1 auto}
+  .board-shell{min-width:0}
+  .nav{display:flex; gap:8px; margin-top:12px}
+  .nav button{
+    flex:1 1 auto; height:40px; border-radius:9px;
+    border:1px solid var(--border-input); background:var(--panel);
+    color:var(--text-soft); font-size:15px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .nav button:hover{border-color:var(--border-input-hover); background:#fff; color:var(--ink)}
   input[type=number]{width:80px}
   :global(.lines){list-style:none; margin:8px 0 0; padding:0}
   :global(.lines li){
-    display:grid; grid-template-columns:62px 1fr; gap:8px;
-    align-items:baseline; padding:6px 6px;
-    border-top:1px solid var(--rule); cursor:pointer; font-size:13px;
-    padding-left:9px;
+    display:flex; align-items:baseline; gap:8px;
+    padding:4px 6px; border-top:1px solid var(--rule);
+    cursor:pointer; font-size:13px; padding-left:9px;
+    overflow:hidden;
   }
   :global(.lines li:hover){background:var(--soft)}
-  :global(.lines .score){font-family:var(--mono); font-weight:700}
+  :global(.lines .score){font-family:var(--mono); font-weight:700; flex:0 0 56px; font-size:12px}
   :global(.lines .score.neg){color:#a5461b}
   :global(.lines .score.pos){color:var(--accent)}
-  :global(.lines .pv){font-family:var(--mono); overflow-wrap:anywhere}
-  :global(.lines .eng){display:inline-flex; align-items:center; gap:4px; font-size:10px; color:var(--muted)}
+  :global(.lines .pv){font-family:var(--mono); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto; min-width:0}
+  :global(.lines .eng){flex:0 0 auto; font-size:10px; color:var(--muted); white-space:nowrap}
+  :global(.lines li.placeholder){display:block; color:var(--muted); border-left:none; cursor:default}
   :global(.engine-logo){width:16px; height:16px; object-fit:contain; border-radius:3px; vertical-align:middle; flex:0 0 auto}
-  :global(.engine-row .engine-logo){width:18px; height:18px}
-  :global(.legend .engine-logo), :global(.lines .engine-logo), :global(table.engine-compare .engine-logo){width:14px; height:14px}
+  :global(.engine-logo-placeholder){display:inline-block; width:16px; height:16px; border-radius:3px; background:var(--rule-soft); flex:0 0 auto; vertical-align:middle}
+  :global(.engine-row .engine-logo), :global(.engine-row .engine-logo-placeholder){width:18px; height:18px}
+  :global(.legend .engine-logo), :global(.lines .engine-logo), :global(table.engine-compare .engine-logo),
+  :global(.legend .engine-logo-placeholder), :global(.lines .engine-logo-placeholder), :global(table.engine-compare .engine-logo-placeholder){width:14px; height:14px}
   :global(.engine-name-with-logo){display:inline-flex; align-items:center; gap:5px}
   :global(.lines li.placeholder){display:block; color:var(--muted); border-left:none; cursor:default}
   :global(.lines li.placeholder:hover){background:none}
@@ -241,29 +251,30 @@
   :global(.review-critical .mono){font-family:var(--mono)}
   :global(.compare-summary){
     margin-top:8px; padding:8px; border:1px solid var(--rule);
-    border-radius:6px; background:#fff; font-size:12px; color:var(--muted);
+    border-radius:var(--radius-sm); background:var(--panel-inset); font-size:12px; color:var(--muted);
   }
-  :global(table.engine-compare){width:100%; border-collapse:collapse; font-size:12px; margin-top:8px}
+  :global(table.engine-compare){width:100%; border-collapse:collapse; font-size:11px; margin-top:8px}
   :global(table.engine-compare th), :global(table.engine-compare td){
-    text-align:left; padding:5px 7px;
-    border-bottom:1px solid var(--rule); vertical-align:top;
+    text-align:left; padding:3px 5px;
+    border-bottom:1px solid var(--rule); vertical-align:middle;
+    overflow-wrap:anywhere;
   }
   :global(table.engine-compare th){
-    color:var(--muted); font-weight:600; font-size:10px; text-transform:uppercase;
+    color:var(--muted); font-weight:600; font-size:9px; text-transform:uppercase;
+    white-space:nowrap;
   }
-  :global(table.engine-compare .mono){font-family:var(--mono)}
-  :global(table.engine-compare .pv){font-family:var(--mono); overflow-wrap:anywhere}
+  :global(table.engine-compare .mono){font-family:var(--mono); white-space:nowrap}
+  :global(table.engine-compare .pv){font-family:var(--mono); font-size:10px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   :global(table.engine-compare .agree){color:var(--accent); font-weight:700}
   :global(.model-load-progress), :global(.search-progress-grid){
     margin-top:8px; padding:8px; border:1px solid var(--rule);
-    border-radius:6px; background:#fff;
+    border-radius:var(--radius-sm); background:var(--panel-inset);
   }
   :global(.model-load-progress progress), :global(.search-progress-grid progress), :global(.search-progress-cell progress){
     width:100%; height:9px; accent-color:var(--accent);
   }
   :global(.loading-progress-row), :global(.search-progress-row){display:grid; gap:3px; margin:4px 0}
   :global(.dl-label), :global(.search-progress-text){font-family:var(--mono); font-size:11px; color:var(--muted)}
-  :global(.search-progress-cell){display:grid; gap:3px; min-width:120px}
   .profile-row{align-items:end}
   .profile-row select{min-width:150px}
   .profile-row input[type=text]{min-width:130px}
@@ -275,8 +286,9 @@
   :global(.legend .key){display:inline-flex; align-items:center; gap:5px}
   :global(.legend .dot){width:11px; height:11px; border-radius:3px; display:inline-block}
   :global(.movelist){
-    font-family:var(--mono); font-size:13px; line-height:1.7;
-    margin-top:8px; max-height:240px; overflow:auto;
+    font-family:var(--mono); font-size:14px; line-height:1.9;
+    margin-top:12px; max-height:300px; overflow:auto;
+    padding:10px 14px; border:1px solid #e6decc; border-radius:var(--radius-sm); background:var(--panel-inset);
   }
   :global(.maia3-grid){margin-top:8px; font-size:13px}
   :global(.maia3-grid .maia3-row){
@@ -299,9 +311,9 @@
   :global(.movelist .var){color:var(--muted)}
   .section-block{margin-top:10px}
   .section-block>summary{
-    cursor:pointer; font-size:13px; text-transform:uppercase;
-    letter-spacing:.04em; color:var(--muted); font-weight:600;
-    list-style:none; user-select:none; padding:4px 0; transition:color .12s;
+    cursor:pointer; font-size:11px; text-transform:uppercase;
+    letter-spacing:.12em; color:var(--muted-2); font-weight:500;
+    font-family:var(--mono); list-style:none; user-select:none; padding:4px 0; transition:color .12s;
   }
   .section-block>summary::-webkit-details-marker{display:none}
   .section-block>summary::before{
@@ -314,8 +326,8 @@
   .section-block[open]>summary::before{color:var(--accent)}
   #message{
     margin-top:10px; padding:8px; border:1px solid var(--rule);
-    border-radius:6px; background:var(--soft);
-    font-family:var(--mono); font-size:12px;
+    border-radius:var(--radius-sm); background:var(--panel-inset);
+    font-family:var(--mono); font-size:12px; color:var(--text-soft);
   }
   :global(.pgn-db-list), :global(.pgn-db-results){display:grid; gap:6px; margin-top:8px}
   :global(.pgn-db-list .empty), :global(.pgn-db-results .empty){
@@ -344,7 +356,7 @@
   :global(.wdlbar .d){background:#b9b3a4}
   :global(.wdlbar .b){background:#3a3a3a}
   @media (max-width:900px){
-    main{grid-template-columns:1fr}
+    main{grid-template-columns:1fr; padding:18px}
     .app-sidebar{position:static; max-height:none; overflow-y:visible}
   }
   @media (prefers-reduced-motion: reduce){

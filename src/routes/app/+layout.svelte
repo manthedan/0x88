@@ -1,8 +1,6 @@
 <script lang="ts">
-  import SiteHeader from '$lib/components/SiteHeader.svelte';
 </script>
 
-<SiteHeader pageTitle="App" />
 <slot />
 <footer class="site-footer">
   <div class="wrap">

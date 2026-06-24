@@ -22,9 +22,9 @@
     {/if}
     <nav class="primary" aria-label="Primary">
       <a href="/" class:active={pageTitle === ''}>Home</a>
-      <a href="/app/play/">Play</a>
-      <a href="/app/analysis/">Analysis</a>
-      <a href="/app/arena/">Arena</a>
+      <a href="/app/play/" class:active={pageTitle === 'Play'}>Play</a>
+      <a href="/app/analysis/" class:active={pageTitle === 'Analysis'}>Analysis</a>
+      <a href="/app/arena/" class:active={pageTitle === 'Arena'}>Arena</a>
       <a href="/docs/" class:active={pageTitle === 'Docs'}>Docs</a>
     </nav>
     <button class="theme-toggle" type="button" aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'} title={isDark ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={isDark} on:click={toggleTheme}>{isDark ? '\u2600' : '\u263E'}</button>

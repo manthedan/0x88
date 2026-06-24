@@ -1,6 +1,6 @@
 import type { EngineFamily } from './engineCatalog.ts';
 
-export type EngineLogoFamily = Extract<EngineFamily, 'lc0' | 'sf' | 'reckless' | 'viridithas' | 'berserk'>;
+export type EngineLogoFamily = Extract<EngineFamily, 'lc0' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'tiny'> | 'generic';
 
 interface EngineLogoAsset {
   family: EngineLogoFamily;
@@ -9,33 +9,36 @@ interface EngineLogoAsset {
 
 const ENGINE_LOGO_ASSETS: Record<EngineLogoFamily, EngineLogoAsset> = {
   lc0: { family: 'lc0', url: '/engine-logos/lc0.svg' },
+  tiny: { family: 'tiny', url: '/engine-logos/tiny-leela.svg' },
   sf: { family: 'sf', url: '/engine-logos/stockfish.png' },
   reckless: { family: 'reckless', url: '/engine-logos/reckless.png' },
   viridithas: { family: 'viridithas', url: '/engine-logos/viridithas.png' },
   berserk: { family: 'berserk', url: '/engine-logos/berserk.jpg' },
+  generic: { family: 'generic', url: '/engine-logos/generic.svg' },
 };
 
-const availableEngineLogos = new Set<EngineLogoFamily>();
+const availableEngineLogos = new Set<EngineLogoFamily>(['generic', 'tiny']);
 const pendingProbeCallbacks = new Set<() => void>();
 let probed = false;
 let probing: Promise<void> | null = null;
 
-export function engineLogoFamilyForName(name: string): EngineLogoFamily | undefined {
+export function engineLogoFamilyForName(name: string): EngineLogoFamily {
   const n = name.toLowerCase();
-  if (n.includes('tiny leela')) return undefined;
+  if (n.includes('tiny leela')) return 'tiny';
   if (n.includes('bt4') || n.includes('lc0') || n.includes('leela')) return 'lc0';
   if (n.includes('reckless')) return 'reckless';
   if (n.includes('viridithas')) return 'viridithas';
   if (n.includes('berserk')) return 'berserk';
   if (n.includes('stockfish') || /\bsf\b/.test(n)) return 'sf';
-  return undefined;
+  return 'generic';
 }
 
-export function engineLogoFamilyForEngineFamily(family: EngineFamily): EngineLogoFamily | undefined {
+export function engineLogoFamilyForEngineFamily(family: EngineFamily): EngineLogoFamily {
   if (family === 'lc0') return 'lc0';
+  if (family === 'tiny') return 'tiny';
   if (family === 'sf') return 'sf';
   if (family === 'reckless' || family === 'viridithas' || family === 'berserk') return family;
-  return undefined;
+  return 'generic';
 }
 
 export function engineLogoUrl(family: EngineLogoFamily | undefined): string | undefined {
@@ -43,9 +46,13 @@ export function engineLogoUrl(family: EngineLogoFamily | undefined): string | un
 }
 
 export function engineLogoHtml(family: EngineLogoFamily | undefined, className = 'engine-logo'): string {
-  if (!family) return '';
-  const url = engineLogoUrl(family);
-  return url && availableEngineLogos.has(family) ? `<img class="${className}" src="${url}" alt="">` : '';
+  const resolved = family ?? 'generic';
+  const url = engineLogoUrl(resolved);
+  if (url && availableEngineLogos.has(resolved)) return `<img class="${className}" src="${url}" alt="">`;
+  // Generic logo doesn't need probing -- it's always available
+  if (resolved === 'generic') return `<img class="${className}" src="/engine-logos/generic.svg" alt="">`;
+  if (resolved === 'tiny') return `<img class="${className}" src="/engine-logos/tiny-leela.svg" alt="">`;
+  return `<span class="${className} engine-logo-placeholder"></span>`;
 }
 
 export function engineLogoHtmlForName(name: string, className = 'engine-logo'): string {

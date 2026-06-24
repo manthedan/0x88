@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import SiteHeader from '$lib/components/SiteHeader.svelte';
   const title = "0x88 Chess — play chess vs an engine in your browser";
   const description = "Play chess against Leela Chess Zero, Stockfish, and four more engines running entirely in your browser. Five strength levels, takebacks, and PGN export.";
   onMount(() => {
@@ -21,6 +22,7 @@
   <meta name="description" content={description} />
 </svelte:head>
 
+<SiteHeader pageTitle="Play" />
 <main id="main">
   <section class="panel" aria-label="Board">
     <div class="board-shell"><div id="ground"></div></div>
@@ -33,6 +35,7 @@
       </div>
     </div>
     <div id="promoPicker" hidden></div>
+    <div id="moveList" class="move-panel"></div>
   </section>
   <section class="panel app-sidebar" aria-label="Game controls">
     <h2>Opponent</h2>
@@ -70,8 +73,6 @@
       <button id="resign" type="button" disabled>Resign</button>
       <button id="flip" type="button" title="Flip board">&#x21c5; Flip</button>
     </div>
-    <h2>Moves</h2>
-    <div id="moveList"></div>
     <div class="row">
       <button id="exportPgn" type="button">Show PGN</button>
       <button id="copyPgn" type="button">Copy PGN</button>
@@ -84,17 +85,18 @@
 <style>
   main{
     display:grid;
-    grid-template-columns:minmax(320px,680px) minmax(360px,420px);
-    gap:20px; align-items:start; justify-content:center; padding:18px;
+    grid-template-columns:minmax(0,1fr) 392px;
+    gap:24px; align-items:start; justify-content:center; padding:26px 28px 56px;
+    max-width:1280px; margin:0 auto;
   }
   .app-sidebar{
     position:sticky; top:72px;
     max-height:calc(100vh - 84px); overflow-y:auto;
   }
   :global(#status){
-    margin-top:12px; padding:10px 12px;
-    border:1px solid var(--rule); border-radius:6px;
-    background:var(--soft); font-size:14px;
+    margin-top:12px; padding:13px 16px;
+    border:1px solid var(--accent-tint-border); border-radius:12px;
+    background:var(--accent-soft); font-size:14px; color:var(--accent-soft-text); font-weight:500;
   }
   :global(#status.over){border-color:var(--accent); font-weight:700}
   :global(button.danger){background:var(--warn); border-color:var(--warn); color:#fff; font-weight:700}
@@ -114,9 +116,9 @@
   :global(#dlProgress .dl-label){margin-top:2px; font-family:var(--mono)}
   :global(#promoPicker){margin-top:10px; display:flex; gap:6px; flex-wrap:wrap}
   :global(#moveList){
-    margin-top:8px; font-family:var(--mono); font-size:13px;
-    line-height:1.8; max-height:300px; overflow:auto;
-    padding:8px; border:1px solid var(--rule); border-radius:6px; background:#fff;
+    margin-top:12px; font-family:var(--mono); font-size:14px;
+    line-height:1.9; max-height:300px; overflow:auto;
+    padding:10px 14px; border:1px solid #e6decc; border-radius:var(--radius-sm); background:var(--panel-inset);
   }
   :global(#moveList .num){color:var(--muted)}
   :global(#moveList .placeholder){color:var(--muted)}
@@ -132,8 +134,23 @@
     margin-top:10px; padding:10px 12px;
     border:1px solid var(--accent); border-radius:6px; background:var(--soft);
   }
+  :global(#maia3Elo){
+    -webkit-appearance:none; appearance:none; width:100%; height:5px;
+    border-radius:3px; background:var(--rule-strong); outline:none;
+  }
+  :global(#maia3Elo::-webkit-slider-thumb){
+    -webkit-appearance:none; appearance:none;
+    width:18px; height:18px; border-radius:50%; background:#fff;
+    border:2px solid var(--accent); cursor:pointer;
+    box-shadow:0 2px 6px rgba(80,55,25,.25);
+  }
+  :global(#maia3Elo::-moz-range-thumb){
+    width:18px; height:18px; border-radius:50%; background:#fff;
+    border:2px solid var(--accent); cursor:pointer;
+    box-shadow:0 2px 6px rgba(80,55,25,.25);
+  }
   @media (max-width:900px){
-    main{grid-template-columns:1fr; padding:12px}
+    main{grid-template-columns:1fr; padding:18px}
     .app-sidebar{position:static; max-height:none; overflow-y:visible}
   }
 </style>

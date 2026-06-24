@@ -27,7 +27,6 @@
 <!-- ===== Hero ===== -->
 <section class="hero" aria-labelledby="hero-h1">
   <div class="wrap">
-    <p class="eyebrow"><span class="dot" aria-hidden="true"></span> Open source · runs entirely client-side</p>
     <h1 id="hero-h1">State-of-the-art chess, <span class="accent">zero installs.</span></h1>
     <p class="lede">
       The strongest neural networks and classical engines — <strong>Leela Chess Zero on WebGPU</strong>,
@@ -261,17 +260,7 @@
             mask-image:radial-gradient(ellipse 60% 80% at 80% 20%, black, transparent 70%);
   }
   .hero .wrap{position:relative; padding:64px 24px 72px}
-  .hero .eyebrow{
-    display:inline-flex; align-items:center; gap:8px;
-    font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase;
-    color:var(--accent-deep); background:var(--accent-soft);
-    padding:6px 12px; border-radius:99px; border:1px solid color-mix(in srgb, var(--accent) 25%, transparent);
-    margin:0 0 20px;
-  }
-  .hero .eyebrow .dot{width:6px; height:6px; border-radius:50%; background:var(--accent); animation:pulse 2.4s ease-in-out infinite}
-  @keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
-  @media (prefers-reduced-motion: reduce){.hero .eyebrow .dot{animation:none}}
-    .hero h1{
+  .hero h1{
     font-size:clamp(34px, 6vw, 56px); line-height:1.05; margin:0 0 18px;
     max-width:18ch; letter-spacing:-.02em;
   }

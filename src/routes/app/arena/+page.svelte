@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import SiteHeader from '$lib/components/SiteHeader.svelte';
   const title = "0x88 Chess — engine arena";
   const description = "Run chess engine tournaments in your browser: head-to-head matches, round-robins, and gauntlets with standings, Elo estimates, and per-game charts.";
   onMount(() => {
@@ -21,6 +22,7 @@
   <meta name="description" content={description} />
 </svelte:head>
 
+<SiteHeader pageTitle="Arena" />
 <main id="main">
   <section class="panel" aria-label="Board">
     <div id="blackSideLabel" class="side-label" aria-label="Black side"></div>
@@ -156,8 +158,9 @@
   :root{--acc-w:#2f6e7d;--acc-b:#b15c2b}
   main{
     display:grid;
-    grid-template-columns:minmax(320px,680px) minmax(360px,440px);
-    gap:20px; align-items:start; justify-content:center; padding:18px;
+    grid-template-columns:minmax(0,1fr) 392px;
+    gap:24px; align-items:start; justify-content:center; padding:26px 28px 56px;
+    max-width:1280px; margin:0 auto;
   }
   .app-sidebar{
     position:sticky; top:72px;
@@ -198,14 +201,15 @@
   :global(#whiteEngineChip){background:var(--acc-w)}
   :global(#blackEngineChip){background:var(--acc-b); margin-left:auto}
   :global(.engine-logo){width:14px; height:14px; object-fit:contain; border-radius:3px; vertical-align:middle; flex:0 0 auto}
-  :global(.eval-chip .engine-logo){width:11px; height:11px; border-radius:2px; background:rgba(255,255,255,.9)}
-  :global(.side-label .engine-logo){width:16px; height:16px}
+  :global(.engine-logo-placeholder){display:inline-block; width:14px; height:14px; border-radius:3px; background:var(--rule-soft); flex:0 0 auto; vertical-align:middle}
+  :global(.eval-chip .engine-logo), :global(.eval-chip .engine-logo-placeholder){width:11px; height:11px; border-radius:2px}
+  :global(.side-label .engine-logo), :global(.side-label .engine-logo-placeholder){width:16px; height:16px}
   :global(.engine-eval-bar.thinking){box-shadow:0 0 0 2px rgba(159,174,111,.6)}
   :global(.side-label){
     display:flex; justify-content:space-between; align-items:center;
     gap:10px; margin:6px 0; min-height:40px;
-    padding:8px 12px; border:1px solid var(--rule); border-left:3px solid var(--rule);
-    border-radius:7px; background:white; font-size:13px;
+    padding:10px 14px; border:1px solid #e6decc; border-left:3px solid var(--rule-strong);
+    border-radius:11px; background:var(--panel); font-size:13px;
   }
   :global(.side-label .side-main){display:flex; flex:1; min-width:0; flex-wrap:nowrap; align-items:center; gap:8px}
   :global(.side-label .color){
@@ -264,24 +268,24 @@
   :global(.review-bar .review-nav){display:flex; gap:5px}
   :global(.review-bar button){padding:4px 9px; font-size:12px}
   :global(.movestrip){
-    margin:8px auto 0; font-family:var(--mono); font-size:12px;
-    line-height:1.9; max-height:72px; overflow:auto;
-    padding:6px 8px; border:1px solid var(--rule); border-radius:7px; background:white;
+    margin-top:12px; font-family:var(--mono); font-size:14px;
+    line-height:1.9; max-height:300px; overflow:auto;
+    padding:10px 14px; border:1px solid #e6decc; border-radius:var(--radius-sm); background:var(--panel-inset);
   }
   :global(.movestrip .num){color:var(--muted)}
   :global(.movestrip .mv){cursor:pointer; padding:1px 3px; border-radius:4px}
   :global(.movestrip .mv:hover){background:var(--soft)}
   :global(.movestrip .mv.current){background:var(--accent); color:white}
   :global(.chart-card svg){cursor:pointer}
-  :global(#pairing){font-size:14px; margin-top:14px; font-weight:700; color:var(--ink)}
+  :global(#pairing){font-size:14px; margin-top:14px; font-weight:600; color:var(--ink); font-family:var(--serif)}
   :global(#message){
-    margin-top:6px; padding:7px 10px; border:1px solid var(--rule);
-    border-radius:7px; background:var(--panel); color:var(--muted);
-    font-family:var(--mono); font-size:11px;
+    margin-top:6px; padding:13px 16px; border:1px solid var(--rule-strong);
+    border-radius:12px; background:var(--panel-inset); color:var(--text-soft);
+    font-family:var(--mono); font-size:13px;
   }
   :global(.model-load-progress){
     margin-top:6px; padding:8px; border:1px solid var(--rule);
-    border-radius:7px; background:white;
+    border-radius:var(--radius-sm); background:var(--panel);
   }
   :global(.model-load-progress progress), :global(.eval-card progress){
     width:100%; height:9px; accent-color:var(--accent);
@@ -290,8 +294,8 @@
   :global(.dl-label), :global(.search-progress-text){font-family:var(--mono); font-size:11px; color:var(--muted)}
   :global(.eval-grid){display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:8px; margin-top:8px}
   :global(.eval-card){
-    padding:8px; border:1px solid var(--rule); border-radius:6px;
-    background:white; font-family:var(--mono); font-size:11px;
+    padding:8px; border:1px solid var(--rule); border-radius:var(--radius-sm);
+    background:var(--panel); font-family:var(--mono); font-size:11px;
     color:var(--muted); overflow-wrap:anywhere;
   }
   :global(.eval-card strong){
@@ -337,7 +341,7 @@
   :global(.diag-block .diag-label){color:var(--muted)}
   :global(.diag-block .diag-value){font-family:var(--mono); font-variant-numeric:tabular-nums; overflow-wrap:anywhere}
   @media (max-width:900px){
-    main{grid-template-columns:1fr}
+    main{grid-template-columns:1fr; padding:18px}
     .app-sidebar{position:static; max-height:none; overflow-y:visible}
   }
   @media (max-width:900px){.chart-grid{grid-template-columns:1fr}}
