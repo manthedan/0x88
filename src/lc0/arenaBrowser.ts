@@ -253,6 +253,9 @@ function el(id: string): HTMLElement {
   if (!node) throw new Error(`Missing #${id}`);
   return node;
 }
+function maybeEl(id: string): HTMLElement | null {
+  return document.getElementById(id);
+}
 function inputEl(id: string): HTMLInputElement { return el(id) as HTMLInputElement; }
 function selectEl(id: string): HTMLSelectElement { return el(id) as HTMLSelectElement; }
 function htmlEscape(value: unknown): string {
@@ -1864,7 +1867,8 @@ async function refreshBt4Availability(): Promise<void> {
 }
 
 async function renderRuntimeBadge(): Promise<void> {
-  const badge = el('runtimeBadge');
+  const badge = maybeEl('runtimeBadge');
+  if (!badge) return;
   if (isV0DeployProfile()) {
     badge.textContent = 'Runtime: v0 deploy · Lc0 small + Stockfish Lite';
     badge.classList.add('ready');
@@ -1873,6 +1877,7 @@ async function renderRuntimeBadge(): Promise<void> {
   }
   try {
     const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
+    if (!badge.isConnected) return;
     runtimeIsolation = diag.crossOriginIsolated === true;
     runtimeSharedArrayBuffer = diag.wasm.sharedArrayBuffer === true;
     refreshStockfishControls();
@@ -1886,6 +1891,7 @@ async function renderRuntimeBadge(): Promise<void> {
     badge.classList.toggle('ready', runtimeIsolation && (diag.webgpuAvailable || runtimeSharedArrayBuffer));
     badge.classList.toggle('warn', !runtimeIsolation || !diag.webgpuAvailable);
   } catch (error) {
+    if (!badge.isConnected) return;
     badge.textContent = `Runtime detection failed: ${(error as Error).message}`;
     badge.classList.add('warn');
   }

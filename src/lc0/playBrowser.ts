@@ -152,6 +152,9 @@ function el(id: string): HTMLElement {
   if (!found) throw new Error(`missing element #${id}`);
   return found;
 }
+function maybeEl(id: string): HTMLElement | null {
+  return document.getElementById(id);
+}
 function selectEl(id: string): HTMLSelectElement { return el(id) as HTMLSelectElement; }
 function buttonEl(id: string): HTMLButtonElement { return el(id) as HTMLButtonElement; }
 
@@ -344,9 +347,10 @@ function ctxSearchProgressText(label: string, progress: { completedVisits?: numb
 }
 
 function ctxShowSearchProgress(label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number }): void {
+  const container = maybeEl('dlProgress');
+  if (!container) return;
   const completed = progress.completedVisits ?? progress.visits;
   const requested = Math.max(1, progress.requestedVisits ?? progress.visits);
-  const container = el('dlProgress');
   const row = document.createElement('div');
   row.className = 'loading-progress-row';
   const bar = document.createElement('progress');
@@ -362,11 +366,15 @@ function ctxShowSearchProgress(label: string, progress: { completedVisits?: numb
 }
 
 function ctxShowDownloadProgress(label: string, loadedBytes?: number, totalBytes?: number, phase = 'Downloading'): void {
-  renderLoadingProgress(el('dlProgress'), { label, phase, loadedBytes, totalBytes });
+  const container = maybeEl('dlProgress');
+  if (!container) return;
+  renderLoadingProgress(container, { label, phase, loadedBytes, totalBytes });
 }
 
 function ctxHideDownloadProgress(): void {
-  hideLoadingProgress(el('dlProgress'));
+  const container = maybeEl('dlProgress');
+  if (!container) return;
+  hideLoadingProgress(container);
 }
 
 function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
