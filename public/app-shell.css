@@ -235,7 +235,7 @@ textarea{width:100%; resize:vertical; line-height:1.5}
 .small{font-size:12px; color:var(--muted); line-height:1.5}
 .board-shell{width:100%; aspect-ratio:1}
 #ground{
-  width:100%; height:100%; border-radius:6px; overflow:hidden;
+  width:100%; height:100%; border-radius:6px;
   border:1px solid var(--rule); box-shadow:0 14px 38px -26px #000;
 }
 .cg-wrap{width:100%!important; height:100%!important}
@@ -287,6 +287,7 @@ textarea{
    :empty selector stops matching and the placeholder vanishes. */
 #ground:empty{
   position:relative;
+  overflow:hidden;
   background-color:var(--board-light,#f0d9b5);
   background-image:repeating-conic-gradient(var(--board-dark,#b58863) 0% 25%,var(--board-light,#f0d9b5) 0% 50%);
   background-size:25% 25%;
