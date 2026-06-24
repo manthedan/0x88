@@ -154,6 +154,8 @@ let lastReviewNodes: GameNode[] = [];
 let lastReviewSignature = '';
 let analyzing = false;
 const lineCache = new Map<string, AnalysisLine[]>();
+const engineLineCache = new Map<string, AnalysisLine[]>();
+const completeAnalysisKeys = new Set<string>();
 interface SearchProgressSnapshot {
   label: string;
   completed?: number;
@@ -166,6 +168,7 @@ interface SearchProgressSnapshot {
   indeterminate?: boolean;
 }
 const searchProgressByEngine = new Map<string, SearchProgressSnapshot>();
+let activeAnalysisRunId = 0;
 const nodeIndex = new Map<number, GameNode>();
 const ENGINE_PROFILE_STORAGE_KEY = 'lc0-analysis-engine-profiles-v1';
 const LAST_ENGINE_PROFILE_STORAGE_KEY = 'lc0-analysis-last-engine-profile-v1';
@@ -442,11 +445,15 @@ function clearAnalysisSearchProgress(): void {
   renderAnalysisSearchProgress();
 }
 
-function showAnalysisProgress(fen: string, label: string, progress: WorkerSearchProgress): void {
-  if (mountAbort.signal.aborted || !analyzing || tree.current.fen !== fen) return;
+function progressKey(runId: number, label: string): string {
+  return `${runId}\u0000${label}`;
+}
+
+function showAnalysisProgress(runId: number, fen: string, label: string, progress: WorkerSearchProgress): void {
+  if (runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analyzing || tree.current.fen !== fen) return;
   const completed = progress.completedVisits ?? progress.visits;
   const elapsedMs = progress.elapsedMs ?? 0;
-  searchProgressByEngine.set(label, {
+  searchProgressByEngine.set(progressKey(runId, label), {
     label,
     completed,
     requested: progress.requestedVisits ?? progress.visits,
@@ -461,8 +468,8 @@ function showAnalysisProgress(fen: string, label: string, progress: WorkerSearch
   el('message').textContent = analysisProgressText(label, progress);
 }
 
-function showMoveSearchProgress(fen: string, label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: Move | null; value: number; elapsedMs?: number }): void {
-  showAnalysisProgress(fen, label, {
+function showMoveSearchProgress(runId: number, fen: string, label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: Move | null; value: number; elapsedMs?: number }): void {
+  showAnalysisProgress(runId, fen, label, {
     visits: progress.visits,
     requestedVisits: progress.requestedVisits ?? progress.visits,
     completedVisits: progress.completedVisits ?? progress.visits,
@@ -474,23 +481,27 @@ function showMoveSearchProgress(fen: string, label: string, progress: { complete
   });
 }
 
-function showIndeterminateSearchProgress(fen: string, label: string): void {
-  if (mountAbort.signal.aborted || !analyzing || tree.current.fen !== fen) return;
-  searchProgressByEngine.set(label, { label, units: 'search', indeterminate: true });
+function showIndeterminateSearchProgress(runId: number, fen: string, label: string): void {
+  if (runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analyzing || tree.current.fen !== fen) return;
+  searchProgressByEngine.set(progressKey(runId, label), { label, units: 'search', indeterminate: true });
   renderAnalysisSearchProgress();
   renderEngineComparison(lineCache.get(fen) ?? []);
 }
 
-function clearEngineSearchProgress(label: string): void {
-  searchProgressByEngine.delete(label);
+function clearEngineSearchProgress(runId: number, label: string): void {
+  searchProgressByEngine.delete(progressKey(runId, label));
   renderAnalysisSearchProgress();
 }
 
-async function workerLc0Lines(fen: string, visits: number, label = 'Lc0'): Promise<AnalysisLine[]> {
+function searchProgressForLabel(label: string): SearchProgressSnapshot | undefined {
+  return searchProgressByEngine.get(progressKey(activeAnalysisRunId, label));
+}
+
+async function workerLc0Lines(runId: number, fen: string, visits: number, label = 'Lc0'): Promise<AnalysisLine[]> {
   const response = await postWorker<{ result: WorkerSearchResult }>(
     { type: 'search', input: { positions: tree.historyBoards() }, visits, batchSize: 1, multiPv: multiPv(), reportProgress: true },
     (id) => { activeWorkerSearchId = id; },
-    (progress) => showAnalysisProgress(fen, label, progress),
+    (progress) => showAnalysisProgress(runId, fen, label, progress),
   );
   return response.result.cancelled ? [] : lc0AnalysisLines(response.result, fen, 'Lc0');
 }
@@ -753,6 +764,7 @@ function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?
   el('engineProfileSummary').textContent = profileSummary(profile, options.note);
   disposeUnusedEngines();
   lineCache.clear();
+  completeAnalysisKeys.clear();
   if (runtimeChanged) void reloadLc0Backend(true);
   else void analyzeCurrent();
 }
@@ -868,7 +880,7 @@ function plentyChessVariantForKey(variantKey: string): PlentyChessVariant {
 
 
 // "Add engine" fills the next missing family by priority
-// (Lc0 → Tiny Leela → SF → Reckless → Viridithas → Berserk → PlentyChess),
+// (Lc0 → SF → Reckless → Viridithas → Berserk → PlentyChess → Tiny Leela),
 // falling back to the top priority when all families are present.
 function nextEngineFamily(): EngineFamily {
   const present = new Set(engineRows.map((row) => row.family));
@@ -948,6 +960,16 @@ function rowLabel(row: EngineRow): string {
   return recklessVariantForKey(row.variant).label;
 }
 
+function engineAnalysisCacheKey(fen: string, row: EngineRow): string {
+  const runtime = row.family === 'lc0' && !isLc0BigNetVariant(row.variant) ? selectedLc0Runtime() : '';
+  const history = tree.historyBoards().map(boardToFen).join('|');
+  return [fen, history, row.family, row.variant, row.strength, `multipv=${multiPv()}`, runtime].join('\u0000');
+}
+
+function analysisSelectionCacheKey(fen: string, rows = activeEngineRows()): string {
+  return rows.map((row) => engineAnalysisCacheKey(fen, row)).join('\u0001');
+}
+
 function activeEngineRows(): EngineRow[] {
   const seen = new Set<string>();
   return engineRows.map((row, index) => normalizeDeployEngineRow(row, 'analysis', index)).filter((r) => {
@@ -974,7 +996,7 @@ function renderEngineList(): void {
   }).join('');
 }
 
-async function workerBigNetLines(variant: string, fen: string, visits: number): Promise<AnalysisLine[]> {
+async function workerBigNetLines(runId: number, variant: string, fen: string, visits: number): Promise<AnalysisLine[]> {
   const { config, searcher } = bigNetFor(variant);
   const label = `Lc0 ${config.name}`;
   searcher.onDownloadProgress = (loaded, total) => showModelProgress(label, loaded, total, 'Downloading');
@@ -984,7 +1006,7 @@ async function workerBigNetLines(variant: string, fen: string, visits: number): 
       multiPv: multiPv(),
       batchSize: config.recommendedBatchSize,
       batchPipelineDepth: config.recommendedPipelineDepth,
-      onProgress: (progress) => showAnalysisProgress(fen, label, progress),
+      onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
     });
     return result.cancelled ? [] : lc0AnalysisLines(result, fen, `Lc0 ${config.name}`);
   } finally {
@@ -1293,7 +1315,7 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     const swatch = engineBrushes(line.engine).swatch;
     const delta = reference === undefined || line.scoreCp === undefined ? '—' : signedCp(line.scoreCp - reference);
     const agreed = line.pvUci[0] === consensusUci && (consensus?.[1].count ?? 0) > 1;
-    const progress = searchProgressByEngine.get(line.engine);
+    const progress = searchProgressForLabel(line.engine);
     const searchText = progress
       ? (progress.indeterminate ? '...' : `${progress.completed ?? 0}/${progress.requested ?? 0}`)
       : htmlEscape(line.detail);
@@ -1920,10 +1942,11 @@ async function copyReviewPgn(): Promise<void> {
   }
 }
 
-async function analyzeCurrent() {
+async function analyzeCurrent(options: { force?: boolean } = {}) {
   if (mountAbort.signal.aborted) return;
   const rows = activeEngineRows();
   if (!rows.length) { el('message').textContent = 'Add an engine to analyze.'; return; }
+  const runId = ++activeAnalysisRunId;
   // Interrupt any in-flight analysis: abort the Stockfish signal and cancel the
   // worker LC0 / big-net searches, so a new position takes over immediately.
   analysisAbort?.abort();
@@ -1943,34 +1966,50 @@ async function analyzeCurrent() {
     return;
   }
   const selectedLabels = rows.map((row) => rowLabel(row)).join(' + ');
+  const selectionCacheKey = analysisSelectionCacheKey(fen, rows);
   el('message').textContent = `Analyzing (${selectedLabels}, ${multiPv()} lines)…`;
   clearAnalysisSearchProgress();
   syncBrokerParticipants(rows);
   try {
-    const tasks: Promise<AnalysisLine[]>[] = [];
-    const pushTask = (label: string, task: Promise<AnalysisLine[]>) => {
-      showIndeterminateSearchProgress(fen, label);
-      tasks.push(task.finally(() => clearEngineSearchProgress(label)));
+    const lineGroups: AnalysisLine[][] = rows.map((row) => (!options.force ? (engineLineCache.get(engineAnalysisCacheKey(fen, row)) ?? []) : []));
+    const publishLines = () => {
+      lineCache.set(fen, lineGroups.flat());
+      if (tree.current.fen === fen) { renderLines(); renderEvalBar(); setShapes(bestShapes()); }
     };
-    for (const row of rows) {
+    if (lineGroups.some((lines) => lines.length > 0)) publishLines();
+    const tasks: Promise<void>[] = [];
+    const pushTask = (index: number, cacheKey: string, label: string, task: Promise<AnalysisLine[]>) => {
+      showIndeterminateSearchProgress(runId, fen, label);
+      tasks.push(task.then((lines) => {
+        if (runId !== activeAnalysisRunId || analysisAbort !== controller || !analyzing || controller.signal.aborted || mountAbort.signal.aborted) return;
+        if (lines.length) engineLineCache.set(cacheKey, lines);
+        else engineLineCache.delete(cacheKey);
+        lineGroups[index] = lines;
+        publishLines();
+      }).finally(() => clearEngineSearchProgress(runId, label)));
+    };
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index];
+      const cacheKey = engineAnalysisCacheKey(fen, row);
+      if (!options.force && engineLineCache.has(cacheKey)) continue;
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
-        pushTask(`Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, workerBigNetLines(row.variant, fen, row.strength));
+        pushTask(index, cacheKey, `Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, workerBigNetLines(runId, row.variant, fen, row.strength));
       } else if (row.family === 'lc0') {
         const label = 'Lc0';
-        if (workerReady) pushTask(label, workerLc0Lines(fen, row.strength, label));
-        else if (searcher) pushTask(label, searcher.search({ positions: tree.historyBoards() }, {
+        if (workerReady) pushTask(index, cacheKey, label, workerLc0Lines(runId, fen, row.strength, label));
+        else if (searcher) pushTask(index, cacheKey, label, searcher.search({ positions: tree.historyBoards() }, {
           visits: row.strength,
           multiPv: multiPv(),
           signal: controller.signal,
           yieldEveryMs: 16,
-          onProgress: (progress) => showAnalysisProgress(fen, label, progress),
+          onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
         })
           .then((result) => lc0AnalysisLines(result, fen, 'Lc0')));
       } else if (row.family === 'tiny') {
         const positions = tree.historyBoards();
         const current = positions[positions.length - 1];
         const label = tinyEngineLabel(row.variant);
-        pushTask(label, tinyEvaluator(row.variant)
+        pushTask(index, cacheKey, label, tinyEvaluator(row.variant)
           .then((evaluator) => chooseMove(current, evaluator, {
             visits: row.strength,
             batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('tinyBatch') ?? '32') || 32))),
@@ -1980,13 +2019,13 @@ async function analyzeCurrent() {
             includePv: true,
             multiPv: multiPv(),
             pvDepth: 12,
-            onProgress: (progress) => showMoveSearchProgress(fen, label, progress),
+            onProgress: (progress) => showMoveSearchProgress(runId, fen, label, progress),
           }))
           .then((result) => tinyPuctAnalysisLines(result, fen, label)));
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
         const label = kind === 'lite' ? 'SF Lite' : 'SF';
-        pushTask(label, resourceBroker.acquire({ engineId: `sf-${kind}`, signal: controller.signal }).then(async (lease) => {
+        pushTask(index, cacheKey, label, resourceBroker.acquire({ engineId: `sf-${kind}`, signal: controller.signal }).then(async (lease) => {
           try {
             const engine = getStockfish(kind);
             engine.setOptions({ threads: lease.threads });
@@ -1999,38 +2038,39 @@ async function analyzeCurrent() {
       } else if (row.family === 'viridithas') {
         const label = `${viridithasVariantForKey(row.variant).label}`;
         const engine = getViridithasFor(row.variant);
-        pushTask(label, engine.newGame(controller.signal)
+        pushTask(index, cacheKey, label, engine.newGame(controller.signal)
           .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       } else if (row.family === 'berserk') {
         const label = `${berserkVariantForKey(row.variant).label}`;
         const engine = getBerserkFor(row.variant);
-        pushTask(label, engine.newGame(controller.signal)
+        pushTask(index, cacheKey, label, engine.newGame(controller.signal)
           .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       } else if (row.family === 'plentychess') {
         const label = `${plentyChessVariantForKey(row.variant).label}`;
         const engine = getPlentyChessFor(row.variant);
-        pushTask(label, engine.newGame(controller.signal)
+        pushTask(index, cacheKey, label, engine.newGame(controller.signal)
           .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       } else {
         const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label}`;
-        pushTask(label, getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
+        pushTask(index, cacheKey, label, getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
           .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
       }
     }
-    const grouped = await Promise.all(tasks);
+    await Promise.all(tasks);
     if (controller.signal.aborted || mountAbort.signal.aborted) return;
-    lineCache.set(fen, grouped.flat());
-    if (tree.current.fen === fen) { renderLines(); renderEvalBar(); setShapes(bestShapes()); }
+    publishLines();
+    completeAnalysisKeys.add(selectionCacheKey);
     const message = document.getElementById('message');
     if (message) message.textContent = `Analyzed: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`;
   } catch (error) {
+    controller.abort();
     const message = document.getElementById('message');
     if ((error as Error).name !== 'AbortError' && !mountAbort.signal.aborted && message) message.textContent = `Analysis failed: ${(error as Error).message}`;
   } finally {
-    if (analysisAbort === controller && !mountAbort.signal.aborted) {
+    if (analysisAbort === controller && runId === activeAnalysisRunId && !mountAbort.signal.aborted) {
       analyzing = false;
       analysisAbort = null;
       clearAnalysisSearchProgress();
@@ -2045,7 +2085,7 @@ function afterNavigation() {
   clearReviewIfMainlineChanged();
   renderAll();
   scheduleMaia3Panel();
-  if (inputEl('autoAnalyze').checked && !lineCache.has(tree.current.fen)) void analyzeCurrent();
+  if (inputEl('autoAnalyze').checked && !completeAnalysisKeys.has(analysisSelectionCacheKey(tree.current.fen))) void analyzeCurrent();
   else { renderEvalBar(); setShapes(bestShapes()); }
 }
 
@@ -2166,6 +2206,7 @@ function loadFen() {
   }
   tree = new GameTree(raw);
   lineCache.clear();
+  completeAnalysisKeys.clear();
   el('message').textContent = 'Loaded FEN.';
   afterNavigation();
 }
@@ -2178,6 +2219,7 @@ function loadPgn() {
     tree = parsed;
     tree.toStart();
     lineCache.clear();
+    completeAnalysisKeys.clear();
     el('message').textContent = `Loaded PGN${tags.White ? `: ${tags.White} – ${tags.Black}` : ''}.`;
     afterNavigation();
   } catch (error) {
@@ -2208,10 +2250,10 @@ function wireEvents() {
   el('flip').addEventListener('click', () => { orientation = orientation === 'white' ? 'black' : 'white'; renderBoard(); });
   el('loadFen').addEventListener('click', loadFen);
   inputEl('fenInput').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') loadFen(); });
-  el('reset').addEventListener('click', () => { tree = new GameTree(); lineCache.clear(); el('message').textContent = 'Reset.'; afterNavigation(); });
+  el('reset').addEventListener('click', () => { tree = new GameTree(); lineCache.clear(); completeAnalysisKeys.clear(); el('message').textContent = 'Reset.'; afterNavigation(); });
   el('loadPgn').addEventListener('click', loadPgn);
   el('copyPgn').addEventListener('click', copyPgn);
-  el('analyze').addEventListener('click', () => { void analyzeCurrent(); });
+  el('analyze').addEventListener('click', () => { void analyzeCurrent({ force: true }); });
   el('stop').addEventListener('click', () => {
     analysisAbort?.abort();
     if (activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
@@ -2487,6 +2529,7 @@ async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = 
 
 async function reloadLc0Backend(forceAnalyzeAfterLoad = false): Promise<void> {
   lineCache.clear();
+  completeAnalysisKeys.clear();
   disposeRuntimeResources();
   renderRecklessRuntimeInfo();
   const loaded = await loadLc0Backend(!forceAnalyzeAfterLoad);

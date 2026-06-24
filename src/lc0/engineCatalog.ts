@@ -34,7 +34,7 @@ export interface EngineFamilyCatalogEntry {
   note: string;
 }
 
-export const ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'tiny', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess'];
+export const ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess', 'tiny'];
 const V0_ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'];
 const V0_RECKLESS_VARIANTS = new Set(['full', 'simd', 'relaxed-simd']);
 const V0_BERSERK_VARIANTS = new Set(['emscripten', 'emscripten-simd', 'emscripten-relaxed']);

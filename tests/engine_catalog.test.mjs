@@ -17,7 +17,7 @@ import {
 } from '../src/lc0/engineCatalog.ts';
 
 test('engine family catalog covers the staged selector families in UI order', () => {
-  assert.deepEqual(ENGINE_FAMILY_PRIORITY, ['lc0', 'tiny', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess']);
+  assert.deepEqual(ENGINE_FAMILY_PRIORITY, ['lc0', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess', 'tiny']);
   assert.deepEqual(engineFamilyOptions().map((option) => option.value), ENGINE_FAMILY_PRIORITY);
   for (const family of ENGINE_FAMILY_PRIORITY) {
     assert.equal(ENGINE_FAMILY_CATALOG[family].id, family);
