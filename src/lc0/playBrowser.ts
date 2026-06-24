@@ -599,6 +599,7 @@ function ctxCancelEngineTurn(ctx: PlayContext): void {
   ctx.abort.abort();
   ctx.abort = new AbortController();
   ctx.engineThinking = false;
+  ctxHideDownloadProgress();
   releaseWakeLock();
 }
 
