@@ -441,7 +441,8 @@ export class ViridithasEngine implements BrowserUciEngine {
         this.lastInfoLines = [];
         return;
       }
-      const result = await this.runCommandsUntil(['ucinewgame', 'isready'], signal, (line, stream) => stream === 'stdout' && line === 'readyok');
+      const commands = this.persistentInitialized ? ['ucinewgame', 'isready'] : ['uci', 'isready', 'ucinewgame', 'isready'];
+      const result = await this.runCommandsUntil(commands, signal, (line, stream) => stream === 'stdout' && line === 'readyok');
       if (result.exitCode !== 0) throw new Error(`Viridithas new game exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = [];
     });

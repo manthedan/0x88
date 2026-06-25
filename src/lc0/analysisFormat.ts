@@ -22,6 +22,7 @@ export interface AnalysisLine {
   nps?: number;
   pvUci: string[];
   pvSan: string;
+  error?: string;
 }
 
 // LC0's standard value->centipawn mapping (used by lc0 `WDL`/`Q` reporting).

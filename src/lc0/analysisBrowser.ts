@@ -1110,14 +1110,18 @@ function getRecklessFor(variantKey: string): RecklessEngine {
   if (!engine) {
     engine = createRecklessEngine(variant, renderRecklessRuntimeInfo);
     recklessByVariant.set(key, engine);
-    void engine.prewarm()
-      .then(renderRecklessRuntimeInfo)
-      .catch((error) => {
-        if ((error as Error).name !== 'AbortError') console.warn('Reckless prewarm failed', error);
-        renderRecklessRuntimeInfo();
-      });
+    prewarmCpuEngine('Reckless', engine, renderRecklessRuntimeInfo);
   }
   return engine;
+}
+
+function prewarmCpuEngine(label: string, engine: { prewarm(signal?: AbortSignal): Promise<void> }, onStatus: () => void): void {
+  void engine.prewarm()
+    .then(onStatus)
+    .catch((error) => {
+      if ((error as Error).name !== 'AbortError') console.warn(`${label} prewarm failed`, error);
+      onStatus();
+    });
 }
 
 function getViridithasFor(variantKey: string): ViridithasEngine {
@@ -1127,7 +1131,7 @@ function getViridithasFor(variantKey: string): ViridithasEngine {
   if (!engine) {
     engine = createViridithasEngine(variant);
     viridithasByVariant.set(key, engine);
-    renderRecklessRuntimeInfo();
+    prewarmCpuEngine('Viridithas', engine, renderRecklessRuntimeInfo);
   }
   return engine;
 }
@@ -1139,7 +1143,7 @@ function getBerserkFor(variantKey: string): BerserkEngine {
   if (!engine) {
     engine = createBerserkEngine(variant);
     berserkByVariant.set(key, engine);
-    renderRecklessRuntimeInfo();
+    prewarmCpuEngine('Berserk', engine, renderRecklessRuntimeInfo);
   }
   return engine;
 }
@@ -1153,7 +1157,7 @@ function getPlentyChessFor(variantKey: string): PlentyChessEngine {
   if (!engine) {
     engine = createPlentyChessEngine(variant);
     plentyChessByVariant.set(key, engine);
-    renderRecklessRuntimeInfo();
+    prewarmCpuEngine('PlentyChess', engine, renderRecklessRuntimeInfo);
   }
   return engine;
 }
@@ -1350,6 +1354,12 @@ function renderLines() {
   renderLegend(lines);
   renderEngineComparison(lines);
   el('lines').innerHTML = lines.map((line) => {
+    if (line.error) {
+      const swatch = engineBrushes(line.engine).swatch;
+      return `<li data-uci="" style="border-left:3px solid ${swatch};opacity:0.6">`
+        + `<span class="score">${engineLogoHtmlForName(line.engine)} ✗</span>`
+        + `<span class="pv small" style="color:var(--text-dim)">${htmlEscape(line.error)}</span></li>`;
+    }
     const cls = line.scoreCp === undefined ? '' : line.scoreCp > 0 ? 'pos' : line.scoreCp < 0 ? 'neg' : '';
     const swatch = engineBrushes(line.engine).swatch;
     return `<li data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}">`
@@ -2053,10 +2063,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     };
     if (lineGroups.some((lines) => lines.length > 0)) publishLines();
     const tasks: Promise<void>[] = [];
-    let taskChain = Promise.resolve();
+    let cpuTaskChain = Promise.resolve();
     let hadTaskFailure = false;
-    const pushTask = (index: number, cacheKey: string, label: string, taskFactory: () => Promise<AnalysisLine[]>) => {
-      const queuedTask = taskChain.then(async () => {
+    const pushTask = (index: number, cacheKey: string, label: string, taskFactory: () => Promise<AnalysisLine[]>, serialized: boolean) => {
+      const run = async () => {
         if (controller.signal.aborted || mountAbort.signal.aborted) return;
         showIndeterminateSearchProgress(runId, fen, label);
         try {
@@ -2069,28 +2079,34 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         } catch (error) {
           if (controller.signal.aborted || mountAbort.signal.aborted || (error as Error).name === 'AbortError') throw error;
           hadTaskFailure = true;
+          const errMsg = (error as Error)?.message ?? String(error);
           console.warn(`${label} analysis failed`, error);
           if (runId === activeAnalysisRunId && analysisAbort === controller && analyzing) {
             engineLineCache.delete(cacheKey);
-            lineGroups[index] = [];
+            lineGroups[index] = [{ engine: label, pvUci: [], multipv: 1, scoreText: '—', detail: 'failed', pvSan: '', error: errMsg }];
             publishLines();
           }
         } finally {
           clearEngineSearchProgress(runId, label);
         }
-      });
-      taskChain = queuedTask.catch(() => undefined);
-      tasks.push(queuedTask);
+      };
+      if (serialized) {
+        const queuedTask = cpuTaskChain.then(run);
+        cpuTaskChain = queuedTask.catch(() => undefined);
+        tasks.push(queuedTask);
+      } else {
+        tasks.push(run());
+      }
     };
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index];
       const cacheKey = engineAnalysisCacheKey(fen, row);
       if (!options.force && engineLineCache.has(cacheKey)) continue;
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
-        pushTask(index, cacheKey, `Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, () => workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv));
+        pushTask(index, cacheKey, `Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, () => workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv), false);
       } else if (row.family === 'lc0') {
         const label = 'Lc0';
-        if (workerReady) pushTask(index, cacheKey, label, () => workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label));
+        if (workerReady) pushTask(index, cacheKey, label, () => workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label), false);
         else if (searcher) {
           const lc0Searcher = searcher;
           pushTask(index, cacheKey, label, () => lc0Searcher.search({ positions: analysisPositions }, {
@@ -2100,7 +2116,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
             yieldEveryMs: 16,
             onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
           })
-            .then((result) => lc0AnalysisLines(result, fen, 'Lc0')));
+            .then((result) => lc0AnalysisLines(result, fen, 'Lc0')), false);
         }
       } else if (row.family === 'tiny') {
         const positions = analysisPositions;
@@ -2118,7 +2134,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
             pvDepth: 12,
             onProgress: (progress) => showMoveSearchProgress(runId, fen, label, progress),
           }))
-          .then((result) => tinyPuctAnalysisLines(result, fen, label)));
+          .then((result) => tinyPuctAnalysisLines(result, fen, label)), false);
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
         const label = kind === 'lite' ? 'SF Lite' : 'SF';
@@ -2127,7 +2143,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
           const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           return stockfishAnalysisLines(infos, fen, label);
-        })));
+        })), true);
       } else if (row.family === 'viridithas') {
         const label = `${viridithasVariantForKey(row.variant).label}`;
         const engine = getViridithasFor(row.variant);
@@ -2136,7 +2152,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        })));
+        })), true);
       } else if (row.family === 'berserk') {
         const label = `${berserkVariantForKey(row.variant).label}`;
         const engine = getBerserkFor(row.variant);
@@ -2146,7 +2162,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        })));
+        })), true);
       } else if (row.family === 'plentychess') {
         const label = `${plentyChessVariantForKey(row.variant).label}`;
         const engine = getPlentyChessFor(row.variant);
@@ -2156,14 +2172,14 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        })));
+        })), true);
       } else {
         const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label}`;
         pushTask(index, cacheKey, label, () => withCpuLease(`reckless:${row.variant}`, controller.signal, async () => withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), async (signal) => {
           const infos = await getRecklessFor(row.variant).analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        })));
+        })), true);
       }
     }
     await Promise.all(tasks);
