@@ -8,22 +8,28 @@ import {
   viridithasVariantAssetStatus,
 } from '../src/lc0/viridithasVariants.ts';
 
-test('production skips known-unshipped Viridithas relaxed asset probes', async () => {
+test('production probes deployed Viridithas relaxed asset', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
-  let calls = 0;
-  globalThis.fetch = async () => { calls += 1; return new Response(null, { status: 200 }); };
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push([String(url), init?.method]);
+    return new Response(null, { status: 200 });
+  };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
     value: { hostname: '0x88.app' },
   });
   const variant = { ...VIRIDITHAS_RELAXED_SIMD_VARIANT };
   try {
-    assert.equal(await checkViridithasVariantAsset(variant), 'missing');
-    assert.equal(viridithasVariantAssetStatus(variant), 'missing');
+    assert.equal(await checkViridithasVariantAsset(variant), 'ok');
+    assert.equal(viridithasVariantAssetStatus(variant), 'ok');
     const r2Variant = { ...VIRIDITHAS_RELAXED_SIMD_VARIANT, wasmUrl: 'https://assets.0x88.app/viridithas/viridithas-relaxed-simd128.wasm' };
-    assert.equal(await checkViridithasVariantAsset(r2Variant), 'missing');
-    assert.equal(calls, 0);
+    assert.equal(await checkViridithasVariantAsset(r2Variant), 'ok');
+    assert.deepEqual(calls, [
+      ['/viridithas/viridithas-relaxed-simd128.wasm', 'HEAD'],
+      ['https://assets.0x88.app/viridithas/viridithas-relaxed-simd128.wasm', 'HEAD'],
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);
@@ -71,7 +77,7 @@ test('production still probes deployed Viridithas SIMD asset', async () => {
   }
 });
 
-test('Viridithas default fallback skips unshipped relaxed before selecting SIMD', async () => {
+test('Viridithas default fallback keeps deployed relaxed asset', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   let calls = 0;
@@ -83,7 +89,7 @@ test('Viridithas default fallback skips unshipped relaxed before selecting SIMD'
   const relaxed = { ...VIRIDITHAS_RELAXED_SIMD_VARIANT };
   try {
     const resolved = await resolveDefaultViridithasVariantAssetFallback(relaxed, false);
-    assert.equal(resolved.key, 'simd');
+    assert.equal(resolved.key, 'relaxed-simd');
     assert.equal(calls, 1);
   } finally {
     globalThis.fetch = originalFetch;

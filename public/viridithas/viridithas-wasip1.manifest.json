@@ -1,6 +1,6 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-06-09T08:55:27.882Z",
+  "generatedAt": "2026-06-25T06:31:29.593Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "viridithas",
   "flavor": "wasip1-scalar-simd128",
@@ -12,11 +12,11 @@
   },
   "build": {
     "script": "scripts/build_viridithas_wasi.mjs",
-    "command": "npm run viridithas:build-wasi && npm run viridithas:build-simd-wasi",
+    "command": "npm run viridithas:build-wasi && npm run viridithas:build-simd-wasi && npm run viridithas:build-relaxed-simd-wasi",
     "patches": [
       "patches/viridithas-wasip1.patch"
     ],
-    "toolchain": "Rust cargo with wasm32-wasip1 target; scalar build uses +bulk-memory, SIMD build also uses +simd128."
+    "toolchain": "Rust cargo with wasm32-wasip1 target; scalar build uses +bulk-memory, SIMD build also uses +simd128, and relaxed build adds +relaxed-simd."
   },
   "artifacts": [
     {
@@ -50,6 +50,22 @@
           "ratio": 0.9474
         }
       }
+    },
+    {
+      "path": "public/viridithas/viridithas-relaxed-simd128.wasm",
+      "bytes": 57419372,
+      "sha256": "2a02492fa153cb5aec60c1abe43b4d05bc15ae0536f5c7832f9ff1cae84755a3",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 54506346,
+          "ratio": 0.9493
+        },
+        "brotli": {
+          "bytes": 54400250,
+          "ratio": 0.9474
+        }
+      }
     }
   ],
   "assets": [
@@ -58,14 +74,14 @@
       "sourceUrl": "https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst",
       "rawSha256": "2d387407b926df4dbda441cdc3e2288fee2e6a2afa8e1bd22262309ec0fb668a",
       "licenseNote": "Viridithas network required by the WASI build; preserve upstream notices with the MIT engine source and network provider provenance.",
-      "embeddedIn": "public/viridithas/viridithas.wasm and public/viridithas/viridithas-simd128.wasm"
+      "embeddedIn": "public/viridithas/viridithas.wasm, public/viridithas/viridithas-simd128.wasm, and public/viridithas/viridithas-relaxed-simd128.wasm"
     }
   ],
   "totals": {
-    "bytes": 114862755,
-    "gzipBytes": 109021121,
-    "brotliBytes": 108805196,
-    "gzipRatio": 0.9491,
+    "bytes": 172282127,
+    "gzipBytes": 163527467,
+    "brotliBytes": 163205446,
+    "gzipRatio": 0.9492,
     "brotliRatio": 0.9473
   },
   "sourceArchive": {

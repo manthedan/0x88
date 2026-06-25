@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   PLENTYCHESS_EMSCRIPTEN_DATA_URL,
   PLENTYCHESS_EMSCRIPTEN_JS_URL,
+  PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT,
   PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT,
   PLENTYCHESS_EMSCRIPTEN_VARIANT,
   PLENTYCHESS_EMSCRIPTEN_WASM_URL,
@@ -85,27 +86,38 @@ test('IPv6 loopback still probes local generated PlentyChess assets', async () =
   }
 });
 
-test('production skips known-unshipped PlentyChess asset probes', async () => {
+test('production probes deployed PlentyChess SIMD-tier asset sidecars', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
-  let calls = 0;
-  globalThis.fetch = async () => { calls += 1; return { ok: false }; };
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push([String(url), init?.method, init?.cache]);
+    return { ok: true };
+  };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
     value: { hostname: '0x88.app' },
   });
   try {
-    assert.equal(await checkPlentyChessVariantAsset(PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT), 'missing');
-    assert.equal(plentyChessVariantAssetStatus(PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT), 'missing');
-    assert.equal(await resolveDefaultPlentyChessVariantAssetFallback(PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT, false), PLENTYCHESS_EMSCRIPTEN_VARIANT);
+    assert.equal(await checkPlentyChessVariantAsset({ ...PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT }), 'present');
+    assert.equal(plentyChessVariantAssetStatus(PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT), 'present');
+    const resolved = await resolveDefaultPlentyChessVariantAssetFallback({ ...PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT }, false);
+    assert.equal(resolved.key, 'emscripten-sse41');
     const r2Variant = {
-      ...PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT,
-      jsUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-sse41.js',
-      wasmUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-sse41.wasm',
-      dataUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-sse41.data',
+      ...PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT,
+      jsUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-relaxed-simd128.js',
+      wasmUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-relaxed-simd128.wasm',
+      dataUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-relaxed-simd128.data',
     };
-    assert.equal(await checkPlentyChessVariantAsset(r2Variant), 'missing');
-    assert.equal(calls, 0);
+    assert.equal(await checkPlentyChessVariantAsset(r2Variant), 'present');
+    assert.deepEqual(calls, [
+      ['/plentychess/plentychess-emscripten-sse41.js', 'HEAD', 'no-store'],
+      ['/plentychess/plentychess-emscripten-sse41.wasm', 'HEAD', 'no-store'],
+      ['/plentychess/plentychess-emscripten-sse41.data', 'HEAD', 'no-store'],
+      ['https://assets.0x88.app/plentychess/plentychess-emscripten-relaxed-simd128.js', 'HEAD', 'no-store'],
+      ['https://assets.0x88.app/plentychess/plentychess-emscripten-relaxed-simd128.wasm', 'HEAD', 'no-store'],
+      ['https://assets.0x88.app/plentychess/plentychess-emscripten-relaxed-simd128.data', 'HEAD', 'no-store'],
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);

@@ -5,6 +5,8 @@ import {
   BERSERK_DEFAULT_VARIANT,
   BERSERK_EMSCRIPTEN_DATA_URL,
   BERSERK_EMSCRIPTEN_JS_URL,
+  BERSERK_EMSCRIPTEN_RELAXED_VARIANT,
+  BERSERK_EMSCRIPTEN_SIMD_VARIANT,
   BERSERK_EMSCRIPTEN_VARIANT,
   BERSERK_EMSCRIPTEN_WASM_URL,
   BERSERK_MAIN_NETWORK,
@@ -94,6 +96,36 @@ test('production skips known-unshipped Berserk asset probes', async () => {
     };
     assert.equal(await checkBerserkVariantAsset(r2Simd), 'missing');
     assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);
+    else delete globalThis.location;
+  }
+});
+
+test('production probes deployed Berserk Emscripten SIMD sidecars', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push([String(url), init?.method, init?.cache]);
+    return { ok: true };
+  };
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { hostname: '0x88.app' },
+  });
+  try {
+    assert.equal(await checkBerserkVariantAsset({ ...BERSERK_EMSCRIPTEN_SIMD_VARIANT }), 'present');
+    assert.equal(await checkBerserkVariantAsset({ ...BERSERK_EMSCRIPTEN_RELAXED_VARIANT }), 'present');
+    assert.deepEqual(calls, [
+      ['/berserk/berserk-emscripten-simd128.js', 'HEAD', 'no-store'],
+      ['/berserk/berserk-emscripten-simd128.wasm', 'HEAD', 'no-store'],
+      ['/berserk/berserk-emscripten-simd128.data', 'HEAD', 'no-store'],
+      ['/berserk/berserk-emscripten-relaxed-simd128.js', 'HEAD', 'no-store'],
+      ['/berserk/berserk-emscripten-relaxed-simd128.wasm', 'HEAD', 'no-store'],
+      ['/berserk/berserk-emscripten-relaxed-simd128.data', 'HEAD', 'no-store'],
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);

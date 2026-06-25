@@ -20,13 +20,19 @@ const CONFIGS = {
     },
     build: {
       script: 'scripts/build_berserk_emscripten.mjs',
-      command: 'npm run berserk:build-emscripten',
+      command: 'npm run berserk:build-emscripten && npm run berserk:build-simd-emscripten && npm run berserk:build-relaxed-simd-emscripten',
       patches: ['patches/berserk-emscripten.patch'],
     },
     artifacts: [
       'public/berserk/berserk-emscripten.js',
       'public/berserk/berserk-emscripten.wasm',
       'public/berserk/berserk-emscripten.data',
+      'public/berserk/berserk-emscripten-simd128.js',
+      'public/berserk/berserk-emscripten-simd128.wasm',
+      'public/berserk/berserk-emscripten-simd128.data',
+      'public/berserk/berserk-emscripten-relaxed-simd128.js',
+      'public/berserk/berserk-emscripten-relaxed-simd128.wasm',
+      'public/berserk/berserk-emscripten-relaxed-simd128.data',
     ],
     assets: [
       {
@@ -34,7 +40,7 @@ const CONFIGS = {
         sourceUrl: 'https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn',
         rawSha256: '9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084',
         licenseNote: 'No standalone license file found in jhonnold/berserk-networks during intake; do not publicly distribute this network until provenance/license is resolved or confirmed as covered by the engine release.',
-        embeddedIn: 'public/berserk/berserk-emscripten.data',
+        embeddedIn: 'public/berserk/berserk-emscripten.data, public/berserk/berserk-emscripten-simd128.data, and public/berserk/berserk-emscripten-relaxed-simd128.data',
       },
     ],
   },
@@ -50,13 +56,19 @@ const CONFIGS = {
     },
     build: {
       script: 'scripts/build_plentychess_emscripten.mjs',
-      command: 'npm run plentychess:build-emscripten',
+      command: 'npm run plentychess:build-emscripten && npm run plentychess:build-sse41-emscripten && npm run plentychess:build-relaxed-simd-emscripten',
       patches: ['patches/plentychess-emscripten.patch'],
     },
     artifacts: [
       'public/plentychess/plentychess-emscripten.js',
       'public/plentychess/plentychess-emscripten.wasm',
       'public/plentychess/plentychess-emscripten.data',
+      'public/plentychess/plentychess-emscripten-sse41.js',
+      'public/plentychess/plentychess-emscripten-sse41.wasm',
+      'public/plentychess/plentychess-emscripten-sse41.data',
+      'public/plentychess/plentychess-emscripten-relaxed-simd128.js',
+      'public/plentychess/plentychess-emscripten-relaxed-simd128.wasm',
+      'public/plentychess/plentychess-emscripten-relaxed-simd128.data',
     ],
     assets: [
       {
@@ -67,7 +79,7 @@ const CONFIGS = {
         processedSha256: '691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4',
         processingCommand: 'tools/process_net false',
         licenseNote: 'Yoshie2000/PlentyNetworks is licensed under GPL-3.0; preserve GPL-3.0 notices with the network asset.',
-        embeddedIn: 'public/plentychess/plentychess-emscripten.data',
+        embeddedIn: 'public/plentychess/plentychess-emscripten.data, public/plentychess/plentychess-emscripten-sse41.data, and public/plentychess/plentychess-emscripten-relaxed-simd128.data',
       },
     ],
   },
@@ -119,13 +131,14 @@ const CONFIGS = {
     },
     build: {
       script: 'scripts/build_viridithas_wasi.mjs',
-      command: 'npm run viridithas:build-wasi && npm run viridithas:build-simd-wasi',
+      command: 'npm run viridithas:build-wasi && npm run viridithas:build-simd-wasi && npm run viridithas:build-relaxed-simd-wasi',
       patches: ['patches/viridithas-wasip1.patch'],
-      toolchain: 'Rust cargo with wasm32-wasip1 target; scalar build uses +bulk-memory, SIMD build also uses +simd128.',
+      toolchain: 'Rust cargo with wasm32-wasip1 target; scalar build uses +bulk-memory, SIMD build also uses +simd128, and relaxed build adds +relaxed-simd.',
     },
     artifacts: [
       'public/viridithas/viridithas.wasm',
       'public/viridithas/viridithas-simd128.wasm',
+      'public/viridithas/viridithas-relaxed-simd128.wasm',
     ],
     assets: [
       {
@@ -133,7 +146,7 @@ const CONFIGS = {
         sourceUrl: 'https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst',
         rawSha256: '2d387407b926df4dbda441cdc3e2288fee2e6a2afa8e1bd22262309ec0fb668a',
         licenseNote: 'Viridithas network required by the WASI build; preserve upstream notices with the MIT engine source and network provider provenance.',
-        embeddedIn: 'public/viridithas/viridithas.wasm and public/viridithas/viridithas-simd128.wasm',
+        embeddedIn: 'public/viridithas/viridithas.wasm, public/viridithas/viridithas-simd128.wasm, and public/viridithas/viridithas-relaxed-simd128.wasm',
       },
     ],
   },

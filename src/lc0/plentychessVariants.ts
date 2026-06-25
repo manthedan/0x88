@@ -33,14 +33,16 @@ export const PLENTYCHESS_SOURCE_NETWORK_URL = `https://github.com/Yoshie2000/Ple
 const assetStatuses = new Map<string, PlentyChessAssetStatus>();
 const assetChecks = new Map<string, Promise<PlentyChessAssetStatus>>();
 
-// Current production only ships the smoked baseline Emscripten PlentyChess
-// sidecars. The SSE4.1/relaxed variants remain selectable for local generated
-// assets, but production should not issue doomed HEAD probes for known-unshipped
-// files because devtools reports those handled fallbacks as 404 errors.
 const DEPLOYED_PLENTYCHESS_PATHS = new Set([
   '/plentychess/plentychess-emscripten.js',
   '/plentychess/plentychess-emscripten.wasm',
   '/plentychess/plentychess-emscripten.data',
+  '/plentychess/plentychess-emscripten-sse41.js',
+  '/plentychess/plentychess-emscripten-sse41.wasm',
+  '/plentychess/plentychess-emscripten-sse41.data',
+  '/plentychess/plentychess-emscripten-relaxed-simd128.js',
+  '/plentychess/plentychess-emscripten-relaxed-simd128.wasm',
+  '/plentychess/plentychess-emscripten-relaxed-simd128.data',
 ]);
 
 function isLocalDevelopmentOrigin(): boolean {

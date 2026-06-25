@@ -41,6 +41,12 @@ const DEPLOYED_BERSERK_PATHS = new Set([
   '/berserk/berserk-emscripten.js',
   '/berserk/berserk-emscripten.wasm',
   '/berserk/berserk-emscripten.data',
+  '/berserk/berserk-emscripten-simd128.js',
+  '/berserk/berserk-emscripten-simd128.wasm',
+  '/berserk/berserk-emscripten-simd128.data',
+  '/berserk/berserk-emscripten-relaxed-simd128.js',
+  '/berserk/berserk-emscripten-relaxed-simd128.wasm',
+  '/berserk/berserk-emscripten-relaxed-simd128.data',
 ]);
 
 function isLocalDevelopmentOrigin(): boolean {

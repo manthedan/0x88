@@ -1,7 +1,7 @@
 {
   "schema": "lc0_browser.artifact_channel_manifest.v1",
   "channel": "stable",
-  "releaseId": "2026-06-23.bt4-qdq8.672059e.1",
-  "releaseManifestUrl": "/releases/2026-06-23.bt4-qdq8.672059e.1.json",
-  "generatedAt": "2026-06-23T21:13:53.186Z"
+  "releaseId": "2026-06-25.50d167086c61",
+  "releaseManifestUrl": "/releases/2026-06-25.50d167086c61.json",
+  "generatedAt": "2026-06-25T06:37:49.153Z"
 }

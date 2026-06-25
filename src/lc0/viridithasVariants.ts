@@ -37,6 +37,7 @@ export const VIRIDITHAS_RELAXED_SIMD_VARIANT: ViridithasVariant = {
 const DEPLOYED_VIRIDITHAS_PATHS = new Set([
   '/viridithas/viridithas.wasm',
   '/viridithas/viridithas-simd128.wasm',
+  '/viridithas/viridithas-relaxed-simd128.wasm',
 ]);
 
 function isLocalDevelopmentOrigin(): boolean {

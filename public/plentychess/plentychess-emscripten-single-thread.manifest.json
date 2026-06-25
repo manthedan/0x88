@@ -1,6 +1,6 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-06-05T19:00:30.034Z",
+  "generatedAt": "2026-06-25T06:37:10.817Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "plentychess",
   "flavor": "emscripten-single-thread",
@@ -13,11 +13,11 @@
   },
   "build": {
     "script": "scripts/build_plentychess_emscripten.mjs",
-    "command": "npm run plentychess:build-emscripten",
+    "command": "npm run plentychess:build-emscripten && npm run plentychess:build-sse41-emscripten && npm run plentychess:build-relaxed-simd-emscripten",
     "patches": [
       "patches/plentychess-emscripten.patch"
     ],
-    "toolchain": "emscripten/emsdk@sha256:9eed2e47b4206928b22f99d2917013ad5462d777bb24cb546a652729896badd8; emcc 6.0.0 (afa15e0c56d1292e073c2c91bafc1d5e0cdf0dd3)"
+    "toolchain": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 5.0.7-git"
   },
   "artifacts": [
     {
@@ -67,6 +67,102 @@
           "ratio": 0.5148
         }
       }
+    },
+    {
+      "path": "public/plentychess/plentychess-emscripten-sse41.js",
+      "bytes": 70933,
+      "sha256": "a8273a5bcb3f6d2d3338432d88860d613874085afa27aab90619b458a3d93dc6",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 20025,
+          "ratio": 0.2823
+        },
+        "brotli": {
+          "bytes": 17763,
+          "ratio": 0.2504
+        }
+      }
+    },
+    {
+      "path": "public/plentychess/plentychess-emscripten-sse41.wasm",
+      "bytes": 388663,
+      "sha256": "172d5436a429bd68c50374bf56df3cce3f5083ebe0a3900cd96c8791c197ef67",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 150132,
+          "ratio": 0.3863
+        },
+        "brotli": {
+          "bytes": 122026,
+          "ratio": 0.314
+        }
+      }
+    },
+    {
+      "path": "public/plentychess/plentychess-emscripten-sse41.data",
+      "bytes": 63023936,
+      "sha256": "691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 34010279,
+          "ratio": 0.5396
+        },
+        "brotli": {
+          "bytes": 32447720,
+          "ratio": 0.5148
+        }
+      }
+    },
+    {
+      "path": "public/plentychess/plentychess-emscripten-relaxed-simd128.js",
+      "bytes": 70983,
+      "sha256": "850b884c518b23cd6d84e15f408a1fa0edad02f28dd5a4ea24199cc39fe8668d",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 20035,
+          "ratio": 0.2823
+        },
+        "brotli": {
+          "bytes": 17768,
+          "ratio": 0.2503
+        }
+      }
+    },
+    {
+      "path": "public/plentychess/plentychess-emscripten-relaxed-simd128.wasm",
+      "bytes": 386827,
+      "sha256": "c030812786c33a56f706b6c84ae36ca7934c7156542dcc9b6f36e9ca2f384dc4",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 149306,
+          "ratio": 0.386
+        },
+        "brotli": {
+          "bytes": 121491,
+          "ratio": 0.3141
+        }
+      }
+    },
+    {
+      "path": "public/plentychess/plentychess-emscripten-relaxed-simd128.data",
+      "bytes": 63023936,
+      "sha256": "691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 34010279,
+          "ratio": 0.5396
+        },
+        "brotli": {
+          "bytes": 32447720,
+          "ratio": 0.5148
+        }
+      }
     }
   ],
   "assets": [
@@ -78,13 +174,13 @@
       "processedSha256": "691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4",
       "processingCommand": "tools/process_net false",
       "licenseNote": "Yoshie2000/PlentyNetworks is licensed under GPL-3.0; preserve GPL-3.0 notices with the network asset.",
-      "embeddedIn": "public/plentychess/plentychess-emscripten.data"
+      "embeddedIn": "public/plentychess/plentychess-emscripten.data, public/plentychess/plentychess-emscripten-sse41.data, and public/plentychess/plentychess-emscripten-relaxed-simd128.data"
     }
   ],
   "totals": {
-    "bytes": 63484805,
-    "gzipBytes": 34180543,
-    "brotliBytes": 32587527,
+    "bytes": 190450083,
+    "gzipBytes": 102540599,
+    "brotliBytes": 97762015,
     "gzipRatio": 0.5384,
     "brotliRatio": 0.5133
   },
