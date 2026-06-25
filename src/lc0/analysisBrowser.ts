@@ -494,9 +494,9 @@ function clearEngineSearchProgress(runId: number, label: string): void {
 }
 
 
-async function workerLc0Lines(runId: number, fen: string, visits: number, label = 'Lc0'): Promise<AnalysisLine[]> {
+async function workerLc0Lines(runId: number, fen: string, visits: number, positions: BoardState[], requestedMultiPv: number, label = 'Lc0'): Promise<AnalysisLine[]> {
   const response = await postWorker<{ result: WorkerSearchResult }>(
-    { type: 'search', input: { positions: tree.historyBoards() }, visits, batchSize: 1, multiPv: multiPv(), reportProgress: true },
+    { type: 'search', input: { positions }, visits, batchSize: 1, multiPv: requestedMultiPv, reportProgress: true },
     (id) => { activeWorkerSearchId = id; },
     (progress) => showAnalysisProgress(runId, fen, label, progress),
   );
@@ -993,14 +993,14 @@ function renderEngineList(): void {
   }).join('');
 }
 
-async function workerBigNetLines(runId: number, variant: string, fen: string, visits: number): Promise<AnalysisLine[]> {
+async function workerBigNetLines(runId: number, variant: string, fen: string, visits: number, positions: BoardState[], requestedMultiPv: number): Promise<AnalysisLine[]> {
   const { config, searcher } = bigNetFor(variant);
   const label = `Lc0 ${config.name}`;
   searcher.onDownloadProgress = (loaded, total) => showModelProgress(label, loaded, total, 'Downloading');
   try {
-    const result = await searcher.search({ positions: tree.historyBoards() }, {
+    const result = await searcher.search({ positions }, {
       visits,
-      multiPv: multiPv(),
+      multiPv: requestedMultiPv,
       batchSize: config.recommendedBatchSize,
       batchPipelineDepth: config.recommendedPipelineDepth,
       onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
@@ -1998,6 +1998,8 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   el('stop').toggleAttribute('disabled', false);
   el('analyze').toggleAttribute('disabled', true);
   const fen = tree.current.fen;
+  const analysisPositions = tree.historyBoards();
+  const analysisMultiPv = multiPv();
   const board = parseFen(fen);
   if (legalMoves(board).length === 0) {
     analyzing = false;
@@ -2007,7 +2009,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   }
   const selectedLabels = rows.map((row) => rowLabel(row)).join(' + ');
   const selectionCacheKey = analysisSelectionCacheKey(fen, rows);
-  el('message').textContent = `Analyzing (${selectedLabels}, ${multiPv()} lines)…`;
+  el('message').textContent = `Analyzing (${selectedLabels}, ${analysisMultiPv} lines)…`;
   clearAnalysisSearchProgress();
   syncBrokerParticipants(rows);
   try {
@@ -2018,38 +2020,50 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     };
     if (lineGroups.some((lines) => lines.length > 0)) publishLines();
     const tasks: Promise<void>[] = [];
-    const pushTask = (index: number, cacheKey: string, label: string, task: Promise<AnalysisLine[]>) => {
-      showIndeterminateSearchProgress(runId, fen, label);
-      tasks.push(task.then((lines) => {
-        if (runId !== activeAnalysisRunId || analysisAbort !== controller || !analyzing || controller.signal.aborted || mountAbort.signal.aborted) return;
-        if (lines.length) engineLineCache.set(cacheKey, lines);
-        else engineLineCache.delete(cacheKey);
-        lineGroups[index] = lines;
-        publishLines();
-      }).finally(() => clearEngineSearchProgress(runId, label)));
+    let taskChain = Promise.resolve();
+    const pushTask = (index: number, cacheKey: string, label: string, taskFactory: () => Promise<AnalysisLine[]>) => {
+      const queuedTask = taskChain.then(async () => {
+        if (controller.signal.aborted || mountAbort.signal.aborted) return;
+        showIndeterminateSearchProgress(runId, fen, label);
+        try {
+          const lines = await taskFactory();
+          if (runId !== activeAnalysisRunId || analysisAbort !== controller || !analyzing || controller.signal.aborted || mountAbort.signal.aborted) return;
+          if (lines.length) engineLineCache.set(cacheKey, lines);
+          else engineLineCache.delete(cacheKey);
+          lineGroups[index] = lines;
+          publishLines();
+        } finally {
+          clearEngineSearchProgress(runId, label);
+        }
+      });
+      taskChain = queuedTask.catch(() => undefined);
+      tasks.push(queuedTask);
     };
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index];
       const cacheKey = engineAnalysisCacheKey(fen, row);
       if (!options.force && engineLineCache.has(cacheKey)) continue;
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
-        pushTask(index, cacheKey, `Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, workerBigNetLines(runId, row.variant, fen, row.strength));
+        pushTask(index, cacheKey, `Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, () => workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv));
       } else if (row.family === 'lc0') {
         const label = 'Lc0';
-        if (workerReady) pushTask(index, cacheKey, label, workerLc0Lines(runId, fen, row.strength, label));
-        else if (searcher) pushTask(index, cacheKey, label, searcher.search({ positions: tree.historyBoards() }, {
-          visits: row.strength,
-          multiPv: multiPv(),
-          signal: controller.signal,
-          yieldEveryMs: 16,
-          onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
-        })
-          .then((result) => lc0AnalysisLines(result, fen, 'Lc0')));
+        if (workerReady) pushTask(index, cacheKey, label, () => workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label));
+        else if (searcher) {
+          const lc0Searcher = searcher;
+          pushTask(index, cacheKey, label, () => lc0Searcher.search({ positions: analysisPositions }, {
+            visits: row.strength,
+            multiPv: analysisMultiPv,
+            signal: controller.signal,
+            yieldEveryMs: 16,
+            onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
+          })
+            .then((result) => lc0AnalysisLines(result, fen, 'Lc0')));
+        }
       } else if (row.family === 'tiny') {
-        const positions = tree.historyBoards();
+        const positions = analysisPositions;
         const current = positions[positions.length - 1];
         const label = tinyEngineLabel(row.variant);
-        pushTask(index, cacheKey, label, tinyEvaluator(row.variant)
+        pushTask(index, cacheKey, label, () => tinyEvaluator(row.variant)
           .then((evaluator) => chooseMove(current, evaluator, {
             visits: row.strength,
             batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('tinyBatch') ?? '32') || 32))),
@@ -2057,7 +2071,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
             historyFens: tinyHistoryFens(positions),
             searchPolicy: montyLitePuctPolicy,
             includePv: true,
-            multiPv: multiPv(),
+            multiPv: analysisMultiPv,
             pvDepth: 12,
             onProgress: (progress) => showMoveSearchProgress(runId, fen, label, progress),
           }))
@@ -2065,45 +2079,45 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
         const label = kind === 'lite' ? 'SF Lite' : 'SF';
-        pushTask(index, cacheKey, label, withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
+        pushTask(index, cacheKey, label, () => withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
           const engine = getStockfish(kind);
           engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
-          const infos = await engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal });
+          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal: controller.signal });
           return stockfishAnalysisLines(infos, fen, label);
         }));
       } else if (row.family === 'viridithas') {
         const label = `${viridithasVariantForKey(row.variant).label}`;
         const engine = getViridithasFor(row.variant);
-        pushTask(index, cacheKey, label, withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
+        pushTask(index, cacheKey, label, () => withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
           await engine.newGame(controller.signal);
-          const infos = await engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal });
+          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal: controller.signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
         }));
       } else if (row.family === 'berserk') {
         const label = `${berserkVariantForKey(row.variant).label}`;
         const engine = getBerserkFor(row.variant);
-        pushTask(index, cacheKey, label, withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
+        pushTask(index, cacheKey, label, () => withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
           engine.setOptions({ threads: lease.threads });
           await engine.newGame(controller.signal);
-          const infos = await engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal });
+          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal: controller.signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
         }));
       } else if (row.family === 'plentychess') {
         const label = `${plentyChessVariantForKey(row.variant).label}`;
         const engine = getPlentyChessFor(row.variant);
-        pushTask(index, cacheKey, label, withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
+        pushTask(index, cacheKey, label, () => withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
           engine.setOptions({ threads: lease.threads });
           await engine.newGame(controller.signal);
-          const infos = await engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal });
+          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal: controller.signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
         }));
       } else {
         const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label}`;
-        pushTask(index, cacheKey, label, withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
-          const infos = await getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal });
+        pushTask(index, cacheKey, label, () => withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
+          const infos = await getRecklessFor(row.variant).analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal: controller.signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
         }));
