@@ -13,7 +13,7 @@ import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
 import { BROWSER_RUNTIME_AUDIT_EVENT, formatBrowserRuntimeAudit, publishBrowserRuntimeAudit, type BrowserRuntimeAuditDetail } from '../nn/runtimeAudit.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
-import { ANALYSIS_DRAWABLE_BRUSHES, engineBrushes, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, tinyPuctAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
+import { ANALYSIS_DRAWABLE_BRUSHES, engineBrushes, engineColorKey, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, tinyPuctAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
 import { annotatedPgn, reviewGame, type GameReview, type ReviewPosition, type ReviewedMove } from './gameReview.ts';
 import { lineChartSvg } from './charts.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
@@ -1265,10 +1265,26 @@ function renderEvalBar() {
 }
 
 function renderLegend(lines: AnalysisLine[]) {
-  const keys = [...new Set(lines.map((line) => line.engine))].map((engine) => ({ label: engine, swatch: engineBrushes(engine).swatch }));
-  if (currentBookStats().length) keys.push({ label: 'Book (most played)', swatch: BOOK_SWATCH });
+  const engines = [...new Set(lines.map((line) => line.engine))];
+  const colorKeys = new Map<string, string[]>();
+  for (const engine of engines) {
+    const key = engineColorKey(engine);
+    const arr = colorKeys.get(key) ?? [];
+    arr.push(engine);
+    colorKeys.set(key, arr);
+  }
+  const familyLabels: Record<string, string> = {
+    green: 'Lc0', blue: 'Stockfish', red: 'Reckless',
+    purple: 'Viridithas', orange: 'Berserk', cyan: 'PlentyChess', pink: 'Engine', yellow: 'Engine',
+  };
+  const keys = engines.map((engine) => {
+    const key = engineColorKey(engine);
+    const label = (colorKeys.get(key)?.length ?? 1) > 1 ? engine : (familyLabels[key] ?? engine);
+    return { label, swatch: engineBrushes(engine).swatch };
+  });
+  if (currentBookStats().length) keys.push({ label: 'Book', swatch: BOOK_SWATCH });
   el('engineLegend').innerHTML = keys.map((key) =>
-    `<span class="key"><span class="dot" style="background:${key.swatch}"></span>${engineLogoHtmlForName(key.label)}${htmlEscape(key.label)}</span>`).join('');
+    `<span class="key"><span class="dot" style="background:${key.swatch}"></span>${htmlEscape(key.label)}</span>`).join('');
 }
 
 function firstSanMove(line: AnalysisLine): string {
@@ -1308,12 +1324,19 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
   const spreadText = evalSpread === null ? 'eval spread unavailable' : `eval spread ${signedCp(evalSpread)} cp`;
   el('engineConsensus').textContent = `${consensusText} · ${spreadText}`;
   const reference = finiteScores.length ? finiteScores[0] : undefined;
+  const colorKeys = new Map<string, number>();
+  for (const line of bestByEngine) {
+    const k = engineColorKey(line.engine);
+    colorKeys.set(k, (colorKeys.get(k) ?? 0) + 1);
+  }
   body.innerHTML = bestByEngine.map((line) => {
     const swatch = engineBrushes(line.engine).swatch;
     const delta = reference === undefined || line.scoreCp === undefined ? '—' : signedCp(line.scoreCp - reference);
     const agreed = line.pvUci[0] === consensusUci && (consensus?.[1].count ?? 0) > 1;
-    return `<tr style="border-left:3px solid ${swatch}">`
-      + `<td><span class="engine-name-with-logo">${engineLogoHtmlForName(line.engine)}${htmlEscape(line.engine)}</span></td>`
+    const needsName = (colorKeys.get(engineColorKey(line.engine)) ?? 1) > 1;
+    const label = needsName ? `<span class="engine-name-with-logo">${engineLogoHtmlForName(line.engine)}${htmlEscape(line.engine)}</span>` : engineLogoHtmlForName(line.engine);
+    return `<tr data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}; cursor:pointer">`
+      + `<td>${label}</td>`
       + `<td class="mono ${agreed ? 'agree' : ''}">${htmlEscape(firstSanMove(line))}</td>`
       + `<td class="mono">${htmlEscape(line.scoreText)}</td>`
       + `<td class="mono">${htmlEscape(delta)}</td>`
@@ -2337,6 +2360,17 @@ function wireEvents() {
     if (pv) hoverLine(pv.split(' ').filter(Boolean), li!.getAttribute('data-engine') ?? 'LC0');
   });
   el('lines').addEventListener('mouseout', () => setShapes(bestShapes()));
+  el('engineCompare').querySelector('tbody')!.addEventListener('click', (event) => {
+    const tr = (event.target as HTMLElement).closest('tr[data-uci]');
+    const uci = tr?.getAttribute('data-uci');
+    if (uci) { tree.addUci(uci); afterNavigation(); }
+  });
+  el('engineCompare').querySelector('tbody')!.addEventListener('mouseover', (event) => {
+    const tr = (event.target as HTMLElement).closest('tr[data-pv]');
+    const pv = tr?.getAttribute('data-pv');
+    if (pv) hoverLine(pv.split(' ').filter(Boolean), tr!.getAttribute('data-engine') ?? 'LC0');
+  });
+  el('engineCompare').querySelector('tbody')!.addEventListener('mouseout', () => setShapes(bestShapes()));
   el('importGames').addEventListener('click', importGames);
   el('fetchGames').addEventListener('click', () => { void fetchGames(); });
   el('downloadPgn').addEventListener('click', downloadPgn);

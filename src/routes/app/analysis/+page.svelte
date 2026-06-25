@@ -54,21 +54,23 @@
     <div id="movelist" class="movelist move-panel"></div>
   </section>
   <section class="panel app-sidebar" aria-label="Analysis">
-    <div class="row">
-      <button id="analyze" class="primary" type="button" disabled>Analyze</button>
-      <button id="stop" type="button" disabled>Stop</button>
-      <label class="small"><input type="checkbox" id="autoAnalyze" checked /> auto</label>
-      <div class="field"><label for="multiPvInput">Lines</label>
-        <input id="multiPvInput" type="number" min="1" max="10" step="1" value="3" /></div>
-    </div>
-    <div id="engineList" class="engine-list"></div>
-    <div class="row">
-      <button id="addEngine" type="button">+ Add engine</button>
-      {#if devMode}
-      <div class="field"><label for="engineProfileSelect">Profile</label>
-        <select id="engineProfileSelect"><option value="">default</option></select></div>
-      {/if}
-    </div>
+    <details class="section-block" open>
+      <summary>Engines</summary>
+      <div class="row">
+        <button id="analyze" class="primary" type="button" disabled>Analyze</button>
+        <button id="stop" type="button" disabled>Stop</button>
+        <label class="small"><input type="checkbox" id="autoAnalyze" checked /> auto</label>
+        <div class="field"><label for="multiPvInput">Lines</label>
+          <input id="multiPvInput" type="number" min="1" max="10" step="1" value="3" /></div>
+      </div>
+      <div id="engineList" class="engine-list"></div>
+      <div class="row">
+        <button id="addEngine" type="button">+ Add engine</button>
+        {#if devMode}
+        <div class="field"><label for="engineProfileSelect">Profile</label>
+          <select id="engineProfileSelect"><option value="">default</option></select></div>
+        {/if}
+      </div>
     {#if devMode}
     <details class="advanced-settings">
       <summary>Profiles &amp; engine settings</summary>
@@ -111,6 +113,7 @@
       <div id="recklessRuntimeInfo"></div>
     </div>
     {/if}
+    </details>
     <details class="section-block" open>
       <summary>Engine comparison</summary>
       <div id="engineConsensus" class="compare-summary">No analysis yet.</div>
@@ -285,6 +288,7 @@
   :global(table.engine-compare .mono){font-family:var(--mono); white-space:nowrap}
   :global(table.engine-compare .pv){font-family:var(--mono); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px}
   :global(table.engine-compare .agree){color:var(--accent); font-weight:700}
+  :global(table.engine-compare tbody tr:hover){background:var(--soft)}
   :global(.model-load-progress), :global(.search-progress-grid){
     margin-top:8px; padding:8px; border:1px solid var(--rule);
     border-radius:var(--radius-sm); background:var(--panel-inset);

@@ -160,9 +160,9 @@ const ENGINE_STRENGTH: Record<EngineSurface, Record<EngineFamily, EngineStrength
     tiny: { unit: 'visits', min: 1, max: 100000, def: 400 },
     sf: { unit: 'depth', min: 1, max: 30, def: 14 },
     reckless: { unit: 'depth', min: 1, max: 30, def: 14 },
-    viridithas: { unit: 'depth', min: 1, max: 20, def: 8 },
-    berserk: { unit: 'depth', min: 1, max: 20, def: 8 },
-    plentychess: { unit: 'depth', min: 1, max: 20, def: 8 },
+    viridithas: { unit: 'depth', min: 1, max: 20, def: 14 },
+    berserk: { unit: 'depth', min: 1, max: 20, def: 14 },
+    plentychess: { unit: 'depth', min: 1, max: 20, def: 14 },
   },
 };
 
