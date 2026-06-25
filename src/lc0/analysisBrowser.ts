@@ -1113,8 +1113,18 @@ function getRecklessFor(variantKey: string): RecklessEngine {
   if (!engine) {
     engine = createRecklessEngine(variant, renderRecklessRuntimeInfo);
     recklessByVariant.set(key, engine);
+    prewarmCpuEngine('Reckless', engine, renderRecklessRuntimeInfo);
   }
   return engine;
+}
+
+function prewarmCpuEngine(label: string, engine: { prewarm(signal?: AbortSignal): Promise<void> }, onStatus: () => void): void {
+  void engine.prewarm(mountAbort.signal)
+    .then(onStatus)
+    .catch((error) => {
+      if ((error as Error).name !== 'AbortError') console.warn(`${label} prewarm failed`, error);
+      onStatus();
+    });
 }
 
 function getViridithasFor(variantKey: string): ViridithasEngine {
@@ -1124,6 +1134,7 @@ function getViridithasFor(variantKey: string): ViridithasEngine {
   if (!engine) {
     engine = createViridithasEngine(variant);
     viridithasByVariant.set(key, engine);
+    prewarmCpuEngine('Viridithas', engine, renderRecklessRuntimeInfo);
   }
   return engine;
 }
