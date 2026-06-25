@@ -11,7 +11,7 @@ const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
 const AUDIT_EVENT = 'lc0-browser-runtime-audit';
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_tiny_strict_custom_webgpu_smoke.mjs [options]\n\nRuns strict Tiny Leela custom WebGPU browser smokes for /app/analysis and /app/arena. The gate fails if the Tiny runtime audit does not resolve runtime=custom-webgpu without fallback.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-surface timeout (default ${DEFAULT_TIMEOUT_MS})\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --skip-analysis       Skip /app/analysis smoke\n  --skip-arena          Skip /app/arena smoke\n  --dry-run             Print planned URLs without running\n  -h, --help            Show this help\n`);
+  console.log(`Usage: node scripts/lc0_tiny_strict_custom_webgpu_smoke.mjs [options]\n\nRuns strict Centipawn custom WebGPU browser smokes for /app/analysis and /app/arena. The gate fails if the Centipawn runtime audit does not resolve runtime=custom-webgpu without fallback.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-surface timeout (default ${DEFAULT_TIMEOUT_MS})\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --skip-analysis       Skip /app/analysis smoke\n  --skip-arena          Skip /app/arena smoke\n  --dry-run             Print planned URLs without running\n  -h, --help            Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -142,7 +142,7 @@ const installAuditCollector = `(() => {
 })()`;
 
 function strictCustomAudit(events) {
-  return (Array.isArray(events) ? events : []).filter((event) => event?.family === 'tiny' && event?.requestedRuntime === 'custom-webgpu');
+  return (Array.isArray(events) ? events : []).filter((event) => event?.family === 'centipawn' && event?.requestedRuntime === 'custom-webgpu');
 }
 
 function validateStrictCustomAudit(label, status) {
@@ -165,13 +165,13 @@ async function runAnalysisSmoke(args) {
   process.stderr.write(`[lc0-tiny-strict] analysis ${url}\n`);
   try {
     await runAgent(args, ['open', String(url)], 30_000, session);
-    await runAgent(args, ['wait', '--text', 'Tiny:', '--timeout', '60000'], 65_000, session);
+    await runAgent(args, ['wait', '--text', 'Centipawn:', '--timeout', '60000'], 65_000, session);
     await evalPage(args, session, installAuditCollector);
     await evalPage(args, session, `(() => {
       const setValue = (node, value) => { node.value = value; node.dispatchEvent(new Event('change', { bubbles: true })); };
       const fam = document.querySelector('#engineList .row-fam');
       if (!fam) throw new Error('missing analysis engine family select');
-      setValue(fam, 'tiny');
+      setValue(fam, 'centipawn');
       setTimeout(() => {
         const variant = document.querySelector('#engineList .row-var');
         const strength = document.querySelector('#engineList .row-strength');
@@ -189,7 +189,7 @@ async function runAnalysisSmoke(args) {
       runtimeInfo: document.querySelector('#recklessRuntimeInfo')?.textContent ?? '',
       lc0Audit: document.querySelector('#runtimeAudit')?.textContent ?? '',
       auditEvents: window.__lc0BrowserRuntimeAuditEvents ?? []
-    }))()`, (value) => validateStrictCustomAudit('analysis', value) && String(value.lines ?? '').includes('Tiny Leela · custom WebGPU'), args.timeoutMs);
+    }))()`, (value) => validateStrictCustomAudit('analysis', value) && String(value.lines ?? '').includes('Centipawn · custom WebGPU'), args.timeoutMs);
     return { name: 'analysis', status: 'LC0_TINY_ANALYSIS_STRICT_CUSTOM_WEBGPU_DONE', url: String(url), auditEvents: strictCustomAudit(status.auditEvents), message: status.message, lines: status.lines, runtimeInfo: status.runtimeInfo, lc0Audit: status.lc0Audit };
   } finally {
     await closeSession(args, session);
@@ -199,11 +199,11 @@ async function runAnalysisSmoke(args) {
 async function runArenaSmoke(args) {
   const session = `lc0-tiny-strict-${process.pid}-arena`;
   const url = new URL('/app/arena', args.baseUrl);
-  Object.entries({ seatA: 'tiny:bt4-custom:1', seatB: 'tiny:bt4-custom:1', games: 1, delayMs: 0, cacheEntries: 64 }).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+  Object.entries({ seatA: 'centipawn:bt4-custom:1', seatB: 'centipawn:bt4-custom:1', games: 1, delayMs: 0, cacheEntries: 64 }).forEach(([k, v]) => url.searchParams.set(k, String(v)));
   process.stderr.write(`[lc0-tiny-strict] arena ${url}\n`);
   try {
     await runAgent(args, ['open', String(url)], 30_000, session);
-    await runAgent(args, ['wait', '--text', 'Tiny hybrid bundle', '--timeout', '90000'], 95_000, session);
+    await runAgent(args, ['wait', '--text', 'Centipawn hybrid bundle', '--timeout', '90000'], 95_000, session);
     await evalPage(args, session, installAuditCollector);
     await evalPage(args, session, `(() => { document.querySelector('#start')?.click(); return true; })()`);
     const status = await pollUntil(args, session, 'arena strict custom WebGPU', `(() => ({
@@ -226,7 +226,7 @@ async function main() {
   if (args.help) { usage(); return; }
   const plan = [];
   if (!args.skipAnalysis) plan.push({ name: 'analysis', url: `${args.baseUrl}/app/analysis?tinyBatch=1` });
-  if (!args.skipArena) plan.push({ name: 'arena', url: `${args.baseUrl}/app/arena?seatA=tiny:bt4-custom:1&seatB=tiny:bt4-custom:1&games=1` });
+  if (!args.skipArena) plan.push({ name: 'arena', url: `${args.baseUrl}/app/arena?seatA=centipawn:bt4-custom:1&seatB=centipawn:bt4-custom:1&games=1` });
   if (args.dryRun) { console.log(JSON.stringify({ baseUrl: args.baseUrl, plan }, null, 2)); return; }
   const server = startServer(args);
   const rows = [];

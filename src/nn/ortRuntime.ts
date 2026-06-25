@@ -108,7 +108,7 @@ function roundMs(ms: number): number {
 
 export function tinyLeelaLogLatency(label: string, payload: Record<string, unknown>): void {
   if (!tinyLeelaDebugEnabled('latency')) return;
-  console.info(`Tiny Leela latency: ${label}`, Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, typeof value === 'number' ? roundMs(value) : value])));
+  console.info(`Centipawn latency: ${label}`, Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, typeof value === 'number' ? roundMs(value) : value])));
 }
 
 function truthyParam(value: string | null | undefined): boolean {
@@ -546,8 +546,8 @@ function logOrtSessionReady(providers: string[], ms: number, note?: string) {
   const requested = requestedOrtExecutionProvider();
   const usesWebGpuProvider = providers.includes('webgpu');
   const message = usesWebGpuProvider
-    ? 'Tiny Leela ORT: session ready with WebGPU provider requested/accepted.'
-    : 'Tiny Leela ORT: session ready with WASM provider.';
+    ? 'Centipawn ORT: session ready with WebGPU provider requested/accepted.'
+    : 'Centipawn ORT: session ready with WASM provider.';
   console.info(message, {
     requestedEp: requested,
     sessionProviders: providers,
@@ -679,7 +679,7 @@ export async function createOrtSession(modelPath: string | Uint8Array | ArrayBuf
     const message = err instanceof Error ? err.message : String(err);
     recordSessionAttempt(providers, false, t1 - t0, message);
     if (!shouldFallbackToWasmAfterOrtFailure(requestedOrtExecutionProvider(), providers)) throw err;
-    console.warn(`Tiny Leela: ORT WebGPU session failed; falling back to WASM. ${message}`);
+    console.warn(`Centipawn: ORT WebGPU session failed; falling back to WASM. ${message}`);
     const fallbackT0 = typeof performance === 'undefined' ? Date.now() : performance.now();
     const session = await ort.InferenceSession.create(modelPath as never, sessionOptions(['wasm']));
     const fallbackT1 = typeof performance === 'undefined' ? Date.now() : performance.now();

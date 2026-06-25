@@ -11,7 +11,7 @@ import {
   lc0AnalysisLines,
   qToCentipawns,
   stockfishAnalysisLines,
-  tinyPuctAnalysisLines,
+  centipawnPuctAnalysisLines,
 } from '../src/lc0/analysisFormat.ts';
 import { parseStockfishInfo } from '../src/lc0/stockfishEngine.ts';
 
@@ -69,7 +69,7 @@ function startMove(uci) {
   return move;
 }
 
-test('tinyPuctAnalysisLines builds Tiny Leela MultiPV lines with SAN and root-mover score', () => {
+test('centipawnPuctAnalysisLines builds Centipawn MultiPV lines with SAN and root-mover score', () => {
   const d4 = startMove('d2d4');
   const nf3 = startMove('g1f3');
   const result = {
@@ -81,9 +81,9 @@ test('tinyPuctAnalysisLines builds Tiny Leela MultiPV lines with SAN and root-mo
     ],
     multiPvLines: [[{ move: d4, visits: 24, q: 0.18 }], [{ move: nf3, visits: 10, q: 0.03 }]],
   };
-  const lines = tinyPuctAnalysisLines(result, START_FEN, 'Tiny Leela · auto');
+  const lines = centipawnPuctAnalysisLines(result, START_FEN, 'Centipawn · auto');
   assert.equal(lines.length, 2);
-  assert.equal(lines[0].engine, 'Tiny Leela · auto');
+  assert.equal(lines[0].engine, 'Centipawn · auto');
   assert.equal(lines[0].detail, '24 visits');
   assert.ok(lines[0].scoreCp > lines[1].scoreCp);
   assert.match(lines[0].pvSan, /^d4/);

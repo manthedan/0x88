@@ -87,7 +87,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
   const customRequested = shouldAttemptCustomRuntime(modelId, requestedRuntime);
   const auditBase = {
     source: 'createBrowserSquareformerRuntimeEvaluator',
-    family: 'tiny',
+    family: 'centipawn',
     engineLabel: spec.label,
     modelId,
     modelUrl: spec.onnx,

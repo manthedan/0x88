@@ -1,4 +1,4 @@
-export type EngineFamily = 'lc0' | 'tiny' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
+export type EngineFamily = 'lc0' | 'centipawn' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
 export type EngineSurface = 'arena' | 'analysis';
 export type EngineStrengthUnit = 'visits' | 'depth';
 
@@ -34,7 +34,7 @@ export interface EngineFamilyCatalogEntry {
   note: string;
 }
 
-export const ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess', 'tiny'];
+export const ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess', 'centipawn'];
 const V0_ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'];
 const V0_RECKLESS_VARIANTS = new Set(['full', 'simd', 'relaxed-simd']);
 const V0_BERSERK_VARIANTS = new Set(['emscripten', 'emscripten-simd', 'emscripten-relaxed']);
@@ -51,13 +51,13 @@ export const ENGINE_FAMILY_CATALOG: Record<EngineFamily, EngineFamilyCatalogEntr
     docHref: 'docs/engine_catalog.md#lc0-family',
     note: 'Browser-native neural/search lane; small model is stable, BT4 and runtime experiments are gated.',
   },
-  tiny: {
-    id: 'tiny',
-    label: 'Tiny Leela',
-    shortLabel: 'TL',
+  centipawn: {
+    id: 'centipawn',
+    label: 'Centipawn',
+    shortLabel: 'CP',
     status: 'mixed',
-    docHref: 'docs/engine_catalog.md#tiny-family',
-    note: 'Tiny SquareFormer family; ORT is baseline and promoted custom WebGPU can be selected separately from LC0.',
+    docHref: 'docs/engine_catalog.md#centipawn-family',
+    note: 'Centipawn SquareFormer neural family; ORT is baseline and promoted custom WebGPU can be selected separately from LC0.',
   },
   sf: {
     id: 'sf',
@@ -111,7 +111,7 @@ export interface EngineFamilyResourceProfile {
 // raising maxThreads here; the broker needs no other change.
 export const ENGINE_RESOURCE_PROFILES: Record<EngineFamily, EngineFamilyResourceProfile> = {
   lc0: { resourceClass: 'gpu', maxThreads: 1 },
-  tiny: { resourceClass: 'gpu', maxThreads: 1 },
+  centipawn: { resourceClass: 'gpu', maxThreads: 1 },
   sf: { resourceClass: 'cpu', maxThreads: 32 },
   reckless: { resourceClass: 'cpu', maxThreads: 1 },
   viridithas: { resourceClass: 'cpu', maxThreads: 1 },
@@ -134,7 +134,7 @@ export function isLc0BigNetVariant(variant: string): variant is 'bt4' | 't3' {
   return variant === 'bt4' || variant === 't3';
 }
 
-export const TINY_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
+export const CENTIPAWN_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
   { value: 'bt4-auto', label: 'BT4 Anneal Muon Best · runtime auto' },
   { value: 'bt4-ort', label: 'BT4 Anneal Muon Best · ORT baseline' },
   { value: 'bt4-custom', label: 'BT4 Anneal Muon Best · custom WebGPU strict', experimental: true },
@@ -148,7 +148,7 @@ export const STOCKFISH_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
 const ENGINE_STRENGTH: Record<EngineSurface, Record<EngineFamily, EngineStrengthMeta>> = {
   arena: {
     lc0: { unit: 'visits', min: 1, max: 100000, def: 100 },
-    tiny: { unit: 'visits', min: 1, max: 100000, def: 100 },
+    centipawn: { unit: 'visits', min: 1, max: 100000, def: 100 },
     sf: { unit: 'depth', min: 1, max: 40, def: 8 },
     reckless: { unit: 'depth', min: 1, max: 30, def: 4 },
     viridithas: { unit: 'depth', min: 1, max: 20, def: 6 },
@@ -157,7 +157,7 @@ const ENGINE_STRENGTH: Record<EngineSurface, Record<EngineFamily, EngineStrength
   },
   analysis: {
     lc0: { unit: 'visits', min: 1, max: 100000, def: 400 },
-    tiny: { unit: 'visits', min: 1, max: 100000, def: 400 },
+    centipawn: { unit: 'visits', min: 1, max: 100000, def: 400 },
     sf: { unit: 'depth', min: 1, max: 30, def: 14 },
     reckless: { unit: 'depth', min: 1, max: 30, def: 6 },
     viridithas: { unit: 'depth', min: 1, max: 20, def: 6 },
@@ -212,8 +212,8 @@ export function lc0VariantOptions(bt4Supported: boolean): EngineVariantOption[] 
   return variants.map((option) => ({ ...option, disabled: isLc0BigNetVariant(option.value) ? !bt4Supported : option.disabled }));
 }
 
-export function tinyVariantOptions(): EngineVariantOption[] {
-  return TINY_ENGINE_VARIANTS.map((option) => ({ ...option }));
+export function centipawnVariantOptions(): EngineVariantOption[] {
+  return CENTIPAWN_ENGINE_VARIANTS.map((option) => ({ ...option }));
 }
 
 export function stockfishVariantOptions(): EngineVariantOption[] {
@@ -221,8 +221,8 @@ export function stockfishVariantOptions(): EngineVariantOption[] {
   return variants.map((option) => ({ ...option }));
 }
 
-export function defaultStaticEngineVariant(family: 'lc0' | 'tiny' | 'sf' | 'berserk' | 'plentychess' | 'viridithas'): string {
-  if (family === 'tiny') return TINY_ENGINE_VARIANTS[0].value;
+export function defaultStaticEngineVariant(family: 'lc0' | 'centipawn' | 'sf' | 'berserk' | 'plentychess' | 'viridithas'): string {
+  if (family === 'centipawn') return CENTIPAWN_ENGINE_VARIANTS[0].value;
   if (family === 'sf') return STOCKFISH_ENGINE_VARIANTS[0].value;
   if (family === 'berserk' || family === 'plentychess') return 'emscripten';
   if (family === 'viridithas') return 'default';
@@ -240,12 +240,21 @@ export function stockfishEngineLabel(variant: string, surface: EngineSurface): s
   return variant === 'lite' ? 'Stockfish Lite' : 'Stockfish';
 }
 
-export function tinyEngineLabel(variant: string): string {
-  if (variant === 'bt4-ort') return 'Tiny Leela · ORT';
-  if (variant === 'bt4-custom') return 'Tiny Leela · custom WebGPU';
-  return 'Tiny Leela · auto';
+export function centipawnEngineLabel(variant: string): string {
+  if (variant === 'bt4-ort') return 'Centipawn · ORT';
+  if (variant === 'bt4-custom') return 'Centipawn · custom WebGPU';
+  return 'Centipawn · auto';
 }
 
 export function isEngineFamily(value: string): value is EngineFamily {
-  return value === 'lc0' || value === 'tiny' || value === 'sf' || value === 'reckless' || value === 'viridithas' || value === 'berserk' || value === 'plentychess';
+  return value === 'lc0' || value === 'centipawn' || value === 'sf' || value === 'reckless' || value === 'viridithas' || value === 'berserk' || value === 'plentychess';
+}
+
+/** Legacy family aliases kept so pre-rename deep-links keep resolving (e.g. ?engine=tiny before the Centipawn rename). */
+const LEGACY_ENGINE_FAMILY_ALIASES: Record<string, EngineFamily> = { tiny: 'centipawn' };
+
+/** Map a possibly-legacy family string to its canonical key, or null when unknown. */
+export function canonicalEngineFamily(value: string): EngineFamily | null {
+  const aliased = LEGACY_ENGINE_FAMILY_ALIASES[value] ?? value;
+  return isEngineFamily(aliased) ? aliased : null;
 }

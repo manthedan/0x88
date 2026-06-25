@@ -1,5 +1,5 @@
 {
-  "schema": "lc0-webgpu.hosted-artifact-index.v1",
+  "schema": "0x88.hosted-artifact-index.v1",
   "generatedAt": "2026-06-10T00:00:00.000Z",
   "documentationPath": "docs/hosted_artifacts.md",
   "distributionPolicyPath": "docs/engine_artifact_distribution.md",

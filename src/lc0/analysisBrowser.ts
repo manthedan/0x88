@@ -13,7 +13,7 @@ import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
 import { BROWSER_RUNTIME_AUDIT_EVENT, formatBrowserRuntimeAudit, publishBrowserRuntimeAudit, type BrowserRuntimeAuditDetail } from '../nn/runtimeAudit.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
-import { ANALYSIS_DRAWABLE_BRUSHES, engineBrushes, engineColorKey, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, tinyPuctAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
+import { ANALYSIS_DRAWABLE_BRUSHES, engineBrushes, engineColorKey, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, centipawnPuctAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
 import { annotatedPgn, reviewGame, type GameReview, type ReviewPosition, type ReviewedMove } from './gameReview.ts';
 import { lineChartSvg } from './charts.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
@@ -38,7 +38,7 @@ import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRe
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
 import { BIG_NETS, bigNetAssetStatusSync, bigNetLoadWarning, bigNetOptionState, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig, type Bt4WorkerSearcher } from './bt4Engine.ts';
 import { acquireBigNetSearcher, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher, type BigNetKey } from './bigNetSessionPool.ts';
-import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { ENGINE_FAMILY_PRIORITY, canonicalEngineFamily, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, centipawnEngineLabel, centipawnVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
@@ -51,9 +51,9 @@ const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled
 const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
 const PACK_URL = isV0DeployProfile() ? DEFAULT_PACK_URL : resolvePublicAssetUrl(params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL);
-const DEFAULT_TINY_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
-const DEFAULT_TINY_META_URL = '/models/bt4_anneal_muon_best.meta.json';
-const DEFAULT_TINY_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
+const DEFAULT_CENTIPAWN_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
+const DEFAULT_CENTIPAWN_META_URL = '/models/bt4_anneal_muon_best.meta.json';
+const DEFAULT_CENTIPAWN_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
 const DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL = '/runtimes/lc0-' + 'tvm' + 'js-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json';
 const LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole-onnx-webgpu' as const;
 type Lc0AnalysisRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads' | typeof LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
@@ -81,9 +81,9 @@ function sameOriginPathParam(names: string[], fallback: string, allowedPrefixes:
   return fallback;
 }
 
-const TINY_MODEL_URL = sameOriginPathParam(['tinyModel', 'tinyOnnx'], DEFAULT_TINY_MODEL_URL, ['/models/']);
-const TINY_META_URL = sameOriginPathParam(['tinyMeta'], DEFAULT_TINY_META_URL, ['/models/']);
-const TINY_HYBRID_MANIFEST_URL = sameOriginPathParam(['tinyManifest', 'manifest', 'manifestUrl'], DEFAULT_TINY_HYBRID_MANIFEST_URL, ['/runtimes/']);
+const CENTIPAWN_MODEL_URL = sameOriginPathParam(['centipawnModel', 'centipawnOnnx', 'tinyModel', 'tinyOnnx'], DEFAULT_CENTIPAWN_MODEL_URL, ['/models/']);
+const CENTIPAWN_META_URL = sameOriginPathParam(['centipawnMeta', 'tinyMeta'], DEFAULT_CENTIPAWN_META_URL, ['/models/']);
+const CENTIPAWN_HYBRID_MANIFEST_URL = sameOriginPathParam(['centipawnManifest', 'manifest', 'manifestUrl', 'tinyManifest'], DEFAULT_CENTIPAWN_HYBRID_MANIFEST_URL, ['/runtimes/']);
 const LC0_WHOLE_MODEL_MANIFEST_URL = sameOriginPathParam(['wholeModelManifest', 'wholeModelManifestUrl', 'tvm' + 'jsManifest'], DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL, ['/runtimes/lc0-' + 'tvm' + 'js-webgpu/']);
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
@@ -91,11 +91,11 @@ let searcher: Lc0PuctSearcher | null = null;
 let mainEvaluator: Lc0EvaluationProvider | null = null;
 let stockfishLite: StockfishEngine | null = null;
 let stockfishFull: StockfishEngine | null = null;
-const tinyEvaluatorPromises = new Map<string, Promise<Evaluator>>();
-const tinyEvaluators = new Set<CachedEvaluator>();
-const tinyEvaluatorsByKey = new Map<string, CachedEvaluator>();
-let tinyEvaluatorGeneration = 0;
-let tinyHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
+const centipawnEvaluatorPromises = new Map<string, Promise<Evaluator>>();
+const centipawnEvaluators = new Set<CachedEvaluator>();
+const centipawnEvaluatorsByKey = new Map<string, CachedEvaluator>();
+let centipawnEvaluatorGeneration = 0;
+let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 
 function initialPerformanceDial(): PerformanceDial {
   const raw = params.get('perfDial');
@@ -551,122 +551,122 @@ function uciShape(uci: string, brush: string): DrawShape | null {
 }
 function multiPv(): number { return Math.max(1, Math.floor(Number(inputEl('multiPvInput').value) || 3)); }
 
-function tinyRuntimeForVariant(variant: string): 'auto' | 'ort' | 'custom-webgpu' {
+function centipawnRuntimeForVariant(variant: string): 'auto' | 'ort' | 'custom-webgpu' {
   if (variant.endsWith('-ort')) return 'ort';
   if (variant.endsWith('-custom')) return 'custom-webgpu';
   return 'auto';
 }
 
-function tinyRuntimeFallbackForVariant(variant: string): boolean {
+function centipawnRuntimeFallbackForVariant(variant: string): boolean {
   return !variant.endsWith('-custom');
 }
 
-function tinyHybridManifestStatusText(): string {
-  if (tinyHybridManifestStatus === 'present') return `Tiny hybrid bundle present (${TINY_HYBRID_MANIFEST_URL})`;
-  if (tinyHybridManifestStatus === 'missing') return `Tiny hybrid bundle missing; auto uses ORT fallback (${TINY_HYBRID_MANIFEST_URL})`;
-  return `Tiny hybrid bundle checking (${TINY_HYBRID_MANIFEST_URL})`;
+function centipawnHybridManifestStatusText(): string {
+  if (centipawnHybridManifestStatus === 'present') return `Centipawn hybrid bundle present (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
+  if (centipawnHybridManifestStatus === 'missing') return `Centipawn hybrid bundle missing; auto uses ORT fallback (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
+  return `Centipawn hybrid bundle checking (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
 }
 
-async function refreshTinyHybridManifestStatus(): Promise<void> {
+async function refreshCentipawnHybridManifestStatus(): Promise<void> {
   try {
-    const res = await fetch(TINY_HYBRID_MANIFEST_URL, { method: 'HEAD', cache: 'no-store' });
-    tinyHybridManifestStatus = res.ok ? 'present' : 'missing';
+    const res = await fetch(CENTIPAWN_HYBRID_MANIFEST_URL, { method: 'HEAD', cache: 'no-store' });
+    centipawnHybridManifestStatus = res.ok ? 'present' : 'missing';
   } catch {
-    tinyHybridManifestStatus = 'missing';
+    centipawnHybridManifestStatus = 'missing';
   }
-  if (tinyHybridManifestStatus === 'missing') {
-    for (const row of engineRows) if (row.family === 'tiny' && row.variant === 'bt4-custom') row.variant = 'bt4-auto';
+  if (centipawnHybridManifestStatus === 'missing') {
+    for (const row of engineRows) if (row.family === 'centipawn' && row.variant === 'bt4-custom') row.variant = 'bt4-auto';
     renderEngineList();
   }
   renderRecklessRuntimeInfo();
 }
 
-function tinyEvaluatorCacheKey(variant: string): string {
-  const runtime = tinyRuntimeForVariant(variant);
-  const fallback = tinyRuntimeFallbackForVariant(variant);
-  return `${runtime}:${fallback ? 'fallback' : 'strict'}:${TINY_MODEL_URL}:${TINY_META_URL}:${TINY_HYBRID_MANIFEST_URL}`;
+function centipawnEvaluatorCacheKey(variant: string): string {
+  const runtime = centipawnRuntimeForVariant(variant);
+  const fallback = centipawnRuntimeFallbackForVariant(variant);
+  return `${runtime}:${fallback ? 'fallback' : 'strict'}:${CENTIPAWN_MODEL_URL}:${CENTIPAWN_META_URL}:${CENTIPAWN_HYBRID_MANIFEST_URL}`;
 }
 
-function activeTinyEvaluatorKeys(): Set<string> {
-  return new Set(activeEngineRows().filter((row) => row.family === 'tiny').map((row) => tinyEvaluatorCacheKey(row.variant)));
+function activeCentipawnEvaluatorKeys(): Set<string> {
+  return new Set(activeEngineRows().filter((row) => row.family === 'centipawn').map((row) => centipawnEvaluatorCacheKey(row.variant)));
 }
 
-async function tinyEvaluator(variant: string): Promise<Evaluator> {
-  const runtime = tinyRuntimeForVariant(variant);
-  const fallback = tinyRuntimeFallbackForVariant(variant);
-  const key = tinyEvaluatorCacheKey(variant);
-  const existing = tinyEvaluatorPromises.get(key);
+async function centipawnEvaluator(variant: string): Promise<Evaluator> {
+  const runtime = centipawnRuntimeForVariant(variant);
+  const fallback = centipawnRuntimeFallbackForVariant(variant);
+  const key = centipawnEvaluatorCacheKey(variant);
+  const existing = centipawnEvaluatorPromises.get(key);
   if (existing) return existing;
-  const generation = tinyEvaluatorGeneration;
+  const generation = centipawnEvaluatorGeneration;
   const created = (async () => {
     const loaded = await createBrowserSquareformerRuntimeEvaluator({
       id: 'bt4-anneal-muon-best',
       modelId: 'bt4-anneal-muon-best',
-      label: tinyEngineLabel(variant),
-      onnx: TINY_MODEL_URL,
-      meta: TINY_META_URL,
+      label: centipawnEngineLabel(variant),
+      onnx: CENTIPAWN_MODEL_URL,
+      meta: CENTIPAWN_META_URL,
       runtime,
-      manifestUrl: TINY_HYBRID_MANIFEST_URL,
+      manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
     }, {
       runtime,
-      manifestUrl: TINY_HYBRID_MANIFEST_URL,
+      manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
       fallback,
       audit: { surface: 'analysis', searchBudget: `multipv=${multiPv()}` },
     });
-    console.info('[lc0-analysis] loaded Tiny Leela evaluator', {
+    console.info('[lc0-analysis] loaded Centipawn evaluator', {
       requestedRuntime: loaded.requestedRuntime,
       resolvedRuntime: loaded.resolvedRuntime,
       runtimeConfigId: loaded.runtimeConfigId,
       manifestUrl: loaded.manifestUrl,
       fallbackReason: loaded.fallbackReason,
     });
-    const cached = new CachedEvaluator(loaded.evaluator, { maxEntries: 4096, includeHistory: true, includeLegalMoves: true, label: `tiny-leela-analysis:${runtime}` });
-    if (tinyEvaluatorGeneration !== generation || !activeTinyEvaluatorKeys().has(key)) {
-      destroyTinyEvaluator(cached);
-      const error = new Error('Tiny Leela evaluator was disposed before it finished loading');
+    const cached = new CachedEvaluator(loaded.evaluator, { maxEntries: 4096, includeHistory: true, includeLegalMoves: true, label: `centipawn-analysis:${runtime}` });
+    if (centipawnEvaluatorGeneration !== generation || !activeCentipawnEvaluatorKeys().has(key)) {
+      destroyCentipawnEvaluator(cached);
+      const error = new Error('Centipawn evaluator was disposed before it finished loading');
       error.name = 'AbortError';
       throw error;
     }
-    tinyEvaluators.add(cached);
-    tinyEvaluatorsByKey.set(key, cached);
+    centipawnEvaluators.add(cached);
+    centipawnEvaluatorsByKey.set(key, cached);
     return cached;
   })();
-  tinyEvaluatorPromises.set(key, created);
+  centipawnEvaluatorPromises.set(key, created);
   try {
     return await created;
   } catch (error) {
-    tinyEvaluatorPromises.delete(key);
+    centipawnEvaluatorPromises.delete(key);
     throw error;
   }
 }
 
-function tinyHistoryFens(positions: BoardState[]): string[] {
+function centipawnHistoryFens(positions: BoardState[]): string[] {
   return positions.slice(0, -1).map(boardToFen).reverse().slice(0, 16);
 }
 
-function destroyTinyEvaluator(evaluator: CachedEvaluator): void {
+function destroyCentipawnEvaluator(evaluator: CachedEvaluator): void {
   evaluator.clear();
   const destroy = (evaluator.inner as Evaluator & { destroy?: () => void }).destroy;
   if (typeof destroy === 'function') destroy.call(evaluator.inner);
 }
 
-function disposeTinyEvaluators(): void {
-  tinyEvaluatorGeneration++;
-  for (const evaluator of tinyEvaluators) destroyTinyEvaluator(evaluator);
-  tinyEvaluators.clear();
-  tinyEvaluatorsByKey.clear();
-  tinyEvaluatorPromises.clear();
+function disposeCentipawnEvaluators(): void {
+  centipawnEvaluatorGeneration++;
+  for (const evaluator of centipawnEvaluators) destroyCentipawnEvaluator(evaluator);
+  centipawnEvaluators.clear();
+  centipawnEvaluatorsByKey.clear();
+  centipawnEvaluatorPromises.clear();
 }
 
-function disposeUnusedTinyEvaluators(): void {
-  const activeTinyKeys = activeTinyEvaluatorKeys();
-  for (const key of [...tinyEvaluatorPromises.keys()]) if (!activeTinyKeys.has(key)) tinyEvaluatorPromises.delete(key);
-  for (const [key, evaluator] of [...tinyEvaluatorsByKey]) {
-    if (activeTinyKeys.has(key)) continue;
-    destroyTinyEvaluator(evaluator);
-    tinyEvaluators.delete(evaluator);
-    tinyEvaluatorsByKey.delete(key);
-    tinyEvaluatorPromises.delete(key);
+function disposeUnusedCentipawnEvaluators(): void {
+  const activeCentipawnKeys = activeCentipawnEvaluatorKeys();
+  for (const key of [...centipawnEvaluatorPromises.keys()]) if (!activeCentipawnKeys.has(key)) centipawnEvaluatorPromises.delete(key);
+  for (const [key, evaluator] of [...centipawnEvaluatorsByKey]) {
+    if (activeCentipawnKeys.has(key)) continue;
+    destroyCentipawnEvaluator(evaluator);
+    centipawnEvaluators.delete(evaluator);
+    centipawnEvaluatorsByKey.delete(key);
+    centipawnEvaluatorPromises.delete(key);
   }
 }
 
@@ -677,8 +677,8 @@ function clampStrengthForRow(row: EngineRow): number {
 function sanitizeEngineRow(value: unknown, index = 0): EngineRow | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Partial<EngineRow>;
-  if (!isEngineFamily(String(raw.family))) return null;
-  const family = raw.family as EngineFamily;
+  const family = canonicalEngineFamily(String(raw.family));
+  if (!family) return null;
   if (raw.variant === 'custom') return null;
   const row = { family, variant: String(raw.variant || defaultVariant(family)), strength: Number(raw.strength) || defaultStrength(family) };
   return normalizeDeployEngineRow({ ...row, strength: clampStrengthForRow(row) }, 'analysis', index);
@@ -820,8 +820,8 @@ function deleteSelectedEngineProfile(): void {
 }
 
 // Engines to analyze are chosen as an add/remove list of cascading selects:
-// family (Lc0/Tiny Leela/Stockfish/Reckless/Viridithas/Berserk/PlentyChess)
-// -> variant (Lc0: Small|BT4; Tiny: runtime config; SF: Lite|Full; UCI engines: variant)
+// family (Lc0/Centipawn/Stockfish/Reckless/Viridithas/Berserk/PlentyChess)
+// -> variant (Lc0: Small|BT4; Centipawn: runtime config; SF: Lite|Full; UCI engines: variant)
 // -> strength (neural visits, UCI depth), all per row.
 function strengthMeta(family: EngineFamily) {
   return engineStrengthMeta(family, 'analysis');
@@ -877,7 +877,7 @@ function plentyChessVariantForKey(variantKey: string): PlentyChessVariant {
 
 
 // "Add engine" fills the next missing family by priority
-// (Lc0 → SF → Reckless → Viridithas → Berserk → PlentyChess → Tiny Leela),
+// (Lc0 → SF → Reckless → Viridithas → Berserk → PlentyChess → Centipawn),
 // falling back to the top priority when all families are present.
 function nextEngineFamily(): EngineFamily {
   const present = new Set(engineRows.map((row) => row.family));
@@ -893,7 +893,7 @@ function analysisEngineFamilyOptions(): { value: EngineFamily; label: string }[]
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
   if (isV0DeployProfile() && !['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'].includes(family)) return [];
-  if (family === 'tiny') return tinyVariantOptions().map((option) => option.value === 'bt4-custom' && tinyHybridManifestStatus === 'missing'
+  if (family === 'centipawn') return centipawnVariantOptions().map((option) => option.value === 'bt4-custom' && centipawnHybridManifestStatus === 'missing'
     ? { ...option, disabled: true, label: `${option.label} (bundle missing)` }
     : option);
   if (family === 'lc0') return lc0VariantOptions(true).map((option) => {
@@ -948,7 +948,7 @@ function defaultVariant(family: EngineFamily): string {
 }
 
 function rowLabel(row: EngineRow): string {
-  if (row.family === 'tiny') return tinyEngineLabel(row.variant);
+  if (row.family === 'centipawn') return centipawnEngineLabel(row.variant);
   if (row.family === 'lc0') return lc0EngineLabel(row.variant);
   if (row.family === 'sf') return stockfishEngineLabel(row.variant, 'analysis');
   if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
@@ -1033,8 +1033,8 @@ function renderRecklessRuntimeInfo(): void {
   });
   const bt4Text = bigNetTexts.join(' | ');
   const fallbackMode = (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) ? 'persistent available' : 'one-shot fallback';
-  const tinyRows = activeEngineRows().filter((row) => row.family === 'tiny');
-  const tinyParts = tinyRows.length ? tinyRows.map((row) => `${tinyEngineLabel(row.variant)} · SquareFormer ${tinyRuntimeForVariant(row.variant)} · ${tinyHybridManifestStatusText()}`) : [];
+  const centipawnRows = activeEngineRows().filter((row) => row.family === 'centipawn');
+  const centipawnParts = centipawnRows.length ? centipawnRows.map((row) => `${centipawnEngineLabel(row.variant)} · SquareFormer ${centipawnRuntimeForVariant(row.variant)} · ${centipawnHybridManifestStatusText()}`) : [];
   const recklessRows = activeEngineRows().filter((row) => row.family === 'reckless');
   const recklessVariants = recklessRows.length ? recklessRows.map((row) => recklessVariantForKey(row.variant)) : [REQUESTED_RECKLESS_VARIANT];
   const recklessParts = recklessVariants.map((variant) => {
@@ -1079,7 +1079,7 @@ function renderRecklessRuntimeInfo(): void {
     const assetText = unsupportedReason ? unsupportedReason : asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
   });
-  el('recklessRuntimeInfo').textContent = `${bt4Text} · Tiny: ${tinyParts.join(' | ') || 'not selected'} · Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'}`;
+  el('recklessRuntimeInfo').textContent = `${bt4Text} · Centipawn: ${centipawnParts.join(' | ') || 'not selected'} · Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'}`;
 }
 
 function threadedStockfishAvailable(): boolean {
@@ -1164,7 +1164,7 @@ function disposeUnusedEngines(): void {
     peekBigNetSearcher(key)?.cancel();
     releaseBigNetSearcher(key);
   }
-  disposeUnusedTinyEvaluators();
+  disposeUnusedCentipawnEvaluators();
   const activeRows = activeEngineRows();
   const activeRecklessKeys = new Set(activeRows.filter((row) => row.family === 'reckless').map((row) => recklessCacheKey(recklessVariantForKey(row.variant))));
   for (const [key, engine] of [...recklessByVariant]) {
@@ -2045,23 +2045,23 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
         })
           .then((result) => lc0AnalysisLines(result, fen, 'Lc0')));
-      } else if (row.family === 'tiny') {
+      } else if (row.family === 'centipawn') {
         const positions = tree.historyBoards();
         const current = positions[positions.length - 1];
-        const label = tinyEngineLabel(row.variant);
-        pushTask(index, cacheKey, label, tinyEvaluator(row.variant)
+        const label = centipawnEngineLabel(row.variant);
+        pushTask(index, cacheKey, label, centipawnEvaluator(row.variant)
           .then((evaluator) => chooseMove(current, evaluator, {
             visits: row.strength,
-            batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('tinyBatch') ?? '32') || 32))),
+            batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('centipawnBatch') ?? params.get('tinyBatch') ?? '32') || 32))),
             signal: controller.signal,
-            historyFens: tinyHistoryFens(positions),
+            historyFens: centipawnHistoryFens(positions),
             searchPolicy: montyLitePuctPolicy,
             includePv: true,
             multiPv: multiPv(),
             pvDepth: 12,
             onProgress: (progress) => showMoveSearchProgress(runId, fen, label, progress),
           }))
-          .then((result) => tinyPuctAnalysisLines(result, fen, label)));
+          .then((result) => centipawnPuctAnalysisLines(result, fen, label)));
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
         const label = kind === 'lite' ? 'SF Lite' : 'SF';
@@ -2476,7 +2476,7 @@ function disposeRuntimeResources(): void {
   stockfishLite = null;
   stockfishFull?.dispose();
   stockfishFull = null;
-  disposeTinyEvaluators();
+  disposeCentipawnEvaluators();
   for (const engine of recklessByVariant.values()) engine.dispose();
   recklessByVariant.clear();
   for (const engine of viridithasByVariant.values()) engine.dispose();
@@ -2633,7 +2633,7 @@ async function init(mountSignal: AbortSignal) {
   void refreshPgnDatabaseCollections();
   if (!isV0DeployProfile()) {
     void refreshBt4Availability();
-    void refreshTinyHybridManifestStatus();
+    void refreshCentipawnHybridManifestStatus();
   }
   await loadLc0Backend(true, mountSignal);
 }

@@ -16,7 +16,7 @@ export interface ProgressiveWideningOptions {
   visitsPerAction?: number;
   /** Number of additional policy-sorted moves admitted per widening step. */
   actionsPerStep?: number;
-  /** Widening schedule: linear is Tiny-Leela's original approximation; exponential is Monty-shaped. */
+  /** Widening schedule: linear is Centipawn's original approximation; exponential is Monty-shaped. */
   wideningSchedule?: 'linear' | 'exponential';
   /** Exponential schedule starts at 2^visitThresholdPower visits, then doubles. */
   visitThresholdPower?: number;
@@ -81,7 +81,7 @@ export interface SearchOptions {
    * 0/undefined disables.
    */
   searchContemptLimit?: number;
-  /** Experimental LC0-style cpuct growth. Default constant preserves classic Tiny Leela PUCT. */
+  /** Experimental LC0-style cpuct growth. Default constant preserves classic Centipawn PUCT. */
   cpuctSchedule?: CpuctSchedule;
   cpuctBase?: number;
   cpuctFactor?: number;
@@ -989,7 +989,7 @@ function latencyDebugEnabled(): boolean {
 
 function logSearchLatency(label: string, payload: Record<string, unknown>): void {
   if (!latencyDebugEnabled()) return;
-  console.info(`Tiny Leela latency: ${label}`, Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, typeof value === 'number' ? Number(value.toFixed(2)) : value])));
+  console.info(`Centipawn latency: ${label}`, Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, typeof value === 'number' ? Number(value.toFixed(2)) : value])));
 }
 
 function yieldToUi(): Promise<void> {

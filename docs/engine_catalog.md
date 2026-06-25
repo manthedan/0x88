@@ -105,13 +105,13 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
 - **Validation:** `npm run lc0:browser-ci-smoke`, LC0 fixture parity tests, model manifest sha256 checks, and browser search matrix artifacts.
 - **Open work:** keep extracting shared catalog metadata into UI config; keep experimental LC0 runtime lanes opt-in until repeated parity, leak, and cross-host latency gates pass. After the naive WebGPU int8 FFN lane regressed throughput despite passing drift, the next high-ROI GPU lane is smolgen f16 tiling/generation. Historical opt-in evidence kept `mixed-tvm-ffn-smolgen-project`, now with 64-column smolgen project plus 8-lane smolgen dense1 with 2-step row-loop unroll, which confirmed at `4.863 ms/eval` on the cleaned mixed-TVM JS-legal 32-position fixed suite with 9-fixture drift passing; a short 2026-06-08 WGSL-head reconfirm was slower than nearby `mixed-tvm-ffn` and failed top-prior drift, so the current documented WGSL-head b4 lane remains `mixed-tvm-ffn` until smolgen-project gets a new cleaned full pass. Simple tiled smolgen-dense1, combined project+dense1, dense1+swish+LN1 fusion, row-split dense1 reduction, discarded dense1 shape/unroll/fma variants including the 3-step row-loop unroll that failed drift, paired-output/dense2-unroll variants, compress/head scalar unrolls/workgroup-size tweaks/packed-f16 buffers/linear-specialized shaders/value dense2+softmax fusion, hand QKV/output-projection larger K tiles, generated TVM `pick_lane` select rewrite, attention-score channel unroll, parallel score+softmax fusion, attention-value loop unrolls/workgroup reshapes, transposed-weight smolgen compress/dense1/dense2, paired-output smolgen project, smolgen dense2/compress workgroup-shape/reduction tweaks, mapped-policy 128-wide groups, 16/32/128/256-column project tiles, manual project-loop unrolling, project weight-index strength reduction, project final-barrier elision, shared-input smolgen dense2/compress, LN2 swish caching, project+TVM outproj/QKV, split-FFN TVM mixes, GPU/WASM legal priors, JS/WGSL input, and project+attention-score fusion attempts did not improve or failed drift, so future smolgen work needs a different generated/fused schedule with isolated parity first.
 
-### Tiny family
+### Centipawn family
 
-- **Family id / UI label:** `tiny` / `Tiny Leela`.
-- **Integration status:** mixed; retained as an active compatibility family while old research/ops artifacts are removed.
-- **Runtime adapter:** Tiny SquareFormer evaluator with ORT baseline and explicit custom WebGPU variant.
+- **Family id / UI label:** `centipawn` / `Centipawn`.
+- **Integration status:** mixed; an active family while old research/ops artifacts are removed.
+- **Runtime adapter:** Centipawn SquareFormer evaluator with ORT baseline and explicit custom WebGPU variant.
 - **UI variants:** `bt4-auto`, `bt4-ort`, `bt4-custom`.
-- **Naming note:** the user-facing family name is intentionally deferred to a later migration so runtime keys, manifests, storage, and docs can be renamed coherently.
+- **Naming note:** previously called "Tiny Leela". The legacy family key `tiny` is still accepted on input (deep-links such as `?engine=tiny`, seat specs, and the `tinyModel`/`tinyMeta`/`tinyManifest` overrides) via `canonicalEngineFamily`, and the hybrid manifest loader still accepts the legacy `tiny-leela.squareformer-tvm-hybrid.v1` schema. The shared NN-runtime infra (`tinyLeela*` timing/env/localStorage) keeps its name for now.
 
 ### Stockfish family
 

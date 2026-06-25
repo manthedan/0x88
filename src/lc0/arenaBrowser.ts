@@ -14,7 +14,7 @@ import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { BROWSER_RUNTIME_AUDIT_EVENT, formatBrowserRuntimeAudit, publishBrowserRuntimeAudit, type BrowserRuntimeAuditDetail } from '../nn/runtimeAudit.ts';
-import { chooseMove, montyLitePuctPolicy, type SearchResult as TinySearchResult } from '../search/puct.ts';
+import { chooseMove, montyLitePuctPolicy, type SearchResult as CentipawnSearchResult } from '../search/puct.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchProgress, type Lc0SearchResult } from './search.ts';
@@ -35,7 +35,7 @@ import { BIG_NETS, bigNetAssetStatusSync, bigNetLoadWarning, bt4SupportedSync, c
 import { acquireBigNetSearcher, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher, type BigNetKey } from './bigNetSessionPool.ts';
 import { TournamentStandings, buildSchedule, tournamentPairings, type ScheduledGame, type TournamentMode } from './tournament.ts';
 import { hBarChartSvg, lineChartSvg, type ChartSeries } from './charts.ts';
-import { defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isEngineFamily, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, tinyEngineLabel, tinyVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { canonicalEngineFamily, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, centipawnEngineLabel, centipawnVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
@@ -138,14 +138,14 @@ const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled
 const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
 const PACK_URL = isV0DeployProfile() ? DEFAULT_PACK_URL : resolvePublicAssetUrl(params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL);
-const DEFAULT_TINY_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
-const DEFAULT_TINY_META_URL = '/models/bt4_anneal_muon_best.meta.json';
-const DEFAULT_TINY_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
+const DEFAULT_CENTIPAWN_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
+const DEFAULT_CENTIPAWN_META_URL = '/models/bt4_anneal_muon_best.meta.json';
+const DEFAULT_CENTIPAWN_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
 const DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL = '/runtimes/lc0-' + 'tvm' + 'js-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json';
 const LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole-onnx-webgpu' as const;
-const TINY_MODEL_URL = params.get('tinyModel') ?? params.get('tinyOnnx') ?? DEFAULT_TINY_MODEL_URL;
-const TINY_META_URL = params.get('tinyMeta') ?? DEFAULT_TINY_META_URL;
-const TINY_HYBRID_MANIFEST_URL = params.get('tinyManifest') ?? params.get('manifest') ?? params.get('manifestUrl') ?? DEFAULT_TINY_HYBRID_MANIFEST_URL;
+const CENTIPAWN_MODEL_URL = params.get('centipawnModel') ?? params.get('centipawnOnnx') ?? params.get('tinyModel') ?? params.get('tinyOnnx') ?? DEFAULT_CENTIPAWN_MODEL_URL;
+const CENTIPAWN_META_URL = params.get('centipawnMeta') ?? params.get('tinyMeta') ?? DEFAULT_CENTIPAWN_META_URL;
+const CENTIPAWN_HYBRID_MANIFEST_URL = params.get('centipawnManifest') ?? params.get('manifest') ?? params.get('manifestUrl') ?? params.get('tinyManifest') ?? DEFAULT_CENTIPAWN_HYBRID_MANIFEST_URL;
 const LC0_WHOLE_MODEL_MANIFEST_URL = params.get('wholeModelManifest') ?? params.get('wholeModelManifestUrl') ?? params.get('tvm' + 'jsManifest') ?? DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL;
 type Lc0ArenaRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads' | typeof LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
 type Lc0ArenaPreset = 'stable' | 'benchmarked-small' | 'custom';
@@ -201,8 +201,8 @@ const recklessByVariant = new Map<string, RecklessEngine>();
 const viridithasByVariant = new Map<string, ViridithasEngine>();
 const berserkByVariant = new Map<string, BerserkEngine>();
 const plentyChessByVariant = new Map<string, PlentyChessEngine>();
-const tinyEvaluatorPromises = new Map<string, Promise<Evaluator>>();
-let tinyHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
+const centipawnEvaluatorPromises = new Map<string, Promise<Evaluator>>();
+let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
 function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4WorkerSearcher } {
   const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
@@ -334,78 +334,78 @@ function clearArenaSearchProgress(engineId: string): void {
   renderEngineOutputs();
 }
 
-function tinyRuntimeForVariant(variant: string): 'auto' | 'ort' | 'custom-webgpu' {
+function centipawnRuntimeForVariant(variant: string): 'auto' | 'ort' | 'custom-webgpu' {
   if (variant.endsWith('-ort')) return 'ort';
   if (variant.endsWith('-custom')) return 'custom-webgpu';
   return 'auto';
 }
 
-function tinyRuntimeFallbackForVariant(variant: string): boolean {
+function centipawnRuntimeFallbackForVariant(variant: string): boolean {
   return !variant.endsWith('-custom');
 }
 
-function tinyHybridManifestStatusText(): string {
-  if (tinyHybridManifestStatus === 'present') return `Tiny hybrid bundle present (${TINY_HYBRID_MANIFEST_URL})`;
-  if (tinyHybridManifestStatus === 'missing') return `Tiny hybrid bundle missing; auto uses ORT fallback (${TINY_HYBRID_MANIFEST_URL})`;
-  return `Tiny hybrid bundle checking (${TINY_HYBRID_MANIFEST_URL})`;
+function centipawnHybridManifestStatusText(): string {
+  if (centipawnHybridManifestStatus === 'present') return `Centipawn hybrid bundle present (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
+  if (centipawnHybridManifestStatus === 'missing') return `Centipawn hybrid bundle missing; auto uses ORT fallback (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
+  return `Centipawn hybrid bundle checking (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
 }
 
-async function refreshTinyHybridManifestStatus(): Promise<void> {
+async function refreshCentipawnHybridManifestStatus(): Promise<void> {
   try {
-    const res = await fetch(TINY_HYBRID_MANIFEST_URL, { method: 'HEAD', cache: 'no-store' });
-    tinyHybridManifestStatus = res.ok ? 'present' : 'missing';
+    const res = await fetch(CENTIPAWN_HYBRID_MANIFEST_URL, { method: 'HEAD', cache: 'no-store' });
+    centipawnHybridManifestStatus = res.ok ? 'present' : 'missing';
   } catch {
-    tinyHybridManifestStatus = 'missing';
+    centipawnHybridManifestStatus = 'missing';
   }
-  if (tinyHybridManifestStatus === 'missing') {
+  if (centipawnHybridManifestStatus === 'missing') {
     for (const row of activeSeatRows()) {
-      if (row.family === 'tiny' && row.variant === 'bt4-custom') row.variant = 'bt4-auto';
+      if (row.family === 'centipawn' && row.variant === 'bt4-custom') row.variant = 'bt4-auto';
     }
   }
   void renderRuntimeBadge();
 }
 
-async function tinyEvaluator(variant: string): Promise<Evaluator> {
-  const runtime = tinyRuntimeForVariant(variant);
-  const fallback = tinyRuntimeFallbackForVariant(variant);
-  const key = `${runtime}:${fallback ? 'fallback' : 'strict'}:${TINY_MODEL_URL}:${TINY_META_URL}`;
-  const existing = tinyEvaluatorPromises.get(key);
+async function centipawnEvaluator(variant: string): Promise<Evaluator> {
+  const runtime = centipawnRuntimeForVariant(variant);
+  const fallback = centipawnRuntimeFallbackForVariant(variant);
+  const key = `${runtime}:${fallback ? 'fallback' : 'strict'}:${CENTIPAWN_MODEL_URL}:${CENTIPAWN_META_URL}`;
+  const existing = centipawnEvaluatorPromises.get(key);
   if (existing) return existing;
   const created = (async () => {
     const loaded = await createBrowserSquareformerRuntimeEvaluator({
       id: 'bt4-anneal-muon-best',
       modelId: 'bt4-anneal-muon-best',
-      label: tinyEngineLabel(variant),
-      onnx: TINY_MODEL_URL,
-      meta: TINY_META_URL,
+      label: centipawnEngineLabel(variant),
+      onnx: CENTIPAWN_MODEL_URL,
+      meta: CENTIPAWN_META_URL,
       runtime,
-      manifestUrl: TINY_HYBRID_MANIFEST_URL,
+      manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
     }, {
       params,
       runtime,
-      manifestUrl: TINY_HYBRID_MANIFEST_URL,
+      manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
       fallback,
       audit: { surface: 'arena', searchBudget: 'visits=seat strength' },
     });
-    console.info('[lc0-arena] loaded Tiny Leela evaluator', {
+    console.info('[lc0-arena] loaded Centipawn evaluator', {
       requestedRuntime: loaded.requestedRuntime,
       resolvedRuntime: loaded.resolvedRuntime,
       runtimeConfigId: loaded.runtimeConfigId,
       manifestUrl: loaded.manifestUrl,
       fallbackReason: loaded.fallbackReason,
     });
-    return new CachedEvaluator(loaded.evaluator, { maxEntries: arenaCacheEntries(), includeHistory: true, includeLegalMoves: true, label: `tiny-leela-arena:${runtime}` });
+    return new CachedEvaluator(loaded.evaluator, { maxEntries: arenaCacheEntries(), includeHistory: true, includeLegalMoves: true, label: `centipawn-arena:${runtime}` });
   })();
-  tinyEvaluatorPromises.set(key, created);
+  centipawnEvaluatorPromises.set(key, created);
   try {
     return await created;
   } catch (error) {
-    tinyEvaluatorPromises.delete(key);
+    centipawnEvaluatorPromises.delete(key);
     throw error;
   }
 }
 
-function tinyHistoryFens(positions: BoardState[]): string[] {
+function centipawnHistoryFens(positions: BoardState[]): string[] {
   return positions.slice(0, -1).map(boardToFen).reverse().slice(0, 16);
 }
 
@@ -616,10 +616,11 @@ function intParam(name: string, fallback: number, min: number, max: number): num
 function parseSeatSpec(value: string | null): EngineRow | undefined {
   if (!value) return undefined;
   const [familyRaw, variantRaw, strengthRaw] = value.split(/[:;,]/).map((part) => part.trim());
-  if (!isEngineFamily(familyRaw)) return undefined;
-  const variant = variantRaw || defaultVariant(familyRaw);
-  const strength = strengthRaw === undefined || strengthRaw === '' ? strengthMeta(familyRaw).def : Number(strengthRaw);
-  const row: EngineRow = { family: familyRaw, variant, strength };
+  const family = canonicalEngineFamily(familyRaw);
+  if (!family) return undefined;
+  const variant = variantRaw || defaultVariant(family);
+  const strength = strengthRaw === undefined || strengthRaw === '' ? strengthMeta(family).def : Number(strengthRaw);
+  const row: EngineRow = { family, variant, strength };
   clampStrength(row);
   return row;
 }
@@ -640,8 +641,9 @@ function applyArenaQueryParams(): void {
     seatRows[0].strength = Number(params.get('lc0Strength'));
     clampStrength(seatRows[0]);
   }
-  const opponentFamily = params.get('opponentFamily');
-  if (opponentFamily && isEngineFamily(opponentFamily)) {
+  const opponentFamilyRaw = params.get('opponentFamily');
+  const opponentFamily = opponentFamilyRaw ? canonicalEngineFamily(opponentFamilyRaw) : null;
+  if (opponentFamily) {
     seatRows[1].family = opponentFamily;
     seatRows[1].variant = params.get('opponentVariant') ?? defaultVariant(opponentFamily);
     seatRows[1].strength = Number(params.get('opponentStrength') ?? strengthMeta(opponentFamily).def);
@@ -790,7 +792,7 @@ function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
 
 function shortEngineTag(name: string): string {
   const n = name.toLowerCase();
-  if (n.includes('tiny leela')) return 'TL';
+  if (n.includes('centipawn')) return 'CP';
   if (n.includes('bt4')) return 'BT4';
   if (n.includes('lc0') || n.includes('leela')) return 'Lc0';
   if (n.includes('reckless')) return 'Reck';
@@ -1070,7 +1072,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const suffix = !bt4SupportedSync() ? ' (WebGPU unavailable)' : asset === 'missing' ? ' (asset missing)' : asset === 'unknown' ? ' (checking asset)' : '';
     return { ...option, label: `${option.label}${suffix}`, disabled: option.disabled || asset !== 'present' };
   });
-  if (family === 'tiny') return tinyVariantOptions().map((option) => option.value === 'bt4-custom' && tinyHybridManifestStatus === 'missing'
+  if (family === 'centipawn') return centipawnVariantOptions().map((option) => option.value === 'bt4-custom' && centipawnHybridManifestStatus === 'missing'
     ? { ...option, label: `${option.label} (bundle missing)`, disabled: true }
     : option);
   if (family === 'sf') return stockfishVariantOptions();
@@ -1124,7 +1126,7 @@ function normalizeSeatRowsForDeploy(): void {
 
 function rowLabel(row: EngineRow): string {
   if (row.family === 'lc0') return lc0EngineLabel(row.variant);
-  if (row.family === 'tiny') return tinyEngineLabel(row.variant);
+  if (row.family === 'centipawn') return centipawnEngineLabel(row.variant);
   if (row.family === 'sf') return stockfishEngineLabel(row.variant, 'arena');
   if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
   if (row.family === 'berserk') return berserkVariantForKey(row.variant).label;
@@ -1167,8 +1169,9 @@ function renderSeatSelectors(): void {
 function syncSeatRowsFromDom(): void {
   const host = el('arenaSeatList');
   for (let index = 0; index < seatRows.length; index++) {
-    const family = host.querySelector<HTMLSelectElement>(`.seat-fam[data-seat="${index}"]`)?.value;
-    if (family && isEngineFamily(family)) seatRows[index].family = family;
+    const familyRaw = host.querySelector<HTMLSelectElement>(`.seat-fam[data-seat="${index}"]`)?.value;
+    const family = familyRaw ? canonicalEngineFamily(familyRaw) : null;
+    if (family) seatRows[index].family = family;
     const variant = host.querySelector<HTMLSelectElement>(`.seat-var[data-seat="${index}"]`)?.value;
     if (variant) seatRows[index].variant = variant;
     const strength = host.querySelector<HTMLInputElement>(`.seat-strength[data-seat="${index}"]`)?.value;
@@ -1319,7 +1322,7 @@ function engineRuntimeDiagnosticsText(): string {
       const { config, searcher } = bigNetFor(row.variant);
       return `${name}: ${budgetText(row)} · ${searcher.loaded ? `loaded ${searcher.backend || 'WebGPU'}` : 'lazy WebGPU worker'} · ${config.name} · batch ${config.recommendedBatchSize} · pipeline depth ${config.recommendedPipelineDepth} · eval cache ${arenaCacheEntries()} · ~${config.approxMb}MB net · ${config.modelUrl}`;
     }
-    if (row?.family === 'tiny') return `${name}: ${budgetText(row)} · SquareFormer ${tinyRuntimeForVariant(row.variant)} · ${tinyHybridManifestStatusText()}`;
+    if (row?.family === 'centipawn') return `${name}: ${budgetText(row)} · SquareFormer ${centipawnRuntimeForVariant(row.variant)} · ${centipawnHybridManifestStatusText()}`;
     if (row?.family === 'sf') {
       const kind = row.variant === 'full' ? 'full' : 'lite';
       const threads = stockfishThreadsPlanned();
@@ -1422,7 +1425,7 @@ function engineSearchDiagnosticsText(): string {
       const { config, searcher } = bigNetFor(row.variant);
       return t?.searches ? bt4TelemetrySummary(t, searcher) : `${name}: ${config.name} search waiting${searcher.loaded ? ` · backend ${searcher.backend || 'WebGPU'}` : ''}`;
     }
-    if (row?.family === 'tiny') return engineOutputs.has(id) ? `${name}: Tiny SquareFormer search output ready` : `${name}: Tiny SquareFormer search waiting`;
+    if (row?.family === 'centipawn') return engineOutputs.has(id) ? `${name}: Centipawn search output ready` : `${name}: Centipawn search waiting`;
     const uci = uciTelemetry.get(id);
     return uci?.searches ? uciTelemetrySummary(uci) : `${name}: UCI search waiting for info`;
   });
@@ -1587,7 +1590,7 @@ function recordBt4SearchOutput(engineId: string, engineName: string, result: Bt4
   });
 }
 
-function recordTinySearchOutput(engineId: string, engineName: string, fen: string, result: TinySearchResult): void {
+function recordCentipawnSearchOutput(engineId: string, engineName: string, fen: string, result: CentipawnSearchResult): void {
   const pv = result.principalVariation?.map((entry) => moveToUci(entry.move));
   recordEngineOutput({
     engineId,
@@ -1595,7 +1598,7 @@ function recordTinySearchOutput(engineId: string, engineName: string, fen: strin
     kind: 'lc0',
     fen,
     move: result.move ? moveToUci(result.move) : undefined,
-    summary: `Tiny Q ${signed(toWhiteQ(result.value, fen), 3)}`,
+    summary: `Centipawn Q ${signed(toWhiteQ(result.value, fen), 3)}`,
     shortEval: `Q ${signed(toWhiteQ(result.value, fen), 2)}`,
     evalBar: qEvalBar(fen, result.value),
     detail: `visits ${result.visits} · evals ${result.stats?.evalCalls ?? 0} · cache hits ${result.stats?.cacheHits ?? 0}`,
@@ -1744,7 +1747,7 @@ function prewarmReckless(engine: RecklessEngine): void {
 
 function recklessMissingAssetMessage(variants: RecklessVariant[]): string {
   const urls = variants.flatMap((variant) => [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])]);
-  return `Reckless asset missing: ${urls.join(', ')}. Build/publish Reckless artifacts with npm run reckless:build-production, or choose Stockfish/Tiny/LC0 instead.`;
+  return `Reckless asset missing: ${urls.join(', ')}. Build/publish Reckless artifacts with npm run reckless:build-production, or choose Stockfish/Centipawn/LC0 instead.`;
 }
 
 function renderRecklessRuntimeInfo(): void {
@@ -1968,7 +1971,7 @@ async function renderRuntimeBadge(): Promise<void> {
     const sfThreads = threadedStockfishAvailable() ? 'SF threaded yes' : 'SF threaded no';
     const ortThreads = `ORT wasm threads ${diag.wasm.numThreads ?? '?'}`;
     const ortSessions = `ORT sessions ${diag.sessions.active} active`;
-    badge.textContent = `Runtime: ${isolated} · ${sab} · ${webgpu} · ${diag.describe} · ${ortThreads} · ${ortSessions} · ${sfThreads} · ${tinyHybridManifestStatusText()}`;
+    badge.textContent = `Runtime: ${isolated} · ${sab} · ${webgpu} · ${diag.describe} · ${ortThreads} · ${ortSessions} · ${sfThreads} · ${centipawnHybridManifestStatusText()}`;
     badge.classList.toggle('ready', runtimeIsolation && (diag.webgpuAvailable || runtimeSharedArrayBuffer));
     badge.classList.toggle('warn', !runtimeIsolation || !diag.webgpuAvailable);
   } catch (error) {
@@ -2077,23 +2080,23 @@ function buildEngines() {
       clearArenaSearchProgress(engineId);
     }
   };
-  const tinyMove = (engineId: string, row: EngineRow): ArenaEngine['move'] => async (positions, signal) => {
+  const centipawnMove = (engineId: string, row: EngineRow): ArenaEngine['move'] => async (positions, signal) => {
     const current = positions[positions.length - 1];
     const fen = boardToFen(current);
-    const evaluator = await tinyEvaluator(row.variant);
+    const evaluator = await centipawnEvaluator(row.variant);
     const timed = arenaBudgetMode() === 'movetime';
     const result = await chooseMove(current, evaluator, {
       visits: timed ? undefined : row.strength,
       movetimeMs: timed ? arenaMovetimeMs() : undefined,
-      batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('tinyBatch') ?? '32') || 32))),
+      batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('centipawnBatch') ?? params.get('tinyBatch') ?? '32') || 32))),
       signal,
-      historyFens: tinyHistoryFens(positions),
+      historyFens: centipawnHistoryFens(positions),
       searchPolicy: montyLitePuctPolicy,
       onProgress: (progress) => {
         const completed = progress.completedVisits ?? progress.visits;
         const elapsedMs = progress.elapsedMs ?? 0;
-        setArenaSearchProgress(engineId, engines.get(engineId)?.name ?? tinyEngineLabel(row.variant), {
-          label: engines.get(engineId)?.name ?? tinyEngineLabel(row.variant),
+        setArenaSearchProgress(engineId, engines.get(engineId)?.name ?? centipawnEngineLabel(row.variant), {
+          label: engines.get(engineId)?.name ?? centipawnEngineLabel(row.variant),
           completed,
           requested: progress.requestedVisits ?? progress.visits,
           elapsedMs,
@@ -2104,7 +2107,7 @@ function buildEngines() {
         });
       },
     });
-    recordTinySearchOutput(engineId, engines.get(engineId)?.name ?? tinyEngineLabel(row.variant), fen, result);
+    recordCentipawnSearchOutput(engineId, engines.get(engineId)?.name ?? centipawnEngineLabel(row.variant), fen, result);
     return result.move ? moveToUci(result.move) : null;
   };
   const sf = (engineId: string, row: EngineRow, kind: 'lite' | 'full'): ArenaEngine['move'] => async (positions, signal) => {
@@ -2187,8 +2190,8 @@ function buildEngines() {
       hideDownloadProgress();
     }
   };
-  const tinyWarmup = (row: EngineRow) => async (signal: AbortSignal) => {
-    const evaluator = await tinyEvaluator(row.variant);
+  const centipawnWarmup = (row: EngineRow) => async (signal: AbortSignal) => {
+    const evaluator = await centipawnEvaluator(row.variant);
     await chooseMove(warmupPositions[0], evaluator, {
       visits: 1,
       batchSize: 1,
@@ -2235,8 +2238,8 @@ function buildEngines() {
     if (row.family === 'lc0') {
       if (isLc0BigNetVariant(row.variant)) engines.set(id, { id, name, move: lc0BigNetMove(id, row), warmup: lc0BigNetWarmup(row.variant) });
       else engines.set(id, { id, name, move: lc0Search(id, row), warmup: lc0SearchWarmup(id) });
-    } else if (row.family === 'tiny') {
-      engines.set(id, { id, name, move: tinyMove(id, row), warmup: tinyWarmup(row) });
+    } else if (row.family === 'centipawn') {
+      engines.set(id, { id, name, move: centipawnMove(id, row), warmup: centipawnWarmup(row) });
     } else if (row.family === 'sf') {
       const kind = row.variant === 'full' ? 'full' : 'lite';
       engines.set(id, { id, name, move: sf(id, row, kind), warmup: stockfishWarmup(kind) });
@@ -2746,7 +2749,7 @@ function disposeRuntimeResources(): void {
   arenaSearchProgress.clear();
   hideDownloadProgress();
   disposeLc0Resources();
-  tinyEvaluatorPromises.clear();
+  centipawnEvaluatorPromises.clear();
   disposeStockfish();
   for (const engine of recklessByVariant.values()) engine.dispose();
   recklessByVariant.clear();
@@ -3270,7 +3273,7 @@ async function init(mountSignal: AbortSignal) {
   inputEl('stockfishThreadsInput').value = String(Math.max(0, Math.min(32, Math.floor(Number(params.get('sfThreads') ?? '1') || 0))));
   refreshStockfishControls();
   void renderRuntimeBadge();
-  if (!isV0DeployProfile()) await refreshTinyHybridManifestStatus();
+  if (!isV0DeployProfile()) await refreshCentipawnHybridManifestStatus();
   if (isStaleMount(mountSignal)) return;
   buildEngines();
   populateSeats();
