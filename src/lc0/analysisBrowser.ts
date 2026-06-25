@@ -1113,18 +1113,8 @@ function getRecklessFor(variantKey: string): RecklessEngine {
   if (!engine) {
     engine = createRecklessEngine(variant, renderRecklessRuntimeInfo);
     recklessByVariant.set(key, engine);
-    prewarmCpuEngine('Reckless', engine, renderRecklessRuntimeInfo);
   }
   return engine;
-}
-
-function prewarmCpuEngine(label: string, engine: { prewarm(signal?: AbortSignal): Promise<void> }, onStatus: () => void): void {
-  void engine.prewarm()
-    .then(onStatus)
-    .catch((error) => {
-      if ((error as Error).name !== 'AbortError') console.warn(`${label} prewarm failed`, error);
-      onStatus();
-    });
 }
 
 function getViridithasFor(variantKey: string): ViridithasEngine {
@@ -1134,7 +1124,6 @@ function getViridithasFor(variantKey: string): ViridithasEngine {
   if (!engine) {
     engine = createViridithasEngine(variant);
     viridithasByVariant.set(key, engine);
-    prewarmCpuEngine('Viridithas', engine, renderRecklessRuntimeInfo);
   }
   return engine;
 }
@@ -1146,7 +1135,6 @@ function getBerserkFor(variantKey: string): BerserkEngine {
   if (!engine) {
     engine = createBerserkEngine(variant);
     berserkByVariant.set(key, engine);
-    prewarmCpuEngine('Berserk', engine, renderRecklessRuntimeInfo);
   }
   return engine;
 }
@@ -1160,7 +1148,6 @@ function getPlentyChessFor(variantKey: string): PlentyChessEngine {
   if (!engine) {
     engine = createPlentyChessEngine(variant);
     plentyChessByVariant.set(key, engine);
-    prewarmCpuEngine('PlentyChess', engine, renderRecklessRuntimeInfo);
   }
   return engine;
 }
