@@ -2,6 +2,24 @@
 
 Status: experimental; do not promote without a larger browser/device benchmark.
 
+## Promotion benchmark matrix
+
+Toolchains to keep in the Stockfish relaxed SIMD benchmark matrix:
+
+- `emscripten/emsdk:3.1.40` as the first known-good baseline toolchain.
+- `emscripten/emsdk:5.0.7` because the final asyncify/import/stack fix works on the 5.x generation too. Prefer Docker for repeatability; local macOS builds need extra Makefile host-flag cleanup.
+- `emscripten/emsdk:latest` / current 6.x because `6.0.1` passed smoke/parity and was marginally fastest in the small matrix.
+
+Minimum release-candidate matrix before promotion:
+
+- Lite single-threaded: baseline vs relaxed across all toolchains above.
+- Full single-threaded: baseline vs relaxed once full-net embedding/download is reproducible.
+- Lite/full pthread builds: only after cross-origin-isolation and helper-worker loading are validated.
+- Browsers: Chromium/Chrome, Firefox, Safari where relaxed SIMD support and fallback can be verified.
+- Positions: opening, tactical middlegame, quiet middlegame, castling-rights edge cases, en-passant edge cases, promotion/endgame cases.
+- Depth/time: fixed-depth parity (`10/12/14` or equivalent) plus fixed-movetime NPS stability runs.
+- Gates: UCI smoke (`uci`, `isready`, `go depth 1`), `sameBestmove`, `sameScore`, `samePv`, no console/runtime errors, and speedup retained over the current public baseline.
+
 ## Build finding
 
 A Stockfish 18 lite single-threaded WASM can be built with WebAssembly relaxed SIMD dot-product opcodes by patching the upstream `stockfish.js` source from `public/stockfish/stockfish-18.0.7-corresponding-source.tar.gz`. The default reproducible build currently uses `emscripten/emsdk:3.1.40`; Emscripten 5.0.7 and 6.0.1 also pass smoke/parity with the same asyncify/import/stack fixes.
