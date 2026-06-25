@@ -43,7 +43,11 @@ test('Reckless relaxed SIMD is the feature-detected default where supported', ()
 
 test('explicit relaxed SIMD falls back when the runtime cannot validate relaxed SIMD', async () => {
   const originalValidate = WebAssembly.validate;
-  WebAssembly.validate = (bytes) => (bytes.byteLength === 49 ? false : originalValidate.call(WebAssembly, bytes));
+  let validateCalls = 0;
+  WebAssembly.validate = (bytes) => {
+    validateCalls += 1;
+    return validateCalls === 1 ? false : originalValidate.call(WebAssembly, bytes);
+  };
   try {
     const resolved = await resolveDefaultRecklessVariantAssetFallback(RECKLESS_RELAXED_SIMD_VARIANT, true);
     assert.equal(resolved.key, supportsWasmSimd() ? 'simd' : 'full');
