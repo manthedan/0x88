@@ -158,6 +158,7 @@ function findForbiddenExternalAssets(root) {
   }
   walk(join(root, 'models', 'lc0'), (name, _path, isDir) => isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx'));
   walk(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDir && name.endsWith('.onnx'));
+  walk(join(root, 'monty'), (_name, _path, _isDir) => true);
   for (const dir of ['berserk', 'plentychess', 'reckless', 'stockfish', 'viridithas', 'runtimes']) {
     walk(join(root, dir), (name, _path, isDir) => !isDir && isForbiddenExternalArtifact(name));
   }

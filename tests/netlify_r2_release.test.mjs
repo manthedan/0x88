@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -68,12 +69,48 @@ test('netlify_r2_release check mode rejects side-effect flags', async () => {
   assert.match(result.stderr, /--check is verification-only/);
 });
 
+test('prune_external_model_assets removes Monty from R2 Netlify dist', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-netlify-r2-prune-monty-'));
+  const dist = join(root, 'dist-client');
+  await mkdir(join(dist, 'monty'), { recursive: true });
+  await writeFile(join(dist, 'monty', 'monty.wasm'), 'abc');
+
+  const result = spawnSync(process.execPath, [
+    'scripts/prune_external_model_assets.mjs',
+    dist,
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(join(dist, 'monty')), false);
+  assert.match(result.stdout, /monty/);
+});
+
+test('precompress_engine_artifacts skips Monty artifacts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-precompress-skip-monty-'));
+  await mkdir(join(root, 'monty'), { recursive: true });
+  await mkdir(join(root, 'models'), { recursive: true });
+  await writeFile(join(root, 'monty', 'monty.wasm'), 'abc');
+  await writeFile(join(root, 'models', 'tiny.wasm'), 'abc');
+
+  const result = spawnSync(process.execPath, [
+    'scripts/precompress_engine_artifacts.mjs',
+    root,
+    '--allow-missing',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(join(root, 'monty', 'monty.wasm.gz')), false);
+  assert.equal(existsSync(join(root, 'monty', 'monty.wasm.br')), false);
+  assert.equal(existsSync(join(root, 'models', 'tiny.wasm.gz')), true);
+  assert.equal(existsSync(join(root, 'models', 'tiny.wasm.br')), true);
+});
+
 test('netlify_r2_release rejects a dist that still contains pruned external blobs', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-netlify-r2-bad-dist-'));
   const dist = join(root, 'dist-client');
   await mkdir(join(dist, 'models/lc0'), { recursive: true });
+  await mkdir(join(dist, 'monty'), { recursive: true });
   await mkdir(join(dist, 'stockfish'), { recursive: true });
   await writeFile(join(dist, 'models/lc0/test.onnx'), 'abc');
+  await writeFile(join(dist, 'monty/monty.wasm'), 'abc');
   await writeFile(join(dist, 'stockfish/stockfish-18-lite.js'), 'abc');
   const npm = join(root, 'fake-npm.sh');
   await fakeBin(npm, 'exit 0');
@@ -86,6 +123,7 @@ test('netlify_r2_release rejects a dist that still contains pruned external blob
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /R2 Netlify dist contains pruned external artifacts/);
   assert.match(result.stderr, /models\/lc0\/test\.onnx/);
+  assert.match(result.stderr, /monty\/monty\.wasm/);
   assert.match(result.stderr, /stockfish\/stockfish-18-lite\.js/);
 });
 

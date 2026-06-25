@@ -8,8 +8,8 @@ const root = resolve(process.argv[2] ?? 'public');
 const allowMissing = process.argv.includes('--allow-missing');
 const force = process.argv.includes('--force');
 // All directories that serve large fetchable artifacts. Missing dirs are
-// skipped under --allow-missing (e.g. monty is excluded from product builds).
-const engines = ['berserk', 'plentychess', 'stockfish', 'viridithas', 'reckless', 'ort', 'models', 'monty'];
+// skipped under --allow-missing.
+const engines = ['berserk', 'plentychess', 'stockfish', 'viridithas', 'reckless', 'ort', 'models'];
 // .onnx: f16/int8 model weights only compress ~0.90, but at current sizes
 // that is still ~2MB (t1 qdq) to ~35MB (BT4) per asset. .mjs covers ORT's
 // glue sidecars in /ort/.
@@ -35,12 +35,16 @@ function needsWrite(source, target) {
   return statSync(target).mtimeMs < statSync(source).mtimeMs;
 }
 
-async function writeIfNeeded(path, suffix, bytes) {
+async function writeCompressed(path, suffix, bytes) {
   const target = `${path}${suffix}`;
-  if (!needsWrite(path, target)) return { target, skipped: true, bytes: statSync(target).size };
   await mkdir(dirname(target), { recursive: true });
   await writeFile(target, bytes);
   return { target, skipped: false, bytes: bytes.byteLength };
+}
+
+function keptCompressed(path, suffix) {
+  const target = `${path}${suffix}`;
+  return { target, skipped: true, bytes: statSync(target).size };
 }
 
 if (!existsSync(root)) {
@@ -65,14 +69,26 @@ if (!sources.length) {
 }
 
 for (const source of sources) {
-  const input = await readFile(source);
-  const gzip = gzipSync(input, { level: 9 });
-  // Brotli q11 takes minutes on the multi-hundred-MB nets for ~1% extra over
-  // q5; use fast quality past 64MB so deploy builds stay quick.
-  const brotliQuality = input.byteLength > 64 * 1024 * 1024 ? 5 : 11;
-  const brotli = brotliCompressSync(input, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: brotliQuality } });
-  const gz = await writeIfNeeded(source, '.gz', gzip);
-  const br = await writeIfNeeded(source, '.br', brotli);
+  const needGzip = needsWrite(source, `${source}.gz`);
+  const needBrotli = needsWrite(source, `${source}.br`);
+  let gz;
+  let br;
+  if (needGzip || needBrotli) {
+    const input = await readFile(source);
+    if (needGzip) gz = await writeCompressed(source, '.gz', gzipSync(input, { level: 9 }));
+    else gz = keptCompressed(source, '.gz');
+    if (needBrotli) {
+      // Brotli q11 takes minutes on the multi-hundred-MB nets for ~1% extra over
+      // q5; use fast quality past 64MB so deploy builds stay quick.
+      const brotliQuality = input.byteLength > 64 * 1024 * 1024 ? 5 : 11;
+      br = await writeCompressed(source, '.br', brotliCompressSync(input, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: brotliQuality } }));
+    } else {
+      br = keptCompressed(source, '.br');
+    }
+  } else {
+    gz = keptCompressed(source, '.gz');
+    br = keptCompressed(source, '.br');
+  }
   const rel = relative(process.cwd(), source);
   const action = gz.skipped && br.skipped ? 'kept' : 'wrote';
   console.log(`${action} ${rel} -> gzip ${gz.bytes} bytes, brotli ${br.bytes} bytes`);
