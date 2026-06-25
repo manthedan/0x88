@@ -105,7 +105,7 @@
       <button id="importEngineProfiles" type="button">Import</button>
       <input id="importEngineProfilesFile" type="file" />
       <div id="engineProfileSummary"></div>
-      <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option></select>
+      <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select>
       <span id="backend"></span>
       <span id="runtimeAudit"></span>
       <div id="recklessRuntimeInfo"></div>
