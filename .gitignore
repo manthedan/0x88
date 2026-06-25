@@ -23,6 +23,7 @@ artifacts/
 public/runtimes/lc0-tvmjs-webgpu/
 public/runtimes/tiny-tvmjs-webgpu/
 logs/
+screenshots/
 .local-dev-docs/
 .local-dev-artifacts/
 .ralph/

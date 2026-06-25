@@ -7,6 +7,10 @@
   "scripts": {
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "npm run typecheck && node --experimental-strip-types --test --test-timeout=120000",
+    "test:targeted": "node scripts/run_targeted_tests.mjs",
+    "test:timings": "node scripts/test_timings.mjs",
+    "validate:quick": "node scripts/validate_change.mjs --mode quick",
+    "validate:full": "node scripts/validate_change.mjs --mode final",
     "bench:movegen": "node --experimental-strip-types scripts/bench_movegen.mjs",
     "bench:model-cache-streaming": "node --experimental-strip-types scripts/bench_model_cache_streaming.mjs",
     "web:client": "vite --host 0.0.0.0",
