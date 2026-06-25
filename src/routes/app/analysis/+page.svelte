@@ -115,7 +115,7 @@
       <summary>Engine comparison</summary>
       <div id="engineConsensus" class="compare-summary">No analysis yet.</div>
       <div id="analysisSearchProgress" class="search-progress-grid" hidden></div>
-      <table id="engineCompare" class="engine-compare"><thead><tr><th></th><th>Best</th><th>Eval</th><th>Δ</th><th>PV</th></tr></thead><tbody></tbody></table>
+      <table id="engineCompare" class="engine-compare"><thead><tr><th>Engine</th><th>Best</th><th>Eval</th><th>Δ</th><th>PV</th></tr></thead><tbody></tbody></table>
     </details>
     <details class="section-block" open>
       <summary>Engine lines</summary>
@@ -282,7 +282,6 @@
     color:var(--muted); font-weight:600; font-size:9px; text-transform:uppercase;
     white-space:nowrap;
   }
-  :global(table.engine-compare td:first-child){width:20px}
   :global(table.engine-compare .mono){font-family:var(--mono); white-space:nowrap}
   :global(table.engine-compare .pv){font-family:var(--mono); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px}
   :global(table.engine-compare .agree){color:var(--accent); font-weight:700}

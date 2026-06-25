@@ -1313,7 +1313,7 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     const delta = reference === undefined || line.scoreCp === undefined ? '—' : signedCp(line.scoreCp - reference);
     const agreed = line.pvUci[0] === consensusUci && (consensus?.[1].count ?? 0) > 1;
     return `<tr style="border-left:3px solid ${swatch}">`
-      + `<td>${engineLogoHtmlForName(line.engine)}</td>`
+      + `<td><span class="engine-name-with-logo">${engineLogoHtmlForName(line.engine)}${htmlEscape(line.engine)}</span></td>`
       + `<td class="mono ${agreed ? 'agree' : ''}">${htmlEscape(firstSanMove(line))}</td>`
       + `<td class="mono">${htmlEscape(line.scoreText)}</td>`
       + `<td class="mono">${htmlEscape(delta)}</td>`
