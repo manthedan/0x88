@@ -107,12 +107,12 @@ function initialPerformanceDial(): PerformanceDial {
   }
 }
 
-// Multi-engine analysis runs all selected engines concurrently, so CPU budget
-// is split with the shared policy: every selected CPU engine is registered as
-// a participant before each run and threads divide deterministically (capped
-// single-thread engines pass their surplus to engines that can use it).
-const resourceBroker = new EngineResourceBroker({ policy: 'shared', dial: initialPerformanceDial() });
+// Multi-engine analysis keeps CPU engines behind an exclusive broker lease.
+// The promoted browser-native WASM engines are single-threaded but can still
+// saturate the page when started together, especially while loading sidecars.
+const resourceBroker = new EngineResourceBroker({ policy: 'exclusive', dial: initialPerformanceDial() });
 const registeredBrokerEngines = new Set<string>();
+let scheduledAnalysisTimer: ReturnType<typeof setTimeout> | null = null;
 
 function syncBrokerParticipants(rows: EngineRow[]): void {
   const desired = new Map<string, EngineFamily>();
@@ -1956,6 +1956,34 @@ async function copyReviewPgn(): Promise<void> {
   }
 }
 
+function cancelActiveAnalysisRun(): void {
+  if (scheduledAnalysisTimer) {
+    clearTimeout(scheduledAnalysisTimer);
+    scheduledAnalysisTimer = null;
+  }
+  analysisAbort?.abort();
+  if (activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
+  for (const key of ANALYSIS_BIG_NET_KEYS) peekBigNetSearcher(key)?.cancel();
+}
+
+function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250): void {
+  if (scheduledAnalysisTimer) clearTimeout(scheduledAnalysisTimer);
+  cancelActiveAnalysisRun();
+  scheduledAnalysisTimer = setTimeout(() => {
+    scheduledAnalysisTimer = null;
+    void analyzeCurrent(options);
+  }, delayMs);
+}
+
+async function withCpuLease<T>(engineId: string, signal: AbortSignal, task: (lease: { threads: number }) => Promise<T>): Promise<T> {
+  const lease = await resourceBroker.acquire({ engineId, signal });
+  try {
+    return await task(lease);
+  } finally {
+    lease.release();
+  }
+}
+
 async function analyzeCurrent(options: { force?: boolean } = {}) {
   if (mountAbort.signal.aborted) return;
   const rows = activeEngineRows();
@@ -1963,9 +1991,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   const runId = ++activeAnalysisRunId;
   // Interrupt any in-flight analysis: abort the Stockfish signal and cancel the
   // worker LC0 / big-net searches, so a new position takes over immediately.
-  analysisAbort?.abort();
-  if (activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
-  for (const key of ANALYSIS_BIG_NET_KEYS) peekBigNetSearcher(key)?.cancel();
+  cancelActiveAnalysisRun();
   const controller = new AbortController();
   analysisAbort = controller;
   analyzing = true;
@@ -2039,38 +2065,48 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
         const label = kind === 'lite' ? 'SF Lite' : 'SF';
-        pushTask(index, cacheKey, label, resourceBroker.acquire({ engineId: `sf-${kind}`, signal: controller.signal }).then(async (lease) => {
-          try {
-            const engine = getStockfish(kind);
-            engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
-            const infos = await engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal });
-            return stockfishAnalysisLines(infos, fen, label);
-          } finally {
-            lease.release();
-          }
+        pushTask(index, cacheKey, label, withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
+          const engine = getStockfish(kind);
+          engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
+          const infos = await engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal });
+          return stockfishAnalysisLines(infos, fen, label);
         }));
       } else if (row.family === 'viridithas') {
         const label = `${viridithasVariantForKey(row.variant).label}`;
         const engine = getViridithasFor(row.variant);
-        pushTask(index, cacheKey, label, engine.newGame(controller.signal)
-          .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
-          .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
+        pushTask(index, cacheKey, label, withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
+          await engine.newGame(controller.signal);
+          const infos = await engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal });
+          renderRecklessRuntimeInfo();
+          return stockfishAnalysisLines(infos, fen, label);
+        }));
       } else if (row.family === 'berserk') {
         const label = `${berserkVariantForKey(row.variant).label}`;
         const engine = getBerserkFor(row.variant);
-        pushTask(index, cacheKey, label, engine.newGame(controller.signal)
-          .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
-          .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
+        pushTask(index, cacheKey, label, withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
+          engine.setOptions({ threads: lease.threads });
+          await engine.newGame(controller.signal);
+          const infos = await engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal });
+          renderRecklessRuntimeInfo();
+          return stockfishAnalysisLines(infos, fen, label);
+        }));
       } else if (row.family === 'plentychess') {
         const label = `${plentyChessVariantForKey(row.variant).label}`;
         const engine = getPlentyChessFor(row.variant);
-        pushTask(index, cacheKey, label, engine.newGame(controller.signal)
-          .then(() => engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal }))
-          .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
+        pushTask(index, cacheKey, label, withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
+          engine.setOptions({ threads: lease.threads });
+          await engine.newGame(controller.signal);
+          const infos = await engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal });
+          renderRecklessRuntimeInfo();
+          return stockfishAnalysisLines(infos, fen, label);
+        }));
       } else {
         const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label}`;
-        pushTask(index, cacheKey, label, getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal })
-          .then((infos) => { renderRecklessRuntimeInfo(); return stockfishAnalysisLines(infos, fen, label); }));
+        pushTask(index, cacheKey, label, withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
+          const infos = await getRecklessFor(row.variant).analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal });
+          renderRecklessRuntimeInfo();
+          return stockfishAnalysisLines(infos, fen, label);
+        }));
       }
     }
     await Promise.all(tasks);
@@ -2269,9 +2305,7 @@ function wireEvents() {
   el('copyPgn').addEventListener('click', copyPgn);
   el('analyze').addEventListener('click', () => { void analyzeCurrent({ force: true }); });
   el('stop').addEventListener('click', () => {
-    analysisAbort?.abort();
-    if (activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
-    for (const key of ANALYSIS_BIG_NET_KEYS) peekBigNetSearcher(key)?.cancel();
+    cancelActiveAnalysisRun();
   });
   el('engineList').addEventListener('change', (event) => {
     const target = event.target as HTMLInputElement | HTMLSelectElement;
@@ -2298,7 +2332,7 @@ function wireEvents() {
     engineRows[i] = normalizeDeployEngineRow(engineRows[i], 'analysis', i);
     disposeUnusedEngines();
     lineCache.delete(tree.current.fen);
-    void analyzeCurrent();
+    scheduleAnalyzeCurrent();
   });
   el('engineProfileSelect').addEventListener('change', () => {
     const value = selectEl('engineProfileSelect').value;
@@ -2323,17 +2357,17 @@ function wireEvents() {
     renderEngineList();
     disposeUnusedEngines();
     lineCache.delete(tree.current.fen);
-    void analyzeCurrent();
+    scheduleAnalyzeCurrent();
   });
   el('addEngine').addEventListener('click', () => {
     const family = nextEngineFamily();
     engineRows.push({ family, variant: defaultVariant(family), strength: defaultStrength(family) });
     renderEngineList();
     lineCache.delete(tree.current.fen);
-    void analyzeCurrent();
+    scheduleAnalyzeCurrent();
   });
   el('lc0RuntimeSelect').addEventListener('change', () => { void reloadLc0Backend(); });
-  el('multiPvInput').addEventListener('change', () => { lineCache.delete(tree.current.fen); void analyzeCurrent(); });
+  el('multiPvInput').addEventListener('change', () => { lineCache.delete(tree.current.fen); scheduleAnalyzeCurrent(); });
   el('reviewGame').addEventListener('click', () => { void runGameReview(); });
   el('reviewStop').addEventListener('click', () => reviewAbort?.abort());
   el('reviewCopyPgn').addEventListener('click', () => { void copyReviewPgn(); });
