@@ -11,6 +11,12 @@
       if (!mounted) return;
       cleanup = module.mountAnalysisBrowser();
     });
+    const multiPv = document.getElementById('multiPvInput') as HTMLInputElement | null;
+    const dec = document.getElementById('multiPvDec');
+    const inc = document.getElementById('multiPvInc');
+    const clampPv = (v: number) => Math.min(10, Math.max(1, v));
+    dec?.addEventListener('click', () => { if (multiPv) { multiPv.value = String(clampPv(Number(multiPv.value) - 1)); multiPv.dispatchEvent(new Event('change', { bubbles: true })); } });
+    inc?.addEventListener('click', () => { if (multiPv) { multiPv.value = String(clampPv(Number(multiPv.value) + 1)); multiPv.dispatchEvent(new Event('change', { bubbles: true })); } });
     return () => {
       mounted = false;
       cleanup();
@@ -56,12 +62,26 @@
   <section class="panel app-sidebar" aria-label="Analysis">
     <details class="section-block" open>
       <summary>Engines</summary>
-      <div class="row">
-        <button id="analyze" class="primary" type="button" disabled>Analyze</button>
-        <button id="stop" type="button" disabled>Stop</button>
-        <label class="small"><input type="checkbox" id="autoAnalyze" checked /> auto</label>
-        <div class="field"><label for="multiPvInput">Lines</label>
-          <input id="multiPvInput" type="number" min="1" max="10" step="1" value="3" /></div>
+      <div class="analyze-controls">
+        <div class="analyze-actions">
+          <button id="analyze" class="primary" type="button" disabled>Analyze</button>
+          <button id="stop" type="button" disabled>Stop</button>
+        </div>
+        <div class="analyze-options">
+          <label class="toggle" for="autoAnalyze">
+            <input type="checkbox" id="autoAnalyze" checked />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-label">Auto</span>
+          </label>
+          <div class="stepper">
+            <button id="multiPvDec" type="button" class="stepper-btn" aria-label="Decrease lines">&minus;</button>
+            <label class="stepper-field">
+              <span class="stepper-label">Lines</span>
+              <input id="multiPvInput" type="number" min="1" max="10" step="1" value="3" />
+            </label>
+            <button id="multiPvInc" type="button" class="stepper-btn" aria-label="Increase lines">+</button>
+          </div>
+        </div>
       </div>
       <div id="engineList" class="engine-list"></div>
       <div class="row">
@@ -228,7 +248,7 @@
     display:flex; align-items:center; justify-content:center;
   }
   .nav button:hover{border-color:var(--border-input-hover); background:#fff; color:var(--ink)}
-  input[type=number]{width:80px}
+  input[type=number]:not(.stepper-field input){width:80px}
   :global(.lines){list-style:none; margin:8px 0 0; padding:0}
   :global(.lines li){
     display:flex; align-items:center; gap:8px;
@@ -299,6 +319,55 @@
   }
   :global(.loading-progress-row), :global(.search-progress-row){display:grid; gap:3px; margin:4px 0}
   :global(.dl-label), :global(.search-progress-text){font-family:var(--mono); font-size:11px; color:var(--muted)}
+  .analyze-controls{display:grid; gap:10px; margin-top:10px}
+  .analyze-actions{display:flex; gap:8px}
+  .analyze-actions button{flex:1 1 0}
+  .analyze-options{display:flex; flex-wrap:wrap; gap:16px; align-items:center}
+  .toggle{
+    display:inline-flex; align-items:center; gap:8px; cursor:pointer; user-select:none;
+  }
+  .toggle input{position:absolute; opacity:0; width:0; height:0}
+  .toggle-track{
+    width:36px; height:20px; border-radius:99px; flex:0 0 auto;
+    background:var(--border-input); border:1px solid var(--border-input);
+    transition:background .15s, border-color .15s;
+    display:inline-flex; align-items:center; padding:1px;
+  }
+  .toggle-thumb{
+    width:14px; height:14px; border-radius:50%; background:#fff;
+    transition:transform .15s; box-shadow:0 1px 2px rgba(0,0,0,.15);
+    transform:translateX(0);
+  }
+  .toggle input:checked + .toggle-track{background:var(--accent); border-color:var(--accent)}
+  .toggle input:checked + .toggle-track .toggle-thumb{transform:translateX(16px)}
+  .toggle input:focus-visible + .toggle-track{box-shadow:var(--focus-ring)}
+  .toggle-label{font-size:13px; color:var(--text-soft); font-weight:500}
+  .stepper{
+    display:inline-flex; align-items:center; gap:0;
+    border:1px solid var(--border-input); border-radius:var(--radius-sm);
+    background:var(--panel); overflow:hidden; height:38px;
+  }
+  .stepper-btn{
+    flex:0 0 34px; height:100%; padding:0; border:none; border-radius:0;
+    background:var(--panel-inset); color:var(--text-soft); font-size:17px; font-weight:600;
+    cursor:pointer; transition:background .12s, color .12s;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .stepper-btn:hover:not(:disabled){background:var(--accent-soft); color:var(--accent-deep)}
+  .stepper-field{
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:0 10px; min-width:48px; border-inline:1px solid var(--border-input);
+    height:100%; background:var(--panel);
+  }
+  .stepper-label{font-size:9px; color:var(--muted-2); line-height:1; letter-spacing:.04em; text-transform:uppercase; font-weight:600}
+  .stepper-field input{
+    width:28px; text-align:center; border:none; background:transparent;
+    padding:0; font-family:var(--mono); font-size:14px; font-weight:700; color:var(--ink);
+    -moz-appearance:textfield;
+  }
+  .stepper-field input::-webkit-inner-spin-button,
+  .stepper-field input::-webkit-outer-spin-button{ -webkit-appearance:none; margin:0 }
+  .stepper-field input:focus{box-shadow:none; outline:none}
   .profile-row{align-items:end}
   .profile-row select{min-width:150px}
   .profile-row input[type=text]{min-width:130px}
