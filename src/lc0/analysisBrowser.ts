@@ -2050,6 +2050,17 @@ function assetFileLabel(rawUrl: string): string {
   }
 }
 
+function jsSidecarWasmUrl(jsUrl: string): string | undefined {
+  try {
+    const url = new URL(jsUrl, location.href);
+    if (!url.pathname.endsWith('.js')) return undefined;
+    url.pathname = url.pathname.replace(/\.js$/, '.wasm');
+    return url.href;
+  } catch {
+    return jsUrl.endsWith('.js') ? jsUrl.replace(/\.js$/, '.wasm') : undefined;
+  }
+}
+
 async function preloadAnalysisAsset(engineLabel: string, rawUrl: string | undefined, signal: AbortSignal): Promise<void> {
   if (!rawUrl) return;
   const id = `asset:${engineLabel}:${rawUrl}`;
@@ -2204,12 +2215,14 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
         const label = kind === 'lite' ? 'SF Lite' : 'SF';
-        pushTask(index, cacheKey, label, () => withCpuLease(`sf-${kind}`, controller.signal, async (lease) => withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), async (signal) => {
+        const stockfishUrl = stockfishFlavorUrl(threadedStockfishAvailable() ? (kind === 'lite' ? 'lite-threaded' : 'threaded') : (kind === 'lite' ? 'lite-single' : 'single'));
+        pushTask(index, cacheKey, label, () => withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
           const engine = getStockfish(kind);
           engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
-          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
+          await prepareCpuEngine(row, label, controller.signal, [stockfishUrl, jsSidecarWasmUrl(stockfishUrl)], (signal) => engine.newGame(signal));
+          const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           return stockfishAnalysisLines(infos, fen, label);
-        })));
+        }));
       } else if (row.family === 'viridithas') {
         const variant = viridithasVariantForKey(row.variant);
         const label = `${variant.label}`;
