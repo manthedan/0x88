@@ -4,12 +4,14 @@ Status: experimental; do not promote without a larger browser/device benchmark.
 
 ## Build finding
 
-A Stockfish 18 lite single-threaded WASM can be built with WebAssembly relaxed SIMD dot-product opcodes by patching the upstream `stockfish.js` source from `public/stockfish/stockfish-18.0.7-corresponding-source.tar.gz` and building with `emscripten/emsdk:3.1.40`.
+A Stockfish 18 lite single-threaded WASM can be built with WebAssembly relaxed SIMD dot-product opcodes by patching the upstream `stockfish.js` source from `public/stockfish/stockfish-18.0.7-corresponding-source.tar.gz`. The default reproducible build currently uses `emscripten/emsdk:3.1.40`; Emscripten 5.0.7 and 6.0.1 also pass smoke/parity with the same asyncify/import/stack fixes.
 
 Working local builder:
 
 ```sh
 ./scripts/build_stockfish_relaxed_simd.mjs
+# or test a newer Docker toolchain:
+EMSDK_DOCKER_IMAGE=emscripten/emsdk:latest ./scripts/build_stockfish_relaxed_simd.mjs
 ```
 
 Output:
@@ -24,14 +26,15 @@ The committed builder keeps the generated artifacts under `.local-dev-artifacts`
 ## Important build details
 
 - Emscripten 3.1.7 matches upstream `stockfish.js` expectations, but its `wasm_simd128.h` does not provide `wasm_i32x4_relaxed_dot_i8x16_i7x16_add`.
-- Emscripten 3.1.40 provides the relaxed dot intrinsic, but the old Stockfish.js makefile needs patching:
+- Emscripten 3.1.40+ provides the relaxed dot intrinsic, but the old Stockfish.js makefile needs patching:
   - add `-mrelaxed-simd` next to `-msimd128`;
   - remove obsolete `-fexperimental-new-pass-manager`;
   - use `--closure 0` for this experiment;
   - keep `-s ASYNCIFY=1` and add `-s ASYNCIFY_IMPORTS=["emscripten_utils_getline_impl"]`;
   - add `-s STACK_SIZE=1048576`.
-- Without the larger stack, the 3.1.40 relaxed build can emit `Stack overflow detected` or fail later with runtime traps.
-- A Docker-latest / Emscripten 6.0.0 build and a 3.1.40 build without the stack increase both failed runtime smoke tests, even when the relaxed opcodes were present.
+- Without the larger stack, the relaxed build can emit `Stack overflow detected` or fail later with runtime traps.
+- Earlier Docker-latest / Emscripten 6.x attempts failed before the stack/import fix was applied. With the final fix set, Emscripten 6.0.1 passes browser Worker smoke and parity.
+- Local Homebrew Emscripten 5.0.7 also passes after the same core fixes, though the upstream Makefile additionally needs Darwin host flags removed (`-arch`, `-mdynamic-no-pic`, `-mmacosx-version-min`) when building outside Linux Docker.
 
 ## NNUE dot-product patch
 
@@ -75,5 +78,18 @@ Parity for that run:
 ```json
 { "pairs": 10, "sameBestmove": 10, "sameScore": 10, "samePv": 10 }
 ```
+
+Toolchain matrix run, same 5 positions x depths 11 and 13:
+
+```json
+{
+  "baseline": { "rows": 10, "medianNps": 1667894, "aggregateNps": 1988633 },
+  "relaxed3140": { "rows": 10, "medianNps": 1980625, "aggregateNps": 2304865, "speedupAggregate": 1.1590197889706144 },
+  "relaxed507": { "rows": 10, "medianNps": 1980625, "aggregateNps": 2290468, "speedupAggregate": 1.1517801424395553 },
+  "relaxed601": { "rows": 10, "medianNps": 1980625, "aggregateNps": 2332723, "speedupAggregate": 1.1730284069509054 }
+}
+```
+
+All three relaxed toolchain builds had `10/10` same bestmove, score, and PV against baseline in that matrix. Emscripten 6.0.1 was slightly fastest in this small run, but the spread between relaxed toolchains was small; choose a promotion toolchain after a larger matrix and browser compatibility pass.
 
 Full local reports are ignored under `.local-dev-artifacts/stockfish-relaxed/*report*.json`.
