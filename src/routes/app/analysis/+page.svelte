@@ -37,6 +37,7 @@
       <button id="navEnd" type="button" title="End (Down)">▶|</button>
       <button id="flip" type="button" title="Flip board">⇅</button>
     </div>
+    <div id="movelist" class="movelist move-panel"></div>
     <div class="row">
       <div class="field" style="flex:1 1 100%"><label for="fenInput">FEN</label>
         <input id="fenInput" type="text" spellcheck="false" autocomplete="off" placeholder="paste a FEN" /></div>
@@ -51,7 +52,6 @@
     </div>
     <div id="message" aria-live="polite">Loading model…</div>
     <div id="downloadProgress" class="model-load-progress" hidden></div>
-    <div id="movelist" class="movelist move-panel"></div>
   </section>
   <section class="panel app-sidebar" aria-label="Analysis">
     <details class="section-block" open>

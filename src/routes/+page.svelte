@@ -88,13 +88,13 @@
   </div>
 </section>
 
-<!-- ===== Capabilities & storage ===== -->
+<!-- ===== Capabilities ===== -->
 <section class="block" aria-labelledby="caps-h">
   <div class="wrap">
     <div class="section-head">
       <p class="kicker">Live diagnostics</p>
       <h2 id="caps-h">What's running in your browser</h2>
-      <p>This site uses the browser as a deep-learning runtime. Here's what your device currently supports, and what's stored locally from past visits.</p>
+      <p>This site uses the browser as a deep-learning runtime. Here's what your device currently supports.</p>
     </div>
     <div class="caps-panel">
       <div class="caps-left">
@@ -102,10 +102,6 @@
         <p>WebGPU unlocks the large Leela Chess Zero neural nets (t3, BT4) at GPU speed. WebAssembly runs every classical NNUE engine. Threads accelerate the WASM builds when the page is cross-origin isolated.</p>
         <div id="caps" aria-live="polite"><span class="cap">Checking capabilities…</span></div>
         <p class="capnote" id="capNote"></p>
-      </div>
-      <div class="caps-right">
-        <h4>Downloads &amp; storage</h4>
-        <div id="storage" aria-live="polite"></div>
       </div>
     </div>
   </div>
@@ -339,7 +335,7 @@
   .action-card:hover .ac-arrow .a{transform:translateX(3px)}
   .caps-panel{
     background:var(--panel); border:1px solid var(--rule); border-radius:var(--radius-lg);
-    padding:28px; display:grid; grid-template-columns:1.1fr 1fr; gap:32px; align-items:start;
+    padding:28px; display:grid; gap:32px; align-items:start;
   }
   .caps-left h3{margin:0 0 8px; font-size:19px}
   .caps-left p{margin:0 0 16px; color:var(--muted); font-size:14px; line-height:1.6}
@@ -355,25 +351,6 @@
   :global(.cap.no::before){content:"\2715"}
   :global(.cap:not(.ok):not(.no)::before){content:"\2022"; opacity:.5}
   :global(.capnote){font-size:13px; color:var(--muted); margin:14px 0 0; line-height:1.55; max-width:50ch}
-  .caps-right h4{margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted)}
-  :global(#storage){display:grid; gap:10px}
-  :global(.store-row){
-    display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:14px;
-    background:var(--bg); border:1px solid var(--rule); border-radius:var(--radius-sm);
-    padding:12px 14px; font-size:13px;
-  }
-  :global(.store-row .store-info){display:grid; gap:2px; min-width:0}
-  :global(.store-row .store-info b){font-weight:600; font-size:13.5px}
-  :global(.store-row .store-info span){color:var(--muted); font-size:12px; line-height:1.4}
-  :global(.store-row .store-size){font-family:var(--mono); font-size:11.5px; color:var(--muted-2); white-space:nowrap}
-  :global(.store-row button){
-    font:inherit; font-size:12px; padding:7px 12px; border:1px solid var(--rule);
-    border-radius:6px; background:var(--panel); cursor:pointer; color:var(--ink-soft);
-    transition:border-color .15s, color .15s, background .15s;
-  }
-  :global(.store-row button:disabled){opacity:.45; cursor:not-allowed}
-  :global(.store-row button:hover:not(:disabled)){border-color:var(--warn); color:var(--warn); background:var(--warn-soft)}
-  :global(.store-row button.clearing){opacity:.7}
   .engine-filters{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px}
   .engine-filter{
     font:inherit; font-size:13px; padding:7px 14px; border-radius:99px;
