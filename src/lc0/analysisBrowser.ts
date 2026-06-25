@@ -2028,7 +2028,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         pushTask(index, cacheKey, label, resourceBroker.acquire({ engineId: `sf-${kind}`, signal: controller.signal }).then(async (lease) => {
           try {
             const engine = getStockfish(kind);
-            engine.setOptions({ threads: lease.threads });
+            engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
             const infos = await engine.analyze(fen, { multipv: multiPv(), depth: row.strength, signal: controller.signal });
             return stockfishAnalysisLines(infos, fen, label);
           } finally {

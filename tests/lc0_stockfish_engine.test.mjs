@@ -21,6 +21,12 @@ test('stockfish flavor helpers map browser Stockfish builds', () => {
   assert.equal(stockfishFlavorUrl('threaded'), '/stockfish/stockfish-18.js');
 });
 
+test('StockfishEngine reports thread capacity from the resolved worker URL', () => {
+  assert.equal(new StockfishEngine({}, '/stockfish/stockfish-18-lite-single.js').maxThreads(), 1);
+  assert.equal(new StockfishEngine({}, '/stockfish/stockfish-18-lite.js').maxThreads(), 32);
+  assert.equal(new StockfishEngine({}, 'https://assets.0x88.app/stockfish/stockfish-18-lite.js').maxThreads(), 1);
+});
+
 test('stockfishGoCommand prefers movetime over depth and clamps depth', () => {
   assert.equal(stockfishGoCommand({ depth: 6 }), 'go depth 6');
   assert.equal(stockfishGoCommand({}), 'go depth 4');
@@ -121,6 +127,51 @@ test('StockfishEngine drains a stopped search before sending the next position',
     const secondPosition = worker.events.indexOf(`cmd:position fen ${fen2}`);
     assert.ok(firstBest >= 0, 'first search did not emit a bestmove');
     assert.ok(secondPosition > firstBest, 'second search started before Stockfish acknowledged stop with bestmove');
+  } finally {
+    if (previousWorker === undefined) delete globalThis.Worker;
+    else globalThis.Worker = previousWorker;
+  }
+});
+
+test('StockfishEngine rejects an aborted analysis if Stockfish never returns bestmove', async () => {
+  class HungStockfishWorker {
+    static instances = [];
+
+    constructor() {
+      this.events = [];
+      this.onmessage = null;
+      this.onerror = null;
+      HungStockfishWorker.instances.push(this);
+    }
+
+    postMessage(command) {
+      this.events.push(`cmd:${command}`);
+      if (command === 'uci') queueMicrotask(() => this.emit('uciok'));
+      else if (command === 'isready') queueMicrotask(() => this.emit('readyok'));
+    }
+
+    emit(line) {
+      this.events.push(`evt:${line}`);
+      this.onmessage?.({ data: line });
+    }
+
+    terminate() {
+      this.events.push('terminate');
+    }
+  }
+
+  const previousWorker = globalThis.Worker;
+  globalThis.Worker = HungStockfishWorker;
+  try {
+    const engine = new StockfishEngine({ depth: 8 }, '/mock-stockfish.js');
+    const controller = new AbortController();
+    const analysis = engine.analyze('8/8/8/8/8/8/4P3/4K3 w - - 0 1', { multipv: 1, depth: 8, signal: controller.signal });
+
+    await waitUntil(() => HungStockfishWorker.instances[0]?.events.includes('cmd:go depth 8'));
+    controller.abort();
+    await assert.rejects(analysis, (error) => error.name === 'AbortError');
+    assert.ok(HungStockfishWorker.instances[0].events.includes('cmd:stop'));
+    assert.ok(HungStockfishWorker.instances[0].events.includes('terminate'));
   } finally {
     if (previousWorker === undefined) delete globalThis.Worker;
     else globalThis.Worker = previousWorker;

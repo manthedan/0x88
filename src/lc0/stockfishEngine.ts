@@ -115,6 +115,8 @@ function threadsCommand(threads: number): string {
 
 export interface StockfishInfoLine extends BrowserUciInfoLine {}
 
+const STOCKFISH_ABORT_DRAIN_TIMEOUT_MS = 1500;
+
 /** Parse a UCI `info ... multipv K ... score ... pv ...` line, or null if it lacks a PV. */
 export function parseStockfishInfo(line: string): StockfishInfoLine | null {
   if (!line.startsWith('info ') || !line.includes(' pv ')) return null;
@@ -333,6 +335,12 @@ export class StockfishEngine implements BrowserUciEngine {
     return this.worker ? 'worker ready' : 'worker idle';
   }
 
+  maxThreads(): number {
+    if (!/stockfish-18(?:-lite)?\.js(?:[?#].*)?$/.test(this.url)) return 1;
+    if (typeof location === 'undefined') return /^[/.]/.test(this.url) ? 32 : 1;
+    return sameOriginUrl(this.url) ? 32 : 1;
+  }
+
   /** Last parsed UCI info/PV lines from `bestMove` or `analyze`, sorted by MultiPV rank. */
   lastInfo(): StockfishInfoLine[] {
     return this.lastInfoLines.map((entry) => ({ ...entry, pvUci: [...entry.pvUci] }));
@@ -351,16 +359,25 @@ export class StockfishEngine implements BrowserUciEngine {
       this.analyzeLines = new Map();
       this.worker.postMessage('setoption name MultiPV value 1');
       return new Promise<string | null>((resolve, reject) => {
-        const onAbort = () => this.worker?.postMessage('stop');
+        let abortTimer: ReturnType<typeof setTimeout> | null = null;
+        const cleanup = () => {
+          signal?.removeEventListener('abort', onAbort);
+          if (abortTimer) clearTimeout(abortTimer);
+          abortTimer = null;
+        };
+        const onAbort = () => {
+          this.worker?.postMessage('stop');
+          abortTimer = setTimeout(() => this.failActive(abortError()), STOCKFISH_ABORT_DRAIN_TIMEOUT_MS);
+        };
         // Clean up the abort listener whether the move completes or is aborted, so
         // listeners don't accumulate on the battle-lifetime signal (one per ply).
         this.resolveMove = (uci) => {
-          signal?.removeEventListener('abort', onAbort);
+          cleanup();
           this.rejectMove = null;
           resolve(uci);
         };
         this.rejectMove = (error) => {
-          signal?.removeEventListener('abort', onAbort);
+          cleanup();
           this.analyzeLines = null;
           reject(error);
         };
@@ -381,14 +398,23 @@ export class StockfishEngine implements BrowserUciEngine {
       this.worker.postMessage(`setoption name MultiPV value ${multipv}`);
       return new Promise<StockfishInfoLine[]>((resolve, reject) => {
         this.analyzeLines = new Map();
-        const onAbort = () => this.worker?.postMessage('stop');
-        this.resolveAnalyze = (lines) => {
+        let abortTimer: ReturnType<typeof setTimeout> | null = null;
+        const cleanup = () => {
           opts.signal?.removeEventListener('abort', onAbort);
+          if (abortTimer) clearTimeout(abortTimer);
+          abortTimer = null;
+        };
+        const onAbort = () => {
+          this.worker?.postMessage('stop');
+          abortTimer = setTimeout(() => this.failActive(abortError()), STOCKFISH_ABORT_DRAIN_TIMEOUT_MS);
+        };
+        this.resolveAnalyze = (lines) => {
+          cleanup();
           this.rejectAnalyze = null;
           resolve(lines);
         };
         this.rejectAnalyze = (error) => {
-          opts.signal?.removeEventListener('abort', onAbort);
+          cleanup();
           this.analyzeLines = null;
           reject(error);
         };
