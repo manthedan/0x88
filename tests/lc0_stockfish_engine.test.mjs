@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseBestMove, parseStockfishInfo, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, stockfishGoCommand, stockfishWorkerUrl } from '../src/lc0/stockfishEngine.ts';
+import { parseBestMove, parseStockfishInfo, StockfishEngine, defaultStockfishUrl, normalizeStockfishFlavor, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, stockfishGoCommand, stockfishWorkerUrl } from '../src/lc0/stockfishEngine.ts';
 
 test('parseBestMove extracts the UCI move and handles (none)', () => {
   assert.equal(parseBestMove('bestmove e2e4 ponder e7e5'), 'e2e4');
@@ -15,10 +15,25 @@ test('stockfish flavor helpers map browser Stockfish builds', () => {
   assert.equal(normalizeStockfishFlavor('full-threaded'), 'threaded');
   assert.equal(stockfishFlavorRequiresIsolation('single'), false);
   assert.equal(stockfishFlavorRequiresIsolation('threaded'), true);
-  assert.equal(stockfishFlavorUrl('lite-single'), '/stockfish/stockfish-18-lite-single.js');
+  assert.equal(stockfishFlavorUrl('lite-single').startsWith('/stockfish/stockfish-18-lite-single'), true);
   assert.equal(stockfishFlavorUrl('single'), '/stockfish/stockfish-18-single.js');
   assert.equal(stockfishFlavorUrl('lite-threaded'), '/stockfish/stockfish-18-lite.js');
   assert.equal(stockfishFlavorUrl('threaded'), '/stockfish/stockfish-18.js');
+});
+
+test('Stockfish lite-single uses relaxed SIMD when validated and falls back otherwise', () => {
+  const originalValidate = WebAssembly.validate;
+  try {
+    WebAssembly.validate = () => true;
+    assert.equal(defaultStockfishUrl(), '/stockfish/stockfish-18-lite-single-relaxed.js');
+    assert.equal(stockfishFlavorUrl('lite-single'), '/stockfish/stockfish-18-lite-single-relaxed.js');
+
+    WebAssembly.validate = () => false;
+    assert.equal(defaultStockfishUrl(), '/stockfish/stockfish-18-lite-single.js');
+    assert.equal(stockfishFlavorUrl('lite-single'), '/stockfish/stockfish-18-lite-single.js');
+  } finally {
+    WebAssembly.validate = originalValidate;
+  }
 });
 
 test('StockfishEngine reports thread capacity from the resolved worker URL', () => {
@@ -38,9 +53,9 @@ test('cross-origin Stockfish wrapper hash initializes the UCI worker, not a pthr
   globalThis.LC0_BROWSER_ASSET_BASE_URL = 'https://assets.0x88.app';
   URL.createObjectURL = () => 'blob:https://0x88.app/stockfish-wrapper';
   try {
-    const worker = stockfishWorkerUrl('https://assets.0x88.app/stockfish/stockfish-18-lite-single.js');
+    const worker = stockfishWorkerUrl('https://assets.0x88.app/stockfish/stockfish-18-lite-single-relaxed.js');
     assert.equal(worker.objectUrl, 'blob:https://0x88.app/stockfish-wrapper');
-    assert.equal(worker.url, 'blob:https://0x88.app/stockfish-wrapper#https%3A%2F%2Fassets.0x88.app%2Fstockfish%2Fstockfish-18-lite-single.wasm');
+    assert.equal(worker.url, 'blob:https://0x88.app/stockfish-wrapper#https%3A%2F%2Fassets.0x88.app%2Fstockfish%2Fstockfish-18-lite-single-relaxed.wasm');
     assert.equal(worker.url.includes(',worker'), false);
   } finally {
     URL.createObjectURL = previousCreateObjectUrl;

@@ -15,6 +15,21 @@ const ASSET_GROUPS = [
     assets: ['/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx'],
   },
   {
+    family: 'stockfish',
+    label: 'Stockfish.js lite single-threaded variants',
+    status: 'release-with-relaxed-candidate',
+    command: 'npm install && npm run stockfish:build-relaxed-simd && npm run stockfish:release-manifest',
+    docs: 'docs/engine_catalog.md#stockfish-family',
+    assets: [
+      '/stockfish/stockfish-18-lite-single.js',
+      '/stockfish/stockfish-18-lite-single.wasm',
+      '/stockfish/stockfish-18-lite-single-relaxed.js',
+      '/stockfish/stockfish-18-lite-single-relaxed.wasm',
+      '/stockfish/stockfish-18.0.7-corresponding-source.tar.gz',
+      '/stockfish/stockfish-18.0.7.manifest.json',
+    ],
+  },
+  {
     family: 'reckless',
     label: 'Reckless WASI/browser variants',
     status: 'experimental-selectable',

@@ -1,6 +1,6 @@
 # Stockfish.js relaxed SIMD experiment
 
-Status: experimental; do not promote without a larger browser/device benchmark.
+Status: lite single-thread relaxed artifact staged as a feature-detected candidate; do not promote as a default replacement without the larger browser/device benchmark below.
 
 ## Promotion benchmark matrix
 
@@ -39,7 +39,7 @@ Output:
 .local-dev-artifacts/stockfish-relaxed/repro/dist/stockfish-18-lite-single-relaxed.wasm
 ```
 
-The committed builder keeps the generated artifacts under `.local-dev-artifacts` intentionally.
+The committed builder keeps fresh generated artifacts under `.local-dev-artifacts`; promotion copies the lite single-thread candidate to `public/stockfish/stockfish-18-lite-single-relaxed.{js,wasm}` as a separate artifact while preserving `stockfish-18-lite-single.{js,wasm}` for fallback.
 
 ## Important build details
 
@@ -109,5 +109,41 @@ Toolchain matrix run, same 5 positions x depths 11 and 13:
 ```
 
 All three relaxed toolchain builds had `10/10` same bestmove, score, and PV against baseline in that matrix. Emscripten 6.0.1 was slightly fastest in this small run, but the spread between relaxed toolchains was small; choose a promotion toolchain after a larger matrix and browser compatibility pass.
+
+Production artifact checks now include the relaxed lite-single files in `scripts/check_browser_engine_assets.mjs`, the R2 Brotli publish list, and `public/stockfish/stockfish-18.0.7.manifest.json`. The corresponding-source archive includes the relaxed builder, app integration code, feature probe, and this experiment note.
+
+Current app integration uses `supportsWasmRelaxedSimd()` from `src/lc0/wasmFeatures.ts` to select `stockfish-18-lite-single-relaxed.js` only when the tiny relaxed-dot `WebAssembly.validate()` probe passes; otherwise it falls back to `stockfish-18-lite-single.js`. Unit coverage in `tests/lc0_stockfish_engine.test.mjs` patches `WebAssembly.validate` to verify both selection paths and keeps the cross-origin blob worker hash behavior intact.
+
+A public-asset browser Worker smoke on the staged relaxed files passed in Chromium via a local static server:
+
+- worker URL: `/stockfish/stockfish-18-lite-single-relaxed.js#<encoded wasm url>`
+- `uci` -> `uciok`
+- `isready` -> `readyok`
+- `position startpos`, `go depth 1` -> `bestmove d2d4`
+- agent-browser console/page-error checks after the smoke returned no console messages and no page errors.
+
+Larger Chromium public-asset validation covered opening, tactical, quiet middlegame, castling-rights, en-passant, promotion, and endgame FENs with fixed depths 7/9 plus fixed movetime 120 ms:
+
+```json
+{
+  "summary": {
+    "baseline": { "rows": 21, "medianNps": 1591700, "aggregateNps": 2013275 },
+    "relaxed": { "rows": 21, "medianNps": 1804000, "aggregateNps": 2337552 },
+    "depthSpeedupAggregate": 1.1024590335416582,
+    "movetimeSpeedupAggregate": 1.1612924466738477,
+    "speedupAggregate": 1.161069401845252
+  },
+  "parity": {
+    "depthPairs": 14,
+    "depthSameBestmove": 14,
+    "depthSameScore": 14,
+    "depthSamePv": 14,
+    "movetimePairs": 7,
+    "movetimeSameBestmove": 7
+  }
+}
+```
+
+The larger run also had no console messages or page errors in agent-browser. Firefox and Safari compatibility remain pending before replacing the default baseline artifact.
 
 Full local reports are ignored under `.local-dev-artifacts/stockfish-relaxed/*report*.json`.

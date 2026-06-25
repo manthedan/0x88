@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, copyFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, copyFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -12,6 +12,7 @@ const sourceDir = resolve(workRoot, 'source');
 const outDir = resolve(workRoot, 'dist');
 const dockerImage = process.env.EMSDK_DOCKER_IMAGE || 'emscripten/emsdk:3.1.40';
 const dockerPlatform = process.env.DOCKER_PLATFORM || 'linux/amd64';
+const sourceInputDir = process.env.STOCKFISH_RELAXED_SOURCE_DIR ? resolve(process.env.STOCKFISH_RELAXED_SOURCE_DIR) : null;
 
 function run(cmd, args, options = {}) {
   console.log(`+ ${cmd} ${args.join(' ')}`);
@@ -104,16 +105,23 @@ function patchSource() {
   );
 }
 
-if (!existsSync(sourceTar)) throw new Error(`missing ${sourceTar}`);
+if (!sourceInputDir && !existsSync(sourceTar)) throw new Error(`missing ${sourceTar}; set STOCKFISH_RELAXED_SOURCE_DIR=/path/to/stockfish.js/source to build from an extracted source archive`);
 rmSync(workRoot, { recursive: true, force: true });
 mkdirSync(sourceDir, { recursive: true });
 mkdirSync(outDir, { recursive: true });
-run('tar', [
-  '-xzf', sourceTar,
-  '-C', sourceDir,
-  '--strip-components=3',
-  'stockfish-stockfish-js-18.0.7-corresponding-source/upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832',
-]);
+if (sourceInputDir) {
+  if (!existsSync(resolve(sourceInputDir, 'build.js')) || !existsSync(resolve(sourceInputDir, 'src/Makefile'))) {
+    throw new Error(`STOCKFISH_RELAXED_SOURCE_DIR does not look like stockfish.js source: ${sourceInputDir}`);
+  }
+  cpSync(sourceInputDir, sourceDir, { recursive: true });
+} else {
+  run('tar', [
+    '-xzf', sourceTar,
+    '-C', sourceDir,
+    '--strip-components=3',
+    'stockfish-stockfish-js-18.0.7-corresponding-source/upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832',
+  ]);
+}
 patchSource();
 ensureLiteNet();
 run('docker', [
