@@ -4,6 +4,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, relative, resolve } from 'node:path';
+import { performance } from 'node:perf_hooks';
 
 const DEFAULT_ASSET_BASE_URL = 'https://assets.0x88.app';
 const DEFAULT_CHANNEL_URL = `${DEFAULT_ASSET_BASE_URL}/channels/stable.json`;
@@ -55,6 +56,21 @@ function run(command, args, options = {}) {
   if (child.status !== 0) throw new Error(`${command} ${args.join(' ')} failed with status ${child.status}`);
 }
 
+function formatMs(ms) {
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+async function timed(name, timings, fn) {
+  const started = performance.now();
+  try {
+    return await fn();
+  } finally {
+    const ms = performance.now() - started;
+    timings.push({ name, ms });
+    console.error(`[netlify-r2-release] ${name}: ${formatMs(ms)}`);
+  }
+}
+
 function capture(command, args) {
   const child = spawnSync(command, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (child.status !== 0) return undefined;
@@ -99,9 +115,14 @@ async function desiredStamp(args) {
     inputs: {
       packageJsonSha256: await sha256Path('package.json'),
       packageLockSha256: await sha256Path('package-lock.json'),
+      svelteConfigSha256: await sha256Path('svelte.config.js'),
       viteConfigSha256: await sha256Path('vite.config.ts'),
       tsconfigSha256: await sha256Path('tsconfig.json'),
       netlifyTomlSha256: await sha256Path('netlify.toml'),
+      buildNetlifyR2Sha256: await sha256Path('scripts/build_netlify_r2.mjs'),
+      prepareNetlifyR2PublicAssetsSha256: await sha256Path('scripts/prepare_netlify_r2_public_assets.mjs'),
+      pruneExternalModelAssetsSha256: await sha256Path('scripts/prune_external_model_assets.mjs'),
+      precompressEngineArtifactsSha256: await sha256Path('scripts/precompress_engine_artifacts.mjs'),
     },
   };
 }
@@ -178,8 +199,9 @@ function verifyPrunedDist(dist) {
 async function main() {
   const args = parseArgs(process.argv);
   const dist = resolve(args.dist);
-  const desired = await desiredStamp(args);
-  const existing = await readStamp(dist);
+  const timings = [];
+  const desired = await timed('compute desired build stamp', timings, () => desiredStamp(args));
+  const existing = await timed('read existing build stamp', timings, () => readStamp(dist));
   const stampMatches = JSON.stringify(comparableStamp(existing)) === JSON.stringify(comparableStamp(desired));
   let built = false;
 
@@ -187,21 +209,23 @@ async function main() {
     if (!args.buildIfNeeded) {
       throw new Error(`Dist build stamp is ${existing ? 'stale' : 'missing'}; rerun with --build-if-needed to rebuild once`);
     }
-    run(args.npmBin, ['run', 'build:netlify:r2'], {
-      env: { ...process.env, BUILD_SCOPE: 'product', VITE_LC0_ARTIFACT_CHANNEL_URL: args.channelUrl, VITE_LC0_BROWSER_ASSET_BASE_URL: args.assetBase, NETLIFY_R2_RELEASE_DIST: dist },
+    await timed('build R2 Netlify dist', timings, () => {
+      run(args.npmBin, ['run', 'build:netlify:r2'], {
+        env: { ...process.env, BUILD_SCOPE: 'product', VITE_LC0_ARTIFACT_CHANNEL_URL: args.channelUrl, VITE_LC0_BROWSER_ASSET_BASE_URL: args.assetBase, NETLIFY_R2_RELEASE_DIST: dist },
+      });
     });
-    verifyPrunedDist(dist);
-    await writeStamp(dist, desired);
+    await timed('verify rebuilt pruned dist', timings, () => verifyPrunedDist(dist));
+    await timed('write build stamp', timings, () => writeStamp(dist, desired));
     built = true;
   }
 
-  const verification = verifyPrunedDist(dist);
+  const verification = await timed('verify pruned dist', timings, () => verifyPrunedDist(dist));
 
   if (args.deploy) {
     const deployArgs = ['deploy', '--no-build', '--dir', dist];
     if (args.prod) deployArgs.push('--prod');
     if (args.message) deployArgs.push('--message', args.message);
-    run(args.netlifyBin, deployArgs);
+    await timed('netlify deploy', timings, () => run(args.netlifyBin, deployArgs));
   }
 
   const summary = {
@@ -213,6 +237,7 @@ async function main() {
     artifactChannelUrl: args.channelUrl,
     assetBaseUrl: args.assetBase,
     verification,
+    timings,
   };
   if (args.json) console.log(JSON.stringify(summary, null, 2));
   else console.log(`R2 Netlify release ${args.deploy ? 'deployed' : 'verified'}: built=${built} dist=${summary.dist}`);

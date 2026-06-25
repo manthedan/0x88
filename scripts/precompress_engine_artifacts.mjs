@@ -1,12 +1,17 @@
 #!/usr/bin/env node
+import { createHash } from 'node:crypto';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import { existsSync, readdirSync, statSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 
 const root = resolve(process.argv[2] ?? 'public');
 const allowMissing = process.argv.includes('--allow-missing');
 const force = process.argv.includes('--force');
+const cacheDirArg = process.argv.find((arg) => arg.startsWith('--cache-dir='));
+const cacheDir = cacheDirArg
+  ? resolve(cacheDirArg.slice('--cache-dir='.length))
+  : (process.argv.includes('--cache-dir') ? resolve(process.argv[process.argv.indexOf('--cache-dir') + 1] ?? '') : undefined);
 const excludedEngines = new Set(process.argv.flatMap((arg, index, args) => {
   if (arg === '--exclude') return args[index + 1] ? [args[index + 1]] : [];
   if (arg.startsWith('--exclude=')) return [arg.slice('--exclude='.length)];
@@ -43,8 +48,27 @@ function needsWrite(source, target) {
 async function writeCompressed(path, suffix, bytes) {
   const target = `${path}${suffix}`;
   await mkdir(dirname(target), { recursive: true });
+  await rm(target, { force: true });
   await writeFile(target, bytes);
   return { target, skipped: false, bytes: bytes.byteLength };
+}
+
+async function writeCachedCompressed(path, suffix, input, compress) {
+  const target = `${path}${suffix}`;
+  if (!cacheDir) return writeCompressed(path, suffix, compress(input));
+  const hash = createHash('sha256').update(input).digest('hex');
+  const cached = join(cacheDir, suffix === '.gz' ? 'gzip' : 'brotli', `${hash}${suffix}`);
+  if (existsSync(cached)) {
+    await mkdir(dirname(target), { recursive: true });
+    await rm(target, { force: true });
+    await copyFile(cached, target);
+    return { target, skipped: false, cached: true, bytes: statSync(cached).size };
+  }
+  const bytes = compress(input);
+  await writeCompressed(path, suffix, bytes);
+  await mkdir(dirname(cached), { recursive: true });
+  await writeFile(cached, bytes);
+  return { target, skipped: false, cached: false, bytes: bytes.byteLength };
 }
 
 function keptCompressed(path, suffix) {
@@ -80,13 +104,13 @@ for (const source of sources) {
   let br;
   if (needGzip || needBrotli) {
     const input = await readFile(source);
-    if (needGzip) gz = await writeCompressed(source, '.gz', gzipSync(input, { level: 9 }));
+    if (needGzip) gz = await writeCachedCompressed(source, '.gz', input, (bytes) => gzipSync(bytes, { level: 9 }));
     else gz = keptCompressed(source, '.gz');
     if (needBrotli) {
       // Brotli q11 takes minutes on the multi-hundred-MB nets for ~1% extra over
       // q5; use fast quality past 64MB so deploy builds stay quick.
       const brotliQuality = input.byteLength > 64 * 1024 * 1024 ? 5 : 11;
-      br = await writeCompressed(source, '.br', brotliCompressSync(input, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: brotliQuality } }));
+      br = await writeCachedCompressed(source, '.br', input, (bytes) => brotliCompressSync(bytes, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: brotliQuality } }));
     } else {
       br = keptCompressed(source, '.br');
     }
@@ -95,6 +119,6 @@ for (const source of sources) {
     br = keptCompressed(source, '.br');
   }
   const rel = relative(process.cwd(), source);
-  const action = gz.skipped && br.skipped ? 'kept' : 'wrote';
+  const action = gz.skipped && br.skipped ? 'kept' : (gz.cached && br.cached ? 'cached' : 'wrote');
   console.log(`${action} ${rel} -> gzip ${gz.bytes} bytes, brotli ${br.bytes} bytes`);
 }

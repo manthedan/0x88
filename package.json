@@ -13,7 +13,7 @@
     "web:isolated:static": "node scripts/serve_isolated_static.mjs dist-client 5181",
     "build:client": "vite build",
     "build:netlify": "BUILD_SCOPE=product npm run build:client && npm run engine-artifacts:precompress-dist",
-    "build:netlify:r2": "BUILD_SCOPE=product vite build --outDir ${NETLIFY_R2_RELEASE_DIST:-dist-client} && node scripts/prune_external_model_assets.mjs ${NETLIFY_R2_RELEASE_DIST:-dist-client} && node scripts/precompress_engine_artifacts.mjs ${NETLIFY_R2_RELEASE_DIST:-dist-client} --allow-missing --exclude monty",
+    "build:netlify:r2": "node scripts/build_netlify_r2.mjs ${NETLIFY_R2_RELEASE_DIST:-dist-client}",
     "deploy:prune-external-model-assets": "node scripts/prune_external_model_assets.mjs dist-client",
     "engine-artifacts:precompress": "node scripts/precompress_engine_artifacts.mjs public --allow-missing",
     "engine-artifacts:precompress-dist": "node scripts/precompress_engine_artifacts.mjs dist-client --allow-missing",
