@@ -275,6 +275,19 @@ function htmlEscape(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
 
+function formatNps(nps: number): string {
+  if (nps >= 1e6) return `${(nps / 1e6).toFixed(1)}M`;
+  if (nps >= 1e3) return `${Math.round(nps / 1e3)}k`;
+  return String(Math.round(nps));
+}
+
+function formatNodes(nodes: number): string {
+  if (nodes >= 1e9) return `${(nodes / 1e9).toFixed(1)}B`;
+  if (nodes >= 1e6) return `${(nodes / 1e6).toFixed(1)}M`;
+  if (nodes >= 1e3) return `${(nodes / 1e3).toFixed(0)}k`;
+  return String(nodes);
+}
+
 function downloadProgressEl(): HTMLElement | null {
   return document.getElementById('downloadProgress');
 }
@@ -830,14 +843,18 @@ function renderEngineOutputs(): void {
     const thinking = thinkingEngineIds.has(id);
     const progress = arenaSearchProgress.get(id);
     const progressHtml = progress ? arenaSearchProgressHtml(progress) : '';
-    // No per-ply "active" highlight here: at fast movetimes it strobes. Whose turn
-    // it is is shown calmly by the last-move arrow on the board instead.
-    if (!snapshot) return `<div class="eval-card"><strong>${htmlEscape(name)}</strong>${thinking ? 'thinking on current position…' : 'waiting for output…'}${progressHtml}</div>`;
-    const status = thinking ? '<span class="eval-status">thinking… keeping last eval</span>' : '';
-    const detail = snapshot.detail ? `<br>${htmlEscape(snapshot.detail)}` : '';
-    const pv = snapshot.pv?.length ? `<br>${htmlEscape(pvText(snapshot.pv))}` : '';
-    const move = snapshot.move ? ` · move ${snapshot.move}` : '';
-    return `<div class="eval-card"><strong>${htmlEscape(name)}${status}</strong>${htmlEscape(snapshot.summary)}${htmlEscape(move)}${progressHtml}${detail}${pv}</div>`;
+    if (!snapshot) return `<div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">${htmlEscape(name)}</span>${thinking ? '<span class="eval-status">thinking…</span>' : ''}</div><div class="eval-card-eval">${thinking ? 'thinking…' : 'waiting…'}</div><div class="eval-card-scroll">${progressHtml}</div></div>`;
+    const status = thinking ? '<span class="eval-status">thinking…</span>' : '';
+    const moveTag = snapshot.move ? ` · move ${snapshot.move}` : '';
+    const statsParts: string[] = [];
+    if (snapshot.nps != null) statsParts.push(`${formatNps(snapshot.nps)} nps`);
+    if (snapshot.depth != null) statsParts.push(`d${snapshot.depth}`);
+    if (snapshot.nodes != null) statsParts.push(`${formatNodes(snapshot.nodes)} nodes`);
+    if (snapshot.elapsedMs != null) statsParts.push(`${Math.round(snapshot.elapsedMs)}ms`);
+    const statsLine = statsParts.length ? `<div class="eval-card-stats">${statsParts.map(htmlEscape).join(' · ')}</div>` : '';
+    const detail = snapshot.detail ? `<div class="eval-card-raw">${htmlEscape(snapshot.detail)}</div>` : '';
+    const pv = snapshot.pv?.length ? `<div class="eval-card-pv">${htmlEscape(pvText(snapshot.pv))}</div>` : '';
+    return `<div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">${htmlEscape(name)}</span>${status}</div><div class="eval-card-eval">${htmlEscape(snapshot.shortEval)}${htmlEscape(moveTag)}</div>${statsLine}<div class="eval-card-scroll">${progressHtml}${detail}${pv}</div></div>`;
   });
   el('engineEvalInfo').innerHTML = cards.length ? cards.join('') : '<div class="eval-card">Engine outputs: waiting for a move…</div>';
 }

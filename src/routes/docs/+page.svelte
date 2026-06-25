@@ -535,11 +535,6 @@
 
   <p>The Worker also handles range requests (delegated to R2's native reader), sets <code>no-transform</code> on binary types to prevent CDN auto-compression of WASM, and attaches CORS/CORP headers for cross-origin isolation. Pre-compression (brotli + gzip sidecars) is done at publish time, not at the edge. Browser-side, the Cache Storage API validates responses by byte length and SHA-256, and compiled <code>WebAssembly.Module</code> objects are cached per worker session.</p>
 
-  <div class="callout warn">
-    <h4>Known failure mode: cache poisoning</h4>
-    <p>If the origin ever returns a 0-byte or truncated response for a large WASM file, Cloudflare caches it. Symptoms: engine appears to load but never produces moves, eventually timing out. Diagnose by comparing <code>Content-Length</code> between <code>Accept-Encoding: br,gzip</code> and <code>identity</code> requests. Fix by purging the cached URL via the Cloudflare API.</p>
-  </div>
-
   <p>Full architecture, compression pipeline details, artifact size table, and operational playbook (diagnostics, publishing, adding new engines) are in <a href="https://github.com/manthedan/0x88/blob/main/docs/cdn_artifact_caching.md">docs/cdn_artifact_caching.md</a>.</p>
 </section>
 

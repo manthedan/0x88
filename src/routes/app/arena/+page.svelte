@@ -3,6 +3,7 @@
   import SiteHeader from '$lib/components/SiteHeader.svelte';
   const title = "0x88 Chess — engine arena";
   const description = "Run chess engine tournaments in your browser: head-to-head matches, round-robins, and gauntlets with standings, Elo estimates, and per-game charts.";
+  const devMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev');
   onMount(() => {
     let cleanup: () => void = () => undefined;
     let mounted = true;
@@ -47,7 +48,6 @@
     <div id="pairing">Select engines and start a tournament.</div>
     <div id="message" aria-live="polite">Loading model…</div>
     <div id="downloadProgress" class="model-load-progress" hidden></div>
-    <div id="engineEvalInfo" class="eval-grid" aria-label="Engine evaluation outputs"><div class="eval-card">Engine outputs: waiting for a move…</div></div>
     <section id="chartsPanel" aria-label="Game charts" hidden>
       <div class="chart-grid">
         <div class="chart-card"><div class="chart-title">White win % per move</div><div id="evalChart"></div></div>
@@ -62,49 +62,53 @@
     </details>
   </section>
   <section class="panel app-sidebar" aria-label="Tournament">
-    <h2>Matchup</h2>
-    <select id="seatA" hidden></select><select id="seatB" hidden></select>
-    <div class="row">
-      <div class="field"><label for="tournamentModeSelect">Mode</label>
-        <select id="tournamentModeSelect"><option value="match">Match (Engine 1 vs 2)</option><option value="round-robin">Round robin</option><option value="gauntlet">Gauntlet (Engine 1 challenges)</option></select></div>
-      <button id="addSeat" type="button" title="Add another engine seat">+ Add engine</button>
-    </div>
-    <div id="arenaSeatList" class="engine-list" aria-label="Arena engine selectors"></div>
-    <div class="matchup-note small" id="matchupNote">Pick an engine and strength for each seat; colors alternate each game.</div>
-    <h2>Time control</h2>
-    <div class="row">
-      <div class="field"><label for="budgetModeSelect">Budget</label>
-        <select id="budgetModeSelect"><option value="fixed">Fixed visits/depth</option><option value="movetime" selected>Equal movetime</option></select></div>
-      <div class="field" id="movetimeField"><label for="movetimeInput">Movetime ms</label>
-        <input id="movetimeInput" type="number" min="10" max="60000" step="50" value="500" /></div>
-      <div class="field"><label for="gamesInput">Games per opening</label>
-        <input id="gamesInput" type="number" min="1" max="20" step="1" value="2" /></div>
-    </div>
-    <div hidden inert>
-      <input id="lc0VisitsInput" type="number" value="100" />
-      <input id="sfDepthInput" type="number" value="8" />
-      <input id="recklessDepthInput" type="number" value="4" />
-      <select id="recklessVariantSelect"></select>
-      <input id="viridithasDepthInput" type="number" value="6" />
-      <select id="viridithasVariantSelect"></select>
-      <input id="berserkDepthInput" type="number" value="4" />
-      <select id="berserkVariantSelect"></select>
-      <input id="plentychessDepthInput" type="number" value="4" />
-      <select id="plentychessVariantSelect"></select>
-    </div>
-    <h2>Starting positions</h2>
-    <div class="row">
-      <div class="field"><label for="startingPositionSelect">Suite</label>
-        <select id="startingPositionSelect"><option value="start">Start position</option><option value="built-in">Built-in opening suite</option><option value="custom">Custom positions / replays</option></select></div>
-      <div class="field wide" id="openingTextField" hidden><label for="openingText">Custom openings (one per line: FEN, UCI moves, PGN/SAN, or Name | ...)</label>
-        <textarea id="openingText" spellcheck="false" placeholder="Ruy Lopez | e2e4 e7e5 g1f3 b8c6 f1b5&#10;Italian Game | 1. e4 e5 2. Nf3 Nc6 3. Bc4&#10;Sicilian FEN | rnbqkbnr/pp1ppppp/8/2p5/3PP3/8/PPP2PPP/RNBQKBNR b KQkq d3 0 2"></textarea></div>
-    </div>
-    <div id="openingInfo" class="small">Start position only.</div>
-    <div class="row">
-      <button id="start" class="primary" type="button" disabled>Start match</button>
-      <button id="stop" type="button" disabled>Stop</button>
-    </div>
-    <details class="advanced-settings">
+    <details class="section-block" open>
+      <summary>Matchup</summary>
+      <select id="seatA" hidden></select><select id="seatB" hidden></select>
+      <div class="row">
+        <div class="field"><label for="tournamentModeSelect">Mode</label>
+          <select id="tournamentModeSelect"><option value="match">Match (Engine 1 vs 2)</option><option value="round-robin">Round robin</option><option value="gauntlet">Gauntlet (Engine 1 challenges)</option></select></div>
+        <button id="addSeat" type="button" title="Add another engine seat">+ Add engine</button>
+      </div>
+      <div id="arenaSeatList" class="engine-list" aria-label="Arena engine selectors"></div>
+      <div class="matchup-note small" id="matchupNote">Pick an engine and strength for each seat; colors alternate each game.</div>
+    </details>
+    <details class="section-block" open>
+      <summary>Time control</summary>
+      <div class="row">
+        <div class="field"><label for="budgetModeSelect">Budget</label>
+          <select id="budgetModeSelect"><option value="fixed">Fixed visits/depth</option><option value="movetime" selected>Equal movetime</option></select></div>
+        <div class="field" id="movetimeField"><label for="movetimeInput">Movetime ms</label>
+          <input id="movetimeInput" type="number" min="10" max="60000" step="50" value="500" /></div>
+        <div class="field"><label for="gamesInput">Games per opening</label>
+          <input id="gamesInput" type="number" min="1" max="20" step="1" value="2" /></div>
+      </div>
+      <div hidden inert>
+        <input id="lc0VisitsInput" type="number" value="100" />
+        <input id="sfDepthInput" type="number" value="8" />
+        <input id="recklessDepthInput" type="number" value="4" />
+        <select id="recklessVariantSelect"></select>
+        <input id="viridithasDepthInput" type="number" value="6" />
+        <select id="viridithasVariantSelect"></select>
+        <input id="berserkDepthInput" type="number" value="4" />
+        <select id="berserkVariantSelect"></select>
+        <input id="plentychessDepthInput" type="number" value="4" />
+        <select id="plentychessVariantSelect"></select>
+      </div>
+      <div class="row">
+        <div class="field"><label for="startingPositionSelect">Suite</label>
+          <select id="startingPositionSelect"><option value="start">Start position</option><option value="built-in">Built-in opening suite</option><option value="custom">Custom positions / replays</option></select></div>
+        <div class="field wide" id="openingTextField" hidden><label for="openingText">Custom openings (one per line: FEN, UCI moves, PGN/SAN, or Name | ...)</label>
+          <textarea id="openingText" spellcheck="false" placeholder="Ruy Lopez | e2e4 e7e5 g1f3 b8c6 f1b5&#10;Italian Game | 1. e4 e5 2. Nf3 Nc6 3. Bc4&#10;Sicilian FEN | rnbqkbnr/pp1ppppp/8/2p5/3PP3/8/PPP2PPP/RNBQKBNR b KQkq d3 0 2"></textarea></div>
+      </div>
+      <div id="openingInfo" class="small">Start position only.</div>
+      <div class="row">
+        <button id="start" class="primary" type="button" disabled>Start match</button>
+        <button id="stop" type="button" disabled>Stop</button>
+      </div>
+    </details>
+    {#if devMode}
+    <details class="section-block advanced-settings">
       <summary>Advanced settings &amp; diagnostics</summary>
       <div class="row">
         <div class="field wide"><label for="lc0PresetSelect">LC0 engine preset</label>
@@ -144,13 +148,41 @@
         <div id="runtimeAuditInfo" class="diag-block"><span class="diag-label">LC0 audit</span><span class="diag-value">waiting for runtime selection…</span></div>
       </details>
     </details>
-    <h2>Result</h2>
-    <div id="matchScore" class="small" aria-live="polite">No games played yet.</div>
-    <h2>Games</h2>
-    <div class="log" id="log"></div>
-    <pre id="benchResult" class="small" hidden></pre>
-    <div class="row"><button id="exportPgn" type="button">Export PGN</button></div>
-    <textarea id="pgnOut" spellcheck="false" placeholder="game PGNs appear here after Export PGN"></textarea>
+    {:else}
+    <div hidden>
+      <select id="lc0PresetSelect"><option value="stable">Stable</option></select>
+      <div id="lc0PresetNote"></div>
+      <details id="lc0AdvancedRuntime"><select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option><option value="whole-onnx-webgpu">TVM whole-model WebGPU (fast, small net)</option></select>
+        <input id="lc0BatchSizeInput" type="number" value="1" />
+        <input id="lc0BatchPipelineDepthInput" type="number" value="1" />
+        <select id="lc0InputBackendSelect"><option value="js">JS</option><option value="wasm">WASM</option><option value="wgsl">WGSL</option></select>
+        <select id="lc0EncoderKernelSelect"><option value="hand">Hand WGSL</option><option value="mixed-tvm-ffn">Mixed TVM FFN</option><option value="mixed-tvm-ffn-outproj">Mixed TVM FFN+outproj</option><option value="mixed-tvm-ffn-smolgen-project">Mixed TVM FFN+smolgen project</option><option value="tvm-packed-f16">TVM packed f16</option></select>
+        <select id="lc0LegalPriorsSelect"><option value="js">JS</option><option value="wasm">WASM</option><option value="gpu">GPU legal (WGSL heads)</option></select>
+      </details>
+      <input id="delayInput" type="number" value="250" />
+      <input id="cacheEntriesInput" type="number" value="2048" />
+      <input id="stockfishThreadsInput" type="number" value="1" />
+      <div id="recklessRuntimeInfo"></div>
+      <div id="viridithasRuntimeInfo"></div>
+      <div id="berserkRuntimeInfo"></div>
+      <div id="plentychessRuntimeInfo"></div>
+      <div id="cacheInfo"></div>
+      <div id="searchTelemetryInfo"></div>
+      <div id="runtimeAuditInfo"></div>
+    </div>
+    {/if}
+    <details class="section-block" open>
+      <summary>Engine outputs</summary>
+      <div id="engineEvalInfo" class="eval-grid" aria-label="Engine evaluation outputs"><div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">Waiting…</span></div><div class="eval-card-eval">Engine outputs: waiting for a move…</div></div></div>
+    </details>
+    <details class="section-block" open>
+      <summary>Result</summary>
+      <div id="matchScore" class="small" aria-live="polite">No games played yet.</div>
+      <div class="log" id="log"></div>
+      <pre id="benchResult" class="small" hidden></pre>
+      <div class="row"><button id="exportPgn" type="button">Export PGN</button></div>
+      <textarea id="pgnOut" spellcheck="false" placeholder="game PGNs appear here after Export PGN"></textarea>
+    </details>
   </section>
 </main>
 
@@ -239,13 +271,32 @@
   :global(.seat-row .seat-name){flex:0 0 auto; white-space:nowrap; font-size:10px}
   :global(.seat-row .arrow){display:none}
   :global(.seat-row .row-strength){flex:0 0 64px; width:64px}
-  :global(.matchup-note){margin-top:6px; color:var(--muted)}
+  :global(.matchup-note){margin-top:8px; color:var(--muted)}
+  .section-block{margin-top:0; padding-top:20px}
+  .section-block:first-child{padding-top:0}
+  .section-block>summary{
+    cursor:pointer; font-size:11px; text-transform:uppercase;
+    letter-spacing:.12em; color:var(--muted-2); font-weight:500;
+    font-family:var(--mono); list-style:none; user-select:none; padding:0 0 10px; transition:color .12s;
+  }
+  .section-block>summary::-webkit-details-marker{display:none}
+  .section-block>summary::before{
+    content:"\25B8"; display:inline-block; margin-right:6px;
+    font-size:10px; transition:transform .15s; color:var(--muted-2);
+  }
+  .section-block[open]>summary::before{transform:rotate(90deg)}
+  .section-block>summary:hover{color:var(--ink)}
+  .section-block[open]>summary{margin-bottom:0}
+  .section-block[open]>summary::before{color:var(--accent)}
   :global(#matchScore){
+    margin-top:4px;
     font-family:var(--mono); font-size:14px; font-weight:700; color:var(--ink);
     padding:8px 10px; border:1px solid var(--rule); border-radius:7px; background:var(--soft);
   }
-  :global(input[type=number]){width:70px; font-family:var(--mono); padding:6px 8px; border:1px solid var(--rule); border-radius:6px}
+  :global(input[type=number]){width:80px; font-family:var(--mono); padding:6px 8px; border:1px solid var(--rule); border-radius:6px}
   :global(select){max-width:100%}
+  .row{margin-top:12px}
+  .field{margin-top:12px}
   :global(.field.wide){flex:1 1 100%}
   :global(.field.wide textarea){margin-top:0; min-height:86px}
   :global(.engines){display:grid; gap:4px; margin-top:8px}
@@ -255,7 +306,7 @@
   :global(th){color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase}
   :global(td.num, th.num){text-align:right; font-family:var(--mono)}
   :global(tr.leader td){background:var(--soft)}
-  :global(.log){font-family:var(--mono); font-size:12px; max-height:180px; overflow:auto; margin-top:8px}
+  :global(.log){font-family:var(--mono); font-size:12px; height:160px; overflow:auto; margin-top:8px}
   :global(.log div){padding:2px 0; border-top:1px solid var(--rule)}
   :global(.log div.replayable){cursor:pointer}
   :global(.log div.replayable:hover){background:var(--soft)}
@@ -269,7 +320,7 @@
   :global(.review-bar button){padding:4px 9px; font-size:12px}
   :global(.movestrip){
     margin-top:12px; font-family:var(--mono); font-size:14px;
-    line-height:1.9; max-height:300px; overflow:auto;
+    line-height:1.9; height:76px; overflow:auto;
     padding:10px 14px; border:1px solid #e6decc; border-radius:var(--radius-sm); background:var(--panel-inset);
   }
   :global(.movestrip .num){color:var(--muted)}
@@ -279,9 +330,9 @@
   :global(.chart-card svg){cursor:pointer}
   :global(#pairing){font-size:14px; margin-top:14px; font-weight:600; color:var(--ink); font-family:var(--serif)}
   :global(#message){
-    margin-top:6px; padding:13px 16px; border:1px solid var(--rule-strong);
-    border-radius:12px; background:var(--panel-inset); color:var(--text-soft);
-    font-family:var(--mono); font-size:13px;
+    margin-top:6px; padding:8px 12px; border:1px solid var(--rule-strong);
+    border-radius:8px; background:var(--panel-inset); color:var(--text-soft);
+    font-family:var(--mono); font-size:12px; line-height:1.5;
   }
   :global(.model-load-progress){
     margin-top:6px; padding:8px; border:1px solid var(--rule);
@@ -292,16 +343,38 @@
   }
   :global(.loading-progress-row), :global(.search-progress-row){display:grid; gap:3px; margin:4px 0}
   :global(.dl-label), :global(.search-progress-text){font-family:var(--mono); font-size:11px; color:var(--muted)}
-  :global(.eval-grid){display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:8px; margin-top:8px}
+  :global(.eval-grid){display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:8px; margin-top:8px; min-height:78px}
   :global(.eval-card){
-    padding:8px; border:1px solid var(--rule); border-radius:var(--radius-sm);
-    background:var(--panel); font-family:var(--mono); font-size:11px;
-    color:var(--muted); overflow-wrap:anywhere;
+    padding:8px 10px; border:1px solid var(--rule); border-radius:var(--radius-sm);
+    background:var(--panel);
+    display:flex; flex-direction:column; gap:3px;
+    height:88px; overflow:hidden;
   }
-  :global(.eval-card strong){
-    display:flex; justify-content:space-between; gap:8px;
-    color:var(--ink); font-family:var(--sans); font-size:12px; margin-bottom:3px;
+  :global(.eval-card-head){
+    display:flex; justify-content:space-between; align-items:center; gap:8px; flex:0 0 auto;
   }
+  :global(.eval-card-name){
+    color:var(--ink); font-family:var(--sans); font-size:12px; font-weight:600;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  :global(.eval-card-eval){
+    font-family:var(--mono); font-size:12px; font-weight:700; color:var(--ink-soft);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 0 auto;
+  }
+  :global(.eval-card-stats){
+    font-family:var(--mono); font-size:10px; color:var(--muted); flex:0 0 auto;
+    display:flex; flex-wrap:wrap; gap:2px 6px;
+  }
+  :global(.eval-card-scroll){
+    font-family:var(--mono); font-size:10px; color:var(--muted);
+    flex:1 1 auto; overflow:hidden; line-height:1.4;
+    opacity:.6; transition:opacity .15s; min-height:0;
+  }
+  :global(.eval-card:hover .eval-card-scroll){
+    overflow:auto; opacity:1;
+  }
+  :global(.eval-card-raw){white-space:pre-wrap; overflow-wrap:anywhere}
+  :global(.eval-card-pv){color:var(--text-soft)}
   :global(.eval-card .eval-status){font-family:var(--mono); font-size:10px; color:var(--accent); font-weight:600; white-space:nowrap}
   :global(.eval-card.active){border-color:#cbd8a6; background:var(--soft)}
   :global(.runtime-badge){
@@ -318,7 +391,6 @@
   :global(.advanced-runtime summary){cursor:pointer; color:var(--muted); font-size:12px; font-weight:700}
   :global(.advanced-runtime[open] summary){margin-bottom:8px}
   :global(.preset-note){flex:1 1 100%; margin-top:-2px; color:var(--muted)}
-  :global(.advanced-settings){margin-top:14px}
   :global(textarea){width:100%; min-height:80px; font-family:var(--mono); font-size:11px; padding:8px; margin-top:8px}
   :global(.chart-grid){display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px}
   :global(.chart-card){border:1px solid var(--rule); border-radius:6px; padding:6px 8px; background:#fff}
