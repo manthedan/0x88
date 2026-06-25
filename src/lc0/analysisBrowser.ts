@@ -493,9 +493,6 @@ function clearEngineSearchProgress(runId: number, label: string): void {
   renderAnalysisSearchProgress();
 }
 
-function searchProgressForLabel(label: string): SearchProgressSnapshot | undefined {
-  return searchProgressByEngine.get(progressKey(activeAnalysisRunId, label));
-}
 
 async function workerLc0Lines(runId: number, fen: string, visits: number, label = 'Lc0'): Promise<AnalysisLine[]> {
   const response = await postWorker<{ result: WorkerSearchResult }>(
@@ -1290,8 +1287,8 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
   const body = el('engineCompare').querySelector('tbody')!;
   if (!bestByEngine.length) {
     el('engineConsensus').textContent = 'No analysis yet.';
-    const progressRows = [...searchProgressByEngine.values()].map((progress) => `<tr><td>${htmlEscape(progress.label)}</td><td colspan="3" class="small">searching</td><td colspan="2">${searchProgressHtml(progress)}</td></tr>`);
-    body.innerHTML = progressRows.length ? progressRows.join('') : '<tr><td colspan="6" class="small">Run analysis to compare selected engines.</td></tr>';
+    const progressRows = [...searchProgressByEngine.values()].map((progress) => `<tr><td>${engineLogoHtmlForName(progress.label)}</td><td colspan="3" class="small">searching</td><td class="pv">${searchProgressHtml(progress)}</td></tr>`);
+    body.innerHTML = progressRows.length ? progressRows.join('') : '<tr><td colspan="5" class="small">Run analysis to compare selected engines.</td></tr>';
     return;
   }
   const finiteScores = bestByEngine.map((line) => line.scoreCp).filter((score): score is number => score !== undefined);
@@ -1306,7 +1303,7 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
   const consensus = [...moveCounts.entries()].sort((a, b) => b[1].count - a[1].count)[0];
   const consensusUci = consensus?.[0] ?? '';
   const consensusText = consensus
-    ? `${consensus[1].count}/${bestByEngine.length} engines prefer ${consensus[1].san} (${consensusUci})`
+    ? `${consensus[1].count}/${bestByEngine.length} engines prefer ${consensus[1].san}`
     : 'No first-move consensus.';
   const spreadText = evalSpread === null ? 'eval spread unavailable' : `eval spread ${signedCp(evalSpread)} cp`;
   el('engineConsensus').textContent = `${consensusText} · ${spreadText}`;
@@ -1315,16 +1312,11 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     const swatch = engineBrushes(line.engine).swatch;
     const delta = reference === undefined || line.scoreCp === undefined ? '—' : signedCp(line.scoreCp - reference);
     const agreed = line.pvUci[0] === consensusUci && (consensus?.[1].count ?? 0) > 1;
-    const progress = searchProgressForLabel(line.engine);
-    const searchText = progress
-      ? (progress.indeterminate ? '...' : `${progress.completed ?? 0}/${progress.requested ?? 0}`)
-      : htmlEscape(line.detail);
     return `<tr style="border-left:3px solid ${swatch}">`
-      + `<td><span class="engine-name-with-logo">${engineLogoHtmlForName(line.engine)}${htmlEscape(line.engine)}</span></td>`
+      + `<td>${engineLogoHtmlForName(line.engine)}</td>`
       + `<td class="mono ${agreed ? 'agree' : ''}">${htmlEscape(firstSanMove(line))}</td>`
       + `<td class="mono">${htmlEscape(line.scoreText)}</td>`
       + `<td class="mono">${htmlEscape(delta)}</td>`
-      + `<td class="mono">${searchText}</td>`
       + `<td class="pv">${htmlEscape(line.pvSan)}</td>`
       + '</tr>';
   }).join('');
@@ -1338,9 +1330,8 @@ function renderLines() {
     const cls = line.scoreCp === undefined ? '' : line.scoreCp > 0 ? 'pos' : line.scoreCp < 0 ? 'neg' : '';
     const swatch = engineBrushes(line.engine).swatch;
     return `<li data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}">`
-      + `<span class="score ${cls}">${htmlEscape(line.scoreText)}</span>`
-      + `<span class="pv">${htmlEscape(line.pvSan)}</span>`
-      + `<span class="eng">${engineLogoHtmlForName(line.engine)}${htmlEscape(line.engine)} · ${htmlEscape(line.detail)}</span></li>`;
+      + `<span class="score ${cls}">${engineLogoHtmlForName(line.engine)} ${htmlEscape(line.scoreText)}</span>`
+      + `<span class="pv">${htmlEscape(line.pvSan)}</span></li>`;
   }).join('') || '<li class="small placeholder">No analysis yet — make a move or press Analyze.</li>';
 }
 

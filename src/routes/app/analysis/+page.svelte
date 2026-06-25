@@ -3,6 +3,7 @@
   import SiteHeader from '$lib/components/SiteHeader.svelte';
   const title = "0x88 Chess — analysis board";
   const description = "Multi-engine chess analysis in your browser: compare Leela Chess Zero and Stockfish lines side by side, review games with accuracy scores, and explore openings from your own games.";
+  const devMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev');
   onMount(() => {
     let cleanup: () => void = () => undefined;
     let mounted = true;
@@ -63,9 +64,12 @@
     <div id="engineList" class="engine-list"></div>
     <div class="row">
       <button id="addEngine" type="button">+ Add engine</button>
+      {#if devMode}
       <div class="field"><label for="engineProfileSelect">Profile</label>
         <select id="engineProfileSelect"><option value="">default</option></select></div>
+      {/if}
     </div>
+    {#if devMode}
     <details class="advanced-settings">
       <summary>Profiles &amp; engine settings</summary>
       <div class="row profile-row">
@@ -90,11 +94,28 @@
         <div id="recklessRuntimeInfo" class="small">Reckless: detecting runtime…</div>
       </details>
     </details>
+    {:else}
+    <!-- Hidden but in DOM so analysisBrowser.ts can find them when dev mode is off -->
+    <div hidden>
+      <select id="engineProfileSelect"><option value="">default</option></select>
+      <input id="engineProfileName" type="text" />
+      <button id="saveEngineProfile" type="button">Save</button>
+      <button id="deleteEngineProfile" type="button">Delete</button>
+      <button id="exportEngineProfiles" type="button">Export</button>
+      <button id="importEngineProfiles" type="button">Import</button>
+      <input id="importEngineProfilesFile" type="file" />
+      <div id="engineProfileSummary"></div>
+      <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option></select>
+      <span id="backend"></span>
+      <span id="runtimeAudit"></span>
+      <div id="recklessRuntimeInfo"></div>
+    </div>
+    {/if}
     <details class="section-block" open>
       <summary>Engine comparison</summary>
       <div id="engineConsensus" class="compare-summary">No analysis yet.</div>
       <div id="analysisSearchProgress" class="search-progress-grid" hidden></div>
-      <table id="engineCompare" class="engine-compare"><thead><tr><th>Engine</th><th>Best</th><th>Eval</th><th>Δ</th><th>Search</th><th>PV</th></tr></thead><tbody></tbody></table>
+      <table id="engineCompare" class="engine-compare"><thead><tr><th></th><th>Best</th><th>Eval</th><th>Δ</th><th>PV</th></tr></thead><tbody></tbody></table>
     </details>
     <details class="section-block" open>
       <summary>Engine lines</summary>
@@ -206,17 +227,16 @@
   input[type=number]{width:80px}
   :global(.lines){list-style:none; margin:8px 0 0; padding:0}
   :global(.lines li){
-    display:flex; align-items:baseline; gap:8px;
+    display:flex; align-items:center; gap:8px;
     padding:4px 6px; border-top:1px solid var(--rule);
     cursor:pointer; font-size:13px; padding-left:9px;
     overflow:hidden;
   }
   :global(.lines li:hover){background:var(--soft)}
-  :global(.lines .score){font-family:var(--mono); font-weight:700; flex:0 0 56px; font-size:12px}
+  :global(.lines .score){display:flex; align-items:center; gap:5px; flex:0 0 auto; font-family:var(--mono); font-weight:700; font-size:12px}
   :global(.lines .score.neg){color:#a5461b}
   :global(.lines .score.pos){color:var(--accent)}
   :global(.lines .pv){font-family:var(--mono); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto; min-width:0}
-  :global(.lines .eng){flex:0 0 auto; font-size:10px; color:var(--muted); white-space:nowrap}
   :global(.lines li.placeholder){display:block; color:var(--muted); border-left:none; cursor:default}
   :global(.engine-logo){width:16px; height:16px; object-fit:contain; border-radius:3px; vertical-align:middle; flex:0 0 auto}
   :global(.engine-logo-placeholder){display:inline-block; width:16px; height:16px; border-radius:3px; background:var(--rule-soft); flex:0 0 auto; vertical-align:middle}
@@ -255,16 +275,16 @@
   }
   :global(table.engine-compare){width:100%; border-collapse:collapse; font-size:11px; margin-top:8px}
   :global(table.engine-compare th), :global(table.engine-compare td){
-    text-align:left; padding:3px 5px;
+    text-align:left; padding:4px 5px;
     border-bottom:1px solid var(--rule); vertical-align:middle;
-    overflow-wrap:anywhere;
   }
   :global(table.engine-compare th){
     color:var(--muted); font-weight:600; font-size:9px; text-transform:uppercase;
     white-space:nowrap;
   }
+  :global(table.engine-compare td:first-child){width:20px}
   :global(table.engine-compare .mono){font-family:var(--mono); white-space:nowrap}
-  :global(table.engine-compare .pv){font-family:var(--mono); font-size:10px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  :global(table.engine-compare .pv){font-family:var(--mono); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px}
   :global(table.engine-compare .agree){color:var(--accent); font-weight:700}
   :global(.model-load-progress), :global(.search-progress-grid){
     margin-top:8px; padding:8px; border:1px solid var(--rule);
@@ -287,7 +307,7 @@
   :global(.legend .dot){width:11px; height:11px; border-radius:3px; display:inline-block}
   :global(.movelist){
     font-family:var(--mono); font-size:14px; line-height:1.9;
-    margin-top:12px; max-height:300px; overflow:auto;
+    margin-top:12px; min-height:42px; max-height:300px; overflow:auto;
     padding:10px 14px; border:1px solid #e6decc; border-radius:var(--radius-sm); background:var(--panel-inset);
   }
   :global(.maia3-grid){margin-top:8px; font-size:13px}
