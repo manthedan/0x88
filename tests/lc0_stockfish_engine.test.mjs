@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseBestMove, parseStockfishInfo, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, stockfishGoCommand } from '../src/lc0/stockfishEngine.ts';
+import { parseBestMove, parseStockfishInfo, StockfishEngine, normalizeStockfishFlavor, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, stockfishGoCommand, stockfishWorkerUrl } from '../src/lc0/stockfishEngine.ts';
 
 test('parseBestMove extracts the UCI move and handles (none)', () => {
   assert.equal(parseBestMove('bestmove e2e4 ponder e7e5'), 'e2e4');
@@ -25,6 +25,30 @@ test('StockfishEngine reports thread capacity from the resolved worker URL', () 
   assert.equal(new StockfishEngine({}, '/stockfish/stockfish-18-lite-single.js').maxThreads(), 1);
   assert.equal(new StockfishEngine({}, '/stockfish/stockfish-18-lite.js').maxThreads(), 32);
   assert.equal(new StockfishEngine({}, 'https://assets.0x88.app/stockfish/stockfish-18-lite.js').maxThreads(), 1);
+});
+
+test('cross-origin Stockfish wrapper hash initializes the UCI worker, not a pthread helper', () => {
+  const previousLocation = globalThis.location;
+  const previousBase = globalThis.LC0_BROWSER_ASSET_BASE_URL;
+  const previousCreateObjectUrl = URL.createObjectURL;
+  Object.defineProperty(globalThis, 'location', {
+    value: { href: 'https://0x88.app/app/analysis/' },
+    configurable: true,
+  });
+  globalThis.LC0_BROWSER_ASSET_BASE_URL = 'https://assets.0x88.app';
+  URL.createObjectURL = () => 'blob:https://0x88.app/stockfish-wrapper';
+  try {
+    const worker = stockfishWorkerUrl('https://assets.0x88.app/stockfish/stockfish-18-lite-single.js');
+    assert.equal(worker.objectUrl, 'blob:https://0x88.app/stockfish-wrapper');
+    assert.equal(worker.url, 'blob:https://0x88.app/stockfish-wrapper#https%3A%2F%2Fassets.0x88.app%2Fstockfish%2Fstockfish-18-lite-single.wasm');
+    assert.equal(worker.url.includes(',worker'), false);
+  } finally {
+    URL.createObjectURL = previousCreateObjectUrl;
+    if (previousBase === undefined) delete globalThis.LC0_BROWSER_ASSET_BASE_URL;
+    else globalThis.LC0_BROWSER_ASSET_BASE_URL = previousBase;
+    if (previousLocation === undefined) delete globalThis.location;
+    else Object.defineProperty(globalThis, 'location', { value: previousLocation, configurable: true });
+  }
 });
 
 test('stockfishGoCommand prefers movetime over depth and clamps depth', () => {

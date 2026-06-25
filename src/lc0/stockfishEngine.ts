@@ -79,17 +79,16 @@ function stockfishWasmUrl(jsUrl: string): string {
   return jsUrl.replace(/\.js(?:[?#].*)?$/, '.wasm');
 }
 
-function stockfishWorkerUrl(jsUrl: string): { url: string; objectUrl?: string } {
+export function stockfishWorkerUrl(jsUrl: string): { url: string; objectUrl?: string } {
   if (sameOriginUrl(jsUrl)) return { url: jsUrl };
   if (!isTrustedExecutableAssetUrl(jsUrl)) throw new Error(`Refusing untrusted Stockfish worker URL: ${jsUrl}`);
   const wasmUrl = stockfishWasmUrl(jsUrl);
-  // nmrugg/stockfish.js workers read self.location.hash as
-  // "<wasm-url>,worker". A same-origin blob wrapper satisfies the Worker()
-  // same-origin rule while preserving the R2 wasm URL in the hash for the
-  // imported Stockfish script.
+  // nmrugg/stockfish.js reads self.location.hash as "<wasm-url>" for the UCI
+  // worker. The ",worker" suffix is reserved for pthread helper workers and
+  // makes the top-level UCI worker skip its onmessage initialization.
   const script = `importScripts(${JSON.stringify(jsUrl)});`;
   const objectUrl = URL.createObjectURL(new Blob([script], { type: 'text/javascript' }));
-  return { url: `${objectUrl}#${encodeURIComponent(wasmUrl)},worker`, objectUrl };
+  return { url: `${objectUrl}#${encodeURIComponent(wasmUrl)}`, objectUrl };
 }
 
 /** Parse a UCI `bestmove` line into a UCI move, or null for `(none)`/no match. */
