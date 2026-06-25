@@ -58,6 +58,13 @@
         <li><a href="#pages-arena">Arena</a></li>
       </ul>
     </li>
+    <li><a href="#human-vs-computer">Human vs computer play</a></li>
+    <li><a href="#neural-runtimes">Neural browser runtimes</a></li>
+    <li><a href="#cpu-wasm">CPU WASM runtimes</a>
+      <ul>
+        <li><a href="#cpu-wasm-relaxed-simd">Relaxed SIMD</a></li>
+      </ul>
+    </li>
     <li><a href="#engines">The engines</a>
       <ul>
         <li><a href="#engines-lc0">Leela Chess Zero</a></li>
@@ -121,6 +128,194 @@
       <li><strong>Configurable engine runtime</strong> &mdash; pick engine, strength, opening book, and time control; the arena handles scheduling and the engines do the rest.</li>
     </ul>
   </div>
+</section>
+
+<!-- ===== HUMAN VS COMPUTER PLAY ===== -->
+<section id="human-vs-computer">
+  <h2>Human vs computer play <a class="anchor-link" href="#human-vs-computer" aria-label="Link to this section">#</a></h2>
+  <p class="lead">There are two different ways to make chess AI useful against people. Maia3 is the neural human-modeling lane: it asks what a rated human is likely to play. LQO and Monty-style contempt search are the practical-engine lane: they keep strong search, but stop assuming the opponent will always find the perfect defense.</p>
+
+  <div class="callout info">
+    <h4>Short version</h4>
+    <p><strong>Maia3</strong> is for human authenticity &mdash; sparring against a 1500-ish style, exploring common human moves, and estimating rating-conditioned human outcomes. <strong>LQO/search contempt</strong> is for practical pressure &mdash; queen-odds play, anti-draw bias, traps, and moves that maximize chances against a fallible human.</p>
+  </div>
+
+  <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Question</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Maia3 neural lane</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">LQO / Monty contempt lane</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">What is it modeling?</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">The move distribution and expected result of real humans at a chosen rating.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">A strong engine's practical chances against an imperfect, budget-limited human opponent.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">How does it pick moves?</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Samples from, or takes argmax of, a rating-conditioned neural human policy.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Runs engine search with odds-calibrated evaluation and contempt knobs such as drawScore, searchContemptLimit, or contemptElo.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">What should the UI promise?</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Human-like play: "what would a 1500-rated player do?"</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Practical engine play: "what move creates the most problems for this human?"</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; font-weight:600">Best fit</td>
+        <td style="padding:10px">Human sparring, human-move explorer, and rating-conditioned analysis.</td>
+        <td style="padding:10px">Queen odds, anti-draw pressure, trap-aware play, and practical-vs-objective comparisons.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>In product copy, do not call contempt search "human-like": it models the opponent's limitations, not the engine's own style. Conversely, do not route Maia3 through LC0 PUCT by default; a future mixed-policy mode can be useful, but it should be labeled experimental. The full design note lives in <a href="https://github.com/manthedan/0x88/blob/main/docs/human_vs_computer_play.md">docs/human_vs_computer_play.md</a>.</p>
+</section>
+
+<!-- ===== NEURAL BROWSER RUNTIMES ===== -->
+<section id="neural-runtimes">
+  <h2>Neural browser runtimes <a class="anchor-link" href="#neural-runtimes" aria-label="Link to this section">#</a></h2>
+  <p class="lead">The LC0 and Maia lanes are browser neural inference stacks, not CPU UCI ports. They start from ONNX models, WebGPU kernels, or compiler-generated runtimes, then feed policy/value outputs into the Play, Analysis, and Arena surfaces.</p>
+
+  <div class="callout info">
+    <h4>Stable baseline</h4>
+    <p><strong>ONNX Runtime WebGPU</strong> is the stable neural baseline and rollback path. TVMJS, custom WGSL, WebNN, and QDQ artifacts all need to prove themselves against ORT WebGPU with fixture drift and search-move gates before they can become product defaults.</p>
+  </div>
+
+  <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Lane</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">What it is</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">ONNX WebGPU</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">ONNX Runtime Web running LC0/Maia models on the browser GPU, with ORT WASM as fallback/control.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Stable default baseline for neural models where WebGPU is available.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">ONNX QDQ</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Weight-only int8 quantize/dequantize ONNX graphs: smaller files, float compute after in-graph dequantization.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Per-model promotion after real chess fixture/search drift gates; mainly a download/cache win.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Custom WGSL</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Hand-written WebGPU kernels for hot LC0 subgraphs: encoder blocks, heads, legal-prior/readback experiments.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Explicit hybrid/runtime lane; parity and readback/batch-fill evidence decide promotion.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">TVMJS WebGPU</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Compiler path from ONNX to TVM Relax to browser-loadable TVMJS wasm plus WebGPU pipelines.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Research/opt-in; generated artifacts need separate hosting, provenance, and cross-device gates.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; font-weight:600">ORT WebNN EP</td>
+        <td style="padding:10px">ONNX Runtime through WebNN, potentially reaching CoreML/ANE/NPU hardware instead of WebGPU.</td>
+        <td style="padding:10px">Promising but flag-gated; not shippable until WebNN is unflagged and model-specific correctness gates pass.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>WebNN is worth tracking because early probes show real acceleration on supported hardware, but it currently requires Chrome's <code>WebMachineLearningNeuralNetwork</code> feature flag and has model-shape/precision caveats. Likewise, QDQ should be judged on real chess positions: random tensor comparisons can overstate int8 drift compared with actual LC0/Maia activations.</p>
+  <p>Full notes live in <a href="https://github.com/manthedan/0x88/blob/main/docs/neural_browser_runtimes.md">docs/neural_browser_runtimes.md</a>, with supporting runbooks for <a href="https://github.com/manthedan/0x88/blob/main/docs/lc0_tvmjs_research_runbook.md">TVMJS</a>, <a href="https://github.com/manthedan/0x88/blob/main/docs/lc0web_custom_inference_checkpoint.md">custom WGSL</a>, and <a href="https://github.com/manthedan/0x88/blob/main/docs/lc0_t3_qdq_webnn_2026-06-10.md">QDQ/WebNN probes</a>.</p>
+</section>
+
+<!-- ===== CPU WASM RUNTIMES ===== -->
+<section id="cpu-wasm">
+  <h2>CPU WASM runtimes <a class="anchor-link" href="#cpu-wasm" aria-label="Link to this section">#</a></h2>
+  <p class="lead">Not every engine here is a WebGPU neural net. Stockfish, Reckless, Berserk, Viridithas, PlentyChess, and the Monty lab port are CPU engines compiled to WebAssembly, then wrapped as browser workers with a UCI-style control plane.</p>
+
+  <div class="callout info">
+    <h4>Two build lanes</h4>
+    <p><strong>Emscripten</strong> is the preferred intake path for C/C++ engines: it gives us Stockfish.js-style JS glue, a worker-loadable <code>.wasm</code>, and optional <code>.data</code> sidecars for NNUE files. <strong>Rust WASI</strong> is the preferred path for Rust engines: compile to <code>wasm32-wasip1</code>, then run through the browser WASI shim in one-shot, batch, or persistent-worker mode.</p>
+  </div>
+
+  <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Runtime path</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Engines</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Build targets</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Stockfish.js package</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Stockfish 18</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Lite/full, single-thread/threaded flavors; threaded builds require cross-origin isolation.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Emscripten UCI worker</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Berserk, PlentyChess</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Single-thread baseline first, then explicit <code>simd128</code>, SSE4.1-shaped wasm SIMD, or relaxed-SIMD variants after smoke/benchmark evidence.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Rust <code>wasm32-wasip1</code></td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Reckless, Viridithas, Monty lab</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Scalar fallback, <code>+simd128</code> preferred variants, and relaxed-SIMD as experimental until proven per engine.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; font-weight:600">Direct browser API</td>
+        <td style="padding:10px">Reckless experiments</td>
+        <td style="padding:10px">Bypasses UCI text for structured calls, but only graduates if it beats the simpler UCI/WASI path on lifecycle or latency.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3 id="cpu-wasm-relaxed-simd">Relaxed SIMD <a class="anchor-link" href="#cpu-wasm-relaxed-simd" aria-label="Link to this section">#</a></h3>
+  <p>Relaxed SIMD is a separate WebAssembly feature from ordinary <code>simd128</code>. A relaxed build can fail to validate on a browser that supports baseline SIMD, so every relaxed artifact needs feature detection, asset fallback, and a non-relaxed path.</p>
+  <p>The main win for these chess engines is the relaxed integer dot product used in NNUE layers. When the activation operand is proven to stay in <code>[0, 127]</code>, <code>i32x4_relaxed_dot_i8x16_i7x16_add</code> is value-exact and can replace slower <code>maddubs</code>/<code>dpbusd</code> emulation. Reckless, Viridithas, Berserk, and PlentyChess all have this proof in their current SIMD audit lanes.</p>
+  <p>The rule is still parity-first: inspect the artifact to confirm relaxed opcodes are present, then require fixed-depth equality for best move, score, node count, and PV before promoting a runtime ladder such as <code>relaxed-simd &gt; simd128 &gt; scalar</code>. Without that evidence, relaxed SIMD remains a lab or benchmark variant.</p>
+
+  <div class="callout info">
+    <h4>Benchmark context</h4>
+    <p>The current relaxed-SIMD snapshot is measured in a Chromium browser on macOS with an Apple M4 chip. Treat the NPS deltas as device/runtime-specific engineering evidence, not universal engine-speed claims; the exact fixed-depth parity result is the stronger promotion signal.</p>
+  </div>
+
+  <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Engine</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Apple M4 / Chromium evidence</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Parity gate</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Reckless</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>+24%</code> NPS vs old kernels</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>60/60</code> exact fixed-depth parity</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Viridithas</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>+14%</code> NPS over standard SIMD</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>40/40</code> exact fixed-depth parity</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Berserk</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>1.50M</code> NPS vs <code>1.38M</code> SIMD (<code>+8%</code>)</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>40/40</code> exact fixed-depth parity</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">PlentyChess</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>992k</code> NPS vs <code>603k</code> default (<code>+64%</code>)</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>40/40</code> exact fixed-depth parity</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; font-weight:600">Stockfish</td>
+        <td style="padding:10px">Not measured; current package is upstream Stockfish.js rather than a local relaxed-SIMD build.</td>
+        <td style="padding:10px">N/A</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>The promotion rule is deliberately conservative: build scripts must pin upstream source and NNUE assets, Node and browser smokes must pass, benchmarks must justify the variant, and GPL/AGPL artifacts need manifests plus matching source archives before public distribution. Full notes live in <a href="https://github.com/manthedan/0x88/blob/main/docs/cpu_wasm_runtimes.md">docs/cpu_wasm_runtimes.md</a> and the C/C++ porting recipe in <a href="https://github.com/manthedan/0x88/blob/main/docs/browser_c_engine_porting.md">docs/browser_c_engine_porting.md</a>.</p>
 </section>
 
 <!-- ===== ENGINES ===== -->

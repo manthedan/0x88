@@ -8,12 +8,15 @@ This directory now favors current browser-product/runtime docs over inherited Ti
 - [`browser_runtime.md`](browser_runtime.md) — browser runtime notes.
 - [`browser_runtime_configuration_and_benchmark_schema.md`](browser_runtime_configuration_and_benchmark_schema.md) — runtime benchmark/config schema.
 - [`browser_uci_adapter_contract.md`](browser_uci_adapter_contract.md) — browser UCI adapter contract.
+- [`neural_browser_runtimes.md`](neural_browser_runtimes.md) — ONNX WebGPU, TVMJS, custom WGSL, WebNN, and ONNX QDQ runtime lanes.
+- [`cpu_wasm_runtimes.md`](cpu_wasm_runtimes.md) — CPU WebAssembly runtime choices and Emscripten/Rust WASM build targets.
 - [`browser_c_engine_porting.md`](browser_c_engine_porting.md) — C/C++ browser engine porting recipe.
 - [`engine_artifact_distribution.md`](engine_artifact_distribution.md) — artifact/source distribution policy.
 - [`netlify_engine_artifacts.md`](netlify_engine_artifacts.md) — Netlify engine artifact handling.
 - [`hosted_artifacts.md`](hosted_artifacts.md) — deployed/hosted artifact inventory.
 - [`model_manifest.md`](model_manifest.md) — LC0 model manifest notes.
 - [`model_efficiency_metrics.md`](model_efficiency_metrics.md) — model efficiency comparison metrics.
+- [`human_vs_computer_play.md`](human_vs_computer_play.md) — Maia3 neural human modeling vs LQO/Monty-style contempt search for practical human play.
 - [`r2_model_hosting.md`](r2_model_hosting.md) — external model hosting policy.
 
 ## LC0/WebGPU research lane docs
