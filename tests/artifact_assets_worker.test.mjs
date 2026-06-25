@@ -73,7 +73,7 @@ test('artifact assets worker serves full immutable artifacts with required heade
   assert.match(response.headers.get('Access-Control-Expose-Headers'), /Content-Length/);
   assert.match(response.headers.get('Access-Control-Expose-Headers'), /X-Artifact-Content-Length/);
   assert.equal(response.headers.get('X-Artifact-Content-Length'), String(BODY.byteLength));
-  assert.equal(response.headers.get('Cache-Control'), 'public, max-age=31536000, immutable');
+  assert.equal(response.headers.get('Cache-Control'), 'public, max-age=31536000, immutable, no-transform');
   assert.equal(response.headers.get('Cache-Status'), 'lc0-artifact-worker; fwd');
   assert.equal(response.headers.get('Accept-Ranges'), 'bytes');
   assert.equal(response.headers.get('Content-Length'), String(BODY.byteLength));

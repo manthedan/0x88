@@ -78,10 +78,25 @@ function cacheControlForKey(key) {
   return 'no-store';
 }
 
+function shouldPreventTransform(key, contentType) {
+  return key.endsWith('.wasm')
+    || key.endsWith('.onnx')
+    || key.endsWith('.data')
+    || key.endsWith('.gz')
+    || contentType === 'application/wasm'
+    || contentType === 'application/octet-stream';
+}
+
+function preventTransform(cacheControl) {
+  return /\bno-transform\b/i.test(cacheControl) ? cacheControl : `${cacheControl}, no-transform`;
+}
+
 function objectHeaders(key, object, env, range, cacheControlOverride) {
   const contentType = object.httpMetadata?.contentType || (key.endsWith('.json') ? 'application/json; charset=utf-8' : 'application/octet-stream');
   // Cache policy is path-controlled so stale R2 metadata cannot make mutable channels immutable.
-  const cacheControl = cacheControlOverride || cacheControlForKey(key);
+  const cacheControl = shouldPreventTransform(key, contentType)
+    ? preventTransform(cacheControlOverride || cacheControlForKey(key))
+    : cacheControlOverride || cacheControlForKey(key);
   const headers = artifactHeaders(env, {
     'Content-Type': contentType,
     'Cache-Control': cacheControl,
