@@ -1984,6 +1984,39 @@ async function withCpuLease<T>(engineId: string, signal: AbortSignal, task: (lea
   }
 }
 
+async function withEngineTimeout<T>(label: string, parentSignal: AbortSignal, timeoutMs: number, task: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  if (parentSignal.aborted) throw new DOMException('Analysis aborted', 'AbortError');
+  const controller = new AbortController();
+  const timeoutMessage = `${label} timed out after ${Math.round(timeoutMs / 1000)}s`;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let abortReject: ((error: DOMException) => void) | null = null;
+  const abortPromise = new Promise<never>((_, reject) => { abortReject = reject; });
+  const onAbort = () => {
+    controller.abort();
+    abortReject?.(new DOMException('Analysis aborted', 'AbortError'));
+  };
+  parentSignal.addEventListener('abort', onAbort, { once: true });
+  try {
+    const taskPromise = task(controller.signal);
+    taskPromise.catch(() => undefined);
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error(timeoutMessage));
+      }, timeoutMs);
+    });
+    return await Promise.race([taskPromise, timeoutPromise, abortPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    parentSignal.removeEventListener('abort', onAbort);
+  }
+}
+
+function cpuAnalysisTimeoutMs(row: EngineRow): number {
+  if (row.family === 'sf') return Math.max(60000, row.strength * 5000);
+  return Math.max(45000, row.strength * 8000);
+}
+
 async function analyzeCurrent(options: { force?: boolean } = {}) {
   if (mountAbort.signal.aborted) return;
   const rows = activeEngineRows();
@@ -2021,6 +2054,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     if (lineGroups.some((lines) => lines.length > 0)) publishLines();
     const tasks: Promise<void>[] = [];
     let taskChain = Promise.resolve();
+    let hadTaskFailure = false;
     const pushTask = (index: number, cacheKey: string, label: string, taskFactory: () => Promise<AnalysisLine[]>) => {
       const queuedTask = taskChain.then(async () => {
         if (controller.signal.aborted || mountAbort.signal.aborted) return;
@@ -2032,6 +2066,15 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           else engineLineCache.delete(cacheKey);
           lineGroups[index] = lines;
           publishLines();
+        } catch (error) {
+          if (controller.signal.aborted || mountAbort.signal.aborted || (error as Error).name === 'AbortError') throw error;
+          hadTaskFailure = true;
+          console.warn(`${label} analysis failed`, error);
+          if (runId === activeAnalysisRunId && analysisAbort === controller && analyzing) {
+            engineLineCache.delete(cacheKey);
+            lineGroups[index] = [];
+            publishLines();
+          }
         } finally {
           clearEngineSearchProgress(runId, label);
         }
@@ -2079,60 +2122,60 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
         const label = kind === 'lite' ? 'SF Lite' : 'SF';
-        pushTask(index, cacheKey, label, () => withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
+        pushTask(index, cacheKey, label, () => withCpuLease(`sf-${kind}`, controller.signal, async (lease) => withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), async (signal) => {
           const engine = getStockfish(kind);
           engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
-          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal: controller.signal });
+          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           return stockfishAnalysisLines(infos, fen, label);
-        }));
+        })));
       } else if (row.family === 'viridithas') {
         const label = `${viridithasVariantForKey(row.variant).label}`;
         const engine = getViridithasFor(row.variant);
-        pushTask(index, cacheKey, label, () => withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
-          await engine.newGame(controller.signal);
-          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal: controller.signal });
+        pushTask(index, cacheKey, label, () => withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), async (signal) => {
+          await engine.newGame(signal);
+          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        }));
+        })));
       } else if (row.family === 'berserk') {
         const label = `${berserkVariantForKey(row.variant).label}`;
         const engine = getBerserkFor(row.variant);
-        pushTask(index, cacheKey, label, () => withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
+        pushTask(index, cacheKey, label, () => withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), async (signal) => {
           engine.setOptions({ threads: lease.threads });
-          await engine.newGame(controller.signal);
-          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal: controller.signal });
+          await engine.newGame(signal);
+          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        }));
+        })));
       } else if (row.family === 'plentychess') {
         const label = `${plentyChessVariantForKey(row.variant).label}`;
         const engine = getPlentyChessFor(row.variant);
-        pushTask(index, cacheKey, label, () => withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
+        pushTask(index, cacheKey, label, () => withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), async (signal) => {
           engine.setOptions({ threads: lease.threads });
-          await engine.newGame(controller.signal);
-          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal: controller.signal });
+          await engine.newGame(signal);
+          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        }));
+        })));
       } else {
         const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label}`;
-        pushTask(index, cacheKey, label, () => withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
-          const infos = await getRecklessFor(row.variant).analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal: controller.signal });
+        pushTask(index, cacheKey, label, () => withCpuLease(`reckless:${row.variant}`, controller.signal, async () => withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), async (signal) => {
+          const infos = await getRecklessFor(row.variant).analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        }));
+        })));
       }
     }
     await Promise.all(tasks);
     if (controller.signal.aborted || mountAbort.signal.aborted) return;
     publishLines();
-    completeAnalysisKeys.add(selectionCacheKey);
+    if (!hadTaskFailure) completeAnalysisKeys.add(selectionCacheKey);
     const message = document.getElementById('message');
-    if (message) message.textContent = `Analyzed: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`;
+    if (message) message.textContent = hadTaskFailure ? `Analyzed with one or more engine failures/timeouts: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}` : `Analyzed: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`;
   } catch (error) {
     controller.abort();
     const message = document.getElementById('message');
-    if ((error as Error).name !== 'AbortError' && !mountAbort.signal.aborted && message) message.textContent = `Analysis failed: ${(error as Error).message}`;
+    if ((error as Error).name !== 'AbortError' && !mountAbort.signal.aborted && message && runId === activeAnalysisRunId && analysisAbort === controller) message.textContent = `Analysis failed: ${(error as Error).message}`;
   } finally {
     if (analysisAbort === controller && runId === activeAnalysisRunId && !mountAbort.signal.aborted) {
       analyzing = false;
