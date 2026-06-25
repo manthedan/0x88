@@ -2762,7 +2762,7 @@ async function init(mountSignal: AbortSignal) {
   }
   REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, renderRecklessRuntimeInfo);
   if (!REQUESTED_VIRIDITHAS_EXPLICIT && REQUESTED_VIRIDITHAS_VARIANT.key === 'relaxed-simd') {
-    REQUESTED_VIRIDITHAS_VARIANT = viridithasVariantByKey('simd');
+    REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(viridithasVariantByKey('simd'), false, renderRecklessRuntimeInfo);
   }
   REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, renderRecklessRuntimeInfo);
   REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, renderRecklessRuntimeInfo);
