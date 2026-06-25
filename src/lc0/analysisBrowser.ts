@@ -42,7 +42,7 @@ import { ENGINE_FAMILY_PRIORITY, defaultEngineStrength, defaultStaticEngineVaria
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
+import { hideLoadingProgress, renderLoadingProgress, type LoadingProgressItem } from './loadingProgress.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
@@ -532,12 +532,31 @@ function modelProgressEl(): HTMLElement {
   return node;
 }
 
+const loadingProgressItems = new Map<string, LoadingProgressItem>();
+
+function renderLoadingProgressItems(): void {
+  const node = modelProgressEl();
+  const items = [...loadingProgressItems.values()];
+  if (items.length) renderLoadingProgress(node, items);
+  else hideLoadingProgress(node);
+}
+
+function showLoadingProgressItem(id: string, item: LoadingProgressItem): void {
+  loadingProgressItems.set(id, { id, ...item });
+  renderLoadingProgressItems();
+}
+
+function hideLoadingProgressItem(id: string): void {
+  loadingProgressItems.delete(id);
+  renderLoadingProgressItems();
+}
+
 function showModelProgress(label: string, loadedBytes?: number, totalBytes?: number, phase = 'Loading'): void {
-  renderLoadingProgress(modelProgressEl(), { label, loadedBytes, totalBytes, phase });
+  showLoadingProgressItem('model', { label, loadedBytes, totalBytes, phase });
 }
 
 function hideModelProgress(): void {
-  hideLoadingProgress(modelProgressEl());
+  hideLoadingProgressItem('model');
 }
 function storageGet(key: string): string | null {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -1113,18 +1132,8 @@ function getRecklessFor(variantKey: string): RecklessEngine {
   if (!engine) {
     engine = createRecklessEngine(variant, renderRecklessRuntimeInfo);
     recklessByVariant.set(key, engine);
-    prewarmCpuEngine('Reckless', engine, renderRecklessRuntimeInfo);
   }
   return engine;
-}
-
-function prewarmCpuEngine(label: string, engine: { prewarm(signal?: AbortSignal): Promise<void> }, onStatus: () => void): void {
-  void engine.prewarm(mountAbort.signal)
-    .then(onStatus)
-    .catch((error) => {
-      if ((error as Error).name !== 'AbortError') console.warn(`${label} prewarm failed`, error);
-      onStatus();
-    });
 }
 
 function getViridithasFor(variantKey: string): ViridithasEngine {
@@ -1134,7 +1143,6 @@ function getViridithasFor(variantKey: string): ViridithasEngine {
   if (!engine) {
     engine = createViridithasEngine(variant);
     viridithasByVariant.set(key, engine);
-    prewarmCpuEngine('Viridithas', engine, renderRecklessRuntimeInfo);
   }
   return engine;
 }
@@ -2028,6 +2036,71 @@ function cpuAnalysisTimeoutMs(row: EngineRow): number {
   return Math.max(45000, row.strength * 8000);
 }
 
+function cpuColdStartTimeoutMs(row: EngineRow): number {
+  if (row.family === 'sf') return 60000;
+  return 300000;
+}
+
+function assetFileLabel(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl, location.href);
+    return decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() ?? rawUrl);
+  } catch {
+    return rawUrl.split('/').pop() ?? rawUrl;
+  }
+}
+
+async function preloadAnalysisAsset(engineLabel: string, rawUrl: string | undefined, signal: AbortSignal): Promise<void> {
+  if (!rawUrl) return;
+  const id = `asset:${engineLabel}:${rawUrl}`;
+  const label = `${engineLabel} · ${assetFileLabel(rawUrl)}`;
+  showLoadingProgressItem(id, { label, phase: 'Downloading' });
+  try {
+    const response = await fetch(rawUrl, { cache: 'force-cache', signal });
+    if (!response.ok) throw new Error(`failed to fetch ${assetFileLabel(rawUrl)}: HTTP ${response.status}`);
+    const totalBytes = Number(response.headers.get('x-artifact-content-length') ?? response.headers.get('content-length') ?? 0) || undefined;
+    if (!response.body) {
+      const bytes = await response.arrayBuffer();
+      showLoadingProgressItem(id, { label, phase: 'Downloading', loadedBytes: bytes.byteLength, totalBytes: totalBytes ?? bytes.byteLength });
+      return;
+    }
+    const reader = response.body.getReader();
+    let loadedBytes = 0;
+    let lastReport = 0;
+    for (;;) {
+      if (signal.aborted) throw new DOMException('Analysis aborted', 'AbortError');
+      const { done, value } = await reader.read();
+      if (done) break;
+      loadedBytes += value.byteLength;
+      const now = performance.now();
+      if (now - lastReport > 250) {
+        lastReport = now;
+        showLoadingProgressItem(id, { label, phase: 'Downloading', loadedBytes, totalBytes });
+      }
+    }
+    showLoadingProgressItem(id, { label, phase: 'Downloaded', loadedBytes, totalBytes: totalBytes ?? loadedBytes });
+  } finally {
+    hideLoadingProgressItem(id);
+  }
+}
+
+async function preloadAnalysisAssets(engineLabel: string, urls: (string | undefined)[], signal: AbortSignal): Promise<void> {
+  const uniqueUrls = [...new Set(urls.filter((url): url is string => Boolean(url)))];
+  for (const url of uniqueUrls) await preloadAnalysisAsset(engineLabel, url, signal);
+}
+
+async function prepareCpuEngine(row: EngineRow, label: string, parentSignal: AbortSignal, urls: (string | undefined)[], start: (signal: AbortSignal) => Promise<void>): Promise<void> {
+  await withEngineTimeout(`${label} loading`, parentSignal, cpuColdStartTimeoutMs(row), async (signal) => {
+    await preloadAnalysisAssets(label, urls, signal);
+    showLoadingProgressItem(`startup:${label}`, { label, phase: 'Starting engine' });
+    try {
+      await start(signal);
+    } finally {
+      hideLoadingProgressItem(`startup:${label}`);
+    }
+  });
+}
+
 async function analyzeCurrent(options: { force?: boolean } = {}) {
   if (mountAbort.signal.aborted) return;
   const rows = activeEngineRows();
@@ -2138,41 +2211,47 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           return stockfishAnalysisLines(infos, fen, label);
         })));
       } else if (row.family === 'viridithas') {
-        const label = `${viridithasVariantForKey(row.variant).label}`;
+        const variant = viridithasVariantForKey(row.variant);
+        const label = `${variant.label}`;
         const engine = getViridithasFor(row.variant);
-        pushTask(index, cacheKey, label, () => withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), async (signal) => {
-          await engine.newGame(signal);
-          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
+        pushTask(index, cacheKey, label, () => withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
+          await prepareCpuEngine(row, label, controller.signal, [variant.wasmUrl], (signal) => engine.newGame(signal));
+          const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        })));
+        }));
       } else if (row.family === 'berserk') {
-        const label = `${berserkVariantForKey(row.variant).label}`;
+        const variant = berserkVariantForKey(row.variant);
+        const label = `${variant.label}`;
         const engine = getBerserkFor(row.variant);
-        pushTask(index, cacheKey, label, () => withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), async (signal) => {
+        pushTask(index, cacheKey, label, () => withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
           engine.setOptions({ threads: lease.threads });
-          await engine.newGame(signal);
-          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
+          await prepareCpuEngine(row, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl, variant.nnueUrl], (signal) => engine.newGame(signal));
+          const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        })));
+        }));
       } else if (row.family === 'plentychess') {
-        const label = `${plentyChessVariantForKey(row.variant).label}`;
+        const variant = plentyChessVariantForKey(row.variant);
+        const label = `${variant.label}`;
         const engine = getPlentyChessFor(row.variant);
-        pushTask(index, cacheKey, label, () => withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), async (signal) => {
+        pushTask(index, cacheKey, label, () => withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
           engine.setOptions({ threads: lease.threads });
-          await engine.newGame(signal);
-          const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
+          await prepareCpuEngine(row, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl], (signal) => engine.newGame(signal));
+          const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        })));
+        }));
       } else {
-        const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label}`;
-        pushTask(index, cacheKey, label, () => withCpuLease(`reckless:${row.variant}`, controller.signal, async () => withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), async (signal) => {
-          const infos = await getRecklessFor(row.variant).analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
+        const variant = recklessVariantByKey(normalizeRecklessVariant(row.variant));
+        const label = `${variant.label}`;
+        const engine = getRecklessFor(row.variant);
+        pushTask(index, cacheKey, label, () => withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
+          await prepareCpuEngine(row, label, controller.signal, [variant.wasmUrl, variant.nnueUrl], (signal) => engine.newGame(signal));
+          const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        })));
+        }));
       }
     }
     await Promise.all(tasks);

@@ -248,6 +248,9 @@
     display:flex; align-items:center; justify-content:center;
   }
   .nav button:hover{border-color:var(--border-input-hover); background:#fff; color:var(--ink)}
+  .row{margin-top:12px}
+  .engine-list{margin-top:12px}
+  .field{margin-top:12px}
   input[type=number]:not(.stepper-field input){width:80px}
   :global(.lines){list-style:none; margin:8px 0 0; padding:0}
   :global(.lines li){
@@ -319,10 +322,10 @@
   }
   :global(.loading-progress-row), :global(.search-progress-row){display:grid; gap:3px; margin:4px 0}
   :global(.dl-label), :global(.search-progress-text){font-family:var(--mono); font-size:11px; color:var(--muted)}
-  .analyze-controls{display:grid; gap:10px; margin-top:10px}
+  .analyze-controls{display:grid; gap:8px; margin-top:0}
   .analyze-actions{display:flex; gap:8px}
   .analyze-actions button{flex:1 1 0}
-  .analyze-options{display:flex; flex-wrap:wrap; gap:16px; align-items:center}
+  .analyze-options{display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-top:2px}
   .toggle{
     display:inline-flex; align-items:center; gap:8px; cursor:pointer; user-select:none;
   }
@@ -402,11 +405,12 @@
   :global(.movelist .mv:hover){background:var(--soft)}
   :global(.movelist .mv.current){background:var(--accent); color:white}
   :global(.movelist .var){color:var(--muted)}
-  .section-block{margin-top:10px}
+  .section-block{margin-top:0; padding-top:20px}
+  .section-block:first-child{padding-top:0}
   .section-block>summary{
     cursor:pointer; font-size:11px; text-transform:uppercase;
     letter-spacing:.12em; color:var(--muted-2); font-weight:500;
-    font-family:var(--mono); list-style:none; user-select:none; padding:4px 0; transition:color .12s;
+    font-family:var(--mono); list-style:none; user-select:none; padding:0 0 10px; transition:color .12s;
   }
   .section-block>summary::-webkit-details-marker{display:none}
   .section-block>summary::before{
@@ -415,10 +419,10 @@
   }
   .section-block[open]>summary::before{transform:rotate(90deg)}
   .section-block>summary:hover{color:var(--ink)}
-  .section-block[open]>summary{margin-bottom:2px}
+  .section-block[open]>summary{margin-bottom:0}
   .section-block[open]>summary::before{color:var(--accent)}
   #message{
-    margin-top:10px; padding:8px; border:1px solid var(--rule);
+    margin-top:12px; padding:8px 10px; border:1px solid var(--rule);
     border-radius:var(--radius-sm); background:var(--panel-inset);
     font-family:var(--mono); font-size:12px; color:var(--text-soft);
   }
