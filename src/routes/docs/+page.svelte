@@ -82,6 +82,7 @@
         <li><a href="#licenses-per-engine">Per-engine source links</a></li>
       </ul>
     </li>
+    <li><a href="#removal">I'm in this project and I don't like it</a></li>
   </ul>
 </aside>
 
@@ -521,6 +522,16 @@
   </blockquote>
 </section>
 
+<!-- ===== REMOVAL ===== -->
+<section id="removal">
+  <h2>I'm in this project and I don't like it <a class="anchor-link" href="#removal" aria-label="Link to this section">#</a></h2>
+  <p class="lead">Thank you for your contribution to chess. The engines and models above are the work of their authors &mdash; this project only packages them for the browser.</p>
+  <p>If you maintain one of them and would prefer it not be included here, just <a href="https://github.com/manthedan/0x88/issues/new?title=Engine%20removal%20request&amp;body=Which%20engine%20or%20model%3A%20%0A%0AAre%20you%20a%20maintainer%20or%20rights%20holder%3A%20%0A%0AAnything%20else%3A%20" rel="noopener">open an issue on GitHub</a> and I'll remove it &mdash; no questions asked.</p>
+  <p>
+    <a class="removal-cta" href="https://github.com/manthedan/0x88/issues/new?title=Engine%20removal%20request&amp;body=Which%20engine%20or%20model%3A%20%0A%0AAre%20you%20a%20maintainer%20or%20rights%20holder%3A%20%0A%0AAnything%20else%3A%20" rel="noopener">Request removal on GitHub <span aria-hidden="true">&rarr;</span></a>
+  </p>
+</section>
+
 </div><!-- /doc-content -->
 
 </div><!-- /wrap -->
@@ -714,6 +725,16 @@
     border-radius:4px; border:1px solid var(--rule);
   }
   .callout a{font-weight:500}
+  .removal-cta{
+    display:inline-flex; align-items:center; gap:8px;
+    margin-top:4px; padding:11px 18px; border-radius:10px;
+    background:var(--accent); color:#fbf8f0; font-weight:600; font-size:14px;
+    border:1px solid var(--accent); text-decoration:none;
+    transition:background .15s ease, transform .15s ease;
+  }
+  .removal-cta:hover{background:var(--accent-2); transform:translateY(-1px); text-decoration:none}
+  .removal-cta span{transition:transform .15s ease}
+  .removal-cta:hover span{transform:translateX(3px)}
   .doc-content blockquote{
     margin:24px 0; padding:16px 22px;
     border-left:3px solid var(--rule);
