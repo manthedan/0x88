@@ -154,7 +154,7 @@ piece.fading {
   right: 0;
   flex-flow: row;
   height: 12.5%;
-  text-transform: uppercase;
+  text-transform: lowercase;
 }
 
 .cg-wrap coords.files.black {
@@ -172,6 +172,7 @@ piece.fading {
   justify-content: flex-start;
   align-items: flex-end;
   padding-left: 4px;
+  padding-bottom: 2px;
   line-height: 1;
 }
 

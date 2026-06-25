@@ -209,6 +209,7 @@
   .evalbar{
     width:18px; border:1px solid var(--border-input); border-radius:6px;
     overflow:hidden; background:var(--eval-black); position:relative; flex:0 0 auto;
+    box-sizing:border-box;
   }
   .evalbar .white{
     position:absolute; left:0; right:0; bottom:0;
