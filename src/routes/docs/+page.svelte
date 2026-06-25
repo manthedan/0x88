@@ -385,6 +385,10 @@
       <dt>Source</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/stockfish/stockfish-18.0.7-corresponding-source.tar.gz">stockfish-18.0.7-corresponding-source.tar.gz</a></dd>
     </dl>
     <p>The strongest classical chess engine in the world, and has been for years. A community project with hundreds of contributors, continually refined through distributed testing (FishCooking). The NNUE evaluation lets it calculate god-like evaluations with a forward pass cheap enough to search hundreds of millions of nodes per second on a CPU. We ship Stockfish.js 18 in Lite and full-network flavors.</p>
+    <div class="callout info">
+      <h4>Relaxed SIMD candidate</h4>
+      <p>The Lite single-thread build has a feature-detected relaxed-SIMD candidate. On our Chromium public-asset validation set &mdash; opening, tactical, quiet middlegame, castling-rights, en-passant, promotion, and endgame FENs; fixed depths 7/9 plus 120 ms movetime &mdash; it measured <strong>2.34M aggregate NPS vs 2.01M</strong> for the baseline Lite single build, a <strong>1.16&times;</strong> overall speedup. Fixed-depth parity was exact: 14/14 same best move, score, and PV. Browsers without the relaxed-SIMD dot-product opcode automatically keep using the baseline artifact.</p>
+    </div>
     <details>
       <summary>Architecture &amp; packaging details</summary>
       <div class="details-body">

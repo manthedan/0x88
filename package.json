@@ -31,6 +31,7 @@
     "release:verify-r2-dist": "node scripts/netlify_r2_release.mjs --check",
     "release:netlify-r2": "node scripts/netlify_r2_release.mjs --build-if-needed --deploy --prod --message 'release r2 artifact-hosted app shell'",
     "deploy:netlify-prod-r2": "npm run release:netlify-r2",
+    "stockfish:build-relaxed-simd": "node scripts/build_stockfish_relaxed_simd.mjs",
     "stockfish:source-archive": "node scripts/write_engine_source_archive.mjs stockfish",
     "stockfish:artifact-manifest": "node scripts/write_engine_artifact_manifest.mjs stockfish",
     "stockfish:release-manifest": "node scripts/write_engine_artifact_manifest.mjs stockfish --source-archive public/stockfish/stockfish-18.0.7-corresponding-source.tar.gz --source-url /stockfish/stockfish-18.0.7-corresponding-source.tar.gz --out public/stockfish/stockfish-18.0.7.manifest.json",

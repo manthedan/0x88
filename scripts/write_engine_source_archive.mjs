@@ -115,14 +115,15 @@ const CONFIGS = {
     buildDir: '.local_engines/stockfish-js-src',
     sourcePrefix: 'upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832/',
     output: 'public/stockfish/stockfish-18.0.7-corresponding-source.tar.gz',
-    buildScript: null,
+    buildScript: 'scripts/build_stockfish_relaxed_simd.mjs',
     smokeScript: 'scripts/uci_stockfish_js_wrapper.mjs',
     adapterFiles: [
       'src/lc0/stockfishEngine.ts',
+      'src/lc0/wasmFeatures.ts',
       'src/lc0/engineCatalog.ts',
       'src/chess/board.ts',
     ],
-    docs: ['docs/engine_artifact_distribution.md', 'docs/engine_catalog.md', 'docs/netlify_engine_artifacts.md', 'public/stockfish/README.md', 'node_modules/stockfish/README.md', 'node_modules/stockfish/Copying.txt', 'node_modules/stockfish/package.json'],
+    docs: ['docs/engine_artifact_distribution.md', 'docs/engine_catalog.md', 'docs/netlify_engine_artifacts.md', 'docs/stockfish_relaxed_simd_experiment.md', 'public/stockfish/README.md', 'node_modules/stockfish/README.md', 'node_modules/stockfish/Copying.txt', 'node_modules/stockfish/package.json'],
     assets: [],
     envPrefix: 'STOCKFISH_JS',
   },
@@ -218,7 +219,7 @@ function rebuildCommand(config) {
     return `${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_OUT="$PWD/out/public/viridithas/viridithas.wasm" npm run viridithas:build-wasi && ${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_SIMD=1 ${config.envPrefix}_WASM_OUT="$PWD/out/public/viridithas/viridithas-simd128.wasm" npm run viridithas:build-wasi`;
   }
   if (config.engine === 'stockfish') {
-    return 'cd upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832 && npm install && node build.js --all -f';
+    return '(cd upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832 && npm install && node build.js --all -f)\n# Relaxed lite-single artifact from the same upstream source plus the documented patch/build script:\nSTOCKFISH_RELAXED_SOURCE_DIR="$PWD/upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832" npm run stockfish:build-relaxed-simd';
   }
   return `npm run ${config.engine}:build`;
 }

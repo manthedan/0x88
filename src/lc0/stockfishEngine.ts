@@ -1,5 +1,6 @@
 import { isTrustedExecutableAssetUrl, resolvePublicAssetUrl } from './assetUrls.ts';
 import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
+import { supportsWasmRelaxedSimd } from './wasmFeatures.ts';
 
 /**
  * Stockfish "lite" opponent for the engine battle. Drives the single-threaded
@@ -24,7 +25,14 @@ export interface StockfishOptions {
 export type StockfishFlavor = 'lite-single' | 'single' | 'lite-threaded' | 'threaded';
 
 export const DEFAULT_STOCKFISH_FLAVOR: StockfishFlavor = 'lite-single';
-export const DEFAULT_STOCKFISH_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite-single.js');
+export const STOCKFISH_LITE_SINGLE_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite-single.js');
+export const STOCKFISH_LITE_SINGLE_RELAXED_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite-single-relaxed.js');
+
+export function defaultStockfishUrl(): string {
+  return supportsWasmRelaxedSimd() ? STOCKFISH_LITE_SINGLE_RELAXED_URL : STOCKFISH_LITE_SINGLE_URL;
+}
+
+export const DEFAULT_STOCKFISH_URL = defaultStockfishUrl();
 
 export function normalizeStockfishFlavor(raw: string | null | undefined): StockfishFlavor {
   const value = String(raw ?? '').toLowerCase().replace(/[ _]/g, '-');
@@ -56,13 +64,13 @@ export function stockfishFlavorUrl(flavor: StockfishFlavor): string {
       // is incompatible with the cross-origin blob wrapper used for R2-hosted
       // Stockfish scripts, so hosted builds fall back to the single-threaded
       // artifact until a dedicated pthread wrapper is promoted.
-      return sameOriginUrl(url) ? url : DEFAULT_STOCKFISH_URL;
+      return sameOriginUrl(url) ? url : defaultStockfishUrl();
     }
     case 'threaded': {
       const url = resolvePublicAssetUrl('/stockfish/stockfish-18.js');
-      return sameOriginUrl(url) ? url : DEFAULT_STOCKFISH_URL;
+      return sameOriginUrl(url) ? url : defaultStockfishUrl();
     }
-    default: return DEFAULT_STOCKFISH_URL;
+    default: return defaultStockfishUrl();
   }
 }
 
@@ -160,7 +168,7 @@ export class StockfishEngine implements BrowserUciEngine {
   private readonly url: string;
   private workerObjectUrl: string | null = null;
 
-  constructor(options: StockfishOptions = {}, url: string = DEFAULT_STOCKFISH_URL) {
+  constructor(options: StockfishOptions = {}, url: string = defaultStockfishUrl()) {
     this.options = options;
     this.url = url;
   }

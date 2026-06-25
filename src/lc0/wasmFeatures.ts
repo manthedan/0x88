@@ -12,13 +12,18 @@ const WASM_SIMD_PROBE = new Uint8Array([
 
 const WASM_RELAXED_SIMD_PROBE = new Uint8Array([
   // (module (func (result v128)
-  //   (f32x4.relaxed_madd
-  //     (f32x4.splat 1) (f32x4.splat 2) (f32x4.splat 3))))
-  0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96,
-  0, 1, 123, 3, 2, 1, 0, 10, 28, 1, 26, 0,
-  67, 0, 0, 128, 63, 253, 19, 67, 0, 0, 0, 64,
-  253, 19, 67, 0, 0, 64, 64, 253, 19, 253, 133,
-  2, 11,
+  //   (i32x4.relaxed_dot_i8x16_i7x16_add
+  //     (v128.const i32x4 0 0 0 0)
+  //     (v128.const i32x4 0 0 0 0)
+  //     (v128.const i32x4 0 0 0 0))))
+  // This probes the exact relaxed dot-product opcode used by the Stockfish.js
+  // lite-single relaxed artifact rather than a generic relaxed SIMD opcode.
+  0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123,
+  3, 2, 1, 0, 10, 61, 1, 59, 0,
+  253, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  253, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  253, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  253, 147, 2, 11,
 ]);
 
 function validateProbe(bytes: Uint8Array): boolean {
