@@ -1141,7 +1141,7 @@ function getViridithasFor(variantKey: string): ViridithasEngine {
   const key = viridithasCacheKey(variant);
   let engine = viridithasByVariant.get(key);
   if (!engine) {
-    engine = createViridithasEngine(variant);
+    engine = createViridithasEngine(variant, { forceOneShot: true });
     viridithasByVariant.set(key, engine);
   }
   return engine;
@@ -2228,7 +2228,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const label = `${variant.label}`;
         const engine = getViridithasFor(row.variant);
         pushTask(index, cacheKey, label, () => withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
-          await prepareCpuEngine(row, label, controller.signal, [variant.wasmUrl], (signal) => engine.newGame(signal));
+          await prepareCpuEngine(row, label, controller.signal, [variant.wasmUrl], async (signal) => {
+            engine.setOptions({ depth: 1, movetimeMs: undefined });
+            await engine.bestMove(START_FEN, signal);
+          });
           const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);

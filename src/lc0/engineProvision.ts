@@ -9,7 +9,7 @@
 // two backends of the same variant collided in the analysis cache).
 import { RecklessEngine } from './recklessEngine.ts';
 import type { RecklessVariant } from './recklessVariants.ts';
-import { ViridithasEngine } from './viridithasEngine.ts';
+import { ViridithasEngine, type ViridithasRuntimeOptions } from './viridithasEngine.ts';
 import type { ViridithasVariant } from './viridithasVariants.ts';
 import { BerserkEngine } from './berserkEngine.ts';
 import type { BerserkVariant } from './berserkVariants.ts';
@@ -39,8 +39,8 @@ export function createRecklessEngine(variant: RecklessVariant, onStatus?: () => 
   return new RecklessEngine({ ...CPU_ENGINE_DEFAULTS }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, ...(onStatus ? { onStatus } : {}) });
 }
 
-export function createViridithasEngine(variant: ViridithasVariant): ViridithasEngine {
-  return new ViridithasEngine({ ...CPU_ENGINE_DEFAULTS }, variant.wasmUrl);
+export function createViridithasEngine(variant: ViridithasVariant, runtimeOptions: ViridithasRuntimeOptions = {}): ViridithasEngine {
+  return new ViridithasEngine({ ...CPU_ENGINE_DEFAULTS }, variant.wasmUrl, runtimeOptions);
 }
 
 export function createBerserkEngine(variant: BerserkVariant): BerserkEngine {
