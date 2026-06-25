@@ -72,7 +72,9 @@ test('netlify_r2_release check mode rejects side-effect flags', async () => {
 test('prune_external_model_assets removes Monty from R2 Netlify dist', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-netlify-r2-prune-monty-'));
   const dist = join(root, 'dist-client');
+  await mkdir(join(dist, 'models', 'monty'), { recursive: true });
   await mkdir(join(dist, 'monty'), { recursive: true });
+  await writeFile(join(dist, 'models', 'monty', 'nn.network'), 'abc');
   await writeFile(join(dist, 'monty', 'monty.wasm'), 'abc');
 
   const result = spawnSync(process.execPath, [
@@ -80,6 +82,7 @@ test('prune_external_model_assets removes Monty from R2 Netlify dist', async () 
     dist,
   ], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(join(dist, 'models', 'monty')), false);
   assert.equal(existsSync(join(dist, 'monty')), false);
   assert.match(result.stdout, /monty/);
 });
@@ -95,6 +98,7 @@ test('precompress_engine_artifacts skips Monty artifacts', async () => {
     'scripts/precompress_engine_artifacts.mjs',
     root,
     '--allow-missing',
+    '--exclude', 'monty',
   ], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(existsSync(join(root, 'monty', 'monty.wasm.gz')), false);
@@ -107,9 +111,11 @@ test('netlify_r2_release rejects a dist that still contains pruned external blob
   const root = await mkdtemp(join(tmpdir(), 'lc0-netlify-r2-bad-dist-'));
   const dist = join(root, 'dist-client');
   await mkdir(join(dist, 'models/lc0'), { recursive: true });
+  await mkdir(join(dist, 'models/monty'), { recursive: true });
   await mkdir(join(dist, 'monty'), { recursive: true });
   await mkdir(join(dist, 'stockfish'), { recursive: true });
   await writeFile(join(dist, 'models/lc0/test.onnx'), 'abc');
+  await writeFile(join(dist, 'models/monty/nn.network'), 'abc');
   await writeFile(join(dist, 'monty/monty.wasm'), 'abc');
   await writeFile(join(dist, 'stockfish/stockfish-18-lite.js'), 'abc');
   const npm = join(root, 'fake-npm.sh');
@@ -123,6 +129,7 @@ test('netlify_r2_release rejects a dist that still contains pruned external blob
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /R2 Netlify dist contains pruned external artifacts/);
   assert.match(result.stderr, /models\/lc0\/test\.onnx/);
+  assert.match(result.stderr, /models\/monty\/nn\.network/);
   assert.match(result.stderr, /monty\/monty\.wasm/);
   assert.match(result.stderr, /stockfish\/stockfish-18-lite\.js/);
 });
@@ -135,4 +142,5 @@ test('netlify.toml and package scripts use the R2-pruned build path', async () =
   const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
   assert.match(packageJson.scripts['build:netlify:r2'], /NETLIFY_R2_RELEASE_DIST:-dist-client/);
   assert.match(packageJson.scripts['build:netlify:r2'], /prune_external_model_assets/);
+  assert.match(packageJson.scripts['build:netlify:r2'], /--exclude monty/);
 });

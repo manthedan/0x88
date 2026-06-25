@@ -47,6 +47,7 @@ function isExternalArtifact(name) {
 // hosts the app shell.
 removeMatchingFiles(join(root, 'models', 'lc0'), (name, _path, isDir) => isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx'));
 removeMatchingFiles(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDir && name.endsWith('.onnx'));
+remove(join(root, 'models', 'monty'));
 remove(join(root, 'monty'));
 for (const dir of ['berserk', 'plentychess', 'reckless', 'stockfish', 'viridithas', 'runtimes']) {
   removeMatchingFiles(join(root, dir), (name, _path, isDir) => isDir ? false : isExternalArtifact(name));

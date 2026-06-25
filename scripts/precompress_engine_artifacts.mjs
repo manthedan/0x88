@@ -7,9 +7,14 @@ import { dirname, extname, join, relative, resolve } from 'node:path';
 const root = resolve(process.argv[2] ?? 'public');
 const allowMissing = process.argv.includes('--allow-missing');
 const force = process.argv.includes('--force');
+const excludedEngines = new Set(process.argv.flatMap((arg, index, args) => {
+  if (arg === '--exclude') return args[index + 1] ? [args[index + 1]] : [];
+  if (arg.startsWith('--exclude=')) return [arg.slice('--exclude='.length)];
+  return [];
+}));
 // All directories that serve large fetchable artifacts. Missing dirs are
 // skipped under --allow-missing.
-const engines = ['berserk', 'plentychess', 'stockfish', 'viridithas', 'reckless', 'ort', 'models'];
+const engines = ['berserk', 'plentychess', 'stockfish', 'viridithas', 'reckless', 'ort', 'models', 'monty'].filter((engine) => !excludedEngines.has(engine));
 // .onnx: f16/int8 model weights only compress ~0.90, but at current sizes
 // that is still ~2MB (t1 qdq) to ~35MB (BT4) per asset. .mjs covers ORT's
 // glue sidecars in /ort/.
