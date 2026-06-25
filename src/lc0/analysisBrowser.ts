@@ -110,7 +110,10 @@ function initialPerformanceDial(): PerformanceDial {
 // Multi-engine analysis keeps CPU engines behind an exclusive broker lease.
 // The promoted browser-native WASM engines are single-threaded but can still
 // saturate the page when started together, especially while loading sidecars.
-const resourceBroker = new EngineResourceBroker({ policy: 'exclusive', dial: initialPerformanceDial() });
+// Multi-engine analysis runs all selected engines concurrently. CPU engines
+// are gated by a bounded broker (max 2 concurrent) to avoid saturating the
+// page; GPU engines (Lc0, Tiny) run without a CPU lease.
+const resourceBroker = new EngineResourceBroker({ policy: 'bounded', maxConcurrentCpu: 2, dial: initialPerformanceDial() });
 const registeredBrokerEngines = new Set<string>();
 let scheduledAnalysisTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -2063,10 +2066,9 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     };
     if (lineGroups.some((lines) => lines.length > 0)) publishLines();
     const tasks: Promise<void>[] = [];
-    let cpuTaskChain = Promise.resolve();
     let hadTaskFailure = false;
-    const pushTask = (index: number, cacheKey: string, label: string, taskFactory: () => Promise<AnalysisLine[]>, serialized: boolean) => {
-      const run = async () => {
+    const pushTask = (index: number, cacheKey: string, label: string, taskFactory: () => Promise<AnalysisLine[]>) => {
+      tasks.push((async () => {
         if (controller.signal.aborted || mountAbort.signal.aborted) return;
         showIndeterminateSearchProgress(runId, fen, label);
         try {
@@ -2089,24 +2091,17 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         } finally {
           clearEngineSearchProgress(runId, label);
         }
-      };
-      if (serialized) {
-        const queuedTask = cpuTaskChain.then(run);
-        cpuTaskChain = queuedTask.catch(() => undefined);
-        tasks.push(queuedTask);
-      } else {
-        tasks.push(run());
-      }
+      })());
     };
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index];
       const cacheKey = engineAnalysisCacheKey(fen, row);
       if (!options.force && engineLineCache.has(cacheKey)) continue;
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
-        pushTask(index, cacheKey, `Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, () => workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv), false);
+        pushTask(index, cacheKey, `Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, () => workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv));
       } else if (row.family === 'lc0') {
         const label = 'Lc0';
-        if (workerReady) pushTask(index, cacheKey, label, () => workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label), false);
+        if (workerReady) pushTask(index, cacheKey, label, () => workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label));
         else if (searcher) {
           const lc0Searcher = searcher;
           pushTask(index, cacheKey, label, () => lc0Searcher.search({ positions: analysisPositions }, {
@@ -2116,7 +2111,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
             yieldEveryMs: 16,
             onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
           })
-            .then((result) => lc0AnalysisLines(result, fen, 'Lc0')), false);
+            .then((result) => lc0AnalysisLines(result, fen, 'Lc0')));
         }
       } else if (row.family === 'tiny') {
         const positions = analysisPositions;
@@ -2134,7 +2129,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
             pvDepth: 12,
             onProgress: (progress) => showMoveSearchProgress(runId, fen, label, progress),
           }))
-          .then((result) => tinyPuctAnalysisLines(result, fen, label)), false);
+          .then((result) => tinyPuctAnalysisLines(result, fen, label)));
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
         const label = kind === 'lite' ? 'SF Lite' : 'SF';
@@ -2143,7 +2138,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
           const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           return stockfishAnalysisLines(infos, fen, label);
-        })), true);
+        })));
       } else if (row.family === 'viridithas') {
         const label = `${viridithasVariantForKey(row.variant).label}`;
         const engine = getViridithasFor(row.variant);
@@ -2152,7 +2147,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        })), true);
+        })));
       } else if (row.family === 'berserk') {
         const label = `${berserkVariantForKey(row.variant).label}`;
         const engine = getBerserkFor(row.variant);
@@ -2162,7 +2157,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        })), true);
+        })));
       } else if (row.family === 'plentychess') {
         const label = `${plentyChessVariantForKey(row.variant).label}`;
         const engine = getPlentyChessFor(row.variant);
@@ -2172,14 +2167,14 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           const infos = await engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        })), true);
+        })));
       } else {
         const label = `${recklessVariantByKey(normalizeRecklessVariant(row.variant)).label}`;
         pushTask(index, cacheKey, label, () => withCpuLease(`reckless:${row.variant}`, controller.signal, async () => withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), async (signal) => {
           const infos = await getRecklessFor(row.variant).analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal });
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
-        })), true);
+        })));
       }
     }
     await Promise.all(tasks);

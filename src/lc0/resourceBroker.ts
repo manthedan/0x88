@@ -10,7 +10,7 @@
  */
 
 export type EngineResourceClass = 'cpu' | 'gpu';
-export type ResourceBrokerPolicy = 'exclusive' | 'shared';
+export type ResourceBrokerPolicy = 'exclusive' | 'shared' | 'bounded';
 export type PerformanceDial = 'eco' | 'balanced' | 'max';
 
 export interface EngineResourceProfile {
@@ -130,11 +130,14 @@ export interface EngineResourceBrokerOptions {
   dial?: PerformanceDial;
   /** Environment provider; injected for tests, defaults to the live browser globals. */
   environment?: () => ResourceBrokerEnvironment;
+  /** Max concurrent CPU engine leases under the 'bounded' policy. Default 2. */
+  maxConcurrentCpu?: number;
 }
 
 export class EngineResourceBroker {
   private policy: ResourceBrokerPolicy;
   private dial: PerformanceDial;
+  private readonly maxConcurrentCpu: number;
   private readonly environment: () => ResourceBrokerEnvironment;
   private readonly profiles = new Map<string, EngineResourceProfile>();
   private readonly active = new Map<symbol, { engineId: string; resourceClass: EngineResourceClass; threads: number }>();
@@ -143,6 +146,7 @@ export class EngineResourceBroker {
   constructor(options: EngineResourceBrokerOptions = {}) {
     this.policy = options.policy ?? 'exclusive';
     this.dial = options.dial ?? 'balanced';
+    this.maxConcurrentCpu = Math.max(1, Math.floor(options.maxConcurrentCpu ?? 2));
     this.environment = options.environment ?? defaultBrowserEnvironment;
   }
 
@@ -208,6 +212,7 @@ export class EngineResourceBroker {
   private drainQueue(): void {
     while (this.queue.length) {
       if (this.policy === 'exclusive' && this.activeCpuLeases() > 0) return;
+      if (this.policy === 'bounded' && this.activeCpuLeases() >= this.maxConcurrentCpu) return;
       const next = this.queue.shift()!;
       next.cleanup();
       const profile = this.profiles.get(next.engineId)!;
@@ -221,7 +226,9 @@ export class EngineResourceBroker {
   /**
    * Acquire a lease for one search. GPU leases and `shared`-policy CPU leases
    * resolve immediately; `exclusive` CPU leases queue FIFO behind the current
-   * holder and reject with AbortError if the request's signal fires first.
+   * holder; `bounded` CPU leases resolve immediately up to maxConcurrentCpu and
+   * queue beyond that. All queued requests reject with AbortError if the
+   * request's signal fires first.
    */
   async acquire(request: ResourceLeaseRequest): Promise<ResourceLease> {
     const profile = this.profiles.get(request.engineId);
@@ -229,8 +236,6 @@ export class EngineResourceBroker {
     if (request.signal?.aborted) throw abortError();
 
     if (profile.resourceClass === 'gpu') {
-      // GPU leases are informational (snapshot/diagnostics): CPU-side overhead
-      // for GPU engines lives in the standing budget reserve.
       return this.makeLease(request.engineId, profile, 1);
     }
 
@@ -238,8 +243,17 @@ export class EngineResourceBroker {
       return this.makeLease(request.engineId, profile, this.sharedGrant(request.engineId, profile));
     }
 
-    if (this.activeCpuLeases() === 0 && this.queue.length === 0) {
-      return this.makeLease(request.engineId, profile, clampThreads(this.cpuBudget(), profile));
+    const currentActive = this.activeCpuLeases();
+    const hasQueue = this.queue.length > 0;
+    const canStart = this.policy === 'exclusive'
+      ? currentActive === 0 && !hasQueue
+      : currentActive < this.maxConcurrentCpu && !hasQueue;
+
+    if (canStart) {
+      const threads = this.policy === 'exclusive'
+        ? clampThreads(this.cpuBudget(), profile)
+        : this.sharedGrant(request.engineId, profile);
+      return this.makeLease(request.engineId, profile, threads);
     }
 
     return new Promise<ResourceLease>((resolve, reject) => {
