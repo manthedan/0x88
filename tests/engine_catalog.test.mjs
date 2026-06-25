@@ -34,11 +34,11 @@ test('engine strength metadata captures arena vs analysis defaults', () => {
   assert.equal(engineStrengthMeta('tiny', 'arena').def, 100);
   assert.equal(engineStrengthMeta('tiny', 'analysis').def, 400);
   assert.equal(engineStrengthMeta('viridithas', 'arena').def, 6);
-  assert.equal(engineStrengthMeta('viridithas', 'analysis').def, 8);
+  assert.equal(engineStrengthMeta('viridithas', 'analysis').def, 6);
   assert.equal(engineStrengthMeta('berserk', 'arena').def, 4);
-  assert.equal(engineStrengthMeta('berserk', 'analysis').def, 8);
+  assert.equal(engineStrengthMeta('berserk', 'analysis').def, 6);
   assert.equal(engineStrengthMeta('plentychess', 'arena').def, 4);
-  assert.equal(engineStrengthMeta('plentychess', 'analysis').def, 8);
+  assert.equal(engineStrengthMeta('plentychess', 'analysis').def, 6);
 });
 
 test('static LC0 and Stockfish variants expose labels and gating metadata', () => {
