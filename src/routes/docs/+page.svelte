@@ -82,6 +82,7 @@
         <li><a href="#licenses-per-engine">Per-engine source links</a></li>
       </ul>
     </li>
+    <li><a href="#cdn">Artifact CDN &amp; caching</a></li>
     <li><a href="#removal">I'm in this project and I don't like it</a></li>
   </ul>
 </aside>
@@ -520,6 +521,26 @@
   <blockquote>
     <p>A note on engine names and branding: the names "Stockfish", "Leela Chess Zero", "Berserk", "Viridithas", "PlentyChess", "Reckless", and "Maia" are project trademarks of their respective owners, separate from the code licenses. We use them here solely to identify the engines (nominative use) and do not claim endorsement. Consult each project's own branding guidance if in doubt.</p>
   </blockquote>
+</section>
+
+<!-- ===== CDN ===== -->
+<section id="cdn">
+  <h2>Artifact CDN &amp; caching <a class="anchor-link" href="#cdn" aria-label="Link to this section">#</a></h2>
+  <p class="lead">Engine binaries and neural-network models are served from a Cloudflare R2 bucket fronted by a Worker that resolves friendly URLs to content-addressed blobs. Artifacts range from 130 KB to 60+ MB, so caching and compression are critical for the site to function.</p>
+
+  <div class="callout info">
+    <h4>Two-plane model</h4>
+    <p><strong>Control plane</strong> &mdash; channel and release manifests (mutable, short TTL). <strong>Data plane</strong> &mdash; content-addressed blobs under <code>/artifacts/sha256/</code> (immutable, 1-year edge cache). The Worker maps friendly URLs like <code>/viridithas/viridithas-relaxed-simd128.wasm</code> to the correct blob by reading the channel manifest.</p>
+  </div>
+
+  <p>The Worker also handles range requests (delegated to R2's native reader), sets <code>no-transform</code> on binary types to prevent CDN auto-compression of WASM, and attaches CORS/CORP headers for cross-origin isolation. Pre-compression (brotli + gzip sidecars) is done at publish time, not at the edge. Browser-side, the Cache Storage API validates responses by byte length and SHA-256, and compiled <code>WebAssembly.Module</code> objects are cached per worker session.</p>
+
+  <div class="callout warn">
+    <h4>Known failure mode: cache poisoning</h4>
+    <p>If the origin ever returns a 0-byte or truncated response for a large WASM file, Cloudflare caches it. Symptoms: engine appears to load but never produces moves, eventually timing out. Diagnose by comparing <code>Content-Length</code> between <code>Accept-Encoding: br,gzip</code> and <code>identity</code> requests. Fix by purging the cached URL via the Cloudflare API.</p>
+  </div>
+
+  <p>Full architecture, compression pipeline details, artifact size table, and operational playbook (diagnostics, publishing, adding new engines) are in <a href="https://github.com/manthedan/0x88/blob/main/docs/cdn_artifact_caching.md">docs/cdn_artifact_caching.md</a>.</p>
 </section>
 
 <!-- ===== REMOVAL ===== -->
