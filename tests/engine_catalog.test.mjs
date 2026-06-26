@@ -30,15 +30,15 @@ test('engine strength metadata captures arena vs analysis defaults', () => {
   assert.equal(defaultEngineStrength('lc0', 'arena'), 100);
   assert.equal(defaultEngineStrength('lc0', 'analysis'), 400);
   assert.deepEqual(engineStrengthMeta('sf', 'arena'), { unit: 'depth', min: 1, max: 40, def: 8 });
-  assert.deepEqual(engineStrengthMeta('sf', 'analysis'), { unit: 'depth', min: 1, max: 30, def: 14 });
+  assert.deepEqual(engineStrengthMeta('sf', 'analysis'), { unit: 'depth', min: 1, max: 30, def: 12 });
   assert.equal(engineStrengthMeta('tiny', 'arena').def, 100);
   assert.equal(engineStrengthMeta('tiny', 'analysis').def, 400);
   assert.equal(engineStrengthMeta('viridithas', 'arena').def, 6);
-  assert.equal(engineStrengthMeta('viridithas', 'analysis').def, 6);
+  assert.equal(engineStrengthMeta('viridithas', 'analysis').def, 12);
   assert.equal(engineStrengthMeta('berserk', 'arena').def, 4);
-  assert.equal(engineStrengthMeta('berserk', 'analysis').def, 6);
+  assert.equal(engineStrengthMeta('berserk', 'analysis').def, 12);
   assert.equal(engineStrengthMeta('plentychess', 'arena').def, 4);
-  assert.equal(engineStrengthMeta('plentychess', 'analysis').def, 6);
+  assert.equal(engineStrengthMeta('plentychess', 'analysis').def, 12);
 });
 
 test('static LC0 and Stockfish variants expose labels and gating metadata', () => {
