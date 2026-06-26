@@ -53,10 +53,28 @@ A safe cleanup candidate must satisfy all of the following:
 - Not needed for license/source distribution obligations.
 - Not part of a rollback window for the currently deployed app shell.
 
+Use the cleanup planner before deleting anything:
+
+```sh
+CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... npm run --silent deploy:r2-cleanup-plan -- --json
+```
+
+The planner is dry-run by default. It never deletes `channels/` or `releases/`, never deletes a hashed artifact referenced by any retained release manifest, and protects unreferenced source archives for manual license review. If a dry-run looks safe, delete only explicit low-risk categories, for example:
+
+```sh
+CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... \
+  npm run --silent deploy:r2-cleanup-plan -- \
+  --execute \
+  --delete-category legacy-unreferenced-metadata
+```
+
+Deleting `artifacts/sha256/*` candidates requires both `--delete-category hashed-orphan` and `--allow-delete-hashed`. Do not use those flags until the candidate is outside the retention window and has been manually reviewed.
+
 ## Tooling hooks
 
 - `scripts/write_artifact_release_manifests.mjs` verifies local file byte counts and SHA-256 before emitting a release entry.
 - `scripts/publish_hashed_artifacts_to_r2.mjs` verifies local bytes, requires the `/artifacts/sha256/<sha>/...` key hash to match the file hash before planning/uploading, and publishes release/channel manifest JSON after blob uploads when `--channel-manifest` is provided.
 - `scripts/validate_artifact_cdn_headers.mjs` validates HEAD, repeated HEAD, range, CORS/CORP, timing, no-cookie, cache-status, and encoding behavior.
+- `scripts/plan_r2_artifact_cleanup.mjs` lists R2 objects through the Cloudflare API, compares them against retained release manifests, and defaults to a no-delete cleanup plan.
 
 Actual production uploads should use an R2 role that can put new objects but should be treated operationally as write-once for `/artifacts/sha256/*`.

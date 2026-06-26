@@ -28,6 +28,7 @@
     "deploy:validate-cdn-artifacts": "node scripts/validate_artifact_cdn_headers.mjs",
     "deploy:artifact-worker": "wrangler deploy --config cloudflare/artifacts.wrangler.toml",
     "deploy:retention-policy-check": "node scripts/check_artifact_retention_policy.mjs",
+    "deploy:r2-cleanup-plan": "node scripts/plan_r2_artifact_cleanup.mjs --bucket browser-chess-models",
     "release:verify-r2-dist": "node scripts/netlify_r2_release.mjs --check",
     "release:netlify-r2": "node scripts/netlify_r2_release.mjs --build-if-needed --deploy --prod --message 'release r2 artifact-hosted app shell'",
     "deploy:netlify-prod-r2": "npm run release:netlify-r2",
