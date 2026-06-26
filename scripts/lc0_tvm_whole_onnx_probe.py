@@ -2,7 +2,7 @@
 """Probe whole-model ONNX -> TVM Relax -> target build feasibility.
 
 This script is intentionally diagnostic and artifact-first.  It records every
-stage in JSON so LC0 / Tiny Leela / future model TVM experiments are
+stage in JSON so LC0 / Centipawn / future model TVM experiments are
 reproducible instead of living in /tmp notebooks.
 
 Expected durable environment from project root (/Users/macthedan/projects/lc0_browser):

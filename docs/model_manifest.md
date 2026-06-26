@@ -1,10 +1,10 @@
 # Model manifest
 
-Tiny Leela model metadata is split across ONNX files, runtime `*.meta.json` files,
+Centipawn model metadata is split across ONNX files, runtime `*.meta.json` files,
 dataset manifests, training logs, arena results, and frontier cards. The project-level model
 manifest makes those pieces queryable from one place.
 
-For the Tiny Leela transformer -> larger LC0 browser deployment ladder, see
+For the Centipawn transformer -> larger LC0 browser deployment ladder, see
 the current browser-productization docs. Future model cards should define `architecture`, `browser_runtime`, and `quality_gates` fields before a model is treated as browser-productizable.
 
 ## Files

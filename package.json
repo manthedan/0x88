@@ -1,9 +1,9 @@
 {
-  "name": "lc0-webgpu",
+  "name": "0x88",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Browser LC0/WebGPU chess engine research prototype.",
+  "description": "Browser-first 0x88 chess-engine research prototype.",
   "scripts": {
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "npm run typecheck && node --experimental-strip-types --test --test-timeout=120000",
@@ -134,6 +134,7 @@
     "plentychess:artifact-manifest": "node scripts/write_engine_artifact_manifest.mjs plentychess",
     "plentychess:release-manifest": "node scripts/write_engine_artifact_manifest.mjs plentychess --source-archive public/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz --source-url /plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz --out public/plentychess/plentychess-emscripten-single-thread.manifest.json",
     "lc0:battle": "node --experimental-strip-types scripts/lc0_engine_battle.mjs",
+    "lc0:centipawn-strict-custom-webgpu-smoke": "node scripts/lc0_tiny_strict_custom_webgpu_smoke.mjs",
     "lc0:tiny-strict-custom-webgpu-smoke": "node scripts/lc0_tiny_strict_custom_webgpu_smoke.mjs",
     "productization:targeted-smoke": "node scripts/productization_fast_gate.mjs",
     "productization:fast-gate": "node scripts/productization_fast_gate.mjs",

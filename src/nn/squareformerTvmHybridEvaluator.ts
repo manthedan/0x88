@@ -33,7 +33,7 @@ type GPUDevice = {
 type KernelSummaryRow = { label: string; epilogue?: string; file: string };
 type FixtureRootSummary = { layers: Array<{ path: string; summary: string; shape?: { rows?: number; dModel?: number; dFf?: number } }> };
 type HybridRuntimeManifest = {
-  schema: 'tiny-leela.squareformer-tvm-hybrid.v1' | string;
+  schema: 'centipawn.squareformer-tvm-hybrid.v1' | 'tiny-leela.squareformer-tvm-hybrid.v1' | string;
   modelKey?: string;
   bundleVersion?: string;
   modelOnnx?: string;
@@ -110,7 +110,8 @@ function assertExpected(label: string, expected: unknown, actual: unknown): void
   if (expected !== undefined && actual !== undefined && expected !== actual) throw new Error(`Hybrid TVM artifact mismatch for ${label}: expected ${expected}, got ${actual}`);
 }
 function validateManifest(manifest: HybridRuntimeManifest, meta: SquareFormerMeta): void {
-  if (manifest.schema !== 'tiny-leela.squareformer-tvm-hybrid.v1') throw new Error(`Unsupported hybrid TVM manifest schema: ${manifest.schema}`);
+  // Accept the legacy 'tiny-leela.*' schema as well so already-cached/CDN manifests keep validating after the Centipawn rename.
+  if (manifest.schema !== 'centipawn.squareformer-tvm-hybrid.v1' && manifest.schema !== 'tiny-leela.squareformer-tvm-hybrid.v1') throw new Error(`Unsupported hybrid TVM manifest schema: ${manifest.schema}`);
   const expected = manifest.expected;
   if (!expected) return;
   assertExpected('kind', expected.kind, meta.kind);

@@ -8,8 +8,8 @@ const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5196;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
-const REQUIRED_FAMILIES = ['lc0', 'tiny', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess'];
-const REQUIRED_RUNTIME_TOKENS = ['Lc0 BT4:', 'Tiny:', 'Reckless:', 'Viridithas:', 'Berserk:', 'PlentyChess:'];
+const REQUIRED_FAMILIES = ['lc0', 'centipawn', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess'];
+const REQUIRED_RUNTIME_TOKENS = ['Lc0 BT4:', 'Centipawn:', 'Reckless:', 'Viridithas:', 'Berserk:', 'PlentyChess:'];
 
 function usage() {
   console.log(`Usage: node scripts/lc0_analysis_browser_smoke.mjs [options]\n\nRuns a fast browser smoke for /app/analysis UI wiring. It verifies the multi-engine selector, profile controls, local PGN database controls, runtime status text, and actionable browser console errors.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --dry-run             Print planned smoke URL without running\n  -h, --help            Show this help\n`);

@@ -1,4 +1,4 @@
-# Tiny Leela v1 Move Encoding
+# Centipawn v1 Move Encoding
 
 This project uses a deliberately simple fixed action space before adopting any legacy lc0 policy layout.
 

@@ -204,22 +204,22 @@ export function lc0AnalysisLines(result: Lc0SearchLike, fen: string, engine = 'L
   });
 }
 
-export interface TinyPuctLineEntryLike {
+export interface CentipawnPuctLineEntryLike {
   move: Move;
   visits: number;
   q: number;
 }
 
-export interface TinyPuctSearchLike {
+export interface CentipawnPuctSearchLike {
   value: number;
   visits: number;
-  policy: TinyPuctLineEntryLike[];
-  principalVariation?: TinyPuctLineEntryLike[];
-  multiPvLines?: TinyPuctLineEntryLike[][];
+  policy: CentipawnPuctLineEntryLike[];
+  principalVariation?: CentipawnPuctLineEntryLike[];
+  multiPvLines?: CentipawnPuctLineEntryLike[][];
 }
 
-/** Build analysis lines from Tiny Leela's browser PUCT result. */
-export function tinyPuctAnalysisLines(result: TinyPuctSearchLike, fen: string, engine = 'Tiny Leela'): AnalysisLine[] {
+/** Build analysis lines from Centipawn's browser PUCT result. */
+export function centipawnPuctAnalysisLines(result: CentipawnPuctSearchLike, fen: string, engine = 'Centipawn'): AnalysisLine[] {
   const board = parseFen(fen);
   const w = board.turn === 'w' ? 1 : -1;
   const pvLines = result.multiPvLines?.length ? result.multiPvLines : (result.principalVariation?.length ? [result.principalVariation] : []);

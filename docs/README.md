@@ -1,6 +1,6 @@
-# lc0_webgpu docs map
+# 0x88 docs map
 
-This directory now favors current browser-product/runtime docs over inherited Tiny Leela research notebooks. Historical training, cloud, agent, and knowledge-graph material was removed in the Tiny-origin cleanup branch.
+This directory now favors current browser-product/runtime docs over inherited Centipawn research notebooks. Historical training, cloud, agent, and knowledge-graph material was removed in the Centipawn-origin cleanup branch.
 
 ## Current product/runtime docs
 

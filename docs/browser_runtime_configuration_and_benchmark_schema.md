@@ -1,12 +1,12 @@
 # Browser Runtime Configuration and Benchmark Schema
 
-This document standardizes how LC0, Tiny Leela/SquareFormer, and future browser chess engines describe runtime choices, benchmark recipes, and promotion evidence.
+This document standardizes how LC0, Centipawn/SquareFormer, and future browser chess engines describe runtime choices, benchmark recipes, and promotion evidence.
 
 The goal is to make performance work reproducible across:
 
 - LC0 small/distilled browser packs;
 - future larger LC0 packs;
-- Tiny Leela MF80 / BT4 / SquareFormer models;
+- Centipawn MF80 / BT4 / SquareFormer models;
 - UCI or piece-odds LC0 variants;
 - ORT WebGPU/WASM, custom WebGPU, native ORT, and future cloud runtimes.
 
@@ -67,7 +67,7 @@ Recommended shape:
 | Field | Meaning |
 |---|---|
 | `schema` | Schema id, currently `browser-engine.runtime-configuration.v1`. |
-| `engineFamily` | `lc0`, `tiny-squareformer`, `tiny-mf80`, `stockfish`, etc. |
+| `engineFamily` | `lc0`, `centipawn-squareformer`, `centipawn-mf80`, `stockfish`, etc. |
 | `modelId` | Stable model identity, not a runtime-path name. |
 | `modelArtifact.kind` | `onnx`, `lc0web-pack`, `tvm-hybrid-manifest`, `wasm-engine`, etc. |
 | `ruleset.id` | `standard-chess`, `piece-odds`, or variant id. |
@@ -103,7 +103,7 @@ Recommended top-level shape:
   "artifactKind": "fixed-suite-search-throughput",
   "createdAt": "2026-06-05T00:00:00.000Z",
   "git": {
-    "repo": "lc0_webgpu",
+    "repo": "0x88",
     "sha": "...",
     "dirty": false
   },
@@ -307,7 +307,7 @@ Use `driftCheck` for backend/runtime correctness evidence.
 }
 ```
 
-For Tiny Leela/SquareFormer, baselines may be FP32 ONNX, current champion, fixed policy fixtures, or cross-language Rust/TS contracts. State the baseline explicitly.
+For Centipawn/SquareFormer, baselines may be FP32 ONNX, current champion, fixed policy fixtures, or cross-language Rust/TS contracts. State the baseline explicitly.
 
 ## Promotion assessment
 
@@ -397,13 +397,13 @@ npm run lc0:browser-runtime-fixed-suite -- \
   --out /tmp/lc0_fixed_suite_b4.json
 ```
 
-### Tiny SquareFormer / custom TVM WebGPU
+### Centipawn SquareFormer / custom TVM WebGPU
 
 Runtime Configuration should distinguish model and runtime:
 
 ```json
 {
-  "engineFamily": "tiny-squareformer",
+  "engineFamily": "centipawn-squareformer",
   "modelId": "bt4-anneal-muon-best",
   "runtimeBackend": "custom-webgpu",
   "runtimeConfigId": "squareformer-tvm-webgpu-hybrid-v1",
@@ -431,7 +431,7 @@ Recommended standard evidence:
 7. pack/execution/cache footprint once runtime is deployable
 ```
 
-Tiny already has candidate frontier-card requirements. The missing standardization work is to emit LC0-style footprint objects and make cache/broker metrics shape-compatible with LC0 artifacts.
+Centipawn already has candidate frontier-card requirements. The missing standardization work is to emit LC0-style footprint objects and make cache/broker metrics shape-compatible with LC0 artifacts.
 
 ### Future large LC0 model
 
@@ -484,19 +484,19 @@ Additional gates:
 5. no cross-pollution with standard-chess baseline artifacts
 ```
 
-## Optimization mapping: LC0 small vs Tiny Leela
+## Optimization mapping: LC0 small vs Centipawn
 
-| Optimization family | LC0 small status | Tiny Leela/SquareFormer status | Standardization action |
+| Optimization family | LC0 small status | Centipawn/SquareFormer status | Standardization action |
 |---|---|---|---|
 | Runtime registry | LC0 opt-ins are script/runtime controls; stable default ORT | SquareFormer has promoted custom runtime registry entry | Use shared `runtimeConfiguration` schema for both. |
 | Generated/custom kernels | LC0 uses WGSL heads and generated/tiled encoder kernels | SquareFormer TVM hybrid uses generated WebGPU kernels | Standardize kernel id and artifact manifest fields, not kernel internals. |
 | Physical batching | LC0 WGSL-head path has real physical Leaf Batch b4 | Generic broker coalesces requests; SquareFormer hybrid currently serializes `evaluateBatch` | Use shared batch metrics: logical requests, physical batch histogram, represented positions. |
-| Readback attribution | LC0 reports readback bytes/maps/timing | Tiny should report analogous ORT/custom timing where available | Standardize `metrics.eval.backendTiming` and `metrics.search.backendTiming`. |
-| Cache/reuse | LC0 reports hits/misses and `cacheFootprint` | Tiny has `CachedEvaluator` and `BrokeredEvaluator` metrics | Add compatible `cacheFootprint` to Tiny artifacts. |
-| Pack footprint | LC0 `lc0web` pack reports tensor/shard bytes | Tiny mostly reports ONNX/export bytes today | Add `packFootprint` for ONNX and TVM manifests. |
-| Execution footprint | LC0 custom runtime reports explicit GPU buffer categories | Tiny custom runtime should report GPU buffers by block/category | Add `executionFootprint` to custom SquareFormer runtime. |
-| Quantization | LC0 simple int8 attempts regressed; drift gates required | Tiny quantization is deployment polish with strict parity gates | Use one quantization drift schema across both. |
-| Promotion | LC0 requires drift + fixed-suite throughput | Tiny uses frontier cards and strength/runtime Pareto | Require both runtime artifact and frontier card for serious deployment. |
+| Readback attribution | LC0 reports readback bytes/maps/timing | Centipawn should report analogous ORT/custom timing where available | Standardize `metrics.eval.backendTiming` and `metrics.search.backendTiming`. |
+| Cache/reuse | LC0 reports hits/misses and `cacheFootprint` | Centipawn has `CachedEvaluator` and `BrokeredEvaluator` metrics | Add compatible `cacheFootprint` to Centipawn artifacts. |
+| Pack footprint | LC0 `lc0web` pack reports tensor/shard bytes | Centipawn mostly reports ONNX/export bytes today | Add `packFootprint` for ONNX and TVM manifests. |
+| Execution footprint | LC0 custom runtime reports explicit GPU buffer categories | Centipawn custom runtime should report GPU buffers by block/category | Add `executionFootprint` to custom SquareFormer runtime. |
+| Quantization | LC0 simple int8 attempts regressed; drift gates required | Centipawn quantization is deployment polish with strict parity gates | Use one quantization drift schema across both. |
+| Promotion | LC0 requires drift + fixed-suite throughput | Centipawn uses frontier cards and strength/runtime Pareto | Require both runtime artifact and frontier card for serious deployment. |
 
 ## Implementation checklist for new engines/models
 
@@ -521,7 +521,7 @@ When onboarding a new engine/model, create or verify:
 
 ## Non-goals
 
-- Do not force LC0 and Tiny Leela to share WGSL kernels.
+- Do not force LC0 and Centipawn to share WGSL kernels.
 - Do not treat Stage Harness wins as promotion evidence.
 - Do not promote `batchPipelineDepth > 1` as parity-preserving fixed-search evidence.
 - Do not compare model strength and runtime speed as one unlabelled number.

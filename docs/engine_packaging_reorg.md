@@ -4,7 +4,7 @@
 optimized-WASM engine packaging (Reckless, Viridithas, Berserk, PlentyChess)
 into standalone per-engine repos plus a shared toolkit, so the builds are
 usable by third parties and adoptable by the upstream engine authors.
-Stockfish stays on its upstream npm build; LC0/Tiny Leela/BT4 stay in
+Stockfish stays on its upstream npm build; LC0/Centipawn/BT4 stay in
 leelaweb — they are the project itself, not packaging.
 
 ## Why (observed pain, 2026-06 audit sessions)
