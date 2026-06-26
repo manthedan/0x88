@@ -27,10 +27,16 @@ test('Stockfish lite-single uses relaxed SIMD when validated and falls back othe
     WebAssembly.validate = () => true;
     assert.equal(defaultStockfishUrl(), '/stockfish/stockfish-18-lite-single-relaxed.js');
     assert.equal(stockfishFlavorUrl('lite-single'), '/stockfish/stockfish-18-lite-single-relaxed.js');
+    assert.equal(stockfishFlavorUrl('single'), '/stockfish/stockfish-18-single.js');
+    assert.equal(stockfishFlavorUrl('lite-threaded'), '/stockfish/stockfish-18-lite.js');
+    assert.equal(stockfishFlavorUrl('threaded'), '/stockfish/stockfish-18.js');
 
     WebAssembly.validate = () => false;
     assert.equal(defaultStockfishUrl(), '/stockfish/stockfish-18-lite-single.js');
     assert.equal(stockfishFlavorUrl('lite-single'), '/stockfish/stockfish-18-lite-single.js');
+    assert.equal(stockfishFlavorUrl('single'), '/stockfish/stockfish-18-single.js');
+    assert.equal(stockfishFlavorUrl('lite-threaded'), '/stockfish/stockfish-18-lite.js');
+    assert.equal(stockfishFlavorUrl('threaded'), '/stockfish/stockfish-18.js');
   } finally {
     WebAssembly.validate = originalValidate;
   }

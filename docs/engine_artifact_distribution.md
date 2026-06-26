@@ -135,8 +135,8 @@ If the selector is visible in a public deployment but assets are intentionally a
 - Upstream: `https://github.com/nmrugg/stockfish.js.git`
 - Package: `stockfish@18.0.7`
 - Pin: npm `gitHead`/upstream commit `32d4b5ae40c01db88219bfbe2b82dbe6dec93832`
-- Build: upstream `npm ci && node build.js --all -f`
-- Distribution status: release archive and manifest are committed beside the deployed Stockfish.js assets.
+- Build: upstream `npm ci && node build.js --all -f`; relaxed-SIMD candidates use `scripts/build_stockfish_relaxed_simd.mjs` variants (`lite-single`, `single`, `lite-threaded`, `threaded`) against the same corresponding source.
+- Distribution status: release archive and manifest are committed beside the deployed Stockfish.js assets, including the separate feature-detected relaxed-SIMD candidates.
 
 ## Manifest helper
 

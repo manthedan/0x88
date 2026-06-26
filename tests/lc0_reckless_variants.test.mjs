@@ -43,10 +43,10 @@ test('Reckless relaxed SIMD is the feature-detected default where supported', ()
 
 test('explicit relaxed SIMD falls back when the runtime cannot validate relaxed SIMD', async () => {
   const originalValidate = WebAssembly.validate;
-  let validateCalls = 0;
   WebAssembly.validate = (bytes) => {
-    validateCalls += 1;
-    return validateCalls === 1 ? false : originalValidate.call(WebAssembly, bytes);
+    const view = new Uint8Array(bytes);
+    const isRelaxedDotProbe = view.some((byte, index) => byte === 253 && view[index + 1] === 147 && view[index + 2] === 2);
+    return isRelaxedDotProbe ? false : originalValidate.call(WebAssembly, bytes);
   };
   try {
     const resolved = await resolveDefaultRecklessVariantAssetFallback(RECKLESS_RELAXED_SIMD_VARIANT, true);

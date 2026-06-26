@@ -31,7 +31,7 @@ const targets = [
   ['models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.002.bin', 'public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.002.bin', 'application/octet-stream', immutable],
   ['stockfish/stockfish-18.0.7.manifest.json', 'public/stockfish/stockfish-18.0.7.manifest.json', 'application/json', immutable],
   ['stockfish/stockfish-18.0.7-corresponding-source.tar.gz', 'public/stockfish/stockfish-18.0.7-corresponding-source.tar.gz', 'application/gzip', immutable],
-  ...['stockfish-18-lite-single', 'stockfish-18-lite-single-relaxed'].flatMap((base) => [
+  ...['stockfish-18-lite-single', 'stockfish-18-lite-single-relaxed', 'stockfish-18-lite', 'stockfish-18-single', 'stockfish-18'].flatMap((base) => [
     [`stockfish/${base}.js`, `public/stockfish/${base}.js`, 'text/javascript; charset=utf-8', immutable],
     [`stockfish/${base}.wasm`, `public/stockfish/${base}.wasm`, 'application/wasm', immutable],
   ]),

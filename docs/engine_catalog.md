@@ -121,9 +121,9 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
 - **License/distribution:** GPL-3.0 package. Treat vendored/symlinked assets as third-party distribution artifacts.
 - **Runtime adapter:** JS worker UCI protocol via `StockfishEngine`.
 - **UI variants:**
-  - `lite`: `Stockfish Lite`, URL `/stockfish/stockfish-18-lite-single.js` by default.
+  - `lite`: `Stockfish Lite`, URL `/stockfish/stockfish-18-lite-single.js` by default, or `/stockfish/stockfish-18-lite-single-relaxed.js` when the relaxed-SIMD probe passes.
   - `full`: `Stockfish`, URL `/stockfish/stockfish-18-single.js` in current arena/analysis wiring.
-  - Threaded flavors exist (`lite-threaded`, `threaded`) and require cross-origin isolation; arena can cap requested threads to 1 when isolation is unavailable.
+  - Threaded flavors exist (`lite-threaded`, `threaded`) and require same-origin cross-origin isolation. Relaxed full/threaded variants remain reproducible local candidates, but are not public selector artifacts yet.
 - **Strength knob:** depth by default; `movetimeMs`, `skillLevel`, and `threads` are supported in `StockfishOptions`. Staged UI uses depth.
 - **Artifact footprint:**
   - Lite single WASM: ~7.0 MB plus ~20 KB JS wrapper.
@@ -135,9 +135,9 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
   - Stop/abort: worker can be terminated/recreated on error; UCI stop handling is mature enough for UI use.
   - New game/hash reset: standard UCI path.
   - Threads: supported by Stockfish, browser availability depends on SAB/cross-origin isolation and flavor.
-- **Speed snapshot:** not cataloged in a current Stockfish-specific browser benchmark doc yet. Use it primarily as the known-strong baseline; add a benchmark card before tuning UI defaults around full/threaded variants.
-- **Validation:** existing arena/analysis smokes and `StockfishEngine` parsing tests where present.
-- **Open work:** document full/threaded benchmark numbers under the same protocol as Reckless/Viridithas; decide whether threaded variants belong in staged selectors or remain URL/config-only.
+- **Speed snapshot:** Lite single relaxed SIMD measured 2.34M aggregate NPS vs 2.01M baseline (1.16×) on the Chromium public-asset validation set. Full and pthread relaxed candidate builds have smoke/parity evidence but need deeper full-net speed claims before promotion.
+- **Validation:** existing arena/analysis smokes, `StockfishEngine` parsing/selection tests, and `.local-dev-artifacts/stockfish-relaxed/browser_promotion_validation_report.json` for Chromium relaxed-vs-baseline parity.
+- **Open work:** finish Safari fallback checks and decide whether full/threaded relaxed variants belong in staged selectors or remain local/config-only.
 
 ### Reckless family
 

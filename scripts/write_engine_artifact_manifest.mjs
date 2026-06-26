@@ -161,10 +161,10 @@ const CONFIGS = {
       license: 'GPL-3.0',
     },
     build: {
-      script: 'upstream build.js; scripts/build_stockfish_relaxed_simd.mjs for the relaxed lite-single artifact',
-      command: 'cd upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832 && npm install && node build.js --all -f; npm run stockfish:build-relaxed-simd',
-      patches: ['scripts/build_stockfish_relaxed_simd.mjs applies the relaxed SIMD source/build edits from the corresponding source tarball'],
-      toolchain: 'Emscripten 3.1.7 as required by Stockfish.js 18 upstream README for upstream artifacts; Emscripten 3.1.40 known-good for stockfish-18-lite-single-relaxed, with 5.0.7 and 6.0.1 retained in the benchmark matrix.',
+      script: 'upstream build.js; scripts/build_stockfish_relaxed_simd.mjs for relaxed SIMD artifacts',
+      command: 'cd upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832 && npm install && node build.js --all -f; npm run stockfish:build-relaxed-simd:lite-single',
+      patches: ['scripts/build_stockfish_relaxed_simd.mjs applies the relaxed SIMD source/build edits from the corresponding source tarball; additional full/threaded relaxed variants remain buildable as unpromoted candidates'],
+      toolchain: 'Emscripten 3.1.7 as required by Stockfish.js 18 upstream README for upstream artifacts; Emscripten 3.1.40 known-good for the promoted lite-single relaxed SIMD artifact. Lite-threaded/full-threaded relaxed candidates build with 3.1.40 and full-single relaxed builds with 6.0.1/linux-arm64, with 5.0.7 and current 6.x retained in the benchmark matrix before promotion.',
     },
     artifacts: [
       'public/stockfish/stockfish-18-lite-single.js',

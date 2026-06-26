@@ -27,6 +27,9 @@ export type StockfishFlavor = 'lite-single' | 'single' | 'lite-threaded' | 'thre
 export const DEFAULT_STOCKFISH_FLAVOR: StockfishFlavor = 'lite-single';
 export const STOCKFISH_LITE_SINGLE_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite-single.js');
 export const STOCKFISH_LITE_SINGLE_RELAXED_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite-single-relaxed.js');
+export const STOCKFISH_SINGLE_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-single.js');
+export const STOCKFISH_LITE_THREADED_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite.js');
+export const STOCKFISH_THREADED_URL = resolvePublicAssetUrl('/stockfish/stockfish-18.js');
 
 export function defaultStockfishUrl(): string {
   return supportsWasmRelaxedSimd() ? STOCKFISH_LITE_SINGLE_RELAXED_URL : STOCKFISH_LITE_SINGLE_URL;
@@ -57,9 +60,9 @@ export function stockfishFlavorLabel(flavor: StockfishFlavor): string {
 
 export function stockfishFlavorUrl(flavor: StockfishFlavor): string {
   switch (flavor) {
-    case 'single': return resolvePublicAssetUrl('/stockfish/stockfish-18-single.js');
+    case 'single': return STOCKFISH_SINGLE_URL;
     case 'lite-threaded': {
-      const url = resolvePublicAssetUrl('/stockfish/stockfish-18-lite.js');
+      const url = STOCKFISH_LITE_THREADED_URL;
       // The pthread builds derive helper-worker URLs from self.location. That
       // is incompatible with the cross-origin blob wrapper used for R2-hosted
       // Stockfish scripts, so hosted builds fall back to the single-threaded
@@ -67,7 +70,7 @@ export function stockfishFlavorUrl(flavor: StockfishFlavor): string {
       return sameOriginUrl(url) ? url : defaultStockfishUrl();
     }
     case 'threaded': {
-      const url = resolvePublicAssetUrl('/stockfish/stockfish-18.js');
+      const url = STOCKFISH_THREADED_URL;
       return sameOriginUrl(url) ? url : defaultStockfishUrl();
     }
     default: return defaultStockfishUrl();
@@ -343,7 +346,7 @@ export class StockfishEngine implements BrowserUciEngine {
   }
 
   maxThreads(): number {
-    if (!/stockfish-18(?:-lite)?\.js(?:[?#].*)?$/.test(this.url)) return 1;
+    if (!/stockfish-18(?:-lite)?(?:-relaxed)?\.js(?:[?#].*)?$/.test(this.url)) return 1;
     if (typeof location === 'undefined') return /^[/.]/.test(this.url) ? 32 : 1;
     return sameOriginUrl(this.url) ? 32 : 1;
   }
