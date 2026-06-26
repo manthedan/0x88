@@ -212,7 +212,7 @@ export function buildCleanupPlan({ objects, releases, channel, now = new Date(),
   };
 }
 
-async function cfFetch(args, path, init = {}) {
+async function cfFetch(args, path, init = {}, options = {}) {
   if (!args.accountId) throw new Error('--account-id or CLOUDFLARE_ACCOUNT_ID is required');
   if (!args.apiToken) throw new Error('--api-token or CLOUDFLARE_API_TOKEN is required');
   const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
@@ -228,19 +228,20 @@ async function cfFetch(args, path, init = {}) {
   if (!text) return undefined;
   const json = JSON.parse(text);
   if (json.success === false) throw new Error(`Cloudflare API error for ${path}: ${JSON.stringify(json.errors ?? json)}`);
-  return json.result ?? json;
+  return options.envelope ? json : (json.result ?? json);
 }
 
-async function listR2Objects(args) {
+export async function listR2Objects(args) {
   const objects = [];
   let cursor;
   do {
     const params = new URLSearchParams({ per_page: '1000' });
     if (cursor) params.set('cursor', cursor);
-    const result = await cfFetch(args, `/accounts/${args.accountId}/r2/buckets/${args.bucket}/objects?${params}`);
-    const page = Array.isArray(result) ? result : (result.objects ?? []);
+    const envelope = await cfFetch(args, `/accounts/${args.accountId}/r2/buckets/${args.bucket}/objects?${params}`, {}, { envelope: true });
+    const result = envelope?.result;
+    const page = Array.isArray(result) ? result : (result?.objects ?? []);
     objects.push(...page);
-    cursor = Array.isArray(result) ? undefined : result.cursor;
+    cursor = envelope?.result_info?.cursor ?? result?.cursor;
   } while (cursor);
   return objects;
 }

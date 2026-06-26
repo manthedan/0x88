@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { artifactKeyFromUrl, buildCleanupPlan, parseArgs } from '../scripts/plan_r2_artifact_cleanup.mjs';
+import { artifactKeyFromUrl, buildCleanupPlan, listR2Objects, parseArgs } from '../scripts/plan_r2_artifact_cleanup.mjs';
 
 const now = new Date('2026-06-26T00:00:00.000Z');
 
@@ -69,6 +69,27 @@ test('parseArgs requires hashed opt-in separately from execute', () => {
   assert.equal(args.allowDeleteHashed, false);
   assert.deepEqual([...args.deleteCategories].sort(), ['legacy-logical-duplicate', 'legacy-unreferenced-metadata']);
   assert.equal(args.retentionDays, 7);
+});
+
+test('listR2Objects follows Cloudflare result_info cursors across pages', async (t) => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    const isSecondPage = String(url).includes('cursor=next-page');
+    return new Response(JSON.stringify({
+      success: true,
+      result: isSecondPage ? [object('b')] : [object('a')],
+      result_info: isSecondPage ? { cursor: undefined } : { cursor: 'next-page' },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  const objects = await listR2Objects({ accountId: 'account', apiToken: 'token', bucket: 'bucket' });
+
+  assert.deepEqual(objects.map((entry) => entry.key), ['a', 'b']);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1], /cursor=next-page/);
 });
 
 test('public docs do not link directly to the legacy R2 dev bucket', async () => {
