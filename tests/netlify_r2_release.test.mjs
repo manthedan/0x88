@@ -89,6 +89,34 @@ test('prune_external_model_assets removes Monty from R2 Netlify dist', async () 
   assert.match(result.stdout, /monty/);
 });
 
+test('prune_v0_deploy_assets keeps default Stockfish lite single relaxed assets', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-v0-prune-stockfish-'));
+  const dist = join(root, 'dist-client');
+  await mkdir(join(dist, 'stockfish'), { recursive: true });
+  for (const name of [
+    'stockfish-18-lite.js',
+    'stockfish-18-lite.wasm',
+    'stockfish-18-lite-single.js',
+    'stockfish-18-lite-single.wasm',
+    'stockfish-18-lite-single-relaxed.js',
+    'stockfish-18-lite-single-relaxed.wasm',
+    'stockfish-18.js',
+  ]) {
+    await writeFile(join(dist, 'stockfish', name), 'abc');
+  }
+
+  const result = spawnSync(process.execPath, [
+    'scripts/prune_v0_deploy_assets.mjs',
+    dist,
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(join(dist, 'stockfish/stockfish-18-lite-single-relaxed.js')), true);
+  assert.equal(existsSync(join(dist, 'stockfish/stockfish-18-lite-single-relaxed.wasm')), true);
+  assert.equal(existsSync(join(dist, 'stockfish/stockfish-18-lite-single.js')), true);
+  assert.equal(existsSync(join(dist, 'stockfish/stockfish-18-lite-single.wasm')), true);
+  assert.equal(existsSync(join(dist, 'stockfish/stockfish-18.js')), false);
+});
+
 test('precompress_engine_artifacts skips Monty artifacts', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-precompress-skip-monty-'));
   await mkdir(join(root, 'monty'), { recursive: true });

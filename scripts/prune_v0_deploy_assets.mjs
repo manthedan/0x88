@@ -39,6 +39,8 @@ removeMatchingFiles(join(root, 'stockfish'), (name) => ![
   'stockfish-18-lite.wasm',
   'stockfish-18-lite-single.js',
   'stockfish-18-lite-single.wasm',
+  'stockfish-18-lite-single-relaxed.js',
+  'stockfish-18-lite-single-relaxed.wasm',
 ].includes(name));
 
 console.log(JSON.stringify({ status: 'V0_DEPLOY_ASSET_PRUNE_DONE', root: relative(process.cwd(), root) || '.', removed }, null, 2));
