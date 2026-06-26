@@ -158,11 +158,11 @@ const ENGINE_STRENGTH: Record<EngineSurface, Record<EngineFamily, EngineStrength
   analysis: {
     lc0: { unit: 'visits', min: 1, max: 100000, def: 400 },
     tiny: { unit: 'visits', min: 1, max: 100000, def: 400 },
-    sf: { unit: 'depth', min: 1, max: 30, def: 14 },
-    reckless: { unit: 'depth', min: 1, max: 30, def: 6 },
-    viridithas: { unit: 'depth', min: 1, max: 20, def: 6 },
-    berserk: { unit: 'depth', min: 1, max: 20, def: 6 },
-    plentychess: { unit: 'depth', min: 1, max: 20, def: 6 },
+    sf: { unit: 'depth', min: 1, max: 30, def: 12 },
+    reckless: { unit: 'depth', min: 1, max: 30, def: 12 },
+    viridithas: { unit: 'depth', min: 1, max: 20, def: 12 },
+    berserk: { unit: 'depth', min: 1, max: 20, def: 12 },
+    plentychess: { unit: 'depth', min: 1, max: 20, def: 12 },
   },
 };
 
