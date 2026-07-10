@@ -12,8 +12,11 @@ import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { Maia3BrowserEvaluator, MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle } from './maia3.ts';
 import { Lc0PuctSearcher } from './search.ts';
+import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { BIG_NETS, LQO_NET, T3_NET, bigNetMemoryCaution, bigNetOptionState, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig, type Bt4SearchOptions } from './bt4Engine.ts';
 import { acquireBigNetSearcher, peekBigNetSearcher, releaseUnusedBigNetSearchers, type BigNetKey } from './bigNetSessionPool.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
@@ -34,8 +37,10 @@ import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
+const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl('/models/bt4_soap_rem_c19000_final.onnx');
+const CENTIPAWN_META_URL = resolvePublicAssetUrl('/models/bt4_soap_rem_c19000_final.meta.json');
 
-type PlayFamily = 'maia3' | 'lc0' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
+type PlayFamily = 'maia3' | 'lc0' | 'centipawn' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
 
 interface PlayEngineOption {
   id: string;
@@ -58,9 +63,10 @@ const ALL_ENGINE_OPTIONS: PlayEngineOption[] = [
   { id: 'viridithas', label: 'Viridithas', family: 'viridithas', variant: 'default', group: 'engine' },
   { id: 'berserk', label: 'Berserk', family: 'berserk', variant: 'default', group: 'engine' },
   { id: 'plentychess', label: 'PlentyChess', family: 'plentychess', variant: 'default', group: 'engine' },
+  { id: 'centipawn', label: 'Centipawn · BT4 SOAP REM', family: 'centipawn', variant: 'bt4-ort', group: 'engine' },
 ];
 const ENGINE_OPTIONS: PlayEngineOption[] = isV0DeployProfile()
-  ? ALL_ENGINE_OPTIONS.filter((option) => option.family === 'maia3' || option.id === 'leela-queen-odds' || option.id === 'sf-lite' || option.id === 'lc0-small' || option.id === 'lc0-bt4' || option.id === 'reckless' || option.id === 'berserk' || option.id === 'viridithas' || option.id === 'plentychess')
+  ? ALL_ENGINE_OPTIONS.filter((option) => option.family === 'maia3' || option.id === 'leela-queen-odds' || option.id === 'sf-lite' || option.id === 'lc0-small' || option.id === 'lc0-bt4' || option.id === 'reckless' || option.id === 'berserk' || option.id === 'viridithas' || option.id === 'plentychess' || option.id === 'centipawn')
   : ALL_ENGINE_OPTIONS;
 
 const LEVEL_COUNT = 5;
@@ -78,6 +84,7 @@ const SF_LEVELS = [
 /** Per-family strength ladders indexed by level (0-4): visits for lc0, depth otherwise. */
 const LEVELS: Record<Exclude<PlayFamily, 'maia3' | 'sf'>, number[]> = {
   lc0: [8, 32, 100, 400, 1600],
+  centipawn: [8, 32, 100, 400, 1600],
   reckless: [2, 4, 6, 10, 14],
   viridithas: [2, 4, 6, 9, 12],
   berserk: [2, 4, 6, 9, 12],
@@ -114,6 +121,8 @@ const LQO_BLACK_SEARCH_CONTEMPT_LIMIT = 32;
 const BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3', 'lqo'];
 let lc0Searcher: Lc0PuctSearcher | null = null;
 let lc0LoadPromise: Promise<Lc0PuctSearcher> | null = null;
+let centipawnEvaluator: CachedEvaluator | null = null;
+let centipawnLoadPromise: Promise<Evaluator> | null = null;
 const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
 let maia3Promise: Promise<Maia3BrowserEvaluator> | null = null;
 /** One-line model/cache status shown in the caption once Maia3 has loaded. */
@@ -285,8 +294,9 @@ function ctxStrengthCaption(ctx: PlayContext): string {
     ? ' · CPU fallback (no WebGPU): expect several seconds per move'
     : '';
   if (option.variant === 'lqo') return `≈ ${value} visits per move — higher levels press harder for tricks${cpuNote}`;
-  const base = option.family === 'lc0' ? `≈ ${value} visits per move` : `search depth ${value}`;
-  return option.family === 'lc0' ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent${cpuNote}` : base;
+  const isNeuralSearch = option.family === 'lc0' || option.family === 'centipawn';
+  const base = isNeuralSearch ? `≈ ${value} visits per move` : `search depth ${value}`;
+  return isNeuralSearch ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent${cpuNote}` : base;
 }
 
 function ctxLqoSearchOptions(ctx: PlayContext): Pick<Bt4SearchOptions, 'drawScore' | 'searchContemptLimit' | 'cpuct' | 'fpu' | 'swapColors'> {
@@ -399,6 +409,39 @@ function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
     });
   }
   return lc0LoadPromise;
+}
+
+function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
+  if (centipawnEvaluator) return Promise.resolve(centipawnEvaluator);
+  if (!centipawnLoadPromise) {
+    ctxSetEngineNote('Loading Centipawn BT4 SOAP REM…');
+    centipawnLoadPromise = createBrowserSquareformerRuntimeEvaluator({
+      id: 'bt4-soap-rem-c19000-final',
+      modelId: 'bt4-soap-rem-c19000-final',
+      label: 'Centipawn · BT4 SOAP REM',
+      onnx: CENTIPAWN_MODEL_URL,
+      meta: CENTIPAWN_META_URL,
+      runtime: 'ort',
+    }, {
+      runtime: 'ort',
+      fallback: false,
+      audit: { surface: 'play' },
+    }).then((loaded) => {
+      centipawnEvaluator = new CachedEvaluator(loaded.evaluator, {
+        maxEntries: 4096,
+        includeHistory: true,
+        includeLegalMoves: true,
+        label: 'centipawn-play:ort',
+      });
+      if (!ctxIsDisposed(ctx)) ctxSetEngineNote('');
+      return centipawnEvaluator;
+    }).catch((error: Error) => {
+      centipawnLoadPromise = null;
+      if (!ctxIsDisposed(ctx)) ctxSetEngineNote(`Centipawn load failed: ${error.message}`, true);
+      throw error;
+    });
+  }
+  return centipawnLoadPromise;
 }
 
 function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> {
@@ -536,6 +579,30 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
       topP: ctxSelectedMaia3TopP(),
     });
     return choice.move;
+  }
+  if (option.family === 'centipawn') {
+    const evaluator = await ctxEnsureCentipawn(ctx);
+    if (signal.aborted) return null;
+    try {
+      const result = await chooseMove(ctx.board, evaluator, {
+        visits: visitsOrDepth,
+        batchSize: Math.max(1, Math.min(32, visitsOrDepth)),
+        signal,
+        historyFens: ctx.positions.slice(0, -1).map(boardToFen).reverse().slice(0, 16),
+        searchPolicy: montyLitePuctPolicy,
+        includePv: true,
+        onProgress: (progress) => {
+          if (!signal.aborted) ctxShowSearchProgress('Centipawn search', {
+            ...progress,
+            move: progress.move ? moveToUci(progress.move) : null,
+          });
+        },
+      });
+      return result.move ? moveToUci(result.move) : null;
+    } finally {
+      ctxHideDownloadProgress();
+      if (!ctxIsDisposed(ctx)) ctxSetEngineNote('');
+    }
   }
   if (option.family === 'lc0' && option.variant === 'small') {
     const searcher = await ctxEnsureLc0Small(ctx);
@@ -859,6 +926,9 @@ function ctxRenderEngineCaution(ctx: PlayContext): void {
       ? ' The bot starts without its queen and plays for traps — the Lichess LeelaQueenOdds net. ' : ' ';
     const cpu = bt4SupportedSync() ? '' : ' No WebGPU here: runs on the CPU (wasm) fallback with reduced visit budgets — expect several seconds per move.';
     caution.textContent = `First move downloads the ~${config.approxMb}MB net.${odds}${memory ?? ''}${cpu}`.trimEnd();
+    caution.hidden = false;
+  } else if (option.family === 'centipawn') {
+    caution.textContent = 'First use downloads the ~4.5MB Centipawn model. Search then runs entirely in your browser.';
     caution.hidden = false;
   } else {
     caution.hidden = true;

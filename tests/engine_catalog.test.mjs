@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   ENGINE_FAMILY_CATALOG,
   ENGINE_FAMILY_PRIORITY,
+  V0_ENGINE_FAMILY_PRIORITY,
   canonicalEngineFamily,
   defaultEngineStrength,
   defaultStaticEngineVariant,
@@ -19,7 +20,10 @@ import {
 
 test('engine family catalog covers the staged selector families in UI order', () => {
   assert.deepEqual(ENGINE_FAMILY_PRIORITY, ['lc0', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess', 'centipawn']);
+  assert.deepEqual(V0_ENGINE_FAMILY_PRIORITY, ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess', 'centipawn']);
   assert.deepEqual(engineFamilyOptions().map((option) => option.value), ENGINE_FAMILY_PRIORITY);
+  assert.equal(ENGINE_FAMILY_PRIORITY.at(-1), 'centipawn');
+  assert.equal(V0_ENGINE_FAMILY_PRIORITY.at(-1), 'centipawn');
   for (const family of ENGINE_FAMILY_PRIORITY) {
     assert.equal(ENGINE_FAMILY_CATALOG[family].id, family);
     assert.ok(ENGINE_FAMILY_CATALOG[family].label.length > 0);
