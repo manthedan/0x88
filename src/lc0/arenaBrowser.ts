@@ -817,7 +817,7 @@ function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
 
 function shortEngineTag(name: string): string {
   const n = name.toLowerCase();
-  if (n.includes('centipawn')) return 'CP';
+  if (n.includes('centipawn')) return 'Centi';
   if (n.includes('bt4')) return 'BT4';
   if (n.includes('lc0') || n.includes('leela')) return 'Lc0';
   if (n.includes('reckless')) return 'Reck';

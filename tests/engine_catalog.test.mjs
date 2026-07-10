@@ -24,6 +24,7 @@ test('engine family catalog covers the staged selector families in UI order', ()
   assert.deepEqual(engineFamilyOptions().map((option) => option.value), ENGINE_FAMILY_PRIORITY);
   assert.equal(ENGINE_FAMILY_PRIORITY.at(-1), 'centipawn');
   assert.equal(V0_ENGINE_FAMILY_PRIORITY.at(-1), 'centipawn');
+  assert.equal(ENGINE_FAMILY_CATALOG.centipawn.shortLabel, 'Centi');
   for (const family of ENGINE_FAMILY_PRIORITY) {
     assert.equal(ENGINE_FAMILY_CATALOG[family].id, family);
     assert.ok(ENGINE_FAMILY_CATALOG[family].label.length > 0);

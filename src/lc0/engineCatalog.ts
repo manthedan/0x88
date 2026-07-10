@@ -54,7 +54,7 @@ export const ENGINE_FAMILY_CATALOG: Record<EngineFamily, EngineFamilyCatalogEntr
   centipawn: {
     id: 'centipawn',
     label: 'Centipawn',
-    shortLabel: 'CP',
+    shortLabel: 'Centi',
     status: 'mixed',
     docHref: 'docs/engine_catalog.md#centipawn-family',
     note: 'Centipawn SquareFormer neural family; ORT is baseline and promoted custom WebGPU can be selected separately from LC0.',
