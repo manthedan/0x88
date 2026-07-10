@@ -38,6 +38,7 @@ test('netlify_r2_release builds once, stamps dist, then deploys with no-build wi
   assert.deepEqual(stamp.viteEnv, {
     VITE_LC0_BROWSER_ASSET_BASE_URL: 'https://assets.0x88.app',
     VITE_LC0_MODEL_BASE_URL: '',
+    VITE_BROWSER_CHESS_DEPLOY_PROFILE: 'v0',
   });
 
   const second = spawnSync(process.execPath, [

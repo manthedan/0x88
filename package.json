@@ -147,12 +147,12 @@
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.10",
-    "@sveltejs/kit": "^2.67.0",
+    "@sveltejs/kit": "^2.69.2",
     "binaryen": "^130.0.0",
-    "svelte": "^5.56.3",
-    "svelte-check": "^4.6.0",
+    "svelte": "^5.56.4",
+    "svelte-check": "^4.7.2",
     "typescript": "^5.4.0",
-    "vite": "^8.0.10",
+    "vite": "^8.1.4",
     "wrangler": "^4.102.0"
   },
   "dependencies": {
@@ -160,7 +160,10 @@
     "@tanstack/query-core": "^5.101.0",
     "@tanstack/store": "^0.11.0",
     "chessground": "^9.2.1",
-    "onnxruntime-web": "^1.25.1",
+    "onnxruntime-web": "^1.27.0",
     "stockfish": "^18.0.7"
+  },
+  "overrides": {
+    "cookie": "0.7.2"
   }
 }

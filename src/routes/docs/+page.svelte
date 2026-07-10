@@ -604,7 +604,7 @@
     border-left:2px solid transparent; margin-left:-2px;
   }
   .toc a:hover{color:var(--ink); background:var(--rule-soft)}
-  .toc a.active{
+  :global(.toc a.active){
     color:var(--accent); font-weight:500;
     background:var(--accent-soft); border-left-color:var(--accent);
   }
@@ -640,12 +640,11 @@
     font-size:16px; max-width:64ch; line-height:1.65;
   }
   .doc-content p{margin:0 0 14px; line-height:1.7; color:var(--ink-soft); max-width:72ch}
-  .doc-content ul, .doc-content ol{
+  .doc-content ul{
     margin:0 0 16px; padding-left:24px;
     line-height:1.7; color:var(--ink-soft); max-width:70ch;
   }
   .doc-content ul li::marker{color:var(--accent)}
-  .doc-content ol li::marker{color:var(--accent); font-weight:600}
   .doc-content code{
     font-family:var(--mono); font-size:.88em;
     background:var(--rule-soft); padding:1px 6px;
@@ -719,24 +718,18 @@
     background:var(--accent-soft);
     border-color:color-mix(in srgb, var(--accent) 30%, var(--rule));
   }
-  .callout.warn{
-    background:var(--warn-soft);
-    border-color:color-mix(in srgb, var(--warn) 30%, var(--rule));
-  }
   .callout h4{
     margin:0 0 10px; font-size:14px;
     font-family:var(--sans); letter-spacing:.02em;
     display:flex; align-items:center; gap:8px;
   }
   .callout.info h4{color:var(--accent-deep)}
-  .callout.warn h4{color:var(--warn)}
   .callout h4::before{
     font-family:var(--mono); font-size:14px;
     width:20px; height:20px; border-radius:4px;
     display:inline-flex; align-items:center; justify-content:center;
   }
   .callout.info h4::before{content:"i"; background:var(--accent); color:var(--panel); font-style:italic}
-  .callout.warn h4::before{content:"!"; background:var(--warn); color:var(--panel); font-weight:700}
   .callout p{margin:0 0 10px; line-height:1.65; font-size:14px; max-width:64ch}
   .callout p:last-child{margin:0}
   .callout code{

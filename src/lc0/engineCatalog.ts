@@ -35,7 +35,7 @@ export interface EngineFamilyCatalogEntry {
 }
 
 export const ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess', 'centipawn'];
-const V0_ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'];
+const V0_ENGINE_FAMILY_PRIORITY: readonly EngineFamily[] = ['lc0', 'centipawn', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'];
 const V0_RECKLESS_VARIANTS = new Set(['full', 'simd', 'relaxed-simd']);
 const V0_BERSERK_VARIANTS = new Set(['emscripten', 'emscripten-simd', 'emscripten-relaxed']);
 const V0_VIRIDITHAS_VARIANTS = new Set(['default', 'simd', 'relaxed-simd']);
@@ -135,9 +135,9 @@ export function isLc0BigNetVariant(variant: string): variant is 'bt4' | 't3' {
 }
 
 export const CENTIPAWN_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
-  { value: 'bt4-auto', label: 'BT4 Anneal Muon Best · runtime auto' },
-  { value: 'bt4-ort', label: 'BT4 Anneal Muon Best · ORT baseline' },
-  { value: 'bt4-custom', label: 'BT4 Anneal Muon Best · custom WebGPU strict', experimental: true },
+  { value: 'bt4-ort', label: 'BT4 SOAP REM c19000 · ORT' },
+  { value: 'bt4-auto', label: 'Legacy BT4 Anneal Muon · runtime auto', experimental: true },
+  { value: 'bt4-custom', label: 'Legacy BT4 Anneal Muon · custom WebGPU strict', experimental: true },
 ];
 
 export const STOCKFISH_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
@@ -187,6 +187,8 @@ export function normalizeDeployEngineRow(row: EngineRow, surface: EngineSurface,
   const next: EngineRow = isV0DeployProfile()
     ? row.family === 'lc0'
       ? { ...row, family: 'lc0', variant: V0_LC0_VARIANTS.has(row.variant) ? row.variant : 'small' }
+      : row.family === 'centipawn'
+        ? { ...row, family: 'centipawn', variant: 'bt4-ort' }
       : row.family === 'sf'
         ? { ...row, family: 'sf', variant: 'lite' }
         : row.family === 'reckless'
@@ -213,7 +215,10 @@ export function lc0VariantOptions(bt4Supported: boolean): EngineVariantOption[] 
 }
 
 export function centipawnVariantOptions(): EngineVariantOption[] {
-  return CENTIPAWN_ENGINE_VARIANTS.map((option) => ({ ...option }));
+  const variants = isV0DeployProfile()
+    ? CENTIPAWN_ENGINE_VARIANTS.filter((option) => option.value === 'bt4-ort')
+    : CENTIPAWN_ENGINE_VARIANTS;
+  return variants.map((option) => ({ ...option }));
 }
 
 export function stockfishVariantOptions(): EngineVariantOption[] {
@@ -241,7 +246,7 @@ export function stockfishEngineLabel(variant: string, surface: EngineSurface): s
 }
 
 export function centipawnEngineLabel(variant: string): string {
-  if (variant === 'bt4-ort') return 'Centipawn · ORT';
+  if (variant === 'bt4-ort') return 'Centipawn · BT4 SOAP REM';
   if (variant === 'bt4-custom') return 'Centipawn · custom WebGPU';
   return 'Centipawn · auto';
 }

@@ -138,13 +138,18 @@ const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled
 const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
 const PACK_URL = isV0DeployProfile() ? DEFAULT_PACK_URL : resolvePublicAssetUrl(params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL);
-const DEFAULT_CENTIPAWN_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
-const DEFAULT_CENTIPAWN_META_URL = '/models/bt4_anneal_muon_best.meta.json';
+const DEFAULT_CENTIPAWN_MODEL_URL = '/models/bt4_soap_rem_c19000_final.onnx';
+const DEFAULT_CENTIPAWN_META_URL = '/models/bt4_soap_rem_c19000_final.meta.json';
+const LEGACY_CENTIPAWN_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
+const LEGACY_CENTIPAWN_META_URL = '/models/bt4_anneal_muon_best.meta.json';
 const DEFAULT_CENTIPAWN_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
 const DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL = '/runtimes/lc0-' + 'tvm' + 'js-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json';
 const LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole-onnx-webgpu' as const;
-const CENTIPAWN_MODEL_URL = params.get('centipawnModel') ?? params.get('centipawnOnnx') ?? params.get('tinyModel') ?? params.get('tinyOnnx') ?? DEFAULT_CENTIPAWN_MODEL_URL;
-const CENTIPAWN_META_URL = params.get('centipawnMeta') ?? params.get('tinyMeta') ?? DEFAULT_CENTIPAWN_META_URL;
+const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl(isV0DeployProfile() ? DEFAULT_CENTIPAWN_MODEL_URL : params.get('centipawnModel') ?? params.get('centipawnOnnx') ?? DEFAULT_CENTIPAWN_MODEL_URL);
+const CENTIPAWN_META_URL = resolvePublicAssetUrl(isV0DeployProfile() ? DEFAULT_CENTIPAWN_META_URL : params.get('centipawnMeta') ?? DEFAULT_CENTIPAWN_META_URL);
+const LEGACY_CENTIPAWN_RESOLVED_MODEL_URL = resolvePublicAssetUrl(params.get('tinyModel') ?? params.get('tinyOnnx') ?? LEGACY_CENTIPAWN_MODEL_URL);
+const LEGACY_CENTIPAWN_RESOLVED_META_URL = resolvePublicAssetUrl(params.get('tinyMeta') ?? LEGACY_CENTIPAWN_META_URL);
+const LEGACY_CENTIPAWN_OVERRIDE = !isV0DeployProfile() && (params.has('tinyModel') || params.has('tinyOnnx') || params.has('tinyMeta'));
 const CENTIPAWN_HYBRID_MANIFEST_URL = params.get('centipawnManifest') ?? params.get('manifest') ?? params.get('manifestUrl') ?? params.get('tinyManifest') ?? DEFAULT_CENTIPAWN_HYBRID_MANIFEST_URL;
 const LC0_WHOLE_MODEL_MANIFEST_URL = params.get('wholeModelManifest') ?? params.get('wholeModelManifestUrl') ?? params.get('tvm' + 'jsManifest') ?? DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL;
 type Lc0ArenaRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads' | typeof LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
@@ -378,19 +383,26 @@ async function refreshCentipawnHybridManifestStatus(): Promise<void> {
   void renderRuntimeBadge();
 }
 
+function centipawnModelForVariant(variant: string): { modelId: string; onnx: string; meta: string } {
+  return variant === 'bt4-ort' && !LEGACY_CENTIPAWN_OVERRIDE
+    ? { modelId: 'bt4-soap-rem-c19000-final', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL }
+    : { modelId: 'bt4-anneal-muon-best', onnx: LEGACY_CENTIPAWN_RESOLVED_MODEL_URL, meta: LEGACY_CENTIPAWN_RESOLVED_META_URL };
+}
+
 async function centipawnEvaluator(variant: string): Promise<Evaluator> {
   const runtime = centipawnRuntimeForVariant(variant);
   const fallback = centipawnRuntimeFallbackForVariant(variant);
-  const key = `${runtime}:${fallback ? 'fallback' : 'strict'}:${CENTIPAWN_MODEL_URL}:${CENTIPAWN_META_URL}`;
+  const model = centipawnModelForVariant(variant);
+  const key = `${runtime}:${fallback ? 'fallback' : 'strict'}:${model.onnx}:${model.meta}`;
   const existing = centipawnEvaluatorPromises.get(key);
   if (existing) return existing;
   const created = (async () => {
     const loaded = await createBrowserSquareformerRuntimeEvaluator({
-      id: 'bt4-anneal-muon-best',
-      modelId: 'bt4-anneal-muon-best',
+      id: model.modelId,
+      modelId: model.modelId,
       label: centipawnEngineLabel(variant),
-      onnx: CENTIPAWN_MODEL_URL,
-      meta: CENTIPAWN_META_URL,
+      onnx: model.onnx,
+      meta: model.meta,
       runtime,
       manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
     }, {
@@ -1080,7 +1092,7 @@ function bigNetUnavailableText(config: BigNetConfig): string {
 }
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
-  if (isV0DeployProfile() && !['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'].includes(family)) return [];
+  if (isV0DeployProfile() && !['lc0', 'centipawn', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'].includes(family)) return [];
   if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync()).map((option) => {
     if (!isLc0BigNetVariant(option.value)) return option;
     const config = BIG_NETS[option.value];
@@ -3305,7 +3317,43 @@ async function init(mountSignal: AbortSignal) {
   void runArenaBenchAutorun();
 }
 
+let lastArenaMountHref: string | null = null;
+
+function resetArenaPageState(): void {
+  board = parseFen(START_FEN);
+  historyBoards = [board];
+  lastUci = null;
+  liveTrail = null;
+  finishedTrails.length = 0;
+  reviewTrail = null;
+  reviewIndex = 0;
+  reviewing = false;
+  reviewShapes = null;
+  rootChartContext = null;
+  boardWhiteId = null;
+  boardBlackId = null;
+  boardWhiteName = null;
+  boardBlackName = null;
+  loadingLc0 = false;
+  running = false;
+  startPending = false;
+  gameChartSamples = [];
+  games.length = 0;
+  engines.clear();
+  seatRows.splice(0, seatRows.length,
+    { family: 'lc0', variant: 'small', strength: 100 },
+    { family: 'sf', variant: 'lite', strength: 8 },
+  );
+}
+
 export function mountArenaBrowser(): () => void {
+  const href = location.href;
+  if (lastArenaMountHref !== null && lastArenaMountHref !== href) {
+    location.reload();
+    return () => undefined;
+  }
+  lastArenaMountHref = href;
+  resetArenaPageState();
   const controller = new AbortController();
   mountAbort = controller;
   void init(controller.signal);

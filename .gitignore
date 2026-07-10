@@ -28,6 +28,7 @@ screenshots/
 .local-dev-artifacts/
 .ralph/
 dist-client/
+.deploy-public/
 .svelte-kit/
 public/models/*.pt
 public/reckless/*.wasm

@@ -1,0 +1,22 @@
+{
+  "schema": "0x88.centipawn-model-manifest.v1",
+  "generatedAt": "2026-07-09T00:00:00.000Z",
+  "models": [
+    {
+      "id": "bt4-soap-rem-c19000-final",
+      "file": "bt4_soap_rem_c19000_final.onnx",
+      "url": "/models/bt4_soap_rem_c19000_final.onnx",
+      "bytes": 4464375,
+      "sha256": "de2dd68518f6e2ed162da5ee27c67a5a4795567d6e39972e3705824572b7660e",
+      "mode": "tracked-lfs"
+    },
+    {
+      "id": "bt4-soap-rem-c19000-final-meta",
+      "file": "bt4_soap_rem_c19000_final.meta.json",
+      "url": "/models/bt4_soap_rem_c19000_final.meta.json",
+      "bytes": 9047,
+      "sha256": "5b78093585ea34d3bcda599ed62d2c01fa4c1839114d9e81ee5b1f6dac4b1b22",
+      "mode": "tracked"
+    }
+  ]
+}

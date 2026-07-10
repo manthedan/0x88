@@ -1,15 +1,26 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { afterNavigate } from '$app/navigation';
   import SiteHeader from '$lib/components/SiteHeader.svelte';
+  let mountedUrl: URL | null = null;
+  afterNavigate(({ to }) => {
+    if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
+  });
   const title = "0x88 Chess — engine arena";
   const description = "Run chess engine tournaments in your browser: head-to-head matches, round-robins, and gauntlets with standings, Elo estimates, and per-game charts.";
   const devMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev');
   onMount(() => {
+    mountedUrl = new URL(location.href);
     let cleanup: () => void = () => undefined;
     let mounted = true;
     void import('../../../lc0/arenaBrowser').then((module) => {
       if (!mounted) return;
       cleanup = module.mountArenaBrowser();
+    }).catch((error) => {
+      if (!mounted) return;
+      console.error('[arena] failed to load page controller', error);
+      const node = document.getElementById('arenaStatus');
+      if (node) node.textContent = `Page failed to initialize: ${error instanceof Error ? error.message : String(error)}`;
     });
     return () => {
       mounted = false;

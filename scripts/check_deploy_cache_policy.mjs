@@ -62,7 +62,7 @@ for (const file of files) {
   }
 }
 
-const immutableAllowed = (path) => path === '/artifacts/sha256/*';
+const immutableAllowed = (path) => path === '/artifacts/sha256/*' || path === '/_app/immutable/*';
 for (const block of parseNetlifyHeaderBlocks(netlify)) {
   const body = block.lines.join('\n');
   if (/Cache-Control\s*=\s*"[^"]*max-age=31536000[^"]*immutable/.test(body) && !immutableAllowed(block.path)) {
@@ -104,7 +104,7 @@ console.log(JSON.stringify({
   invariants: [
     'no forced .br redirects',
     'no custom Content-Encoding headers',
-    'one-year immutable only on /artifacts/sha256/*',
+    'one-year immutable only on content-addressed artifacts and Vite immutable bundles',
     'HTML and channel pointers revalidate',
   ],
 }, null, 2));

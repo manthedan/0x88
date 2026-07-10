@@ -111,6 +111,7 @@ async function desiredStamp(args) {
     viteEnv: {
       VITE_LC0_BROWSER_ASSET_BASE_URL: args.assetBase ?? '',
       VITE_LC0_MODEL_BASE_URL: process.env.VITE_LC0_MODEL_BASE_URL ?? '',
+      VITE_BROWSER_CHESS_DEPLOY_PROFILE: process.env.VITE_BROWSER_CHESS_DEPLOY_PROFILE ?? 'v0',
     },
     inputs: {
       packageJsonSha256: await sha256Path('package.json'),
@@ -179,6 +180,7 @@ function findForbiddenExternalAssets(root) {
   }
   walk(join(root, 'models', 'lc0'), (name, _path, isDir) => isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx'));
   walk(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDir && name.endsWith('.onnx'));
+  walk(join(root, 'models'), (name, _path, isDir) => !isDir && name === 'bt4_soap_rem_c19000_final.onnx');
   walk(join(root, 'models', 'monty'), (_name, _path, _isDir) => true);
   walk(join(root, 'monty'), (_name, _path, _isDir) => true);
   for (const dir of ['berserk', 'plentychess', 'reckless', 'stockfish', 'viridithas', 'runtimes']) {

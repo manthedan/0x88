@@ -1,15 +1,26 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { afterNavigate } from '$app/navigation';
   import SiteHeader from '$lib/components/SiteHeader.svelte';
+  let mountedUrl: URL | null = null;
+  afterNavigate(({ to }) => {
+    if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
+  });
   const title = "0x88 Chess — analysis board";
   const description = "Multi-engine chess analysis in your browser: compare Leela Chess Zero and Stockfish lines side by side, review games with accuracy scores, and explore openings from your own games.";
   const devMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev');
   onMount(() => {
+    mountedUrl = new URL(location.href);
     let cleanup: () => void = () => undefined;
     let mounted = true;
     void import('../../../lc0/analysisBrowser').then((module) => {
       if (!mounted) return;
       cleanup = module.mountAnalysisBrowser();
+    }).catch((error) => {
+      if (!mounted) return;
+      console.error('[analysis] failed to load page controller', error);
+      const node = document.getElementById('message');
+      if (node) node.textContent = `Page failed to initialize: ${error instanceof Error ? error.message : String(error)}`;
     });
     const multiPv = document.getElementById('multiPvInput') as HTMLInputElement | null;
     const dec = document.getElementById('multiPvDec');
@@ -366,13 +377,14 @@
   .stepper-field input{
     width:28px; text-align:center; border:none; background:transparent;
     padding:0; font-family:var(--mono); font-size:14px; font-weight:700; color:var(--ink);
+    appearance:textfield;
     -moz-appearance:textfield;
   }
   .stepper-field input::-webkit-inner-spin-button,
   .stepper-field input::-webkit-outer-spin-button{ -webkit-appearance:none; margin:0 }
   .stepper-field input:focus{box-shadow:none; outline:none}
   .profile-row{align-items:end}
-  .profile-row select{min-width:150px}
+  :global(.profile-row select){min-width:150px}
   .profile-row input[type=text]{min-width:130px}
   :global(.profile-summary){
     margin-top:6px; padding:7px 8px;

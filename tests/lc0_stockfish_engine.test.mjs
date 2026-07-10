@@ -111,6 +111,73 @@ async function waitUntil(predicate, timeoutMs = 200) {
   }
 }
 
+test('StockfishEngine disposal rejects an active search instead of leaving it pending', async () => {
+  class HangingStockfishWorker {
+    constructor() {
+      this.onmessage = null;
+      this.onerror = null;
+    }
+
+    postMessage(command) {
+      if (command === 'uci') queueMicrotask(() => this.onmessage?.({ data: 'uciok' }));
+      else if (command === 'isready') queueMicrotask(() => this.onmessage?.({ data: 'readyok' }));
+      // Deliberately never answer go/stop; dispose must settle the request.
+    }
+
+    terminate() {}
+  }
+
+  const previousWorker = globalThis.Worker;
+  globalThis.Worker = HangingStockfishWorker;
+  try {
+    const engine = new StockfishEngine({ depth: 8 }, '/mock-stockfish.js');
+    const search = engine.bestMove('8/8/8/8/8/8/4P3/4K3 w - - 0 1');
+    await sleep(5);
+    engine.dispose();
+    await assert.rejects(search, (error) => error.name === 'AbortError');
+  } finally {
+    if (previousWorker === undefined) delete globalThis.Worker;
+    else globalThis.Worker = previousWorker;
+  }
+});
+
+test('StockfishEngine disposal rejects queued searches without restarting a worker', async () => {
+  class HangingStockfishWorker {
+    static instances = [];
+
+    constructor() {
+      this.onmessage = null;
+      this.onerror = null;
+      HangingStockfishWorker.instances.push(this);
+    }
+
+    postMessage(command) {
+      if (command === 'uci') queueMicrotask(() => this.onmessage?.({ data: 'uciok' }));
+      else if (command === 'isready') queueMicrotask(() => this.onmessage?.({ data: 'readyok' }));
+    }
+
+    terminate() {}
+  }
+
+  const previousWorker = globalThis.Worker;
+  globalThis.Worker = HangingStockfishWorker;
+  try {
+    const engine = new StockfishEngine({ depth: 8 }, '/mock-stockfish.js');
+    const first = engine.bestMove('8/8/8/8/8/8/4P3/4K3 w - - 0 1');
+    const queued = engine.bestMove('8/8/8/8/4P3/8/8/4K3 b - - 0 1');
+    await sleep(5);
+    engine.dispose();
+    await Promise.all([
+      assert.rejects(first, (error) => error.name === 'AbortError'),
+      assert.rejects(queued, (error) => error.name === 'AbortError'),
+    ]);
+    assert.equal(HangingStockfishWorker.instances.length, 1, 'queued search recreated a worker after disposal');
+  } finally {
+    if (previousWorker === undefined) delete globalThis.Worker;
+    else globalThis.Worker = previousWorker;
+  }
+});
+
 test('StockfishEngine drains a stopped search before sending the next position', async () => {
   class MockStockfishWorker {
     static instances = [];

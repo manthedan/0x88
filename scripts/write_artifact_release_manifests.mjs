@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 const DEFAULT_SOURCE_MANIFESTS = [
   'public/models/lc0/r2-v0-present.manifest.json',
   'public/models/maia3/manifest.json',
+  'public/models/centipawn.manifest.json',
   'public/stockfish/stockfish-18.0.7.manifest.json',
   'public/reckless/reckless-wasip1.manifest.json',
   'public/viridithas/viridithas-wasip1.manifest.json',

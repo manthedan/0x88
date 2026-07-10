@@ -51,8 +51,10 @@ const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled
 const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
 const PACK_URL = isV0DeployProfile() ? DEFAULT_PACK_URL : resolvePublicAssetUrl(params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL);
-const DEFAULT_CENTIPAWN_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
-const DEFAULT_CENTIPAWN_META_URL = '/models/bt4_anneal_muon_best.meta.json';
+const DEFAULT_CENTIPAWN_MODEL_URL = '/models/bt4_soap_rem_c19000_final.onnx';
+const DEFAULT_CENTIPAWN_META_URL = '/models/bt4_soap_rem_c19000_final.meta.json';
+const LEGACY_CENTIPAWN_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
+const LEGACY_CENTIPAWN_META_URL = '/models/bt4_anneal_muon_best.meta.json';
 const DEFAULT_CENTIPAWN_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
 const DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL = '/runtimes/lc0-' + 'tvm' + 'js-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json';
 const LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole-onnx-webgpu' as const;
@@ -81,8 +83,11 @@ function sameOriginPathParam(names: string[], fallback: string, allowedPrefixes:
   return fallback;
 }
 
-const CENTIPAWN_MODEL_URL = sameOriginPathParam(['centipawnModel', 'centipawnOnnx', 'tinyModel', 'tinyOnnx'], DEFAULT_CENTIPAWN_MODEL_URL, ['/models/']);
-const CENTIPAWN_META_URL = sameOriginPathParam(['centipawnMeta', 'tinyMeta'], DEFAULT_CENTIPAWN_META_URL, ['/models/']);
+const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl(sameOriginPathParam(['centipawnModel', 'centipawnOnnx'], DEFAULT_CENTIPAWN_MODEL_URL, ['/models/']));
+const CENTIPAWN_META_URL = resolvePublicAssetUrl(sameOriginPathParam(['centipawnMeta'], DEFAULT_CENTIPAWN_META_URL, ['/models/']));
+const LEGACY_CENTIPAWN_RESOLVED_MODEL_URL = resolvePublicAssetUrl(sameOriginPathParam(['tinyModel', 'tinyOnnx'], LEGACY_CENTIPAWN_MODEL_URL, ['/models/']));
+const LEGACY_CENTIPAWN_RESOLVED_META_URL = resolvePublicAssetUrl(sameOriginPathParam(['tinyMeta'], LEGACY_CENTIPAWN_META_URL, ['/models/']));
+const LEGACY_CENTIPAWN_OVERRIDE = !isV0DeployProfile() && (params.has('tinyModel') || params.has('tinyOnnx') || params.has('tinyMeta'));
 const CENTIPAWN_HYBRID_MANIFEST_URL = sameOriginPathParam(['centipawnManifest', 'manifest', 'manifestUrl', 'tinyManifest'], DEFAULT_CENTIPAWN_HYBRID_MANIFEST_URL, ['/runtimes/']);
 const LC0_WHOLE_MODEL_MANIFEST_URL = sameOriginPathParam(['wholeModelManifest', 'wholeModelManifestUrl', 'tvm' + 'jsManifest'], DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL, ['/runtimes/lc0-' + 'tvm' + 'js-webgpu/']);
 
@@ -603,10 +608,17 @@ async function refreshCentipawnHybridManifestStatus(): Promise<void> {
   renderRecklessRuntimeInfo();
 }
 
+function centipawnModelForVariant(variant: string): { modelId: string; onnx: string; meta: string } {
+  return variant === 'bt4-ort' && !LEGACY_CENTIPAWN_OVERRIDE
+    ? { modelId: 'bt4-soap-rem-c19000-final', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL }
+    : { modelId: 'bt4-anneal-muon-best', onnx: LEGACY_CENTIPAWN_RESOLVED_MODEL_URL, meta: LEGACY_CENTIPAWN_RESOLVED_META_URL };
+}
+
 function centipawnEvaluatorCacheKey(variant: string): string {
   const runtime = centipawnRuntimeForVariant(variant);
   const fallback = centipawnRuntimeFallbackForVariant(variant);
-  return `${runtime}:${fallback ? 'fallback' : 'strict'}:${CENTIPAWN_MODEL_URL}:${CENTIPAWN_META_URL}:${CENTIPAWN_HYBRID_MANIFEST_URL}`;
+  const model = centipawnModelForVariant(variant);
+  return `${runtime}:${fallback ? 'fallback' : 'strict'}:${model.onnx}:${model.meta}:${CENTIPAWN_HYBRID_MANIFEST_URL}`;
 }
 
 function activeCentipawnEvaluatorKeys(): Set<string> {
@@ -621,12 +633,13 @@ async function centipawnEvaluator(variant: string): Promise<Evaluator> {
   if (existing) return existing;
   const generation = centipawnEvaluatorGeneration;
   const created = (async () => {
+    const model = centipawnModelForVariant(variant);
     const loaded = await createBrowserSquareformerRuntimeEvaluator({
-      id: 'bt4-anneal-muon-best',
-      modelId: 'bt4-anneal-muon-best',
+      id: model.modelId,
+      modelId: model.modelId,
       label: centipawnEngineLabel(variant),
-      onnx: CENTIPAWN_MODEL_URL,
-      meta: CENTIPAWN_META_URL,
+      onnx: model.onnx,
+      meta: model.meta,
       runtime,
       manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
     }, {
@@ -914,7 +927,7 @@ function analysisEngineFamilyOptions(): { value: EngineFamily; label: string }[]
 }
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
-  if (isV0DeployProfile() && !['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'].includes(family)) return [];
+  if (isV0DeployProfile() && !['lc0', 'centipawn', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'].includes(family)) return [];
   if (family === 'centipawn') return centipawnVariantOptions().map((option) => option.value === 'bt4-custom' && centipawnHybridManifestStatus === 'missing'
     ? { ...option, disabled: true, label: `${option.label} (bundle missing)` }
     : option);
@@ -1928,12 +1941,14 @@ async function runGameReview(): Promise<void> {
         continue;
       }
       const lines = await engine.analyze(fen, { multipv: 1, depth, signal: controller.signal });
+      if (reviewAbort !== controller) return;
       positions.push({
         winWhite: winWhiteFromInfo(fen, lines[0]),
         bestUci: lines[0]?.pvUci?.[0] ?? null,
         legalMoves: legal,
       });
     }
+    if (reviewAbort !== controller) return;
     if (controller.signal.aborted || positions.length !== nodes.length) {
       el('reviewStatus').textContent = 'Review stopped.';
       return;
@@ -1946,11 +1961,15 @@ async function runGameReview(): Promise<void> {
     el('reviewCopyPgn').hidden = false;
     el('reviewStatus').textContent = `Reviewed ${moves.length} moves with ${label}.`;
   } catch (error) {
-    el('reviewStatus').textContent = (error as Error).name === 'AbortError' ? 'Review stopped.' : `Review failed: ${(error as Error).message}`;
+    if (reviewAbort === controller) {
+      el('reviewStatus').textContent = (error as Error).name === 'AbortError' ? 'Review stopped.' : `Review failed: ${(error as Error).message}`;
+    }
   } finally {
-    reviewAbort = null;
-    el('reviewGame').toggleAttribute('disabled', false);
-    el('reviewStop').toggleAttribute('disabled', true);
+    if (reviewAbort === controller) {
+      reviewAbort = null;
+      el('reviewGame').toggleAttribute('disabled', false);
+      el('reviewStop').toggleAttribute('disabled', true);
+    }
   }
 }
 
@@ -2308,6 +2327,7 @@ function afterNavigation() {
 const MAIA3_PANEL_RATINGS = [1100, 1300, 1500, 1700, 1900, 2200];
 let maia3PanelEvaluator: Maia3BrowserEvaluator | null = null;
 let maia3PanelLoading = false;
+let maia3PanelLoadGeneration = 0;
 let maia3PanelSeq = 0;
 let maia3PanelTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -2317,17 +2337,26 @@ function maia3PanelStatus(text: string): void {
 
 async function enableMaia3Panel(): Promise<void> {
   if (maia3PanelEvaluator || maia3PanelLoading) return;
+  const mountSignal = mountAbort.signal;
+  const generation = ++maia3PanelLoadGeneration;
   maia3PanelLoading = true;
   (el('maia3Enable') as HTMLButtonElement).disabled = true;
   try {
     maia3PanelStatus('Loading Maia3…');
     showModelProgress('Maia3', undefined, undefined, 'Preparing');
-    maia3PanelEvaluator = await Maia3BrowserEvaluator.create({
+    const evaluator = await Maia3BrowserEvaluator.create({
       onProgress: (loaded, total) => {
-        maia3PanelStatus(`Downloading Maia3 ${(loaded / 1e6).toFixed(0)}/${total ? (total / 1e6).toFixed(0) : '?'}MB…`);
-        showModelProgress('Maia3', loaded, total, 'Downloading');
+        if (!isStaleMount(mountSignal) && generation === maia3PanelLoadGeneration) {
+          maia3PanelStatus(`Downloading Maia3 ${(loaded / 1e6).toFixed(0)}/${total ? (total / 1e6).toFixed(0) : '?'}MB…`);
+          showModelProgress('Maia3', loaded, total, 'Downloading');
+        }
       },
     });
+    if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) {
+      await evaluator.dispose();
+      return;
+    }
+    maia3PanelEvaluator = evaluator;
     hideModelProgress();
     el('maia3Enable').hidden = true;
     el('maia3Grid').hidden = false;
@@ -2335,11 +2364,15 @@ async function enableMaia3Panel(): Promise<void> {
     maia3PanelStatus('');
     scheduleMaia3Panel();
   } catch (error) {
-    maia3PanelStatus(`Maia3 load failed: ${(error as Error).message}`);
-    (el('maia3Enable') as HTMLButtonElement).disabled = false;
+    if (!isStaleMount(mountSignal) && generation === maia3PanelLoadGeneration) {
+      maia3PanelStatus(`Maia3 load failed: ${(error as Error).message}`);
+      (el('maia3Enable') as HTMLButtonElement).disabled = false;
+    }
   } finally {
-    hideModelProgress();
-    maia3PanelLoading = false;
+    if (generation === maia3PanelLoadGeneration) {
+      hideModelProgress();
+      maia3PanelLoading = false;
+    }
   }
 }
 
@@ -2621,6 +2654,17 @@ function wireEvents() {
 function disposeRuntimeResources(): void {
   analysisAbort?.abort();
   analysisAbort = null;
+  const reviewWasRunning = reviewAbort !== null;
+  reviewAbort?.abort();
+  reviewAbort = null;
+  if (reviewWasRunning) {
+    // Runtime reload keeps the page mounted. The stale review's identity guard
+    // intentionally skips its finally block, so restore controls here.
+    (document.getElementById('reviewGame') as HTMLButtonElement | null)?.toggleAttribute('disabled', false);
+    (document.getElementById('reviewStop') as HTMLButtonElement | null)?.toggleAttribute('disabled', true);
+    const status = document.getElementById('reviewStatus');
+    if (status) status.textContent = 'Review stopped after runtime changed.';
+  }
   if (activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
   activeWorkerSearchId = null;
   searchWorker?.terminate();
@@ -2654,6 +2698,11 @@ function disposeRuntimeResources(): void {
 function disposePageResources(): void {
   disposeRuntimeResources();
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
+  void maia3PanelEvaluator?.dispose();
+  maia3PanelEvaluator = null;
+  maia3PanelLoading = false;
+  maia3PanelLoadGeneration += 1;
+  maia3PanelSeq += 1;
   maia3PanelTimer = null;
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = null;
@@ -2802,7 +2851,40 @@ async function init(mountSignal: AbortSignal) {
   await loadLc0Backend(true, mountSignal);
 }
 
+let lastAnalysisMountHref: string | null = null;
+
+function resetAnalysisPageState(): void {
+  tree = new GameTree(params.get('fen') ?? START_FEN);
+  orientation = 'white';
+  analysisAbort = null;
+  reviewAbort?.abort();
+  reviewAbort = null;
+  lastReview = null;
+  lastReviewNodes = [];
+  lastReviewSignature = '';
+  analyzing = false;
+  lineCache.clear();
+  nodeIndex.clear();
+  engineRows = [{ family: 'lc0', variant: 'small', strength: 400 }];
+  importedGames = [];
+  importedPositionIndex = null;
+  databasePositionStats = [];
+  databasePositionKey = '';
+  databasePositionCollectionCount = 0;
+  pgnDatabaseSearchKey = '';
+  pgnCollections = [];
+  activePgnCollectionId = '';
+  bookCache.clear();
+}
+
 export function mountAnalysisBrowser(): () => void {
+  const href = location.href;
+  if (lastAnalysisMountHref !== null && lastAnalysisMountHref !== href) {
+    location.reload();
+    return () => undefined;
+  }
+  lastAnalysisMountHref = href;
+  resetAnalysisPageState();
   const controller = new AbortController();
   mountAbort = controller;
   // Test hook for automated browser checks: synthetic chessground drags are

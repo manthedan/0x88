@@ -94,6 +94,22 @@ test('queued exclusive requests are FIFO and abortable', async () => {
   lease.release();
 });
 
+test('unregister rejects queued exclusive requests without breaking queue draining', async () => {
+  const broker = new EngineResourceBroker({ policy: 'exclusive', environment: () => isolated(8) });
+  for (const id of ['a', 'b', 'c']) broker.register(id, { resourceClass: 'cpu', maxThreads: 32 });
+
+  const first = await broker.acquire({ engineId: 'a' });
+  const removed = broker.acquire({ engineId: 'b' });
+  const third = broker.acquire({ engineId: 'c' });
+  broker.unregister('b');
+  await assert.rejects(removed, /unregistered/);
+
+  assert.doesNotThrow(() => first.release());
+  const lease = await third;
+  assert.equal(lease.engineId, 'c');
+  lease.release();
+});
+
 test('acquire rejects immediately when the signal is already aborted', async () => {
   const broker = new EngineResourceBroker({ environment: () => isolated(8) });
   broker.register('a', { resourceClass: 'cpu', maxThreads: 32 });

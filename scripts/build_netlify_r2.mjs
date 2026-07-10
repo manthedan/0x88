@@ -40,6 +40,9 @@ async function main() {
         env: {
           ...process.env,
           BUILD_SCOPE: process.env.BUILD_SCOPE || 'product',
+          VITE_LC0_ARTIFACT_CHANNEL_URL: process.env.VITE_LC0_ARTIFACT_CHANNEL_URL || 'https://assets.0x88.app/channels/stable.json',
+          VITE_LC0_BROWSER_ASSET_BASE_URL: process.env.VITE_LC0_BROWSER_ASSET_BASE_URL || 'https://assets.0x88.app',
+          VITE_BROWSER_CHESS_DEPLOY_PROFILE: process.env.VITE_BROWSER_CHESS_DEPLOY_PROFILE || 'v0',
           NETLIFY_R2_RELEASE_DIST: dist,
           NETLIFY_R2_PUBLIC_ASSETS: publicDir,
         },

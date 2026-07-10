@@ -45,8 +45,9 @@ function isExternalArtifact(name) {
 // lightweight manifests/docs in dist for diagnostics, but remove local blobs,
 // generated sidecars, source archives, and precompressed copies so Netlify only
 // hosts the app shell.
-removeMatchingFiles(join(root, 'models', 'lc0'), (name, _path, isDir) => isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx'));
-removeMatchingFiles(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDir && name.endsWith('.onnx'));
+removeMatchingFiles(join(root, 'models', 'lc0'), (name, _path, isDir) => isDir ? name.endsWith('.lc0web') : /\.onnx(?:\.(?:br|gz))?$/.test(name));
+removeMatchingFiles(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDir && /\.onnx(?:\.(?:br|gz))?$/.test(name));
+remove(join(root, 'models', 'bt4_soap_rem_c19000_final.onnx'));
 remove(join(root, 'models', 'monty'));
 remove(join(root, 'monty'));
 for (const dir of ['berserk', 'plentychess', 'reckless', 'stockfish', 'viridithas', 'runtimes']) {

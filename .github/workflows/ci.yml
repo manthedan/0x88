@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Dependency audit
+        run: npm audit
+      - name: Typecheck and tests
+        run: npm test
+      - name: Production asset stage and static build
+        run: npm run build:netlify:r2
+      - name: Verify deploy shell
+        run: |
+          test -f dist-client/index.html
+          test -f dist-client/sw.js
+          test -f dist-client/app/play/index.html
+          test -f dist-client/app/analysis/index.html
+          test -f dist-client/app/arena/index.html
+          test ! -e dist-client/runtimes
+          test ! -e dist-client/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx

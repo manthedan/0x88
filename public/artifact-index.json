@@ -29,18 +29,18 @@
       "notes": "ORT WebGPU/WASM remains the default evaluator path. lc0web pack shards are tracked; ONNX entries are staged symlinks."
     },
     {
-      "id": "tiny-best-bt4",
-      "family": "tiny",
-      "uiLabel": "0x88 Neural BT4",
+      "id": "centipawn-best-bt4",
+      "family": "centipawn",
+      "uiLabel": "Centipawn BT4",
       "status": "public-candidate",
       "versionOrSource": "bt4_soap_rem_c19000_final",
       "deploymentStatus": "tracked-deployable-lfs",
-      "manifestUrl": "/models/bt4_soap_rem_c19000_final.meta.json",
+      "manifestUrl": "/models/centipawn.manifest.json",
       "provenancePath": "docs/model_provenance/bt4_soap_rem_c19000_final.md",
       "primaryUrls": [
         "/models/bt4_soap_rem_c19000_final.onnx"
       ],
-      "notes": "Current best-bt4 Tiny Leela model for first 0x88 Neural public/site release. BT4/SquareFormer + ThreatGraph TG1; LC0 public data with Stockfish labels; not ChessBench, TCEC, or generic human-game corpus."
+      "notes": "Production Centipawn ORT model. BT4/SquareFormer + ThreatGraph TG1; LC0 public data with Stockfish labels; not ChessBench, TCEC, or generic human-game corpus."
     },
     {
       "id": "lc0-bt4-it332",

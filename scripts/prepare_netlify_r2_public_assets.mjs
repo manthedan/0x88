@@ -26,6 +26,7 @@ export function shouldSkipR2PublicAsset(relPath, isDir) {
   if (normalized === 'models/monty' || normalized.startsWith('models/monty/')) return true;
   if (parts[0] === 'models' && parts[1] === 'lc0') return isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx');
   if (parts[0] === 'models' && parts[1] === 'maia3') return !isDir && name.endsWith('.onnx');
+  if (parts[0] === 'models' && !isDir && name === 'bt4_soap_rem_c19000_final.onnx') return true;
   if (['berserk', 'plentychess', 'reckless', 'stockfish', 'viridithas', 'runtimes'].includes(parts[0])) return !isDir && isExternalArtifact(name);
   return false;
 }
