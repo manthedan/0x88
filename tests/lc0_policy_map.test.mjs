@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
   LC0_FLIP_TRANSFORM,
@@ -16,14 +16,18 @@ import {
 } from '../src/lc0/policyMap.ts';
 import { moveFromUci } from '../src/chess/moveCodec.ts';
 
+const LC0_ENCODER_SOURCE = new URL('../../repos/lc0/src/neural/encoder.cc', import.meta.url);
+
 function lc0SourceMoveStrings() {
-  const source = readFileSync('../repos/lc0/src/neural/encoder.cc', 'utf8');
+  const source = readFileSync(LC0_ENCODER_SOURCE, 'utf8');
   const match = source.match(/const char\* kMoveStrs\[\]\s*=\s*\{([\s\S]*?)\};/);
   assert.ok(match, 'kMoveStrs[] exists in LC0 encoder.cc');
   return [...match[1].matchAll(/"([a-h][1-8][a-h][1-8][qrb]?)"/g)].map((m) => m[1]);
 }
 
-test('LC0 generated policy table matches encoder.cc kMoveStrs', () => {
+test('LC0 generated policy table matches encoder.cc kMoveStrs', {
+  skip: !existsSync(LC0_ENCODER_SOURCE) ? 'missing external LC0 source checkout' : false,
+}, () => {
   assert.equal(LC0_POLICY_MAP, 'lc0_1858_from_encoder_cc');
   assert.equal(LC0_POLICY_SIZE, 1858);
   assert.deepEqual([...LC0_POLICY_MOVES], lc0SourceMoveStrings());

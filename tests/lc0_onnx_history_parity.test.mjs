@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
@@ -14,7 +14,9 @@ function normalizeNativeUci(uci) {
   return ({ e1h1: 'e1g1', e1a1: 'e1c1', e8h8: 'e8g8', e8a8: 'e8c8' })[uci] ?? uci;
 }
 
-test('LC0 f32 ONNX evaluator matches native BLAS explicit move-history fixture priors', async () => {
+test('LC0 f32 ONNX evaluator matches native BLAS explicit move-history fixture priors', {
+  skip: !existsSync(MODEL) ? 'missing external ONNX model' : false,
+}, async () => {
   const evaluator = await Lc0OnnxEvaluator.create(readFileSync(MODEL));
   for (const native of nativeRecords) {
     const positions = buildBoardHistoryFromMoves(native.moves, native.startFen);

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 
@@ -7,7 +7,9 @@ const F32_MODEL = new URL('../../models/lc0-bestnets/onnx/t1-256x10-distilled-sw
 const F16_MODEL = new URL('../../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.onnx', import.meta.url);
 const fixtures = JSON.parse(readFileSync(new URL('../fixtures/lc0/fen_only.json', import.meta.url), 'utf8'));
 
-test('LC0 f16 ONNX evaluator stays close to f32 FEN-only priors under WASM', async () => {
+test('LC0 f16 ONNX evaluator stays close to f32 FEN-only priors under WASM', {
+  skip: !existsSync(F32_MODEL) || !existsSync(F16_MODEL) ? 'missing external ONNX models' : false,
+}, async () => {
   const f32 = await Lc0OnnxEvaluator.create(readFileSync(F32_MODEL));
   const f16 = await Lc0OnnxEvaluator.create(readFileSync(F16_MODEL));
   for (const fixture of fixtures) {

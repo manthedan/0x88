@@ -8,6 +8,7 @@ import { prepareNetlifyR2PublicAssets } from './prepare_netlify_r2_public_assets
 
 const dist = resolve(process.env.NETLIFY_R2_RELEASE_DIST || process.argv[2] || 'dist-client');
 const precompressCacheDir = resolve(process.env.NETLIFY_R2_PRECOMPRESS_CACHE_DIR || '.local-dev-artifacts/precompress-r2');
+const deployProfile = process.env.VITE_BROWSER_CHESS_DEPLOY_PROFILE || 'v0';
 
 function formatMs(ms) {
   return `${(ms / 1000).toFixed(2)}s`;
@@ -42,7 +43,7 @@ async function main() {
           BUILD_SCOPE: process.env.BUILD_SCOPE || 'product',
           VITE_LC0_ARTIFACT_CHANNEL_URL: process.env.VITE_LC0_ARTIFACT_CHANNEL_URL || 'https://assets.0x88.app/channels/stable.json',
           VITE_LC0_BROWSER_ASSET_BASE_URL: process.env.VITE_LC0_BROWSER_ASSET_BASE_URL || 'https://assets.0x88.app',
-          VITE_BROWSER_CHESS_DEPLOY_PROFILE: process.env.VITE_BROWSER_CHESS_DEPLOY_PROFILE || 'v0',
+          VITE_BROWSER_CHESS_DEPLOY_PROFILE: deployProfile,
           NETLIFY_R2_RELEASE_DIST: dist,
           NETLIFY_R2_PUBLIC_ASSETS: publicDir,
         },
@@ -51,6 +52,11 @@ async function main() {
     await timed('prune external assets', () => {
       run(process.execPath, ['scripts/prune_external_model_assets.mjs', dist]);
     }, timings);
+    if (deployProfile === 'v0') {
+      await timed('prune v0 assets', () => {
+        run(process.execPath, ['scripts/prune_v0_deploy_assets.mjs', dist]);
+      }, timings);
+    }
     await timed('precompress artifacts', () => {
       run(process.execPath, ['scripts/precompress_engine_artifacts.mjs', dist, '--allow-missing', '--exclude', 'monty', '--cache-dir', precompressCacheDir]);
     }, timings);

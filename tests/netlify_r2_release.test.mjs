@@ -90,10 +90,13 @@ test('prune_external_model_assets removes Monty from R2 Netlify dist', async () 
   assert.match(result.stdout, /monty/);
 });
 
-test('prune_v0_deploy_assets keeps default Stockfish lite single relaxed assets', async () => {
+test('prune_v0_deploy_assets keeps production Stockfish assets and Reckless notices', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-v0-prune-stockfish-'));
   const dist = join(root, 'dist-client');
   await mkdir(join(dist, 'stockfish'), { recursive: true });
+  await mkdir(join(dist, 'reckless'), { recursive: true });
+  await writeFile(join(dist, 'reckless', 'NOTICE.md'), 'license notice');
+  await writeFile(join(dist, 'reckless', 'reckless.wasm'), 'abc');
   for (const name of [
     'stockfish-18-lite.js',
     'stockfish-18-lite.wasm',
@@ -116,6 +119,8 @@ test('prune_v0_deploy_assets keeps default Stockfish lite single relaxed assets'
   assert.equal(existsSync(join(dist, 'stockfish/stockfish-18-lite-single.js')), true);
   assert.equal(existsSync(join(dist, 'stockfish/stockfish-18-lite-single.wasm')), true);
   assert.equal(existsSync(join(dist, 'stockfish/stockfish-18.js')), false);
+  assert.equal(existsSync(join(dist, 'reckless/NOTICE.md')), true);
+  assert.equal(existsSync(join(dist, 'reckless/reckless.wasm')), false);
 });
 
 test('precompress_engine_artifacts skips Monty artifacts', async () => {
@@ -238,4 +243,7 @@ test('netlify.toml and package scripts use the R2-pruned build path', async () =
   const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
   assert.match(packageJson.scripts['build:netlify:r2'], /NETLIFY_R2_RELEASE_DIST:-dist-client/);
   assert.match(packageJson.scripts['build:netlify:r2'], /build_netlify_r2/);
+  const buildScript = await readFile('scripts/build_netlify_r2.mjs', 'utf8');
+  assert.match(buildScript, /deployProfile === 'v0'/);
+  assert.match(buildScript, /prune_v0_deploy_assets\.mjs/);
 });
