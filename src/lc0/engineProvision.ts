@@ -15,6 +15,8 @@ import { BerserkEngine } from './berserkEngine.ts';
 import type { BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import type { PlentyChessVariant } from './plentychessVariants.ts';
+import { StormphraxEngine } from './stormphraxEngine.ts';
+import type { StormphraxVariant } from './stormphraxVariants.ts';
 
 /** Construction-time search defaults; pages re-tune per move via setOptions. */
 const CPU_ENGINE_DEFAULTS = { depth: 4, hashMb: 16 } as const;
@@ -35,6 +37,10 @@ export function plentyChessCacheKey(variant: PlentyChessVariant): string {
   return `${variant.key}:${variant.jsUrl}:${variant.wasmUrl}:${variant.dataUrl}`;
 }
 
+export function stormphraxCacheKey(variant: StormphraxVariant): string {
+  return `${variant.key}:${variant.jsUrl}:${variant.wasmUrl}:${variant.dataUrl}`;
+}
+
 export function createRecklessEngine(variant: RecklessVariant, onStatus?: () => void): RecklessEngine {
   return new RecklessEngine({ ...CPU_ENGINE_DEFAULTS }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, ...(onStatus ? { onStatus } : {}) });
 }
@@ -49,4 +55,8 @@ export function createBerserkEngine(variant: BerserkVariant): BerserkEngine {
 
 export function createPlentyChessEngine(variant: PlentyChessVariant): PlentyChessEngine {
   return new PlentyChessEngine({ ...CPU_ENGINE_DEFAULTS, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
+}
+
+export function createStormphraxEngine(variant: StormphraxVariant): StormphraxEngine {
+  return new StormphraxEngine({ ...CPU_ENGINE_DEFAULTS, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
 }

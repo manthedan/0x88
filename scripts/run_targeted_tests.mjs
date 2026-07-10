@@ -86,6 +86,7 @@ function inferTests(files) {
     ['src/lc0/viridithasVariants.ts', ['viridithas_variants']],
     ['src/lc0/berserkVariants.ts', ['berserk_variants']],
     ['src/lc0/plentychessVariants.ts', ['plentychess_variants']],
+    ['src/lc0/stormphraxVariants.ts', ['stormphrax_variants']],
     ['src/lc0/stockfishEngine.ts', ['lc0_stockfish_engine']],
     ['src/lc0/gameReview.ts', ['game_review']],
   ]);

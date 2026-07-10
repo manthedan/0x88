@@ -20,7 +20,14 @@ function withCacheStatus(response, status) {
   const headers = new Headers(response.headers);
   headers.set('Cache-Status', `lc0-artifact-worker; ${status}`);
   headers.set('Age', status === 'hit' ? headers.get('Age') || '1' : '0');
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+    // R2 returns an already encoded representation. Without manual mode the
+    // Workers runtime can strip Content-Encoding without decoding the body.
+    encodeBody: headers.has('Content-Encoding') ? 'manual' : 'automatic',
+  });
 }
 
 function immutableCache() {
@@ -102,6 +109,7 @@ function objectHeaders(key, object, env, range, cacheControlOverride) {
     'Cache-Control': cacheControl,
     ETag: object.httpEtag || object.etag || '',
   });
+  if (object.httpMetadata?.contentEncoding) headers.set('Content-Encoding', object.httpMetadata.contentEncoding);
   headers.set('Accept-Ranges', 'bytes');
   if (isImmutableArtifactKey(key)) headers.set('X-Artifact-Content-Length', String(object.size));
   if (range) {
@@ -187,7 +195,7 @@ function artifactKeyFromUrl(raw) {
 async function keyFromStableReleaseLogicalPath(request, env) {
   const url = new URL(request.url);
   const logicalUrl = url.pathname;
-  if (!logicalUrl.startsWith('/models/') && !logicalUrl.startsWith('/stockfish/') && !logicalUrl.startsWith('/berserk/') && !logicalUrl.startsWith('/plentychess/') && !logicalUrl.startsWith('/viridithas/') && !logicalUrl.startsWith('/monty/') && !logicalUrl.startsWith('/reckless/') && !logicalUrl.startsWith('/runtimes/')) return undefined;
+  if (!logicalUrl.startsWith('/models/') && !logicalUrl.startsWith('/stockfish/') && !logicalUrl.startsWith('/berserk/') && !logicalUrl.startsWith('/plentychess/') && !logicalUrl.startsWith('/stormphrax/') && !logicalUrl.startsWith('/viridithas/') && !logicalUrl.startsWith('/monty/') && !logicalUrl.startsWith('/reckless/') && !logicalUrl.startsWith('/runtimes/')) return undefined;
   const channelKey = env.ARTIFACT_CHANNEL_KEY || DEFAULT_CHANNEL_KEY;
   const channel = await readJsonObject(env, channelKey);
   const releasePath = channel?.releaseManifestUrl;

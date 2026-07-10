@@ -77,6 +77,38 @@ const CONFIGS = {
     ],
     envPrefix: 'PLENTYCHESS',
   },
+  stormphrax: {
+    engine: 'stormphrax',
+    flavor: 'emscripten-single-thread',
+    upstreamRepo: 'https://github.com/Ciekce/Stormphrax.git',
+    upstreamCommit: '582965517ed2032d41a6b4cd6c2e66b1b934e2ad',
+    upstreamTag: 'v8.0.0',
+    upstreamVersion: '8.0.0',
+    buildDir: '.local_engines/stormphrax-emscripten-src',
+    sourcePrefix: 'upstream/stormphrax-582965517ed2032d41a6b4cd6c2e66b1b934e2ad/',
+    output: 'public/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz',
+    patch: 'patches/stormphrax-emscripten.patch',
+    buildScript: 'scripts/build_stormphrax_emscripten.mjs',
+    smokeScript: 'scripts/stormphrax_emscripten_smoke.mjs',
+    adapterFiles: [
+      'src/lc0/stormphraxEngine.ts',
+      'src/lc0/stormphraxVariants.ts',
+      'src/lc0/browserUciEngine.ts',
+      'src/lc0/stockfishEngine.ts',
+      'src/chess/board.ts',
+    ],
+    docs: ['docs/engine_artifact_distribution.md', 'docs/browser_c_engine_porting.md', 'docs/engine_catalog.md', 'docs/stormphrax_browser_port.md', 'docs/netlify_engine_artifacts.md', 'public/stormphrax/README.md'],
+    assetDir: '.local_engines/stormphrax-nets',
+    assets: [
+      {
+        name: 'undertown.nnue',
+        sourceUrl: 'https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/undertown.nnue',
+        rawSha256: '04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf',
+        licenseNote: 'Stormphrax documents undertown as the self-trained release network for 8.0.0; preserve GPL source and provenance alongside public browser artifacts.',
+      },
+    ],
+    envPrefix: 'STORMPHRAX',
+  },
   viridithas: {
     engine: 'viridithas',
     flavor: 'wasip1-scalar-simd128',
@@ -130,7 +162,7 @@ const CONFIGS = {
 };
 
 function usage() {
-  console.error('Usage: node scripts/write_engine_source_archive.mjs <berserk|plentychess|viridithas|stockfish> [--out path] [--allow-missing-assets]');
+  console.error('Usage: node scripts/write_engine_source_archive.mjs <berserk|plentychess|stormphrax|viridithas|stockfish> [--out path] [--allow-missing-assets]');
 }
 
 function argValue(name) {
@@ -211,8 +243,8 @@ async function copyAssets(config, archiveRoot, allowMissingAssets) {
 
 function rebuildCommand(config) {
   const sourceDir = `$PWD/${config.sourcePrefix.replace(/\/$/, '')}`;
-  if (config.engine === 'berserk' || config.engine === 'plentychess') {
-    const outDir = config.engine === 'berserk' ? '$PWD/out/public/berserk/berserk-emscripten.js' : '$PWD/out/public/plentychess/plentychess-emscripten.js';
+  if (config.engine === 'berserk' || config.engine === 'plentychess' || config.engine === 'stormphrax') {
+    const outDir = `$PWD/out/public/${config.engine}/${config.engine}-emscripten.js`;
     return `${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_EMSCRIPTEN_JS_OUT="${outDir}" npm run ${config.engine}:build-emscripten`;
   }
   if (config.engine === 'viridithas') {

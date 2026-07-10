@@ -83,6 +83,38 @@ const CONFIGS = {
       },
     ],
   },
+  stormphrax: {
+    engine: 'stormphrax',
+    flavor: 'emscripten-single-thread',
+    status: 'experimental',
+    upstream: {
+      repo: 'https://github.com/Ciekce/Stormphrax.git',
+      tag: 'v8.0.0',
+      commit: '582965517ed2032d41a6b4cd6c2e66b1b934e2ad',
+      version: '8.0.0',
+      license: 'GPL-3.0-or-later',
+    },
+    build: {
+      script: 'scripts/build_stormphrax_emscripten.mjs',
+      command: 'npm run stormphrax:build-emscripten',
+      patches: ['patches/stormphrax-emscripten.patch'],
+      toolchain: 'Emscripten 6.0.2, WebAssembly SIMD, synchronous single-thread search, tablebases disabled by leaving SyzygyPath empty.',
+    },
+    artifacts: [
+      'public/stormphrax/stormphrax-emscripten.js',
+      'public/stormphrax/stormphrax-emscripten.wasm',
+      'public/stormphrax/stormphrax-emscripten.data',
+    ],
+    assets: [
+      {
+        name: 'undertown.nnue',
+        sourceUrl: 'https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/undertown.nnue',
+        rawSha256: '04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf',
+        licenseNote: 'Stormphrax documents undertown as its self-trained 8.0.0 release network; distribute it with the GPL corresponding source and provenance manifest.',
+        embeddedIn: 'public/stormphrax/stormphrax-emscripten.data',
+      },
+    ],
+  },
   reckless: {
     engine: 'reckless',
     flavor: 'wasip1-browser',
@@ -183,7 +215,7 @@ const CONFIGS = {
 };
 
 function usage() {
-  console.error('Usage: node scripts/write_engine_artifact_manifest.mjs <berserk|plentychess|reckless|viridithas|stockfish> [--out path] [--allow-missing]');
+  console.error('Usage: node scripts/write_engine_artifact_manifest.mjs <berserk|plentychess|stormphrax|reckless|viridithas|stockfish> [--out path] [--allow-missing]');
 }
 
 function argValue(name) {

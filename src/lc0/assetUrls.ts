@@ -38,9 +38,11 @@ function configuredAssetBase(allowModelBaseAlias: boolean): string | undefined {
 }
 
 const R2_RESOLVED_PREFIXES = [
+  '/artifacts/sha256/',
   '/models/',
   '/berserk/',
   '/plentychess/',
+  '/stormphrax/',
   '/viridithas/',
   '/reckless/',
   '/stockfish/',

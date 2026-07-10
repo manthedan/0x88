@@ -19,7 +19,7 @@ const excludedEngines = new Set(process.argv.flatMap((arg, index, args) => {
 }));
 // All directories that serve large fetchable artifacts. Missing dirs are
 // skipped under --allow-missing.
-const engines = ['berserk', 'plentychess', 'stockfish', 'viridithas', 'reckless', 'ort', 'models', 'monty'].filter((engine) => !excludedEngines.has(engine));
+const engines = ['berserk', 'plentychess', 'stormphrax', 'stockfish', 'viridithas', 'reckless', 'ort', 'models', 'monty'].filter((engine) => !excludedEngines.has(engine));
 // .onnx: f16/int8 model weights only compress ~0.90, but at current sizes
 // that is still ~2MB (t1 qdq) to ~35MB (BT4) per asset. .mjs covers ORT's
 // glue sidecars in /ort/.

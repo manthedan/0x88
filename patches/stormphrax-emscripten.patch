@@ -1,0 +1,676 @@
+diff --git a/3rdparty/pyrrhic/stdendian.h b/3rdparty/pyrrhic/stdendian.h
+index b8d20db..908cc82 100644
+--- a/3rdparty/pyrrhic/stdendian.h
++++ b/3rdparty/pyrrhic/stdendian.h
+@@ -52,6 +52,14 @@
+ #define __ENDIAN_DEFINED        1
+ #endif /* sun */
+
++/* WebAssembly */
++#if defined(__EMSCRIPTEN__)
++#define _LITTLE_ENDIAN          1234
++#define _BIG_ENDIAN             4321
++#define _BYTE_ORDER             _LITTLE_ENDIAN
++#define __ENDIAN_DEFINED        1
++#endif
++
+ /* Windows */
+ #if defined(_WIN32) || defined(_MSC_VER)
+ /* assumes all Microsoft targets are little endian */
+diff --git a/src/arch.h b/src/arch.h
+index 9e80c0c..35e657f 100644
+--- a/src/arch.h
++++ b/src/arch.h
+@@ -22,7 +22,19 @@
+
+ #include <new>
+
+-#if defined(SP_NATIVE)
++#if defined(SP_WASM_SIMD)
++    #define SP_HAS_WASM_SIMD 1
++    #define SP_HAS_BMI2 0
++    #define SP_HAS_VNNI512 0
++    #define SP_HAS_VBMI2 0
++    #define SP_HAS_VBMI 0
++    #define SP_HAS_AVX512 0
++    #define SP_HAS_VNNI256 0
++    #define SP_HAS_AVX2 0
++    #define SP_HAS_NEON 0
++    #define SP_HAS_NEON_DOTPROD 0
++#elif defined(SP_NATIVE)
++    #define SP_HAS_WASM_SIMD 0
+     // cannot expand a macro to defined()
+     #if __BMI2__ && defined(SP_FAST_PEXT)
+         #define SP_HAS_BMI2 1
+@@ -49,6 +61,7 @@
+         #define SP_HAS_NEON_DOTPROD 0
+     #endif
+ #elif defined(SP_AVX512)
++    #define SP_HAS_WASM_SIMD 0
+     #define SP_HAS_BMI2 1
+     #define SP_HAS_VNNI512 1
+     #define SP_HAS_VBMI2 1
+@@ -59,6 +72,7 @@
+     #define SP_HAS_NEON 0
+     #define SP_HAS_NEON_DOTPROD 0
+ #elif defined(SP_AVX2_BMI2)
++    #define SP_HAS_WASM_SIMD 0
+     #define SP_HAS_BMI2 1
+     #define SP_HAS_VNNI512 0
+     #define SP_HAS_VBMI2 0
+@@ -69,6 +83,7 @@
+     #define SP_HAS_NEON 0
+     #define SP_HAS_NEON_DOTPROD 0
+ #elif defined(SP_ZEN2)
++    #define SP_HAS_WASM_SIMD 0
+     #define SP_HAS_BMI2 0
+     #define SP_HAS_VNNI512 0
+     #define SP_HAS_VBMI2 0
+@@ -79,6 +94,7 @@
+     #define SP_HAS_NEON 0
+     #define SP_HAS_NEON_DOTPROD 0
+ #elif defined(SP_ARMV8_4)
++    #define SP_HAS_WASM_SIMD 0
+     #define SP_HAS_BMI2 0
+     #define SP_HAS_VNNI512 0
+     #define SP_HAS_VBMI2 0
+diff --git a/src/eval/nnue.cpp b/src/eval/nnue.cpp
+index f815c50..7fd8d61 100644
+--- a/src/eval/nnue.cpp
++++ b/src/eval/nnue.cpp
+@@ -21,8 +21,10 @@
+ #include <cassert>
+ #include <cstring>
+ #include <fstream>
++#include <limits>
+ #include <memory>
+ #include <string_view>
++#include <vector>
+
+ #include "../../3rdparty/zstd/zstd.h"
+
+@@ -34,23 +36,53 @@
+ #include "nnue/features/threats/geometry.h"
+ #include "nnue/loader.h"
+
+-#ifdef _MSC_VER
+-    #define SP_MSVC
+-    #pragma push_macro("_MSC_VER")
+-    #undef _MSC_VER
+-#endif
++#ifndef __EMSCRIPTEN__
++    #ifdef _MSC_VER
++        #define SP_MSVC
++        #pragma push_macro("_MSC_VER")
++        #undef _MSC_VER
++    #endif
+
+-#define INCBIN_PREFIX g_
+-#include "../../3rdparty/incbin.h"
++    #define INCBIN_PREFIX g_
++    #include "../../3rdparty/incbin.h"
+
+-#ifdef SP_MSVC
+-    #pragma pop_macro("_MSC_VER")
+-    #undef SP_MSVC
+-#endif
++    #ifdef SP_MSVC
++        #pragma pop_macro("_MSC_VER")
++        #undef SP_MSVC
++    #endif
+
+ namespace {
+     INCBIN(std::byte, defaultNet, SP_NETWORK_FILE);
+ } // namespace
++#else
++namespace {
++    std::vector<std::byte> g_defaultNetStorage{};
++    const std::byte* g_defaultNetData{};
++    unsigned int g_defaultNetSize{};
++
++    bool loadBrowserNetwork() {
++        std::ifstream stream{SP_NETWORK_FILE, std::ios::binary | std::ios::ate};
++        if (!stream) {
++            stormphrax::eprintln("Unable to open network file {}", SP_NETWORK_FILE);
++            return false;
++        }
++        const auto size = stream.tellg();
++        if (size <= 0 || static_cast<unsigned long long>(size) > std::numeric_limits<unsigned int>::max()) {
++            stormphrax::eprintln("Invalid network file size {}", static_cast<long long>(size));
++            return false;
++        }
++        g_defaultNetStorage.resize(static_cast<std::size_t>(size));
++        stream.seekg(0, std::ios::beg);
++        if (!stream.read(reinterpret_cast<char*>(g_defaultNetStorage.data()), static_cast<std::streamsize>(size))) {
++            stormphrax::eprintln("Unable to read network file {}", SP_NETWORK_FILE);
++            return false;
++        }
++        g_defaultNetData = g_defaultNetStorage.data();
++        g_defaultNetSize = static_cast<unsigned int>(g_defaultNetStorage.size());
++        return true;
++    }
++} // namespace
++#endif
+
+ namespace stormphrax::eval {
+     namespace {
+@@ -198,6 +230,9 @@ namespace stormphrax::eval {
+     } // namespace
+
+     void init() {
++#ifdef __EMSCRIPTEN__
++        if (!loadBrowserNetwork()) return;
++#endif
+         if (g_defaultNetSize < sizeof(NetworkHeader)) {
+             eprintln("Missing default network?");
+             return;
+diff --git a/src/eval/nnue/features/threats/geometry.h b/src/eval/nnue/features/threats/geometry.h
+index a8e8368..32fff49 100644
+--- a/src/eval/nnue/features/threats/geometry.h
++++ b/src/eval/nnue/features/threats/geometry.h
+@@ -141,7 +141,9 @@ namespace stormphrax::eval::nnue::features::threats::geometry {
+     }();
+ } // namespace stormphrax::eval::nnue::features::threats::geometry
+
+-#if SP_HAS_VBMI
++#if SP_HAS_WASM_SIMD
++    #include "geometry_wasm.h"
++#elif SP_HAS_VBMI
+     #include "geometry_vbmi.h"
+ #elif SP_HAS_AVX2
+     #include "geometry_avx2.h"
+diff --git a/src/eval/nnue/features/threats/geometry_wasm.h b/src/eval/nnue/features/threats/geometry_wasm.h
+new file mode 100644
+index 0000000..72b42f1
+--- /dev/null
++++ b/src/eval/nnue/features/threats/geometry_wasm.h
+@@ -0,0 +1,109 @@
++/* Scalar geometry fallback for the Stormphrax browser/WebAssembly port. */
++#pragma once
++
++#include "../../../../types.h"
++
++#include <array>
++#include <cstring>
++#include <span>
++#include <tuple>
++
++namespace stormphrax::eval::nnue::features::threats::geometry {
++    struct Vector {
++        std::array<u8, 64> raw{};
++
++        [[nodiscard]] Vector flip() const {
++            Vector out{};
++            std::copy(raw.begin() + 32, raw.end(), out.raw.begin());
++            std::copy(raw.begin(), raw.begin() + 32, out.raw.begin() + 32);
++            return out;
++        }
++
++        [[nodiscard]] Bitrays toMask() const {
++            Bitrays out{};
++            for (u32 i = 0; i < 64; ++i) if (raw[i]) out |= Bitrays{1} << i;
++            return out;
++        }
++
++        [[nodiscard]] static Vector load(const void* ptr) {
++            Vector out{};
++            std::memcpy(out.raw.data(), ptr, out.raw.size());
++            return out;
++        }
++
++        template <typename T>
++        [[nodiscard]] static Vector cast(const T& value)
++            requires(sizeof(T) == 64)
++        {
++            return load(&value);
++        }
++    };
++
++    struct Permutation {
++        Vector indexes;
++        Vector valid;
++    };
++
++    [[nodiscard]] inline Permutation permutationFor(Square focus) {
++        const auto indexes = Vector::load(kPermutationTable[focus.idx()].data());
++        Vector valid{};
++        for (u32 i = 0; i < 64; ++i) valid.raw[i] = indexes.raw[i] < 64 ? 0xFF : 0;
++        return {indexes, valid};
++    }
++
++    [[nodiscard]] inline std::tuple<Vector, Vector> permuteMailbox(const Permutation& permutation, Vector mailbox) {
++        Vector permuted{};
++        Vector bits{};
++        for (u32 i = 0; i < 64; ++i) {
++            if (!permutation.valid.raw[i]) continue;
++            const auto piece = mailbox.raw[permutation.indexes.raw[i]];
++            permuted.raw[i] = piece;
++            bits.raw[i] = kPieceToBitTable[piece];
++        }
++        return {permuted, bits};
++    }
++
++    [[nodiscard]] inline std::tuple<Vector, Vector> permuteMailbox(
++        const Permutation& permutation,
++        const std::span<const Piece, Squares::kCount> mailbox
++    ) {
++        return permuteMailbox(permutation, Vector::load(mailbox.data()));
++    }
++
++    [[nodiscard]] inline std::tuple<Vector, Vector> permuteMailbox(
++        const Permutation& permutation,
++        const std::span<const Piece, Squares::kCount> mailbox,
++        Square ignore
++    ) {
++        auto copy = Vector::load(mailbox.data());
++        copy.raw[ignore.idx()] = static_cast<u8>(Pieces::kNone.idx());
++        return permuteMailbox(permutation, copy);
++    }
++
++    [[nodiscard]] inline Bitrays closestOccupied(Vector bits) {
++        const auto occupied = bits.toMask();
++        const Bitrays withEnds = occupied | 0x8181818181818181ULL;
++        return (withEnds ^ (withEnds - 0x0303030303030303ULL)) & occupied;
++    }
++
++    [[nodiscard]] inline Bitrays rayFill(Bitrays br) {
++        br = (br + 0x7E7E7E7E7E7E7E7EULL) & 0x8080808080808080ULL;
++        return br - (br >> 7);
++    }
++
++    [[nodiscard]] inline Bitrays outgoingThreats(Piece piece, Bitrays closest) {
++        return kOutgoingThreatsTable[piece.idx()] & closest;
++    }
++
++    [[nodiscard]] inline Bitrays incomingAttackers(Vector bits, Bitrays closest) {
++        Bitrays out{};
++        for (u32 i = 0; i < 64; ++i) if (bits.raw[i] & kIncomingThreatsMask[i]) out |= Bitrays{1} << i;
++        return out & closest;
++    }
++
++    [[nodiscard]] inline Bitrays incomingSliders(Vector bits, Bitrays closest) {
++        Bitrays out{};
++        for (u32 i = 0; i < 64; ++i) if (bits.raw[i] & kIncomingSlidersMask[i]) out |= Bitrays{1} << i;
++        return out & closest & 0xFEFEFEFEFEFEFEFEULL;
++    }
++} // namespace stormphrax::eval::nnue::features::threats::geometry
+diff --git a/src/main.cpp b/src/main.cpp
+index cd6c32e..b94b22c 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -124,7 +124,9 @@ i32 main(i32 argc, const char* argv[]) {
+
+     const auto exitCode = run(args);
+
++#ifndef __EMSCRIPTEN__
+     eval::shutdown();
++#endif
+
+     return exitCode;
+ }
+diff --git a/src/search.cpp b/src/search.cpp
+index 94ebce1..c555ea3 100644
+--- a/src/search.cpp
++++ b/src/search.cpp
+@@ -59,8 +59,21 @@ namespace stormphrax::search {
+     Searcher::Searcher(usize ttSizeMib) :
+             m_ttable{ttSizeMib}, m_startTime{Instant::now()} {
+         m_threadData.resize(1);
++#ifdef SP_SYNC_SEARCH
++        m_threadData[0] = std::make_unique<ThreadData>();
++        auto& thread = *m_threadData[0];
++        thread.id = 0;
++        thread.numaId = 0;
++        thread.nnueState.setNetwork(eval::getNetwork(0));
++        thread.correctionHistory = m_corrhists.get(0);
++        m_resetBarrier.reset(1);
++        m_idleBarrier.reset(1);
++        m_setupBarrier.reset(1);
++        m_searchEndBarrier.reset(1);
++#else
+         m_threads.emplace_back([this] { run(0); });
+         m_initBarrier.arriveAndWait();
++#endif
+         m_rootMoves.reserve(kDefaultMoveListCapacity);
+     }
+
+@@ -105,7 +118,9 @@ namespace stormphrax::search {
+             );
+         }
+
++#ifndef SP_SYNC_SEARCH
+         m_resetBarrier.arriveAndWait();
++#endif
+
+         m_infinite = infinite;
+         m_probeWdl = !g_opts.syzygyProbeRootOnly;
+@@ -164,12 +179,20 @@ namespace stormphrax::search {
+         m_startTime = startTime;
+
+         m_stop.store(false, std::memory_order::seq_cst);
++#ifdef SP_SYNC_SEARCH
++        m_runningThreads.store(1);
++#else
+         m_runningThreads.store(static_cast<i32>(m_threads.size()));
++#endif
+
+         m_searching.store(true, std::memory_order::relaxed);
+
++#ifdef SP_SYNC_SEARCH
++        searchRoot(*m_threadData[0], true);
++#else
+         m_idleBarrier.arriveAndWait();
+         m_setupBarrier.arriveAndWait();
++#endif
+     }
+
+     void Searcher::stop() {
+@@ -267,6 +290,10 @@ namespace stormphrax::search {
+     }
+
+     void Searcher::setThreads(u32 threadCount) {
++#ifdef SP_SYNC_SEARCH
++        SP_UNUSED(threadCount);
++        return;
++#else
+         if (threadCount == m_threads.size()) {
+             return;
+         }
+@@ -296,6 +323,7 @@ namespace stormphrax::search {
+         }
+
+         m_initBarrier.arriveAndWait();
++#endif
+     }
+
+     void Searcher::populateDefaultRootMoves(const Position& pos) {
+@@ -357,13 +385,16 @@ namespace stormphrax::search {
+
+     void Searcher::stopThreads() {
+         m_quit.store(true, std::memory_order::release);
+-
++#ifdef SP_SYNC_SEARCH
++        return;
++#else
+         m_resetBarrier.arriveAndWait();
+         m_idleBarrier.arriveAndWait();
+
+         for (auto& thread : m_threads) {
+             thread.join();
+         }
++#endif
+     }
+
+     void Searcher::run(u32 threadId) {
+diff --git a/src/ttable.cpp b/src/ttable.cpp
+index d6fee40..af91954 100644
+--- a/src/ttable.cpp
++++ b/src/ttable.cpp
+@@ -221,6 +221,10 @@ namespace stormphrax {
+     void TTable::clear() {
+         assert(!m_pendingInit);
+
++#ifdef SP_SYNC_SEARCH
++        std::memset(m_clusters, 0, m_clusterCount * sizeof(Cluster));
++        m_age = 0;
++#else
+         const auto threadCount = g_opts.threads;
+
+         std::vector<std::thread> threads{};
+@@ -244,6 +248,7 @@ namespace stormphrax {
+         for (auto& thread : threads) {
+             thread.join();
+         }
++#endif
+     }
+
+     u32 TTable::full() const {
+diff --git a/src/uci/uci.cpp b/src/uci/uci.cpp
+index e733336..d8a9b75 100644
+--- a/src/uci/uci.cpp
++++ b/src/uci/uci.cpp
+@@ -22,6 +22,7 @@
+ #include <cctype>
+ #include <cmath>
+ #include <iostream>
++#include <memory>
+ #include <string>
+ #include <vector>
+
+@@ -81,6 +82,8 @@ namespace stormphrax {
+             ~UciHandler();
+
+             i32 run(std::span<const std::string_view> commands);
++            void command(std::string_view line);
++            [[nodiscard]] bool searching() const { return m_searcher.searching(); }
+
+         private:
+             void handleCommand(std::span<std::string_view> tokens, Instant startTime);
+@@ -211,26 +214,18 @@ namespace stormphrax {
+             tb::free();
+         }
+
+-        i32 UciHandler::run(std::span<const std::string_view> commands) {
++        void UciHandler::command(std::string_view line) {
++            const auto startTime = Instant::now();
+             std::vector<std::string_view> tokens{};
++            split::split(tokens, line, ' ');
++            handleCommand(tokens, startTime);
++        }
+
+-            const auto handleLine = [&](std::string_view line) {
+-                const auto startTime = Instant::now();
+-
+-                tokens.clear();
+-                split::split(tokens, line, ' ');
+-
+-                handleCommand(tokens, startTime);
+-            };
+-
+-            for (const auto line : commands) {
+-                handleLine(line);
+-            }
+-
+-            for (std::string line{}; !m_quit && std::getline(std::cin, line);) {
+-                handleLine(line);
+-            }
+-
++        i32 UciHandler::run(std::span<const std::string_view> commands) {
++            for (const auto line : commands) command(line);
++#ifndef __EMSCRIPTEN__
++            for (std::string line{}; !m_quit && std::getline(std::cin, line);) command(line);
++#endif
+             return 0;
+         }
+
+@@ -1050,10 +1045,33 @@ namespace stormphrax {
+     } // namespace tunable
+ #endif
+
++#ifdef __EMSCRIPTEN__
++    std::unique_ptr<UciHandler> s_browserHandler{};
++#endif
++
++#ifdef __EMSCRIPTEN__
++    extern "C" void command(const char* rawCommand) {
++        if (s_browserHandler) s_browserHandler->command(rawCommand ? std::string_view{rawCommand} : std::string_view{});
++    }
++
++    extern "C" bool isReady() {
++        return static_cast<bool>(s_browserHandler);
++    }
++
++    extern "C" bool isSearching() {
++        return s_browserHandler && s_browserHandler->searching();
++    }
++#endif
++
+     namespace uci {
+         i32 run(std::span<const std::string_view> commands) {
++#ifdef __EMSCRIPTEN__
++            if (!s_browserHandler) s_browserHandler = std::make_unique<UciHandler>();
++            return s_browserHandler->run(commands);
++#else
+             UciHandler handler{};
+             return handler.run(commands);
++#endif
+         }
+
+ #if SP_EXTERNAL_TUNE
+diff --git a/src/util/simd.h b/src/util/simd.h
+index b210718..161e3d8 100644
+--- a/src/util/simd.h
++++ b/src/util/simd.h
+@@ -26,7 +26,9 @@
+ #include "align.h"
+ #include "aligned_array.h"
+
+-#if SP_HAS_AVX512
++#if SP_HAS_WASM_SIMD
++    #include "simd/wasm128.h"
++#elif SP_HAS_AVX512
+     #include "simd/avx512.h"
+ #elif SP_HAS_AVX2
+     #include "simd/avx2.h"
+diff --git a/src/util/simd/wasm128.h b/src/util/simd/wasm128.h
+new file mode 100644
+index 0000000..0b1a9ab
+--- /dev/null
++++ b/src/util/simd/wasm128.h
+@@ -0,0 +1,136 @@
++/*
++ * Stormphrax browser port WebAssembly SIMD backend.
++ * Derived from the upstream AVX2 backend and mapped to Emscripten's SSE
++ * intrinsic compatibility layer (one 128-bit vector per operation).
++ */
++#pragma once
++
++#include "../../types.h"
++#include "../../arch.h"
++#include "../align.h"
++
++#if SP_HAS_WASM_SIMD
++
++#include <smmintrin.h>
++#include <tmmintrin.h>
++
++namespace stormphrax::util::simd {
++    using VectorU8 = __m128i;
++    using VectorU16 = __m128i;
++    using VectorI8 = __m128i;
++    using VectorI16 = __m128i;
++    using VectorI32 = __m128i;
++
++    constexpr std::uintptr_t kAlignment = sizeof(__m128i);
++    constexpr bool kPackNonSequential = false;
++    constexpr usize kPackGrouping = 1;
++    constexpr std::array kPackOrdering = {0};
++
++    namespace impl {
++        SP_ALWAYS_INLINE_NDEBUG inline VectorU8 zeroU8() { return _mm_setzero_si128(); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorU8 loadU8(const void* ptr) {
++            assert(isAligned<kAlignment>(ptr));
++            return _mm_load_si128(static_cast<const VectorU8*>(ptr));
++        }
++        SP_ALWAYS_INLINE_NDEBUG inline void storeU8(void* ptr, VectorU8 v) {
++            assert(isAligned<kAlignment>(ptr));
++            _mm_store_si128(static_cast<VectorU8*>(ptr), v);
++        }
++
++        SP_ALWAYS_INLINE_NDEBUG inline VectorU16 zeroU16() { return _mm_setzero_si128(); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorU16 loadU16(const void* ptr) {
++            assert(isAligned<kAlignment>(ptr));
++            return _mm_load_si128(static_cast<const VectorU16*>(ptr));
++        }
++        SP_ALWAYS_INLINE_NDEBUG inline void storeU16(void* ptr, VectorU16 v) {
++            assert(isAligned<kAlignment>(ptr));
++            _mm_store_si128(static_cast<VectorU16*>(ptr), v);
++        }
++
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI8 zeroI8() { return _mm_setzero_si128(); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI8 set1I8(i8 v) { return _mm_set1_epi8(v); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI8 loadI8(const void* ptr) {
++            assert(isAligned<kAlignment>(ptr));
++            return _mm_load_si128(static_cast<const VectorI8*>(ptr));
++        }
++        SP_ALWAYS_INLINE_NDEBUG inline void storeI8(void* ptr, VectorI8 v) {
++            assert(isAligned<kAlignment>(ptr));
++            _mm_store_si128(static_cast<VectorI8*>(ptr), v);
++        }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI8 minI8(VectorI8 a, VectorI8 b) { return _mm_min_epi8(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI8 maxI8(VectorI8 a, VectorI8 b) { return _mm_max_epi8(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI8 clampI8(VectorI8 v, VectorI8 min, VectorI8 max) { return minI8(maxI8(v, min), max); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI8 addI8(VectorI8 a, VectorI8 b) { return _mm_add_epi8(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI8 subI8(VectorI8 a, VectorI8 b) { return _mm_sub_epi8(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI8 shiftLeftI8(VectorI8 v, i32 shift) {
++            SP_UNUSED(v, shift);
++            unimplemented();
++        }
++
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 zeroI16() { return _mm_setzero_si128(); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 set1I16(i16 v) { return _mm_set1_epi16(v); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 loadI16(const void* ptr) {
++            assert(isAligned<kAlignment>(ptr));
++            return _mm_load_si128(static_cast<const VectorI16*>(ptr));
++        }
++        SP_ALWAYS_INLINE_NDEBUG inline void storeI16(void* ptr, VectorI16 v) {
++            assert(isAligned<kAlignment>(ptr));
++            _mm_store_si128(static_cast<VectorI16*>(ptr), v);
++        }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 widenLoadI8ToI16(const void* ptr) {
++            return _mm_cvtepi8_epi16(_mm_loadl_epi64(static_cast<const __m128i*>(ptr)));
++        }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 minI16(VectorI16 a, VectorI16 b) { return _mm_min_epi16(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 maxI16(VectorI16 a, VectorI16 b) { return _mm_max_epi16(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 clampI16(VectorI16 v, VectorI16 min, VectorI16 max) { return minI16(maxI16(v, min), max); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 addI16(VectorI16 a, VectorI16 b) { return _mm_add_epi16(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 subI16(VectorI16 a, VectorI16 b) { return _mm_sub_epi16(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 mulLoI16(VectorI16 a, VectorI16 b) { return _mm_mullo_epi16(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 shiftLeftI16(VectorI16 v, i32 shift) { return _mm_sll_epi16(v, _mm_cvtsi32_si128(shift)); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 shiftRightI16(VectorI16 v, i32 shift) { return _mm_sra_epi16(v, _mm_cvtsi32_si128(shift)); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 shiftLeftMulHiI16(VectorI16 a, VectorI16 b, i32 shift) {
++            return _mm_mulhi_epi16(shiftLeftI16(a, shift), b);
++        }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 mulAddAdjI16(VectorI16 a, VectorI16 b) { return _mm_madd_epi16(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI16 packUnsignedI16(VectorI16 a, VectorI16 b) { return _mm_packus_epi16(a, b); }
++
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 zeroI32() { return _mm_setzero_si128(); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 set1I32(i32 v) { return _mm_set1_epi32(v); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 loadI32(const void* ptr) {
++            assert(isAligned<kAlignment>(ptr));
++            return _mm_load_si128(static_cast<const VectorI32*>(ptr));
++        }
++        SP_ALWAYS_INLINE_NDEBUG inline void storeI32(void* ptr, VectorI32 v) {
++            assert(isAligned<kAlignment>(ptr));
++            _mm_store_si128(static_cast<VectorI32*>(ptr), v);
++        }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 minI32(VectorI32 a, VectorI32 b) { return _mm_min_epi32(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 maxI32(VectorI32 a, VectorI32 b) { return _mm_max_epi32(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 clampI32(VectorI32 v, VectorI32 min, VectorI32 max) { return minI32(maxI32(v, min), max); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 addI32(VectorI32 a, VectorI32 b) { return _mm_add_epi32(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 subI32(VectorI32 a, VectorI32 b) { return _mm_sub_epi32(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 mulLoI32(VectorI32 a, VectorI32 b) { return _mm_mullo_epi32(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 shiftLeftI32(VectorI32 v, i32 shift) { return _mm_sll_epi32(v, _mm_cvtsi32_si128(shift)); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 shiftRightI32(VectorI32 v, i32 shift) { return _mm_sra_epi32(v, _mm_cvtsi32_si128(shift)); }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorU16 packUnsignedI32(VectorI32 a, VectorI32 b) { return _mm_packus_epi32(a, b); }
++        SP_ALWAYS_INLINE_NDEBUG inline i32 hsumI32(VectorI32 v) {
++            v = _mm_add_epi32(v, _mm_shuffle_epi32(v, _MM_SHUFFLE(1, 0, 3, 2)));
++            v = _mm_add_epi32(v, _mm_shuffle_epi32(v, _MM_SHUFFLE(2, 3, 0, 1)));
++            return _mm_cvtsi128_si32(v);
++        }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 dpbusdI32(VectorI32 sum, VectorU8 u, VectorI8 i) {
++            const auto p = _mm_maddubs_epi16(u, i);
++            const auto w = _mm_madd_epi16(p, _mm_set1_epi16(1));
++            return _mm_add_epi32(sum, w);
++        }
++        SP_ALWAYS_INLINE_NDEBUG inline u32 nonzeroMaskU8(VectorU8 v) {
++            const auto nz = _mm_cmpgt_epi32(v, _mm_setzero_si128());
++            return static_cast<u32>(_mm_movemask_ps(_mm_castsi128_ps(nz)));
++        }
++        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 mulAddAdjAccI16(VectorI32 sum, VectorI16 a, VectorI16 b) {
++            return addI32(sum, mulAddAdjI16(a, b));
++        }
++    } // namespace impl
++} // namespace stormphrax::util::simd
++
++#endif

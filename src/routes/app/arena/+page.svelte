@@ -105,6 +105,8 @@
         <select id="berserkVariantSelect"></select>
         <input id="plentychessDepthInput" type="number" value="4" />
         <select id="plentychessVariantSelect"></select>
+        <input id="stormphraxDepthInput" type="number" value="4" />
+        <select id="stormphraxVariantSelect"></select>
       </div>
       <div class="row">
         <div class="field"><label for="startingPositionSelect">Suite</label>
@@ -154,6 +156,7 @@
         <div id="viridithasRuntimeInfo" class="diag-block">Viridithas: detecting runtime…</div>
         <div id="berserkRuntimeInfo" class="diag-block">Berserk: detecting runtime…</div>
         <div id="plentychessRuntimeInfo" class="diag-block">PlentyChess: detecting runtime…</div>
+        <div id="stormphraxRuntimeInfo" class="diag-block">Stormphrax: detecting runtime…</div>
         <div id="cacheInfo" class="diag-block">NN cache: loading…</div>
         <div id="searchTelemetryInfo" class="diag-block">LC0 tree: waiting for searches…</div>
         <div id="runtimeAuditInfo" class="diag-block"><span class="diag-label">LC0 audit</span><span class="diag-value">waiting for runtime selection…</span></div>
@@ -177,6 +180,7 @@
       <div id="viridithasRuntimeInfo"></div>
       <div id="berserkRuntimeInfo"></div>
       <div id="plentychessRuntimeInfo"></div>
+      <div id="stormphraxRuntimeInfo"></div>
       <div id="cacheInfo"></div>
       <div id="searchTelemetryInfo"></div>
       <div id="runtimeAuditInfo"></div>

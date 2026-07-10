@@ -31,6 +31,9 @@ import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berse
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
+import { StormphraxEngine } from './stormphraxEngine.ts';
+import { createStormphraxEngine, stormphraxCacheKey } from './engineProvision.ts';
+import { STORMPHRAX_VARIANTS, checkStormphraxVariantAsset, hasExplicitStormphraxVariant, normalizeStormphraxVariant, resolveDefaultStormphraxVariantAssetFallback, stormphraxVariantAssetStatus, stormphraxVariantByKey, stormphraxVariantFromParams, stormphraxVariantUnsupportedReason, type StormphraxVariant } from './stormphraxVariants.ts';
 import { BIG_NETS, bigNetAssetStatusSync, bigNetLoadWarning, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig, type Bt4SearchResult, type Bt4WorkerSearcher } from './bt4Engine.ts';
 import { acquireBigNetSearcher, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher, type BigNetKey } from './bigNetSessionPool.ts';
 import { TournamentStandings, buildSchedule, tournamentPairings, type ScheduledGame, type TournamentMode } from './tournament.ts';
@@ -162,6 +165,8 @@ const REQUESTED_BERSERK_EXPLICIT = hasExplicitBerserkVariant(params);
 let REQUESTED_BERSERK_VARIANT = berserkVariantFromParams(params);
 const REQUESTED_PLENTYCHESS_EXPLICIT = hasExplicitPlentyChessVariant(params);
 let REQUESTED_PLENTYCHESS_VARIANT = plentyChessVariantFromParams(params);
+const REQUESTED_STORMPHRAX_EXPLICIT = hasExplicitStormphraxVariant(params);
+let REQUESTED_STORMPHRAX_VARIANT = stormphraxVariantFromParams(params);
 
 let ground: Ground | null = null;
 let mountAbort = new AbortController();
@@ -206,6 +211,7 @@ const recklessByVariant = new Map<string, RecklessEngine>();
 const viridithasByVariant = new Map<string, ViridithasEngine>();
 const berserkByVariant = new Map<string, BerserkEngine>();
 const plentyChessByVariant = new Map<string, PlentyChessEngine>();
+const stormphraxByVariant = new Map<string, StormphraxEngine>();
 const centipawnEvaluatorPromises = new Map<string, Promise<Evaluator>>();
 let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
@@ -818,6 +824,7 @@ function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
 function shortEngineTag(name: string): string {
   const n = name.toLowerCase();
   if (n.includes('centipawn')) return 'Centi';
+  if (n.includes('stormphrax')) return 'Storm';
   if (n.includes('bt4')) return 'BT4';
   if (n.includes('lc0') || n.includes('leela')) return 'Lc0';
   if (n.includes('reckless')) return 'Reck';
@@ -1077,6 +1084,7 @@ function defaultVariant(family: EngineFamily): string {
   if (family === 'viridithas') return REQUESTED_VIRIDITHAS_VARIANT.key;
   if (family === 'berserk') return REQUESTED_BERSERK_VARIANT.key;
   if (family === 'plentychess') return REQUESTED_PLENTYCHESS_VARIANT.key;
+  if (family === 'stormphrax') return REQUESTED_STORMPHRAX_VARIANT.key;
   return defaultStaticEngineVariant(family);
 }
 
@@ -1092,7 +1100,7 @@ function bigNetUnavailableText(config: BigNetConfig): string {
 }
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
-  if (isV0DeployProfile() && !['lc0', 'centipawn', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess'].includes(family)) return [];
+  if (isV0DeployProfile() && !['lc0', 'centipawn', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess', 'stormphrax'].includes(family)) return [];
   if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync()).map((option) => {
     if (!isLc0BigNetVariant(option.value)) return option;
     const config = BIG_NETS[option.value];
@@ -1131,6 +1139,14 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const suffix = unsupportedReason ? ` (${unsupportedReason})` : status === 'missing' ? ' (asset missing)' : needsGeneratedAsset && status !== 'present' ? ' (checking asset)' : '';
     return { value: v.key, label: `${v.label}${suffix}`, disabled };
   });
+  if (family === 'stormphrax') return availableStormphraxVariants().map((v) => {
+    const status = stormphraxVariantAssetStatus(v);
+    const unsupportedReason = stormphraxVariantUnsupportedReason(v);
+    if (!unsupportedReason && status === 'unknown') void checkStormphraxVariantAsset(v, populateSeats);
+    const disabled = Boolean(unsupportedReason) || status === 'missing';
+    const suffix = unsupportedReason ? ` (${unsupportedReason})` : status === 'missing' ? ' (asset missing)' : '';
+    return { value: v.key, label: `${v.label}${suffix}`, disabled };
+  });
   const recklessVariants = availableRecklessVariants().filter((v) => !isV0DeployProfile() || ['full', 'simd', 'relaxed-simd'].includes(v.key));
   return recklessVariants.map((v) => {
     const status = recklessVariantAssetStatus(v);
@@ -1160,6 +1176,7 @@ function rowLabel(row: EngineRow): string {
   if (row.family === 'viridithas') return viridithasVariantForKey(row.variant).label;
   if (row.family === 'berserk') return berserkVariantForKey(row.variant).label;
   if (row.family === 'plentychess') return plentyChessVariantForKey(row.variant).label;
+  if (row.family === 'stormphrax') return stormphraxVariantForKey(row.variant).label;
   return recklessVariantForKey(row.variant).label;
 }
 
@@ -1375,6 +1392,11 @@ function engineRuntimeDiagnosticsText(): string {
     if (row?.family === 'plentychess') {
       const variant = plentyChessVariantForKey(row.variant);
       const engine = plentyChessByVariant.get(plentyChessCacheKey(variant));
+      return `${name}: ${budgetText(row)} · ${variant.label} · ${engine?.runtimeLabel() ?? 'not loaded'} · hash 16MB`;
+    }
+    if (row?.family === 'stormphrax') {
+      const variant = stormphraxVariantForKey(row.variant);
+      const engine = stormphraxByVariant.get(stormphraxCacheKey(variant));
       return `${name}: ${budgetText(row)} · ${variant.label} · ${engine?.runtimeLabel() ?? 'not loaded'} · hash 16MB`;
     }
     return `${name}: diagnostics unavailable`;
@@ -1678,6 +1700,10 @@ function recordPlentyChessOutput(engineId: string, engineName: string, fen: stri
   recordUciOutput(engineId, engineName, 'PlentyChess', fen, move, lines, elapsedMs);
 }
 
+function recordStormphraxOutput(engineId: string, engineName: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
+  recordUciOutput(engineId, engineName, 'Stormphrax', fen, move, lines, elapsedMs);
+}
+
 function recordEngineThinking(engine: ArenaEngine): void {
   thinkingEngineIds.add(engine.id);
   arenaSearchProgress.set(engine.id, { label: engine.name, units: 'search', indeterminate: true });
@@ -1956,6 +1982,53 @@ function refreshPlentyChessVariantUi(): void {
   renderPlentyChessRuntimeInfo();
 }
 
+function availableStormphraxVariants(): StormphraxVariant[] {
+  if (REQUESTED_STORMPHRAX_VARIANT.key === 'custom') return [...STORMPHRAX_VARIANTS, REQUESTED_STORMPHRAX_VARIANT];
+  return [...STORMPHRAX_VARIANTS];
+}
+
+function stormphraxVariantForKey(variantKey: string): StormphraxVariant {
+  const key = normalizeStormphraxVariant(variantKey);
+  if (key === 'custom' && REQUESTED_STORMPHRAX_VARIANT.key === 'custom') return REQUESTED_STORMPHRAX_VARIANT;
+  return stormphraxVariantByKey(key);
+}
+
+function getStormphraxFor(variantKey: string): StormphraxEngine {
+  const variant = stormphraxVariantForKey(variantKey);
+  const key = stormphraxCacheKey(variant);
+  let engine = stormphraxByVariant.get(key);
+  if (!engine) {
+    engine = createStormphraxEngine(variant);
+    stormphraxByVariant.set(key, engine);
+  }
+  return engine;
+}
+
+function renderStormphraxRuntimeInfo(): void {
+  const rows = activeSeatRows().filter((row) => row.family === 'stormphrax');
+  el('stormphraxRuntimeInfo').hidden = !rows.length;
+  if (!rows.length) { el('stormphraxRuntimeInfo').textContent = ''; return; }
+  const parts = rows.map((row) => {
+    const variant = stormphraxVariantForKey(row.variant);
+    const engine = stormphraxByVariant.get(stormphraxCacheKey(variant));
+    const asset = stormphraxVariantAssetStatus(variant);
+    const unsupportedReason = stormphraxVariantUnsupportedReason(variant);
+    if (!unsupportedReason && asset === 'unknown') void checkStormphraxVariantAsset(variant, renderStormphraxRuntimeInfo);
+    const assetText = unsupportedReason ?? (asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset');
+    return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
+  });
+  el('stormphraxRuntimeInfo').innerHTML = diagBlockHtml('Stormphrax', [...new Set(parts)].map(htmlEscape));
+}
+
+function refreshStormphraxVariantUi(): void {
+  const select = selectEl('stormphraxVariantSelect');
+  const selected = select.value;
+  select.innerHTML = availableStormphraxVariants().map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
+  if (selected) select.value = selected;
+  select.disabled = running;
+  renderStormphraxRuntimeInfo();
+}
+
 function refreshStockfishControls(): void {
   inputEl('stockfishThreadsInput').disabled = running || !threadedStockfishAvailable();
   inputEl('stockfishThreadsInput').value = String(stockfishThreadsCap());
@@ -2053,6 +2126,10 @@ function disposeUnusedUciEngines(): void {
   const activePlenty = new Set(activeSeatRows().filter((row) => row.family === 'plentychess').map((row) => plentyChessCacheKey(plentyChessVariantForKey(row.variant))));
   for (const [key, engine] of plentyChessByVariant) {
     if (!activePlenty.has(key)) { engine.dispose(); plentyChessByVariant.delete(key); }
+  }
+  const activeStormphrax = new Set(activeSeatRows().filter((row) => row.family === 'stormphrax').map((row) => stormphraxCacheKey(stormphraxVariantForKey(row.variant))));
+  for (const [key, engine] of stormphraxByVariant) {
+    if (!activeStormphrax.has(key)) { engine.dispose(); stormphraxByVariant.delete(key); }
   }
 }
 
@@ -2200,6 +2277,17 @@ function buildEngines() {
     renderPlentyChessRuntimeInfo();
     return move;
   };
+  const stormphraxMove = (engineId: string, row: EngineRow, engine: StormphraxEngine): ArenaEngine['move'] => async (positions, signal) => {
+    if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: 1 });
+    else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: 1 });
+    const fen = boardToFen(positions[positions.length - 1]);
+    const started = performance.now();
+    const move = await engine.bestMove(fen, signal);
+    const elapsedMs = performance.now() - started;
+    recordStormphraxOutput(engineId, engines.get(engineId)?.name ?? 'Stormphrax', fen, move, engine.lastInfo(), elapsedMs);
+    renderStormphraxRuntimeInfo();
+    return move;
+  };
   const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {
     const search = lc0SearcherFor(engineId);
     await search.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
@@ -2257,6 +2345,12 @@ function buildEngines() {
     await engine.newGame(signal);
     renderPlentyChessRuntimeInfo();
   };
+  const stormphraxWarmup = (engine: StormphraxEngine) => async (signal: AbortSignal) => {
+    engine.setOptions({ depth: 1, movetimeMs: undefined, threads: 1 });
+    await engine.bestMove(START_FEN, signal);
+    await engine.newGame(signal);
+    renderStormphraxRuntimeInfo();
+  };
   for (const row of activeSeatRows()) {
     const id = engineIdForRow(row);
     if (engines.has(id)) continue;
@@ -2287,7 +2381,7 @@ function buildEngines() {
     } else if (row.family === 'berserk') {
       const engine = getBerserkFor(row.variant);
       engines.set(id, { id, name, move: berserkMove(id, row, engine), warmup: berserkWarmup(engine) });
-    } else {
+    } else if (row.family === 'plentychess') {
       const variant = plentyChessVariantForKey(row.variant);
       const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
       if (unsupportedReason) {
@@ -2296,12 +2390,22 @@ function buildEngines() {
       }
       const engine = getPlentyChessFor(row.variant);
       engines.set(id, { id, name, move: plentyChessMove(id, row, engine), warmup: plentyChessWarmup(engine) });
+    } else {
+      const variant = stormphraxVariantForKey(row.variant);
+      const unsupportedReason = stormphraxVariantUnsupportedReason(variant);
+      if (unsupportedReason) {
+        engines.set(id, { id, name, move: async () => { throw new Error(`${variant.label} ${unsupportedReason}.`); } });
+        continue;
+      }
+      const engine = getStormphraxFor(row.variant);
+      engines.set(id, { id, name, move: stormphraxMove(id, row, engine), warmup: stormphraxWarmup(engine) });
     }
   }
   renderRecklessRuntimeInfo();
   renderViridithasRuntimeInfo();
   renderBerserkRuntimeInfo();
   renderPlentyChessRuntimeInfo();
+  renderStormphraxRuntimeInfo();
   renderEngineDiagnosticsInfo();
 }
 
@@ -2654,6 +2758,7 @@ async function startMatch() {
   refreshViridithasVariantUi();
   refreshBerserkVariantUi();
   refreshPlentyChessVariantUi();
+  refreshStormphraxVariantUi();
   refreshSeatControls();
   games.length = 0;
   activeEngineIds = [];
@@ -2698,6 +2803,7 @@ async function startMatch() {
       for (const engine of viridithasByVariant.values()) await engine.newGame(abort.signal);
       for (const engine of berserkByVariant.values()) await engine.newGame(abort.signal);
       for (const engine of plentyChessByVariant.values()) await engine.newGame(abort.signal);
+      for (const engine of stormphraxByVariant.values()) await engine.newGame(abort.signal);
       setBoardSideEngines(whiteEngine.id, whiteEngine.name, blackEngine.id, blackEngine.name);
       el('pairing').textContent = `Game ${i + 1}/${schedule.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
       el('message').textContent = 'Playing…';
@@ -2745,6 +2851,7 @@ async function startMatch() {
     refreshViridithasVariantUi();
     refreshBerserkVariantUi();
     refreshPlentyChessVariantUi();
+    refreshStormphraxVariantUi();
     refreshSeatControls();
   }
 }
@@ -2788,6 +2895,8 @@ function disposeRuntimeResources(): void {
   berserkByVariant.clear();
   for (const engine of plentyChessByVariant.values()) engine.dispose();
   plentyChessByVariant.clear();
+  for (const engine of stormphraxByVariant.values()) engine.dispose();
+  stormphraxByVariant.clear();
   for (const key of ARENA_BIG_NET_KEYS) {
     peekBigNetSearcher(key)?.cancel();
     releaseBigNetSearcher(key);
@@ -3204,6 +3313,7 @@ function wireEvents() {
       renderViridithasRuntimeInfo();
       renderBerserkRuntimeInfo();
       renderPlentyChessRuntimeInfo();
+      renderStormphraxRuntimeInfo();
     }
   });
   el('arenaSeatList').addEventListener('click', (event) => {
@@ -3234,6 +3344,7 @@ function wireEvents() {
     renderViridithasRuntimeInfo();
     renderBerserkRuntimeInfo();
     renderPlentyChessRuntimeInfo();
+    renderStormphraxRuntimeInfo();
   });
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
   el('openingText').addEventListener('input', refreshOpeningPreview);
@@ -3278,6 +3389,8 @@ async function init(mountSignal: AbortSignal) {
   if (isStaleMount(mountSignal)) return;
   REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, renderRecklessRuntimeInfo);
   if (isStaleMount(mountSignal)) return;
+  REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(REQUESTED_STORMPHRAX_VARIANT, REQUESTED_STORMPHRAX_EXPLICIT, renderStormphraxRuntimeInfo);
+  if (isStaleMount(mountSignal)) return;
   renderBoard();
   installRuntimeAuditPanel();
   installExperimentalLc0RuntimeOption();
@@ -3286,10 +3399,12 @@ async function init(mountSignal: AbortSignal) {
   refreshViridithasVariantUi();
   refreshBerserkVariantUi();
   refreshPlentyChessVariantUi();
+  refreshStormphraxVariantUi();
   selectEl('recklessVariantSelect').value = REQUESTED_RECKLESS_VARIANT.key;
   selectEl('viridithasVariantSelect').value = REQUESTED_VIRIDITHAS_VARIANT.key;
   selectEl('berserkVariantSelect').value = REQUESTED_BERSERK_VARIANT.key;
   selectEl('plentychessVariantSelect').value = REQUESTED_PLENTYCHESS_VARIANT.key;
+  selectEl('stormphraxVariantSelect').value = REQUESTED_STORMPHRAX_VARIANT.key;
   applyArenaQueryParams();
   applyLc0Preset(inferredLc0Preset());
   if (!isV0DeployProfile()) await ensureSelectedRecklessAssetsAvailable();
@@ -3298,6 +3413,7 @@ async function init(mountSignal: AbortSignal) {
   renderViridithasRuntimeInfo();
   renderBerserkRuntimeInfo();
   renderPlentyChessRuntimeInfo();
+  renderStormphraxRuntimeInfo();
   // sfThreads=0 (or sfThreads=auto) hands thread selection to the resource broker.
   inputEl('stockfishThreadsInput').value = String(Math.max(0, Math.min(32, Math.floor(Number(params.get('sfThreads') ?? '1') || 0))));
   refreshStockfishControls();

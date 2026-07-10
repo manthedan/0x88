@@ -164,6 +164,22 @@
       "notes": "Single-thread Emscripten worker builds with baseline, SSE4.1, and relaxed-SIMD tiers; processed NNUE is preloaded in each .data sidecar."
     },
     {
+      "id": "stormphrax-emscripten-single-thread",
+      "family": "stormphrax",
+      "uiLabel": "Stormphrax 8",
+      "status": "experimental",
+      "versionOrSource": "Ciekce/Stormphrax v8.0.0 commit 582965517ed2032d41a6b4cd6c2e66b1b934e2ad; undertown.nnue",
+      "deploymentStatus": "tracked-deployable",
+      "manifestUrl": "/stormphrax/stormphrax-emscripten-single-thread.manifest.json",
+      "sourceArchiveUrl": "/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz",
+      "primaryUrls": [
+        "/stormphrax/stormphrax-emscripten.js",
+        "/stormphrax/stormphrax-emscripten.wasm",
+        "/stormphrax/stormphrax-emscripten.data"
+      ],
+      "notes": "Single-thread WebAssembly SIMD Emscripten worker with the self-trained undertown NNUE preloaded in the data sidecar."
+    },
+    {
       "id": "reckless-wasi",
       "family": "reckless",
       "uiLabel": "Reckless",

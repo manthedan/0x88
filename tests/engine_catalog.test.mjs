@@ -19,8 +19,8 @@ import {
 } from '../src/lc0/engineCatalog.ts';
 
 test('engine family catalog covers the staged selector families in UI order', () => {
-  assert.deepEqual(ENGINE_FAMILY_PRIORITY, ['lc0', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess', 'centipawn']);
-  assert.deepEqual(V0_ENGINE_FAMILY_PRIORITY, ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess', 'centipawn']);
+  assert.deepEqual(ENGINE_FAMILY_PRIORITY, ['lc0', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess', 'stormphrax', 'centipawn']);
+  assert.deepEqual(V0_ENGINE_FAMILY_PRIORITY, ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess', 'stormphrax', 'centipawn']);
   assert.deepEqual(engineFamilyOptions().map((option) => option.value), ENGINE_FAMILY_PRIORITY);
   assert.equal(ENGINE_FAMILY_PRIORITY.at(-1), 'centipawn');
   assert.equal(V0_ENGINE_FAMILY_PRIORITY.at(-1), 'centipawn');
@@ -45,6 +45,8 @@ test('engine strength metadata captures arena vs analysis defaults', () => {
   assert.equal(engineStrengthMeta('berserk', 'analysis').def, 12);
   assert.equal(engineStrengthMeta('plentychess', 'arena').def, 4);
   assert.equal(engineStrengthMeta('plentychess', 'analysis').def, 12);
+  assert.equal(engineStrengthMeta('stormphrax', 'arena').def, 4);
+  assert.equal(engineStrengthMeta('stormphrax', 'analysis').def, 12);
 });
 
 test('static LC0 and Stockfish variants expose labels and gating metadata', () => {
@@ -53,6 +55,7 @@ test('static LC0 and Stockfish variants expose labels and gating metadata', () =
   assert.equal(defaultStaticEngineVariant('sf'), 'lite');
   assert.equal(defaultStaticEngineVariant('berserk'), 'emscripten');
   assert.equal(defaultStaticEngineVariant('plentychess'), 'emscripten');
+  assert.equal(defaultStaticEngineVariant('stormphrax'), 'emscripten');
   assert.equal(lc0EngineLabel('small'), 'Lc0');
   assert.equal(lc0EngineLabel('bt4'), 'Lc0 BT4-it332');
   assert.equal(stockfishEngineLabel('lite', 'arena'), 'Stockfish Lite');
@@ -70,6 +73,7 @@ test('engine family guard rejects unknown selector values', () => {
   assert.equal(isEngineFamily('centipawn'), true);
   assert.equal(isEngineFamily('berserk'), true);
   assert.equal(isEngineFamily('plentychess'), true);
+  assert.equal(isEngineFamily('stormphrax'), true);
   assert.equal(isEngineFamily('tiny'), false);
   assert.equal(isEngineFamily('stockfish'), false);
   assert.equal(isEngineFamily(''), false);

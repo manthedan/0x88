@@ -1,0 +1,97 @@
+{
+  "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
+  "generatedAt": "2026-07-10T08:59:30.014Z",
+  "distributionPolicy": "docs/engine_artifact_distribution.md",
+  "engine": "stormphrax",
+  "flavor": "emscripten-single-thread",
+  "status": "experimental",
+  "upstream": {
+    "repo": "https://github.com/Ciekce/Stormphrax.git",
+    "tag": "v8.0.0",
+    "commit": "582965517ed2032d41a6b4cd6c2e66b1b934e2ad",
+    "version": "8.0.0",
+    "license": "GPL-3.0-or-later"
+  },
+  "build": {
+    "script": "scripts/build_stormphrax_emscripten.mjs",
+    "command": "npm run stormphrax:build-emscripten",
+    "patches": [
+      "patches/stormphrax-emscripten.patch"
+    ],
+    "toolchain": "Emscripten 6.0.2, WebAssembly SIMD, synchronous single-thread search, tablebases disabled by leaving SyzygyPath empty."
+  },
+  "artifacts": [
+    {
+      "path": "public/stormphrax/stormphrax-emscripten.js",
+      "bytes": 70611,
+      "sha256": "4c95a359f1c09760611d09ea6a3fa4a451407c699d14ef559940d37365a4bfec",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 19969,
+          "ratio": 0.2828
+        },
+        "brotli": {
+          "bytes": 17708,
+          "ratio": 0.2508
+        }
+      }
+    },
+    {
+      "path": "public/stormphrax/stormphrax-emscripten.wasm",
+      "bytes": 697245,
+      "sha256": "92149aeeeefbc7bac74ec9b6ebf24384599bf35e8f8f404bf26518f53f6f93e1",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 262569,
+          "ratio": 0.3766
+        },
+        "brotli": {
+          "bytes": 201259,
+          "ratio": 0.2886
+        }
+      }
+    },
+    {
+      "path": "public/stormphrax/stormphrax-emscripten.data",
+      "bytes": 55914848,
+      "sha256": "04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 35880418,
+          "ratio": 0.6417
+        },
+        "brotli": {
+          "bytes": 33929708,
+          "ratio": 0.6068
+        }
+      }
+    }
+  ],
+  "assets": [
+    {
+      "name": "undertown.nnue",
+      "sourceUrl": "https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/undertown.nnue",
+      "rawSha256": "04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf",
+      "licenseNote": "Stormphrax documents undertown as its self-trained 8.0.0 release network; distribute it with the GPL corresponding source and provenance manifest.",
+      "embeddedIn": "public/stormphrax/stormphrax-emscripten.data"
+    }
+  ],
+  "totals": {
+    "bytes": 56682704,
+    "gzipBytes": 36162956,
+    "brotliBytes": 34148675,
+    "gzipRatio": 0.638,
+    "brotliRatio": 0.6025
+  },
+  "sourceArchive": {
+    "required": true,
+    "path": "public/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz",
+    "bytes": 37260111,
+    "sha256": "31f6ece2da14c6354a0251b08e7014521440dfca07eaae09f3f30a9597a62652",
+    "url": "/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz",
+    "note": "Source archive recorded for public distribution."
+  }
+}

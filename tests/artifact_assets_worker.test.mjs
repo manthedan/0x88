@@ -226,7 +226,7 @@ test('artifact assets worker serves stable logical asset paths through the chann
   const channelBody = new TextEncoder().encode(JSON.stringify({ releaseManifestUrl: '/releases/stable-test.json' }));
   const releaseBody = new TextEncoder().encode(JSON.stringify({
     artifacts: [{
-      logicalUrl: '/stockfish/stockfish-18-lite.js',
+      logicalUrl: '/stormphrax/stormphrax-emscripten.js',
       artifactUrl: `https://assets.example/${KEY}`,
     }],
   }));
@@ -252,7 +252,7 @@ test('artifact assets worker serves stable logical asset paths through the chann
     },
   };
   await withFakeEdgeCache(async () => {
-    const request = new Request('https://assets.example/stockfish/stockfish-18-lite.js');
+    const request = new Request('https://assets.example/stormphrax/stormphrax-emscripten.js');
     const response = await handleArtifactRequest(request, env);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('Cache-Control'), 'public, max-age=300, stale-while-revalidate=86400');
@@ -264,6 +264,42 @@ test('artifact assets worker serves stable logical asset paths through the chann
     assert.equal(cached.headers.get('Cache-Status'), 'lc0-artifact-worker; hit');
     assert.equal(await text(cached), 'abcdefghijklmnopqrstuvwxyz');
   });
+});
+
+test('artifact assets worker binds engine manifests to the selected release', async () => {
+  const manifestKey = `artifacts/sha256/${'a'.repeat(64)}/stormphrax.manifest.json`;
+  const channelBody = new TextEncoder().encode(JSON.stringify({ releaseManifestUrl: '/releases/stable-test.json' }));
+  const releaseBody = new TextEncoder().encode(JSON.stringify({
+    sourceManifests: ['public/stormphrax/stormphrax-emscripten-single-thread.manifest.json'],
+    artifacts: [{
+      logicalUrl: '/stormphrax/stormphrax-emscripten-single-thread.manifest.json',
+      artifactUrl: `https://assets.example/${manifestKey}`,
+    }],
+  }));
+  const manifestBody = new TextEncoder().encode('{}');
+  const entries = new Map([
+    ['channels/stable.json', { body: channelBody, contentType: 'application/json; charset=utf-8' }],
+    ['releases/stable-test.json', { body: releaseBody, contentType: 'application/json; charset=utf-8' }],
+    [manifestKey, { body: manifestBody, contentType: 'application/json; charset=utf-8' }],
+  ]);
+  const env = {
+    ARTIFACTS: {
+      async head(key) {
+        const entry = entries.get(key);
+        return entry ? { size: entry.body.byteLength, httpEtag: '"etag"', httpMetadata: { contentType: entry.contentType } } : null;
+      },
+      async get(key) {
+        const entry = entries.get(key);
+        return entry ? { size: entry.body.byteLength, httpEtag: '"etag"', httpMetadata: { contentType: entry.contentType }, body: entry.body } : null;
+      },
+    },
+  };
+  const response = await handleArtifactRequest(new Request('https://assets.example/stormphrax/stormphrax-emscripten-single-thread.manifest.json', { method: 'HEAD' }), env);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Cache-Control'), 'public, max-age=300, stale-while-revalidate=86400');
+  assert.equal(response.headers.get('X-Artifact-Content-Length'), String(manifestBody.byteLength));
+  const unrelated = await handleArtifactRequest(new Request('https://assets.example/stormphrax/future.manifest.json', { method: 'HEAD' }), env);
+  assert.equal(unrelated.status, 404);
 });
 
 test('artifact assets worker rejects non-artifact paths and invalid ranges', async () => {

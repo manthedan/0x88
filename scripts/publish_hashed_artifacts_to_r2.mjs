@@ -169,21 +169,25 @@ async function main() {
   const planned = [];
   const skipped = [];
   for (const artifact of release.artifacts ?? []) {
-    if (!artifact.localPath) { skipped.push({ logicalUrl: artifact.logicalUrl, reason: 'no localPath' }); continue; }
-    const localPath = `${args.root.replace(/\/$/, '')}/${artifact.localPath}`;
-    if (!existsSync(localPath)) {
-      if (args.allowMissing) { skipped.push({ logicalUrl: artifact.logicalUrl, reason: 'missing localPath', localPath }); continue; }
-      throw new Error(`Missing local artifact for ${artifact.logicalUrl}: ${localPath}`);
-    }
-    const actual = await sha256File(localPath);
-    if (actual.bytes !== artifact.bytes) throw new Error(`Size mismatch for ${artifact.logicalUrl}: got ${actual.bytes}, expected ${artifact.bytes}`);
-    if (actual.sha256 !== artifact.sha256) throw new Error(`SHA-256 mismatch for ${artifact.logicalUrl}: got ${actual.sha256}, expected ${artifact.sha256}`);
     const key = keyFromArtifact(artifact);
     const keySha256 = sha256FromArtifactKey(key);
     if (keySha256 !== artifact.sha256.toLowerCase()) {
       throw new Error(`Content-addressed key mismatch for ${artifact.logicalUrl}: key has ${keySha256 ?? 'no sha256'}, manifest has ${artifact.sha256}`);
     }
-    const probe = (args.probeExisting || args.execute) ? await probeExistingArtifact(args, artifact) : undefined;
+    const localPath = artifact.localPath ? `${args.root.replace(/\/$/, '')}/${artifact.localPath}` : undefined;
+    const localExists = Boolean(!artifact.carriedForwardFrom && localPath && existsSync(localPath));
+    if (localExists) {
+      const actual = await sha256File(localPath);
+      if (actual.bytes !== artifact.bytes) throw new Error(`Size mismatch for ${artifact.logicalUrl}: got ${actual.bytes}, expected ${artifact.bytes}`);
+      if (actual.sha256 !== artifact.sha256) throw new Error(`SHA-256 mismatch for ${artifact.logicalUrl}: got ${actual.sha256}, expected ${artifact.sha256}`);
+    } else if (!artifact.carriedForwardFrom) {
+      if (args.allowMissing) { skipped.push({ logicalUrl: artifact.logicalUrl, reason: localPath ? 'missing localPath' : 'no localPath', localPath }); continue; }
+      throw new Error(`Missing local artifact for ${artifact.logicalUrl}: ${localPath ?? 'no localPath'}`);
+    }
+    // Carried-forward entries may intentionally have no local file, so even a
+    // dry-run must prove the immutable remote body exists and matches its hash.
+    const probe = (args.probeExisting || args.execute || !localExists) ? await probeExistingArtifact(args, artifact) : undefined;
+    if (!localExists && probe?.state !== 'existing') throw new Error(`Carried-forward artifact is not available remotely: ${artifact.logicalUrl}`);
     planned.push({
       logicalUrl: artifact.logicalUrl,
       localPath,
@@ -211,6 +215,7 @@ async function main() {
       if (item.remoteState === 'unchecked') {
         throw new Error(`Cannot safely publish ${item.logicalUrl}: ${item.remoteProbe?.reason ?? 'remote artifact existence was not checked'}`);
       }
+      if (!item.localPath) throw new Error(`Cannot upload ${item.logicalUrl} without a localPath`);
       const child = spawnSync(args.wranglerBin, [
         'r2', 'object', 'put', target,
         '--file', item.localPath,

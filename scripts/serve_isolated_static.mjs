@@ -94,6 +94,9 @@ const server = createServer((req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   } else if (rel.startsWith('reckless/') && rel.includes('corresponding-source') && ext === '.gz') {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  } else if (rel.startsWith('stormphrax/') && (ext === '.js' || ext === '.wasm' || ext === '.data' || ext === '.nnue')) {
+    // Stormphrax uses versionless logical aliases; avoid cross-build mixtures.
+    res.setHeader('Cache-Control', 'public, max-age=300');
   } else if ((rel.startsWith('berserk/') || rel.startsWith('plentychess/')) && (ext === '.js' || ext === '.wasm' || ext === '.data' || ext === '.nn' || ext === '.nnue' || ext === '.bin')) {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   } else if (rel.startsWith('assets/')) {

@@ -183,7 +183,7 @@ function findForbiddenExternalAssets(root) {
   walk(join(root, 'models'), (name, _path, isDir) => !isDir && name === 'bt4_soap_rem_c19000_final.onnx');
   walk(join(root, 'models', 'monty'), (_name, _path, _isDir) => true);
   walk(join(root, 'monty'), (_name, _path, _isDir) => true);
-  for (const dir of ['berserk', 'plentychess', 'reckless', 'stockfish', 'viridithas', 'runtimes']) {
+  for (const dir of ['berserk', 'plentychess', 'stormphrax', 'reckless', 'stockfish', 'viridithas', 'runtimes']) {
     walk(join(root, dir), (name, _path, isDir) => !isDir && isForbiddenExternalArtifact(name));
   }
   return forbidden.map((item) => ({ ...item, path: relative(process.cwd(), item.path) }));

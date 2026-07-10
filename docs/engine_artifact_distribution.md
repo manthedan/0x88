@@ -116,6 +116,19 @@ If the selector is visible in a public deployment but assets are intentionally a
 - Processing command: upstream `tools/process_net false`, then preload as `/processed.bin`
 - Distribution status: cleared mechanically once generated artifacts, source archive, release manifest, and GPL notices are published together; the ~63 MB `.data` sidecar still needs an explicit product/footprint decision before enabling by default.
 
+### Stormphrax Emscripten
+
+- License: GPL-3.0-or-later upstream.
+- Upstream: `https://github.com/Ciekce/Stormphrax.git`
+- Pin: tag `v8.0.0`, commit `582965517ed2032d41a6b4cd6c2e66b1b934e2ad`
+- Patch: `patches/stormphrax-emscripten.patch`
+- Build: `npm run stormphrax:build-emscripten`
+- Smoke: `npm run stormphrax:smoke-emscripten`
+- Network: `undertown.nnue`, identified by the 8.0.0 release and upstream `network.txt`; Stormphrax states that its networks are trained from self-generated data.
+- Network source: `https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/undertown.nnue`
+- Raw network SHA-256: `04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf`
+- Distribution status: generated artifacts, matching corresponding-source archive, release manifest, source/build patch, and network provenance must be published together.
+
 ### Viridithas WASI
 
 - License: MIT upstream at the pinned commit (`LICENSE` and `Cargo.toml`).

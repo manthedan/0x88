@@ -28,7 +28,8 @@ import type { BerserkEngine } from './berserkEngine.ts';
 import { berserkVariantByKey, defaultBerserkVariantKey, resolveDefaultBerserkVariantAssetFallback } from './berserkVariants.ts';
 import type { PlentyChessEngine } from './plentychessEngine.ts';
 import { defaultPlentyChessVariantKey, plentyChessVariantByKey, resolveDefaultPlentyChessVariantAssetFallback } from './plentychessVariants.ts';
-import { createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine } from './engineProvision.ts';
+import { createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createStormphraxEngine, createViridithasEngine } from './engineProvision.ts';
+import { defaultStormphraxVariantKey, resolveDefaultStormphraxVariantAssetFallback, stormphraxVariantByKey, stormphraxVariantUnsupportedReason } from './stormphraxVariants.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { isV0DeployProfile } from './engineCatalog.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
@@ -40,7 +41,7 @@ const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUr
 const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl('/models/bt4_soap_rem_c19000_final.onnx');
 const CENTIPAWN_META_URL = resolvePublicAssetUrl('/models/bt4_soap_rem_c19000_final.meta.json');
 
-type PlayFamily = 'maia3' | 'lc0' | 'centipawn' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess';
+type PlayFamily = 'maia3' | 'lc0' | 'centipawn' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess' | 'stormphrax';
 
 interface PlayEngineOption {
   id: string;
@@ -63,10 +64,11 @@ const ALL_ENGINE_OPTIONS: PlayEngineOption[] = [
   { id: 'viridithas', label: 'Viridithas', family: 'viridithas', variant: 'default', group: 'engine' },
   { id: 'berserk', label: 'Berserk', family: 'berserk', variant: 'default', group: 'engine' },
   { id: 'plentychess', label: 'PlentyChess', family: 'plentychess', variant: 'default', group: 'engine' },
+  { id: 'stormphrax', label: 'Stormphrax', family: 'stormphrax', variant: 'emscripten', group: 'engine' },
   { id: 'centipawn', label: 'Centipawn', family: 'centipawn', variant: 'bt4-ort', group: 'engine' },
 ];
 const ENGINE_OPTIONS: PlayEngineOption[] = isV0DeployProfile()
-  ? ALL_ENGINE_OPTIONS.filter((option) => option.family === 'maia3' || option.id === 'leela-queen-odds' || option.id === 'sf-lite' || option.id === 'lc0-small' || option.id === 'lc0-bt4' || option.id === 'reckless' || option.id === 'berserk' || option.id === 'viridithas' || option.id === 'plentychess' || option.id === 'centipawn')
+  ? ALL_ENGINE_OPTIONS.filter((option) => option.family === 'maia3' || option.id === 'leela-queen-odds' || option.id === 'sf-lite' || option.id === 'lc0-small' || option.id === 'lc0-bt4' || option.id === 'reckless' || option.id === 'berserk' || option.id === 'viridithas' || option.id === 'plentychess' || option.id === 'stormphrax' || option.id === 'centipawn')
   : ALL_ENGINE_OPTIONS;
 
 const LEVEL_COUNT = 5;
@@ -89,6 +91,7 @@ const LEVELS: Record<Exclude<PlayFamily, 'maia3' | 'sf'>, number[]> = {
   viridithas: [2, 4, 6, 9, 12],
   berserk: [2, 4, 6, 9, 12],
   plentychess: [2, 4, 6, 9, 12],
+  stormphrax: [2, 4, 6, 9, 12],
 };
 /** Big nets are far slower per visit; keep upper levels playable. */
 const BIG_NET_LEVELS = [4, 16, 64, 256, 800];
@@ -131,6 +134,7 @@ let maia3Status: string | null = null;
 interface CpuEngine {
   setOptions(options: { depth?: number; movetimeMs?: number; threads?: number; skillLevel?: number }): void;
   bestMove(fen: string, signal?: AbortSignal): Promise<string | null>;
+  dispose?(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -487,6 +491,8 @@ function ctxCpuEngineFor(ctx: PlayContext, option: PlayEngineOption): Promise<Cp
           return createBerserkEngine(await resolveDefaultBerserkVariantAssetFallback(berserkVariantByKey(defaultBerserkVariantKey()), false));
         case 'plentychess':
           return createPlentyChessEngine(await resolveDefaultPlentyChessVariantAssetFallback(plentyChessVariantByKey(defaultPlentyChessVariantKey()), false));
+        case 'stormphrax':
+          return createStormphraxEngine(await resolveDefaultStormphraxVariantAssetFallback(stormphraxVariantByKey(defaultStormphraxVariantKey()), false));
         default:
           throw new Error(`unsupported engine family ${option.family}`);
       }
@@ -500,6 +506,13 @@ function ctxCpuEngineFor(ctx: PlayContext, option: PlayEngineOption): Promise<Cp
   });
   cpuEnginePromises.set(option.id, created);
   return created;
+}
+
+function disposeCachedCpuEngine(id: string): void {
+  const pending = cpuEnginePromises.get(id);
+  if (!pending) return;
+  cpuEnginePromises.delete(id);
+  void pending.then((engine) => engine.dispose?.()).catch(() => undefined);
 }
 
 function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal): boolean {
@@ -894,6 +907,10 @@ function ctxRenderPromotionPicker(ctx: PlayContext): void {
 }
 
 function ctxEngineOptionState(option: PlayEngineOption): { disabled: boolean; suffix: string } {
+  if (option.family === 'stormphrax') {
+    const reason = stormphraxVariantUnsupportedReason(stormphraxVariantByKey(defaultStormphraxVariantKey()));
+    return reason ? { disabled: true, suffix: ` (${reason})` } : { disabled: false, suffix: '' };
+  }
   if (option.family !== 'lc0' || option.variant === 'small') return { disabled: false, suffix: '' };
   return bigNetOptionState(BIG_NETS[option.variant as BigNetKey]);
 }
@@ -943,6 +960,7 @@ function ctxRender(ctx: PlayContext): void {
   el('levelCaption').textContent = ctxStrengthCaption(ctx);
   buttonEl('takeback').disabled = !ctx.moves.length || !!ctx.pendingPromotion;
   buttonEl('resign').disabled = !!ctx.gameOver || !ctx.moves.length;
+  selectEl('engineSelect').disabled = ctx.engineThinking;
   ctxRenderMoveList(ctx);
   ctxRenderPromotionPicker(ctx);
   ctxRenderRestartBanner(ctx);
@@ -1070,14 +1088,21 @@ function ctxInit(ctx: PlayContext): void {
     }
   });
   trackListener(ctx, selectEl('engineSelect'), 'change', () => {
+    const previousEngineId = ctx.lastEngineId;
+    if (ctx.engineThinking) {
+      selectEl('engineSelect').value = previousEngineId;
+      ctxRender(ctx);
+      return;
+    }
     const option = ctxSelectedEngine(ctx);
-    if (option.family === 'maia3' && ctx.lastEngineId.startsWith('maia-')) {
+    if (option.family === 'maia3' && previousEngineId.startsWith('maia-')) {
       const carried = Number(ctx.lastEngineId.slice('maia-'.length));
       if (Number.isFinite(carried)) {
         (el('maia3Elo') as HTMLInputElement).value = String(Math.max(MAIA3_MIN_ELO, Math.min(MAIA3_MAX_ELO, carried)));
       }
     }
     ctx.lastEngineId = option.id;
+    if (previousEngineId === 'stormphrax' && option.id !== 'stormphrax') disposeCachedCpuEngine('stormphrax');
     ctxRenderLevelOptions(ctx);
     ctxRenderMaia3Controls(ctx);
     ctxRenderEngineCaution(ctx);
@@ -1156,6 +1181,9 @@ export function mountPlayBrowser(): () => void {
     ctxCancelEngineTurn(ctx);
     ctx.abort.abort();
     releaseUnusedBigNetSearchers([]);
+    // Stormphrax reserves a 512 MiB WASM heap, so unlike the smaller CPU
+    // engines it must not remain cached after this Play route is gone.
+    disposeCachedCpuEngine('stormphrax');
     if (ctx.resignArmTimer) { clearTimeout(ctx.resignArmTimer); ctx.resignArmTimer = null; }
     (ctx.ground as { destroy?: () => void } | null)?.destroy?.();
     ctx.ground = null;

@@ -14,10 +14,11 @@ const DEFAULT_SOURCE_MANIFESTS = [
   'public/viridithas/viridithas-wasip1.manifest.json',
   'public/berserk/berserk-emscripten-single-thread.manifest.json',
   'public/plentychess/plentychess-emscripten-single-thread.manifest.json',
+  'public/stormphrax/stormphrax-emscripten-single-thread.manifest.json',
 ];
 
 function usage() {
-  console.log(`Usage: node scripts/write_artifact_release_manifests.mjs [options]\n\nOptions:\n  --root DIR             Repository root (default .)\n  --release-id ID        Immutable release id (default date + git short sha)\n  --channel NAME         Channel name to write (default stable)\n  --out-dir DIR          Public output root (default public under --root)\n  --asset-origin URL     Absolute asset origin prefix (default https://assets.0x88.app)\n  --manifest PATH        Source manifest to include; may be repeated\n  --generated-at ISO     Override generatedAt for reproducible checks\n  --check                Verify existing outputs match instead of writing\n  -h, --help             Show help\n`);
+  console.log(`Usage: node scripts/write_artifact_release_manifests.mjs [options]\n\nOptions:\n  --root DIR             Repository root (default .)\n  --release-id ID        Immutable release id (default date + git short sha)\n  --channel NAME         Channel name to write (default stable)\n  --out-dir DIR          Public output root (default public under --root)\n  --asset-origin URL     Absolute asset origin prefix (default https://assets.0x88.app)\n  --manifest PATH        Source manifest to include; may be repeated\n  --base-release PATH    Carry forward immutable entries from an existing release\n  --generated-at ISO     Override generatedAt for reproducible checks\n  --check                Verify existing outputs match instead of writing\n  -h, --help             Show help\n`);
 }
 
 function parseArgs(argv) {
@@ -31,6 +32,7 @@ function parseArgs(argv) {
     if (arg === '--out-dir' && next) { args.outDir = next; i += 1; continue; }
     if (arg === '--asset-origin' && next) { args.assetOrigin = next.replace(/\/+$/, ''); i += 1; continue; }
     if (arg === '--manifest' && next) { args.manifests.push(next); i += 1; continue; }
+    if (arg === '--base-release' && next) { args.baseRelease = next; i += 1; continue; }
     if (arg === '--generated-at' && next) { args.generatedAt = next; i += 1; continue; }
     if (arg === '--check') { args.check = true; continue; }
     if (arg === '-h' || arg === '--help') { usage(); process.exit(0); }
@@ -202,6 +204,24 @@ async function collectArtifacts(args) {
   return { artifacts: [...byLogical.values()].sort((a, b) => a.logicalUrl.localeCompare(b.logicalUrl)), sourceManifests };
 }
 
+async function sourceManifestArtifact(sourceManifest, args) {
+  const absolute = join(args.root, sourceManifest);
+  const digest = await localFileDigest(absolute);
+  if (!digest) throw new Error(`Missing source manifest: ${sourceManifest}`);
+  const file = basename(sourceManifest);
+  return {
+    logicalUrl: logicalUrlFromPublicPath(sourceManifest),
+    artifactUrl: artifactUrlFor(digest.sha256, file, args.assetOrigin),
+    sha256: digest.sha256,
+    bytes: digest.bytes,
+    file,
+    kind: 'manifest',
+    contentType: 'application/json',
+    sourceManifest,
+    localPath: sourceManifest,
+  };
+}
+
 async function writeOrCheck(path, value, check) {
   const text = `${JSON.stringify(value, null, 2)}\n`;
   if (check) {
@@ -216,13 +236,37 @@ async function writeOrCheck(path, value, check) {
 async function main() {
   const args = parseArgs(process.argv);
   const generatedAt = args.generatedAt ?? new Date().toISOString();
-  const { artifacts, sourceManifests } = await collectArtifacts(args);
+  const collected = await collectArtifacts(args);
+  const updatedSourceManifests = collected.sourceManifests;
+  let artifacts = collected.artifacts;
+  let sourceManifests = updatedSourceManifests;
+  let baseReleaseId;
+  if (args.baseRelease) {
+    const basePath = args.baseRelease.startsWith('/') ? args.baseRelease : join(args.root, args.baseRelease);
+    const base = await readJson(basePath);
+    if (base.schema !== 'lc0_browser.artifact_release_manifest.v1') throw new Error(`Unexpected base release schema: ${base.schema}`);
+    baseReleaseId = base.releaseId;
+    const merged = new Map((base.artifacts ?? []).map((artifact) => [artifact.logicalUrl, { ...artifact, carriedForwardFrom: base.releaseId }]));
+    for (const artifact of artifacts) merged.set(artifact.logicalUrl, artifact);
+    artifacts = [...merged.values()].sort((a, b) => a.logicalUrl.localeCompare(b.logicalUrl));
+    sourceManifests = [...new Set([...(base.sourceManifests ?? []), ...sourceManifests])];
+  }
+  // Newly supplied source manifests are release artifacts too. Inherited
+  // manifests retain their base release entries instead of being rebuilt from
+  // potentially changed or unavailable local files.
+  const withSourceManifests = new Map(artifacts.map((artifact) => [artifact.logicalUrl, artifact]));
+  for (const sourceManifest of updatedSourceManifests) {
+    const artifact = await sourceManifestArtifact(sourceManifest, args);
+    withSourceManifests.set(artifact.logicalUrl, artifact);
+  }
+  artifacts = [...withSourceManifests.values()].sort((a, b) => a.logicalUrl.localeCompare(b.logicalUrl));
   const releaseManifestUrl = `/releases/${args.releaseId}.json`;
   const release = {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: args.releaseId,
     generatedAt,
     channel: args.channel,
+    ...(baseReleaseId ? { baseReleaseId } : {}),
     sourceManifests,
     artifacts,
   };

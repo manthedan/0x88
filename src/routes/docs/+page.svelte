@@ -74,6 +74,7 @@
         <li><a href="#engines-berserk">Berserk</a></li>
         <li><a href="#engines-viridithas">Viridithas</a></li>
         <li><a href="#engines-plentychess">PlentyChess</a></li>
+        <li><a href="#engines-stormphrax">Stormphrax</a></li>
         <li><a href="#engines-reckless">Reckless</a></li>
       </ul>
     </li>
@@ -431,6 +432,17 @@
   </div>
 
   <div class="engine-entry">
+    <h3 id="engines-stormphrax">Stormphrax <a class="anchor-link" href="#engines-stormphrax" aria-label="Link to this section">#</a></h3>
+    <dl class="engine-meta">
+      <dt>Author</dt><dd>Ciekce &middot; <a href="https://github.com/Ciekce/Stormphrax" rel="noopener">github.com/Ciekce/Stormphrax</a></dd>
+      <dt>License</dt><dd><span class="lic gpl">GPL-3.0-or-later</span></dd>
+      <dt>Network</dt><dd><code>undertown.nnue</code>, trained from Stormphrax self-play data</dd>
+      <dt>Source</dt><dd><a href="https://assets.0x88.app/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz">stormphrax-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
+    </dl>
+    <p>A Chess960-focused C++ UCI engine with an independently trained NNUE. The browser build uses a single-thread Emscripten worker and a dedicated 128-bit WebAssembly SIMD backend.</p>
+  </div>
+
+  <div class="engine-entry">
     <h3 id="engines-reckless">Reckless <a class="anchor-link" href="#engines-reckless" aria-label="Link to this section">#</a></h3>
     <dl class="engine-meta">
       <dt>Author</dt><dd>CodeDeliveryService &middot; <a href="https://github.com/codedeliveryservice/Reckless" rel="noopener">github.com/codedeliveryservice/Reckless</a></dd>
@@ -523,7 +535,7 @@
   </table>
 
   <blockquote>
-    <p>A note on engine names and branding: the names "Stockfish", "Leela Chess Zero", "Berserk", "Viridithas", "PlentyChess", "Reckless", and "Maia" are project trademarks of their respective owners, separate from the code licenses. We use them here solely to identify the engines (nominative use) and do not claim endorsement. Consult each project's own branding guidance if in doubt.</p>
+    <p>A note on engine names and branding: the names "Stockfish", "Leela Chess Zero", "Berserk", "Viridithas", "PlentyChess", "Stormphrax", "Reckless", and "Maia" are project trademarks of their respective owners, separate from the code licenses. We use them here solely to identify the engines (nominative use) and do not claim endorsement. Consult each project's own branding guidance if in doubt.</p>
   </blockquote>
 </section>
 

@@ -100,6 +100,18 @@ const ASSET_GROUPS = [
       '/plentychess/plentychess-emscripten-relaxed-simd128.data',
     ],
   },
+  {
+    family: 'stormphrax',
+    label: 'Stormphrax Emscripten worker',
+    status: 'experimental-selectable',
+    command: 'npm run stormphrax:build-emscripten',
+    docs: 'docs/engine_catalog.md#stormphrax-family',
+    assets: [
+      '/stormphrax/stormphrax-emscripten.js',
+      '/stormphrax/stormphrax-emscripten.wasm',
+      '/stormphrax/stormphrax-emscripten.data',
+    ],
+  },
 ];
 
 function usage() {

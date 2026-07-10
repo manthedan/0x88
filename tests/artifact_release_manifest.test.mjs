@@ -62,13 +62,19 @@ test('write_artifact_release_manifests creates channel and content-addressed rel
   const release = JSON.parse(await readFile(join(root, 'public/releases/test-release.json'), 'utf8'));
   assert.equal(release.schema, 'lc0_browser.artifact_release_manifest.v1');
   assert.equal(release.releaseId, 'test-release');
-  assert.equal(release.artifacts.length, 2);
-  assert.deepEqual(release.artifacts.map((artifact) => artifact.logicalUrl).sort(), ['/models/lc0/test.onnx', '/stockfish/engine.wasm']);
-  for (const artifact of release.artifacts) {
+  assert.equal(release.artifacts.length, 4);
+  assert.deepEqual(release.artifacts.map((artifact) => artifact.logicalUrl).sort(), [
+    '/models/lc0/manifest.json',
+    '/models/lc0/test.onnx',
+    '/stockfish/engine.wasm',
+    '/stockfish/stockfish.manifest.json',
+  ]);
+  for (const artifact of release.artifacts.filter((entry) => entry.kind !== 'manifest')) {
     assert.match(artifact.artifactUrl, new RegExp(`/artifacts/sha256/${ABC_SHA256}/`));
     assert.equal(artifact.sha256, ABC_SHA256);
     assert.equal(artifact.bytes, 3);
   }
+  assert.equal(release.artifacts.filter((entry) => entry.kind === 'manifest').length, 2);
 
   const check = spawnSync(process.execPath, [
     'scripts/write_artifact_release_manifests.mjs',
@@ -81,6 +87,49 @@ test('write_artifact_release_manifests creates channel and content-addressed rel
     '--check',
   ], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(check.status, 0, check.stderr);
+});
+
+test('write_artifact_release_manifests carries forward an immutable base release without local legacy files', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-release-carry-forward-'));
+  await mkdir(join(root, 'public/stormphrax'), { recursive: true });
+  await writeFile(join(root, 'public/stormphrax/engine.wasm'), 'abc');
+  await writeJson(join(root, 'public/stormphrax/manifest.json'), {
+    artifacts: [{ path: 'public/stormphrax/engine.wasm', bytes: 3, sha256: ABC_SHA256 }],
+  });
+  await writeJson(join(root, 'public/releases/base.json'), {
+    schema: 'lc0_browser.artifact_release_manifest.v1',
+    releaseId: 'base',
+    sourceManifests: ['public/legacy/manifest.json'],
+    artifacts: [{
+      logicalUrl: '/legacy/engine.wasm',
+      artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/legacy.wasm`,
+      sha256: ABC_SHA256,
+      bytes: 3,
+      file: 'legacy.wasm',
+      kind: 'engine',
+      contentType: 'application/wasm',
+      sourceManifest: 'public/legacy/manifest.json',
+      localPath: 'public/legacy/engine.wasm',
+    }],
+  });
+  const result = spawnSync(process.execPath, [
+    'scripts/write_artifact_release_manifests.mjs',
+    '--root', root,
+    '--release-id', 'next',
+    '--base-release', 'public/releases/base.json',
+    '--manifest', 'public/stormphrax/manifest.json',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const release = JSON.parse(await readFile(join(root, 'public/releases/next.json'), 'utf8'));
+  assert.equal(release.baseReleaseId, 'base');
+  assert.deepEqual(release.artifacts.map((artifact) => artifact.logicalUrl), [
+    '/legacy/engine.wasm',
+    '/stormphrax/engine.wasm',
+    '/stormphrax/manifest.json',
+  ]);
+  assert.equal(release.artifacts[0].carriedForwardFrom, 'base');
+  assert.equal(release.artifacts[1].carriedForwardFrom, undefined);
+  assert.equal(release.artifacts.filter((artifact) => artifact.kind === 'manifest').length, 1);
 });
 
 test('publish_hashed_artifacts_to_r2 plans release and channel manifest uploads', async () => {

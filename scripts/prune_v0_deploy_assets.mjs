@@ -30,6 +30,7 @@ remove(join(root, 'monty'));
 remove(join(root, 'rust_bridge'));
 remove(join(root, 'berserk'));
 remove(join(root, 'plentychess'));
+remove(join(root, 'stormphrax'));
 remove(join(root, 'viridithas'));
 removeMatchingFiles(join(root, 'reckless'), (name) => name.endsWith('.wasm') || name.endsWith('.nnue') || name.endsWith('.tar.gz'));
 remove(join(root, 'models', 'monty'));

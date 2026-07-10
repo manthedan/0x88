@@ -44,6 +44,7 @@ Every engine family should have one card with these fields:
 | Viridithas | `default`, `simd` | Experimental opt-in | Patched Rust `wasm32-wasip1` UCI, one-shot/persistent/batch | Upstream `cosmobobak/viridithas` commit `20d7402065ca` + v106 `atlantis-b800.nnue.zst` + local patches | WASM ~55 MB with compressed NNUE embedded | Integration works for shallow arena/analysis, but stop/abort and throughput remain experimental. |
 | Berserk | `emscripten` (WASI `default`/`simd` planned only) | Experimental opt-in | Patched single-thread Emscripten UCI worker; WASI still unpromoted | Upstream `jhonnold/berserk` tag `14` commit `8ae895a6151695be4a50d4fb65b0c131659c513a` + network `berserk-9b84c340af7e.nn` | Emscripten emits JS glue + ~128 KB WASM + ~24 MB preload data; generated/local only | Strong GPL C UCI candidate; staged UI integration is experimental while lifecycle/benchmark data accumulates. |
 | PlentyChess | `emscripten` | Experimental opt-in | Patched single-thread Emscripten UCI worker | `Yoshie2000/PlentyChess` commit `58d8ba2505ae2b49f48dd410d214a457d15c12c6` + network `0134-2r24-s0.bin` | JS ~71 KB + WASM ~390 KB + data/processed NNUE ~63 MB raw; ~32-34 MB compressed transfer if `.data` is served with brotli/gzip; generated/local only | Node/browser lifecycle smoke and arena/analysis selector smoke pass; depth-7 rotated-FEN benchmark is ~718k NPS; large sidecar and source-archive release gate keep it experimental. |
+| Stormphrax | `emscripten` | Experimental opt-in | Patched single-thread Emscripten UCI worker with wasm SIMD | `Ciekce/Stormphrax` tag `v8.0.0`, commit `582965517ed2032d41a6b4cd6c2e66b1b934e2ad` + `undertown.nnue` | JS ~71 KB + WASM ~697 KB + data 55.9 MB raw | Node UCI smoke passes; available in Play, Arena, and Analysis with depth/movetime and MultiPV. |
 
 ## Asset prep/check fast path
 
@@ -67,6 +68,7 @@ npm run reckless:build-production && npm run reckless:build-browser-api && npm r
 npm run viridithas:build-wasi && npm run viridithas:build-simd-wasi && npm run viridithas:build-relaxed-simd-wasi
 npm run berserk:build-emscripten && npm run berserk:build-simd-emscripten && npm run berserk:build-relaxed-simd-emscripten
 npm run plentychess:build-emscripten && npm run plentychess:build-sse41-emscripten && npm run plentychess:build-relaxed-simd-emscripten
+npm run stormphrax:build-emscripten
 ```
 
 Generated large/GPL/AGPL blobs remain local unless the release follows `docs/engine_artifact_distribution.md`; the browser UI must continue to treat missing assets as a selectable/runtime status, not as a silent failure.
@@ -222,6 +224,20 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
 - **Validation:** `npm run plentychess:build-emscripten` then `npm run plentychess:smoke-emscripten` verifies `uci`, `isready`, `ucinewgame`, startpos search (`bestmove c2c4`), one non-startpos FEN (`bestmove e1g1`), and post-search `readyok` in Node. `lab/plentychess-smoke.html` verifies browser worker prewarm, repeated searches, MultiPV, abort/recovery, and missing-asset failure surfacing. `lab/reckless-benchmark.html` includes a PlentyChess checkbox; first depth-7 rotated-FEN benchmark measured ~9.35 ms/search, ~4,068 nodes/search, and ~718k engine-reported NPS. Arena selector smoke passed on K-v-K vs Stockfish Lite; analysis selector smoke rendered depth-8 startpos PVs. Details are in `docs/plentychess_browser_port.md`.
 - **Open risks:** source pin choice (`main` vs release), missing/stale release-network mapping, single-thread Emscripten patch size, tablebase guards, SIMD/scalar fallback correctness, large GPL artifact packaging, and whether the engine is meaningfully distinct from the existing Stockfish/Reckless speed-strength lane in browser form.
 
+### Stormphrax family
+
+- **Family id / UI label:** `stormphrax` / `Stormphrax`.
+- **Integration status:** experimental opt-in in Play, Arena, and Analysis.
+- **Source/version anchor:** `Ciekce/Stormphrax` tag `v8.0.0`, commit `582965517ed2032d41a6b4cd6c2e66b1b934e2ad`; self-trained release network `undertown.nnue`, 55,914,848 bytes, SHA-256 `04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf`.
+- **License/distribution:** GPL-3.0-or-later. Public JS/WASM/data requires the matching source archive and artifact manifest.
+- **Runtime adapter:** patched single-thread synchronous Emscripten UCI worker. A new 128-bit wasm SIMD backend maps the engine's vector operations to Emscripten SSE intrinsics; threat-input geometry uses a correctness-first scalar browser path.
+- **Variant:** `emscripten` (`Stormphrax 8`) plus same-origin custom sidecar overrides via `stormphraxJs`, `stormphraxWasm`, and `stormphraxData`.
+- **Strength knob:** depth; movetime is supported by the adapter.
+- **Feature parity:** UCI handshake/readiness, repeated new games, start/non-start FEN search, MultiPV analysis, parsed info/PV/WDL output, and worker-restart abort recovery. Threads remain fixed at one; Syzygy is not loaded.
+- **Artifact footprint:** initial build emits JS 70,611 bytes, WASM 697,245 bytes, and data 55,914,848 bytes.
+- **Validation:** `npm run stormphrax:build-emscripten`, `npm run stormphrax:smoke-emscripten`, and browser selector smokes. See `docs/stormphrax_browser_port.md`.
+- **Open work:** browser benchmark matrix, broader fixed-depth parity against native, and a shared configurable Emscripten adapter to remove the remaining per-engine adapter duplication.
+
 ### Viridithas family
 
 - **Family id / UI label:** `viridithas` / `Viridithas`.
@@ -294,6 +310,6 @@ The staged selectors now consume the shared typed catalog in `src/lc0/engineCata
 - shared row labels for Lc0 and Stockfish;
 - the `EngineFamily` / `EngineRow` types used by arena and analysis.
 
-Reckless, Viridithas, Berserk, and PlentyChess keep their dynamic artifact metadata in `recklessVariants.ts`, `viridithasVariants.ts`, `berserkVariants.ts`, and `plentychessVariants.ts` because those modules own URL-param custom variants, asset checks, and runtime-specific defaults. If a future engine uses similar generated artifacts, add a dedicated variant module and then surface its family/static selector facts through `engineCatalog.ts`.
+Reckless, Viridithas, Berserk, PlentyChess, and Stormphrax keep their dynamic artifact metadata in `recklessVariants.ts`, `viridithasVariants.ts`, `berserkVariants.ts`, and `plentychessVariants.ts` because those modules own URL-param custom variants, asset checks, and runtime-specific defaults. If a future engine uses similar generated artifacts, add a dedicated variant module and then surface its family/static selector facts through `engineCatalog.ts`.
 
 Any UI variant/default change should update both `src/lc0/engineCatalog.ts` and this card in the same commit. `tests/engine_catalog.test.mjs` pins the current selector order, static variants, family guard, and arena/analysis strength defaults.
