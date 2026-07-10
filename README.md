@@ -31,9 +31,12 @@ npm run web:isolated:static
 
 Then open `http://localhost:5181/app/arena`.
 
-## Artifact inventory
+## Engine integration and artifacts
 
-Hosted/deployable engine and model versions are tracked in `docs/hosted_artifacts.md`, with a compact machine-readable summary at `public/artifact-index.json`.
+- `docs/engine_integration_architecture.md` documents the family registry, typed runtime boundaries, disposable worker pools, artifact tooling, ORT packaging, and engine-onboarding checklist.
+- `docs/hosted_artifacts.md` tracks hosted/deployable engine and model versions.
+- `docs/engine_artifact_distribution.md` defines the binary, manifest, licensing, and corresponding-source release gate.
+- `public/artifact-index.json` provides the compact machine-readable artifact summary.
 
 ## Validation
 
@@ -41,5 +44,7 @@ Common frontend checks:
 
 ```sh
 npm run typecheck
-npm run build:client
+npm test
+npm run build:netlify:r2
+npm run deploy:ort-wasm-dedup-check
 ```

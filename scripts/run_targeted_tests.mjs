@@ -79,7 +79,10 @@ function inferTests(files) {
     }
   };
   const exact = new Map([
-    ['src/lc0/analysisBrowser.ts', ['engine_catalog', 'engine_resource_broker', 'lc0_analysis_format']],
+    ['src/lc0/analysisBrowser.ts', ['engine_catalog', 'engine_resource_broker', 'lc0_analysis_format', 'disposable_variant_pool']],
+    ['src/lc0/arenaBrowser.ts', ['engine_catalog', 'engine_resource_broker', 'disposable_variant_pool']],
+    ['src/lc0/disposableVariantPool.ts', ['disposable_variant_pool']],
+    ['src/lc0/browserVariantOption.ts', ['browser_variant_option']],
     ['src/lc0/engineCatalog.ts', ['engine_catalog']],
     ['src/lc0/engineProvision.ts', ['engine_catalog']],
     ['src/lc0/playBrowser.ts', ['engine_catalog']],
@@ -91,6 +94,14 @@ function inferTests(files) {
     ['src/lc0/stormphraxVariants.ts', ['stormphrax_variants']],
     ['src/lc0/stockfishEngine.ts', ['lc0_stockfish_engine']],
     ['src/lc0/gameReview.ts', ['game_review']],
+    ['scripts/engine_artifact_registry.mjs', ['engine_artifact_registry', 'netlify_r2_release']],
+    ['scripts/check_browser_engine_assets.mjs', ['engine_artifact_registry']],
+    ['scripts/netlify_r2_release.mjs', ['netlify_r2_release']],
+    ['scripts/precompress_engine_artifacts.mjs', ['engine_artifact_registry', 'netlify_r2_release']],
+    ['scripts/prepare_netlify_r2_public_assets.mjs', ['engine_artifact_registry', 'netlify_r2_release']],
+    ['scripts/prune_external_model_assets.mjs', ['engine_artifact_registry', 'netlify_r2_release']],
+    ['scripts/check_ort_wasm_dedup.mjs', ['ort_wasm_dedup']],
+    ['vite.config.ts', ['ort_wasm_dedup']],
   ]);
   for (const file of files) {
     if (file.startsWith('tests/') && tests.has(file)) add(file);

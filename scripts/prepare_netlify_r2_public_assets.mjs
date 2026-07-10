@@ -2,21 +2,9 @@
 import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { copyFile, link, mkdir, rm } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
+import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './engine_artifact_registry.mjs';
 
-function isExternalArtifact(name) {
-  return name.endsWith('.onnx')
-    || name.endsWith('.lc0web')
-    || name.endsWith('.wasm')
-    || name.endsWith('.data')
-    || name.endsWith('.nn')
-    || name.endsWith('.nnue')
-    || name.endsWith('.bin')
-    || name.endsWith('.tar.gz')
-    || name.endsWith('.gz')
-    || name.endsWith('.br')
-    || name.endsWith('.js')
-    || name.endsWith('.mjs');
-}
+const externalArtifactDirectories = new Set(EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES);
 
 export function shouldSkipR2PublicAsset(relPath, isDir) {
   const normalized = relPath.replace(/\\/g, '/');
@@ -27,7 +15,7 @@ export function shouldSkipR2PublicAsset(relPath, isDir) {
   if (parts[0] === 'models' && parts[1] === 'lc0') return isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx');
   if (parts[0] === 'models' && parts[1] === 'maia3') return !isDir && name.endsWith('.onnx');
   if (parts[0] === 'models' && !isDir && name === 'bt4_soap_rem_c19000_final.onnx') return true;
-  if (['berserk', 'plentychess', 'stormphrax', 'reckless', 'stockfish', 'viridithas', 'runtimes'].includes(parts[0])) return !isDir && isExternalArtifact(name);
+  if (externalArtifactDirectories.has(parts[0])) return !isDir && isExternalArtifactName(name);
   return false;
 }
 

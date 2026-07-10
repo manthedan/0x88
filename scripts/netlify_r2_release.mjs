@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './engine_artifact_registry.mjs';
 
 const DEFAULT_ASSET_BASE_URL = 'https://assets.0x88.app';
 const DEFAULT_CHANNEL_URL = `${DEFAULT_ASSET_BASE_URL}/channels/stable.json`;
@@ -146,21 +147,6 @@ async function writeStamp(dist, stamp) {
   await writeFile(path, `${JSON.stringify({ generatedAt: new Date().toISOString(), ...stamp }, null, 2)}\n`);
 }
 
-function isForbiddenExternalArtifact(name) {
-  return name.endsWith('.onnx')
-    || name.endsWith('.lc0web')
-    || name.endsWith('.wasm')
-    || name.endsWith('.data')
-    || name.endsWith('.nn')
-    || name.endsWith('.nnue')
-    || name.endsWith('.bin')
-    || name.endsWith('.tar.gz')
-    || name.endsWith('.gz')
-    || name.endsWith('.br')
-    || name.endsWith('.js')
-    || name.endsWith('.mjs');
-}
-
 function findForbiddenExternalAssets(root) {
   const forbidden = [];
   function push(path, kind) {
@@ -183,8 +169,8 @@ function findForbiddenExternalAssets(root) {
   walk(join(root, 'models'), (name, _path, isDir) => !isDir && name === 'bt4_soap_rem_c19000_final.onnx');
   walk(join(root, 'models', 'monty'), (_name, _path, _isDir) => true);
   walk(join(root, 'monty'), (_name, _path, _isDir) => true);
-  for (const dir of ['berserk', 'plentychess', 'stormphrax', 'reckless', 'stockfish', 'viridithas', 'runtimes']) {
-    walk(join(root, dir), (name, _path, isDir) => !isDir && isForbiddenExternalArtifact(name));
+  for (const dir of EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES) {
+    walk(join(root, dir), (name, _path, isDir) => !isDir && isExternalArtifactName(name));
   }
   return forbidden.map((item) => ({ ...item, path: relative(process.cwd(), item.path) }));
 }

@@ -8,6 +8,12 @@ const crossOriginIsolationHeaders = {
 
 export default defineConfig({
   plugins: [sveltekit()],
+  resolve: {
+    // ORT is configured to load its staged /ort/ glue and WASM at runtime.
+    // Select the external-WASM export so Vite does not emit another copy for
+    // the main bundle and each evaluator worker.
+    conditions: ['onnxruntime-web-use-extern-wasm', 'module', 'browser', 'development|production'],
+  },
   server: {
     headers: crossOriginIsolationHeaders,
     fs: {

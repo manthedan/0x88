@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
+import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './engine_artifact_registry.mjs';
 
 const root = resolve(process.argv[2] ?? 'dist-client');
 
@@ -26,21 +27,6 @@ function removeMatchingFiles(dir, predicate) {
   }
 }
 
-function isExternalArtifact(name) {
-  return name.endsWith('.onnx')
-    || name.endsWith('.lc0web')
-    || name.endsWith('.wasm')
-    || name.endsWith('.data')
-    || name.endsWith('.nn')
-    || name.endsWith('.nnue')
-    || name.endsWith('.bin')
-    || name.endsWith('.tar.gz')
-    || name.endsWith('.gz')
-    || name.endsWith('.br')
-    || name.endsWith('.js')
-    || name.endsWith('.mjs');
-}
-
 // The R2 deployment serves model and engine blobs from the artifact host. Keep
 // lightweight manifests/docs in dist for diagnostics, but remove local blobs,
 // generated sidecars, source archives, and precompressed copies so Netlify only
@@ -50,8 +36,8 @@ removeMatchingFiles(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDi
 remove(join(root, 'models', 'bt4_soap_rem_c19000_final.onnx'));
 remove(join(root, 'models', 'monty'));
 remove(join(root, 'monty'));
-for (const dir of ['berserk', 'plentychess', 'stormphrax', 'reckless', 'stockfish', 'viridithas', 'runtimes']) {
-  removeMatchingFiles(join(root, dir), (name, _path, isDir) => isDir ? false : isExternalArtifact(name));
+for (const dir of EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES) {
+  removeMatchingFiles(join(root, dir), (name, _path, isDir) => isDir ? false : isExternalArtifactName(name));
 }
 
 console.log(JSON.stringify({ status: 'EXTERNAL_DEPLOY_ASSET_PRUNE_DONE', root: relative(process.cwd(), root) || '.', removed }, null, 2));

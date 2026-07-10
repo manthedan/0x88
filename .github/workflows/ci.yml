@@ -14,7 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          lfs: true
+          lfs: false
+      - name: Fetch required release fixture
+        run: git lfs pull --include="public/models/bt4_soap_rem_c19000_final.onnx" --exclude=""
       - name: Remove unavailable local-model symlinks
         run: find public/models -type l -delete
       - uses: actions/setup-node@v5
@@ -35,5 +37,6 @@ jobs:
           test -f dist-client/app/play/index.html
           test -f dist-client/app/analysis/index.html
           test -f dist-client/app/arena/index.html
+          npm run deploy:ort-wasm-dedup-check
           test ! -e dist-client/runtimes
           test ! -e dist-client/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx

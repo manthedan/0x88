@@ -4,6 +4,7 @@ import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:z
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, relative, resolve } from 'node:path';
+import { COMPRESSIBLE_ARTIFACT_EXTENSIONS, PRECOMPRESS_ARTIFACT_DIRECTORIES } from './engine_artifact_registry.mjs';
 
 const root = resolve(process.argv[2] ?? 'public');
 const allowMissing = process.argv.includes('--allow-missing');
@@ -19,11 +20,11 @@ const excludedEngines = new Set(process.argv.flatMap((arg, index, args) => {
 }));
 // All directories that serve large fetchable artifacts. Missing dirs are
 // skipped under --allow-missing.
-const engines = ['berserk', 'plentychess', 'stormphrax', 'stockfish', 'viridithas', 'reckless', 'ort', 'models', 'monty'].filter((engine) => !excludedEngines.has(engine));
+const engines = PRECOMPRESS_ARTIFACT_DIRECTORIES.filter((engine) => !excludedEngines.has(engine));
 // .onnx: f16/int8 model weights only compress ~0.90, but at current sizes
 // that is still ~2MB (t1 qdq) to ~35MB (BT4) per asset. .mjs covers ORT's
 // glue sidecars in /ort/.
-const compressibleExts = new Set(['.js', '.mjs', '.wasm', '.data', '.nn', '.nnue', '.bin', '.onnx']);
+const compressibleExts = new Set(COMPRESSIBLE_ARTIFACT_EXTENSIONS);
 
 function walk(dir, out = []) {
   if (!existsSync(dir)) return out;
