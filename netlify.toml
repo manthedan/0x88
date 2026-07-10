@@ -50,3 +50,13 @@
     Cross-Origin-Opener-Policy = "same-origin"
     Cross-Origin-Embedder-Policy = "require-corp"
     Cross-Origin-Resource-Policy = "same-origin"
+
+# Unlisted friend/tester diagnostics route. Do not link from public nav;
+# keep search engines from indexing copies of benchmark output.
+[[headers]]
+  for = "/lab/webgpu-lc0-diag/*"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "require-corp"
+    Cross-Origin-Resource-Policy = "same-origin"
+    X-Robots-Tag = "noindex, nofollow, noarchive"

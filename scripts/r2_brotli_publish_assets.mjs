@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const bucket = process.env.R2_BUCKET ?? 'browser-chess-models';
-const publicBase = process.env.R2_PUBLIC_BASE_URL ?? 'https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev';
+const publicBase = process.env.R2_PUBLIC_BASE_URL ?? 'https://assets.0x88.app';
 const verifyOrigin = process.env.R2_VERIFY_ORIGIN ?? 'https://chess-engine-browser.netlify.app';
 const outRoot = resolve(process.env.R2_BROTLI_OUT_DIR ?? '/tmp/r2-brotli-artifacts');
 const remote = process.env.R2_REMOTE ?? '1';

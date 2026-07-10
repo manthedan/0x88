@@ -1,14 +1,25 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { afterNavigate } from '$app/navigation';
   import SiteHeader from '$lib/components/SiteHeader.svelte';
+  let mountedUrl: URL | null = null;
+  afterNavigate(({ to }) => {
+    if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
+  });
   const title = "LC0 browser engine";
   const description = "LC0 single-engine lab console: policy-only moves, configurable PUCT search, and parity debugging.";
   onMount(() => {
+    mountedUrl = new URL(location.href);
     let cleanup: () => void = () => undefined;
     let mounted = true;
     void import('../../lc0/policyOnlyBrowser').then((module) => {
       if (!mounted) return;
       cleanup = module.mountPolicyOnlyBrowser();
+    }).catch((error) => {
+      if (!mounted) return;
+      console.error('[single-engine] failed to load page controller', error);
+      const node = document.getElementById('message');
+      if (node) node.textContent = `Page failed to initialize: ${error instanceof Error ? error.message : String(error)}`;
     });
     return () => {
       mounted = false;

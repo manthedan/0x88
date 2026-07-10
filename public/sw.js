@@ -1,4 +1,4 @@
-const SHELL_CACHE = '0x88-app-shell-v1';
+const SHELL_CACHE = '0x88-app-shell-v2';
 const APP_SHELL_FALLBACK = '/app/play/';
 
 self.addEventListener('install', (event) => {
@@ -12,7 +12,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then((names) => Promise.all(
-        names.filter((name) => name.startsWith('0x88-app-shell-') && name !== SHELL_CACHE)
+        names.filter((name) => (name.startsWith('0x88-app-shell-') || name.startsWith('lc0-app-shell-')) && name !== SHELL_CACHE)
           .map((name) => caches.delete(name)),
       )),
   );

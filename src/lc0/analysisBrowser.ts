@@ -1739,12 +1739,14 @@ async function runGameReview(): Promise<void> {
         continue;
       }
       const lines = await engine.analyze(fen, { multipv: 1, depth, signal: controller.signal });
+      if (reviewAbort !== controller) return;
       positions.push({
         winWhite: winWhiteFromInfo(fen, lines[0]),
         bestUci: lines[0]?.pvUci?.[0] ?? null,
         legalMoves: legal,
       });
     }
+    if (reviewAbort !== controller) return;
     if (controller.signal.aborted || positions.length !== nodes.length) {
       el('reviewStatus').textContent = 'Review stopped.';
       return;
@@ -1757,11 +1759,15 @@ async function runGameReview(): Promise<void> {
     el('reviewCopyPgn').hidden = false;
     el('reviewStatus').textContent = `Reviewed ${moves.length} moves with ${label}.`;
   } catch (error) {
-    el('reviewStatus').textContent = (error as Error).name === 'AbortError' ? 'Review stopped.' : `Review failed: ${(error as Error).message}`;
+    if (reviewAbort === controller) {
+      el('reviewStatus').textContent = (error as Error).name === 'AbortError' ? 'Review stopped.' : `Review failed: ${(error as Error).message}`;
+    }
   } finally {
-    reviewAbort = null;
-    el('reviewGame').toggleAttribute('disabled', false);
-    el('reviewStop').toggleAttribute('disabled', true);
+    if (reviewAbort === controller) {
+      reviewAbort = null;
+      el('reviewGame').toggleAttribute('disabled', false);
+      el('reviewStop').toggleAttribute('disabled', true);
+    }
   }
 }
 
@@ -1908,6 +1914,7 @@ function afterNavigation() {
 const MAIA3_PANEL_RATINGS = [1100, 1300, 1500, 1700, 1900, 2200];
 let maia3PanelEvaluator: Maia3BrowserEvaluator | null = null;
 let maia3PanelLoading = false;
+let maia3PanelLoadGeneration = 0;
 let maia3PanelSeq = 0;
 let maia3PanelTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1917,23 +1924,36 @@ function maia3PanelStatus(text: string): void {
 
 async function enableMaia3Panel(): Promise<void> {
   if (maia3PanelEvaluator || maia3PanelLoading) return;
+  const mountSignal = mountAbort.signal;
+  const generation = ++maia3PanelLoadGeneration;
   maia3PanelLoading = true;
   (el('maia3Enable') as HTMLButtonElement).disabled = true;
   try {
     maia3PanelStatus('Loading Maia3…');
-    maia3PanelEvaluator = await Maia3BrowserEvaluator.create({
-      onProgress: (loaded, total) => maia3PanelStatus(`Downloading Maia3 ${(loaded / 1e6).toFixed(0)}/${total ? (total / 1e6).toFixed(0) : '?'}MB…`),
+    const evaluator = await Maia3BrowserEvaluator.create({
+      onProgress: (loaded, total) => {
+        if (!isStaleMount(mountSignal) && generation === maia3PanelLoadGeneration) {
+          maia3PanelStatus(`Downloading Maia3 ${(loaded / 1e6).toFixed(0)}/${total ? (total / 1e6).toFixed(0) : '?'}MB…`);
+        }
+      },
     });
+    if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) {
+      await evaluator.dispose();
+      return;
+    }
+    maia3PanelEvaluator = evaluator;
     el('maia3Enable').hidden = true;
     el('maia3Grid').hidden = false;
     el('maia3Caption').hidden = false;
     maia3PanelStatus('');
     scheduleMaia3Panel();
   } catch (error) {
-    maia3PanelStatus(`Maia3 load failed: ${(error as Error).message}`);
-    (el('maia3Enable') as HTMLButtonElement).disabled = false;
+    if (!isStaleMount(mountSignal) && generation === maia3PanelLoadGeneration) {
+      maia3PanelStatus(`Maia3 load failed: ${(error as Error).message}`);
+      (el('maia3Enable') as HTMLButtonElement).disabled = false;
+    }
   } finally {
-    maia3PanelLoading = false;
+    if (generation === maia3PanelLoadGeneration) maia3PanelLoading = false;
   }
 }
 
@@ -2204,6 +2224,17 @@ function wireEvents() {
 function disposeRuntimeResources(): void {
   analysisAbort?.abort();
   analysisAbort = null;
+  const reviewWasRunning = reviewAbort !== null;
+  reviewAbort?.abort();
+  reviewAbort = null;
+  if (reviewWasRunning) {
+    // Runtime reload keeps the page mounted. The stale review's identity guard
+    // intentionally skips its finally block, so restore controls here.
+    (document.getElementById('reviewGame') as HTMLButtonElement | null)?.toggleAttribute('disabled', false);
+    (document.getElementById('reviewStop') as HTMLButtonElement | null)?.toggleAttribute('disabled', true);
+    const status = document.getElementById('reviewStatus');
+    if (status) status.textContent = 'Review stopped after runtime changed.';
+  }
   if (activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
   activeWorkerSearchId = null;
   searchWorker?.terminate();
@@ -2234,6 +2265,11 @@ function disposeRuntimeResources(): void {
 function disposePageResources(): void {
   disposeRuntimeResources();
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
+  void maia3PanelEvaluator?.dispose();
+  maia3PanelEvaluator = null;
+  maia3PanelLoading = false;
+  maia3PanelLoadGeneration += 1;
+  maia3PanelSeq += 1;
   maia3PanelTimer = null;
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = null;
@@ -2374,7 +2410,40 @@ async function init(mountSignal: AbortSignal) {
   await loadLc0Backend(true, mountSignal);
 }
 
+let lastAnalysisMountHref: string | null = null;
+
+function resetAnalysisPageState(): void {
+  tree = new GameTree(params.get('fen') ?? START_FEN);
+  orientation = 'white';
+  analysisAbort = null;
+  reviewAbort?.abort();
+  reviewAbort = null;
+  lastReview = null;
+  lastReviewNodes = [];
+  lastReviewSignature = '';
+  analyzing = false;
+  lineCache.clear();
+  nodeIndex.clear();
+  engineRows = [{ family: 'lc0', variant: 'small', strength: 400 }];
+  importedGames = [];
+  importedPositionIndex = null;
+  databasePositionStats = [];
+  databasePositionKey = '';
+  databasePositionCollectionCount = 0;
+  pgnDatabaseSearchKey = '';
+  pgnCollections = [];
+  activePgnCollectionId = '';
+  bookCache.clear();
+}
+
 export function mountAnalysisBrowser(): () => void {
+  const href = location.href;
+  if (lastAnalysisMountHref !== null && lastAnalysisMountHref !== href) {
+    location.reload();
+    return () => undefined;
+  }
+  lastAnalysisMountHref = href;
+  resetAnalysisPageState();
   const controller = new AbortController();
   mountAbort = controller;
   // Test hook for automated browser checks: synthetic chessground drags are

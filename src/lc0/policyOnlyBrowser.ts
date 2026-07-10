@@ -866,8 +866,6 @@ function requestedKernelVariant(): KernelVariant {
 }
 // Register the offline app-shell SW in production builds, or opt in with ?sw=1.
 // Disabled in dev by default so it never serves stale HMR modules.
-const SW_ENABLED = params.get('sw') === '1'
-  || (params.get('sw') !== '0' && (import.meta as { env?: { PROD?: boolean } }).env?.PROD === true);
 
 function parseEarlyStop(raw: string | null): SearchEarlyStop {
   const normalized = (raw ?? 'none').toLowerCase().replace(/[ _]/g, '-');
@@ -4263,6 +4261,38 @@ async function init(mountSignal: AbortSignal) {
   }
 }
 
+let lastPolicyMountHref: string | null = null;
+
+function resetPolicyPageState(): void {
+  playerSide = params.get('side') === 'black' ? 'black' : 'white';
+  searchVisits = clampInt(params.get('visits') ?? '32', 1, 100000, 32);
+  searchBatchSize = clampInt(params.get('batch') ?? params.get('batchSize') ?? '1', 1, 512, 1);
+  searchBatchPipelineDepth = clampInt(params.get('batchPipelineDepth') ?? params.get('pipelineDepth') ?? '1', 1, 16, 1);
+  searchBatchCollisionMode = parseBatchCollisionMode(params.get('collision') ?? params.get('batchCollisionMode'));
+  searchMultiPv = clampInt(params.get('multipv') ?? params.get('multiPv') ?? '1', 1, 20, 1);
+  searchEarlyStop = parseEarlyStop(params.get('earlyStop') ?? params.get('stop'));
+  searchMovetimeMs = clampInt(params.get('movetime') ?? params.get('movetimeMs') ?? '0', 0, 600000, 0);
+  searchCpuct = clampFloat(params.get('cpuct'), 0, 100, 1.5);
+  searchCpuctSchedule = parseCpuctSchedule(params.get('cpuctSchedule'));
+  searchFpuStrategy = parseFpuStrategy(params.get('fpuStrategy'));
+  searchFpuReduction = clampFloat(params.get('fpuReduction'), 0, 5, 0.330);
+  searchTemperature = clampFloat(params.get('temperature'), 0, 10, 0);
+  engineReplyMode = params.get('mode') === 'search' ? 'search' : 'policy';
+  board = parseFen(params.get('fen') ?? START_FEN);
+  historyBoards = [board];
+  orientation = playerSide;
+  lastMove = null;
+  playedMoves.length = 0;
+  busy = false;
+  searching = false;
+  battleRunning = false;
+  battleGames = Math.max(1, Math.floor(Number(params.get('battleGames') ?? '1') || 1));
+  battleDelayMs = Math.max(0, Math.floor(Number(params.get('battleDelay') ?? '350') || 350));
+  battleOpponent = params.get('opponent') === 'stockfish' ? 'stockfish' : 'policy';
+  stockfishDepth = Math.max(1, Math.floor(Number(params.get('sfDepth') ?? '4') || 4));
+  useSearchWorker = SEARCH_WORKER_REQUESTED;
+}
+
 function seedSettingsInputs() {
   inputEl('visitsInput').value = String(searchVisits);
   inputEl('batchInput').value = String(searchBatchSize);
@@ -4371,23 +4401,24 @@ selectEl('modeSelect').addEventListener('change', () => {
 });
 }
 
-function registerAppServiceWorker() {
-  if (!SW_ENABLED || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/lc0-sw.js').then((registration) => {
-      console.info('LC0 app shell service worker registered.', registration.scope);
-    }).catch((error) => {
-      console.warn('LC0 app shell service worker registration failed.', error);
-    });
-  });
-}
-
 export function mountPolicyOnlyBrowser(): () => void {
+  const href = location.href;
+  if (lastPolicyMountHref !== null && lastPolicyMountHref !== href) {
+    // This legacy controller derives many runtime constants at module load.
+    // A full reload is required only when a cached module is remounted under a
+    // different query string; it prevents stale model/runtime parameters.
+    location.reload();
+    return () => undefined;
+  }
+  lastPolicyMountHref = href;
+  resetPolicyPageState();
   const controller = new AbortController();
   mountAbort = controller;
   seedSettingsInputs();
   wireEvents();
-  registerAppServiceWorker();
+  // The root layout owns the single origin-wide service worker. Registering a
+  // second worker from this page would replace it because both files have `/`
+  // scope.
   void init(controller.signal);
   return () => {
     controller.abort();

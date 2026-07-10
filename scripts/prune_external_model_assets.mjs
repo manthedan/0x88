@@ -29,7 +29,7 @@ function removeMatchingFiles(dir, predicate) {
 // The R2 deployment serves model blobs from an external /models origin. Keep
 // lightweight manifests/docs in dist for diagnostics, but remove local blobs and
 // packs so Netlify only hosts the app shell and small engine assets.
-removeMatchingFiles(join(root, 'models', 'lc0'), (name, _path, isDir) => isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx'));
-removeMatchingFiles(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDir && name.endsWith('.onnx'));
+removeMatchingFiles(join(root, 'models', 'lc0'), (name, _path, isDir) => isDir ? name.endsWith('.lc0web') : /\.onnx(?:\.(?:br|gz))?$/.test(name));
+removeMatchingFiles(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDir && /\.onnx(?:\.(?:br|gz))?$/.test(name));
 
 console.log(JSON.stringify({ status: 'EXTERNAL_MODEL_ASSET_PRUNE_DONE', root: relative(process.cwd(), root) || '.', removed }, null, 2));

@@ -1,13 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { afterNavigate } from '$app/navigation';
+  let mountedUrl: URL | null = null;
+  afterNavigate(({ to }) => {
+    if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
+  });
   const title = "0x88 Chess — analysis board";
   const description = "Multi-engine chess analysis in your browser: compare Leela Chess Zero and Stockfish lines side by side, review games with accuracy scores, and explore openings from your own games.";
   onMount(() => {
+    mountedUrl = new URL(location.href);
     let cleanup: () => void = () => undefined;
     let mounted = true;
     void import('../../../lc0/analysisBrowser').then((module) => {
       if (!mounted) return;
       cleanup = module.mountAnalysisBrowser();
+    }).catch((error) => {
+      if (!mounted) return;
+      console.error('[analysis] failed to load page controller', error);
+      const node = document.getElementById('message');
+      if (node) node.textContent = `Page failed to initialize: ${error instanceof Error ? error.message : String(error)}`;
     });
     return () => {
       mounted = false;
@@ -249,7 +260,7 @@
   :global(table.engine-compare .pv){font-family:var(--mono); overflow-wrap:anywhere}
   :global(table.engine-compare .agree){color:var(--accent); font-weight:700}
   .profile-row{align-items:end}
-  .profile-row select{min-width:150px}
+  :global(.profile-row select){min-width:150px}
   .profile-row input[type=text]{min-width:130px}
   :global(.profile-summary){
     margin-top:6px; padding:7px 8px;

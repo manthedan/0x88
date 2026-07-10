@@ -24,6 +24,11 @@ const ASSET_GROUPS = [
       '/reckless/reckless.wasm',
       '/reckless/reckless-simd128.wasm',
       '/reckless/reckless-relaxed-simd128.wasm',
+    ],
+    // These variants are intentionally not part of the normal release gate.
+    // Report them so researchers get the prep command, but do not make a
+    // production-capable checkout fail validation.
+    optionalAssets: [
       '/reckless/reckless-browser-api.wasm',
       '/reckless/reckless-browser-api-simd128.wasm',
       '/reckless/reckless-browser-api-simd128-external.wasm',
@@ -116,9 +121,11 @@ async function checkAsset(urlPath) {
 
 async function checkGroup(group) {
   const assets = await Promise.all(group.assets.map(checkAsset));
+  const optionalAssets = await Promise.all((group.optionalAssets ?? []).map(checkAsset));
   const missing = assets.filter((asset) => !asset.ok).map((asset) => asset.url);
-  const bytes = assets.reduce((sum, asset) => sum + (asset.bytes ?? 0), 0);
-  return { ...group, ok: missing.length === 0, missing, bytes, assets };
+  const optionalMissing = optionalAssets.filter((asset) => !asset.ok).map((asset) => asset.url);
+  const bytes = [...assets, ...optionalAssets].reduce((sum, asset) => sum + (asset.bytes ?? 0), 0);
+  return { ...group, ok: missing.length === 0, missing, optionalMissing, bytes, assets, optionalAssets };
 }
 
 function textReport(report) {
@@ -129,7 +136,8 @@ function textReport(report) {
     lines.push(`  docs: ${group.docs}`);
     lines.push(`  bytes present: ${group.bytes}`);
     for (const asset of group.assets) lines.push(`  ${asset.ok ? 'ok ' : 'miss'} ${asset.url}${asset.ok ? ` (${asset.bytes} bytes)` : ''}`);
-    if (!group.ok) lines.push(`  prepare: ${group.command}`);
+    for (const asset of group.optionalAssets) lines.push(`  ${asset.ok ? 'ok ' : 'opt '} ${asset.url}${asset.ok ? ` (${asset.bytes} bytes)` : ' (optional, not staged)'}`);
+    if (!group.ok || group.optionalMissing.length) lines.push(`  prepare: ${group.command}`);
   }
   if (!report.ok) {
     lines.push('\nMissing asset prep commands:');

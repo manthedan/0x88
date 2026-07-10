@@ -9,6 +9,11 @@
     void import('../lc0/homeBrowser').then((module) => {
       if (!mounted) return;
       cleanup = module.mountHomeBrowser();
+    }).catch((error) => {
+      if (!mounted) return;
+      console.error('[home] failed to load page controller', error);
+      const node = document.getElementById('capNote');
+      if (node) node.textContent = `Page failed to initialize: ${error instanceof Error ? error.message : String(error)}`;
     });
     return () => {
       mounted = false;

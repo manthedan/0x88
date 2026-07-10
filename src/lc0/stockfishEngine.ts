@@ -115,9 +115,11 @@ export class StockfishEngine implements BrowserUciEngine {
   private rejectAnalyze: ((error: Error) => void) | null = null;
   private resolveReady: (() => void) | null = null;
   private rejectReady: ((error: Error) => void) | null = null;
+  private rejectInit: ((error: Error) => void) | null = null;
   private analyzeLines: Map<number, StockfishInfoLine> | null = null;
   private lastInfoLines: StockfishInfoLine[] = [];
   private queueTail: Promise<void> = Promise.resolve();
+  private disposed = false;
   private options: StockfishOptions;
   private readonly url: string;
 
@@ -154,12 +156,14 @@ export class StockfishEngine implements BrowserUciEngine {
     const rejectMove = this.rejectMove;
     const rejectAnalyze = this.rejectAnalyze;
     const rejectReady = this.rejectReady;
+    const rejectInit = this.rejectInit;
     this.resolveMove = null;
     this.rejectMove = null;
     this.resolveAnalyze = null;
     this.rejectAnalyze = null;
     this.resolveReady = null;
     this.rejectReady = null;
+    this.rejectInit = null;
     this.analyzeLines = null;
     this.lastInfoLines = [];
     this.worker?.terminate();
@@ -168,11 +172,14 @@ export class StockfishEngine implements BrowserUciEngine {
     rejectMove?.(error);
     rejectAnalyze?.(error);
     rejectReady?.(error);
+    rejectInit?.(error);
   }
 
   private init(): Promise<void> {
+    if (this.disposed) return Promise.reject(abortError());
     if (this.readyPromise) return this.readyPromise;
     this.readyPromise = new Promise<void>((resolve, reject) => {
+      this.rejectInit = reject;
       try {
         const worker = new Worker(this.url);
         this.worker = worker;
@@ -187,6 +194,7 @@ export class StockfishEngine implements BrowserUciEngine {
               resolveReady();
               return;
             }
+            this.rejectInit = null;
             resolve();
             return;
           }
@@ -224,6 +232,7 @@ export class StockfishEngine implements BrowserUciEngine {
         };
         worker.postMessage('uci');
       } catch (error) {
+        this.rejectInit = null;
         reject(error as Error);
       }
     });
@@ -352,16 +361,10 @@ export class StockfishEngine implements BrowserUciEngine {
   }
 
   dispose(): void {
-    this.worker?.terminate();
-    this.worker = null;
-    this.readyPromise = null;
-    this.resolveMove = null;
-    this.rejectMove = null;
-    this.resolveAnalyze = null;
-    this.rejectAnalyze = null;
-    this.resolveReady = null;
-    this.rejectReady = null;
-    this.analyzeLines = null;
-    this.lastInfoLines = [];
+    this.disposed = true;
+    // Reject active work before terminating the worker. Merely clearing these
+    // callbacks leaves bestMove()/analyze()/waitReady() promises pending
+    // forever and keeps the exclusive queue locked.
+    this.failActive(abortError());
   }
 }

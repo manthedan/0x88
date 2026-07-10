@@ -150,8 +150,8 @@
     <dl class="engine-meta">
       <dt>Author</dt><dd>notune &middot; <a href="https://github.com/notune/LeelaQueenOdds" rel="noopener">github.com/notune/LeelaQueenOdds</a></dd>
       <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span> (derived from LC0)</dd>
-      <dt>Artifact</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/models/lc0/lqo_v2.f16.qdq8.onnx">/models/lc0/lqo_v2.f16.qdq8.onnx</a> (~96 MB, QDQ int8)</dd>
-      <dt>Derived from</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/models/lc0/lqo_v2.f16.onnx">lqo_v2.f16.onnx</a> (fp16 source export)</dd>
+      <dt>Artifact</dt><dd><a href="https://assets.0x88.app/models/lc0/lqo_v2.f16.qdq8.onnx">/models/lc0/lqo_v2.f16.qdq8.onnx</a> (~96 MB, QDQ int8)</dd>
+      <dt>Derived from</dt><dd><a href="https://assets.0x88.app/models/lc0/lqo_v2.f16.onnx">lqo_v2.f16.onnx</a> (fp16 source export)</dd>
       <dt>Manifest</dt><dd><a href="/models/lc0/manifest.json">/models/lc0/manifest.json</a></dd>
     </dl>
     <p>The public net behind the Lichess queen-odds bot: a Leela Chess Zero network fine-tuned to win against humans from a <strong>queen-down</strong> starting position. Selecting it on the Play page removes your queen before move one, and the bot then presses hardest for tricks &mdash; the same dynamic the Lichess bot is famous for. Not a general analysis net (it evaluates the queen-odds start as equal), but a uniquely instructive opponent for practicing from behind.</p>
@@ -184,8 +184,8 @@
     <dl class="engine-meta">
       <dt>Author</dt><dd>official-stockfish &middot; via <a href="https://github.com/nmrugg/stockfish.js" rel="noopener">github.com/nmrugg/stockfish.js</a></dd>
       <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
-      <dt>Manifest</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/stockfish/stockfish-18.0.7.manifest.json">/stockfish/stockfish-18.0.7.manifest.json</a></dd>
-      <dt>Source</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/stockfish/stockfish-18.0.7-corresponding-source.tar.gz">stockfish-18.0.7-corresponding-source.tar.gz</a></dd>
+      <dt>Manifest</dt><dd><a href="/stockfish/stockfish-18.0.7.manifest.json">/stockfish/stockfish-18.0.7.manifest.json</a></dd>
+      <dt>Source</dt><dd><a href="https://assets.0x88.app/stockfish/stockfish-18.0.7-corresponding-source.tar.gz">stockfish-18.0.7-corresponding-source.tar.gz</a></dd>
     </dl>
     <p>The strongest classical chess engine in the world, and has been for years. A community project with hundreds of contributors, continually refined through distributed testing (FishCooking). The NNUE evaluation lets it calculate god-like evaluations with a forward pass cheap enough to search hundreds of millions of nodes per second on a CPU. We ship Stockfish.js 18 in Lite and full-network flavors.</p>
     <details>
@@ -201,8 +201,8 @@
     <dl class="engine-meta">
       <dt>Author</dt><dd>Jay Honnold &middot; <a href="https://github.com/jhonnold/berserk" rel="noopener">github.com/jhonnold/berserk</a></dd>
       <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
-      <dt>Manifest</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/berserk/berserk-emscripten-single-thread.manifest.json">/berserk/berserk-emscripten-single-thread.manifest.json</a></dd>
-      <dt>Source</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz">berserk-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
+      <dt>Manifest</dt><dd><a href="/berserk/berserk-emscripten-single-thread.manifest.json">/berserk/berserk-emscripten-single-thread.manifest.json</a></dd>
+      <dt>Source</dt><dd><a href="https://assets.0x88.app/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz">berserk-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
     </dl>
     <p>A remarkably strong, remarkably compact engine written in C. Jay Honnold's work is a textbook example of how far clean code and a well-tuned NNUE can go &mdash; Berserk consistently outranks engines with far larger codebases. Compiled here with Emscripten for the browser.</p>
   </div>
@@ -212,8 +212,8 @@
     <dl class="engine-meta">
       <dt>Author</dt><dd>Cosmo Bobak &middot; <a href="https://github.com/cosmobobak/viridithas" rel="noopener">github.com/cosmobobak/viridithas</a></dd>
       <dt>License</dt><dd><span class="lic mit">MIT</span></dd>
-      <dt>Manifest</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/viridithas/viridithas-wasip1.manifest.json">/viridithas/viridithas-wasip1.manifest.json</a></dd>
-      <dt>Source</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/viridithas/viridithas-wasip1-corresponding-source.tar.gz">viridithas-wasip1-corresponding-source.tar.gz</a></dd>
+      <dt>Manifest</dt><dd><a href="/viridithas/viridithas-wasip1.manifest.json">/viridithas/viridithas-wasip1.manifest.json</a></dd>
+      <dt>Source</dt><dd><a href="https://assets.0x88.app/viridithas/viridithas-wasip1-corresponding-source.tar.gz">viridithas-wasip1-corresponding-source.tar.gz</a></dd>
     </dl>
     <p>A modern Rust engine and a consistent top-tier competitor in computer-chess tournaments. Rust's safety guarantees plus Cosmo Bobak's tuning make it both fast and approachable. The browser build here uses relaxed-SIMD for the heavy NNUE inner loops, which WebAssembly finally exposes to engines.</p>
   </div>
@@ -223,8 +223,8 @@
     <dl class="engine-meta">
       <dt>Author</dt><dd>Yoshie2000 &middot; <a href="https://github.com/Yoshie2000/PlentyChess" rel="noopener">github.com/Yoshie2000/PlentyChess</a></dd>
       <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
-      <dt>Manifest</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/plentychess/plentychess-emscripten-single-thread.manifest.json">/plentychess/plentychess-emscripten-single-thread.manifest.json</a></dd>
-      <dt>Source</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz">plentychess-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
+      <dt>Manifest</dt><dd><a href="/plentychess/plentychess-emscripten-single-thread.manifest.json">/plentychess/plentychess-emscripten-single-thread.manifest.json</a></dd>
+      <dt>Source</dt><dd><a href="https://assets.0x88.app/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz">plentychess-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
     </dl>
     <p>A top-tier C++ engine and frequent contender at the top of rating lists. PlentyChess ships its own NNUE architecture and a feature-detected SIMD build so the browser picks the fastest instruction set the device supports. Compiled here with Emscripten, with the processed NNUE network embedded.</p>
   </div>
@@ -235,7 +235,7 @@
       <dt>Author</dt><dd>CodeDeliveryService &middot; <a href="https://github.com/codedeliveryservice/Reckless" rel="noopener">github.com/codedeliveryservice/Reckless</a></dd>
       <dt>License</dt><dd><span class="lic agpl">AGPL-3.0</span></dd>
       <dt>Notice</dt><dd><a href="/reckless/NOTICE.md">/reckless/NOTICE.md</a></dd>
-      <dt>Source</dt><dd><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-scalar-corresponding-source.tar.gz">scalar</a>, <a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-simd128-corresponding-source.tar.gz">SIMD</a>, and <a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz">relaxed SIMD</a></dd>
+      <dt>Source</dt><dd><a href="https://assets.0x88.app/reckless/reckless-scalar-corresponding-source.tar.gz">scalar</a>, <a href="https://assets.0x88.app/reckless/reckless-simd128-corresponding-source.tar.gz">SIMD</a>, and <a href="https://assets.0x88.app/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz">relaxed SIMD</a></dd>
       <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (build scripts &amp; release policy)</dd>
     </dl>
     <p>An aggressive, sacrificial Rust engine that lives up to its name &mdash; it plays sharp, entertaining chess and is a favorite in the computer-chess streaming scene.</p>
@@ -280,7 +280,7 @@
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Leela Queen Odds (LQO)</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/notune/LeelaQueenOdds" rel="noopener">notune/LeelaQueenOdds</a></td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/models/lc0/lqo_v2.f16.onnx">fp16 source export</a> + <a href="https://github.com/manthedan/0x88" rel="noopener">0x88 repo</a> (QDQ int8 derivation scripts)</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://assets.0x88.app/models/lc0/lqo_v2.f16.onnx">fp16 source export</a> + <a href="https://github.com/manthedan/0x88" rel="noopener">0x88 repo</a> (QDQ int8 derivation scripts)</td>
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Maia3</td>
@@ -292,31 +292,31 @@
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Stockfish 18</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/nmrugg/stockfish.js" rel="noopener">nmrugg/stockfish.js</a></td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/stockfish/stockfish-18.0.7-corresponding-source.tar.gz">stockfish-18.0.7-corresponding-source.tar.gz</a></td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://assets.0x88.app/stockfish/stockfish-18.0.7-corresponding-source.tar.gz">stockfish-18.0.7-corresponding-source.tar.gz</a></td>
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Berserk</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/jhonnold/berserk" rel="noopener">jhonnold/berserk</a></td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz">berserk-emscripten-single-thread-corresponding-source.tar.gz</a></td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://assets.0x88.app/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz">berserk-emscripten-single-thread-corresponding-source.tar.gz</a></td>
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Viridithas</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">MIT</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/cosmobobak/viridithas" rel="noopener">cosmobobak/viridithas</a></td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/viridithas/viridithas-wasip1-corresponding-source.tar.gz">viridithas-wasip1-corresponding-source.tar.gz</a> (license still honored)</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://assets.0x88.app/viridithas/viridithas-wasip1-corresponding-source.tar.gz">viridithas-wasip1-corresponding-source.tar.gz</a> (license still honored)</td>
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">PlentyChess</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/Yoshie2000/PlentyChess" rel="noopener">Yoshie2000/PlentyChess</a></td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz">plentychess-emscripten-single-thread-corresponding-source.tar.gz</a></td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://assets.0x88.app/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz">plentychess-emscripten-single-thread-corresponding-source.tar.gz</a></td>
       </tr>
       <tr>
         <td style="padding:10px; font-weight:600">Reckless</td>
         <td style="padding:10px; font-family:var(--mono); font-size:12px">AGPL-3.0</td>
         <td style="padding:10px"><a href="https://github.com/codedeliveryservice/Reckless" rel="noopener">codedeliveryservice/Reckless</a></td>
-        <td style="padding:10px"><a href="/reckless/NOTICE.md">NOTICE.md</a> + <a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-scalar-corresponding-source.tar.gz">scalar</a>, <a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-simd128-corresponding-source.tar.gz">SIMD</a>, and <a href="https://pub-c3fb64db6e434c738bc86cb1a56d6384.r2.dev/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz">relaxed SIMD</a> source archives</td>
+        <td style="padding:10px"><a href="/reckless/NOTICE.md">NOTICE.md</a> + <a href="https://assets.0x88.app/reckless/reckless-scalar-corresponding-source.tar.gz">scalar</a>, <a href="https://assets.0x88.app/reckless/reckless-simd128-corresponding-source.tar.gz">SIMD</a>, and <a href="https://assets.0x88.app/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz">relaxed SIMD</a> source archives</td>
       </tr>
     </tbody>
   </table>
@@ -378,7 +378,7 @@
     border-left:2px solid transparent; margin-left:-2px;
   }
   .toc a:hover{color:var(--ink); background:var(--rule-soft)}
-  .toc a.active{
+  :global(.toc a.active){
     color:var(--accent); font-weight:500;
     background:var(--accent-soft); border-left-color:var(--accent);
   }
@@ -414,12 +414,11 @@
     font-size:16px; max-width:64ch; line-height:1.65;
   }
   .doc-content p{margin:0 0 14px; line-height:1.7; color:var(--ink-soft); max-width:72ch}
-  .doc-content ul, .doc-content ol{
+  .doc-content ul{
     margin:0 0 16px; padding-left:24px;
     line-height:1.7; color:var(--ink-soft); max-width:70ch;
   }
   .doc-content ul li::marker{color:var(--accent)}
-  .doc-content ol li::marker{color:var(--accent); font-weight:600}
   .doc-content code{
     font-family:var(--mono); font-size:.88em;
     background:var(--rule-soft); padding:1px 6px;
@@ -493,24 +492,18 @@
     background:var(--accent-soft);
     border-color:color-mix(in srgb, var(--accent) 30%, var(--rule));
   }
-  .callout.warn{
-    background:var(--warn-soft);
-    border-color:color-mix(in srgb, var(--warn) 30%, var(--rule));
-  }
   .callout h4{
     margin:0 0 10px; font-size:14px;
     font-family:var(--sans); letter-spacing:.02em;
     display:flex; align-items:center; gap:8px;
   }
   .callout.info h4{color:var(--accent-deep)}
-  .callout.warn h4{color:var(--warn)}
   .callout h4::before{
     font-family:var(--mono); font-size:14px;
     width:20px; height:20px; border-radius:4px;
     display:inline-flex; align-items:center; justify-content:center;
   }
   .callout.info h4::before{content:"i"; background:var(--accent); color:var(--panel); font-style:italic}
-  .callout.warn h4::before{content:"!"; background:var(--warn); color:var(--panel); font-weight:700}
   .callout p{margin:0 0 10px; line-height:1.65; font-size:14px; max-width:64ch}
   .callout p:last-child{margin:0}
   .callout code{

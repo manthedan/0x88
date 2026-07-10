@@ -28,10 +28,9 @@ function removeMatchingFiles(dir, predicate) {
 remove(join(root, 'runtimes'));
 remove(join(root, 'monty'));
 remove(join(root, 'rust_bridge'));
-remove(join(root, 'berserk'));
-remove(join(root, 'plentychess'));
-remove(join(root, 'viridithas'));
-removeMatchingFiles(join(root, 'reckless'), (name) => name.endsWith('.wasm') || name.endsWith('.nnue') || name.endsWith('.tar.gz'));
+for (const family of ['berserk', 'plentychess', 'viridithas', 'reckless']) {
+  removeMatchingFiles(join(root, family), (name) => /\.(?:wasm|nnue|data|js)(?:\.(?:br|gz))?$|\.tar\.gz(?:\.(?:br|gz))?$/.test(name));
+}
 remove(join(root, 'models', 'monty'));
 removeMatchingFiles(join(root, 'ort'), (name) => name.endsWith('.map'));
 removeMatchingFiles(join(root, 'stockfish'), (name) => ![
@@ -39,6 +38,8 @@ removeMatchingFiles(join(root, 'stockfish'), (name) => ![
   'stockfish-18-lite.wasm',
   'stockfish-18-lite-single.js',
   'stockfish-18-lite-single.wasm',
+  'stockfish-18.0.7.manifest.json',
+  'README.md',
 ].includes(name));
 
 console.log(JSON.stringify({ status: 'V0_DEPLOY_ASSET_PRUNE_DONE', root: relative(process.cwd(), root) || '.', removed }, null, 2));

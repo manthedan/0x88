@@ -153,6 +153,18 @@ export class EngineResourceBroker {
 
   unregister(engineId: string): void {
     this.profiles.delete(engineId);
+    // A caller may remove a participant while an exclusive request is queued.
+    // Reject those requests now rather than leaving drainQueue() to dereference
+    // a missing profile (and strand the promise forever).
+    const error = new Error(`Engine ${engineId} was unregistered while waiting for a resource lease`);
+    error.name = 'AbortError';
+    for (let i = this.queue.length - 1; i >= 0; i -= 1) {
+      const request = this.queue[i];
+      if (request.engineId !== engineId) continue;
+      this.queue.splice(i, 1);
+      request.cleanup();
+      request.reject(error);
+    }
   }
 
   setPolicy(policy: ResourceBrokerPolicy): void {
@@ -210,7 +222,11 @@ export class EngineResourceBroker {
       if (this.policy === 'exclusive' && this.activeCpuLeases() > 0) return;
       const next = this.queue.shift()!;
       next.cleanup();
-      const profile = this.profiles.get(next.engineId)!;
+      const profile = this.profiles.get(next.engineId);
+      if (!profile) {
+        next.reject(new Error(`Engine ${next.engineId} is no longer registered with the resource broker`));
+        continue;
+      }
       const threads = this.policy === 'exclusive'
         ? clampThreads(this.cpuBudget(), profile)
         : this.sharedGrant(next.engineId, profile);

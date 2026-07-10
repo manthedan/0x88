@@ -12,7 +12,7 @@ import { resolvePublicAssetUrl } from './assetUrls.ts';
  */
 export const MAIA3_DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/maia3/maia3_simplified.qdq8.onnx');
 export const MAIA3_FP16_MODEL_URL = resolvePublicAssetUrl('/models/maia3/maia3_simplified.onnx');
-export const MAIA3_MODEL_MANIFEST_URL = resolvePublicAssetUrl('/models/maia3/manifest.json');
+export const MAIA3_MODEL_MANIFEST_URL = '/models/maia3/manifest.json';
 export const MAIA3_MIN_ELO = 600;
 export const MAIA3_MAX_ELO = 2600;
 export const MAIA3_DEFAULT_ELO = 1500;
@@ -276,8 +276,13 @@ export class Maia3BrowserEvaluator {
       }
     }
     const worker = new Worker(new URL('./maia3Worker.ts', import.meta.url), { type: 'module', name: 'maia3-evaluator' });
-    const init = Maia3BrowserEvaluator.postInit(worker, modelLoad.model, options.ep);
-    return new Maia3BrowserEvaluator(worker, modelLoad, selfElo, oppoElo, await init);
+    try {
+      const names = await Maia3BrowserEvaluator.postInit(worker, modelLoad.model, options.ep);
+      return new Maia3BrowserEvaluator(worker, modelLoad, selfElo, oppoElo, names);
+    } catch (error) {
+      worker.terminate();
+      throw error;
+    }
   }
 
   private static postInit(worker: Worker, model: string | ArrayBuffer, ep?: Maia3BrowserEvaluatorOptions['ep']): Promise<{ inputNames: string[]; outputNames: string[]; backend: string }> {

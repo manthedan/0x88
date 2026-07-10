@@ -3178,7 +3178,43 @@ async function init(mountSignal: AbortSignal) {
   void runArenaBenchAutorun();
 }
 
+let lastArenaMountHref: string | null = null;
+
+function resetArenaPageState(): void {
+  board = parseFen(START_FEN);
+  historyBoards = [board];
+  lastUci = null;
+  liveTrail = null;
+  finishedTrails.length = 0;
+  reviewTrail = null;
+  reviewIndex = 0;
+  reviewing = false;
+  reviewShapes = null;
+  rootChartContext = null;
+  boardWhiteId = null;
+  boardBlackId = null;
+  boardWhiteName = null;
+  boardBlackName = null;
+  loadingLc0 = false;
+  running = false;
+  startPending = false;
+  gameChartSamples = [];
+  games.length = 0;
+  engines.clear();
+  seatRows.splice(0, seatRows.length,
+    { family: 'lc0', variant: 'small', strength: 100 },
+    { family: 'sf', variant: 'lite', strength: 8 },
+  );
+}
+
 export function mountArenaBrowser(): () => void {
+  const href = location.href;
+  if (lastArenaMountHref !== null && lastArenaMountHref !== href) {
+    location.reload();
+    return () => undefined;
+  }
+  lastArenaMountHref = href;
+  resetArenaPageState();
   const controller = new AbortController();
   mountAbort = controller;
   void init(controller.signal);

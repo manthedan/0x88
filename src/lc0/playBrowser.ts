@@ -919,7 +919,15 @@ function ctxInit(ctx: PlayContext): void {
   ctxRender(ctx);
 }
 
+let lastPlayMountHref: string | null = null;
+
 export function mountPlayBrowser(): () => void {
+  const href = location.href;
+  if (lastPlayMountHref !== null && lastPlayMountHref !== href) {
+    location.reload();
+    return () => undefined;
+  }
+  lastPlayMountHref = href;
   const ctx = createPlayContext();
   ctxInit(ctx);
 

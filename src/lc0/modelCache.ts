@@ -1,5 +1,3 @@
-import { resolvePublicAssetUrl } from './assetUrls.ts';
-
 export type Lc0ModelCacheMode = 'url' | 'cache' | 'memory';
 
 export interface Lc0ModelManifestEntry {
@@ -45,13 +43,16 @@ export interface Lc0ModelLoadOptions {
 }
 
 const DEFAULT_CACHE_NAME = 'lc0-browser-models-v1';
-const DEFAULT_MANIFEST_URL = resolvePublicAssetUrl('/models/lc0/manifest.json');
+// Manifests are small app-shell metadata and are staged locally even when the
+// model blobs resolve to the external asset origin. Keeping them same-origin
+// preserves length/sha256 validation if the CDN does not publish manifests.
+const DEFAULT_MANIFEST_URL = '/models/lc0/manifest.json';
 
 function defaultManifestUrlForModel(modelUrl: string): string {
   try {
     const url = new URL(modelUrl, location.href);
-    if (url.pathname.startsWith('/models/lc0/')) return new URL('/models/lc0/manifest.json', url).href;
-    if (url.pathname.startsWith('/models/maia3/')) return new URL('/models/maia3/manifest.json', url).href;
+    if (url.pathname.startsWith('/models/lc0/')) return new URL('/models/lc0/manifest.json', location.origin).href;
+    if (url.pathname.startsWith('/models/maia3/')) return new URL('/models/maia3/manifest.json', location.origin).href;
   } catch {
     // Fall through to the configured local/default manifest.
   }

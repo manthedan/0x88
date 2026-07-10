@@ -1,13 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { afterNavigate } from '$app/navigation';
+  let mountedUrl: URL | null = null;
+  afterNavigate(({ to }) => {
+    if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
+  });
   const title = "0x88 Chess — play chess vs an engine in your browser";
   const description = "Play chess against Leela Chess Zero, Stockfish, and four more engines running entirely in your browser. Five strength levels, takebacks, and PGN export.";
   onMount(() => {
+    mountedUrl = new URL(location.href);
     let cleanup: () => void = () => undefined;
     let mounted = true;
     void import('../../../lc0/playBrowser').then((module) => {
       if (!mounted) return;
       cleanup = module.mountPlayBrowser();
+    }).catch((error) => {
+      if (!mounted) return;
+      console.error('[play] failed to load page controller', error);
+      const node = document.getElementById('status');
+      if (node) node.textContent = `Page failed to initialize: ${error instanceof Error ? error.message : String(error)}`;
     });
     return () => {
       mounted = false;
