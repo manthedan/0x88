@@ -246,7 +246,7 @@ export function stockfishEngineLabel(variant: string, surface: EngineSurface): s
 }
 
 export function centipawnEngineLabel(variant: string): string {
-  if (variant === 'bt4-ort') return 'Centipawn · BT4 SOAP REM';
+  if (variant === 'bt4-ort') return 'Centipawn';
   if (variant === 'bt4-custom') return 'Centipawn · custom WebGPU';
   return 'Centipawn · auto';
 }

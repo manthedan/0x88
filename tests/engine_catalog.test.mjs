@@ -56,6 +56,7 @@ test('static LC0 and Stockfish variants expose labels and gating metadata', () =
   assert.equal(lc0EngineLabel('bt4'), 'Lc0 BT4-it332');
   assert.equal(stockfishEngineLabel('lite', 'arena'), 'Stockfish Lite');
   assert.equal(stockfishEngineLabel('lite', 'analysis'), 'SF Lite');
+  assert.equal(centipawnEngineLabel('bt4-ort'), 'Centipawn');
   assert.equal(centipawnEngineLabel('bt4-custom'), 'Centipawn · custom WebGPU');
   assert.deepEqual(centipawnVariantOptions().map((option) => option.value), ['bt4-ort', 'bt4-auto', 'bt4-custom']);
   assert.deepEqual(stockfishVariantOptions().map((option) => option.value), ['lite', 'full']);

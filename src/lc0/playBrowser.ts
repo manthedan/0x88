@@ -63,7 +63,7 @@ const ALL_ENGINE_OPTIONS: PlayEngineOption[] = [
   { id: 'viridithas', label: 'Viridithas', family: 'viridithas', variant: 'default', group: 'engine' },
   { id: 'berserk', label: 'Berserk', family: 'berserk', variant: 'default', group: 'engine' },
   { id: 'plentychess', label: 'PlentyChess', family: 'plentychess', variant: 'default', group: 'engine' },
-  { id: 'centipawn', label: 'Centipawn · BT4 SOAP REM', family: 'centipawn', variant: 'bt4-ort', group: 'engine' },
+  { id: 'centipawn', label: 'Centipawn', family: 'centipawn', variant: 'bt4-ort', group: 'engine' },
 ];
 const ENGINE_OPTIONS: PlayEngineOption[] = isV0DeployProfile()
   ? ALL_ENGINE_OPTIONS.filter((option) => option.family === 'maia3' || option.id === 'leela-queen-odds' || option.id === 'sf-lite' || option.id === 'lc0-small' || option.id === 'lc0-bt4' || option.id === 'reckless' || option.id === 'berserk' || option.id === 'viridithas' || option.id === 'plentychess' || option.id === 'centipawn')
@@ -414,11 +414,11 @@ function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
 function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
   if (centipawnEvaluator) return Promise.resolve(centipawnEvaluator);
   if (!centipawnLoadPromise) {
-    ctxSetEngineNote('Loading Centipawn BT4 SOAP REM…');
+    ctxSetEngineNote('Loading Centipawn…');
     centipawnLoadPromise = createBrowserSquareformerRuntimeEvaluator({
       id: 'bt4-soap-rem-c19000-final',
       modelId: 'bt4-soap-rem-c19000-final',
-      label: 'Centipawn · BT4 SOAP REM',
+      label: 'Centipawn',
       onnx: CENTIPAWN_MODEL_URL,
       meta: CENTIPAWN_META_URL,
       runtime: 'ort',
