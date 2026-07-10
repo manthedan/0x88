@@ -81,6 +81,8 @@ function inferTests(files) {
   const exact = new Map([
     ['src/lc0/analysisBrowser.ts', ['engine_catalog', 'engine_resource_broker', 'lc0_analysis_format']],
     ['src/lc0/engineCatalog.ts', ['engine_catalog']],
+    ['src/lc0/engineProvision.ts', ['engine_catalog']],
+    ['src/lc0/playBrowser.ts', ['engine_catalog']],
     ['src/lc0/resourceBroker.ts', ['engine_resource_broker']],
     ['src/lc0/recklessVariants.ts', ['lc0_reckless_variants']],
     ['src/lc0/viridithasVariants.ts', ['viridithas_variants']],

@@ -20,18 +20,10 @@ import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { BIG_NETS, LQO_NET, T3_NET, bigNetMemoryCaution, bigNetOptionState, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig, type Bt4SearchOptions } from './bt4Engine.ts';
 import { acquireBigNetSearcher, peekBigNetSearcher, releaseUnusedBigNetSearchers, type BigNetKey } from './bigNetSessionPool.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
-import type { RecklessEngine } from './recklessEngine.ts';
-import { defaultRecklessVariantKey, recklessVariantByKey, resolveDefaultRecklessVariantAssetFallback } from './recklessVariants.ts';
-import type { ViridithasEngine } from './viridithasEngine.ts';
-import { defaultViridithasVariantKey, resolveDefaultViridithasVariantAssetFallback, viridithasVariantByKey } from './viridithasVariants.ts';
-import type { BerserkEngine } from './berserkEngine.ts';
-import { berserkVariantByKey, defaultBerserkVariantKey, resolveDefaultBerserkVariantAssetFallback } from './berserkVariants.ts';
-import type { PlentyChessEngine } from './plentychessEngine.ts';
-import { defaultPlentyChessVariantKey, plentyChessVariantByKey, resolveDefaultPlentyChessVariantAssetFallback } from './plentychessVariants.ts';
-import { createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createStormphraxEngine, createViridithasEngine } from './engineProvision.ts';
-import { defaultStormphraxVariantKey, resolveDefaultStormphraxVariantAssetFallback, stormphraxVariantByKey, stormphraxVariantUnsupportedReason } from './stormphraxVariants.ts';
+import { createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
+import { defaultStormphraxVariantKey, stormphraxVariantByKey, stormphraxVariantUnsupportedReason } from './stormphraxVariants.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { isV0DeployProfile } from './engineCatalog.ts';
+import { enginePlayLevels, enginePlayOptions, isV0DeployProfile, type EngineFamily } from './engineCatalog.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
 
@@ -41,7 +33,7 @@ const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUr
 const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl('/models/bt4_soap_rem_c19000_final.onnx');
 const CENTIPAWN_META_URL = resolvePublicAssetUrl('/models/bt4_soap_rem_c19000_final.meta.json');
 
-type PlayFamily = 'maia3' | 'lc0' | 'centipawn' | 'sf' | 'reckless' | 'viridithas' | 'berserk' | 'plentychess' | 'stormphrax';
+type PlayFamily = 'maia3' | EngineFamily;
 
 interface PlayEngineOption {
   id: string;
@@ -52,24 +44,10 @@ interface PlayEngineOption {
   group: 'human' | 'odds' | 'engine';
 }
 
-const ALL_ENGINE_OPTIONS: PlayEngineOption[] = [
+const ENGINE_OPTIONS: PlayEngineOption[] = [
   { id: 'maia3', label: 'Maia3 · Elo-conditioned human model', family: 'maia3', variant: 'maia3', group: 'human' },
-  { id: 'leela-queen-odds', label: 'Leela Queen Odds', family: 'lc0', variant: 'lqo', group: 'odds' },
-  { id: 'sf-lite', label: 'Stockfish Lite', family: 'sf', variant: 'lite', group: 'engine' },
-  { id: 'sf-full', label: 'Stockfish', family: 'sf', variant: 'full', group: 'engine' },
-  { id: 'lc0-small', label: 'Lc0 · Small net', family: 'lc0', variant: 'small', group: 'engine' },
-  { id: 'lc0-t3', label: 'Lc0 · t3-512 distill', family: 'lc0', variant: 't3', group: 'engine' },
-  { id: 'lc0-bt4', label: 'Lc0 · BT4-it332', family: 'lc0', variant: 'bt4', group: 'engine' },
-  { id: 'reckless', label: 'Reckless', family: 'reckless', variant: 'default', group: 'engine' },
-  { id: 'viridithas', label: 'Viridithas', family: 'viridithas', variant: 'default', group: 'engine' },
-  { id: 'berserk', label: 'Berserk', family: 'berserk', variant: 'default', group: 'engine' },
-  { id: 'plentychess', label: 'PlentyChess', family: 'plentychess', variant: 'default', group: 'engine' },
-  { id: 'stormphrax', label: 'Stormphrax', family: 'stormphrax', variant: 'emscripten', group: 'engine' },
-  { id: 'centipawn', label: 'Centipawn', family: 'centipawn', variant: 'bt4-ort', group: 'engine' },
+  ...enginePlayOptions().map(({ id, label, family, variant, group }) => ({ id, label, family, variant, group })),
 ];
-const ENGINE_OPTIONS: PlayEngineOption[] = isV0DeployProfile()
-  ? ALL_ENGINE_OPTIONS.filter((option) => option.family === 'maia3' || option.id === 'leela-queen-odds' || option.id === 'sf-lite' || option.id === 'lc0-small' || option.id === 'lc0-bt4' || option.id === 'reckless' || option.id === 'berserk' || option.id === 'viridithas' || option.id === 'plentychess' || option.id === 'stormphrax' || option.id === 'centipawn')
-  : ALL_ENGINE_OPTIONS;
 
 const LEVEL_COUNT = 5;
 /** Search-effort labels. Deliberately not "Beginner": engine play is strong at any setting. */
@@ -83,16 +61,6 @@ const SF_LEVELS = [
   { skill: 20, depth: 18, label: '5 · Full strength' },
 ] as const;
 
-/** Per-family strength ladders indexed by level (0-4): visits for lc0, depth otherwise. */
-const LEVELS: Record<Exclude<PlayFamily, 'maia3' | 'sf'>, number[]> = {
-  lc0: [8, 32, 100, 400, 1600],
-  centipawn: [8, 32, 100, 400, 1600],
-  reckless: [2, 4, 6, 10, 14],
-  viridithas: [2, 4, 6, 9, 12],
-  berserk: [2, 4, 6, 9, 12],
-  plentychess: [2, 4, 6, 9, 12],
-  stormphrax: [2, 4, 6, 9, 12],
-};
 /** Big nets are far slower per visit; keep upper levels playable. */
 const BIG_NET_LEVELS = [4, 16, 64, 256, 800];
 
@@ -277,7 +245,7 @@ function ctxStrengthFor(option: PlayEngineOption, level: number): number {
     if (!bt4SupportedSync()) return BIG_NETS[option.variant as BigNetKey].wasmLevels[level];
     return BIG_NET_LEVELS[level];
   }
-  return LEVELS[option.family][level];
+  return enginePlayLevels(option.family)[level];
 }
 
 function ctxStrengthCaption(ctx: PlayContext): string {
@@ -483,17 +451,8 @@ function ctxCpuEngineFor(ctx: PlayContext, option: PlayEngineOption): Promise<Cp
       switch (option.family) {
         case 'sf':
           return new StockfishEngine({ depth: 4, threads: 1 }, stockfishFlavorUrl(option.variant === 'lite' ? 'lite-single' : 'single'));
-        case 'reckless':
-          return createRecklessEngine(await resolveDefaultRecklessVariantAssetFallback(recklessVariantByKey(defaultRecklessVariantKey()), false));
-        case 'viridithas':
-          return createViridithasEngine(await resolveDefaultViridithasVariantAssetFallback(viridithasVariantByKey(defaultViridithasVariantKey()), false));
-        case 'berserk':
-          return createBerserkEngine(await resolveDefaultBerserkVariantAssetFallback(berserkVariantByKey(defaultBerserkVariantKey()), false));
-        case 'plentychess':
-          return createPlentyChessEngine(await resolveDefaultPlentyChessVariantAssetFallback(plentyChessVariantByKey(defaultPlentyChessVariantKey()), false));
-        case 'stormphrax':
-          return createStormphraxEngine(await resolveDefaultStormphraxVariantAssetFallback(stormphraxVariantByKey(defaultStormphraxVariantKey()), false));
         default:
+          if (isDefaultBrowserUciFamily(option.family)) return createDefaultBrowserUciEngine(option.family);
           throw new Error(`unsupported engine family ${option.family}`);
       }
     } finally {

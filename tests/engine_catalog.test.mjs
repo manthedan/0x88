@@ -2,12 +2,16 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   ENGINE_FAMILY_CATALOG,
+  ENGINE_FAMILY_DEFINITIONS,
   ENGINE_FAMILY_PRIORITY,
   V0_ENGINE_FAMILY_PRIORITY,
   canonicalEngineFamily,
   defaultEngineStrength,
   defaultStaticEngineVariant,
   engineFamilyOptions,
+  enginePlayLevels,
+  enginePlayOptions,
+  engineResourceProfile,
   engineStrengthMeta,
   isEngineFamily,
   lc0EngineLabel,
@@ -30,6 +34,23 @@ test('engine family catalog covers the staged selector families in UI order', ()
     assert.ok(ENGINE_FAMILY_CATALOG[family].label.length > 0);
     assert.ok(ENGINE_FAMILY_CATALOG[family].docHref.includes('engine_catalog.md'));
   }
+});
+
+test('unified family definitions drive order, resources, strengths, and Play options', () => {
+  assert.deepEqual(Object.keys(ENGINE_FAMILY_DEFINITIONS).sort(), [...ENGINE_FAMILY_PRIORITY].sort());
+  for (const family of ENGINE_FAMILY_PRIORITY) {
+    const definition = ENGINE_FAMILY_DEFINITIONS[family];
+    assert.equal(definition.id, family);
+    assert.deepEqual(engineResourceProfile(family), definition.resource);
+    assert.deepEqual(engineStrengthMeta(family, 'arena'), definition.strength.arena);
+    assert.deepEqual(engineStrengthMeta(family, 'analysis'), definition.strength.analysis);
+  }
+  assert.deepEqual(enginePlayOptions().map((option) => option.id), [
+    'leela-queen-odds', 'sf-lite', 'sf-full', 'lc0-small', 'lc0-t3', 'lc0-bt4',
+    'reckless', 'viridithas', 'berserk', 'plentychess', 'stormphrax', 'centipawn',
+  ]);
+  assert.deepEqual(enginePlayLevels('stormphrax'), [2, 4, 6, 9, 12]);
+  assert.throws(() => enginePlayLevels('sf'), /does not use the shared Play strength ladder/);
 });
 
 test('engine strength metadata captures arena vs analysis defaults', () => {

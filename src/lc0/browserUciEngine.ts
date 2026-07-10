@@ -15,6 +15,14 @@ export interface BrowserUciAnalysisOptions {
   signal?: AbortSignal;
 }
 
+export interface BrowserUciEngineOptions {
+  depth?: number;
+  movetimeMs?: number;
+  threads?: number;
+  hashMb?: number;
+  skillLevel?: number;
+}
+
 export interface BrowserUciRuntimeStatus {
   mode: string;
   persistentAvailable?: boolean;
@@ -32,6 +40,8 @@ export interface BrowserUciRuntimeStatus {
  */
 export interface BrowserUciEngine {
   readonly name: string;
+  /** Update common UCI search/resource options before the next command. */
+  setOptions(options: BrowserUciEngineOptions): void;
   /** Initialize worker/runtime state without starting a real search. */
   prewarm(signal?: AbortSignal): Promise<void>;
   /** Search a single FEN and return the UCI bestmove, or null for no legal move. */
