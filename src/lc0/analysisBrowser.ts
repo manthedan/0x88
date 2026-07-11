@@ -610,13 +610,16 @@ function centipawnHybridManifestStatusText(): string {
   return `Centipawn hybrid bundle checking (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
 }
 
-async function refreshCentipawnHybridManifestStatus(): Promise<void> {
+async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.signal): Promise<void> {
+  let status: typeof centipawnHybridManifestStatus;
   try {
     const res = await fetch(CENTIPAWN_HYBRID_MANIFEST_URL, { method: 'HEAD', cache: 'no-store' });
-    centipawnHybridManifestStatus = res.ok ? 'present' : 'missing';
+    status = res.ok ? 'present' : 'missing';
   } catch {
-    centipawnHybridManifestStatus = 'missing';
+    status = 'missing';
   }
+  if (isStaleMount(mountSignal)) return;
+  centipawnHybridManifestStatus = status;
   if (centipawnHybridManifestStatus === 'missing') {
     for (const row of engineRows) if (row.family === 'centipawn' && row.variant === 'bt4-custom') row.variant = 'bt4-auto';
     renderEngineList();
@@ -961,7 +964,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'lc0') return lc0VariantOptions(true).map((option) => {
     if (!isLc0BigNetVariant(option.value)) return option;
     const config = BIG_NETS[option.value];
-    if (bigNetAssetStatusSync(config) === 'unknown') void checkBigNetAsset(config, renderEngineList);
+    if (bigNetAssetStatusSync(config) === 'unknown') void checkBigNetAsset(config, whileAnalysisMounted(renderEngineList));
     const state = bigNetOptionState(config);
     return { ...option, label: `${option.label}${state.suffix}`, disabled: option.disabled || state.disabled };
   });
@@ -1086,9 +1089,10 @@ async function workerBigNetLines(runId: number, variant: string, fen: string, vi
 }
 
 // Lc0 big nets are WebGPU-only and require the large local ONNX assets.
-async function refreshBt4Availability(): Promise<void> {
+async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<void> {
   if (isV0DeployProfile()) return;
-  await Promise.all([probeBt4Support(), checkBigNetAsset(BIG_NETS.bt4, renderRecklessRuntimeInfo), checkBigNetAsset(BIG_NETS.t3, renderRecklessRuntimeInfo)]);
+  await Promise.all([probeBt4Support(), checkBigNetAsset(BIG_NETS.bt4, whileAnalysisMounted(renderRecklessRuntimeInfo)), checkBigNetAsset(BIG_NETS.t3, whileAnalysisMounted(renderRecklessRuntimeInfo))]);
+  if (isStaleMount(mountSignal)) return;
   for (const row of engineRows) {
     if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectableSync(bigNetFor(row.variant).config)) row.variant = 'small';
   }
@@ -1101,7 +1105,7 @@ function renderRecklessRuntimeInfo(): void {
   const bigNetTexts = isV0DeployProfile() ? [] : (['bt4', 't3'] as const).map((key) => {
     const config = BIG_NETS[key];
     const asset = bigNetAssetStatusSync(config);
-    if (asset === 'unknown') void checkBigNetAsset(config, renderRecklessRuntimeInfo);
+    if (asset === 'unknown') void checkBigNetAsset(config, whileAnalysisMounted(renderRecklessRuntimeInfo));
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? `asset missing · ${config.modelUrl} · run node scripts/lc0_prepare_model_assets.mjs` : 'checking asset';
     return `Lc0 ${config.name}: ${bt4SupportedSync() ? 'WebGPU ok' : 'WebGPU unavailable'} · batch ${config.recommendedBatchSize} · pipeline depth ${config.recommendedPipelineDepth} · ${assetText}`;
   });
@@ -1564,14 +1568,28 @@ function renderPgnDatabaseCollections(selected = activePgnCollectionId): void {
   if (!databasePositionStats.length) clearPgnDatabaseSearchResults();
 }
 
-async function refreshPgnDatabaseCollections(selected = activePgnCollectionId): Promise<void> {
-  if (!pgnDatabaseAvailable()) { renderPgnDatabaseCollections(''); return; }
+function refreshPgnCollectionsOnReplacementMount(originSignal: AbortSignal): boolean {
+  if (!isStaleMount(originSignal)) return false;
+  const currentSignal = mountAbort.signal;
+  if (!currentSignal.aborted && currentSignal !== originSignal) {
+    void refreshPgnDatabaseCollections(activePgnCollectionId, currentSignal);
+  }
+  return true;
+}
+
+async function refreshPgnDatabaseCollections(selected = activePgnCollectionId, mountSignal?: AbortSignal): Promise<void> {
+  if (!pgnDatabaseAvailable()) {
+    if (!mountSignal || !isStaleMount(mountSignal)) renderPgnDatabaseCollections('');
+    return;
+  }
   try {
-    pgnCollections = await listPgnCollections();
+    const collections = await listPgnCollections();
+    if (mountSignal && isStaleMount(mountSignal)) return;
+    pgnCollections = collections;
     activePgnCollectionId = pgnCollections.some((entry) => entry.id === selected) ? selected : '';
     renderPgnDatabaseCollections(activePgnCollectionId);
   } catch (error) {
-    el('pgnDbInfo').textContent = `Local PGN database failed: ${(error as Error).message}`;
+    if (!mountSignal || !isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Local PGN database failed: ${(error as Error).message}`;
   }
 }
 
@@ -1648,6 +1666,7 @@ function downloadPgn() {
 }
 
 async function saveCurrentPgnCollection(): Promise<void> {
+  const mountSignal = mountAbort.signal;
   const raw = inputEl('importGamesInput').value.trim();
   if (!raw) { el('pgnDbInfo').textContent = 'Paste, fetch, or load PGN before saving to the local database.'; return; }
   let gameCount = 0;
@@ -1672,23 +1691,26 @@ async function saveCurrentPgnCollection(): Promise<void> {
       positionIndex: importedPositionIndex ?? undefined,
       indexedPositionCount: importedPositionIndex ? Object.keys(importedPositionIndex).length : 0,
     });
+    if (refreshPgnCollectionsOnReplacementMount(mountSignal)) return;
     activePgnCollectionId = record.id;
     inputEl('pgnDbName').value = record.name;
-    await refreshPgnDatabaseCollections(record.id);
-    el('pgnDbInfo').textContent = `Saved “${record.name}” (${record.gameCount} games) to local IndexedDB.`;
+    await refreshPgnDatabaseCollections(record.id, mountSignal);
+    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Saved “${record.name}” (${record.gameCount} games) to local IndexedDB.`;
   } catch (error) {
-    el('pgnDbInfo').textContent = `Save failed: ${(error as Error).message}`;
+    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Save failed: ${(error as Error).message}`;
   } finally {
-    el('savePgnDb').toggleAttribute('disabled', false);
+    if (!isStaleMount(mountSignal)) el('savePgnDb').toggleAttribute('disabled', false);
   }
 }
 
 async function loadSelectedPgnCollection(): Promise<void> {
+  const mountSignal = mountAbort.signal;
   const id = selectedPgnCollectionId();
   if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to load.'; return; }
   try {
     const record = await loadPgnCollection(id);
-    if (!record) { el('pgnDbInfo').textContent = 'Saved PGN collection not found.'; await refreshPgnDatabaseCollections(''); return; }
+    if (isStaleMount(mountSignal)) return;
+    if (!record) { el('pgnDbInfo').textContent = 'Saved PGN collection not found.'; await refreshPgnDatabaseCollections('', mountSignal); return; }
     activePgnCollectionId = record.id;
     lastImportSource = record.source;
     lastImportUsername = record.username ?? '';
@@ -1698,30 +1720,34 @@ async function loadSelectedPgnCollection(): Promise<void> {
     setImportedPgn(record.pgn, `loaded “${record.name}”:`);
     if (!record.positionIndex && importedPositionIndex) {
       await updatePgnCollectionPositionIndex(record.id, importedPositionIndex);
-      await refreshPgnDatabaseCollections(record.id);
-      el('pgnDbInfo').textContent = `Loaded and indexed “${record.name}” (${record.gameCount} games).`;
+      if (refreshPgnCollectionsOnReplacementMount(mountSignal)) return;
+      await refreshPgnDatabaseCollections(record.id, mountSignal);
+      if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Loaded and indexed “${record.name}” (${record.gameCount} games).`;
     } else {
       renderPgnDatabaseCollections(record.id);
     }
   } catch (error) {
-    el('pgnDbInfo').textContent = `Load failed: ${(error as Error).message}`;
+    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Load failed: ${(error as Error).message}`;
   }
 }
 
 async function renameSelectedPgnCollection(): Promise<void> {
+  const mountSignal = mountAbort.signal;
   const id = selectedPgnCollectionId();
   if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to rename.'; return; }
   try {
     const record = await renamePgnCollection(id, inputEl('pgnDbName').value);
+    if (refreshPgnCollectionsOnReplacementMount(mountSignal)) return;
     inputEl('pgnDbName').value = record.name;
-    await refreshPgnDatabaseCollections(record.id);
-    el('pgnDbInfo').textContent = `Renamed collection to “${record.name}”.`;
+    await refreshPgnDatabaseCollections(record.id, mountSignal);
+    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Renamed collection to “${record.name}”.`;
   } catch (error) {
-    el('pgnDbInfo').textContent = `Rename failed: ${(error as Error).message}`;
+    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Rename failed: ${(error as Error).message}`;
   }
 }
 
 async function duplicateSelectedPgnCollection(): Promise<void> {
+  const mountSignal = mountAbort.signal;
   const id = selectedPgnCollectionId();
   if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to duplicate.'; return; }
   const summary = pgnCollections.find((entry) => entry.id === id);
@@ -1729,26 +1755,29 @@ async function duplicateSelectedPgnCollection(): Promise<void> {
   const duplicateName = requestedName && requestedName !== summary?.name ? requestedName : `${summary?.name ?? 'PGN collection'} copy`;
   try {
     const record = await duplicatePgnCollection(id, duplicateName);
+    if (refreshPgnCollectionsOnReplacementMount(mountSignal)) return;
     activePgnCollectionId = record.id;
     inputEl('pgnDbName').value = record.name;
-    await refreshPgnDatabaseCollections(record.id);
-    el('pgnDbInfo').textContent = `Duplicated “${summary?.name ?? 'collection'}” as “${record.name}”.`;
+    await refreshPgnDatabaseCollections(record.id, mountSignal);
+    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Duplicated “${summary?.name ?? 'collection'}” as “${record.name}”.`;
   } catch (error) {
-    el('pgnDbInfo').textContent = `Duplicate failed: ${(error as Error).message}`;
+    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Duplicate failed: ${(error as Error).message}`;
   }
 }
 
 async function exportSelectedPgnCollection(): Promise<void> {
+  const mountSignal = mountAbort.signal;
   const id = selectedPgnCollectionId();
   if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to export.'; return; }
   try {
     const record = await loadPgnCollection(id);
-    if (!record) { el('pgnDbInfo').textContent = 'Saved PGN collection not found.'; await refreshPgnDatabaseCollections(''); return; }
+    if (isStaleMount(mountSignal)) return;
+    if (!record) { el('pgnDbInfo').textContent = 'Saved PGN collection not found.'; await refreshPgnDatabaseCollections('', mountSignal); return; }
     const filename = `${safeFilename(record.name, 'collection')}.pgn`;
     downloadTextFile(filename, record.pgn, 'application/x-chess-pgn');
     el('pgnDbInfo').textContent = `Exported “${record.name}” as ${filename}.`;
   } catch (error) {
-    el('pgnDbInfo').textContent = `Export failed: ${(error as Error).message}`;
+    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Export failed: ${(error as Error).message}`;
   }
 }
 
@@ -1766,15 +1795,18 @@ async function exportPgnDatabase(): Promise<void> {
 
 async function importPgnDatabaseFile(file: File | undefined): Promise<void> {
   if (!file) return;
+  const mountSignal = mountAbort.signal;
   try {
     const backup = JSON.parse(await file.text()) as unknown;
+    if (isStaleMount(mountSignal)) return;
     const count = await importPgnDatabaseBackup(backup);
-    await refreshPgnDatabaseCollections(activePgnCollectionId);
-    el('pgnDbInfo').textContent = `Imported ${count} PGN collections from ${file.name}; position indexes rebuilt from raw PGN.`;
+    if (refreshPgnCollectionsOnReplacementMount(mountSignal)) return;
+    await refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
+    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Imported ${count} PGN collections from ${file.name}; position indexes rebuilt from raw PGN.`;
   } catch (error) {
-    el('pgnDbInfo').textContent = `Database import failed: ${(error as Error).message}`;
+    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Database import failed: ${(error as Error).message}`;
   } finally {
-    inputEl('importPgnDbFile').value = '';
+    if (!isStaleMount(mountSignal)) inputEl('importPgnDbFile').value = '';
   }
 }
 
@@ -1821,17 +1853,19 @@ async function searchCurrentPositionInPgnDatabase(): Promise<void> {
 }
 
 async function deleteSelectedPgnCollection(): Promise<void> {
+  const mountSignal = mountAbort.signal;
   const id = selectedPgnCollectionId();
   if (!id) return;
   const summary = pgnCollections.find((entry) => entry.id === id);
   if (summary && !window.confirm(`Delete local PGN collection “${summary.name}”?`)) return;
   try {
     await deletePgnCollection(id);
+    if (refreshPgnCollectionsOnReplacementMount(mountSignal)) return;
     if (activePgnCollectionId === id) activePgnCollectionId = '';
-    await refreshPgnDatabaseCollections('');
-    el('pgnDbInfo').textContent = summary ? `Deleted “${summary.name}”.` : 'Deleted PGN collection.';
+    await refreshPgnDatabaseCollections('', mountSignal);
+    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = summary ? `Deleted “${summary.name}”.` : 'Deleted PGN collection.';
   } catch (error) {
-    el('pgnDbInfo').textContent = `Delete failed: ${(error as Error).message}`;
+    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Delete failed: ${(error as Error).message}`;
   }
 }
 
@@ -2861,7 +2895,7 @@ async function init(mountSignal: AbortSignal) {
   renderRecklessRuntimeInfo();
   if (!isV0DeployProfile()) void probeEngineLogos(whileAnalysisMounted(() => { renderEngineList(); renderAll(); }));
   wireEvents();
-  void refreshPgnDatabaseCollections();
+  void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
   if (!isV0DeployProfile()) {
     void refreshBt4Availability();
     void refreshCentipawnHybridManifestStatus();

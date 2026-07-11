@@ -388,13 +388,16 @@ function centipawnHybridManifestStatusText(): string {
   return `Centipawn hybrid bundle checking (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
 }
 
-async function refreshCentipawnHybridManifestStatus(): Promise<void> {
+async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.signal): Promise<void> {
+  let status: typeof centipawnHybridManifestStatus;
   try {
     const res = await fetch(CENTIPAWN_HYBRID_MANIFEST_URL, { method: 'HEAD', cache: 'no-store' });
-    centipawnHybridManifestStatus = res.ok ? 'present' : 'missing';
+    status = res.ok ? 'present' : 'missing';
   } catch {
-    centipawnHybridManifestStatus = 'missing';
+    status = 'missing';
   }
+  if (isStaleMount(mountSignal)) return;
+  centipawnHybridManifestStatus = status;
   if (centipawnHybridManifestStatus === 'missing') {
     for (const row of activeSeatRows()) {
       if (row.family === 'centipawn' && row.variant === 'bt4-custom') row.variant = 'bt4-auto';
@@ -1119,7 +1122,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     if (!isLc0BigNetVariant(option.value)) return option;
     const config = BIG_NETS[option.value];
     const asset = bigNetAssetStatusSync(config);
-    if (bt4SupportedSync() && asset === 'unknown') void checkBigNetAsset(config, () => { renderSeatSelectors(); refreshSeatControls(); });
+    if (bt4SupportedSync() && asset === 'unknown') void checkBigNetAsset(config, whileArenaMounted(() => { renderSeatSelectors(); refreshSeatControls(); }));
     const suffix = !bt4SupportedSync() ? ' (WebGPU unavailable)' : asset === 'missing' ? ' (asset missing)' : asset === 'unknown' ? ' (checking asset)' : '';
     return { ...option, label: `${option.label}${suffix}`, disabled: option.disabled || asset !== 'present' };
   });
@@ -2017,13 +2020,14 @@ function refreshStockfishControls(): void {
 
 // Lc0 big nets are WebGPU-only and locally staged; disable/downgrade them
 // when WebGPU is unusable or their ONNX asset is missing.
-async function refreshBt4Availability(): Promise<void> {
+async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<void> {
   if (isV0DeployProfile()) return;
   await Promise.all([
     probeBt4Support(),
-    checkBigNetAsset(BIG_NETS.bt4, renderSeatSelectors),
-    checkBigNetAsset(BIG_NETS.t3, renderSeatSelectors),
+    checkBigNetAsset(BIG_NETS.bt4, whileArenaMounted(renderSeatSelectors)),
+    checkBigNetAsset(BIG_NETS.t3, whileArenaMounted(renderSeatSelectors)),
   ]);
+  if (isStaleMount(mountSignal)) return;
   for (const row of activeSeatRows()) {
     if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectableSync(bigNetFor(row.variant).config)) row.variant = 'small';
   }
@@ -2618,7 +2622,7 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
   return { result: '1/2-1/2', reason: 'max plies', tree };
 }
 
-async function ensureSelectedRecklessAssetsAvailable(): Promise<boolean> {
+async function ensureSelectedRecklessAssetsAvailable(mountSignal = mountAbort.signal): Promise<boolean> {
   const variants = [...new Map(activeSeatRows()
     .filter((row) => row.family === 'reckless')
     .map((row) => {
@@ -2633,6 +2637,7 @@ async function ensureSelectedRecklessAssetsAvailable(): Promise<boolean> {
       renderSeatSelectors();
       refreshSeatControls();
     }));
+    if (isStaleMount(mountSignal)) return false;
     if (status === 'missing' && variant.key !== 'custom') missing.push(variant);
   }
   if (!missing.length) return true;
@@ -2650,10 +2655,13 @@ function clearStartPending(): void {
 
 async function startMatch() {
   if (running || startPending) return;
+  const mountSignal = mountAbort.signal;
   startPending = true;
   el('start').toggleAttribute('disabled', true);
   syncSeatRowsFromDom();
-  if (!(await ensureSelectedRecklessAssetsAvailable())) { clearStartPending(); return; }
+  const selectedAssetsAvailable = await ensureSelectedRecklessAssetsAvailable();
+  if (isStaleMount(mountSignal)) return;
+  if (!selectedAssetsAvailable) { clearStartPending(); return; }
   if (running) { clearStartPending(); return; }
   buildEngines();
   populateSeats();
@@ -2679,7 +2687,9 @@ async function startMatch() {
   }
   const byPid = new Map(participants.map((participant) => [participant.pid, participant]));
   const bigNetRows = activeSeatRows().filter((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant));
-  if (bigNetRows.length && !(await probeBt4Support())) {
+  const bigNetRuntimeSupported = !bigNetRows.length || await probeBt4Support();
+  if (isStaleMount(mountSignal)) return;
+  if (!bigNetRuntimeSupported) {
     el('message').textContent = 'Lc0 big nets need WebGPU, which is unavailable in this browser.';
     clearStartPending();
     return;
@@ -2689,7 +2699,8 @@ async function startMatch() {
     if (!isLc0BigNetVariant(row.variant) || checkedBigNetVariants.has(row.variant)) continue;
     checkedBigNetVariants.add(row.variant);
     const { config } = bigNetFor(row.variant);
-    const status = await checkBigNetAsset(config, renderSeatSelectors);
+    const status = await checkBigNetAsset(config, whileArenaMounted(renderSeatSelectors));
+    if (isStaleMount(mountSignal)) return;
     if (status !== 'present') {
       el('message').textContent = bigNetUnavailableText(config);
       renderSeatSelectors();
@@ -2717,7 +2728,8 @@ async function startMatch() {
 
   startPending = false;
   running = true;
-  abort = new AbortController();
+  const matchAbort = new AbortController();
+  abort = matchAbort;
   refreshOpeningPreview();
   refreshStockfishControls();
   refreshRecklessVariantUi();
@@ -2749,10 +2761,10 @@ async function startMatch() {
   else renderStandings(standings, schedule.length);
   try {
     resetLc0SearchTrees(seatIds);
-    await warmUpSelectedEngines(seatIds, abort.signal);
-    if (abort.signal.aborted) return;
+    await warmUpSelectedEngines(seatIds, matchAbort.signal);
+    if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
     for (let i = 0; i < schedule.length; i++) {
-      if (abort.signal.aborted) break;
+      if (matchAbort.signal.aborted) break;
       const { whiteId, blackId, opening } = schedule[i];
       const white = byPid.get(whiteId)!;
       const black = byPid.get(blackId)!;
@@ -2766,14 +2778,15 @@ async function startMatch() {
         if (!searcher) continue;
         if (searcher.loaded) await searcher.resetTree();
       }
-      for (const engine of viridithasEngines.values()) await engine.newGame(abort.signal);
-      for (const engine of berserkEngines.values()) await engine.newGame(abort.signal);
-      for (const engine of plentyChessEngines.values()) await engine.newGame(abort.signal);
-      for (const engine of stormphraxEngines.values()) await engine.newGame(abort.signal);
+      for (const engine of viridithasEngines.values()) await engine.newGame(matchAbort.signal);
+      for (const engine of berserkEngines.values()) await engine.newGame(matchAbort.signal);
+      for (const engine of plentyChessEngines.values()) await engine.newGame(matchAbort.signal);
+      for (const engine of stormphraxEngines.values()) await engine.newGame(matchAbort.signal);
+      if (isStaleMount(mountSignal) || matchAbort.signal.aborted) break;
       setBoardSideEngines(whiteEngine.id, whiteEngine.name, blackEngine.id, blackEngine.name);
       el('pairing').textContent = `Game ${i + 1}/${schedule.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
       el('message').textContent = 'Playing…';
-      const { result, reason, tree } = await playArenaGame(whiteEngine, blackEngine, opening, abort.signal);
+      const { result, reason, tree } = await playArenaGame(whiteEngine, blackEngine, opening, matchAbort.signal);
       if (reason === 'cancelled') break;
       score.games += 1;
       standings.record(whiteId, blackId, result);
@@ -2793,32 +2806,41 @@ async function startMatch() {
       if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
       else renderStandings(standings, schedule.length);
     }
-    el('message').textContent = abort.signal.aborted ? `Stopped after ${score.games} game(s).` : `Match done (${score.games} game${score.games === 1 ? '' : 's'}).`;
-    el('pairing').textContent = abort.signal.aborted ? 'Match stopped.' : 'Match finished.';
+    if (!isStaleMount(mountSignal)) {
+      el('message').textContent = matchAbort.signal.aborted ? `Stopped after ${score.games} game(s).` : `Match done (${score.games} game${score.games === 1 ? '' : 's'}).`;
+      el('pairing').textContent = matchAbort.signal.aborted ? 'Match stopped.' : 'Match finished.';
+    }
   } catch (error) {
-    if (isAbortError(error) || abort?.signal.aborted) {
-      el('message').textContent = `Stopped after ${score.games} game(s).`;
-      el('pairing').textContent = 'Match stopped.';
-    } else {
-      el('message').textContent = `Match failed: ${(error as Error).message}`;
+    if (!isStaleMount(mountSignal)) {
+      if (isAbortError(error) || matchAbort.signal.aborted) {
+        el('message').textContent = `Stopped after ${score.games} game(s).`;
+        el('pairing').textContent = 'Match stopped.';
+      } else {
+        el('message').textContent = `Match failed: ${(error as Error).message}`;
+      }
     }
   } finally {
-    running = false;
-    startPending = false;
-    abort = null;
-    activeEngineIds = [];
-    engineOutputs.clear();
-    thinkingEngineIds.clear();
-    el('start').toggleAttribute('disabled', false);
-    el('stop').toggleAttribute('disabled', true);
-    refreshOpeningPreview();
-    refreshStockfishControls();
-    refreshRecklessVariantUi();
-    refreshViridithasVariantUi();
-    refreshBerserkVariantUi();
-    refreshPlentyChessVariantUi();
-    refreshStormphraxVariantUi();
-    refreshSeatControls();
+    const ownsMatchState = abort === matchAbort;
+    if (ownsMatchState) {
+      running = false;
+      startPending = false;
+      abort = null;
+      activeEngineIds = [];
+      engineOutputs.clear();
+      thinkingEngineIds.clear();
+    }
+    if (ownsMatchState && !isStaleMount(mountSignal)) {
+      el('start').toggleAttribute('disabled', false);
+      el('stop').toggleAttribute('disabled', true);
+      refreshOpeningPreview();
+      refreshStockfishControls();
+      refreshRecklessVariantUi();
+      refreshViridithasVariantUi();
+      refreshBerserkVariantUi();
+      refreshPlentyChessVariantUi();
+      refreshStormphraxVariantUi();
+      refreshSeatControls();
+    }
   }
 }
 
