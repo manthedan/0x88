@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
   STORMPHRAX_EMSCRIPTEN_VARIANT,
@@ -71,6 +72,14 @@ test('Stormphrax search timeout leaves startup headroom above movetime', () => {
   assert.equal(stormphraxSearchTimeoutMs({ movetimeMs: 60_000 }), 75_000);
   assert.equal(stormphraxSearchTimeoutMs({ movetimeMs: 1_000 }), 60_000);
   assert.equal(stormphraxSearchTimeoutMs({ depth: 12 }), 120_000);
+});
+
+test('Stormphrax corresponding-source recipe rebuilds baseline and relaxed outputs from clean trees', () => {
+  const source = readFileSync(new URL('../scripts/write_engine_source_archive.mjs', import.meta.url), 'utf8');
+  assert.match(source, /stormphrax-baseline/);
+  assert.match(source, /stormphrax-relaxed/);
+  assert.match(source, /\$\{config\.envPrefix\}_WASM_RELAXED_SIMD=1/);
+  assert.match(source, /stormphrax-emscripten-relaxed-simd128\.js/);
 });
 
 test('Stormphrax variant normalization and same-origin overrides are stable', () => {

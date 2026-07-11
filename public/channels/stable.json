@@ -1,7 +1,7 @@
 {
   "schema": "lc0_browser.artifact_channel_manifest.v1",
   "channel": "stable",
-  "releaseId": "2026-07-11.stormphrax-relaxed-simd.1",
-  "releaseManifestUrl": "/releases/2026-07-11.stormphrax-relaxed-simd.1.json",
-  "generatedAt": "2026-07-11T07:51:14.430Z"
+  "releaseId": "2026-07-11.stormphrax-relaxed-simd.2",
+  "releaseManifestUrl": "/releases/2026-07-11.stormphrax-relaxed-simd.2.json",
+  "generatedAt": "2026-07-11T10:46:30.000Z"
 }
