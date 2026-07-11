@@ -172,8 +172,20 @@ let REQUESTED_STORMPHRAX_VARIANT = stormphraxVariantFromParams(params);
 
 let ground: Ground | null = null;
 let mountAbort = new AbortController();
+let arenaMountedCallbackCache = new WeakMap<() => void, () => void>();
 function isStaleMount(signal: AbortSignal = mountAbort.signal): boolean {
   return signal.aborted || signal !== mountAbort.signal;
+}
+function whileArenaMounted(callback: () => void): () => void {
+  const existing = arenaMountedCallbackCache.get(callback);
+  if (existing) return existing;
+  const signal = mountAbort.signal;
+  const guarded = () => { if (!isStaleMount(signal)) callback(); };
+  arenaMountedCallbackCache.set(callback, guarded);
+  return guarded;
+}
+function assetProbePending(status: string): boolean {
+  return status === 'unknown' || status === 'checking';
 }
 let arenaKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
 let arenaAuditHandler: ((event: Event) => void) | null = null;
@@ -1118,7 +1130,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'viridithas') return availableViridithasVariants().map((v) => {
     const status = viridithasVariantAssetStatus(v);
     const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
-    if (!unsupported && v.key === 'relaxed-simd' && status === 'unknown') void checkViridithasVariantAsset(v, populateSeats);
+    if (!unsupported && v.key === 'relaxed-simd' && assetProbePending(status)) void checkViridithasVariantAsset(v, whileArenaMounted(populateSeats));
     return browserVariantOption(v.key, v.label, {
       assetStatus: status,
       unsupportedReason: unsupported ? 'unsupported by this browser' : null,
@@ -1128,7 +1140,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'berserk') return availableBerserkVariants().map((v) => {
     const status = berserkVariantAssetStatus(v);
     const unsupported = v.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd();
-    if (!unsupported && status === 'unknown') void checkBerserkVariantAsset(v, populateSeats);
+    if (!unsupported && assetProbePending(status)) void checkBerserkVariantAsset(v, whileArenaMounted(populateSeats));
     const needsGeneratedAsset = v.key === 'emscripten-simd' || v.key === 'emscripten-relaxed';
     return browserVariantOption(v.key, v.label, {
       assetStatus: status,
@@ -1140,13 +1152,13 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const status = plentyChessVariantAssetStatus(v);
     const unsupportedReason = plentyChessVariantUnsupportedReason(v);
     const needsGeneratedAsset = v.key === 'emscripten-sse41' || v.key === 'emscripten-relaxed';
-    if (!unsupportedReason && needsGeneratedAsset && status === 'unknown') void checkPlentyChessVariantAsset(v, populateSeats);
+    if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkPlentyChessVariantAsset(v, whileArenaMounted(populateSeats));
     return browserVariantOption(v.key, v.label, { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
   });
   if (family === 'stormphrax') return availableStormphraxVariants().map((v) => {
     const status = stormphraxVariantAssetStatus(v);
     const unsupportedReason = stormphraxVariantUnsupportedReason(v);
-    if (!unsupportedReason && status === 'unknown') void checkStormphraxVariantAsset(v, populateSeats);
+    if (!unsupportedReason && assetProbePending(status)) void checkStormphraxVariantAsset(v, whileArenaMounted(populateSeats));
     return browserVariantOption(v.key, v.label, { assetStatus: status, unsupportedReason });
   });
   const recklessVariants = availableRecklessVariants().filter((v) => !isV0DeployProfile() || ['full', 'simd', 'relaxed-simd'].includes(v.key));
@@ -1812,7 +1824,7 @@ function renderRecklessRuntimeInfo(): void {
     const status = engine?.runtimeStatus();
     const mode = engine?.runtimeLabel() ?? (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated ? 'persistent available' : 'one-shot fallback');
     const asset = recklessVariantAssetStatus(variant);
-    if (asset === 'unknown') void checkRecklessVariantAsset(variant, renderRecklessRuntimeInfo);
+    if (assetProbePending(asset)) void checkRecklessVariantAsset(variant, whileArenaMounted(renderRecklessRuntimeInfo));
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     const loadText = formatRecklessBrowserApiLoadStatus(status?.browserApiLoad);
     return `${variant.label} · ${mode} · ${assetText}${loadText ? ` · ${loadText}` : ''}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
@@ -1853,7 +1865,7 @@ function renderViridithasRuntimeInfo(): void {
     const status = engine?.runtimeStatus();
     const mode = engine?.runtimeLabel() ?? (canUsePersistentViridithasWasi() ? 'persistent available' : 'one-shot fallback');
     const asset = viridithasVariantAssetStatus(variant);
-    if (asset === 'unknown') void checkViridithasVariantAsset(variant, renderViridithasRuntimeInfo);
+    if (assetProbePending(asset)) void checkViridithasVariantAsset(variant, whileArenaMounted(renderViridithasRuntimeInfo));
     const assetText = asset === 'ok' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${mode} · ${assetText}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
   });
@@ -1894,7 +1906,7 @@ function renderBerserkRuntimeInfo(): void {
     const variant = berserkVariantForKey(row.variant);
     const engine = berserkEngines.peek(variant);
     const asset = berserkVariantAssetStatus(variant);
-    if (asset === 'unknown') void checkBerserkVariantAsset(variant, renderBerserkRuntimeInfo);
+    if (assetProbePending(asset)) void checkBerserkVariantAsset(variant, whileArenaMounted(renderBerserkRuntimeInfo));
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
@@ -1934,7 +1946,7 @@ function renderPlentyChessRuntimeInfo(): void {
     const engine = plentyChessEngines.peek(variant);
     const asset = plentyChessVariantAssetStatus(variant);
     const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
-    if (!unsupportedReason && asset === 'unknown') void checkPlentyChessVariantAsset(variant, renderPlentyChessRuntimeInfo);
+    if (!unsupportedReason && assetProbePending(asset)) void checkPlentyChessVariantAsset(variant, whileArenaMounted(renderPlentyChessRuntimeInfo));
     const assetText = unsupportedReason ? unsupportedReason : asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
@@ -1948,7 +1960,7 @@ function refreshPlentyChessVariantUi(): void {
     const status = plentyChessVariantAssetStatus(variant);
     const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
     const needsGeneratedAsset = variant.key === 'emscripten-sse41' || variant.key === 'emscripten-relaxed';
-    if (!unsupportedReason && needsGeneratedAsset && status === 'unknown') void checkPlentyChessVariantAsset(variant, refreshPlentyChessVariantUi);
+    if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkPlentyChessVariantAsset(variant, whileArenaMounted(refreshPlentyChessVariantUi));
     const option = browserVariantOption(variant.key, variant.label, { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
     return `<option value="${option.value}"${option.disabled ? ' disabled' : ''}>${htmlEscape(option.label)}</option>`;
   }).join('');
@@ -1981,7 +1993,7 @@ function renderStormphraxRuntimeInfo(): void {
     const engine = stormphraxEngines.peek(variant);
     const asset = stormphraxVariantAssetStatus(variant);
     const unsupportedReason = stormphraxVariantUnsupportedReason(variant);
-    if (!unsupportedReason && asset === 'unknown') void checkStormphraxVariantAsset(variant, renderStormphraxRuntimeInfo);
+    if (!unsupportedReason && assetProbePending(asset)) void checkStormphraxVariantAsset(variant, whileArenaMounted(renderStormphraxRuntimeInfo));
     const assetText = unsupportedReason ?? (asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset');
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
@@ -2616,11 +2628,11 @@ async function ensureSelectedRecklessAssetsAvailable(): Promise<boolean> {
   if (!variants.length) return true;
   const missing: RecklessVariant[] = [];
   for (const variant of variants) {
-    const status = await checkRecklessVariantAsset(variant, () => {
+    const status = await checkRecklessVariantAsset(variant, whileArenaMounted(() => {
       renderRecklessRuntimeInfo();
       renderSeatSelectors();
       refreshSeatControls();
-    });
+    }));
     if (status === 'missing' && variant.key !== 'custom') missing.push(variant);
   }
   if (!missing.length) return true;
@@ -3329,16 +3341,16 @@ function wireEvents() {
 
 async function init(mountSignal: AbortSignal) {
   if (!isV0DeployProfile()) {
-    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
+    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, whileArenaMounted(renderRecklessRuntimeInfo));
   }
   if (isStaleMount(mountSignal)) return;
-  REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, renderRecklessRuntimeInfo);
+  REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, whileArenaMounted(renderRecklessRuntimeInfo));
   if (isStaleMount(mountSignal)) return;
-  REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, renderRecklessRuntimeInfo);
+  REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, whileArenaMounted(renderRecklessRuntimeInfo));
   if (isStaleMount(mountSignal)) return;
-  REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, renderRecklessRuntimeInfo);
+  REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, whileArenaMounted(renderRecklessRuntimeInfo));
   if (isStaleMount(mountSignal)) return;
-  REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(REQUESTED_STORMPHRAX_VARIANT, REQUESTED_STORMPHRAX_EXPLICIT, renderStormphraxRuntimeInfo);
+  REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(REQUESTED_STORMPHRAX_VARIANT, REQUESTED_STORMPHRAX_EXPLICIT, whileArenaMounted(renderStormphraxRuntimeInfo));
   if (isStaleMount(mountSignal)) return;
   renderBoard();
   installRuntimeAuditPanel();
@@ -3372,7 +3384,7 @@ async function init(mountSignal: AbortSignal) {
   buildEngines();
   populateSeats();
   if (!isV0DeployProfile()) void refreshBt4Availability();
-  if (!isV0DeployProfile()) void probeEngineLogos(() => { renderSeatSelectors(); refreshSeatControls(); renderSideLabels(); });
+  if (!isV0DeployProfile()) void probeEngineLogos(whileArenaMounted(() => { renderSeatSelectors(); refreshSeatControls(); renderSideLabels(); }));
   wireEvents();
   refreshBudgetControls();
   refreshOpeningPreview();
@@ -3421,6 +3433,7 @@ export function mountArenaBrowser(): () => void {
   resetArenaPageState();
   const controller = new AbortController();
   mountAbort = controller;
+  arenaMountedCallbackCache = new WeakMap();
   void init(controller.signal);
   return () => {
     controller.abort();

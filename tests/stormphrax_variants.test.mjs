@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   STORMPHRAX_EMSCRIPTEN_VARIANT,
   STORMPHRAX_MAIN_NETWORK,
+  checkStormphraxVariantAsset,
   defaultStormphraxVariantKey,
   hasExplicitStormphraxVariant,
   normalizeStormphraxVariant,
@@ -18,6 +19,36 @@ test('Stormphrax variant metadata pins the browser sidecars and undertown networ
   assert.equal(STORMPHRAX_EMSCRIPTEN_VARIANT.dataUrl, '/stormphrax/stormphrax-emscripten.data');
   assert.equal(STORMPHRAX_MAIN_NETWORK, 'undertown.nnue');
   assert.equal(defaultStormphraxVariantKey(), 'emscripten');
+});
+
+test('Stormphrax in-flight asset checks notify callbacks attached by a remount', async () => {
+  const originalFetch = globalThis.fetch;
+  const resolvers = [];
+  globalThis.fetch = () => new Promise((resolve) => resolvers.push(resolve));
+  const variant = {
+    ...STORMPHRAX_EMSCRIPTEN_VARIANT,
+    key: 'custom',
+    jsUrl: '/stormphrax/remount-test.js',
+    wasmUrl: '/stormphrax/remount-test.wasm',
+    dataUrl: '/stormphrax/remount-test.data',
+  };
+  let firstNotifications = 0;
+  let remountNotifications = 0;
+  try {
+    let remount;
+    const first = checkStormphraxVariantAsset(variant, () => {
+      firstNotifications += 1;
+      if (firstNotifications === 1) remount = checkStormphraxVariantAsset(variant, () => { remountNotifications += 1; });
+    });
+    assert.equal(resolvers.length, 3, 're-entrant checking callback must reuse the registered probe');
+    for (const resolve of resolvers) resolve({ ok: true });
+    assert.equal(await first, 'present');
+    assert.equal(await remount, 'present');
+    assert.equal(firstNotifications, 2);
+    assert.equal(remountNotifications, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('Stormphrax search timeout leaves startup headroom above movetime', () => {

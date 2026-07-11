@@ -152,8 +152,20 @@ function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4Worker
 }
 let ground: Ground | null = null;
 let mountAbort = new AbortController();
+let analysisMountedCallbackCache = new WeakMap<() => void, () => void>();
 function isStaleMount(signal: AbortSignal = mountAbort.signal): boolean {
   return signal.aborted || signal !== mountAbort.signal;
+}
+function whileAnalysisMounted(callback: () => void): () => void {
+  const existing = analysisMountedCallbackCache.get(callback);
+  if (existing) return existing;
+  const signal = mountAbort.signal;
+  const guarded = () => { if (!isStaleMount(signal)) callback(); };
+  analysisMountedCallbackCache.set(callback, guarded);
+  return guarded;
+}
+function assetProbePending(status: string): boolean {
+  return status === 'unknown' || status === 'checking';
 }
 let analysisKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
 let analysisPagehideHandler: ((event: PageTransitionEvent) => void) | null = null;
@@ -957,7 +969,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'viridithas') return availableViridithasVariants().map((v) => {
     const status = viridithasVariantAssetStatus(v);
     const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
-    if (!unsupported && v.key === 'relaxed-simd' && status === 'unknown') void checkViridithasVariantAsset(v, renderEngineList);
+    if (!unsupported && v.key === 'relaxed-simd' && assetProbePending(status)) void checkViridithasVariantAsset(v, whileAnalysisMounted(renderEngineList));
     return browserVariantOption(v.key, v.label, {
       assetStatus: status,
       unsupportedReason: unsupported ? 'unsupported by this browser' : null,
@@ -967,7 +979,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'berserk') return availableBerserkVariants().map((v) => {
     const status = berserkVariantAssetStatus(v);
     const unsupported = v.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd();
-    if (!unsupported && status === 'unknown') void checkBerserkVariantAsset(v, renderEngineList);
+    if (!unsupported && assetProbePending(status)) void checkBerserkVariantAsset(v, whileAnalysisMounted(renderEngineList));
     const needsGeneratedAsset = v.key === 'emscripten-simd' || v.key === 'emscripten-relaxed';
     return browserVariantOption(v.key, v.label, {
       assetStatus: status,
@@ -979,13 +991,13 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const status = plentyChessVariantAssetStatus(v);
     const unsupportedReason = plentyChessVariantUnsupportedReason(v);
     const needsGeneratedAsset = v.key === 'emscripten-sse41' || v.key === 'emscripten-relaxed';
-    if (!unsupportedReason && needsGeneratedAsset && status === 'unknown') void checkPlentyChessVariantAsset(v, renderEngineList);
+    if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkPlentyChessVariantAsset(v, whileAnalysisMounted(renderEngineList));
     return browserVariantOption(v.key, v.label, { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
   });
   if (family === 'stormphrax') return availableStormphraxVariants().map((v) => {
     const status = stormphraxVariantAssetStatus(v);
     const unsupportedReason = stormphraxVariantUnsupportedReason(v);
-    if (!unsupportedReason && status === 'unknown') void checkStormphraxVariantAsset(v, renderEngineList);
+    if (!unsupportedReason && assetProbePending(status)) void checkStormphraxVariantAsset(v, whileAnalysisMounted(renderEngineList));
     return browserVariantOption(v.key, v.label, { assetStatus: status, unsupportedReason });
   });
   const recklessVariants = availableRecklessVariants().filter((v) => !isV0DeployProfile() || ['full', 'simd', 'relaxed-simd'].includes(v.key));
@@ -1104,7 +1116,7 @@ function renderRecklessRuntimeInfo(): void {
     const status = engine?.runtimeStatus();
     const mode = engine?.runtimeLabel() ?? fallbackMode;
     const asset = recklessVariantAssetStatus(variant);
-    if (asset === 'unknown') void checkRecklessVariantAsset(variant, () => { renderEngineList(); renderRecklessRuntimeInfo(); });
+    if (assetProbePending(asset)) void checkRecklessVariantAsset(variant, whileAnalysisMounted(() => { renderEngineList(); renderRecklessRuntimeInfo(); }));
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     const targetUrl = status?.wasmUrl ?? variant.wasmUrl;
     const assetUrlText = variant.nnueUrl ? `${targetUrl} + ${variant.nnueUrl}` : targetUrl;
@@ -1118,7 +1130,7 @@ function renderRecklessRuntimeInfo(): void {
     const status = engine?.runtimeStatus();
     const mode = engine?.runtimeLabel() ?? (canUsePersistentViridithasWasi() ? 'persistent available' : 'one-shot fallback');
     const asset = viridithasVariantAssetStatus(variant);
-    if (asset === 'unknown') void checkViridithasVariantAsset(variant, renderRecklessRuntimeInfo);
+    if (assetProbePending(asset)) void checkViridithasVariantAsset(variant, whileAnalysisMounted(renderRecklessRuntimeInfo));
     const assetText = asset === 'ok' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${mode} · ${sab} · ${assetText} · ${status?.wasmUrl ?? variant.wasmUrl}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}${asset === 'missing' ? ' · build locally with npm run viridithas:build-wasi or viridithas:build-simd-wasi' : ''}`;
   });
@@ -1127,7 +1139,7 @@ function renderRecklessRuntimeInfo(): void {
   const berserkParts = berserkVariants.map((variant) => {
     const engine = berserkEngines.peek(variant);
     const asset = berserkVariantAssetStatus(variant);
-    if (asset === 'unknown') void checkBerserkVariantAsset(variant, renderRecklessRuntimeInfo);
+    if (assetProbePending(asset)) void checkBerserkVariantAsset(variant, whileAnalysisMounted(renderRecklessRuntimeInfo));
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl ?? variant.wasmUrl}`;
   });
@@ -1137,7 +1149,7 @@ function renderRecklessRuntimeInfo(): void {
     const engine = plentyChessEngines.peek(variant);
     const asset = plentyChessVariantAssetStatus(variant);
     const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
-    if (!unsupportedReason && asset === 'unknown') void checkPlentyChessVariantAsset(variant, renderRecklessRuntimeInfo);
+    if (!unsupportedReason && assetProbePending(asset)) void checkPlentyChessVariantAsset(variant, whileAnalysisMounted(renderRecklessRuntimeInfo));
     const assetText = unsupportedReason ? unsupportedReason : asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
   });
@@ -1147,7 +1159,7 @@ function renderRecklessRuntimeInfo(): void {
     const engine = stormphraxEngines.peek(variant);
     const asset = stormphraxVariantAssetStatus(variant);
     const unsupportedReason = stormphraxVariantUnsupportedReason(variant);
-    if (!unsupportedReason && asset === 'unknown') void checkStormphraxVariantAsset(variant, renderRecklessRuntimeInfo);
+    if (!unsupportedReason && assetProbePending(asset)) void checkStormphraxVariantAsset(variant, whileAnalysisMounted(renderRecklessRuntimeInfo));
     const assetText = unsupportedReason ?? (asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset');
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
   });
@@ -2812,15 +2824,15 @@ async function reloadLc0Backend(forceAnalyzeAfterLoad = false): Promise<void> {
 
 async function init(mountSignal: AbortSignal) {
   if (!isV0DeployProfile()) {
-    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, renderRecklessRuntimeInfo);
+    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
   }
-  REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, renderRecklessRuntimeInfo);
+  REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
   if (!REQUESTED_VIRIDITHAS_EXPLICIT && REQUESTED_VIRIDITHAS_VARIANT.key === 'relaxed-simd') {
-    REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(viridithasVariantByKey('simd'), false, renderRecklessRuntimeInfo);
+    REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(viridithasVariantByKey('simd'), false, whileAnalysisMounted(renderRecklessRuntimeInfo));
   }
-  REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, renderRecklessRuntimeInfo);
-  REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, renderRecklessRuntimeInfo);
-  REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(REQUESTED_STORMPHRAX_VARIANT, REQUESTED_STORMPHRAX_EXPLICIT, renderRecklessRuntimeInfo);
+  REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
+  REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
+  REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(REQUESTED_STORMPHRAX_VARIANT, REQUESTED_STORMPHRAX_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
   if (isStaleMount(mountSignal)) return;
   if (analysisPagehideHandler) window.removeEventListener('pagehide', analysisPagehideHandler);
   analysisPagehideHandler = (event: PageTransitionEvent) => {
@@ -2847,7 +2859,7 @@ async function init(mountSignal: AbortSignal) {
   renderAll();
   renderEngineList();
   renderRecklessRuntimeInfo();
-  if (!isV0DeployProfile()) void probeEngineLogos(() => { renderEngineList(); renderAll(); });
+  if (!isV0DeployProfile()) void probeEngineLogos(whileAnalysisMounted(() => { renderEngineList(); renderAll(); }));
   wireEvents();
   void refreshPgnDatabaseCollections();
   if (!isV0DeployProfile()) {
@@ -2893,6 +2905,7 @@ export function mountAnalysisBrowser(): () => void {
   resetAnalysisPageState();
   const controller = new AbortController();
   mountAbort = controller;
+  analysisMountedCallbackCache = new WeakMap();
   // Test hook for automated browser checks: synthetic chessground drags are
   // unreliable, so smokes call this to route through the real user-move path.
   const hook = (from: string, to: string) => { void onUserMove(from as Key, to as Key); };

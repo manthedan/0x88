@@ -34,6 +34,8 @@ export const VIRIDITHAS_RELAXED_SIMD_VARIANT: ViridithasVariant = {
   note: 'Viridithas build using the relaxed integer dot for the L1 NNUE kernels (exact: QA=255/FT_SHIFT=9 keep activations in 0..127). Default when the browser validates Relaxed SIMD; +14% NPS over simd128 at 40/40 parity.',
 };
 
+const assetChecks = new Map<string, Promise<ViridithasAssetStatus>>();
+
 const DEPLOYED_VIRIDITHAS_PATHS = new Set([
   '/viridithas/viridithas.wasm',
   '/viridithas/viridithas-simd128.wasm',
@@ -131,21 +133,33 @@ export function viridithasVariantAssetStatus(variant: ViridithasVariant): Viridi
   return variant.assetStatus ?? 'unknown';
 }
 
-export async function checkViridithasVariantAsset(variant: ViridithasVariant, onChange?: () => void): Promise<ViridithasAssetStatus> {
-  if (variant.assetStatus === 'ok' || variant.assetStatus === 'missing') return variant.assetStatus;
+export function checkViridithasVariantAsset(variant: ViridithasVariant, onChange?: () => void): Promise<ViridithasAssetStatus> {
+  if (variant.assetStatus === 'ok' || variant.assetStatus === 'missing') return Promise.resolve(variant.assetStatus);
+  const existing = assetChecks.get(variant.wasmUrl);
+  if (existing) {
+    variant.assetStatus = 'checking';
+    return existing.then((status) => {
+      variant.assetStatus = status;
+      onChange?.();
+      return status;
+    });
+  }
   if (shouldSkipKnownUnshippedProbe(variant)) {
     variant.assetStatus = 'missing';
     onChange?.();
-    return variant.assetStatus;
+    return Promise.resolve(variant.assetStatus);
   }
   variant.assetStatus = 'checking';
+  const promise = fetch(variant.wasmUrl, { method: 'HEAD' })
+    .then((response) => response.ok ? 'ok' : 'missing' as ViridithasAssetStatus)
+    .catch(() => 'missing' as ViridithasAssetStatus)
+    .then((status) => {
+      variant.assetStatus = status;
+      assetChecks.delete(variant.wasmUrl);
+      onChange?.();
+      return status;
+    });
+  assetChecks.set(variant.wasmUrl, promise);
   onChange?.();
-  try {
-    const response = await fetch(variant.wasmUrl, { method: 'HEAD' });
-    variant.assetStatus = response.ok ? 'ok' : 'missing';
-  } catch {
-    variant.assetStatus = 'missing';
-  }
-  onChange?.();
-  return variant.assetStatus;
+  return promise;
 }

@@ -240,14 +240,13 @@ export function checkBerserkVariantAsset(variant: BerserkVariant, onChange?: () 
   const current = assetStatuses.get(key);
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
   const existing = assetChecks.get(key);
-  if (existing) return existing;
+  if (existing) return existing.then((status) => { onChange?.(); return status; });
   if (shouldSkipKnownUnshippedProbe(variant)) {
     assetStatuses.set(key, 'missing');
     onChange?.();
     return Promise.resolve('missing');
   }
   assetStatuses.set(key, 'checking');
-  onChange?.();
   const promise = Promise.all(assetUrls(variant).map((url) => fetch(url, { method: 'HEAD', cache: 'no-store' }).then((response) => response.ok).catch(() => false)))
     .then((results) => (results.every(Boolean) ? 'present' : 'missing') as BerserkAssetStatus)
     .then((status) => {
@@ -257,5 +256,6 @@ export function checkBerserkVariantAsset(variant: BerserkVariant, onChange?: () 
       return status;
     });
   assetChecks.set(key, promise);
+  onChange?.();
   return promise;
 }

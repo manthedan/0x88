@@ -179,7 +179,7 @@ export function checkRecklessVariantAsset(variant: RecklessVariant, onChange?: (
   const current = assetStatuses.get(key);
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
   const existing = assetChecks.get(key);
-  if (existing) return existing;
+  if (existing) return existing.then((status) => { onChange?.(); return status; });
   if (shouldSkipKnownUnshippedProbe(variant)) {
     assetStatuses.set(key, 'missing');
     onChange?.();

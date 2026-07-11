@@ -37,6 +37,34 @@ test('production probes deployed Viridithas relaxed asset', async () => {
   }
 });
 
+test('Viridithas in-flight asset checks notify callbacks attached by a remount', async () => {
+  const originalFetch = globalThis.fetch;
+  let resolveFetch;
+  globalThis.fetch = () => new Promise((resolve) => { resolveFetch = resolve; });
+  const variant = { ...VIRIDITHAS_SIMD_VARIANT, key: 'custom', wasmUrl: '/viridithas/remount-test.wasm' };
+  let firstNotifications = 0;
+  let remountNotifications = 0;
+  try {
+    let remount;
+    let remountedVariant;
+    const first = checkViridithasVariantAsset(variant, () => {
+      firstNotifications += 1;
+      if (firstNotifications === 1) {
+        remountedVariant = { ...variant, assetStatus: undefined };
+        remount = checkViridithasVariantAsset(remountedVariant, () => { remountNotifications += 1; });
+      }
+    });
+    resolveFetch({ ok: true });
+    assert.equal(await first, 'ok');
+    assert.equal(await remount, 'ok');
+    assert.equal(viridithasVariantAssetStatus(remountedVariant), 'ok');
+    assert.equal(firstNotifications, 2);
+    assert.equal(remountNotifications, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('IPv6 loopback still probes local Viridithas generated assets', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
