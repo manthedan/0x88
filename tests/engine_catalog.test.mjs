@@ -77,6 +77,8 @@ test('static LC0 and Stockfish variants expose labels and gating metadata', () =
   assert.equal(defaultStaticEngineVariant('berserk'), 'emscripten');
   assert.equal(defaultStaticEngineVariant('plentychess'), 'emscripten');
   assert.equal(defaultStaticEngineVariant('stormphrax'), 'emscripten');
+  assert.deepEqual(ENGINE_FAMILY_DEFINITIONS.stormphrax.variants.v0Allowed, ['emscripten', 'emscripten-relaxed']);
+  assert.equal(ENGINE_FAMILY_DEFINITIONS.stormphrax.play.options[0]?.variant, 'default');
   assert.equal(lc0EngineLabel('small'), 'Lc0');
   assert.equal(lc0EngineLabel('bt4'), 'Lc0 BT4-it332');
   assert.equal(stockfishEngineLabel('lite', 'arena'), 'Stockfish Lite');

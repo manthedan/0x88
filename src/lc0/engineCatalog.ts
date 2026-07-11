@@ -262,7 +262,7 @@ export const ENGINE_FAMILY_DEFINITIONS = {
     shortLabel: 'Storm',
     status: 'experimental',
     docHref: 'docs/engine_catalog.md#stormphrax-family',
-    note: 'Stormphrax 8.0.0 single-thread Emscripten UCI worker with its undertown NNUE.',
+    note: 'Stormphrax 8.0.0 single-thread Emscripten UCI worker with a feature-detected Relaxed SIMD fast path and baseline SIMD fallback.',
     runtime: 'uci',
     resource: { resourceClass: 'cpu', maxThreads: 1 },
     strength: {
@@ -272,11 +272,11 @@ export const ENGINE_FAMILY_DEFINITIONS = {
     order: { default: 6, v0: 6 },
     variants: {
       default: 'emscripten',
-      v0Allowed: ['emscripten'],
+      v0Allowed: ['emscripten', 'emscripten-relaxed'],
       v0Fallback: 'emscripten',
     },
     play: {
-      options: [{ id: 'stormphrax', label: 'Stormphrax', variant: 'emscripten', group: 'engine', order: 10, v0: true }],
+      options: [{ id: 'stormphrax', label: 'Stormphrax', variant: 'default', group: 'engine', order: 10, v0: true }],
       levels: [2, 4, 6, 9, 12],
     },
   },

@@ -537,7 +537,7 @@ new file mode 100644
 index 0000000..0b1a9ab
 --- /dev/null
 +++ b/src/util/simd/wasm128.h
-@@ -0,0 +1,136 @@
+@@ -0,0 +1,159 @@
 +/*
 + * Stormphrax browser port WebAssembly SIMD backend.
 + * Derived from the upstream AVX2 backend and mapped to Emscripten's SSE
@@ -553,6 +553,9 @@ index 0000000..0b1a9ab
 +
 +#include <smmintrin.h>
 +#include <tmmintrin.h>
++#if defined(__wasm_relaxed_simd__)
++#include <wasm_simd128.h>
++#endif
 +
 +namespace stormphrax::util::simd {
 +    using VectorU8 = __m128i;
@@ -659,6 +662,26 @@ index 0000000..0b1a9ab
 +            return _mm_cvtsi128_si32(v);
 +        }
 +        SP_ALWAYS_INLINE_NDEBUG inline VectorI32 dpbusdI32(VectorI32 sum, VectorU8 u, VectorI8 i) {
++#if defined(__wasm_relaxed_simd__)
++            // activateFt packs non-negative pairwise activations to u8. The
++            // relaxed dot is exact when those activations remain in [0, 127];
++            // fixed-depth parity validation guards that precondition before
++            // this candidate can be promoted.
++            const auto outsideI7 = wasm_i8x16_bitmask(
++                wasm_u8x16_gt((v128_t) u, wasm_i8x16_splat(127))
++            );
++#if defined(SP_RELAXED_SIMD_AUDIT)
++            if (outsideI7) __builtin_trap();
++#endif
++            if (!outsideI7) {
++                return (VectorI32) wasm_i32x4_relaxed_dot_i8x16_i7x16_add(
++                    (v128_t) i, (v128_t) u, (v128_t) sum
++                );
++            }
++            // The relaxed opcode permits implementation-dependent results
++            // outside its i7 operand range. Preserve baseline semantics for
++            // those vectors instead of relying on a position-specific bound.
++#endif
 +            const auto p = _mm_maddubs_epi16(u, i);
 +            const auto w = _mm_madd_epi16(p, _mm_set1_epi16(1));
 +            return _mm_add_epi32(sum, w);

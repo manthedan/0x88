@@ -243,7 +243,10 @@ async function copyAssets(config, archiveRoot, allowMissingAssets) {
 
 function rebuildCommand(config) {
   const sourceDir = `$PWD/${config.sourcePrefix.replace(/\/$/, '')}`;
-  if (config.engine === 'berserk' || config.engine === 'plentychess' || config.engine === 'stormphrax') {
+  if (config.engine === 'stormphrax') {
+    return `rm -rf "$PWD/.build/stormphrax-baseline" "$PWD/.build/stormphrax-relaxed"\nmkdir -p "$PWD/.build" "$PWD/out/public/stormphrax"\ncp -a "${sourceDir}" "$PWD/.build/stormphrax-baseline"\ncp -a "${sourceDir}" "$PWD/.build/stormphrax-relaxed"\n${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="$PWD/.build/stormphrax-baseline" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_EMSCRIPTEN_JS_OUT="$PWD/out/public/stormphrax/stormphrax-emscripten.js" npm run stormphrax:build-emscripten\n${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="$PWD/.build/stormphrax-relaxed" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_RELAXED_SIMD=1 ${config.envPrefix}_EMSCRIPTEN_JS_OUT="$PWD/out/public/stormphrax/stormphrax-emscripten-relaxed-simd128.js" node scripts/build_stormphrax_emscripten.mjs`;
+  }
+  if (config.engine === 'berserk' || config.engine === 'plentychess') {
     const outDir = `$PWD/out/public/${config.engine}/${config.engine}-emscripten.js`;
     return `${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_EMSCRIPTEN_JS_OUT="${outDir}" npm run ${config.engine}:build-emscripten`;
   }

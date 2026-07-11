@@ -37,6 +37,14 @@ npm run stormphrax:smoke-emscripten
 
 The Node smoke covers UCI handshake, readiness, new-game reset, start position, a non-start FEN, info output, and a second readiness barrier. At depth 2 the browser build exactly matched the official Apple M1 8.0.0 binary after equivalent `ucinewgame` resets: startpos `g1f3` (76 nodes, +0.35) and the test FEN `e1g1` (145 nodes, +1.38). The smoke pins both best moves and emitted no stderr.
 
+### Relaxed SIMD promotion
+
+`npm run stormphrax:build-relaxed-simd-emscripten` adds `-mrelaxed-simd` and replaces the NNUE L1 `maddubs`/`madd` sequence with `i32x4.relaxed_dot_i8x16_i7x16_add`. Each vector is checked against the opcode's `[0, 127]` i7 precondition; an out-of-range vector uses the baseline SIMD sequence, preserving exact behavior for every input without relying on a position-specific activation bound. An optional audit build traps on that fallback for coverage experiments.
+
+The artifact contains 12 relaxed dot-product instructions and passes the standard Node smoke. Fixed-depth comparison passed all 20 rotated positions at depths 7, 9, and 11 (60/60) with identical best move, score, nodes, and PV. On Node.js on an Apple M4, aggregate NPS was 648k vs 621k at depth 9 (`1.04x`) and 717k vs 634k at depth 11 (`1.13x`). A Chromium depth-11 run on the same machine produced 540k vs 477k aggregate NPS (`1.13x`) with 20/20 exact browser parity. These measurements are device/runtime-specific.
+
+Relaxed SIMD is the automatic default when the exact relaxed-dot feature probe validates. Browsers without it select the baseline SIMD artifact, and a missing default relaxed asset also falls back to baseline. `stormphraxVariant=relaxed` remains available as an explicit diagnostic override.
+
 Before distribution:
 
 ```sh

@@ -34,6 +34,17 @@ test('browser artifact groups expose absolute URL paths and preparation metadata
   }
 });
 
+test('Stormphrax registry requires baseline and relaxed SIMD sidecars', () => {
+  const group = BROWSER_ENGINE_ASSET_GROUPS.find((entry) => entry.family === 'stormphrax');
+  assert.ok(group);
+  assert.match(group.command, /stormphrax:build-relaxed-simd-emscripten/);
+  assert.deepEqual(group.assets.filter((asset) => asset.includes('relaxed-simd128')), [
+    '/stormphrax/stormphrax-emscripten-relaxed-simd128.js',
+    '/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm',
+    '/stormphrax/stormphrax-emscripten-relaxed-simd128.data',
+  ]);
+});
+
 test('external artifact classifier covers deployable binaries and keeps manifests', () => {
   for (const name of ['engine.wasm', 'engine.data', 'net.nnue', 'model.onnx', 'source.tar.gz', 'engine.js.br']) {
     assert.equal(isExternalArtifactName(name), true, name);
