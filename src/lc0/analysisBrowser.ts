@@ -1034,8 +1034,9 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
   if (family === 'stormphrax') return availableStormphraxVariants().map((v) => {
     const status = stormphraxVariantAssetStatus(v);
     const unsupportedReason = stormphraxVariantUnsupportedReason(v);
-    if (!unsupportedReason && assetProbePending(status)) void checkStormphraxVariantAsset(v, whileAnalysisMounted(renderEngineList));
-    return browserVariantOption(v.key, v.label, { assetStatus: status, unsupportedReason });
+    const needsGeneratedAsset = v.key === 'emscripten-relaxed';
+    if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkStormphraxVariantAsset(v, whileAnalysisMounted(renderEngineList));
+    return browserVariantOption(v.key, v.label, { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
   });
   const recklessVariants = availableRecklessVariants().filter((v) => !isV0DeployProfile() || ['full', 'simd', 'relaxed-simd'].includes(v.key));
   return recklessVariants.map((v) => {
