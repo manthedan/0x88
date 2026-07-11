@@ -154,7 +154,7 @@ export function stormphraxVariantAssetStatus(variant: StormphraxVariant): Stormp
   return assetStatuses.get(assetKey(variant)) ?? 'unknown';
 }
 
-export function checkStormphraxVariantAsset(variant: StormphraxVariant, onChange?: () => void): Promise<StormphraxAssetStatus> {
+export function checkStormphraxVariantAsset(variant: StormphraxVariant, onChange?: () => void, timeoutMs = 8_000): Promise<StormphraxAssetStatus> {
   const key = assetKey(variant);
   const current = assetStatuses.get(key);
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
@@ -166,14 +166,17 @@ export function checkStormphraxVariantAsset(variant: StormphraxVariant, onChange
     return Promise.resolve('missing');
   }
   assetStatuses.set(key, 'checking');
-  const promise = Promise.all(assetUrls(variant).map((url) => fetch(url, { method: 'HEAD', cache: 'no-store' }).then((response) => response.ok).catch(() => false)))
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
+  const promise = Promise.all(assetUrls(variant).map((url) => fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal }).then((response) => response.ok).catch(() => false)))
     .then((results) => (results.every(Boolean) ? 'present' : 'missing') as StormphraxAssetStatus)
     .then((status) => {
       assetStatuses.set(key, status);
       assetChecks.delete(key);
       onChange?.();
       return status;
-    });
+    })
+    .finally(() => clearTimeout(timeout));
   assetChecks.set(key, promise);
   onChange?.();
   return promise;

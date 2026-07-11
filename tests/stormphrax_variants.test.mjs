@@ -57,6 +57,25 @@ test('Stormphrax in-flight asset checks notify callbacks attached by a remount',
   }
 });
 
+test('Stormphrax asset probes time out to the safe missing state', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (_url, init) => new Promise((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+  });
+  try {
+    const variant = {
+      ...STORMPHRAX_EMSCRIPTEN_VARIANT,
+      key: 'custom',
+      jsUrl: '/stormphrax/timeout-test.js',
+      wasmUrl: '/stormphrax/timeout-test.wasm',
+      dataUrl: '/stormphrax/timeout-test.data',
+    };
+    assert.equal(await checkStormphraxVariantAsset(variant, undefined, 5), 'missing');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('Stormphrax missing default relaxed assets fall back to baseline SIMD', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ ok: false });
