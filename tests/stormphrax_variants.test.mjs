@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   STORMPHRAX_EMSCRIPTEN_VARIANT,
+  STORMPHRAX_RELAXED_VARIANT,
   STORMPHRAX_MAIN_NETWORK,
   checkStormphraxVariantAsset,
   defaultStormphraxVariantKey,
@@ -18,6 +19,8 @@ test('Stormphrax variant metadata pins the browser sidecars and undertown networ
   assert.equal(STORMPHRAX_EMSCRIPTEN_VARIANT.wasmUrl, '/stormphrax/stormphrax-emscripten.wasm');
   assert.equal(STORMPHRAX_EMSCRIPTEN_VARIANT.dataUrl, '/stormphrax/stormphrax-emscripten.data');
   assert.equal(STORMPHRAX_MAIN_NETWORK, 'undertown.nnue');
+  assert.equal(STORMPHRAX_RELAXED_VARIANT.key, 'emscripten-relaxed');
+  assert.equal(STORMPHRAX_RELAXED_VARIANT.wasmUrl, '/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm');
   assert.equal(defaultStormphraxVariantKey(), 'emscripten');
 });
 
@@ -59,6 +62,7 @@ test('Stormphrax search timeout leaves startup headroom above movetime', () => {
 
 test('Stormphrax variant normalization and same-origin overrides are stable', () => {
   assert.equal(normalizeStormphraxVariant('browser worker'), 'emscripten');
+  assert.equal(normalizeStormphraxVariant('relaxed SIMD'), 'emscripten-relaxed');
   assert.equal(normalizeStormphraxVariant('custom'), 'custom');
   assert.equal(stormphraxVariantByKey('unknown').label, 'Stormphrax 8');
   assert.equal(hasExplicitStormphraxVariant(new URLSearchParams('')), false);

@@ -1,6 +1,6 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-07-10T08:59:30.014Z",
+  "generatedAt": "2026-07-11T07:20:18.262Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "stormphrax",
   "flavor": "emscripten-single-thread",
@@ -14,11 +14,11 @@
   },
   "build": {
     "script": "scripts/build_stormphrax_emscripten.mjs",
-    "command": "npm run stormphrax:build-emscripten",
+    "command": "npm run stormphrax:build-emscripten && npm run stormphrax:build-relaxed-simd-emscripten",
     "patches": [
       "patches/stormphrax-emscripten.patch"
     ],
-    "toolchain": "Emscripten 6.0.2, WebAssembly SIMD, synchronous single-thread search, tablebases disabled by leaving SyzygyPath empty."
+    "toolchain": "Emscripten 6.0.2, WebAssembly SIMD plus an explicit Relaxed SIMD candidate, synchronous single-thread search, tablebases disabled by leaving SyzygyPath empty."
   },
   "artifacts": [
     {
@@ -68,6 +68,54 @@
           "ratio": 0.6068
         }
       }
+    },
+    {
+      "path": "public/stormphrax/stormphrax-emscripten-relaxed-simd128.js",
+      "bytes": 70691,
+      "sha256": "1a57e31fdfe4df209f0bfd1bddf250e5a9f621ea74c033091dfa7376a88f9f0f",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 19984,
+          "ratio": 0.2827
+        },
+        "brotli": {
+          "bytes": 17696,
+          "ratio": 0.2503
+        }
+      }
+    },
+    {
+      "path": "public/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm",
+      "bytes": 696486,
+      "sha256": "04991640ec6429ccc683d491a891017673902ce707a94783658b7231ff3194d5",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 262475,
+          "ratio": 0.3769
+        },
+        "brotli": {
+          "bytes": 201236,
+          "ratio": 0.2889
+        }
+      }
+    },
+    {
+      "path": "public/stormphrax/stormphrax-emscripten-relaxed-simd128.data",
+      "bytes": 55914848,
+      "sha256": "04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 35880418,
+          "ratio": 0.6417
+        },
+        "brotli": {
+          "bytes": 33929708,
+          "ratio": 0.6068
+        }
+      }
     }
   ],
   "assets": [
@@ -76,21 +124,21 @@
       "sourceUrl": "https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/undertown.nnue",
       "rawSha256": "04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf",
       "licenseNote": "Stormphrax documents undertown as its self-trained 8.0.0 release network; distribute it with the GPL corresponding source and provenance manifest.",
-      "embeddedIn": "public/stormphrax/stormphrax-emscripten.data"
+      "embeddedIn": "public/stormphrax/stormphrax-emscripten.data and public/stormphrax/stormphrax-emscripten-relaxed-simd128.data"
     }
   ],
   "totals": {
-    "bytes": 56682704,
-    "gzipBytes": 36162956,
-    "brotliBytes": 34148675,
+    "bytes": 113364729,
+    "gzipBytes": 72325833,
+    "brotliBytes": 68297315,
     "gzipRatio": 0.638,
     "brotliRatio": 0.6025
   },
   "sourceArchive": {
     "required": true,
     "path": "public/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz",
-    "bytes": 37260111,
-    "sha256": "31f6ece2da14c6354a0251b08e7014521440dfca07eaae09f3f30a9597a62652",
+    "bytes": 37260840,
+    "sha256": "ab408f751cf25003c915ed4ab01651b3f93d7a2201a6190582a5f44dfdcadd1f",
     "url": "/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz",
     "note": "Source archive recorded for public distribution."
   }

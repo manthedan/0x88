@@ -37,6 +37,12 @@ npm run stormphrax:smoke-emscripten
 
 The Node smoke covers UCI handshake, readiness, new-game reset, start position, a non-start FEN, info output, and a second readiness barrier. At depth 2 the browser build exactly matched the official Apple M1 8.0.0 binary after equivalent `ucinewgame` resets: startpos `g1f3` (76 nodes, +0.35) and the test FEN `e1g1` (145 nodes, +1.38). The smoke pins both best moves and emitted no stderr.
 
+### Relaxed SIMD candidate
+
+`npm run stormphrax:build-relaxed-simd-emscripten` adds `-mrelaxed-simd` and replaces the NNUE L1 `maddubs`/`madd` sequence with `i32x4.relaxed_dot_i8x16_i7x16_add`. An audit build traps if a packed activation exceeds the opcode's `[0, 127]` i7 precondition. The audit and fixed-depth comparison passed all 20 rotated positions at depth 7 with identical best move, score, nodes, and PV. The artifact contains 12 relaxed dot-product instructions and passes the standard Node smoke.
+
+This remains an explicit candidate rather than the automatic default until the activation bound is established analytically for every legal position and deeper browser performance evidence justifies promotion. It is exposed as `stormphraxVariant=relaxed` only when the exact relaxed-dot feature probe validates.
+
 Before distribution:
 
 ```sh

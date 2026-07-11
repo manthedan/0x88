@@ -96,14 +96,17 @@ const CONFIGS = {
     },
     build: {
       script: 'scripts/build_stormphrax_emscripten.mjs',
-      command: 'npm run stormphrax:build-emscripten',
+      command: 'npm run stormphrax:build-emscripten && npm run stormphrax:build-relaxed-simd-emscripten',
       patches: ['patches/stormphrax-emscripten.patch'],
-      toolchain: 'Emscripten 6.0.2, WebAssembly SIMD, synchronous single-thread search, tablebases disabled by leaving SyzygyPath empty.',
+      toolchain: 'Emscripten 6.0.2, WebAssembly SIMD plus an explicit Relaxed SIMD candidate, synchronous single-thread search, tablebases disabled by leaving SyzygyPath empty.',
     },
     artifacts: [
       'public/stormphrax/stormphrax-emscripten.js',
       'public/stormphrax/stormphrax-emscripten.wasm',
       'public/stormphrax/stormphrax-emscripten.data',
+      'public/stormphrax/stormphrax-emscripten-relaxed-simd128.js',
+      'public/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm',
+      'public/stormphrax/stormphrax-emscripten-relaxed-simd128.data',
     ],
     assets: [
       {
@@ -111,7 +114,7 @@ const CONFIGS = {
         sourceUrl: 'https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/undertown.nnue',
         rawSha256: '04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf',
         licenseNote: 'Stormphrax documents undertown as its self-trained 8.0.0 release network; distribute it with the GPL corresponding source and provenance manifest.',
-        embeddedIn: 'public/stormphrax/stormphrax-emscripten.data',
+        embeddedIn: 'public/stormphrax/stormphrax-emscripten.data and public/stormphrax/stormphrax-emscripten-relaxed-simd128.data',
       },
     ],
   },

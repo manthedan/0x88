@@ -18,6 +18,8 @@ const jsOut = path.resolve(process.env.STORMPHRAX_EMSCRIPTEN_JS_OUT ?? path.join
 const outBase = path.basename(jsOut, '.js');
 const emsdkImage = process.env.STORMPHRAX_EMSDK_IMAGE ?? 'emscripten/emsdk:6.0.2';
 const skipGit = process.env.STORMPHRAX_SKIP_GIT === '1';
+const relaxedSimd = process.env.STORMPHRAX_WASM_RELAXED_SIMD === '1';
+const relaxedSimdAudit = process.env.STORMPHRAX_RELAXED_SIMD_AUDIT === '1';
 
 function run(command, args, options = {}) {
   console.log(`$ ${command} ${args.join(' ')}`);
@@ -79,12 +81,14 @@ const emxxArgs = [
   '-DNDEBUG',
   `-DSP_VERSION=${version}`,
   '-DSP_WASM_SIMD',
+  ...(relaxedSimdAudit ? ['-DSP_RELAXED_SIMD_AUDIT'] : []),
   '-DSP_SYNC_SEARCH',
   `-DSP_NETWORK_FILE="/${netName}"`,
   '-I3rdparty/fmt/include',
   '-msimd128',
   '-mssse3',
   '-msse4.1',
+  ...(relaxedSimd ? ['-mrelaxed-simd'] : []),
   '-s', 'USE_PTHREADS=0',
   '-s', 'MODULARIZE=1',
   '-s', 'EXPORT_NAME="Stormphrax"',

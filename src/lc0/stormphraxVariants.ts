@@ -1,8 +1,8 @@
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { isV0DeployProfile } from './engineCatalog.ts';
-import { supportsWasmSimd } from './wasmFeatures.ts';
+import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
-export type StormphraxVariantKey = 'emscripten' | 'custom';
+export type StormphraxVariantKey = 'emscripten' | 'emscripten-relaxed' | 'custom';
 export type StormphraxAssetStatus = 'unknown' | 'checking' | 'present' | 'missing';
 
 export interface StormphraxVariant {
@@ -24,10 +24,22 @@ const STORMPHRAX_WASM_PATH = isV0DeployProfile()
 const STORMPHRAX_DATA_PATH = isV0DeployProfile()
   ? '/artifacts/sha256/04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf/stormphrax-emscripten.data'
   : '/stormphrax/stormphrax-emscripten.data';
+const STORMPHRAX_RELAXED_JS_PATH = isV0DeployProfile()
+  ? '/artifacts/sha256/1a57e31fdfe4df209f0bfd1bddf250e5a9f621ea74c033091dfa7376a88f9f0f/stormphrax-emscripten-relaxed-simd128.js'
+  : '/stormphrax/stormphrax-emscripten-relaxed-simd128.js';
+const STORMPHRAX_RELAXED_WASM_PATH = isV0DeployProfile()
+  ? '/artifacts/sha256/04991640ec6429ccc683d491a891017673902ce707a94783658b7231ff3194d5/stormphrax-emscripten-relaxed-simd128.wasm'
+  : '/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm';
+const STORMPHRAX_RELAXED_DATA_PATH = isV0DeployProfile()
+  ? '/artifacts/sha256/04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf/stormphrax-emscripten-relaxed-simd128.data'
+  : '/stormphrax/stormphrax-emscripten-relaxed-simd128.data';
 
 export const STORMPHRAX_EMSCRIPTEN_JS_URL = resolvePublicAssetUrl(STORMPHRAX_JS_PATH);
 export const STORMPHRAX_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl(STORMPHRAX_WASM_PATH);
 export const STORMPHRAX_EMSCRIPTEN_DATA_URL = resolvePublicAssetUrl(STORMPHRAX_DATA_PATH);
+export const STORMPHRAX_RELAXED_JS_URL = resolvePublicAssetUrl(STORMPHRAX_RELAXED_JS_PATH);
+export const STORMPHRAX_RELAXED_WASM_URL = resolvePublicAssetUrl(STORMPHRAX_RELAXED_WASM_PATH);
+export const STORMPHRAX_RELAXED_DATA_URL = resolvePublicAssetUrl(STORMPHRAX_RELAXED_DATA_PATH);
 export const STORMPHRAX_MAIN_NETWORK = 'undertown.nnue';
 export const STORMPHRAX_SOURCE_NETWORK_URL = `https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/${STORMPHRAX_MAIN_NETWORK}`;
 
@@ -69,15 +81,28 @@ export const STORMPHRAX_EMSCRIPTEN_VARIANT: StormphraxVariant = {
   note: 'Stormphrax 8.0.0 single-thread WebAssembly SIMD Emscripten worker with the undertown NNUE preloaded in .data.',
 };
 
-export const STORMPHRAX_VARIANTS: readonly StormphraxVariant[] = [STORMPHRAX_EMSCRIPTEN_VARIANT];
+export const STORMPHRAX_RELAXED_VARIANT: StormphraxVariant = {
+  key: 'emscripten-relaxed',
+  label: 'Stormphrax 8 Relaxed SIMD candidate',
+  jsUrl: STORMPHRAX_RELAXED_JS_URL,
+  wasmUrl: STORMPHRAX_RELAXED_WASM_URL,
+  dataUrl: STORMPHRAX_RELAXED_DATA_URL,
+  sourceNetworkUrl: STORMPHRAX_SOURCE_NETWORK_URL,
+  note: 'Candidate using i32x4.relaxed_dot_i8x16_i7x16_add in the NNUE L1 dot product. Passed 20/20 depth-7 fixed-depth parity and activation-range audit; not yet the automatic default.',
+};
+
+export const STORMPHRAX_VARIANTS: readonly StormphraxVariant[] = [STORMPHRAX_EMSCRIPTEN_VARIANT, STORMPHRAX_RELAXED_VARIANT];
 
 export function normalizeStormphraxVariant(raw: string | null | undefined): StormphraxVariantKey {
   const value = String(raw ?? '').toLowerCase().replace(/[ _-]+/g, '');
-  return value === 'custom' ? 'custom' : 'emscripten';
+  if (value === 'custom') return 'custom';
+  if (value === 'relaxed' || value === 'relaxedsimd' || value === 'emscriptenrelaxed' || value === 'emscriptenrelaxedsimd128') return 'emscripten-relaxed';
+  return 'emscripten';
 }
 
 export function stormphraxVariantUnsupportedReason(variant: StormphraxVariant): string | null {
   if (variant.key === 'custom') return null;
+  if (variant.key === 'emscripten-relaxed') return supportsWasmRelaxedSimd() ? null : 'requires WebAssembly Relaxed SIMD';
   return supportsWasmSimd() ? null : 'requires WebAssembly SIMD';
 }
 
@@ -90,7 +115,9 @@ export function defaultStormphraxVariantKey(): StormphraxVariantKey {
 }
 
 export function stormphraxVariantByKey(key: string): StormphraxVariant {
-  if (normalizeStormphraxVariant(key) === 'custom') {
+  const normalized = normalizeStormphraxVariant(key);
+  if (normalized === 'emscripten-relaxed') return supportsWasmRelaxedSimd() ? STORMPHRAX_RELAXED_VARIANT : STORMPHRAX_EMSCRIPTEN_VARIANT;
+  if (normalized === 'custom') {
     return {
       ...STORMPHRAX_EMSCRIPTEN_VARIANT,
       key: 'custom',
