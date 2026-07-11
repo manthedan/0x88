@@ -48,3 +48,5 @@ npm test
 npm run build:netlify:r2
 npm run deploy:ort-wasm-dedup-check
 ```
+
+The nightly production journey can also be run manually with `npm run production:browser-smoke`.

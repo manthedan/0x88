@@ -1,0 +1,48 @@
+name: production-smoke
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Production origin to test
+        required: false
+        default: https://0x88.app
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-smoke
+  cancel-in-progress: false
+
+jobs:
+  browser-journey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PRODUCTION_BASE_URL: ${{ inputs.base_url || 'https://0x88.app' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install browser harness
+        run: |
+          npm install --global agent-browser@0.31.1
+          agent-browser install --with-deps
+      - name: Run production browser journey
+        run: node scripts/production_browser_smoke.mjs --base-url "$PRODUCTION_BASE_URL" --out artifacts/production-browser-smoke.json
+      - name: Upload smoke report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-browser-smoke-${{ github.run_id }}
+          path: artifacts/production-browser-smoke.json
+          if-no-files-found: warn
+          retention-days: 30

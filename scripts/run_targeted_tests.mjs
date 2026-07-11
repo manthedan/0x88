@@ -101,6 +101,8 @@ function inferTests(files) {
     ['scripts/prepare_netlify_r2_public_assets.mjs', ['engine_artifact_registry', 'netlify_r2_release']],
     ['scripts/prune_external_model_assets.mjs', ['engine_artifact_registry', 'netlify_r2_release']],
     ['scripts/check_ort_wasm_dedup.mjs', ['ort_wasm_dedup']],
+    ['scripts/production_browser_smoke.mjs', ['production_browser_smoke']],
+    ['.github/workflows/production-smoke.yml', ['production_browser_smoke']],
     ['vite.config.ts', ['ort_wasm_dedup']],
   ]);
   for (const file of files) {

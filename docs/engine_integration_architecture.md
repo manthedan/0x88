@@ -93,3 +93,21 @@ npm run lc0:analysis-browser-smoke -- --base-url http://127.0.0.1:5181
 ```
 
 For runtime-sensitive changes, also select the affected engine in Play/Arena/Analysis and wait for an actual move or completed search before deployment.
+
+## Scheduled production smoke
+
+`.github/workflows/production-smoke.yml` runs a nightly browser journey against `https://0x88.app` and can also be started manually with an alternate production origin. The workflow pins its browser harness version and uploads a JSON report for 30 days.
+
+The journey intentionally uses one browser session while navigating between product surfaces so route teardown and remount behavior is exercised:
+
+1. Centipawn completes a first move in Play.
+2. Arena exposes the canonical family order with Centipawn last.
+3. Analysis exposes the same order and resolves runtime diagnostics.
+4. Stormphrax completes a first move in a newly mounted Play page.
+5. Browser errors, HTTP 4xx/5xx requests, the app-shell cache policy, and the canonical ORT WASM cache policy are checked.
+
+Run the same gate locally against production with:
+
+```sh
+npm run production:browser-smoke -- --out /tmp/production-browser-smoke.json
+```
