@@ -23,7 +23,7 @@
   --accent:#5c7029; --accent-2:#6f8736;
   --accent-hover:#4d601f; --accent-deep:#3f4f1d;
   --accent-soft:#eef2dd; --accent-tint-border:#dde3c2;
-  --accent-soft-text:#3f4a1f;
+  --accent-soft-text:#3f4a1f; --on-accent:#fff;
   --soft:#eef2dd; /* legacy alias used by app pages */
   --warn:#a5461b; --warn-soft:#f7e6db;
   --chart-1:#4a7a2a; --chart-2:#a5461b; --chart-3:#1c5f8a;
@@ -55,7 +55,7 @@
   --border-input:#332e25; --border-input-hover:#4a4438;
   --accent:#a3c456; --accent-2:#b8d574; --accent-deep:#768f2f;
   --accent-hover:#8db540; --accent-soft:#2b3416; --accent-tint-border:#3a4318;
-  --accent-soft-text:#a3c456; --soft:#2b3416;
+  --accent-soft-text:#a3c456; --on-accent:#15130f; --soft:#2b3416;
   --warn:#e08147; --warn-soft:#3a2418;
   --chart-1:#9bc967; --chart-2:#ed9566; --chart-3:#6cb6e5;
   --chart-4:#d2a0e8; --chart-5:#dec85f; --chart-6:#c7c1b5;
@@ -80,7 +80,7 @@
     --border-input:#332e25; --border-input-hover:#4a4438;
     --accent:#a3c456; --accent-2:#b8d574; --accent-deep:#768f2f;
     --accent-hover:#8db540; --accent-soft:#2b3416; --accent-tint-border:#3a4318;
-    --accent-soft-text:#a3c456; --soft:#2b3416;
+    --accent-soft-text:#a3c456; --on-accent:#15130f; --soft:#2b3416;
     --warn:#e08147; --warn-soft:#3a2418;
     --chart-1:#9bc967; --chart-2:#ed9566; --chart-3:#6cb6e5;
     --chart-4:#d2a0e8; --chart-5:#dec85f; --chart-6:#c7c1b5;

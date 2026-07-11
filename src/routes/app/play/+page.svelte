@@ -143,7 +143,7 @@
   :global(#moveList .num){color:var(--muted)}
   :global(#moveList .placeholder){color:var(--muted)}
   :global(#moveList .san){padding:1px 4px; border-radius:4px}
-  :global(#moveList .san.current){background:var(--accent); color:#fbf8f0; font-weight:600}
+  :global(#moveList .san.current){background:var(--accent); color:var(--on-accent); font-weight:600}
   :global(#pgnOut){
     font-family:var(--mono); font-size:12px;
     white-space:pre-wrap; overflow-wrap:anywhere; margin-top:8px;
