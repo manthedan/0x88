@@ -3,6 +3,7 @@ import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { copyFile, link, mkdir, rm } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './engine_artifact_registry.mjs';
+import { isRequiredOrtRuntimeAsset } from './ort_runtime_assets.mjs';
 
 const externalArtifactDirectories = new Set(EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES);
 
@@ -15,6 +16,7 @@ export function shouldSkipR2PublicAsset(relPath, isDir) {
   if (parts[0] === 'models' && parts[1] === 'lc0') return isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx');
   if (parts[0] === 'models' && parts[1] === 'maia3') return !isDir && name.endsWith('.onnx');
   if (parts[0] === 'models' && !isDir && name === 'bt4_soap_rem_c19000_final.onnx') return true;
+  if (parts[0] === 'ort' && !isDir) return !isRequiredOrtRuntimeAsset(name);
   if (externalArtifactDirectories.has(parts[0])) return !isDir && isExternalArtifactName(name);
   return false;
 }

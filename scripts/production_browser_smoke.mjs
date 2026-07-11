@@ -171,8 +171,17 @@ async function navigateSurface(args, session, path, fullNavigation = false) {
   return String(url);
 }
 
+async function inspectCapabilities(args, session, surface) {
+  const text = await waitForEval(args, session, `document.querySelector('[data-testid="browser-capabilities"]')?.textContent ?? ''`, (value) => /WebGPU (?:ready|unavailable)/.test(value) && /WASM threads (?:ready|single-thread fallback)/.test(value), 30_000);
+  if (!/Model cache/.test(text)) {
+    const expanded = await evaluate(args, session, `(() => { const panel = document.querySelector('[data-testid="browser-capabilities"]'); if (panel) panel.open = true; return panel?.textContent ?? ''; })()`);
+    if (!/Model cache/.test(expanded)) throw new Error(`${surface} browser capability details did not initialize`);
+  }
+}
+
 async function playFirstMove(args, session, engine, fullNavigation = false) {
   const url = await navigateSurface(args, session, '/app/play/', fullNavigation);
+  await inspectCapabilities(args, session, `Play/${engine}`);
   await waitForEval(args, session, `(() => ({ engine: !!document.querySelector('#engineSelect option[value="${engine}"]'), color: !!document.querySelector('#colorSelect') }))()`, (value) => value?.engine && value?.color, 60_000);
   const started = await evaluate(args, session, `(() => {
     const engine = document.querySelector('#engineSelect');
@@ -199,6 +208,7 @@ async function playFirstMove(args, session, engine, fullNavigation = false) {
 
 async function inspectArena(args, session) {
   const url = await navigateSurface(args, session, '/app/arena/');
+  await inspectCapabilities(args, session, 'Arena');
   const result = await waitForEval(args, session, `(() => ({
     title: document.title,
     families: [...(document.querySelector('.seat-fam')?.options ?? [])].map((option) => option.value),
@@ -211,6 +221,7 @@ async function inspectArena(args, session) {
 
 async function inspectAnalysis(args, session) {
   const url = await navigateSurface(args, session, '/app/analysis/');
+  await inspectCapabilities(args, session, 'Analysis');
   const result = await waitForEval(args, session, `(() => ({
     title: document.title,
     families: [...(document.querySelector('.row-fam')?.options ?? [])].map((option) => option.value),

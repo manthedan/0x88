@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { afterNavigate } from '$app/navigation';
   import SiteHeader from '$lib/components/SiteHeader.svelte';
+  import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
   let mountedUrl: URL | null = null;
   afterNavigate(({ to }) => {
     if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
@@ -35,6 +36,7 @@
 </svelte:head>
 
 <SiteHeader pageTitle="Arena" />
+<BrowserCapabilities />
 <main id="main">
   <section class="panel" aria-label="Board">
     <div id="blackSideLabel" class="side-label" aria-label="Black side"></div>

@@ -196,6 +196,7 @@ let activeAnalysisRunId = 0;
 const nodeIndex = new Map<number, GameNode>();
 const ENGINE_PROFILE_STORAGE_KEY = 'lc0-analysis-engine-profiles-v1';
 const LAST_ENGINE_PROFILE_STORAGE_KEY = 'lc0-analysis-last-engine-profile-v1';
+const MANUAL_ENGINE_ROWS_STORAGE_KEY = '0x88-analysis-engine-rows-v1';
 const ENGINE_PROFILE_BACKUP_KIND = 'lc0-analysis-engine-profile-backup';
 const BUILT_IN_PROFILE_VALUE_PREFIX = 'builtin:';
 
@@ -952,6 +953,39 @@ function nextEngineFamily(): EngineFamily {
 
 let engineRows: EngineRow[] = [{ family: 'lc0', variant: 'small', strength: 400 }];
 
+function persistedVariantOrDefault(family: EngineFamily, value: unknown): string {
+  const variant = String(value ?? '');
+  const options = variantOptions(family);
+  const selected = options.find((option) => option.value === variant);
+  if (selected && (!selected.disabled || /\(checking\b/.test(selected.label))) return selected.value;
+  return options.find((option) => !option.disabled)?.value ?? defaultVariant(family);
+}
+
+function loadManualEngineRows(): EngineRow[] | undefined {
+  try {
+    const parsed = JSON.parse(storageGet(MANUAL_ENGINE_ROWS_STORAGE_KEY) ?? 'null');
+    if (!Array.isArray(parsed) || !parsed.length) return undefined;
+    const rows = parsed.slice(0, 8).flatMap((value, index): EngineRow[] => {
+      if (!value || typeof value !== 'object') return [];
+      const raw = value as Record<string, unknown>;
+      const family = canonicalEngineFamily(String(raw.family ?? ''));
+      if (!family) return [];
+      const persistedVariant = persistedVariantOrDefault(family, raw.variant);
+      const variant = family === 'lc0' && isLc0BigNetVariant(persistedVariant) ? 'small' : persistedVariant;
+      return [normalizeDeployEngineRow({ family, variant, strength: Number(raw.strength) }, 'analysis', index)];
+    });
+    return rows.length ? rows : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistManualEngineRows(): void {
+  storageSet(MANUAL_ENGINE_ROWS_STORAGE_KEY, JSON.stringify(engineRows));
+  storageRemove(LAST_ENGINE_PROFILE_STORAGE_KEY);
+  renderEngineProfiles('');
+}
+
 function analysisEngineFamilyOptions(): { value: EngineFamily; label: string }[] {
   return engineFamilyOptions();
 }
@@ -1059,7 +1093,15 @@ function usesBigNetRow(variant: 'bt4' | 't3'): boolean {
 }
 
 function renderEngineList(): void {
-  engineRows = engineRows.map((row, index) => normalizeDeployEngineRow(row, 'analysis', index));
+  engineRows = engineRows.map((row, index) => {
+    const normalized = normalizeDeployEngineRow(row, 'analysis', index);
+    const options = variantOptions(normalized.family);
+    const selected = options.find((option) => option.value === normalized.variant);
+    if (!selected || (selected.disabled && !/\(checking\b/.test(selected.label))) {
+      normalized.variant = options.find((option) => !option.disabled)?.value ?? defaultVariant(normalized.family);
+    }
+    return normalized;
+  });
   const families = analysisEngineFamilyOptions();
   el('engineList').innerHTML = engineRows.map((row, i) => {
     const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
@@ -2578,6 +2620,7 @@ function wireEvents() {
       engineRows[i].strength = Math.max(meta.min, Math.min(meta.max, Math.floor(Number(target.value) || meta.def)));
     }
     engineRows[i] = normalizeDeployEngineRow(engineRows[i], 'analysis', i);
+    persistManualEngineRows();
     disposeUnusedEngines();
     lineCache.delete(tree.current.fen);
     scheduleAnalyzeCurrent();
@@ -2588,7 +2631,17 @@ function wireEvents() {
     if (builtIn) { applyEngineProfile(builtIn, { selected: value, persistLast: false, note: builtIn.note }); return; }
     const profile = engineProfiles.find((entry) => entry.name === value);
     if (profile) applyEngineProfile(profile);
-    else { storageRemove(LAST_ENGINE_PROFILE_STORAGE_KEY); inputEl('engineProfileName').value = ''; renderEngineProfiles(''); }
+    else {
+      storageRemove(LAST_ENGINE_PROFILE_STORAGE_KEY);
+      engineRows = loadManualEngineRows() ?? [{ family: 'lc0', variant: 'small', strength: 400 }];
+      inputEl('engineProfileName').value = '';
+      renderEngineProfiles('');
+      renderEngineList();
+      disposeUnusedEngines();
+      lineCache.clear();
+      completeAnalysisKeys.clear();
+      scheduleAnalyzeCurrent();
+    }
   });
   el('saveEngineProfile').addEventListener('click', saveCurrentEngineProfile);
   el('deleteEngineProfile').addEventListener('click', deleteSelectedEngineProfile);
@@ -2602,6 +2655,7 @@ function wireEvents() {
     const i = Number(button.dataset.i);
     if (Number.isNaN(i) || engineRows.length <= 1) return;
     engineRows.splice(i, 1);
+    persistManualEngineRows();
     renderEngineList();
     disposeUnusedEngines();
     lineCache.delete(tree.current.fen);
@@ -2610,6 +2664,7 @@ function wireEvents() {
   el('addEngine').addEventListener('click', () => {
     const family = nextEngineFamily();
     engineRows.push({ family, variant: defaultVariant(family), strength: defaultStrength(family) });
+    persistManualEngineRows();
     renderEngineList();
     lineCache.delete(tree.current.fen);
     scheduleAnalyzeCurrent();
@@ -2887,6 +2942,8 @@ async function init(mountSignal: AbortSignal) {
     engineRows = profileRowsForUse(lastProfile.rows, false);
     inputEl('multiPvInput').value = String(lastProfile.multiPv);
     selectEl('lc0RuntimeSelect').value = lastProfile.lc0Runtime;
+  } else {
+    engineRows = loadManualEngineRows() ?? engineRows;
   }
   renderEngineProfiles(lastProfile?.name ?? '');
   installRuntimeAuditPanel();

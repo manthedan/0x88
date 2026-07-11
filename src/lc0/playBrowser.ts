@@ -17,7 +17,7 @@ import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeE
 import { Maia3BrowserEvaluator, MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle } from './maia3.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
-import { BIG_NETS, LQO_NET, T3_NET, bigNetMemoryCaution, bigNetOptionState, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig, type Bt4SearchOptions } from './bt4Engine.ts';
+import { BIG_NETS, LQO_NET, T3_NET, bigNetAssetStatusSync, bigNetMemoryCaution, bigNetOptionState, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig, type Bt4SearchOptions } from './bt4Engine.ts';
 import { acquireBigNetSearcher, peekBigNetSearcher, releaseUnusedBigNetSearchers, type BigNetKey } from './bigNetSessionPool.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
@@ -26,6 +26,7 @@ import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { enginePlayLevels, enginePlayOptions, isV0DeployProfile, type EngineFamily } from './engineCatalog.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
+import { loadPlayPreferences, savePlayPreferences, type PlayPreferences, type PreferenceStorage } from './playPreferences.ts';
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
@@ -171,8 +172,11 @@ interface PlayContext {
   activeEngineId: string;
   activeColor: 'white' | 'black' | 'random';
   lastEngineId: string;
+  pendingPreferredEngineId: string | null;
+  pendingPreferredEngineTimer: ReturnType<typeof setTimeout> | null;
   resignArmed: boolean;
   resignArmTimer: ReturnType<typeof setTimeout> | null;
+  lastProgressAnnouncement: number;
   // Bound listeners for cleanup
   listeners: Array<{ type: string; target: EventTarget; fn: EventListenerOrEventListenerObject }>;
 }
@@ -196,8 +200,11 @@ function createPlayContext(): PlayContext {
     activeEngineId: 'maia3',
     activeColor: 'white',
     lastEngineId: 'maia3',
+    pendingPreferredEngineId: null,
+    pendingPreferredEngineTimer: null,
     resignArmed: false,
     resignArmTimer: null,
+    lastProgressAnnouncement: -1,
     listeners: [],
   };
 }
@@ -236,6 +243,26 @@ function ctxSelectedMaia3Temperature(): number {
 function ctxSelectedMaia3TopP(): number {
   const input = el('maia3TopP') as HTMLInputElement;
   return Math.max(0.01, Math.min(1, Number(input.value) || 1));
+}
+
+function playPreferenceStorage(): PreferenceStorage | undefined {
+  try { return globalThis.localStorage; } catch { return undefined; }
+}
+
+function ctxCurrentPlayPreferences(ctx: PlayContext): PlayPreferences {
+  return {
+    engineId: ctxSelectedEngine(ctx).id,
+    level: ctxSelectedLevel(),
+    color: selectEl('colorSelect').value as PlayPreferences['color'],
+    maiaElo: ctxSelectedMaia3Elo(),
+    maiaStyle: ctxSelectedMaia3Style(),
+    maiaTemperature: ctxSelectedMaia3Temperature(),
+    maiaTopP: ctxSelectedMaia3TopP(),
+  };
+}
+
+function ctxPersistPlayPreferences(ctx: PlayContext): void {
+  savePlayPreferences(playPreferenceStorage(), ctxCurrentPlayPreferences(ctx));
 }
 
 function ctxStrengthFor(option: PlayEngineOption, level: number): number {
@@ -287,11 +314,7 @@ function ctxRenderLevelOptions(ctx: PlayContext): void {
   const previous = select.value;
   const option = ctxSelectedEngine(ctx);
   const field = select.closest('.field') as HTMLElement;
-  if (option.family === 'maia3') {
-    field.hidden = true;
-    return;
-  }
-  field.hidden = false;
+  field.hidden = option.family === 'maia3';
   const labels = option.family === 'sf'
     ? SF_LEVELS.map((sf) => sf.label)
     : EFFORT_LEVEL_NAMES.map((name, i) => `${i + 1} · ${name}`);
@@ -316,6 +339,27 @@ function ctxSetEngineNote(text: string, warn = false): void {
   note.textContent = text;
   note.hidden = !text;
   note.classList.toggle('warn', warn);
+  if (!text) buttonEl('retryEngine').hidden = true;
+}
+
+function ctxActionableEngineError(ctx: PlayContext, error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  const option = ctxSelectedEngine(ctx);
+  if (/fetch|network|load failed|failed to load|404/i.test(detail)) {
+    return `${option.label} could not download a required asset. Check your connection, then retry; choose another engine if the asset remains unavailable. Details: ${detail}`;
+  }
+  if (/webgpu|gpu|backend/i.test(detail)) {
+    return `${option.label} could not start its GPU runtime. Retry to use its supported fallback, or choose a CPU engine. Details: ${detail}`;
+  }
+  if (/wasm|worker|sharedarraybuffer|cross-origin/i.test(detail)) {
+    return `${option.label} could not start its browser runtime. Retry, or choose another engine supported by the capability panel. Details: ${detail}`;
+  }
+  return `${option.label} stopped before making a move. Retry the engine or choose another opponent. Details: ${detail}`;
+}
+
+function ctxSetEngineFailure(ctx: PlayContext, error: unknown): void {
+  ctxSetEngineNote(ctxActionableEngineError(ctx, error), true);
+  buttonEl('retryEngine').hidden = false;
 }
 
 function ctxSearchProgressText(label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number }): string {
@@ -328,7 +372,7 @@ function ctxSearchProgressText(label: string, progress: { completedVisits?: numb
   return `${label}: ${completed}/${requested} visits${pct} · best ${progress.move ?? '—'} · Q ${progress.value.toFixed(3)}${speed}`;
 }
 
-function ctxShowSearchProgress(label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number }): void {
+function ctxShowSearchProgress(ctx: PlayContext, label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number }): void {
   const container = maybeEl('dlProgress');
   if (!container) return;
   const completed = progress.completedVisits ?? progress.visits;
@@ -338,13 +382,19 @@ function ctxShowSearchProgress(label: string, progress: { completedVisits?: numb
   const bar = document.createElement('progress');
   bar.max = requested;
   bar.value = Math.max(0, Math.min(requested, completed));
+  bar.setAttribute('aria-label', `${label} search progress`);
+  bar.setAttribute('aria-valuetext', `${completed} of ${requested} visits`);
   const text = document.createElement('div');
   text.className = 'dl-label small';
   text.textContent = ctxSearchProgressText(label, progress);
   row.append(bar, text);
   container.replaceChildren(row);
   container.hidden = false;
-  ctxSetEngineNote(text.textContent);
+  const milestone = Math.min(4, Math.floor(4 * completed / requested));
+  if (milestone > ctx.lastProgressAnnouncement) {
+    ctx.lastProgressAnnouncement = milestone;
+    el('progressAnnouncement').textContent = milestone === 4 ? `${label} search complete.` : `${label} search ${milestone * 25}% complete.`;
+  }
 }
 
 function ctxShowDownloadProgress(label: string, loadedBytes?: number, totalBytes?: number, phase = 'Downloading'): void {
@@ -564,7 +614,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
         searchPolicy: montyLitePuctPolicy,
         includePv: true,
         onProgress: (progress) => {
-          if (!signal.aborted) ctxShowSearchProgress('Centipawn search', {
+          if (!signal.aborted) ctxShowSearchProgress(ctx, 'Centipawn search', {
             ...progress,
             move: progress.move ? moveToUci(progress.move) : null,
           });
@@ -587,7 +637,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
         drawScore: PLAY_DRAW_SCORE,
         searchContemptLimit: PLAY_SEARCH_CONTEMPT_LIMIT,
         onProgress: (progress) => {
-          if (!signal.aborted) ctxShowSearchProgress('Lc0 search', progress);
+          if (!signal.aborted) ctxShowSearchProgress(ctx, 'Lc0 search', progress);
         },
       });
       return result.move ?? null;
@@ -614,7 +664,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
         searchContemptLimit: lqoOptions?.searchContemptLimit ?? PLAY_SEARCH_CONTEMPT_LIMIT,
         signal,
         onProgress: (progress) => {
-          if (!signal.aborted) ctxShowSearchProgress(`Lc0 ${searcher.config.name} search`, progress);
+          if (!signal.aborted) ctxShowSearchProgress(ctx, `Lc0 ${searcher.config.name} search`, progress);
         },
         ...(lqoOptions ?? {}),
       });
@@ -670,6 +720,8 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
   if (ctx.gameOver || ctx.board.turn === ctx.humanColor) return;
   const signal = ctx.abort.signal;
   ctx.engineThinking = true;
+  ctx.lastProgressAnnouncement = -1;
+  el('progressAnnouncement').textContent = '';
   await requestWakeLock();
   ctxRender(ctx);
   let uci: string | null = null;
@@ -679,7 +731,7 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
     if (signal.aborted) return;
     ctx.engineThinking = false;
     releaseWakeLock();
-    ctxSetEngineNote(`Engine error: ${(error as Error).message}`, true);
+    ctxSetEngineFailure(ctx, error);
     ctxRender(ctx);
     return;
   } finally {
@@ -892,6 +944,32 @@ function ctxRefreshEngineOptions(ctx: PlayContext): void {
   ctxRenderEngineCaution(ctx);
 }
 
+function ctxResolvePendingPreferredEngine(ctx: PlayContext): void {
+  const id = ctx.pendingPreferredEngineId;
+  if (!id || ctx.disposed) return;
+  const option = ENGINE_OPTIONS.find((candidate) => candidate.id === id);
+  if (!option || option.family !== 'lc0' || option.variant === 'small') {
+    ctx.pendingPreferredEngineId = null;
+    return;
+  }
+  const status = bigNetAssetStatusSync(BIG_NETS[option.variant as BigNetKey]);
+  if (status === 'unknown') return;
+  ctx.pendingPreferredEngineId = null;
+  if (ctx.pendingPreferredEngineTimer) {
+    clearTimeout(ctx.pendingPreferredEngineTimer);
+    ctx.pendingPreferredEngineTimer = null;
+  }
+  const restored = status === 'present';
+  if (restored) selectEl('engineSelect').value = option.id;
+  ctxRenderLevelOptions(ctx);
+  ctxResetGameStateForMount(ctx);
+  ctxPersistPlayPreferences(ctx);
+  ctxRenderEngineCaution(ctx);
+  if (!restored) ctxSetEngineNote('Your saved engine asset is unavailable, so Play is using Maia instead.', true);
+  ctxRender(ctx);
+  if (ctx.humanColor === 'b') void ctxEngineTurn(ctx);
+}
+
 function ctxRenderEngineCaution(ctx: PlayContext): void {
   const option = ctxSelectedEngine(ctx);
   const caution = el('engineCaution');
@@ -915,6 +993,7 @@ function ctxRender(ctx: PlayContext): void {
   if (ctx.disposed) return;
   el('status').textContent = ctxStatusText(ctx);
   el('status').classList.toggle('over', !!ctx.gameOver);
+  el('status').setAttribute('aria-busy', ctx.engineThinking ? 'true' : 'false');
   ctxRenderMaia3Controls(ctx);
   el('levelCaption').textContent = ctxStrengthCaption(ctx);
   buttonEl('takeback').disabled = !ctx.moves.length || !!ctx.pendingPromotion;
@@ -924,7 +1003,7 @@ function ctxRender(ctx: PlayContext): void {
   ctxRenderPromotionPicker(ctx);
   ctxRenderRestartBanner(ctx);
   el('pgnOut').textContent = '';
-  const humanCanMove = !ctx.engineThinking && !ctx.gameOver && !ctx.pendingPromotion && ctx.board.turn === ctx.humanColor;
+  const humanCanMove = !ctx.pendingPreferredEngineId && !ctx.engineThinking && !ctx.gameOver && !ctx.pendingPromotion && ctx.board.turn === ctx.humanColor;
   const lastUci = ctx.moves.length ? moveToUci(ctx.moves[ctx.moves.length - 1]) : undefined;
   const config = {
     orientation: ctx.orientation,
@@ -976,6 +1055,7 @@ function ctxDismissRestart(ctx: PlayContext): void {
   ctx.lastEngineId = ctx.activeEngineId;
   ctx.pendingRestart = null;
   ctxRenderLevelOptions(ctx);
+  ctxPersistPlayPreferences(ctx);
   ctxRenderMaia3Controls(ctx);
   ctxRenderEngineCaution(ctx);
   ctxRender(ctx);
@@ -987,9 +1067,9 @@ function ctxDismissRestart(ctx: PlayContext): void {
 
 function ctxResetGameStateForMount(ctx: PlayContext): void {
   ctxCancelEngineTurn(ctx);
-  selectEl('colorSelect').value = 'white';
-  ctx.humanColor = 'w';
-  ctx.orientation = 'white';
+  const colorChoice = selectEl('colorSelect').value;
+  ctx.humanColor = colorChoice === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : colorChoice === 'black' ? 'b' : 'w';
+  ctx.orientation = ctx.humanColor === 'w' ? 'white' : 'black';
   ctx.startFen = startFenFor(ctxSelectedEngine(ctx), ctx.humanColor);
   ctx.board = parseFen(ctx.startFen);
   ctx.positions = [ctx.board];
@@ -1006,13 +1086,44 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
 
 function ctxInit(ctx: PlayContext): void {
   ctxRefreshEngineOptions(ctx);
-  selectEl('engineSelect').value = 'maia3';
-  ctx.activeEngineId = 'maia3';
-  ctx.activeColor = 'white';
-  ctxResetGameStateForMount(ctx);
+  const preferences = loadPlayPreferences(playPreferenceStorage(), new Set(ENGINE_OPTIONS.map((option) => option.id)));
+  const preferredOption = ENGINE_OPTIONS.find((option) => option.id === preferences.engineId);
+  const preferredBigNetStatus = preferredOption?.family === 'lc0' && preferredOption.variant !== 'small'
+    ? bigNetAssetStatusSync(BIG_NETS[preferredOption.variant as BigNetKey])
+    : null;
+  const preferredBigNetCanProbe = preferredOption?.family === 'lc0'
+    && preferredOption.variant !== 'small'
+    && (!isV0DeployProfile() || preferredOption.variant === 'lqo');
+  ctx.pendingPreferredEngineId = preferredOption && preferredBigNetCanProbe && preferredBigNetStatus === 'unknown'
+    ? preferredOption.id
+    : null;
+  selectEl('engineSelect').value = preferredOption && !ctxEngineOptionState(preferredOption).disabled ? preferredOption.id : 'maia3';
+  selectEl('colorSelect').value = preferences.color;
+  (el('maia3Elo') as HTMLInputElement).value = String(preferences.maiaElo);
+  selectEl('maia3Style').value = preferences.maiaStyle;
+  (el('maia3Temperature') as HTMLInputElement).value = String(preferences.maiaTemperature);
+  (el('maia3TopP') as HTMLInputElement).value = String(preferences.maiaTopP);
   ctxRenderLevelOptions(ctx);
+  selectEl('levelSelect').value = String(preferences.level);
+  ctx.activeEngineId = selectEl('engineSelect').value;
+  ctx.lastEngineId = ctx.activeEngineId;
+  ctx.activeColor = preferences.color;
+  ctxResetGameStateForMount(ctx);
 
-  trackListener(ctx, el('newGame'), 'click', () => ctxNewGame(ctx));
+  trackListener(ctx, el('newGame'), 'click', () => {
+    ctx.pendingPreferredEngineId = null;
+    if (ctx.pendingPreferredEngineTimer) { clearTimeout(ctx.pendingPreferredEngineTimer); ctx.pendingPreferredEngineTimer = null; }
+    ctxNewGame(ctx);
+  });
+  trackListener(ctx, el('retryEngine'), 'click', () => {
+    if (ctx.engineThinking || ctx.gameOver || ctx.board.turn === ctx.humanColor) {
+      ctxSetEngineNote('Nothing to retry right now. Make your move or start a new game.');
+      return;
+    }
+    buttonEl('retryEngine').hidden = true;
+    ctxSetEngineNote('Retrying engine…');
+    void ctxEngineTurn(ctx);
+  });
   trackListener(ctx, el('takeback'), 'click', () => ctxTakeback(ctx));
   trackListener(ctx, el('resign'), 'click', () => ctxResign(ctx));
   trackListener(ctx, el('flip'), 'click', () => { ctx.orientation = ctx.orientation === 'white' ? 'black' : 'white'; ctxRender(ctx); });
@@ -1029,6 +1140,8 @@ function ctxInit(ctx: PlayContext): void {
   trackListener(ctx, el('confirmRestart'), 'click', () => ctxConfirmRestart(ctx));
   trackListener(ctx, el('dismissRestart'), 'click', () => ctxDismissRestart(ctx));
   trackListener(ctx, selectEl('colorSelect'), 'change', () => {
+    ctxPersistPlayPreferences(ctx);
+    ctxSetEngineNote('');
     if (!ctx.moves.length) {
       ctxCancelEngineTurn(ctx);
       const choice = selectEl('colorSelect').value;
@@ -1047,6 +1160,8 @@ function ctxInit(ctx: PlayContext): void {
     }
   });
   trackListener(ctx, selectEl('engineSelect'), 'change', () => {
+    ctx.pendingPreferredEngineId = null;
+    if (ctx.pendingPreferredEngineTimer) { clearTimeout(ctx.pendingPreferredEngineTimer); ctx.pendingPreferredEngineTimer = null; }
     const previousEngineId = ctx.lastEngineId;
     if (ctx.engineThinking) {
       selectEl('engineSelect').value = previousEngineId;
@@ -1061,6 +1176,8 @@ function ctxInit(ctx: PlayContext): void {
       }
     }
     ctx.lastEngineId = option.id;
+    ctxPersistPlayPreferences(ctx);
+    ctxSetEngineNote('');
     if (previousEngineId === 'stormphrax' && option.id !== 'stormphrax') disposeCachedCpuEngine('stormphrax');
     ctxRenderLevelOptions(ctx);
     ctxRenderMaia3Controls(ctx);
@@ -1083,24 +1200,39 @@ function ctxInit(ctx: PlayContext): void {
       ctxRender(ctx);
     }
   });
-  trackListener(ctx, selectEl('levelSelect'), 'change', () => ctxRender(ctx));
-  trackListener(ctx, selectEl('maia3Style'), 'change', () => ctxRender(ctx));
-  trackListener(ctx, el('maia3Elo'), 'input', () => ctxRender(ctx));
-  trackListener(ctx, el('maia3Temperature'), 'input', () => ctxRender(ctx));
-  trackListener(ctx, el('maia3TopP'), 'input', () => ctxRender(ctx));
+  trackListener(ctx, selectEl('levelSelect'), 'change', () => { ctxPersistPlayPreferences(ctx); ctxRender(ctx); });
+  trackListener(ctx, selectEl('maia3Style'), 'change', () => { ctxPersistPlayPreferences(ctx); ctxRender(ctx); });
+  trackListener(ctx, el('maia3Elo'), 'input', () => { ctxPersistPlayPreferences(ctx); ctxRender(ctx); });
+  trackListener(ctx, el('maia3Temperature'), 'input', () => { ctxPersistPlayPreferences(ctx); ctxRender(ctx); });
+  trackListener(ctx, el('maia3TopP'), 'input', () => { ctxPersistPlayPreferences(ctx); ctxRender(ctx); });
   const refreshIfMounted = () => {
-    if (!ctxIsDisposed(ctx)) ctxRefreshEngineOptions(ctx);
+    if (!ctxIsDisposed(ctx)) {
+      ctxRefreshEngineOptions(ctx);
+      ctxResolvePendingPreferredEngine(ctx);
+    }
   };
   if (!isV0DeployProfile()) {
     void probeBt4Support().then(refreshIfMounted);
-    void checkBigNetAsset(BIG_NETS.bt4, refreshIfMounted);
-    void checkBigNetAsset(T3_NET, refreshIfMounted);
-    void checkBigNetAsset(LQO_NET, refreshIfMounted);
+    void checkBigNetAsset(BIG_NETS.bt4).then(refreshIfMounted);
+    void checkBigNetAsset(T3_NET).then(refreshIfMounted);
+    void checkBigNetAsset(LQO_NET).then(refreshIfMounted);
   } else {
     void probeBt4Support().then(refreshIfMounted);
-    void checkBigNetAsset(LQO_NET, refreshIfMounted);
+    void checkBigNetAsset(LQO_NET).then(refreshIfMounted);
   }
   ctxRender(ctx);
+  if (ctx.pendingPreferredEngineId) {
+    ctxSetEngineNote('Checking your saved engine assets…');
+    ctx.pendingPreferredEngineTimer = setTimeout(() => {
+      if (ctx.disposed || !ctx.pendingPreferredEngineId) return;
+      ctx.pendingPreferredEngineId = null;
+      ctx.pendingPreferredEngineTimer = null;
+      ctxPersistPlayPreferences(ctx);
+      ctxSetEngineNote('The saved-engine check timed out, so Play is using Maia. You can retry the engine from the selector.', true);
+      ctxRender(ctx);
+      if (ctx.humanColor === 'b') void ctxEngineTurn(ctx);
+    }, 10_000);
+  } else if (ctx.humanColor === 'b') void ctxEngineTurn(ctx);
 }
 
 function hasPlayBrowserDom(): boolean {
@@ -1108,7 +1240,7 @@ function hasPlayBrowserDom(): boolean {
     'ground', 'status', 'restartBanner', 'restartMessage', 'confirmRestart', 'dismissRestart', 'promoPicker',
     'engineSelect', 'levelSelect', 'maia3Controls', 'maia3Elo', 'maia3EloValue', 'maia3Style',
     'maia3TemperatureField', 'maia3Temperature', 'maia3TopPField', 'maia3TopP', 'levelCaption',
-    'engineCaution', 'engineNote', 'dlProgress', 'colorSelect', 'newGame', 'takeback', 'resign',
+    'engineCaution', 'engineNote', 'retryEngine', 'dlProgress', 'progressAnnouncement', 'colorSelect', 'newGame', 'takeback', 'resign',
     'flip', 'moveList', 'exportPgn', 'copyPgn', 'pgnOut',
   ];
   const missing = required.filter((id) => !document.getElementById(id));
@@ -1144,6 +1276,7 @@ export function mountPlayBrowser(): () => void {
     // engines it must not remain cached after this Play route is gone.
     disposeCachedCpuEngine('stormphrax');
     if (ctx.resignArmTimer) { clearTimeout(ctx.resignArmTimer); ctx.resignArmTimer = null; }
+    if (ctx.pendingPreferredEngineTimer) { clearTimeout(ctx.pendingPreferredEngineTimer); ctx.pendingPreferredEngineTimer = null; }
     (ctx.ground as { destroy?: () => void } | null)?.destroy?.();
     ctx.ground = null;
     for (const { target, type, fn } of ctx.listeners) {

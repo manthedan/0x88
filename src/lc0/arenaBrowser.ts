@@ -285,6 +285,40 @@ const seatRows: EngineRow[] = [
   { family: 'lc0', variant: 'small', strength: 100 },
   { family: 'sf', variant: 'lite', strength: 8 },
 ];
+const ARENA_SEAT_STORAGE_KEY = '0x88-arena-seats-v1';
+let bt4AvailabilityResolved = false;
+
+function persistedVariantOrDefault(family: EngineFamily, value: unknown): string {
+  const variant = String(value ?? '');
+  const options = variantOptions(family);
+  const selected = options.find((option) => option.value === variant);
+  const pendingBigNet = !isV0DeployProfile() && !bt4AvailabilityResolved && family === 'lc0' && isLc0BigNetVariant(variant);
+  if (selected && (!selected.disabled || pendingBigNet || /\(checking\b/.test(selected.label))) return selected.value;
+  return options.find((option) => !option.disabled)?.value ?? defaultVariant(family);
+}
+
+function restoreArenaSeatRows(): void {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ARENA_SEAT_STORAGE_KEY) ?? 'null');
+    if (!Array.isArray(parsed) || parsed.length < 2) return;
+    const restored = parsed.slice(0, 8).flatMap((value): EngineRow[] => {
+      if (!value || typeof value !== 'object') return [];
+      const raw = value as Record<string, unknown>;
+      const family = canonicalEngineFamily(String(raw.family ?? ''));
+      if (!family) return [];
+      const row: EngineRow = { family, variant: persistedVariantOrDefault(family, raw.variant), strength: Number(raw.strength) };
+      clampStrength(row);
+      return [row];
+    });
+    if (restored.length >= 2) seatRows.splice(0, seatRows.length, ...restored);
+  } catch {
+    // Preferences are optional when storage is blocked or corrupt.
+  }
+}
+
+function persistArenaSeatRows(): void {
+  try { localStorage.setItem(ARENA_SEAT_STORAGE_KEY, JSON.stringify(seatRows)); } catch { /* optional preference */ }
+}
 
 function el(id: string): HTMLElement {
   const node = document.getElementById(id);
@@ -1218,6 +1252,14 @@ function seatEngineId(index: number): string {
 }
 
 function renderSeatSelectors(): void {
+  for (const row of seatRows) {
+    const options = variantOptions(row.family);
+    const selected = options.find((option) => option.value === row.variant);
+    const pendingBigNet = !isV0DeployProfile() && !bt4AvailabilityResolved && row.family === 'lc0' && isLc0BigNetVariant(row.variant);
+    if (!selected || (selected.disabled && !pendingBigNet && !/\(checking\b/.test(selected.label))) {
+      row.variant = options.find((option) => !option.disabled)?.value ?? defaultVariant(row.family);
+    }
+  }
   const families = engineFamilyOptions();
   const matchMode = arenaTournamentMode() === 'match';
   el('arenaSeatList').innerHTML = seatRows.map((row, index) => {
@@ -2027,6 +2069,7 @@ async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<
     checkBigNetAsset(BIG_NETS.bt4, whileArenaMounted(renderSeatSelectors)),
     checkBigNetAsset(BIG_NETS.t3, whileArenaMounted(renderSeatSelectors)),
   ]);
+  bt4AvailabilityResolved = true;
   if (isStaleMount(mountSignal)) return;
   for (const row of activeSeatRows()) {
     if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectableSync(bigNetFor(row.variant).config)) row.variant = 'small';
@@ -3275,6 +3318,7 @@ function wireEvents() {
       clampStrength(row);
     }
     normalizeSeatRowForDeploy(seat);
+    persistArenaSeatRows();
     for (const key of ARENA_BIG_NET_KEYS) {
       if (activeSeatRows().some((r) => r.family === 'lc0' && r.variant === key)) continue;
       peekBigNetSearcher(key)?.cancel();
@@ -3292,6 +3336,7 @@ function wireEvents() {
     if (Number.isInteger(seat) && seatRows[seat] && target.classList.contains('seat-strength')) {
       seatRows[seat].strength = Number(target.value);
       clampStrength(seatRows[seat]);
+      persistArenaSeatRows();
       renderRecklessRuntimeInfo();
       renderViridithasRuntimeInfo();
       renderBerserkRuntimeInfo();
@@ -3307,6 +3352,7 @@ function wireEvents() {
     if (!Number.isInteger(index) || seatRows.length <= 2) return;
     syncSeatRowsFromDom();
     seatRows.splice(index, 1);
+    persistArenaSeatRows();
     buildEngines();
     populateSeats();
   });
@@ -3314,6 +3360,7 @@ function wireEvents() {
     if (running) return;
     syncSeatRowsFromDom();
     seatRows.push({ family: 'sf', variant: 'lite', strength: 8 });
+    persistArenaSeatRows();
     buildEngines();
     populateSeats();
   });
@@ -3388,6 +3435,7 @@ async function init(mountSignal: AbortSignal) {
   selectEl('berserkVariantSelect').value = REQUESTED_BERSERK_VARIANT.key;
   selectEl('plentychessVariantSelect').value = REQUESTED_PLENTYCHESS_VARIANT.key;
   selectEl('stormphraxVariantSelect').value = REQUESTED_STORMPHRAX_VARIANT.key;
+  restoreArenaSeatRows();
   applyArenaQueryParams();
   applyLc0Preset(inferredLc0Preset());
   if (!isV0DeployProfile()) await ensureSelectedRecklessAssetsAvailable();

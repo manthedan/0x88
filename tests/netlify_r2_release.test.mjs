@@ -18,7 +18,7 @@ test('netlify_r2_release builds once, stamps dist, then deploys with no-build wi
   const netlifyLog = join(root, 'netlify.log');
   const npm = join(root, 'fake-npm.sh');
   const netlify = join(root, 'fake-netlify.sh');
-  await fakeBin(npm, 'printf "%s\\n" "$*" >> "$NPM_LOG"\nmkdir -p "$NETLIFY_R2_RELEASE_DIST/models/lc0"\nprintf "{}\\n" > "$NETLIFY_R2_RELEASE_DIST/models/lc0/manifest.json"\nexit 0');
+  await fakeBin(npm, 'printf "%s\\n" "$*" >> "$NPM_LOG"\nmkdir -p "$NETLIFY_R2_RELEASE_DIST/models/lc0" "$NETLIFY_R2_RELEASE_DIST/ort"\nprintf "{}\\n" > "$NETLIFY_R2_RELEASE_DIST/models/lc0/manifest.json"\nprintf "glue\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.wasm"\nexit 0');
   await fakeBin(netlify, 'printf "%s\\n" "$*" >> "$NETLIFY_LOG"\nexit 0');
 
   const first = spawnSync(process.execPath, [
@@ -31,6 +31,7 @@ test('netlify_r2_release builds once, stamps dist, then deploys with no-build wi
   assert.equal(first.status, 0, first.stderr);
   const firstSummary = JSON.parse(first.stdout);
   assert.equal(firstSummary.built, true);
+  assert.deepEqual(firstSummary.verification.ortRuntimeAssets, ['ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.asyncify.wasm']);
   assert.ok(firstSummary.timings.some((entry) => entry.name === 'build R2 Netlify dist'));
   const stamp = JSON.parse(await readFile(join(dist, 'release-build.json'), 'utf8'));
   assert.equal(stamp.schema, 'lc0_browser.netlify_r2_release_build.v1');
@@ -187,7 +188,12 @@ test('prepare_netlify_r2_public_assets skips R2-hosted blobs but keeps lightweig
   await writeFile(join(source, 'models/lc0/manifest.json'), '{}');
   await writeFile(join(source, 'engine-logos/stockfish.png'), 'png');
   await writeFile(join(source, 'lc0/lc0_input_encoder.wasm'), 'abc');
-  await writeFile(join(root, 'ort-real/ort.js'), 'ort');
+  await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.asyncify.mjs'), 'asyncify glue');
+  await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.asyncify.wasm'), 'asyncify wasm');
+  await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.jsep.mjs'), 'jsep glue');
+  await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.jsep.wasm'), 'jsep wasm');
+  await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.jspi.wasm'), 'unused');
+  await writeFile(join(root, 'ort-real/ort.webgpu.min.mjs'), 'bundled by Vite');
   await symlink(join(root, 'ort-real'), join(source, 'ort'));
 
   const result = spawnSync(process.execPath, [
@@ -205,7 +211,12 @@ test('prepare_netlify_r2_public_assets skips R2-hosted blobs but keeps lightweig
   assert.equal(existsSync(join(out, 'models/lc0/manifest.json')), true);
   assert.equal(existsSync(join(out, 'engine-logos/stockfish.png')), true);
   assert.equal(existsSync(join(out, 'lc0/lc0_input_encoder.wasm')), true);
-  assert.equal(existsSync(join(out, 'ort/ort.js')), true);
+  assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.asyncify.mjs')), true);
+  assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.asyncify.wasm')), true);
+  assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.jsep.mjs')), false);
+  assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.jsep.wasm')), false);
+  assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.jspi.wasm')), false);
+  assert.equal(existsSync(join(out, 'ort/ort.webgpu.min.mjs')), false);
 });
 
 test('netlify_r2_release rejects a dist that still contains pruned external blobs', async () => {

@@ -38,5 +38,6 @@ jobs:
           test -f dist-client/app/analysis/index.html
           test -f dist-client/app/arena/index.html
           npm run deploy:ort-wasm-dedup-check
+          npm run deploy:ort-runtime-assets-check
           test ! -e dist-client/runtimes
           test ! -e dist-client/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx

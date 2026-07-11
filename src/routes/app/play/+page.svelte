@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { afterNavigate } from '$app/navigation';
   import SiteHeader from '$lib/components/SiteHeader.svelte';
+  import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
   let mountedUrl: URL | null = null;
   afterNavigate(({ to }) => {
     if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
@@ -34,6 +35,7 @@
 </svelte:head>
 
 <SiteHeader pageTitle="Play" />
+<BrowserCapabilities />
 <main id="main">
   <section class="panel" aria-label="Board">
     <div class="board-shell"><div id="ground"></div></div>
@@ -69,8 +71,10 @@
     </div>
     <div id="levelCaption" class="small"></div>
     <div id="engineCaution" class="small" hidden></div>
-    <div id="engineNote" hidden></div>
+    <div id="engineNote" role="status" aria-live="polite" hidden></div>
+    <button id="retryEngine" type="button" hidden>Retry engine</button>
     <div id="dlProgress" hidden><progress></progress><div class="dl-label small"></div></div>
+    <div id="progressAnnouncement" class="visually-hidden" role="status" aria-live="polite"></div>
     <h2>Game</h2>
     <div class="field"><label for="colorSelect">You play</label>
       <select id="colorSelect">
@@ -114,17 +118,19 @@
   :global(#levelCaption){margin-top:4px}
   :global(#engineCaution){
     margin-top:6px; padding:7px 9px;
-    border:1px dashed var(--rule); border-radius:6px; background:#fff;
+    border:1px dashed var(--rule); border-radius:6px; background:var(--panel-inset);
   }
   :global(#engineNote){
     margin-top:8px; padding:8px 10px;
     border:1px solid var(--rule); border-radius:6px;
-    background:#fff; font-family:var(--mono); font-size:12px;
+    background:var(--panel-inset); font-family:var(--mono); font-size:12px;
   }
   :global(#engineNote.warn){color:var(--warn); border-color:var(--warn)}
+  :global(#retryEngine){margin-top:6px}
   :global(#dlProgress){margin-top:8px}
   :global(#dlProgress progress){width:100%; height:10px; accent-color:var(--accent)}
   :global(#dlProgress .dl-label){margin-top:2px; font-family:var(--mono)}
+  .visually-hidden{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
   :global(#promoPicker){margin-top:10px; display:flex; gap:6px; flex-wrap:wrap}
   :global(#moveList){
     margin-top:12px; font-family:var(--mono); font-size:14px;

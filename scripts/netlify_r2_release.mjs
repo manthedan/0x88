@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './engine_artifact_registry.mjs';
+import { checkOrtRuntimeAssets } from './check_ort_runtime_assets.mjs';
 
 const DEFAULT_ASSET_BASE_URL = 'https://assets.0x88.app';
 const DEFAULT_CHANNEL_URL = `${DEFAULT_ASSET_BASE_URL}/channels/stable.json`;
@@ -181,7 +182,8 @@ function verifyPrunedDist(dist) {
   if (forbidden.length) {
     throw new Error(`R2 Netlify dist contains pruned external artifacts: ${forbidden.map((item) => item.path).join(', ')}`);
   }
-  return { forbiddenExternalAssets: forbidden };
+  const ortRuntimeAssets = checkOrtRuntimeAssets(dist).runtimeFiles;
+  return { forbiddenExternalAssets: forbidden, ortRuntimeAssets };
 }
 
 async function main() {

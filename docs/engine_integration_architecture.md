@@ -52,12 +52,20 @@ The registry is consumed by asset checks, R2 staging, external-asset pruning, re
 
 The application configures ONNX Runtime to load glue and WASM from the staged `/ort/` directory. `vite.config.ts` selects ONNX Runtime's `onnxruntime-web-use-extern-wasm` conditional export while retaining Vite's normal client resolution conditions.
 
-This prevents Vite from emitting identical ORT WASM files into both the main asset graph and evaluator-worker asset graphs. `npm run deploy:ort-wasm-dedup-check` verifies that:
+Production staging is intentionally allowlisted in `scripts/ort_runtime_assets.mjs`. The application imports only `onnxruntime-web/webgpu`; in ONNX Runtime 1.27 that entrypoint requests the Asyncify glue/binary pair for both accepted WebGPU sessions and WASM fallback sessions:
 
-- `dist-client/ort/ort-wasm-simd-threaded.asyncify.wasm` exists, and
-- no `ort-wasm*.wasm` files were emitted under `dist-client/_app/`.
+- `ort-wasm-simd-threaded.asyncify.mjs`
+- `ort-wasm-simd-threaded.asyncify.wasm`
 
-Run this check against the final R2-pruned deployment directory, not only a development build.
+This was verified with a production build running a Centipawn move through an accepted WebGPU provider while recording `/ort/` requests. The package's other JS bundles, source maps, base WASM, JSEP, and JSPI variants are not copied into the deployment shell. `npm run deploy:ort-runtime-assets-check` rejects missing or unexpected runtime variants, including compressed sidecars. `npm run deploy:ort-wasm-dedup-check` separately verifies that the canonical fallback WASM exists and no `ort-wasm*.wasm` files were emitted under `dist-client/_app/`.
+
+Run both checks against the final R2-pruned deployment directory, not only a development build.
+
+## Browser UX policy
+
+Play persists the selected opponent, strength, side, and Maia controls in local storage. Analysis persists manual engine rows separately from named profiles; selecting “manual / default” restores those rows. Analysis deliberately downgrades persisted large Lc0 nets to the small net so a page visit cannot silently trigger a very large download. Arena persists seat families, variants, and strengths; explicit URL parameters still override stored Arena seats. Corrupt, stale, or unavailable storage always falls back to current safe defaults.
+
+Play exposes download/search progress, retryable and actionable engine failures, and selection-specific cautions. Play, Analysis, and Arena share the compact browser-capability panel so WebGPU, shared-memory/threaded WASM, CPU capacity, and model-cache availability are visible before an engine is selected.
 
 ## CI artifact checkout
 
