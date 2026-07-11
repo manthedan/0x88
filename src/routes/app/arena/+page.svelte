@@ -234,6 +234,7 @@
   }
   :global(.engine-eval-bar .eval-bar-caption, .engine-eval-bar .eval-bar-value){display:none}
   :global(.engine-eval-bar.empty .eval-fill){height:50%}
+  :global(.engine-eval-bar.empty){opacity:.3}
   :global(#whiteEngineEvalBar){border:2px solid var(--acc-w)}
   :global(#blackEngineEvalBar){border:2px solid var(--acc-b)}
   :global(.eval-chip-row){
@@ -368,7 +369,7 @@
     height:88px; overflow:hidden;
   }
   :global(.eval-card-head){
-    display:flex; justify-content:space-between; align-items:center; gap:8px; flex:0 0 auto;
+    display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:2px 8px; flex:0 0 auto; min-width:0;
   }
   :global(.eval-card-name){
     color:var(--ink); font-family:var(--sans); font-size:12px; font-weight:600;
@@ -392,7 +393,7 @@
   }
   :global(.eval-card-raw){white-space:pre-wrap; overflow-wrap:anywhere}
   :global(.eval-card-pv){color:var(--text-soft)}
-  :global(.eval-card .eval-status){font-family:var(--mono); font-size:10px; color:var(--accent); font-weight:600; white-space:nowrap}
+  :global(.eval-card .eval-status){font-family:var(--mono); font-size:10px; color:var(--accent); font-weight:600; white-space:nowrap; margin-left:auto}
   :global(.eval-card.active){border-color:color-mix(in srgb, var(--accent) 30%, var(--rule)); background:var(--soft)}
   :global(.runtime-badge){
     margin-top:8px; padding:7px 8px; border:1px solid var(--rule);

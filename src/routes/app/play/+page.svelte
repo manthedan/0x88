@@ -64,10 +64,13 @@
           <option value="sample">Human sampling</option>
           <option value="argmax">Deterministic top move</option>
         </select></div>
-      <div class="field" id="maia3TemperatureField"><label for="maia3Temperature">Temperature</label>
-        <input id="maia3Temperature" type="number" min="0.01" max="5" step="0.05" value="1" /></div>
-      <div class="field" id="maia3TopPField"><label for="maia3TopP">Top-p</label>
-        <input id="maia3TopP" type="number" min="0.01" max="1" step="0.05" value="1" /></div>
+      <details class="advanced-settings">
+        <summary>Sampling settings</summary>
+        <div class="field" id="maia3TemperatureField"><label for="maia3Temperature">Temperature</label>
+          <input id="maia3Temperature" type="number" min="0.01" max="5" step="0.05" value="1" /></div>
+        <div class="field" id="maia3TopPField"><label for="maia3TopP">Top-p</label>
+          <input id="maia3TopP" type="number" min="0.01" max="1" step="0.05" value="1" /></div>
+      </details>
     </div>
     <div id="levelCaption" class="small"></div>
     <div id="engineCaution" class="small" hidden></div>
@@ -139,6 +142,8 @@
   }
   :global(#moveList .num){color:var(--muted)}
   :global(#moveList .placeholder){color:var(--muted)}
+  :global(#moveList .san){padding:1px 4px; border-radius:4px}
+  :global(#moveList .san.current){background:var(--accent); color:#fbf8f0; font-weight:600}
   :global(#pgnOut){
     font-family:var(--mono); font-size:12px;
     white-space:pre-wrap; overflow-wrap:anywhere; margin-top:8px;

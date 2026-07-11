@@ -915,6 +915,7 @@ function renderEngineOutputs(): void {
     const thinking = thinkingEngineIds.has(id);
     const progress = arenaSearchProgress.get(id);
     const progressHtml = progress ? arenaSearchProgressHtml(progress) : '';
+    if (!snapshot && !running && !thinking) return '';
     if (!snapshot) return `<div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">${htmlEscape(name)}</span>${thinking ? '<span class="eval-status">thinking…</span>' : ''}</div><div class="eval-card-eval">${thinking ? 'thinking…' : 'waiting…'}</div><div class="eval-card-scroll">${progressHtml}</div></div>`;
     const status = thinking ? '<span class="eval-status">thinking…</span>' : '';
     const moveTag = snapshot.move ? ` · move ${snapshot.move}` : '';
@@ -928,7 +929,10 @@ function renderEngineOutputs(): void {
     const pv = snapshot.pv?.length ? `<div class="eval-card-pv">${htmlEscape(pvText(snapshot.pv))}</div>` : '';
     return `<div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">${htmlEscape(name)}</span>${status}</div><div class="eval-card-eval">${htmlEscape(snapshot.shortEval)}${htmlEscape(moveTag)}</div>${statsLine}<div class="eval-card-scroll">${progressHtml}${detail}${pv}</div></div>`;
   });
-  el('engineEvalInfo').innerHTML = cards.length ? cards.join('') : '<div class="eval-card">Engine outputs: waiting for a move…</div>';
+  const html = cards.filter(Boolean);
+  const grid = el('engineEvalInfo');
+  grid.hidden = !html.length && !running;
+  grid.innerHTML = html.length ? html.join('') : '<div class="eval-card">Engine outputs: waiting for a move…</div>';
 }
 
 function renderSideLabels() {
@@ -2568,6 +2572,7 @@ function resetGameCharts(): void {
   el('chartsPanel').hidden = false;
   for (const id of ['evalChart', 'timeChart', 'npsChart', 'rootChart']) el(id).innerHTML = '';
   el('rootChartTitle').textContent = 'LC0 root visits';
+  (el('rootChart').parentElement as HTMLElement).hidden = true;
   el('chartLegend').innerHTML = '';
 }
 
@@ -2597,6 +2602,7 @@ function renderRootChart(engineId: string): void {
   if (!top.length) return;
   rootChartContext = { fen: result.fen, top: top.map((child) => ({ uci: child.uci, visits: child.visits })) };
   el('rootChartTitle').textContent = `${engines.get(engineId)?.name ?? engineId} root visits (Q from side to move)`;
+  (el('rootChart').parentElement as HTMLElement).hidden = false;
   el('rootChart').innerHTML = hBarChartSvg(top.map((child) => ({
     label: child.uci,
     value: child.visits,

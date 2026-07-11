@@ -882,11 +882,11 @@ function ctxRenderMoveList(ctx: PlayContext): void {
   const list = el('moveList');
   if (!ctx.sans.length) { list.innerHTML = '<span class="placeholder">No moves yet</span>'; return; }
   const parts: string[] = [];
+  const last = ctx.sans.length - 1;
+  const san = (i: number) => `<span class="san${i === last ? ' current' : ''}">${ctx.sans[i]}</span>`;
   for (let i = 0; i < ctx.sans.length; i += 2) {
     const number = i / 2 + 1;
-    const white = ctx.sans[i];
-    const black = ctx.sans[i + 1];
-    parts.push(`<span class="num">${number}.</span> <span class="san">${white}</span>${black ? ` <span class="san">${black}</span>` : ''}`);
+    parts.push(`<span class="num">${number}.</span> ${san(i)}${i + 1 < ctx.sans.length ? ` ${san(i + 1)}` : ''}`);
   }
   list.innerHTML = parts.join(' ');
   list.scrollTop = list.scrollHeight;

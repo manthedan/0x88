@@ -64,16 +64,16 @@ export function lineChartSvg(series: readonly ChartSeries[], options: LineChartO
   // y ticks: min / mid / max
   for (const tick of [yMin, (yMin + yMax) / 2, yMax]) {
     const y = py(tick);
-    parts.push(`<line x1="${pad.left}" y1="${round2(y)}" x2="${width - pad.right}" y2="${round2(y)}" stroke="#00000018" stroke-width="1"/>`);
-    parts.push(`<text x="${pad.left - 3}" y="${round2(y + 3)}" text-anchor="end" fill="#777" ${FONT}>${escapeXml(formatY(tick))}</text>`);
+    parts.push(`<line x1="${pad.left}" y1="${round2(y)}" x2="${width - pad.right}" y2="${round2(y)}" stroke="var(--rule,#00000018)" stroke-width="1"/>`);
+    parts.push(`<text x="${pad.left - 3}" y="${round2(y + 3)}" text-anchor="end" fill="var(--muted,#777)" ${FONT}>${escapeXml(formatY(tick))}</text>`);
   }
   if (options.midline !== undefined && options.midline > yMin && options.midline < yMax) {
     const y = py(options.midline);
-    parts.push(`<line x1="${pad.left}" y1="${round2(y)}" x2="${width - pad.right}" y2="${round2(y)}" stroke="#00000033" stroke-dasharray="3 3" stroke-width="1"/>`);
+    parts.push(`<line x1="${pad.left}" y1="${round2(y)}" x2="${width - pad.right}" y2="${round2(y)}" stroke="var(--rule,#00000033)" stroke-dasharray="3 3" stroke-width="1"/>`);
   }
   // x extents
-  parts.push(`<text x="${pad.left}" y="${height - 3}" fill="#777" ${FONT}>${round2(xMin)}</text>`);
-  parts.push(`<text x="${width - pad.right}" y="${height - 3}" text-anchor="end" fill="#777" ${FONT}>${round2(xMax)}</text>`);
+  parts.push(`<text x="${pad.left}" y="${height - 3}" fill="var(--muted,#777)" ${FONT}>${round2(xMin)}</text>`);
+  parts.push(`<text x="${width - pad.right}" y="${height - 3}" text-anchor="end" fill="var(--muted,#777)" ${FONT}>${round2(xMax)}</text>`);
   for (const entry of drawn) {
     const coords = entry.points.map((point) => `${round2(px(point.x))},${round2(py(point.y))}`);
     if (coords.length === 1) {
@@ -118,9 +118,9 @@ export function hBarChartSvg(items: readonly BarItem[], options: BarChartOptions
   items.forEach((item, index) => {
     const y = index * rowHeight + 1;
     const length = Math.max(1, (item.value / maxValue) * barW);
-    parts.push(`<text x="${labelW - 4}" y="${y + rowHeight - 4}" text-anchor="end" fill="#444" ${FONT}>${escapeXml(item.label)}</text>`);
+    parts.push(`<text x="${labelW - 4}" y="${y + rowHeight - 4}" text-anchor="end" fill="var(--ink-soft,#444)" ${FONT}>${escapeXml(item.label)}</text>`);
     parts.push(`<rect x="${labelW}" y="${y + 1.5}" width="${round2(length)}" height="${rowHeight - 5}" rx="2" fill="${item.color ?? '#4a7a2a'}" fill-opacity="0.8"/>`);
-    parts.push(`<text x="${labelW + round2(length) + 4}" y="${y + rowHeight - 4}" fill="#555" ${FONT}>${escapeXml(`${item.value}${item.detail ? ` ${item.detail}` : ''}`)}</text>`);
+    parts.push(`<text x="${labelW + round2(length) + 4}" y="${y + rowHeight - 4}" fill="var(--muted,#555)" ${FONT}>${escapeXml(`${item.value}${item.detail ? ` ${item.detail}` : ''}`)}</text>`);
   });
   parts.push('</svg>');
   return parts.join('');

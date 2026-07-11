@@ -251,6 +251,10 @@ textarea{width:100%; resize:vertical; line-height:1.5}
 .row button{flex:1 1 auto}
 .field{display:grid; gap:6px; margin-top:10px}
 .field label{font-size:12px; color:var(--muted); font-weight:500}
+:where(.row, .field, .engine-row) :where(button, select, input:not([type=checkbox]):not([type=radio]):not([type=range])){min-height:36px}
+.engine-row .row-rm{min-height:0}
+.row>.field{min-width:0}
+.field>select, .field>input, .field>textarea{max-width:100%; min-width:0}
 .small{font-size:12px; color:var(--muted); line-height:1.5}
 .board-shell{width:100%; aspect-ratio:1}
 #ground{
@@ -340,7 +344,7 @@ textarea{
 }
 @media (max-width:420px){
   .site-header .wrap{gap:8px; padding-left:14px; padding-right:14px}
-  .brand-name{font-size:14px}
+  .brand-name{display:none}
   .page-title{display:none}
   nav.primary a{padding:6px 6px; font-size:12px}
   .board-style-select{display:none}

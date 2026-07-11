@@ -595,9 +595,15 @@
   .doc-hero p strong{color:var(--ink)}
   .doc-body .wrap{
     padding:48px 24px 64px;
-    display:grid; grid-template-columns:220px 1fr;
+    display:grid; grid-template-columns:220px minmax(0,1fr);
     gap:56px; align-items:start;
   }
+  /* Wide tables (per-engine source links) scroll inside their own box
+     instead of forcing the whole column past narrow viewports. */
+  .doc-content :global(table){display:block; overflow-x:auto}
+  /* Long slash-joined tokens (best/good/inaccuracy/…) have no natural
+     break points; let them wrap rather than overflow on phones. */
+  .doc-content{overflow-wrap:break-word}
   .toc{
     position:sticky; top:88px;
     font-size:13px; max-height:calc(100vh - 100px); overflow-y:auto;
@@ -768,7 +774,7 @@
   }
   .doc-content blockquote p{margin:0; color:var(--muted)}
   @media(max-width:860px){
-    .doc-body .wrap{grid-template-columns:1fr; gap:0}
+    .doc-body .wrap{grid-template-columns:minmax(0,1fr); gap:0}
     .toc{
       position:static; max-height:none; padding:0 0 16px;
       margin-bottom:24px; border:none; border-bottom:1px solid var(--rule);
