@@ -36,6 +36,7 @@ Then open `http://localhost:5181/app/arena`.
 - `docs/engine_integration_architecture.md` documents the family registry, typed runtime boundaries, disposable worker pools, artifact tooling, ORT packaging, and engine-onboarding checklist.
 - `docs/hosted_artifacts.md` tracks hosted/deployable engine and model versions.
 - `docs/engine_artifact_distribution.md` defines the binary, manifest, licensing, and corresponding-source release gate.
+- `docs/asset_telemetry_plan.md` specifies privacy-preserving Cloudflare asset/runtime telemetry, schemas, sampling, dashboards, and rollout gates.
 - `public/artifact-index.json` provides the compact machine-readable artifact summary.
 
 ## Validation
