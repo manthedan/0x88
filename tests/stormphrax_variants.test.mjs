@@ -8,10 +8,12 @@ import {
   defaultStormphraxVariantKey,
   hasExplicitStormphraxVariant,
   normalizeStormphraxVariant,
+  resolveDefaultStormphraxVariantAssetFallback,
   stormphraxVariantByKey,
   stormphraxVariantFromParams,
 } from '../src/lc0/stormphraxVariants.ts';
 import { stormphraxSearchTimeoutMs } from '../src/lc0/stormphraxEngine.ts';
+import { supportsWasmRelaxedSimd } from '../src/lc0/wasmFeatures.ts';
 
 test('Stormphrax variant metadata pins the browser sidecars and undertown network', () => {
   assert.equal(STORMPHRAX_EMSCRIPTEN_VARIANT.key, 'emscripten');
@@ -21,7 +23,7 @@ test('Stormphrax variant metadata pins the browser sidecars and undertown networ
   assert.equal(STORMPHRAX_MAIN_NETWORK, 'undertown.nnue');
   assert.equal(STORMPHRAX_RELAXED_VARIANT.key, 'emscripten-relaxed');
   assert.equal(STORMPHRAX_RELAXED_VARIANT.wasmUrl, '/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm');
-  assert.equal(defaultStormphraxVariantKey(), 'emscripten');
+  assert.equal(defaultStormphraxVariantKey(), supportsWasmRelaxedSimd() ? 'emscripten-relaxed' : 'emscripten');
 });
 
 test('Stormphrax in-flight asset checks notify callbacks attached by a remount', async () => {
@@ -54,6 +56,17 @@ test('Stormphrax in-flight asset checks notify callbacks attached by a remount',
   }
 });
 
+test('Stormphrax missing default relaxed assets fall back to baseline SIMD', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false });
+  try {
+    assert.equal(await resolveDefaultStormphraxVariantAssetFallback(STORMPHRAX_RELAXED_VARIANT, false), STORMPHRAX_EMSCRIPTEN_VARIANT);
+    assert.equal(await resolveDefaultStormphraxVariantAssetFallback(STORMPHRAX_RELAXED_VARIANT, true), STORMPHRAX_RELAXED_VARIANT);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('Stormphrax search timeout leaves startup headroom above movetime', () => {
   assert.equal(stormphraxSearchTimeoutMs({ movetimeMs: 60_000 }), 75_000);
   assert.equal(stormphraxSearchTimeoutMs({ movetimeMs: 1_000 }), 60_000);
@@ -72,5 +85,5 @@ test('Stormphrax variant normalization and same-origin overrides are stable', ()
   assert.equal(custom.jsUrl, '/stormphrax/custom.js');
   assert.equal(custom.wasmUrl, '/stormphrax/custom.wasm');
   assert.equal(custom.dataUrl, '/stormphrax/custom.data');
-  assert.equal(stormphraxVariantFromParams(new URLSearchParams('stormphraxJs=https://evil.example/x.js')).key, 'emscripten');
+  assert.equal(stormphraxVariantFromParams(new URLSearchParams('stormphraxJs=https://evil.example/x.js')).key, defaultStormphraxVariantKey());
 });

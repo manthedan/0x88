@@ -537,7 +537,7 @@ new file mode 100644
 index 0000000..0b1a9ab
 --- /dev/null
 +++ b/src/util/simd/wasm128.h
-@@ -0,0 +1,154 @@
+@@ -0,0 +1,159 @@
 +/*
 + * Stormphrax browser port WebAssembly SIMD backend.
 + * Derived from the upstream AVX2 backend and mapped to Emscripten's SSE
@@ -667,19 +667,24 @@ index 0000000..0b1a9ab
 +            // relaxed dot is exact when those activations remain in [0, 127];
 +            // fixed-depth parity validation guards that precondition before
 +            // this candidate can be promoted.
-+#if defined(SP_RELAXED_SIMD_AUDIT)
-+            if (wasm_i8x16_bitmask(wasm_u8x16_gt((v128_t) u, wasm_i8x16_splat(127)))) {
-+                __builtin_trap();
-+            }
-+#endif
-+            return (VectorI32) wasm_i32x4_relaxed_dot_i8x16_i7x16_add(
-+                (v128_t) i, (v128_t) u, (v128_t) sum
++            const auto outsideI7 = wasm_i8x16_bitmask(
++                wasm_u8x16_gt((v128_t) u, wasm_i8x16_splat(127))
 +            );
-+#else
++#if defined(SP_RELAXED_SIMD_AUDIT)
++            if (outsideI7) __builtin_trap();
++#endif
++            if (!outsideI7) {
++                return (VectorI32) wasm_i32x4_relaxed_dot_i8x16_i7x16_add(
++                    (v128_t) i, (v128_t) u, (v128_t) sum
++                );
++            }
++            // The relaxed opcode permits implementation-dependent results
++            // outside its i7 operand range. Preserve baseline semantics for
++            // those vectors instead of relying on a position-specific bound.
++#endif
 +            const auto p = _mm_maddubs_epi16(u, i);
 +            const auto w = _mm_madd_epi16(p, _mm_set1_epi16(1));
 +            return _mm_add_epi32(sum, w);
-+#endif
 +        }
 +        SP_ALWAYS_INLINE_NDEBUG inline u32 nonzeroMaskU8(VectorU8 v) {
 +            const auto nz = _mm_cmpgt_epi32(v, _mm_setzero_si128());

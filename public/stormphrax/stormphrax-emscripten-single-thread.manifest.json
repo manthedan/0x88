@@ -1,6 +1,6 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-07-11T07:20:18.262Z",
+  "generatedAt": "2026-07-11T07:43:40.252Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "stormphrax",
   "flavor": "emscripten-single-thread",
@@ -87,17 +87,17 @@
     },
     {
       "path": "public/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm",
-      "bytes": 696486,
-      "sha256": "04991640ec6429ccc683d491a891017673902ce707a94783658b7231ff3194d5",
+      "bytes": 697512,
+      "sha256": "409e973092412289576c0ae67b982fbb512d9aead2cfe3a81554d2f46994003d",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 262475,
-          "ratio": 0.3769
+          "bytes": 262696,
+          "ratio": 0.3766
         },
         "brotli": {
-          "bytes": 201236,
-          "ratio": 0.2889
+          "bytes": 201448,
+          "ratio": 0.2888
         }
       }
     },
@@ -128,17 +128,17 @@
     }
   ],
   "totals": {
-    "bytes": 113364729,
-    "gzipBytes": 72325833,
-    "brotliBytes": 68297315,
+    "bytes": 113365755,
+    "gzipBytes": 72326054,
+    "brotliBytes": 68297527,
     "gzipRatio": 0.638,
     "brotliRatio": 0.6025
   },
   "sourceArchive": {
     "required": true,
     "path": "public/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz",
-    "bytes": 37260840,
-    "sha256": "ab408f751cf25003c915ed4ab01651b3f93d7a2201a6190582a5f44dfdcadd1f",
+    "bytes": 37261302,
+    "sha256": "3913a2e9c15319475d5e4706dad98c3a02fa46f429bb838e20d7be4563013220",
     "url": "/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz",
     "note": "Source archive recorded for public distribution."
   }

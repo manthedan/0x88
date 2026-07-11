@@ -137,12 +137,15 @@ export const BROWSER_ENGINE_ASSET_GROUPS = Object.freeze([
     family: 'stormphrax',
     label: 'Stormphrax Emscripten worker',
     status: 'experimental-selectable',
-    command: 'npm run stormphrax:build-emscripten',
+    command: 'npm run stormphrax:build-emscripten && npm run stormphrax:build-relaxed-simd-emscripten',
     docs: 'docs/engine_catalog.md#stormphrax-family',
     assets: [
       '/stormphrax/stormphrax-emscripten.js',
       '/stormphrax/stormphrax-emscripten.wasm',
       '/stormphrax/stormphrax-emscripten.data',
+      '/stormphrax/stormphrax-emscripten-relaxed-simd128.js',
+      '/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm',
+      '/stormphrax/stormphrax-emscripten-relaxed-simd128.data',
     ],
   },
 ]);

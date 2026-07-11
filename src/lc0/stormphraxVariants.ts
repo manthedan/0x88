@@ -28,7 +28,7 @@ const STORMPHRAX_RELAXED_JS_PATH = isV0DeployProfile()
   ? '/artifacts/sha256/1a57e31fdfe4df209f0bfd1bddf250e5a9f621ea74c033091dfa7376a88f9f0f/stormphrax-emscripten-relaxed-simd128.js'
   : '/stormphrax/stormphrax-emscripten-relaxed-simd128.js';
 const STORMPHRAX_RELAXED_WASM_PATH = isV0DeployProfile()
-  ? '/artifacts/sha256/04991640ec6429ccc683d491a891017673902ce707a94783658b7231ff3194d5/stormphrax-emscripten-relaxed-simd128.wasm'
+  ? '/artifacts/sha256/409e973092412289576c0ae67b982fbb512d9aead2cfe3a81554d2f46994003d/stormphrax-emscripten-relaxed-simd128.wasm'
   : '/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm';
 const STORMPHRAX_RELAXED_DATA_PATH = isV0DeployProfile()
   ? '/artifacts/sha256/04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf/stormphrax-emscripten-relaxed-simd128.data'
@@ -83,12 +83,12 @@ export const STORMPHRAX_EMSCRIPTEN_VARIANT: StormphraxVariant = {
 
 export const STORMPHRAX_RELAXED_VARIANT: StormphraxVariant = {
   key: 'emscripten-relaxed',
-  label: 'Stormphrax 8 Relaxed SIMD candidate',
+  label: 'Stormphrax 8 Relaxed SIMD',
   jsUrl: STORMPHRAX_RELAXED_JS_URL,
   wasmUrl: STORMPHRAX_RELAXED_WASM_URL,
   dataUrl: STORMPHRAX_RELAXED_DATA_URL,
   sourceNetworkUrl: STORMPHRAX_SOURCE_NETWORK_URL,
-  note: 'Candidate using i32x4.relaxed_dot_i8x16_i7x16_add in the NNUE L1 dot product. Passed 20/20 depth-7 fixed-depth parity and activation-range audit; not yet the automatic default.',
+  note: 'Preferred build using i32x4.relaxed_dot_i8x16_i7x16_add for in-range NNUE L1 vectors with an exact baseline SIMD fallback outside the i7 operand range. Requires WebAssembly Relaxed SIMD.',
 };
 
 export const STORMPHRAX_VARIANTS: readonly StormphraxVariant[] = [STORMPHRAX_EMSCRIPTEN_VARIANT, STORMPHRAX_RELAXED_VARIANT];
@@ -111,7 +111,7 @@ export function supportsStormphraxVariant(variant: StormphraxVariant): boolean {
 }
 
 export function defaultStormphraxVariantKey(): StormphraxVariantKey {
-  return 'emscripten';
+  return supportsWasmRelaxedSimd() ? 'emscripten-relaxed' : 'emscripten';
 }
 
 export function stormphraxVariantByKey(key: string): StormphraxVariant {
@@ -179,10 +179,8 @@ export function checkStormphraxVariantAsset(variant: StormphraxVariant, onChange
   return promise;
 }
 
-export async function resolveDefaultStormphraxVariantAssetFallback(variant: StormphraxVariant, _explicit: boolean, onChange?: () => void): Promise<StormphraxVariant> {
-  if (!supportsStormphraxVariant(variant)) return variant;
-  // There is no fallback tier yet, so asset status is informational. Do not
-  // block Analysis/Arena initialization on three remote HEAD requests.
-  void checkStormphraxVariantAsset(variant, onChange);
-  return variant;
+export async function resolveDefaultStormphraxVariantAssetFallback(variant: StormphraxVariant, explicit: boolean, onChange?: () => void): Promise<StormphraxVariant> {
+  if (explicit || variant.key !== 'emscripten-relaxed') return variant;
+  const status = await checkStormphraxVariantAsset(variant, onChange);
+  return status === 'missing' ? STORMPHRAX_EMSCRIPTEN_VARIANT : variant;
 }
