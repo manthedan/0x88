@@ -66,7 +66,7 @@
         <div class="chart-card"><div class="chart-title">White win % per move</div><div id="evalChart"></div></div>
         <div class="chart-card"><div class="chart-title">Move time (ms)</div><div id="timeChart"></div></div>
         <div class="chart-card"><div class="chart-title">Speed (NPS)</div><div id="npsChart"></div></div>
-        <div class="chart-card"><div class="chart-title" id="rootChartTitle">LC0 root visits</div><div id="rootChart"></div></div>
+        <div class="chart-card" hidden><div class="chart-title" id="rootChartTitle">LC0 root visits</div><div id="rootChart"></div></div>
       </div>
       <div id="chartLegend" class="chart-legend"></div>
     </section>
