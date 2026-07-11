@@ -14,7 +14,7 @@
 :root{
   color-scheme:light;
   --bg:#f3eee4; --bg-2:#ece4d2; --bg-workspace:#efe8d8;
-  --panel:#fcf9f2; --panel-inset:#f7f2e7; --panel-2:#f6efde;
+  --panel:#fcf9f2; --panel-inset:#f7f2e7; --panel-2:#f6efde; --card:#fff;
   --ink:#221c12; --ink-body-strong:#2a2317; --ink-soft:#3a342a;
   --text:#4a4032; --text-soft:#5f5444;
   --muted:#8a7d66; --muted-2:#9b8e76; --faint:#aa9d85;
@@ -45,7 +45,7 @@
 :root[data-theme="dark"]{
   color-scheme:dark;
   --bg:#15130f; --bg-2:#1c1914; --bg-workspace:#191610;
-  --panel:#211d17; --panel-inset:#1a1812; --panel-2:#28231b;
+  --panel:#211d17; --panel-inset:#1a1812; --panel-2:#28231b; --card:#28231b;
   --ink:#f0ead9; --ink-body-strong:#f0ead9; --ink-soft:#d8d0bd;
   --text:#c4baa6; --text-soft:#a59c89;
   --muted:#a59c89; --muted-2:#847c6c; --faint:#6e675c;
@@ -68,7 +68,7 @@
   :root:not([data-theme]){
     color-scheme:dark;
     --bg:#15130f; --bg-2:#1c1914; --bg-workspace:#191610;
-    --panel:#211d17; --panel-inset:#1a1812; --panel-2:#28231b;
+    --panel:#211d17; --panel-inset:#1a1812; --panel-2:#28231b; --card:#28231b;
     --ink:#f0ead9; --ink-body-strong:#f0ead9; --ink-soft:#d8d0bd;
     --text:#c4baa6; --text-soft:#a59c89;
     --muted:#a59c89; --muted-2:#847c6c; --faint:#6e675c;
@@ -176,7 +176,8 @@ select{cursor:pointer; appearance:none; -webkit-appearance:none;
   background-repeat:no-repeat; background-position:right 11px center; padding-right:30px;
 }
 input[type=number]{font-family:var(--mono); font-size:13px}
-input[type=range]{accent-color:var(--accent)}
+input[type=range]{accent-color:var(--accent); padding:0; border:none; background:transparent}
+input[type=checkbox], input[type=radio], progress{accent-color:var(--accent)}
 textarea{width:100%; resize:vertical; line-height:1.5}
 
 /* App pages use `background:white` directly on some surfaces; in dark mode
@@ -263,7 +264,7 @@ textarea{width:100%; resize:vertical; line-height:1.5}
 }
 .engine-row select{
   flex:1 1 0; min-width:0; font:inherit; font-size:13px;
-  padding:6px 8px; border:1px solid var(--border-input); border-radius:6px; background:#fff;
+  padding:6px 8px; border:1px solid var(--border-input); border-radius:6px; background:var(--card);
 }
 .engine-row .arrow{color:var(--muted); font-weight:700}
 .engine-row .row-strength{
@@ -274,7 +275,7 @@ textarea{width:100%; resize:vertical; line-height:1.5}
 .engine-row .row-rm{flex:0 0 auto; padding:4px 9px; line-height:1; color:var(--muted)}
 .advanced-settings{
   margin-top:10px; border:1px solid #e6decc; border-radius:var(--radius-sm);
-  background:var(--panel-inset); padding:8px 10px;
+  background:var(--card); padding:8px 10px;
 }
 .advanced-settings>summary{
   cursor:pointer; color:var(--muted); font-size:12px; font-weight:700;

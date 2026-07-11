@@ -1,9 +1,17 @@
 <script lang="ts">
+  import { page } from '$app/stores';
   import { theme, boardStyle, toggleTheme, type BoardStyle } from '$lib/stores/theme';
 
   export let pageTitle = '';
 
+  $: path = $page.url.pathname;
   $: isDark = $theme === 'dark';
+
+  function isActive(href: string): boolean {
+    if (href === '/') return path === '/';
+    const base = href.replace(/\/$/, '');
+    return path === base || path.startsWith(`${base}/`);
+  }
 
   function onBoardChange(event: Event) {
     boardStyle.set((event.target as HTMLSelectElement).value as BoardStyle);
@@ -21,11 +29,11 @@
       <span class="page-title">{pageTitle}</span>
     {/if}
     <nav class="primary" aria-label="Primary">
-      <a href="/" class:active={pageTitle === ''}>Home</a>
-      <a href="/app/play/" class:active={pageTitle === 'Play'}>Play</a>
-      <a href="/app/analysis/" class:active={pageTitle === 'Analysis'}>Analysis</a>
-      <a href="/app/arena/" class:active={pageTitle === 'Arena'}>Arena</a>
-      <a href="/docs/" class:active={pageTitle === 'Docs'}>Docs</a>
+      <a href="/" class:active={isActive('/')} aria-current={isActive('/') ? 'page' : undefined}>Home</a>
+      <a href="/app/play/" class:active={isActive('/app/play/')} aria-current={isActive('/app/play/') ? 'page' : undefined}>Play</a>
+      <a href="/app/analysis/" class:active={isActive('/app/analysis/')} aria-current={isActive('/app/analysis/') ? 'page' : undefined}>Analysis</a>
+      <a href="/app/arena/" class:active={isActive('/app/arena/')} aria-current={isActive('/app/arena/') ? 'page' : undefined}>Arena</a>
+      <a href="/docs/" class:active={isActive('/docs/')} aria-current={isActive('/docs/') ? 'page' : undefined}>Docs</a>
     </nav>
     <button class="theme-toggle" type="button" aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'} title={isDark ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={isDark} on:click={toggleTheme}>{isDark ? '\u2600' : '\u263E'}</button>
     <select class="board-style-select" aria-label="Board style" title="Board style" value={$boardStyle} on:change={onBoardChange}>

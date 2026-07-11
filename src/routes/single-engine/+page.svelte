@@ -168,7 +168,7 @@
   :global(.settings input, .settings select){
     font:inherit; font-size:13px; padding:7px 8px;
     border:1px solid var(--rule); border-radius:6px;
-    background:white; color:var(--ink); width:100%;
+    background:var(--card); color:var(--ink); width:100%;
   }
   :global(.settings input[type=number]){font-family:var(--mono)}
   :global(.settings .settings-row button){flex:1 1 auto}

@@ -145,7 +145,7 @@
   }
   :global(#pgnOut:not(:empty)){
     padding:8px; border:1px solid var(--rule);
-    border-radius:6px; background:#fff;
+    border-radius:6px; background:var(--card);
   }
   :global(.restart-banner){
     margin-top:10px; padding:10px 12px;

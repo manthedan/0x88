@@ -274,12 +274,12 @@
   :global(.side-label .turn){
     flex:0 0 auto; font-family:var(--mono); font-size:10px; font-weight:700;
     color:var(--accent); white-space:nowrap; text-transform:uppercase; letter-spacing:.04em;
-    background:var(--soft); border:1px solid #cbd8a6; border-radius:999px; padding:2px 8px;
+    background:var(--soft); border:1px solid color-mix(in srgb, var(--accent) 30%, var(--rule)); border-radius:999px; padding:2px 8px;
   }
-  :global(.side-label.active){background:var(--soft); border-color:#cbd8a6; border-left-color:var(--accent)}
+  :global(.side-label.active){background:var(--soft); border-color:color-mix(in srgb, var(--accent) 30%, var(--rule)); border-left-color:var(--accent)}
   :global(.side-label.active .side-eval){color:var(--accent); font-weight:700}
-  :global(#whiteSideLabel .color){color:var(--acc-w); border-color:var(--acc-w); background:#fff}
-  :global(#blackSideLabel .color){color:var(--acc-b); border-color:var(--acc-b); background:#fff}
+  :global(#whiteSideLabel .color){color:var(--acc-w); border-color:var(--acc-w); background:var(--card)}
+  :global(#blackSideLabel .color){color:var(--acc-b); border-color:var(--acc-b); background:var(--card)}
   :global(.engine-row .row-strength){flex:0 0 76px; width:76px}
   :global(.engine-row .seat-name){
     flex:0 0 56px; color:var(--muted); font-size:11px;
@@ -330,7 +330,7 @@
   :global(.review-bar){
     display:flex; align-items:center; justify-content:space-between;
     gap:10px; margin:8px auto 0; padding:7px 10px;
-    border:1px solid #cbd8a6; border-radius:7px; background:var(--soft);
+    border:1px solid color-mix(in srgb, var(--accent) 30%, var(--rule)); border-radius:7px; background:var(--soft);
     font-size:12px; font-weight:600;
   }
   :global(.review-bar .review-nav){display:flex; gap:5px}
@@ -393,24 +393,24 @@
   :global(.eval-card-raw){white-space:pre-wrap; overflow-wrap:anywhere}
   :global(.eval-card-pv){color:var(--text-soft)}
   :global(.eval-card .eval-status){font-family:var(--mono); font-size:10px; color:var(--accent); font-weight:600; white-space:nowrap}
-  :global(.eval-card.active){border-color:#cbd8a6; background:var(--soft)}
+  :global(.eval-card.active){border-color:color-mix(in srgb, var(--accent) 30%, var(--rule)); background:var(--soft)}
   :global(.runtime-badge){
     margin-top:8px; padding:7px 8px; border:1px solid var(--rule);
-    border-radius:6px; background:white; font-family:var(--mono);
+    border-radius:6px; background:var(--card); font-family:var(--mono);
     font-size:11px; color:var(--muted); overflow-wrap:anywhere;
   }
-  :global(.runtime-badge.ready){color:var(--accent); border-color:#cbd8a6; background:var(--soft)}
-  :global(.runtime-badge.warn){color:#a5461b; border-color:#e5b38d; background:#fff4e8}
+  :global(.runtime-badge.ready){color:var(--accent); border-color:color-mix(in srgb, var(--accent) 30%, var(--rule)); background:var(--soft)}
+  :global(.runtime-badge.warn){color:var(--warn); border-color:color-mix(in srgb, var(--warn) 35%, var(--rule)); background:var(--warn-soft)}
   :global(.advanced-runtime){
     flex:1 1 100%; border:1px solid var(--rule); border-radius:7px;
-    background:#fff; padding:8px 10px;
+    background:var(--card); padding:8px 10px;
   }
   :global(.advanced-runtime summary){cursor:pointer; color:var(--muted); font-size:12px; font-weight:700}
   :global(.advanced-runtime[open] summary){margin-bottom:8px}
   :global(.preset-note){flex:1 1 100%; margin-top:-2px; color:var(--muted)}
   :global(textarea){width:100%; min-height:80px; font-family:var(--mono); font-size:11px; padding:8px; margin-top:8px}
   :global(.chart-grid){display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px}
-  :global(.chart-card){border:1px solid var(--rule); border-radius:6px; padding:6px 8px; background:#fff}
+  :global(.chart-card){border:1px solid var(--rule); border-radius:6px; padding:6px 8px; background:var(--card)}
   :global(.chart-card svg){display:block; width:100%; height:auto}
   :global(.chart-title){font-size:11px; color:var(--muted); margin-bottom:2px}
   :global(.chart-legend){display:flex; gap:14px; margin-top:4px; font-size:11px; color:var(--muted)}
