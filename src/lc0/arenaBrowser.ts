@@ -257,7 +257,10 @@ const lc0Searchers = new Map<string, Lc0PuctSearcher>();
 const lastLc0SearchResults = new Map<string, Lc0SearchResult>();
 interface GameChartSample { ply: number; engineId: string; whiteScore?: number; moveMs: number; nps?: number; }
 let gameChartSamples: GameChartSample[] = [];
-const CHART_COLORS = ['#4a7a2a', '#a5461b', '#1c5f8a', '#7a4a9a', '#8a7a1c', '#5a5a5a'];
+const CHART_COLORS = [
+  'var(--chart-1,#4a7a2a)', 'var(--chart-2,#a5461b)', 'var(--chart-3,#1c5f8a)',
+  'var(--chart-4,#7a4a9a)', 'var(--chart-5,#8a7a1c)', 'var(--chart-6,#5a5a5a)',
+];
 const pendingLc0ReplyProbes = new Map<string, PendingLc0ReplyProbe>();
 const lc0TreeTelemetry = new Map<string, Lc0TreeTelemetry>();
 const uciTelemetry = new Map<string, UciEngineTelemetry>();
@@ -2890,6 +2893,7 @@ async function startMatch() {
       refreshPlentyChessVariantUi();
       refreshStormphraxVariantUi();
       refreshSeatControls();
+      renderEngineOutputs();
     }
   }
 }

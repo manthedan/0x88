@@ -26,6 +26,8 @@
   --accent-soft-text:#3f4a1f;
   --soft:#eef2dd; /* legacy alias used by app pages */
   --warn:#a5461b; --warn-soft:#f7e6db;
+  --chart-1:#4a7a2a; --chart-2:#a5461b; --chart-3:#1c5f8a;
+  --chart-4:#7a4a9a; --chart-5:#8a7a1c; --chart-6:#5a5a5a;
   --gold:#b5882f;
   --board-light:#f0d9b5; --board-dark:#b58863;
   --board-highlight:rgba(124,148,42,.42);
@@ -55,6 +57,8 @@
   --accent-hover:#8db540; --accent-soft:#2b3416; --accent-tint-border:#3a4318;
   --accent-soft-text:#a3c456; --soft:#2b3416;
   --warn:#e08147; --warn-soft:#3a2418;
+  --chart-1:#9bc967; --chart-2:#ed9566; --chart-3:#6cb6e5;
+  --chart-4:#d2a0e8; --chart-5:#dec85f; --chart-6:#c7c1b5;
   --gold:#d9b46a;
   --board-light:#d7c0a0; --board-dark:#8a6648;
   --coord-light:rgba(245,238,222,.86); --coord-dark:rgba(34,29,24,.72);
@@ -78,6 +82,8 @@
     --accent-hover:#8db540; --accent-soft:#2b3416; --accent-tint-border:#3a4318;
     --accent-soft-text:#a3c456; --soft:#2b3416;
     --warn:#e08147; --warn-soft:#3a2418;
+    --chart-1:#9bc967; --chart-2:#ed9566; --chart-3:#6cb6e5;
+    --chart-4:#d2a0e8; --chart-5:#dec85f; --chart-6:#c7c1b5;
     --gold:#d9b46a;
     --board-light:#d7c0a0; --board-dark:#8a6648;
     --coord-light:rgba(245,238,222,.86); --coord-dark:rgba(34,29,24,.72);
