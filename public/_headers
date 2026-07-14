@@ -6,23 +6,57 @@
 /*.html
   Cache-Control: public, max-age=0, must-revalidate
 
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+  Service-Worker-Allowed: /
+
 /channels/*
   Cache-Control: public, max-age=0, no-cache
   Netlify-CDN-Cache-Control: public, max-age=60, stale-if-error=86400
   CDN-Cache-Control: public, max-age=60, stale-if-error=86400
   Cloudflare-CDN-Cache-Control: public, max-age=60, stale-if-error=86400
+  Access-Control-Expose-Headers: Age, Cache-Status, CF-Cache-Status, Content-Length, ETag
+  Timing-Allow-Origin: *
 
-/artifacts/sha256/*
+/releases/*
   Cache-Control: public, max-age=31536000, immutable
   Netlify-CDN-Cache-Control: public, max-age=31536000
   CDN-Cache-Control: public, max-age=31536000
   Cloudflare-CDN-Cache-Control: public, max-age=31536000
+  Access-Control-Expose-Headers: Age, Cache-Status, CF-Cache-Status, Content-Length, ETag
+  Timing-Allow-Origin: *
+
+/artifacts/sha256/*
+  Cache-Control: public, max-age=31536000, immutable
+  Access-Control-Allow-Origin: *
+  Cross-Origin-Resource-Policy: cross-origin
+  Netlify-CDN-Cache-Control: public, max-age=31536000
+  CDN-Cache-Control: public, max-age=31536000
+  Cloudflare-CDN-Cache-Control: public, max-age=31536000
+  Access-Control-Expose-Headers: Age, Cache-Status, CF-Cache-Status, Content-Length, ETag
+  Timing-Allow-Origin: *
 
 /_app/immutable/*
   Cache-Control: public, max-age=31536000, immutable
   Netlify-CDN-Cache-Control: public, max-age=31536000
   CDN-Cache-Control: public, max-age=31536000
   Cloudflare-CDN-Cache-Control: public, max-age=31536000
+
+/models/*
+  Cache-Control: public, max-age=0, must-revalidate
+  Netlify-CDN-Cache-Control: public, max-age=86400, stale-if-error=86400
+  CDN-Cache-Control: public, max-age=86400, stale-if-error=86400
+  Cloudflare-CDN-Cache-Control: public, max-age=86400, stale-if-error=86400
+  Access-Control-Expose-Headers: Age, Cache-Status, CF-Cache-Status, Content-Length, ETag
+  Timing-Allow-Origin: *
+
+/engines/*
+  Cache-Control: public, max-age=0, must-revalidate
+  Netlify-CDN-Cache-Control: public, max-age=86400, stale-if-error=86400
+  CDN-Cache-Control: public, max-age=86400, stale-if-error=86400
+  Cloudflare-CDN-Cache-Control: public, max-age=86400, stale-if-error=86400
+  Access-Control-Expose-Headers: Age, Cache-Status, CF-Cache-Status, Content-Length, ETag
+  Timing-Allow-Origin: *
 
 /ort/*
   Cache-Control: public, max-age=3600, stale-while-revalidate=86400

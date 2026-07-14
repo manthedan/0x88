@@ -5,13 +5,14 @@ import { boardToFen, parseFen, squareName, START_FEN, type BoardState } from '..
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { bestMoveShapes, searchShapes } from './boardArrows.ts';
-import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig, type OrtExecutionProviderPreference, type OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
+import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig, type OrtExecutionProviderPreference, type OrtRuntimeDiagnostics, type OrtWasmArtifactSelection } from '../nn/ortRuntime.ts';
 import { publishBrowserRuntimeAudit } from '../nn/runtimeAudit.ts';
 import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
 import { clearLc0ModelCache, describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { workerFallbackReplayAbort } from './ortWorkerFallback.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchOptions, type Lc0SearchResult } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
@@ -733,8 +734,9 @@ type HybridEncoderProfileResult = {
   executionFootprint?: ExecutionFootprint;
 };
 
+type WorkerReadyResponse = { type: 'ready'; id: number; backend: string; modelCache: string; ortWasm?: OrtRuntimeDiagnostics['wasm'] };
 type WorkerResponse =
-  | { type: 'ready'; id: number; backend: string; modelCache: string }
+  | WorkerReadyResponse
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
   | { type: 'packLoadResult'; id: number; result: PackLoadResult }
@@ -778,6 +780,7 @@ type EvalBenchResult = {
   p90Ms: number;
   evalsPerSecond: number;
   workerInitMs?: number;
+  ortWasm?: OrtRuntimeDiagnostics['wasm'];
   timesMs: number[];
   bestMove?: string;
   q?: number;
@@ -922,15 +925,20 @@ let searchWorker: Worker | null = null;
 let useSearchWorker = SEARCH_WORKER_REQUESTED;
 let searchWorkerReady = false;
 let searchWorkerBackend = '—';
+let searchWorkerOrtWasm: OrtRuntimeDiagnostics['wasm'] | undefined;
 let mainModelCacheStatus = CACHE_MODEL ? 'pending' : 'disabled';
 let workerModelCacheStatus = '';
 let searchWorkerInitMs: number | undefined;
 let workerRequestSeq = 0;
 const workerPending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+let searchWorkerOrtWasmVariant: 'bundled' | 'fixed' | 'relaxed' = 'bundled';
+let searchWorkerInitMessage: Record<string, unknown> | null = null;
+let searchWorkerOrtFallback: Promise<void> | null = null;
 let busy = false;
 let searching = false;
 let mainSearchAbort: AbortController | null = null;
 let activeWorkerSearchId: number | null = null;
+let workerSearchCancellationRequested = false;
 let battleRunning = false;
 let battleGames = Math.max(1, Math.floor(Number(params.get('battleGames') ?? '1') || 1));
 // Delay between plies so the game is watchable on the board.
@@ -988,6 +996,41 @@ function requestedOrtDiagnosticsPayload() {
     webgpuApiInstrumentation: ORT_WEBGPU_API_TRACE_REQUESTED,
     ...(ORT_PREFERRED_OUTPUT_LOCATION ? { preferredOutputLocation: ORT_PREFERRED_OUTPUT_LOCATION } : {}),
   };
+}
+
+function sameOriginOrtAssetUrl(paramName: string, fallbackPath: string): string {
+  const url = new URL(params.get(paramName) ?? fallbackPath, location.href);
+  if (url.origin !== location.origin) {
+    throw new Error(`${paramName} must reference a same-origin ORT artifact`);
+  }
+  return url.href;
+}
+
+function requestedOrtWasmArtifactPayload(variantOverride?: 'fixed' | 'relaxed'): OrtWasmArtifactSelection | undefined {
+  const raw = variantOverride ?? String(params.get('ortWasmVariant') ?? 'bundled').toLowerCase();
+  if (raw !== 'fixed' && raw !== 'relaxed') return undefined;
+  const prefix = raw === 'relaxed' ? 'ortWasmRelaxed' : 'ortWasmFixed';
+  const directory = `/ort-experimental/${raw}`;
+  const basename = raw === 'relaxed'
+    ? 'ort-wasm-relaxedsimd-threaded.asyncify'
+    : 'ort-wasm-simd-threaded.asyncify';
+  return {
+    variant: raw,
+    mjsUrl: sameOriginOrtAssetUrl(`${prefix}Mjs`, `${directory}/${basename}.mjs`),
+    wasmUrl: sameOriginOrtAssetUrl(`${prefix}Wasm`, `${directory}/${basename}.wasm`),
+    artifactId: params.get(`${prefix}Id`) ?? `ort-1.27.0-${raw}-simd-threaded-asyncify`,
+  };
+}
+
+function experimentalOrtWasmRequested(): boolean {
+  return requestedOrtWasmArtifactPayload() !== undefined;
+}
+
+function requestedOrtWasmThreadsPayload(): number | undefined {
+  const raw = params.get('ortThreads') ?? params.get('wasmThreads');
+  if (raw === null) return undefined;
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 function evaluationAvailable(): boolean {
@@ -1181,7 +1224,7 @@ function lc0PolicyRuntimeName(): string {
   return HYBRID_WGSL_HEADS_REQUESTED ? 'hybrid-wgsl-heads' : 'hybrid-ort-heads';
 }
 
-function postWorkerRequest<T>(message: Record<string, unknown>, onId?: (id: number) => void): Promise<T> {
+function postWorkerRequestOnce<T>(message: Record<string, unknown>, onId?: (id: number) => void): Promise<T> {
   if (!searchWorker) return Promise.reject(new Error('LC0 search worker unavailable'));
   const id = ++workerRequestSeq;
   onId?.(id);
@@ -1191,31 +1234,86 @@ function postWorkerRequest<T>(message: Record<string, unknown>, onId?: (id: numb
   });
 }
 
+async function postWorkerRequest<T>(message: Record<string, unknown>, onId?: (id: number) => void): Promise<T> {
+  try {
+    return await postWorkerRequestOnce<T>(message, onId);
+  } catch (error) {
+    const inferenceRequest = message.type === 'evaluate' || message.type === 'evaluateBatch' || message.type === 'search';
+    if (!inferenceRequest || searchWorkerOrtWasmVariant !== 'relaxed' || !searchWorkerInitMessage) throw error;
+    await demoteSearchWorkerToFixedOrt(error);
+    const replayAbort = workerFallbackReplayAbort(message.type, workerSearchCancellationRequested);
+    if (replayAbort) throw replayAbort;
+    return postWorkerRequestOnce<T>(message, onId);
+  }
+}
+
+function ensureSearchWorkerInstance(): void {
+  if (searchWorker) return;
+  searchWorker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
+  searchWorker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
+    const message = event.data;
+    const pending = workerPending.get(message.id);
+    if (!pending) return;
+    workerPending.delete(message.id);
+    if (message.type === 'error') pending.reject(new Error(message.error));
+    else pending.resolve(message);
+  });
+  searchWorker.addEventListener('error', (event) => {
+    for (const pending of workerPending.values()) pending.reject(new Error(event.message || 'LC0 search worker error'));
+    workerPending.clear();
+  });
+}
+
+function replaceSearchWorkerForOrtFallback(): void {
+  for (const pending of workerPending.values()) pending.reject(new Error('LC0 search worker restarting with fixed SIMD ORT'));
+  workerPending.clear();
+  searchWorker?.terminate();
+  searchWorker = null;
+  searchWorkerReady = false;
+  ensureSearchWorkerInstance();
+}
+
+async function demoteSearchWorkerToFixedOrt(error: unknown): Promise<void> {
+  if (searchWorkerOrtFallback) return searchWorkerOrtFallback;
+  searchWorkerOrtFallback = (async () => {
+    const previousInitMessage = searchWorkerInitMessage;
+    if (!previousInitMessage) throw new Error('cannot restart relaxed ORT worker without its initialization request');
+    const fixedArtifact = requestedOrtWasmArtifactPayload('fixed');
+    const initMessage = { ...previousInitMessage, ortWasmArtifact: fixedArtifact };
+    replaceSearchWorkerForOrtFallback();
+    console.warn('Tiny Leela ORT: relaxed WASM failed; retrying fixed SIMD in a fresh worker.', {
+      error: error instanceof Error ? error.message : String(error),
+      fallbackArtifact: fixedArtifact?.artifactId,
+    });
+    const ready = await postWorkerRequestOnce<WorkerReadyResponse>(initMessage);
+    searchWorkerOrtWasmVariant = 'fixed';
+    searchWorkerInitMessage = initMessage;
+    searchWorkerReady = true;
+    searchWorkerBackend = ready.backend;
+    searchWorkerOrtWasm = ready.ortWasm;
+    workerModelCacheStatus = `${ready.modelCache} · relaxed fallback`;
+  })();
+  try {
+    await searchWorkerOrtFallback;
+  } finally {
+    searchWorkerOrtFallback = null;
+  }
+}
+
 async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<void> {
   const initModel = options.initModel ?? true;
-  if (!searchWorker) {
-    searchWorker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
-    searchWorker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
-      const message = event.data;
-      const pending = workerPending.get(message.id);
-      if (!pending) return;
-      workerPending.delete(message.id);
-      if (message.type === 'error') pending.reject(new Error(message.error));
-      else pending.resolve(message);
-    });
-    searchWorker.addEventListener('error', (event) => {
-      for (const pending of workerPending.values()) pending.reject(new Error(event.message || 'LC0 search worker error'));
-      workerPending.clear();
-    });
-  }
+  ensureSearchWorkerInstance();
   if (!initModel || searchWorkerReady) return;
   const initStarted = performance.now();
-  const ready = await postWorkerRequest<{ type: 'ready'; backend: string; modelCache: string }>({
+  const requestedWasmArtifact = requestedOrtWasmArtifactPayload();
+  const initMessage = {
     type: 'init',
     modelUrl: MODEL_URL,
     ep: requestedWorkerEp(),
     cacheModel: CACHE_MODEL,
     ortDiagnostics: requestedOrtDiagnosticsPayload(),
+    ortWasmArtifact: requestedWasmArtifact,
+    ortWasmThreads: requestedOrtWasmThreadsPayload(),
     ...(HYBRID_EVALUATOR_REQUESTED ? {
       runtime: 'hybrid',
       packUrl: PACK_URL,
@@ -1228,10 +1326,21 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
       encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
       evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
     } : {}),
-  });
+  };
+  searchWorkerInitMessage = initMessage;
+  searchWorkerOrtWasmVariant = requestedWasmArtifact?.variant ?? 'bundled';
+  let ready: WorkerReadyResponse;
+  try {
+    ready = await postWorkerRequestOnce(initMessage);
+  } catch (error) {
+    if (requestedWasmArtifact?.variant !== 'relaxed') throw error;
+    await demoteSearchWorkerToFixedOrt(error);
+    ready = { type: 'ready', id: 0, backend: searchWorkerBackend, modelCache: workerModelCacheStatus, ortWasm: searchWorkerOrtWasm };
+  }
   searchWorkerInitMs = performance.now() - initStarted;
   searchWorkerReady = true;
   searchWorkerBackend = ready.backend;
+  searchWorkerOrtWasm = ready.ortWasm;
   workerModelCacheStatus = ready.modelCache;
   const runtime = lc0PolicyRuntimeName();
   publishBrowserRuntimeAudit({
@@ -1255,12 +1364,15 @@ async function initHybridWorkerWithOptions(options: { inputBackend?: 'js' | 'wgs
   if (!searchWorker) await initSearchWorker({ initModel: false });
   const inputBackend = options.inputBackend ?? HYBRID_INPUT_BACKEND;
   const initStarted = performance.now();
-  const ready = await postWorkerRequest<{ type: 'ready'; backend: string; modelCache: string }>({
+  const requestedWasmArtifact = requestedOrtWasmArtifactPayload();
+  const initMessage = {
     type: 'init',
     modelUrl: MODEL_URL,
     ep: requestedWorkerEp(),
     cacheModel: CACHE_MODEL,
     ortDiagnostics: requestedOrtDiagnosticsPayload(),
+    ortWasmArtifact: requestedWasmArtifact,
+    ortWasmThreads: requestedOrtWasmThreadsPayload(),
     runtime: 'hybrid',
     packUrl: PACK_URL,
     layers: Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10))),
@@ -1271,10 +1383,21 @@ async function initHybridWorkerWithOptions(options: { inputBackend?: 'js' | 'wgs
     legalPriorsBackend: options.legalPriorsBackend ?? HYBRID_LEGAL_PRIORS_BACKEND,
     encoderKernelVariant: options.encoderKernelVariant ?? HYBRID_ENCODER_KERNEL_VARIANT,
     evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
-  });
+  };
+  searchWorkerInitMessage = initMessage;
+  searchWorkerOrtWasmVariant = requestedWasmArtifact?.variant ?? 'bundled';
+  let ready: WorkerReadyResponse;
+  try {
+    ready = await postWorkerRequestOnce(initMessage);
+  } catch (error) {
+    if (requestedWasmArtifact?.variant !== 'relaxed') throw error;
+    await demoteSearchWorkerToFixedOrt(error);
+    ready = { type: 'ready', id: 0, backend: searchWorkerBackend, modelCache: workerModelCacheStatus, ortWasm: searchWorkerOrtWasm };
+  }
   searchWorkerInitMs = performance.now() - initStarted;
   searchWorkerReady = true;
   searchWorkerBackend = ready.backend;
+  searchWorkerOrtWasm = ready.ortWasm;
   workerModelCacheStatus = ready.modelCache;
   const runtime = HYBRID_WGSL_HEADS_REQUESTED ? 'hybrid-wgsl-heads' : 'hybrid-ort-heads';
   publishBrowserRuntimeAudit({
@@ -2720,6 +2843,7 @@ async function runWorkerEvalBenchmark(): Promise<void> {
       warmup: BENCH_WARMUP,
       iterations: BENCH_ITERS,
       workerInitMs: searchWorkerInitMs,
+      ortWasm: searchWorkerOrtWasm,
       timesMs: times,
       bestMove: last?.move,
       q: last?.evaluation.q,
@@ -3519,6 +3643,7 @@ function isAbortError(error: unknown): boolean {
 function beginSearch() {
   searching = true;
   activeWorkerSearchId = null;
+  workerSearchCancellationRequested = false;
   // Worker searches are cancelled by message id; main-thread searches by signal.
   mainSearchAbort = useSearchWorker ? null : new AbortController();
 }
@@ -3527,6 +3652,7 @@ function endSearch() {
   searching = false;
   mainSearchAbort = null;
   activeWorkerSearchId = null;
+  workerSearchCancellationRequested = false;
 }
 
 // Produce one search result for the current position. The caller owns the
@@ -3582,12 +3708,16 @@ function stopSearch() {
     el('message').textContent = 'Stopping game…';
     battleAbort?.abort();
     // Also abort the in-flight per-move worker search so it stops immediately.
-    if (searchWorkerReady && activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
+    if (activeWorkerSearchId !== null) {
+      workerSearchCancellationRequested = true;
+      if (searchWorkerReady) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
+    }
     return;
   }
   if (!searching) return;
   el('message').textContent = 'Cancelling search…';
   if (useSearchWorker) {
+    workerSearchCancellationRequested = true;
     if (activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
   } else {
     mainSearchAbort?.abort();
@@ -4102,6 +4232,10 @@ function disposeRuntimeResources(): void {
   searchWorker?.terminate();
   searchWorker = null;
   searchWorkerReady = false;
+  searchWorkerOrtWasm = undefined;
+  searchWorkerOrtWasmVariant = 'bundled';
+  searchWorkerInitMessage = null;
+  searchWorkerOrtFallback = null;
   for (const pending of workerPending.values()) pending.reject(new Error('LC0 worker disposed'));
   workerPending.clear();
   stockfish?.dispose();
@@ -4118,7 +4252,7 @@ async function init(mountSignal: AbortSignal) {
     if (!event.persisted) disposeRuntimeResources();
   };
   window.addEventListener('pagehide', policyPagehideHandler);
-  el('message').textContent = SHADER_F16_PROBE_REQUESTED ? 'Preparing WebGPU shader-f16 probe…' : PACK_PROBE_REQUESTED ? 'Preparing dedicated worker for lc0web pack probe…' : WORKER_ONLY_MODEL ? 'Loading LC0 model in dedicated worker…' : 'Loading LC0 ONNX model…';
+  el('message').textContent = SHADER_F16_PROBE_REQUESTED ? 'Preparing WebGPU shader-f16 probe…' : PACK_PROBE_REQUESTED ? 'Preparing dedicated worker for lc0web pack probe…' : WORKER_ONLY_MODEL || experimentalOrtWasmRequested() ? 'Loading LC0 model in dedicated worker…' : 'Loading LC0 ONNX model…';
   renderStatic();
   try {
     if (SHADER_F16_PROBE_REQUESTED) {
@@ -4161,14 +4295,14 @@ async function init(mountSignal: AbortSignal) {
       else await runPackProbe();
       return;
     }
-    if (WORKER_ONLY_MODEL) {
+    if (WORKER_ONLY_MODEL || experimentalOrtWasmRequested()) {
       mainModelCacheStatus = 'worker-only (not loaded on main thread)';
       useSearchWorker = true;
       await initSearchWorker();
       if (isStaleMount(mountSignal)) return;
       renderWorkerGpuStatus(searchWorkerBackend);
     } else {
-      const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: CACHE_MODEL });
+      const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: CACHE_MODEL, requestPersistentStorage: CACHE_MODEL });
       if (isStaleMount(mountSignal)) return;
       mainModelCacheStatus = describeLc0ModelLoad(modelLoad);
       const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
@@ -4208,7 +4342,7 @@ async function init(mountSignal: AbortSignal) {
         }
       }
     }
-    el('message').textContent = WORKER_ONLY_MODEL
+    el('message').textContent = WORKER_ONLY_MODEL || experimentalOrtWasmRequested()
       ? 'Ready. LC0 model is loaded only in the dedicated worker.'
       : 'Ready. Drag a legal move or ask the engine to move.';
     if (HYBRID_DRIFT_REQUESTED) {

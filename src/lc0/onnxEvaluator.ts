@@ -1,7 +1,7 @@
 import * as ort from '../nn/ortRuntime.ts';
 import { boardToFen, parseFen, type BoardState } from '../chess/board.ts';
 import { legalMoves } from '../chess/movegen.ts';
-import { moveToUci, type Move } from '../chess/moveCodec.ts';
+import { moveToActionId, moveToUci, type Move } from '../chess/moveCodec.ts';
 import { encodeLc0Classical112, type Lc0EncoderInput, type Lc0HistoryFill, type Lc0PositionHistoryInput } from './encoder112.ts';
 import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from './policyMap.ts';
 
@@ -18,8 +18,33 @@ const LC0_INPUT_PLANES_SIZE = 112 * 8 * 8;
 export interface Lc0LegalPrior {
   uci: string;
   index: number;
+  /** Search-native action ID, present when legal moves were prepared upstream. */
+  actionId?: number;
   logit: number;
   prior: number;
+}
+
+export interface Lc0PreparedLegalMove {
+  move: Move;
+  uci: string;
+  actionId: number;
+  policyIndex: number;
+}
+
+/**
+ * Search-native evaluator input. It retains the already-owned current board,
+ * legal move mappings, and canonical cache key so evaluator adapters do not
+ * repeat move generation, FEN parsing, or policy/action conversion.
+ */
+export interface Lc0PreparedEvaluatorInput extends Lc0PositionHistoryInput {
+  prepared: {
+    board: BoardState;
+    fen: string;
+    legalMoves: readonly Lc0PreparedLegalMove[];
+    /** Preserve fen-only synthetic history semantics for a bare root input. */
+    explicitHistory: boolean;
+    cacheKey: string;
+  };
 }
 
 export interface Lc0Evaluation {
@@ -38,7 +63,7 @@ export interface Lc0OnnxEvaluatorOptions {
   historyFill?: Lc0HistoryFill;
 }
 
-export type Lc0EvaluatorInput = BoardState | string | Lc0PositionHistoryInput;
+export type Lc0EvaluatorInput = BoardState | string | Lc0PositionHistoryInput | Lc0PreparedEvaluatorInput;
 
 export interface Lc0EvaluationProvider {
   evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> | Lc0Evaluation;
@@ -167,6 +192,7 @@ function arraySlice<T extends ArrayLike<number>>(values: T, start: number, lengt
 }
 
 function inputHistoryKey(input: Lc0EvaluatorInput): string {
+  if (typeof input === 'object' && input !== null && 'prepared' in input) return input.prepared.cacheKey;
   if (typeof input === 'object' && input !== null && 'positions' in input) {
     const positions = input.positions.map((position) => typeof position === 'string' ? boardToFen(parseFen(position)) : boardToFen(position));
     return `history:${positions.length}\n${positions.join('\n')}`;
@@ -196,7 +222,41 @@ function approximateCachedEvaluationBytes(evaluation: Lc0Evaluation): number {
   return stringBytes + scalarBytes + legalPriorBytes;
 }
 
-export function currentBoardAndFen(input: Lc0EvaluatorInput): { board: BoardState; fen: string } {
+export function prepareLc0EvaluatorInput(
+  board: BoardState,
+  historyNewestFirst: readonly (BoardState | string)[] = [],
+  preparedMoves: readonly Move[] = legalMoves(board),
+  historyFensNewestFirst?: readonly string[],
+  explicitHistory: boolean = historyNewestFirst.length > 0,
+): Lc0PreparedEvaluatorInput {
+  const fen = boardToFen(board);
+  const moveTransform = board.turn === 'b' ? LC0_MIRROR_TRANSFORM : 0;
+  const mappedMoves = preparedMoves.map((move) => {
+    const uci = moveToUci(move);
+    const policyIndex = uciToLc0PolicyIndex(uci, moveTransform, { standardCastling: isStandardCastlingMove(board, move) });
+    if (policyIndex === undefined) throw new Error(`No LC0 policy index for legal move ${uci}`);
+    return { move, uci, actionId: moveToActionId(move), policyIndex };
+  });
+  const chronological = [...historyNewestFirst].reverse();
+  const cacheHistory = historyFensNewestFirst
+    ? [...historyFensNewestFirst].reverse()
+    : chronological.map((position) => typeof position === 'string' ? boardToFen(parseFen(position)) : boardToFen(position));
+  return {
+    positions: chronological.concat(board),
+    prepared: {
+      board,
+      fen,
+      legalMoves: mappedMoves,
+      explicitHistory,
+      cacheKey: `history:${cacheHistory.length + 1}\n${cacheHistory.concat(fen).join('\n')}`,
+    },
+  };
+}
+
+export function currentBoardAndFen(input: Lc0EvaluatorInput): { board: BoardState; fen: string; preparedLegalMoves?: readonly Lc0PreparedLegalMove[] } {
+  if (typeof input === 'object' && input !== null && 'prepared' in input) {
+    return { board: input.prepared.board, fen: input.prepared.fen, preparedLegalMoves: input.prepared.legalMoves };
+  }
   if (typeof input === 'object' && input !== null && 'positions' in input) {
     if (input.positions.length === 0) throw new Error('LC0 evaluator history input requires at least one position');
     const last = input.positions[input.positions.length - 1];
@@ -207,9 +267,13 @@ export function currentBoardAndFen(input: Lc0EvaluatorInput): { board: BoardStat
   return { board, fen: typeof input === 'string' ? input : boardToFen(board) };
 }
 
-export function legalPolicyPriors(board: BoardState, logits: ArrayLike<number>, policyTemperature: number): Lc0LegalPrior[] {
+export function legalPolicyPriors(board: BoardState, logits: ArrayLike<number>, policyTemperature: number, prepared?: readonly Lc0PreparedLegalMove[]): Lc0LegalPrior[] {
   const moveTransform = board.turn === 'b' ? LC0_MIRROR_TRANSFORM : 0;
-  const legal = legalMoves(board).map((move) => {
+  const legal = (prepared ?? legalMoves(board)).map((entry) => {
+    if ('policyIndex' in entry) {
+      return { uci: entry.uci, index: entry.policyIndex, actionId: entry.actionId, logit: Number(logits[entry.policyIndex]) / policyTemperature };
+    }
+    const move = entry;
     const uci = moveToUci(move);
     const index = uciToLc0PolicyIndex(uci, moveTransform, { standardCastling: isStandardCastlingMove(board, move) });
     if (index === undefined) throw new Error(`No LC0 policy index for legal move ${uci}`);
@@ -279,84 +343,144 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
   async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
     if (!inputs.length) return [];
     const results = new Array<Lc0Evaluation>(inputs.length);
-    const missInputs: Lc0EvaluatorInput[] = [];
-    const missSlots: number[] = [];
-    const missKeys: string[] = [];
+    const groups = new Map<string, { input: Lc0EvaluatorInput; slots: number[]; promise?: Promise<Lc0Evaluation> }>();
+
     for (let i = 0; i < inputs.length; i++) {
       const key = inputHistoryKey(inputs[i]);
-      const cached = this.cache.get(key);
+      const cached = this.cachedValue(key);
       if (cached) {
-        this.hits += 1;
-        this.cache.delete(key);
-        this.cache.set(key, cached);
-        results[i] = cloneCachedEvaluation(cached);
-      } else {
-        this.misses += 1;
-        missInputs.push(inputs[i]);
-        missSlots.push(i);
-        missKeys.push(key);
+        results[i] = cached;
+        continue;
       }
+      this.misses += 1;
+      const group = groups.get(key);
+      if (group) group.slots.push(i);
+      else groups.set(key, { input: inputs[i], slots: [i], promise: this.inFlight.get(key) });
     }
-    if (missInputs.length) {
-      const evals = this.inner.evaluateBatch
-        ? await this.inner.evaluateBatch(missInputs)
-        : await Promise.all(missInputs.map((input) => this.inner.evaluate(input)));
-      for (let i = 0; i < evals.length; i++) {
-        const value = cloneEvaluation(evals[i]);
-        this.store(missKeys[i], value);
-        results[missSlots[i]] = cloneEvaluation(value);
-      }
+
+    const fresh = [...groups.entries()].filter(([, group]) => !group.promise);
+    if (fresh.length) {
+      const deferred = fresh.map(([key, group]) => {
+        const pending = this.createInFlight(key);
+        group.promise = pending.promise;
+        return { key, input: group.input, ...pending };
+      });
+      void this.runMissBatch(deferred);
     }
+
+    await Promise.all([...groups.entries()].map(async ([, group]) => {
+      const value = await group.promise!;
+      for (const slot of group.slots) results[slot] = cloneEvaluation(value);
+    }));
     return results;
   }
 
   async evaluateBatchSequence(batches: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> {
     const out = batches.map((batch) => new Array<Lc0Evaluation>(batch.length));
-    const missBatches: Lc0EvaluatorInput[][] = [];
-    const missBatchSlots: Array<{ batchIndex: number; slots: number[]; keys: string[] }> = [];
+    const groups = new Map<string, { input: Lc0EvaluatorInput; slots: Array<{ batch: number; slot: number }>; sourceBatch: number; promise?: Promise<Lc0Evaluation> }>();
+
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      const missInputs: Lc0EvaluatorInput[] = [];
-      const slots: number[] = [];
-      const keys: string[] = [];
-      for (let i = 0; i < batches[batchIndex].length; i++) {
-        const key = inputHistoryKey(batches[batchIndex][i]);
-        const cached = this.cache.get(key);
+      for (let slot = 0; slot < batches[batchIndex].length; slot++) {
+        const input = batches[batchIndex][slot];
+        const key = inputHistoryKey(input);
+        const cached = this.cachedValue(key);
         if (cached) {
-          this.hits += 1;
-          this.cache.delete(key);
-          this.cache.set(key, cached);
-          out[batchIndex][i] = cloneCachedEvaluation(cached);
-        } else {
-          this.misses += 1;
-          missInputs.push(batches[batchIndex][i]);
-          slots.push(i);
-          keys.push(key);
+          out[batchIndex][slot] = cached;
+          continue;
         }
-      }
-      if (missInputs.length) {
-        missBatches.push(missInputs);
-        missBatchSlots.push({ batchIndex, slots, keys });
+        this.misses += 1;
+        const group = groups.get(key);
+        if (group) group.slots.push({ batch: batchIndex, slot });
+        else groups.set(key, { input, slots: [{ batch: batchIndex, slot }], sourceBatch: batchIndex, promise: this.inFlight.get(key) });
       }
     }
-    if (missBatches.length) {
-      const missResults = this.inner.evaluateBatchSequence ? await this.inner.evaluateBatchSequence(missBatches) : [];
+
+    const newBySourceBatch = new Map<number, Array<{ key: string; input: Lc0EvaluatorInput; promise: Promise<Lc0Evaluation>; resolve: (value: Lc0Evaluation) => void; reject: (error: unknown) => void }>>();
+    for (const [key, group] of groups) {
+      if (group.promise) continue;
+      const pending = this.createInFlight(key);
+      group.promise = pending.promise;
+      const entries = newBySourceBatch.get(group.sourceBatch) ?? [];
+      entries.push({ key, input: group.input, ...pending });
+      newBySourceBatch.set(group.sourceBatch, entries);
+    }
+    if (newBySourceBatch.size) void this.runMissSequence([...newBySourceBatch.values()]);
+
+    await Promise.all([...groups.values()].map(async (group) => {
+      const value = await group.promise!;
+      for (const target of group.slots) out[target.batch][target.slot] = cloneEvaluation(value);
+    }));
+    return out;
+  }
+
+  private readonly inFlight = new Map<string, Promise<Lc0Evaluation>>();
+
+  private cachedValue(key: string): Lc0Evaluation | undefined {
+    const cached = this.cache.get(key);
+    if (!cached) return undefined;
+    this.hits += 1;
+    this.cache.delete(key);
+    this.cache.set(key, cached);
+    return cloneCachedEvaluation(cached);
+  }
+
+  private createInFlight(key: string): { promise: Promise<Lc0Evaluation>; resolve: (value: Lc0Evaluation) => void; reject: (error: unknown) => void } {
+    let resolve!: (value: Lc0Evaluation) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<Lc0Evaluation>((res, rej) => { resolve = res; reject = rej; });
+    this.inFlight.set(key, promise);
+    return { promise, resolve, reject };
+  }
+
+  private settleMiss(key: string, value: Lc0Evaluation): Lc0Evaluation {
+    const cloned = cloneEvaluation(value);
+    this.store(key, cloned);
+    this.inFlight.delete(key);
+    return cloned;
+  }
+
+  private async runMissBatch(entries: Array<{ key: string; input: Lc0EvaluatorInput; resolve: (value: Lc0Evaluation) => void; reject: (error: unknown) => void }>): Promise<void> {
+    try {
+      const evals = this.inner.evaluateBatch
+        ? await this.inner.evaluateBatch(entries.map((entry) => entry.input))
+        : await Promise.all(entries.map((entry) => this.inner.evaluate(entry.input)));
+      if (evals.length !== entries.length) throw new Error(`LC0 evaluator returned ${evals.length} result(s), expected ${entries.length}`);
+      for (let i = 0; i < entries.length; i++) entries[i].resolve(this.settleMiss(entries[i].key, evals[i]));
+    } catch (error) {
+      for (const entry of entries) {
+        this.inFlight.delete(entry.key);
+        entry.reject(error);
+      }
+    }
+  }
+
+  private async runMissSequence(batchEntries: Array<Array<{ key: string; input: Lc0EvaluatorInput; resolve: (value: Lc0Evaluation) => void; reject: (error: unknown) => void }>>): Promise<void> {
+    try {
+      const inputs = batchEntries.map((batch) => batch.map((entry) => entry.input));
+      const results = this.inner.evaluateBatchSequence ? await this.inner.evaluateBatchSequence(inputs) : [];
       if (!this.inner.evaluateBatchSequence) {
-        for (const batch of missBatches) {
-          missResults.push(this.inner.evaluateBatch
+        for (const batch of inputs) {
+          results.push(this.inner.evaluateBatch
             ? await this.inner.evaluateBatch(batch)
             : await Promise.all(batch.map((input) => this.inner.evaluate(input))));
         }
       }
-      for (let batchIndex = 0; batchIndex < missResults.length; batchIndex++) {
-        const placement = missBatchSlots[batchIndex];
-        for (let i = 0; i < missResults[batchIndex].length; i++) {
-          const value = cloneEvaluation(missResults[batchIndex][i]);
-          this.store(placement.keys[i], value);
-          out[placement.batchIndex][placement.slots[i]] = cloneEvaluation(value);
+      if (results.length !== batchEntries.length) throw new Error(`LC0 evaluator returned ${results.length} sequence batch(es), expected ${batchEntries.length}`);
+      for (let batch = 0; batch < batchEntries.length; batch++) {
+        if (results[batch].length !== batchEntries[batch].length) throw new Error(`LC0 evaluator returned ${results[batch].length} result(s) for sequence batch ${batch}, expected ${batchEntries[batch].length}`);
+        for (let i = 0; i < batchEntries[batch].length; i++) {
+          const entry = batchEntries[batch][i];
+          entry.resolve(this.settleMiss(entry.key, results[batch][i]));
+        }
+      }
+    } catch (error) {
+      for (const entries of batchEntries) {
+        for (const entry of entries) {
+          this.inFlight.delete(entry.key);
+          entry.reject(error);
         }
       }
     }
-    return out;
   }
 
   private store(key: string, value: Lc0Evaluation): void {
@@ -411,12 +535,14 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     const encodedPlanes = new Float32Array(physicalBatchSize * LC0_INPUT_PLANES_SIZE);
     const boards: BoardState[] = [];
     const fens: string[] = [];
+    const preparedLegalMoves: Array<readonly Lc0PreparedLegalMove[] | undefined> = [];
     const encodeStarted = ort.tinyLeelaNowMs();
     for (let i = 0; i < inputs.length; i++) {
       const input = inputs[i];
-      const { board, fen } = currentBoardAndFen(input);
-      boards.push(board);
-      fens.push(fen);
+      const current = currentBoardAndFen(input);
+      boards.push(current.board);
+      fens.push(current.fen);
+      preparedLegalMoves.push(current.preparedLegalMoves);
       encodedPlanes.set(encodeLc0Classical112(input as Lc0EncoderInput, { historyFill: this.historyFill }).planes, i * LC0_INPUT_PLANES_SIZE);
     }
     // Fixed batch-N artifacts require a full physical batch. Pad by copying the
@@ -481,7 +607,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       const legalPriorsStarted = ort.tinyLeelaNowMs();
       const wdlSlice = arraySlice(wdlRaw, i * LC0_WDL_SIZE, LC0_WDL_SIZE);
       const wdl: [number, number, number] = [Number(wdlSlice[0]), Number(wdlSlice[1]), Number(wdlSlice[2])];
-      const legalPriors = legalPolicyPriors(boards[i], arraySlice(policy, i * LC0_POLICY_SIZE, LC0_POLICY_SIZE), this.policyTemperature);
+      const legalPriors = legalPolicyPriors(boards[i], arraySlice(policy, i * LC0_POLICY_SIZE, LC0_POLICY_SIZE), this.policyTemperature, preparedLegalMoves[i]);
       const legalPriorsMs = ort.tinyLeelaNowMs() - legalPriorsStarted;
       return {
         fen: fens[i],

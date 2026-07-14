@@ -7,7 +7,7 @@ const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 180_000;
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_ort_readback_profile.mjs [options]\n\nRuns the LC0 ONNX evaluator in browser ORT-WebGPU with diagnostic output downloads enabled.\n\nOptions:\n  --base-url URL        Use an existing dev server\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --model URL          LC0 ONNX model URL\n  --fen FEN            Position to benchmark (default page start position)\n  --iters N            Timed eval iterations (default 10)\n  --warmup N           Warmup eval iterations (default 2)\n  --ep EP              ORT EP: webgpu, webgpu,wasm, auto (default webgpu)\n  --no-monkey-patch    Disable WebGPU API monkey-patch counts\n  --no-kernel-profile  Disable ORT WebGPU kernel timestamp profiling\n  --no-gpu-outputs     Do not set preferredOutputLocation=gpu-buffer\n  --pack-verify        Kept for symmetry; ignored by ONNX bench\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`);
+  console.log(`Usage: node scripts/lc0_browser_ort_readback_profile.mjs [options]\n\nRuns the LC0 ONNX evaluator in browser ORT with diagnostic output enabled.\n\nOptions:\n  --base-url URL        Use an existing dev server\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --model URL          LC0 ONNX model URL\n  --fen FEN            Position to benchmark (default page start position)\n  --iters N            Timed eval iterations (default 10)\n  --warmup N           Warmup eval iterations (default 2)\n  --ep EP              ORT EP: wasm, webgpu, webgpu,wasm, auto (default webgpu)\n  --ort-wasm-variant V ORT WASM artifact: fixed or relaxed\n  --ort-threads N      Pin ORT WASM threads\n  --no-monkey-patch    Disable WebGPU API monkey-patch counts\n  --no-kernel-profile  Disable ORT WebGPU kernel timestamp profiling\n  --no-gpu-outputs     Do not set preferredOutputLocation=gpu-buffer\n  --pack-verify        Kept for symmetry; ignored by ONNX bench\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`);
 }
 
 function parseArgs(argv) {
@@ -44,6 +44,8 @@ function parseArgs(argv) {
     else if (arg === '--iters') args.iters = Number(next());
     else if (arg === '--warmup') args.warmup = Number(next());
     else if (arg === '--ep') args.ep = next();
+    else if (arg === '--ort-wasm-variant') args.ortWasmVariant = next();
+    else if (arg === '--ort-threads') args.ortThreads = Number(next());
     else if (arg === '--no-monkey-patch') args.monkeyPatch = false;
     else if (arg === '--no-kernel-profile') args.kernelProfile = false;
     else if (arg === '--no-gpu-outputs') args.gpuOutputs = false;
@@ -58,6 +60,8 @@ function parseArgs(argv) {
   for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs], ['iters', args.iters], ['warmup', args.warmup]]) {
     if (!Number.isFinite(value) || value < 0 || (name !== 'warmup' && value <= 0)) throw new Error(`Invalid --${name}: ${value}`);
   }
+  if (args.ortWasmVariant && !['fixed', 'relaxed'].includes(args.ortWasmVariant)) throw new Error(`Invalid --ort-wasm-variant: ${args.ortWasmVariant}`);
+  if (args.ortThreads !== undefined && (!Number.isInteger(args.ortThreads) || args.ortThreads < 1)) throw new Error(`Invalid --ort-threads: ${args.ortThreads}`);
   return args;
 }
 
@@ -67,6 +71,8 @@ function benchmarkUrl(args) {
   url.searchParams.set('ep', args.ep);
   url.searchParams.set('benchIters', String(args.iters));
   url.searchParams.set('benchWarmup', String(args.warmup));
+  if (args.ortWasmVariant) url.searchParams.set('ortWasmVariant', args.ortWasmVariant);
+  if (args.ortThreads !== undefined) url.searchParams.set('ortThreads', String(args.ortThreads));
   url.searchParams.set('ortReadbackProfile', '1');
   url.searchParams.set('ortWebGpuProfile', args.kernelProfile ? '1' : '0');
   url.searchParams.set('ortMonkeyPatchWebGpu', args.monkeyPatch ? '1' : '0');
@@ -150,6 +156,9 @@ async function runBrowserBenchmark(args) {
         const text = textFromGetResult(await runAgent(args, ['get', 'text', '#benchResult'], 30_000));
         const result = JSON.parse(text);
         if (result.status !== 'BENCH_DONE') throw new Error(`unexpected benchmark status: ${result.status}`);
+        if (args.ortWasmVariant && !String(result.backend).includes(`[${args.ortWasmVariant}:`)) {
+          throw new Error(`requested ORT WASM ${args.ortWasmVariant}, received backend ${result.backend}`);
+        }
         return result;
       } catch (error) {
         if (Date.now() >= deadline) throw error;

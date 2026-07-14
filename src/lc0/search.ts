@@ -3,8 +3,7 @@ import { legalMoves } from '../chess/movegen.ts';
 import { moveToActionId, moveToUci, type Move } from '../chess/moveCodec.ts';
 import { searchRoot, type Node as PuctNode, type SearchOptions, type SearchProgress, type SearchResult } from '../search/puct.ts';
 import type { Evaluation, EvaluationBatchRequest, EvaluationContext, Evaluator } from '../nn/evaluator.ts';
-import { Lc0OnnxEvaluator, type Lc0EvaluationCacheMetrics, type Lc0EvaluationProvider, type Lc0EvaluatorInput, type Lc0Evaluation, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
-import type { Lc0PositionHistoryInput } from './encoder112.ts';
+import { Lc0OnnxEvaluator, prepareLc0EvaluatorInput, type Lc0EvaluationCacheMetrics, type Lc0EvaluationProvider, type Lc0EvaluatorInput, type Lc0Evaluation, type Lc0OnnxEvaluatorOptions, type Lc0PreparedEvaluatorInput } from './onnxEvaluator.ts';
 
 export interface Lc0SearchOptions extends Omit<SearchOptions, 'onProgress'> {
   /** Fixed PUCT visits. Kept explicit here because Phase 2 starts with fixed-visit search parity. */
@@ -49,27 +48,37 @@ export interface Lc0SearchProgress {
   elapsedMs: number;
 }
 
-function currentBoardAndHistory(input: Lc0EvaluatorInput): { board: BoardState; historyFens: string[] } {
+function currentBoardAndHistory(input: Lc0EvaluatorInput): { board: BoardState; historyFens: string[]; historyBoards: BoardState[]; explicitHistory: boolean } {
   if (typeof input === 'object' && input !== null && 'positions' in input) {
     if (input.positions.length === 0) throw new Error('LC0 search history input requires at least one position');
     const boards = input.positions.map((position) => typeof position === 'string' ? parseFen(position) : position);
     const board = boards[boards.length - 1];
-    return { board, historyFens: boards.slice(0, -1).reverse().map(boardToFen) };
+    const historyBoards = boards.slice(0, -1).reverse();
+    return { board, historyBoards, historyFens: historyBoards.map(boardToFen), explicitHistory: true };
   }
-  return { board: typeof input === 'string' ? parseFen(input) : input, historyFens: [] };
+  return { board: typeof input === 'string' ? parseFen(input) : input, historyFens: [], historyBoards: [], explicitHistory: false };
 }
 
-function contextInput(board: BoardState, context?: EvaluationContext): BoardState | Lc0PositionHistoryInput {
-  const history = context?.historyFens ?? [];
-  if (!history.length) return board;
-  return { positions: [...history].reverse().map(parseFen).concat(board) };
+function contextInput(board: BoardState, context?: EvaluationContext): Lc0PreparedEvaluatorInput {
+  const historyFens = context?.historyFens ?? [];
+  const history = context?.historyBoards?.length === historyFens.length
+    ? context.historyBoards
+    : historyFens.map(parseFen);
+  return prepareLc0EvaluatorInput(board, history, context?.legalMoves ?? legalMoves(board), historyFens, context?.explicitHistory ?? (history.length > 0));
 }
 
 function lc0ToSearchEvaluation(board: BoardState, lc0: Lc0Evaluation, context?: EvaluationContext): Evaluation {
   const policy = new Map<number, number>();
-  const legalByUci = new Map<string, Move>((context?.legalMoves ?? legalMoves(board)).map((move) => [moveToUci(move), move]));
+  const needsUciFallback = lc0.legalPriors.some((prior) => prior.actionId === undefined);
+  const legalByUci = needsUciFallback
+    ? new Map<string, Move>((context?.legalMoves ?? legalMoves(board)).map((move) => [moveToUci(move), move]))
+    : undefined;
   for (const prior of lc0.legalPriors) {
-    const move = legalByUci.get(prior.uci);
+    if (prior.actionId !== undefined) {
+      policy.set(prior.actionId, prior.prior);
+      continue;
+    }
+    const move = legalByUci?.get(prior.uci);
     if (move) policy.set(moveToActionId(move), prior.prior);
   }
   const evaluation: Evaluation & { timing?: unknown } = { policy, wdl: lc0.wdl };
@@ -159,7 +168,7 @@ export class Lc0PuctSearcher {
   }
 
   async search(input: Lc0EvaluatorInput, options: Lc0SearchOptions = {}): Promise<Lc0SearchResult> {
-    const { board, historyFens } = currentBoardAndHistory(input);
+    const { board, historyFens, historyBoards, explicitHistory } = currentBoardAndHistory(input);
     const { reuseTree = false, onProgress, ...searchOptions } = options;
     const hasExplicitRoot = Object.prototype.hasOwnProperty.call(searchOptions, 'root');
     const useInternalTree = reuseTree && !hasExplicitRoot && !searchOptions.rootMoves;
@@ -197,6 +206,8 @@ export class Lc0PuctSearcher {
       // History belongs to the LC0 input. Do not let generic SearchOptions
       // accidentally replace it and desynchronize the 112-plane encoder.
       historyFens,
+      historyBoards,
+      explicitHistory,
       onProgress: onProgress ? (progress) => onProgress(convertProgress(progress)) : undefined,
     });
     if (useInternalTree) this.cachedRoot = result.root ?? null;

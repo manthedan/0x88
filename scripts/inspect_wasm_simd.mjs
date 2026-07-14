@@ -180,15 +180,27 @@ function scanSimd(code) {
   return counts;
 }
 
-if (process.argv.length < 3) {
-  console.error('Usage: node scripts/inspect_wasm_simd.mjs <file.wasm> [file2.wasm ...]');
+const cliArgs = process.argv.slice(2);
+let requiredOp;
+let forbiddenOp;
+const files = [];
+for (let index = 0; index < cliArgs.length; index += 1) {
+  if (cliArgs[index] === '--require-op') requiredOp = cliArgs[++index];
+  else if (cliArgs[index] === '--forbid-op') forbiddenOp = cliArgs[++index];
+  else files.push(cliArgs[index]);
+}
+
+if (!files.length) {
+  console.error('Usage: node scripts/inspect_wasm_simd.mjs [--require-op NAME] [--forbid-op NAME] <file.wasm> [file2.wasm ...]');
   process.exit(2);
 }
 
-for (const file of process.argv.slice(2)) {
+let requirementFailed = false;
+for (const file of files) {
   if (!existsSync(file)) {
     console.log(`${file}`);
     console.log('  missing; build local artifacts first with npm run reckless:build-wasi and npm run reckless:build-simd-wasi');
+    if (requiredOp || forbiddenOp) requirementFailed = true;
     continue;
   }
   const bytes = readFileSync(file);
@@ -205,4 +217,18 @@ for (const file of process.argv.slice(2)) {
   console.log(`  families=${families.map(([name, count]) => `${name}:${count}`).join(', ') || 'none'}`);
   console.log(`  topOps=${subops.map(([op, count]) => `${SIMD_NAMES.get(op) ?? `simd.${op}`}:${count}`).join(', ') || 'none'}`);
   console.log(`  relaxedOps=${relaxedOps.map(([op, count]) => `${SIMD_NAMES.get(op)}:${count}`).join(', ') || 'none'}`);
+  if (requiredOp) {
+    const requiredEntry = [...SIMD_NAMES.entries()].find(([, name]) => name === requiredOp);
+    const count = requiredEntry ? counts.get(requiredEntry[0]) ?? 0 : 0;
+    console.log(`  requiredOp=${requiredOp}:${count}`);
+    if (count === 0) requirementFailed = true;
+  }
+  if (forbiddenOp) {
+    const forbiddenEntry = [...SIMD_NAMES.entries()].find(([, name]) => name === forbiddenOp);
+    const count = forbiddenEntry ? counts.get(forbiddenEntry[0]) ?? 0 : 0;
+    console.log(`  forbiddenOp=${forbiddenOp}:${count}`);
+    if (count > 0) requirementFailed = true;
+  }
 }
+
+if (requirementFailed) process.exitCode = 1;

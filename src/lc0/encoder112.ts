@@ -128,7 +128,10 @@ function parseHistoryInput(input: Lc0EncoderInput): { board: BoardState; history
   if (typeof input === 'object' && input !== null && 'positions' in input) {
     if (input.positions.length === 0) throw new Error('LC0 history input requires at least one position');
     const chronological = input.positions.map((position) => typeof position === 'string' ? parseFen(position) : position);
-    return { board: chronological[chronological.length - 1], historyBoards: [...chronological].reverse(), explicitHistory: true };
+    const preparedExplicit = 'prepared' in input
+      ? (input as Lc0PositionHistoryInput & { prepared?: { explicitHistory?: boolean } }).prepared?.explicitHistory
+      : undefined;
+    return { board: chronological[chronological.length - 1], historyBoards: [...chronological].reverse(), explicitHistory: preparedExplicit ?? true };
   }
   const board = typeof input === 'string' ? parseFen(input) : input;
   return { board, historyBoards: [board], explicitHistory: false };

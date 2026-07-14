@@ -1,5 +1,5 @@
 import '../nn/ortConsoleFilter.ts';
-import { collectOrtRuntimeDiagnostics, setOrtRuntimeDiagnosticOptionsForCurrentThread, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference, type OrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
+import { collectOrtRuntimeDiagnostics, setOrtRuntimeDiagnosticOptionsForCurrentThread, setRequestedOrtExecutionProviderForCurrentThread, setRequestedOrtWasmArtifactForCurrentThread, setRequestedOrtWasmThreadsForCurrentThread, type OrtExecutionProviderPreference, type OrtRuntimeDiagnosticOptions, type OrtRuntimeDiagnostics, type OrtWasmArtifactSelection } from '../nn/ortRuntime.ts';
 import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { loadLc0WebModelPack } from './modelPack.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationCacheFootprint, type Lc0EvaluationProvider, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
@@ -89,6 +89,8 @@ type InitMessage = {
   encoderKernelVariant?: Lc0WebEncoderKernelVariant;
   evalCacheEntries?: number;
   ortDiagnostics?: OrtRuntimeDiagnosticOptions;
+  ortWasmArtifact?: OrtWasmArtifactSelection;
+  ortWasmThreads?: number;
   /** Stream model download progress back as 'downloadProgress' messages. */
   reportDownloadProgress?: boolean;
   requestPersistentModelStorage?: boolean;
@@ -473,7 +475,7 @@ type PackLoadResult = {
 };
 
 type WorkerResponse =
-  | { type: 'ready'; id: number; backend: string; modelCache: string }
+  | { type: 'ready'; id: number; backend: string; modelCache: string; ortWasm?: OrtRuntimeDiagnostics['wasm'] }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
   | { type: 'hybridEvaluationResult'; id: number; result: Lc0WebHybridEvaluationResult }
@@ -602,6 +604,7 @@ let configuredModelUrl: string | null = null;
 let configuredInitKey: string | null = null;
 let configuredBackend = '';
 let configuredModelCacheStatus = '';
+let configuredOrtWasm: OrtRuntimeDiagnostics['wasm'] | undefined;
 /** In-flight search abort controllers keyed by request id, so cancel messages can stop them. */
 const activeSearches = new Map<number, AbortController>();
 // This worker owns exactly one ORT session. Queue all model operations so the
@@ -644,9 +647,11 @@ async function handleInit(message: InitMessage): Promise<void> {
     requestPersistentModelStorage: message.requestPersistentModelStorage === true,
     minimumFreeBytesAfterModelCache: message.minimumFreeBytesAfterModelCache ?? null,
     ortDiagnostics: message.ortDiagnostics ?? null,
+    ortWasmArtifact: message.ortWasmArtifact ?? null,
+    ortWasmThreads: message.ortWasmThreads ?? null,
   });
   if (evaluator && configuredInitKey === initKey) {
-    post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: `${configuredModelCacheStatus} · reused existing worker session` });
+    post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: `${configuredModelCacheStatus} · reused existing worker session`, ortWasm: configuredOrtWasm });
     return;
   }
 
@@ -654,6 +659,8 @@ async function handleInit(message: InitMessage): Promise<void> {
   const cacheLabel = evalCacheEntries > 0 ? ` · eval-cache ${evalCacheEntries}` : '';
   setRequestedOrtExecutionProviderForCurrentThread(message.ep);
   setOrtRuntimeDiagnosticOptionsForCurrentThread(message.ortDiagnostics ?? null);
+  setRequestedOrtWasmArtifactForCurrentThread(message.ortWasmArtifact ?? null);
+  setRequestedOrtWasmThreadsForCurrentThread(message.ortWasmThreads ?? null);
   if (message.runtime === 'whole-onnx-webgpu') {
     if (!message.wholeModelManifestUrl) throw new Error('whole-model LC0 worker init requires manifest URL');
     const baseEvaluator: WorkerEvaluator = await Lc0WholeOnnxWebgpuEvaluator.create({
@@ -672,6 +679,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     configuredInitKey = initKey;
     configuredBackend = 'whole-onnx-webgpu';
     configuredModelCacheStatus = `whole-model-webgpu${cacheLabel}`;
+    configuredOrtWasm = undefined;
     await previousEvaluator?.dispose?.();
     post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
     return;
@@ -698,6 +706,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     configuredInitKey = initKey;
     configuredBackend = message.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
     configuredModelCacheStatus = `hybrid-pack-lazy${cacheLabel}`;
+    configuredOrtWasm = undefined;
     await previousEvaluator?.dispose?.();
     post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
     return;
@@ -730,8 +739,9 @@ async function handleInit(message: InitMessage): Promise<void> {
   configuredInitKey = initKey;
   configuredBackend = diagnostics.describe;
   configuredModelCacheStatus = `${describeLc0ModelLoad(modelLoad)}${cacheLabel}`;
+  configuredOrtWasm = diagnostics.wasm;
   await previousEvaluator?.dispose?.();
-  post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
+  post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus, ortWasm: configuredOrtWasm });
 }
 
 async function handleEvaluate(message: EvaluateMessage): Promise<void> {

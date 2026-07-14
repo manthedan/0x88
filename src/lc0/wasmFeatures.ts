@@ -26,6 +26,21 @@ const WASM_RELAXED_SIMD_PROBE = new Uint8Array([
   253, 147, 2, 11,
 ]);
 
+const WASM_RELAXED_SIMD_INTEGER_DOT_PROBE = new Uint8Array([
+  // (module (func (result v128)
+  //   (i32x4.relaxed_dot_i8x16_i7x16_add
+  //     (i8x16.splat (i32.const 0))
+  //     (i8x16.splat (i32.const 0))
+  //     (i8x16.splat (i32.const 0)))))
+  0, 97, 115, 109, 1, 0, 0, 0, 1,
+  5, 1, 96, 0, 1, 123, 3, 2, 1,
+  0, 10, 19, 1, 17, 0,
+  65, 0, 253, 15,
+  65, 0, 253, 15,
+  65, 0, 253, 15,
+  253, 147, 2, 11,
+]);
+
 function validateProbe(bytes: Uint8Array): boolean {
   if (typeof WebAssembly === 'undefined' || typeof WebAssembly.validate !== 'function') return false;
   try {
@@ -41,4 +56,8 @@ export function supportsWasmSimd(): boolean {
 
 export function supportsWasmRelaxedSimd(): boolean {
   return validateProbe(WASM_RELAXED_SIMD_PROBE);
+}
+
+export function supportsWasmRelaxedSimdIntegerDot(): boolean {
+  return validateProbe(WASM_RELAXED_SIMD_INTEGER_DOT_PROBE);
 }

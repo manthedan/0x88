@@ -86,9 +86,14 @@ async function compileModule(wasmUrl: string, id: number): Promise<WebAssembly.M
       if (!response.ok) throw new Error(`failed to fetch Reckless browser API module ${wasmUrl}: HTTP ${response.status}`);
       postStatus(id, 'wasm-compile', { url: wasmUrl, elapsedMs: nowMs() - started });
       try {
-        return await WebAssembly.compileStreaming(response.clone());
+        return await WebAssembly.compileStreaming(response);
       } catch {
-        return WebAssembly.compile(await response.arrayBuffer());
+        // Avoid teeing every successful large response solely to preserve an
+        // exceptional MIME fallback. Refetch only when streaming compilation
+        // actually fails.
+        const fallback = await fetch(wasmUrl, { cache: 'force-cache' });
+        if (!fallback.ok) throw new Error(`failed to refetch Reckless browser API module ${wasmUrl}: HTTP ${fallback.status}`);
+        return WebAssembly.compile(await fallback.arrayBuffer());
       }
     })
     .then((module) => {
@@ -104,36 +109,42 @@ async function compileModule(wasmUrl: string, id: number): Promise<WebAssembly.M
 }
 
 async function readResponseWithProgress(response: Response, id: number, phase: string, url: string, started: number): Promise<ArrayBuffer> {
-  const totalBytes = Number(response.headers.get('content-length')) || undefined;
+  const decodedHeader = Number(response.headers.get('x-artifact-content-length') ?? '');
+  const contentLength = Number(response.headers.get('content-length') ?? '');
+  const totalBytes = Number.isSafeInteger(decodedHeader) && decodedHeader > 0
+    ? decodedHeader
+    : !response.headers.has('content-encoding') && Number.isSafeInteger(contentLength) && contentLength > 0 ? contentLength : undefined;
   if (!response.body) {
     const bytes = await response.arrayBuffer();
     postStatus(id, `${phase}-ready`, { url, loadedBytes: bytes.byteLength, totalBytes: totalBytes ?? bytes.byteLength, elapsedMs: nowMs() - started });
     return bytes;
   }
   const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
+  let out = totalBytes ? new Uint8Array(totalBytes) : new Uint8Array(64 * 1024);
   let loadedBytes = 0;
   let lastProgressMs = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     if (!value) continue;
-    chunks.push(value);
-    loadedBytes += value.byteLength;
+    const required = loadedBytes + value.byteLength;
+    if (required > out.byteLength) {
+      const grown = new Uint8Array(Math.max(required, out.byteLength * 2));
+      grown.set(out.subarray(0, loadedBytes));
+      out = grown;
+    }
+    out.set(value, loadedBytes);
+    loadedBytes = required;
     const current = nowMs();
     if (current - lastProgressMs > 250 || (totalBytes && loadedBytes >= totalBytes)) {
       lastProgressMs = current;
       postStatus(id, phase, { url, loadedBytes, totalBytes, elapsedMs: current - started });
     }
   }
-  const out = new Uint8Array(loadedBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  if (totalBytes && loadedBytes !== totalBytes) throw new Error(`Reckless NNUE decoded byte length mismatch for ${url}: got ${loadedBytes}, expected ${totalBytes}`);
+  const bytes = loadedBytes === out.byteLength ? out.buffer : out.buffer.slice(0, loadedBytes);
   postStatus(id, `${phase}-ready`, { url, loadedBytes, totalBytes: totalBytes ?? loadedBytes, elapsedMs: nowMs() - started });
-  return out.buffer;
+  return bytes;
 }
 
 async function fetchNnue(nnueUrl: string, id: number): Promise<ArrayBuffer> {
@@ -193,7 +204,9 @@ async function ensureState(wasmUrl: string, hashMb = 16, nnueUrl: string | undef
     return state;
   }
   if (state) state.exports.reckless_api_free(state.handle);
-  const module = await compileModule(wasmUrl, id);
+  const modulePromise = compileModule(wasmUrl, id);
+  const nnuePromise = nnueUrl ? fetchNnue(nnueUrl, id) : undefined;
+  const module = await modulePromise;
   const wasiInstance = new WASI(
     ['reckless-browser-api'],
     [],
@@ -208,7 +221,7 @@ async function ensureState(wasmUrl: string, hashMb = 16, nnueUrl: string | undef
   const handle = nnueUrl
     ? await (async () => {
       if (!exports.reckless_api_new_with_network) throw new Error('Reckless browser API external-NNUE export missing: reckless_api_new_with_network');
-      const bytes = new Uint8Array(await fetchNnue(nnueUrl, id));
+      const bytes = new Uint8Array(await nnuePromise!);
       postStatus(id, 'nnue-copy', { url: nnueUrl, loadedBytes: bytes.byteLength, totalBytes: bytes.byteLength });
       return withBytes(exports, bytes, (ptr, len) => exports.reckless_api_new_with_network!(hashMb, ptr, len));
     })()

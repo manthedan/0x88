@@ -418,6 +418,7 @@ function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
     lc0LoadPromise = (async () => {
       const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
         cache: true,
+        requestPersistentStorage: true,
         onProgress: (loaded, total) => ctxShowDownloadProgress('Lc0 small net', loaded, total),
       });
       ctxHideDownloadProgress();

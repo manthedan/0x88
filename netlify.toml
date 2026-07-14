@@ -110,3 +110,72 @@
     Netlify-CDN-Cache-Control = "public, max-age=86400"
     CDN-Cache-Control = "public, max-age=86400"
     Cloudflare-CDN-Cache-Control = "public, max-age=86400"
+
+# Mutable control-plane pointers must revalidate. The CDN may retain a short
+# stale-if-error copy, but browsers never treat a channel as immutable.
+[[headers]]
+  for = "/channels/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, no-cache"
+    Netlify-CDN-Cache-Control = "public, max-age=60, stale-if-error=86400"
+    CDN-Cache-Control = "public, max-age=60, stale-if-error=86400"
+    Cloudflare-CDN-Cache-Control = "public, max-age=60, stale-if-error=86400"
+    Access-Control-Expose-Headers = "Age, Cache-Status, CF-Cache-Status, Content-Length, ETag"
+    Timing-Allow-Origin = "*"
+
+# Release manifests and hash-keyed blobs are write-once. Stable /models and
+# /engines names deliberately do not match these immutable rules.
+[[headers]]
+  for = "/releases/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Netlify-CDN-Cache-Control = "public, max-age=31536000"
+    CDN-Cache-Control = "public, max-age=31536000"
+    Cloudflare-CDN-Cache-Control = "public, max-age=31536000"
+    Access-Control-Expose-Headers = "Age, Cache-Status, CF-Cache-Status, Content-Length, ETag"
+    Timing-Allow-Origin = "*"
+
+[[headers]]
+  for = "/artifacts/sha256/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Access-Control-Allow-Origin = "*"
+    Cross-Origin-Resource-Policy = "cross-origin"
+    Netlify-CDN-Cache-Control = "public, max-age=31536000"
+    CDN-Cache-Control = "public, max-age=31536000"
+    Cloudflare-CDN-Cache-Control = "public, max-age=31536000"
+    Access-Control-Expose-Headers = "Age, Cache-Status, CF-Cache-Status, Content-Length, ETag"
+    Timing-Allow-Origin = "*"
+
+# Logical heavy URLs are mutable aliases. Revalidate instead of pinning a stale
+# model/engine for a year; immutable release manifests point at hashed blobs.
+[[headers]]
+  for = "/models/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+    Netlify-CDN-Cache-Control = "public, max-age=86400, stale-if-error=86400"
+    CDN-Cache-Control = "public, max-age=86400, stale-if-error=86400"
+    Cloudflare-CDN-Cache-Control = "public, max-age=86400, stale-if-error=86400"
+    Access-Control-Expose-Headers = "Age, Cache-Status, CF-Cache-Status, Content-Length, ETag"
+    Timing-Allow-Origin = "*"
+
+[[headers]]
+  for = "/engines/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+    Netlify-CDN-Cache-Control = "public, max-age=86400, stale-if-error=86400"
+    CDN-Cache-Control = "public, max-age=86400, stale-if-error=86400"
+    Cloudflare-CDN-Cache-Control = "public, max-age=86400, stale-if-error=86400"
+    Access-Control-Expose-Headers = "Age, Cache-Status, CF-Cache-Status, Content-Length, ETag"
+    Timing-Allow-Origin = "*"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+    Service-Worker-Allowed = "/"

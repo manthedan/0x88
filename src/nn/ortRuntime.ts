@@ -1,10 +1,18 @@
 import './ortConsoleFilter.ts';
 export * from 'onnxruntime-web/webgpu';
 import * as ort from 'onnxruntime-web/webgpu';
+import { supportsWasmRelaxedSimdIntegerDot } from '../lc0/wasmFeatures.ts';
 
 (ort.env as unknown as { logLevel?: 'fatal' }).logLevel = 'fatal';
 
 export type OrtExecutionProviderPreference = 'wasm' | 'webgpu' | 'webgpu,wasm' | 'auto';
+export type OrtWasmSimdVariant = 'bundled' | 'fixed' | 'relaxed';
+export type OrtWasmArtifactSelection = {
+  variant: OrtWasmSimdVariant;
+  mjsUrl?: string;
+  wasmUrl?: string;
+  artifactId?: string;
+};
 
 export type OrtSessionAttempt = {
   at: string;
@@ -61,7 +69,17 @@ export type OrtRuntimeDiagnostics = {
   secureContext?: boolean;
   crossOriginIsolated?: boolean;
   userAgent?: string;
-  wasm: { numThreads?: number; proxy?: boolean; sharedArrayBuffer?: boolean; threadedAvailable?: boolean };
+  wasm: {
+    numThreads?: number;
+    proxy?: boolean;
+    sharedArrayBuffer?: boolean;
+    threadedAvailable?: boolean;
+    simdVariant: OrtWasmSimdVariant;
+    artifactId?: string;
+    mjsUrl?: string;
+    wasmUrl?: string;
+    relaxedIntegerDotAvailable: boolean;
+  };
   webgpuEnv?: { powerPreference?: string; profilingMode?: string; preferredOutputLocation?: string; apiInstrumentation?: boolean };
   adapter?: OrtWebGpuAdapterDiagnostics;
   sessions: { created: number; released: number; active: number };
@@ -135,6 +153,9 @@ function ortDiagnosticsParamDisabled(...names: string[]): boolean {
 
 let forcedOrtExecutionProvider: OrtExecutionProviderPreference | null = null;
 let forcedOrtDiagnosticsOptions: OrtRuntimeDiagnosticOptions | null = null;
+let forcedOrtWasmArtifact: OrtWasmArtifactSelection = { variant: 'bundled' };
+let forcedOrtWasmThreads: number | null = null;
+let lockedOrtWasmArtifactKey: string | null = null;
 
 export type OrtRuntimeDiagnosticOptions = {
   /** Enable ORT WebGPU timestamp profiling and collect per-kernel program totals. */
@@ -147,6 +168,49 @@ export type OrtRuntimeDiagnosticOptions = {
 
 export function setRequestedOrtExecutionProviderForCurrentThread(value: OrtExecutionProviderPreference | null): void {
   forcedOrtExecutionProvider = value;
+}
+
+export function validateOrtWasmArtifactSelection(selection: OrtWasmArtifactSelection): OrtWasmArtifactSelection {
+  const customPathCount = Number(Boolean(selection.mjsUrl)) + Number(Boolean(selection.wasmUrl));
+  if (customPathCount === 1) throw new Error('custom ORT WASM artifacts require matching mjsUrl and wasmUrl');
+  if (selection.variant === 'bundled' && customPathCount > 0) {
+    throw new Error('the bundled ORT WASM variant cannot specify custom artifact URLs');
+  }
+  if (selection.variant !== 'bundled' && customPathCount !== 2) {
+    throw new Error(`${selection.variant} ORT WASM variant requires matching mjsUrl and wasmUrl`);
+  }
+  return { ...selection };
+}
+
+export function setRequestedOrtWasmArtifactForCurrentThread(value: OrtWasmArtifactSelection | null): void {
+  const next = value ? validateOrtWasmArtifactSelection(value) : { variant: 'bundled' } as const;
+  if (lockedOrtWasmArtifactKey && ortWasmArtifactKey(next) !== lockedOrtWasmArtifactKey) {
+    throw new Error('ORT WASM is already initialized with a different artifact; select the fallback in a fresh worker');
+  }
+  forcedOrtWasmArtifact = next;
+}
+
+export function requestedOrtWasmArtifact(): OrtWasmArtifactSelection {
+  return { ...forcedOrtWasmArtifact };
+}
+
+export function setRequestedOrtWasmThreadsForCurrentThread(value: number | null): void {
+  if (value !== null && (!Number.isInteger(value) || value < 1)) {
+    throw new Error(`ORT WASM thread count must be a positive integer, received ${value}`);
+  }
+  forcedOrtWasmThreads = value;
+}
+
+function ortWasmArtifactKey(selection: OrtWasmArtifactSelection): string {
+  return JSON.stringify([selection.variant, selection.mjsUrl ?? '', selection.wasmUrl ?? '', selection.artifactId ?? '']);
+}
+
+function lockRequestedOrtWasmArtifact(): void {
+  const key = ortWasmArtifactKey(forcedOrtWasmArtifact);
+  if (lockedOrtWasmArtifactKey && lockedOrtWasmArtifactKey !== key) {
+    throw new Error('ORT WASM artifact selection changed after initialization; create a fresh worker');
+  }
+  lockedOrtWasmArtifactKey = key;
 }
 
 export function setOrtRuntimeDiagnosticOptionsForCurrentThread(options: OrtRuntimeDiagnosticOptions | null): void {
@@ -199,11 +263,14 @@ let releasedOrtSessions = 0;
 export function describeOrtBackendConfig(): string {
   const requested = requestedOrtExecutionProvider();
   const resolved = (lastOrtExecutionProviders ?? resolvedOrtExecutionProviders()).join(',');
-  return requested === 'wasm' && resolved === 'wasm' ? 'wasm' : `${requested}->${resolved}`;
+  const backend = requested === 'wasm' && resolved === 'wasm' ? 'wasm' : `${requested}->${resolved}`;
+  const artifact = requestedOrtWasmArtifact();
+  if (artifact.variant === 'bundled') return backend;
+  return `${backend}[${artifact.variant}:${artifact.artifactId ?? 'custom'}]`;
 }
 
-function configureNodeOrtWasmBinary(wasm: { wasmBinary?: ArrayBufferLike | Uint8Array; wasmPaths?: string | { wasm?: string } }): void {
-  if (typeof document !== 'undefined' || wasm.wasmBinary) return;
+function configureNodeOrtWasmBinary(wasm: { wasmBinary?: ArrayBufferLike | Uint8Array; wasmPaths?: string | { wasm?: string; mjs?: string } }): void {
+  if (typeof document !== 'undefined' || wasm.wasmBinary || forcedOrtWasmArtifact.variant !== 'bundled') return;
   const proc = globalThis.process as unknown as { cwd?: () => string; getBuiltinModule?: (name: string) => unknown } | undefined;
   const fs = (proc?.getBuiltinModule?.('node:fs') ?? proc?.getBuiltinModule?.('fs')) as { existsSync?: (path: string) => boolean; readFileSync?: (path: string) => Uint8Array } | undefined;
   if (!proc?.cwd || !fs?.existsSync || !fs.readFileSync) return;
@@ -227,6 +294,11 @@ function defaultAutoThreads(): number {
 }
 
 function requestedOrtWasmThreads(isBrowserMainThread: boolean, isNode: boolean): number {
+  if (forcedOrtWasmThreads !== null) {
+    return isBrowserMainThread && forcedOrtWasmThreads > 1 && !browserThreadedWasmAvailable()
+      ? 1
+      : forcedOrtWasmThreads;
+  }
   // In production builds, ORT's threaded wasm boot inside a bundled worker
   // deadlocks: the emscripten pthread helpers are spawned from the chunk's
   // own import.meta.url, which re-executes our worker module instead of the
@@ -266,6 +338,28 @@ function browserOrtWasmPaths(): string | Record<string, string> {
   // (Empirically the jsep glue resolves its own binary in dev and tolerates
   // this asyncify-named pin; a jsep-named pin breaks its init instead.)
   return { wasm: '/ort/ort-wasm-simd-threaded.asyncify.wasm' };
+}
+
+function configureOrtWasmArtifact(wasm: {
+  simd?: boolean | 'fixed' | 'relaxed';
+  wasmBinary?: ArrayBufferLike | Uint8Array;
+  wasmPaths?: string | { wasm?: string; mjs?: string };
+}, isBrowserRuntime: boolean): void {
+  const artifact = requestedOrtWasmArtifact();
+  if (artifact.variant === 'relaxed') {
+    if (!supportsWasmRelaxedSimdIntegerDot()) {
+      throw new Error('requested relaxed ORT WASM artifact requires i32x4.relaxed_dot_i8x16_i7x16_add support');
+    }
+    wasm.simd = 'relaxed';
+  } else {
+    wasm.simd = 'fixed';
+  }
+  if (artifact.variant !== 'bundled') {
+    wasm.wasmBinary = undefined;
+    wasm.wasmPaths = { mjs: artifact.mjsUrl!, wasm: artifact.wasmUrl! };
+  } else if (isBrowserRuntime) {
+    wasm.wasmPaths = browserOrtWasmPaths();
+  }
 }
 
 function requestedOrtPreferredOutputLocation(): OrtRuntimeDiagnosticOptions['preferredOutputLocation'] | undefined {
@@ -501,12 +595,18 @@ export function subtractOrtWebGpuDiagnosticsSnapshot(after: OrtWebGpuDiagnostics
 function configureOrtRuntime() {
   const env = ort.env as unknown as { logLevel?: 'verbose' | 'info' | 'warning' | 'error' | 'fatal' };
   env.logLevel = requestedOrtLogLevelName();
-  const wasm = ort.env.wasm as unknown as { numThreads?: number; proxy?: boolean; wasmBinary?: ArrayBufferLike | Uint8Array; wasmPaths?: string | Record<string, string> };
+  const wasm = ort.env.wasm as unknown as {
+    numThreads?: number;
+    proxy?: boolean;
+    simd?: boolean | 'fixed' | 'relaxed';
+    wasmBinary?: ArrayBufferLike | Uint8Array;
+    wasmPaths?: string | { wasm?: string; mjs?: string };
+  };
   configureNodeOrtWasmBinary(wasm);
   const isBrowserMainThread = typeof document !== 'undefined';
   const isNode = typeof document === 'undefined' && !!globalThis.process?.versions?.node;
   const isBrowserRuntime = !isNode && typeof location !== 'undefined';
-  if (isBrowserRuntime) wasm.wasmPaths = browserOrtWasmPaths();
+  configureOrtWasmArtifact(wasm, isBrowserRuntime);
   const threads = requestedOrtWasmThreads(isBrowserMainThread, isNode);
   if (threads > 0) wasm.numThreads = threads;
   if (isBrowserMainThread) {
@@ -618,6 +718,7 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
   configureOrtRuntime();
   const wasm = ort.env.wasm as unknown as { numThreads?: number; proxy?: boolean };
   const webgpu = ort.env.webgpu as unknown as { powerPreference?: string } | undefined;
+  const artifact = requestedOrtWasmArtifact();
   const diag: OrtRuntimeDiagnostics = {
     requestedEp: requestedOrtExecutionProvider(),
     resolvedExecutionProviders: lastOrtExecutionProviders ?? resolvedOrtExecutionProviders(),
@@ -631,6 +732,11 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
       proxy: wasm.proxy,
       sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
       threadedAvailable: browserThreadedWasmAvailable(),
+      simdVariant: artifact.variant,
+      ...(artifact.artifactId ? { artifactId: artifact.artifactId } : {}),
+      ...(artifact.mjsUrl ? { mjsUrl: artifact.mjsUrl } : {}),
+      ...(artifact.wasmUrl ? { wasmUrl: artifact.wasmUrl } : {}),
+      relaxedIntegerDotAvailable: supportsWasmRelaxedSimdIntegerDot(),
     },
     ...(webgpu ? { webgpuEnv: { powerPreference: webgpu.powerPreference, profilingMode: (webgpu as { profiling?: { mode?: string } }).profiling?.mode, preferredOutputLocation: requestedOrtPreferredOutputLocation(), apiInstrumentation: requestedOrtWebGpuApiInstrumentation() } } : {}),
     sessions: { created: createdOrtSessions, released: releasedOrtSessions, active: Math.max(0, createdOrtSessions - releasedOrtSessions) },
@@ -665,6 +771,7 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
 
 export async function createOrtSession(modelPath: string | Uint8Array | ArrayBuffer): Promise<ort.InferenceSession> {
   const providers = resolvedOrtExecutionProviders();
+  lockRequestedOrtWasmArtifact();
   const t0 = typeof performance === 'undefined' ? Date.now() : performance.now();
   try {
     const session = await ort.InferenceSession.create(modelPath as never, sessionOptions(providers));

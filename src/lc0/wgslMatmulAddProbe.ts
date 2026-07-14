@@ -5704,6 +5704,7 @@ const WGSL_HEADS_READBACK_BYTES = WGSL_HEADS_READBACK_FLOATS * 4;
 interface LegalPolicyCandidate {
   uci: string;
   index: number;
+  actionId?: number;
 }
 
 function lc0SquareFile(square: number): number {
@@ -5715,7 +5716,8 @@ function isLc0StandardCastlingMove(board: BoardState, move: Move): boolean {
   return piece?.[1] === 'k' && Math.abs(lc0SquareFile(move.to) - lc0SquareFile(move.from)) === 2;
 }
 
-function legalPolicyCandidates(board: BoardState): LegalPolicyCandidate[] {
+function legalPolicyCandidates(board: BoardState, prepared?: ReturnType<typeof currentBoardAndFen>['preparedLegalMoves']): LegalPolicyCandidate[] {
+  if (prepared) return prepared.map((entry) => ({ uci: entry.uci, index: entry.policyIndex, actionId: entry.actionId }));
   const moveTransform = board.turn === 'b' ? LC0_MIRROR_TRANSFORM : 0;
   return legalMoves(board).map((move) => {
     const uci = moveToUci(move);
@@ -6947,25 +6949,26 @@ class Lc0WebHybridRuntime {
     };
   }
 
-  private computeLegalPriors(board: ReturnType<typeof currentBoardAndFen>['board'], fen: string, mappedPolicy: ArrayLike<number>, policyTemperature: number): { legalPriors: Lc0Evaluation['legalPriors']; bestMove?: string; legalPriorsMs: number; wasmTiming?: Lc0WasmLegalPriorTiming } {
+  private computeLegalPriors(board: ReturnType<typeof currentBoardAndFen>['board'], fen: string, mappedPolicy: ArrayLike<number>, policyTemperature: number, preparedLegalMoves?: ReturnType<typeof currentBoardAndFen>['preparedLegalMoves']): { legalPriors: Lc0Evaluation['legalPriors']; bestMove?: string; legalPriorsMs: number; wasmTiming?: Lc0WasmLegalPriorTiming } {
     const legalPriorsStarted = nowMs();
     if (this.legalPriorsBackend === 'wasm') {
       if (!this.wasmLegalPriors) throw new Error('WASM legal-prior backend is not initialized');
       const result = this.wasmLegalPriors.evaluateFen(fen, mappedPolicy, { temperature: policyTemperature });
       return { legalPriors: result.legalPriors, bestMove: result.bestMove, legalPriorsMs: nowMs() - legalPriorsStarted, wasmTiming: result.timing };
     }
-    const legalPriors = legalPolicyPriors(board, mappedPolicy, policyTemperature);
+    const legalPriors = legalPolicyPriors(board, mappedPolicy, policyTemperature, preparedLegalMoves);
     return { legalPriors, bestMove: legalPriors[0]?.uci, legalPriorsMs: nowMs() - legalPriorsStarted };
   }
 
   async encode(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill }): Promise<{
     board: ReturnType<typeof currentBoardAndFen>['board'];
     fen: string;
+    preparedLegalMoves?: ReturnType<typeof currentBoardAndFen>['preparedLegalMoves'];
     output: Float32Array<ArrayBufferLike>;
     encoderDispatchSyncedMs: number;
     timing: Pick<Lc0WebHybridTimingBreakdown, 'inputBuildMs' | 'inputUploadMs' | 'commandEncodeMs' | 'queueSubmitMs' | 'readbackSyncedMs' | 'readbackBytes' | 'readbackMapCount' | 'dispatchCount' | 'inputBackend' | 'encoderKernelVariant' | 'inputBridgeCopyMs' | 'wasmEncodeMs' | 'wasmTotalMs'>;
   }> {
-    const { board, fen } = currentBoardAndFen(input);
+    const { board, fen, preparedLegalMoves } = currentBoardAndFen(input);
     const inputBuildStarted = nowMs();
     const { payload: inputPayload, wasmTiming } = this.buildInputPayload(input, options.historyFill);
     const inputBuildMs = nowMs() - inputBuildStarted;
@@ -7004,6 +7007,7 @@ class Lc0WebHybridRuntime {
     return {
       board,
       fen,
+      preparedLegalMoves,
       output,
       encoderDispatchSyncedMs: nowMs() - blockStarted,
       timing: { inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, readbackSyncedMs, readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4, readbackMapCount: 1, dispatchCount: dispatchCounter.count, inputBackend: this.inputBackend, encoderKernelVariant: this.encoderKernelVariant, ...this.timingWasmFields(wasmTiming) },
@@ -7221,7 +7225,7 @@ class Lc0WebHybridRuntime {
     const totalStarted = nowMs();
     if (this.headBackend === 'wgsl') {
       if (!this.wgslHeads) throw new Error('WGSL hybrid heads runtime is not initialized');
-      const { board, fen } = currentBoardAndFen(input);
+      const { board, fen, preparedLegalMoves } = currentBoardAndFen(input);
       const inputBuildStarted = nowMs();
       const { payload: inputPayload, wasmTiming } = this.buildInputPayload(input, options.historyFill);
       const inputBuildMs = nowMs() - inputBuildStarted;
@@ -7234,7 +7238,7 @@ class Lc0WebHybridRuntime {
       }
       const inputUploadMs = nowMs() - inputUploadStarted;
       const gpuLegalSetupStarted = nowMs();
-      const gpuLegalCandidates = this.legalPriorsBackend === 'gpu' ? legalPolicyCandidates(board) : undefined;
+      const gpuLegalCandidates = this.legalPriorsBackend === 'gpu' ? legalPolicyCandidates(board, preparedLegalMoves) : undefined;
       if (gpuLegalCandidates) uploadWgslLegalPriorsInputs(this.device, this.wgslHeads, gpuLegalCandidates, options.policyTemperature);
       const legalPriorsGpuSetupMs = gpuLegalCandidates ? nowMs() - gpuLegalSetupStarted : undefined;
       const encoderStarted = nowMs();
@@ -7279,7 +7283,7 @@ class Lc0WebHybridRuntime {
       const legalPriorsStarted = nowMs();
       const legalPriorsResult = gpuLegalOutput
         ? { legalPriors: gpuLegalOutput.legalPriors, bestMove: gpuLegalOutput.legalPriors[0]?.uci, legalPriorsMs: (legalPriorsGpuSetupMs ?? 0) + (nowMs() - legalPriorsStarted), wasmTiming: undefined }
-        : this.computeLegalPriors(board, fen, mappedPolicy, options.policyTemperature);
+        : this.computeLegalPriors(board, fen, mappedPolicy, options.policyTemperature, preparedLegalMoves);
       const { legalPriors, bestMove, legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = legalPriorsResult;
       return {
         status: 'LC0WEB_HYBRID_EVALUATION_DONE',
@@ -7322,7 +7326,7 @@ class Lc0WebHybridRuntime {
     const encoded = await this.encode(input, { historyFill: options.historyFill });
     const heads = await runCachedPolicyValueHeadsOrt(encoded.output, this.headSession);
     const wdl: [number, number, number] = [Number(heads.wdl[0]), Number(heads.wdl[1]), Number(heads.wdl[2])];
-    const { legalPriors, bestMove, legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = this.computeLegalPriors(encoded.board, encoded.fen, heads.mappedPolicy, options.policyTemperature);
+    const { legalPriors, bestMove, legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = this.computeLegalPriors(encoded.board, encoded.fen, heads.mappedPolicy, options.policyTemperature, encoded.preparedLegalMoves);
     return {
       status: 'LC0WEB_HYBRID_EVALUATION_DONE',
       backend: 'lc0web-wgsl-encoder-ort-heads',
@@ -7375,7 +7379,7 @@ class Lc0WebHybridRuntime {
     const inputElements = this.inputBackend !== 'js' ? DEFAULT_INPUT_PLANES * DEFAULT_TOKENS : outputElements;
     const boardsAndFens = inputs.map((input) => currentBoardAndFen(input));
     const legalPriorsSetupStarted = nowMs();
-    const legalCandidates = this.legalPriorsBackend === 'gpu' ? boardsAndFens.map(({ board }) => legalPolicyCandidates(board)) : undefined;
+    const legalCandidates = this.legalPriorsBackend === 'gpu' ? boardsAndFens.map(({ board, preparedLegalMoves }) => legalPolicyCandidates(board, preparedLegalMoves)) : undefined;
     let legalPriorsSetupMs = legalCandidates ? nowMs() - legalPriorsSetupStarted : undefined;
     const inputBuildStarted = nowMs();
     const combinedInput = new Float32Array(inputs.length * inputElements);
@@ -7443,7 +7447,7 @@ class Lc0WebHybridRuntime {
     try {
       if (this.legalPriorsBackend === 'js') {
         const legalPriorsPrepStarted = nowMs();
-        jsLegalCandidates = boardsAndFens.map(({ board }) => legalPolicyCandidates(board));
+        jsLegalCandidates = boardsAndFens.map(({ board, preparedLegalMoves }) => legalPolicyCandidates(board, preparedLegalMoves));
         legalPriorsPrepMs = nowMs() - legalPriorsPrepStarted;
       }
     } catch (error) {
@@ -7534,7 +7538,7 @@ class Lc0WebHybridRuntime {
                 const legalPriors = legalPolicyPriorsFromCandidates(jsLegalCandidates, mappedPolicy, options.policyTemperature);
                 return { legalPriors, bestMove: legalPriors[0]?.uci, legalPriorsMs: legalPriorsPrepMs + (nowMs() - legalPriorsStarted), wasmTiming: undefined };
               })()
-            : this.computeLegalPriors(submitted.boardsAndFens[i].board, submitted.boardsAndFens[i].fen, mappedPolicy, options.policyTemperature);
+            : this.computeLegalPriors(submitted.boardsAndFens[i].board, submitted.boardsAndFens[i].fen, mappedPolicy, options.policyTemperature, submitted.boardsAndFens[i].preparedLegalMoves);
         const legalPriors = legalPriorsResult.legalPriors;
         const bestMove = gpuLegalCandidates ? legalPriors[0]?.uci : legalPriorsResult.bestMove;
         const { legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = legalPriorsResult;

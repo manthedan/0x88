@@ -89,6 +89,10 @@ export interface SearchOptions {
   fpuStrategy?: FpuStrategy;
   fpuReduction?: number;
   historyFens?: string[];
+  /** Previous board states, newest first; must correspond to historyFens when supplied. */
+  historyBoards?: readonly BoardState[];
+  /** Preserve the distinction between bare FEN and explicit one-position LC0 history. */
+  explicitHistory?: boolean;
   batchSize?: number;
   /**
    * Batched MCTS leaf collisions. `retry` keeps temporary virtual visits on
@@ -273,6 +277,9 @@ export interface Edge {
 export interface Node {
   board: BoardState;
   historyFens: string[];
+  /** Search-owned board history, newest first, avoiding evaluator-side FEN reparsing. */
+  historyBoards: readonly BoardState[];
+  explicitHistory: boolean;
   expanded: boolean;
   terminalValue: number | null;
   edges: Edge[];
@@ -444,7 +451,7 @@ function edgeQVariance(edges: Edge[], context: SearchPolicyContext): number {
   const qForVariance = (edge: Edge) => edge.visits > 0
     ? edgeQForParent(edge, context.fpu)
     : context.fpuStrategy === 'lc0-reduction'
-      ? parentQForNode({ board: null as unknown as BoardState, historyFens: [], expanded: true, terminalValue: null, edges }, context.fpu) - context.fpuReduction * Math.sqrt(visitedPolicyMass({ board: null as unknown as BoardState, historyFens: [], expanded: true, terminalValue: null, edges }))
+      ? parentQForNode({ board: null as unknown as BoardState, historyFens: [], historyBoards: [], explicitHistory: false, expanded: true, terminalValue: null, edges }, context.fpu) - context.fpuReduction * Math.sqrt(visitedPolicyMass({ board: null as unknown as BoardState, historyFens: [], historyBoards: [], explicitHistory: false, expanded: true, terminalValue: null, edges }))
       : context.fpu;
   const qs = edges.map(qForVariance);
   const mean = qs.reduce((sum, q, i) => sum + q * weights[i], 0) / total;
@@ -1012,8 +1019,8 @@ export function searchNodeKey(board: BoardState, historyFens: string[] = []): st
   return `${boardToFen(board)}\nh:${historyFens.join('|')}`;
 }
 
-function makeSearchRoot(board: BoardState, historyFens: string[] = []): Node {
-  return { board, historyFens, expanded: false, terminalValue: null, edges: [], visits: 0, isRoot: true };
+function makeSearchRoot(board: BoardState, historyFens: string[] = [], historyBoards: readonly BoardState[] = [], explicitHistory = historyFens.length > 0): Node {
+  return { board, historyFens, historyBoards, explicitHistory, expanded: false, terminalValue: null, edges: [], visits: 0, isRoot: true };
 }
 
 function searchValueKey(context: SearchPolicyContext): string {
@@ -1036,7 +1043,7 @@ function makeChild(parent: Node, move: Move, transpositionTable?: Map<string, No
     cached.isRoot = false;
     return cached;
   }
-  const child = { board: childBoard, historyFens: childHistory, expanded: false, terminalValue: null, edges: [], visits: 0, searchValueKey: parent.searchValueKey, isRoot: false };
+  const child = { board: childBoard, historyFens: childHistory, historyBoards: [parent.board, ...parent.historyBoards], explicitHistory: true, expanded: false, terminalValue: null, edges: [], visits: 0, searchValueKey: parent.searchValueKey, isRoot: false };
   transpositionTable?.set(key, child);
   return child;
 }
@@ -1198,7 +1205,7 @@ async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyCon
   }
   const beforeMetrics = stats ? evaluatorMetrics(evaluator) : null;
   if (stats) stats.evalCalls += 1;
-  const evaln = await evaluator.evaluate(node.board, { historyFens: node.historyFens, legalMoves: moves });
+  const evaln = await evaluator.evaluate(node.board, { historyFens: node.historyFens, historyBoards: node.historyBoards, explicitHistory: node.explicitHistory, legalMoves: moves });
   if (stats) {
     recordEvaluatorMetricsDelta(evaluator, beforeMetrics, 1, stats);
     recordEvaluationTimingBatch(stats, [evaln]);
@@ -1513,7 +1520,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
 
     let evals: Evaluation[] = [];
     if (evalNodes.length) {
-      const contexts = evalNodes.map((node, i) => ({ historyFens: node.historyFens, legalMoves: evalMoves[i] }));
+      const contexts = evalNodes.map((node, i) => ({ historyFens: node.historyFens, historyBoards: node.historyBoards, explicitHistory: node.explicitHistory, legalMoves: evalMoves[i] }));
       stats.evalCalls += evalNodes.length;
       stats.maxEvalBatch = Math.max(stats.maxEvalBatch, evalNodes.length);
       const batchKey = String(evalNodes.length);
@@ -1566,7 +1573,7 @@ function assertEvaluationBatchSequenceShape(evalResults: Evaluation[][], evalBat
 async function evaluatePreparedLeafBatches(evaluator: Evaluator, batches: PreparedLeafBatch[], stats: SearchStats): Promise<Evaluation[][]> {
   const evalBatches = batches.map((batch) => ({
     boards: batch.evalNodes.map((node) => node.board),
-    contexts: batch.evalNodes.map((node, i) => ({ historyFens: node.historyFens, legalMoves: batch.evalMoves[i] })),
+    contexts: batch.evalNodes.map((node, i) => ({ historyFens: node.historyFens, historyBoards: node.historyBoards, explicitHistory: node.explicitHistory, legalMoves: batch.evalMoves[i] })),
   })).filter((batch) => batch.boards.length > 0);
   if (!evalBatches.length) return batches.map(() => []);
   for (const batch of batches) recordEvalBatchStats(batch, stats);
@@ -1681,7 +1688,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   const requestedHistory = options.historyFens ?? [];
   const currentSearchValueKey = searchValueKey(context);
   const reusableRoot = !options.rootMoves && options.root && boardToFen(options.root.board) === boardToFen(board) && sameHistory(options.root.historyFens, requestedHistory) && nodeSearchValueCompatible(options.root, currentSearchValueKey) ? options.root : null;
-  const root: Node = reusableRoot ?? makeSearchRoot(board, requestedHistory);
+  const root: Node = reusableRoot ?? makeSearchRoot(board, requestedHistory, options.historyBoards ?? [], options.explicitHistory ?? (requestedHistory.length > 0));
   root.searchValueKey = currentSearchValueKey;
   root.isRoot = true;
   stats.rootReused = !!reusableRoot;
@@ -1707,7 +1714,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     } else {
       const beforeMetrics = evaluatorMetrics(evaluator);
       stats.evalCalls += 1;
-      const evaln = await evaluator.evaluate(root.board, { historyFens: root.historyFens, legalMoves: options.rootMoves });
+      const evaln = await evaluator.evaluate(root.board, { historyFens: root.historyFens, historyBoards: root.historyBoards, explicitHistory: root.explicitHistory, legalMoves: options.rootMoves });
       recordEvaluatorMetricsDelta(evaluator, beforeMetrics, 1, stats);
       recordEvaluationTimingBatch(stats, [evaln]);
       rootValue = finishExpansion(root, options.rootMoves, evaln, context);

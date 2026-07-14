@@ -1,4 +1,5 @@
 .local_engines/
+.local_ort/
 data/teacher_labels.jsonl
 data/stockfish_teacher_labels.jsonl
 data/lichess_raw/

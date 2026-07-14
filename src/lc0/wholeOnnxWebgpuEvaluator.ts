@@ -1,9 +1,6 @@
-import { boardToFen, parseFen, type BoardState } from '../chess/board.ts';
-import { legalMoves } from '../chess/movegen.ts';
-import { moveToUci, type Move } from '../chess/moveCodec.ts';
-import { encodeLc0Classical112, type Lc0PositionHistoryInput } from './encoder112.ts';
-import { LC0_DEFAULT_POLICY_TEMPERATURE, type Lc0Evaluation, type Lc0EvaluationProvider, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
-import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from './policyMap.ts';
+import type { BoardState } from '../chess/board.ts';
+import { encodeLc0Classical112 } from './encoder112.ts';
+import { currentBoardAndFen, LC0_DEFAULT_POLICY_TEMPERATURE, legalPolicyPriors, type Lc0Evaluation, type Lc0EvaluationProvider, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 
 const STAGED_RUNTIME_PREFIX = '/runtimes/lc0-' + 'tvm' + 'js-webgpu/';
 const DEFAULT_BUNDLE = 'tvm' + 'js.bundle.js';
@@ -88,6 +85,7 @@ interface NavigatorWithGpu extends Navigator {
 interface SubmittedBatch {
   boards: BoardState[];
   fens: string[];
+  preparedLegalMoves: Array<ReturnType<typeof currentBoardAndFen>['preparedLegalMoves']>;
   staged: Array<WholeModelTensor | null>;
   device: { sync(): Promise<void> };
   timing: Record<string, number>;
@@ -192,39 +190,6 @@ function tensorCacheUrl(manifest: RuntimeManifest, baseUrl: URL): string | undef
   const directory = tensorCache.directory ?? (tensorCache.manifest ? tensorCache.manifest.replace(/[^/]*$/, '') : 'tensor-cache/');
   const path = String(directory).replace(/\/?$/, '/');
   return checkedStagedRuntimeUrl(path, baseUrl, 'tensor cache').toString();
-}
-
-function fileOf(square: number): number { return square % 8; }
-
-function isStandardCastlingMove(board: BoardState, move: Move): boolean {
-  const piece = board.squares[move.from];
-  return piece?.[1] === 'k' && Math.abs(fileOf(move.to) - fileOf(move.from)) === 2;
-}
-
-function legalPolicyPriors(board: BoardState, logits: Float32Array): Lc0Evaluation['legalPriors'] {
-  const moveTransform = board.turn === 'b' ? LC0_MIRROR_TRANSFORM : 0;
-  const legal = legalMoves(board).map((move) => {
-    const uci = moveToUci(move);
-    const index = uciToLc0PolicyIndex(uci, moveTransform, { standardCastling: isStandardCastlingMove(board, move) });
-    if (index === undefined) throw new Error(`No LC0 policy index for legal move ${uci}`);
-    return { uci, index, logit: Number(logits[index]) / LC0_DEFAULT_POLICY_TEMPERATURE };
-  });
-  if (!legal.length) return [];
-  const max = Math.max(...legal.map((entry) => entry.logit));
-  const sum = legal.reduce((acc, entry) => acc + Math.exp(entry.logit - max), 0);
-  return legal.map((entry) => ({ ...entry, prior: Math.exp(entry.logit - max) / sum })).sort((a, b) => b.prior - a.prior);
-}
-
-function currentBoardAndFen(input: Lc0EvaluatorInput): { board: BoardState; fen: string } {
-  if (typeof input === 'object' && input !== null && 'positions' in input) {
-    const history = input as Lc0PositionHistoryInput;
-    if (!history.positions.length) throw new Error('history input requires at least one position');
-    const last = history.positions[history.positions.length - 1];
-    const board = typeof last === 'string' ? parseFen(last) : last;
-    return { board, fen: boardToFen(board) };
-  }
-  const board = typeof input === 'string' ? parseFen(input) : input;
-  return { board, fen: boardToFen(board) };
 }
 
 function batchTimingFromRowTiming(timing: unknown): Record<string, unknown> | undefined {
@@ -360,11 +325,13 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     const encoded = new Float32Array(this.physicalBatchSize * LC0_INPUT_PLANES_SIZE);
     const boards: BoardState[] = [];
     const fens: string[] = [];
+    const preparedLegalMoves: Array<ReturnType<typeof currentBoardAndFen>['preparedLegalMoves']> = [];
     let phaseStarted = performance.now();
     for (let i = 0; i < inputs.length; i++) {
-      const { board, fen } = currentBoardAndFen(inputs[i]);
-      boards.push(board);
-      fens.push(fen);
+      const current = currentBoardAndFen(inputs[i]);
+      boards.push(current.board);
+      fens.push(current.fen);
+      preparedLegalMoves.push(current.preparedLegalMoves);
       encoded.set(encodeLc0Classical112(inputs[i], { historyFill: 'fen_only' }).planes, i * LC0_INPUT_PLANES_SIZE);
     }
     for (let i = inputs.length; i < this.physicalBatchSize; i++) {
@@ -400,11 +367,11 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
       return cpu;
     });
     const outputCopyEnqueueMs = performance.now() - phaseStarted;
-    return { boards, fens, staged, device: outs[0].device, timing: { encodeMs, inputConvertMs, inputTensorAllocMs, inputUploadMs, setInputMs, tvmInvokeMs, outputHandleMs, outputCopyEnqueueMs } };
+    return { boards, fens, preparedLegalMoves, staged, device: outs[0].device, timing: { encodeMs, inputConvertMs, inputTensorAllocMs, inputUploadMs, setInputMs, tvmInvokeMs, outputHandleMs, outputCopyEnqueueMs } };
   }
 
   private finishBatch(submitted: SubmittedBatch, timingExtra: Record<string, number | string>): Lc0Evaluation[] {
-    const { boards, fens, staged, timing } = submitted;
+    const { boards, fens, preparedLegalMoves, staged, timing } = submitted;
     const phaseStarted = performance.now();
     const policyRaw = staged[0]?.toRawBytes();
     if (!policyRaw) throw new Error('Whole-model policy output readback unavailable');
@@ -426,7 +393,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
       const wdlSlice: [number, number, number] = [rawWdl[0] ?? NaN, rawWdl[1] ?? NaN, rawWdl[2] ?? NaN];
       const logits = policy.subarray(i * LC0_POLICY_SIZE, (i + 1) * LC0_POLICY_SIZE);
       const legalStarted = performance.now();
-      const legalPriors = legalPolicyPriors(board, logits);
+      const legalPriors = legalPolicyPriors(board, logits, LC0_DEFAULT_POLICY_TEMPERATURE, preparedLegalMoves[i]);
       const legalPriorsMs = performance.now() - legalStarted;
       return {
         fen: fens[i],

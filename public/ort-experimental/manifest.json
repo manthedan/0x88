@@ -1,0 +1,79 @@
+{
+  "schema": "lc0_browser.ort_wasm_relaxed_simd_build.v1",
+  "repository": "https://github.com/microsoft/onnxruntime.git",
+  "tag": "v1.27.0",
+  "commit": "8f0278c77bf44b0cc83c098c6c722b92a36ac4b5",
+  "expectedEmscriptenVersion": "4.0.23",
+  "generatedAt": "2026-07-14T07:47:15.524Z",
+  "variants": [
+    {
+      "variant": "fixed",
+      "flags": [
+        "--config",
+        "Release",
+        "--build_dir",
+        ".local_ort/build-fixed",
+        "--parallel",
+        "8",
+        "--build_wasm",
+        "--skip_tests",
+        "--emsdk_version",
+        "4.0.23",
+        "--enable_wasm_simd",
+        "--enable_wasm_threads",
+        "--use_webgpu",
+        "--disable_wasm_exception_catching",
+        "--disable_rtti"
+      ],
+      "artifacts": [
+        {
+          "name": "ort-wasm-simd-threaded.asyncify.mjs",
+          "path": "public/ort-experimental/fixed/ort-wasm-simd-threaded.asyncify.mjs",
+          "bytes": 35493,
+          "sha256": "b704ea1ab6239713ff33a55f3d9995c7aed1d1df4b856938988b7855deb01510"
+        },
+        {
+          "name": "ort-wasm-simd-threaded.asyncify.wasm",
+          "path": "public/ort-experimental/fixed/ort-wasm-simd-threaded.asyncify.wasm",
+          "bytes": 26862231,
+          "sha256": "b3e74e0e13698773b7040278ab1424500f61e126f53936cc0b4e44e48d7e079b"
+        }
+      ]
+    },
+    {
+      "variant": "relaxed",
+      "flags": [
+        "--config",
+        "Release",
+        "--build_dir",
+        ".local_ort/build-relaxed",
+        "--parallel",
+        "8",
+        "--build_wasm",
+        "--skip_tests",
+        "--emsdk_version",
+        "4.0.23",
+        "--enable_wasm_simd",
+        "--enable_wasm_threads",
+        "--use_webgpu",
+        "--disable_wasm_exception_catching",
+        "--disable_rtti",
+        "--enable_wasm_relaxed_simd"
+      ],
+      "artifacts": [
+        {
+          "name": "ort-wasm-relaxedsimd-threaded.asyncify.mjs",
+          "path": "public/ort-experimental/relaxed/ort-wasm-relaxedsimd-threaded.asyncify.mjs",
+          "bytes": 35514,
+          "sha256": "12b9a2e387446408c15e82107f25e664575db1af8bee905eec3c521680e3ebc9"
+        },
+        {
+          "name": "ort-wasm-relaxedsimd-threaded.asyncify.wasm",
+          "path": "public/ort-experimental/relaxed/ort-wasm-relaxedsimd-threaded.asyncify.wasm",
+          "bytes": 26878232,
+          "sha256": "7b552fe90aaac33774391c5452618dfbb45666c8b6849b9d93ad92f40938c368"
+        }
+      ]
+    }
+  ]
+}

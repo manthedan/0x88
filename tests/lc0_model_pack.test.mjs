@@ -78,6 +78,24 @@ test('lc0web pack loader can load only requested tensors', async () => {
   assert.deepEqual([...pack.tensors.get('b').bytes], [5, 6, 7, 8]);
 });
 
+test('lc0web pack loader reserves per-tensor hashes for explicit diagnostic mode', async () => {
+  const { manifest, shardBytes } = makeTinyPack();
+  manifest.weights.tensors[0].sha256 = sha256(new Uint8Array([9, 9, 9, 9]));
+
+  const production = await loadLc0WebModelPack('https://example.test/pack/model.lc0web.json', {
+    fetchFn: makeFetch(manifest, shardBytes),
+  });
+  assert.equal(production.verifiedShards.length, 1, 'production integrity is established at shard level');
+
+  await assert.rejects(
+    () => loadLc0WebModelPack('https://example.test/pack/model.lc0web.json', {
+      fetchFn: makeFetch(manifest, shardBytes),
+      verifyTensors: true,
+    }),
+    /tensor a sha256 mismatch/,
+  );
+});
+
 test('lc0web pack loader rejects corrupt shard bytes', async () => {
   const { manifest } = makeTinyPack();
   const corruptShard = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 9]);

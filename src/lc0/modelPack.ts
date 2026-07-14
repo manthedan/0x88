@@ -84,6 +84,12 @@ export interface Lc0WebLoadOptions {
   fetchFn?: typeof fetch;
   /** Defaults to true when weights are loaded. */
   verifyShards?: boolean;
+  /**
+   * Rehash every selected tensor after its containing shard was verified.
+   * Defaults to false in production; enable for pack-generation tests,
+   * diagnostics, or spot checks.
+   */
+  verifyTensors?: boolean;
   /** Defaults to true. Set false to inspect only JSON graph/weight metadata. */
   loadWeights?: boolean;
   /** Load only these tensors and their containing shards. Defaults to all tensors. */
@@ -179,6 +185,7 @@ export async function loadLc0WebModelPack(manifestUrlInput: string, options: Lc0
   const fetchFn = options.fetchFn ?? fetch;
   const loadWeights = options.loadWeights ?? true;
   const verifyShards = options.verifyShards ?? loadWeights;
+  const verifyTensors = options.verifyTensors ?? false;
   const manifestResponse = await fetchFn(manifestUrl);
   if (!manifestResponse.ok) throw new Error(`lc0web manifest fetch failed for ${manifestUrl}: ${manifestResponse.status}`);
   const manifest = await manifestResponse.json() as unknown;
@@ -222,7 +229,7 @@ export async function loadLc0WebModelPack(manifestUrlInput: string, options: Lc0
     const shard = shardBytes.get(tensor.shard);
     if (!shard) throw new Error(`lc0web internal error: shard not loaded for tensor ${tensor.name}`);
     const view = shard.subarray(tensor.byteOffset, tensor.byteOffset + tensor.byteLength);
-    if (tensor.sha256 && verifyShards) {
+    if (tensor.sha256 && verifyTensors) {
       const actualSha = await sha256Hex(view);
       if (actualSha !== tensor.sha256.toLowerCase()) {
         throw new Error(`lc0web tensor ${tensor.name} sha256 mismatch: got ${actualSha}, expected ${tensor.sha256.toLowerCase()}`);

@@ -33,6 +33,29 @@ test('CachedLc0Evaluator reuses evaluations and exposes hit/miss metrics', async
   assert.deepEqual(cached.metrics(), { hits: 1, misses: 1, entries: 1, maxEntries: 8 });
 });
 
+test('CachedLc0Evaluator collapses duplicate and concurrent in-flight misses', async () => {
+  let calls = 0;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const inner = {
+    async evaluateBatch(inputs) {
+      calls += 1;
+      await gate;
+      return inputs.map((input) => evaluation(String(input)));
+    },
+  };
+  const cached = new CachedLc0Evaluator(inner, { maxEntries: 8 });
+  const first = cached.evaluateBatch([START_FEN, START_FEN]);
+  const second = cached.evaluate(START_FEN);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(calls, 1, 'duplicates in one batch and a concurrent caller share one physical evaluation');
+  release();
+  assert.deepEqual((await first).map((entry) => entry.bestMove), ['e2e4', 'e2e4']);
+  assert.equal((await second).bestMove, 'e2e4');
+  assert.deepEqual(cached.metrics(), { hits: 0, misses: 3, entries: 1, maxEntries: 8 });
+});
+
 test('CachedLc0Evaluator preserves sequence batches for uncached misses', async () => {
   const sequenceCalls = [];
   const inner = {
@@ -54,6 +77,23 @@ test('CachedLc0Evaluator preserves sequence batches for uncached misses', async 
   assert.deepEqual(second.map((batch) => batch.map((entry) => entry.bestMove)), [['e2e4'], ['e2e4', 'e2e4']]);
   assert.deepEqual(sequenceCalls, [[1, 2]], 'cache forwards the first miss set as one sequence call');
   assert.deepEqual(cached.metrics(), { hits: 3, misses: 3, entries: 3, maxEntries: 8 });
+});
+
+test('CachedLc0Evaluator deduplicates misses across a batch sequence', async () => {
+  const calls = [];
+  const inner = {
+    async evaluateBatchSequence(batches) {
+      calls.push(batches.map((batch) => batch.length));
+      return batches.map((batch) => batch.map((input) => evaluation(String(input))));
+    },
+  };
+  const cached = new CachedLc0Evaluator(inner, { maxEntries: 8 });
+  const fen2 = '8/8/8/8/8/8/8/K5k1 w - - 0 1';
+  const result = await cached.evaluateBatchSequence([[START_FEN, START_FEN], [START_FEN, fen2]]);
+
+  assert.deepEqual(calls, [[1, 1]], 'only one representative per key reaches the physical sequence');
+  assert.deepEqual(result.map((batch) => batch.map((entry) => entry.bestMove)), [['e2e4', 'e2e4'], ['e2e4', 'e2e4']]);
+  assert.deepEqual(cached.metrics(), { hits: 0, misses: 4, entries: 2, maxEntries: 8 });
 });
 
 test('CachedLc0Evaluator keeps bare FEN and explicit one-position history separate', async () => {

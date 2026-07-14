@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   clearLc0ModelCache,
+  clearLc0ModelCacheEntry,
   loadLc0ModelForOrt,
   sha256Hex,
   verifyLc0ModelBytes,
@@ -65,6 +66,17 @@ class FakeCacheStorage {
   async delete(name) { return this.named.delete(name); }
 }
 
+class MemoryMetadataStore {
+  constructor() { this.entries = new Map(); }
+  async get(key) { return this.entries.get(key); }
+  async put(entry) { this.entries.set(entry.key, { ...entry }); }
+  async delete(key) { this.entries.delete(key); }
+  async list(cacheName) { return [...this.entries.values()].filter((entry) => entry.cacheName === cacheName); }
+  async clear(cacheName) {
+    for (const [key, entry] of this.entries) if (entry.cacheName === cacheName) this.entries.delete(key);
+  }
+}
+
 const MODEL_URL = 'http://localhost/models/lc0/test.onnx';
 const MODEL_ARTIFACT_URL = 'http://localhost/artifacts/sha256/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad/test.onnx';
 const MANIFEST_URL = 'http://localhost/models/lc0/manifest.json';
@@ -75,11 +87,12 @@ async function withMockedEnv(run, { serveBytes, manifestSha256, manifestBytes, m
   const prev = { caches: globalThis.caches, fetch: globalThis.fetch, location: globalThis.location };
   globalThis.caches = new FakeCacheStorage();
   globalThis.location = { href: 'http://localhost/' };
-  const fetchLog = { model: 0, modelRequestCaches: [], urls: [] };
+  const fetchLog = { manifest: 0, model: 0, modelRequestCaches: [], modelCacheModes: [], urls: [] };
   globalThis.fetch = async (input) => {
     const url = typeof input === 'string' ? input : input.url;
     fetchLog.urls.push(url);
     if (url === MANIFEST_URL || url === '/models/lc0/manifest.json') {
+      fetchLog.manifest += 1;
       const manifest = { models: [{ file: 'test.onnx', url: MODEL_URL, artifactUrl: manifestArtifactUrl, bytes: manifestBytes, sha256: manifestSha256 }] };
       return new Response(JSON.stringify(manifest), { headers: { 'content-type': 'application/json' } });
     }
@@ -91,7 +104,9 @@ async function withMockedEnv(run, { serveBytes, manifestSha256, manifestBytes, m
     }
     if (url === MODEL_URL || url === MODEL_ARTIFACT_URL) {
       fetchLog.model += 1;
-      fetchLog.modelRequestCaches.push(typeof input === 'string' ? undefined : input.cache);
+      const requestCache = typeof input === 'string' ? undefined : input.cache;
+      fetchLog.modelRequestCaches.push(requestCache);
+      fetchLog.modelCacheModes.push(requestCache);
       const served = serveBytes(input);
       return served instanceof Response ? served : new Response(served);
     }
@@ -247,6 +262,44 @@ test('loadLc0ModelForOrt skips Cache Storage admission when quota is too low', a
   }, { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 });
 });
 
+test('concurrent model loads share manifest, download, and verification work', async () => {
+  await withMockedEnv(async (fetchLog) => {
+    const firstProgress = [];
+    const secondProgress = [];
+    const [first, second] = await Promise.all([
+      loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, onProgress: (loaded) => firstProgress.push(loaded) }),
+      loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, onProgress: (loaded) => secondProgress.push(loaded) }),
+    ]);
+    assert.equal(first.cacheStatus, 'miss');
+    assert.equal(second.cacheStatus, 'miss');
+    assert.equal(fetchLog.manifest, 1);
+    assert.equal(fetchLog.model, 1);
+    assert.strictEqual(first.model, second.model, 'in-flight callers share the verified byte buffer');
+    assert.deepEqual(firstProgress, [0, 3]);
+    assert.deepEqual(secondProgress, firstProgress, 'all in-flight callers receive shared download progress');
+
+    const warm = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL });
+    assert.equal(warm.cacheStatus, 'hit');
+    assert.equal(fetchLog.model, 1);
+    assert.equal(fetchLog.manifest, 2, 'settled single-flight state does not pin mutable manifests forever');
+  }, { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 });
+});
+
+test('metadata-trusted warm hit skips the full SHA-256 pass', async () => {
+  await withMockedEnv(async (fetchLog) => {
+    const metadataStore = new MemoryMetadataStore();
+    const options = { cache: true, manifestUrl: MANIFEST_URL, metadataStore };
+    const miss = await loadLc0ModelForOrt(MODEL_URL, options);
+    assert.equal(miss.verification, 'hashed');
+    const hit = await loadLc0ModelForOrt(MODEL_URL, options);
+    assert.equal(hit.cacheStatus, 'hit');
+    assert.equal(hit.verification, 'metadata');
+    assert.equal(hit.hashMs, 0);
+    assert.equal(hit.sha256, ABC_SHA256);
+    assert.equal(fetchLog.model, 1);
+  }, { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 });
+});
+
 test('loadLc0ModelForOrt rejects a corrupt download and does not cache it', async () => {
   await withMockedEnv(async (fetchLog) => {
     await assert.rejects(
@@ -271,6 +324,7 @@ test('loadLc0ModelForOrt evicts and revalidates a stale cache entry when the mod
     // server returns the new bytes. The stale cached "abc" must be evicted.
     let phase = 0;
     const requestCaches = [];
+    let recoveryCacheMode;
     const prevFetch = globalThis.fetch;
     globalThis.fetch = async (input) => {
       const url = typeof input === 'string' ? input : input.url;
@@ -280,7 +334,8 @@ test('loadLc0ModelForOrt evicts and revalidates a stale cache entry when the mod
       }
       if (url === MODEL_URL) {
         phase += 1;
-        requestCaches.push(typeof input === 'string' ? undefined : input.cache);
+        recoveryCacheMode = typeof input === 'string' ? undefined : input.cache;
+        requestCaches.push(recoveryCacheMode);
         return new Response(bytesOf('abcd'));
       }
       return new Response(null, { status: 404 });
@@ -294,6 +349,7 @@ test('loadLc0ModelForOrt evicts and revalidates a stale cache entry when the mod
     assert.equal(revalidated.telemetry.requestCache, 'reload');
     assert.deepEqual(requestCaches, ['reload'], 'stale-cache recovery bypasses the browser HTTP cache');
     assert.equal(phase, 1, 'the new content is fetched exactly once after eviction');
+    assert.equal(recoveryCacheMode, 'reload', 'corruption recovery bypasses stale HTTP cache content');
     globalThis.fetch = prevFetch;
   }, { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 });
 });
@@ -326,6 +382,18 @@ test('loadLc0ModelForOrt streams progress downloads into a preallocated buffer',
     manifestSha256: ABC_SHA256,
     manifestBytes: 3,
   });
+});
+
+test('clearLc0ModelCacheEntry removes only the selected model and its metadata', async () => {
+  await withMockedEnv(async () => {
+    const metadataStore = new MemoryMetadataStore();
+    await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, metadataStore });
+    assert.equal(metadataStore.entries.size, 1);
+    assert.equal(await clearLc0ModelCacheEntry(MODEL_URL, 'lc0-browser-models-v1', metadataStore), true);
+    assert.equal(metadataStore.entries.size, 0);
+    const cache = await globalThis.caches.open('lc0-browser-models-v1');
+    assert.equal(await cache.match(MODEL_URL), undefined);
+  }, { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 });
 });
 
 test('clearLc0ModelCache reports removed entries and is safe when empty', async () => {

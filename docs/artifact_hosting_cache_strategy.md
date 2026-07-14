@@ -14,11 +14,30 @@ A production URL layout should look like:
 ```text
 /channels/stable.json
 /releases/2026-06-22.<release-sha>.json
-/artifacts/sha256/<full-sha256>/lc0-small.onnx
-/artifacts/sha256/<full-sha256>/stockfish.wasm
+/artifacts/sha256/<decoded-sha256>/identity
+/artifacts/sha256/<decoded-sha256>/br/<encoded-sha256>
 ```
 
 The channel manifest points to an immutable release manifest. The release manifest points to immutable binaries. Deploy blobs first, publish the release manifest second, and update the channel pointer last. Rollback should only repoint the channel manifest; it should not purge or overwrite binaries.
+
+Generate a publishable tree with the write-once release tool:
+
+```sh
+npm run deploy:content-addressed-release -- \
+  --root .release-public \
+  --release-id 2026-07-14.<release-sha> \
+  --channel stable \
+  --asset lc0-small=/path/to/model.onnx \
+  --asset engine=/path/to/engine.wasm
+```
+
+The command streams the decoded hash, stores equal identity bytes exactly once
+regardless of logical filename, creates a deterministic Brotli representation,
+and records both decoded and encoded hashes/lengths in a v2 release manifest.
+It refuses to change an existing release manifest and updates only the mutable
+channel pointer. Upload the resulting tree in blob → release → channel order.
+Range requests must select `identity`; negotiated full responses may select
+`br` and must vary their canonical cache key by representation.
 
 ## Current assessment
 

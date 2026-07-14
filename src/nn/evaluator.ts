@@ -21,6 +21,10 @@ export interface Evaluation {
 export interface EvaluationContext {
   /** Previous position FENs, newest first. */
   historyFens?: string[];
+  /** Previous board states, newest first. Search-native evaluators use these to avoid reparsing history FENs. */
+  historyBoards?: readonly BoardState[];
+  /** Distinguishes an explicit one-position history from a bare FEN input. */
+  explicitHistory?: boolean;
   /** Optional precomputed legal moves for this board, used to avoid duplicate movegen in search hot paths. */
   legalMoves?: Move[];
   /** Optional diagnostic-only multiplier for ThreatGraph attack-summary channels. Not used by search. */
