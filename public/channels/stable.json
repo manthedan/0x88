@@ -1,7 +1,7 @@
 {
   "schema": "lc0_browser.artifact_channel_manifest.v1",
   "channel": "stable",
-  "releaseId": "2026-07-11.stormphrax-relaxed-simd.3",
-  "releaseManifestUrl": "/releases/2026-07-11.stormphrax-relaxed-simd.3.json",
-  "generatedAt": "2026-07-11T10:53:01.000Z"
+  "releaseId": "2026-07-14.centipawn-tvmjs.1",
+  "releaseManifestUrl": "/releases/2026-07-14.centipawn-tvmjs.1.json",
+  "generatedAt": "2026-07-14T01:04:09.538Z"
 }

@@ -87,7 +87,9 @@ async function main() {
     if (args.expectedDtype && manifest.dtype !== args.expectedDtype) failures.push(`manifest dtype ${manifest.dtype ?? '<missing>'} != ${args.expectedDtype}`);
     if (args.expectedVersion && manifest.version !== args.expectedVersion) failures.push(`manifest version ${manifest.version ?? '<missing>'} != ${args.expectedVersion}`);
     if (!Array.isArray(manifest.requiredFeatures) || !manifest.requiredFeatures.includes('webgpu')) failures.push('manifest requiredFeatures missing webgpu');
-    if (!Array.isArray(manifest.requiredFeatures) || !manifest.requiredFeatures.includes('shader-f16')) failures.push('manifest requiredFeatures missing shader-f16');
+    if (manifest.dtype === 'f16' && (!Array.isArray(manifest.requiredFeatures) || !manifest.requiredFeatures.includes('shader-f16'))) {
+      failures.push('f16 manifest requiredFeatures missing shader-f16');
+    }
     out.models = manifest.models?.map((model) => ({ batch: model.batch, wasm: model.wasm, bytes: model.bytes, sha256: model.sha256 })) ?? [];
     const actualBatches = out.models.map((model) => model.batch).sort((a, b) => a - b);
     if (args.expectedBatches && !sameNumberList(actualBatches, [...args.expectedBatches].sort((a, b) => a - b))) failures.push(`manifest batches ${actualBatches.join(',')} != expected ${args.expectedBatches.join(',')}`);

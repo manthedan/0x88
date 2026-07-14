@@ -1,0 +1,1150 @@
+{
+  "schema": "lc0_tvm_whole_onnx_probe_v1",
+  "model": "bt4-soap-rem-c19000-final.batch16.f32.onnx",
+  "model_bytes": 16246184,
+  "target": "webgpu",
+  "host_target": "{\"kind\":\"llvm\",\"mtriple\":\"wasm32-unknown-unknown-wasm\"}",
+  "dtype_arg": "{\"tokens\":\"int32\"}",
+  "cast_int64_initializers_to_int32": true,
+  "trust_nonnegative_gather_indices": true,
+  "sanitize_onnx_names": true,
+  "capture_module_sources": false,
+  "export_tvmjs_wasm": true,
+  "dlight": true,
+  "detach_params": false,
+  "env": {
+    "python": "3.13.13 | packaged by conda-forge | (main, Apr  8 2026, 02:29:07) [Clang 19.1.7 ]"
+  },
+  "steps": {
+    "import_tvm": {
+      "ok": true,
+      "seconds": 0.6620169590460137
+    },
+    "onnx_load": {
+      "ok": true,
+      "seconds": 0.008049917058087885
+    },
+    "relax_from_onnx": {
+      "ok": true,
+      "seconds": 0.0696169160073623
+    },
+    "relax_module_script": {
+      "ok": true,
+      "seconds": 0.005104791955091059
+    },
+    "relax_build_target": {
+      "ok": true,
+      "seconds": 0.9785496249096468
+    },
+    "export_library": {
+      "ok": true,
+      "skipped": true,
+      "reason": "TVMJS wasm export uses wasm32 host objects; native shared-library export would try to link them with the platform C++ linker."
+    },
+    "export_tvmjs_wasm": {
+      "ok": true,
+      "seconds": 23.558086875011213
+    }
+  },
+  "tvm": {
+    "version": "0.25.dev0",
+    "libinfo": {
+      "USE_CLML": "OFF",
+      "USE_CUDA": "ON",
+      "USE_CUDNN": "OFF",
+      "USE_CUTLASS": "OFF",
+      "USE_HEXAGON": "OFF",
+      "USE_LLVM": "ON",
+      "USE_METAL": "OFF",
+      "USE_NCCL": "ON",
+      "USE_NNAPI_CODEGEN": "OFF",
+      "USE_NNAPI_RUNTIME": "OFF",
+      "USE_NVSHMEM": "OFF",
+      "USE_NVTX": "ON",
+      "USE_OPENCL": "OFF",
+      "USE_ROCM": "OFF",
+      "USE_VULKAN": "OFF"
+    },
+    "runtime_enabled_llvm": true,
+    "runtime_enabled_webgpu_error": "InternalError('Unknown optional runtime webgpu')",
+    "runtime_enabled_rpc": false,
+    "target_kinds": [
+      "trn",
+      "test",
+      "composite",
+      "c",
+      "ext_dev",
+      "rocm",
+      "hexagon",
+      "nvptx",
+      "opencl",
+      "metal",
+      "webgpu",
+      "llvm",
+      "cuda",
+      "vulkan"
+    ],
+    "has_webgpu_target": true
+  },
+  "onnx_before_mutation": {
+    "ir_version": 8,
+    "opsets": [
+      {
+        "domain": "",
+        "version": 18
+      }
+    ],
+    "inputs": [
+      {
+        "name": "tokens",
+        "elem_type": 7,
+        "shape": [
+          16,
+          64,
+          24
+        ]
+      },
+      {
+        "name": "attack_summary",
+        "elem_type": 1,
+        "shape": [
+          16,
+          64,
+          28
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "policy",
+        "elem_type": 1,
+        "shape": [
+          16,
+          20480
+        ]
+      },
+      {
+        "name": "wdl",
+        "elem_type": 1,
+        "shape": [
+          16,
+          3
+        ]
+      },
+      {
+        "name": "q",
+        "elem_type": 1,
+        "shape": [
+          16
+        ]
+      },
+      {
+        "name": "hidden",
+        "elem_type": 1,
+        "shape": [
+          16,
+          64,
+          128
+        ]
+      }
+    ],
+    "node_count": 342,
+    "initializer_count": 139,
+    "op_counts": {
+      "Add": 56,
+      "Reshape": 56,
+      "Transpose": 49,
+      "MatMul": 37,
+      "Gather": 32,
+      "Mul": 24,
+      "LayerNormalization": 13,
+      "Div": 12,
+      "Unsqueeze": 12,
+      "Gemm": 8,
+      "Clip": 7,
+      "Cast": 7,
+      "Squeeze": 7,
+      "Softmax": 6,
+      "Erf": 6,
+      "BitwiseAnd": 4,
+      "Slice": 2,
+      "Concat": 2,
+      "ReduceSum": 1,
+      "ReduceMean": 1
+    }
+  },
+  "onnx_mutation": {
+    "converted_count": 30,
+    "skipped_count": 0,
+    "converted": [
+      {
+        "name": "/Constant_output_0",
+        "shape": [],
+        "values_head": [
+          4
+        ]
+      },
+      {
+        "name": "/Constant_1_output_0",
+        "shape": [],
+        "values_head": [
+          0
+        ]
+      },
+      {
+        "name": "/Constant_2_output_0",
+        "shape": [],
+        "values_head": [
+          1
+        ]
+      },
+      {
+        "name": "/Constant_3_output_0",
+        "shape": [],
+        "values_head": [
+          2
+        ]
+      },
+      {
+        "name": "/Constant_4_output_0",
+        "shape": [],
+        "values_head": [
+          8
+        ]
+      },
+      {
+        "name": "/Constant_5_output_0",
+        "shape": [
+          1
+        ],
+        "values_head": [
+          2
+        ]
+      },
+      {
+        "name": "/Constant_6_output_0",
+        "shape": [
+          1
+        ],
+        "values_head": [
+          0
+        ]
+      },
+      {
+        "name": "/Constant_7_output_0",
+        "shape": [
+          1
+        ],
+        "values_head": [
+          8
+        ]
+      },
+      {
+        "name": "/Constant_8_output_0",
+        "shape": [
+          1
+        ],
+        "values_head": [
+          1
+        ]
+      },
+      {
+        "name": "/Constant_9_output_0",
+        "shape": [],
+        "values_head": [
+          12
+        ]
+      },
+      {
+        "name": "/Constant_12_output_0",
+        "shape": [
+          1,
+          1,
+          8
+        ],
+        "values_head": [
+          0,
+          13,
+          26,
+          39,
+          52,
+          65,
+          78,
+          91
+        ]
+      },
+      {
+        "name": "/Constant_15_output_0",
+        "shape": [],
+        "values_head": [
+          9
+        ]
+      },
+      {
+        "name": "/Constant_16_output_0",
+        "shape": [],
+        "values_head": [
+          10
+        ]
+      },
+      {
+        "name": "/Constant_17_output_0",
+        "shape": [],
+        "values_head": [
+          11
+        ]
+      },
+      {
+        "name": "/Constant_28_output_0",
+        "shape": [
+          1
+        ],
+        "values_head": [
+          -1
+        ]
+      },
+      {
+        "name": "/Constant_35_output_0",
+        "shape": [],
+        "values_head": [
+          7
+        ]
+      },
+      {
+        "name": "/Constant_36_output_0",
+        "shape": [],
+        "values_head": [
+          13
+        ]
+      },
+      {
+        "name": "/Constant_39_output_0",
+        "shape": [],
+        "values_head": [
+          14
+        ]
+      },
+      {
+        "name": "/Constant_42_output_0",
+        "shape": [],
+        "values_head": [
+          15
+        ]
+      },
+      {
+        "name": "/Constant_44_output_0",
+        "shape": [],
+        "values_head": [
+          63
+        ]
+      },
+      {
+        "name": "/Constant_46_output_0",
+        "shape": [
+          1
+        ],
+        "values_head": [
+          16
+        ]
+      },
+      {
+        "name": "/Constant_47_output_0",
+        "shape": [
+          1
+        ],
+        "values_head": [
+          24
+        ]
+      },
+      {
+        "name": "/layers.0/att/Constant_8_output_0",
+        "shape": [
+          1
+        ],
+        "values_head": [
+          3
+        ]
+      },
+      {
+        "name": "_v_2234",
+        "shape": [
+          2
+        ],
+        "values_head": [
+          -1,
+          4096
+        ]
+      },
+      {
+        "name": "_v_2236",
+        "shape": [
+          2
+        ],
+        "values_head": [
+          -1,
+          16384
+        ]
+      },
+      {
+        "name": "_v_702",
+        "shape": [
+          3
+        ],
+        "values_head": [
+          64,
+          -1,
+          16
+        ]
+      },
+      {
+        "name": "_v_708",
+        "shape": [
+          4
+        ],
+        "values_head": [
+          -1,
+          8,
+          64,
+          16
+        ]
+      },
+      {
+        "name": "_v_710",
+        "shape": [
+          2
+        ],
+        "values_head": [
+          -1,
+          128
+        ]
+      },
+      {
+        "name": "_v_712",
+        "shape": [
+          3
+        ],
+        "values_head": [
+          64,
+          -1,
+          128
+        ]
+      },
+      {
+        "name": "_v_574",
+        "shape": [
+          4
+        ],
+        "values_head": [
+          64,
+          16,
+          3,
+          128
+        ]
+      }
+    ],
+    "skipped": []
+  },
+  "onnx_name_sanitization": {
+    "changed_count": 477,
+    "changed_head": {
+      "/Slice_output_0": "Slice_output_0",
+      "/Clip_output_0": "Clip_output_0",
+      "/Add_output_0": "Add_output_0",
+      "/piece_emb/Gather_output_0": "piece_emb_Gather_output_0",
+      "/ReduceSum_output_0": "ReduceSum_output_0",
+      "/Gather_output_0": "Gather_output_0",
+      "/Clip_1_output_0": "Clip_1_output_0",
+      "/Gather_1_output_0": "Gather_1_output_0",
+      "/Gather_2_output_0": "Gather_2_output_0",
+      "/Cast_2_output_0": "Cast_2_output_0",
+      "/Gather_3_output_0": "Gather_3_output_0",
+      "/Cast_3_output_0": "Cast_3_output_0",
+      "/Div_output_0": "Div_output_0",
+      "/BitwiseAnd_output_0": "BitwiseAnd_output_0",
+      "/Cast_5_output_0": "Cast_5_output_0",
+      "/Div_2_output_0": "Div_2_output_0",
+      "/BitwiseAnd_1_output_0": "BitwiseAnd_1_output_0",
+      "/Cast_7_output_0": "Cast_7_output_0",
+      "/Div_3_output_0": "Div_3_output_0",
+      "/BitwiseAnd_2_output_0": "BitwiseAnd_2_output_0",
+      "/Cast_9_output_0": "Cast_9_output_0",
+      "/Div_4_output_0": "Div_4_output_0",
+      "/BitwiseAnd_3_output_0": "BitwiseAnd_3_output_0",
+      "/Cast_11_output_0": "Cast_11_output_0",
+      "/Unsqueeze_output_0": "Unsqueeze_output_0",
+      "/Unsqueeze_1_output_0": "Unsqueeze_1_output_0",
+      "/Unsqueeze_2_output_0": "Unsqueeze_2_output_0",
+      "/Unsqueeze_3_output_0": "Unsqueeze_3_output_0",
+      "/Unsqueeze_4_output_0": "Unsqueeze_4_output_0",
+      "/Unsqueeze_5_output_0": "Unsqueeze_5_output_0",
+      "/Concat_output_0": "Concat_output_0",
+      "/Gather_4_output_0": "Gather_4_output_0",
+      "/Clip_2_output_0": "Clip_2_output_0",
+      "/Gather_5_output_0": "Gather_5_output_0",
+      "/Clip_3_output_0": "Clip_3_output_0",
+      "/Gather_6_output_0": "Gather_6_output_0",
+      "/Clip_4_output_0": "Clip_4_output_0",
+      "/Gather_7_output_0": "Gather_7_output_0",
+      "/Clip_5_output_0": "Clip_5_output_0",
+      "/Slice_1_output_0": "Slice_1_output_0",
+      "/Cast_12_output_0": "Cast_12_output_0",
+      "/Clip_6_output_0": "Clip_6_output_0",
+      "/rep_linear/MatMul_output_0": "rep_linear_MatMul_output_0",
+      "/Add_1_output_0": "Add_1_output_0",
+      "/stm_emb/Gather_output_0": "stm_emb_Gather_output_0",
+      "/Add_2_output_0": "Add_2_output_0",
+      "/flag_linear/MatMul_output_0": "flag_linear_MatMul_output_0",
+      "/flag_linear/Add_output_0": "flag_linear_Add_output_0",
+      "/Add_3_output_0": "Add_3_output_0",
+      "/rank_emb/Gather_output_0": "rank_emb_Gather_output_0",
+      "/Add_4_output_0": "Add_4_output_0",
+      "/file_emb/Gather_output_0": "file_emb_Gather_output_0",
+      "/Add_5_output_0": "Add_5_output_0",
+      "/color_emb/Gather_output_0": "color_emb_Gather_output_0",
+      "/Add_6_output_0": "Add_6_output_0",
+      "/square_emb/Gather_output_0": "square_emb_Gather_output_0",
+      "/Add_7_output_0": "Add_7_output_0",
+      "/Div_5_output_0": "Div_5_output_0",
+      "/attack_summary_proj/attack_summary_proj.0/LayerNormalization_output_0": "attack_summary_proj_attack_summary_proj_0_LayerNormalization_output_0",
+      "/attack_summary_proj/attack_summary_proj.1/MatMul_output_0": "attack_summary_proj_attack_summary_proj_1_MatMul_output_0",
+      "/Add_8_output_0": "Add_8_output_0",
+      "/Add_9_output_0": "Add_9_output_0",
+      "/layers.0/n1/LayerNormalization_output_0": "layers_0_n1_LayerNormalization_output_0",
+      "/layers.0/att/Transpose_output_0": "layers_0_att_Transpose_output_0",
+      "/layers.0/att/MatMul_output_0": "layers_0_att_MatMul_output_0",
+      "/layers.0/att/Add_output_0": "layers_0_att_Add_output_0",
+      "/layers.0/att/Reshape_2_output_0": "layers_0_att_Reshape_2_output_0",
+      "/layers.0/att/Unsqueeze_1_output_0": "layers_0_att_Unsqueeze_1_output_0",
+      "/layers.0/att/Transpose_1_output_0": "layers_0_att_Transpose_1_output_0",
+      "/layers.0/att/Squeeze_1_output_0": "layers_0_att_Squeeze_1_output_0",
+      "/layers.0/att/Gather_3_output_0": "layers_0_att_Gather_3_output_0",
+      "/layers.0/att/Gather_4_output_0": "layers_0_att_Gather_4_output_0",
+      "/layers.0/att/Gather_5_output_0": "layers_0_att_Gather_5_output_0",
+      "/layers.0/att/Reshape_3_output_0": "layers_0_att_Reshape_3_output_0",
+      "/layers.0/att/Transpose_2_output_0": "layers_0_att_Transpose_2_output_0",
+      "/layers.0/att/Reshape_4_output_0": "layers_0_att_Reshape_4_output_0",
+      "/layers.0/att/Transpose_3_output_0": "layers_0_att_Transpose_3_output_0",
+      "/layers.0/att/Reshape_5_output_0": "layers_0_att_Reshape_5_output_0",
+      "/layers.0/att/Transpose_4_output_0": "layers_0_att_Transpose_4_output_0",
+      "/layers.0/att/Reshape_7_output_0": "layers_0_att_Reshape_7_output_0",
+      "/layers.0/att/Reshape_8_output_0": "layers_0_att_Reshape_8_output_0",
+      "/layers.0/att/Reshape_9_output_0": "layers_0_att_Reshape_9_output_0",
+      "/layers.0/att/Transpose_5_output_0": "layers_0_att_Transpose_5_output_0",
+      "/layers.0/att/Mul_1_output_0": "layers_0_att_Mul_1_output_0",
+      "/layers.0/att/Mul_2_output_0": "layers_0_att_Mul_2_output_0",
+      "/layers.0/att/MatMul_1_output_0": "layers_0_att_MatMul_1_output_0",
+      "/layers.0/att/Add_2_output_0": "layers_0_att_Add_2_output_0",
+      "/layers.0/att/Softmax_output_0": "layers_0_att_Softmax_output_0",
+      "/layers.0/att/MatMul_2_output_0": "layers_0_att_MatMul_2_output_0",
+      "/layers.0/att/Transpose_6_output_0": "layers_0_att_Transpose_6_output_0",
+      "/layers.0/att/Reshape_10_output_0": "layers_0_att_Reshape_10_output_0",
+      "/layers.0/att/Gemm_output_0": "layers_0_att_Gemm_output_0",
+      "/layers.0/att/Reshape_11_output_0": "layers_0_att_Reshape_11_output_0",
+      "/layers.0/att/Transpose_7_output_0": "layers_0_att_Transpose_7_output_0",
+      "/layers.0/Add_output_0": "layers_0_Add_output_0",
+      "/layers.0/n2/LayerNormalization_output_0": "layers_0_n2_LayerNormalization_output_0",
+      "/layers.0/ff/ff.0/MatMul_output_0": "layers_0_ff_ff_0_MatMul_output_0",
+      "/layers.0/ff/ff.0/Add_output_0": "layers_0_ff_ff_0_Add_output_0",
+      "/layers.0/ff/ff.1/Div_output_0": "layers_0_ff_ff_1_Div_output_0",
+      "/layers.0/ff/ff.1/Erf_output_0": "layers_0_ff_ff_1_Erf_output_0",
+      "/layers.0/ff/ff.1/Add_output_0": "layers_0_ff_ff_1_Add_output_0",
+      "/layers.0/ff/ff.1/Mul_output_0": "layers_0_ff_ff_1_Mul_output_0",
+      "/layers.0/ff/ff.1/Mul_1_output_0": "layers_0_ff_ff_1_Mul_1_output_0",
+      "/layers.0/ff/ff.2/MatMul_output_0": "layers_0_ff_ff_2_MatMul_output_0",
+      "/layers.0/ff/ff.2/Add_output_0": "layers_0_ff_ff_2_Add_output_0",
+      "/layers.0/Add_1_output_0": "layers_0_Add_1_output_0",
+      "/layers.1/n1/LayerNormalization_output_0": "layers_1_n1_LayerNormalization_output_0",
+      "/layers.1/att/Transpose_output_0": "layers_1_att_Transpose_output_0",
+      "/layers.1/att/MatMul_output_0": "layers_1_att_MatMul_output_0",
+      "/layers.1/att/Add_output_0": "layers_1_att_Add_output_0",
+      "/layers.1/att/Reshape_2_output_0": "layers_1_att_Reshape_2_output_0",
+      "/layers.1/att/Unsqueeze_1_output_0": "layers_1_att_Unsqueeze_1_output_0",
+      "/layers.1/att/Transpose_1_output_0": "layers_1_att_Transpose_1_output_0",
+      "/layers.1/att/Squeeze_1_output_0": "layers_1_att_Squeeze_1_output_0",
+      "/layers.1/att/Gather_3_output_0": "layers_1_att_Gather_3_output_0",
+      "/layers.1/att/Gather_4_output_0": "layers_1_att_Gather_4_output_0",
+      "/layers.1/att/Gather_5_output_0": "layers_1_att_Gather_5_output_0",
+      "/layers.1/att/Reshape_3_output_0": "layers_1_att_Reshape_3_output_0",
+      "/layers.1/att/Transpose_2_output_0": "layers_1_att_Transpose_2_output_0",
+      "/layers.1/att/Reshape_4_output_0": "layers_1_att_Reshape_4_output_0",
+      "/layers.1/att/Transpose_3_output_0": "layers_1_att_Transpose_3_output_0",
+      "/layers.1/att/Reshape_5_output_0": "layers_1_att_Reshape_5_output_0",
+      "/layers.1/att/Transpose_4_output_0": "layers_1_att_Transpose_4_output_0",
+      "/layers.1/att/Reshape_7_output_0": "layers_1_att_Reshape_7_output_0",
+      "/layers.1/att/Reshape_8_output_0": "layers_1_att_Reshape_8_output_0",
+      "/layers.1/att/Reshape_9_output_0": "layers_1_att_Reshape_9_output_0",
+      "/layers.1/att/Transpose_5_output_0": "layers_1_att_Transpose_5_output_0",
+      "/layers.1/att/Mul_1_output_0": "layers_1_att_Mul_1_output_0",
+      "/layers.1/att/Mul_2_output_0": "layers_1_att_Mul_2_output_0",
+      "/layers.1/att/MatMul_1_output_0": "layers_1_att_MatMul_1_output_0",
+      "/layers.1/att/Add_2_output_0": "layers_1_att_Add_2_output_0",
+      "/layers.1/att/Softmax_output_0": "layers_1_att_Softmax_output_0",
+      "/layers.1/att/MatMul_2_output_0": "layers_1_att_MatMul_2_output_0",
+      "/layers.1/att/Transpose_6_output_0": "layers_1_att_Transpose_6_output_0",
+      "/layers.1/att/Reshape_10_output_0": "layers_1_att_Reshape_10_output_0",
+      "/layers.1/att/Gemm_output_0": "layers_1_att_Gemm_output_0",
+      "/layers.1/att/Reshape_11_output_0": "layers_1_att_Reshape_11_output_0",
+      "/layers.1/att/Transpose_7_output_0": "layers_1_att_Transpose_7_output_0",
+      "/layers.1/Add_output_0": "layers_1_Add_output_0",
+      "/layers.1/n2/LayerNormalization_output_0": "layers_1_n2_LayerNormalization_output_0",
+      "/layers.1/ff/ff.0/MatMul_output_0": "layers_1_ff_ff_0_MatMul_output_0",
+      "/layers.1/ff/ff.0/Add_output_0": "layers_1_ff_ff_0_Add_output_0",
+      "/layers.1/ff/ff.1/Div_output_0": "layers_1_ff_ff_1_Div_output_0",
+      "/layers.1/ff/ff.1/Erf_output_0": "layers_1_ff_ff_1_Erf_output_0",
+      "/layers.1/ff/ff.1/Add_output_0": "layers_1_ff_ff_1_Add_output_0",
+      "/layers.1/ff/ff.1/Mul_output_0": "layers_1_ff_ff_1_Mul_output_0",
+      "/layers.1/ff/ff.1/Mul_1_output_0": "layers_1_ff_ff_1_Mul_1_output_0",
+      "/layers.1/ff/ff.2/MatMul_output_0": "layers_1_ff_ff_2_MatMul_output_0",
+      "/layers.1/ff/ff.2/Add_output_0": "layers_1_ff_ff_2_Add_output_0",
+      "/layers.1/Add_1_output_0": "layers_1_Add_1_output_0",
+      "/layers.2/n1/LayerNormalization_output_0": "layers_2_n1_LayerNormalization_output_0",
+      "/layers.2/att/Transpose_output_0": "layers_2_att_Transpose_output_0",
+      "/layers.2/att/MatMul_output_0": "layers_2_att_MatMul_output_0",
+      "/layers.2/att/Add_output_0": "layers_2_att_Add_output_0",
+      "/layers.2/att/Reshape_2_output_0": "layers_2_att_Reshape_2_output_0",
+      "/layers.2/att/Unsqueeze_1_output_0": "layers_2_att_Unsqueeze_1_output_0",
+      "/layers.2/att/Transpose_1_output_0": "layers_2_att_Transpose_1_output_0",
+      "/layers.2/att/Squeeze_1_output_0": "layers_2_att_Squeeze_1_output_0",
+      "/layers.2/att/Gather_3_output_0": "layers_2_att_Gather_3_output_0",
+      "/layers.2/att/Gather_4_output_0": "layers_2_att_Gather_4_output_0",
+      "/layers.2/att/Gather_5_output_0": "layers_2_att_Gather_5_output_0",
+      "/layers.2/att/Reshape_3_output_0": "layers_2_att_Reshape_3_output_0",
+      "/layers.2/att/Transpose_2_output_0": "layers_2_att_Transpose_2_output_0",
+      "/layers.2/att/Reshape_4_output_0": "layers_2_att_Reshape_4_output_0",
+      "/layers.2/att/Transpose_3_output_0": "layers_2_att_Transpose_3_output_0",
+      "/layers.2/att/Reshape_5_output_0": "layers_2_att_Reshape_5_output_0",
+      "/layers.2/att/Transpose_4_output_0": "layers_2_att_Transpose_4_output_0",
+      "/layers.2/att/Reshape_7_output_0": "layers_2_att_Reshape_7_output_0",
+      "/layers.2/att/Reshape_8_output_0": "layers_2_att_Reshape_8_output_0",
+      "/layers.2/att/Reshape_9_output_0": "layers_2_att_Reshape_9_output_0",
+      "/layers.2/att/Transpose_5_output_0": "layers_2_att_Transpose_5_output_0",
+      "/layers.2/att/Mul_1_output_0": "layers_2_att_Mul_1_output_0",
+      "/layers.2/att/Mul_2_output_0": "layers_2_att_Mul_2_output_0",
+      "/layers.2/att/MatMul_1_output_0": "layers_2_att_MatMul_1_output_0",
+      "/layers.2/att/Add_2_output_0": "layers_2_att_Add_2_output_0",
+      "/layers.2/att/Softmax_output_0": "layers_2_att_Softmax_output_0",
+      "/layers.2/att/MatMul_2_output_0": "layers_2_att_MatMul_2_output_0",
+      "/layers.2/att/Transpose_6_output_0": "layers_2_att_Transpose_6_output_0",
+      "/layers.2/att/Reshape_10_output_0": "layers_2_att_Reshape_10_output_0",
+      "/layers.2/att/Gemm_output_0": "layers_2_att_Gemm_output_0",
+      "/layers.2/att/Reshape_11_output_0": "layers_2_att_Reshape_11_output_0",
+      "/layers.2/att/Transpose_7_output_0": "layers_2_att_Transpose_7_output_0",
+      "/layers.2/Add_output_0": "layers_2_Add_output_0",
+      "/layers.2/n2/LayerNormalization_output_0": "layers_2_n2_LayerNormalization_output_0",
+      "/layers.2/ff/ff.0/MatMul_output_0": "layers_2_ff_ff_0_MatMul_output_0",
+      "/layers.2/ff/ff.0/Add_output_0": "layers_2_ff_ff_0_Add_output_0",
+      "/layers.2/ff/ff.1/Div_output_0": "layers_2_ff_ff_1_Div_output_0",
+      "/layers.2/ff/ff.1/Erf_output_0": "layers_2_ff_ff_1_Erf_output_0",
+      "/layers.2/ff/ff.1/Add_output_0": "layers_2_ff_ff_1_Add_output_0",
+      "/layers.2/ff/ff.1/Mul_output_0": "layers_2_ff_ff_1_Mul_output_0",
+      "/layers.2/ff/ff.1/Mul_1_output_0": "layers_2_ff_ff_1_Mul_1_output_0",
+      "/layers.2/ff/ff.2/MatMul_output_0": "layers_2_ff_ff_2_MatMul_output_0",
+      "/layers.2/ff/ff.2/Add_output_0": "layers_2_ff_ff_2_Add_output_0",
+      "/layers.2/Add_1_output_0": "layers_2_Add_1_output_0",
+      "/layers.3/n1/LayerNormalization_output_0": "layers_3_n1_LayerNormalization_output_0",
+      "/layers.3/att/Transpose_output_0": "layers_3_att_Transpose_output_0",
+      "/layers.3/att/MatMul_output_0": "layers_3_att_MatMul_output_0",
+      "/layers.3/att/Add_output_0": "layers_3_att_Add_output_0",
+      "/layers.3/att/Reshape_2_output_0": "layers_3_att_Reshape_2_output_0",
+      "/layers.3/att/Unsqueeze_1_output_0": "layers_3_att_Unsqueeze_1_output_0"
+    }
+  },
+  "onnx": {
+    "ir_version": 8,
+    "opsets": [
+      {
+        "domain": "",
+        "version": 18
+      }
+    ],
+    "inputs": [
+      {
+        "name": "tokens",
+        "elem_type": 7,
+        "shape": [
+          16,
+          64,
+          24
+        ]
+      },
+      {
+        "name": "attack_summary",
+        "elem_type": 1,
+        "shape": [
+          16,
+          64,
+          28
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "policy",
+        "elem_type": 1,
+        "shape": [
+          16,
+          20480
+        ]
+      },
+      {
+        "name": "wdl",
+        "elem_type": 1,
+        "shape": [
+          16,
+          3
+        ]
+      },
+      {
+        "name": "q",
+        "elem_type": 1,
+        "shape": [
+          16
+        ]
+      },
+      {
+        "name": "hidden",
+        "elem_type": 1,
+        "shape": [
+          16,
+          64,
+          128
+        ]
+      }
+    ],
+    "node_count": 342,
+    "initializer_count": 139,
+    "op_counts": {
+      "Add": 56,
+      "Reshape": 56,
+      "Transpose": 49,
+      "MatMul": 37,
+      "Gather": 32,
+      "Mul": 24,
+      "LayerNormalization": 13,
+      "Div": 12,
+      "Unsqueeze": 12,
+      "Gemm": 8,
+      "Clip": 7,
+      "Cast": 7,
+      "Squeeze": 7,
+      "Softmax": 6,
+      "Erf": 6,
+      "BitwiseAnd": 4,
+      "Slice": 2,
+      "Concat": 2,
+      "ReduceSum": 1,
+      "ReduceMean": 1
+    }
+  },
+  "onnx_frontend_patch": {
+    "installed": true,
+    "stats": {
+      "constant_nonnegative_gathers": 26,
+      "trusted_runtime_gathers": 6
+    }
+  },
+  "onnx_frontend_patch_stats": {
+    "constant_nonnegative_gathers": 26,
+    "trusted_runtime_gathers": 6
+  },
+  "relax_module": {
+    "function_count": 7,
+    "functions": [
+      "I.GlobalVar(\"maximum\")",
+      "I.GlobalVar(\"minimum\")",
+      "I.GlobalVar(\"maximum1\")",
+      "I.GlobalVar(\"minimum1\")",
+      "I.GlobalVar(\"maximum2\")",
+      "I.GlobalVar(\"minimum2\")",
+      "I.GlobalVar(\"main\")"
+    ],
+    "script_chars": 45811,
+    "script_head": "# from tvm.script import ir as I\n# from tvm.script import tirx as T\n# from tvm.tirx.layout import Axis\n# from tvm.script import relax as R\n\n@I.ir_module\nclass Module:\n    @T.prim_func(private=True, s_tir=True)\n    def maximum(A: T.Buffer((T.int64(16), T.int64(64), T.int64(8)), \"int32\"), B: T.Buffer((), \"int32\"), T_maximum: T.Buffer((T.int64(16), T.int64(64), T.int64(8)), \"int32\")):\n        T.func_attr({\"tirx.noalias\": True})\n        # with T.sblock(\"root\"):\n        for ax0, ax1, ax2 in T.grid(T.int64(16), T.int64(64), T.int64(8)):\n            with T.sblock(\"T_maximum\"):\n                v_ax0, v_ax1, v_ax2 = T.axis.remap(\"SSS\", [ax0, ax1, ax2])\n                T.reads(A[v_ax0, v_ax1, v_ax2], B[()])\n                T.writes(T_maximum[v_ax0, v_ax1, v_ax2])\n                T_maximum[v_ax0, v_ax1, v_ax2] = T.max(A[v_ax0, v_ax1, v_ax2], B[()])\n\n    @T.prim_func(private=True, s_tir=True)\n    def maximum1(A: T.Buffer((T.int64(16), T.int64(64)), \"int32\"), B: T.Buffer((), \"int32\"), T_maximum: T.Buffer((T.int64(16), T.int64(64)), \"int32\")):\n        T.func_attr({\"tirx.noalias\": True})\n        # with T.sblock(\"root\"):\n        for ax0, ax1 in T.grid(T.int64(16), T.int64(64)):\n            with T.sblock(\"T_maximum\"):\n                v_ax0, v_ax1 = T.axis.remap(\"SS\", [ax0, ax1])\n                T.reads(A[v_ax0, v_ax1], B[()])\n                T.writes(T_maximum[v_ax0, v_ax1])\n                T_maximum[v_ax0, v_ax1] = T.max(A[v_ax0, v_ax1], B[()])\n\n    @T.prim_func(private=True, s_tir=True)\n    def maximum2(A: T.Buffer((T.int64(16), T.int64(64), T.int64(8)), \"float32\"), lv45: T.Buffer((), \"float32\"), T_maximum: T.Buffer((T.int64(16), T.int64(64), T.int64(8)), \"float32\")):\n        T.func_attr({\"tirx.noalias\": True})\n        # with T.sblock(\"root\"):\n        for ax0, ax1, ax2 in T.grid(T.int64(16), T.int64(64), T.int64(8)):\n            with T.sblock(\"T_maximum\"):\n                v_ax0, v_ax1, v_ax2 = T.axis.remap(\"SSS\", [ax0, ax1, ax2])\n                T.reads(A[v_ax0, v_ax1, v_ax2], lv45[()])\n                T.writes(T_maximum[v_ax0, v_ax1, v_ax2])\n                T_maximum[v_ax0, v_ax1, v_ax2] = T.max(A[v_ax0, v_ax1, v_ax2], lv45[()])\n\n    @T.prim_func(private=True, s_tir=True)\n    def minimum(lv1: T.Buffer((T.int64(16), T.int64(64), T.int64(8)), \"int32\"), B: T.Buffer((), \"int32\"), T_minimum: T.Buffer((T.int64(16), T.int64(64), T.int64(8)), \"int32\")):\n        T.func_attr({\"tirx.noalias\": True})\n        # with T.sblock(\"root\"):\n        for ax0, ax1, ax2 in T.grid(T.int64(16), T.int64(64), T.int64(8)):\n            with T.sblock(\"T_minimum\"):\n                v_ax0, v_ax1, v_ax2 = T.axis.remap(\"SSS\", [ax0, ax1, ax2])\n                T.reads(lv1[v_ax0, v_ax1, v_ax2], B[()])\n                T.writes(T_minimum[v_ax0, v_ax1, v_ax2])\n                T_minimum[v_ax0, v_ax1, v_ax2] = T.min(lv1[v_ax0, v_ax1, v_ax2], B[()])\n\n    @T.prim_func(private=True, s_tir=True)\n    def minimum1(lv6: T.Buffer((T.int64(16), T.int64(64)), \"int32\"), B: T.Buffer((), \"int32\"), T_minimum: T.Buffer((T.int64(16), T.int64(64)), \"int32\")):\n        T.func_attr({\"tirx.noalias\": True})\n        # with T.sblock(\"root\"):\n        for ax0, ax1 in T.grid(T.int64(16), T.int64(64)):\n            with T.sblock(\"T_minimum\"):\n                v_ax0, v_ax1 = T.axis.remap(\"SS\", [ax0, ax1])\n                T.reads(lv6[v_ax0, v_ax1], B[()])\n                T.writes(T_minimum[v_ax0, v_ax1])\n                T_minimum[v_ax0, v_ax1] = T.min(lv6[v_ax0, v_ax1], B[()])\n\n    @T.prim_func(private=True, s_tir=True)\n    def minimum2(lv47: T.Buffer((T.int64(16), T.int64(64), T.int64(8)), \"float32\"), lv49: T.Buffer((), \"float32\"), T_minimum: T.Buffer((T.int64(16), T.int64(64), T.int64(8)), \"float32\")):\n        T.func_attr({\"tirx.noalias\": True})\n        # with T.sblock(\"root\"):\n        for ax0, ax1, ax2 in T.grid(T.int64(16), T.int64(64), T.int64(8)):\n            with T.sblock(\"T_minimum\"):\n                v_ax0, v_ax1, v_ax2 = T.axis.remap(\"SSS\", [ax0, ax1, ax2])\n                T.reads(lv47[v_ax0, v_ax1, v_ax2], lv49[()])\n                T.writes(T_minimum[v_ax0, v_ax1, v_ax2])\n                T_minimum[v_ax0, v_ax1, v_ax2] = T.min(lv47[v_ax0, v_ax1, v_ax2], lv49[()])\n\n    @R.function\n    def main(tokens: R.Tensor((16, 64, 24), dtype=\"int32\"), attack_summary: R.Tensor((16, 64, 28), dtype=\"float32\")) -> R.Tuple(R.Tensor((16, 20480), dtype=\"float32\"), R.Tensor((16, 3), dtype=\"float32\"), R.Tensor((16,), dtype=\"float32\"), R.Tensor((16, 64, 128), dtype=\"float32\")):\n        R.func_attr({\"num_input\": 2})\n        cls = Module\n        with R.dataflow():\n            lv: R.Tensor((16, 64, 8), dtype=\"int32\") = R.strided_slice(tokens, (R.prim_value(2),), (R.prim_value(0),), (R.prim_value(8),), (R.prim_value(1),), assume_inbound=False)\n            lv1 = R.call_tir(cls.maximum, (lv, R.const(0, \"int32\")), out_sinfo=R.Tensor((16, 64, 8), dtype=\"int32\"))\n            lv2 = R.call_tir(cls.minimum, (lv1, R.const(12, \"int32\")), out_sinfo=R.Tensor((16, 64, 8), dtype=\"int32\"))\n            lv3: R.Tensor((16, 64, 8), dtype=\"int32\") = R.add(lv2, metadata[\"relax.expr.Constant\"][0])\n            lv4: R.Tensor((16, 64, 8, 128), dtype=\"float32\") = R.take(metadata[\"relax.expr.Constant\"][1], lv3, axis=0, mode=\"fast\")\n            lv5: R.Tensor((16, 64), dtype=\"int32\") = R.take(tokens, R.const(8, \"int32\"), axis=2, mode=\"fast\")\n            lv6 = R.call_tir(cls.maximum1, (lv5, R.const(0, \"int32\")), out_sinfo=R.Tensor((16, 64), dtype=\"int32\"))\n            lv7 = R.call_tir(cls.minimum1, (lv6, R.const(2, \"int32\")), out_sinfo=R.Tensor((16, 64), dtype=\"int32\"))\n            lv8: R.Tensor((16, 64), dtype=\"int32\") = R.take(tokens, R.const(10, \"int32\"), axis=2, mode=\"fast\")\n            lv9: R.Tensor((16, 64), dtype=\"int32\") = R.take(tokens, R.const(11, \"int32\"), axis=2, mode=\"fast\")\n            lv10: R.Tensor((16, 64), dtype=\"float32\") = R.astype(lv9, dtype=\"float32\")\n            lv11: R.Tensor((16, 64), dtype=\"int32\") = R.take(tokens, R.const(9, \"int32\"), axis=2, mode=\"fast\")\n            lv12: R.Tensor((16, 64), dtype=\"int32\") = R.bitwise_and(lv11, R.const(1, \"int32\"))\n            lv13: R.Tensor((16, 64), dtype=\"int32\") = R.divide(lv11, R.const(2, \"int32\"))\n            lv14: R.Tensor((16, 64), dtype=\"int32\") = R.bitwise_and(lv13, R.const(1, \"int32\"))\n            lv15: R.Tensor((16, 64), dtype=\"int32\") = R.divide(lv11, R.const(4, \"int32\"))\n            lv16: R.Tensor((16, 64), dtype=\"int32\") = R.bitwise_and(lv15, R.const(1, \"int32\"))\n            lv17: R.Tensor((16, 64), dtype=\"int32\") = R.divide(lv11, R.const(8, \"int32\"))\n            lv18: R.Tensor((16, 64), dtype=\"int32\") = R.bitwise_and(lv17, R.const(1, \"int32\"))\n            lv19: R.Tensor((16, 64), dtype=\"float32\") = R.astype(lv12, dtype=\"float32\")\n            lv20: R.Tensor((16, 64), dtype=\"float32\") = R.astype(lv14, dtype=\"float32\")\n            lv21: R.Tensor((16, 64), dtype=\"float32\") = R.astype(lv16, dtype=\"float32\")\n            lv22: R.Tensor((16, 64), dtype=\"float32\") = R.astype(lv18, dtype=\"float32\")\n            lv23: R.Tensor((16, 64), dtype=\"float32\") = R.astype(lv8, dtype=\"float32\")\n            lv24: R.Tensor((16, 64), dtype=\"float32\") = R.divide(lv10, R.const(100.0, \"float32\"))\n            lv25: R.Tensor((16, 64, 1), dtype=\"float32\") = R.expand_dims(lv19, axis=[2])\n            lv26: R.Tensor((16, 64, 1), dtype=\"float32\") = R.expand_dims(lv20, axis=[2])\n            lv27: R.Tensor((16, 64, 1), dtype=\"float32\") = R.expand_dims(lv21, axis=[2])\n            lv28: R.Tensor((16, 64, 1), dtype=\"float32\") = R.expand_dims(lv22, axis=[2])\n            lv29: R.Tensor((16, 64, 1), dtype=\"float32\") = R.expand_dims(lv23, axis=[2])\n            lv30: R.Tensor((16, 64, 1), dtype=\"float32\") = R.expand_dims(lv24, axis=[2])\n            lv31: R.Tensor((16, 64), dtype=\"int32\") = R.take(tokens, R.const(12, \"int32\"), axis=2, mode=\"fast\")\n            lv32 = R.call_tir(cls.maximum1, (lv31, R.const(0, \"int32\")), out_sinfo=R.Tensor((16, 64), dtype=\"int32\"))\n            lv33 = R.call_tir(cls.minimum1, (lv32, R.const(7, \"int32\")), out_sinfo=R.Tensor((16, 64), dtype=\"int32\"))\n            lv34: R.Tensor((16, 64), dtype=\"int32\") = R.take(tokens, R.const(13, \"int32\"), axis=2, mode=\"fast\")\n            lv35 = R.call_tir(cls.maximum1, (lv34, R.const(0, \"int32\")), out_sinfo=R.Tensor((16, 64), dtype=\"int32\"))\n            lv36 = R.call_tir(cls.minimum1, (lv35, R.const(7, \"int32\")), out_sinfo=R.Tensor((16, 64), dtype=\"int32\"))\n            lv37: R.Tensor((16, 64), dtype=\"int32\") = R.take(tokens, R.const(14, \"int32\"), axis=2, mode=\"fast\")\n            lv38 = R.call_tir(cls.maximum1, (lv37, R.const(0, \"int32\")), out_sinfo=R.Tensor((16, 64), dtype=\"int32\"))\n            lv39 = R.call_tir(cls.minimum1, (lv38, R.const(1, \"int32\")), out_sinfo=R.Tensor((16, 64), dtype=\"int32\"))\n            lv40: R.Tensor((16, 64), dtype=\"int32\") = R.take(tokens, R.const(15, \"int32\"), axis=2, mode=\"fast\")\n            lv41 = R.call_tir(cls.maximum1, (lv40, R.const(0, \"int32\")), out_sinfo=R.Tensor((16, 64), dtype=\"int32\"))\n            lv42 = R.call_tir(cls.minimum1, (lv41, R.const(63, \"int32\")), out_sinfo=R.Tensor((16, 64), dtype=\"int32\"))\n            lv43: R.Tensor((16, 64, 8), dtype=\"int32\") = R.strided_slice(tokens, (R.prim_value(2),), (R.prim_value(16),), (R.prim_value(24),), (R.prim_value(1),), assume_inbound=False)\n            lv44: R.Tensor((), dtype=\"bool\") = R.isnan(R.const(0.0, \"float32\"))\n            lv45: R.Tensor((), dtype=\"float32\") = R.where(lv44, R.const(\"-inf\", \"float32\"), R.const(0.0, \"float32\"))\n            lv46: R.Tensor((16, 64, 8), dtype=\"float32\") = R.astype(lv43, dtype=\"float32\")\n            lv47 = R.call_tir(cls.maximum2, (lv46, lv45), out_sinfo=R.Tensor((16, 64, 8), dtype=\"float32\"))\n            lv48: R.Tensor((), dtype=\"bool\") = R.isnan(R.const(1.0, \"float32\"))\n            lv49: R.Tensor((), dtype=\"float32\") = R.where(lv48, R.const(\"inf\", \"float32\"), R.const(1.0, \"float32\"))\n            lv50 = R.call_tir(cls.minimum2, (lv47, lv49), out_sinfo=R.Tensor((16, 64, 8), dtype=\"float32\"))\n            lv51: R.Tensor((16, 64, 8), dtype=\"bool\") = R.isnan(lv46)\n            lv52: R.Tensor((16, 64, 8), dtype=\"float32\") = R.where(lv51, lv46, lv50)\n            lv53: R.Tensor((16, 64, 128), dtype=\"float32\") = R.sum(lv4, axis=[2], keepdims=False)\n            lv54: R.Tensor((16, 64, 128), dtype=\"float32\") = R.matmul(lv52, metadata[\"relax.expr.Constant\"][2], out_dtype=\"void\")\n            lv55: R.Tensor((16, 64, 128), dtype=\"float32\") = R.add(lv53, lv54)\n            lv56: R.Tensor((16, 64, 128), dtype=\"float32\") = R.take(metadata[\"relax.expr.Constant\"][3], lv7, axis=0, mode=\"fast\")\n            lv57: R.Tensor((16, 64, 6), dtype=\"float32\") = R.concat((lv25, lv26, lv27, lv28, lv29, lv30), axis=-1)\n            lv58: R.Tensor((16, 64, 128), dtype=\"float32\") = R.matmul(lv57, metadata[\"relax.expr.Constant\"][4], out_dtype=\"void\")\n            lv59: R.Tensor((16, 64, 128), dtype=\"float32\") = R.add(lv55, lv56)\n            lv60: R.Tensor((16, 64, 128), dtype=\"float32\") = R.add(metadata[\"relax.expr.Constant\"][5], lv58)\n            lv61: R.Tensor((16, 64, 128), dtype=\"float32\") = R.add(lv59, lv60)\n            lv62: R.Tensor((16, 64, 128), dtype=\"float32\") = R.take(metadata[\"relax.expr.Constant\"][6], lv33, axis=0, mode=\"fast\")\n            lv63: R.Tensor((16, 64, 128), dtype=\"float32\") = R.add(lv61, lv62)\n            lv64: R.Tensor((16, 64, 128), dtype=\"float32\") = R.take(metadata[\"relax.expr.Constant\"][7], lv36, axis=0, mode=\"fast\")\n            lv65: R.Tensor((16, 64, 128), dtype=\"float32\") = R.add(lv63, lv64)\n            lv66: R.Tensor((16, 64, 128), dtype=\"float32\") = R.take(metadata[\"relax.expr.Constant\"][8], lv39, axis=0, mode=\"fast\")\n            lv67: R.Tensor((16, 64, 128), dtype=\"float32\") = R.add(lv65, lv66)\n            lv68: R.Tensor((16, 64, 128), dtype=\"float32\") = R.take(metadata[\"relax.expr.Constant\"][9], lv42, axis=0, mode=\"fast\")\n            lv69: R.Tensor((16, 64, 28), dtype=\"float32\") = R.divide(attack_summary, R.const(8.0, \"float32\"))\n            lv70: R.Tensor((16, 64, 28), dtype=\"float32\") = R.nn.la",
+    "int64_token_count": 48,
+    "shape_to_tensor_token_count": 0
+  },
+  "build_target": "{\"kind\":\"webgpu\",\"tag\":\"\",\"keys\":[\"webgpu\",\"gpu\"],\"host\":{\"kind\":\"llvm\",\"tag\":\"\",\"keys\":[\"cpu\"],\"mtriple\":\"wasm32-unknown-unknown-wasm\"},\"thread_warp_size\":1,\"supports_subgroups\":false,\"max_num_threads\":256}",
+  "max_fuse_depth": 6,
+  "dlight_matmul_config": {
+    "block_size_x": 8,
+    "block_size_y": 8,
+    "vthread_x": 1,
+    "vthread_y": 1,
+    "micro_size_x": 4,
+    "micro_size_y": 4,
+    "micro_size_k": 16,
+    "vector_size": 1,
+    "unroll": 256,
+    "use_shared": true,
+    "storage_align": false,
+    "inner_x": false
+  },
+  "dlight_matmul_dispatch": {
+    "selector": {
+      "kind": "static_large",
+      "min_macs": 8000000,
+      "j_multiple": 32,
+      "k_multiple": 16
+    },
+    "selected_config": {
+      "block_size_x": 8,
+      "block_size_y": 8,
+      "vthread_x": 1,
+      "vthread_y": 1,
+      "micro_size_x": 4,
+      "micro_size_y": 4,
+      "micro_size_k": 16,
+      "vector_size": 1,
+      "unroll": 256,
+      "use_shared": true,
+      "storage_align": false,
+      "inner_x": false
+    },
+    "functions": {
+      "divide4": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_add1_add1_matmul2_add1_add3": {
+        "shape": {
+          "s": 1,
+          "i": 1024,
+          "j": 128,
+          "k": 28,
+          "macs": 3670016
+        },
+        "profile": "default"
+      },
+      "fused_bitwise_and_cast_cast_expand_dims_expand_dims_concatenate": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_cast_divide3_expand_dims": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_divide1_bitwise_and_cast_expand_dims": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_divide2_bitwise_and_cast_expand_dims": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_divide_bitwise_and_cast_expand_dims": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_matmul10_divide6": {
+        "shape": {
+          "s": 16,
+          "i": 64,
+          "j": 64,
+          "k": 128,
+          "macs": 8388608
+        },
+        "profile": "selected"
+      },
+      "fused_matmul11_add10": {
+        "shape": {
+          "s": 1,
+          "i": 16,
+          "j": 3,
+          "k": 128,
+          "macs": 6144
+        },
+        "profile": "default"
+      },
+      "fused_matmul12_add9": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_matmul1_add2": {
+        "shape": {
+          "s": 1,
+          "i": 1024,
+          "j": 128,
+          "k": 6,
+          "macs": 786432
+        },
+        "profile": "default"
+      },
+      "fused_matmul3_add4": {
+        "shape": {
+          "s": 1,
+          "i": 1024,
+          "j": 384,
+          "k": 128,
+          "macs": 50331648
+        },
+        "profile": "selected"
+      },
+      "fused_matmul4_add5": {
+        "shape": {
+          "s": 128,
+          "i": 64,
+          "j": 64,
+          "k": 16,
+          "macs": 8388608
+        },
+        "profile": "selected"
+      },
+      "fused_matmul6_add6": {
+        "shape": {
+          "s": 1,
+          "i": 1024,
+          "j": 128,
+          "k": 128,
+          "macs": 16777216
+        },
+        "profile": "selected"
+      },
+      "fused_matmul7_add7": {
+        "shape": {
+          "s": 1,
+          "i": 1024,
+          "j": 256,
+          "k": 128,
+          "macs": 33554432
+        },
+        "profile": "selected"
+      },
+      "fused_matmul7_add7_divide5_erf_add8_multiply2": {
+        "shape": {
+          "s": 1,
+          "i": 1024,
+          "j": 256,
+          "k": 128,
+          "macs": 33554432
+        },
+        "profile": "selected"
+      },
+      "fused_matmul8_add2_add1": {
+        "shape": {
+          "s": 1,
+          "i": 1024,
+          "j": 128,
+          "k": 256,
+          "macs": 33554432
+        },
+        "profile": "selected"
+      },
+      "fused_matmul9_add2": {
+        "shape": {
+          "s": 1,
+          "i": 1024,
+          "j": 128,
+          "k": 128,
+          "macs": 16777216
+        },
+        "profile": "selected"
+      },
+      "fused_matmul_add1_add1_add1_add1_add1": {
+        "shape": {
+          "s": 1,
+          "i": 1024,
+          "j": 128,
+          "k": 8,
+          "macs": 1048576
+        },
+        "profile": "default"
+      },
+      "fused_maximum1_minimum1": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_reshape1_transpose2_reshape2": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_reshape1_transpose2_reshape2_multiply": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_reshape1_transpose2_reshape2_transpose3_multiply1": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_reshape4_transpose6_add1": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_reshape5_reshape6_concatenate1": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_reshape_expand_dims1_transpose1_squeeze": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_strided_slice1_cast1_maximum2_minimum2_tir_isnan1_where1": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_strided_slice_maximum_minimum_add": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "fused_transpose4_reshape3": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "layer_norm": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "layer_norm1": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "matmul5": {
+        "shape": {
+          "s": 128,
+          "i": 64,
+          "j": 16,
+          "k": 64,
+          "macs": 8388608
+        },
+        "profile": "default"
+      },
+      "mean": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "multiply3": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "softmax": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "squeeze1": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "sum": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "take": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "take1": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "take2": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "take3": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "take4": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "take5": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "take6": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "transpose": {
+        "shape": null,
+        "profile": "unmatched"
+      },
+      "transpose7": {
+        "shape": null,
+        "profile": "unmatched"
+      }
+    },
+    "counts": {
+      "unmatched": 33,
+      "default": 5,
+      "selected": 8
+    }
+  },
+  "dlight_applied": true,
+  "dlight_rule_attribution": {
+    "counts": {
+      "Fallback": 28,
+      "Matmul": 13,
+      "GEMV": 1,
+      "GeneralReduction": 3,
+      "Reduction": 1
+    },
+    "unscheduled": [],
+    "functions": {
+      "divide4": "Fallback",
+      "fused_add1_add1_matmul2_add1_add3": "Matmul",
+      "fused_bitwise_and_cast_cast_expand_dims_expand_dims_concatenate": "Fallback",
+      "fused_cast_divide3_expand_dims": "Fallback",
+      "fused_divide1_bitwise_and_cast_expand_dims": "Fallback",
+      "fused_divide2_bitwise_and_cast_expand_dims": "Fallback",
+      "fused_divide_bitwise_and_cast_expand_dims": "Fallback",
+      "fused_matmul10_divide6": "Matmul",
+      "fused_matmul11_add10": "Matmul",
+      "fused_matmul12_add9": "GEMV",
+      "fused_matmul1_add2": "Matmul",
+      "fused_matmul3_add4": "Matmul",
+      "fused_matmul4_add5": "Matmul",
+      "fused_matmul6_add6": "Matmul",
+      "fused_matmul7_add7": "Matmul",
+      "fused_matmul7_add7_divide5_erf_add8_multiply2": "Matmul",
+      "fused_matmul8_add2_add1": "Matmul",
+      "fused_matmul9_add2": "Matmul",
+      "fused_matmul_add1_add1_add1_add1_add1": "Matmul",
+      "fused_maximum1_minimum1": "Fallback",
+      "fused_reshape1_transpose2_reshape2": "Fallback",
+      "fused_reshape1_transpose2_reshape2_multiply": "Fallback",
+      "fused_reshape1_transpose2_reshape2_transpose3_multiply1": "Fallback",
+      "fused_reshape4_transpose6_add1": "Fallback",
+      "fused_reshape5_reshape6_concatenate1": "Fallback",
+      "fused_reshape_expand_dims1_transpose1_squeeze": "Fallback",
+      "fused_strided_slice1_cast1_maximum2_minimum2_tir_isnan1_where1": "Fallback",
+      "fused_strided_slice_maximum_minimum_add": "Fallback",
+      "fused_transpose4_reshape3": "Fallback",
+      "layer_norm": "GeneralReduction",
+      "layer_norm1": "GeneralReduction",
+      "matmul5": "Matmul",
+      "mean": "Reduction",
+      "multiply3": "Fallback",
+      "softmax": "GeneralReduction",
+      "squeeze1": "Fallback",
+      "sum": "Fallback",
+      "take": "Fallback",
+      "take1": "Fallback",
+      "take2": "Fallback",
+      "take3": "Fallback",
+      "take4": "Fallback",
+      "take5": "Fallback",
+      "take6": "Fallback",
+      "transpose": "Fallback",
+      "transpose7": "Fallback"
+    },
+    "ruleFailures": {
+      "sum:Reduction": "ScheduleError('ScheduleError: An error occurred in the schedule primitive \\'bind\\'.\\n\\nThe IR with diagnostic is:\\n# from tvm.script import ir as I\\n# from tvm.script import tirx as T\\n# from tvm.tirx"
+    }
+  },
+  "build": {
+    "type": "<class 'tvm.relax.vm_build.VMExecutable'>",
+    "mod_type": "<class 'tvm.runtime.module.Module'>",
+    "tvmjs_wasm": "bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.tvmjs.wasm",
+    "tvmjs_wasm_bytes": 20192787
+  },
+  "required_steps": [
+    "import_tvm",
+    "onnx_load",
+    "relax_from_onnx",
+    "relax_build_target",
+    "export_tvmjs_wasm"
+  ],
+  "required_step_failures": [],
+  "ok": true
+}

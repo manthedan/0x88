@@ -1,0 +1,292 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Centipawn TVMJS/WebGPU benchmark</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; }
+  pre { background: #111; color: #eee; padding: 1rem; white-space: pre-wrap; }
+</style>
+<h1>Centipawn TVMJS/WebGPU benchmark</h1>
+<p>Research-only whole-model TVMJS versus ONNX Runtime WebGPU comparison.</p>
+<button id="run">Run benchmark</button>
+<pre id="log"></pre>
+<script type="module">
+import * as ortRuntime from '/src/nn/ortRuntime.ts';
+
+const params = new URLSearchParams(location.search);
+const batch = Math.max(1, Math.floor(Number(params.get('batch') ?? '16')));
+const warmup = Math.max(0, Math.floor(Number(params.get('warmup') ?? '5')));
+const repeats = Math.max(1, Math.floor(Number(params.get('repeats') ?? '20')));
+const manifestPath = params.get('manifest') ?? '/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v1-baseline/manifest.json';
+const ortModelPath = params.get('ortModel') ?? '/models/bt4_soap_rem_c19000_final.onnx';
+const tokenShape = [batch, 64, 24];
+const attackShape = [batch, 64, 28];
+const outputSpecs = [
+  { name: 'policy', shape: [batch, 20480] },
+  { name: 'wdl', shape: [batch, 3] },
+  { name: 'q', shape: [batch] },
+  { name: 'hidden', shape: [batch, 64, 128] },
+];
+const timedOutputs = ['policy', 'wdl'];
+const logEl = document.getElementById('log');
+
+function log(...values) {
+  logEl.textContent += `${values.map((value) => typeof value === 'string' ? value : JSON.stringify(value)).join(' ')}\n`;
+}
+
+function elementCount(shape) {
+  return shape.reduce((product, value) => product * value, 1);
+}
+
+function sameOriginPath(raw, prefix) {
+  const url = new URL(raw, location.origin);
+  if (url.origin !== location.origin || !url.pathname.startsWith(prefix)) {
+    throw new Error(`Unsafe local path: ${raw}`);
+  }
+  return url.pathname;
+}
+
+function syntheticInputs(seed = 7) {
+  let state = seed >>> 0;
+  const next = () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state;
+  };
+  const tokens = new Int32Array(elementCount(tokenShape));
+  for (let index = 0; index < tokens.length; index++) tokens[index] = next() % 8;
+  const attack = new Float32Array(elementCount(attackShape));
+  for (let index = 0; index < attack.length; index++) {
+    attack[index] = ((next() % 1000) / 1000 - 0.5) * 0.5;
+  }
+  return { tokens, attack };
+}
+
+function summarize(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return {
+    count: sorted.length,
+    minMs: sorted[0],
+    maxMs: sorted[sorted.length - 1],
+    meanMs: sorted.reduce((sum, value) => sum + value, 0) / sorted.length,
+    medianMs: sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2,
+  };
+}
+
+function compareOutputs(tvmOutputs, ortOutputs) {
+  const comparison = {};
+  for (const spec of outputSpecs) {
+    const tvmData = tvmOutputs[spec.name];
+    const ortData = ortOutputs[spec.name];
+    let maxAbsDiff = 0;
+    let sumAbsDiff = 0;
+    const expectedLength = elementCount(spec.shape);
+    let allFinite = tvmData.length === expectedLength && ortData.length === expectedLength;
+    const length = Math.min(tvmData.length, ortData.length);
+    for (let index = 0; index < length; index++) {
+      const diff = Math.abs(tvmData[index] - ortData[index]);
+      if (!Number.isFinite(tvmData[index]) || !Number.isFinite(ortData[index]) || !Number.isFinite(diff)) {
+        allFinite = false;
+        break;
+      }
+      maxAbsDiff = Math.max(maxAbsDiff, diff);
+      sumAbsDiff += diff;
+    }
+    comparison[spec.name] = {
+      allFinite,
+      length: tvmData.length,
+      expectedLength,
+      maxAbsDiff,
+      meanAbsDiff: length ? sumAbsDiff / length : 0,
+    };
+  }
+  return comparison;
+}
+
+async function loadTvmjsBundle(baseUrl, bundlePath) {
+  if (globalThis.tvmjs) return;
+  await new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = new URL(bundlePath, baseUrl).pathname;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('TVMJS bundle load failed'));
+    document.head.appendChild(script);
+  });
+  if (!globalThis.tvmjs) throw new Error('TVMJS global missing');
+}
+
+async function createTvmRunner(manifest, manifestUrl, inputs) {
+  const baseUrl = new URL('.', manifestUrl);
+  const model = manifest.models?.find((entry) => Number(entry.batch) === batch);
+  if (!model) throw new Error(`Manifest has no batch ${batch} model`);
+  await loadTvmjsBundle(baseUrl, manifest.runtime?.tvmjsBundle ?? 'tvmjs.bundle.js');
+  if (!navigator.gpu) throw new Error('navigator.gpu missing');
+  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+  if (!adapter) throw new Error('WebGPU adapter unavailable');
+  const requiredLimits = {};
+  for (const key of [
+    'maxStorageBuffersPerShaderStage',
+    'maxStorageBufferBindingSize',
+    'maxBufferSize',
+    'maxComputeWorkgroupStorageSize',
+    'maxComputeInvocationsPerWorkgroup',
+  ]) {
+    if (adapter.limits[key] !== undefined) requiredLimits[key] = adapter.limits[key];
+  }
+  const device = await adapter.requestDevice({ requiredLimits });
+  const gpuErrors = [];
+  device.addEventListener('uncapturederror', (event) => {
+    gpuErrors.push(event.error?.message ?? String(event.error));
+  });
+  const wasmPath = new URL(model.wasm, baseUrl).pathname;
+  const wasmBytes = await (await fetch(wasmPath)).arrayBuffer();
+  const tvm = await tvmjs.instantiate(wasmBytes, tvmjs.createPolyfillWASI(), () => {});
+  tvm.initWebGPU(device);
+  tvm.beginScope();
+  const systemLib = tvm.systemLib();
+  const pipelineStart = performance.now();
+  await tvm.asyncLoadWebGPUPipelines(systemLib);
+  const pipelineMs = performance.now() - pipelineStart;
+  const vm = tvm.createVirtualMachine(tvm.webgpu());
+  const vmModule = vm.getInternalModule();
+  const setInput = vmModule.getFunction('set_input');
+  const invokeStateful = vmModule.getFunction('invoke_stateful');
+  const getOutput = vmModule.getFunction('get_output');
+  async function invoke(outputNames) {
+    tvm.beginScope();
+    try {
+      const start = performance.now();
+      const tokensTensor = tvm.empty(tokenShape, 'int32', tvm.webgpu());
+      tokensTensor.copyFromRawBytes(new Uint8Array(inputs.tokens.buffer));
+      const attackTensor = tvm.empty(attackShape, 'float32', tvm.webgpu());
+      attackTensor.copyFromRawBytes(new Uint8Array(inputs.attack.buffer));
+      setInput('main', tokensTensor, attackTensor);
+      invokeStateful('main');
+      const outputs = {};
+      const cpuOutputs = {};
+      let lastGpuTensor;
+      for (const name of outputNames) {
+        const outputIndex = outputSpecs.findIndex((entry) => entry.name === name);
+        const gpuTensor = getOutput('main', tvm.scalar(outputIndex, 'int32'));
+        const cpuTensor = tvm.empty(gpuTensor.shape, gpuTensor.dtype, tvm.cpu());
+        cpuTensor.copyFrom(gpuTensor);
+        cpuOutputs[name] = cpuTensor;
+        lastGpuTensor = gpuTensor;
+      }
+      if (lastGpuTensor) await lastGpuTensor.device.sync();
+      for (const name of outputNames) {
+        outputs[name] = new Float32Array(cpuOutputs[name].toRawBytes().buffer.slice(0));
+      }
+      return { outputs, ms: performance.now() - start };
+    } finally {
+      tvm.endScope();
+    }
+  }
+
+  return {
+    invoke,
+    pipelineMs,
+    gpuErrors,
+    dispose() {
+      tvm.endScope();
+      tvm.dispose();
+      device.destroy();
+    },
+  };
+}
+
+async function createOrtRunner(inputs, modelPath) {
+  ortRuntime.setRequestedOrtExecutionProviderForCurrentThread('webgpu');
+  let session;
+  try {
+    session = await ortRuntime.createOrtSession(modelPath);
+  } catch (error) {
+    ortRuntime.setRequestedOrtExecutionProviderForCurrentThread(null);
+    throw error;
+  }
+  const tokens64 = new BigInt64Array(inputs.tokens.length);
+  for (let index = 0; index < inputs.tokens.length; index++) tokens64[index] = BigInt(inputs.tokens[index]);
+  const feeds = {
+    tokens: new ortRuntime.Tensor('int64', tokens64, tokenShape),
+    attack_summary: new ortRuntime.Tensor('float32', inputs.attack, attackShape),
+  };
+  return {
+    async invoke(outputNames) {
+      const start = performance.now();
+      const results = await session.run(feeds, outputNames);
+      const outputs = {};
+      for (const name of outputNames) outputs[name] = Float32Array.from(results[name].data);
+      return { outputs, ms: performance.now() - start };
+    },
+    async dispose() {
+      await ortRuntime.releaseOrtSession(session);
+      ortRuntime.setRequestedOrtExecutionProviderForCurrentThread(null);
+    },
+  };
+}
+
+async function run() {
+  logEl.textContent = '';
+  const safeManifestPath = sameOriginPath(manifestPath, '/runtimes/centipawn-tvmjs-webgpu/');
+  const safeOrtModelPath = sameOriginPath(ortModelPath, '/models/');
+  const manifestUrl = new URL(safeManifestPath, location.origin);
+  const manifestResponse = await fetch(manifestUrl);
+  if (!manifestResponse.ok) throw new Error(`Manifest fetch failed: ${manifestResponse.status}`);
+  const manifest = await manifestResponse.json();
+  const inputs = syntheticInputs();
+  const tvm = await createTvmRunner(manifest, manifestUrl, inputs);
+  let ort;
+  try {
+    ort = await createOrtRunner(inputs, safeOrtModelPath);
+    for (let index = 0; index < warmup; index++) {
+      await tvm.invoke(timedOutputs);
+      await ort.invoke(timedOutputs);
+    }
+    const tvmParity = await tvm.invoke(outputSpecs.map((entry) => entry.name));
+    const ortParity = await ort.invoke(outputSpecs.map((entry) => entry.name));
+    const parity = compareOutputs(tvmParity.outputs, ortParity.outputs);
+    const tvmMs = [];
+    const ortMs = [];
+    for (let index = 0; index < repeats; index++) {
+      if (index % 2 === 0) {
+        tvmMs.push((await tvm.invoke(timedOutputs)).ms);
+        ortMs.push((await ort.invoke(timedOutputs)).ms);
+      } else {
+        ortMs.push((await ort.invoke(timedOutputs)).ms);
+        tvmMs.push((await tvm.invoke(timedOutputs)).ms);
+      }
+    }
+    const timing = { tvm: summarize(tvmMs), ort: summarize(ortMs) };
+    const result = {
+      schema: 'lc0_browser.centipawn_tvmjs_webgpu_bench.v1',
+      batch,
+      warmup,
+      repeats,
+      manifest: safeManifestPath,
+      ortModel: safeOrtModelPath,
+      timedOutputs,
+      timingIncludes: ['gpu-input-upload', 'model-execution', 'policy-wdl-readback'],
+      parityOutputs: outputSpecs.map((entry) => entry.name),
+      parity,
+      timing,
+      tvmToOrtMeanRatio: timing.tvm.meanMs / timing.ort.meanMs,
+      tvmPipelineMs: tvm.pipelineMs,
+      gpuErrors: tvm.gpuErrors,
+      ok: tvm.gpuErrors.length === 0 && Object.values(parity).every((row) => row.allFinite && row.maxAbsDiff <= 0.001),
+    };
+    window.centipawnTvmjsLastResult = result;
+    log('CENTIPAWN_RESULT', result);
+    log(result.ok ? 'BENCH_OK' : 'BENCH_FAILED');
+  } finally {
+    await ort?.dispose();
+    tvm.dispose();
+  }
+}
+
+document.getElementById('run').addEventListener('click', () => run().catch((error) => {
+  console.error(error);
+  window.centipawnTvmjsLastError = error?.stack ?? String(error);
+  log('BENCH_ERROR', window.centipawnTvmjsLastError);
+}));
+
+if (params.get('autorun') === '1') setTimeout(() => document.getElementById('run').click(), 0);
+</script>

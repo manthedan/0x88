@@ -1,0 +1,53 @@
+diff --git a/src/tirx/transform/storage_rewrite.cc b/src/tirx/transform/storage_rewrite.cc
+index ddc16b039..660256f84 100644
+--- a/src/tirx/transform/storage_rewrite.cc
++++ b/src/tirx/transform/storage_rewrite.cc
+@@ -1540,7 +1540,7 @@ class VectorTypeRewriter : public StmtExprMutator {
+       indices.Set(indices.size() - 1, new_index);
+     } else if (last_dim_index.dtype().lanes() == 1 && info.factor() > 1) {
+       arith::ModularSet me = analyzer_->modular_set(last_dim_index);
+-      TVM_FFI_ICHECK(me->coeff == 0 || info.factor() % me->coeff == 0);
++      TVM_FFI_ICHECK(me->coeff == 0 || me->coeff % info.factor() == 0);
+       PrimExpr new_index = last_dim_index / make_const(last_dim_index.dtype(), info.factor());
+       shuffle_index = me->base % info.factor();
+       indices.Set(indices.size() - 1, new_index);
+diff --git a/tests/python/tirx-transform/test_tir_transform_pointer_value_type_rewrite.py b/tests/python/tirx-transform/test_tir_transform_pointer_value_type_rewrite.py
+index 98a903a09..efb0c94c3 100644
+--- a/tests/python/tirx-transform/test_tir_transform_pointer_value_type_rewrite.py
++++ b/tests/python/tirx-transform/test_tir_transform_pointer_value_type_rewrite.py
+@@ -97,6 +97,35 @@ def test_rewrite_to_shuffle_1():
+     tvm.ir.assert_structural_equal(After, Expected)
+ 
+ 
++def test_rewrite_to_shuffle_stride_multiple_of_vector_lanes():
++    transform = tvm.tirx.transform.PointerValueTypeRewrite()
++
++    @I.ir_module
++    class Before:
++        @T.prim_func(s_tir=True)
++        def main(A: T.Buffer((8,), "float32"), B: T.Buffer((2,), "float32")):
++            A_local = T.alloc_buffer((8,), scope="local")
++            for i in range(4):
++                A_local[i * 2 : i * 2 + 2] = A[i * 2 : i * 2 + 2]
++            for i in range(2):
++                B[i] = A_local[i * 4] + A_local[i * 4 + 1]
++
++    @I.ir_module
++    class Expected:
++        @T.prim_func(s_tir=True)
++        def main(A: T.Buffer((4,), "float32x2"), B: T.Buffer((2,), "float32")):
++            A_local = T.alloc_buffer((4,), "float32x2", scope="local")
++            for i in range(4):
++                A_local[T.Div(i * 2, 2)] = A[T.Div(i * 2, 2)]
++            for i in range(2):
++                B[i] = T.Shuffle([A_local[T.Div(i * 4, 2)]], [0]) + T.Shuffle(
++                    [A_local[T.Div(i * 4 + 1, 2)]], [1]
++                )
++
++    After = transform(Before)
++    tvm.ir.assert_structural_equal(After, Expected)
++
++
+ def test_address_of():
+     transform = tvm.tirx.transform.PointerValueTypeRewrite()
+ 

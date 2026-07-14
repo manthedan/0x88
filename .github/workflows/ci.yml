@@ -16,7 +16,7 @@ jobs:
         with:
           lfs: false
       - name: Fetch required release fixture
-        run: git lfs pull --include="public/models/bt4_soap_rem_c19000_final.onnx" --exclude=""
+        run: git lfs pull --include="public/models/bt4_soap_rem_c19000_final.onnx,public/runtimes/centipawn-tvmjs-webgpu/**/*.wasm" --exclude=""
       - name: Remove unavailable local-model symlinks
         run: find public/models -type l -delete
       - uses: actions/setup-node@v5

@@ -47,6 +47,7 @@ const R2_RESOLVED_PREFIXES = [
   '/reckless/',
   '/stockfish/',
   '/runtimes/squareformer-tvm-hybrid/',
+  '/runtimes/centipawn-tvmjs-webgpu/',
 ];
 
 /**

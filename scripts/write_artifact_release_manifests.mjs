@@ -9,6 +9,7 @@ const DEFAULT_SOURCE_MANIFESTS = [
   'public/models/lc0/r2-v0-present.manifest.json',
   'public/models/maia3/manifest.json',
   'public/models/centipawn.manifest.json',
+  'public/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json',
   'public/stockfish/stockfish-18.0.7.manifest.json',
   'public/reckless/reckless-wasip1.manifest.json',
   'public/viridithas/viridithas-wasip1.manifest.json',
@@ -56,6 +57,7 @@ function contentTypeFor(file) {
   if (file.endsWith('.wasm')) return 'application/wasm';
   if (file.endsWith('.js')) return 'text/javascript; charset=utf-8';
   if (file.endsWith('.json')) return 'application/json';
+  if (file.endsWith('.patch')) return 'text/plain; charset=utf-8';
   if (file.endsWith('.onnx')) return 'application/octet-stream';
   if (file.endsWith('.data') || file.endsWith('.bin') || file.endsWith('.nn') || file.endsWith('.nnue')) return 'application/octet-stream';
   if (file.endsWith('.gz')) return 'application/gzip';
@@ -72,7 +74,7 @@ function logicalUrlFromPublicPath(path) {
 }
 
 function artifactFromModelEntry(entry, sourceManifest, manifestPath, args) {
-  if (!entry?.sha256 || !Number.isFinite(entry.bytes)) return undefined;
+  if (!entry?.sha256 || !Number.isFinite(entry.bytes) || (!entry.file && !entry.url)) return undefined;
   const file = entry.file ?? basename(entry.url ?? 'artifact');
   const logicalUrl = entry.url?.startsWith('/') ? entry.url : logicalUrlFromPublicPath(posix.join(dirname(manifestPath).replace(/\\/g, '/'), file));
   return {
@@ -103,6 +105,27 @@ function artifactFromEngineEntry(entry, sourceManifest, args) {
     contentType: contentTypeFor(file),
     sourceManifest,
     localPath: entry.path,
+  };
+}
+
+function artifactFromTvmjsFile(entry, sourceManifest, manifestPath, args) {
+  if (!entry?.path || !entry?.sha256 || !Number.isFinite(entry.bytes)) return undefined;
+  const normalizedPath = posix.normalize(String(entry.path).replace(/\\/g, '/'));
+  if (normalizedPath.startsWith('../') || posix.isAbsolute(normalizedPath)) {
+    throw new Error(`Unsafe TVMJS artifact path in ${sourceManifest}: ${entry.path}`);
+  }
+  const manifestDir = posix.dirname(manifestPath).replace(/\\/g, '/');
+  const file = basename(normalizedPath);
+  return {
+    logicalUrl: logicalUrlFromPublicPath(posix.join(manifestDir, normalizedPath)),
+    artifactUrl: artifactUrlFor(entry.sha256.toLowerCase(), file, args.assetOrigin),
+    sha256: entry.sha256.toLowerCase(),
+    bytes: entry.bytes,
+    file,
+    kind: 'runtime',
+    contentType: contentTypeFor(file),
+    sourceManifest,
+    localPath: posix.join(manifestDir, normalizedPath),
   };
 }
 
@@ -188,6 +211,12 @@ async function collectArtifacts(args) {
     if (Array.isArray(manifest.artifacts)) {
       for (const entry of manifest.artifacts) {
         const artifact = artifactFromEngineEntry(entry, manifestPath, args);
+        if (artifact) artifacts.push(artifact);
+      }
+    }
+    if (Array.isArray(manifest.files)) {
+      for (const entry of manifest.files) {
+        const artifact = artifactFromTvmjsFile(entry, manifestPath, manifestPath, args);
         if (artifact) artifacts.push(artifact);
       }
     }

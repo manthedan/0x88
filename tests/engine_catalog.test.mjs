@@ -72,7 +72,7 @@ test('engine strength metadata captures arena vs analysis defaults', () => {
 
 test('static LC0 and Stockfish variants expose labels and gating metadata', () => {
   assert.equal(defaultStaticEngineVariant('lc0'), 'small');
-  assert.equal(defaultStaticEngineVariant('centipawn'), 'bt4-ort');
+  assert.equal(defaultStaticEngineVariant('centipawn'), 'bt4-auto');
   assert.equal(defaultStaticEngineVariant('sf'), 'lite');
   assert.equal(defaultStaticEngineVariant('berserk'), 'emscripten');
   assert.equal(defaultStaticEngineVariant('plentychess'), 'emscripten');
@@ -83,9 +83,11 @@ test('static LC0 and Stockfish variants expose labels and gating metadata', () =
   assert.equal(lc0EngineLabel('bt4'), 'Lc0 BT4-it332');
   assert.equal(stockfishEngineLabel('lite', 'arena'), 'Stockfish Lite');
   assert.equal(stockfishEngineLabel('lite', 'analysis'), 'SF Lite');
-  assert.equal(centipawnEngineLabel('bt4-ort'), 'Centipawn');
-  assert.equal(centipawnEngineLabel('bt4-custom'), 'Centipawn · custom WebGPU');
-  assert.deepEqual(centipawnVariantOptions().map((option) => option.value), ['bt4-ort', 'bt4-auto', 'bt4-custom']);
+  assert.equal(centipawnEngineLabel('bt4-ort'), 'Centipawn · ORT');
+  assert.equal(centipawnEngineLabel('bt4-custom'), 'Centipawn · TVMJS strict');
+  assert.deepEqual(centipawnVariantOptions().map((option) => option.value), ['bt4-auto', 'bt4-ort', 'bt4-custom']);
+  assert.deepEqual(ENGINE_FAMILY_DEFINITIONS.centipawn.variants.v0Allowed, ['bt4-auto', 'bt4-ort']);
+  assert.equal(ENGINE_FAMILY_DEFINITIONS.centipawn.play.options[0]?.variant, 'bt4-auto');
   assert.deepEqual(stockfishVariantOptions().map((option) => option.value), ['lite', 'full']);
   assert.equal(lc0VariantOptions(false).find((option) => option.value === 'bt4')?.disabled, true);
   assert.equal(lc0VariantOptions(true).find((option) => option.value === 'bt4')?.disabled, false);

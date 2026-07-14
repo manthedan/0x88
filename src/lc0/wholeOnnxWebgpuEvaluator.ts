@@ -35,6 +35,7 @@ interface RuntimeManifest {
   parameterStrategy?: { current?: string };
   tensorCache?: { directory?: string; manifest?: string };
   models: RuntimeManifestModel[];
+  files?: Array<{ path: string; sha256?: string }>;
 }
 
 interface WholeModelTensor {
@@ -169,12 +170,17 @@ async function fetchChecked(baseUrl: URL, rel: string, expected?: { bytes?: numb
   return bytes;
 }
 
-async function loadRuntimeBundle(bundleUrl: string, baseUrl: URL): Promise<WholeModelRuntimeApi> {
+async function loadRuntimeBundle(bundleUrl: string, baseUrl: URL, expectedSha256: string): Promise<WholeModelRuntimeApi> {
   const url = checkedStagedRuntimeUrl(bundleUrl, baseUrl, 'runtime bundle').toString();
   const globals = globalThis as Record<string, unknown>;
-  if (globals[RUNTIME_GLOBAL] && globals.lc0WholeModelRuntimeBundleUrl === url) return globals[RUNTIME_GLOBAL] as WholeModelRuntimeApi;
+  const loadedSha256 = globals.__LC0_TVMJS_BUNDLE_SHA256__;
+  if (globals[RUNTIME_GLOBAL]) {
+    if (loadedSha256 === expectedSha256) return globals[RUNTIME_GLOBAL] as WholeModelRuntimeApi;
+    throw new Error(`TVMJS runtime bundle mismatch: loaded ${String(loadedSha256 ?? 'unknown')} != expected ${expectedSha256}`);
+  }
   await import(/* @vite-ignore */ url);
   globals.lc0WholeModelRuntimeBundleUrl = url;
+  globals.__LC0_TVMJS_BUNDLE_SHA256__ = expectedSha256;
   const api = globals[RUNTIME_GLOBAL] as WholeModelRuntimeApi | undefined;
   if (!api) throw new Error(`runtime global missing after loading ${url}`);
   return api;
@@ -268,7 +274,9 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     const model = manifest.models.find((item) => item.batch === requestedBatch);
     if (!model) throw new Error(`Batch ${requestedBatch} not in manifest`);
     const bundle = manifest.runtime?.['tvm' + 'jsBundle'] ?? DEFAULT_BUNDLE;
-    const api = await timed('runtimeBundleLoadMs', () => loadRuntimeBundle(bundle, base));
+    const bundleFile = manifest.files?.find((entry) => entry.path === bundle);
+    if (!bundleFile?.sha256) throw new Error(`Runtime bundle integrity metadata missing for ${bundle}`);
+    const api = await timed('runtimeBundleLoadMs', () => loadRuntimeBundle(bundle, base, bundleFile.sha256!));
     const nav = navigator as NavigatorWithGpu;
     if (!nav.gpu) throw new Error('navigator.gpu missing');
     const adapter = await timed('requestAdapterMs', () => nav.gpu!.requestAdapter());

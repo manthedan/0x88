@@ -33,6 +33,7 @@ const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled
 const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
 const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl('/models/bt4_soap_rem_c19000_final.onnx');
 const CENTIPAWN_META_URL = resolvePublicAssetUrl('/models/bt4_soap_rem_c19000_final.meta.json');
+const CENTIPAWN_TVMJS_MANIFEST_URL = resolvePublicAssetUrl('/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json');
 
 type PlayFamily = 'maia3' | EngineFamily;
 
@@ -95,6 +96,7 @@ let lc0Searcher: Lc0PuctSearcher | null = null;
 let lc0LoadPromise: Promise<Lc0PuctSearcher> | null = null;
 let centipawnEvaluator: CachedEvaluator | null = null;
 let centipawnLoadPromise: Promise<Evaluator> | null = null;
+let centipawnEvaluatorGeneration = 0;
 const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
 let maia3Promise: Promise<Maia3BrowserEvaluator> | null = null;
 /** One-line model/cache status shown in the caption once Maia3 has loaded. */
@@ -436,6 +438,7 @@ function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
 function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
   if (centipawnEvaluator) return Promise.resolve(centipawnEvaluator);
   if (!centipawnLoadPromise) {
+    const generation = centipawnEvaluatorGeneration;
     ctxSetEngineNote('Loading Centipawn…');
     centipawnLoadPromise = createBrowserSquareformerRuntimeEvaluator({
       id: 'bt4-soap-rem-c19000-final',
@@ -443,22 +446,30 @@ function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
       label: 'Centipawn',
       onnx: CENTIPAWN_MODEL_URL,
       meta: CENTIPAWN_META_URL,
-      runtime: 'ort',
+      runtime: 'auto',
+      manifestUrl: CENTIPAWN_TVMJS_MANIFEST_URL,
     }, {
-      runtime: 'ort',
-      fallback: false,
+      runtime: 'auto',
+      manifestUrl: CENTIPAWN_TVMJS_MANIFEST_URL,
+      fallback: true,
       audit: { surface: 'play' },
     }).then((loaded) => {
+      if (ctxIsDisposed(ctx) || generation !== centipawnEvaluatorGeneration) {
+        (loaded.evaluator as Evaluator & { destroy?: () => void }).destroy?.();
+        const error = new Error('Centipawn load discarded after Play teardown');
+        error.name = 'AbortError';
+        throw error;
+      }
       centipawnEvaluator = new CachedEvaluator(loaded.evaluator, {
         maxEntries: 4096,
         includeHistory: true,
         includeLegalMoves: true,
-        label: 'centipawn-play:ort',
+        label: `centipawn-play:${loaded.resolvedRuntime}`,
       });
       if (!ctxIsDisposed(ctx)) ctxSetEngineNote('');
       return centipawnEvaluator;
     }).catch((error: Error) => {
-      centipawnLoadPromise = null;
+      if (generation === centipawnEvaluatorGeneration) centipawnLoadPromise = null;
       if (!ctxIsDisposed(ctx)) ctxSetEngineNote(`Centipawn load failed: ${error.message}`, true);
       throw error;
     });
@@ -982,7 +993,7 @@ function ctxRenderEngineCaution(ctx: PlayContext): void {
     caution.textContent = `First move downloads the ~${config.approxMb}MB net.${odds}${memory ?? ''}${cpu}`.trimEnd();
     caution.hidden = false;
   } else if (option.family === 'centipawn') {
-    caution.textContent = 'First use downloads the ~4.5MB Centipawn model. Search then runs entirely in your browser.';
+    caution.textContent = 'First use downloads about 26MB for the Centipawn TVMJS runtime. ORT downloads only if the WebGPU runtime needs to fall back.';
     caution.hidden = false;
   } else {
     caution.hidden = true;
@@ -1272,6 +1283,12 @@ export function mountPlayBrowser(): () => void {
     ctxCancelEngineTurn(ctx);
     ctx.abort.abort();
     releaseUnusedBigNetSearchers([]);
+    centipawnEvaluatorGeneration += 1;
+    centipawnEvaluator?.clear();
+    const destroyCentipawn = (centipawnEvaluator?.inner as Evaluator & { destroy?: () => void } | undefined)?.destroy;
+    if (typeof destroyCentipawn === 'function') destroyCentipawn.call(centipawnEvaluator?.inner);
+    centipawnEvaluator = null;
+    centipawnLoadPromise = null;
     // Stormphrax reserves a 512 MiB WASM heap, so unlike the smaller CPU
     // engines it must not remain cached after this Play route is gone.
     disposeCachedCpuEngine('stormphrax');

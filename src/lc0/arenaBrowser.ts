@@ -147,15 +147,21 @@ const DEFAULT_CENTIPAWN_MODEL_URL = '/models/bt4_soap_rem_c19000_final.onnx';
 const DEFAULT_CENTIPAWN_META_URL = '/models/bt4_soap_rem_c19000_final.meta.json';
 const LEGACY_CENTIPAWN_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
 const LEGACY_CENTIPAWN_META_URL = '/models/bt4_anneal_muon_best.meta.json';
-const DEFAULT_CENTIPAWN_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
+const DEFAULT_CENTIPAWN_TVMJS_MANIFEST_URL = '/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json';
+const LEGACY_CENTIPAWN_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
 const DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL = '/runtimes/lc0-' + 'tvm' + 'js-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json';
 const LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole-onnx-webgpu' as const;
 const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl(isV0DeployProfile() ? DEFAULT_CENTIPAWN_MODEL_URL : params.get('centipawnModel') ?? params.get('centipawnOnnx') ?? DEFAULT_CENTIPAWN_MODEL_URL);
 const CENTIPAWN_META_URL = resolvePublicAssetUrl(isV0DeployProfile() ? DEFAULT_CENTIPAWN_META_URL : params.get('centipawnMeta') ?? DEFAULT_CENTIPAWN_META_URL);
 const LEGACY_CENTIPAWN_RESOLVED_MODEL_URL = resolvePublicAssetUrl(params.get('tinyModel') ?? params.get('tinyOnnx') ?? LEGACY_CENTIPAWN_MODEL_URL);
 const LEGACY_CENTIPAWN_RESOLVED_META_URL = resolvePublicAssetUrl(params.get('tinyMeta') ?? LEGACY_CENTIPAWN_META_URL);
-const LEGACY_CENTIPAWN_OVERRIDE = !isV0DeployProfile() && (params.has('tinyModel') || params.has('tinyOnnx') || params.has('tinyMeta'));
-const CENTIPAWN_HYBRID_MANIFEST_URL = params.get('centipawnManifest') ?? params.get('manifest') ?? params.get('manifestUrl') ?? params.get('tinyManifest') ?? DEFAULT_CENTIPAWN_HYBRID_MANIFEST_URL;
+const LEGACY_CENTIPAWN_OVERRIDE = !isV0DeployProfile()
+  && (params.has('tinyModel') || params.has('tinyOnnx') || params.has('tinyMeta') || params.has('tinyManifest'));
+const CENTIPAWN_HYBRID_MANIFEST_URL = params.get('centipawnManifest')
+  ?? params.get('manifest')
+  ?? params.get('manifestUrl')
+  ?? params.get('tinyManifest')
+  ?? (LEGACY_CENTIPAWN_OVERRIDE ? LEGACY_CENTIPAWN_HYBRID_MANIFEST_URL : DEFAULT_CENTIPAWN_TVMJS_MANIFEST_URL);
 const LC0_WHOLE_MODEL_MANIFEST_URL = params.get('wholeModelManifest') ?? params.get('wholeModelManifestUrl') ?? params.get('tvm' + 'jsManifest') ?? DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL;
 type Lc0ArenaRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads' | typeof LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
 type Lc0ArenaPreset = 'stable' | 'benchmarked-small' | 'custom';
@@ -227,6 +233,8 @@ const berserkEngines = new DisposableVariantPool(berserkCacheKey, createBerserkE
 const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, createPlentyChessEngine);
 const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, createStormphraxEngine);
 const centipawnEvaluatorPromises = new Map<string, Promise<Evaluator>>();
+const centipawnEvaluators = new Set<CachedEvaluator>();
+let centipawnEvaluatorGeneration = 0;
 let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
 function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4WorkerSearcher } {
@@ -409,9 +417,9 @@ function clearArenaSearchProgress(engineId: string): void {
   renderEngineOutputs();
 }
 
-function centipawnRuntimeForVariant(variant: string): 'auto' | 'ort' | 'custom-webgpu' {
+function centipawnRuntimeForVariant(variant: string): 'auto' | 'ort' | 'custom-webgpu' | 'tvmjs-webgpu' {
   if (variant.endsWith('-ort')) return 'ort';
-  if (variant.endsWith('-custom')) return 'custom-webgpu';
+  if (variant.endsWith('-custom')) return LEGACY_CENTIPAWN_OVERRIDE ? 'custom-webgpu' : 'tvmjs-webgpu';
   return 'auto';
 }
 
@@ -420,15 +428,15 @@ function centipawnRuntimeFallbackForVariant(variant: string): boolean {
 }
 
 function centipawnHybridManifestStatusText(): string {
-  if (centipawnHybridManifestStatus === 'present') return `Centipawn hybrid bundle present (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
-  if (centipawnHybridManifestStatus === 'missing') return `Centipawn hybrid bundle missing; auto uses ORT fallback (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
-  return `Centipawn hybrid bundle checking (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
+  if (centipawnHybridManifestStatus === 'present') return `Centipawn TVMJS bundle present (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
+  if (centipawnHybridManifestStatus === 'missing') return `Centipawn TVMJS bundle missing; auto uses ORT fallback (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
+  return `Centipawn TVMJS bundle checking (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
 }
 
 async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.signal): Promise<void> {
   let status: typeof centipawnHybridManifestStatus;
   try {
-    const res = await fetch(CENTIPAWN_HYBRID_MANIFEST_URL, { method: 'HEAD', cache: 'no-store' });
+    const res = await fetch(resolvePublicAssetUrl(CENTIPAWN_HYBRID_MANIFEST_URL), { method: 'HEAD', cache: 'no-store' });
     status = res.ok ? 'present' : 'missing';
   } catch {
     status = 'missing';
@@ -444,18 +452,19 @@ async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.sig
 }
 
 function centipawnModelForVariant(variant: string): { modelId: string; onnx: string; meta: string } {
-  return variant === 'bt4-ort' && !LEGACY_CENTIPAWN_OVERRIDE
-    ? { modelId: 'bt4-soap-rem-c19000-final', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL }
-    : { modelId: 'bt4-anneal-muon-best', onnx: LEGACY_CENTIPAWN_RESOLVED_MODEL_URL, meta: LEGACY_CENTIPAWN_RESOLVED_META_URL };
+  return LEGACY_CENTIPAWN_OVERRIDE
+    ? { modelId: 'bt4-anneal-muon-best', onnx: LEGACY_CENTIPAWN_RESOLVED_MODEL_URL, meta: LEGACY_CENTIPAWN_RESOLVED_META_URL }
+    : { modelId: 'bt4-soap-rem-c19000-final', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL };
 }
 
 async function centipawnEvaluator(variant: string): Promise<Evaluator> {
   const runtime = centipawnRuntimeForVariant(variant);
   const fallback = centipawnRuntimeFallbackForVariant(variant);
   const model = centipawnModelForVariant(variant);
-  const key = `${runtime}:${fallback ? 'fallback' : 'strict'}:${model.onnx}:${model.meta}`;
+  const key = `${runtime}:${fallback ? 'fallback' : 'strict'}:${model.onnx}:${model.meta}:${CENTIPAWN_HYBRID_MANIFEST_URL}`;
   const existing = centipawnEvaluatorPromises.get(key);
   if (existing) return existing;
+  const generation = centipawnEvaluatorGeneration;
   const created = (async () => {
     const loaded = await createBrowserSquareformerRuntimeEvaluator({
       id: model.modelId,
@@ -479,13 +488,22 @@ async function centipawnEvaluator(variant: string): Promise<Evaluator> {
       manifestUrl: loaded.manifestUrl,
       fallbackReason: loaded.fallbackReason,
     });
-    return new CachedEvaluator(loaded.evaluator, { maxEntries: arenaCacheEntries(), includeHistory: true, includeLegalMoves: true, label: `centipawn-arena:${runtime}` });
+    const cached = new CachedEvaluator(loaded.evaluator, { maxEntries: arenaCacheEntries(), includeHistory: true, includeLegalMoves: true, label: `centipawn-arena:${runtime}` });
+    if (centipawnEvaluatorGeneration !== generation) {
+      const destroy = (cached.inner as Evaluator & { destroy?: () => void }).destroy;
+      if (typeof destroy === 'function') destroy.call(cached.inner);
+      const error = new Error('Centipawn evaluator was disposed before it finished loading');
+      error.name = 'AbortError';
+      throw error;
+    }
+    centipawnEvaluators.add(cached);
+    return cached;
   })();
   centipawnEvaluatorPromises.set(key, created);
   try {
     return await created;
   } catch (error) {
-    centipawnEvaluatorPromises.delete(key);
+    if (centipawnEvaluatorPromises.get(key) === created) centipawnEvaluatorPromises.delete(key);
     throw error;
   }
 }
@@ -2927,6 +2945,13 @@ function disposeRuntimeResources(): void {
   arenaSearchProgress.clear();
   hideDownloadProgress();
   disposeLc0Resources();
+  centipawnEvaluatorGeneration++;
+  for (const evaluator of centipawnEvaluators) {
+    evaluator.clear();
+    const destroy = (evaluator.inner as Evaluator & { destroy?: () => void }).destroy;
+    if (typeof destroy === 'function') destroy.call(evaluator.inner);
+  }
+  centipawnEvaluators.clear();
   centipawnEvaluatorPromises.clear();
   disposeStockfish();
   recklessEngines.disposeAll();

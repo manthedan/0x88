@@ -1,0 +1,77 @@
+{
+  "schema": "lc0_browser.lc0_tvmjs_webgpu_bundle.v1",
+  "modelFamily": "bt4-soap-rem-c19000-final",
+  "dtype": "f32",
+  "version": "v1-baseline",
+  "target": "webgpu",
+  "hostTarget": {
+    "kind": "llvm",
+    "mtriple": "wasm32-unknown-unknown-wasm"
+  },
+  "generatedAt": "2026-07-13T18:34:44.580Z",
+  "requiredFeatures": [
+    "webgpu"
+  ],
+  "runtime": {
+    "tvmjsBundle": "tvmjs.bundle.js",
+    "tvmjsRuntimeWasm": "tvmjs_runtime.wasm",
+    "note": "TVMJS/WebGPU whole-model export bundle. Runtime/parity/perf still require browser validation."
+  },
+  "parameterStrategy": {
+    "current": "embedded-in-per-batch-wasm",
+    "note": "Current research staging embeds model weights in each batch-specific TVMJS wasm. Future release candidates should evaluate TVM tensor-cache weight separation before publication.",
+    "tensorCacheApis": {
+      "pythonDumpTensorCache": "tvm.contrib.tvmjs.dump_tensor_cache",
+      "browserFetchTensorCache": "tvm.fetchTensorCache"
+    }
+  },
+  "compilerProvenance": {
+    "gitCommit": "94398e51fbb8bf9022da85d83e25f914ef033110",
+    "gitDescribe": "v0.26.dev0-6-g94398e51f-dirty",
+    "gitDirty": true,
+    "tvmBuildDir": "build-tvmjs",
+    "note": "Local filesystem paths are intentionally omitted because this manifest can be browser-fetchable when artifacts are published.",
+    "emscripten": {
+      "emcc": "emcc",
+      "version": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 5.0.7-git"
+    },
+    "webgpu": {
+      "requiredFeatures": [
+        "webgpu"
+      ],
+      "fetchTensorCacheApiPresent": true,
+      "dumpTensorCacheApiPresent": true
+    }
+  },
+  "models": [
+    {
+      "batch": 16,
+      "wasm": "bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.tvmjs.wasm",
+      "probe": "bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.json",
+      "bytes": 19961887,
+      "sha256": "7f6f0138ea04a3ed1be52ce8a71afe5d34c7e954098191a381bea01f89e98e1b"
+    }
+  ],
+  "files": [
+    {
+      "path": "tvmjs.bundle.js",
+      "bytes": 310860,
+      "sha256": "e5225b46a98cc6c5ab133233a67f830e856ac0a23b01022768e7f94ed58a8111"
+    },
+    {
+      "path": "tvmjs_runtime.wasm",
+      "bytes": 5354374,
+      "sha256": "f5d0b00f63ee878a2144f576ab41825a7c3d13a79621782dcc98b14f4d1c58e5"
+    },
+    {
+      "path": "bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.tvmjs.wasm",
+      "bytes": 19961887,
+      "sha256": "7f6f0138ea04a3ed1be52ce8a71afe5d34c7e954098191a381bea01f89e98e1b"
+    },
+    {
+      "path": "bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.json",
+      "bytes": 39876,
+      "sha256": "9aec3fd0a79efe0298e9665ca4decf1bee40b72b43e1a4d9d40217b601b9f8d5"
+    }
+  ]
+}

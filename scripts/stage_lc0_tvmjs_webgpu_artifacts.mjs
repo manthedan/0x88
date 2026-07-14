@@ -18,6 +18,22 @@ function copyTracked(src, dst, root) {
   copyFileSync(src, dst);
   return { path: relative(root, dst).replaceAll('\\', '/'), bytes: statSync(dst).size, sha256: sha256(dst) };
 }
+function copySanitizedProbe(src, dst, root) {
+  requireFile(src);
+  const probe = JSON.parse(readFileSync(src, 'utf8'));
+  if (typeof probe.model === 'string') probe.model = basename(probe.model);
+  if (probe.env && typeof probe.env === 'object') {
+    probe.env = typeof probe.env.python === 'string' ? { python: probe.env.python } : {};
+  }
+  if (probe.tvm && typeof probe.tvm === 'object') {
+    delete probe.tvm.file;
+    delete probe.tvm.lib;
+  }
+  if (typeof probe.build?.tvmjs_wasm === 'string') probe.build.tvmjs_wasm = basename(probe.build.tvmjs_wasm);
+  mkdirSync(resolve(dst, '..'), { recursive: true });
+  writeFileSync(dst, `${JSON.stringify(probe, null, 2)}\n`);
+  return { path: relative(root, dst).replaceAll('\\', '/'), bytes: statSync(dst).size, sha256: sha256(dst) };
+}
 function optionalArgPath(name, envName) {
   const value = arg(name, process.env[envName] ?? '');
   return value ? resolve(value) : undefined;
@@ -69,7 +85,7 @@ function contains(path, needle) {
 function publicPathLabel(value, fallback) {
   return basename(String(value || fallback));
 }
-function tvmProvenance(tvmSrc) {
+function tvmProvenance(tvmSrc, requiredFeatures) {
   const webRuntime = join(tvmSrc, 'web/src/runtime.ts');
   const tvmjsPy = join(tvmSrc, 'python/tvm/contrib/tvmjs.py');
   const emccCommand = process.env.EMCC ?? 'emcc';
@@ -84,7 +100,7 @@ function tvmProvenance(tvmSrc) {
       version: commandOutput(emccCommand, ['--version'])?.split('\n')[0],
     },
     webgpu: {
-      requiredFeatures: ['webgpu', 'shader-f16'],
+      requiredFeatures,
       fetchTensorCacheApiPresent: contains(webRuntime, 'fetchTensorCache('),
       dumpTensorCacheApiPresent: contains(tvmjsPy, 'def dump_tensor_cache('),
     },
@@ -94,6 +110,7 @@ function tvmProvenance(tvmSrc) {
 const repo = process.cwd();
 const modelFamily = arg('model-family', process.env.LC0_TVMJS_MODEL_FAMILY ?? 't1-256x10-distilled-swa-2432500');
 const dtype = arg('dtype', process.env.LC0_TVMJS_DTYPE ?? 'f16');
+const requiredFeatures = dtype === 'f16' ? ['webgpu', 'shader-f16'] : ['webgpu'];
 const version = arg('version', process.env.LC0_TVMJS_VERSION ?? 'v1');
 const batches = parseBatches(arg('batches', process.env.LC0_TVMJS_BATCHES ?? '1,4,8'));
 const stemTemplate = arg('stem-template', process.env.LC0_TVMJS_STEM_TEMPLATE ?? '{modelFamily}.batch{batch}.{dtype}.webgpu.tvmjs-wasm.probe');
@@ -124,7 +141,7 @@ for (const batch of batches) {
   const wasm = join(artifacts, `${stem}.tvmjs.wasm`);
   const probe = join(artifacts, `${stem}.json`);
   files.push(copyTracked(wasm, join(out, basename(wasm)), out));
-  files.push(copyTracked(probe, join(out, basename(probe)), out));
+  files.push(copySanitizedProbe(probe, join(out, basename(probe)), out));
   models.push({
     batch,
     wasm: basename(wasm),
@@ -143,7 +160,7 @@ const manifest = {
   target: 'webgpu',
   hostTarget: { kind: 'llvm', mtriple: 'wasm32-unknown-unknown-wasm' },
   generatedAt: new Date().toISOString(),
-  requiredFeatures: ['webgpu', 'shader-f16'],
+  requiredFeatures,
   runtime: {
     tvmjsBundle: 'tvmjs.bundle.js',
     tvmjsRuntimeWasm: 'tvmjs_runtime.wasm',
@@ -174,7 +191,7 @@ const manifest = {
     totalBytes: tensorCache.totalBytes,
     files: tensorCache.files.map((file) => file.path),
   } } : {}),
-  compilerProvenance: tvmProvenance(tvmSrc),
+  compilerProvenance: tvmProvenance(tvmSrc, requiredFeatures),
   models,
   files,
 };

@@ -11,21 +11,20 @@
 // The policy this script now enforces:
 //   1. ORT stays the DEFAULT runtime: normalizeLc0Runtime must fall back to
 //      'onnx' in both arena and analysis.
-//   2. The stable NN runtime plumbing (runtimeRegistry, the generic
-//      browserRuntimeEvaluator) stays TVMJS-free: page-level selection only.
-//   3. TVMJS artifacts stay out of the committed tree (gitignored staging).
+//   2. LC0 whole-model TVMJS stays page-level and non-default. Centipawn has
+//      a separately promoted TVMJS runtime in the shared registry.
 import { readFile } from 'node:fs/promises';
 
 const FORBIDDEN = [
   {
     path: 'src/nn/runtimeRegistry.ts',
-    forbidden: [/tvmjs/i, /lc0-tvmjs/i],
-    reason: 'TVMJS selection is page-level; the stable runtime registry stays TVMJS-free.',
+    forbidden: [/lc0-tvmjs/i],
+    reason: 'LC0 TVMJS selection remains page-level rather than registry-promoted.',
   },
   {
     path: 'src/nn/browserRuntimeEvaluator.ts',
-    forbidden: [/tvmjs/i, /lc0-tvmjs/i],
-    reason: 'TVMJS must not be instantiated by the stable browser runtime evaluator.',
+    forbidden: [/lc0-tvmjs/i],
+    reason: 'The shared evaluator may host Centipawn TVMJS, but not the LC0 whole-model runtime.',
   },
 ];
 
@@ -56,7 +55,7 @@ async function main() {
     ok: failures.length === 0,
     checked,
     failures,
-    note: 'Promoted 2026-06-10: TVMJS is a visible non-default LC0 runtime option; ORT remains the default and fallback, and the stable NN runtime plumbing stays TVMJS-free.',
+    note: 'LC0 TVMJS remains visible and non-default. This gate does not prohibit the separately promoted Centipawn TVMJS runtime.',
   };
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (failures.length) process.exitCode = 1;

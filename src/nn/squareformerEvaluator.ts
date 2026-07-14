@@ -899,6 +899,7 @@ export class SquareFormerEvaluator implements Evaluator {
   private session: ort.InferenceSession;
   private meta: SquareFormerMeta;
   private inputCache = new Map<string, SquareFormerEncodedInput>();
+  private destroyed = false;
   constructor(session: ort.InferenceSession, meta: SquareFormerMeta) { this.session = session; this.meta = meta; }
   static async create(modelPath: string | Uint8Array | ArrayBuffer, meta: SquareFormerMeta): Promise<SquareFormerEvaluator> {
     return new SquareFormerEvaluator(await ort.createOrtSession(modelPath), meta);
@@ -917,6 +918,7 @@ export class SquareFormerEvaluator implements Evaluator {
   }
 
   async evaluateBatch(boards: BoardState[], contexts: EvaluationContext[] = []): Promise<Evaluation[]> {
+    if (this.destroyed) throw new Error('SquareFormer evaluator is destroyed');
     if (!boards.length) return [];
     const t0 = ort.tinyLeelaNowMs();
     if (boards.length > 1 && this.meta.onnx_dynamic_batch !== true) {
@@ -1033,5 +1035,12 @@ export class SquareFormerEvaluator implements Evaluator {
       totalMs: tDone - t0,
     });
     return out;
+  }
+
+  destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.inputCache.clear();
+    void ort.releaseOrtSession(this.session).catch(() => undefined);
   }
 }

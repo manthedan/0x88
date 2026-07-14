@@ -81,9 +81,9 @@ export const LC0_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
 ];
 
 export const CENTIPAWN_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
+  { value: 'bt4-auto', label: 'BT4 SOAP REM c19000 · TVMJS auto' },
   { value: 'bt4-ort', label: 'BT4 SOAP REM c19000 · ORT' },
-  { value: 'bt4-auto', label: 'Legacy BT4 Anneal Muon · runtime auto', experimental: true },
-  { value: 'bt4-custom', label: 'Legacy BT4 Anneal Muon · custom WebGPU strict', experimental: true },
+  { value: 'bt4-custom', label: 'BT4 SOAP REM c19000 · TVMJS strict', experimental: true },
 ];
 
 export const STOCKFISH_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
@@ -286,7 +286,7 @@ export const ENGINE_FAMILY_DEFINITIONS = {
     shortLabel: 'Centi',
     status: 'mixed',
     docHref: 'docs/engine_catalog.md#centipawn-family',
-    note: 'Centipawn SquareFormer neural family; ORT is baseline and promoted custom WebGPU can be selected separately from LC0.',
+    note: 'Centipawn SquareFormer neural family; TVMJS WebGPU is primary with automatic ORT fallback.',
     runtime: 'neural',
     resource: { resourceClass: 'gpu', maxThreads: 1 },
     strength: {
@@ -295,16 +295,16 @@ export const ENGINE_FAMILY_DEFINITIONS = {
     },
     order: { default: 7, v0: 7 },
     variants: {
-      default: 'bt4-ort',
+      default: 'bt4-auto',
       options: CENTIPAWN_ENGINE_VARIANTS,
-      v0Allowed: ['bt4-ort'],
-      v0Fallback: 'bt4-ort',
+      v0Allowed: ['bt4-auto', 'bt4-ort'],
+      v0Fallback: 'bt4-auto',
       label: (variant) => variant === 'bt4-ort'
-        ? 'Centipawn'
-        : variant === 'bt4-custom' ? 'Centipawn · custom WebGPU' : 'Centipawn · auto',
+        ? 'Centipawn · ORT'
+        : variant === 'bt4-custom' ? 'Centipawn · TVMJS strict' : 'Centipawn',
     },
     play: {
-      options: [{ id: 'centipawn', label: 'Centipawn', variant: 'bt4-ort', group: 'engine', order: 11, v0: true }],
+      options: [{ id: 'centipawn', label: 'Centipawn', variant: 'bt4-auto', group: 'engine', order: 11, v0: true }],
       levels: [8, 32, 100, 400, 1600],
     },
     aliases: ['tiny'],

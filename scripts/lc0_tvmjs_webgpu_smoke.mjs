@@ -120,13 +120,20 @@ async function evalPage(args, session, expression, timeoutMs = 30_000) {
 
 function startServer(args) {
   if (args.noServer) return null;
-  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
+    env: { ...process.env, LC0_TVMJS_LAB: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   let output = '';
   let settled = false;
   server.ready = new Promise((resolve, reject) => {
     const timer = setTimeout(() => settle(reject, new Error(`Vite did not become ready on ${args.port}: ${output.trim()}`)), 30_000);
     const settle = (fn, value) => { if (settled) return; settled = true; clearTimeout(timer); fn(value); };
-    const onOutput = (chunk) => { output += chunk.toString('utf8'); if (/ready in \d+\s*ms/.test(output) || output.includes(`:${args.port}/`)) settle(resolve); };
+    const onOutput = (chunk) => {
+      output += chunk.toString('utf8');
+      const plainOutput = output.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
+      if (/ready in \d+\s*ms/.test(plainOutput) || plainOutput.includes(`:${args.port}/`)) settle(resolve);
+    };
     server.stdout.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
     server.stderr.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
     server.on('exit', (status, signal) => settle(reject, new Error(`Vite exited before ready (${status ?? signal}): ${output.trim()}`)));

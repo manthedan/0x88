@@ -611,9 +611,9 @@ def main() -> int:
             crashed_functions: set[str] = set()
 
             class _RecordingRule:
-                def __init__(self, rule: Any) -> None:
+                def __init__(self, rule: Any, name: str | None = None) -> None:
                     self._rule = rule
-                    self._name = type(rule).__name__
+                    self._name = name or type(rule).__name__
 
                 def apply(self, func: Any, rule_target: Any, tunable: bool) -> Any:
                     # A rule that crashes mid-schedule (e.g. rfactor bind on an
@@ -647,21 +647,129 @@ def main() -> int:
                 ]
                 matmul_rule = dl.gpu.Matmul()
                 if args.dlight_matmul_config:
-                    overrides = json.loads(args.dlight_matmul_config)
-                    base_config = matmul_rule.get_configs(tvm.target.Target.current())
+                    raw_config = json.loads(args.dlight_matmul_config)
+                    shape_selector = raw_config.get("selector") if isinstance(raw_config, dict) else None
+                    if shape_selector is not None:
+                        unknown_top_level = sorted(set(raw_config) - {"selector", "config"})
+                        if unknown_top_level:
+                            raise ValueError(f"Unknown shape-aware dlight config fields: {unknown_top_level}")
+                        if not isinstance(shape_selector, dict) or shape_selector.get("kind") != "static_large":
+                            raise ValueError("Shape-aware dlight selector must use kind=static_large")
+                        unknown_selector = sorted(
+                            set(shape_selector) - {"kind", "min_macs", "j_multiple", "k_multiple"}
+                        )
+                        if unknown_selector:
+                            raise ValueError(f"Unknown dlight matmul selector fields: {unknown_selector}")
+                        overrides = raw_config.get("config")
+                        if not isinstance(overrides, dict) or not overrides:
+                            raise ValueError("Shape-aware dlight config requires a non-empty config object")
+                    elif isinstance(raw_config, dict):
+                        overrides = raw_config
+                    else:
+                        raise ValueError("Dlight matmul config must be a JSON object")
+                    selected_rule = dl.gpu.Matmul()
+                    base_config = selected_rule.get_configs(tvm.target.Target.current())
                     for key, value in overrides.items():
                         if not hasattr(base_config, key):
                             raise ValueError(f"Unknown dlight Matmul.Config field: {key}")
                         setattr(base_config, key, value)
-                    matmul_rule.get_configs = lambda _target, _config=base_config: _config
+                    selected_rule.get_configs = lambda _target, _config=base_config: _config
                     result["dlight_matmul_config"] = {key: getattr(base_config, key) for key in vars(base_config)}
+                    if shape_selector is None:
+                        matmul_rule = selected_rule
+                    else:
+                        from tvm.s_tir.dlight.analysis import get_root_block  # type: ignore
+                        from tvm.s_tir.dlight.gpu.matmul import (  # type: ignore
+                            IterKind,
+                            detect_iter_traits,
+                            get_reduction_blocks,
+                        )
+
+                        selector = {
+                            "kind": "static_large",
+                            "min_macs": int(shape_selector.get("min_macs", 0)),
+                            "j_multiple": int(shape_selector.get("j_multiple", 1)),
+                            "k_multiple": int(shape_selector.get("k_multiple", 1)),
+                        }
+                        for key in ("min_macs", "j_multiple", "k_multiple"):
+                            if selector[key] <= 0 and key != "min_macs":
+                                raise ValueError(f"Dlight matmul selector {key} must be positive")
+                            if selector[key] < 0:
+                                raise ValueError(f"Dlight matmul selector {key} must be nonnegative")
+
+                        default_rule = matmul_rule
+                        dispatch_decisions: dict[str, dict[str, Any]] = {}
+
+                        def static_matmul_shape(func: Any) -> dict[str, int] | None:
+                            schedule = tvm.s_tir.Schedule(func)
+                            root_block = get_root_block(schedule)
+                            reduction_blocks = get_reduction_blocks(
+                                schedule, schedule.get_child_blocks(root_block)
+                            )
+                            if reduction_blocks is None:
+                                return None
+                            traits = detect_iter_traits(schedule.get(reduction_blocks[0]))
+                            if traits is None:
+                                return None
+                            dimensions = {
+                                IterKind.kIter_S: 1,
+                                IterKind.kIter_I: 1,
+                                IterKind.kIter_J: 1,
+                                IterKind.kIter_K: 1,
+                            }
+                            for trait in traits[3]:
+                                if trait.kind == IterKind.kIter_T:
+                                    continue
+                                if trait.kind not in dimensions or not isinstance(
+                                    trait.extent, tvm.tirx.IntImm
+                                ):
+                                    return None
+                                dimensions[trait.kind] *= int(trait.extent.value)
+                            shape = {
+                                "s": dimensions[IterKind.kIter_S],
+                                "i": dimensions[IterKind.kIter_I],
+                                "j": dimensions[IterKind.kIter_J],
+                                "k": dimensions[IterKind.kIter_K],
+                            }
+                            shape["macs"] = shape["s"] * shape["i"] * shape["j"] * shape["k"]
+                            return shape
+
+                        class _ShapeAwareMatmulRule:
+                            def apply(self, func: Any, rule_target: Any, tunable: bool) -> Any:
+                                shape = static_matmul_shape(func)
+                                selected = (
+                                    shape is not None
+                                    and shape["macs"] >= selector["min_macs"]
+                                    and shape["j"] % selector["j_multiple"] == 0
+                                    and shape["k"] % selector["k_multiple"] == 0
+                                )
+                                dispatch_decisions[function_name(func)] = {
+                                    "shape": shape,
+                                    "profile": (
+                                        "selected" if selected else "default" if shape is not None else "unmatched"
+                                    ),
+                                }
+                                rule = selected_rule if selected else default_rule
+                                return rule.apply(func, rule_target, tunable)
+
+                        matmul_rule = _ShapeAwareMatmulRule()
+                        result["dlight_matmul_dispatch"] = {
+                            "selector": selector,
+                            "selected_config": result["dlight_matmul_config"],
+                            "functions": dispatch_decisions,
+                        }
                 build_mod = dl.ApplyDefaultSchedule(
-                    _RecordingRule(matmul_rule),
+                    _RecordingRule(matmul_rule, "Matmul"),
                     _RecordingRule(dl.gpu.GEMV()),
                     _RecordingRule(dl.gpu.Reduction()),
                     _RecordingRule(dl.gpu.GeneralReduction()),
                     _RecordingRule(dl.gpu.Fallback()),
                 )(build_mod)
+                if "dlight_matmul_dispatch" in result:
+                    dispatch_functions = result["dlight_matmul_dispatch"]["functions"]
+                    result["dlight_matmul_dispatch"]["counts"] = dict(
+                        Counter(item["profile"] for item in dispatch_functions.values())
+                    )
             result["dlight_applied"] = True
             result["dlight_rule_attribution"] = {
                 "counts": dict(Counter(rule_attribution.values())),

@@ -89,6 +89,39 @@ test('write_artifact_release_manifests creates channel and content-addressed rel
   assert.equal(check.status, 0, check.stderr);
 });
 
+test('write_artifact_release_manifests includes TVMJS runtime files', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'centipawn-tvmjs-release-manifest-'));
+  const runtimeDir = join(root, 'public/runtimes/centipawn-tvmjs-webgpu/model/f32/v2');
+  await mkdir(runtimeDir, { recursive: true });
+  for (const file of ['tvmjs.bundle.js', 'tvmjs_runtime.wasm', 'model.tvmjs.wasm']) {
+    await writeFile(join(runtimeDir, file), 'abc');
+  }
+  await writeJson(join(runtimeDir, 'manifest.json'), {
+    schema: 'lc0_browser.lc0_tvmjs_webgpu_bundle.v1',
+    files: [
+      { path: 'tvmjs.bundle.js', bytes: 3, sha256: ABC_SHA256 },
+      { path: 'tvmjs_runtime.wasm', bytes: 3, sha256: ABC_SHA256 },
+      { path: 'model.tvmjs.wasm', bytes: 3, sha256: ABC_SHA256 },
+    ],
+  });
+
+  const result = spawnSync(process.execPath, [
+    'scripts/write_artifact_release_manifests.mjs',
+    '--root', root,
+    '--release-id', 'centipawn-tvmjs',
+    '--manifest', 'public/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/manifest.json',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+
+  const release = JSON.parse(await readFile(join(root, 'public/releases/centipawn-tvmjs.json'), 'utf8'));
+  assert.deepEqual(release.artifacts.map((artifact) => [artifact.logicalUrl, artifact.kind, artifact.contentType]), [
+    ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/manifest.json', 'manifest', 'application/json'],
+    ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/model.tvmjs.wasm', 'runtime', 'application/wasm'],
+    ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/tvmjs_runtime.wasm', 'runtime', 'application/wasm'],
+    ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/tvmjs.bundle.js', 'runtime', 'text/javascript; charset=utf-8'],
+  ]);
+});
+
 test('write_artifact_release_manifests carries forward an immutable base release without local legacy files', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-release-carry-forward-'));
   await mkdir(join(root, 'public/stormphrax'), { recursive: true });

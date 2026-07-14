@@ -5,9 +5,11 @@ const crossOriginIsolationHeaders = {
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Embedder-Policy': 'require-corp',
 };
+const labOnly = process.env.LC0_TVMJS_LAB === '1';
 
 export default defineConfig({
-  plugins: [sveltekit()],
+  plugins: labOnly ? [] : [sveltekit()],
+  optimizeDeps: labOnly ? { exclude: ['onnxruntime-web'] } : undefined,
   resolve: {
     // ORT is configured to load its staged /ort/ glue and WASM at runtime.
     // Select the external-WASM export so Vite does not emit another copy for
