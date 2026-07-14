@@ -322,10 +322,24 @@ function logicalUrlField(modelUrl: string, resolvedUrl: string): string | undefi
   return absoluteUrl(resolvedUrl) === absoluteUrl(modelUrl) ? undefined : modelUrl;
 }
 
-interface Lc0ArtifactChannelManifest { releaseManifestUrl?: string }
-interface Lc0ArtifactReleaseManifest {
-  artifacts?: Array<{ logicalUrl: string; artifactUrl: string; bytes?: number; sha256?: string }>;
+interface Lc0ArtifactChannelManifest { releaseManifestUrl?: string; releaseUrl?: string }
+interface Lc0ArtifactRepresentation {
+  encoding: 'identity' | 'br';
+  url: string;
+  bytes: number;
+  sha256: string;
 }
+interface Lc0ArtifactReleaseEntry {
+  logicalUrl?: string;
+  name?: string;
+  file?: string;
+  artifactUrl?: string;
+  bytes?: number;
+  sha256?: string;
+  raw?: { bytes: number; sha256: string };
+  representations?: Lc0ArtifactRepresentation[];
+}
+interface Lc0ArtifactReleaseManifest { artifacts?: Lc0ArtifactReleaseEntry[] }
 interface ResolvedModelArtifact { url: string; expectedBytes?: number; expectedSha256?: string }
 
 function cleanChannelUrl(raw: string | null | undefined): string | undefined {
@@ -350,13 +364,32 @@ async function resolveChannelArtifactUrl(modelUrl: string, channelUrl: string | 
     const channelResponse = await fetch(channelUrl, { cache: 'no-cache' });
     if (!channelResponse.ok) return undefined;
     const channel = await channelResponse.json() as Lc0ArtifactChannelManifest;
-    if (!channel.releaseManifestUrl) return undefined;
-    const releaseUrl = new URL(channel.releaseManifestUrl, channelUrl).href;
+    const releasePath = channel.releaseManifestUrl ?? channel.releaseUrl;
+    if (!releasePath) return undefined;
+    const releaseUrl = new URL(releasePath, channelUrl).href;
     const releaseResponse = await fetch(releaseUrl, { cache: 'force-cache' });
     if (!releaseResponse.ok) return undefined;
     const release = await releaseResponse.json() as Lc0ArtifactReleaseManifest;
-    const artifact = release.artifacts?.find((entry) => entry.logicalUrl === logicalPath);
-    return artifact?.artifactUrl ? {
+    const artifacts = release.artifacts ?? [];
+    const exactArtifact = artifacts.find((entry) => entry.logicalUrl === logicalPath);
+    const logicalFile = logicalPath.split('/').pop();
+    const fallbackArtifacts = exactArtifact ? [] : artifacts.filter((entry) => !entry.logicalUrl
+      && (entry.file === logicalFile || entry.name === logicalFile));
+    const artifact = exactArtifact ?? (fallbackArtifacts.length === 1 ? fallbackArtifacts[0] : undefined);
+    if (!artifact) return undefined;
+    if (artifact.raw && artifact.representations?.length) {
+      // Full model loads do not use Range, so prefer the immutable Brotli body.
+      // Fetch transparently decodes it; integrity remains the decoded raw hash.
+      const representation = artifact.representations.find((entry) => entry.encoding === 'br')
+        ?? artifact.representations.find((entry) => entry.encoding === 'identity');
+      if (!representation) return undefined;
+      return {
+        url: new URL(representation.url, releaseUrl).href,
+        expectedBytes: artifact.raw.bytes,
+        expectedSha256: artifact.raw.sha256,
+      };
+    }
+    return artifact.artifactUrl ? {
       url: new URL(artifact.artifactUrl, releaseUrl).href,
       expectedBytes: artifact.bytes,
       expectedSha256: artifact.sha256,

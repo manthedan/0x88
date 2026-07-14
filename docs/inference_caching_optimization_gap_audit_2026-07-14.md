@@ -488,12 +488,13 @@ Success criteria:
 
 ## Revised implementation sequence
 
-### Phase 0: integrate the production baseline
+### Phase 0: integrate the production baseline — completed
 
-The inference worktree branched before the current Artifact Worker and R2
-publisher. Port these changes onto current `main` before changing production
-serving code, and rerun the cache/search parity gates after integration. Do not
-optimize a stale Worker copy.
+The inference and Artifact Worker work has been reconciled onto current `main`.
+The combined baseline passed the full TypeScript/build/test gates before the
+production Worker fast path was changed. The original checkpoint branches and
+an external reconciliation backup remain available until the integrated branch
+is published.
 
 ### Phase 1: artifact system v2
 
@@ -578,12 +579,33 @@ Completed in the inference worktree:
   successful streaming-compilation responses, and preallocates decoded NNUE
   downloads when metadata provides the size.
 
-Still blocked on Phase 0 integration:
+Completed after Phase 0 integration:
 
-- representation negotiation and canonical cache keys in the production
-  Artifact Worker;
-- R2 custom verification metadata and HEAD-only carried-forward publication;
-- immutable URLs stamped into deployed app manifests;
+- the production Artifact Worker accepts v1 and v2 release/channel manifests,
+  negotiates identity/Brotli full responses, forces Range requests to identity,
+  emits representation integrity/length headers, and returns `406` when no
+  published representation is acceptable;
+- body and HEAD Cache API entries now use canonical representation-specific
+  keys, so equal bodies and logical aliases share one edge-cache identity;
+- immutable release maps and short-lived channel pointers are cached separately;
+- full GET misses perform one Cache API lookup and one R2 `get`, without a
+  preliminary HEAD or a duplicate body-cache lookup;
+- the production R2 publisher accepts v2 representation maps, deduplicates equal
+  representation keys, uploads Brotli objects with `Content-Encoding: br`, and
+  validates v2 representation metadata with HEAD and retains decoded full-body
+  integrity checks until uploads persist a trustworthy R2 verification digest;
+- browser model resolution accepts v2 channels/releases, prefers immutable
+  Brotli representations for full loads, and continues to verify decoded length
+  and SHA-256 metadata.
+
+Still remaining:
+
+- live identity/Brotli/Range canary validation through Cloudflare;
+- migration of the default production release-manifest generator and deployed
+  app manifests from v1 filename-keyed identity entries to v2 SHA-only entries;
+- persisted R2 verification metadata that can safely replace ordinary
+  carried-forward full-body integrity downloads with HEAD-only checks;
+- replacement of variant-level existence probes with one shared release catalog;
 - production cross-worker/session evaluation brokering;
 - WGSL shared-head resources and fused final output;
 - external-weight persistent runtimes and pthread packaging repairs.

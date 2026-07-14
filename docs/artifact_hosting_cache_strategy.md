@@ -1,6 +1,6 @@
 # Artifact hosting and cache strategy
 
-Last updated: 2026-06-22
+Last updated: 2026-07-14
 
 ## Recommendation
 
@@ -38,6 +38,18 @@ It refuses to change an existing release manifest and updates only the mutable
 channel pointer. Upload the resulting tree in blob → release → channel order.
 Range requests must select `identity`; negotiated full responses may select
 `br` and must vary their canonical cache key by representation.
+
+The production Artifact Worker now supports this v2 representation map while
+retaining v1 compatibility. It caches bodies and HEAD metadata under canonical
+representation URLs rather than logical aliases, caches immutable release maps
+separately from short-lived channel pointers, and avoids preliminary HEADs on
+full GET misses. `scripts/publish_hashed_artifacts_to_r2.mjs` accepts both
+schemas, deduplicates shared v2 objects, and applies `Content-Encoding: br` on
+encoded uploads. It combines immutable HEAD validation with decoded full-body
+integrity checks until uploads persist a trustworthy R2 digest that can make
+ordinary carried-forward checks HEAD-only. The remaining deployment migration is to make the default production
+release generator emit SHA-only v2 entries and validate them with a live CDN
+canary before repointing `stable`.
 
 ## Current assessment
 

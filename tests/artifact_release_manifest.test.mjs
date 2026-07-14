@@ -201,9 +201,152 @@ test('publish_hashed_artifacts_to_r2 plans release and channel manifest uploads'
   assert.equal(result.status, 0, result.stderr);
   const parsed = JSON.parse(result.stdout);
   assert.deepEqual(parsed.manifests.map((item) => [item.type, item.key, item.cacheControl]), [
-    ['release-manifest', 'releases/test-release.json', 'public, max-age=300, stale-while-revalidate=86400'],
+    ['release-manifest', 'releases/test-release.json', 'public, max-age=31536000, immutable'],
     ['channel-manifest', 'channels/stable.json', 'no-cache'],
   ]);
+});
+
+test('publish_hashed_artifacts_to_r2 plans deduplicated v2 identity and Brotli representations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-v2-'));
+  const sourceA = join(root, 'a.onnx');
+  const sourceB = join(root, 'b.onnx');
+  await writeFile(sourceA, 'abc');
+  await writeFile(sourceB, 'abc');
+  const materialize = spawnSync(process.execPath, [
+    'scripts/publish_content_addressed_release.mjs',
+    '--root', root,
+    '--release-id', 'v2-release',
+    '--channel', 'stable',
+    '--asset', `model-a=${sourceA}`,
+    '--asset', `model-b=${sourceB}`,
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(materialize.status, 0, materialize.stderr);
+
+  const releasePath = join(root, 'releases/v2-release.json');
+  const channelPath = join(root, 'channels/stable.json');
+  const result = spawnSync(process.execPath, [
+    'scripts/publish_hashed_artifacts_to_r2.mjs',
+    '--root', root,
+    '--release', releasePath,
+    '--channel-manifest', channelPath,
+    '--bucket', 'test-bucket',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.releaseSchema, 'lc0-webgpu.artifact-release.v2');
+  assert.equal(parsed.plannedCount, 2, 'equal logical assets share identity and Brotli objects');
+  const identity = parsed.planned.find((item) => item.contentEncoding === undefined);
+  const br = parsed.planned.find((item) => item.contentEncoding === 'br');
+  assert.equal(identity.key, `artifacts/sha256/${ABC_SHA256}/identity`);
+  assert.deepEqual(identity.logicalUrls.sort(), ['model-a', 'model-b']);
+  assert.match(br.key, new RegExp(`^artifacts/sha256/${ABC_SHA256}/br/[a-f0-9]{64}$`));
+  assert.deepEqual(br.logicalUrls.sort(), ['model-a', 'model-b']);
+  assert.equal(parsed.manifests[0].cacheControl, 'public, max-age=31536000, immutable');
+});
+
+test('publish_hashed_artifacts_to_r2 uses any local duplicate when an inherited v2 alias appears first', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-v2-inherited-dedupe-'));
+  await writeFile(join(root, 'model.onnx'), 'abc');
+  const releasePath = join(root, 'release.json');
+  const identity = { encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 };
+  await writeJson(releasePath, {
+    schema: 'lc0-webgpu.artifact-release.v2',
+    releaseId: 'v2-inherited-dedupe',
+    artifacts: [
+      { name: 'inherited', carriedForwardFrom: 'base', raw: { bytes: 3, sha256: ABC_SHA256 }, representations: [identity] },
+      { name: 'local', localPath: 'model.onnx', raw: { bytes: 3, sha256: ABC_SHA256 }, representations: [identity] },
+      { name: 'missing-later-alias', localPath: 'missing.onnx', raw: { bytes: 3, sha256: ABC_SHA256 }, representations: [identity] },
+    ],
+  });
+  const result = spawnSync(process.execPath, [
+    'scripts/publish_hashed_artifacts_to_r2.mjs',
+    '--root', root,
+    '--release', releasePath,
+    '--bucket', 'test-bucket',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.plannedCount, 1);
+  assert.deepEqual(parsed.planned[0].logicalUrls, ['inherited', 'local', 'missing-later-alias']);
+  assert.equal(parsed.planned[0].remoteState, 'not-probed');
+  assert.equal(parsed.planned[0].localPath, join(root, 'model.onnx'));
+});
+
+test('publish_hashed_artifacts_to_r2 rejects same-length corrupt v2 remote bodies', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-v2-corrupt-'));
+  await writeFile(join(root, 'model.onnx'), 'abc');
+  const releasePath = join(root, 'release.json');
+  await writeJson(releasePath, {
+    schema: 'lc0-webgpu.artifact-release.v2',
+    releaseId: 'v2-corrupt',
+    artifacts: [{
+      name: 'model',
+      localPath: 'model.onnx',
+      raw: { bytes: 3, sha256: ABC_SHA256 },
+      representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
+    }],
+  });
+  const server = createServer((req, res) => {
+    const headers = {
+      'Content-Length': '3',
+      'X-Artifact-Content-Length': '3',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    };
+    if (req.method === 'HEAD') res.writeHead(200, headers).end();
+    else res.writeHead(200, headers).end('abd');
+  });
+  const port = await listen(server);
+  try {
+    const result = await runNode([
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', releasePath,
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--probe-existing',
+    ]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Remote artifact SHA-256 mismatch/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('publish_hashed_artifacts_to_r2 uploads v2 Brotli bodies with Content-Encoding', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-v2-execute-'));
+  const source = join(root, 'model.onnx');
+  await writeFile(source, 'abc');
+  const materialize = spawnSync(process.execPath, [
+    'scripts/publish_content_addressed_release.mjs',
+    '--root', root,
+    '--release-id', 'v2-execute',
+    '--asset', `model=${source}`,
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(materialize.status, 0, materialize.stderr);
+
+  const server = createServer((_req, res) => res.writeHead(404).end());
+  const port = await listen(server);
+  try {
+    const logPath = join(root, 'wrangler.log');
+    const wrangler = join(root, 'fake-wrangler.sh');
+    await writeFile(wrangler, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOG"\nif [ "$1 $2 $3" = "r2 object get" ]; then exit 1; fi\nexit 0\n');
+    await chmod(wrangler, 0o755);
+    const result = await runNode([
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', join(root, 'releases/v2-execute.json'),
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--execute',
+      '--wrangler-bin', wrangler,
+    ], { env: { ...process.env, LOG: logPath } });
+    assert.equal(result.status, 0, result.stderr);
+    const log = await readFile(logPath, 'utf8');
+    assert.match(log, new RegExp(`r2 object put test-bucket/artifacts/sha256/${ABC_SHA256}/identity`));
+    assert.match(log, /\/br\/[a-f0-9]{64} .*--content-encoding br --remote/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test('publish_hashed_artifacts_to_r2 skips existing validated artifact uploads', async () => {

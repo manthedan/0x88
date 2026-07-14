@@ -82,8 +82,9 @@ const MODEL_ARTIFACT_URL = 'http://localhost/artifacts/sha256/ba7816bf8f01cfea41
 const MANIFEST_URL = 'http://localhost/models/lc0/manifest.json';
 const CHANNEL_URL = 'http://localhost/channels/stable.json';
 const RELEASE_URL = 'http://localhost/releases/test-release.json';
+const MODEL_V2_BR_URL = `http://localhost/artifacts/sha256/${ABC_SHA256}/br/${'b'.repeat(64)}`;
 
-async function withMockedEnv(run, { serveBytes, manifestSha256, manifestBytes, manifestArtifactUrl, channelArtifacts }) {
+async function withMockedEnv(run, { serveBytes, manifestSha256, manifestBytes, manifestArtifactUrl, channelArtifacts, channelManifest, releaseManifest, artifactUrls = [] }) {
   const prev = { caches: globalThis.caches, fetch: globalThis.fetch, location: globalThis.location };
   globalThis.caches = new FakeCacheStorage();
   globalThis.location = { href: 'http://localhost/' };
@@ -97,12 +98,12 @@ async function withMockedEnv(run, { serveBytes, manifestSha256, manifestBytes, m
       return new Response(JSON.stringify(manifest), { headers: { 'content-type': 'application/json' } });
     }
     if (url === CHANNEL_URL) {
-      return new Response(JSON.stringify({ schema: 'lc0_browser.artifact_channel_manifest.v1', releaseManifestUrl: '/releases/test-release.json' }), { headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify(channelManifest ?? { schema: 'lc0_browser.artifact_channel_manifest.v1', releaseManifestUrl: '/releases/test-release.json' }), { headers: { 'content-type': 'application/json' } });
     }
     if (url === RELEASE_URL) {
-      return new Response(JSON.stringify({ schema: 'lc0_browser.artifact_release_manifest.v1', artifacts: channelArtifacts ?? [] }), { headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify(releaseManifest ?? { schema: 'lc0_browser.artifact_release_manifest.v1', artifacts: channelArtifacts ?? [] }), { headers: { 'content-type': 'application/json' } });
     }
-    if (url === MODEL_URL || url === MODEL_ARTIFACT_URL) {
+    if (url === MODEL_URL || url === MODEL_ARTIFACT_URL || artifactUrls.includes(url)) {
       fetchLog.model += 1;
       const requestCache = typeof input === 'string' ? undefined : input.cache;
       fetchLog.modelRequestCaches.push(requestCache);
@@ -193,6 +194,57 @@ test('loadLc0ModelForOrt resolves stable model URLs through channel release mani
     manifestSha256: ABC_SHA256,
     manifestBytes: 3,
     channelArtifacts: [{ logicalUrl: '/models/lc0/test.onnx', artifactUrl: '/artifacts/sha256/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad/test.onnx', bytes: 3, sha256: ABC_SHA256 }],
+  });
+});
+
+test('loadLc0ModelForOrt resolves v2 channels to immutable Brotli bodies with decoded integrity', async () => {
+  await withMockedEnv(async (fetchLog) => {
+    const direct = await loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
+    assert.equal(direct.model, MODEL_V2_BR_URL);
+
+    const cached = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
+    assert.equal(cached.url, MODEL_V2_BR_URL);
+    assert.equal(cached.sha256Valid, true);
+    assert.deepEqual(fetchLog.modelRequestCaches, ['force-cache']);
+  }, {
+    serveBytes: () => bytesOf('abc'),
+    manifestSha256: EMPTY_SHA256,
+    manifestBytes: 0,
+    artifactUrls: [MODEL_V2_BR_URL],
+    channelManifest: { schema: 'lc0-webgpu.artifact-channel.v2', releaseUrl: '/releases/test-release.json' },
+    releaseManifest: {
+      schema: 'lc0-webgpu.artifact-release.v2',
+      artifacts: [{
+        name: 'test-model',
+        file: 'test.onnx',
+        raw: { bytes: 3, sha256: ABC_SHA256 },
+        representations: [
+          { encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 },
+          { encoding: 'br', url: `/artifacts/sha256/${ABC_SHA256}/br/${'b'.repeat(64)}`, bytes: 2, sha256: 'b'.repeat(64) },
+        ],
+      }],
+    },
+  });
+});
+
+test('loadLc0ModelForOrt does not resolve ambiguous name-only v2 basenames', async () => {
+  await withMockedEnv(async () => {
+    const direct = await loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
+    assert.equal(direct.model, MODEL_URL);
+  }, {
+    serveBytes: () => bytesOf('abc'),
+    manifestSha256: ABC_SHA256,
+    manifestBytes: 3,
+    channelManifest: { schema: 'lc0-webgpu.artifact-channel.v2', releaseUrl: '/releases/test-release.json' },
+    releaseManifest: {
+      schema: 'lc0-webgpu.artifact-release.v2',
+      artifacts: ['one', 'two'].map((name) => ({
+        name,
+        file: 'test.onnx',
+        raw: { bytes: 3, sha256: ABC_SHA256 },
+        representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
+      })),
+    },
   });
 });
 

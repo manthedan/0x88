@@ -1,15 +1,20 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 
 const DEFAULT_ARTIFACT_BASE = 'https://assets.0x88.app';
+const V1_RELEASE_SCHEMA = 'lc0_browser.artifact_release_manifest.v1';
+const V2_RELEASE_SCHEMAS = new Set(['lc0_browser.artifact_release_manifest.v2', 'lc0-webgpu.artifact-release.v2']);
+const V1_CHANNEL_SCHEMA = 'lc0_browser.artifact_channel_manifest.v1';
+const V2_CHANNEL_SCHEMAS = new Set(['lc0_browser.artifact_channel_manifest.v2', 'lc0-webgpu.artifact-channel.v2']);
 
 function usage() {
-  console.log(`Usage: node scripts/publish_hashed_artifacts_to_r2.mjs --release public/releases/ID.json --bucket BUCKET [options]\n\nOptions:\n  --root DIR          Repository root (default .)\n  --execute           Actually call wrangler; default is dry-run\n  --allow-missing     Skip artifacts whose localPath is absent\n  --wrangler-bin BIN  Wrangler binary (default wrangler)\n  --channel-manifest PATH  Optional generated channel manifest to publish after the release\n  --artifact-base URL Public artifact origin used to probe relative artifactUrl values (default https://assets.0x88.app)\n  --probe-existing    In dry-run mode, validate artifact URLs and mark existing uploads as skipped\n  -h, --help          Show help\n\nThe script publishes each local artifact to artifacts/sha256/<sha>/<file>. It verifies\nlocal size and SHA-256 before upload and intentionally has no overwrite flag. It also\npublishes the release manifest to releases/<file> and, when provided, the mutable channel\nmanifest to channels/<file> after artifact/release uploads. Configure R2 lifecycle/retention\nseparately; routine releases should never replace existing hashed keys.\n`);
+  console.log(`Usage: node scripts/publish_hashed_artifacts_to_r2.mjs --release public/releases/ID.json --bucket BUCKET [options]\n\nOptions:\n  --root DIR          Repository or materialized release root (default .)\n  --execute           Actually call wrangler; default is dry-run\n  --allow-missing     Skip artifacts whose localPath is absent\n  --wrangler-bin BIN  Wrangler binary (default wrangler)\n  --channel-manifest PATH  Optional generated channel manifest to publish after the release\n  --artifact-base URL Public artifact origin used to probe relative representation URLs (default https://assets.0x88.app)\n  --probe-existing    In dry-run mode, validate representation URLs and mark existing uploads as skipped\n  -h, --help          Show help\n\nBoth legacy v1 releases and representation-aware v2 releases are accepted. V2 identity\nobjects use artifacts/sha256/<decoded-sha256>/identity; Brotli objects use\nartifacts/sha256/<decoded-sha256>/br/<encoded-sha256>. Existing v2 bodies are\nvalidated with immutable HEAD metadata plus decoded full-body integrity until trusted\nR2 verification metadata is available. Legacy filename-keyed bodies retain v1 checks. Release manifests are write-once and\nchannel pointers are published last.\n`);
 }
 
 function parseArgs(argv) {
@@ -35,32 +40,134 @@ function parseArgs(argv) {
 }
 
 async function sha256File(path) {
-  const buf = await readFile(path);
-  return { bytes: buf.byteLength, sha256: createHash('sha256').update(buf).digest('hex') };
+  const hash = createHash('sha256');
+  let bytes = 0;
+  for await (const chunk of createReadStream(path)) {
+    hash.update(chunk);
+    bytes += chunk.byteLength;
+  }
+  return { bytes, sha256: hash.digest('hex') };
 }
 
-function keyFromArtifact(artifact) {
-  const marker = '/artifacts/sha256/';
-  const url = artifact.artifactUrl;
-  const idx = url.indexOf(marker);
-  if (idx < 0) throw new Error(`Artifact URL is not content-addressed: ${url}`);
-  return url.slice(idx + 1);
+function artifactKeyFromUrl(rawUrl) {
+  const parsed = new URL(rawUrl, 'https://assets.invalid');
+  const key = parsed.pathname.replace(/^\/+/, '');
+  if (!key.startsWith('artifacts/sha256/')) throw new Error(`Artifact URL is not content-addressed: ${rawUrl}`);
+  return key;
 }
 
-function sha256FromArtifactKey(key) {
-  const match = key.match(/^artifacts\/sha256\/([a-f0-9]{64})\//);
-  return match?.[1];
-}
-
-function publicArtifactUrl(args, artifact) {
+function publicUrl(args, rawUrl) {
   try {
-    const parsed = new URL(artifact.artifactUrl);
+    const parsed = new URL(rawUrl);
     if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return parsed.href;
   } catch {
-    // Resolve relative artifact URLs below when a public artifact base is supplied.
+    // Resolve relative URLs below.
   }
   if (!args.artifactBase) return undefined;
-  return new URL(artifact.artifactUrl, args.artifactBase).href;
+  return new URL(rawUrl, args.artifactBase).href;
+}
+
+function localPathFor(args, candidate, key) {
+  if (candidate) return isAbsolute(candidate) ? candidate : join(args.root, candidate);
+  return join(args.root, key);
+}
+
+function entriesFromV1Release(release, args) {
+  return (release.artifacts ?? []).map((artifact) => {
+    const key = artifactKeyFromUrl(artifact.artifactUrl);
+    const match = key.match(/^artifacts\/sha256\/([a-f0-9]{64})\//);
+    const sha256 = artifact.sha256?.toLowerCase();
+    if (match?.[1] !== sha256) {
+      throw new Error(`Content-addressed key mismatch for ${artifact.logicalUrl}: key has ${match?.[1] ?? 'no sha256'}, manifest has ${artifact.sha256}`);
+    }
+    return {
+      logicalUrls: [artifact.logicalUrl],
+      key,
+      localPath: localPathFor(args, artifact.localPath, key),
+      carriedForward: Boolean(artifact.carriedForwardFrom),
+      bytes: artifact.bytes,
+      sha256,
+      decodedBytes: artifact.bytes,
+      decodedSha256: sha256,
+      contentType: artifact.contentType ?? 'application/octet-stream',
+      contentEncoding: undefined,
+      url: publicUrl(args, artifact.artifactUrl),
+      verification: 'legacy-full-body',
+    };
+  });
+}
+
+function validateV2Representation(artifact, representation) {
+  const rawSha256 = artifact.raw?.sha256?.toLowerCase();
+  const rawBytes = artifact.raw?.bytes;
+  if (!rawSha256 || !Number.isFinite(rawBytes)) throw new Error(`Invalid v2 raw metadata for ${artifact.logicalUrl ?? artifact.name}`);
+  const key = artifactKeyFromUrl(representation.url);
+  const encodedSha256 = representation.sha256?.toLowerCase();
+  if (!encodedSha256 || !Number.isFinite(representation.bytes)) throw new Error(`Invalid v2 representation metadata for ${artifact.logicalUrl ?? artifact.name}`);
+  if (representation.encoding === 'identity') {
+    if (key !== `artifacts/sha256/${rawSha256}/identity` || encodedSha256 !== rawSha256 || representation.bytes !== rawBytes) {
+      throw new Error(`Invalid identity representation for ${artifact.logicalUrl ?? artifact.name}`);
+    }
+  } else if (representation.encoding === 'br') {
+    if (key !== `artifacts/sha256/${rawSha256}/br/${encodedSha256}`) {
+      throw new Error(`Invalid Brotli representation key for ${artifact.logicalUrl ?? artifact.name}`);
+    }
+  } else {
+    throw new Error(`Unsupported artifact encoding: ${representation.encoding}`);
+  }
+  return { key, rawSha256, rawBytes, encodedSha256 };
+}
+
+function entriesFromV2Release(release, args) {
+  const byKey = new Map();
+  for (const artifact of release.artifacts ?? []) {
+    if (!Array.isArray(artifact.representations) || !artifact.representations.length) {
+      throw new Error(`V2 artifact has no representations: ${artifact.logicalUrl ?? artifact.name}`);
+    }
+    for (const representation of artifact.representations) {
+      const validated = validateV2Representation(artifact, representation);
+      const logicalUrl = artifact.logicalUrl ?? artifact.name;
+      const carriedForward = Boolean(artifact.carriedForwardFrom);
+      const localPath = localPathFor(args, representation.localPath ?? (representation.encoding === 'identity' ? artifact.localPath : undefined), validated.key);
+      const existing = byKey.get(validated.key);
+      if (existing) {
+        if (existing.bytes !== representation.bytes || existing.sha256 !== validated.encodedSha256 || existing.contentEncoding !== (representation.encoding === 'identity' ? undefined : representation.encoding)) {
+          throw new Error(`Conflicting v2 representation metadata for ${validated.key}`);
+        }
+        if (logicalUrl && !existing.logicalUrls.includes(logicalUrl)) existing.logicalUrls.push(logicalUrl);
+        // Equal bodies may be inherited by one logical entry and materialized by
+        // another. Any local source is sufficient to make the deduplicated body
+        // uploadable when the remote object is absent.
+        if (!carriedForward) {
+          const availableLocalPath = [existing.localPath, localPath].find((candidate) => candidate && existsSync(candidate));
+          existing.carriedForward = false;
+          existing.localPath = availableLocalPath ?? existing.localPath ?? localPath;
+        }
+        continue;
+      }
+      byKey.set(validated.key, {
+        logicalUrls: logicalUrl ? [logicalUrl] : [],
+        key: validated.key,
+        localPath,
+        carriedForward,
+        bytes: representation.bytes,
+        sha256: validated.encodedSha256,
+        decodedBytes: validated.rawBytes,
+        decodedSha256: validated.rawSha256,
+        contentType: artifact.contentType ?? 'application/octet-stream',
+        contentEncoding: representation.encoding === 'identity' ? undefined : representation.encoding,
+        url: publicUrl(args, representation.url),
+        verification: 'v2-immutable-head',
+      });
+    }
+  }
+  return [...byKey.values()];
+}
+
+function releaseEntries(release, args) {
+  if (release.schema === V1_RELEASE_SCHEMA) return entriesFromV1Release(release, args);
+  if (V2_RELEASE_SCHEMAS.has(release.schema)) return entriesFromV2Release(release, args);
+  throw new Error(`Unexpected release schema: ${release.schema}`);
 }
 
 function headerValue(headers, name) {
@@ -79,7 +186,7 @@ function cacheControlDirective(cacheControl, directive, expectedValue) {
 }
 
 async function sha256RemoteUrl(url) {
-  const response = await fetch(url, { cache: 'no-cache' });
+  const response = await fetch(url, { cache: 'no-cache', headers: { 'Accept-Encoding': 'identity' } });
   if (!response.ok) throw new Error(`Artifact hash fetch failed for ${url}: HTTP ${response.status}`);
   const hash = createHash('sha256');
   let bytes = 0;
@@ -99,40 +206,57 @@ async function sha256RemoteUrl(url) {
   return { bytes, sha256: hash.digest('hex') };
 }
 
-async function probeExistingArtifact(args, artifact) {
-  const url = publicArtifactUrl(args, artifact);
-  if (!url) return { state: 'unchecked', reason: 'no public artifact URL; pass --artifact-base for relative artifactUrl values' };
-  const response = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
-  if (response.status === 404) return { state: 'missing', url, status: response.status };
-  if (!response.ok) throw new Error(`Artifact probe failed for ${url}: HTTP ${response.status}`);
-  const lengthHeader = headerValue(response.headers, 'x-artifact-content-length') ?? headerValue(response.headers, 'content-length');
-  const length = Number(lengthHeader ?? '');
-  if (!Number.isFinite(length) || length !== artifact.bytes) {
-    throw new Error(`Remote artifact size mismatch for ${artifact.logicalUrl}: got ${lengthHeader ?? 'missing'}, expected ${artifact.bytes}`);
+async function probeExistingEntry(entry) {
+  if (!entry.url) return { state: 'unchecked', reason: 'no public artifact URL; pass --artifact-base for relative representation URLs' };
+  const response = await fetch(entry.url, { method: 'HEAD', cache: 'no-cache', headers: { 'Accept-Encoding': 'identity' } });
+  if (response.status === 404) return { state: 'missing', url: entry.url, status: response.status };
+  if (!response.ok) throw new Error(`Artifact probe failed for ${entry.url}: HTTP ${response.status}`);
+  const encodedLengthHeader = headerValue(response.headers, 'content-length')
+    ?? (!entry.contentEncoding ? headerValue(response.headers, 'x-artifact-content-length') : null);
+  const encodedLength = Number(encodedLengthHeader ?? '');
+  if (!Number.isFinite(encodedLength) || encodedLength !== entry.bytes) {
+    throw new Error(`Remote artifact size mismatch for ${entry.logicalUrls.join(', ')}: got ${encodedLengthHeader ?? 'missing'}, expected ${entry.bytes}`);
+  }
+  const decodedLengthHeader = headerValue(response.headers, 'x-artifact-content-length');
+  if (decodedLengthHeader !== null && Number(decodedLengthHeader) !== entry.decodedBytes) {
+    throw new Error(`Remote decoded artifact size mismatch for ${entry.logicalUrls.join(', ')}: got ${decodedLengthHeader}, expected ${entry.decodedBytes}`);
   }
   const cacheControl = headerValue(response.headers, 'cache-control') ?? '';
   if (!cacheControlDirective(cacheControl, 'immutable') || !cacheControlDirective(cacheControl, 'max-age', '31536000')) {
-    throw new Error(`Remote artifact cache policy is not immutable for ${artifact.logicalUrl}: ${cacheControl || 'missing'}`);
+    throw new Error(`Remote artifact cache policy is not immutable for ${entry.logicalUrls.join(', ')}: ${cacheControl || 'missing'}`);
   }
-  const actual = await sha256RemoteUrl(url);
-  if (actual.bytes !== artifact.bytes) {
-    throw new Error(`Remote artifact body size mismatch for ${artifact.logicalUrl}: got ${actual.bytes}, expected ${artifact.bytes}`);
+  if (entry.contentEncoding) {
+    const actualEncoding = headerValue(response.headers, 'content-encoding');
+    if (actualEncoding !== entry.contentEncoding) throw new Error(`Remote artifact encoding mismatch for ${entry.logicalUrls.join(', ')}: got ${actualEncoding ?? 'identity'}, expected ${entry.contentEncoding}`);
   }
-  if (actual.sha256 !== artifact.sha256.toLowerCase()) {
-    throw new Error(`Remote artifact SHA-256 mismatch for ${artifact.logicalUrl}: got ${actual.sha256}, expected ${artifact.sha256.toLowerCase()}`);
+  const actual = await sha256RemoteUrl(entry.url);
+  const expectedBodyBytes = entry.verification === 'legacy-full-body' ? entry.bytes : entry.decodedBytes;
+  const expectedBodySha256 = entry.verification === 'legacy-full-body' ? entry.sha256 : entry.decodedSha256;
+  if (actual.bytes !== expectedBodyBytes) {
+    throw new Error(`Remote artifact body size mismatch for ${entry.logicalUrls.join(', ')}: got ${actual.bytes}, expected ${expectedBodyBytes}`);
   }
-  return { state: 'existing', url, status: response.status, bytes: length, sha256: actual.sha256 };
+  if (actual.sha256 !== expectedBodySha256) {
+    throw new Error(`Remote artifact SHA-256 mismatch for ${entry.logicalUrls.join(', ')}: got ${actual.sha256}, expected ${expectedBodySha256}`);
+  }
+  return {
+    state: 'existing',
+    url: entry.url,
+    status: response.status,
+    bytes: encodedLength,
+    sha256: actual.sha256,
+    verification: entry.verification === 'legacy-full-body' ? 'full-body' : 'decoded-full-body',
+  };
 }
 
 async function assertRemoteObjectMissing(args, target) {
-  const tempDir = mkdtemp(join(tmpdir(), 'lc0-r2-exists-'));
-  return tempDir.then((dir) => {
+  const dir = await mkdtemp(join(tmpdir(), 'lc0-r2-exists-'));
+  try {
     const file = join(dir, 'object');
     const child = spawnSync(args.wranglerBin, ['r2', 'object', 'get', target, '--file', file, '--remote'], { stdio: 'ignore' });
-    return rm(dir, { recursive: true, force: true }).then(() => {
-      if (child.status === 0) throw new Error(`Refusing to overwrite immutable release manifest ${target}`);
-    });
-  });
+    if (child.status === 0) throw new Error(`Refusing to overwrite immutable release manifest ${target}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 async function manifestPublishItems(args, release) {
@@ -142,15 +266,14 @@ async function manifestPublishItems(args, release) {
     localPath: args.release,
     key: releaseKey,
     contentType: 'application/json; charset=utf-8',
-    cacheControl: 'public, max-age=300, stale-while-revalidate=86400',
+    cacheControl: 'public, max-age=31536000, immutable',
   }];
   if (args.channelManifest) {
     const channel = JSON.parse(await readFile(args.channelManifest, 'utf8'));
-    if (channel.schema !== 'lc0_browser.artifact_channel_manifest.v1') throw new Error(`Unexpected channel schema: ${channel.schema}`);
+    if (channel.schema !== V1_CHANNEL_SCHEMA && !V2_CHANNEL_SCHEMAS.has(channel.schema)) throw new Error(`Unexpected channel schema: ${channel.schema}`);
     if (channel.releaseId !== release.releaseId) throw new Error(`Channel releaseId ${channel.releaseId} does not match release ${release.releaseId}`);
-    if (channel.releaseManifestUrl !== `/${releaseKey}`) {
-      throw new Error(`Channel releaseManifestUrl ${channel.releaseManifestUrl} does not match /${releaseKey}`);
-    }
+    const releaseUrl = channel.releaseManifestUrl || channel.releaseUrl;
+    if (releaseUrl !== `/${releaseKey}`) throw new Error(`Channel release URL ${releaseUrl} does not match /${releaseKey}`);
     items.push({
       type: 'channel-manifest',
       localPath: args.channelManifest,
@@ -165,37 +288,38 @@ async function manifestPublishItems(args, release) {
 async function main() {
   const args = parseArgs(process.argv);
   const release = JSON.parse(await readFile(args.release, 'utf8'));
-  if (release.schema !== 'lc0_browser.artifact_release_manifest.v1') throw new Error(`Unexpected release schema: ${release.schema}`);
+  const entries = releaseEntries(release, args);
   const planned = [];
   const skipped = [];
-  for (const artifact of release.artifacts ?? []) {
-    const key = keyFromArtifact(artifact);
-    const keySha256 = sha256FromArtifactKey(key);
-    if (keySha256 !== artifact.sha256.toLowerCase()) {
-      throw new Error(`Content-addressed key mismatch for ${artifact.logicalUrl}: key has ${keySha256 ?? 'no sha256'}, manifest has ${artifact.sha256}`);
-    }
-    const localPath = artifact.localPath ? `${args.root.replace(/\/$/, '')}/${artifact.localPath}` : undefined;
-    const localExists = Boolean(!artifact.carriedForwardFrom && localPath && existsSync(localPath));
+
+  for (const entry of entries) {
+    const localExists = Boolean(!entry.carriedForward && entry.localPath && existsSync(entry.localPath));
     if (localExists) {
-      const actual = await sha256File(localPath);
-      if (actual.bytes !== artifact.bytes) throw new Error(`Size mismatch for ${artifact.logicalUrl}: got ${actual.bytes}, expected ${artifact.bytes}`);
-      if (actual.sha256 !== artifact.sha256) throw new Error(`SHA-256 mismatch for ${artifact.logicalUrl}: got ${actual.sha256}, expected ${artifact.sha256}`);
-    } else if (!artifact.carriedForwardFrom) {
-      if (args.allowMissing) { skipped.push({ logicalUrl: artifact.logicalUrl, reason: localPath ? 'missing localPath' : 'no localPath', localPath }); continue; }
-      throw new Error(`Missing local artifact for ${artifact.logicalUrl}: ${localPath ?? 'no localPath'}`);
+      const actual = await sha256File(entry.localPath);
+      if (actual.bytes !== entry.bytes) throw new Error(`Size mismatch for ${entry.logicalUrls.join(', ')}: got ${actual.bytes}, expected ${entry.bytes}`);
+      if (actual.sha256 !== entry.sha256) throw new Error(`SHA-256 mismatch for ${entry.logicalUrls.join(', ')}: got ${actual.sha256}, expected ${entry.sha256}`);
+    } else if (!entry.carriedForward) {
+      if (args.allowMissing) { skipped.push({ logicalUrls: entry.logicalUrls, reason: entry.localPath ? 'missing localPath' : 'no localPath', localPath: entry.localPath }); continue; }
+      throw new Error(`Missing local artifact for ${entry.logicalUrls.join(', ')}: ${entry.localPath ?? 'no localPath'}`);
     }
-    // Carried-forward entries may intentionally have no local file, so even a
-    // dry-run must prove the immutable remote body exists and matches its hash.
-    const probe = (args.probeExisting || args.execute || !localExists) ? await probeExistingArtifact(args, artifact) : undefined;
-    if (!localExists && probe?.state !== 'existing') throw new Error(`Carried-forward artifact is not available remotely: ${artifact.logicalUrl}`);
+
+    // HEAD verifies representation metadata and a decoded full-body pass proves
+    // integrity. This can become HEAD-only once uploads persist a trustworthy R2
+    // verification digest; a hash-shaped key alone is not proof of stored bytes.
+    const probe = (args.probeExisting || args.execute || !localExists) ? await probeExistingEntry(entry) : undefined;
+    if (!localExists && probe?.state !== 'existing') throw new Error(`Carried-forward artifact is not available remotely: ${entry.logicalUrls.join(', ')}`);
     planned.push({
-      logicalUrl: artifact.logicalUrl,
-      localPath,
-      key,
-      bytes: artifact.bytes,
-      sha256: artifact.sha256,
-      contentType: artifact.contentType ?? 'application/octet-stream',
-      artifactUrl: publicArtifactUrl(args, artifact),
+      logicalUrl: entry.logicalUrls[0],
+      logicalUrls: entry.logicalUrls,
+      localPath: entry.localPath,
+      key: entry.key,
+      bytes: entry.bytes,
+      sha256: entry.sha256,
+      decodedBytes: entry.decodedBytes,
+      decodedSha256: entry.decodedSha256,
+      contentType: entry.contentType,
+      contentEncoding: entry.contentEncoding,
+      artifactUrl: entry.url,
       remoteState: probe?.state ?? 'not-probed',
       uploadAction: probe?.state === 'existing' ? 'skip-existing' : 'upload',
       remoteProbe: probe,
@@ -203,7 +327,6 @@ async function main() {
   }
 
   const manifests = await manifestPublishItems(args, release);
-
   if (args.execute && skipped.length) {
     throw new Error('Refusing to publish release/channel manifests when artifacts were skipped; rerun without --allow-missing or verify/upload all artifacts first');
   }
@@ -212,17 +335,17 @@ async function main() {
     for (const item of planned) {
       const target = `${args.bucket}/${item.key}`;
       if (item.remoteState === 'existing') continue;
-      if (item.remoteState === 'unchecked') {
-        throw new Error(`Cannot safely publish ${item.logicalUrl}: ${item.remoteProbe?.reason ?? 'remote artifact existence was not checked'}`);
-      }
-      if (!item.localPath) throw new Error(`Cannot upload ${item.logicalUrl} without a localPath`);
-      const child = spawnSync(args.wranglerBin, [
+      if (item.remoteState === 'unchecked') throw new Error(`Cannot safely publish ${item.logicalUrls.join(', ')}: ${item.remoteProbe?.reason ?? 'remote artifact existence was not checked'}`);
+      if (!item.localPath) throw new Error(`Cannot upload ${item.logicalUrls.join(', ')} without a localPath`);
+      const command = [
         'r2', 'object', 'put', target,
         '--file', item.localPath,
         '--content-type', item.contentType,
         '--cache-control', 'public, max-age=31536000, immutable',
-        '--remote',
-      ], { stdio: 'inherit' });
+      ];
+      if (item.contentEncoding) command.push('--content-encoding', item.contentEncoding);
+      command.push('--remote');
+      const child = spawnSync(args.wranglerBin, command, { stdio: 'inherit' });
       if (child.status !== 0) throw new Error(`wrangler failed for ${target}`);
     }
     for (const item of manifests) {
@@ -240,8 +363,9 @@ async function main() {
   }
 
   console.log(JSON.stringify({
-    schema: 'lc0_browser.r2_hashed_artifact_publish_plan.v1',
+    schema: 'lc0_browser.r2_hashed_artifact_publish_plan.v2',
     releaseId: release.releaseId,
+    releaseSchema: release.schema,
     execute: args.execute,
     bucket: args.bucket,
     plannedCount: planned.length,
