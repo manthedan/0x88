@@ -1,7 +1,18 @@
 #!/usr/bin/env node
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { ORT_RUNTIME_ASSET_FILES, isRequiredOrtRuntimeAsset, uncompressedOrtRuntimeAsset } from './ort_runtime_assets.mjs';
+import { ORT_PTHREAD_BOOTSTRAP_FILE, ORT_RUNTIME_ASSET_FILES, isRequiredOrtRuntimeAsset, uncompressedOrtRuntimeAsset } from './ort_runtime_assets.mjs';
+
+function verifyPthreadBootstrap(ortDir) {
+  const path = join(ortDir, ORT_PTHREAD_BOOTSTRAP_FILE);
+  if (!existsSync(path)) return;
+  const source = readFileSync(path, 'utf8');
+  const createsSelfWorker = source.includes('new Worker(new URL(import.meta.url)');
+  const namesPthreadWorker = /name\s*:\s*["']em-pthread["']/.test(source);
+  if (!createsSelfWorker || !namesPthreadWorker) {
+    throw new Error(`ORT pthread bootstrap markers missing from ${ORT_PTHREAD_BOOTSTRAP_FILE}`);
+  }
+}
 
 export function checkOrtRuntimeAssets(rootPath) {
   const root = resolve(rootPath);
@@ -17,6 +28,7 @@ export function checkOrtRuntimeAssets(rootPath) {
   if (missing.length || unexpected.length) {
     throw new Error(`ORT runtime asset allowlist mismatch${missing.length ? `; missing: ${missing.join(', ')}` : ''}${unexpected.length ? `; unexpected: ${unexpected.join(', ')}` : ''}`);
   }
+  verifyPthreadBootstrap(ortDir);
   return { root, files, runtimeFiles: [...baseFiles].sort() };
 }
 

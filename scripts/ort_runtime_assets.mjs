@@ -1,6 +1,9 @@
+export const ORT_PTHREAD_BOOTSTRAP_FILE = 'ort-wasm-simd-threaded.asyncify.mjs';
+export const ORT_PTHREAD_WASM_FILE = 'ort-wasm-simd-threaded.asyncify.wasm';
+
 export const ORT_RUNTIME_ASSET_FILES = Object.freeze([
-  'ort-wasm-simd-threaded.asyncify.mjs',
-  'ort-wasm-simd-threaded.asyncify.wasm',
+  ORT_PTHREAD_BOOTSTRAP_FILE,
+  ORT_PTHREAD_WASM_FILE,
 ]);
 
 const ortRuntimeAssetFiles = new Set(ORT_RUNTIME_ASSET_FILES);

@@ -14,6 +14,20 @@ export type OrtWasmArtifactSelection = {
   artifactId?: string;
 };
 
+export const ORT_PTHREAD_BOOTSTRAP_FILE = 'ort-wasm-simd-threaded.asyncify.mjs';
+export const ORT_PTHREAD_WASM_FILE = 'ort-wasm-simd-threaded.asyncify.wasm';
+
+export function resolveOrtPthreadRuntimeUrls(
+  runtimeBase = '/ort/',
+  pageHref = typeof location === 'undefined' ? 'http://localhost/' : location.href,
+): { mjs: string; wasm: string } {
+  const base = new URL(runtimeBase.endsWith('/') ? runtimeBase : `${runtimeBase}/`, pageHref);
+  return {
+    mjs: new URL(ORT_PTHREAD_BOOTSTRAP_FILE, base).href,
+    wasm: new URL(ORT_PTHREAD_WASM_FILE, base).href,
+  };
+}
+
 export type OrtSessionAttempt = {
   at: string;
   providers: string[];
@@ -325,14 +339,14 @@ function browserOrtWasmPaths(): string | Record<string, string> {
   // Production builds: Vite/rolldown does not emit ORT's dynamic-import glue
   // (.mjs sidecars) into /assets/, so the runtime's import() resolves to the
   // SPA-fallback HTML and initWasm fails ("no available backend found").
-  // Hand ORT a plain '/ort/' prefix instead: it imports BOTH the glue .mjs
-  // and the matching .wasm binary from the staged public copies (public/ort/
-  // carries every flavor, served as text/javascript + application/wasm).
+  // Hand ORT explicit same-origin glue and wasm URLs instead. The glue module
+  // is also the Emscripten pthread bootstrap, so preserving its deployed URL
+  // lets helper workers re-import that exact staged module.
   // `location` (not `document`) detects browser-ness so this also applies
   // inside workers.
   const builtBrowser = typeof location !== 'undefined'
     && (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true;
-  if (builtBrowser) return '/ort/';
+  if (builtBrowser) return resolveOrtPthreadRuntimeUrls('/ort/', location.href);
   // Dev server: a '/ort/' prefix is blocked for source-mode module imports,
   // so let the glue resolve from node_modules and only pin the .wasm binary.
   // (Empirically the jsep glue resolves its own binary in dev and tolerates

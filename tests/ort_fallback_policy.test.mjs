@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   requestedOrtWasmArtifact,
+  resolveOrtPthreadRuntimeUrls,
   resolvedOrtExecutionProviders,
   setRequestedOrtExecutionProviderForCurrentThread,
   setRequestedOrtWasmArtifactForCurrentThread,
@@ -9,6 +10,17 @@ import {
   shouldFallbackToWasmAfterOrtFailure,
   validateOrtWasmArtifactSelection,
 } from '../src/nn/ortRuntime.ts';
+
+test('ORT pthread sidecar URLs resolve from root and deployed subpath bases', () => {
+  assert.deepEqual(resolveOrtPthreadRuntimeUrls('/ort/', 'https://0x88.app/app/analysis/'), {
+    mjs: 'https://0x88.app/ort/ort-wasm-simd-threaded.asyncify.mjs',
+    wasm: 'https://0x88.app/ort/ort-wasm-simd-threaded.asyncify.wasm',
+  });
+  assert.deepEqual(resolveOrtPthreadRuntimeUrls('/chess/ort', 'https://0x88.app/chess/app/analysis/'), {
+    mjs: 'https://0x88.app/chess/ort/ort-wasm-simd-threaded.asyncify.mjs',
+    wasm: 'https://0x88.app/chess/ort/ort-wasm-simd-threaded.asyncify.wasm',
+  });
+});
 
 test('strict webgpu sessions do not silently fall back to wasm', () => {
   assert.equal(shouldFallbackToWasmAfterOrtFailure('webgpu', ['webgpu']), false);
