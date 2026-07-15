@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { constants } from 'node:fs';
-import { access, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadResumableLc0ModelForOrt } from '../src/lc0/modelCache.ts';
@@ -87,6 +87,15 @@ export class FileModelShardStore {
   async delete(sha256) {
     try {
       await unlink(this.path(sha256));
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+
+  async touch(sha256) {
+    const now = new Date();
+    try {
+      await utimes(this.path(sha256), now, now);
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
     }

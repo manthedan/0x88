@@ -90,6 +90,65 @@ function loaderOptions(entry, overrides = {}) {
   };
 }
 
+function sha256(bytes) {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function singleShardManifest(bytes, url = 'shards/model.bin') {
+  const hash = sha256(bytes);
+  return {
+    schema: 'lc0_browser.resumable_model_shards.v1',
+    chunkBytes: CHUNK_BYTES,
+    decoded: { bytes: bytes.byteLength, sha256: hash },
+    shards: [{ bytes: bytes.byteLength, sha256: hash, url }],
+  };
+}
+
+function responseWithUrl(body, init, url) {
+  const response = new Response(body, init);
+  Object.defineProperty(response, 'url', { value: url });
+  return response;
+}
+
+class MemoryShardStore {
+  constructor(entries = []) {
+    this.entries = new Map(entries.map((entry) => [entry.sha256, {
+      bytes: entry.bytes.slice(0),
+      lastUsedAt: entry.lastUsedAt ?? 0,
+    }]));
+    this.deleted = [];
+    this.touched = [];
+  }
+
+  async get(sha256) {
+    return this.entries.get(sha256)?.bytes.slice(0);
+  }
+
+  async put(sha256, bytes) {
+    this.entries.set(sha256, { bytes: bytes.slice(0), lastUsedAt: Date.now() });
+  }
+
+  async delete(sha256) {
+    this.deleted.push(sha256);
+    this.entries.delete(sha256);
+  }
+
+  async touch(sha256) {
+    const entry = this.entries.get(sha256);
+    if (!entry) return;
+    this.touched.push(sha256);
+    entry.lastUsedAt = Date.now();
+  }
+
+  async list() {
+    return [...this.entries].map(([sha256, entry]) => ({
+      sha256,
+      bytes: entry.bytes.byteLength,
+      lastUsedAt: entry.lastUsedAt,
+    }));
+  }
+}
+
 test('resumable shard generation uses ordered 16 MiB content hashes and reconstructs byte-identically', async () => {
   const entry = await fixture();
   assert.equal(entry.manifest.chunkBytes, CHUNK_BYTES);
@@ -163,6 +222,161 @@ test('oversized shard responses are cancelled before unbounded buffering', async
   );
   assert.equal(shardFetches, 1);
   assert.equal(cancelled, true);
+});
+
+test('encoded shard responses ignore encoded Content-Length while bounding decoded bytes', async () => {
+  const bytes = Buffer.alloc(CHUNK_BYTES, 0x3c);
+  const manifest = singleShardManifest(bytes);
+  const manifestUrl = 'https://models.example/research/model.resumable.json';
+  const shardUrl = new URL(manifest.shards[0].url, manifestUrl).href;
+  const fetched = [];
+  const result = await loadResumableLc0ModelForOrt(manifestUrl, {
+    researchOnly: true,
+    corruptionRetries: 0,
+    shardStore: new MemoryShardStore(),
+    fetchFn: async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      fetched.push(url);
+      if (url === manifestUrl) return new Response(JSON.stringify(manifest));
+      if (url === shardUrl) {
+        return new Response(bytes, {
+          headers: {
+            'content-encoding': 'gzip',
+            'content-length': String(CHUNK_BYTES + 1),
+          },
+        });
+      }
+      return new Response(null, { status: 404 });
+    },
+  });
+  assert.deepEqual(fetched, [manifestUrl, shardUrl]);
+  assert.deepEqual(Buffer.from(result.model), bytes);
+});
+
+test('relative shard URLs resolve against the redirected manifest response URL', async () => {
+  const bytes = Buffer.alloc(CHUNK_BYTES, 0x5d);
+  const manifest = singleShardManifest(bytes);
+  const requestedManifestUrl = 'https://models.example/latest/model.resumable.json';
+  const redirectedManifestUrl = 'https://cdn.example/releases/v2/model.resumable.json';
+  const redirectedShardUrl = new URL(manifest.shards[0].url, redirectedManifestUrl).href;
+  const fetched = [];
+  const result = await loadResumableLc0ModelForOrt(requestedManifestUrl, {
+    researchOnly: true,
+    corruptionRetries: 0,
+    shardStore: new MemoryShardStore(),
+    fetchFn: async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      fetched.push(url);
+      if (url === requestedManifestUrl) {
+        return responseWithUrl(JSON.stringify(manifest), undefined, redirectedManifestUrl);
+      }
+      if (url === redirectedShardUrl) return new Response(bytes);
+      return new Response(null, { status: 404 });
+    },
+  });
+  assert.deepEqual(fetched, [requestedManifestUrl, redirectedShardUrl]);
+  assert.deepEqual(Buffer.from(result.model), bytes);
+});
+
+test('verified persistent cache hits refresh LRU metadata before cache-bound eviction', async () => {
+  const first = Buffer.alloc(CHUNK_BYTES, 0x11);
+  const second = Buffer.alloc(CHUNK_BYTES, 0x22);
+  const firstHash = sha256(first);
+  const secondHash = sha256(second);
+  const manifest = {
+    schema: 'lc0_browser.resumable_model_shards.v1',
+    chunkBytes: CHUNK_BYTES,
+    decoded: {
+      bytes: first.byteLength + second.byteLength,
+      sha256: sha256(Buffer.concat([first, second])),
+    },
+    shards: [
+      { bytes: first.byteLength, sha256: firstHash, url: 'shards/first.bin' },
+      { bytes: second.byteLength, sha256: secondHash, url: 'shards/second.bin' },
+    ],
+  };
+  const oldUnprotected = Buffer.alloc(1, 0x33);
+  const newUnprotected = Buffer.alloc(1, 0x44);
+  const oldUnprotectedHash = sha256(oldUnprotected);
+  const newUnprotectedHash = sha256(newUnprotected);
+  const store = new MemoryShardStore([
+    { sha256: firstHash, bytes: first.buffer, lastUsedAt: 1 },
+    { sha256: secondHash, bytes: second.buffer, lastUsedAt: 2 },
+    { sha256: oldUnprotectedHash, bytes: oldUnprotected.buffer, lastUsedAt: 3 },
+    { sha256: newUnprotectedHash, bytes: newUnprotected.buffer, lastUsedAt: 4 },
+  ]);
+  const manifestUrl = 'https://models.example/research/model.resumable.json';
+  const result = await loadResumableLc0ModelForOrt(manifestUrl, {
+    researchOnly: true,
+    concurrency: 1,
+    maxCacheEntries: 3,
+    maxCacheBytes: Infinity,
+    shardStore: store,
+    fetchFn: async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url === manifestUrl) return new Response(JSON.stringify(manifest));
+      return new Response(null, { status: 500 });
+    },
+  });
+  assert.equal(result.reusedShards, 2);
+  assert.equal(result.downloadedShards, 0);
+  assert.equal(store.touched.includes(firstHash), true);
+  assert.equal(store.touched.includes(secondHash), true);
+  assert.deepEqual(store.deleted, [oldUnprotectedHash]);
+  assert.equal(store.entries.has(firstHash), true);
+  assert.equal(store.entries.has(secondHash), true);
+  assert.equal(store.entries.has(newUnprotectedHash), true);
+});
+
+test('quota eviction stops after the first deletion that creates sufficient reserve', async () => {
+  const bytes = Buffer.alloc(CHUNK_BYTES, 0x6e);
+  const manifest = singleShardManifest(bytes);
+  const manifestUrl = 'https://models.example/research/model.resumable.json';
+  const shardUrl = new URL(manifest.shards[0].url, manifestUrl).href;
+  const oldFirst = Buffer.alloc(CHUNK_BYTES, 0x77);
+  const oldSecond = Buffer.alloc(CHUNK_BYTES, 0x88);
+  const oldFirstHash = sha256(oldFirst);
+  const oldSecondHash = sha256(oldSecond);
+  const store = new MemoryShardStore([
+    { sha256: oldFirstHash, bytes: oldFirst.buffer, lastUsedAt: 1 },
+    { sha256: oldSecondHash, bytes: oldSecond.buffer, lastUsedAt: 2 },
+  ]);
+  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      storage: {
+        async estimate() {
+          const usage = [...store.entries.values()].reduce((sum, entry) => sum + entry.bytes.byteLength, 0);
+          return { quota: 3 * CHUNK_BYTES, usage };
+        },
+      },
+    },
+  });
+  try {
+    const result = await loadResumableLc0ModelForOrt(manifestUrl, {
+      researchOnly: true,
+      concurrency: 1,
+      corruptionRetries: 0,
+      maxCacheEntries: Infinity,
+      maxCacheBytes: Infinity,
+      minimumFreeBytesAfterCache: CHUNK_BYTES,
+      shardStore: store,
+      fetchFn: async (input) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url === manifestUrl) return new Response(JSON.stringify(manifest));
+        if (url === shardUrl) return new Response(bytes);
+        return new Response(null, { status: 404 });
+      },
+    });
+    assert.equal(result.downloadedShards, 1);
+    assert.deepEqual(store.deleted, [oldFirstHash]);
+    assert.equal(store.entries.has(oldSecondHash), true);
+    assert.equal(store.entries.has(manifest.shards[0].sha256), true);
+  } finally {
+    if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator);
+    else delete globalThis.navigator;
+  }
 });
 
 test('abort around 40% persists completed shards and resume does not redownload them', async () => {
