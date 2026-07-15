@@ -455,6 +455,24 @@ test('filesystem shard cache bounds oversized reads and propagates aborts', asyn
     await assert.rejects(read, { name: 'AbortError' });
     assert.equal((await store.list()).some((entry) => entry.sha256 === hash), true);
   });
+
+  await t.test('concurrent stores use collision-resistant temporary paths', async () => {
+    const bytes = Buffer.alloc(CHUNK_BYTES, 0x64);
+    const hash = sha256(bytes);
+    const first = new FileModelShardStore(join(root, 'shared-cache'));
+    const second = new FileModelShardStore(join(root, 'shared-cache'));
+    const originalNow = Date.now;
+    Date.now = () => 1;
+    try {
+      await Promise.all([
+        first.put(hash, bytes.buffer),
+        second.put(hash, bytes.buffer),
+      ]);
+    } finally {
+      Date.now = originalNow;
+    }
+    assert.deepEqual(await readFile(first.path(hash)), bytes);
+  });
 });
 
 test('manifest allocation limits reject amplification before shard access', async (t) => {
@@ -1153,6 +1171,46 @@ test('failed loads release process-wide shard protection', async () => {
   assert.equal(replacement.downloadedShards, 1);
   assert.equal(store.deleted.includes(failedHash), true);
   assert.equal(store.entries.has(failedHash), false);
+});
+
+test('failed loads enforce persistent shard bounds after releasing protection', async () => {
+  const shards = [0x61, 0x62, 0x63].map((value, index) => {
+    const bytes = Buffer.alloc(CHUNK_BYTES, value);
+    return { bytes, descriptor: { bytes: bytes.byteLength, sha256: sha256(bytes), url: `shards/${index}.bin` } };
+  });
+  const manifest = {
+    schema: 'lc0_browser.resumable_model_shards.v1',
+    chunkBytes: CHUNK_BYTES,
+    decoded: {
+      bytes: shards.reduce((sum, shard) => sum + shard.bytes.byteLength, 0),
+      sha256: sha256(Buffer.concat(shards.map((shard) => shard.bytes))),
+    },
+    shards: shards.map((shard) => shard.descriptor),
+  };
+  const manifestUrl = 'https://models.example/research/failed-bounds.resumable.json';
+  const store = new MemoryShardStore();
+  const controller = new AbortController();
+  await assert.rejects(
+    loadResumableLc0ModelForOrt(manifestUrl, {
+      researchOnly: true,
+      concurrency: 1,
+      maxCacheEntries: 2,
+      maxCacheBytes: Infinity,
+      shardStore: store,
+      signal: controller.signal,
+      fetchFn: async (input) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url === manifestUrl) return new Response(JSON.stringify(manifest));
+        const index = manifest.shards.findIndex((shard) => new URL(shard.url, manifestUrl).href === url);
+        return index >= 0 ? new Response(shards[index].bytes) : new Response(null, { status: 404 });
+      },
+      onProgress(progress) {
+        if (progress.phase === 'download' && progress.completedShards === manifest.shards.length) controller.abort();
+      },
+    }),
+    { name: 'AbortError' },
+  );
+  assert.equal(store.entries.size, 2);
 });
 
 test('cached shard hashing contributes to concurrent peak temporary bytes', async () => {

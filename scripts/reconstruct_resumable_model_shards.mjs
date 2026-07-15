@@ -119,7 +119,7 @@ export class FileModelShardStore {
     await mkdir(this.directory, { recursive: true });
     const destination = this.path(sha256);
     if (await exists(destination)) return;
-    const temporary = `${destination}.tmp-${process.pid}-${Date.now()}`;
+    const temporary = `${destination}.tmp-${process.pid}-${randomUUID()}`;
     try {
       await writeFile(temporary, new Uint8Array(bytes), { flag: 'wx' });
       try {

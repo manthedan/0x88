@@ -1495,6 +1495,7 @@ export async function loadResumableLc0ModelForOrt(
   for (const shard of manifest.shards) referenceCounts.set(shard.sha256, (referenceCounts.get(shard.sha256) ?? 0) + 1);
   const manifestHashes = new Set(unique.keys());
   const releaseActiveHashes = retainActiveResumableShardHashes(persistenceDomain, manifestHashes);
+  let finalBoundsEnforced = false;
   try {
     await bestEffortEnforceResumableShardCacheBounds(
       store,
@@ -1730,6 +1731,7 @@ export async function loadResumableLc0ModelForOrt(
       maxCacheBytes,
       activeResumableShardHashes(persistenceDomain),
     );
+    finalBoundsEnforced = true;
     throwIfAborted(options.signal);
     const result: Lc0ResumableModelLoadResult = {
       model: model.buffer,
@@ -1751,6 +1753,14 @@ export async function loadResumableLc0ModelForOrt(
     return result;
   } finally {
     releaseActiveHashes();
+    if (!finalBoundsEnforced) {
+      await bestEffortEnforceResumableShardCacheBounds(
+        store,
+        maxCacheEntries,
+        maxCacheBytes,
+        activeResumableShardHashes(persistenceDomain),
+      );
+    }
   }
 }
 
