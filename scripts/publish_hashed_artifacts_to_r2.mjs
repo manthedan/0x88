@@ -403,13 +403,10 @@ function isMissingObjectOutput(output) {
 }
 
 async function downloadMigrationSource(source, target) {
-  if (!source.url) throw new Error(`V1 migration source ${source.key} has no downloadable URL`);
+  if (!source.url) throw new Error('no downloadable URL is configured');
   const response = await fetch(source.url, { cache: 'no-cache', headers: { 'Accept-Encoding': 'identity' } });
   if (!response.ok) {
-    throw new Error(
-      `V1 migration body is unavailable at R2 key ${source.key} and ${source.url} returned HTTP ${response.status}. `
-      + 'Restore the legacy object or provide matching local decoded bytes before publishing.',
-    );
+    throw new Error(`${source.url} returned HTTP ${response.status}`);
   }
   if (response.body) {
     await pipeline(Readable.fromWeb(response.body), createWriteStream(target, { flags: 'wx' }));
@@ -418,32 +415,57 @@ async function downloadMigrationSource(source, target) {
   await writeFile(target, new Uint8Array(await response.arrayBuffer()), { flag: 'wx' });
 }
 
-async function materializeMigrationSource(args, item) {
-  const source = item.migrationSources[0];
-  const dir = await mkdtemp(join(tmpdir(), 'lc0-v1-migration-'));
-  const file = join(dir, 'identity');
-  try {
-    const sourceTarget = `${args.bucket}/${source.key}`;
-    const child = spawnSync(args.wranglerBin, ['r2', 'object', 'get', sourceTarget, '--file', file, '--remote'], { encoding: 'utf8' });
-    if (child.status !== 0) {
-      const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
-      if (!isMissingObjectOutput(output)) {
-        throw new Error(`Unable to read authoritative v1 migration source ${sourceTarget}`);
-      }
-      await downloadMigrationSource(source, file);
-    }
-    const actual = await sha256File(file);
-    if (actual.bytes !== item.decodedBytes || actual.sha256 !== item.decodedSha256) {
-      throw new Error(
-        `Corrupt v1 migration source for ${item.logicalUrls.join(', ')}: `
-        + `got ${actual.bytes}/${actual.sha256}, expected ${item.decodedBytes}/${item.decodedSha256}`,
-      );
-    }
-    return { dir, file, source };
-  } catch (error) {
-    await rm(dir, { recursive: true, force: true });
-    throw error;
+function compareMigrationSources(a, b) {
+  for (const [left, right] of [
+    [a.key, b.key],
+    [a.releaseId, b.releaseId],
+    [a.url ?? '', b.url ?? ''],
+  ]) {
+    if (left < right) return -1;
+    if (left > right) return 1;
   }
+  return 0;
+}
+
+async function materializeMigrationSource(args, item) {
+  const attempts = [];
+  const sources = [...item.migrationSources].sort(compareMigrationSources);
+  for (const source of sources) {
+    const dir = await mkdtemp(join(tmpdir(), 'lc0-v1-migration-'));
+    const file = join(dir, 'identity');
+    try {
+      const sourceTarget = `${args.bucket}/${source.key}`;
+      const child = spawnSync(args.wranglerBin, ['r2', 'object', 'get', sourceTarget, '--file', file, '--remote'], { encoding: 'utf8' });
+      if (child.status !== 0) {
+        const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
+        if (!isMissingObjectOutput(output)) {
+          throw new Error(`authoritative R2 read failed for ${sourceTarget}: ${output.trim() || `exit ${child.status}`}`);
+        }
+        await rm(file, { force: true });
+        try {
+          await downloadMigrationSource(source, file);
+        } catch (error) {
+          throw new Error(`R2 object is missing and fallback download failed: ${error.message}`);
+        }
+      }
+      const actual = await sha256File(file);
+      if (actual.bytes !== item.decodedBytes || actual.sha256 !== item.decodedSha256) {
+        throw new Error(
+          `verification failed: got ${actual.bytes}/${actual.sha256}, `
+          + `expected ${item.decodedBytes}/${item.decodedSha256}`,
+        );
+      }
+      return { dir, file, source };
+    } catch (error) {
+      attempts.push({ key: source.key, reason: error.message });
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+  throw new Error(
+    `No verified v1 migration source was available for ${item.logicalUrls.join(', ')}. Attempted:\n`
+    + attempts.map(({ key, reason }) => `- ${key}: ${reason}`).join('\n')
+    + '\nRestore one listed legacy object or provide matching local decoded bytes before publishing.',
+  );
 }
 
 function isConditionalCreateConflict(output) {

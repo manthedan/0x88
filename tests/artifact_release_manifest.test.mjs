@@ -135,6 +135,41 @@ writeFileSync(metadataPath, JSON.stringify({
   return path;
 }
 
+async function writeDeduplicatedMigrationRelease(root, sourceNames) {
+  const releasePath = join(root, 'release.json');
+  const channelPath = join(root, 'stable.json');
+  const identity = {
+    encoding: 'identity',
+    url: `/artifacts/sha256/${ABC_SHA256}/identity`,
+    bytes: 3,
+    sha256: ABC_SHA256,
+  };
+  await writeJson(releasePath, {
+    schema: 'lc0_browser.artifact_release_manifest.v2',
+    releaseId: 'next',
+    artifacts: sourceNames.map((name) => ({
+      logicalUrl: `/legacy/${name}`,
+      carriedForwardFrom: `base-${name}`,
+      migrationSource: {
+        schema: 'lc0_browser.artifact_migration_source.v1',
+        releaseId: `base-${name}`,
+        key: `artifacts/sha256/${ABC_SHA256}/${name}.wasm`,
+        url: `/artifacts/sha256/${ABC_SHA256}/${name}.wasm`,
+      },
+      raw: { bytes: 3, sha256: ABC_SHA256 },
+      representations: [identity],
+      contentType: 'application/wasm',
+    })),
+  });
+  await writeJson(channelPath, {
+    schema: 'lc0_browser.artifact_channel_manifest.v2',
+    channel: 'stable',
+    releaseId: 'next',
+    releaseManifestUrl: '/releases/next.json',
+  });
+  return { releasePath, channelPath };
+}
+
 test('write_artifact_release_manifests creates channel and content-addressed release manifests', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-release-manifest-'));
   await mkdir(join(root, 'public/models/lc0'), { recursive: true });
@@ -632,6 +667,120 @@ test('publish_hashed_artifacts_to_r2 materializes a missing SHA-only identity fr
   }
 });
 
+test('publish_hashed_artifacts_to_r2 tries a later deduplicated migration source when the first is missing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-v1-migration-fallback-missing-'));
+  const { releasePath, channelPath } = await writeDeduplicatedMigrationRelease(root, ['b-available', 'a-missing']);
+  const r2Root = join(root, 'mock-r2');
+  const wrangler = await writeStatefulWrangler(root);
+  const aws = await writeAtomicAws(root);
+  const log = join(root, 'commands.log');
+  const availableKey = `artifacts/sha256/${ABC_SHA256}/b-available.wasm`;
+  const availableTarget = `test-bucket/${availableKey}`;
+  const identityTarget = `test-bucket/artifacts/sha256/${ABC_SHA256}/identity`;
+  await mkdir(r2Root, { recursive: true });
+  await writeFile(mockR2ObjectPath(r2Root, availableTarget), 'abc');
+  const server = createServer((_req, res) => res.writeHead(404).end());
+  const port = await listen(server);
+  try {
+    const result = await runNode([
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', releasePath,
+      '--channel-manifest', channelPath,
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--execute',
+      '--wrangler-bin', wrangler,
+      '--aws-bin', aws,
+      '--r2-endpoint', 'https://r2.invalid',
+    ], { env: { ...process.env, MOCK_R2_DIR: r2Root, LOG: log } });
+    assert.equal(result.status, 0, result.stderr);
+    const plan = JSON.parse(result.stdout);
+    assert.equal(plan.planned[0].migrationSourceUsed.key, availableKey);
+    assert.equal((await readFile(mockR2ObjectPath(r2Root, identityTarget))).toString(), 'abc');
+    const sourceGets = (await readFile(log, 'utf8'))
+      .split('\n')
+      .filter((line) => /a-missing\.wasm|b-available\.wasm/.test(line));
+    assert.deepEqual(sourceGets.map((line) => line.match(/(a-missing|b-available)\.wasm/)[1]), ['a-missing', 'b-available']);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('publish_hashed_artifacts_to_r2 tries a later deduplicated migration source when the first is corrupt', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-v1-migration-fallback-corrupt-'));
+  const { releasePath, channelPath } = await writeDeduplicatedMigrationRelease(root, ['b-available', 'a-corrupt']);
+  const r2Root = join(root, 'mock-r2');
+  const wrangler = await writeStatefulWrangler(root);
+  const aws = await writeAtomicAws(root);
+  const corruptTarget = `test-bucket/artifacts/sha256/${ABC_SHA256}/a-corrupt.wasm`;
+  const availableKey = `artifacts/sha256/${ABC_SHA256}/b-available.wasm`;
+  const availableTarget = `test-bucket/${availableKey}`;
+  const identityTarget = `test-bucket/artifacts/sha256/${ABC_SHA256}/identity`;
+  await mkdir(r2Root, { recursive: true });
+  await writeFile(mockR2ObjectPath(r2Root, corruptTarget), 'abd');
+  await writeFile(mockR2ObjectPath(r2Root, availableTarget), 'abc');
+  const server = createServer((_req, res) => res.writeHead(404).end());
+  const port = await listen(server);
+  try {
+    const result = await runNode([
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', releasePath,
+      '--channel-manifest', channelPath,
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--execute',
+      '--wrangler-bin', wrangler,
+      '--aws-bin', aws,
+      '--r2-endpoint', 'https://r2.invalid',
+    ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
+    assert.equal(result.status, 0, result.stderr);
+    const plan = JSON.parse(result.stdout);
+    assert.equal(plan.planned[0].migrationSourceUsed.key, availableKey);
+    assert.equal((await readFile(mockR2ObjectPath(r2Root, identityTarget))).toString(), 'abc');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('publish_hashed_artifacts_to_r2 reports every failed deduplicated migration source before publishing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-v1-migration-fallback-all-fail-'));
+  const { releasePath, channelPath } = await writeDeduplicatedMigrationRelease(root, ['b-corrupt', 'a-missing']);
+  const r2Root = join(root, 'mock-r2');
+  const wrangler = await writeStatefulWrangler(root);
+  const aws = await writeAtomicAws(root);
+  const corruptKey = `artifacts/sha256/${ABC_SHA256}/b-corrupt.wasm`;
+  await mkdir(r2Root, { recursive: true });
+  await writeFile(mockR2ObjectPath(r2Root, `test-bucket/${corruptKey}`), 'abd');
+  const server = createServer((_req, res) => res.writeHead(404).end());
+  const port = await listen(server);
+  try {
+    const result = await runNode([
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', releasePath,
+      '--channel-manifest', channelPath,
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--execute',
+      '--wrangler-bin', wrangler,
+      '--aws-bin', aws,
+      '--r2-endpoint', 'https://r2.invalid',
+    ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /No verified v1 migration source was available/);
+    assert.match(result.stderr, new RegExp(`- artifacts/sha256/${ABC_SHA256}/a-missing\\.wasm: .*HTTP 404`));
+    assert.match(result.stderr, new RegExp(`- artifacts/sha256/${ABC_SHA256}/b-corrupt\\.wasm: verification failed`));
+    assert.ok(result.stderr.indexOf('/a-missing.wasm:') < result.stderr.indexOf('/b-corrupt.wasm:'));
+    assert.equal(existsSync(mockR2ObjectPath(r2Root, `test-bucket/artifacts/sha256/${ABC_SHA256}/identity`)), false);
+    assert.equal(existsSync(mockR2ObjectPath(r2Root, 'test-bucket/releases/next.json')), false);
+    assert.equal(existsSync(mockR2ObjectPath(r2Root, 'test-bucket/channels/stable.json')), false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test('publish_hashed_artifacts_to_r2 blocks migration when the v1 body is unavailable locally and remotely', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-r2-v1-migration-missing-'));
   await writeJson(join(root, 'public/releases/base.json'), {
@@ -674,8 +823,9 @@ test('publish_hashed_artifacts_to_r2 blocks migration when the v1 body is unavai
       '--r2-endpoint', 'https://r2.invalid',
     ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /V1 migration body is unavailable at R2 key/);
-    assert.match(result.stderr, /Restore the legacy object or provide matching local decoded bytes/);
+    assert.match(result.stderr, /No verified v1 migration source was available/);
+    assert.match(result.stderr, /R2 object is missing and fallback download failed: .*HTTP 404/);
+    assert.match(result.stderr, /Restore one listed legacy object or provide matching local decoded bytes/);
     assert.equal(existsSync(mockR2ObjectPath(r2Root, `test-bucket/artifacts/sha256/${ABC_SHA256}/identity`)), false);
     assert.equal(existsSync(mockR2ObjectPath(r2Root, 'test-bucket/releases/next.json')), false);
     assert.equal(existsSync(mockR2ObjectPath(r2Root, 'test-bucket/channels/stable.json')), false);
@@ -728,7 +878,8 @@ test('publish_hashed_artifacts_to_r2 rejects corrupt v1 migration content before
       '--r2-endpoint', 'https://r2.invalid',
     ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /Corrupt v1 migration source/);
+    assert.match(result.stderr, /No verified v1 migration source was available/);
+    assert.match(result.stderr, /verification failed: got 3\//);
     assert.equal(existsSync(mockR2ObjectPath(r2Root, `test-bucket/artifacts/sha256/${ABC_SHA256}/identity`)), false);
     assert.equal(existsSync(mockR2ObjectPath(r2Root, 'test-bucket/releases/next.json')), false);
     assert.equal(existsSync(mockR2ObjectPath(r2Root, 'test-bucket/channels/stable.json')), false);

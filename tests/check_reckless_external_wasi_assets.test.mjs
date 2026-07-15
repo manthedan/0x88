@@ -32,6 +32,12 @@ test('Reckless external WASI prototype has explicit build, release, publish, and
   assert.match(publisher, /reckless-simd128-external\.wasm/);
   assert.match(publisher, /reckless-v60-7f587dfb\.nnue/);
   assert.match(publisher, /reckless-simd128-external-corresponding-source\.tar\.gz/);
+
+  const hostedArtifacts = await readFile('docs/hosted_artifacts.md', 'utf8');
+  assert.match(hostedArtifacts, /Production must run `npm run reckless:build-release`, which generates the release manifest/);
+
+  const engineCatalog = await readFile('docs/engine_catalog.md', 'utf8');
+  assert.match(engineCatalog, /^npm run reckless:build-release && npm run reckless:build-lite-wasi$/m);
 });
 
 test('Reckless release manifest command generates complete external artifact metadata', async () => {
