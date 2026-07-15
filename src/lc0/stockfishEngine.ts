@@ -61,18 +61,8 @@ export function stockfishFlavorLabel(flavor: StockfishFlavor): string {
 export function stockfishFlavorUrl(flavor: StockfishFlavor): string {
   switch (flavor) {
     case 'single': return STOCKFISH_SINGLE_URL;
-    case 'lite-threaded': {
-      const url = STOCKFISH_LITE_THREADED_URL;
-      // The pthread builds derive helper-worker URLs from self.location. That
-      // is incompatible with the cross-origin blob wrapper used for R2-hosted
-      // Stockfish scripts, so hosted builds fall back to the single-threaded
-      // artifact until a dedicated pthread wrapper is promoted.
-      return sameOriginUrl(url) ? url : defaultStockfishUrl();
-    }
-    case 'threaded': {
-      const url = STOCKFISH_THREADED_URL;
-      return sameOriginUrl(url) ? url : defaultStockfishUrl();
-    }
+    case 'lite-threaded': return STOCKFISH_LITE_THREADED_URL;
+    case 'threaded': return STOCKFISH_THREADED_URL;
     default: return defaultStockfishUrl();
   }
 }
@@ -90,7 +80,22 @@ function stockfishWasmUrl(jsUrl: string): string {
   return jsUrl.replace(/\.js(?:[?#].*)?$/, '.wasm');
 }
 
-export function stockfishWorkerUrl(jsUrl: string): { url: string; objectUrl?: string } {
+function isStockfishPthreadScriptUrl(jsUrl: string): boolean {
+  try {
+    const pathname = new URL(jsUrl, typeof location === 'undefined' ? 'http://localhost/' : location.href).pathname;
+    return /\/stockfish-18(?:-lite)?\.js$/.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+export function stockfishWorkerUrl(jsUrl: string): { url: string; objectUrl?: string; bootstrapWasmUrl?: string } {
+  if (isStockfishPthreadScriptUrl(jsUrl)) {
+    if (!sameOriginUrl(jsUrl) && !isTrustedExecutableAssetUrl(jsUrl)) {
+      throw new Error(`Refusing untrusted Stockfish worker URL: ${jsUrl}`);
+    }
+    return { url: jsUrl, bootstrapWasmUrl: stockfishWasmUrl(jsUrl) };
+  }
   if (sameOriginUrl(jsUrl)) return { url: jsUrl };
   if (!isTrustedExecutableAssetUrl(jsUrl)) throw new Error(`Refusing untrusted Stockfish worker URL: ${jsUrl}`);
   const wasmUrl = stockfishWasmUrl(jsUrl);
@@ -240,7 +245,14 @@ export class StockfishEngine implements BrowserUciEngine {
       try {
         const workerUrl = stockfishWorkerUrl(this.url);
         this.workerObjectUrl = workerUrl.objectUrl ?? null;
-        const worker = new Worker(workerUrl.url);
+        let worker: Worker;
+        if (workerUrl.bootstrapWasmUrl) {
+          const bootstrapUrl = new URL('./stockfishPthreadBootstrap.js?no-inline', import.meta.url);
+          bootstrapUrl.hash = encodeURIComponent(workerUrl.bootstrapWasmUrl);
+          worker = new Worker(bootstrapUrl, { name: 'stockfish-pthread-bootstrap' });
+        } else {
+          worker = new Worker(workerUrl.url);
+        }
         this.worker = worker;
         worker.onmessage = (event: MessageEvent) => {
           const line = typeof event.data === 'string' ? event.data : String(event.data);
@@ -357,7 +369,7 @@ export class StockfishEngine implements BrowserUciEngine {
   maxThreads(): number {
     if (!/stockfish-18(?:-lite)?(?:-relaxed)?\.js(?:[?#].*)?$/.test(this.url)) return 1;
     if (typeof location === 'undefined') return /^[/.]/.test(this.url) ? 32 : 1;
-    return sameOriginUrl(this.url) ? 32 : 1;
+    return sameOriginUrl(this.url) || isTrustedExecutableAssetUrl(this.url) ? 32 : 1;
   }
 
   /** Last parsed UCI info/PV lines from `bestMove` or `analyze`, sorted by MultiPV rank. */

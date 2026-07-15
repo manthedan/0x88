@@ -42,10 +42,85 @@ test('Stockfish lite-single uses relaxed SIMD when validated and falls back othe
   }
 });
 
+test('Stockfish pthread bootstrap loads trusted external artifacts through a local helper', () => {
+  const previousLocation = globalThis.location;
+  const previousBase = globalThis.LC0_BROWSER_ASSET_BASE_URL;
+  Object.defineProperty(globalThis, 'location', {
+    value: { href: 'https://0x88.app/chess/app/analysis/', origin: 'https://0x88.app' },
+    configurable: true,
+  });
+  globalThis.LC0_BROWSER_ASSET_BASE_URL = 'https://assets.0x88.app';
+  try {
+    const worker = stockfishWorkerUrl('https://assets.0x88.app/stockfish/stockfish-18-lite.js');
+    assert.equal(worker.objectUrl, undefined);
+    assert.equal(worker.url, 'https://assets.0x88.app/stockfish/stockfish-18-lite.js');
+    assert.equal(worker.bootstrapWasmUrl, 'https://assets.0x88.app/stockfish/stockfish-18-lite.wasm');
+    assert.equal(new StockfishEngine({}, 'https://assets.0x88.app/stockfish/stockfish-18-lite.js').maxThreads(), 32);
+  } finally {
+    if (previousBase === undefined) delete globalThis.LC0_BROWSER_ASSET_BASE_URL;
+    else globalThis.LC0_BROWSER_ASSET_BASE_URL = previousBase;
+    if (previousLocation === undefined) delete globalThis.location;
+    else Object.defineProperty(globalThis, 'location', { value: previousLocation, configurable: true });
+  }
+});
+
 test('StockfishEngine reports thread capacity from the resolved worker URL', () => {
   assert.equal(new StockfishEngine({}, '/stockfish/stockfish-18-lite-single.js').maxThreads(), 1);
   assert.equal(new StockfishEngine({}, '/stockfish/stockfish-18-lite.js').maxThreads(), 32);
   assert.equal(new StockfishEngine({}, 'https://assets.0x88.app/stockfish/stockfish-18-lite.js').maxThreads(), 1);
+});
+
+test('StockfishEngine starts threaded artifacts through the local pthread bootstrap', async () => {
+  class MockStockfishWorker {
+    static instances = [];
+
+    constructor(url, options) {
+      this.url = String(url);
+      this.options = options;
+      this.messages = [];
+      this.onmessage = null;
+      this.onerror = null;
+      MockStockfishWorker.instances.push(this);
+    }
+
+    postMessage(message) {
+      this.messages.push(message);
+      if (message === 'uci') queueMicrotask(() => this.onmessage?.({ data: 'uciok' }));
+      else if (message === 'isready') queueMicrotask(() => this.onmessage?.({ data: 'readyok' }));
+    }
+
+    terminate() {}
+  }
+
+  const previousWorker = globalThis.Worker;
+  const previousLocation = globalThis.location;
+  const previousBase = globalThis.LC0_BROWSER_ASSET_BASE_URL;
+  globalThis.Worker = MockStockfishWorker;
+  Object.defineProperty(globalThis, 'location', {
+    value: { href: 'https://0x88.app/app/analysis/', origin: 'https://0x88.app' },
+    configurable: true,
+  });
+  globalThis.LC0_BROWSER_ASSET_BASE_URL = 'https://assets.0x88.app';
+  try {
+    const engine = new StockfishEngine({ threads: 2 }, 'https://assets.0x88.app/stockfish/stockfish-18-lite.js');
+    await engine.prewarm();
+    const worker = MockStockfishWorker.instances[0];
+    assert.match(worker.url, /stockfishPthreadBootstrap\.js\?no-inline#https%3A%2F%2Fassets\.0x88\.app%2Fstockfish%2Fstockfish-18-lite\.wasm$/);
+    assert.equal(worker.options.name, 'stockfish-pthread-bootstrap');
+    assert.deepEqual(worker.messages.slice(0, 4), [
+      'uci',
+      'setoption name Threads value 2',
+      'isready',
+    ]);
+    engine.dispose();
+  } finally {
+    if (previousWorker === undefined) delete globalThis.Worker;
+    else globalThis.Worker = previousWorker;
+    if (previousBase === undefined) delete globalThis.LC0_BROWSER_ASSET_BASE_URL;
+    else globalThis.LC0_BROWSER_ASSET_BASE_URL = previousBase;
+    if (previousLocation === undefined) delete globalThis.location;
+    else Object.defineProperty(globalThis, 'location', { value: previousLocation, configurable: true });
+  }
 });
 
 test('cross-origin Stockfish wrapper hash initializes the UCI worker, not a pthread helper', () => {
