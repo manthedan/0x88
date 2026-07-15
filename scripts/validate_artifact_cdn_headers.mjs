@@ -2,16 +2,17 @@
 import { readFile } from 'node:fs/promises';
 
 function usage() {
-  console.log(`Usage: node scripts/validate_artifact_cdn_headers.mjs [--url URL ...] [--release manifest.json] [options]\n\nOptions:\n  --url URL          Artifact URL to validate; may be repeated\n  --release PATH     Release manifest containing artifactUrl entries\n  --limit N          Max release artifacts to validate\n  --range BYTES      Range probe length (default 1024)\n  --json             Print JSON only\n  -h, --help         Show help\n\nThe validator checks HEAD twice, a small Range GET, and identity/br header probes.\nIt expects immutable artifacts to expose Content-Length and valid 206 range behavior.\n`);
+  console.log(`Usage: node scripts/validate_artifact_cdn_headers.mjs [--url URL ...] [--release manifest.json] [options]\n\nOptions:\n  --url URL          Artifact URL to validate; may be repeated\n  --release PATH     V1/v2 release manifest to validate\n  --artifact-base URL  Origin for v2 logical URLs (default https://assets.0x88.app)\n  --limit N          Max release artifacts to validate\n  --range BYTES      Range probe length (default 1024)\n  --json             Print JSON only\n  -h, --help         Show help\n\nThe validator checks HEAD twice, a small Range GET, and identity/br header probes.\nFor v2 releases it verifies representation negotiation, integrity metadata, and that\nRange requests force identity. It never uploads, purges, or mutates channels.\n`);
 }
 
 function parseArgs(argv) {
-  const args = { urls: [], rangeBytes: 1024, json: false };
+  const args = { urls: [], rangeBytes: 1024, json: false, artifactBase: 'https://assets.0x88.app' };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = argv[i + 1];
     if (arg === '--url' && next) { args.urls.push(next); i += 1; continue; }
     if (arg === '--release' && next) { args.release = next; i += 1; continue; }
+    if (arg === '--artifact-base' && next) { args.artifactBase = next; i += 1; continue; }
     if (arg === '--limit' && next) { args.limit = Number(next); i += 1; continue; }
     if (arg === '--range' && next) { args.rangeBytes = Number(next); i += 1; continue; }
     if (arg === '--json') { args.json = true; continue; }
@@ -23,7 +24,7 @@ function parseArgs(argv) {
 }
 
 function pickHeaders(headers) {
-  const keys = ['cache-control', 'cdn-cache-control', 'cloudflare-cdn-cache-control', 'cf-cache-status', 'cache-status', 'age', 'etag', 'content-length', 'x-artifact-content-length', 'content-type', 'content-encoding', 'accept-ranges', 'content-range', 'vary', 'access-control-allow-origin', 'cross-origin-resource-policy', 'timing-allow-origin', 'access-control-expose-headers', 'set-cookie'];
+  const keys = ['cache-control', 'cdn-cache-control', 'cloudflare-cdn-cache-control', 'cf-cache-status', 'cache-status', 'age', 'etag', 'content-length', 'x-artifact-content-length', 'x-artifact-decoded-sha256', 'x-artifact-encoded-sha256', 'content-type', 'content-encoding', 'accept-ranges', 'content-range', 'vary', 'access-control-allow-origin', 'cross-origin-resource-policy', 'timing-allow-origin', 'access-control-expose-headers', 'set-cookie'];
   const out = {};
   for (const key of keys) {
     const value = headers.get(key);
@@ -32,10 +33,28 @@ function pickHeaders(headers) {
   return out;
 }
 
-async function urlsFromRelease(path, limit) {
+async function urlsFromRelease(path, limit, artifactBase) {
   const release = JSON.parse(await readFile(path, 'utf8'));
-  const urls = (release.artifacts ?? []).map((artifact) => artifact.artifactUrl).filter(Boolean);
-  return Number.isFinite(limit) ? urls.slice(0, limit) : urls;
+  const targets = [];
+  for (const artifact of release.artifacts ?? []) {
+    if (artifact.raw && Array.isArray(artifact.representations)) {
+      const identity = artifact.representations.find((entry) => entry.encoding === 'identity');
+      const br = artifact.representations.find((entry) => entry.encoding === 'br');
+      const rawUrl = artifact.logicalUrl ?? artifact.url ?? identity?.url;
+      if (!rawUrl) continue;
+      targets.push({
+        url: new URL(rawUrl, artifactBase).href,
+        expected: {
+          raw: artifact.raw,
+          identity,
+          br,
+        },
+      });
+      continue;
+    }
+    if (artifact.artifactUrl) targets.push({ url: new URL(artifact.artifactUrl, artifactBase).href });
+  }
+  return Number.isFinite(limit) ? targets.slice(0, limit) : targets;
 }
 
 async function head(url, acceptEncoding) {
@@ -45,7 +64,7 @@ async function head(url, acceptEncoding) {
 }
 
 async function rangeGet(url, rangeBytes) {
-  const response = await fetch(url, { headers: { Range: `bytes=0-${rangeBytes - 1}` }, cache: 'no-store' });
+  const response = await fetch(url, { headers: { Range: `bytes=0-${rangeBytes - 1}`, 'Accept-Encoding': 'br' }, cache: 'no-store' });
   const headers = pickHeaders(response.headers);
   if (response.status !== 206) {
     await response.body?.cancel();
@@ -61,6 +80,8 @@ function validateRow(row) {
   if (row.secondHead.status < 200 || row.secondHead.status >= 400) failures.push(`second HEAD status ${row.secondHead.status}`);
   if (row.firstHead.headers['set-cookie'] || row.secondHead.headers['set-cookie'] || row.range.headers['set-cookie']) failures.push('artifact response must not set cookies');
   if (!row.firstHead.headers['content-length'] && !row.firstHead.headers['x-artifact-content-length']) failures.push('missing Content-Length or X-Artifact-Content-Length on HEAD');
+  const cacheControl = row.firstHead.headers['cache-control'] ?? '';
+  if (!/\bimmutable\b/i.test(cacheControl) || !/\bmax-age=31536000\b/i.test(cacheControl)) failures.push(`artifact cache policy is not immutable: ${cacheControl || 'missing'}`);
   if (!row.firstHead.headers.etag) failures.push('missing ETag on HEAD');
   if (!row.secondHead.headers.age) failures.push('missing Age on repeated HEAD');
   const cfCacheStatus = row.secondHead.headers['cf-cache-status']?.toUpperCase();
@@ -80,6 +101,7 @@ function validateRow(row) {
     if (!exposed.has(required)) failures.push(`Access-Control-Expose-Headers missing ${required}`);
   }
   if (row.range.status !== 206) failures.push(`Range probe returned ${row.range.status}, expected 206`);
+  if (row.range.headers['content-encoding']) failures.push(`Range probe must force identity, got Content-Encoding: ${row.range.headers['content-encoding']}`);
   const contentRange = row.range.headers['content-range'];
   if (!contentRange) failures.push('missing Content-Range on range response');
   const contentRangeMatch = contentRange?.match(/^bytes (\d+)-(\d+)\/(\d+)$/);
@@ -98,27 +120,53 @@ function validateRow(row) {
   const identityEncoding = row.identityHead.headers['content-encoding'];
   if (identityEncoding && identityEncoding !== 'identity') failures.push(`identity probe returned Content-Encoding: ${identityEncoding}`);
   if (row.brHead.status < 200 || row.brHead.status >= 400) failures.push(`br HEAD status ${row.brHead.status}`);
+  if (row.expected) {
+    const expectedRawBytes = row.expected.raw?.bytes;
+    const expectedRawSha256 = row.expected.raw?.sha256?.toLowerCase();
+    const actualIdentityBytes = Number(row.identityHead.headers['x-artifact-content-length'] ?? row.identityHead.headers['content-length']);
+    if (Number.isFinite(expectedRawBytes) && actualIdentityBytes !== expectedRawBytes) {
+      failures.push(`identity decoded length ${actualIdentityBytes} does not match manifest ${expectedRawBytes}`);
+    }
+    const actualDecodedSha256 = row.identityHead.headers['x-artifact-decoded-sha256'];
+    if (expectedRawSha256 && actualDecodedSha256 !== expectedRawSha256) {
+      failures.push(`identity decoded SHA-256 ${actualDecodedSha256 ?? 'missing'} does not match manifest ${expectedRawSha256}`);
+    }
+    if (row.expected.br) {
+      if (row.brHead.headers['content-encoding'] !== 'br') failures.push(`br probe returned Content-Encoding: ${row.brHead.headers['content-encoding'] ?? 'identity'}`);
+      if (!(row.brHead.headers.vary ?? '').toLowerCase().split(',').map((value) => value.trim()).includes('accept-encoding')) {
+        failures.push('br probe missing Vary: Accept-Encoding');
+      }
+      const encodedSha256 = row.brHead.headers['x-artifact-encoded-sha256'];
+      if (encodedSha256 !== row.expected.br.sha256?.toLowerCase()) {
+        failures.push(`br encoded SHA-256 ${encodedSha256 ?? 'missing'} does not match manifest ${row.expected.br.sha256}`);
+      }
+      if (Number(row.brHead.headers['content-length']) !== row.expected.br.bytes) {
+        failures.push(`br encoded length ${row.brHead.headers['content-length'] ?? 'missing'} does not match manifest ${row.expected.br.bytes}`);
+      }
+    }
+  }
   return failures;
 }
 
-async function validateUrl(url, rangeBytes) {
+async function validateUrl(target, rangeBytes) {
+  const { url, expected } = target;
   const firstHead = await head(url);
   const secondHead = await head(url);
   const range = await rangeGet(url, rangeBytes);
   const identityHead = await head(url, 'identity');
   const brHead = await head(url, 'br');
-  const row = { url, firstHead, secondHead, range, identityHead, brHead };
+  const row = { url, ...(expected ? { expected } : {}), firstHead, secondHead, range, identityHead, brHead };
   const failures = validateRow(row);
   return { ...row, ok: failures.length === 0, failures };
 }
 
 async function main() {
   const args = parseArgs(process.argv);
-  const releaseUrls = args.release ? await urlsFromRelease(args.release, args.limit) : [];
-  const urls = [...args.urls, ...releaseUrls];
-  if (!urls.length) throw new Error('No artifact URLs to validate');
+  const releaseTargets = args.release ? await urlsFromRelease(args.release, args.limit, args.artifactBase) : [];
+  const targets = [...args.urls.map((url) => ({ url })), ...releaseTargets];
+  if (!targets.length) throw new Error('No artifact URLs to validate');
   const rows = [];
-  for (const url of urls) rows.push(await validateUrl(url, args.rangeBytes));
+  for (const target of targets) rows.push(await validateUrl(target, args.rangeBytes));
   const result = {
     schema: 'lc0_browser.artifact_cdn_validation.v1',
     ok: rows.every((row) => row.ok),

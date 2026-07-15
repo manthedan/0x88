@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
+import {
+  artifactKeyFromReleaseUrl,
+  buildArtifactReleaseCatalog,
+} from './engine_artifact_registry.mjs';
 
 const DEFAULT_BUCKET = 'browser-chess-models';
 const DEFAULT_RETENTION_DAYS = 90;
@@ -58,10 +62,7 @@ function objectAgeDays(object, now) {
 }
 
 export function artifactKeyFromUrl(raw) {
-  if (!raw) return undefined;
-  const url = new URL(raw, 'https://assets.0x88.app');
-  const key = url.pathname.replace(/^\/+/, '');
-  return key.startsWith(HASHED_PREFIX) ? key : undefined;
+  return artifactKeyFromReleaseUrl(raw);
 }
 
 function logicalKeyFromUrl(raw) {
@@ -111,15 +112,15 @@ function protectedFrom(object, reason, extra = {}) {
 }
 
 export function buildCleanupPlan({ objects, releases, channel, now = new Date(), retentionDays = DEFAULT_RETENTION_DAYS }) {
-  const artifactRefs = new Map();
+  const catalog = buildArtifactReleaseCatalog(releases);
+  const artifactRefs = new Map([...catalog].map(([key, entry]) => [key, new Set(entry.releases)]));
   const logicalRefs = new Map();
   const releasesById = new Map();
   for (const release of releases) {
     const releaseId = release.releaseId ?? release.id ?? 'unknown-release';
     releasesById.set(releaseId, release);
     for (const artifact of release.artifacts ?? []) {
-      addRef(artifactRefs, artifactKeyFromUrl(artifact.artifactUrl), releaseId);
-      addRef(logicalRefs, logicalKeyFromUrl(artifact.logicalUrl), releaseId);
+      addRef(logicalRefs, logicalKeyFromUrl(artifact.logicalUrl ?? artifact.name), releaseId);
     }
   }
 
@@ -128,10 +129,9 @@ export function buildCleanupPlan({ objects, releases, channel, now = new Date(),
   const stableArtifactRefs = new Set();
   const stableLogicalRefs = new Set();
   if (stableRelease) {
+    for (const key of buildArtifactReleaseCatalog([stableRelease]).keys()) stableArtifactRefs.add(key);
     for (const artifact of stableRelease.artifacts ?? []) {
-      const artifactKey = artifactKeyFromUrl(artifact.artifactUrl);
-      const logicalKey = logicalKeyFromUrl(artifact.logicalUrl);
-      if (artifactKey) stableArtifactRefs.add(artifactKey);
+      const logicalKey = logicalKeyFromUrl(artifact.logicalUrl ?? artifact.name);
       if (logicalKey) stableLogicalRefs.add(logicalKey);
     }
   }
@@ -201,6 +201,7 @@ export function buildCleanupPlan({ objects, releases, channel, now = new Date(),
     stableReleaseId,
     objectCount: objects.length,
     releaseCount: releases.length,
+    catalogObjectCount: catalog.size,
     candidateCount: candidates.length,
     candidateBytes: candidates.reduce((sum, candidate) => sum + candidate.size, 0),
     summaryByCategory,

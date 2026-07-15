@@ -63,6 +63,36 @@ test('R2 cleanup plan reports missing retained artifacts', () => {
   assert.deepEqual(plan.missingReferencedArtifacts, [{ key: missingKey, releases: ['stable-release'] }]);
 });
 
+test('R2 cleanup plan protects every shared v2 representation and reports catalog gaps once', () => {
+  const rawSha = '6'.repeat(64);
+  const brSha = '7'.repeat(64);
+  const identityKey = `artifacts/sha256/${rawSha}/identity`;
+  const brKey = `artifacts/sha256/${rawSha}/br/${brSha}`;
+  const representationMap = [
+    { encoding: 'identity', url: `/${identityKey}`, sha256: rawSha, bytes: 3 },
+    { encoding: 'br', url: `/${brKey}`, sha256: brSha, bytes: 2 },
+  ];
+  const release = {
+    schema: 'lc0_browser.artifact_release_manifest.v2',
+    releaseId: 'stable-v2',
+    artifacts: [
+      { logicalUrl: '/models/a.onnx', raw: { sha256: rawSha, bytes: 3 }, representations: representationMap },
+      { logicalUrl: '/models/b.onnx', raw: { sha256: rawSha, bytes: 3 }, representations: representationMap },
+    ],
+  };
+  const plan = buildCleanupPlan({
+    now,
+    channel: { releaseId: 'stable-v2' },
+    releases: [release],
+    objects: [object('channels/stable.json'), object('releases/stable-v2.json'), object(identityKey)],
+  });
+
+  assert.equal(plan.catalogObjectCount, 2);
+  assert.deepEqual(plan.missingReferencedArtifacts, [{ key: brKey, releases: ['stable-v2'] }]);
+  assert.ok(plan.protected.some((entry) => entry.key === identityKey && entry.reason === 'referenced by stable release'));
+  assert.equal(plan.candidates.some((entry) => entry.key === identityKey), false);
+});
+
 test('parseArgs requires hashed opt-in separately from execute', () => {
   const args = parseArgs(['node', 'script', '--execute', '--delete-category', 'legacy-logical-duplicate,legacy-unreferenced-metadata', '--retention-days', '7']);
   assert.equal(args.execute, true);
