@@ -181,7 +181,6 @@ export class FileModelShardStore {
 }
 
 export function localFileFetch() {
-  const expectedBytesByUrl = new Map();
   return async (input, init = {}) => {
     const raw = typeof input === 'string' ? input : input.url;
     const url = new URL(raw);
@@ -189,45 +188,19 @@ export function localFileFetch() {
     const signal = init.signal ?? (typeof input === 'string' ? undefined : input.signal);
     if (signal?.aborted) throw new DOMException('The operation was aborted', 'AbortError');
     const path = fileURLToPath(url);
-    const expectedBytes = expectedBytesByUrl.get(url.href);
     try {
-      if (expectedBytes === undefined && url.pathname.endsWith('.json')) {
-        const bytes = await readFile(path, { signal });
-        if (url.pathname.endsWith('.resumable.json')) {
-          try {
-            const manifest = JSON.parse(bytes);
-            if (Array.isArray(manifest?.shards)) {
-              for (const shard of manifest.shards) {
-                if (typeof shard?.url === 'string' && Number.isSafeInteger(shard.bytes) && shard.bytes >= 0) {
-                  expectedBytesByUrl.set(new URL(shard.url, url).href, shard.bytes);
-                }
-              }
-            }
-          } catch {
-            // The loader reports malformed manifest JSON with its normal validation error.
-          }
-        }
-        return new Response(bytes, { headers: { 'content-type': 'application/json' } });
-      }
       const metadata = await stat(path);
-      if (expectedBytes !== undefined && metadata.size > expectedBytes) {
-        throw new Error(`Local shard file exceeded expected length ${expectedBytes}: ${path}`);
-      }
-      let loaded = 0;
+      throwIfAborted(signal);
       const source = Readable.toWeb(createReadStream(path, { signal }));
       const bounded = source.pipeThrough(new TransformStream({
         transform(chunk, controller) {
-          loaded += chunk.byteLength;
-          if (expectedBytes !== undefined && loaded > expectedBytes) {
-            controller.error(new Error(`Local shard file exceeded expected length ${expectedBytes}: ${path}`));
-            return;
-          }
           controller.enqueue(chunk);
         },
       }), { signal });
       return new Response(bounded, {
         headers: {
           'content-length': String(metadata.size),
+          ...(url.pathname.endsWith('.json') ? { 'content-type': 'application/json' } : {}),
         },
       });
     } catch (error) {

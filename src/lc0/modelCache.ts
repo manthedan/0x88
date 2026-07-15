@@ -1136,13 +1136,48 @@ async function ensureResumableShardQuota(
   }
 }
 
-let resumableShardCacheWriteTail: Promise<void> = Promise.resolve();
-const activeResumableShardHashesByCacheName = new Map<string, Map<string, number>>();
+interface ResumableShardPersistenceDomain {
+  activeHashes: Map<string, number>;
+  writeTail: Promise<void>;
+}
 
-async function serializeResumableShardCacheWrite<T>(operation: () => Promise<T>): Promise<T> {
-  const previous = resumableShardCacheWriteTail;
+const resumableShardCacheStorageDomains = new Map<string, ResumableShardPersistenceDomain>();
+const resumableShardCustomStoreDomains = new WeakMap<Lc0ModelShardStore, ResumableShardPersistenceDomain>();
+
+function newResumableShardPersistenceDomain(): ResumableShardPersistenceDomain {
+  return {
+    activeHashes: new Map(),
+    writeTail: Promise.resolve(),
+  };
+}
+
+function resumableShardPersistenceDomain(
+  cacheName: string,
+  customStore: Lc0ModelShardStore | undefined,
+): ResumableShardPersistenceDomain {
+  if (customStore) {
+    let domain = resumableShardCustomStoreDomains.get(customStore);
+    if (!domain) {
+      domain = newResumableShardPersistenceDomain();
+      resumableShardCustomStoreDomains.set(customStore, domain);
+    }
+    return domain;
+  }
+  let domain = resumableShardCacheStorageDomains.get(cacheName);
+  if (!domain) {
+    domain = newResumableShardPersistenceDomain();
+    resumableShardCacheStorageDomains.set(cacheName, domain);
+  }
+  return domain;
+}
+
+async function serializeResumableShardCacheWrite<T>(
+  domain: ResumableShardPersistenceDomain,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = domain.writeTail;
   let release!: () => void;
-  resumableShardCacheWriteTail = new Promise<void>((resolve) => {
+  domain.writeTail = new Promise<void>((resolve) => {
     release = resolve;
   });
   await previous;
@@ -1153,30 +1188,26 @@ async function serializeResumableShardCacheWrite<T>(operation: () => Promise<T>)
   }
 }
 
-function retainActiveResumableShardHashes(cacheName: string, hashes: ReadonlySet<string>): () => void {
-  let counts = activeResumableShardHashesByCacheName.get(cacheName);
-  if (!counts) {
-    counts = new Map();
-    activeResumableShardHashesByCacheName.set(cacheName, counts);
-  }
+function retainActiveResumableShardHashes(
+  domain: ResumableShardPersistenceDomain,
+  hashes: ReadonlySet<string>,
+): () => void {
+  const counts = domain.activeHashes;
   for (const hash of hashes) counts.set(hash, (counts.get(hash) ?? 0) + 1);
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    const current = activeResumableShardHashesByCacheName.get(cacheName);
-    if (!current) return;
     for (const hash of hashes) {
-      const count = current.get(hash);
-      if (count === undefined || count <= 1) current.delete(hash);
-      else current.set(hash, count - 1);
+      const count = counts.get(hash);
+      if (count === undefined || count <= 1) counts.delete(hash);
+      else counts.set(hash, count - 1);
     }
-    if (current.size === 0) activeResumableShardHashesByCacheName.delete(cacheName);
   };
 }
 
-function activeResumableShardHashes(cacheName: string): ReadonlySet<string> {
-  return new Set(activeResumableShardHashesByCacheName.get(cacheName)?.keys());
+function activeResumableShardHashes(domain: ResumableShardPersistenceDomain): ReadonlySet<string> {
+  return new Set(domain.activeHashes.keys());
 }
 
 async function readBoundedShardResponse(
@@ -1445,7 +1476,9 @@ export async function loadResumableLc0ModelForOrt(
     DEFAULT_CACHE_FREE_BYTES_RESERVE,
   );
   const cacheName = options.cacheName ?? DEFAULT_RESUMABLE_SHARD_CACHE_NAME;
-  const store = options.shardStore ?? new CacheStorageModelShardStore(cacheName);
+  const customStore = options.shardStore;
+  const store = customStore ?? new CacheStorageModelShardStore(cacheName);
+  const persistenceDomain = resumableShardPersistenceDomain(cacheName, customStore);
   throwIfAborted(options.signal);
 
   const manifestResponse = await fetchFn(manifestUrl, { cache: 'no-cache', signal: options.signal });
@@ -1461,13 +1494,13 @@ export async function loadResumableLc0ModelForOrt(
   for (const shard of manifest.shards) unique.set(shard.sha256, shard);
   for (const shard of manifest.shards) referenceCounts.set(shard.sha256, (referenceCounts.get(shard.sha256) ?? 0) + 1);
   const manifestHashes = new Set(unique.keys());
-  const releaseActiveHashes = retainActiveResumableShardHashes(cacheName, manifestHashes);
+  const releaseActiveHashes = retainActiveResumableShardHashes(persistenceDomain, manifestHashes);
   try {
     await bestEffortEnforceResumableShardCacheBounds(
       store,
       maxCacheEntries,
       maxCacheBytes,
-      activeResumableShardHashes(cacheName),
+      activeResumableShardHashes(persistenceDomain),
     );
     throwIfAborted(options.signal);
 
@@ -1548,7 +1581,7 @@ export async function loadResumableLc0ModelForOrt(
           if (valid) {
             throwIfAborted(signal);
             let reusedConcurrentWrite = false;
-            await serializeResumableShardCacheWrite(async () => {
+            await serializeResumableShardCacheWrite(persistenceDomain, async () => {
               throwIfAborted(signal);
               const existing = await verifiedShardBytes(
                 store,
@@ -1568,7 +1601,7 @@ export async function loadResumableLc0ModelForOrt(
                 store,
                 shard.bytes,
                 minimumFreeBytesAfterCache,
-                activeResumableShardHashes(cacheName),
+                activeResumableShardHashes(persistenceDomain),
               );
               throwIfAborted(signal);
               await store.put(shard.sha256, bytes);
@@ -1576,7 +1609,7 @@ export async function loadResumableLc0ModelForOrt(
                 store,
                 maxCacheEntries,
                 maxCacheBytes,
-                activeResumableShardHashes(cacheName),
+                activeResumableShardHashes(persistenceDomain),
               );
             });
             if (reusedConcurrentWrite) {
@@ -1695,7 +1728,7 @@ export async function loadResumableLc0ModelForOrt(
       store,
       maxCacheEntries,
       maxCacheBytes,
-      activeResumableShardHashes(cacheName),
+      activeResumableShardHashes(persistenceDomain),
     );
     throwIfAborted(options.signal);
     const result: Lc0ResumableModelLoadResult = {

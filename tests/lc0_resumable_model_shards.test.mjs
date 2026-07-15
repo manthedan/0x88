@@ -356,7 +356,7 @@ test('oversized shard responses are cancelled before unbounded buffering', async
   assert.equal(cancelled, true);
 });
 
-test('local file fetch rejects oversized shards before streaming and propagates aborts', async () => {
+test('local file fetch streams JSON and shard bodies while propagating aborts', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-resumable-local-fetch-'));
   temporaryRoots.add(root);
   const manifestPath = join(root, 'model.resumable.json');
@@ -371,11 +371,13 @@ test('local file fetch rejects oversized shards before streaming and propagates 
   await writeFile(shardPath, Buffer.of(1, 2));
   const fetchFile = localFileFetch();
   const manifestResponse = await fetchFile(pathToFileURL(manifestPath).href);
+  assert.equal(manifestResponse.url, '');
+  assert.equal(manifestResponse.headers.get('content-type'), 'application/json');
+  assert.equal(manifestResponse.headers.get('content-length'), String(Buffer.byteLength(JSON.stringify(manifest))));
   assert.deepEqual(await manifestResponse.json(), manifest);
-  await assert.rejects(
-    fetchFile(pathToFileURL(shardPath).href),
-    /Local shard file exceeded expected length 1/,
-  );
+  const shardResponse = await fetchFile(pathToFileURL(shardPath).href);
+  assert.equal(shardResponse.url, '');
+  assert.deepEqual(Buffer.from(await shardResponse.arrayBuffer()), Buffer.of(1, 2));
 
   const abortBytes = Buffer.alloc(CHUNK_BYTES, 0x35);
   manifest.decoded = { bytes: abortBytes.byteLength, sha256: sha256(abortBytes) };
@@ -388,9 +390,26 @@ test('local file fetch rejects oversized shards before streaming and propagates 
   await writeFile(shardPath, abortBytes);
   await (await fetchFile(pathToFileURL(manifestPath).href)).json();
   const controller = new AbortController();
-  const shardResponse = await fetchFile(pathToFileURL(shardPath).href, { signal: controller.signal });
+  const abortedShardResponse = await fetchFile(pathToFileURL(shardPath).href, { signal: controller.signal });
   controller.abort();
-  await assert.rejects(shardResponse.arrayBuffer(), { name: 'AbortError' });
+  await assert.rejects(abortedShardResponse.arrayBuffer(), { name: 'AbortError' });
+});
+
+test('oversized local manifests are rejected by the loader stream bound', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-resumable-local-manifest-bound-'));
+  temporaryRoots.add(root);
+  const manifestPath = join(root, 'oversized.resumable.json');
+  const manifestBody = `${JSON.stringify(singleShardManifest(Buffer.of(1)))}${' '.repeat(4096)}`;
+  await writeFile(manifestPath, manifestBody);
+  await assert.rejects(
+    loadResumableLc0ModelForOrt(pathToFileURL(manifestPath).href, {
+      researchOnly: true,
+      maxManifestBytes: 1024,
+      fetchFn: localFileFetch(),
+      shardStore: new MemoryShardStore(),
+    }),
+    /manifest exceeded configured limit 1024 bytes/,
+  );
 });
 
 test('filesystem shard cache bounds oversized reads and propagates aborts', async (t) => {
@@ -967,6 +986,77 @@ test('final eviction preserves shards protected by another active load', async (
   assert.equal(store.entries.has(protectedHash), true);
   assert.equal(store.entries.has(incomingHash), false);
   assert.equal(store.deleted.includes(protectedHash), false);
+  releaseProtectedReconstruction();
+  await protectedLoad;
+});
+
+test('active shard protection is isolated between different custom stores', async () => {
+  const protectedBytes = Buffer.alloc(CHUNK_BYTES, 0x51);
+  const incomingBytes = Buffer.alloc(CHUNK_BYTES, 0x52);
+  const protectedManifest = singleShardManifest(protectedBytes, 'shards/protected.bin');
+  const incomingManifest = singleShardManifest(incomingBytes, 'shards/incoming.bin');
+  const protectedManifestUrl = 'https://models.example/research/custom-store-protected.resumable.json';
+  const incomingManifestUrl = 'https://models.example/research/custom-store-incoming.resumable.json';
+  const protectedHash = protectedManifest.shards[0].sha256;
+  const incomingHash = incomingManifest.shards[0].sha256;
+  const protectedStore = new MemoryShardStore([
+    { sha256: protectedHash, bytes: protectedBytes.buffer, lastUsedAt: 1 },
+  ]);
+  const incomingStore = new MemoryShardStore([
+    { sha256: protectedHash, bytes: protectedBytes.buffer, lastUsedAt: 1 },
+  ]);
+  protectedStore.touch = async () => {};
+  let protectedReads = 0;
+  let releaseProtectedReconstruction;
+  const reconstructionStarted = new Promise((resolve) => {
+    const originalGet = protectedStore.get.bind(protectedStore);
+    protectedStore.get = async (hash) => {
+      if (hash === protectedHash) {
+        protectedReads += 1;
+        if (protectedReads === 2) {
+          resolve();
+          await new Promise((release) => {
+            releaseProtectedReconstruction = release;
+          });
+        }
+      }
+      return originalGet(hash);
+    };
+  });
+  const protectedLoad = loadResumableLc0ModelForOrt(protectedManifestUrl, {
+    researchOnly: true,
+    cacheName: 'custom-store-isolation-test',
+    concurrency: 1,
+    maxCacheEntries: 1,
+    maxCacheBytes: Infinity,
+    shardStore: protectedStore,
+    fetchFn: async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url === protectedManifestUrl) return new Response(JSON.stringify(protectedManifest));
+      return new Response(null, { status: 404 });
+    },
+  });
+  await reconstructionStarted;
+  const incomingLoad = await loadResumableLc0ModelForOrt(incomingManifestUrl, {
+    researchOnly: true,
+    cacheName: 'custom-store-isolation-test',
+    concurrency: 1,
+    corruptionRetries: 0,
+    maxCacheEntries: 1,
+    maxCacheBytes: Infinity,
+    shardStore: incomingStore,
+    fetchFn: async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url === incomingManifestUrl) return new Response(JSON.stringify(incomingManifest));
+      if (url.endsWith('/incoming.bin')) return new Response(incomingBytes);
+      return new Response(null, { status: 404 });
+    },
+  });
+  assert.equal(incomingLoad.downloadedShards, 1);
+  assert.equal(incomingStore.deleted.includes(protectedHash), true);
+  assert.equal(incomingStore.entries.has(protectedHash), false);
+  assert.equal(incomingStore.entries.has(incomingHash), true);
+  assert.equal(protectedStore.entries.has(protectedHash), true);
   releaseProtectedReconstruction();
   await protectedLoad;
 });

@@ -85,6 +85,7 @@ async function createOrtSession(model) {
 async function loadAndCreateSession(manifestPath, cacheDir, concurrency) {
   const load = await reconstructResumableModelShards({ manifestPath, cacheDir, concurrency });
   const ort = await createOrtSession(load.model);
+  delete load.model;
   return { load, ort };
 }
 
