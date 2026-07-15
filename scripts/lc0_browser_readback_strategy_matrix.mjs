@@ -4,6 +4,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { arch, cpus, platform, release, totalmem } from 'node:os';
+import { pathToFileURL } from 'node:url';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
@@ -274,10 +275,18 @@ function median(values) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function numericStats(values) {
+export function numericStats(values) {
   const samples = values.map(Number).filter(Number.isFinite);
   if (!samples.length) return undefined;
-  const mean = samples.reduce((sum, value) => sum + value, 0) / samples.length;
+  let sum = 0;
+  let min = samples[0];
+  let max = samples[0];
+  for (const value of samples) {
+    sum += value;
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  }
+  const mean = sum / samples.length;
   const variance = samples.length > 1
     ? samples.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (samples.length - 1)
     : 0;
@@ -285,8 +294,8 @@ function numericStats(values) {
     samples: samples.length,
     mean,
     median: median(samples),
-    min: Math.min(...samples),
-    max: Math.max(...samples),
+    min,
+    max,
     variance,
     standardDeviation: Math.sqrt(variance),
     coefficientOfVariation: mean === 0 ? 0 : Math.sqrt(variance) / Math.abs(mean),
@@ -419,4 +428,6 @@ async function main() {
   }
 }
 
-main().catch((error) => { console.error(error.stack ?? error.message); process.exit(1); });
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => { console.error(error.stack ?? error.message); process.exit(1); });
+}
