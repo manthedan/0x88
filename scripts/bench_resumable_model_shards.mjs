@@ -7,8 +7,24 @@ import { InferenceSession } from 'onnxruntime-web';
 import { generateResumableModelShards } from './generate_resumable_model_shards.mjs';
 import { reconstructResumableModelShards } from './reconstruct_resumable_model_shards.mjs';
 
-function parseArgs(argv) {
-  const args = { model: undefined, workDir: undefined, chunkMib: 16, concurrency: 3 };
+function optionalPositiveSafeInteger(value, option) {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${option} must be a positive safe integer`);
+  }
+  return value;
+}
+
+export function parseArgs(argv) {
+  const args = {
+    model: undefined,
+    workDir: undefined,
+    chunkMib: 16,
+    concurrency: 3,
+    maxManifestBytes: undefined,
+    maxDecodedBytes: undefined,
+    maxShardReferences: undefined,
+  };
   for (let index = 2; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = argv[index + 1];
@@ -16,8 +32,11 @@ function parseArgs(argv) {
     if (arg === '--work-dir' && next) { args.workDir = next; index += 1; continue; }
     if (arg === '--chunk-mib' && next) { args.chunkMib = Number(next); index += 1; continue; }
     if (arg === '--concurrency' && next) { args.concurrency = Number(next); index += 1; continue; }
+    if (arg === '--max-manifest-bytes' && next) { args.maxManifestBytes = Number(next); index += 1; continue; }
+    if (arg === '--max-decoded-bytes' && next) { args.maxDecodedBytes = Number(next); index += 1; continue; }
+    if (arg === '--max-shard-references' && next) { args.maxShardReferences = Number(next); index += 1; continue; }
     if (arg === '-h' || arg === '--help') {
-      console.log('Usage: node --experimental-strip-types scripts/bench_resumable_model_shards.mjs --model model.onnx --work-dir output [--chunk-mib 16] [--concurrency 3]');
+      console.log('Usage: node --experimental-strip-types scripts/bench_resumable_model_shards.mjs --model model.onnx --work-dir output [--chunk-mib 16] [--concurrency 3] [--max-manifest-bytes bytes] [--max-decoded-bytes bytes] [--max-shard-references count]');
       process.exit(0);
     }
     throw new Error(`Unknown argument: ${arg}`);
@@ -34,6 +53,9 @@ function parseArgs(argv) {
     workDir: resolve(args.workDir),
     chunkBytes: args.chunkMib * 1024 * 1024,
     concurrency: args.concurrency,
+    maxManifestBytes: optionalPositiveSafeInteger(args.maxManifestBytes, '--max-manifest-bytes'),
+    maxDecodedBytes: optionalPositiveSafeInteger(args.maxDecodedBytes, '--max-decoded-bytes'),
+    maxShardReferences: optionalPositiveSafeInteger(args.maxShardReferences, '--max-shard-references'),
   };
 }
 
@@ -82,8 +104,8 @@ async function createOrtSession(model) {
   return { elapsedMs, inputs, outputs };
 }
 
-async function loadAndCreateSession(manifestPath, cacheDir, concurrency) {
-  const load = await reconstructResumableModelShards({ manifestPath, cacheDir, concurrency });
+async function loadAndCreateSession(manifestPath, cacheDir, options) {
+  const load = await reconstructResumableModelShards({ manifestPath, cacheDir, ...options });
   const ort = await createOrtSession(load.model);
   delete load.model;
   return { load, ort };
@@ -102,11 +124,17 @@ async function main() {
     outputDir: join(runDir, 'published'),
     chunkBytes: args.chunkBytes,
   }));
+  const reconstructionOptions = {
+    concurrency: args.concurrency,
+    maxManifestBytes: args.maxManifestBytes,
+    maxDecodedBytes: args.maxDecodedBytes,
+    maxShardReferences: args.maxShardReferences,
+  };
 
   const cold = await measured(() => loadAndCreateSession(
     generation.value.manifestPath,
     join(runDir, 'cold-cache'),
-    args.concurrency,
+    reconstructionOptions,
   ));
 
   const resumeCache = join(runDir, 'resume-cache');
@@ -118,6 +146,9 @@ async function main() {
         manifestPath: generation.value.manifestPath,
         cacheDir: resumeCache,
         concurrency: 1,
+        maxManifestBytes: reconstructionOptions.maxManifestBytes,
+        maxDecodedBytes: reconstructionOptions.maxDecodedBytes,
+        maxShardReferences: reconstructionOptions.maxShardReferences,
         signal: controller.signal,
         onProgress(progress) {
           if (progress.phase === 'download' && progress.completedBytes >= progress.totalBytes * 0.4) {
@@ -136,7 +167,7 @@ async function main() {
   const resumed = await measured(() => loadAndCreateSession(
     generation.value.manifestPath,
     resumeCache,
-    args.concurrency,
+    reconstructionOptions,
   ));
   const modelStat = await stat(args.modelPath);
   const summarize = (measurement) => ({

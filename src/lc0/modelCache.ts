@@ -127,6 +127,8 @@ export interface Lc0ResumableModelShardManifest {
 }
 
 export interface Lc0ModelShardStore {
+  /** Stable identity for stores sharing one persistence domain. Omit to isolate by store object identity. */
+  persistenceDomainKey?: string | object;
   get(sha256: string): Promise<ArrayBuffer | undefined>;
   getBounded?(sha256: string, expectedBytes: number, signal?: AbortSignal): Promise<ArrayBuffer | undefined>;
   put(sha256: string, bytes: ArrayBuffer): Promise<void>;
@@ -1143,6 +1145,8 @@ interface ResumableShardPersistenceDomain {
 
 const resumableShardCacheStorageDomains = new Map<string, ResumableShardPersistenceDomain>();
 const resumableShardCustomStoreDomains = new WeakMap<Lc0ModelShardStore, ResumableShardPersistenceDomain>();
+const resumableShardStringDomains = new Map<string, ResumableShardPersistenceDomain>();
+const resumableShardObjectDomains = new WeakMap<object, ResumableShardPersistenceDomain>();
 
 function newResumableShardPersistenceDomain(): ResumableShardPersistenceDomain {
   return {
@@ -1156,6 +1160,23 @@ function resumableShardPersistenceDomain(
   customStore: Lc0ModelShardStore | undefined,
 ): ResumableShardPersistenceDomain {
   if (customStore) {
+    const persistenceDomainKey = customStore.persistenceDomainKey;
+    if (typeof persistenceDomainKey === 'string') {
+      let domain = resumableShardStringDomains.get(persistenceDomainKey);
+      if (!domain) {
+        domain = newResumableShardPersistenceDomain();
+        resumableShardStringDomains.set(persistenceDomainKey, domain);
+      }
+      return domain;
+    }
+    if (persistenceDomainKey && typeof persistenceDomainKey === 'object') {
+      let domain = resumableShardObjectDomains.get(persistenceDomainKey);
+      if (!domain) {
+        domain = newResumableShardPersistenceDomain();
+        resumableShardObjectDomains.set(persistenceDomainKey, domain);
+      }
+      return domain;
+    }
     let domain = resumableShardCustomStoreDomains.get(customStore);
     if (!domain) {
       domain = newResumableShardPersistenceDomain();

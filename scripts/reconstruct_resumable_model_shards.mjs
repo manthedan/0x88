@@ -7,8 +7,24 @@ import { Readable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadResumableLc0ModelForOrt } from '../src/lc0/modelCache.ts';
 
-function parseArgs(argv) {
-  const args = { manifest: undefined, output: undefined, cacheDir: undefined, concurrency: 3 };
+function optionalPositiveSafeInteger(value, option) {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${option} must be a positive safe integer`);
+  }
+  return value;
+}
+
+export function parseArgs(argv) {
+  const args = {
+    manifest: undefined,
+    output: undefined,
+    cacheDir: undefined,
+    concurrency: 3,
+    maxManifestBytes: undefined,
+    maxDecodedBytes: undefined,
+    maxShardReferences: undefined,
+  };
   for (let index = 2; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = argv[index + 1];
@@ -16,8 +32,11 @@ function parseArgs(argv) {
     if (arg === '--output' && next) { args.output = next; index += 1; continue; }
     if (arg === '--cache-dir' && next) { args.cacheDir = next; index += 1; continue; }
     if (arg === '--concurrency' && next) { args.concurrency = Number(next); index += 1; continue; }
+    if (arg === '--max-manifest-bytes' && next) { args.maxManifestBytes = Number(next); index += 1; continue; }
+    if (arg === '--max-decoded-bytes' && next) { args.maxDecodedBytes = Number(next); index += 1; continue; }
+    if (arg === '--max-shard-references' && next) { args.maxShardReferences = Number(next); index += 1; continue; }
     if (arg === '-h' || arg === '--help') {
-      console.log('Usage: node --experimental-strip-types scripts/reconstruct_resumable_model_shards.mjs --manifest model.resumable.json --output model.onnx --cache-dir shard-cache [--concurrency 3]');
+      console.log('Usage: node --experimental-strip-types scripts/reconstruct_resumable_model_shards.mjs --manifest model.resumable.json --output model.onnx --cache-dir shard-cache [--concurrency 3] [--max-manifest-bytes bytes] [--max-decoded-bytes bytes] [--max-shard-references count]');
       process.exit(0);
     }
     throw new Error(`Unknown argument: ${arg}`);
@@ -33,6 +52,9 @@ function parseArgs(argv) {
     outputPath: resolve(args.output),
     cacheDir: resolve(args.cacheDir),
     concurrency: args.concurrency,
+    maxManifestBytes: optionalPositiveSafeInteger(args.maxManifestBytes, '--max-manifest-bytes'),
+    maxDecodedBytes: optionalPositiveSafeInteger(args.maxDecodedBytes, '--max-decoded-bytes'),
+    maxShardReferences: optionalPositiveSafeInteger(args.maxShardReferences, '--max-shard-references'),
   };
 }
 
@@ -58,7 +80,8 @@ async function exists(path) {
 
 export class FileModelShardStore {
   constructor(directory) {
-    this.directory = directory;
+    this.directory = resolve(directory);
+    this.persistenceDomainKey = `file-model-shard-store:${pathToFileURL(this.directory).href}`;
   }
 
   path(sha256) {
@@ -214,12 +237,21 @@ export async function reconstructResumableModelShards({
   manifestPath,
   cacheDir,
   concurrency = 3,
+  maxManifestBytes,
+  maxDecodedBytes,
+  maxShardReferences,
   signal,
   onProgress,
 }) {
+  optionalPositiveSafeInteger(maxManifestBytes, 'maxManifestBytes');
+  optionalPositiveSafeInteger(maxDecodedBytes, 'maxDecodedBytes');
+  optionalPositiveSafeInteger(maxShardReferences, 'maxShardReferences');
   return loadResumableLc0ModelForOrt(pathToFileURL(manifestPath).href, {
     researchOnly: true,
     concurrency,
+    maxManifestBytes,
+    maxDecodedBytes,
+    maxShardReferences,
     signal,
     onProgress,
     fetchFn: localFileFetch(),

@@ -9,7 +9,10 @@ import {
   clearResumableLc0ModelShardCache,
   loadResumableLc0ModelForOrt,
 } from '../src/lc0/modelCache.ts';
-import { createBenchmarkRunDirectory } from '../scripts/bench_resumable_model_shards.mjs';
+import {
+  createBenchmarkRunDirectory,
+  parseArgs as parseBenchmarkArgs,
+} from '../scripts/bench_resumable_model_shards.mjs';
 import {
   generateResumableModelShards,
   writeFileAtomically,
@@ -17,6 +20,8 @@ import {
 import {
   FileModelShardStore,
   localFileFetch,
+  parseArgs as parseReconstructionArgs,
+  reconstructResumableModelShards,
   writeReconstructedModelAtomically,
 } from '../scripts/reconstruct_resumable_model_shards.mjs';
 
@@ -473,6 +478,74 @@ test('filesystem shard cache bounds oversized reads and propagates aborts', asyn
     }
     assert.deepEqual(await readFile(first.path(hash)), bytes);
   });
+});
+
+test('distinct filesystem stores coordinate active shards for the same resolved directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-resumable-shared-file-domain-'));
+  temporaryRoots.add(root);
+  const cacheDir = join(root, 'cache');
+  const protectedBytes = Buffer.of(0x65);
+  const incomingBytes = Buffer.of(0x66);
+  const protectedManifest = singleShardManifest(protectedBytes, 'shards/protected.bin');
+  const incomingManifest = singleShardManifest(incomingBytes, 'shards/incoming.bin');
+  const protectedManifestUrl = 'https://models.example/research/file-protected.resumable.json';
+  const incomingManifestUrl = 'https://models.example/research/file-incoming.resumable.json';
+  const protectedHash = protectedManifest.shards[0].sha256;
+  const incomingHash = incomingManifest.shards[0].sha256;
+  const protectedStore = new FileModelShardStore(cacheDir);
+  const incomingStore = new FileModelShardStore(join(root, '.', 'cache'));
+  assert.equal(protectedStore.persistenceDomainKey, incomingStore.persistenceDomainKey);
+  await protectedStore.put(protectedHash, Uint8Array.from(protectedBytes).buffer);
+  protectedStore.touch = async () => {};
+  let protectedReads = 0;
+  let releaseProtectedReconstruction;
+  const reconstructionStarted = new Promise((resolve) => {
+    const originalGetBounded = protectedStore.getBounded.bind(protectedStore);
+    protectedStore.getBounded = async (...args) => {
+      if (args[0] === protectedHash) {
+        protectedReads += 1;
+        if (protectedReads === 2) {
+          resolve();
+          await new Promise((release) => {
+            releaseProtectedReconstruction = release;
+          });
+        }
+      }
+      return originalGetBounded(...args);
+    };
+  });
+  const protectedLoad = loadResumableLc0ModelForOrt(protectedManifestUrl, {
+    researchOnly: true,
+    concurrency: 1,
+    maxCacheEntries: 1,
+    maxCacheBytes: Infinity,
+    shardStore: protectedStore,
+    fetchFn: async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url === protectedManifestUrl) return new Response(JSON.stringify(protectedManifest));
+      return new Response(null, { status: 404 });
+    },
+  });
+  await reconstructionStarted;
+  const incomingLoad = await loadResumableLc0ModelForOrt(incomingManifestUrl, {
+    researchOnly: true,
+    concurrency: 1,
+    corruptionRetries: 0,
+    maxCacheEntries: 1,
+    maxCacheBytes: Infinity,
+    shardStore: incomingStore,
+    fetchFn: async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url === incomingManifestUrl) return new Response(JSON.stringify(incomingManifest));
+      if (url.endsWith('/incoming.bin')) return new Response(incomingBytes);
+      return new Response(null, { status: 404 });
+    },
+  });
+  assert.equal(incomingLoad.downloadedShards, 1);
+  assert.deepEqual(await readFile(protectedStore.path(protectedHash)), protectedBytes);
+  await assert.rejects(readFile(incomingStore.path(incomingHash)), { code: 'ENOENT' });
+  releaseProtectedReconstruction();
+  await protectedLoad;
 });
 
 test('manifest allocation limits reject amplification before shard access', async (t) => {
@@ -1707,6 +1780,128 @@ test('persistent shard cache applies explicit bounds and supports research-only 
     clearResumableLc0ModelShardCache({ researchOnly: false, shardStore: store }),
     /researchOnly: true/,
   );
+});
+
+test('reconstruction wrapper passes explicit manifest allocation limits to the loader', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-resumable-wrapper-limits-'));
+  temporaryRoots.add(root);
+  const shard = Buffer.of(0x71);
+  const descriptor = singleShardManifest(shard, 'model.bin').shards[0];
+  const decoded = Buffer.concat([shard, shard]);
+  const manifest = {
+    schema: 'lc0_browser.resumable_model_shards.v1',
+    chunkBytes: CHUNK_BYTES,
+    decoded: { bytes: decoded.byteLength, sha256: sha256(decoded) },
+    shards: [descriptor, descriptor],
+  };
+  const manifestPath = join(root, 'model.resumable.json');
+  const manifestBody = JSON.stringify(manifest);
+  await writeFile(manifestPath, manifestBody);
+  await writeFile(join(root, 'model.bin'), shard);
+  const options = {
+    manifestPath,
+    cacheDir: join(root, 'cache'),
+    concurrency: 1,
+  };
+
+  await assert.rejects(
+    reconstructResumableModelShards({ ...options, maxManifestBytes: Buffer.byteLength(manifestBody) - 1 }),
+    /manifest exceeded configured limit/,
+  );
+  await assert.rejects(
+    reconstructResumableModelShards({ ...options, maxDecodedBytes: 1 }),
+    /decoded bytes exceed configured limit 1/,
+  );
+  await assert.rejects(
+    reconstructResumableModelShards({ ...options, maxShardReferences: 1 }),
+    /shard references exceed configured limit 1/,
+  );
+
+  const validManifestBody = JSON.stringify(singleShardManifest(shard, 'model.bin'));
+  await writeFile(manifestPath, validManifestBody);
+  const result = await reconstructResumableModelShards({
+    ...options,
+    maxManifestBytes: Buffer.byteLength(validManifestBody),
+    maxDecodedBytes: 1,
+    maxShardReferences: 1,
+  });
+  assert.deepEqual(Buffer.from(result.model), shard);
+});
+
+test('reconstruction and benchmark CLIs parse positive safe manifest allocation limits', () => {
+  const reconstruction = parseReconstructionArgs([
+    'node',
+    'script',
+    '--manifest',
+    '/tmp/model.resumable.json',
+    '--output',
+    '/tmp/model.onnx',
+    '--cache-dir',
+    '/tmp/model-cache',
+    '--max-manifest-bytes',
+    '2097152',
+    '--max-decoded-bytes',
+    '2000000000',
+    '--max-shard-references',
+    '128',
+  ]);
+  assert.equal(reconstruction.maxManifestBytes, 2 * MIB);
+  assert.equal(reconstruction.maxDecodedBytes, 2_000_000_000);
+  assert.equal(reconstruction.maxShardReferences, 128);
+
+  const benchmark = parseBenchmarkArgs([
+    'node',
+    'script',
+    '--model',
+    '/tmp/model.onnx',
+    '--work-dir',
+    '/tmp/bench',
+    '--max-manifest-bytes',
+    '2097152',
+    '--max-decoded-bytes',
+    '2000000000',
+    '--max-shard-references',
+    '128',
+  ]);
+  assert.equal(benchmark.maxManifestBytes, 2 * MIB);
+  assert.equal(benchmark.maxDecodedBytes, 2_000_000_000);
+  assert.equal(benchmark.maxShardReferences, 128);
+
+  const parsers = [
+    {
+      parse: parseReconstructionArgs,
+      required: ['--manifest', '/tmp/model.resumable.json', '--output', '/tmp/model.onnx', '--cache-dir', '/tmp/cache'],
+    },
+    {
+      parse: parseBenchmarkArgs,
+      required: ['--model', '/tmp/model.onnx', '--work-dir', '/tmp/bench'],
+    },
+  ];
+  for (const { parse, required } of parsers) {
+    for (const option of ['--max-manifest-bytes', '--max-decoded-bytes', '--max-shard-references']) {
+      for (const invalid of ['0', '-1', '1.5', '9007199254740992']) {
+        assert.throws(
+          () => parse(['node', 'script', ...required, option, invalid]),
+          new RegExp(`${option} must be a positive safe integer`),
+        );
+      }
+    }
+  }
+});
+
+test('reconstruction wrapper rejects invalid allocation limits before filesystem access', async () => {
+  const base = {
+    manifestPath: '/does/not/exist/model.resumable.json',
+    cacheDir: '/does/not/exist/cache',
+  };
+  for (const option of ['maxManifestBytes', 'maxDecodedBytes', 'maxShardReferences']) {
+    for (const invalid of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      await assert.rejects(
+        reconstructResumableModelShards({ ...base, [option]: invalid }),
+        new RegExp(`${option} must be a positive safe integer`),
+      );
+    }
+  }
 });
 
 test('benchmark creates a fresh run directory when the work directory is reused', async () => {
