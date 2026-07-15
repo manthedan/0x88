@@ -311,7 +311,71 @@ async function probeExistingEntry(entry) {
   };
 }
 
+function normalizedCustomMetadata(metadata) {
+  return Object.fromEntries(
+    Object.entries(metadata ?? {}).map(([key, value]) => [key.toLowerCase(), String(value)]),
+  );
+}
+
+function verifyImmutableObjectMetadata(target, actual, expected) {
+  const expectedEncoding = expected.contentEncoding;
+  const actualEncoding = actual.ContentEncoding;
+  if (actual.ContentType !== expected.contentType) {
+    throw new Error(
+      `Refusing to accept immutable object ${target}: Content-Type is ${actual.ContentType ?? 'missing'}, expected ${expected.contentType}`,
+    );
+  }
+  if (expectedEncoding ? actualEncoding !== expectedEncoding : actualEncoding !== undefined && actualEncoding !== null && actualEncoding !== '') {
+    throw new Error(
+      `Refusing to accept immutable object ${target}: Content-Encoding is ${actualEncoding ?? 'missing'}, expected ${expectedEncoding ?? 'absent'}`,
+    );
+  }
+  if (actual.CacheControl !== expected.cacheControl) {
+    throw new Error(
+      `Refusing to accept immutable object ${target}: Cache-Control is ${actual.CacheControl ?? 'missing'}, expected ${expected.cacheControl}`,
+    );
+  }
+  if (actual.ContentLength !== expected.bytes) {
+    throw new Error(
+      `Refusing to accept immutable object ${target}: Content-Length is ${actual.ContentLength ?? 'missing'}, expected ${expected.bytes}`,
+    );
+  }
+  const actualMetadata = normalizedCustomMetadata(actual.Metadata);
+  for (const [key, value] of Object.entries(normalizedCustomMetadata(expected.customMetadata))) {
+    if (actualMetadata[key] !== value) {
+      throw new Error(
+        `Refusing to accept immutable object ${target}: metadata ${key} is ${actualMetadata[key] ?? 'missing'}, expected ${value}`,
+      );
+    }
+  }
+}
+
+function headRemoteImmutableObject(args, target, expected) {
+  const child = spawnSync(args.awsBin, [
+    's3api', 'head-object',
+    '--bucket', args.bucket,
+    '--key', expected.key,
+    '--endpoint-url', args.r2Endpoint,
+    '--region', 'auto',
+  ], { encoding: 'utf8' });
+  const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
+  if (child.status !== 0) {
+    if (isMissingObjectOutput(output)) return 'missing';
+    throw new Error(`Unable to verify immutable object metadata for ${target}; refusing to upload`);
+  }
+  let metadata;
+  try {
+    metadata = JSON.parse(child.stdout);
+  } catch {
+    throw new Error(`Unable to parse immutable object metadata for ${target}; refusing to upload`);
+  }
+  verifyImmutableObjectMetadata(target, metadata, expected);
+  return 'identical';
+}
+
 async function verifyRemoteImmutableObject(args, target, expected) {
+  const metadataState = headRemoteImmutableObject(args, target, expected);
+  if (metadataState === 'missing') return 'missing';
   const dir = await mkdtemp(join(tmpdir(), 'lc0-r2-exists-'));
   try {
     const file = join(dir, 'object');
@@ -403,6 +467,9 @@ async function createImmutableObjectAtomically(args, item) {
     '--region', 'auto',
   ];
   if (item.contentEncoding) command.push('--content-encoding', item.contentEncoding);
+  if (item.customMetadata && Object.keys(item.customMetadata).length) {
+    command.push('--metadata', JSON.stringify(item.customMetadata));
+  }
   const child = spawnSync(args.awsBin, command, { encoding: 'utf8' });
   const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
   if (child.status !== 0 && !isConditionalCreateConflict(output)) {

@@ -371,7 +371,7 @@ async function migrateV1Artifacts(base, localArtifacts, args) {
 
   return inspected.map(({ artifact, metadata, mismatches }) => {
     const sourcePath = sourceByRaw.get(`${metadata.sha256}/${metadata.bytes}`);
-    if (mismatches.length) {
+    if (!sourcePath && mismatches.length) {
       throw new Error(
         `Corrupt local v1 migration source for ${metadata.logicalUrl} in base release ${base.releaseId}: `
         + mismatches.join('; '),
