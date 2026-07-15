@@ -583,32 +583,76 @@ Completed after Phase 0 integration:
 
 - the production Artifact Worker accepts v1 and v2 release/channel manifests,
   negotiates identity/Brotli full responses, forces Range requests to identity,
-  emits representation integrity/length headers, and returns `406` when no
-  published representation is acceptable;
+  emits decoded and encoded representation integrity/length headers, and
+  returns `406` when no published representation is acceptable;
 - body and HEAD Cache API entries now use canonical representation-specific
   keys, so equal bodies and logical aliases share one edge-cache identity;
 - immutable release maps and short-lived channel pointers are cached separately;
 - full GET misses perform one Cache API lookup and one R2 `get`, without a
   preliminary HEAD or a duplicate body-cache lookup;
-- the production R2 publisher accepts v2 representation maps, deduplicates equal
-  representation keys, uploads Brotli objects with `Content-Encoding: br`, and
-  validates v2 representation metadata with HEAD and retains decoded full-body
-  integrity checks until uploads persist a trustworthy R2 verification digest;
+- the default release generator now emits v2 SHA-only identity/Brotli
+  representation maps into an isolated staging directory, deduplicates equal
+  bodies, carries forward v1/v2 releases, and preserves immutable release and
+  mutable channel semantics;
+- the production R2 publisher accepts v1 and v2 maps, atomically creates
+  immutable representation and release objects with conditional S3 writes,
+  validates authoritative R2 state, uploads Brotli metadata correctly, and
+  updates channel pointers last;
+- CDN validation checks the exact hosted release and its physical identity and
+  Brotli representations, keeps ordinary canaries to HEAD and bounded Range
+  traffic, and provides explicit opt-in full-body integrity verification;
+- cleanup and retention planning use one shared v1/v2 release catalog, preserve
+  migration-compatible logical objects, and require manual review for
+  unclassified SHA-only bodies and source archives;
 - browser model resolution accepts v2 channels/releases, prefers immutable
   Brotli representations for full loads, and continues to verify decoded length
-  and SHA-256 metadata.
+  and SHA-256 metadata;
+- custom WebGPU physical/deferred slots share immutable modules, pipelines,
+  constants, input/head weights, and existing encoder weights; superseded
+  buffers retire after queue completion, initialization runs independent work
+  concurrently, and disposal drains evaluations and session cleanup before
+  device destruction;
+- WebGPU profiling now distinguishes queue-drain/fence latency, command-copy
+  encoding, mapped-range copying, and timestamped GPU execution rather than
+  attributing synchronization time to `mapAsync`;
+- the persistent Reckless WASI/UCI path supports an opt-in external NNUE with
+  bounded download allocation and settled-promise release; Stockfish pthread
+  bootstrap and ORT pthread sidecar staging/URL resolution are repaired while
+  single-thread fallbacks and production defaults remain intact.
+
+Confirmed local evidence:
+
+- integrated typecheck, client build, full tests, production-style R2 build,
+  ORT staging/dedup checks, artifact retention checks, and `git diff --check`
+  passed;
+- WebGPU lifecycle completed with matching moves and a clean leak check; the
+  two-fixture search parity run matched native and depth baselines with visit
+  L1 equal to zero;
+- one controlled WebGPU profile measured about 37.16 ms timestamped GPU
+  execution, about 1.3 ms queue-drain/readback synchronization, and about
+  0.05 ms mapped-range copying, confirming that the prior roughly 59.9 ms
+  `mapAsync` interval was not mapping cost alone;
+- Stockfish lite pthread depth-13 runs produced the same `e2e4` best move at
+  one, two, and four threads, with approximately 1.44M, 3.57M, and 6.76M NPS;
+- external versus embedded Reckless NNUE depth-7/8 parity matched best move,
+  score, nodes, and PV in all 40 comparisons. The generated external release
+  binaries and corresponding-source archive were not materialized in this
+  checkout, so their final release hashes remain unconfirmed.
 
 Still remaining:
 
 - live identity/Brotli/Range canary validation through Cloudflare;
-- migration of the default production release-manifest generator and deployed
-  app manifests from v1 filename-keyed identity entries to v2 SHA-only entries;
+- deployment of a generated v2 release and migration of the live channel from
+  the currently published v1 manifests;
 - persisted R2 verification metadata that can safely replace ordinary
   carried-forward full-body integrity downloads with HEAD-only checks;
-- replacement of variant-level existence probes with one shared release catalog;
 - production cross-worker/session evaluation brokering;
-- WGSL shared-head resources and fused final output;
-- external-weight persistent runtimes and pthread packaging repairs.
+- fused compact GPU output, still gated on repeatable full evaluation/search
+  improvement after the completed lifecycle and timing work;
+- generation and parity validation of the external Reckless release artifacts,
+  plus supported external-network work for Viridithas and Stockfish;
+- resumable model shards, which remain dependent on the live Artifact v2
+  rollout.
 
 ## Work that should remain parked
 
