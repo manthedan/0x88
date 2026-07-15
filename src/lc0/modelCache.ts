@@ -128,6 +128,7 @@ export interface Lc0ResumableModelShardManifest {
 
 export interface Lc0ModelShardStore {
   get(sha256: string): Promise<ArrayBuffer | undefined>;
+  getBounded?(sha256: string, expectedBytes: number, signal?: AbortSignal): Promise<ArrayBuffer | undefined>;
   put(sha256: string, bytes: ArrayBuffer): Promise<void>;
   delete(sha256: string): Promise<void>;
   touch?(sha256: string): Promise<void>;
@@ -944,8 +945,12 @@ class CacheStorageModelShardStore implements Lc0ModelShardStore {
   }
 
   async get(sha256: string): Promise<ArrayBuffer | undefined> {
+    return this.getBounded(sha256, MAX_RESUMABLE_SHARD_BYTES);
+  }
+
+  async getBounded(sha256: string, expectedBytes: number, signal?: AbortSignal): Promise<ArrayBuffer | undefined> {
     const response = await (await this.cache()).match(resumableShardCacheKey(sha256));
-    return response ? response.arrayBuffer() : undefined;
+    return response ? readBoundedShardResponse(response, expectedBytes, signal, () => {}) : undefined;
   }
 
   async put(sha256: string, bytes: ArrayBuffer): Promise<void> {
@@ -1010,7 +1015,7 @@ class CacheStorageModelShardStore implements Lc0ModelShardStore {
           ? metadataBytes
           : Number.isSafeInteger(headerBytes) && headerBytes >= 0
             ? headerBytes
-          : (await response.arrayBuffer()).byteLength,
+            : Infinity,
         lastUsedAt: Number.isFinite(metadataLastUsedAt) ? metadataLastUsedAt : undefined,
       };
     }));
@@ -1168,6 +1173,10 @@ async function readBoundedShardResponse(
   }
   if (!response.body) throw new Error('Resumable model shard response body is unavailable');
   const reader = response.body.getReader();
+  const onAbort = (): void => {
+    void reader.cancel('The operation was aborted').catch(() => {});
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
   const target = new Uint8Array(expectedBytes);
   let loaded = 0;
   try {
@@ -1187,10 +1196,17 @@ async function readBoundedShardResponse(
       target.set(value, loaded);
       loaded += value.byteLength;
     }
+    throwIfAborted(signal);
   } finally {
+    signal?.removeEventListener('abort', onAbort);
     reader.releaseLock();
   }
   return loaded === expectedBytes ? target.buffer : target.buffer.slice(0, loaded);
+}
+
+function isOversizedResumableShardResponse(error: unknown): boolean {
+  return error instanceof Error
+    && error.message.startsWith('Resumable model shard response exceeded expected length');
 }
 
 function validateResumableModelShardManifest(value: unknown): Lc0ResumableModelShardManifest {
@@ -1253,10 +1269,28 @@ async function verifiedShardBytes(
   expectedBytes: number,
   refreshLastUsed: boolean = true,
   accountTemporaryBytes?: (bytes: number) => () => void,
+  signal?: AbortSignal,
 ): Promise<{ bytes?: ArrayBuffer; corrupt: boolean; releaseTemporaryBytes?: () => void }> {
-  const bytes = await store.get(sha256);
-  if (!bytes) return { corrupt: false };
-  const releaseTemporaryBytes = accountTemporaryBytes?.(bytes.byteLength);
+  let bytes: ArrayBuffer | undefined;
+  const boundedReleaseTemporaryBytes = store.getBounded
+    ? accountTemporaryBytes?.(expectedBytes)
+    : undefined;
+  try {
+    bytes = store.getBounded
+      ? await store.getBounded(sha256, expectedBytes, signal)
+      : await store.get(sha256);
+  } catch (error) {
+    boundedReleaseTemporaryBytes?.();
+    if (!isOversizedResumableShardResponse(error)) throw error;
+    await store.delete(sha256);
+    return { corrupt: true };
+  }
+  if (!bytes) {
+    boundedReleaseTemporaryBytes?.();
+    return { corrupt: false };
+  }
+  const releaseTemporaryBytes = boundedReleaseTemporaryBytes
+    ?? accountTemporaryBytes?.(bytes.byteLength);
   try {
     if (bytes.byteLength !== expectedBytes || await sha256Hex(bytes) !== sha256) {
       await store.delete(sha256);
@@ -1335,6 +1369,24 @@ export async function loadResumableLc0ModelForOrt(
     let completedShards = 0;
     let activeTemporaryBytes = 0;
     let peakTemporaryBytes = 0;
+    const downloadedShardHashes = new Set<string>();
+    const reusedShardHashes = new Set<string>();
+    const markShardDownloaded = (shard: (typeof manifest.shards)[number]): void => {
+      if (!downloadedShardHashes.has(shard.sha256)) {
+        downloadedShardHashes.add(shard.sha256);
+        downloadedShards += 1;
+      }
+      if (reusedShardHashes.delete(shard.sha256)) {
+        reusedShards -= 1;
+        reusedBytes -= shard.bytes;
+      }
+    };
+    const markShardReused = (shard: (typeof manifest.shards)[number]): void => {
+      if (downloadedShardHashes.has(shard.sha256) || reusedShardHashes.has(shard.sha256)) return;
+      reusedShardHashes.add(shard.sha256);
+      reusedShards += 1;
+      reusedBytes += shard.bytes;
+    };
     const accountTemporaryBytes = (bytes: number): (() => void) => {
       activeTemporaryBytes += bytes;
       peakTemporaryBytes = Math.max(peakTemporaryBytes, activeTemporaryBytes);
@@ -1363,6 +1415,75 @@ export async function loadResumableLc0ModelForOrt(
     if (options.signal?.aborted) workerAbort.abort();
     const workerSignal = workerAbort.signal;
     let workerFailure: unknown;
+    const downloadAndPersistShard = async (
+      shard: (typeof manifest.shards)[number],
+      signal: AbortSignal | undefined,
+    ): Promise<void> => {
+      for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
+        throwIfAborted(signal);
+        const shardUrl = new URL(shard.url, manifestBaseUrl).href;
+        const response = await fetchFn(shardUrl, {
+          cache: attempt === 0 ? 'force-cache' : 'reload',
+          signal,
+        });
+        if (!response.ok) throw new Error(`Resumable model shard fetch failed for ${shard.sha256}: ${response.status}`);
+        const releaseTemporaryBytes = accountTemporaryBytes(shard.bytes);
+        try {
+          const bytes = await readBoundedShardResponse(response, shard.bytes, signal, (chunkBytes) => {
+            downloadedBytes += chunkBytes;
+          });
+          const valid = bytes.byteLength === shard.bytes && await sha256Hex(bytes) === shard.sha256;
+          if (valid) {
+            throwIfAborted(signal);
+            let reusedConcurrentWrite = false;
+            await serializeResumableShardCacheWrite(async () => {
+              throwIfAborted(signal);
+              const existing = await verifiedShardBytes(
+                store,
+                shard.sha256,
+                shard.bytes,
+                true,
+                accountTemporaryBytes,
+                signal,
+              );
+              if (existing.corrupt) corruptShardsEvicted += 1;
+              if (existing.bytes) {
+                existing.releaseTemporaryBytes?.();
+                reusedConcurrentWrite = true;
+                return;
+              }
+              await ensureResumableShardQuota(
+                store,
+                shard.bytes,
+                minimumFreeBytesAfterCache,
+                activeResumableShardHashes(cacheName),
+              );
+              throwIfAborted(signal);
+              await store.put(shard.sha256, bytes);
+              await bestEffortEnforceResumableShardCacheBounds(
+                store,
+                maxCacheEntries,
+                maxCacheBytes,
+                activeResumableShardHashes(cacheName),
+              );
+            });
+            if (reusedConcurrentWrite) {
+              markShardReused(shard);
+            } else {
+              markShardDownloaded(shard);
+            }
+            return;
+          }
+        } catch (error) {
+          if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+          if (!isOversizedResumableShardResponse(error)) throw error;
+        } finally {
+          releaseTemporaryBytes();
+        }
+        if (attempt < retryLimit) corruptionRetries += 1;
+      }
+      throw new Error(`Resumable model shard corruption persisted after ${retryLimit + 1} attempts: ${shard.sha256}`);
+    };
     const workers = Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
       for (;;) {
         throwIfAborted(workerSignal);
@@ -1370,86 +1491,23 @@ export async function loadResumableLc0ModelForOrt(
         nextJob += 1;
         if (jobIndex >= jobs.length) return;
         const shard = jobs[jobIndex];
-        const cached = await verifiedShardBytes(store, shard.sha256, shard.bytes, true, accountTemporaryBytes);
+        const cached = await verifiedShardBytes(
+          store,
+          shard.sha256,
+          shard.bytes,
+          true,
+          accountTemporaryBytes,
+          workerSignal,
+        );
         if (cached.corrupt) corruptShardsEvicted += 1;
         if (cached.bytes) {
           try {
-            reusedBytes += shard.bytes;
-            reusedShards += 1;
+            markShardReused(shard);
           } finally {
             cached.releaseTemporaryBytes?.();
           }
         } else {
-          let persisted = false;
-          for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
-            throwIfAborted(workerSignal);
-            const shardUrl = new URL(shard.url, manifestBaseUrl).href;
-            const response = await fetchFn(shardUrl, {
-              cache: attempt === 0 ? 'force-cache' : 'reload',
-              signal: workerSignal,
-            });
-            if (!response.ok) throw new Error(`Resumable model shard fetch failed for ${shard.sha256}: ${response.status}`);
-            const releaseTemporaryBytes = accountTemporaryBytes(shard.bytes);
-            try {
-              const bytes = await readBoundedShardResponse(response, shard.bytes, workerSignal, (chunkBytes) => {
-                downloadedBytes += chunkBytes;
-              });
-              const valid = bytes.byteLength === shard.bytes && await sha256Hex(bytes) === shard.sha256;
-              if (valid) {
-                throwIfAborted(workerSignal);
-                let reusedConcurrentWrite = false;
-                await serializeResumableShardCacheWrite(async () => {
-                  throwIfAborted(workerSignal);
-                  const existing = await verifiedShardBytes(
-                    store,
-                    shard.sha256,
-                    shard.bytes,
-                    true,
-                    accountTemporaryBytes,
-                  );
-                  if (existing.corrupt) corruptShardsEvicted += 1;
-                  if (existing.bytes) {
-                    existing.releaseTemporaryBytes?.();
-                    reusedConcurrentWrite = true;
-                    return;
-                  }
-                  await ensureResumableShardQuota(
-                    store,
-                    shard.bytes,
-                    minimumFreeBytesAfterCache,
-                    activeResumableShardHashes(cacheName),
-                  );
-                  throwIfAborted(workerSignal);
-                  await store.put(shard.sha256, bytes);
-                  await bestEffortEnforceResumableShardCacheBounds(
-                    store,
-                    maxCacheEntries,
-                    maxCacheBytes,
-                    activeResumableShardHashes(cacheName),
-                  );
-                });
-                if (reusedConcurrentWrite) {
-                  reusedBytes += shard.bytes;
-                  reusedShards += 1;
-                } else {
-                  downloadedShards += 1;
-                }
-                persisted = true;
-                break;
-              }
-            } catch (error) {
-              if (workerSignal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
-              if (!(error instanceof Error) || !error.message.startsWith('Resumable model shard response exceeded expected length')) {
-                throw error;
-              }
-            } finally {
-              releaseTemporaryBytes();
-            }
-            if (attempt < retryLimit) corruptionRetries += 1;
-          }
-          if (!persisted) {
-            throw new Error(`Resumable model shard corruption persisted after ${retryLimit + 1} attempts: ${shard.sha256}`);
-          }
+          await downloadAndPersistShard(shard, workerSignal);
         }
         completedBytes += shard.bytes * (referenceCounts.get(shard.sha256) ?? 1);
         completedShards += 1;
@@ -1480,9 +1538,29 @@ export async function loadResumableLc0ModelForOrt(
     let offset = 0;
     for (const shard of manifest.shards) {
       throwIfAborted(options.signal);
-      const stored = await verifiedShardBytes(store, shard.sha256, shard.bytes, false, accountTemporaryBytes);
+      let stored = await verifiedShardBytes(
+        store,
+        shard.sha256,
+        shard.bytes,
+        false,
+        accountTemporaryBytes,
+        options.signal,
+      );
+      if (stored.corrupt) corruptShardsEvicted += 1;
       if (!stored.bytes) {
-        throw new Error(`Resumable model shard was evicted or corrupted during reconstruction: ${shard.sha256}`);
+        await downloadAndPersistShard(shard, options.signal);
+        stored = await verifiedShardBytes(
+          store,
+          shard.sha256,
+          shard.bytes,
+          false,
+          accountTemporaryBytes,
+          options.signal,
+        );
+        if (stored.corrupt) corruptShardsEvicted += 1;
+        if (!stored.bytes) {
+          throw new Error(`Resumable model shard was evicted during reconstruction after recovery: ${shard.sha256}`);
+        }
       }
       try {
         model.set(new Uint8Array(stored.bytes), offset);

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, open, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
@@ -59,6 +59,22 @@ async function writeShardVerified(path, bytes, sha256) {
   return true;
 }
 
+export async function writeFileAtomically(path, bytes, renameFile = rename) {
+  const temporaryPath = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  let temporaryCreated = false;
+  try {
+    await writeFile(temporaryPath, bytes, { flag: 'wx' });
+    temporaryCreated = true;
+    await renameFile(temporaryPath, path);
+    temporaryCreated = false;
+  } catch (error) {
+    if (temporaryCreated) {
+      try { await unlink(temporaryPath); } catch { /* best-effort cleanup of this script's exact temporary file */ }
+    }
+    throw error;
+  }
+}
+
 export async function generateResumableModelShards({ inputPath, outputDir, chunkBytes = MIN_CHUNK_BYTES }) {
   if (!Number.isInteger(chunkBytes) || chunkBytes < MIN_CHUNK_BYTES || chunkBytes > MAX_CHUNK_BYTES) {
     throw new Error('chunkBytes must be an integer from 16 MiB through 32 MiB');
@@ -111,7 +127,7 @@ export async function generateResumableModelShards({ inputPath, outputDir, chunk
   };
   await mkdir(outputDir, { recursive: true });
   const manifestPath = join(outputDir, `${basename(inputPath)}.resumable.json`);
-  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeFileAtomically(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   return {
     manifest,
     manifestPath,

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-import { constants } from 'node:fs';
+import { constants, createReadStream } from 'node:fs';
 import { access, mkdir, readFile, readdir, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadResumableLc0ModelForOrt } from '../src/lc0/modelCache.ts';
 
@@ -131,13 +132,55 @@ export class FileModelShardStore {
 }
 
 export function localFileFetch() {
-  return async (input) => {
+  const expectedBytesByUrl = new Map();
+  return async (input, init = {}) => {
     const raw = typeof input === 'string' ? input : input.url;
     const url = new URL(raw);
     if (url.protocol !== 'file:') return new Response(null, { status: 404 });
+    const signal = init.signal ?? (typeof input === 'string' ? undefined : input.signal);
+    if (signal?.aborted) throw new DOMException('The operation was aborted', 'AbortError');
+    const path = fileURLToPath(url);
+    const expectedBytes = expectedBytesByUrl.get(url.href);
     try {
-      const bytes = await readFile(fileURLToPath(url));
-      return new Response(bytes);
+      if (expectedBytes === undefined && url.pathname.endsWith('.json')) {
+        const bytes = await readFile(path, { signal });
+        if (url.pathname.endsWith('.resumable.json')) {
+          try {
+            const manifest = JSON.parse(bytes);
+            if (Array.isArray(manifest?.shards)) {
+              for (const shard of manifest.shards) {
+                if (typeof shard?.url === 'string' && Number.isSafeInteger(shard.bytes) && shard.bytes >= 0) {
+                  expectedBytesByUrl.set(new URL(shard.url, url).href, shard.bytes);
+                }
+              }
+            }
+          } catch {
+            // The loader reports malformed manifest JSON with its normal validation error.
+          }
+        }
+        return new Response(bytes, { headers: { 'content-type': 'application/json' } });
+      }
+      const metadata = await stat(path);
+      if (expectedBytes !== undefined && metadata.size > expectedBytes) {
+        throw new Error(`Local shard file exceeded expected length ${expectedBytes}: ${path}`);
+      }
+      let loaded = 0;
+      const source = Readable.toWeb(createReadStream(path, { signal }));
+      const bounded = source.pipeThrough(new TransformStream({
+        transform(chunk, controller) {
+          loaded += chunk.byteLength;
+          if (expectedBytes !== undefined && loaded > expectedBytes) {
+            controller.error(new Error(`Local shard file exceeded expected length ${expectedBytes}: ${path}`));
+            return;
+          }
+          controller.enqueue(chunk);
+        },
+      }), { signal });
+      return new Response(bounded, {
+        headers: {
+          'content-length': String(metadata.size),
+        },
+      });
     } catch (error) {
       if (error?.code === 'ENOENT') return new Response(null, { status: 404 });
       throw error;

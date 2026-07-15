@@ -10,7 +10,10 @@ import {
   loadResumableLc0ModelForOrt,
 } from '../src/lc0/modelCache.ts';
 import { createBenchmarkRunDirectory } from '../scripts/bench_resumable_model_shards.mjs';
-import { generateResumableModelShards } from '../scripts/generate_resumable_model_shards.mjs';
+import {
+  generateResumableModelShards,
+  writeFileAtomically,
+} from '../scripts/generate_resumable_model_shards.mjs';
 import { FileModelShardStore, localFileFetch } from '../scripts/reconstruct_resumable_model_shards.mjs';
 
 const MIB = 1024 * 1024;
@@ -153,8 +156,10 @@ class FakeShardCache {
   constructor() {
     this.entries = new Map();
     this.bodyReads = 0;
+    this.bodyStreamReads = 0;
     this.bodyPuts = 0;
     this.metadataPuts = 0;
+    this.deleted = [];
   }
 
   seed(request, bytes, headers = {}) {
@@ -175,6 +180,22 @@ class FakeShardCache {
         this.bodyReads += 1;
         return arrayBuffer();
       };
+      const body = response.body;
+      const cache = this;
+      Object.defineProperty(response, 'body', {
+        value: new ReadableStream({
+          async pull(controller) {
+            const reader = body.getReader();
+            const { done, value } = await reader.read();
+            reader.releaseLock();
+            if (done) controller.close();
+            else {
+              controller.enqueue(value);
+              cache.bodyStreamReads += 1;
+            }
+          },
+        }),
+      });
     }
     return response;
   }
@@ -188,7 +209,9 @@ class FakeShardCache {
   }
 
   async delete(request) {
-    return this.entries.delete(request.url ?? request);
+    const url = request.url ?? request;
+    this.deleted.push(url);
+    return this.entries.delete(url);
   }
 
   async keys() {
@@ -251,6 +274,25 @@ test('resumable shard generation uses ordered 16 MiB content hashes and reconstr
   await assertMatchesFile(result.model, entry.modelPath);
 });
 
+test('manifest publishing atomically preserves the previous file when replacement fails', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-resumable-manifest-atomic-'));
+  temporaryRoots.add(root);
+  const manifestPath = join(root, 'model.resumable.json');
+  const previous = '{"schema":"previous-valid-manifest"}\n';
+  await writeFile(manifestPath, previous);
+  await assert.rejects(
+    writeFileAtomically(manifestPath, '{"schema":"replacement"}\n', async () => {
+      throw new Error('forced rename failure');
+    }),
+    /forced rename failure/,
+  );
+  assert.equal(await readFile(manifestPath, 'utf8'), previous);
+  assert.deepEqual(
+    (await readdir(root)).filter((name) => name.startsWith('model.resumable.json.tmp-')),
+    [],
+  );
+});
+
 test('oversized shard responses are cancelled before unbounded buffering', async () => {
   const entry = await fixture();
   const fileFetch = localFileFetch();
@@ -284,6 +326,43 @@ test('oversized shard responses are cancelled before unbounded buffering', async
   );
   assert.equal(shardFetches, 1);
   assert.equal(cancelled, true);
+});
+
+test('local file fetch rejects oversized shards before streaming and propagates aborts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-resumable-local-fetch-'));
+  temporaryRoots.add(root);
+  const manifestPath = join(root, 'model.resumable.json');
+  const shardPath = join(root, 'model.bin');
+  const manifest = {
+    schema: 'lc0_browser.resumable_model_shards.v1',
+    chunkBytes: CHUNK_BYTES,
+    decoded: { bytes: 1, sha256: sha256(Buffer.of(1)) },
+    shards: [{ bytes: 1, sha256: sha256(Buffer.of(1)), url: 'model.bin' }],
+  };
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  await writeFile(shardPath, Buffer.of(1, 2));
+  const fetchFile = localFileFetch();
+  const manifestResponse = await fetchFile(pathToFileURL(manifestPath).href);
+  assert.deepEqual(await manifestResponse.json(), manifest);
+  await assert.rejects(
+    fetchFile(pathToFileURL(shardPath).href),
+    /Local shard file exceeded expected length 1/,
+  );
+
+  const abortBytes = Buffer.alloc(CHUNK_BYTES, 0x35);
+  manifest.decoded = { bytes: abortBytes.byteLength, sha256: sha256(abortBytes) };
+  manifest.shards = [{
+    bytes: abortBytes.byteLength,
+    sha256: manifest.decoded.sha256,
+    url: 'model.bin',
+  }];
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  await writeFile(shardPath, abortBytes);
+  await (await fetchFile(pathToFileURL(manifestPath).href)).json();
+  const controller = new AbortController();
+  const shardResponse = await fetchFile(pathToFileURL(shardPath).href, { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(shardResponse.arrayBuffer(), { name: 'AbortError' });
 });
 
 test('encoded shard responses ignore encoded Content-Length while bounding decoded bytes', async () => {
@@ -643,6 +722,46 @@ test('final eviction preserves shards protected by another active load', async (
   await protectedLoad;
 });
 
+test('reconstruction redownloads a shard evicted by another realm', async () => {
+  const bytes = Buffer.alloc(CHUNK_BYTES, 0x4a);
+  const manifest = singleShardManifest(bytes);
+  const manifestUrl = 'https://models.example/research/cross-realm.resumable.json';
+  const shardUrl = new URL(manifest.shards[0].url, manifestUrl).href;
+  const hash = manifest.shards[0].sha256;
+  const store = new MemoryShardStore([{ sha256: hash, bytes: bytes.buffer }]);
+  const originalGet = store.get.bind(store);
+  let reads = 0;
+  store.get = async (requestedHash) => {
+    if (requestedHash === hash) {
+      reads += 1;
+      if (reads === 2) store.entries.delete(hash);
+    }
+    return originalGet(requestedHash);
+  };
+  let shardFetches = 0;
+  const result = await loadResumableLc0ModelForOrt(manifestUrl, {
+    researchOnly: true,
+    cacheName: 'cross-realm-reconstruction-recovery-test',
+    concurrency: 1,
+    corruptionRetries: 0,
+    shardStore: store,
+    fetchFn: async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url === manifestUrl) return new Response(JSON.stringify(manifest));
+      if (url === shardUrl) {
+        shardFetches += 1;
+        return new Response(bytes);
+      }
+      return new Response(null, { status: 404 });
+    },
+  });
+  assert.equal(shardFetches, 1);
+  assert.equal(result.downloadedShards, 1);
+  assert.equal(result.reusedShards, 0);
+  assert.equal(result.downloadedBytes, CHUNK_BYTES);
+  assert.deepEqual(Buffer.from(result.model), bytes);
+});
+
 test('failed loads release process-wide shard protection', async () => {
   const failedBytes = Buffer.alloc(CHUNK_BYTES, 0x4f);
   const replacementBytes = Buffer.alloc(CHUNK_BYTES, 0x50);
@@ -842,7 +961,8 @@ test('Cache Storage LRU touch writes metadata once without replaying the shard b
       },
     });
     assert.equal(result.reusedShards, 1);
-    assert.equal(cache.bodyReads, 2, 'verification and reconstruction each read once');
+    assert.equal(cache.bodyReads, 0, 'bounded cache reads must not call arrayBuffer()');
+    assert(cache.bodyStreamReads > 0, 'verification and reconstruction stream the cached shard');
     assert.equal(cache.bodyPuts, 0, 'touch must not rewrite the shard body');
     assert.equal(cache.metadataPuts, 1, 'verified shard load refreshes LRU once');
     assert.equal(cache.entries.has(oldBodyUrl), false, 'eviction deletes the old shard body');
@@ -851,6 +971,49 @@ test('Cache Storage LRU touch writes metadata once without replaying the shard b
     const cleared = await clearResumableLc0ModelShardCache({ researchOnly: true });
     assert.equal(cleared.removedEntries, 1, 'cleanup does not count metadata keys as shard bodies');
     assert.equal(cache.entries.size, 0);
+  } finally {
+    globalThis.caches = originalCaches;
+    globalThis.location = originalLocation;
+  }
+});
+
+test('oversized Cache Storage shard bodies are bounded, evicted, and redownloaded', async () => {
+  const bytes = Buffer.alloc(CHUNK_BYTES, 0x62);
+  const manifest = singleShardManifest(bytes);
+  const manifestUrl = 'https://models.example/research/oversized-cache.resumable.json';
+  const shardUrl = new URL(manifest.shards[0].url, manifestUrl).href;
+  const hash = manifest.shards[0].sha256;
+  const bodyUrl = `http://localhost/__lc0-resumable-model-shards__/sha256/${hash}`;
+  const cache = new FakeShardCache();
+  cache.seed(bodyUrl, Buffer.alloc(CHUNK_BYTES + 1, 0x63), {
+    'x-lc0-shard-bytes': String(CHUNK_BYTES),
+  });
+  const originalCaches = globalThis.caches;
+  const originalLocation = globalThis.location;
+  globalThis.caches = new FakeShardCacheStorage(cache);
+  globalThis.location = { href: 'http://localhost/' };
+  let shardFetches = 0;
+  try {
+    const result = await loadResumableLc0ModelForOrt(manifestUrl, {
+      researchOnly: true,
+      concurrency: 1,
+      corruptionRetries: 0,
+      fetchFn: async (input) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url === manifestUrl) return new Response(JSON.stringify(manifest));
+        if (url === shardUrl) {
+          shardFetches += 1;
+          return new Response(bytes);
+        }
+        return new Response(null, { status: 404 });
+      },
+    });
+    assert.equal(cache.bodyReads, 0);
+    assert.equal(cache.deleted.includes(bodyUrl), true);
+    assert.equal(shardFetches, 1);
+    assert.equal(result.corruptShardsEvicted, 1);
+    assert.equal(result.downloadedShards, 1);
+    assert.deepEqual(Buffer.from(result.model), bytes);
   } finally {
     globalThis.caches = originalCaches;
     globalThis.location = originalLocation;
