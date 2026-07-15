@@ -188,7 +188,7 @@ export const BROWSER_ENGINE_ASSET_GROUPS = Object.freeze([
     family: 'reckless',
     label: 'Reckless WASI/browser variants',
     status: 'experimental-selectable',
-    command: 'npm run reckless:build-production && npm run reckless:build-browser-api && npm run reckless:build-browser-api-simd && npm run reckless:build-browser-api-simd-external',
+    command: 'npm run reckless:build-release',
     docs: 'docs/engine_catalog.md#reckless-family',
     assets: [
       '/reckless/reckless.wasm',
