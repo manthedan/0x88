@@ -637,7 +637,7 @@ Completed after Phase 0 integration:
 
 Confirmed local evidence:
 
-- integrated typecheck, client build, the final 590-test suite (589 passed and
+- integrated typecheck, client build, the final 592-test suite (591 passed and
   one skipped), production-style R2 build, ORT staging/dedup checks, artifact
   retention checks, and `git diff --check` passed;
 - WebGPU lifecycle completed with matching moves and a clean leak check; the
