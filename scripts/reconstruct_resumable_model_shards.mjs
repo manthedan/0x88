@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { randomUUID } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
-import { access, mkdir, open, readFile, readdir, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadResumableLc0ModelForOrt } from '../src/lc0/modelCache.ts';
@@ -203,7 +203,43 @@ export class FileModelShardStore {
   }
 }
 
-export function localFileFetch() {
+function pathIsWithin(root, candidate) {
+  const relativePath = relative(root, candidate);
+  return relativePath === ''
+    || (!isAbsolute(relativePath) && relativePath !== '..' && !relativePath.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`));
+}
+
+function resolveLocalShardUrl(shardUrl, manifestBaseUrl, publicationRoot) {
+  try {
+    new URL(shardUrl);
+    throw new Error(`Local resumable model shard URL must be relative: ${shardUrl}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Local resumable model shard URL must be relative:')) throw error;
+  }
+  const rawPath = shardUrl.split(/[?#]/, 1)[0];
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(rawPath).replaceAll('\\', '/');
+  } catch {
+    throw new Error(`Invalid local resumable model shard URL: ${shardUrl}`);
+  }
+  if (decodedPath.startsWith('/') || decodedPath.split('/').includes('..')) {
+    throw new Error(`Local resumable model shard URL escapes the publication root: ${shardUrl}`);
+  }
+  const resolvedUrl = new URL(shardUrl, manifestBaseUrl);
+  if (resolvedUrl.protocol !== 'file:') {
+    throw new Error(`Local resumable model shard URL must use the manifest publication root: ${shardUrl}`);
+  }
+  const resolvedPath = fileURLToPath(resolvedUrl);
+  if (!pathIsWithin(publicationRoot, resolvedPath)) {
+    throw new Error(`Local resumable model shard URL escapes the publication root: ${shardUrl}`);
+  }
+  return resolvedUrl.href;
+}
+
+export function localFileFetch(publicationRoot) {
+  const resolvedPublicationRoot = resolve(publicationRoot);
+  const publicationRootRealPath = realpath(resolvedPublicationRoot);
   return async (input, init = {}) => {
     const raw = typeof input === 'string' ? input : input.url;
     const url = new URL(raw);
@@ -211,9 +247,19 @@ export function localFileFetch() {
     const signal = init.signal ?? (typeof input === 'string' ? undefined : input.signal);
     if (signal?.aborted) throw new DOMException('The operation was aborted', 'AbortError');
     const path = fileURLToPath(url);
+    if (!pathIsWithin(resolvedPublicationRoot, path)) {
+      throw new Error(`Local resumable model file escapes the publication root: ${path}`);
+    }
     try {
-      const metadata = await stat(path);
+      const [metadata, canonicalRoot, canonicalPath] = await Promise.all([
+        lstat(path),
+        publicationRootRealPath,
+        realpath(path),
+      ]);
       throwIfAborted(signal);
+      if (!metadata.isFile() || !pathIsWithin(canonicalRoot, canonicalPath)) {
+        throw new Error(`Local resumable model file must be a regular file within the publication root: ${path}`);
+      }
       const source = Readable.toWeb(createReadStream(path, { signal }));
       const bounded = source.pipeThrough(new TransformStream({
         transform(chunk, controller) {
@@ -246,7 +292,9 @@ export async function reconstructResumableModelShards({
   optionalPositiveSafeInteger(maxManifestBytes, 'maxManifestBytes');
   optionalPositiveSafeInteger(maxDecodedBytes, 'maxDecodedBytes');
   optionalPositiveSafeInteger(maxShardReferences, 'maxShardReferences');
-  return loadResumableLc0ModelForOrt(pathToFileURL(manifestPath).href, {
+  const resolvedManifestPath = resolve(manifestPath);
+  const publicationRoot = dirname(resolvedManifestPath);
+  return loadResumableLc0ModelForOrt(pathToFileURL(resolvedManifestPath).href, {
     researchOnly: true,
     concurrency,
     maxManifestBytes,
@@ -254,8 +302,13 @@ export async function reconstructResumableModelShards({
     maxShardReferences,
     signal,
     onProgress,
-    fetchFn: localFileFetch(),
+    fetchFn: localFileFetch(publicationRoot),
     shardStore: new FileModelShardStore(cacheDir),
+    resolveShardUrl: (shardUrl, manifestBaseUrl) => resolveLocalShardUrl(
+      shardUrl,
+      manifestBaseUrl,
+      publicationRoot,
+    ),
   });
 }
 

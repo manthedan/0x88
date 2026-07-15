@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, open, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import {
@@ -96,7 +96,7 @@ function loaderOptions(entry, overrides = {}) {
     researchOnly: true,
     concurrency: 3,
     corruptionRetries: 1,
-    fetchFn: localFileFetch(),
+    fetchFn: localFileFetch(dirname(entry.manifestPath)),
     shardStore: new FileModelShardStore(entry.cacheDir),
     ...overrides,
   };
@@ -328,7 +328,7 @@ test('reconstructed output atomically preserves the previous file when replaceme
 
 test('oversized shard responses are cancelled before unbounded buffering', async () => {
   const entry = await fixture();
-  const fileFetch = localFileFetch();
+  const fileFetch = localFileFetch(dirname(entry.manifestPath));
   let cancelled = false;
   let shardFetches = 0;
   await assert.rejects(
@@ -374,7 +374,7 @@ test('local file fetch streams JSON and shard bodies while propagating aborts', 
   };
   await writeFile(manifestPath, JSON.stringify(manifest));
   await writeFile(shardPath, Buffer.of(1, 2));
-  const fetchFile = localFileFetch();
+  const fetchFile = localFileFetch(root);
   const manifestResponse = await fetchFile(pathToFileURL(manifestPath).href);
   assert.equal(manifestResponse.url, '');
   assert.equal(manifestResponse.headers.get('content-type'), 'application/json');
@@ -400,6 +400,79 @@ test('local file fetch streams JSON and shard bodies while propagating aborts', 
   await assert.rejects(abortedShardResponse.arrayBuffer(), { name: 'AbortError' });
 });
 
+test('reconstruction wrapper confines shard files to the manifest publication root', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-resumable-local-root-'));
+  temporaryRoots.add(root);
+  const publicationRoot = join(root, 'published');
+  const manifestPath = join(publicationRoot, 'model.resumable.json');
+  const outsidePath = join(root, 'outside.bin');
+  const shard = Buffer.of(0x72);
+  await mkdir(publicationRoot);
+  await writeFile(outsidePath, shard);
+  await writeFile(manifestPath, JSON.stringify(singleShardManifest(shard, 'model.bin')));
+  await writeFile(join(publicationRoot, 'model.bin'), shard);
+  const options = {
+    manifestPath,
+    concurrency: 1,
+  };
+
+  {
+    const generated = await generateResumableModelShards({
+      inputPath: outsidePath,
+      outputDir: publicationRoot,
+      chunkBytes: CHUNK_BYTES,
+    });
+    const result = await reconstructResumableModelShards({
+      ...options,
+      manifestPath: generated.manifestPath,
+      cacheDir: join(root, 'cache-generated'),
+    });
+    assert.deepEqual(Buffer.from(result.model), shard);
+  }
+
+  {
+    await writeFile(manifestPath, JSON.stringify(singleShardManifest(shard, 'model.bin')));
+    const result = await reconstructResumableModelShards({
+      ...options,
+      cacheDir: join(root, 'cache-same-directory'),
+    });
+    assert.deepEqual(Buffer.from(result.model), shard);
+  }
+
+  for (const [index, [name, shardUrl, expected]] of [
+    ['absolute file URL', pathToFileURL(outsidePath).href, /must be relative/],
+    ['absolute filesystem path', outsidePath, /escapes the publication root/],
+    ['parent traversal', '../outside.bin', /escapes the publication root/],
+    ['encoded parent traversal', '%2e%2e/outside.bin', /escapes the publication root/],
+    ['HTTPS URL', 'https://models.example/outside.bin', /must be relative/],
+  ].entries()) {
+    await writeFile(manifestPath, JSON.stringify(singleShardManifest(shard, shardUrl)));
+    await assert.rejects(reconstructResumableModelShards({
+      ...options,
+      cacheDir: join(root, `cache-rejected-url-${index}`),
+    }), expected, name);
+  }
+
+  await symlink(root, join(publicationRoot, 'outside-link'));
+  await writeFile(manifestPath, JSON.stringify(singleShardManifest(shard, 'outside-link/outside.bin')));
+  await assert.rejects(
+    reconstructResumableModelShards({
+      ...options,
+      cacheDir: join(root, 'cache-outside-symlink'),
+    }),
+    /must be a regular file within the publication root/,
+  );
+
+  await writeFile(manifestPath, JSON.stringify(singleShardManifest(shard, '.')));
+  await assert.rejects(
+    reconstructResumableModelShards({
+      ...options,
+      cacheDir: join(root, 'cache-non-regular'),
+    }),
+    /must be a regular file within the publication root/,
+  );
+});
+
 test('oversized local manifests are rejected by the loader stream bound', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-resumable-local-manifest-bound-'));
   temporaryRoots.add(root);
@@ -410,7 +483,7 @@ test('oversized local manifests are rejected by the loader stream bound', async 
     loadResumableLc0ModelForOrt(pathToFileURL(manifestPath).href, {
       researchOnly: true,
       maxManifestBytes: 1024,
-      fetchFn: localFileFetch(),
+      fetchFn: localFileFetch(root),
       shardStore: new MemoryShardStore(),
     }),
     /manifest exceeded configured limit 1024 bytes/,
@@ -826,6 +899,43 @@ test('verified persistent cache hits refresh LRU metadata before cache-bound evi
   assert.equal(store.entries.has(firstHash), true);
   assert.equal(store.entries.has(secondHash), true);
   assert.equal(store.entries.has(newUnprotectedHash), true);
+});
+
+test('cache byte eviction removes one unknown-size entry without draining known shards', async () => {
+  const activeBytes = Buffer.of(0x67);
+  const knownBytes = Buffer.of(0x68);
+  const unknownBytes = Buffer.of(0x69);
+  const manifest = singleShardManifest(activeBytes);
+  const activeHash = manifest.shards[0].sha256;
+  const knownHash = sha256(knownBytes);
+  const unknownHash = sha256(unknownBytes);
+  const store = new MemoryShardStore([
+    { sha256: unknownHash, bytes: unknownBytes.buffer, lastUsedAt: 1 },
+    { sha256: knownHash, bytes: knownBytes.buffer, lastUsedAt: 2 },
+    { sha256: activeHash, bytes: activeBytes.buffer, lastUsedAt: 3 },
+  ]);
+  const list = store.list.bind(store);
+  store.list = async () => (await list()).map((entry) => (
+    entry.sha256 === unknownHash ? { ...entry, bytes: Infinity } : entry
+  ));
+  const result = await loadResumableLc0ModelForOrt(
+    'https://models.example/research/unknown-cache-size.resumable.json',
+    {
+      researchOnly: true,
+      maxCacheEntries: Infinity,
+      maxCacheBytes: knownBytes.byteLength + activeBytes.byteLength,
+      shardStore: store,
+      fetchFn: async () => new Response(JSON.stringify(manifest)),
+    },
+  );
+  assert.equal(result.reusedShards, 1);
+  assert.deepEqual(store.deleted, [unknownHash]);
+  assert.equal(store.entries.has(knownHash), true);
+  assert.equal(store.entries.has(activeHash), true);
+  const retainedKnownBytes = (await store.list())
+    .filter((entry) => Number.isFinite(entry.bytes))
+    .reduce((sum, entry) => sum + entry.bytes, 0);
+  assert(retainedKnownBytes <= knownBytes.byteLength + activeBytes.byteLength);
 });
 
 test('quota eviction stops after the first deletion that creates sufficient reserve', async () => {
@@ -1636,7 +1746,7 @@ test('abort around 40% persists completed shards and resume does not redownload 
   assert.equal((await readdir(entry.cacheDir)).length, 3);
 
   const fetched = [];
-  const fileFetch = localFileFetch();
+  const fileFetch = localFileFetch(dirname(entry.manifestPath));
   const resumed = await loadResumableLc0ModelForOrt(pathToFileURL(entry.manifestPath).href, loaderOptions(entry, {
     concurrency: 2,
     fetchFn: async (input, init) => {
@@ -1659,7 +1769,7 @@ test('cached corruption is evicted and only the corrupt shard is redownloaded', 
   await writeFile(join(entry.cacheDir, `${corruptHash}.bin`), Buffer.alloc(CHUNK_BYTES, 0x5a));
 
   let shardFetches = 0;
-  const fileFetch = localFileFetch();
+  const fileFetch = localFileFetch(dirname(entry.manifestPath));
   const repaired = await loadResumableLc0ModelForOrt(manifestUrl, loaderOptions(entry, {
     fetchFn: async (input, init) => {
       const url = typeof input === 'string' ? input : input.url;
@@ -1679,7 +1789,7 @@ test('corrupt network shard is retried, persisted only when valid, and ordered r
   const manifestUrl = pathToFileURL(entry.manifestPath).href;
   const targetUrl = new URL(entry.manifest.shards[1].url, manifestUrl).href;
   const attempts = new Map();
-  const fileFetch = localFileFetch();
+  const fileFetch = localFileFetch(dirname(entry.manifestPath));
   const result = await loadResumableLc0ModelForOrt(manifestUrl, loaderOptions(entry, {
     concurrency: 2,
     fetchFn: async (input, init) => {
@@ -1728,7 +1838,7 @@ test('duplicate content hashes fetch once, reconstruct every ordered reference, 
   let peakFetches = 0;
   let shardFetches = 0;
   const progress = [];
-  const fileFetch = localFileFetch();
+  const fileFetch = localFileFetch(dirname(duplicatePath));
   const result = await loadResumableLc0ModelForOrt(pathToFileURL(duplicatePath).href, {
     researchOnly: true,
     concurrency: 2,

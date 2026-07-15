@@ -166,6 +166,8 @@ export interface Lc0ResumableModelLoadOptions {
   maxShardReferences?: number;
   /** Minimum browser storage quota retained after shard caching. Defaults to 64 MiB. */
   minimumFreeBytesAfterCache?: number;
+  /** Optional host-specific shard URL policy. Browser callers normally use standard URL resolution. */
+  resolveShardUrl?: (shardUrl: string, manifestBaseUrl: string) => string;
   onProgress?: (progress: Lc0ResumableModelProgress) => void;
 }
 
@@ -1078,15 +1080,23 @@ async function enforceResumableShardCacheBounds(
   if (!store.list || (maxEntries === Infinity && maxBytes === Infinity)) return;
   const entries = await store.list();
   let entryCount = entries.length;
-  let byteCount = entries.reduce((sum, entry) => sum + entry.bytes, 0);
+  let knownByteCount = 0;
+  let unknownByteCount = 0;
+  for (const entry of entries) {
+    if (Number.isFinite(entry.bytes)) knownByteCount += entry.bytes;
+    else unknownByteCount += 1;
+  }
   const candidates = entries
     .filter((entry) => !protectedHashes.has(entry.sha256))
     .sort((a, b) => (a.lastUsedAt ?? 0) - (b.lastUsedAt ?? 0) || a.sha256.localeCompare(b.sha256));
   for (const entry of candidates) {
-    if (entryCount <= maxEntries && byteCount <= maxBytes) break;
+    const bytesWithinBound = maxBytes === Infinity
+      || (unknownByteCount === 0 && knownByteCount <= maxBytes);
+    if (entryCount <= maxEntries && bytesWithinBound) break;
     await store.delete(entry.sha256);
     entryCount -= 1;
-    byteCount -= entry.bytes;
+    if (Number.isFinite(entry.bytes)) knownByteCount -= entry.bytes;
+    else unknownByteCount -= 1;
   }
 }
 
@@ -1510,9 +1520,18 @@ export async function loadResumableLc0ModelForOrt(
     maxShardReferences,
   );
   const manifestBaseUrl = manifestResponse.url || manifestUrl;
+  const resolvedShardUrls = new Map<string, string>();
   const unique = new Map<string, (typeof manifest.shards)[number]>();
   const referenceCounts = new Map<string, number>();
-  for (const shard of manifest.shards) unique.set(shard.sha256, shard);
+  for (const shard of manifest.shards) {
+    resolvedShardUrls.set(
+      shard.sha256,
+      options.resolveShardUrl
+        ? options.resolveShardUrl(shard.url, manifestBaseUrl)
+        : new URL(shard.url, manifestBaseUrl).href,
+    );
+    unique.set(shard.sha256, shard);
+  }
   for (const shard of manifest.shards) referenceCounts.set(shard.sha256, (referenceCounts.get(shard.sha256) ?? 0) + 1);
   const manifestHashes = new Set(unique.keys());
   const releaseActiveHashes = retainActiveResumableShardHashes(persistenceDomain, manifestHashes);
@@ -1588,7 +1607,7 @@ export async function loadResumableLc0ModelForOrt(
     ): Promise<void> => {
       for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
         throwIfAborted(signal);
-        const shardUrl = new URL(shard.url, manifestBaseUrl).href;
+        const shardUrl = resolvedShardUrls.get(shard.sha256)!;
         const response = await fetchFn(shardUrl, {
           cache: attempt === 0 ? 'force-cache' : 'reload',
           signal,
