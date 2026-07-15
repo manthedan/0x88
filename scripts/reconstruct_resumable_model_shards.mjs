@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { randomUUID } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
-import { access, mkdir, readFile, readdir, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
+import { access, mkdir, open, readFile, readdir, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -39,6 +40,13 @@ function exactArrayBuffer(bytes) {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }
 
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error('The operation was aborted');
+  error.name = 'AbortError';
+  throw error;
+}
+
 async function exists(path) {
   try {
     await access(path, constants.F_OK);
@@ -64,6 +72,47 @@ export class FileModelShardStore {
       if (error?.code === 'ENOENT') return undefined;
       throw error;
     }
+  }
+
+  async getBounded(sha256, expectedBytes, signal) {
+    if (!Number.isSafeInteger(expectedBytes) || expectedBytes < 0) {
+      throw new Error('Expected shard bytes must be a non-negative safe integer');
+    }
+    throwIfAborted(signal);
+    const path = this.path(sha256);
+    let metadata;
+    try {
+      metadata = await stat(path);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return undefined;
+      throw error;
+    }
+    throwIfAborted(signal);
+    if (metadata.size > expectedBytes) {
+      await this.delete(sha256);
+      throw new Error(`Resumable model shard response exceeded expected length ${expectedBytes}`);
+    }
+    const target = new Uint8Array(expectedBytes);
+    let loaded = 0;
+    try {
+      for await (const chunk of createReadStream(path, { signal })) {
+        throwIfAborted(signal);
+        if (loaded + chunk.byteLength > expectedBytes) {
+          throw new Error(`Resumable model shard response exceeded expected length ${expectedBytes}`);
+        }
+        target.set(chunk, loaded);
+        loaded += chunk.byteLength;
+      }
+      throwIfAborted(signal);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return undefined;
+      if (error instanceof Error
+        && error.message.startsWith('Resumable model shard response exceeded expected length')) {
+        await this.delete(sha256);
+      }
+      throw error;
+    }
+    return loaded === expectedBytes ? target.buffer : target.buffer.slice(0, loaded);
   }
 
   async put(sha256, bytes) {
@@ -205,11 +254,35 @@ export async function reconstructResumableModelShards({
   });
 }
 
+export async function writeReconstructedModelAtomically(outputPath, model, renameFile = rename) {
+  await mkdir(dirname(outputPath), { recursive: true });
+  const temporaryPath = `${outputPath}.tmp-${process.pid}-${randomUUID()}`;
+  let file;
+  let temporaryCreated = false;
+  try {
+    file = await open(temporaryPath, 'wx');
+    temporaryCreated = true;
+    await file.writeFile(new Uint8Array(model));
+    await file.sync();
+    await file.close();
+    file = undefined;
+    await renameFile(temporaryPath, outputPath);
+    temporaryCreated = false;
+  } catch (error) {
+    if (file) {
+      try { await file.close(); } catch { /* best-effort close before cleanup */ }
+    }
+    if (temporaryCreated) {
+      try { await unlink(temporaryPath); } catch { /* best-effort cleanup of this exact temporary file */ }
+    }
+    throw error;
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const result = await reconstructResumableModelShards(args);
-  await mkdir(dirname(args.outputPath), { recursive: true });
-  await writeFile(args.outputPath, new Uint8Array(result.model));
+  await writeReconstructedModelAtomically(args.outputPath, result.model);
   console.log(JSON.stringify({
     schema: 'lc0_browser.resumable_model_reconstruction.v1',
     researchOnly: true,

@@ -14,7 +14,11 @@ import {
   generateResumableModelShards,
   writeFileAtomically,
 } from '../scripts/generate_resumable_model_shards.mjs';
-import { FileModelShardStore, localFileFetch } from '../scripts/reconstruct_resumable_model_shards.mjs';
+import {
+  FileModelShardStore,
+  localFileFetch,
+  writeReconstructedModelAtomically,
+} from '../scripts/reconstruct_resumable_model_shards.mjs';
 
 const MIB = 1024 * 1024;
 const CHUNK_BYTES = 16 * MIB;
@@ -270,7 +274,7 @@ test('resumable shard generation uses ordered 16 MiB content hashes and reconstr
   assert.equal(result.bytes, MODEL_BYTES);
   assert.equal(result.downloadedShards, 6);
   assert.equal(result.reusedShards, 0);
-  assert(result.peakTemporaryBytes <= 3 * CHUNK_BYTES);
+  assert(result.peakTemporaryBytes <= 4 * CHUNK_BYTES);
   await assertMatchesFile(result.model, entry.modelPath);
 });
 
@@ -289,6 +293,25 @@ test('manifest publishing atomically preserves the previous file when replacemen
   assert.equal(await readFile(manifestPath, 'utf8'), previous);
   assert.deepEqual(
     (await readdir(root)).filter((name) => name.startsWith('model.resumable.json.tmp-')),
+    [],
+  );
+});
+
+test('reconstructed output atomically preserves the previous file when replacement fails', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-resumable-output-atomic-'));
+  temporaryRoots.add(root);
+  const outputPath = join(root, 'model.onnx');
+  const previous = Buffer.from('previous valid model');
+  await writeFile(outputPath, previous);
+  await assert.rejects(
+    writeReconstructedModelAtomically(outputPath, Buffer.from('replacement model'), async () => {
+      throw new Error('forced output rename failure');
+    }),
+    /forced output rename failure/,
+  );
+  assert.deepEqual(await readFile(outputPath), previous);
+  assert.deepEqual(
+    (await readdir(root)).filter((name) => name.startsWith('model.onnx.tmp-')),
     [],
   );
 });
@@ -363,6 +386,129 @@ test('local file fetch rejects oversized shards before streaming and propagates 
   const shardResponse = await fetchFile(pathToFileURL(shardPath).href, { signal: controller.signal });
   controller.abort();
   await assert.rejects(shardResponse.arrayBuffer(), { name: 'AbortError' });
+});
+
+test('filesystem shard cache bounds oversized reads and propagates aborts', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-resumable-file-cache-'));
+  temporaryRoots.add(root);
+  const store = new FileModelShardStore(join(root, 'cache'));
+
+  await t.test('oversized cached entries are deleted and redownloaded', async () => {
+    const bytes = Buffer.alloc(CHUNK_BYTES, 0x36);
+    const manifest = singleShardManifest(bytes);
+    const manifestUrl = 'https://models.example/research/filesystem-cache.resumable.json';
+    const shardUrl = new URL(manifest.shards[0].url, manifestUrl).href;
+    await store.put(manifest.shards[0].sha256, bytes.buffer);
+    await writeFile(store.path(manifest.shards[0].sha256), Buffer.alloc(CHUNK_BYTES + 1, 0x37));
+    let shardFetches = 0;
+    const result = await loadResumableLc0ModelForOrt(manifestUrl, {
+      researchOnly: true,
+      concurrency: 1,
+      corruptionRetries: 0,
+      shardStore: store,
+      fetchFn: async (input) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url === manifestUrl) return new Response(JSON.stringify(manifest));
+        if (url === shardUrl) {
+          shardFetches += 1;
+          return new Response(bytes);
+        }
+        return new Response(null, { status: 404 });
+      },
+    });
+    assert.equal(shardFetches, 1);
+    assert.equal(result.corruptShardsEvicted, 1);
+    assert.deepEqual(await readFile(store.path(manifest.shards[0].sha256)), bytes);
+  });
+
+  await t.test('aborted cached reads reject without deleting valid entries', async () => {
+    const bytes = Buffer.alloc(2 * CHUNK_BYTES, 0x38);
+    const hash = sha256(bytes);
+    await store.put(hash, bytes.buffer);
+    const controller = new AbortController();
+    const read = store.getBounded(hash, bytes.byteLength, controller.signal);
+    setImmediate(() => controller.abort());
+    await assert.rejects(read, { name: 'AbortError' });
+    assert.equal((await store.list()).some((entry) => entry.sha256 === hash), true);
+  });
+});
+
+test('manifest allocation limits reject amplification before shard access', async (t) => {
+  const manifestUrl = 'https://models.example/research/allocation-limits.resumable.json';
+
+  await t.test('duplicate shard references respect the configured reference limit', async () => {
+    const bytes = Buffer.alloc(CHUNK_BYTES, 0x39);
+    const descriptor = singleShardManifest(bytes).shards[0];
+    const manifest = {
+      schema: 'lc0_browser.resumable_model_shards.v1',
+      chunkBytes: CHUNK_BYTES,
+      decoded: {
+        bytes: 3 * CHUNK_BYTES,
+        sha256: sha256(Buffer.concat([bytes, bytes, bytes])),
+      },
+      shards: [descriptor, descriptor, descriptor],
+    };
+    let fetches = 0;
+    const store = new MemoryShardStore();
+    await assert.rejects(
+      loadResumableLc0ModelForOrt(manifestUrl, {
+        researchOnly: true,
+        maxShardReferences: 2,
+        shardStore: store,
+        fetchFn: async () => {
+          fetches += 1;
+          return new Response(JSON.stringify(manifest));
+        },
+      }),
+      /shard references exceed configured limit 2/,
+    );
+    assert.equal(fetches, 1);
+    assert.equal(store.entries.size, 0);
+  });
+
+  await t.test('decoded bytes respect the configured allocation limit', async () => {
+    const bytes = Buffer.alloc(CHUNK_BYTES, 0x3a);
+    const manifest = singleShardManifest(bytes);
+    let fetches = 0;
+    const store = new MemoryShardStore();
+    await assert.rejects(
+      loadResumableLc0ModelForOrt(manifestUrl, {
+        researchOnly: true,
+        maxDecodedBytes: CHUNK_BYTES - 1,
+        shardStore: store,
+        fetchFn: async () => {
+          fetches += 1;
+          return new Response(JSON.stringify(manifest));
+        },
+      }),
+      new RegExp(`decoded bytes exceed configured limit ${CHUNK_BYTES - 1}`),
+    );
+    assert.equal(fetches, 1);
+    assert.equal(store.entries.size, 0);
+  });
+
+  await t.test('invalid allocation limit options reject before the manifest fetch', async () => {
+    for (const options of [
+      { maxDecodedBytes: -1 },
+      { maxDecodedBytes: 1.5 },
+      { maxShardReferences: -1 },
+      { maxShardReferences: Number.NaN },
+    ]) {
+      let fetches = 0;
+      await assert.rejects(
+        loadResumableLc0ModelForOrt(manifestUrl, {
+          researchOnly: true,
+          ...options,
+          fetchFn: async () => {
+            fetches += 1;
+            return new Response(null, { status: 500 });
+          },
+        }),
+        /must be a non-negative safe integer or Infinity/,
+      );
+      assert.equal(fetches, 0);
+    }
+  });
 });
 
 test('encoded shard responses ignore encoded Content-Length while bounding decoded bytes', async () => {

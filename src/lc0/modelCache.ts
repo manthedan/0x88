@@ -156,6 +156,10 @@ export interface Lc0ResumableModelLoadOptions {
   /** Persistent research shard-cache bounds. Set to Infinity to disable a bound. */
   maxCacheEntries?: number;
   maxCacheBytes?: number;
+  /** Maximum decoded model bytes. Defaults to 1,000,000,000; set to Infinity to disable. */
+  maxDecodedBytes?: number;
+  /** Maximum ordered shard references. Defaults to 64; set to Infinity to disable. */
+  maxShardReferences?: number;
   /** Minimum browser storage quota retained after shard caching. Defaults to 64 MiB. */
   minimumFreeBytesAfterCache?: number;
   onProgress?: (progress: Lc0ResumableModelProgress) => void;
@@ -909,6 +913,8 @@ const DEFAULT_RESUMABLE_SHARD_CONCURRENCY = 3;
 const DEFAULT_RESUMABLE_CORRUPTION_RETRIES = 1;
 const DEFAULT_RESUMABLE_MAX_CACHE_ENTRIES = 64;
 const DEFAULT_RESUMABLE_MAX_CACHE_BYTES = 1_000_000_000;
+const DEFAULT_RESUMABLE_MAX_DECODED_BYTES = 1_000_000_000;
+const DEFAULT_RESUMABLE_MAX_SHARD_REFERENCES = 64;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/i;
 
 function abortError(): Error {
@@ -1037,6 +1043,19 @@ function normalizedResumableCacheBound(value: number | undefined, fallback: numb
   if (value === Infinity) return Infinity;
   const normalized = Math.floor(value ?? fallback);
   if (!Number.isFinite(normalized) || normalized < 0) throw new Error('Resumable model shard cache bounds must be non-negative integers or Infinity');
+  return normalized;
+}
+
+function normalizedResumableManifestLimit(
+  value: number | undefined,
+  fallback: number,
+  label: string,
+): number {
+  const normalized = value ?? fallback;
+  if (normalized === Infinity) return Infinity;
+  if (!Number.isSafeInteger(normalized) || normalized < 0) {
+    throw new Error(`${label} must be a non-negative safe integer or Infinity`);
+  }
   return normalized;
 }
 
@@ -1209,7 +1228,11 @@ function isOversizedResumableShardResponse(error: unknown): boolean {
     && error.message.startsWith('Resumable model shard response exceeded expected length');
 }
 
-function validateResumableModelShardManifest(value: unknown): Lc0ResumableModelShardManifest {
+function validateResumableModelShardManifest(
+  value: unknown,
+  maxDecodedBytes: number,
+  maxShardReferences: number,
+): Lc0ResumableModelShardManifest {
   const manifest = value as Partial<Lc0ResumableModelShardManifest>;
   if (manifest?.schema !== 'lc0_browser.resumable_model_shards.v1') {
     throw new Error('Invalid resumable model shard manifest schema');
@@ -1225,8 +1248,14 @@ function validateResumableModelShardManifest(value: unknown): Lc0ResumableModelS
     || !SHA256_PATTERN.test(manifest.decoded.sha256)) {
     throw new Error('Invalid resumable model shard decoded metadata');
   }
+  if (manifest.decoded.bytes > maxDecodedBytes) {
+    throw new Error(`Resumable model decoded bytes exceed configured limit ${maxDecodedBytes}`);
+  }
   if (!Array.isArray(manifest.shards) || manifest.shards.length === 0) {
     throw new Error('Invalid resumable model shard list');
+  }
+  if (manifest.shards.length > maxShardReferences) {
+    throw new Error(`Resumable model shard references exceed configured limit ${maxShardReferences}`);
   }
   let totalBytes = 0;
   const descriptors = new Map<string, { bytes: number; url: string }>();
@@ -1332,6 +1361,16 @@ export async function loadResumableLc0ModelForOrt(
   const retryLimit = Math.max(0, Math.min(3, Math.floor(options.corruptionRetries ?? DEFAULT_RESUMABLE_CORRUPTION_RETRIES)));
   const maxCacheEntries = normalizedResumableCacheBound(options.maxCacheEntries, DEFAULT_RESUMABLE_MAX_CACHE_ENTRIES);
   const maxCacheBytes = normalizedResumableCacheBound(options.maxCacheBytes, DEFAULT_RESUMABLE_MAX_CACHE_BYTES);
+  const maxDecodedBytes = normalizedResumableManifestLimit(
+    options.maxDecodedBytes,
+    DEFAULT_RESUMABLE_MAX_DECODED_BYTES,
+    'maxDecodedBytes',
+  );
+  const maxShardReferences = normalizedResumableManifestLimit(
+    options.maxShardReferences,
+    DEFAULT_RESUMABLE_MAX_SHARD_REFERENCES,
+    'maxShardReferences',
+  );
   const minimumFreeBytesAfterCache = normalizedResumableCacheBound(
     options.minimumFreeBytesAfterCache,
     DEFAULT_CACHE_FREE_BYTES_RESERVE,
@@ -1342,7 +1381,11 @@ export async function loadResumableLc0ModelForOrt(
 
   const manifestResponse = await fetchFn(manifestUrl, { cache: 'no-cache', signal: options.signal });
   if (!manifestResponse.ok) throw new Error(`Resumable model shard manifest fetch failed: ${manifestResponse.status}`);
-  const manifest = validateResumableModelShardManifest(await manifestResponse.json());
+  const manifest = validateResumableModelShardManifest(
+    await manifestResponse.json(),
+    maxDecodedBytes,
+    maxShardReferences,
+  );
   const manifestBaseUrl = manifestResponse.url || manifestUrl;
   const unique = new Map<string, (typeof manifest.shards)[number]>();
   const referenceCounts = new Map<string, number>();
