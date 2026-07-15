@@ -1,6 +1,7 @@
 # Inference, caching, and compression optimization gap audit
 
 Date: 2026-07-14
+Updated: 2026-07-15
 
 ## Executive conclusion
 
@@ -623,11 +624,20 @@ Completed after Phase 0 integration:
   one-shot WASI searches, and no settled promises retaining large buffers;
   Stockfish pthread bootstrap and ORT pthread sidecar staging/URL resolution
   are repaired while single-thread fallbacks and production defaults remain
-  intact.
+  intact;
+- the external-NNUE Reckless WASI and browser-API binaries, NNUE, complete
+  corresponding-source archive, and release manifest are materialized with
+  gzip/Brotli transfer estimates while the external variants remain explicit
+  non-default prototypes;
+- a research-only resumable model loader now generates ordered 16 MiB
+  content-hashed shards, persists and verifies shards independently, resumes
+  interrupted downloads, repairs corruption, bounds manifest/body/allocation
+  sizes, coordinates shared persistence domains, reconstructs atomically, and
+  validates the final decoded hash before ORT session creation.
 
 Confirmed local evidence:
 
-- integrated typecheck, client build, the final 540-test suite (539 passed and
+- integrated typecheck, client build, the final 590-test suite (589 passed and
   one skipped), production-style R2 build, ORT staging/dedup checks, artifact
   retention checks, and `git diff --check` passed;
 - WebGPU lifecycle completed with matching moves and a clean leak check; the
@@ -640,23 +650,45 @@ Confirmed local evidence:
 - Stockfish lite pthread depth-13 runs produced the same `e2e4` best move at
   one, two, and four threads, with approximately 1.44M, 3.57M, and 6.76M NPS;
 - external versus embedded Reckless NNUE depth-7/8 parity matched best move,
-  score, nodes, and PV in all 40 comparisons. The generated external release
-  binaries and corresponding-source archive were not materialized in this
-  checkout, so their final release hashes remain unconfirmed.
+  score, nodes, and PV in all 40 comparisons. The external WASI binary is
+  1,316,053 bytes (`5886d817...e2f2`), the external browser-API binary is
+  1,260,734 bytes (`70e6e51e...b881`), the NNUE is 63,266,880 bytes
+  (`7f587dfb...c61`), and the external corresponding-source archive is
+  44,572,430 bytes (`efdeb216...da69`);
+- the final t3 resumable-shard run reconstructed the 171,016,323-byte model
+  byte-identically, persisted five of eleven shards before an intentional
+  interruption, reused 83,886,080 bytes on resume, downloaded the remaining
+  87,130,243 bytes, and successfully created an ORT session. This remains
+  research-only pending live Artifact v2 rollout and browser startup evidence;
+- the compact GPU legal-prior control reduced per-evaluation readback from
+  7,444 to 3,084 bytes and search readback from 25,309.6 to 10,485.6 bytes, but
+  median search throughput regressed from 110.574 to 106.953 visits/s and only
+  three of four PVs matched. It is not promoted;
+- the evaluation-broker prototype passed unit parity, fairness, deduplication,
+  cancellation, lifecycle, and queue-bound tests, but the controlled
+  concurrency run was unstable, including one four-search sample near 1,009
+  seconds. Production wiring was removed, and later review also identified
+  unresolved cache-aware per-consumer accounting semantics. The prototype is
+  retained only on its temporary research branch.
 
 Still remaining:
 
 - live identity/Brotli/Range canary validation through Cloudflare;
 - deployment of a generated v2 release and migration of the live channel from
   the currently published v1 manifests;
+- deployment of the updated Artifact Worker and publication of the prepared v2
+  release to the canary channel. A read-only live check confirmed that Range
+  currently returns `206`, but the deployed Worker still lacks the v2 encoded
+  length header and repeated HEAD requests remained cache misses;
 - persisted R2 verification metadata that can safely replace ordinary
   carried-forward full-body integrity downloads with HEAD-only checks;
-- production cross-worker/session evaluation brokering;
+- production cross-worker/session evaluation brokering, after stable repeated
+  performance evidence and cache-aware per-consumer neural-budget accounting;
 - fused compact GPU output, still gated on repeatable full evaluation/search
   improvement after the completed lifecycle and timing work;
-- generation and parity validation of the external Reckless release artifacts,
-  plus supported external-network work for Viridithas and Stockfish;
-- resumable model shards, which remain dependent on the live Artifact v2
+- supported external-network work for Viridithas and Stockfish;
+- production integration and representative browser startup measurement for
+  resumable model shards, which remain dependent on the live Artifact v2
   rollout.
 
 ## Work that should remain parked
