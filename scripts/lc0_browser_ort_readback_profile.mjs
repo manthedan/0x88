@@ -143,6 +143,30 @@ function textFromGetResult(result) {
   throw new Error(`agent-browser get text returned unexpected payload: ${JSON.stringify(result)}`);
 }
 
+function browserInfoFromEvalResult(result) {
+  const value = result?.value ?? result?.result ?? result;
+  if (!value || typeof value !== 'object'
+    || typeof value.userAgent !== 'string'
+    || typeof value.platform !== 'string'
+    || !Number.isFinite(value.hardwareConcurrency)) {
+    throw new Error(`agent-browser eval returned unexpected browser info: ${JSON.stringify(result)}`);
+  }
+  return {
+    userAgent: value.userAgent,
+    platform: value.platform,
+    hardwareConcurrency: value.hardwareConcurrency,
+  };
+}
+
+async function readBrowserInfo(args) {
+  const result = await runAgent(args, ['eval', `(() => ({
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    hardwareConcurrency: navigator.hardwareConcurrency,
+  }))()`], 30_000);
+  return browserInfoFromEvalResult(result);
+}
+
 async function runBrowserBenchmark(args) {
   const url = benchmarkUrl(args);
   process.stderr.write(`[lc0-ort-readback-profile] ${url}\n`);
@@ -159,7 +183,8 @@ async function runBrowserBenchmark(args) {
         if (args.ortWasmVariant && !String(result.backend).includes(`[${args.ortWasmVariant}:`)) {
           throw new Error(`requested ORT WASM ${args.ortWasmVariant}, received backend ${result.backend}`);
         }
-        return result;
+        const browserInfo = await readBrowserInfo(args);
+        return { ...result, browserInfo };
       } catch (error) {
         if (Date.now() >= deadline) throw error;
       }
