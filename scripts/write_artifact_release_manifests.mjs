@@ -335,17 +335,19 @@ function validateV1Artifact(artifact, baseReleaseId) {
 
 function v1BodyCandidates(artifact, metadata, args) {
   const candidates = [];
-  const add = (path) => {
-    if (path && !candidates.includes(path)) candidates.push(path);
+  const add = (path, authoritative = false) => {
+    if (path && !candidates.some((candidate) => candidate.path === path)) {
+      candidates.push({ path, authoritative });
+    }
   };
   add(localArtifactPath(artifact, args));
   if (artifact.logicalUrl?.startsWith('/')) add(resolve(args.root, `public/${artifact.logicalUrl.replace(/^\/+/, '')}`));
-  add(resolve(args.outDir, metadata.key));
-  add(resolve(args.root, metadata.key));
+  add(resolve(args.outDir, metadata.key), true);
+  add(resolve(args.root, metadata.key), true);
   return candidates;
 }
 
-async function migrateV1Artifacts(base, localArtifacts, args) {
+async function migrateV1Artifacts(base, localArtifacts, currentLogicalUrls, args) {
   const sourceByRaw = new Map();
   for (const artifact of localArtifacts) {
     const path = localArtifactPath(artifact, args);
@@ -355,16 +357,17 @@ async function migrateV1Artifacts(base, localArtifacts, args) {
   const inspected = [];
   for (const artifact of base.artifacts ?? []) {
     const metadata = validateV1Artifact(artifact, base.releaseId);
+    if (currentLogicalUrls.has(metadata.logicalUrl)) continue;
     const candidates = v1BodyCandidates(artifact, metadata, args);
     const mismatches = [];
-    for (const path of candidates) {
+    for (const { path, authoritative } of candidates) {
       const digest = await localFileDigest(path);
       if (!digest) continue;
       if (digest.bytes === metadata.bytes && digest.sha256 === metadata.sha256) {
         sourceByRaw.set(`${metadata.sha256}/${metadata.bytes}`, path);
         break;
       }
-      mismatches.push(`${path} has ${digest.bytes}/${digest.sha256}`);
+      if (authoritative) mismatches.push(`${path} has ${digest.bytes}/${digest.sha256}`);
     }
     inspected.push({ artifact, metadata, candidates, mismatches });
   }
@@ -589,6 +592,10 @@ async function main() {
   const collected = await collectArtifacts(args);
   const updatedSourceManifests = collected.sourceManifests;
   const localArtifacts = [...collected.artifacts];
+  const currentLogicalUrls = new Set([
+    ...localArtifacts.map((artifact) => logicalIdentity(artifact)),
+    ...updatedSourceManifests.map((sourceManifest) => logicalUrlFromPublicPath(sourceManifest)),
+  ]);
   let sourceManifests = updatedSourceManifests;
   let baseReleaseId;
   let inheritedArtifacts = [];
@@ -602,7 +609,7 @@ async function main() {
     if (isArtifactReleaseV2(base)) releaseCatalogEntries(base);
     baseReleaseId = base.releaseId;
     if (base.schema === ARTIFACT_RELEASE_V1_SCHEMA) {
-      migratedV1Artifacts = await migrateV1Artifacts(base, localArtifacts, args);
+      migratedV1Artifacts = await migrateV1Artifacts(base, localArtifacts, currentLogicalUrls, args);
     }
     else inheritedArtifacts = (base.artifacts ?? []).map((artifact) => ({
       ...artifact,

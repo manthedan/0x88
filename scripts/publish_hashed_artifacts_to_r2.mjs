@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join } from 'node:path';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import {
   ARTIFACT_RELEASE_V1_SCHEMA,
@@ -172,10 +172,14 @@ function entriesFromV2Release(release, args) {
       const validated = validateV2Representation(artifact, representation);
       const logicalUrl = artifact.logicalUrl ?? artifact.name;
       const carriedForward = Boolean(artifact.carriedForwardFrom);
+      const contentType = artifact.contentType ?? 'application/octet-stream';
       const localPath = localPathFor(args, representation.localPath ?? (representation.encoding === 'identity' ? artifact.localPath : undefined), validated.key);
       const existing = byKey.get(validated.key);
       if (existing) {
-        if (existing.bytes !== representation.bytes || existing.sha256 !== validated.encodedSha256 || existing.contentEncoding !== (representation.encoding === 'identity' ? undefined : representation.encoding)) {
+        if (existing.bytes !== representation.bytes
+          || existing.sha256 !== validated.encodedSha256
+          || existing.contentType !== contentType
+          || existing.contentEncoding !== (representation.encoding === 'identity' ? undefined : representation.encoding)) {
           throw new Error(`Conflicting v2 representation metadata for ${validated.key}`);
         }
         if (logicalUrl && !existing.logicalUrls.includes(logicalUrl)) existing.logicalUrls.push(logicalUrl);
@@ -202,7 +206,7 @@ function entriesFromV2Release(release, args) {
         sha256: validated.encodedSha256,
         decodedBytes: validated.rawBytes,
         decodedSha256: validated.rawSha256,
-        contentType: artifact.contentType ?? 'application/octet-stream',
+        contentType,
         contentEncoding: representation.encoding === 'identity' ? undefined : representation.encoding,
         url: publicUrl(args, representation.url),
         verification: 'v2-immutable-head',
@@ -402,17 +406,32 @@ function isMissingObjectOutput(output) {
   return /specified key does not exist|NoSuchKey|status code:\s*404|HTTP\s*404/i.test(output);
 }
 
-async function downloadMigrationSource(source, target) {
+async function downloadMigrationSource(source, target, maxBytes) {
   if (!source.url) throw new Error('no downloadable URL is configured');
   const response = await fetch(source.url, { cache: 'no-cache', headers: { 'Accept-Encoding': 'identity' } });
   if (!response.ok) {
     throw new Error(`${source.url} returned HTTP ${response.status}`);
   }
   if (response.body) {
-    await pipeline(Readable.fromWeb(response.body), createWriteStream(target, { flags: 'wx' }));
+    let bytes = 0;
+    const limiter = new Transform({
+      transform(chunk, _encoding, callback) {
+        bytes += chunk.byteLength;
+        if (bytes > maxBytes) {
+          callback(new Error(`${source.url} exceeded the expected ${maxBytes} bytes`));
+          return;
+        }
+        callback(null, chunk);
+      },
+    });
+    await pipeline(Readable.fromWeb(response.body), limiter, createWriteStream(target, { flags: 'wx' }));
     return;
   }
-  await writeFile(target, new Uint8Array(await response.arrayBuffer()), { flag: 'wx' });
+  const body = new Uint8Array(await response.arrayBuffer());
+  if (body.byteLength > maxBytes) {
+    throw new Error(`${source.url} exceeded the expected ${maxBytes} bytes`);
+  }
+  await writeFile(target, body, { flag: 'wx' });
 }
 
 function compareMigrationSources(a, b) {
@@ -427,15 +446,23 @@ function compareMigrationSources(a, b) {
   return 0;
 }
 
-async function materializeMigrationSource(args, item) {
+async function materializeMigrationSource(args, item, workspace) {
   const attempts = [];
   const sources = [...item.migrationSources].sort(compareMigrationSources);
   for (const source of sources) {
-    const dir = await mkdtemp(join(tmpdir(), 'lc0-v1-migration-'));
+    const dir = await mkdtemp(join(workspace, 'migration-'));
     const file = join(dir, 'identity');
     try {
       const sourceTarget = `${args.bucket}/${source.key}`;
-      const child = spawnSync(args.wranglerBin, ['r2', 'object', 'get', sourceTarget, '--file', file, '--remote'], { encoding: 'utf8' });
+      const child = spawnSync(args.awsBin, [
+        's3api', 'get-object',
+        '--bucket', args.bucket,
+        '--key', source.key,
+        '--range', `bytes=0-${item.decodedBytes}`,
+        '--endpoint-url', args.r2Endpoint,
+        '--region', 'auto',
+        file,
+      ], { encoding: 'utf8' });
       if (child.status !== 0) {
         const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
         if (!isMissingObjectOutput(output)) {
@@ -443,7 +470,7 @@ async function materializeMigrationSource(args, item) {
         }
         await rm(file, { force: true });
         try {
-          await downloadMigrationSource(source, file);
+          await downloadMigrationSource(source, file, item.decodedBytes);
         } catch (error) {
           throw new Error(`R2 object is missing and fallback download failed: ${error.message}`);
         }
@@ -466,6 +493,34 @@ async function materializeMigrationSource(args, item) {
     + attempts.map(({ key, reason }) => `- ${key}: ${reason}`).join('\n')
     + '\nRestore one listed legacy object or provide matching local decoded bytes before publishing.',
   );
+}
+
+async function preflightArtifactPublish(args, planned, workspace) {
+  const materialized = [];
+  for (const item of planned) {
+    const target = `${args.bucket}/${item.key}`;
+    if (item.remoteState === 'unchecked') {
+      throw new Error(`Cannot safely publish ${item.logicalUrls.join(', ')}: ${item.remoteProbe?.reason ?? 'remote artifact existence was not checked'}`);
+    }
+    if (item.localPath && existsSync(item.localPath)) continue;
+
+    const remoteState = await verifyRemoteImmutableObject(args, target, item);
+    if (remoteState === 'identical') {
+      item.remoteState = 'identical-r2';
+      item.uploadAction = 'skip-identical-r2';
+      continue;
+    }
+    if (!item.migrationSources.length) {
+      throw new Error(`Cannot upload missing R2 artifact ${item.logicalUrls.join(', ')} without a local file: ${item.localPath ?? 'no localPath'}`);
+    }
+    if (!workspace) throw new Error('Migration preflight workspace was not created');
+
+    const source = await materializeMigrationSource(args, item, workspace);
+    item.localPath = source.file;
+    item.migrationSourceUsed = source.source;
+    materialized.push(item);
+  }
+  return materialized;
 }
 
 function isConditionalCreateConflict(output) {
@@ -607,52 +662,46 @@ async function main() {
   }
 
   if (args.execute) {
-    for (const item of planned) {
-      const target = `${args.bucket}/${item.key}`;
-      if (item.remoteState === 'unchecked') throw new Error(`Cannot safely publish ${item.logicalUrls.join(', ')}: ${item.remoteProbe?.reason ?? 'remote artifact existence was not checked'}`);
-      if (!item.localPath || !existsSync(item.localPath)) {
-        const remoteState = await verifyRemoteImmutableObject(args, target, item);
-        if (remoteState === 'identical') {
-          item.remoteState = 'identical-r2';
-          item.uploadAction = 'skip-identical-r2';
-          continue;
-        }
-        if (item.migrationSources.length) {
-          const materialized = await materializeMigrationSource(args, item);
-          try {
-            item.localPath = materialized.file;
-            const uploadState = await createImmutableObjectAtomically(args, item);
-            item.remoteState = uploadState === 'identical' ? 'identical-r2' : 'created-r2';
-            item.uploadAction = uploadState === 'identical' ? 'skip-identical-r2' : 'migrated-and-uploaded';
-            item.migrationSourceUsed = materialized.source;
-          } finally {
-            await rm(materialized.dir, { recursive: true, force: true });
-            item.localPath = undefined;
-          }
-          continue;
-        }
-        throw new Error(`Cannot upload missing R2 artifact ${item.logicalUrls.join(', ')} without a local file: ${item.localPath ?? 'no localPath'}`);
-      }
-      const uploadState = await createImmutableObjectAtomically(args, item);
-      item.remoteState = uploadState === 'identical' ? 'identical-r2' : 'created-r2';
-      item.uploadAction = uploadState === 'identical' ? 'skip-identical-r2' : 'uploaded';
+    if (!args.r2Endpoint) {
+      throw new Error('Atomic immutable object creation requires --r2-endpoint, R2_ENDPOINT, R2_ACCOUNT_ID, or CLOUDFLARE_ACCOUNT_ID');
     }
-    for (const item of manifests) {
-      const target = `${args.bucket}/${item.key}`;
-      if (item.type === 'release-manifest') {
+    const needsMigrationWorkspace = planned.some((item) => (
+      (!item.localPath || !existsSync(item.localPath)) && item.migrationSources.length
+    ));
+    const workspace = needsMigrationWorkspace
+      ? await mkdtemp(join(tmpdir(), 'lc0-r2-publish-preflight-'))
+      : undefined;
+    let materialized = [];
+    try {
+      materialized = await preflightArtifactPublish(args, planned, workspace);
+      for (const item of planned) {
+        if (item.uploadAction === 'skip-identical-r2') continue;
         const uploadState = await createImmutableObjectAtomically(args, item);
-        item.remoteState = uploadState === 'identical' ? 'identical' : 'created';
-        item.uploadAction = uploadState === 'identical' ? 'skip-identical' : 'uploaded';
-        continue;
+        item.remoteState = uploadState === 'identical' ? 'identical-r2' : 'created-r2';
+        item.uploadAction = uploadState === 'identical'
+          ? 'skip-identical-r2'
+          : (item.migrationSourceUsed ? 'migrated-and-uploaded' : 'uploaded');
       }
-      const child = spawnSync(args.wranglerBin, [
-        'r2', 'object', 'put', target,
-        '--file', item.localPath,
-        '--content-type', item.contentType,
-        '--cache-control', item.cacheControl,
-        '--remote',
-      ], { stdio: 'inherit' });
-      if (child.status !== 0) throw new Error(`wrangler failed for ${target}`);
+      for (const item of manifests) {
+        const target = `${args.bucket}/${item.key}`;
+        if (item.type === 'release-manifest') {
+          const uploadState = await createImmutableObjectAtomically(args, item);
+          item.remoteState = uploadState === 'identical' ? 'identical' : 'created';
+          item.uploadAction = uploadState === 'identical' ? 'skip-identical' : 'uploaded';
+          continue;
+        }
+        const child = spawnSync(args.wranglerBin, [
+          'r2', 'object', 'put', target,
+          '--file', item.localPath,
+          '--content-type', item.contentType,
+          '--cache-control', item.cacheControl,
+          '--remote',
+        ], { stdio: 'inherit' });
+        if (child.status !== 0) throw new Error(`wrangler failed for ${target}`);
+      }
+    } finally {
+      for (const item of materialized) item.localPath = undefined;
+      if (workspace) await rm(workspace, { recursive: true, force: true });
     }
   }
 
