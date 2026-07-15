@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -75,7 +75,7 @@ process.exit(1);
 async function writeAtomicAws(root) {
   const path = join(root, 'fake-aws.mjs');
   await writeFile(path, `#!/usr/bin/env node
-import { appendFileSync, constants, copyFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, linkSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 
@@ -94,7 +94,7 @@ const target = \`\${bucket}/\${key}\`;
 const objectPath = join(process.env.MOCK_R2_DIR, createHash('sha256').update(target).digest('hex'));
 mkdirSync(dirname(objectPath), { recursive: true });
 try {
-  copyFileSync(file, objectPath, constants.COPYFILE_EXCL);
+  linkSync(file, objectPath);
 } catch (error) {
   if (error.code === 'EEXIST') {
     console.error('PreconditionFailed: status code: 412');
@@ -307,6 +307,80 @@ test('write_artifact_release_manifests keeps releases write-once while channels 
   assert.match(overwrite.stderr, /Refusing to overwrite immutable release manifest/);
   channel = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'channels/stable.json'), 'utf8'));
   assert.equal(channel.releaseId, 'one');
+});
+
+test('write_artifact_release_manifests reuses an existing release timestamp for default retries', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-release-default-retry-'));
+  await mkdir(join(root, 'public/models/lc0'), { recursive: true });
+  await writeFile(join(root, 'public/models/lc0/test.onnx'), 'abc');
+  await writeJson(join(root, 'public/models/lc0/manifest.json'), {
+    models: [{ file: 'test.onnx', url: '/models/lc0/test.onnx', bytes: 3, sha256: ABC_SHA256 }],
+  });
+  const generate = () => spawnSync(process.execPath, [
+    'scripts/write_artifact_release_manifests.mjs',
+    '--root', root,
+    '--manifest', 'public/models/lc0/manifest.json',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+
+  const first = generate();
+  assert.equal(first.status, 0, first.stderr);
+  const releaseDirectory = join(root, DEFAULT_RELEASE_OUTPUT, 'releases');
+  const [releaseFilename] = await readdir(releaseDirectory);
+  const defaultReleaseId = releaseFilename.replace(/\.json$/, '');
+  const releasePath = join(releaseDirectory, releaseFilename);
+  const original = await readFile(releasePath, 'utf8');
+  const originalRelease = JSON.parse(original);
+  assert.equal(originalRelease.releaseId, defaultReleaseId);
+  assert.match(defaultReleaseId, /^\d{4}-\d{2}-\d{2}\.nogit$/);
+
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const retry = generate();
+  assert.equal(retry.status, 0, retry.stderr);
+  assert.equal(await readFile(releasePath, 'utf8'), original);
+  const channel = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'channels/stable.json'), 'utf8'));
+  assert.equal(channel.generatedAt, originalRelease.generatedAt);
+});
+
+test('write_artifact_release_manifests rejects mismatched default retries without moving the channel', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-release-default-retry-mismatch-'));
+  await mkdir(join(root, 'public/models/lc0'), { recursive: true });
+  const assetPath = join(root, 'public/models/lc0/test.onnx');
+  const manifestPath = join(root, 'public/models/lc0/manifest.json');
+  await writeFile(assetPath, 'abc');
+  await writeJson(manifestPath, {
+    models: [{ file: 'test.onnx', url: '/models/lc0/test.onnx', bytes: 3, sha256: ABC_SHA256 }],
+  });
+  const generate = (releaseId) => spawnSync(process.execPath, [
+    'scripts/write_artifact_release_manifests.mjs',
+    '--root', root,
+    '--release-id', releaseId,
+    '--manifest', 'public/models/lc0/manifest.json',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+
+  assert.equal(generate('accepted').status, 0);
+  assert.equal(generate('conflict').status, 0);
+  const channelPath = join(root, DEFAULT_RELEASE_OUTPUT, 'channels/stable.json');
+  const acceptedChannel = JSON.parse(await readFile(channelPath, 'utf8'));
+  assert.equal(acceptedChannel.releaseId, 'conflict');
+
+  const differentSha = createHash('sha256').update('abd').digest('hex');
+  await writeFile(assetPath, 'abd');
+  await writeJson(manifestPath, {
+    models: [{ file: 'test.onnx', url: '/models/lc0/test.onnx', bytes: 3, sha256: differentSha }],
+  });
+  const mismatch = generate('conflict');
+  assert.notEqual(mismatch.status, 0);
+  assert.match(mismatch.stderr, /Refusing to overwrite immutable release manifest/);
+  assert.equal(JSON.parse(await readFile(channelPath, 'utf8')).releaseId, 'conflict');
+
+  const releasePath = join(root, DEFAULT_RELEASE_OUTPUT, 'releases/conflict.json');
+  const tampered = JSON.parse(await readFile(releasePath, 'utf8'));
+  tampered.channel = 'canary';
+  await writeJson(releasePath, tampered);
+  const identityMismatch = generate('conflict');
+  assert.notEqual(identityMismatch.status, 0);
+  assert.match(identityMismatch.stderr, /Existing immutable release identity does not match requested release/);
+  assert.equal(JSON.parse(await readFile(channelPath, 'utf8')).releaseId, 'conflict');
 });
 
 test('write_artifact_release_manifests rejects unsafe release and channel names', async () => {
@@ -605,9 +679,10 @@ test('publish_hashed_artifacts_to_r2 uploads v2 Brotli bodies with Content-Encod
     ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
     assert.equal(result.status, 0, result.stderr);
     const log = await readFile(logPath, 'utf8');
-    assert.match(log, new RegExp(`r2 object put test-bucket/artifacts/sha256/${ABC_SHA256}/identity`));
-    assert.match(log, /\/br\/[a-f0-9]{64} .*--content-encoding br --remote/);
-    assert.match(log, /s3api put-object --bucket test-bucket --key releases\/v2-execute\.json .*--if-none-match \* .*--endpoint-url https:\/\/r2\.invalid --region auto/);
+    assert.match(log, new RegExp(`s3api put-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/identity --body .* --content-type application/octet-stream --cache-control public, max-age=31536000, immutable --if-none-match \\* --endpoint-url https://r2\\.invalid --region auto`));
+    assert.match(log, new RegExp(`s3api put-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/br/[a-f0-9]{64} --body .* --content-type application/octet-stream --cache-control public, max-age=31536000, immutable --if-none-match \\* --endpoint-url https://r2\\.invalid --region auto --content-encoding br`));
+    assert.match(log, /s3api put-object --bucket test-bucket --key releases\/v2-execute\.json .*--content-type application\/json; charset=utf-8 --cache-control public, max-age=31536000, immutable --if-none-match \* .*--endpoint-url https:\/\/r2\.invalid --region auto/);
+    assert.doesNotMatch(log, /r2 object put test-bucket\/artifacts\//);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -641,6 +716,7 @@ test('publish_hashed_artifacts_to_r2 refuses a warm valid CDN object when author
     const logPath = join(root, 'wrangler.log');
     const r2Root = join(root, 'mock-r2');
     const wrangler = await writeStatefulWrangler(root);
+    const aws = await writeAtomicAws(root);
     const target = `test-bucket/artifacts/sha256/${ABC_SHA256}/identity`;
     await mkdir(r2Root, { recursive: true });
     await writeFile(mockR2ObjectPath(r2Root, target), 'abd');
@@ -653,6 +729,8 @@ test('publish_hashed_artifacts_to_r2 refuses a warm valid CDN object when author
       '--artifact-base', `http://127.0.0.1:${port}`,
       '--execute',
       '--wrangler-bin', wrangler,
+      '--aws-bin', aws,
+      '--r2-endpoint', 'https://r2.invalid',
     ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
 
     assert.notEqual(result.status, 0);
@@ -665,10 +743,11 @@ test('publish_hashed_artifacts_to_r2 refuses a warm valid CDN object when author
   }
 });
 
-test('publish_hashed_artifacts_to_r2 fails when authoritative post-create verification detects a race', async () => {
+test('publish_hashed_artifacts_to_r2 rejects a differing artifact after an atomic create conflict and never updates the channel', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-create-race-'));
   await writeFile(join(root, 'model.onnx'), 'abc');
   const releasePath = join(root, 'release.json');
+  const channelPath = join(root, 'stable.json');
   await writeJson(releasePath, {
     schema: 'lc0-webgpu.artifact-release.v2',
     releaseId: 'create-race',
@@ -679,45 +758,59 @@ test('publish_hashed_artifacts_to_r2 fails when authoritative post-create verifi
       representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
     }],
   });
+  await writeJson(channelPath, {
+    schema: 'lc0_browser.artifact_channel_manifest.v2',
+    channel: 'stable',
+    releaseId: 'create-race',
+    releaseManifestUrl: '/releases/create-race.json',
+    releaseUrl: '/releases/create-race.json',
+  });
   const server = createServer((_req, res) => res.writeHead(404).end());
   const port = await listen(server);
   try {
     const logPath = join(root, 'wrangler.log');
-    const statePath = join(root, 'get-count');
-    const wrangler = join(root, 'fake-racing-wrangler.sh');
-    await writeFile(wrangler, `#!/bin/sh
-printf "%s\\n" "$*" >> "$LOG"
-if [ "$1 $2 $3" = "r2 object get" ]; then
-  count=0
-  if [ -f "$STATE" ]; then count=$(cat "$STATE"); fi
-  count=$((count + 1))
-  printf "%s" "$count" > "$STATE"
-  if [ "$count" -eq 1 ]; then
-    echo "The specified key does not exist." >&2
-    exit 1
-  fi
-  printf "abd" > "$6"
-  exit 0
-fi
-exit 0
+    const r2Root = join(root, 'mock-r2');
+    const wrangler = await writeStatefulWrangler(root);
+    const aws = join(root, 'fake-conflicting-aws.mjs');
+    await writeFile(aws, `#!/usr/bin/env node
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { dirname, join } from 'node:path';
+
+const args = process.argv.slice(2);
+if (process.env.LOG) appendFileSync(process.env.LOG, \`\${args.join(' ')}\\n\`);
+const bucket = args[args.indexOf('--bucket') + 1];
+const key = args[args.indexOf('--key') + 1];
+const target = \`\${bucket}/\${key}\`;
+const objectPath = join(process.env.MOCK_R2_DIR, createHash('sha256').update(target).digest('hex'));
+mkdirSync(dirname(objectPath), { recursive: true });
+writeFileSync(objectPath, 'abd');
+console.error('PreconditionFailed: status code: 412');
+process.exit(1);
 `);
-    await chmod(wrangler, 0o755);
+    await chmod(aws, 0o755);
 
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
       '--root', root,
       '--release', releasePath,
+      '--channel-manifest', channelPath,
       '--bucket', 'test-bucket',
       '--artifact-base', `http://127.0.0.1:${port}`,
       '--execute',
       '--wrangler-bin', wrangler,
-    ], { env: { ...process.env, LOG: logPath, STATE: statePath } });
+      '--aws-bin', aws,
+      '--r2-endpoint', 'https://r2.invalid',
+    ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
 
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Refusing to overwrite immutable object .*remote content differs/);
     const log = await readFile(logPath, 'utf8');
+    assert.match(log, new RegExp(`s3api put-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/identity .*--if-none-match \\*`));
     assert.match(log, /r2 object get .*identity/);
-    assert.match(log, /r2 object put .*identity/);
+    assert.doesNotMatch(log, /r2 object put .*identity/);
+    assert.doesNotMatch(log, /releases\/create-race\.json/);
+    assert.doesNotMatch(log, /r2 object put test-bucket\/channels\/stable\.json/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -984,8 +1077,11 @@ test('publish_hashed_artifacts_to_r2 fails closed when artifact existence cannot
   const port = await listen(server);
   try {
     const wrangler = join(root, 'fake-wrangler.sh');
+    const aws = join(root, 'fake-aws.sh');
     await writeFile(wrangler, '#!/bin/sh\nif [ "$1 $2 $3" = "r2 object get" ]; then echo "authentication failed" >&2; exit 1; fi\nexit 0\n');
+    await writeFile(aws, '#!/bin/sh\necho "PreconditionFailed: status code: 412" >&2\nexit 1\n');
     await chmod(wrangler, 0o755);
+    await chmod(aws, 0o755);
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
       '--root', root,
@@ -994,6 +1090,8 @@ test('publish_hashed_artifacts_to_r2 fails closed when artifact existence cannot
       '--artifact-base', `http://127.0.0.1:${port}`,
       '--execute',
       '--wrangler-bin', wrangler,
+      '--aws-bin', aws,
+      '--r2-endpoint', 'https://r2.invalid',
     ]);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, new RegExp(`Unable to verify immutable object .*artifacts/sha256/${ABC_SHA256}/test\\.onnx`));
@@ -1115,6 +1213,63 @@ test('publish_hashed_artifacts_to_r2 atomically admits only one competing releas
   const log = await readFile(logPath, 'utf8');
   assert.equal(log.match(/s3api put-object --bucket test-bucket --key releases\/test-release\.json/g)?.length, 2);
   assert.equal(log.match(/r2 object put test-bucket\/channels\/stable\.json/g)?.length, 1);
+});
+
+test('publish_hashed_artifacts_to_r2 safely handles concurrent writers for the same immutable artifact representations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-artifact-race-'));
+  const source = join(root, 'model.onnx');
+  await writeFile(source, 'abc');
+  const materialize = spawnSync(process.execPath, [
+    'scripts/publish_content_addressed_release.mjs',
+    '--root', root,
+    '--release-id', 'artifact-race',
+    '--asset', `model=${source}`,
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(materialize.status, 0, materialize.stderr);
+
+  const server = createServer((_req, res) => res.writeHead(404).end());
+  const port = await listen(server);
+  try {
+    const r2Root = join(root, 'mock-r2');
+    const logPath = join(root, 'publish.log');
+    const wrangler = await writeStatefulWrangler(root);
+    const aws = await writeAtomicAws(root);
+    const args = [
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', join(root, 'releases/artifact-race.json'),
+      '--channel-manifest', join(root, 'channels/stable.json'),
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--execute',
+      '--wrangler-bin', wrangler,
+      '--aws-bin', aws,
+      '--r2-endpoint', 'https://r2.invalid',
+    ];
+    const runs = await Promise.all([
+      runNode(args, { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } }),
+      runNode(args, { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } }),
+    ]);
+    assert.ok(runs.every((result) => result.status === 0), runs.map((result) => result.stderr).join('\n'));
+    const plans = runs.map((result) => JSON.parse(result.stdout));
+    for (const plan of plans) {
+      assert.ok(plan.planned.every((item) => ['created-r2', 'identical-r2'].includes(item.remoteState)));
+      assert.ok(plan.planned.every((item) => ['uploaded', 'skip-identical-r2'].includes(item.uploadAction)));
+    }
+
+    const release = JSON.parse(await readFile(join(root, 'releases/artifact-race.json'), 'utf8'));
+    for (const representation of release.artifacts[0].representations) {
+      const key = new URL(representation.url, 'https://assets.invalid').pathname.replace(/^\/+/, '');
+      const stored = await readFile(mockR2ObjectPath(r2Root, `test-bucket/${key}`));
+      assert.equal(createHash('sha256').update(stored).digest('hex'), representation.sha256);
+    }
+    const log = await readFile(logPath, 'utf8');
+    assert.equal(log.match(new RegExp(`s3api put-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/identity`, 'g'))?.length, 2);
+    assert.equal(log.match(new RegExp(`s3api put-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/br/[a-f0-9]{64}`, 'g'))?.length, 2);
+    assert.doesNotMatch(log, /r2 object put test-bucket\/artifacts\//);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test('publish_hashed_artifacts_to_r2 refuses execute when artifacts are skipped', async () => {

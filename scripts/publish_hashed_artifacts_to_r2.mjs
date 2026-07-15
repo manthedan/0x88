@@ -16,7 +16,7 @@ import {
 const DEFAULT_ARTIFACT_BASE = 'https://assets.0x88.app';
 
 function usage() {
-  console.log(`Usage: node scripts/publish_hashed_artifacts_to_r2.mjs --release .local-dev-artifacts/artifact-releases/releases/ID.json --bucket BUCKET [options]\n\nOptions:\n  --root DIR          Repository or materialized release root (default .)\n  --execute           Actually call wrangler/AWS CLI; default is dry-run\n  --allow-missing     Skip artifacts whose localPath is absent\n  --wrangler-bin BIN  Wrangler binary (default wrangler)\n  --aws-bin BIN       AWS CLI binary used for atomic release creation (default aws)\n  --r2-endpoint URL   R2 S3 endpoint (or R2_ENDPOINT / R2_ACCOUNT_ID)\n  --channel-manifest PATH  Optional generated channel manifest to publish after the release\n  --artifact-base URL Public artifact origin used to probe relative representation URLs (default https://assets.0x88.app)\n  --probe-existing    In dry-run mode, validate representation URLs and mark existing uploads as skipped\n  -h, --help          Show help\n\nBoth legacy v1 releases and representation-aware v2 releases are accepted. V2 identity\nobjects use artifacts/sha256/<decoded-sha256>/identity; Brotli objects use\nartifacts/sha256/<decoded-sha256>/br/<encoded-sha256>. Existing v2 bodies are\nvalidated with immutable HEAD metadata plus decoded full-body integrity until trusted\nR2 verification metadata is available. Legacy filename-keyed bodies retain v1 checks. Release manifests are created atomically\nwith S3 If-None-Match and channel pointers are published last.\n`);
+  console.log(`Usage: node scripts/publish_hashed_artifacts_to_r2.mjs --release .local-dev-artifacts/artifact-releases/releases/ID.json --bucket BUCKET [options]\n\nOptions:\n  --root DIR          Repository or materialized release root (default .)\n  --execute           Actually call wrangler/AWS CLI; default is dry-run\n  --allow-missing     Skip artifacts whose localPath is absent\n  --wrangler-bin BIN  Wrangler binary (default wrangler)\n  --aws-bin BIN       AWS CLI binary used for atomic immutable object creation (default aws)\n  --r2-endpoint URL   R2 S3 endpoint (or R2_ENDPOINT / R2_ACCOUNT_ID)\n  --channel-manifest PATH  Optional generated channel manifest to publish after the release\n  --artifact-base URL Public artifact origin used to probe relative representation URLs (default https://assets.0x88.app)\n  --probe-existing    In dry-run mode, validate representation URLs and mark existing uploads as skipped\n  -h, --help          Show help\n\nBoth legacy v1 releases and representation-aware v2 releases are accepted. V2 identity\nobjects use artifacts/sha256/<decoded-sha256>/identity; Brotli objects use\nartifacts/sha256/<decoded-sha256>/br/<encoded-sha256>. Existing v2 bodies are\nvalidated with immutable HEAD metadata plus decoded full-body integrity until trusted\nR2 verification metadata is available. Legacy filename-keyed bodies retain v1 checks. Immutable bodies and release manifests are\ncreated atomically with S3 If-None-Match and channel pointers are published last.\n`);
 }
 
 function parseArgs(argv) {
@@ -297,31 +297,16 @@ async function verifyRemoteImmutableObject(args, target, expected) {
   }
 }
 
-async function uploadImmutableObject(args, item, command) {
-  const target = `${args.bucket}/${item.key}`;
-  const remoteState = await verifyRemoteImmutableObject(args, target, item);
-  if (remoteState === 'identical') return 'identical';
-
-  const child = spawnSync(args.wranglerBin, command, { stdio: 'inherit' });
-  if (child.status !== 0) throw new Error(`wrangler failed for ${target}`);
-
-  const createdState = await verifyRemoteImmutableObject(args, target, item);
-  if (createdState !== 'identical') {
-    throw new Error(`Immutable object create race or verification failure for ${target}`);
-  }
-  return 'created';
-}
-
 function isConditionalCreateConflict(output) {
   return /PreconditionFailed|precondition(?: condition)? failed|status code:\s*412|HTTP\s*412/i.test(output);
 }
 
-async function createReleaseManifestAtomically(args, item) {
+async function createImmutableObjectAtomically(args, item) {
   if (!args.r2Endpoint) {
-    throw new Error('Atomic release creation requires --r2-endpoint, R2_ENDPOINT, R2_ACCOUNT_ID, or CLOUDFLARE_ACCOUNT_ID');
+    throw new Error('Atomic immutable object creation requires --r2-endpoint, R2_ENDPOINT, R2_ACCOUNT_ID, or CLOUDFLARE_ACCOUNT_ID');
   }
   const target = `${args.bucket}/${item.key}`;
-  const child = spawnSync(args.awsBin, [
+  const command = [
     's3api', 'put-object',
     '--bucket', args.bucket,
     '--key', item.key,
@@ -331,15 +316,17 @@ async function createReleaseManifestAtomically(args, item) {
     '--if-none-match', '*',
     '--endpoint-url', args.r2Endpoint,
     '--region', 'auto',
-  ], { encoding: 'utf8' });
+  ];
+  if (item.contentEncoding) command.push('--content-encoding', item.contentEncoding);
+  const child = spawnSync(args.awsBin, command, { encoding: 'utf8' });
   const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
   if (child.status !== 0 && !isConditionalCreateConflict(output)) {
-    throw new Error(`Atomic release create failed for ${target}: ${output.trim() || `exit ${child.status}`}`);
+    throw new Error(`Atomic immutable object create failed for ${target}: ${output.trim() || `exit ${child.status}`}`);
   }
 
   const remoteState = await verifyRemoteImmutableObject(args, target, item);
   if (remoteState !== 'identical') {
-    throw new Error(`Atomic release create verification failed for ${target}`);
+    throw new Error(`Atomic immutable object create verification failed for ${target}`);
   }
   return child.status === 0 ? 'created' : 'identical';
 }
@@ -424,9 +411,10 @@ async function main() {
       decodedSha256: entry.decodedSha256,
       contentType: entry.contentType,
       contentEncoding: entry.contentEncoding,
+      cacheControl: 'public, max-age=31536000, immutable',
       artifactUrl: entry.url,
       remoteState: probe?.state ?? 'not-probed',
-      uploadAction: probe?.state === 'existing' ? 'skip-existing' : 'upload',
+      uploadAction: probe?.state === 'existing' ? 'conditional-create-or-verify' : 'conditional-create',
       remoteProbe: probe,
     });
   }
@@ -449,22 +437,14 @@ async function main() {
         }
         throw new Error(`Cannot upload missing R2 artifact ${item.logicalUrls.join(', ')} without a local file: ${item.localPath ?? 'no localPath'}`);
       }
-      const command = [
-        'r2', 'object', 'put', target,
-        '--file', item.localPath,
-        '--content-type', item.contentType,
-        '--cache-control', 'public, max-age=31536000, immutable',
-      ];
-      if (item.contentEncoding) command.push('--content-encoding', item.contentEncoding);
-      command.push('--remote');
-      const uploadState = await uploadImmutableObject(args, item, command);
+      const uploadState = await createImmutableObjectAtomically(args, item);
       item.remoteState = uploadState === 'identical' ? 'identical-r2' : 'created-r2';
       item.uploadAction = uploadState === 'identical' ? 'skip-identical-r2' : 'uploaded';
     }
     for (const item of manifests) {
       const target = `${args.bucket}/${item.key}`;
       if (item.type === 'release-manifest') {
-        const uploadState = await createReleaseManifestAtomically(args, item);
+        const uploadState = await createImmutableObjectAtomically(args, item);
         item.remoteState = uploadState === 'identical' ? 'identical' : 'created';
         item.uploadAction = uploadState === 'identical' ? 'skip-identical' : 'uploaded';
         continue;

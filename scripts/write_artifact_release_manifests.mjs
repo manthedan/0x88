@@ -62,7 +62,16 @@ function parseArgs(argv) {
   if (!Number.isInteger(args.brotliQuality) || args.brotliQuality < 0 || args.brotliQuality > 11) {
     throw new Error('--brotli-quality must be an integer from 0 through 11');
   }
+  if (args.generatedAt && !isIsoTimestamp(args.generatedAt)) {
+    throw new Error('--generated-at must be an ISO timestamp');
+  }
   return args;
+}
+
+function isIsoTimestamp(value) {
+  return typeof value === 'string'
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    && Number.isFinite(Date.parse(value));
 }
 
 function defaultReleaseId(root) {
@@ -374,16 +383,46 @@ async function writeReleaseOnce(path, value, check) {
   }
   if (check) throw new Error(`Missing immutable release manifest: ${path}`);
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, text, { flag: 'wx' });
+  try {
+    await writeFile(path, text, { flag: 'wx' });
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+    const existing = await readFile(path, 'utf8');
+    if (existing !== text) throw new Error(`Refusing to overwrite immutable release manifest: ${path}`);
+  }
 }
 
 function logicalIdentity(artifact) {
   return artifact.logicalUrl ?? artifact.name;
 }
 
+async function reusableGeneratedAt(path, args) {
+  if (args.generatedAt || !existsSync(path)) return args.generatedAt;
+  let existing;
+  try {
+    existing = await readJson(path);
+  } catch {
+    throw new Error(`Existing immutable release manifest is not valid JSON: ${path}`);
+  }
+  if (existing.schema !== ARTIFACT_RELEASE_V2_SCHEMAS[0]
+    || existing.releaseId !== args.releaseId
+    || existing.channel !== args.channel
+    || existing.immutable !== true
+    || existing.representationKeyIncludesEncoding !== true
+    || existing.integrityIdentity !== 'decoded-sha256') {
+    throw new Error(`Existing immutable release identity does not match requested release: ${path}`);
+  }
+  if (!isIsoTimestamp(existing.generatedAt)) {
+    throw new Error(`Existing immutable release generatedAt is not a valid ISO timestamp: ${path}`);
+  }
+  return existing.generatedAt;
+}
+
 async function main() {
   const args = parseArgs(process.argv);
-  const generatedAt = args.generatedAt ?? new Date().toISOString();
+  const releasePath = join(args.outDir, 'releases', `${args.releaseId}.json`);
+  const channelPath = join(args.outDir, 'channels', `${args.channel}.json`);
+  const generatedAt = await reusableGeneratedAt(releasePath, args) ?? new Date().toISOString();
   const collected = await collectArtifacts(args);
   const updatedSourceManifests = collected.sourceManifests;
   const localArtifacts = [...collected.artifacts];
@@ -450,8 +489,6 @@ async function main() {
     generatedAt,
   };
 
-  const releasePath = join(args.outDir, 'releases', `${args.releaseId}.json`);
-  const channelPath = join(args.outDir, 'channels', `${args.channel}.json`);
   await writeReleaseOnce(releasePath, release, args.check);
   await writeMutableOrCheck(channelPath, channel, args.check);
   console.log(JSON.stringify({
