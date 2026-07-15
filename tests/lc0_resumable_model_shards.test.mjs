@@ -510,6 +510,251 @@ test('concurrent shard writes serialize quota reservation through persistence', 
   }
 });
 
+test('concurrent loads recheck persistence inside the serialized cache-write slot', async () => {
+  const bytes = Buffer.alloc(CHUNK_BYTES, 0x4a);
+  const manifest = singleShardManifest(bytes);
+  const manifestUrl = 'https://models.example/research/shared.resumable.json';
+  const shardUrl = new URL(manifest.shards[0].url, manifestUrl).href;
+  const store = new MemoryShardStore();
+  let shardFetches = 0;
+  let puts = 0;
+  let releaseFirstPut;
+  let secondShardFetchStarted;
+  const secondShardFetch = new Promise((resolve) => {
+    secondShardFetchStarted = resolve;
+  });
+  const firstPutStarted = new Promise((resolve) => {
+    store.put = async (hash, storedBytes) => {
+      puts += 1;
+      if (puts === 1) {
+        await new Promise((release) => {
+          releaseFirstPut = release;
+          resolve();
+        });
+      }
+      store.entries.set(hash, { bytes: storedBytes.slice(0), lastUsedAt: Date.now() });
+    };
+  });
+  const fetchFn = async (input) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (url === manifestUrl) return new Response(JSON.stringify(manifest));
+    if (url === shardUrl) {
+      shardFetches += 1;
+      if (shardFetches === 2) secondShardFetchStarted();
+      return new Response(bytes);
+    }
+    return new Response(null, { status: 404 });
+  };
+  const options = {
+    researchOnly: true,
+    cacheName: 'shared-write-recheck-test',
+    concurrency: 1,
+    corruptionRetries: 0,
+    maxCacheEntries: Infinity,
+    maxCacheBytes: Infinity,
+    shardStore: store,
+    fetchFn,
+  };
+  const first = loadResumableLc0ModelForOrt(manifestUrl, options);
+  await firstPutStarted;
+  const second = loadResumableLc0ModelForOrt(manifestUrl, options);
+  await secondShardFetch;
+  releaseFirstPut();
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+  assert.equal(shardFetches, 2);
+  assert.equal(puts, 1);
+  assert.deepEqual(
+    [firstResult.downloadedShards, secondResult.downloadedShards].sort((a, b) => a - b),
+    [0, 1],
+  );
+  assert.deepEqual(
+    [firstResult.reusedShards, secondResult.reusedShards].sort((a, b) => a - b),
+    [0, 1],
+  );
+});
+
+test('final eviction preserves shards protected by another active load', async () => {
+  const protectedBytes = Buffer.alloc(CHUNK_BYTES, 0x4b);
+  const incomingBytes = Buffer.alloc(CHUNK_BYTES, 0x4c);
+  const protectedManifest = singleShardManifest(protectedBytes, 'shards/protected.bin');
+  const incomingManifest = singleShardManifest(incomingBytes, 'shards/incoming.bin');
+  const protectedManifestUrl = 'https://models.example/research/protected.resumable.json';
+  const incomingManifestUrl = 'https://models.example/research/incoming.resumable.json';
+  const protectedShardUrl = new URL(protectedManifest.shards[0].url, protectedManifestUrl).href;
+  const incomingShardUrl = new URL(incomingManifest.shards[0].url, incomingManifestUrl).href;
+  const protectedHash = protectedManifest.shards[0].sha256;
+  const incomingHash = incomingManifest.shards[0].sha256;
+  const store = new MemoryShardStore([
+    { sha256: protectedHash, bytes: protectedBytes.buffer, lastUsedAt: 1 },
+  ]);
+  store.touch = async () => {};
+  let protectedReads = 0;
+  let releaseProtectedReconstruction;
+  const reconstructionStarted = new Promise((resolve) => {
+    const originalGet = store.get.bind(store);
+    store.get = async (hash) => {
+      if (hash === protectedHash) {
+        protectedReads += 1;
+        if (protectedReads === 2) {
+          resolve();
+          await new Promise((release) => {
+            releaseProtectedReconstruction = release;
+          });
+        }
+      }
+      return originalGet(hash);
+    };
+  });
+  const protectedLoad = loadResumableLc0ModelForOrt(protectedManifestUrl, {
+    researchOnly: true,
+    cacheName: 'shared-eviction-protection-test',
+    concurrency: 1,
+    maxCacheEntries: 1,
+    maxCacheBytes: Infinity,
+    shardStore: store,
+    fetchFn: async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url === protectedManifestUrl) return new Response(JSON.stringify(protectedManifest));
+      if (url === protectedShardUrl) return new Response(null, { status: 500 });
+      return new Response(null, { status: 404 });
+    },
+  });
+  await reconstructionStarted;
+  const incomingLoad = await loadResumableLc0ModelForOrt(incomingManifestUrl, {
+    researchOnly: true,
+    cacheName: 'shared-eviction-protection-test',
+    concurrency: 1,
+    corruptionRetries: 0,
+    maxCacheEntries: 1,
+    maxCacheBytes: Infinity,
+    shardStore: store,
+    fetchFn: async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url === incomingManifestUrl) return new Response(JSON.stringify(incomingManifest));
+      if (url === incomingShardUrl) return new Response(incomingBytes);
+      return new Response(null, { status: 404 });
+    },
+  });
+  assert.equal(incomingLoad.downloadedShards, 1);
+  assert.equal(store.entries.has(protectedHash), true);
+  assert.equal(store.entries.has(incomingHash), false);
+  assert.equal(store.deleted.includes(protectedHash), false);
+  releaseProtectedReconstruction();
+  await protectedLoad;
+});
+
+test('failed loads release process-wide shard protection', async () => {
+  const failedBytes = Buffer.alloc(CHUNK_BYTES, 0x4f);
+  const replacementBytes = Buffer.alloc(CHUNK_BYTES, 0x50);
+  const failedManifest = singleShardManifest(failedBytes, 'shards/failed.bin');
+  const replacementManifest = singleShardManifest(replacementBytes, 'shards/replacement.bin');
+  const failedManifestUrl = 'https://models.example/research/failed.resumable.json';
+  const replacementManifestUrl = 'https://models.example/research/replacement.resumable.json';
+  const replacementShardUrl = new URL(replacementManifest.shards[0].url, replacementManifestUrl).href;
+  const failedHash = failedManifest.shards[0].sha256;
+  const store = new MemoryShardStore([
+    { sha256: failedHash, bytes: failedBytes.buffer, lastUsedAt: 1 },
+  ]);
+  store.touch = async () => {};
+  const originalGet = store.get.bind(store);
+  let failedReads = 0;
+  store.get = async (hash) => {
+    if (hash === failedHash) {
+      failedReads += 1;
+      if (failedReads === 2) throw new Error('forced reconstruction failure');
+    }
+    return originalGet(hash);
+  };
+  await assert.rejects(
+    loadResumableLc0ModelForOrt(failedManifestUrl, {
+      researchOnly: true,
+      cacheName: 'failed-load-protection-test',
+      concurrency: 1,
+      maxCacheEntries: 1,
+      maxCacheBytes: Infinity,
+      shardStore: store,
+      fetchFn: async () => new Response(JSON.stringify(failedManifest)),
+    }),
+    /forced reconstruction failure/,
+  );
+  const replacement = await loadResumableLc0ModelForOrt(replacementManifestUrl, {
+    researchOnly: true,
+    cacheName: 'failed-load-protection-test',
+    concurrency: 1,
+    corruptionRetries: 0,
+    maxCacheEntries: 1,
+    maxCacheBytes: Infinity,
+    shardStore: store,
+    fetchFn: async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url === replacementManifestUrl) return new Response(JSON.stringify(replacementManifest));
+      if (url === replacementShardUrl) return new Response(replacementBytes);
+      return new Response(null, { status: 404 });
+    },
+  });
+  assert.equal(replacement.downloadedShards, 1);
+  assert.equal(store.deleted.includes(failedHash), true);
+  assert.equal(store.entries.has(failedHash), false);
+});
+
+test('cached shard hashing contributes to concurrent peak temporary bytes', async () => {
+  const first = Buffer.alloc(CHUNK_BYTES, 0x4d);
+  const second = Buffer.alloc(CHUNK_BYTES, 0x4e);
+  const manifest = {
+    schema: 'lc0_browser.resumable_model_shards.v1',
+    chunkBytes: CHUNK_BYTES,
+    decoded: {
+      bytes: first.byteLength + second.byteLength,
+      sha256: sha256(Buffer.concat([first, second])),
+    },
+    shards: [
+      { bytes: first.byteLength, sha256: sha256(first), url: 'shards/first.bin' },
+      { bytes: second.byteLength, sha256: sha256(second), url: 'shards/second.bin' },
+    ],
+  };
+  const store = new MemoryShardStore([
+    { sha256: manifest.shards[0].sha256, bytes: first.buffer },
+    { sha256: manifest.shards[1].sha256, bytes: second.buffer },
+  ]);
+  const originalCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  const subtle = globalThis.crypto.subtle;
+  let initialDigests = 0;
+  let releaseInitialDigests;
+  const bothInitialDigestsStarted = new Promise((resolve) => {
+    releaseInitialDigests = resolve;
+  });
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: {
+      subtle: {
+        async digest(...args) {
+          initialDigests += 1;
+          if (initialDigests <= 2) {
+            if (initialDigests === 2) releaseInitialDigests();
+            await bothInitialDigestsStarted;
+          }
+          return subtle.digest(...args);
+        },
+      },
+    },
+  });
+  try {
+    const result = await loadResumableLc0ModelForOrt('https://models.example/research/memory.resumable.json', {
+      researchOnly: true,
+      cacheName: 'cached-memory-telemetry-test',
+      concurrency: 2,
+      maxCacheEntries: Infinity,
+      maxCacheBytes: Infinity,
+      shardStore: store,
+      fetchFn: async () => new Response(JSON.stringify(manifest)),
+    });
+    assert.equal(result.reusedShards, 2);
+    assert.equal(result.peakTemporaryBytes, 2 * CHUNK_BYTES);
+  } finally {
+    Object.defineProperty(globalThis, 'crypto', originalCrypto);
+  }
+});
+
 test('first shard worker failure aborts siblings and waits for their settlement', async () => {
   const first = Buffer.alloc(CHUNK_BYTES, 0x51);
   const second = Buffer.alloc(CHUNK_BYTES, 0x52);

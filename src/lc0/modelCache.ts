@@ -1105,6 +1105,7 @@ async function ensureResumableShardQuota(
 }
 
 let resumableShardCacheWriteTail: Promise<void> = Promise.resolve();
+const activeResumableShardHashesByCacheName = new Map<string, Map<string, number>>();
 
 async function serializeResumableShardCacheWrite<T>(operation: () => Promise<T>): Promise<T> {
   const previous = resumableShardCacheWriteTail;
@@ -1118,6 +1119,32 @@ async function serializeResumableShardCacheWrite<T>(operation: () => Promise<T>)
   } finally {
     release();
   }
+}
+
+function retainActiveResumableShardHashes(cacheName: string, hashes: ReadonlySet<string>): () => void {
+  let counts = activeResumableShardHashesByCacheName.get(cacheName);
+  if (!counts) {
+    counts = new Map();
+    activeResumableShardHashesByCacheName.set(cacheName, counts);
+  }
+  for (const hash of hashes) counts.set(hash, (counts.get(hash) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const current = activeResumableShardHashesByCacheName.get(cacheName);
+    if (!current) return;
+    for (const hash of hashes) {
+      const count = current.get(hash);
+      if (count === undefined || count <= 1) current.delete(hash);
+      else current.set(hash, count - 1);
+    }
+    if (current.size === 0) activeResumableShardHashesByCacheName.delete(cacheName);
+  };
+}
+
+function activeResumableShardHashes(cacheName: string): ReadonlySet<string> {
+  return new Set(activeResumableShardHashesByCacheName.get(cacheName)?.keys());
 }
 
 async function readBoundedShardResponse(
@@ -1225,21 +1252,29 @@ async function verifiedShardBytes(
   sha256: string,
   expectedBytes: number,
   refreshLastUsed: boolean = true,
-): Promise<{ bytes?: ArrayBuffer; corrupt: boolean }> {
+  accountTemporaryBytes?: (bytes: number) => () => void,
+): Promise<{ bytes?: ArrayBuffer; corrupt: boolean; releaseTemporaryBytes?: () => void }> {
   const bytes = await store.get(sha256);
   if (!bytes) return { corrupt: false };
-  if (bytes.byteLength !== expectedBytes || await sha256Hex(bytes) !== sha256) {
-    await store.delete(sha256);
-    return { corrupt: true };
-  }
-  if (refreshLastUsed) {
-    try {
-      await store.touch?.(sha256);
-    } catch {
-      // Retention metadata is best-effort and must not invalidate verified bytes.
+  const releaseTemporaryBytes = accountTemporaryBytes?.(bytes.byteLength);
+  try {
+    if (bytes.byteLength !== expectedBytes || await sha256Hex(bytes) !== sha256) {
+      await store.delete(sha256);
+      releaseTemporaryBytes?.();
+      return { corrupt: true };
     }
+    if (refreshLastUsed) {
+      try {
+        await store.touch?.(sha256);
+      } catch {
+        // Retention metadata is best-effort and must not invalidate verified bytes.
+      }
+    }
+    return { bytes, corrupt: false, releaseTemporaryBytes };
+  } catch (error) {
+    releaseTemporaryBytes?.();
+    throw error;
   }
-  return { bytes, corrupt: false };
 }
 
 /**
@@ -1267,7 +1302,8 @@ export async function loadResumableLc0ModelForOrt(
     options.minimumFreeBytesAfterCache,
     DEFAULT_CACHE_FREE_BYTES_RESERVE,
   );
-  const store = options.shardStore ?? new CacheStorageModelShardStore(options.cacheName ?? DEFAULT_RESUMABLE_SHARD_CACHE_NAME);
+  const cacheName = options.cacheName ?? DEFAULT_RESUMABLE_SHARD_CACHE_NAME;
+  const store = options.shardStore ?? new CacheStorageModelShardStore(cacheName);
   throwIfAborted(options.signal);
 
   const manifestResponse = await fetchFn(manifestUrl, { cache: 'no-cache', signal: options.signal });
@@ -1279,167 +1315,220 @@ export async function loadResumableLc0ModelForOrt(
   for (const shard of manifest.shards) unique.set(shard.sha256, shard);
   for (const shard of manifest.shards) referenceCounts.set(shard.sha256, (referenceCounts.get(shard.sha256) ?? 0) + 1);
   const manifestHashes = new Set(unique.keys());
-  await bestEffortEnforceResumableShardCacheBounds(store, maxCacheEntries, maxCacheBytes, manifestHashes);
-  throwIfAborted(options.signal);
-
-  let downloadedBytes = 0;
-  let reusedBytes = 0;
-  let downloadedShards = 0;
-  let reusedShards = 0;
-  let corruptShardsEvicted = 0;
-  let corruptionRetries = 0;
-  let completedBytes = 0;
-  let completedShards = 0;
-  let activeTemporaryBytes = 0;
-  let peakTemporaryBytes = 0;
-  const jobs = [...unique.values()];
-  let nextJob = 0;
-
-  const report = (phase: Lc0ResumableModelProgress['phase']): void => options.onProgress?.({
-    phase,
-    completedBytes,
-    totalBytes: manifest.decoded.bytes,
-    completedShards,
-    totalShards: phase === 'download' ? unique.size : manifest.shards.length,
-  });
-  report('download');
-
-  const workerAbort = new AbortController();
-  const onCallerAbort = (): void => workerAbort.abort();
-  options.signal?.addEventListener('abort', onCallerAbort, { once: true });
-  if (options.signal?.aborted) workerAbort.abort();
-  const workerSignal = workerAbort.signal;
-  let workerFailure: unknown;
-  const workers = Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
-    for (;;) {
-      throwIfAborted(workerSignal);
-      const jobIndex = nextJob;
-      nextJob += 1;
-      if (jobIndex >= jobs.length) return;
-      const shard = jobs[jobIndex];
-      const cached = await verifiedShardBytes(store, shard.sha256, shard.bytes);
-      if (cached.corrupt) corruptShardsEvicted += 1;
-      if (cached.bytes) {
-        activeTemporaryBytes += cached.bytes.byteLength;
-        peakTemporaryBytes = Math.max(peakTemporaryBytes, activeTemporaryBytes);
-        reusedBytes += shard.bytes;
-        reusedShards += 1;
-        activeTemporaryBytes -= cached.bytes.byteLength;
-      } else {
-        let persisted = false;
-        for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
-          throwIfAborted(workerSignal);
-          const shardUrl = new URL(shard.url, manifestBaseUrl).href;
-          const response = await fetchFn(shardUrl, {
-            cache: attempt === 0 ? 'force-cache' : 'reload',
-            signal: workerSignal,
-          });
-          if (!response.ok) throw new Error(`Resumable model shard fetch failed for ${shard.sha256}: ${response.status}`);
-          activeTemporaryBytes += shard.bytes;
-          peakTemporaryBytes = Math.max(peakTemporaryBytes, activeTemporaryBytes);
-          try {
-            const bytes = await readBoundedShardResponse(response, shard.bytes, workerSignal, (chunkBytes) => {
-              downloadedBytes += chunkBytes;
-            });
-            const valid = bytes.byteLength === shard.bytes && await sha256Hex(bytes) === shard.sha256;
-            if (valid) {
-              throwIfAborted(workerSignal);
-              await serializeResumableShardCacheWrite(async () => {
-                throwIfAborted(workerSignal);
-                await ensureResumableShardQuota(store, shard.bytes, minimumFreeBytesAfterCache, manifestHashes);
-                throwIfAborted(workerSignal);
-                await store.put(shard.sha256, bytes);
-                await bestEffortEnforceResumableShardCacheBounds(store, maxCacheEntries, maxCacheBytes, manifestHashes);
-              });
-              downloadedShards += 1;
-              persisted = true;
-              break;
-            }
-          } catch (error) {
-            if (workerSignal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
-            if (!(error instanceof Error) || !error.message.startsWith('Resumable model shard response exceeded expected length')) {
-              throw error;
-            }
-          } finally {
-            activeTemporaryBytes -= shard.bytes;
-          }
-          if (attempt < retryLimit) corruptionRetries += 1;
-        }
-        if (!persisted) {
-          throw new Error(`Resumable model shard corruption persisted after ${retryLimit + 1} attempts: ${shard.sha256}`);
-        }
-      }
-      completedBytes += shard.bytes * (referenceCounts.get(shard.sha256) ?? 1);
-      completedShards += 1;
-      report('download');
-    }
-  });
-  const guardedWorkers = workers.map(async (worker) => {
-    try {
-      await worker;
-    } catch (error) {
-      if (workerFailure === undefined && !options.signal?.aborted) workerFailure = error;
-      workerAbort.abort();
-      throw error;
-    }
-  });
-  const workerSettlements = await Promise.allSettled(guardedWorkers);
-  options.signal?.removeEventListener('abort', onCallerAbort);
-  if (options.signal?.aborted) throw abortError();
-  if (workerFailure !== undefined) throw workerFailure;
-  const rejectedWorker = workerSettlements.find((settlement): settlement is PromiseRejectedResult => settlement.status === 'rejected');
-  if (rejectedWorker) throw rejectedWorker.reason;
-
-  throwIfAborted(options.signal);
-  const model = new Uint8Array(manifest.decoded.bytes);
-  completedBytes = 0;
-  completedShards = 0;
-  report('reconstruct');
-  let offset = 0;
-  for (const shard of manifest.shards) {
+  const releaseActiveHashes = retainActiveResumableShardHashes(cacheName, manifestHashes);
+  try {
+    await bestEffortEnforceResumableShardCacheBounds(
+      store,
+      maxCacheEntries,
+      maxCacheBytes,
+      activeResumableShardHashes(cacheName),
+    );
     throwIfAborted(options.signal);
-    const stored = await verifiedShardBytes(store, shard.sha256, shard.bytes, false);
-    if (!stored.bytes) {
-      throw new Error(`Resumable model shard was evicted or corrupted during reconstruction: ${shard.sha256}`);
-    }
-    activeTemporaryBytes += stored.bytes.byteLength;
-    peakTemporaryBytes = Math.max(peakTemporaryBytes, activeTemporaryBytes);
-    try {
-      model.set(new Uint8Array(stored.bytes), offset);
-    } finally {
-      activeTemporaryBytes -= stored.bytes.byteLength;
-    }
-    offset += shard.bytes;
-    completedBytes += shard.bytes;
-    completedShards += 1;
+
+    let downloadedBytes = 0;
+    let reusedBytes = 0;
+    let downloadedShards = 0;
+    let reusedShards = 0;
+    let corruptShardsEvicted = 0;
+    let corruptionRetries = 0;
+    let completedBytes = 0;
+    let completedShards = 0;
+    let activeTemporaryBytes = 0;
+    let peakTemporaryBytes = 0;
+    const accountTemporaryBytes = (bytes: number): (() => void) => {
+      activeTemporaryBytes += bytes;
+      peakTemporaryBytes = Math.max(peakTemporaryBytes, activeTemporaryBytes);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        activeTemporaryBytes -= bytes;
+      };
+    };
+    const jobs = [...unique.values()];
+    let nextJob = 0;
+
+    const report = (phase: Lc0ResumableModelProgress['phase']): void => options.onProgress?.({
+      phase,
+      completedBytes,
+      totalBytes: manifest.decoded.bytes,
+      completedShards,
+      totalShards: phase === 'download' ? unique.size : manifest.shards.length,
+    });
+    report('download');
+
+    const workerAbort = new AbortController();
+    const onCallerAbort = (): void => workerAbort.abort();
+    options.signal?.addEventListener('abort', onCallerAbort, { once: true });
+    if (options.signal?.aborted) workerAbort.abort();
+    const workerSignal = workerAbort.signal;
+    let workerFailure: unknown;
+    const workers = Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
+      for (;;) {
+        throwIfAborted(workerSignal);
+        const jobIndex = nextJob;
+        nextJob += 1;
+        if (jobIndex >= jobs.length) return;
+        const shard = jobs[jobIndex];
+        const cached = await verifiedShardBytes(store, shard.sha256, shard.bytes, true, accountTemporaryBytes);
+        if (cached.corrupt) corruptShardsEvicted += 1;
+        if (cached.bytes) {
+          try {
+            reusedBytes += shard.bytes;
+            reusedShards += 1;
+          } finally {
+            cached.releaseTemporaryBytes?.();
+          }
+        } else {
+          let persisted = false;
+          for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
+            throwIfAborted(workerSignal);
+            const shardUrl = new URL(shard.url, manifestBaseUrl).href;
+            const response = await fetchFn(shardUrl, {
+              cache: attempt === 0 ? 'force-cache' : 'reload',
+              signal: workerSignal,
+            });
+            if (!response.ok) throw new Error(`Resumable model shard fetch failed for ${shard.sha256}: ${response.status}`);
+            const releaseTemporaryBytes = accountTemporaryBytes(shard.bytes);
+            try {
+              const bytes = await readBoundedShardResponse(response, shard.bytes, workerSignal, (chunkBytes) => {
+                downloadedBytes += chunkBytes;
+              });
+              const valid = bytes.byteLength === shard.bytes && await sha256Hex(bytes) === shard.sha256;
+              if (valid) {
+                throwIfAborted(workerSignal);
+                let reusedConcurrentWrite = false;
+                await serializeResumableShardCacheWrite(async () => {
+                  throwIfAborted(workerSignal);
+                  const existing = await verifiedShardBytes(
+                    store,
+                    shard.sha256,
+                    shard.bytes,
+                    true,
+                    accountTemporaryBytes,
+                  );
+                  if (existing.corrupt) corruptShardsEvicted += 1;
+                  if (existing.bytes) {
+                    existing.releaseTemporaryBytes?.();
+                    reusedConcurrentWrite = true;
+                    return;
+                  }
+                  await ensureResumableShardQuota(
+                    store,
+                    shard.bytes,
+                    minimumFreeBytesAfterCache,
+                    activeResumableShardHashes(cacheName),
+                  );
+                  throwIfAborted(workerSignal);
+                  await store.put(shard.sha256, bytes);
+                  await bestEffortEnforceResumableShardCacheBounds(
+                    store,
+                    maxCacheEntries,
+                    maxCacheBytes,
+                    activeResumableShardHashes(cacheName),
+                  );
+                });
+                if (reusedConcurrentWrite) {
+                  reusedBytes += shard.bytes;
+                  reusedShards += 1;
+                } else {
+                  downloadedShards += 1;
+                }
+                persisted = true;
+                break;
+              }
+            } catch (error) {
+              if (workerSignal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+              if (!(error instanceof Error) || !error.message.startsWith('Resumable model shard response exceeded expected length')) {
+                throw error;
+              }
+            } finally {
+              releaseTemporaryBytes();
+            }
+            if (attempt < retryLimit) corruptionRetries += 1;
+          }
+          if (!persisted) {
+            throw new Error(`Resumable model shard corruption persisted after ${retryLimit + 1} attempts: ${shard.sha256}`);
+          }
+        }
+        completedBytes += shard.bytes * (referenceCounts.get(shard.sha256) ?? 1);
+        completedShards += 1;
+        report('download');
+      }
+    });
+    const guardedWorkers = workers.map(async (worker) => {
+      try {
+        await worker;
+      } catch (error) {
+        if (workerFailure === undefined && !options.signal?.aborted) workerFailure = error;
+        workerAbort.abort();
+        throw error;
+      }
+    });
+    const workerSettlements = await Promise.allSettled(guardedWorkers);
+    options.signal?.removeEventListener('abort', onCallerAbort);
+    if (options.signal?.aborted) throw abortError();
+    if (workerFailure !== undefined) throw workerFailure;
+    const rejectedWorker = workerSettlements.find((settlement): settlement is PromiseRejectedResult => settlement.status === 'rejected');
+    if (rejectedWorker) throw rejectedWorker.reason;
+
+    throwIfAborted(options.signal);
+    const model = new Uint8Array(manifest.decoded.bytes);
+    completedBytes = 0;
+    completedShards = 0;
     report('reconstruct');
+    let offset = 0;
+    for (const shard of manifest.shards) {
+      throwIfAborted(options.signal);
+      const stored = await verifiedShardBytes(store, shard.sha256, shard.bytes, false, accountTemporaryBytes);
+      if (!stored.bytes) {
+        throw new Error(`Resumable model shard was evicted or corrupted during reconstruction: ${shard.sha256}`);
+      }
+      try {
+        model.set(new Uint8Array(stored.bytes), offset);
+      } finally {
+        stored.releaseTemporaryBytes?.();
+      }
+      offset += shard.bytes;
+      completedBytes += shard.bytes;
+      completedShards += 1;
+      report('reconstruct');
+    }
+    throwIfAborted(options.signal);
+    const decodedSha256 = await sha256Hex(model);
+    throwIfAborted(options.signal);
+    if (decodedSha256 !== manifest.decoded.sha256) {
+      throw new Error(`Resumable model decoded sha256 mismatch: got ${decodedSha256}, expected ${manifest.decoded.sha256}`);
+    }
+    releaseActiveHashes();
+    await bestEffortEnforceResumableShardCacheBounds(
+      store,
+      maxCacheEntries,
+      maxCacheBytes,
+      activeResumableShardHashes(cacheName),
+    );
+    throwIfAborted(options.signal);
+    const result: Lc0ResumableModelLoadResult = {
+      model: model.buffer,
+      manifestUrl,
+      sha256: decodedSha256,
+      bytes: model.byteLength,
+      downloadedBytes,
+      reusedBytes,
+      downloadedShards,
+      reusedShards,
+      corruptShardsEvicted,
+      corruptionRetries,
+      uniqueShardCount: unique.size,
+      deduplicatedReferences: manifest.shards.length - unique.size,
+      peakTemporaryBytes,
+      elapsedMs: nowMs() - started,
+    };
+    throwIfAborted(options.signal);
+    return result;
+  } finally {
+    releaseActiveHashes();
   }
-  throwIfAborted(options.signal);
-  const decodedSha256 = await sha256Hex(model);
-  throwIfAborted(options.signal);
-  if (decodedSha256 !== manifest.decoded.sha256) {
-    throw new Error(`Resumable model decoded sha256 mismatch: got ${decodedSha256}, expected ${manifest.decoded.sha256}`);
-  }
-  await bestEffortEnforceResumableShardCacheBounds(store, maxCacheEntries, maxCacheBytes, new Set());
-  throwIfAborted(options.signal);
-  const result: Lc0ResumableModelLoadResult = {
-    model: model.buffer,
-    manifestUrl,
-    sha256: decodedSha256,
-    bytes: model.byteLength,
-    downloadedBytes,
-    reusedBytes,
-    downloadedShards,
-    reusedShards,
-    corruptShardsEvicted,
-    corruptionRetries,
-    uniqueShardCount: unique.size,
-    deduplicatedReferences: manifest.shards.length - unique.size,
-    peakTemporaryBytes,
-    elapsedMs: nowMs() - started,
-  };
-  throwIfAborted(options.signal);
-  return result;
 }
 
 export interface Lc0ResumableShardCacheClearOptions {
