@@ -618,16 +618,18 @@ Completed after Phase 0 integration:
 - WebGPU profiling now distinguishes queue-drain/fence latency, command-copy
   encoding, mapped-range copying, and timestamped GPU execution rather than
   attributing synchronization time to `mapAsync`;
-- the persistent Reckless WASI/UCI path supports an opt-in external NNUE with
-  bounded download allocation and settled-promise release; Stockfish pthread
-  bootstrap and ORT pthread sidecar staging/URL resolution are repaired while
-  single-thread fallbacks and production defaults remain intact.
+- the persistent and browser-API Reckless paths support an opt-in external NNUE
+  with exact decoded-size bounds, bounded verified-byte caching for repeated
+  one-shot WASI searches, and no settled promises retaining large buffers;
+  Stockfish pthread bootstrap and ORT pthread sidecar staging/URL resolution
+  are repaired while single-thread fallbacks and production defaults remain
+  intact.
 
 Confirmed local evidence:
 
-- integrated typecheck, client build, full tests, production-style R2 build,
-  ORT staging/dedup checks, artifact retention checks, and `git diff --check`
-  passed;
+- integrated typecheck, client build, the final 540-test suite (539 passed and
+  one skipped), production-style R2 build, ORT staging/dedup checks, artifact
+  retention checks, and `git diff --check` passed;
 - WebGPU lifecycle completed with matching moves and a clean leak check; the
   two-fixture search parity run matched native and depth baselines with visit
   L1 equal to zero;
