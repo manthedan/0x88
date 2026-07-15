@@ -24,26 +24,31 @@ function streamedResponse(chunks, headers = {}) {
   }), { headers });
 }
 
-test('Reckless WASI preopen download preallocates from content length without chunk retention', async () => {
+test('Reckless WASI preopen download preallocates Brotli-decoded bytes from artifact length', async () => {
   const previousSelf = globalThis.self;
   const previousFetch = globalThis.fetch;
   const messages = [];
   try {
     const { fetchPreopenBytes } = await loadWorkerModule(messages);
-    globalThis.fetch = async () => streamedResponse([[1, 2], [3, 4]], { 'content-length': '4' });
-    const buffer = await fetchPreopenBytes('/reckless/known.nnue');
+    globalThis.fetch = async () => streamedResponse([[1, 2], [3, 4]], {
+      'content-encoding': 'br',
+      'content-length': '2',
+      'x-artifact-content-length': '4',
+    });
+    const buffer = await fetchPreopenBytes('/reckless/br-known.nnue');
     assert.equal(buffer.byteLength, 4);
     assert.deepEqual([...new Uint8Array(buffer)], [1, 2, 3, 4]);
     assert.deepEqual(messages.at(-1), {
       type: 'preopen-progress',
-      url: '/reckless/known.nnue',
+      url: '/reckless/br-known.nnue',
       loadedBytes: 4,
       totalBytes: 4,
     });
 
     const source = await readFile('src/lc0/recklessWasiWorker.ts', 'utf8');
     assert.doesNotMatch(source, /chunks:\s*Uint8Array\[\]/);
-    assert.match(source, /new Uint8Array\(totalBytes\)/);
+    assert.match(source, /new Uint8Array\(totalBytes \?\? 0\)/);
+    assert.match(source, /loadedBytes === bytes\.byteLength \? buffer : buffer\.slice\(0, loadedBytes\)/);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousSelf === undefined) delete globalThis.self;
@@ -51,7 +56,7 @@ test('Reckless WASI preopen download preallocates from content length without ch
   }
 });
 
-test('Reckless WASI preopen download grows when content length is unknown', async () => {
+test('Reckless WASI preopen download ignores encoded Brotli content length without decoded metadata', async () => {
   const previousSelf = globalThis.self;
   const previousFetch = globalThis.fetch;
   const messages = [];
@@ -59,15 +64,46 @@ test('Reckless WASI preopen download grows when content length is unknown', asyn
     const { fetchPreopenBytes } = await loadWorkerModule(messages);
     const first = new Uint8Array(40_000).fill(7);
     const second = new Uint8Array(30_000).fill(9);
-    globalThis.fetch = async () => streamedResponse([first, second]);
-    const buffer = await fetchPreopenBytes('/reckless/unknown.nnue');
+    globalThis.fetch = async () => streamedResponse([first, second], {
+      'content-encoding': 'br',
+      'content-length': '1234',
+    });
+    const buffer = await fetchPreopenBytes('/reckless/br-unknown.nnue');
     const bytes = new Uint8Array(buffer);
     assert.equal(bytes.byteLength, 70_000);
     assert.equal(bytes[0], 7);
     assert.equal(bytes[39_999], 7);
     assert.equal(bytes[40_000], 9);
     assert.equal(bytes[69_999], 9);
+    assert.ok(messages.some((message) => message.totalBytes === 0));
+    assert.ok(messages.every((message) => message.totalBytes !== 1234));
     assert.equal(messages.at(-1).totalBytes, 70_000);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousSelf === undefined) delete globalThis.self;
+    else globalThis.self = previousSelf;
+  }
+});
+
+test('Reckless WASI preopen download uses content length for identity responses', async () => {
+  const previousSelf = globalThis.self;
+  const previousFetch = globalThis.fetch;
+  const messages = [];
+  try {
+    const { fetchPreopenBytes } = await loadWorkerModule(messages);
+    globalThis.fetch = async () => streamedResponse([[1, 2], [3, 4]], {
+      'content-encoding': 'identity',
+      'content-length': '4',
+    });
+    const buffer = await fetchPreopenBytes('/reckless/identity.nnue');
+    assert.equal(buffer.byteLength, 4);
+    assert.deepEqual([...new Uint8Array(buffer)], [1, 2, 3, 4]);
+    assert.deepEqual(messages.at(-1), {
+      type: 'preopen-progress',
+      url: '/reckless/identity.nnue',
+      loadedBytes: 4,
+      totalBytes: 4,
+    });
   } finally {
     globalThis.fetch = previousFetch;
     if (previousSelf === undefined) delete globalThis.self;

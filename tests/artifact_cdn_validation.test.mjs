@@ -47,6 +47,7 @@ async function runV2BodyValidationCase({ identityBody, brDecodedBody }) {
       'Content-Type': 'application/octet-stream',
       'Content-Length': String(wantsBr ? brBody.length : identityBody.length),
       'X-Artifact-Content-Length': String(expectedBody.length),
+      'X-Artifact-Encoded-Length': String(wantsBr ? brBody.length : identityBody.length),
       'X-Artifact-Decoded-SHA256': rawSha,
       'X-Artifact-Encoded-SHA256': wantsBr ? brSha : rawSha,
       'Accept-Ranges': 'bytes',
@@ -57,7 +58,7 @@ async function runV2BodyValidationCase({ identityBody, brDecodedBody }) {
       'Access-Control-Allow-Origin': '*',
       'Cross-Origin-Resource-Policy': 'cross-origin',
       'Timing-Allow-Origin': 'https://0x88.app',
-      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length',
+      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, X-Artifact-Encoded-Length',
       ...(wantsBr ? { 'Content-Encoding': 'br' } : {}),
     };
     if (req.method === 'HEAD') {
@@ -126,7 +127,7 @@ test('validate_artifact_cdn_headers accepts short-cache logical aliases without 
       'Access-Control-Allow-Origin': '*',
       'Cross-Origin-Resource-Policy': 'cross-origin',
       'Timing-Allow-Origin': 'https://0x88.app',
-      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length',
+      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, X-Artifact-Encoded-Length',
     };
     if (req.method === 'HEAD') {
       res.writeHead(200, headers).end();
@@ -215,7 +216,7 @@ test('validate_artifact_cdn_headers accepts worker artifact length when HEAD is 
       'Access-Control-Allow-Origin': '*',
       'Cross-Origin-Resource-Policy': 'cross-origin',
       'Timing-Allow-Origin': 'https://0x88.app',
-      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length',
+      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, X-Artifact-Encoded-Length',
     };
     if (req.method === 'HEAD') {
       const encodingHeaders = req.headers['accept-encoding'] === 'identity' ? {} : { 'Content-Encoding': 'br' };
@@ -274,6 +275,7 @@ test('validate_artifact_cdn_headers verifies v2 Brotli negotiation and Range ide
       'Content-Type': 'application/octet-stream',
       'Content-Length': String(wantsBr ? brBytes : body.length),
       'X-Artifact-Content-Length': String(body.length),
+      'X-Artifact-Encoded-Length': String(wantsBr ? brBytes : body.length),
       'X-Artifact-Decoded-SHA256': rawSha,
       'X-Artifact-Encoded-SHA256': wantsBr ? brSha : rawSha,
       'Accept-Ranges': 'bytes',
@@ -284,11 +286,14 @@ test('validate_artifact_cdn_headers verifies v2 Brotli negotiation and Range ide
       'Access-Control-Allow-Origin': '*',
       'Cross-Origin-Resource-Policy': 'cross-origin',
       'Timing-Allow-Origin': 'https://0x88.app',
-      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length',
+      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, X-Artifact-Encoded-Length',
       ...(wantsBr ? { 'Content-Encoding': 'br' } : {}),
     };
     if (req.method === 'HEAD') {
-      res.writeHead(200, headers).end();
+      res.writeHead(200, {
+        ...headers,
+        'Content-Length': wantsBr ? '0' : headers['Content-Length'],
+      }).end();
       return;
     }
     if (req.headers.range) {
@@ -341,6 +346,8 @@ test('validate_artifact_cdn_headers verifies v2 Brotli negotiation and Range ide
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.rows[0].brHead.headers['content-encoding'], 'br');
+    assert.equal(parsed.rows[0].brHead.headers['content-length'], '0');
+    assert.equal(parsed.rows[0].brHead.headers['x-artifact-encoded-length'], String(brBytes));
     assert.equal(parsed.rows[0].identityHead.headers['content-encoding'], undefined);
     assert.equal(parsed.rows[0].range.headers['content-encoding'], undefined);
     assert.equal(parsed.rows[0].cachePolicy, 'mutable');
@@ -373,7 +380,7 @@ test('validate_artifact_cdn_headers requires immutable caching for physical repr
       'Access-Control-Allow-Origin': '*',
       'Cross-Origin-Resource-Policy': 'cross-origin',
       'Timing-Allow-Origin': 'https://0x88.app',
-      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length',
+      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, X-Artifact-Encoded-Length',
     };
     if (req.method === 'HEAD') {
       res.writeHead(200, headers).end();

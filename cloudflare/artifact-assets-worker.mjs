@@ -6,7 +6,7 @@ const LOGICAL_ALIAS_CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate
 const CONTROL_CHANNEL_CACHE_CONTROL = 'public, max-age=60, stale-if-error=86400';
 const DEFAULT_CHANNEL_KEY = 'channels/stable.json';
 const MAX_CONTROL_MANIFEST_BYTES = 8 * 1024 * 1024;
-const EXPOSED_HEADERS = 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, X-Artifact-Decoded-SHA256, X-Artifact-Encoded-SHA256, Content-Range, Accept-Ranges';
+const EXPOSED_HEADERS = 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, X-Artifact-Encoded-Length, X-Artifact-Decoded-SHA256, X-Artifact-Encoded-SHA256, Content-Range, Accept-Ranges';
 
 function artifactHeaders(env, extra = {}) {
   const headers = new Headers(extra);
@@ -284,7 +284,14 @@ function resolvedMetadata(descriptor, object) {
   const custom = object?.customMetadata || {};
   const representation = descriptor.representation || representationFromKey(descriptor.key);
   const encoding = representation.encoding || custom.encoding || 'identity';
-  const encodedBytes = Number.isFinite(representation.bytes) ? representation.bytes : object?.size;
+  const customEncodedBytes = typeof custom.encodedBytes === 'string' && custom.encodedBytes.trim() !== ''
+    ? Number(custom.encodedBytes)
+    : undefined;
+  const encodedBytes = Number.isFinite(representation.bytes)
+    ? representation.bytes
+    : Number.isFinite(customEncodedBytes)
+      ? customEncodedBytes
+      : object?.size;
   const customDecodedBytes = typeof custom.decodedBytes === 'string' && custom.decodedBytes.trim() !== ''
     ? Number(custom.decodedBytes)
     : undefined;
@@ -317,6 +324,7 @@ function objectHeaders(descriptor, object, env, range, cacheControlOverride) {
   headers.set('Accept-Ranges', 'bytes');
   if (isImmutableArtifactKey(descriptor.key)) {
     if (Number.isFinite(metadata.decodedBytes)) headers.set('X-Artifact-Content-Length', String(metadata.decodedBytes));
+    if (!range && Number.isFinite(metadata.encodedBytes)) headers.set('X-Artifact-Encoded-Length', String(metadata.encodedBytes));
     if (metadata.decodedSha256) headers.set('X-Artifact-Decoded-SHA256', metadata.decodedSha256);
     if (metadata.encodedSha256) headers.set('X-Artifact-Encoded-SHA256', metadata.encodedSha256);
   }
@@ -347,6 +355,7 @@ function applyDescriptorHeaders(response, descriptor, env, range) {
     },
     customMetadata: {
       decodedBytes: cachedHeaders.get('X-Artifact-Content-Length') || '',
+      encodedBytes: cachedHeaders.get('X-Artifact-Encoded-Length') || '',
       decodedSha256: cachedHeaders.get('X-Artifact-Decoded-SHA256') || '',
       encodedSha256: cachedHeaders.get('X-Artifact-Encoded-SHA256') || '',
     },

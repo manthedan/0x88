@@ -72,7 +72,9 @@ test('artifact assets worker serves full immutable artifacts with required heade
   assert.equal(response.headers.get('Timing-Allow-Origin'), 'https://0x88.app');
   assert.match(response.headers.get('Access-Control-Expose-Headers'), /Content-Length/);
   assert.match(response.headers.get('Access-Control-Expose-Headers'), /X-Artifact-Content-Length/);
+  assert.match(response.headers.get('Access-Control-Expose-Headers'), /X-Artifact-Encoded-Length/);
   assert.equal(response.headers.get('X-Artifact-Content-Length'), String(BODY.byteLength));
+  assert.equal(response.headers.get('X-Artifact-Encoded-Length'), String(BODY.byteLength));
   assert.equal(response.headers.get('Cache-Control'), 'public, max-age=31536000, immutable, no-transform');
   assert.equal(response.headers.get('Cache-Status'), 'lc0-artifact-worker; fwd');
   assert.equal(response.headers.get('Accept-Ranges'), 'bytes');
@@ -90,6 +92,32 @@ test('artifact assets worker caches HEAD metadata without R2 body fetches', asyn
     assert.equal(second.headers.get('Cache-Status'), 'lc0-artifact-worker; hit');
     assert.equal(second.headers.get('X-Artifact-Content-Length'), String(BODY.byteLength));
   });
+});
+
+test('artifact assets worker preserves encoded length through normalized cached HEAD metadata', async () => {
+  const previous = globalThis.caches;
+  let cached;
+  globalThis.caches = { default: {
+    async match() { return cached; },
+    async put(_request, response) {
+      const headers = new Headers(response.headers);
+      headers.set('Content-Length', '0');
+      cached = new Response(null, { status: response.status, headers });
+    },
+  } };
+  try {
+    const request = new Request(`https://assets.example/${V2_BR_KEY}`, { method: 'HEAD' });
+    const env = fakeV2Env();
+    const first = await handleArtifactRequest(request, env);
+    assert.equal(first.headers.get('Content-Encoding'), 'br');
+    assert.equal(first.headers.get('X-Artifact-Encoded-Length'), String(V2_BR_BODY.byteLength));
+    const second = await handleArtifactRequest(request, env);
+    assert.equal(second.headers.get('Cache-Status'), 'lc0-artifact-worker; hit');
+    assert.equal(second.headers.get('Content-Length'), String(V2_BR_BODY.byteLength));
+    assert.equal(second.headers.get('X-Artifact-Encoded-Length'), String(V2_BR_BODY.byteLength));
+  } finally {
+    globalThis.caches = previous;
+  }
 });
 
 test('artifact assets worker serves cached full artifacts without an R2 head hit', async () => {
@@ -386,6 +414,7 @@ test('artifact assets worker negotiates a v2 Brotli representation with decoded 
   assert.equal(response.headers.get('Vary'), 'Accept-Encoding');
   assert.equal(response.headers.get('Content-Length'), String(V2_BR_BODY.byteLength));
   assert.equal(response.headers.get('X-Artifact-Content-Length'), String(BODY.byteLength));
+  assert.equal(response.headers.get('X-Artifact-Encoded-Length'), String(V2_BR_BODY.byteLength));
   assert.equal(response.headers.get('X-Artifact-Decoded-SHA256'), V2_RAW_SHA);
   assert.equal(response.headers.get('X-Artifact-Encoded-SHA256'), V2_BR_SHA);
   assert.equal(await text(response), 'compressed-body');

@@ -32,7 +32,7 @@ The R2/Worker/custom-domain response should include:
 Access-Control-Allow-Origin: *
 Cross-Origin-Resource-Policy: cross-origin
 Timing-Allow-Origin: https://0x88.app
-Access-Control-Expose-Headers: CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length
+Access-Control-Expose-Headers: CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, X-Artifact-Encoded-Length
 ```
 
 Do not set cookies on the asset hostname. App requests should be credential-free.
@@ -45,7 +45,7 @@ If direct R2 custom-domain responses cannot provide all required CORS/CORP/timin
 npm run deploy:artifact-worker
 ```
 
-The Worker config in `cloudflare/artifacts.wrangler.toml` binds `browser-chess-models` as `ARTIFACTS` and serves `/artifacts/sha256/*`, `/releases/*.json`, and `/channels/*.json` keys. It preserves percent-encoded object keys, supports `GET`/`HEAD`/`OPTIONS`, handles bounded byte ranges through R2 range reads, and caches immutable artifact full-body/HEAD metadata responses without caching errors. Release manifests are immutable, while mutable channel manifests use revalidation-oriented headers. V2 logical aliases negotiate SHA-only identity and Brotli representation keys, and Range requests always select identity. Cloudflare Workers may normalize cached synthetic `HEAD` responses to `Content-Length: 0`; the Worker also exposes `X-Artifact-Content-Length` so validation can compare range totals against the original artifact byte length.
+The Worker config in `cloudflare/artifacts.wrangler.toml` binds `browser-chess-models` as `ARTIFACTS` and serves `/artifacts/sha256/*`, `/releases/*.json`, and `/channels/*.json` keys. It preserves percent-encoded object keys, supports `GET`/`HEAD`/`OPTIONS`, handles bounded byte ranges through R2 range reads, and caches immutable artifact full-body/HEAD metadata responses without caching errors. Release manifests are immutable, while mutable channel manifests use revalidation-oriented headers. V2 logical aliases negotiate SHA-only identity and Brotli representation keys, and Range requests always select identity. Cloudflare Workers may normalize cached synthetic `HEAD` responses to `Content-Length: 0`; the Worker also exposes decoded `X-Artifact-Content-Length` and representation-specific `X-Artifact-Encoded-Length` metadata so validation does not depend on that normalized value.
 
 ## Non-mutating live CDN canary
 
@@ -146,6 +146,6 @@ The validator checks:
 - `Range: bytes=0-1023`
 - `Accept-Encoding: identity`
 - `Accept-Encoding: br`
-- `Content-Length`, `X-Artifact-Content-Length`, `Content-Range`, `ETag`, `Age`, `CF-Cache-Status`, and related cache headers
+- `Content-Length`, `X-Artifact-Content-Length`, `X-Artifact-Encoded-Length`, `Content-Range`, `ETag`, `Age`, `CF-Cache-Status`, and related cache headers
 
 Range probes should return `206 Partial Content`. A cached range request returning `200` is alert-worthy for large artifacts.

@@ -26,7 +26,7 @@ function parseArgs(argv) {
 }
 
 function pickHeaders(headers) {
-  const keys = ['cache-control', 'cdn-cache-control', 'cloudflare-cdn-cache-control', 'cf-cache-status', 'cache-status', 'age', 'etag', 'content-length', 'x-artifact-content-length', 'x-artifact-decoded-sha256', 'x-artifact-encoded-sha256', 'content-type', 'content-encoding', 'accept-ranges', 'content-range', 'vary', 'access-control-allow-origin', 'cross-origin-resource-policy', 'timing-allow-origin', 'access-control-expose-headers', 'set-cookie'];
+  const keys = ['cache-control', 'cdn-cache-control', 'cloudflare-cdn-cache-control', 'cf-cache-status', 'cache-status', 'age', 'etag', 'content-length', 'x-artifact-content-length', 'x-artifact-encoded-length', 'x-artifact-decoded-sha256', 'x-artifact-encoded-sha256', 'content-type', 'content-encoding', 'accept-ranges', 'content-range', 'vary', 'access-control-allow-origin', 'cross-origin-resource-policy', 'timing-allow-origin', 'access-control-expose-headers', 'set-cookie'];
   const out = {};
   for (const key of keys) {
     const value = headers.get(key);
@@ -164,7 +164,7 @@ function validateRow(row) {
     failures.push('Timing-Allow-Origin does not include https://0x88.app');
   }
   const exposed = new Set((row.firstHead.headers['access-control-expose-headers']?.toLowerCase() ?? '').split(',').map((value) => value.trim()).filter(Boolean));
-  for (const required of ['cf-cache-status', 'cache-status', 'age', 'etag', 'content-length', 'x-artifact-content-length']) {
+  for (const required of ['cf-cache-status', 'cache-status', 'age', 'etag', 'content-length', 'x-artifact-content-length', 'x-artifact-encoded-length']) {
     if (!exposed.has(required)) failures.push(`Access-Control-Expose-Headers missing ${required}`);
   }
   if (row.range.status !== 206) failures.push(`Range probe returned ${row.range.status}, expected 206`);
@@ -217,8 +217,9 @@ function validateRow(row) {
       if (encodedSha256 !== row.expected.br.sha256?.toLowerCase()) {
         failures.push(`br encoded SHA-256 ${encodedSha256 ?? 'missing'} does not match manifest ${row.expected.br.sha256}`);
       }
-      if (Number(row.brHead.headers['content-length']) !== row.expected.br.bytes) {
-        failures.push(`br encoded length ${row.brHead.headers['content-length'] ?? 'missing'} does not match manifest ${row.expected.br.bytes}`);
+      const encodedLength = row.brHead.headers['x-artifact-encoded-length'] ?? row.brHead.headers['content-length'];
+      if (Number(encodedLength) !== row.expected.br.bytes) {
+        failures.push(`br encoded length ${encodedLength ?? 'missing'} does not match manifest ${row.expected.br.bytes}`);
       }
       if (verifyBrBody && row.brBody.bodyBytes !== expectedRawBytes) {
         failures.push(`br decoded body length ${row.brBody.bodyBytes} does not match manifest ${expectedRawBytes}`);
