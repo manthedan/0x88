@@ -3,6 +3,7 @@ import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { brotliDecompressSync } from 'node:zlib';
@@ -30,6 +31,43 @@ async function runNode(args, options = {}) {
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.on('close', (status) => resolve({ status, stdout, stderr }));
   });
+}
+
+function mockR2ObjectPath(root, target) {
+  return join(root, createHash('sha256').update(target).digest('hex'));
+}
+
+async function writeStatefulWrangler(root) {
+  const path = join(root, 'fake-wrangler.mjs');
+  await writeFile(path, `#!/usr/bin/env node
+import { appendFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { dirname, join } from 'node:path';
+
+const args = process.argv.slice(2);
+if (process.env.LOG) appendFileSync(process.env.LOG, \`\${args.join(' ')}\\n\`);
+const target = args[3];
+const objectPath = join(process.env.MOCK_R2_DIR, createHash('sha256').update(target).digest('hex'));
+if (args[0] === 'r2' && args[1] === 'object' && args[2] === 'get') {
+  if (!existsSync(objectPath)) {
+    console.error('The specified key does not exist.');
+    process.exit(1);
+  }
+  const file = args[args.indexOf('--file') + 1];
+  mkdirSync(dirname(file), { recursive: true });
+  copyFileSync(objectPath, file);
+  process.exit(0);
+}
+if (args[0] === 'r2' && args[1] === 'object' && args[2] === 'put') {
+  const file = args[args.indexOf('--file') + 1];
+  mkdirSync(dirname(objectPath), { recursive: true });
+  copyFileSync(file, objectPath);
+  process.exit(0);
+}
+process.exit(1);
+`);
+  await chmod(path, 0o755);
+  return path;
 }
 
 test('write_artifact_release_manifests creates channel and content-addressed release manifests', async () => {
@@ -296,6 +334,41 @@ test('publish_hashed_artifacts_to_r2 plans release and channel manifest uploads'
   ]);
 });
 
+test('publish_hashed_artifacts_to_r2 rejects a channel manifest whose filename disagrees with channel.channel', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-channel-name-'));
+  await writeFile(join(root, 'model.onnx'), 'abc');
+  const releasePath = join(root, 'test-release.json');
+  const channelPath = join(root, 'canary.json');
+  await writeJson(releasePath, {
+    schema: 'lc0_browser.artifact_release_manifest.v1',
+    releaseId: 'test-release',
+    artifacts: [{
+      logicalUrl: '/model.onnx',
+      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/model.onnx`,
+      sha256: ABC_SHA256,
+      bytes: 3,
+      localPath: 'model.onnx',
+    }],
+  });
+  await writeJson(channelPath, {
+    schema: 'lc0_browser.artifact_channel_manifest.v1',
+    channel: 'stable',
+    releaseId: 'test-release',
+    releaseManifestUrl: '/releases/test-release.json',
+  });
+
+  const result = spawnSync(process.execPath, [
+    'scripts/publish_hashed_artifacts_to_r2.mjs',
+    '--root', root,
+    '--release', releasePath,
+    '--channel-manifest', channelPath,
+    '--bucket', 'test-bucket',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /filename canary\.json does not match channel\.channel stable/);
+});
+
 test('publish_hashed_artifacts_to_r2 retains mixed v1 entries inside a migrated v2 release', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-mixed-release-'));
   await writeFile(join(root, 'legacy.wasm'), 'abc');
@@ -462,9 +535,8 @@ test('publish_hashed_artifacts_to_r2 uploads v2 Brotli bodies with Content-Encod
   const port = await listen(server);
   try {
     const logPath = join(root, 'wrangler.log');
-    const wrangler = join(root, 'fake-wrangler.sh');
-    await writeFile(wrangler, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOG"\nif [ "$1 $2 $3" = "r2 object get" ]; then echo "The specified key does not exist." >&2; exit 1; fi\nexit 0\n');
-    await chmod(wrangler, 0o755);
+    const r2Root = join(root, 'mock-r2');
+    const wrangler = await writeStatefulWrangler(root);
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
       '--root', root,
@@ -473,11 +545,113 @@ test('publish_hashed_artifacts_to_r2 uploads v2 Brotli bodies with Content-Encod
       '--artifact-base', `http://127.0.0.1:${port}`,
       '--execute',
       '--wrangler-bin', wrangler,
-    ], { env: { ...process.env, LOG: logPath } });
+    ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
     assert.equal(result.status, 0, result.stderr);
     const log = await readFile(logPath, 'utf8');
     assert.match(log, new RegExp(`r2 object put test-bucket/artifacts/sha256/${ABC_SHA256}/identity`));
     assert.match(log, /\/br\/[a-f0-9]{64} .*--content-encoding br --remote/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('publish_hashed_artifacts_to_r2 refuses a stale CDN 404 when authoritative R2 content differs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-stale-cdn-'));
+  await writeFile(join(root, 'model.onnx'), 'abc');
+  const releasePath = join(root, 'release.json');
+  await writeJson(releasePath, {
+    schema: 'lc0-webgpu.artifact-release.v2',
+    releaseId: 'stale-cdn',
+    artifacts: [{
+      name: 'model',
+      localPath: 'model.onnx',
+      raw: { bytes: 3, sha256: ABC_SHA256 },
+      representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
+    }],
+  });
+  const server = createServer((_req, res) => res.writeHead(404).end());
+  const port = await listen(server);
+  try {
+    const logPath = join(root, 'wrangler.log');
+    const r2Root = join(root, 'mock-r2');
+    const wrangler = await writeStatefulWrangler(root);
+    const target = `test-bucket/artifacts/sha256/${ABC_SHA256}/identity`;
+    await mkdir(r2Root, { recursive: true });
+    await writeFile(mockR2ObjectPath(r2Root, target), 'abd');
+
+    const result = await runNode([
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', releasePath,
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--execute',
+      '--wrangler-bin', wrangler,
+    ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Refusing to overwrite immutable object .*remote content differs/);
+    const log = await readFile(logPath, 'utf8');
+    assert.match(log, new RegExp(`r2 object get ${target}`));
+    assert.doesNotMatch(log, new RegExp(`r2 object put ${target}`));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('publish_hashed_artifacts_to_r2 fails when authoritative post-create verification detects a race', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-create-race-'));
+  await writeFile(join(root, 'model.onnx'), 'abc');
+  const releasePath = join(root, 'release.json');
+  await writeJson(releasePath, {
+    schema: 'lc0-webgpu.artifact-release.v2',
+    releaseId: 'create-race',
+    artifacts: [{
+      name: 'model',
+      localPath: 'model.onnx',
+      raw: { bytes: 3, sha256: ABC_SHA256 },
+      representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
+    }],
+  });
+  const server = createServer((_req, res) => res.writeHead(404).end());
+  const port = await listen(server);
+  try {
+    const logPath = join(root, 'wrangler.log');
+    const statePath = join(root, 'get-count');
+    const wrangler = join(root, 'fake-racing-wrangler.sh');
+    await writeFile(wrangler, `#!/bin/sh
+printf "%s\\n" "$*" >> "$LOG"
+if [ "$1 $2 $3" = "r2 object get" ]; then
+  count=0
+  if [ -f "$STATE" ]; then count=$(cat "$STATE"); fi
+  count=$((count + 1))
+  printf "%s" "$count" > "$STATE"
+  if [ "$count" -eq 1 ]; then
+    echo "The specified key does not exist." >&2
+    exit 1
+  fi
+  printf "abd" > "$6"
+  exit 0
+fi
+exit 0
+`);
+    await chmod(wrangler, 0o755);
+
+    const result = await runNode([
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', releasePath,
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--execute',
+      '--wrangler-bin', wrangler,
+    ], { env: { ...process.env, LOG: logPath, STATE: statePath } });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Refusing to overwrite immutable object .*remote content differs/);
+    const log = await readFile(logPath, 'utf8');
+    assert.match(log, /r2 object get .*identity/);
+    assert.match(log, /r2 object put .*identity/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -517,9 +691,8 @@ test('publish_hashed_artifacts_to_r2 skips existing validated artifact uploads',
       }],
     });
     const logPath = join(root, 'wrangler.log');
-    const wrangler = join(root, 'fake-wrangler.sh');
-    await writeFile(wrangler, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOG"\nif [ "$1 $2 $3" = "r2 object get" ]; then echo "The specified key does not exist." >&2; exit 1; fi\nexit 0\n');
-    await chmod(wrangler, 0o755);
+    const r2Root = join(root, 'mock-r2');
+    const wrangler = await writeStatefulWrangler(root);
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
       '--root', root,
@@ -527,7 +700,7 @@ test('publish_hashed_artifacts_to_r2 skips existing validated artifact uploads',
       '--bucket', 'test-bucket',
       '--execute',
       '--wrangler-bin', wrangler,
-    ], { env: { ...process.env, LOG: logPath } });
+    ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
     assert.equal(result.status, 0, result.stderr);
     const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.planned[0].remoteState, 'existing');
@@ -687,9 +860,11 @@ test('publish_hashed_artifacts_to_r2 refuses to overwrite release manifests', as
   const server = createServer((_req, res) => res.writeHead(404).end());
   const port = await listen(server);
   try {
-    const wrangler = join(root, 'fake-wrangler.sh');
-    await writeFile(wrangler, '#!/bin/sh\nif [ "$1 $2 $3" = "r2 object get" ]; then exit 0; fi\nexit 0\n');
-    await chmod(wrangler, 0o755);
+    const r2Root = join(root, 'mock-r2');
+    const wrangler = await writeStatefulWrangler(root);
+    const releaseTarget = 'test-bucket/releases/test-release.json';
+    await mkdir(r2Root, { recursive: true });
+    await writeFile(mockR2ObjectPath(r2Root, releaseTarget), '{"different":true}\n');
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
       '--root', root,
@@ -698,9 +873,9 @@ test('publish_hashed_artifacts_to_r2 refuses to overwrite release manifests', as
       '--artifact-base', `http://127.0.0.1:${port}`,
       '--execute',
       '--wrangler-bin', wrangler,
-    ]);
+    ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /Refusing to overwrite immutable release manifest/);
+    assert.match(result.stderr, /Refusing to overwrite immutable object .*releases\/test-release\.json/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -722,7 +897,14 @@ test('publish_hashed_artifacts_to_r2 fails closed when release existence cannot 
       localPath: 'public/models/lc0/test.onnx',
     }],
   });
-  const server = createServer((_req, res) => res.writeHead(404).end());
+  const server = createServer((req, res) => {
+    const headers = {
+      'X-Artifact-Content-Length': '3',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    };
+    if (req.method === 'HEAD') res.writeHead(200, headers).end();
+    else res.writeHead(200, { ...headers, 'Content-Length': '3' }).end('abc');
+  });
   const port = await listen(server);
   try {
     const wrangler = join(root, 'fake-wrangler.sh');
@@ -738,7 +920,7 @@ test('publish_hashed_artifacts_to_r2 fails closed when release existence cannot 
       '--wrangler-bin', wrangler,
     ]);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /Unable to verify immutable release manifest/);
+    assert.match(result.stderr, /Unable to verify immutable object .*releases\/test-release\.json/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -771,15 +953,11 @@ test('publish_hashed_artifacts_to_r2 treats an identical remote release manifest
   const port = await listen(server);
   try {
     const logPath = join(root, 'wrangler.log');
-    const wrangler = join(root, 'fake-wrangler.sh');
-    await writeFile(wrangler, `#!/bin/sh
-printf "%s\\n" "$*" >> "$LOG"
-if [ "$1 $2 $3" = "r2 object get" ]; then
-  cp "$RELEASE" "$6"
-fi
-exit 0
-`);
-    await chmod(wrangler, 0o755);
+    const r2Root = join(root, 'mock-r2');
+    const wrangler = await writeStatefulWrangler(root);
+    const releaseTarget = 'test-bucket/releases/test-release.json';
+    await mkdir(r2Root, { recursive: true });
+    await writeFile(mockR2ObjectPath(r2Root, releaseTarget), await readFile(releasePath));
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
       '--root', root,
@@ -789,7 +967,7 @@ exit 0
       '--artifact-base', `http://127.0.0.1:${port}`,
       '--execute',
       '--wrangler-bin', wrangler,
-    ], { env: { ...process.env, LOG: logPath, RELEASE: releasePath } });
+    ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
     assert.equal(result.status, 0, result.stderr);
     const parsed = JSON.parse(result.stdout);
     const releaseItem = parsed.manifests.find((item) => item.type === 'release-manifest');

@@ -262,7 +262,7 @@ async function probeExistingEntry(entry) {
   };
 }
 
-async function verifyRemoteReleaseManifest(args, target, expected) {
+async function verifyRemoteImmutableObject(args, target, expected) {
   const dir = await mkdtemp(join(tmpdir(), 'lc0-r2-exists-'));
   try {
     const file = join(dir, 'object');
@@ -270,19 +270,34 @@ async function verifyRemoteReleaseManifest(args, target, expected) {
     if (child.status !== 0) {
       const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
       if (/specified key does not exist/i.test(output)) return 'missing';
-      throw new Error(`Unable to verify immutable release manifest ${target}; refusing to upload`);
+      throw new Error(`Unable to verify immutable object ${target}; refusing to upload`);
     }
     if (!existsSync(file)) {
-      throw new Error(`Refusing to overwrite immutable release manifest ${target}: existing object could not be verified`);
+      throw new Error(`Refusing to overwrite immutable object ${target}: existing object could not be verified`);
     }
     const actual = await sha256File(file);
     if (actual.bytes !== expected.bytes || actual.sha256 !== expected.sha256) {
-      throw new Error(`Refusing to overwrite immutable release manifest ${target}: remote content differs`);
+      throw new Error(`Refusing to overwrite immutable object ${target}: remote content differs`);
     }
     return 'identical';
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+async function uploadImmutableObject(args, item, command) {
+  const target = `${args.bucket}/${item.key}`;
+  const remoteState = await verifyRemoteImmutableObject(args, target, item);
+  if (remoteState === 'identical') return 'identical';
+
+  const child = spawnSync(args.wranglerBin, command, { stdio: 'inherit' });
+  if (child.status !== 0) throw new Error(`wrangler failed for ${target}`);
+
+  const createdState = await verifyRemoteImmutableObject(args, target, item);
+  if (createdState !== 'identical') {
+    throw new Error(`Immutable object create race or verification failure for ${target}`);
+  }
+  return 'created';
 }
 
 async function manifestPublishItems(args, release) {
@@ -302,13 +317,18 @@ async function manifestPublishItems(args, release) {
   if (args.channelManifest) {
     const channel = JSON.parse(await readFile(args.channelManifest, 'utf8'));
     if (!isArtifactChannelManifest(channel)) throw new Error(`Unexpected channel schema: ${channel.schema}`);
+    const expectedChannelFilename = `${channel.channel}.json`;
+    const actualChannelFilename = basename(args.channelManifest);
+    if (actualChannelFilename !== expectedChannelFilename) {
+      throw new Error(`Channel manifest filename ${actualChannelFilename} does not match channel.channel ${channel.channel}`);
+    }
     if (channel.releaseId !== release.releaseId) throw new Error(`Channel releaseId ${channel.releaseId} does not match release ${release.releaseId}`);
     const releaseUrl = channel.releaseManifestUrl || channel.releaseUrl;
     if (releaseUrl !== `/${releaseKey}`) throw new Error(`Channel release URL ${releaseUrl} does not match /${releaseKey}`);
     items.push({
       type: 'channel-manifest',
       localPath: args.channelManifest,
-      key: `channels/${basename(args.channelManifest)}`,
+      key: `channels/${expectedChannelFilename}`,
       contentType: 'application/json; charset=utf-8',
       cacheControl: 'no-cache',
       remoteState: 'mutable',
@@ -383,15 +403,24 @@ async function main() {
       ];
       if (item.contentEncoding) command.push('--content-encoding', item.contentEncoding);
       command.push('--remote');
-      const child = spawnSync(args.wranglerBin, command, { stdio: 'inherit' });
-      if (child.status !== 0) throw new Error(`wrangler failed for ${target}`);
+      const uploadState = await uploadImmutableObject(args, item, command);
+      item.remoteState = uploadState === 'identical' ? 'identical-r2' : 'created-r2';
+      item.uploadAction = uploadState === 'identical' ? 'skip-identical-r2' : 'uploaded';
     }
     for (const item of manifests) {
       const target = `${args.bucket}/${item.key}`;
       if (item.type === 'release-manifest') {
-        item.remoteState = await verifyRemoteReleaseManifest(args, target, item);
-        item.uploadAction = item.remoteState === 'identical' ? 'skip-identical' : 'upload';
-        if (item.remoteState === 'identical') continue;
+        const command = [
+          'r2', 'object', 'put', target,
+          '--file', item.localPath,
+          '--content-type', item.contentType,
+          '--cache-control', item.cacheControl,
+          '--remote',
+        ];
+        const uploadState = await uploadImmutableObject(args, item, command);
+        item.remoteState = uploadState === 'identical' ? 'identical' : 'created';
+        item.uploadAction = uploadState === 'identical' ? 'skip-identical' : 'uploaded';
+        continue;
       }
       const child = spawnSync(args.wranglerBin, [
         'r2', 'object', 'put', target,
