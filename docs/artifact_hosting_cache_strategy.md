@@ -47,9 +47,11 @@ full GET misses. `scripts/publish_hashed_artifacts_to_r2.mjs` accepts both
 schemas, deduplicates shared v2 objects, and applies `Content-Encoding: br` on
 encoded uploads. It combines immutable HEAD validation with decoded full-body
 integrity checks until uploads persist a trustworthy R2 digest that can make
-ordinary carried-forward checks HEAD-only. The remaining deployment migration is to make the default production
-release generator emit SHA-only v2 entries and validate them with a live CDN
-canary before repointing `stable`.
+ordinary carried-forward checks HEAD-only. The default production release
+generator now emits SHA-only v2 identity/Brotli entries, retains inherited v1
+entries during migration, and shares one representation catalog with publisher
+and cleanup safety checks. Live CDN validation remains a required manual canary
+before any production channel mutation.
 
 ## Current assessment
 

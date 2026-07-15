@@ -45,20 +45,85 @@ If direct R2 custom-domain responses cannot provide all required CORS/CORP/timin
 npm run deploy:artifact-worker
 ```
 
-The Worker config in `cloudflare/artifacts.wrangler.toml` binds `browser-chess-models` as `ARTIFACTS` and serves `/artifacts/sha256/*`, `/releases/*.json`, and `/channels/*.json` keys. It preserves percent-encoded object keys, supports `GET`/`HEAD`/`OPTIONS`, handles bounded byte ranges through R2 range reads, and caches immutable artifact full-body/HEAD metadata responses without caching errors. Release manifests use short CDN/browser TTLs, and mutable channel manifests use revalidation-oriented headers instead of immutable caching. Cloudflare Workers may normalize cached synthetic `HEAD` responses to `Content-Length: 0`; the Worker also exposes `X-Artifact-Content-Length` so validation can compare range totals against the original artifact byte length.
+The Worker config in `cloudflare/artifacts.wrangler.toml` binds `browser-chess-models` as `ARTIFACTS` and serves `/artifacts/sha256/*`, `/releases/*.json`, and `/channels/*.json` keys. It preserves percent-encoded object keys, supports `GET`/`HEAD`/`OPTIONS`, handles bounded byte ranges through R2 range reads, and caches immutable artifact full-body/HEAD metadata responses without caching errors. Release manifests are immutable, while mutable channel manifests use revalidation-oriented headers. V2 logical aliases negotiate SHA-only identity and Brotli representation keys, and Range requests always select identity. Cloudflare Workers may normalize cached synthetic `HEAD` responses to `Content-Length: 0`; the Worker also exposes `X-Artifact-Content-Length` so validation can compare range totals against the original artifact byte length.
 
-## Validation command
+## Non-mutating live CDN canary
 
-Use the repository validator against representative artifacts or a release manifest:
+Run this only against a release manifest that is already published. It performs
+read-only `HEAD` and small Range requests through the live CDN. It does not
+upload objects, deploy the Worker, purge cache, or change a channel:
 
 ```sh
-npm run deploy:validate-cdn-artifacts -- \
-  --url https://assets.0x88.app/artifacts/sha256/<sha>/model.onnx
+export RELEASE_MANIFEST="public/releases/<existing-release-id>.json"
 
-npm run deploy:validate-cdn-artifacts -- \
-  --release public/releases/<release-id>.json \
-  --limit 5
+node scripts/validate_artifact_cdn_headers.mjs \
+  --release "$RELEASE_MANIFEST" \
+  --artifact-base https://assets.0x88.app \
+  --limit 5 \
+  --range 1024 \
+  --json
 ```
+
+For an already-published logical alias, the exact single-asset canary is:
+
+```sh
+node scripts/validate_artifact_cdn_headers.mjs \
+  --url https://assets.0x88.app/models/lc0/<existing-model>.onnx \
+  --range 1024 \
+  --json
+```
+
+The v2 release form verifies:
+
+- `Accept-Encoding: identity` selects the SHA-only identity object.
+- `Accept-Encoding: br` selects the recorded Brotli representation.
+- decoded and encoded SHA-256/length headers match the release manifest.
+- a Range request sent with Brotli accepted still returns identity bytes and
+  valid `206 Partial Content`.
+
+## Local release and publisher dry-run
+
+Generate a release into a disposable directory, then inspect the publisher plan
+without `--execute`:
+
+```sh
+export RELEASE_ID="canary-$(date -u +%Y%m%dT%H%M%SZ)"
+export RELEASE_ROOT="$(mktemp -d)"
+
+node scripts/write_artifact_release_manifests.mjs \
+  --root . \
+  --out-dir "$RELEASE_ROOT" \
+  --release-id "$RELEASE_ID" \
+  --channel canary \
+  --generated-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+
+node scripts/publish_hashed_artifacts_to_r2.mjs \
+  --root . \
+  --release "$RELEASE_ROOT/releases/$RELEASE_ID.json" \
+  --channel-manifest "$RELEASE_ROOT/channels/canary.json" \
+  --bucket browser-chess-models
+```
+
+The second command is a local plan only. It must report `"execute": false`.
+Stop here. Do not add `--execute`, do not run `wrangler deploy`, do not upload
+objects, do not purge, and do not repoint `stable` as part of this validation.
+The generated release id and channel name are path-safe identifiers, and the
+plan must list the release manifest before a channel item whose
+`"uploadAction"` is `"update-last"`.
+
+To inspect cleanup safety separately, use the read-only planner and stop before
+any delete flags:
+
+```sh
+CLOUDFLARE_ACCOUNT_ID="<read-only-account-id>" \
+CLOUDFLARE_API_TOKEN="<read-only-token>" \
+node scripts/plan_r2_artifact_cleanup.mjs \
+  --bucket browser-chess-models \
+  --retention-days 90 \
+  --json
+```
+
+Do not add `--execute`, `--delete-category`, or `--allow-delete-hashed`.
 
 The validator checks:
 

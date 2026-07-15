@@ -7,7 +7,9 @@ This policy applies to LC0 browser model/engine artifacts published through cont
 ## Invariants
 
 1. **Never overwrite content-addressed keys.**
-   - Keys under `/artifacts/sha256/<sha256>/<file>` are write-once.
+   - V2 identity keys under `/artifacts/sha256/<decoded-sha256>/identity` are write-once.
+   - V2 Brotli keys under `/artifacts/sha256/<decoded-sha256>/br/<encoded-sha256>` are write-once.
+   - Legacy v1 filename-keyed objects remain readable during migration.
    - A release/publish tool must verify that the key hash equals the local file hash before upload.
    - If a key already exists, treat it as immutable. Do not replace it during routine releases.
 
@@ -72,8 +74,8 @@ Deleting `artifacts/sha256/*` candidates requires both `--delete-category hashed
 
 ## Tooling hooks
 
-- `scripts/write_artifact_release_manifests.mjs` verifies local file byte counts and SHA-256 before emitting a release entry.
-- `scripts/publish_hashed_artifacts_to_r2.mjs` verifies local bytes, requires the `/artifacts/sha256/<sha>/...` key hash to match the file hash before planning/uploading, and publishes release/channel manifest JSON after blob uploads when `--channel-manifest` is provided.
+- `scripts/write_artifact_release_manifests.mjs` verifies local file byte counts and SHA-256, emits v2 SHA-only identity/Brotli representation maps, deduplicates equal decoded bodies, refuses unsafe release/channel names, refuses to replace an existing release manifest, and atomically replaces mutable local channel pointers.
+- `scripts/publish_hashed_artifacts_to_r2.mjs` reads v1 and v2 releases, verifies local encoded bytes and representation keys, deduplicates shared representation objects, treats an identical existing release manifest as an idempotent retry, refuses a differing release body, and publishes the mutable channel manifest last when `--channel-manifest` is provided.
 - `scripts/validate_artifact_cdn_headers.mjs` validates HEAD, repeated HEAD, range, CORS/CORP, timing, no-cookie, cache-status, and encoding behavior.
 - `scripts/plan_r2_artifact_cleanup.mjs` lists R2 objects through the Cloudflare API, compares them against retained release manifests, and defaults to a no-delete cleanup plan.
 
