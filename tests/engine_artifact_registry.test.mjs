@@ -74,6 +74,7 @@ test('shared release catalog reads v1 and v2 representation keys and deduplicate
       artifacts: [
         {
           logicalUrl: '/model-a.onnx',
+          kind: 'model',
           raw: { sha256: rawSha, bytes: 3 },
           representations: [
             { encoding: 'identity', url: `/${identityKey}`, sha256: rawSha, bytes: 3 },
@@ -82,6 +83,7 @@ test('shared release catalog reads v1 and v2 representation keys and deduplicate
         },
         {
           logicalUrl: '/model-b.onnx',
+          kind: 'source',
           raw: { sha256: rawSha, bytes: 3 },
           representations: [{ encoding: 'identity', url: `/${identityKey}`, sha256: rawSha, bytes: 3 }],
         },
@@ -94,6 +96,7 @@ test('shared release catalog reads v1 and v2 representation keys and deduplicate
   assert.deepEqual([...catalog.keys()].sort(), [brKey, identityKey, v1Key].sort());
   assert.deepEqual(catalog.get(identityKey).logicalUrls, ['/model-a.onnx', '/model-b.onnx']);
   assert.deepEqual(catalog.get(identityKey).releases, ['v2']);
+  assert.deepEqual(catalog.get(identityKey).kinds, ['model', 'source']);
 });
 
 test('shared release catalog fails closed on corrupt v2 representation keys', () => {

@@ -15,7 +15,7 @@ test('artifactKeyFromUrl extracts only content-addressed artifact keys', () => {
   assert.equal(artifactKeyFromUrl('/models/lc0/model.onnx'), undefined);
 });
 
-test('R2 cleanup plan protects retained release artifacts and flags safe legacy duplicates', () => {
+test('R2 cleanup plan protects retained release artifacts and migration-compatible legacy logical objects', () => {
   const retainedKey = `artifacts/sha256/${'1'.repeat(64)}/model.onnx`;
   const oldKey = `artifacts/sha256/${'2'.repeat(64)}/old-model.onnx`;
   const freshOrphan = `artifacts/sha256/${'3'.repeat(64)}/fresh.onnx`;
@@ -42,13 +42,57 @@ test('R2 cleanup plan protects retained release artifacts and flags safe legacy 
   });
 
   assert.deepEqual(plan.missingReferencedArtifacts, []);
-  assert.equal(plan.summaryByCategory['legacy-logical-duplicate'].count, 1);
+  assert.equal(plan.summaryByCategory['legacy-logical-duplicate'], undefined);
   assert.equal(plan.summaryByCategory['legacy-unreferenced-metadata'].count, 1);
   assert.equal(plan.summaryByCategory['hashed-orphan'].count, 1);
   assert.ok(plan.candidates.some((candidate) => candidate.key === oldKey && candidate.category === 'hashed-orphan'));
   assert.ok(plan.protected.some((entry) => entry.key === retainedKey && entry.reason === 'referenced by stable release'));
+  assert.ok(plan.protected.some((entry) => entry.key === 'models/lc0/model.onnx' && /active stable release/.test(entry.reason)));
   assert.ok(plan.protected.some((entry) => entry.key === freshOrphan && /retention window/.test(entry.reason)));
   assert.ok(plan.protected.some((entry) => entry.key === sourceOrphan && /source archive/.test(entry.reason)));
+});
+
+test('R2 cleanup plan preserves v1 logical objects referenced by retained non-stable releases', () => {
+  const plan = buildCleanupPlan({
+    now,
+    retentionDays: 30,
+    channel: { releaseId: 'stable-release' },
+    releases: [
+      { releaseId: 'stable-release', artifacts: [] },
+      {
+        releaseId: 'rollback-release',
+        artifacts: [{
+          logicalUrl: '/legacy/engine.wasm',
+          artifactUrl: `/artifacts/sha256/${'8'.repeat(64)}/engine.wasm`,
+        }],
+      },
+    ],
+    objects: [object('legacy/engine.wasm', 10, '2025-01-01T00:00:00.000Z')],
+  });
+
+  assert.equal(plan.candidates.some((entry) => entry.key === 'legacy/engine.wasm'), false);
+  assert.ok(plan.protected.some((entry) => entry.key === 'legacy/engine.wasm'
+    && /rollback and migration client compatibility/.test(entry.reason)));
+});
+
+test('R2 cleanup plan requires manual review for unreferenced SHA-only v2 objects', () => {
+  const rawSha = '9'.repeat(64);
+  const brSha = 'a'.repeat(64);
+  const identityKey = `artifacts/${'sha256'}/${rawSha}/identity`;
+  const brKey = `artifacts/${'sha256'}/${rawSha}/br/${brSha}`;
+  const plan = buildCleanupPlan({
+    now,
+    retentionDays: 30,
+    channel: undefined,
+    releases: [],
+    objects: [
+      object(identityKey, 10, '2025-01-01T00:00:00.000Z'),
+      object(brKey, 8, '2025-01-01T00:00:00.000Z'),
+    ],
+  });
+
+  assert.equal(plan.candidateCount, 0);
+  assert.ok(plan.protected.every((entry) => /logical filename and artifact kind are unavailable/.test(entry.reason)));
 });
 
 test('R2 cleanup plan reports missing retained artifacts', () => {
@@ -66,7 +110,7 @@ test('R2 cleanup plan reports missing retained artifacts', () => {
 test('R2 cleanup plan protects every shared v2 representation and reports catalog gaps once', () => {
   const rawSha = '6'.repeat(64);
   const brSha = '7'.repeat(64);
-  const identityKey = `artifacts/sha256/${rawSha}/identity`;
+  const identityKey = `artifacts/${'sha256'}/${rawSha}/identity`;
   const brKey = `artifacts/sha256/${rawSha}/br/${brSha}`;
   const representationMap = [
     { encoding: 'identity', url: `/${identityKey}`, sha256: rawSha, bytes: 3 },
@@ -91,6 +135,36 @@ test('R2 cleanup plan protects every shared v2 representation and reports catalo
   assert.deepEqual(plan.missingReferencedArtifacts, [{ key: brKey, releases: ['stable-v2'] }]);
   assert.ok(plan.protected.some((entry) => entry.key === identityKey && entry.reason === 'referenced by stable release'));
   assert.equal(plan.candidates.some((entry) => entry.key === identityKey), false);
+});
+
+test('R2 cleanup plan carries source kind and logical metadata into protected v2 catalog objects', () => {
+  const rawSha = 'b'.repeat(64);
+  const identityKey = `artifacts/${'sha256'}/${rawSha}/identity`;
+  const release = {
+    schema: 'lc0_browser.artifact_release_manifest.v2',
+    releaseId: 'source-release',
+    artifacts: [{
+      logicalUrl: '/stockfish/stockfish-corresponding-source.tar.gz',
+      kind: 'source',
+      raw: { sha256: rawSha, bytes: 3 },
+      representations: [{
+        encoding: 'identity',
+        url: `/${identityKey}`,
+        sha256: rawSha,
+        bytes: 3,
+      }],
+    }],
+  };
+  const plan = buildCleanupPlan({
+    now,
+    channel: { releaseId: 'source-release' },
+    releases: [release],
+    objects: [object(identityKey)],
+  });
+
+  const protectedSource = plan.protected.find((entry) => entry.key === identityKey);
+  assert.deepEqual(protectedSource.kinds, ['source']);
+  assert.deepEqual(protectedSource.logicalUrls, ['/stockfish/stockfish-corresponding-source.tar.gz']);
 });
 
 test('parseArgs requires hashed opt-in separately from execute', () => {

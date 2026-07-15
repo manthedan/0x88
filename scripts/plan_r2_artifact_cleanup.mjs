@@ -10,6 +10,7 @@ const DEFAULT_RETENTION_DAYS = 90;
 const CONTROL_PREFIXES = ['channels/', 'releases/'];
 const HASHED_PREFIX = 'artifacts/sha256/';
 const SOURCE_ARCHIVE_RE = /(?:corresponding-source|source).*\.tar\.gz$/i;
+const SHA_ONLY_V2_KEY_RE = /^artifacts\/sha256\/[a-f0-9]{64}\/(?:identity|br\/[a-f0-9]{64})$/;
 const SAFE_DELETE_CATEGORIES = new Set([
   'legacy-logical-duplicate',
   'legacy-unreferenced-metadata',
@@ -113,7 +114,11 @@ function protectedFrom(object, reason, extra = {}) {
 
 export function buildCleanupPlan({ objects, releases, channel, now = new Date(), retentionDays = DEFAULT_RETENTION_DAYS }) {
   const catalog = buildArtifactReleaseCatalog(releases);
-  const artifactRefs = new Map([...catalog].map(([key, entry]) => [key, new Set(entry.releases)]));
+  const artifactRefs = new Map([...catalog].map(([key, entry]) => [key, {
+    releases: new Set(entry.releases),
+    logicalUrls: entry.logicalUrls,
+    kinds: entry.kinds,
+  }]));
   const logicalRefs = new Map();
   const releasesById = new Map();
   for (const release of releases) {
@@ -141,7 +146,7 @@ export function buildCleanupPlan({ objects, releases, channel, now = new Date(),
   const missingReferencedArtifacts = [];
   const objectKeys = new Set(objects.map((object) => object.key));
   for (const key of artifactRefs.keys()) {
-    if (!objectKeys.has(key)) missingReferencedArtifacts.push({ key, releases: [...artifactRefs.get(key)].sort() });
+    if (!objectKeys.has(key)) missingReferencedArtifacts.push({ key, releases: [...artifactRefs.get(key).releases].sort() });
   }
 
   for (const object of objects) {
@@ -153,11 +158,19 @@ export function buildCleanupPlan({ objects, releases, channel, now = new Date(),
 
     if (key.startsWith(HASHED_PREFIX)) {
       const refs = artifactRefs.get(key);
-      if (refs?.size) {
-        protectedObjects.push(protectedFrom(object, stableArtifactRefs.has(key) ? 'referenced by stable release' : 'referenced by retained release', { releases: [...refs].sort() }));
+      if (refs?.releases.size) {
+        protectedObjects.push(protectedFrom(object, stableArtifactRefs.has(key) ? 'referenced by stable release' : 'referenced by retained release', {
+          releases: [...refs.releases].sort(),
+          logicalUrls: refs.logicalUrls,
+          kinds: refs.kinds,
+        }));
         continue;
       }
       const ageDays = objectAgeDays(object, now);
+      if (SHA_ONLY_V2_KEY_RE.test(key)) {
+        protectedObjects.push(protectedFrom(object, 'unreferenced SHA-only v2 artifact; logical filename and artifact kind are unavailable, so manual review is required', { ageDays }));
+        continue;
+      }
       if (SOURCE_ARCHIVE_RE.test(key)) {
         protectedObjects.push(protectedFrom(object, 'unreferenced source archive; preserve for license/source obligations unless manually reviewed', { ageDays }));
         continue;
@@ -171,12 +184,14 @@ export function buildCleanupPlan({ objects, releases, channel, now = new Date(),
     }
 
     const logicalRefsForObject = logicalRefs.get(key);
-    if (stableLogicalRefs.has(key)) {
-      candidates.push(candidateFrom(object, 'legacy-logical-duplicate', 'non-content-addressed object shadowed by current stable release manifest; Worker resolves this logical path to artifacts/sha256', { releases: [...(logicalRefsForObject ?? [])].sort() }));
-      continue;
-    }
     if (logicalRefsForObject?.size) {
-      protectedObjects.push(protectedFrom(object, 'legacy object referenced only by retained non-stable release logicalUrl', { releases: [...logicalRefsForObject].sort() }));
+      protectedObjects.push(protectedFrom(
+        object,
+        stableLogicalRefs.has(key)
+          ? 'legacy logical object referenced by active stable release; preserve for migration client compatibility'
+          : 'legacy logical object referenced by retained release; preserve for rollback and migration client compatibility',
+        { releases: [...logicalRefsForObject].sort() },
+      ));
       continue;
     }
     if (isLegacyMetadataKey(key)) {

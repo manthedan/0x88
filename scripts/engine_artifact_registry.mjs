@@ -120,10 +120,12 @@ export function buildArtifactReleaseCatalog(releases) {
         releases: new Set(),
         logicalUrls: new Set(),
         encodings: new Set(),
+        kinds: new Set(),
       };
       existing.releases.add(releaseId);
       if (entry.logicalUrl) existing.logicalUrls.add(entry.logicalUrl);
       if (entry.encoding) existing.encodings.add(entry.encoding);
+      if (entry.artifact?.kind) existing.kinds.add(entry.artifact.kind);
       byKey.set(entry.key, existing);
     }
   }
@@ -132,6 +134,7 @@ export function buildArtifactReleaseCatalog(releases) {
     releases: [...entry.releases].sort(),
     logicalUrls: [...entry.logicalUrls].sort(),
     encodings: [...entry.encodings].sort(),
+    kinds: [...entry.kinds].sort(),
   }]));
 }
 
