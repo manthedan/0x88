@@ -135,7 +135,7 @@ function responseContentLength(response: Response): number {
   return Number.isSafeInteger(value) && value > 0 ? value : 0;
 }
 
-function growPreopenBuffer(bytes: Uint8Array, requiredBytes: number, loadedBytes: number): Uint8Array {
+function growPreopenBuffer(bytes: Uint8Array<ArrayBufferLike>, requiredBytes: number, loadedBytes: number): Uint8Array<ArrayBuffer> {
   let capacity = Math.max(bytes.byteLength, INITIAL_PREOPEN_CAPACITY);
   while (capacity < requiredBytes) capacity = Math.max(requiredBytes, capacity * 2);
   const grown = new Uint8Array(capacity);
@@ -156,7 +156,7 @@ export async function fetchPreopenBytes(url: string): Promise<ArrayBuffer> {
         return buffer;
       }
       const reader = response.body.getReader();
-      let bytes = new Uint8Array(totalBytes);
+      let bytes: Uint8Array<ArrayBuffer> = new Uint8Array(totalBytes);
       let loadedBytes = 0;
       let lastReport = 0;
       for (;;) {
