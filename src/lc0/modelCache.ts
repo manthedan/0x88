@@ -106,6 +106,70 @@ export interface Lc0ModelLoadOptions {
   metadataStore?: Lc0ModelVerificationMetadataStore;
 }
 
+/**
+ * Research-only manifest for reconstructing one decoded ONNX file from
+ * independently cached, content-addressed shards. Production model loading
+ * does not consult this schema unless a caller explicitly uses
+ * loadResumableLc0ModelForOrt().
+ */
+export interface Lc0ResumableModelShardManifest {
+  schema: 'lc0_browser.resumable_model_shards.v1';
+  chunkBytes: number;
+  decoded: {
+    bytes: number;
+    sha256: string;
+  };
+  shards: Array<{
+    bytes: number;
+    sha256: string;
+    url: string;
+  }>;
+}
+
+export interface Lc0ModelShardStore {
+  get(sha256: string): Promise<ArrayBuffer | undefined>;
+  put(sha256: string, bytes: ArrayBuffer): Promise<void>;
+  delete(sha256: string): Promise<void>;
+}
+
+export interface Lc0ResumableModelProgress {
+  phase: 'download' | 'reconstruct';
+  completedBytes: number;
+  totalBytes: number;
+  completedShards: number;
+  totalShards: number;
+}
+
+export interface Lc0ResumableModelLoadOptions {
+  /** Required explicit opt-in. This API throws unless set to true. */
+  researchOnly: true;
+  cacheName?: string;
+  concurrency?: number;
+  corruptionRetries?: number;
+  signal?: AbortSignal;
+  fetchFn?: typeof fetch;
+  shardStore?: Lc0ModelShardStore;
+  onProgress?: (progress: Lc0ResumableModelProgress) => void;
+}
+
+export interface Lc0ResumableModelLoadResult {
+  /** Byte-identical, fully hash-validated decoded ONNX for ORT session creation. */
+  model: ArrayBuffer;
+  manifestUrl: string;
+  sha256: string;
+  bytes: number;
+  downloadedBytes: number;
+  reusedBytes: number;
+  downloadedShards: number;
+  reusedShards: number;
+  corruptShardsEvicted: number;
+  corruptionRetries: number;
+  uniqueShardCount: number;
+  deduplicatedReferences: number;
+  peakTemporaryBytes: number;
+  elapsedMs: number;
+}
+
 const DEFAULT_CACHE_NAME = 'lc0-browser-models-v1';
 const DEFAULT_MANIFEST_URL = '/models/lc0/manifest.json';
 const DEFAULT_CACHE_FREE_BYTES_RESERVE = 64 * 1024 * 1024;
@@ -827,4 +891,272 @@ export function describeLc0ModelLoad(result: Lc0ModelLoadResult): string {
     : ' · sha256 unchecked';
   const revalidated = result.revalidated ? ' · revalidated' : '';
   return `${result.cacheStatus}${mb}${integrity}${revalidated}${timing}`;
+}
+
+const MIN_RESUMABLE_SHARD_BYTES = 16 * 1024 * 1024;
+const MAX_RESUMABLE_SHARD_BYTES = 32 * 1024 * 1024;
+const DEFAULT_RESUMABLE_SHARD_CACHE_NAME = 'lc0-browser-model-shards-research-v1';
+const DEFAULT_RESUMABLE_SHARD_CONCURRENCY = 3;
+const DEFAULT_RESUMABLE_CORRUPTION_RETRIES = 1;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/i;
+
+function abortError(): Error {
+  if (typeof DOMException !== 'undefined') return new DOMException('The operation was aborted', 'AbortError');
+  const error = new Error('The operation was aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw abortError();
+}
+
+function resumableShardCacheKey(sha256: string): Request {
+  const origin = typeof location === 'undefined' ? 'http://localhost/' : location.href;
+  return new Request(new URL(`/__lc0-resumable-model-shards__/sha256/${sha256}`, origin).href);
+}
+
+class CacheStorageModelShardStore implements Lc0ModelShardStore {
+  private readonly cacheName: string;
+
+  constructor(cacheName: string) {
+    this.cacheName = cacheName;
+  }
+
+  private async cache(): Promise<Cache> {
+    if (!cacheApiAvailable()) throw new Error('Cache Storage is unavailable for resumable model shards');
+    return caches.open(this.cacheName);
+  }
+
+  async get(sha256: string): Promise<ArrayBuffer | undefined> {
+    const response = await (await this.cache()).match(resumableShardCacheKey(sha256));
+    return response ? response.arrayBuffer() : undefined;
+  }
+
+  async put(sha256: string, bytes: ArrayBuffer): Promise<void> {
+    await (await this.cache()).put(resumableShardCacheKey(sha256), new Response(bytes));
+  }
+
+  async delete(sha256: string): Promise<void> {
+    await (await this.cache()).delete(resumableShardCacheKey(sha256));
+  }
+}
+
+function validateResumableModelShardManifest(value: unknown): Lc0ResumableModelShardManifest {
+  const manifest = value as Partial<Lc0ResumableModelShardManifest>;
+  if (manifest?.schema !== 'lc0_browser.resumable_model_shards.v1') {
+    throw new Error('Invalid resumable model shard manifest schema');
+  }
+  if (!Number.isSafeInteger(manifest.chunkBytes)
+    || manifest.chunkBytes! < MIN_RESUMABLE_SHARD_BYTES
+    || manifest.chunkBytes! > MAX_RESUMABLE_SHARD_BYTES) {
+    throw new Error('Invalid resumable model shard chunkBytes: expected 16-32 MiB');
+  }
+  if (!manifest.decoded
+    || !Number.isSafeInteger(manifest.decoded.bytes)
+    || manifest.decoded.bytes <= 0
+    || !SHA256_PATTERN.test(manifest.decoded.sha256)) {
+    throw new Error('Invalid resumable model shard decoded metadata');
+  }
+  if (!Array.isArray(manifest.shards) || manifest.shards.length === 0) {
+    throw new Error('Invalid resumable model shard list');
+  }
+  let totalBytes = 0;
+  const descriptors = new Map<string, { bytes: number; url: string }>();
+  manifest.shards.forEach((shard, index) => {
+    if (!shard || !Number.isSafeInteger(shard.bytes) || shard.bytes <= 0 || shard.bytes > manifest.chunkBytes!) {
+      throw new Error(`Invalid resumable model shard length at index ${index}`);
+    }
+    if (index < manifest.shards!.length - 1 && shard.bytes !== manifest.chunkBytes) {
+      throw new Error(`Invalid non-final resumable model shard length at index ${index}`);
+    }
+    if (!SHA256_PATTERN.test(shard.sha256) || typeof shard.url !== 'string' || !shard.url) {
+      throw new Error(`Invalid resumable model shard descriptor at index ${index}`);
+    }
+    const hash = shard.sha256.toLowerCase();
+    const previous = descriptors.get(hash);
+    if (previous && (previous.bytes !== shard.bytes || previous.url !== shard.url)) {
+      throw new Error(`Conflicting resumable model shard descriptor for ${hash}`);
+    }
+    descriptors.set(hash, { bytes: shard.bytes, url: shard.url });
+    totalBytes += shard.bytes;
+  });
+  if (totalBytes !== manifest.decoded.bytes) {
+    throw new Error(`Invalid resumable model decoded length: shards total ${totalBytes}, expected ${manifest.decoded.bytes}`);
+  }
+  return {
+    schema: manifest.schema,
+    chunkBytes: manifest.chunkBytes!,
+    decoded: { bytes: manifest.decoded.bytes, sha256: manifest.decoded.sha256.toLowerCase() },
+    shards: manifest.shards.map((shard) => ({
+      bytes: shard.bytes,
+      sha256: shard.sha256.toLowerCase(),
+      url: shard.url,
+    })),
+  };
+}
+
+async function verifiedShardBytes(
+  store: Lc0ModelShardStore,
+  sha256: string,
+  expectedBytes: number,
+): Promise<{ bytes?: ArrayBuffer; corrupt: boolean }> {
+  const bytes = await store.get(sha256);
+  if (!bytes) return { corrupt: false };
+  if (bytes.byteLength !== expectedBytes || await sha256Hex(bytes) !== sha256) {
+    await store.delete(sha256);
+    return { corrupt: true };
+  }
+  return { bytes, corrupt: false };
+}
+
+/**
+ * Explicit research path for resumable model shards.
+ *
+ * Every shard is independently persisted only after length/hash validation.
+ * Cached corruption is evicted, missing or evicted shards are redownloaded,
+ * and corrupt network responses are retried without disturbing valid shards.
+ * The ordered ONNX is reconstructed and its final decoded hash is validated
+ * before the bytes are returned to any ORT session caller.
+ */
+export async function loadResumableLc0ModelForOrt(
+  manifestUrl: string,
+  options: Lc0ResumableModelLoadOptions,
+): Promise<Lc0ResumableModelLoadResult> {
+  if (options?.researchOnly !== true) throw new Error('Resumable model shards require explicit researchOnly: true opt-in');
+  const started = nowMs();
+  const fetchFn = options.fetchFn ?? globalThis.fetch;
+  if (!fetchFn) throw new Error('fetch is unavailable for resumable model shards');
+  const concurrency = Math.max(1, Math.min(8, Math.floor(options.concurrency ?? DEFAULT_RESUMABLE_SHARD_CONCURRENCY)));
+  const retryLimit = Math.max(0, Math.min(3, Math.floor(options.corruptionRetries ?? DEFAULT_RESUMABLE_CORRUPTION_RETRIES)));
+  const store = options.shardStore ?? new CacheStorageModelShardStore(options.cacheName ?? DEFAULT_RESUMABLE_SHARD_CACHE_NAME);
+  throwIfAborted(options.signal);
+
+  const manifestResponse = await fetchFn(manifestUrl, { cache: 'no-cache', signal: options.signal });
+  if (!manifestResponse.ok) throw new Error(`Resumable model shard manifest fetch failed: ${manifestResponse.status}`);
+  const manifest = validateResumableModelShardManifest(await manifestResponse.json());
+  const unique = new Map<string, (typeof manifest.shards)[number]>();
+  const referenceCounts = new Map<string, number>();
+  for (const shard of manifest.shards) unique.set(shard.sha256, shard);
+  for (const shard of manifest.shards) referenceCounts.set(shard.sha256, (referenceCounts.get(shard.sha256) ?? 0) + 1);
+
+  let downloadedBytes = 0;
+  let reusedBytes = 0;
+  let downloadedShards = 0;
+  let reusedShards = 0;
+  let corruptShardsEvicted = 0;
+  let corruptionRetries = 0;
+  let completedBytes = 0;
+  let completedShards = 0;
+  let activeTemporaryBytes = 0;
+  let peakTemporaryBytes = 0;
+  const jobs = [...unique.values()];
+  let nextJob = 0;
+
+  const report = (phase: Lc0ResumableModelProgress['phase']): void => options.onProgress?.({
+    phase,
+    completedBytes,
+    totalBytes: manifest.decoded.bytes,
+    completedShards,
+    totalShards: unique.size,
+  });
+  report('download');
+
+  const workers = Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
+    for (;;) {
+      throwIfAborted(options.signal);
+      const jobIndex = nextJob;
+      nextJob += 1;
+      if (jobIndex >= jobs.length) return;
+      const shard = jobs[jobIndex];
+      const cached = await verifiedShardBytes(store, shard.sha256, shard.bytes);
+      if (cached.corrupt) corruptShardsEvicted += 1;
+      if (cached.bytes) {
+        activeTemporaryBytes += cached.bytes.byteLength;
+        peakTemporaryBytes = Math.max(peakTemporaryBytes, activeTemporaryBytes);
+        reusedBytes += shard.bytes;
+        reusedShards += 1;
+        activeTemporaryBytes -= cached.bytes.byteLength;
+      } else {
+        let persisted = false;
+        for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
+          throwIfAborted(options.signal);
+          const shardUrl = new URL(shard.url, manifestUrl).href;
+          const response = await fetchFn(shardUrl, {
+            cache: attempt === 0 ? 'force-cache' : 'reload',
+            signal: options.signal,
+          });
+          if (!response.ok) throw new Error(`Resumable model shard fetch failed for ${shard.sha256}: ${response.status}`);
+          const bytes = await response.arrayBuffer();
+          downloadedBytes += bytes.byteLength;
+          activeTemporaryBytes += bytes.byteLength;
+          peakTemporaryBytes = Math.max(peakTemporaryBytes, activeTemporaryBytes);
+          try {
+            const valid = bytes.byteLength === shard.bytes && await sha256Hex(bytes) === shard.sha256;
+            if (valid) {
+              await store.put(shard.sha256, bytes);
+              downloadedShards += 1;
+              persisted = true;
+              break;
+            }
+          } finally {
+            activeTemporaryBytes -= bytes.byteLength;
+          }
+          if (attempt < retryLimit) corruptionRetries += 1;
+        }
+        if (!persisted) {
+          throw new Error(`Resumable model shard corruption persisted after ${retryLimit + 1} attempts: ${shard.sha256}`);
+        }
+      }
+      completedBytes += shard.bytes * (referenceCounts.get(shard.sha256) ?? 1);
+      completedShards += 1;
+      report('download');
+    }
+  });
+  await Promise.all(workers);
+
+  throwIfAborted(options.signal);
+  const model = new Uint8Array(manifest.decoded.bytes);
+  completedBytes = 0;
+  completedShards = 0;
+  report('reconstruct');
+  let offset = 0;
+  for (const shard of manifest.shards) {
+    throwIfAborted(options.signal);
+    const stored = await verifiedShardBytes(store, shard.sha256, shard.bytes);
+    if (!stored.bytes) {
+      throw new Error(`Resumable model shard was evicted or corrupted during reconstruction: ${shard.sha256}`);
+    }
+    activeTemporaryBytes += stored.bytes.byteLength;
+    peakTemporaryBytes = Math.max(peakTemporaryBytes, activeTemporaryBytes);
+    try {
+      model.set(new Uint8Array(stored.bytes), offset);
+    } finally {
+      activeTemporaryBytes -= stored.bytes.byteLength;
+    }
+    offset += shard.bytes;
+    completedBytes += shard.bytes;
+    completedShards += 1;
+    report('reconstruct');
+  }
+  const decodedSha256 = await sha256Hex(model);
+  if (decodedSha256 !== manifest.decoded.sha256) {
+    throw new Error(`Resumable model decoded sha256 mismatch: got ${decodedSha256}, expected ${manifest.decoded.sha256}`);
+  }
+  return {
+    model: model.buffer,
+    manifestUrl,
+    sha256: decodedSha256,
+    bytes: model.byteLength,
+    downloadedBytes,
+    reusedBytes,
+    downloadedShards,
+    reusedShards,
+    corruptShardsEvicted,
+    corruptionRetries,
+    uniqueShardCount: unique.size,
+    deduplicatedReferences: manifest.shards.length - unique.size,
+    peakTemporaryBytes,
+    elapsedMs: nowMs() - started,
+  };
 }
