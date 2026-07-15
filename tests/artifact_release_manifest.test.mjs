@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -9,6 +10,7 @@ import { test } from 'node:test';
 import { brotliDecompressSync } from 'node:zlib';
 
 const ABC_SHA256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+const DEFAULT_RELEASE_OUTPUT = '.local-dev-artifacts/artifact-releases';
 
 async function writeJson(path, value) {
   await mkdir(dirname(path), { recursive: true });
@@ -129,12 +131,14 @@ test('write_artifact_release_manifests creates channel and content-addressed rel
   ], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 
-  const channel = JSON.parse(await readFile(join(root, 'public/channels/stable.json'), 'utf8'));
+  const outputRoot = join(root, DEFAULT_RELEASE_OUTPUT);
+  const channel = JSON.parse(await readFile(join(outputRoot, 'channels/stable.json'), 'utf8'));
   assert.equal(channel.schema, 'lc0_browser.artifact_channel_manifest.v2');
   assert.equal(channel.releaseManifestUrl, '/releases/test-release.json');
   assert.equal(channel.releaseUrl, '/releases/test-release.json');
 
-  const release = JSON.parse(await readFile(join(root, 'public/releases/test-release.json'), 'utf8'));
+  const releasePath = join(outputRoot, 'releases/test-release.json');
+  const release = JSON.parse(await readFile(releasePath, 'utf8'));
   assert.equal(release.schema, 'lc0_browser.artifact_release_manifest.v2');
   assert.equal(release.releaseId, 'test-release');
   assert.equal(release.artifacts.length, 4);
@@ -159,10 +163,25 @@ test('write_artifact_release_manifests creates channel and content-addressed rel
   assert.equal(equalBodies.length, 2);
   assert.equal(equalBodies[0].representations[0].url, equalBodies[1].representations[0].url);
   assert.equal(equalBodies[0].representations[1].url, equalBodies[1].representations[1].url);
-  const identityPath = join(root, 'public', new URL(equalBodies[0].representations[0].url).pathname);
-  const brPath = join(root, 'public', new URL(equalBodies[0].representations[1].url).pathname);
+  const identityPath = join(outputRoot, new URL(equalBodies[0].representations[0].url).pathname);
+  const brPath = join(outputRoot, new URL(equalBodies[0].representations[1].url).pathname);
   assert.equal((await readFile(identityPath)).toString(), 'abc');
   assert.equal(brotliDecompressSync(await readFile(brPath)).toString(), 'abc');
+  assert.equal(existsSync(join(root, 'public/artifacts')), false);
+  assert.equal(existsSync(join(root, 'public/releases')), false);
+  assert.equal(existsSync(join(root, 'public/channels')), false);
+
+  const publishPlan = spawnSync(process.execPath, [
+    'scripts/publish_hashed_artifacts_to_r2.mjs',
+    '--root', root,
+    '--release', releasePath,
+    '--channel-manifest', join(outputRoot, 'channels/stable.json'),
+    '--bucket', 'test-bucket',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(publishPlan.status, 0, publishPlan.stderr);
+  const planned = JSON.parse(publishPlan.stdout).planned;
+  assert.ok(planned.every((entry) => entry.localPath.startsWith(outputRoot)));
+  assert.ok(planned.every((entry) => existsSync(entry.localPath)));
 
   const check = spawnSync(process.execPath, [
     'scripts/write_artifact_release_manifests.mjs',
@@ -201,7 +220,7 @@ test('write_artifact_release_manifests includes TVMJS runtime files', async () =
   ], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 
-  const release = JSON.parse(await readFile(join(root, 'public/releases/centipawn-tvmjs.json'), 'utf8'));
+  const release = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'releases/centipawn-tvmjs.json'), 'utf8'));
   assert.equal(release.schema, 'lc0_browser.artifact_release_manifest.v2');
   assert.deepEqual(release.artifacts.map((artifact) => [artifact.logicalUrl, artifact.kind, artifact.contentType]), [
     ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/manifest.json', 'manifest', 'application/json'],
@@ -242,7 +261,7 @@ test('write_artifact_release_manifests carries forward an immutable base release
     '--manifest', 'public/stormphrax/manifest.json',
   ], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
-  const release = JSON.parse(await readFile(join(root, 'public/releases/next.json'), 'utf8'));
+  const release = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'releases/next.json'), 'utf8'));
   assert.equal(release.schema, 'lc0_browser.artifact_release_manifest.v2');
   assert.equal(release.baseReleaseId, 'base');
   assert.deepEqual(release.artifacts.map((artifact) => artifact.logicalUrl), [
@@ -275,18 +294,18 @@ test('write_artifact_release_manifests keeps releases write-once while channels 
 
   assert.equal(generate('one', '2026-07-14T00:00:00.000Z').status, 0);
   assert.equal(generate('two', '2026-07-14T00:01:00.000Z').status, 0);
-  let channel = JSON.parse(await readFile(join(root, 'public/channels/stable.json'), 'utf8'));
+  let channel = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'channels/stable.json'), 'utf8'));
   assert.equal(channel.releaseId, 'two');
 
   const rollback = generate('one', '2026-07-14T00:00:00.000Z');
   assert.equal(rollback.status, 0, rollback.stderr);
-  channel = JSON.parse(await readFile(join(root, 'public/channels/stable.json'), 'utf8'));
+  channel = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'channels/stable.json'), 'utf8'));
   assert.equal(channel.releaseId, 'one');
 
   const overwrite = generate('one', '2026-07-14T00:02:00.000Z');
   assert.notEqual(overwrite.status, 0);
   assert.match(overwrite.stderr, /Refusing to overwrite immutable release manifest/);
-  channel = JSON.parse(await readFile(join(root, 'public/channels/stable.json'), 'utf8'));
+  channel = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'channels/stable.json'), 'utf8'));
   assert.equal(channel.releaseId, 'one');
 });
 
@@ -315,7 +334,7 @@ test('write_artifact_release_manifests rejects corrupt existing SHA-only bodies'
   await writeJson(join(root, 'public/models/lc0/manifest.json'), {
     models: [{ file: 'test.onnx', url: '/models/lc0/test.onnx', bytes: 3, sha256: ABC_SHA256 }],
   });
-  const identity = join(root, 'public/artifacts/sha256', ABC_SHA256, 'identity');
+  const identity = join(root, DEFAULT_RELEASE_OUTPUT, 'artifacts/sha256', ABC_SHA256, 'identity');
   await mkdir(dirname(identity), { recursive: true });
   await writeFile(identity, 'abd');
   const result = spawnSync(process.execPath, [

@@ -11,6 +11,7 @@ export function shouldSkipR2PublicAsset(relPath, isDir) {
   const normalized = relPath.replace(/\\/g, '/');
   const parts = normalized.split('/');
   const name = parts[parts.length - 1] ?? '';
+  if (parts[0] === 'artifacts') return true;
   if (normalized === 'monty' || normalized.startsWith('monty/')) return true;
   if (normalized === 'models/monty' || normalized.startsWith('models/monty/')) return true;
   if (parts[0] === 'models' && parts[1] === 'lc0') return isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx');

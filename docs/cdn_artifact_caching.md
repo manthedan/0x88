@@ -198,7 +198,10 @@ service worker cache small.
 
 1. Build artifacts locally or in CI.
 2. Run `scripts/r2_brotli_publish_assets.mjs` to upload with correct metadata.
-3. Run `scripts/write_artifact_release_manifests.mjs` to generate release manifests.
+3. Run `scripts/write_artifact_release_manifests.mjs` to generate release manifests
+   and content-addressed bodies under the ignored
+   `.local-dev-artifacts/artifact-releases/` staging root. Use `--out-dir` only
+   when an explicitly managed alternative staging root is required.
 4. Run `scripts/netlify_r2_release.mjs` to update the channel pointer.
 5. Purge the channel URL for immediate propagation.
 

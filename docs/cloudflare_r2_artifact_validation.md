@@ -54,7 +54,7 @@ read-only `HEAD` and small Range requests through the live CDN. It does not
 upload objects, deploy the Worker, purge cache, or change a channel:
 
 ```sh
-export RELEASE_MANIFEST="public/releases/<existing-release-id>.json"
+export RELEASE_MANIFEST=".local-dev-artifacts/artifact-releases/releases/<existing-release-id>.json"
 
 node scripts/validate_artifact_cdn_headers.mjs \
   --release "$RELEASE_MANIFEST" \
@@ -81,18 +81,32 @@ The v2 release form verifies:
 - a Range request sent with Brotli accepted still returns identity bytes and
   valid `206 Partial Content`.
 
+The default canary does not download full artifact bodies. Run full identity and
+decoded Brotli integrity verification separately, against one tightly limited
+artifact:
+
+```sh
+node scripts/validate_artifact_cdn_headers.mjs \
+  --release "$RELEASE_MANIFEST" \
+  --artifact-base https://assets.0x88.app \
+  --limit 1 \
+  --range 1024 \
+  --verify-bodies \
+  --json
+```
+
 ## Local release and publisher dry-run
 
-Generate a release into a disposable directory, then inspect the publisher plan
-without `--execute`:
+Generate a release into the ignored local staging directory, then inspect the
+publisher plan without `--execute`. The default output intentionally stays
+outside `public/` so large R2 bodies cannot enter the app-shell build:
 
 ```sh
 export RELEASE_ID="canary-$(date -u +%Y%m%dT%H%M%SZ)"
-export RELEASE_ROOT="$(mktemp -d)"
+export RELEASE_ROOT=".local-dev-artifacts/artifact-releases"
 
 node scripts/write_artifact_release_manifests.mjs \
   --root . \
-  --out-dir "$RELEASE_ROOT" \
   --release-id "$RELEASE_ID" \
   --channel canary \
   --generated-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"

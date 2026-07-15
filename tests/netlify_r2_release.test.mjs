@@ -180,6 +180,7 @@ test('prepare_netlify_r2_public_assets skips R2-hosted blobs but keeps lightweig
   await mkdir(join(source, 'models/lc0'), { recursive: true });
   await mkdir(join(source, 'engine-logos'), { recursive: true });
   await mkdir(join(source, 'lc0'), { recursive: true });
+  await mkdir(join(source, 'artifacts/sha256/deadbeef'), { recursive: true });
   await mkdir(join(root, 'ort-real'), { recursive: true });
   await writeFile(join(source, 'stockfish/stockfish-18-lite.js'), 'abc');
   await writeFile(join(source, 'stockfish/stockfish-18.0.7.manifest.json'), '{}');
@@ -188,6 +189,7 @@ test('prepare_netlify_r2_public_assets skips R2-hosted blobs but keeps lightweig
   await writeFile(join(source, 'models/lc0/manifest.json'), '{}');
   await writeFile(join(source, 'engine-logos/stockfish.png'), 'png');
   await writeFile(join(source, 'lc0/lc0_input_encoder.wasm'), 'abc');
+  await writeFile(join(source, 'artifacts/sha256/deadbeef/identity'), 'large generated body');
   await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.asyncify.mjs'), 'asyncify glue');
   await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.asyncify.wasm'), 'asyncify wasm');
   await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.jsep.mjs'), 'jsep glue');
@@ -211,6 +213,7 @@ test('prepare_netlify_r2_public_assets skips R2-hosted blobs but keeps lightweig
   assert.equal(existsSync(join(out, 'models/lc0/manifest.json')), true);
   assert.equal(existsSync(join(out, 'engine-logos/stockfish.png')), true);
   assert.equal(existsSync(join(out, 'lc0/lc0_input_encoder.wasm')), true);
+  assert.equal(existsSync(join(out, 'artifacts')), false);
   assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.asyncify.mjs')), true);
   assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.asyncify.wasm')), true);
   assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.jsep.mjs')), false);

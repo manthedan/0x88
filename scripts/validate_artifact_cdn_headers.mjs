@@ -3,11 +3,11 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 function usage() {
-  console.log(`Usage: node scripts/validate_artifact_cdn_headers.mjs [--url URL ...] [--release manifest.json] [options]\n\nOptions:\n  --url URL          Artifact URL to validate; may be repeated\n  --release PATH     V1/v2 release manifest to validate\n  --artifact-base URL  Origin for v2 logical URLs (default https://assets.0x88.app)\n  --limit N          Max release artifacts to validate\n  --range BYTES      Range probe length (default 1024)\n  --json             Print JSON only\n  -h, --help         Show help\n\nThe validator checks HEAD twice, a small Range GET, and identity/br header probes.\nFor v2 releases it verifies representation negotiation, integrity metadata, and that\nRange requests force identity. It never uploads, purges, or mutates channels.\n`);
+  console.log(`Usage: node scripts/validate_artifact_cdn_headers.mjs [--url URL ...] [--release manifest.json] [options]\n\nOptions:\n  --url URL          Artifact URL to validate; may be repeated\n  --release PATH     V1/v2 release manifest to validate\n  --artifact-base URL  Origin for v2 logical URLs (default https://assets.0x88.app)\n  --limit N          Max release artifacts to validate\n  --range BYTES      Range probe length (default 1024)\n  --verify-bodies    Download and hash full identity and decoded Brotli bodies\n  --json             Print JSON only\n  -h, --help         Show help\n\nBy default the validator checks HEAD twice, a small Range GET, and identity/br HEAD\nnegotiation without downloading full artifacts. For v2 releases it also verifies\nintegrity metadata and that Range requests force identity. Physical /artifacts/sha256/\nURLs require immutable one-year caching; mutable logical aliases require short or\nrevalidation-safe caching. It never uploads, purges, or mutates channels.\n`);
 }
 
 function parseArgs(argv) {
-  const args = { urls: [], rangeBytes: 1024, json: false, artifactBase: 'https://assets.0x88.app' };
+  const args = { urls: [], rangeBytes: 1024, verifyBodies: false, json: false, artifactBase: 'https://assets.0x88.app' };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = argv[i + 1];
@@ -16,6 +16,7 @@ function parseArgs(argv) {
     if (arg === '--artifact-base' && next) { args.artifactBase = next; i += 1; continue; }
     if (arg === '--limit' && next) { args.limit = Number(next); i += 1; continue; }
     if (arg === '--range' && next) { args.rangeBytes = Number(next); i += 1; continue; }
+    if (arg === '--verify-bodies') { args.verifyBodies = true; continue; }
     if (arg === '--json') { args.json = true; continue; }
     if (arg === '-h' || arg === '--help') { usage(); process.exit(0); }
     throw new Error(`Unknown argument: ${arg}`);
@@ -34,6 +35,10 @@ function pickHeaders(headers) {
   return out;
 }
 
+function cachePolicyForUrl(url) {
+  return new URL(url).pathname.startsWith('/artifacts/sha256/') ? 'immutable' : 'mutable';
+}
+
 async function urlsFromRelease(path, limit, artifactBase) {
   const release = JSON.parse(await readFile(path, 'utf8'));
   const targets = [];
@@ -43,8 +48,10 @@ async function urlsFromRelease(path, limit, artifactBase) {
       const br = artifact.representations.find((entry) => entry.encoding === 'br');
       const rawUrl = artifact.logicalUrl ?? artifact.url ?? identity?.url;
       if (!rawUrl) continue;
+      const url = new URL(rawUrl, artifactBase).href;
       targets.push({
-        url: new URL(rawUrl, artifactBase).href,
+        url,
+        cachePolicy: cachePolicyForUrl(url),
         expected: {
           raw: artifact.raw,
           identity,
@@ -53,7 +60,10 @@ async function urlsFromRelease(path, limit, artifactBase) {
       });
       continue;
     }
-    if (artifact.artifactUrl) targets.push({ url: new URL(artifact.artifactUrl, artifactBase).href });
+    if (artifact.artifactUrl) {
+      const url = new URL(artifact.artifactUrl, artifactBase).href;
+      targets.push({ url, cachePolicy: cachePolicyForUrl(url) });
+    }
   }
   return Number.isFinite(limit) ? targets.slice(0, limit) : targets;
 }
@@ -107,6 +117,16 @@ function hasExpectedBodyMetadata(expected, representation) {
     && Number.isFinite(representation?.bytes);
 }
 
+function cacheControlDirectives(cacheControl) {
+  const directives = new Map();
+  for (const part of cacheControl.split(',')) {
+    const [rawName, rawValue] = part.trim().split('=', 2);
+    if (!rawName) continue;
+    directives.set(rawName.toLowerCase(), rawValue?.replace(/^"|"$/g, '') ?? true);
+  }
+  return directives;
+}
+
 function validateRow(row) {
   const failures = [];
   if (row.firstHead.status < 200 || row.firstHead.status >= 400) failures.push(`first HEAD status ${row.firstHead.status}`);
@@ -114,7 +134,21 @@ function validateRow(row) {
   if (row.firstHead.headers['set-cookie'] || row.secondHead.headers['set-cookie'] || row.range.headers['set-cookie']) failures.push('artifact response must not set cookies');
   if (!row.firstHead.headers['content-length'] && !row.firstHead.headers['x-artifact-content-length']) failures.push('missing Content-Length or X-Artifact-Content-Length on HEAD');
   const cacheControl = row.firstHead.headers['cache-control'] ?? '';
-  if (!/\bimmutable\b/i.test(cacheControl) || !/\bmax-age=31536000\b/i.test(cacheControl)) failures.push(`artifact cache policy is not immutable: ${cacheControl || 'missing'}`);
+  const cacheDirectives = cacheControlDirectives(cacheControl);
+  if (row.cachePolicy === 'immutable') {
+    if (!cacheDirectives.has('immutable') || cacheDirectives.get('max-age') !== '31536000') {
+      failures.push(`physical artifact cache policy is not immutable: ${cacheControl || 'missing'}`);
+    }
+  } else {
+    const maxAgeValue = cacheDirectives.get('max-age');
+    const maxAge = typeof maxAgeValue === 'string' && /^\d+$/.test(maxAgeValue) ? Number(maxAgeValue) : undefined;
+    const revalidationSafe = cacheDirectives.has('no-cache')
+      || cacheDirectives.has('no-store')
+      || (Number.isFinite(maxAge) && maxAge <= 300);
+    if (cacheDirectives.has('immutable') || !revalidationSafe) {
+      failures.push(`logical alias cache policy is not short or revalidation-safe: ${cacheControl || 'missing'}`);
+    }
+  }
   if (!row.firstHead.headers.etag) failures.push('missing ETag on HEAD');
   if (!row.secondHead.headers.age) failures.push('missing Age on repeated HEAD');
   const cfCacheStatus = row.secondHead.headers['cf-cache-status']?.toUpperCase();
@@ -154,8 +188,8 @@ function validateRow(row) {
   if (identityEncoding && identityEncoding !== 'identity') failures.push(`identity probe returned Content-Encoding: ${identityEncoding}`);
   if (row.brHead.status < 200 || row.brHead.status >= 400) failures.push(`br HEAD status ${row.brHead.status}`);
   if (row.expected) {
-    const verifyIdentityBody = hasExpectedBodyMetadata(row.expected, row.expected.identity);
-    const verifyBrBody = hasExpectedBodyMetadata(row.expected, row.expected.br);
+    const verifyIdentityBody = row.verifyBodies && hasExpectedBodyMetadata(row.expected, row.expected.identity);
+    const verifyBrBody = row.verifyBodies && hasExpectedBodyMetadata(row.expected, row.expected.br);
     if (verifyIdentityBody && (row.identityBody.status < 200 || row.identityBody.status >= 400)) failures.push(`identity body status ${row.identityBody.status}`);
     if (verifyBrBody && (row.brBody.status < 200 || row.brBody.status >= 400)) failures.push(`br body status ${row.brBody.status}`);
     const expectedRawBytes = row.expected.raw?.bytes;
@@ -198,15 +232,16 @@ function validateRow(row) {
 }
 
 async function validateUrl(target, rangeBytes) {
-  const { url, expected } = target;
+  const { url, expected, verifyBodies } = target;
+  const cachePolicy = target.cachePolicy ?? cachePolicyForUrl(url);
   const firstHead = await head(url);
   const secondHead = await head(url);
   const range = await rangeGet(url, rangeBytes);
   const identityHead = await head(url, 'identity');
   const brHead = await head(url, 'br');
-  const identityBody = hasExpectedBodyMetadata(expected, expected?.identity) ? await hashGet(url, 'identity') : undefined;
-  const brBody = hasExpectedBodyMetadata(expected, expected?.br) ? await hashGet(url, 'br') : undefined;
-  const row = { url, ...(expected ? { expected } : {}), firstHead, secondHead, range, identityHead, brHead, identityBody, brBody };
+  const identityBody = verifyBodies && hasExpectedBodyMetadata(expected, expected?.identity) ? await hashGet(url, 'identity') : undefined;
+  const brBody = verifyBodies && hasExpectedBodyMetadata(expected, expected?.br) ? await hashGet(url, 'br') : undefined;
+  const row = { url, cachePolicy, verifyBodies, ...(expected ? { expected } : {}), firstHead, secondHead, range, identityHead, brHead, identityBody, brBody };
   const failures = validateRow(row);
   return { ...row, ok: failures.length === 0, failures };
 }
@@ -214,7 +249,10 @@ async function validateUrl(target, rangeBytes) {
 async function main() {
   const args = parseArgs(process.argv);
   const releaseTargets = args.release ? await urlsFromRelease(args.release, args.limit, args.artifactBase) : [];
-  const targets = [...args.urls.map((url) => ({ url })), ...releaseTargets];
+  const targets = [
+    ...args.urls.map((url) => ({ url, cachePolicy: cachePolicyForUrl(url) })),
+    ...releaseTargets,
+  ].map((target) => ({ ...target, verifyBodies: args.verifyBodies }));
   if (!targets.length) throw new Error('No artifact URLs to validate');
   const rows = [];
   for (const target of targets) rows.push(await validateUrl(target, args.rangeBytes));

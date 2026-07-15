@@ -43,7 +43,7 @@ async function runV2BodyValidationCase({ identityBody, brDecodedBody }) {
     }
     const wantsBr = req.headers['accept-encoding']?.split(',').some((entry) => entry.trim() === 'br') && !req.headers.range;
     const headers = {
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400',
       'Content-Type': 'application/octet-stream',
       'Content-Length': String(wantsBr ? brBody.length : identityBody.length),
       'X-Artifact-Content-Length': String(expectedBody.length),
@@ -99,22 +99,24 @@ async function runV2BodyValidationCase({ identityBody, brDecodedBody }) {
       '--release', releasePath,
       '--artifact-base', `http://127.0.0.1:${port}`,
       '--range', '4',
+      '--verify-bodies',
     ]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
 }
 
-test('validate_artifact_cdn_headers accepts cacheable ranged artifacts', async () => {
+test('validate_artifact_cdn_headers accepts short-cache logical aliases without full body downloads', async () => {
   const body = Buffer.from('abcdefghijklmnopqrstuvwxyz');
   let fullBodyGets = 0;
+  let cacheControl = 'public, max-age=300, stale-while-revalidate=86400';
   const server = createServer((req, res) => {
     if (req.url !== '/artifact.wasm') {
       res.writeHead(404).end();
       return;
     }
     const headers = {
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': cacheControl,
       'Content-Type': 'application/wasm',
       'Content-Length': String(body.length),
       'Accept-Ranges': 'bytes',
@@ -185,6 +187,11 @@ test('validate_artifact_cdn_headers accepts cacheable ranged artifacts', async (
     const v1Result = await runValidator(['--release', releasePath, '--range', '4']);
     assert.equal(v1Result.status, 0, v1Result.stderr);
     assert.equal(fullBodyGets, 0);
+
+    cacheControl = 'public, max-age=31536000, immutable';
+    const rejected = await runValidator(['--url', `http://127.0.0.1:${port}/artifact.wasm`, '--range', '4']);
+    assert.notEqual(rejected.status, 0);
+    assert.ok(JSON.parse(rejected.stdout).rows[0].failures.some((failure) => /logical alias cache policy is not short or revalidation-safe/.test(failure)));
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -198,7 +205,7 @@ test('validate_artifact_cdn_headers accepts worker artifact length when HEAD is 
       return;
     }
     const headers = {
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400',
       'Content-Type': 'application/json',
       'X-Artifact-Content-Length': String(body.length),
       'Accept-Ranges': 'bytes',
@@ -255,6 +262,7 @@ test('validate_artifact_cdn_headers verifies v2 Brotli negotiation and Range ide
   const brBody = brotliCompressSync(body);
   const brSha = createHash('sha256').update(brBody).digest('hex');
   const brBytes = brBody.length;
+  let fullBodyGets = 0;
   const server = createServer((req, res) => {
     if (req.url !== '/models/lc0/model.onnx') {
       res.writeHead(404).end();
@@ -262,7 +270,7 @@ test('validate_artifact_cdn_headers verifies v2 Brotli negotiation and Range ide
     }
     const wantsBr = req.headers['accept-encoding']?.split(',').some((entry) => entry.trim() === 'br') && !req.headers.range;
     const headers = {
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400',
       'Content-Type': 'application/octet-stream',
       'Content-Length': String(wantsBr ? brBytes : body.length),
       'X-Artifact-Content-Length': String(body.length),
@@ -295,6 +303,7 @@ test('validate_artifact_cdn_headers verifies v2 Brotli negotiation and Range ide
       res.end(body.subarray(start, end + 1));
       return;
     }
+    fullBodyGets += 1;
     res.writeHead(200, headers);
     res.end(wantsBr ? brBody : body);
   });
@@ -334,8 +343,59 @@ test('validate_artifact_cdn_headers verifies v2 Brotli negotiation and Range ide
     assert.equal(parsed.rows[0].brHead.headers['content-encoding'], 'br');
     assert.equal(parsed.rows[0].identityHead.headers['content-encoding'], undefined);
     assert.equal(parsed.rows[0].range.headers['content-encoding'], undefined);
-    assert.equal(parsed.rows[0].identityBody.sha256, rawSha);
-    assert.equal(parsed.rows[0].brBody.sha256, rawSha);
+    assert.equal(parsed.rows[0].cachePolicy, 'mutable');
+    assert.equal(parsed.rows[0].identityBody, undefined);
+    assert.equal(parsed.rows[0].brBody, undefined);
+    assert.equal(fullBodyGets, 0);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('validate_artifact_cdn_headers requires immutable caching for physical representation URLs', async () => {
+  const body = Buffer.from('abcdefghijklmnopqrstuvwxyz');
+  const rawSha = createHash('sha256').update(body).digest('hex');
+  let cacheControl = 'public, max-age=31536000, immutable';
+  const path = `/artifacts/sha256/${rawSha}/identity`;
+  const server = createServer((req, res) => {
+    if (req.url !== path) {
+      res.writeHead(404).end();
+      return;
+    }
+    const headers = {
+      'Cache-Control': cacheControl,
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(body.length),
+      'Accept-Ranges': 'bytes',
+      ETag: '"physical-artifact"',
+      Age: '10',
+      'CF-Cache-Status': 'HIT',
+      'Access-Control-Allow-Origin': '*',
+      'Cross-Origin-Resource-Policy': 'cross-origin',
+      'Timing-Allow-Origin': 'https://0x88.app',
+      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length',
+    };
+    if (req.method === 'HEAD') {
+      res.writeHead(200, headers).end();
+      return;
+    }
+    const match = req.headers.range?.match(/^bytes=(\d+)-(\d+)$/);
+    const start = Number(match?.[1] ?? 0);
+    const end = Math.min(Number(match?.[2] ?? body.length - 1), body.length - 1);
+    res.writeHead(206, { ...headers, 'Content-Length': String(end - start + 1), 'Content-Range': `bytes ${start}-${end}/${body.length}` });
+    res.end(body.subarray(start, end + 1));
+  });
+  const port = await listen(server);
+  try {
+    const url = `http://127.0.0.1:${port}${path}`;
+    const accepted = await runValidator(['--url', url, '--range', '4']);
+    assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
+    assert.equal(JSON.parse(accepted.stdout).rows[0].cachePolicy, 'immutable');
+
+    cacheControl = 'public, max-age=300, stale-while-revalidate=86400';
+    const rejected = await runValidator(['--url', url, '--range', '4']);
+    assert.notEqual(rejected.status, 0);
+    assert.ok(JSON.parse(rejected.stdout).rows[0].failures.some((failure) => /physical artifact cache policy is not immutable/.test(failure)));
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

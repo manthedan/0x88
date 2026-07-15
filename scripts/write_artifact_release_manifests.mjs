@@ -24,9 +24,10 @@ const DEFAULT_SOURCE_MANIFESTS = [
   'public/plentychess/plentychess-emscripten-single-thread.manifest.json',
   'public/stormphrax/stormphrax-emscripten-single-thread.manifest.json',
 ];
+const DEFAULT_OUTPUT_DIRECTORY = '.local-dev-artifacts/artifact-releases';
 
 function usage() {
-  console.log(`Usage: node scripts/write_artifact_release_manifests.mjs [options]\n\nOptions:\n  --root DIR             Repository root (default .)\n  --release-id ID        Immutable release id (default date + git short sha)\n  --channel NAME         Channel name to write (default stable)\n  --out-dir DIR          Public output root (default public under --root)\n  --asset-origin URL     Absolute asset origin prefix (default https://assets.0x88.app)\n  --manifest PATH        Source manifest to include; may be repeated\n  --base-release PATH    Carry forward immutable entries from an existing v1/v2 release\n  --generated-at ISO     Override generatedAt for reproducible checks\n  --no-brotli            Emit identity representations only\n  --brotli-quality N     Brotli quality 0-11 (default 5)\n  --check                Verify existing outputs match instead of writing\n  -h, --help             Show help\n`);
+  console.log(`Usage: node scripts/write_artifact_release_manifests.mjs [options]\n\nOptions:\n  --root DIR             Repository root (default .)\n  --release-id ID        Immutable release id (default date + git short sha)\n  --channel NAME         Channel name to write (default stable)\n  --out-dir DIR          Staging output root (default .local-dev-artifacts/artifact-releases under --root)\n  --asset-origin URL     Absolute asset origin prefix (default https://assets.0x88.app)\n  --manifest PATH        Source manifest to include; may be repeated\n  --base-release PATH    Carry forward immutable entries from an existing v1/v2 release\n  --generated-at ISO     Override generatedAt for reproducible checks\n  --no-brotli            Emit identity representations only\n  --brotli-quality N     Brotli quality 0-11 (default 5)\n  --check                Verify existing outputs match instead of writing\n  -h, --help             Show help\n`);
 }
 
 function parseArgs(argv) {
@@ -50,7 +51,7 @@ function parseArgs(argv) {
   }
   if (!args.releaseId) args.releaseId = defaultReleaseId(args.root);
   if (!args.assetOrigin) args.assetOrigin = process.env.LC0_ARTIFACT_ASSET_ORIGIN ?? 'https://assets.0x88.app';
-  if (!args.outDir) args.outDir = join(args.root, 'public');
+  if (!args.outDir) args.outDir = join(args.root, DEFAULT_OUTPUT_DIRECTORY);
   if (!args.manifests.length) args.manifests = DEFAULT_SOURCE_MANIFESTS;
   if (!/^[A-Za-z0-9._-]+$/.test(args.releaseId)) {
     throw new Error('--release-id must contain only letters, numbers, dots, underscores, and hyphens');

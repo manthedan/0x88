@@ -37,7 +37,7 @@ This policy applies to LC0 browser model/engine artifacts published through cont
 
 To roll back from release `bad` to release `good`:
 
-1. Confirm `public/releases/good.json` or the hosted equivalent still exists.
+1. Confirm `.local-dev-artifacts/artifact-releases/releases/good.json` or the hosted equivalent still exists.
 2. Confirm the blobs referenced by `good` are still present under `/artifacts/sha256/*`.
 3. Update `/channels/stable.json` to reference `/releases/good.json`.
 4. Purge only `/channels/stable.json` if immediate propagation is required.
@@ -74,9 +74,9 @@ Deleting `artifacts/sha256/*` candidates requires both `--delete-category hashed
 
 ## Tooling hooks
 
-- `scripts/write_artifact_release_manifests.mjs` verifies local file byte counts and SHA-256, emits v2 SHA-only identity/Brotli representation maps, deduplicates equal decoded bodies, refuses unsafe release/channel names, refuses to replace an existing release manifest, and atomically replaces mutable local channel pointers.
+- `scripts/write_artifact_release_manifests.mjs` verifies local file byte counts and SHA-256, emits v2 SHA-only identity/Brotli representation maps under ignored `.local-dev-artifacts/artifact-releases/` staging by default, deduplicates equal decoded bodies, refuses unsafe release/channel names, refuses to replace an existing release manifest, and atomically replaces mutable local channel pointers.
 - `scripts/publish_hashed_artifacts_to_r2.mjs` reads v1 and v2 releases, verifies local encoded bytes and representation keys, deduplicates shared representation objects, treats an identical existing release manifest as an idempotent retry, refuses a differing release body, and publishes the mutable channel manifest last when `--channel-manifest` is provided.
-- `scripts/validate_artifact_cdn_headers.mjs` validates HEAD, repeated HEAD, range, CORS/CORP, timing, no-cookie, cache-status, and encoding behavior.
+- `scripts/validate_artifact_cdn_headers.mjs` validates HEAD, repeated HEAD, range, target-aware cache policy, CORS/CORP, timing, no-cookie, cache-status, and encoding behavior. Full identity and decoded Brotli hashes require the explicit `--verify-bodies` integrity mode.
 - `scripts/plan_r2_artifact_cleanup.mjs` lists R2 objects through the Cloudflare API, compares them against retained release manifests, and defaults to a no-delete cleanup plan.
 
 Actual production uploads should use an R2 role that can put new objects but should be treated operationally as write-once for `/artifacts/sha256/*`.
