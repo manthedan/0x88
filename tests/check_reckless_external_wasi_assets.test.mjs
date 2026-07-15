@@ -36,6 +36,9 @@ test('Reckless external WASI prototype has explicit build, release, publish, and
   const hostedArtifacts = await readFile('docs/hosted_artifacts.md', 'utf8');
   assert.match(hostedArtifacts, /Production must run `npm run reckless:build-release`, which generates the release manifest/);
 
+  const benchmarkNotes = await readFile('docs/reckless_browser_benchmarks.md', 'utf8');
+  assert.match(benchmarkNotes, /release pipeline running `npm run reckless:build-release`/);
+
   const engineCatalog = await readFile('docs/engine_catalog.md', 'utf8');
   assert.match(engineCatalog, /^npm run reckless:build-release && npm run reckless:build-lite-wasi$/m);
 });
