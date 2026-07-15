@@ -48,7 +48,7 @@ async function existingShardIsValid(path, expectedBytes, expectedSha256) {
 async function writeShardVerified(path, bytes, sha256) {
   if (await existingShardIsValid(path, bytes.byteLength, sha256)) return false;
   await mkdir(dirname(path), { recursive: true });
-  const temporaryPath = `${path}.tmp-${process.pid}-${Date.now()}`;
+  const temporaryPath = `${path}.tmp-${process.pid}-${randomUUID()}`;
   try {
     await writeFile(temporaryPath, bytes, { flag: 'wx' });
     await rename(temporaryPath, path);
@@ -61,16 +61,11 @@ async function writeShardVerified(path, bytes, sha256) {
 
 export async function writeFileAtomically(path, bytes, renameFile = rename) {
   const temporaryPath = `${path}.tmp-${process.pid}-${randomUUID()}`;
-  let temporaryCreated = false;
   try {
     await writeFile(temporaryPath, bytes, { flag: 'wx' });
-    temporaryCreated = true;
     await renameFile(temporaryPath, path);
-    temporaryCreated = false;
   } catch (error) {
-    if (temporaryCreated) {
-      try { await unlink(temporaryPath); } catch { /* best-effort cleanup of this script's exact temporary file */ }
-    }
+    try { await unlink(temporaryPath); } catch { /* best-effort cleanup of this script's exact temporary file */ }
     throw error;
   }
 }
