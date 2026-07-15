@@ -153,6 +153,8 @@ export interface Lc0ResumableModelLoadOptions {
   signal?: AbortSignal;
   fetchFn?: typeof fetch;
   shardStore?: Lc0ModelShardStore;
+  /** Maximum decoded manifest bytes. Defaults to 1 MiB; set to Infinity to disable. */
+  maxManifestBytes?: number;
   /** Persistent research shard-cache bounds. Set to Infinity to disable a bound. */
   maxCacheEntries?: number;
   maxCacheBytes?: number;
@@ -913,6 +915,7 @@ const DEFAULT_RESUMABLE_SHARD_CONCURRENCY = 3;
 const DEFAULT_RESUMABLE_CORRUPTION_RETRIES = 1;
 const DEFAULT_RESUMABLE_MAX_CACHE_ENTRIES = 64;
 const DEFAULT_RESUMABLE_MAX_CACHE_BYTES = 1_000_000_000;
+const DEFAULT_RESUMABLE_MAX_MANIFEST_BYTES = 1024 * 1024;
 const DEFAULT_RESUMABLE_MAX_DECODED_BYTES = 1_000_000_000;
 const DEFAULT_RESUMABLE_MAX_SHARD_REFERENCES = 64;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/i;
@@ -966,12 +969,17 @@ class CacheStorageModelShardStore implements Lc0ModelShardStore {
         'x-lc0-shard-bytes': String(bytes.byteLength),
       },
     }));
-    await cache.put(resumableShardMetadataKey(sha256), new Response(JSON.stringify({
-      bytes: bytes.byteLength,
-      lastUsedAt: epochMs(),
-    }), {
-      headers: { 'content-type': 'application/json' },
-    }));
+    try {
+      await cache.put(resumableShardMetadataKey(sha256), new Response(JSON.stringify({
+        bytes: bytes.byteLength,
+        lastUsedAt: epochMs(),
+      }), {
+        headers: { 'content-type': 'application/json' },
+      }));
+    } catch {
+      // Retention metadata is optional. The persisted body remains valid and
+      // list() can recover its byte count from x-lc0-shard-bytes.
+    }
   }
 
   async delete(sha256: string): Promise<void> {
@@ -1223,6 +1231,62 @@ async function readBoundedShardResponse(
   return loaded === expectedBytes ? target.buffer : target.buffer.slice(0, loaded);
 }
 
+async function readBoundedResumableManifest(
+  response: Response,
+  maxBytes: number,
+  signal: AbortSignal | undefined,
+): Promise<unknown> {
+  const contentLengthHeader = response.headers.get('content-length');
+  const contentLength = Number(contentLengthHeader);
+  if (response.headers.get('content-encoding') === null
+    && contentLengthHeader !== null
+    && Number.isFinite(contentLength)
+    && contentLength > maxBytes) {
+    try {
+      await response.body?.cancel(`Manifest response exceeds configured limit ${maxBytes} bytes`);
+    } catch {
+      // The response is already rejected as oversized even if cancellation fails.
+    }
+    throw new Error(`Resumable model shard manifest exceeded configured limit ${maxBytes} bytes`);
+  }
+  if (!response.body) throw new Error('Resumable model shard manifest response body is unavailable');
+  const reader = response.body.getReader();
+  const onAbort = (): void => {
+    void reader.cancel('The operation was aborted').catch(() => {});
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  const chunks: Uint8Array[] = [];
+  let loaded = 0;
+  try {
+    for (;;) {
+      throwIfAborted(signal);
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (loaded + value.byteLength > maxBytes) {
+        try {
+          await reader.cancel(`Manifest response exceeds configured limit ${maxBytes} bytes`);
+        } catch {
+          // The response is already rejected as oversized even if cancellation fails.
+        }
+        throw new Error(`Resumable model shard manifest exceeded configured limit ${maxBytes} bytes`);
+      }
+      chunks.push(value);
+      loaded += value.byteLength;
+    }
+    throwIfAborted(signal);
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(loaded);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder('utf-8').decode(bytes)) as unknown;
+}
+
 function isOversizedResumableShardResponse(error: unknown): boolean {
   return error instanceof Error
     && error.message.startsWith('Resumable model shard response exceeded expected length');
@@ -1361,6 +1425,11 @@ export async function loadResumableLc0ModelForOrt(
   const retryLimit = Math.max(0, Math.min(3, Math.floor(options.corruptionRetries ?? DEFAULT_RESUMABLE_CORRUPTION_RETRIES)));
   const maxCacheEntries = normalizedResumableCacheBound(options.maxCacheEntries, DEFAULT_RESUMABLE_MAX_CACHE_ENTRIES);
   const maxCacheBytes = normalizedResumableCacheBound(options.maxCacheBytes, DEFAULT_RESUMABLE_MAX_CACHE_BYTES);
+  const maxManifestBytes = normalizedResumableManifestLimit(
+    options.maxManifestBytes,
+    DEFAULT_RESUMABLE_MAX_MANIFEST_BYTES,
+    'maxManifestBytes',
+  );
   const maxDecodedBytes = normalizedResumableManifestLimit(
     options.maxDecodedBytes,
     DEFAULT_RESUMABLE_MAX_DECODED_BYTES,
@@ -1382,7 +1451,7 @@ export async function loadResumableLc0ModelForOrt(
   const manifestResponse = await fetchFn(manifestUrl, { cache: 'no-cache', signal: options.signal });
   if (!manifestResponse.ok) throw new Error(`Resumable model shard manifest fetch failed: ${manifestResponse.status}`);
   const manifest = validateResumableModelShardManifest(
-    await manifestResponse.json(),
+    await readBoundedResumableManifest(manifestResponse, maxManifestBytes, options.signal),
     maxDecodedBytes,
     maxShardReferences,
   );

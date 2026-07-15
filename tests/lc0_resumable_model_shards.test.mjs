@@ -163,6 +163,7 @@ class FakeShardCache {
     this.bodyStreamReads = 0;
     this.bodyPuts = 0;
     this.metadataPuts = 0;
+    this.failMetadataPuts = false;
     this.deleted = [];
   }
 
@@ -206,6 +207,10 @@ class FakeShardCache {
 
   async put(request, response) {
     const url = request.url ?? request;
+    if (url.includes('/metadata/') && this.failMetadataPuts) {
+      this.metadataPuts += 1;
+      throw new Error('forced metadata cache.put failure');
+    }
     const bytes = Buffer.from(await response.arrayBuffer());
     this.entries.set(url, { bytes, headers: new Headers(response.headers) });
     if (url.includes('/metadata/')) this.metadataPuts += 1;
@@ -489,6 +494,8 @@ test('manifest allocation limits reject amplification before shard access', asyn
 
   await t.test('invalid allocation limit options reject before the manifest fetch', async () => {
     for (const options of [
+      { maxManifestBytes: -1 },
+      { maxManifestBytes: 1.5 },
       { maxDecodedBytes: -1 },
       { maxDecodedBytes: 1.5 },
       { maxShardReferences: -1 },
@@ -508,6 +515,102 @@ test('manifest allocation limits reject amplification before shard access', asyn
       );
       assert.equal(fetches, 0);
     }
+  });
+});
+
+test('remote manifest bodies are bounded before JSON parsing and validation', async (t) => {
+  const manifestUrl = 'https://models.example/research/bounded-manifest.resumable.json';
+
+  await t.test('oversized unencoded Content-Length rejects before reading', async () => {
+    let cancelled = false;
+    await assert.rejects(
+      loadResumableLc0ModelForOrt(manifestUrl, {
+        researchOnly: true,
+        maxManifestBytes: 32,
+        shardStore: new MemoryShardStore(),
+        fetchFn: async () => new Response(new ReadableStream({
+          pull(controller) {
+            controller.enqueue(Buffer.from('{}'));
+            controller.close();
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }), {
+          headers: { 'content-length': '33' },
+        }),
+      }),
+      /manifest exceeded configured limit 32 bytes/,
+    );
+    assert.equal(cancelled, true);
+  });
+
+  await t.test('oversized streamed body is cancelled before parsing', async () => {
+    let cancelled = false;
+    await assert.rejects(
+      loadResumableLc0ModelForOrt(manifestUrl, {
+        researchOnly: true,
+        maxManifestBytes: 32,
+        shardStore: new MemoryShardStore(),
+        fetchFn: async () => new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(Buffer.alloc(33, 0x7b));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        })),
+      }),
+      /manifest exceeded configured limit 32 bytes/,
+    );
+    assert.equal(cancelled, true);
+  });
+
+  await t.test('content-encoded responses ignore encoded length but bound decoded bytes', async () => {
+    const bytes = Buffer.of(0x3b);
+    const manifest = singleShardManifest(bytes);
+    const manifestBody = JSON.stringify(manifest);
+    const maxManifestBytes = Buffer.byteLength(manifestBody);
+    const store = new MemoryShardStore([{
+      sha256: manifest.shards[0].sha256,
+      bytes: bytes.buffer,
+    }]);
+    const result = await loadResumableLc0ModelForOrt(manifestUrl, {
+      researchOnly: true,
+      maxManifestBytes,
+      shardStore: store,
+      fetchFn: async () => new Response(manifestBody, {
+        headers: {
+          'content-encoding': 'gzip',
+          'content-length': String(maxManifestBytes + 1),
+        },
+      }),
+    });
+    assert.deepEqual(Buffer.from(result.model), bytes);
+
+    let cancelled = false;
+    await assert.rejects(
+      loadResumableLc0ModelForOrt(manifestUrl, {
+        researchOnly: true,
+        maxManifestBytes: maxManifestBytes - 1,
+        shardStore: store,
+        fetchFn: async () => new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(Buffer.from(manifestBody));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }), {
+          headers: {
+            'content-encoding': 'gzip',
+            'content-length': '1',
+          },
+        }),
+      }),
+      new RegExp(`manifest exceeded configured limit ${maxManifestBytes - 1} bytes`),
+    );
+    assert.equal(cancelled, true);
   });
 });
 
@@ -1117,6 +1220,47 @@ test('Cache Storage LRU touch writes metadata once without replaying the shard b
     const cleared = await clearResumableLc0ModelShardCache({ researchOnly: true });
     assert.equal(cleared.removedEntries, 1, 'cleanup does not count metadata keys as shard bodies');
     assert.equal(cache.entries.size, 0);
+  } finally {
+    globalThis.caches = originalCaches;
+    globalThis.location = originalLocation;
+  }
+});
+
+test('Cache Storage metadata put failure does not invalidate a persisted shard body', async () => {
+  const bytes = Buffer.of(0x64);
+  const manifest = singleShardManifest(bytes);
+  const manifestUrl = 'https://models.example/research/metadata-put-failure.resumable.json';
+  const shardUrl = new URL(manifest.shards[0].url, manifestUrl).href;
+  const hash = manifest.shards[0].sha256;
+  const bodyUrl = `http://localhost/__lc0-resumable-model-shards__/sha256/${hash}`;
+  const metadataUrl = `http://localhost/__lc0-resumable-model-shards__/metadata/sha256/${hash}`;
+  const cache = new FakeShardCache();
+  cache.failMetadataPuts = true;
+  const originalCaches = globalThis.caches;
+  const originalLocation = globalThis.location;
+  globalThis.caches = new FakeShardCacheStorage(cache);
+  globalThis.location = { href: 'http://localhost/' };
+  try {
+    const result = await loadResumableLc0ModelForOrt(manifestUrl, {
+      researchOnly: true,
+      concurrency: 1,
+      corruptionRetries: 0,
+      maxCacheEntries: Infinity,
+      maxCacheBytes: Infinity,
+      fetchFn: async (input) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url === manifestUrl) return new Response(JSON.stringify(manifest));
+        if (url === shardUrl) return new Response(bytes);
+        return new Response(null, { status: 404 });
+      },
+    });
+    assert.deepEqual(Buffer.from(result.model), bytes);
+    assert.equal(result.downloadedShards, 1);
+    assert.equal(cache.bodyPuts, 1);
+    assert.equal(cache.metadataPuts, 1);
+    assert.equal(cache.entries.has(bodyUrl), true);
+    assert.equal(cache.entries.has(metadataUrl), false);
+    assert.equal(cache.entries.get(bodyUrl).headers.get('x-lc0-shard-bytes'), String(bytes.byteLength));
   } finally {
     globalThis.caches = originalCaches;
     globalThis.location = originalLocation;
