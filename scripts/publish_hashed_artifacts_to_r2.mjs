@@ -330,6 +330,7 @@ async function createReleaseManifestAtomically(args, item) {
     '--cache-control', item.cacheControl,
     '--if-none-match', '*',
     '--endpoint-url', args.r2Endpoint,
+    '--region', 'auto',
   ], { encoding: 'utf8' });
   const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
   if (child.status !== 0 && !isConditionalCreateConflict(output)) {

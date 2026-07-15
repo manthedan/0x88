@@ -79,7 +79,12 @@ import { dirname, join } from 'node:path';
 
 const args = process.argv.slice(2);
 if (process.env.LOG) appendFileSync(process.env.LOG, \`\${args.join(' ')}\\n\`);
-if (args[0] !== 's3api' || args[1] !== 'put-object' || args[args.indexOf('--if-none-match') + 1] !== '*') process.exit(2);
+if (
+  args[0] !== 's3api'
+  || args[1] !== 'put-object'
+  || args[args.indexOf('--if-none-match') + 1] !== '*'
+  || args[args.indexOf('--region') + 1] !== 'auto'
+) process.exit(2);
 const bucket = args[args.indexOf('--bucket') + 1];
 const key = args[args.indexOf('--key') + 1];
 const file = args[args.indexOf('--body') + 1];
@@ -583,7 +588,7 @@ test('publish_hashed_artifacts_to_r2 uploads v2 Brotli bodies with Content-Encod
     const log = await readFile(logPath, 'utf8');
     assert.match(log, new RegExp(`r2 object put test-bucket/artifacts/sha256/${ABC_SHA256}/identity`));
     assert.match(log, /\/br\/[a-f0-9]{64} .*--content-encoding br --remote/);
-    assert.match(log, /s3api put-object --bucket test-bucket --key releases\/v2-execute\.json .*--if-none-match \*/);
+    assert.match(log, /s3api put-object --bucket test-bucket --key releases\/v2-execute\.json .*--if-none-match \* .*--endpoint-url https:\/\/r2\.invalid --region auto/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
