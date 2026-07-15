@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { constants } from 'node:fs';
-import { access, mkdir, open, rename, unlink, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { mkdir, open, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -33,27 +33,25 @@ function parseArgs(argv) {
   };
 }
 
-async function exists(path) {
+async function existingShardIsValid(path, expectedBytes, expectedSha256) {
   try {
-    await access(path, constants.F_OK);
-    return true;
-  } catch {
+    if ((await stat(path)).size !== expectedBytes) return false;
+    const hash = createHash('sha256');
+    for await (const chunk of createReadStream(path)) hash.update(chunk);
+    return hash.digest('hex') === expectedSha256;
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
     return false;
   }
 }
 
-async function writeShardOnce(path, bytes) {
-  if (await exists(path)) return false;
+async function writeShardVerified(path, bytes, sha256) {
+  if (await existingShardIsValid(path, bytes.byteLength, sha256)) return false;
   await mkdir(dirname(path), { recursive: true });
   const temporaryPath = `${path}.tmp-${process.pid}-${Date.now()}`;
   try {
     await writeFile(temporaryPath, bytes, { flag: 'wx' });
-    try {
-      await rename(temporaryPath, path);
-    } catch (error) {
-      if (!await exists(path)) throw error;
-      await unlink(temporaryPath);
-    }
+    await rename(temporaryPath, path);
   } catch (error) {
     try { await unlink(temporaryPath); } catch { /* best-effort cleanup of this script's exact temporary file */ }
     throw error;
@@ -85,7 +83,7 @@ export async function generateResumableModelShards({ inputPath, outputDir, chunk
       fullHash.update(bytes);
       const sha256 = createHash('sha256').update(bytes).digest('hex');
       const shardPath = join(outputDir, 'shards', 'sha256', `${sha256}.bin`);
-      if (await writeShardOnce(shardPath, bytes)) uniqueBytesWritten += bytes.byteLength;
+      if (await writeShardVerified(shardPath, bytes, sha256)) uniqueBytesWritten += bytes.byteLength;
       else deduplicatedShards += 1;
       shards.push({
         bytes: bytes.byteLength,

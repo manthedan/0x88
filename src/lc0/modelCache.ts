@@ -130,6 +130,8 @@ export interface Lc0ModelShardStore {
   get(sha256: string): Promise<ArrayBuffer | undefined>;
   put(sha256: string, bytes: ArrayBuffer): Promise<void>;
   delete(sha256: string): Promise<void>;
+  list?(): Promise<Array<{ sha256: string; bytes: number; lastUsedAt?: number }>>;
+  clear?(): Promise<number>;
 }
 
 export interface Lc0ResumableModelProgress {
@@ -149,6 +151,11 @@ export interface Lc0ResumableModelLoadOptions {
   signal?: AbortSignal;
   fetchFn?: typeof fetch;
   shardStore?: Lc0ModelShardStore;
+  /** Persistent research shard-cache bounds. Set to Infinity to disable a bound. */
+  maxCacheEntries?: number;
+  maxCacheBytes?: number;
+  /** Minimum browser storage quota retained after shard caching. Defaults to 64 MiB. */
+  minimumFreeBytesAfterCache?: number;
   onProgress?: (progress: Lc0ResumableModelProgress) => void;
 }
 
@@ -898,6 +905,8 @@ const MAX_RESUMABLE_SHARD_BYTES = 32 * 1024 * 1024;
 const DEFAULT_RESUMABLE_SHARD_CACHE_NAME = 'lc0-browser-model-shards-research-v1';
 const DEFAULT_RESUMABLE_SHARD_CONCURRENCY = 3;
 const DEFAULT_RESUMABLE_CORRUPTION_RETRIES = 1;
+const DEFAULT_RESUMABLE_MAX_CACHE_ENTRIES = 64;
+const DEFAULT_RESUMABLE_MAX_CACHE_BYTES = 1_000_000_000;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/i;
 
 function abortError(): Error {
@@ -934,12 +943,160 @@ class CacheStorageModelShardStore implements Lc0ModelShardStore {
   }
 
   async put(sha256: string, bytes: ArrayBuffer): Promise<void> {
-    await (await this.cache()).put(resumableShardCacheKey(sha256), new Response(bytes));
+    await (await this.cache()).put(resumableShardCacheKey(sha256), new Response(bytes, {
+      headers: {
+        'x-lc0-shard-bytes': String(bytes.byteLength),
+        'x-lc0-shard-last-used': String(epochMs()),
+      },
+    }));
   }
 
   async delete(sha256: string): Promise<void> {
     await (await this.cache()).delete(resumableShardCacheKey(sha256));
   }
+
+  async list(): Promise<Array<{ sha256: string; bytes: number; lastUsedAt?: number }>> {
+    const cache = await this.cache();
+    const keys = await cache.keys();
+    const entries = await Promise.all(keys.map(async (request) => {
+      const match = /\/sha256\/([0-9a-f]{64})$/i.exec(new URL(request.url).pathname);
+      if (!match) return undefined;
+      const response = await cache.match(request);
+      if (!response) return undefined;
+      const headerBytes = Number(response.headers.get('x-lc0-shard-bytes'));
+      const headerLastUsedAt = Number(response.headers.get('x-lc0-shard-last-used'));
+      return {
+        sha256: match[1].toLowerCase(),
+        bytes: Number.isSafeInteger(headerBytes) && headerBytes >= 0
+          ? headerBytes
+          : (await response.arrayBuffer()).byteLength,
+        lastUsedAt: Number.isFinite(headerLastUsedAt) ? headerLastUsedAt : undefined,
+      };
+    }));
+    return entries.filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+  }
+
+  async clear(): Promise<number> {
+    const cache = await this.cache();
+    const removedEntries = (await cache.keys()).length;
+    await caches.delete(this.cacheName);
+    return removedEntries;
+  }
+}
+
+function normalizedResumableCacheBound(value: number | undefined, fallback: number): number {
+  if (value === Infinity) return Infinity;
+  const normalized = Math.floor(value ?? fallback);
+  if (!Number.isFinite(normalized) || normalized < 0) throw new Error('Resumable model shard cache bounds must be non-negative integers or Infinity');
+  return normalized;
+}
+
+async function enforceResumableShardCacheBounds(
+  store: Lc0ModelShardStore,
+  maxEntries: number,
+  maxBytes: number,
+  protectedHashes: ReadonlySet<string>,
+): Promise<void> {
+  if (!store.list || (maxEntries === Infinity && maxBytes === Infinity)) return;
+  const entries = await store.list();
+  let entryCount = entries.length;
+  let byteCount = entries.reduce((sum, entry) => sum + entry.bytes, 0);
+  const candidates = entries
+    .filter((entry) => !protectedHashes.has(entry.sha256))
+    .sort((a, b) => (a.lastUsedAt ?? 0) - (b.lastUsedAt ?? 0) || a.sha256.localeCompare(b.sha256));
+  for (const entry of candidates) {
+    if (entryCount <= maxEntries && byteCount <= maxBytes) break;
+    await store.delete(entry.sha256);
+    entryCount -= 1;
+    byteCount -= entry.bytes;
+  }
+}
+
+async function bestEffortEnforceResumableShardCacheBounds(
+  store: Lc0ModelShardStore,
+  maxEntries: number,
+  maxBytes: number,
+  protectedHashes: ReadonlySet<string>,
+): Promise<void> {
+  try {
+    await enforceResumableShardCacheBounds(store, maxEntries, maxBytes, protectedHashes);
+  } catch {
+    // Retention is best-effort. Integrity and reconstruction remain correct
+    // when cache enumeration or deletion is unavailable.
+  }
+}
+
+async function resumableShardQuotaAllows(expectedBytes: number, minimumFreeBytesAfterCache: number): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.storage?.estimate) return true;
+  try {
+    const estimate = await navigator.storage.estimate();
+    const quota = Number(estimate.quota);
+    const usage = Number(estimate.usage);
+    if (!Number.isFinite(quota) || !Number.isFinite(usage) || quota <= 0) return true;
+    return quota - usage - expectedBytes >= minimumFreeBytesAfterCache;
+  } catch {
+    return true;
+  }
+}
+
+async function ensureResumableShardQuota(
+  store: Lc0ModelShardStore,
+  expectedBytes: number,
+  minimumFreeBytesAfterCache: number,
+  protectedHashes: ReadonlySet<string>,
+): Promise<void> {
+  if (await resumableShardQuotaAllows(expectedBytes, minimumFreeBytesAfterCache)) return;
+  if (store.list) {
+    const candidates = (await store.list())
+      .filter((entry) => !protectedHashes.has(entry.sha256))
+      .sort((a, b) => (a.lastUsedAt ?? 0) - (b.lastUsedAt ?? 0) || a.sha256.localeCompare(b.sha256));
+    for (const entry of candidates) await store.delete(entry.sha256);
+  }
+  if (!await resumableShardQuotaAllows(expectedBytes, minimumFreeBytesAfterCache)) {
+    throw new Error(`Insufficient storage quota for resumable model shard (${expectedBytes} bytes)`);
+  }
+}
+
+async function readBoundedShardResponse(
+  response: Response,
+  expectedBytes: number,
+  signal: AbortSignal | undefined,
+  onBytes: (bytes: number) => void,
+): Promise<ArrayBuffer> {
+  const contentLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > expectedBytes) {
+    try {
+      await response.body?.cancel(`Shard response exceeds expected ${expectedBytes} bytes`);
+    } catch {
+      // The response is already rejected as oversized even if cancellation fails.
+    }
+    throw new Error(`Resumable model shard response exceeded expected length ${expectedBytes}`);
+  }
+  if (!response.body) throw new Error('Resumable model shard response body is unavailable');
+  const reader = response.body.getReader();
+  const target = new Uint8Array(expectedBytes);
+  let loaded = 0;
+  try {
+    for (;;) {
+      throwIfAborted(signal);
+      const { done, value } = await reader.read();
+      if (done) break;
+      onBytes(value.byteLength);
+      if (loaded + value.byteLength > expectedBytes) {
+        try {
+          await reader.cancel(`Shard response exceeds expected ${expectedBytes} bytes`);
+        } catch {
+          // The response is already rejected as oversized even if cancellation fails.
+        }
+        throw new Error(`Resumable model shard response exceeded expected length ${expectedBytes}`);
+      }
+      target.set(value, loaded);
+      loaded += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return loaded === expectedBytes ? target.buffer : target.buffer.slice(0, loaded);
 }
 
 function validateResumableModelShardManifest(value: unknown): Lc0ResumableModelShardManifest {
@@ -1029,6 +1186,12 @@ export async function loadResumableLc0ModelForOrt(
   if (!fetchFn) throw new Error('fetch is unavailable for resumable model shards');
   const concurrency = Math.max(1, Math.min(8, Math.floor(options.concurrency ?? DEFAULT_RESUMABLE_SHARD_CONCURRENCY)));
   const retryLimit = Math.max(0, Math.min(3, Math.floor(options.corruptionRetries ?? DEFAULT_RESUMABLE_CORRUPTION_RETRIES)));
+  const maxCacheEntries = normalizedResumableCacheBound(options.maxCacheEntries, DEFAULT_RESUMABLE_MAX_CACHE_ENTRIES);
+  const maxCacheBytes = normalizedResumableCacheBound(options.maxCacheBytes, DEFAULT_RESUMABLE_MAX_CACHE_BYTES);
+  const minimumFreeBytesAfterCache = normalizedResumableCacheBound(
+    options.minimumFreeBytesAfterCache,
+    DEFAULT_CACHE_FREE_BYTES_RESERVE,
+  );
   const store = options.shardStore ?? new CacheStorageModelShardStore(options.cacheName ?? DEFAULT_RESUMABLE_SHARD_CACHE_NAME);
   throwIfAborted(options.signal);
 
@@ -1039,6 +1202,8 @@ export async function loadResumableLc0ModelForOrt(
   const referenceCounts = new Map<string, number>();
   for (const shard of manifest.shards) unique.set(shard.sha256, shard);
   for (const shard of manifest.shards) referenceCounts.set(shard.sha256, (referenceCounts.get(shard.sha256) ?? 0) + 1);
+  const manifestHashes = new Set(unique.keys());
+  await bestEffortEnforceResumableShardCacheBounds(store, maxCacheEntries, maxCacheBytes, manifestHashes);
 
   let downloadedBytes = 0;
   let reusedBytes = 0;
@@ -1058,7 +1223,7 @@ export async function loadResumableLc0ModelForOrt(
     completedBytes,
     totalBytes: manifest.decoded.bytes,
     completedShards,
-    totalShards: unique.size,
+    totalShards: phase === 'download' ? unique.size : manifest.shards.length,
   });
   report('download');
 
@@ -1087,20 +1252,28 @@ export async function loadResumableLc0ModelForOrt(
             signal: options.signal,
           });
           if (!response.ok) throw new Error(`Resumable model shard fetch failed for ${shard.sha256}: ${response.status}`);
-          const bytes = await response.arrayBuffer();
-          downloadedBytes += bytes.byteLength;
-          activeTemporaryBytes += bytes.byteLength;
+          activeTemporaryBytes += shard.bytes;
           peakTemporaryBytes = Math.max(peakTemporaryBytes, activeTemporaryBytes);
           try {
+            const bytes = await readBoundedShardResponse(response, shard.bytes, options.signal, (chunkBytes) => {
+              downloadedBytes += chunkBytes;
+            });
             const valid = bytes.byteLength === shard.bytes && await sha256Hex(bytes) === shard.sha256;
             if (valid) {
+              await ensureResumableShardQuota(store, shard.bytes, minimumFreeBytesAfterCache, manifestHashes);
               await store.put(shard.sha256, bytes);
+              await bestEffortEnforceResumableShardCacheBounds(store, maxCacheEntries, maxCacheBytes, manifestHashes);
               downloadedShards += 1;
               persisted = true;
               break;
             }
+          } catch (error) {
+            if (options.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+            if (!(error instanceof Error) || !error.message.startsWith('Resumable model shard response exceeded expected length')) {
+              throw error;
+            }
           } finally {
-            activeTemporaryBytes -= bytes.byteLength;
+            activeTemporaryBytes -= shard.bytes;
           }
           if (attempt < retryLimit) corruptionRetries += 1;
         }
@@ -1143,6 +1316,7 @@ export async function loadResumableLc0ModelForOrt(
   if (decodedSha256 !== manifest.decoded.sha256) {
     throw new Error(`Resumable model decoded sha256 mismatch: got ${decodedSha256}, expected ${manifest.decoded.sha256}`);
   }
+  await bestEffortEnforceResumableShardCacheBounds(store, maxCacheEntries, maxCacheBytes, new Set());
   return {
     model: model.buffer,
     manifestUrl,
@@ -1159,4 +1333,24 @@ export async function loadResumableLc0ModelForOrt(
     peakTemporaryBytes,
     elapsedMs: nowMs() - started,
   };
+}
+
+export interface Lc0ResumableShardCacheClearOptions {
+  /** Required explicit opt-in. This API throws unless set to true. */
+  researchOnly: true;
+  cacheName?: string;
+  shardStore?: Lc0ModelShardStore;
+}
+
+/** Best-effort cleanup for the research-only persistent resumable shard cache. */
+export async function clearResumableLc0ModelShardCache(
+  options: Lc0ResumableShardCacheClearOptions,
+): Promise<{ removedEntries: number }> {
+  if (options?.researchOnly !== true) throw new Error('Resumable model shard cache cleanup requires explicit researchOnly: true opt-in');
+  const store = options.shardStore ?? new CacheStorageModelShardStore(options.cacheName ?? DEFAULT_RESUMABLE_SHARD_CACHE_NAME);
+  if (store.clear) return { removedEntries: await store.clear() };
+  if (!store.list) return { removedEntries: 0 };
+  const entries = await store.list();
+  await Promise.all(entries.map((entry) => store.delete(entry.sha256)));
+  return { removedEntries: entries.length };
 }

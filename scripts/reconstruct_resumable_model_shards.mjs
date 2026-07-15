@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { constants } from 'node:fs';
-import { access, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadResumableLc0ModelForOrt } from '../src/lc0/modelCache.ts';
@@ -90,6 +90,34 @@ export class FileModelShardStore {
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
     }
+  }
+
+  async list() {
+    let names;
+    try {
+      names = await readdir(this.directory);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    }
+    const entries = [];
+    for (const name of names) {
+      const match = /^([0-9a-f]{64})\.bin$/i.exec(name);
+      if (!match) continue;
+      const metadata = await stat(join(this.directory, name));
+      entries.push({
+        sha256: match[1].toLowerCase(),
+        bytes: metadata.size,
+        lastUsedAt: metadata.mtimeMs,
+      });
+    }
+    return entries;
+  }
+
+  async clear() {
+    const entries = await this.list();
+    await Promise.all(entries.map((entry) => this.delete(entry.sha256)));
+    return entries.length;
   }
 }
 

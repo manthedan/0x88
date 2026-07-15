@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-import { mkdir, readdir, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { pathToFileURL } from 'node:url';
 import { InferenceSession } from 'onnxruntime-web';
 import { generateResumableModelShards } from './generate_resumable_model_shards.mjs';
 import { reconstructResumableModelShards } from './reconstruct_resumable_model_shards.mjs';
@@ -87,22 +88,27 @@ async function loadAndCreateSession(manifestPath, cacheDir, concurrency) {
   return { load, ort };
 }
 
+export async function createBenchmarkRunDirectory(workDir) {
+  await mkdir(workDir, { recursive: true });
+  return mkdtemp(join(workDir, 'run-'));
+}
+
 async function main() {
   const args = parseArgs(process.argv);
-  await mkdir(args.workDir, { recursive: true });
+  const runDir = await createBenchmarkRunDirectory(args.workDir);
   const generation = await measured(() => generateResumableModelShards({
     inputPath: args.modelPath,
-    outputDir: join(args.workDir, 'published'),
+    outputDir: join(runDir, 'published'),
     chunkBytes: args.chunkBytes,
   }));
 
   const cold = await measured(() => loadAndCreateSession(
     generation.value.manifestPath,
-    join(args.workDir, 'cold-cache'),
+    join(runDir, 'cold-cache'),
     args.concurrency,
   ));
 
-  const resumeCache = join(args.workDir, 'resume-cache');
+  const resumeCache = join(runDir, 'resume-cache');
   const controller = new AbortController();
   let abortProgress;
   const interrupted = await measured(async () => {
@@ -178,7 +184,9 @@ async function main() {
   }, null, 2));
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

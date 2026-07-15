@@ -1,17 +1,28 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, open, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { afterEach, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { loadResumableLc0ModelForOrt } from '../src/lc0/modelCache.ts';
+import {
+  clearResumableLc0ModelShardCache,
+  loadResumableLc0ModelForOrt,
+} from '../src/lc0/modelCache.ts';
+import { createBenchmarkRunDirectory } from '../scripts/bench_resumable_model_shards.mjs';
 import { generateResumableModelShards } from '../scripts/generate_resumable_model_shards.mjs';
 import { FileModelShardStore, localFileFetch } from '../scripts/reconstruct_resumable_model_shards.mjs';
 
 const MIB = 1024 * 1024;
 const CHUNK_BYTES = 16 * MIB;
 const MODEL_BYTES = 5 * CHUNK_BYTES + 12345;
+const temporaryRoots = new Set();
+
+afterEach(async () => {
+  const roots = [...temporaryRoots];
+  temporaryRoots.clear();
+  await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })));
+});
 
 async function writeDeterministicModel(path, bytes = MODEL_BYTES) {
   const file = await open(path, 'w');
@@ -50,6 +61,7 @@ async function assertMatchesFile(actual, expectedPath) {
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'lc0-resumable-shards-'));
+  temporaryRoots.add(root);
   const modelPath = join(root, 'fixture.onnx');
   const expectedSha256 = await writeDeterministicModel(modelPath);
   const generated = await generateResumableModelShards({
@@ -87,6 +99,28 @@ test('resumable shard generation uses ordered 16 MiB content hashes and reconstr
   assert(entry.manifest.shards.slice(0, -1).every((shard) => shard.bytes === CHUNK_BYTES));
   assert(entry.manifest.shards.every((shard) => shard.url === `shards/sha256/${shard.sha256}.bin`));
 
+  const firstShardPath = new URL(entry.manifest.shards[0].url, pathToFileURL(entry.manifestPath));
+  await writeFile(firstShardPath, Buffer.alloc(1, 0xa5));
+  const sizeRepaired = await generateResumableModelShards({
+    inputPath: entry.modelPath,
+    outputDir: join(entry.root, 'published'),
+    chunkBytes: CHUNK_BYTES,
+  });
+  assert.equal(sizeRepaired.uniqueBytesWritten, CHUNK_BYTES);
+  assert.equal((await readFile(firstShardPath)).byteLength, CHUNK_BYTES);
+
+  await writeFile(firstShardPath, Buffer.alloc(CHUNK_BYTES, 0xa5));
+  const hashRepaired = await generateResumableModelShards({
+    inputPath: entry.modelPath,
+    outputDir: join(entry.root, 'published'),
+    chunkBytes: CHUNK_BYTES,
+  });
+  assert.equal(hashRepaired.uniqueBytesWritten, CHUNK_BYTES);
+  assert.equal(
+    createHash('sha256').update(await readFile(firstShardPath)).digest('hex'),
+    entry.manifest.shards[0].sha256,
+  );
+
   const result = await loadResumableLc0ModelForOrt(pathToFileURL(entry.manifestPath).href, loaderOptions(entry));
   assert.equal(result.sha256, entry.expectedSha256);
   assert.equal(result.bytes, MODEL_BYTES);
@@ -94,6 +128,41 @@ test('resumable shard generation uses ordered 16 MiB content hashes and reconstr
   assert.equal(result.reusedShards, 0);
   assert(result.peakTemporaryBytes <= 3 * CHUNK_BYTES);
   await assertMatchesFile(result.model, entry.modelPath);
+});
+
+test('oversized shard responses are cancelled before unbounded buffering', async () => {
+  const entry = await fixture();
+  const fileFetch = localFileFetch();
+  let cancelled = false;
+  let shardFetches = 0;
+  await assert.rejects(
+    loadResumableLc0ModelForOrt(pathToFileURL(entry.manifestPath).href, loaderOptions(entry, {
+      concurrency: 1,
+      corruptionRetries: 0,
+      fetchFn: async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (!url.endsWith('.bin')) return fileFetch(input, init);
+        shardFetches += 1;
+        let sentExpectedBytes = false;
+        return new Response(new ReadableStream({
+          pull(controller) {
+            if (!sentExpectedBytes) {
+              sentExpectedBytes = true;
+              controller.enqueue(new Uint8Array(CHUNK_BYTES));
+            } else {
+              controller.enqueue(Uint8Array.of(1));
+            }
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }));
+      },
+    })),
+    /corruption persisted/,
+  );
+  assert.equal(shardFetches, 1);
+  assert.equal(cancelled, true);
 });
 
 test('abort around 40% persists completed shards and resume does not redownload them', async () => {
@@ -208,6 +277,7 @@ test('duplicate content hashes fetch once, reconstruct every ordered reference, 
   let activeFetches = 0;
   let peakFetches = 0;
   let shardFetches = 0;
+  const progress = [];
   const fileFetch = localFileFetch();
   const result = await loadResumableLc0ModelForOrt(pathToFileURL(duplicatePath).href, {
     researchOnly: true,
@@ -226,6 +296,9 @@ test('duplicate content hashes fetch once, reconstruct every ordered reference, 
       }
     },
     shardStore: new FileModelShardStore(duplicateCache),
+    onProgress(update) {
+      progress.push(update);
+    },
   });
   assert.equal(result.uniqueShardCount, 2);
   assert.equal(result.deduplicatedReferences, 1);
@@ -234,4 +307,37 @@ test('duplicate content hashes fetch once, reconstruct every ordered reference, 
   assert(peakFetches <= 2);
   assert(result.peakTemporaryBytes <= 2 * CHUNK_BYTES);
   assert.deepEqual(Buffer.from(result.model), decoded);
+  assert(progress.filter((update) => update.phase === 'download').every((update) => update.totalShards === 2));
+  assert(progress.filter((update) => update.phase === 'reconstruct').every((update) => update.totalShards === 3));
+});
+
+test('persistent shard cache applies explicit bounds and supports research-only cleanup', async () => {
+  const entry = await fixture();
+  const store = new FileModelShardStore(entry.cacheDir);
+  const result = await loadResumableLc0ModelForOrt(pathToFileURL(entry.manifestPath).href, loaderOptions(entry, {
+    shardStore: store,
+    maxCacheEntries: 2,
+    maxCacheBytes: 2 * CHUNK_BYTES,
+  }));
+  assert.equal(result.sha256, entry.expectedSha256);
+  const retained = await store.list();
+  assert.equal(retained.length, 2);
+  assert(retained.reduce((sum, shard) => sum + shard.bytes, 0) <= 2 * CHUNK_BYTES);
+  const cleared = await clearResumableLc0ModelShardCache({ researchOnly: true, shardStore: store });
+  assert.equal(cleared.removedEntries, 2);
+  assert.equal((await store.list()).length, 0);
+  await assert.rejects(
+    clearResumableLc0ModelShardCache({ researchOnly: false, shardStore: store }),
+    /researchOnly: true/,
+  );
+});
+
+test('benchmark creates a fresh run directory when the work directory is reused', async () => {
+  const workDir = await mkdtemp(join(tmpdir(), 'lc0-resumable-bench-'));
+  temporaryRoots.add(workDir);
+  const first = await createBenchmarkRunDirectory(workDir);
+  const second = await createBenchmarkRunDirectory(workDir);
+  assert.notEqual(first, second);
+  assert.equal(first.startsWith(`${workDir}/run-`), true);
+  assert.equal(second.startsWith(`${workDir}/run-`), true);
 });
