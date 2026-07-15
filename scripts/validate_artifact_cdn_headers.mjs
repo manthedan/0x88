@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 function usage() {
@@ -74,6 +75,31 @@ async function rangeGet(url, rangeBytes) {
   return { status: response.status, headers, bodyBytes: body.byteLength, requestedBytes: rangeBytes };
 }
 
+async function hashGet(url, acceptEncoding) {
+  const response = await fetch(url, {
+    headers: { 'Accept-Encoding': acceptEncoding },
+    cache: 'no-store',
+  });
+  const headers = pickHeaders(response.headers);
+  const hash = createHash('sha256');
+  let bodyBytes = 0;
+  if (response.body) {
+    const reader = response.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      hash.update(value);
+      bodyBytes += value.byteLength;
+    }
+  }
+  return {
+    status: response.status,
+    headers,
+    bodyBytes,
+    sha256: hash.digest('hex'),
+  };
+}
+
 function validateRow(row) {
   const failures = [];
   if (row.firstHead.status < 200 || row.firstHead.status >= 400) failures.push(`first HEAD status ${row.firstHead.status}`);
@@ -120,6 +146,8 @@ function validateRow(row) {
   const identityEncoding = row.identityHead.headers['content-encoding'];
   if (identityEncoding && identityEncoding !== 'identity') failures.push(`identity probe returned Content-Encoding: ${identityEncoding}`);
   if (row.brHead.status < 200 || row.brHead.status >= 400) failures.push(`br HEAD status ${row.brHead.status}`);
+  if (row.identityBody.status < 200 || row.identityBody.status >= 400) failures.push(`identity body status ${row.identityBody.status}`);
+  if (row.brBody.status < 200 || row.brBody.status >= 400) failures.push(`br body status ${row.brBody.status}`);
   if (row.expected) {
     const expectedRawBytes = row.expected.raw?.bytes;
     const expectedRawSha256 = row.expected.raw?.sha256?.toLowerCase();
@@ -130,6 +158,12 @@ function validateRow(row) {
     const actualDecodedSha256 = row.identityHead.headers['x-artifact-decoded-sha256'];
     if (expectedRawSha256 && actualDecodedSha256 !== expectedRawSha256) {
       failures.push(`identity decoded SHA-256 ${actualDecodedSha256 ?? 'missing'} does not match manifest ${expectedRawSha256}`);
+    }
+    if (Number.isFinite(expectedRawBytes) && row.identityBody.bodyBytes !== expectedRawBytes) {
+      failures.push(`identity body length ${row.identityBody.bodyBytes} does not match manifest ${expectedRawBytes}`);
+    }
+    if (expectedRawSha256 && row.identityBody.sha256 !== expectedRawSha256) {
+      failures.push(`identity body SHA-256 ${row.identityBody.sha256} does not match manifest ${expectedRawSha256}`);
     }
     if (row.expected.br) {
       if (row.brHead.headers['content-encoding'] !== 'br') failures.push(`br probe returned Content-Encoding: ${row.brHead.headers['content-encoding'] ?? 'identity'}`);
@@ -143,6 +177,12 @@ function validateRow(row) {
       if (Number(row.brHead.headers['content-length']) !== row.expected.br.bytes) {
         failures.push(`br encoded length ${row.brHead.headers['content-length'] ?? 'missing'} does not match manifest ${row.expected.br.bytes}`);
       }
+      if (Number.isFinite(expectedRawBytes) && row.brBody.bodyBytes !== expectedRawBytes) {
+        failures.push(`br decoded body length ${row.brBody.bodyBytes} does not match manifest ${expectedRawBytes}`);
+      }
+      if (expectedRawSha256 && row.brBody.sha256 !== expectedRawSha256) {
+        failures.push(`br decoded body SHA-256 ${row.brBody.sha256} does not match manifest ${expectedRawSha256}`);
+      }
     }
   }
   return failures;
@@ -155,7 +195,9 @@ async function validateUrl(target, rangeBytes) {
   const range = await rangeGet(url, rangeBytes);
   const identityHead = await head(url, 'identity');
   const brHead = await head(url, 'br');
-  const row = { url, ...(expected ? { expected } : {}), firstHead, secondHead, range, identityHead, brHead };
+  const identityBody = await hashGet(url, 'identity');
+  const brBody = await hashGet(url, 'br');
+  const row = { url, ...(expected ? { expected } : {}), firstHead, secondHead, range, identityHead, brHead, identityBody, brBody };
   const failures = validateRow(row);
   return { ...row, ok: failures.length === 0, failures };
 }
