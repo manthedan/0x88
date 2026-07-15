@@ -195,6 +195,7 @@ export const BROWSER_ENGINE_ASSET_GROUPS = Object.freeze([
       '/reckless/reckless-relaxed-simd128.wasm',
     ],
     optionalAssets: [
+      '/reckless/reckless-simd128-external.wasm',
       '/reckless/reckless-browser-api.wasm',
       '/reckless/reckless-browser-api-simd128.wasm',
       '/reckless/reckless-browser-api-simd128-external.wasm',

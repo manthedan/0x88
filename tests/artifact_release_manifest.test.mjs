@@ -555,8 +555,8 @@ test('publish_hashed_artifacts_to_r2 uploads v2 Brotli bodies with Content-Encod
   }
 });
 
-test('publish_hashed_artifacts_to_r2 refuses a stale CDN 404 when authoritative R2 content differs', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-stale-cdn-'));
+test('publish_hashed_artifacts_to_r2 refuses a warm valid CDN object when authoritative R2 content differs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-warm-cdn-'));
   await writeFile(join(root, 'model.onnx'), 'abc');
   const releasePath = join(root, 'release.json');
   await writeJson(releasePath, {
@@ -569,7 +569,15 @@ test('publish_hashed_artifacts_to_r2 refuses a stale CDN 404 when authoritative 
       representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
     }],
   });
-  const server = createServer((_req, res) => res.writeHead(404).end());
+  const server = createServer((req, res) => {
+    const headers = {
+      'Content-Length': '3',
+      'X-Artifact-Content-Length': '3',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    };
+    if (req.method === 'HEAD') res.writeHead(200, headers).end();
+    else res.writeHead(200, headers).end('abc');
+  });
   const port = await listen(server);
   try {
     const logPath = join(root, 'wrangler.log');
@@ -693,6 +701,9 @@ test('publish_hashed_artifacts_to_r2 skips existing validated artifact uploads',
     const logPath = join(root, 'wrangler.log');
     const r2Root = join(root, 'mock-r2');
     const wrangler = await writeStatefulWrangler(root);
+    const target = `test-bucket/artifacts/sha256/${ABC_SHA256}/test.onnx`;
+    await mkdir(r2Root, { recursive: true });
+    await writeFile(mockR2ObjectPath(r2Root, target), 'abc');
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
       '--root', root,
@@ -703,10 +714,11 @@ test('publish_hashed_artifacts_to_r2 skips existing validated artifact uploads',
     ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
     assert.equal(result.status, 0, result.stderr);
     const parsed = JSON.parse(result.stdout);
-    assert.equal(parsed.planned[0].remoteState, 'existing');
-    assert.equal(parsed.planned[0].uploadAction, 'skip-existing');
+    assert.equal(parsed.planned[0].remoteState, 'identical-r2');
+    assert.equal(parsed.planned[0].uploadAction, 'skip-identical-r2');
     const log = await readFile(logPath, 'utf8');
-    assert.doesNotMatch(log, /artifacts\/sha256/);
+    assert.match(log, new RegExp(`r2 object get ${target}`));
+    assert.doesNotMatch(log, new RegExp(`r2 object put ${target}`));
     assert.match(log, /r2 object put test-bucket\/releases\/test-release\.json/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -881,7 +893,7 @@ test('publish_hashed_artifacts_to_r2 refuses to overwrite release manifests', as
   }
 });
 
-test('publish_hashed_artifacts_to_r2 fails closed when release existence cannot be checked', async () => {
+test('publish_hashed_artifacts_to_r2 fails closed when artifact existence cannot be checked authoritatively', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-release-check-failure-'));
   await mkdir(join(root, 'public/models/lc0'), { recursive: true });
   await writeFile(join(root, 'public/models/lc0/test.onnx'), 'abc');
@@ -920,7 +932,7 @@ test('publish_hashed_artifacts_to_r2 fails closed when release existence cannot 
       '--wrangler-bin', wrangler,
     ]);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /Unable to verify immutable object .*releases\/test-release\.json/);
+    assert.match(result.stderr, new RegExp(`Unable to verify immutable object .*artifacts/sha256/${ABC_SHA256}/test\\.onnx`));
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

@@ -392,9 +392,16 @@ async function main() {
   if (args.execute) {
     for (const item of planned) {
       const target = `${args.bucket}/${item.key}`;
-      if (item.remoteState === 'existing') continue;
       if (item.remoteState === 'unchecked') throw new Error(`Cannot safely publish ${item.logicalUrls.join(', ')}: ${item.remoteProbe?.reason ?? 'remote artifact existence was not checked'}`);
-      if (!item.localPath) throw new Error(`Cannot upload ${item.logicalUrls.join(', ')} without a localPath`);
+      if (!item.localPath || !existsSync(item.localPath)) {
+        const remoteState = await verifyRemoteImmutableObject(args, target, item);
+        if (remoteState === 'identical') {
+          item.remoteState = 'identical-r2';
+          item.uploadAction = 'skip-identical-r2';
+          continue;
+        }
+        throw new Error(`Cannot upload missing R2 artifact ${item.logicalUrls.join(', ')} without a local file: ${item.localPath ?? 'no localPath'}`);
+      }
       const command = [
         'r2', 'object', 'put', target,
         '--file', item.localPath,

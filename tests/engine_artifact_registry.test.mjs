@@ -47,6 +47,12 @@ test('Stormphrax registry requires baseline and relaxed SIMD sidecars', () => {
   ]);
 });
 
+test('Reckless registry includes the external SIMD WASI artifact', () => {
+  const group = BROWSER_ENGINE_ASSET_GROUPS.find((entry) => entry.family === 'reckless');
+  assert.ok(group);
+  assert.ok(group.optionalAssets.includes('/reckless/reckless-simd128-external.wasm'));
+});
+
 test('external artifact classifier covers deployable binaries and keeps manifests', () => {
   for (const name of ['engine.wasm', 'engine.data', 'net.nnue', 'model.onnx', 'source.tar.gz', 'engine.js.br']) {
     assert.equal(isExternalArtifactName(name), true, name);

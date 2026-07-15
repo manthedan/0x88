@@ -107,6 +107,7 @@ async function runV2BodyValidationCase({ identityBody, brDecodedBody }) {
 
 test('validate_artifact_cdn_headers accepts cacheable ranged artifacts', async () => {
   const body = Buffer.from('abcdefghijklmnopqrstuvwxyz');
+  let fullBodyGets = 0;
   const server = createServer((req, res) => {
     if (req.url !== '/artifact.wasm') {
       res.writeHead(404).end();
@@ -138,6 +139,7 @@ test('validate_artifact_cdn_headers accepts cacheable ranged artifacts', async (
       res.end(body.subarray(start, end + 1));
       return;
     }
+    fullBodyGets += 1;
     res.writeHead(200, headers).end(body);
   });
   const port = await listen(server);
@@ -161,6 +163,28 @@ test('validate_artifact_cdn_headers accepts cacheable ranged artifacts', async (
     assert.equal(parsed.ok, true);
     assert.equal(parsed.rows[0].range.status, 206);
     assert.equal(parsed.rows[0].firstHead.headers['cf-cache-status'], 'HIT');
+    assert.equal(parsed.rows[0].identityBody, undefined);
+    assert.equal(parsed.rows[0].brBody, undefined);
+    assert.equal(fullBodyGets, 0);
+
+    const { mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const root = await mkdtemp(join(tmpdir(), 'lc0-v1-cdn-release-'));
+    const releasePath = join(root, 'release.json');
+    await writeFile(releasePath, JSON.stringify({
+      schema: 'lc0_browser.artifact_release_manifest.v1',
+      releaseId: 'v1',
+      artifacts: [{
+        logicalUrl: '/artifact.wasm',
+        artifactUrl: `http://127.0.0.1:${port}/artifact.wasm`,
+        bytes: body.length,
+        sha256: createHash('sha256').update(body).digest('hex'),
+      }],
+    }));
+    const v1Result = await runValidator(['--release', releasePath, '--range', '4']);
+    assert.equal(v1Result.status, 0, v1Result.stderr);
+    assert.equal(fullBodyGets, 0);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

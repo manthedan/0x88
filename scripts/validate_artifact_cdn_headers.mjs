@@ -100,6 +100,13 @@ async function hashGet(url, acceptEncoding) {
   };
 }
 
+function hasExpectedBodyMetadata(expected, representation) {
+  return /^[a-f0-9]{64}$/i.test(expected?.raw?.sha256 ?? '')
+    && Number.isFinite(expected?.raw?.bytes)
+    && /^[a-f0-9]{64}$/i.test(representation?.sha256 ?? '')
+    && Number.isFinite(representation?.bytes);
+}
+
 function validateRow(row) {
   const failures = [];
   if (row.firstHead.status < 200 || row.firstHead.status >= 400) failures.push(`first HEAD status ${row.firstHead.status}`);
@@ -146,9 +153,11 @@ function validateRow(row) {
   const identityEncoding = row.identityHead.headers['content-encoding'];
   if (identityEncoding && identityEncoding !== 'identity') failures.push(`identity probe returned Content-Encoding: ${identityEncoding}`);
   if (row.brHead.status < 200 || row.brHead.status >= 400) failures.push(`br HEAD status ${row.brHead.status}`);
-  if (row.identityBody.status < 200 || row.identityBody.status >= 400) failures.push(`identity body status ${row.identityBody.status}`);
-  if (row.brBody.status < 200 || row.brBody.status >= 400) failures.push(`br body status ${row.brBody.status}`);
   if (row.expected) {
+    const verifyIdentityBody = hasExpectedBodyMetadata(row.expected, row.expected.identity);
+    const verifyBrBody = hasExpectedBodyMetadata(row.expected, row.expected.br);
+    if (verifyIdentityBody && (row.identityBody.status < 200 || row.identityBody.status >= 400)) failures.push(`identity body status ${row.identityBody.status}`);
+    if (verifyBrBody && (row.brBody.status < 200 || row.brBody.status >= 400)) failures.push(`br body status ${row.brBody.status}`);
     const expectedRawBytes = row.expected.raw?.bytes;
     const expectedRawSha256 = row.expected.raw?.sha256?.toLowerCase();
     const actualIdentityBytes = Number(row.identityHead.headers['x-artifact-content-length'] ?? row.identityHead.headers['content-length']);
@@ -159,10 +168,10 @@ function validateRow(row) {
     if (expectedRawSha256 && actualDecodedSha256 !== expectedRawSha256) {
       failures.push(`identity decoded SHA-256 ${actualDecodedSha256 ?? 'missing'} does not match manifest ${expectedRawSha256}`);
     }
-    if (Number.isFinite(expectedRawBytes) && row.identityBody.bodyBytes !== expectedRawBytes) {
+    if (verifyIdentityBody && row.identityBody.bodyBytes !== expectedRawBytes) {
       failures.push(`identity body length ${row.identityBody.bodyBytes} does not match manifest ${expectedRawBytes}`);
     }
-    if (expectedRawSha256 && row.identityBody.sha256 !== expectedRawSha256) {
+    if (verifyIdentityBody && row.identityBody.sha256 !== expectedRawSha256) {
       failures.push(`identity body SHA-256 ${row.identityBody.sha256} does not match manifest ${expectedRawSha256}`);
     }
     if (row.expected.br) {
@@ -177,10 +186,10 @@ function validateRow(row) {
       if (Number(row.brHead.headers['content-length']) !== row.expected.br.bytes) {
         failures.push(`br encoded length ${row.brHead.headers['content-length'] ?? 'missing'} does not match manifest ${row.expected.br.bytes}`);
       }
-      if (Number.isFinite(expectedRawBytes) && row.brBody.bodyBytes !== expectedRawBytes) {
+      if (verifyBrBody && row.brBody.bodyBytes !== expectedRawBytes) {
         failures.push(`br decoded body length ${row.brBody.bodyBytes} does not match manifest ${expectedRawBytes}`);
       }
-      if (expectedRawSha256 && row.brBody.sha256 !== expectedRawSha256) {
+      if (verifyBrBody && row.brBody.sha256 !== expectedRawSha256) {
         failures.push(`br decoded body SHA-256 ${row.brBody.sha256} does not match manifest ${expectedRawSha256}`);
       }
     }
@@ -195,8 +204,8 @@ async function validateUrl(target, rangeBytes) {
   const range = await rangeGet(url, rangeBytes);
   const identityHead = await head(url, 'identity');
   const brHead = await head(url, 'br');
-  const identityBody = await hashGet(url, 'identity');
-  const brBody = await hashGet(url, 'br');
+  const identityBody = hasExpectedBodyMetadata(expected, expected?.identity) ? await hashGet(url, 'identity') : undefined;
+  const brBody = hasExpectedBodyMetadata(expected, expected?.br) ? await hashGet(url, 'br') : undefined;
   const row = { url, ...(expected ? { expected } : {}), firstHead, secondHead, range, identityHead, brHead, identityBody, brBody };
   const failures = validateRow(row);
   return { ...row, ok: failures.length === 0, failures };
