@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
+import { brotliDecompressSync } from 'node:zlib';
 
 const ABC_SHA256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
 
@@ -56,11 +57,12 @@ test('write_artifact_release_manifests creates channel and content-addressed rel
   assert.equal(result.status, 0, result.stderr);
 
   const channel = JSON.parse(await readFile(join(root, 'public/channels/stable.json'), 'utf8'));
-  assert.equal(channel.schema, 'lc0_browser.artifact_channel_manifest.v1');
+  assert.equal(channel.schema, 'lc0_browser.artifact_channel_manifest.v2');
   assert.equal(channel.releaseManifestUrl, '/releases/test-release.json');
+  assert.equal(channel.releaseUrl, '/releases/test-release.json');
 
   const release = JSON.parse(await readFile(join(root, 'public/releases/test-release.json'), 'utf8'));
-  assert.equal(release.schema, 'lc0_browser.artifact_release_manifest.v1');
+  assert.equal(release.schema, 'lc0_browser.artifact_release_manifest.v2');
   assert.equal(release.releaseId, 'test-release');
   assert.equal(release.artifacts.length, 4);
   assert.deepEqual(release.artifacts.map((artifact) => artifact.logicalUrl).sort(), [
@@ -70,11 +72,24 @@ test('write_artifact_release_manifests creates channel and content-addressed rel
     '/stockfish/stockfish.manifest.json',
   ]);
   for (const artifact of release.artifacts.filter((entry) => entry.kind !== 'manifest')) {
-    assert.match(artifact.artifactUrl, new RegExp(`/artifacts/sha256/${ABC_SHA256}/`));
+    assert.equal(artifact.raw.sha256, ABC_SHA256);
+    assert.equal(artifact.raw.bytes, 3);
     assert.equal(artifact.sha256, ABC_SHA256);
     assert.equal(artifact.bytes, 3);
+    assert.deepEqual(artifact.representations.map((entry) => entry.encoding), ['identity', 'br']);
+    assert.match(artifact.representations[0].url, new RegExp(`/artifacts/sha256/${ABC_SHA256}/identity$`));
+    assert.doesNotMatch(artifact.representations[0].url, /test\.onnx|engine\.wasm/);
+    assert.match(artifact.representations[1].url, new RegExp(`/artifacts/sha256/${ABC_SHA256}/br/[a-f0-9]{64}$`));
   }
   assert.equal(release.artifacts.filter((entry) => entry.kind === 'manifest').length, 2);
+  const equalBodies = release.artifacts.filter((entry) => entry.raw?.sha256 === ABC_SHA256);
+  assert.equal(equalBodies.length, 2);
+  assert.equal(equalBodies[0].representations[0].url, equalBodies[1].representations[0].url);
+  assert.equal(equalBodies[0].representations[1].url, equalBodies[1].representations[1].url);
+  const identityPath = join(root, 'public', new URL(equalBodies[0].representations[0].url).pathname);
+  const brPath = join(root, 'public', new URL(equalBodies[0].representations[1].url).pathname);
+  assert.equal((await readFile(identityPath)).toString(), 'abc');
+  assert.equal(brotliDecompressSync(await readFile(brPath)).toString(), 'abc');
 
   const check = spawnSync(process.execPath, [
     'scripts/write_artifact_release_manifests.mjs',
@@ -114,6 +129,7 @@ test('write_artifact_release_manifests includes TVMJS runtime files', async () =
   assert.equal(result.status, 0, result.stderr);
 
   const release = JSON.parse(await readFile(join(root, 'public/releases/centipawn-tvmjs.json'), 'utf8'));
+  assert.equal(release.schema, 'lc0_browser.artifact_release_manifest.v2');
   assert.deepEqual(release.artifacts.map((artifact) => [artifact.logicalUrl, artifact.kind, artifact.contentType]), [
     ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/manifest.json', 'manifest', 'application/json'],
     ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/model.tvmjs.wasm', 'runtime', 'application/wasm'],
@@ -154,6 +170,7 @@ test('write_artifact_release_manifests carries forward an immutable base release
   ], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   const release = JSON.parse(await readFile(join(root, 'public/releases/next.json'), 'utf8'));
+  assert.equal(release.schema, 'lc0_browser.artifact_release_manifest.v2');
   assert.equal(release.baseReleaseId, 'base');
   assert.deepEqual(release.artifacts.map((artifact) => artifact.logicalUrl), [
     '/legacy/engine.wasm',
@@ -161,8 +178,81 @@ test('write_artifact_release_manifests carries forward an immutable base release
     '/stormphrax/manifest.json',
   ]);
   assert.equal(release.artifacts[0].carriedForwardFrom, 'base');
+  assert.equal(release.artifacts[0].artifactUrl, `https://assets.example/artifacts/sha256/${ABC_SHA256}/legacy.wasm`);
+  assert.equal(release.artifacts[0].representations, undefined, 'v1 body key remains readable during migration');
   assert.equal(release.artifacts[1].carriedForwardFrom, undefined);
+  assert.equal(release.artifacts[1].representations[0].url.endsWith(`/${ABC_SHA256}/identity`), true);
   assert.equal(release.artifacts.filter((artifact) => artifact.kind === 'manifest').length, 1);
+});
+
+test('write_artifact_release_manifests keeps releases write-once while channels remain mutable for rollback', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-release-write-once-'));
+  await mkdir(join(root, 'public/models/lc0'), { recursive: true });
+  await writeFile(join(root, 'public/models/lc0/test.onnx'), 'abc');
+  await writeJson(join(root, 'public/models/lc0/manifest.json'), {
+    models: [{ file: 'test.onnx', url: '/models/lc0/test.onnx', bytes: 3, sha256: ABC_SHA256 }],
+  });
+  const generate = (releaseId, generatedAt) => spawnSync(process.execPath, [
+    'scripts/write_artifact_release_manifests.mjs',
+    '--root', root,
+    '--release-id', releaseId,
+    '--generated-at', generatedAt,
+    '--manifest', 'public/models/lc0/manifest.json',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+
+  assert.equal(generate('one', '2026-07-14T00:00:00.000Z').status, 0);
+  assert.equal(generate('two', '2026-07-14T00:01:00.000Z').status, 0);
+  let channel = JSON.parse(await readFile(join(root, 'public/channels/stable.json'), 'utf8'));
+  assert.equal(channel.releaseId, 'two');
+
+  const rollback = generate('one', '2026-07-14T00:00:00.000Z');
+  assert.equal(rollback.status, 0, rollback.stderr);
+  channel = JSON.parse(await readFile(join(root, 'public/channels/stable.json'), 'utf8'));
+  assert.equal(channel.releaseId, 'one');
+
+  const overwrite = generate('one', '2026-07-14T00:02:00.000Z');
+  assert.notEqual(overwrite.status, 0);
+  assert.match(overwrite.stderr, /Refusing to overwrite immutable release manifest/);
+  channel = JSON.parse(await readFile(join(root, 'public/channels/stable.json'), 'utf8'));
+  assert.equal(channel.releaseId, 'one');
+});
+
+test('write_artifact_release_manifests rejects unsafe release and channel names', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-release-path-safety-'));
+  const run = (...args) => spawnSync(process.execPath, [
+    'scripts/write_artifact_release_manifests.mjs',
+    '--root', root,
+    '--manifest', 'missing.json',
+    ...args,
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+
+  const release = run('--release-id', '../outside');
+  assert.notEqual(release.status, 0);
+  assert.match(release.stderr, /--release-id must contain only/);
+
+  const channel = run('--release-id', 'safe', '--channel', '../outside');
+  assert.notEqual(channel.status, 0);
+  assert.match(channel.stderr, /--channel must contain only/);
+});
+
+test('write_artifact_release_manifests rejects corrupt existing SHA-only bodies', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-release-corrupt-body-'));
+  await mkdir(join(root, 'public/models/lc0'), { recursive: true });
+  await writeFile(join(root, 'public/models/lc0/test.onnx'), 'abc');
+  await writeJson(join(root, 'public/models/lc0/manifest.json'), {
+    models: [{ file: 'test.onnx', url: '/models/lc0/test.onnx', bytes: 3, sha256: ABC_SHA256 }],
+  });
+  const identity = join(root, 'public/artifacts/sha256', ABC_SHA256, 'identity');
+  await mkdir(dirname(identity), { recursive: true });
+  await writeFile(identity, 'abd');
+  const result = spawnSync(process.execPath, [
+    'scripts/write_artifact_release_manifests.mjs',
+    '--root', root,
+    '--release-id', 'corrupt',
+    '--manifest', 'public/models/lc0/manifest.json',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Content-addressed key collision or corruption/);
 });
 
 test('publish_hashed_artifacts_to_r2 plans release and channel manifest uploads', async () => {
@@ -203,6 +293,50 @@ test('publish_hashed_artifacts_to_r2 plans release and channel manifest uploads'
   assert.deepEqual(parsed.manifests.map((item) => [item.type, item.key, item.cacheControl]), [
     ['release-manifest', 'releases/test-release.json', 'public, max-age=31536000, immutable'],
     ['channel-manifest', 'channels/stable.json', 'no-cache'],
+  ]);
+});
+
+test('publish_hashed_artifacts_to_r2 retains mixed v1 entries inside a migrated v2 release', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-mixed-release-'));
+  await writeFile(join(root, 'legacy.wasm'), 'abc');
+  await writeFile(join(root, 'model.onnx'), 'abc');
+  const releasePath = join(root, 'release.json');
+  await writeJson(releasePath, {
+    schema: 'lc0_browser.artifact_release_manifest.v2',
+    releaseId: 'mixed',
+    artifacts: [
+      {
+        logicalUrl: '/legacy/engine.wasm',
+        artifactUrl: `/artifacts/sha256/${ABC_SHA256}/legacy.wasm`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        localPath: 'legacy.wasm',
+      },
+      {
+        logicalUrl: '/models/model.onnx',
+        raw: { sha256: ABC_SHA256, bytes: 3 },
+        representations: [{
+          encoding: 'identity',
+          url: `/artifacts/sha256/${ABC_SHA256}/identity`,
+          sha256: ABC_SHA256,
+          bytes: 3,
+          localPath: 'model.onnx',
+        }],
+      },
+    ],
+  });
+  const result = spawnSync(process.execPath, [
+    'scripts/publish_hashed_artifacts_to_r2.mjs',
+    '--root', root,
+    '--release', releasePath,
+    '--bucket', 'test-bucket',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.catalogObjectCount, 2);
+  assert.deepEqual(parsed.planned.map((entry) => entry.key).sort(), [
+    `artifacts/sha256/${ABC_SHA256}/identity`,
+    `artifacts/sha256/${ABC_SHA256}/legacy.wasm`,
   ]);
 });
 
@@ -329,7 +463,7 @@ test('publish_hashed_artifacts_to_r2 uploads v2 Brotli bodies with Content-Encod
   try {
     const logPath = join(root, 'wrangler.log');
     const wrangler = join(root, 'fake-wrangler.sh');
-    await writeFile(wrangler, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOG"\nif [ "$1 $2 $3" = "r2 object get" ]; then exit 1; fi\nexit 0\n');
+    await writeFile(wrangler, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOG"\nif [ "$1 $2 $3" = "r2 object get" ]; then echo "The specified key does not exist." >&2; exit 1; fi\nexit 0\n');
     await chmod(wrangler, 0o755);
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
@@ -384,7 +518,7 @@ test('publish_hashed_artifacts_to_r2 skips existing validated artifact uploads',
     });
     const logPath = join(root, 'wrangler.log');
     const wrangler = join(root, 'fake-wrangler.sh');
-    await writeFile(wrangler, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOG"\nif [ "$1 $2 $3" = "r2 object get" ]; then exit 1; fi\nexit 0\n');
+    await writeFile(wrangler, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOG"\nif [ "$1 $2 $3" = "r2 object get" ]; then echo "The specified key does not exist." >&2; exit 1; fi\nexit 0\n');
     await chmod(wrangler, 0o755);
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
@@ -567,6 +701,103 @@ test('publish_hashed_artifacts_to_r2 refuses to overwrite release manifests', as
     ]);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Refusing to overwrite immutable release manifest/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('publish_hashed_artifacts_to_r2 fails closed when release existence cannot be checked', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-release-check-failure-'));
+  await mkdir(join(root, 'public/models/lc0'), { recursive: true });
+  await writeFile(join(root, 'public/models/lc0/test.onnx'), 'abc');
+  const releasePath = join(root, 'public/releases/test-release.json');
+  await writeJson(releasePath, {
+    schema: 'lc0_browser.artifact_release_manifest.v1',
+    releaseId: 'test-release',
+    artifacts: [{
+      logicalUrl: '/models/lc0/test.onnx',
+      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
+      sha256: ABC_SHA256,
+      bytes: 3,
+      localPath: 'public/models/lc0/test.onnx',
+    }],
+  });
+  const server = createServer((_req, res) => res.writeHead(404).end());
+  const port = await listen(server);
+  try {
+    const wrangler = join(root, 'fake-wrangler.sh');
+    await writeFile(wrangler, '#!/bin/sh\nif [ "$1 $2 $3" = "r2 object get" ]; then echo "authentication failed" >&2; exit 1; fi\nexit 0\n');
+    await chmod(wrangler, 0o755);
+    const result = await runNode([
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', releasePath,
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--execute',
+      '--wrangler-bin', wrangler,
+    ]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Unable to verify immutable release manifest/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('publish_hashed_artifacts_to_r2 treats an identical remote release manifest as idempotent', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-identical-release-'));
+  await mkdir(join(root, 'public/models/lc0'), { recursive: true });
+  await writeFile(join(root, 'public/models/lc0/test.onnx'), 'abc');
+  const releasePath = join(root, 'public/releases/test-release.json');
+  const channelPath = join(root, 'public/channels/stable.json');
+  await writeJson(releasePath, {
+    schema: 'lc0_browser.artifact_release_manifest.v1',
+    releaseId: 'test-release',
+    artifacts: [{
+      logicalUrl: '/models/lc0/test.onnx',
+      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
+      sha256: ABC_SHA256,
+      bytes: 3,
+      localPath: 'public/models/lc0/test.onnx',
+    }],
+  });
+  await writeJson(channelPath, {
+    schema: 'lc0_browser.artifact_channel_manifest.v1',
+    channel: 'stable',
+    releaseId: 'test-release',
+    releaseManifestUrl: '/releases/test-release.json',
+  });
+  const server = createServer((_req, res) => res.writeHead(404).end());
+  const port = await listen(server);
+  try {
+    const logPath = join(root, 'wrangler.log');
+    const wrangler = join(root, 'fake-wrangler.sh');
+    await writeFile(wrangler, `#!/bin/sh
+printf "%s\\n" "$*" >> "$LOG"
+if [ "$1 $2 $3" = "r2 object get" ]; then
+  cp "$RELEASE" "$6"
+fi
+exit 0
+`);
+    await chmod(wrangler, 0o755);
+    const result = await runNode([
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', releasePath,
+      '--channel-manifest', channelPath,
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--execute',
+      '--wrangler-bin', wrangler,
+    ], { env: { ...process.env, LOG: logPath, RELEASE: releasePath } });
+    assert.equal(result.status, 0, result.stderr);
+    const parsed = JSON.parse(result.stdout);
+    const releaseItem = parsed.manifests.find((item) => item.type === 'release-manifest');
+    assert.equal(releaseItem.remoteState, 'identical');
+    assert.equal(releaseItem.uploadAction, 'skip-identical');
+    const log = await readFile(logPath, 'utf8');
+    assert.doesNotMatch(log, /r2 object put test-bucket\/releases\/test-release\.json/);
+    assert.match(log, /r2 object put test-bucket\/channels\/stable\.json/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

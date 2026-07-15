@@ -6,12 +6,14 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join } from 'node:path';
+import {
+  ARTIFACT_RELEASE_V1_SCHEMA,
+  ARTIFACT_RELEASE_V2_SCHEMAS,
+  buildArtifactReleaseCatalog,
+  isArtifactChannelManifest,
+} from './engine_artifact_registry.mjs';
 
 const DEFAULT_ARTIFACT_BASE = 'https://assets.0x88.app';
-const V1_RELEASE_SCHEMA = 'lc0_browser.artifact_release_manifest.v1';
-const V2_RELEASE_SCHEMAS = new Set(['lc0_browser.artifact_release_manifest.v2', 'lc0-webgpu.artifact-release.v2']);
-const V1_CHANNEL_SCHEMA = 'lc0_browser.artifact_channel_manifest.v1';
-const V2_CHANNEL_SCHEMAS = new Set(['lc0_browser.artifact_channel_manifest.v2', 'lc0-webgpu.artifact-channel.v2']);
 
 function usage() {
   console.log(`Usage: node scripts/publish_hashed_artifacts_to_r2.mjs --release public/releases/ID.json --bucket BUCKET [options]\n\nOptions:\n  --root DIR          Repository or materialized release root (default .)\n  --execute           Actually call wrangler; default is dry-run\n  --allow-missing     Skip artifacts whose localPath is absent\n  --wrangler-bin BIN  Wrangler binary (default wrangler)\n  --channel-manifest PATH  Optional generated channel manifest to publish after the release\n  --artifact-base URL Public artifact origin used to probe relative representation URLs (default https://assets.0x88.app)\n  --probe-existing    In dry-run mode, validate representation URLs and mark existing uploads as skipped\n  -h, --help          Show help\n\nBoth legacy v1 releases and representation-aware v2 releases are accepted. V2 identity\nobjects use artifacts/sha256/<decoded-sha256>/identity; Brotli objects use\nartifacts/sha256/<decoded-sha256>/br/<encoded-sha256>. Existing v2 bodies are\nvalidated with immutable HEAD metadata plus decoded full-body integrity until trusted\nR2 verification metadata is available. Legacy filename-keyed bodies retain v1 checks. Release manifests are write-once and\nchannel pointers are published last.\n`);
@@ -72,29 +74,31 @@ function localPathFor(args, candidate, key) {
   return join(args.root, key);
 }
 
+function entryFromLegacyArtifact(artifact, args) {
+  const key = artifactKeyFromUrl(artifact.artifactUrl);
+  const match = key.match(/^artifacts\/sha256\/([a-f0-9]{64})\//);
+  const sha256 = artifact.sha256?.toLowerCase();
+  if (match?.[1] !== sha256) {
+    throw new Error(`Content-addressed key mismatch for ${artifact.logicalUrl}: key has ${match?.[1] ?? 'no sha256'}, manifest has ${artifact.sha256}`);
+  }
+  return {
+    logicalUrls: [artifact.logicalUrl],
+    key,
+    localPath: localPathFor(args, artifact.localPath, key),
+    carriedForward: Boolean(artifact.carriedForwardFrom),
+    bytes: artifact.bytes,
+    sha256,
+    decodedBytes: artifact.bytes,
+    decodedSha256: sha256,
+    contentType: artifact.contentType ?? 'application/octet-stream',
+    contentEncoding: undefined,
+    url: publicUrl(args, artifact.artifactUrl),
+    verification: 'legacy-full-body',
+  };
+}
+
 function entriesFromV1Release(release, args) {
-  return (release.artifacts ?? []).map((artifact) => {
-    const key = artifactKeyFromUrl(artifact.artifactUrl);
-    const match = key.match(/^artifacts\/sha256\/([a-f0-9]{64})\//);
-    const sha256 = artifact.sha256?.toLowerCase();
-    if (match?.[1] !== sha256) {
-      throw new Error(`Content-addressed key mismatch for ${artifact.logicalUrl}: key has ${match?.[1] ?? 'no sha256'}, manifest has ${artifact.sha256}`);
-    }
-    return {
-      logicalUrls: [artifact.logicalUrl],
-      key,
-      localPath: localPathFor(args, artifact.localPath, key),
-      carriedForward: Boolean(artifact.carriedForwardFrom),
-      bytes: artifact.bytes,
-      sha256,
-      decodedBytes: artifact.bytes,
-      decodedSha256: sha256,
-      contentType: artifact.contentType ?? 'application/octet-stream',
-      contentEncoding: undefined,
-      url: publicUrl(args, artifact.artifactUrl),
-      verification: 'legacy-full-body',
-    };
-  });
+  return (release.artifacts ?? []).map((artifact) => entryFromLegacyArtifact(artifact, args));
 }
 
 function validateV2Representation(artifact, representation) {
@@ -122,6 +126,16 @@ function entriesFromV2Release(release, args) {
   const byKey = new Map();
   for (const artifact of release.artifacts ?? []) {
     if (!Array.isArray(artifact.representations) || !artifact.representations.length) {
+      if (artifact.artifactUrl) {
+        const legacy = entryFromLegacyArtifact(artifact, args);
+        const existing = byKey.get(legacy.key);
+        if (existing) {
+          if (!existing.logicalUrls.includes(artifact.logicalUrl)) existing.logicalUrls.push(artifact.logicalUrl);
+          continue;
+        }
+        byKey.set(legacy.key, legacy);
+        continue;
+      }
       throw new Error(`V2 artifact has no representations: ${artifact.logicalUrl ?? artifact.name}`);
     }
     for (const representation of artifact.representations) {
@@ -165,8 +179,8 @@ function entriesFromV2Release(release, args) {
 }
 
 function releaseEntries(release, args) {
-  if (release.schema === V1_RELEASE_SCHEMA) return entriesFromV1Release(release, args);
-  if (V2_RELEASE_SCHEMAS.has(release.schema)) return entriesFromV2Release(release, args);
+  if (release.schema === ARTIFACT_RELEASE_V1_SCHEMA) return entriesFromV1Release(release, args);
+  if (ARTIFACT_RELEASE_V2_SCHEMAS.includes(release.schema)) return entriesFromV2Release(release, args);
   throw new Error(`Unexpected release schema: ${release.schema}`);
 }
 
@@ -248,12 +262,24 @@ async function probeExistingEntry(entry) {
   };
 }
 
-async function assertRemoteObjectMissing(args, target) {
+async function verifyRemoteReleaseManifest(args, target, expected) {
   const dir = await mkdtemp(join(tmpdir(), 'lc0-r2-exists-'));
   try {
     const file = join(dir, 'object');
-    const child = spawnSync(args.wranglerBin, ['r2', 'object', 'get', target, '--file', file, '--remote'], { stdio: 'ignore' });
-    if (child.status === 0) throw new Error(`Refusing to overwrite immutable release manifest ${target}`);
+    const child = spawnSync(args.wranglerBin, ['r2', 'object', 'get', target, '--file', file, '--remote'], { encoding: 'utf8' });
+    if (child.status !== 0) {
+      const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
+      if (/specified key does not exist/i.test(output)) return 'missing';
+      throw new Error(`Unable to verify immutable release manifest ${target}; refusing to upload`);
+    }
+    if (!existsSync(file)) {
+      throw new Error(`Refusing to overwrite immutable release manifest ${target}: existing object could not be verified`);
+    }
+    const actual = await sha256File(file);
+    if (actual.bytes !== expected.bytes || actual.sha256 !== expected.sha256) {
+      throw new Error(`Refusing to overwrite immutable release manifest ${target}: remote content differs`);
+    }
+    return 'identical';
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -261,16 +287,21 @@ async function assertRemoteObjectMissing(args, target) {
 
 async function manifestPublishItems(args, release) {
   const releaseKey = `releases/${basename(args.release)}`;
+  const releaseDigest = await sha256File(args.release);
   const items = [{
     type: 'release-manifest',
     localPath: args.release,
     key: releaseKey,
+    bytes: releaseDigest.bytes,
+    sha256: releaseDigest.sha256,
     contentType: 'application/json; charset=utf-8',
     cacheControl: 'public, max-age=31536000, immutable',
+    remoteState: 'not-checked',
+    uploadAction: 'verify-or-upload',
   }];
   if (args.channelManifest) {
     const channel = JSON.parse(await readFile(args.channelManifest, 'utf8'));
-    if (channel.schema !== V1_CHANNEL_SCHEMA && !V2_CHANNEL_SCHEMAS.has(channel.schema)) throw new Error(`Unexpected channel schema: ${channel.schema}`);
+    if (!isArtifactChannelManifest(channel)) throw new Error(`Unexpected channel schema: ${channel.schema}`);
     if (channel.releaseId !== release.releaseId) throw new Error(`Channel releaseId ${channel.releaseId} does not match release ${release.releaseId}`);
     const releaseUrl = channel.releaseManifestUrl || channel.releaseUrl;
     if (releaseUrl !== `/${releaseKey}`) throw new Error(`Channel release URL ${releaseUrl} does not match /${releaseKey}`);
@@ -280,6 +311,8 @@ async function manifestPublishItems(args, release) {
       key: `channels/${basename(args.channelManifest)}`,
       contentType: 'application/json; charset=utf-8',
       cacheControl: 'no-cache',
+      remoteState: 'mutable',
+      uploadAction: 'update-last',
     });
   }
   return items;
@@ -289,6 +322,11 @@ async function main() {
   const args = parseArgs(process.argv);
   const release = JSON.parse(await readFile(args.release, 'utf8'));
   const entries = releaseEntries(release, args);
+  const catalog = buildArtifactReleaseCatalog([release]);
+  const plannedKeys = new Set(entries.map((entry) => entry.key));
+  if (catalog.size !== plannedKeys.size || [...catalog.keys()].some((key) => !plannedKeys.has(key))) {
+    throw new Error(`Release catalog mismatch: catalog has ${catalog.size} representation keys, publisher planned ${plannedKeys.size}`);
+  }
   const planned = [];
   const skipped = [];
 
@@ -350,7 +388,11 @@ async function main() {
     }
     for (const item of manifests) {
       const target = `${args.bucket}/${item.key}`;
-      if (item.type === 'release-manifest') await assertRemoteObjectMissing(args, target);
+      if (item.type === 'release-manifest') {
+        item.remoteState = await verifyRemoteReleaseManifest(args, target, item);
+        item.uploadAction = item.remoteState === 'identical' ? 'skip-identical' : 'upload';
+        if (item.remoteState === 'identical') continue;
+      }
       const child = spawnSync(args.wranglerBin, [
         'r2', 'object', 'put', target,
         '--file', item.localPath,
@@ -366,6 +408,7 @@ async function main() {
     schema: 'lc0_browser.r2_hashed_artifact_publish_plan.v2',
     releaseId: release.releaseId,
     releaseSchema: release.schema,
+    catalogObjectCount: catalog.size,
     execute: args.execute,
     bucket: args.bucket,
     plannedCount: planned.length,

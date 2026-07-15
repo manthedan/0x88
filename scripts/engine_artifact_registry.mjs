@@ -26,6 +26,115 @@ export const COMPRESSIBLE_ARTIFACT_EXTENSIONS = Object.freeze([
   '.js', '.mjs', '.wasm', '.data', '.nn', '.nnue', '.bin', '.onnx',
 ]);
 
+export const ARTIFACT_RELEASE_V1_SCHEMA = 'lc0_browser.artifact_release_manifest.v1';
+export const ARTIFACT_RELEASE_V2_SCHEMAS = Object.freeze([
+  'lc0_browser.artifact_release_manifest.v2',
+  'lc0-webgpu.artifact-release.v2',
+]);
+export const ARTIFACT_CHANNEL_V1_SCHEMA = 'lc0_browser.artifact_channel_manifest.v1';
+export const ARTIFACT_CHANNEL_V2_SCHEMAS = Object.freeze([
+  'lc0_browser.artifact_channel_manifest.v2',
+  'lc0-webgpu.artifact-channel.v2',
+]);
+
+export function isArtifactReleaseV2(release) {
+  return ARTIFACT_RELEASE_V2_SCHEMAS.includes(release?.schema);
+}
+
+export function isArtifactChannelManifest(channel) {
+  return channel?.schema === ARTIFACT_CHANNEL_V1_SCHEMA
+    || ARTIFACT_CHANNEL_V2_SCHEMAS.includes(channel?.schema);
+}
+
+export function artifactKeyFromReleaseUrl(rawUrl) {
+  if (!rawUrl) return undefined;
+  try {
+    const url = new URL(rawUrl, 'https://assets.invalid');
+    const key = url.pathname.replace(/^\/+/, '');
+    return key.startsWith('artifacts/sha256/') ? key : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function releaseCatalogEntries(release) {
+  const legacyV1 = release?.schema === ARTIFACT_RELEASE_V1_SCHEMA
+    || (!release?.schema && (release?.artifacts ?? []).every((artifact) => artifact.artifactUrl));
+  if (!legacyV1 && !isArtifactReleaseV2(release)) {
+    throw new Error(`Unexpected release schema: ${release?.schema}`);
+  }
+  const entries = [];
+  for (const artifact of release.artifacts ?? []) {
+    const logicalUrl = artifact.logicalUrl ?? artifact.name;
+    if (legacyV1) {
+      const key = artifactKeyFromReleaseUrl(artifact.artifactUrl);
+      if (key) entries.push({ key, logicalUrl, encoding: 'identity', artifact });
+      continue;
+    }
+    if ((!Array.isArray(artifact.representations) || !artifact.representations.length) && artifact.artifactUrl) {
+      const key = artifactKeyFromReleaseUrl(artifact.artifactUrl);
+      if (!key) throw new Error(`Artifact URL is not content-addressed: ${artifact.artifactUrl}`);
+      entries.push({ key, logicalUrl, encoding: 'identity', artifact, legacy: true });
+      continue;
+    }
+    if (!Array.isArray(artifact.representations) || !artifact.representations.length) {
+      throw new Error(`V2 artifact has no representations: ${logicalUrl}`);
+    }
+    const rawSha256 = artifact.raw?.sha256?.toLowerCase();
+    const rawBytes = artifact.raw?.bytes;
+    if (!/^[a-f0-9]{64}$/.test(rawSha256 ?? '') || !Number.isFinite(rawBytes)) {
+      throw new Error(`Invalid v2 raw metadata for ${logicalUrl}`);
+    }
+    for (const representation of artifact.representations ?? []) {
+      const key = artifactKeyFromReleaseUrl(representation.url);
+      const encodedSha256 = representation.sha256?.toLowerCase();
+      if (!key || !/^[a-f0-9]{64}$/.test(encodedSha256 ?? '') || !Number.isFinite(representation.bytes)) {
+        throw new Error(`Invalid v2 representation metadata for ${logicalUrl}`);
+      }
+      if (representation.encoding === 'identity') {
+        if (key !== `artifacts/sha256/${rawSha256}/identity`
+          || encodedSha256 !== rawSha256
+          || representation.bytes !== rawBytes) {
+          throw new Error(`Invalid identity representation for ${logicalUrl}`);
+        }
+      } else if (representation.encoding === 'br') {
+        if (key !== `artifacts/sha256/${rawSha256}/br/${encodedSha256}`) {
+          throw new Error(`Invalid Brotli representation for ${logicalUrl}`);
+        }
+      } else {
+        throw new Error(`Unsupported artifact encoding for ${logicalUrl}: ${representation.encoding}`);
+      }
+      entries.push({ key, logicalUrl, encoding: representation.encoding, artifact, representation });
+    }
+  }
+  return entries;
+}
+
+export function buildArtifactReleaseCatalog(releases) {
+  const byKey = new Map();
+  for (const release of releases) {
+    const releaseId = release.releaseId ?? release.id ?? 'unknown-release';
+    for (const entry of releaseCatalogEntries(release)) {
+      const existing = byKey.get(entry.key) ?? {
+        key: entry.key,
+        releases: new Set(),
+        logicalUrls: new Set(),
+        encodings: new Set(),
+      };
+      existing.releases.add(releaseId);
+      if (entry.logicalUrl) existing.logicalUrls.add(entry.logicalUrl);
+      if (entry.encoding) existing.encodings.add(entry.encoding);
+      byKey.set(entry.key, existing);
+    }
+  }
+  return new Map([...byKey].map(([key, entry]) => [key, {
+    key,
+    releases: [...entry.releases].sort(),
+    logicalUrls: [...entry.logicalUrls].sort(),
+    encodings: [...entry.encodings].sort(),
+  }]));
+}
+
 export function isExternalArtifactName(name) {
   return name.endsWith('.onnx')
     || name.endsWith('.lc0web')

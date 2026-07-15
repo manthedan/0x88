@@ -4,7 +4,9 @@ import {
   BROWSER_ENGINE_ASSET_GROUPS,
   EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES,
   PRECOMPRESS_ARTIFACT_DIRECTORIES,
+  buildArtifactReleaseCatalog,
   isExternalArtifactName,
+  releaseCatalogEntries,
 } from '../scripts/engine_artifact_registry.mjs';
 
 const EXPECTED_BROWSER_FAMILIES = ['lc0', 'stockfish', 'reckless', 'viridithas', 'berserk', 'plentychess', 'stormphrax'];
@@ -52,4 +54,63 @@ test('external artifact classifier covers deployable binaries and keeps manifest
   for (const name of ['README.md', 'engine.manifest.json', 'NOTICE.txt']) {
     assert.equal(isExternalArtifactName(name), false, name);
   }
+});
+
+test('shared release catalog reads v1 and v2 representation keys and deduplicates aliases', () => {
+  const rawSha = 'a'.repeat(64);
+  const brSha = 'b'.repeat(64);
+  const v1Key = `artifacts/sha256/${'c'.repeat(64)}/legacy.wasm`;
+  const identityKey = `artifacts/sha256/${rawSha}/identity`;
+  const brKey = `artifacts/sha256/${rawSha}/br/${brSha}`;
+  const releases = [
+    {
+      schema: 'lc0_browser.artifact_release_manifest.v1',
+      releaseId: 'v1',
+      artifacts: [{ logicalUrl: '/legacy.wasm', artifactUrl: `/${v1Key}` }],
+    },
+    {
+      schema: 'lc0_browser.artifact_release_manifest.v2',
+      releaseId: 'v2',
+      artifacts: [
+        {
+          logicalUrl: '/model-a.onnx',
+          raw: { sha256: rawSha, bytes: 3 },
+          representations: [
+            { encoding: 'identity', url: `/${identityKey}`, sha256: rawSha, bytes: 3 },
+            { encoding: 'br', url: `/${brKey}`, sha256: brSha, bytes: 2 },
+          ],
+        },
+        {
+          logicalUrl: '/model-b.onnx',
+          raw: { sha256: rawSha, bytes: 3 },
+          representations: [{ encoding: 'identity', url: `/${identityKey}`, sha256: rawSha, bytes: 3 }],
+        },
+      ],
+    },
+  ];
+
+  assert.equal(releaseCatalogEntries(releases[1]).length, 3);
+  const catalog = buildArtifactReleaseCatalog(releases);
+  assert.deepEqual([...catalog.keys()].sort(), [brKey, identityKey, v1Key].sort());
+  assert.deepEqual(catalog.get(identityKey).logicalUrls, ['/model-a.onnx', '/model-b.onnx']);
+  assert.deepEqual(catalog.get(identityKey).releases, ['v2']);
+});
+
+test('shared release catalog fails closed on corrupt v2 representation keys', () => {
+  const rawSha = 'a'.repeat(64);
+  const wrongSha = 'b'.repeat(64);
+  assert.throws(() => buildArtifactReleaseCatalog([{
+    schema: 'lc0_browser.artifact_release_manifest.v2',
+    releaseId: 'corrupt',
+    artifacts: [{
+      logicalUrl: '/model.onnx',
+      raw: { sha256: rawSha, bytes: 3 },
+      representations: [{
+        encoding: 'identity',
+        url: `/artifacts/sha256/${wrongSha}/identity`,
+        sha256: rawSha,
+        bytes: 3,
+      }],
+    }],
+  }]), /Invalid identity representation/);
 });
