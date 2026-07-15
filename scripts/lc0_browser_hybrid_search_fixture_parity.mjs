@@ -235,7 +235,8 @@ function startServer(args) {
     };
     const onOutput = (chunk) => {
       output += chunk.toString('utf8');
-      if (/ready in \d+\s*ms/.test(output) || output.includes(`:${args.port}/`)) settle(resolve);
+      const plainOutput = output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+      if (/ready in \d+\s*ms/.test(plainOutput) || plainOutput.includes(`:${args.port}/`)) settle(resolve);
     };
     server.stdout.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
     server.stderr.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });

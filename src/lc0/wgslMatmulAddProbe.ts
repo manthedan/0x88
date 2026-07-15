@@ -309,6 +309,7 @@ type DeviceLike = {
   createQuerySet?: (descriptor: Record<string, unknown>) => QuerySetLike;
   createShaderModule: (descriptor: Record<string, unknown>) => unknown;
   createComputePipeline: (descriptor: Record<string, unknown>) => PipelineLike;
+  createComputePipelineAsync?: (descriptor: Record<string, unknown>) => Promise<PipelineLike>;
   createBindGroup: (descriptor: Record<string, unknown>) => unknown;
   createCommandEncoder: () => CommandEncoderLike;
   destroy?: () => void;
@@ -328,6 +329,68 @@ type BufferLike = {
 type PipelineLike = {
   getBindGroupLayout: (index: number) => unknown;
 };
+
+type WgslPipelineDescriptor = {
+  key: string;
+  label: string;
+  code: string;
+  entryPoint?: string;
+};
+
+type WgslPipelineCache = {
+  modules: Map<string, unknown>;
+  pipelines: Map<string, PipelineLike>;
+};
+
+export async function createLc0WebGpuPipelineCache(
+  device: Pick<DeviceLike, 'createShaderModule' | 'createComputePipeline' | 'createComputePipelineAsync'>,
+  descriptors: readonly WgslPipelineDescriptor[],
+): Promise<WgslPipelineCache> {
+  const modules = new Map<string, unknown>();
+  const pipelines = new Map<string, PipelineLike>();
+  const uniqueDescriptors = new Map(descriptors.map((descriptor) => [descriptor.key, descriptor]));
+  const prepared = Array.from(uniqueDescriptors.values(), (descriptor) => {
+    const module = device.createShaderModule({ label: descriptor.label, code: descriptor.code });
+    modules.set(descriptor.key, module);
+    return {
+      descriptor,
+      pipelineDescriptor: {
+        layout: 'auto',
+        compute: { module, entryPoint: descriptor.entryPoint ?? 'main' },
+      },
+    };
+  });
+  if (device.createComputePipelineAsync) {
+    const results = await Promise.allSettled(prepared.map(async ({ descriptor, pipelineDescriptor }) => {
+      pipelines.set(descriptor.key, await device.createComputePipelineAsync!(pipelineDescriptor));
+    }));
+    const failure = results.find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
+    if (failure) throw failure.reason;
+  } else {
+    for (const { descriptor, pipelineDescriptor } of prepared) {
+      pipelines.set(descriptor.key, device.createComputePipeline(pipelineDescriptor));
+    }
+  }
+  return { modules, pipelines };
+}
+
+function createCachedComputePipeline(
+  device: DeviceLike,
+  cache: WgslPipelineCache | undefined,
+  key: string,
+  descriptor: { label: string; code: string; entryPoint?: string },
+): PipelineLike {
+  const cached = cache?.pipelines.get(key);
+  if (cached) return cached;
+  const module = cache?.modules.get(key) ?? device.createShaderModule({ label: descriptor.label, code: descriptor.code });
+  cache?.modules.set(key, module);
+  const pipeline = device.createComputePipeline({
+    layout: 'auto',
+    compute: { module, entryPoint: descriptor.entryPoint ?? 'main' },
+  }) as PipelineLike;
+  cache?.pipelines.set(key, pipeline);
+  return pipeline;
+}
 
 type CommandEncoderLike = {
   beginComputePass: (descriptor?: Record<string, unknown>) => ComputePassLike;
@@ -362,6 +425,16 @@ function gpuGlobals(): GpuGlobals {
 
 function nowMs(): number {
   return typeof performance === 'undefined' ? Date.now() : performance.now();
+}
+
+export async function retireLc0WebGpuBufferAfterSubmittedWork(
+  queue: { onSubmittedWorkDone?: () => Promise<void> },
+  buffer: { destroy?: () => void },
+): Promise<boolean> {
+  if (!queue.onSubmittedWorkDone) return false;
+  await queue.onSubmittedWorkDone();
+  buffer.destroy?.();
+  return true;
 }
 
 function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
@@ -1899,9 +1972,11 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
 }
 `;
 
-function createSoftmaxPipeline(device: DeviceLike, buffers: { input: BufferLike; output: BufferLike }): { pipeline: PipelineLike; bindGroup: unknown } {
-  const module = device.createShaderModule({ label: 'lc0web attention softmax probe', code: SOFTMAX_WGSL });
-  const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
+function createSoftmaxPipeline(device: DeviceLike, buffers: { input: BufferLike; output: BufferLike }, pipelineCache?: WgslPipelineCache): { pipeline: PipelineLike; bindGroup: unknown } {
+  const pipeline = createCachedComputePipeline(device, pipelineCache, 'attention-softmax', {
+    label: 'lc0web attention softmax probe',
+    code: SOFTMAX_WGSL,
+  });
   const bindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
     entries: [
@@ -2424,11 +2499,14 @@ function createAttentionQkvStage(device: DeviceLike, buffers: {
   vBias: BufferLike;
   qkv: BufferLike;
   podArgs?: BufferLike;
-}, qkvKernelVariant: Lc0WebAttentionQkvKernelVariant): { qkv: PipelineLike; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant } {
+}, qkvKernelVariant: Lc0WebAttentionQkvKernelVariant, pipelineCache?: WgslPipelineCache): { qkv: PipelineLike; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant } {
   if (qkvKernelVariant === 'tvm-packed-f16') {
     if (!buffers.podArgs) throw new Error('TVM packed-f16 attention QKV kernels require a POD args uniform buffer');
-    const qkvModule = device.createShaderModule({ label: 'lc0web attention block QKV TVM packed-f16 projection', code: ATTENTION_BLOCK_QKV_TVM_PACKED_F16_WGSL });
-    const qkv = device.createComputePipeline({ layout: 'auto', compute: { module: qkvModule, entryPoint: 'matmul_kernel' } }) as PipelineLike;
+    const qkv = createCachedComputePipeline(device, pipelineCache, 'attention-qkv-tvm-packed-f16', {
+      label: 'lc0web attention block QKV TVM packed-f16 projection',
+      code: ATTENTION_BLOCK_QKV_TVM_PACKED_F16_WGSL,
+      entryPoint: 'matmul_kernel',
+    });
     const outputBytes = DEFAULT_TOKENS * DEFAULT_N * 4;
     const qkvBindFor = (weight: BufferLike, bias: BufferLike, outputOffset: number) => device.createBindGroup({
       layout: qkv.getBindGroupLayout(0),
@@ -2446,8 +2524,10 @@ function createAttentionQkvStage(device: DeviceLike, buffers: {
       qkvBindFor(buffers.vWeight, buffers.vBias, outputBytes * 2),
     ] };
   }
-  const qkvModule = device.createShaderModule({ label: 'lc0web attention block qkv', code: ATTENTION_BLOCK_QKV_WGSL });
-  const qkv = device.createComputePipeline({ layout: 'auto', compute: { module: qkvModule, entryPoint: 'main' } }) as PipelineLike;
+  const qkv = createCachedComputePipeline(device, pipelineCache, 'attention-qkv-hand', {
+    label: 'lc0web attention block qkv',
+    code: ATTENTION_BLOCK_QKV_WGSL,
+  });
   const qkvBind = device.createBindGroup({
     layout: qkv.getBindGroupLayout(0),
     entries: [
@@ -2479,11 +2559,13 @@ function createAttentionBlockPipelines(device: DeviceLike, buffers: {
   probs: BufferLike;
   output: BufferLike;
   podArgs?: BufferLike;
-}, qkvKernelVariant: Lc0WebAttentionQkvKernelVariant = 'hand'): { qkv: PipelineLike; qkvBind: unknown; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant; score: PipelineLike; scoreBind: unknown; softmax: PipelineLike; softmaxBind: unknown; value: PipelineLike; valueBind: unknown } {
-  const qkvStage = createAttentionQkvStage(device, buffers, qkvKernelVariant);
+}, qkvKernelVariant: Lc0WebAttentionQkvKernelVariant = 'hand', pipelineCache?: WgslPipelineCache): { qkv: PipelineLike; qkvBind: unknown; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant; score: PipelineLike; scoreBind: unknown; softmax: PipelineLike; softmaxBind: unknown; value: PipelineLike; valueBind: unknown } {
+  const qkvStage = createAttentionQkvStage(device, buffers, qkvKernelVariant, pipelineCache);
   const { qkv, qkvBinds } = qkvStage;
-  const scoreModule = device.createShaderModule({ label: 'lc0web attention block score', code: ATTENTION_BLOCK_SCORE_WGSL });
-  const score = device.createComputePipeline({ layout: 'auto', compute: { module: scoreModule, entryPoint: 'main' } }) as PipelineLike;
+  const score = createCachedComputePipeline(device, pipelineCache, 'attention-score', {
+    label: 'lc0web attention block score',
+    code: ATTENTION_BLOCK_SCORE_WGSL,
+  });
   const scoreBind = device.createBindGroup({
     layout: score.getBindGroupLayout(0),
     entries: [
@@ -2493,9 +2575,11 @@ function createAttentionBlockPipelines(device: DeviceLike, buffers: {
       { binding: 3, resource: { buffer: buffers.scores } },
     ],
   });
-  const { pipeline: softmax, bindGroup: softmaxBind } = createSoftmaxPipeline(device, { input: buffers.scores, output: buffers.probs });
-  const valueModule = device.createShaderModule({ label: 'lc0web attention block value', code: ATTENTION_BLOCK_VALUE_WGSL });
-  const value = device.createComputePipeline({ layout: 'auto', compute: { module: valueModule, entryPoint: 'main' } }) as PipelineLike;
+  const { pipeline: softmax, bindGroup: softmaxBind } = createSoftmaxPipeline(device, { input: buffers.scores, output: buffers.probs }, pipelineCache);
+  const value = createCachedComputePipeline(device, pipelineCache, 'attention-value', {
+    label: 'lc0web attention block value',
+    code: ATTENTION_BLOCK_VALUE_WGSL,
+  });
   const valueBind = device.createBindGroup({
     layout: value.getBindGroupLayout(0),
     entries: [
@@ -3221,35 +3305,50 @@ function createSmolgenPipelines(device: DeviceLike, buffers: {
   ln2: BufferLike;
   smolgenWeight: BufferLike;
   output: BufferLike;
-}, projectKernelVariant: Lc0WebSmolgenKernelVariant = 'hand'): SmolgenPipelines {
-  const compress = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen compress', code: SMOLGEN_COMPRESS_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+}, projectKernelVariant: Lc0WebSmolgenKernelVariant = 'hand', pipelineCache?: WgslPipelineCache): SmolgenPipelines {
+  const compress = createCachedComputePipeline(device, pipelineCache, 'smolgen-compress', {
+    label: 'lc0web smolgen compress',
+    code: SMOLGEN_COMPRESS_WGSL,
+  });
   const compressBind = device.createBindGroup({ layout: compress.getBindGroupLayout(0), entries: [
     { binding: 0, resource: { buffer: buffers.input } },
     { binding: 1, resource: { buffer: buffers.compressWeight } },
     { binding: 2, resource: { buffer: buffers.compressed } },
   ] });
-  const dense1 = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen dense1', code: SMOLGEN_DENSE1_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const dense1 = createCachedComputePipeline(device, pipelineCache, 'smolgen-dense1', {
+    label: 'lc0web smolgen dense1',
+    code: SMOLGEN_DENSE1_WGSL,
+  });
   const dense1Bind = device.createBindGroup({ layout: dense1.getBindGroupLayout(0), entries: [
     { binding: 0, resource: { buffer: buffers.compressed } },
     { binding: 1, resource: { buffer: buffers.dense1Weight } },
     { binding: 2, resource: { buffer: buffers.dense1Bias } },
     { binding: 3, resource: { buffer: buffers.dense1 } },
   ] });
-  const ln1 = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen ln1', code: SMOLGEN_SWISH_LN1_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const ln1 = createCachedComputePipeline(device, pipelineCache, 'smolgen-ln1', {
+    label: 'lc0web smolgen ln1',
+    code: SMOLGEN_SWISH_LN1_WGSL,
+  });
   const ln1Bind = device.createBindGroup({ layout: ln1.getBindGroupLayout(0), entries: [
     { binding: 0, resource: { buffer: buffers.dense1 } },
     { binding: 1, resource: { buffer: buffers.ln1Scale } },
     { binding: 2, resource: { buffer: buffers.ln1Bias } },
     { binding: 3, resource: { buffer: buffers.ln1 } },
   ] });
-  const dense2 = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen dense2', code: SMOLGEN_DENSE2_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const dense2 = createCachedComputePipeline(device, pipelineCache, 'smolgen-dense2', {
+    label: 'lc0web smolgen dense2',
+    code: SMOLGEN_DENSE2_WGSL,
+  });
   const dense2Bind = device.createBindGroup({ layout: dense2.getBindGroupLayout(0), entries: [
     { binding: 0, resource: { buffer: buffers.ln1 } },
     { binding: 1, resource: { buffer: buffers.dense2Weight } },
     { binding: 2, resource: { buffer: buffers.dense2Bias } },
     { binding: 3, resource: { buffer: buffers.dense2 } },
   ] });
-  const ln2 = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web smolgen ln2', code: SMOLGEN_SWISH_LN2_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const ln2 = createCachedComputePipeline(device, pipelineCache, 'smolgen-ln2', {
+    label: 'lc0web smolgen ln2',
+    code: SMOLGEN_SWISH_LN2_WGSL,
+  });
   const ln2Bind = device.createBindGroup({ layout: ln2.getBindGroupLayout(0), entries: [
     { binding: 0, resource: { buffer: buffers.dense2 } },
     { binding: 1, resource: { buffer: buffers.ln2Scale } },
@@ -3257,7 +3356,10 @@ function createSmolgenPipelines(device: DeviceLike, buffers: {
     { binding: 3, resource: { buffer: buffers.ln2 } },
   ] });
   const projectTileSize = smolgenProjectKernelTileSize(projectKernelVariant);
-  const project = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: projectTileSize ? `lc0web smolgen project tiled f16 ${projectTileSize}` : 'lc0web smolgen project', code: projectTileSize ? (projectTileSize === 64 ? SMOLGEN_PROJECT_TILED_F16_WGSL : smolgenProjectTiledF16Wgsl(projectTileSize)) : SMOLGEN_PROJECT_WGSL }), entryPoint: 'main' } }) as PipelineLike;
+  const project = createCachedComputePipeline(device, pipelineCache, `smolgen-project-${projectTileSize ?? 'hand'}`, {
+    label: projectTileSize ? `lc0web smolgen project tiled f16 ${projectTileSize}` : 'lc0web smolgen project',
+    code: projectTileSize ? (projectTileSize === 64 ? SMOLGEN_PROJECT_TILED_F16_WGSL : smolgenProjectTiledF16Wgsl(projectTileSize)) : SMOLGEN_PROJECT_WGSL,
+  });
   const projectBind = device.createBindGroup({ layout: project.getBindGroupLayout(0), entries: [
     { binding: 0, resource: { buffer: buffers.ln2 } },
     { binding: 1, resource: { buffer: buffers.smolgenWeight } },
@@ -3477,14 +3579,17 @@ function createAttentionOutputPipelines(device: DeviceLike, buffers: {
   lnBias: BufferLike;
   output: BufferLike;
   podArgs?: BufferLike;
-}, outProjKernelVariant: Lc0WebAttentionOutProjKernelVariant = 'hand', qkvKernelVariant: Lc0WebAttentionQkvKernelVariant = 'hand'): ReturnType<typeof createAttentionBlockPipelines> & { outProjKernelVariant: Lc0WebAttentionOutProjKernelVariant; outProj: PipelineLike; outProjBind: unknown; norm: PipelineLike; normBind: unknown } {
-  const base = createAttentionBlockPipelines(device, { ...buffers, output: buffers.attn }, qkvKernelVariant);
+}, outProjKernelVariant: Lc0WebAttentionOutProjKernelVariant = 'hand', qkvKernelVariant: Lc0WebAttentionQkvKernelVariant = 'hand', pipelineCache?: WgslPipelineCache): ReturnType<typeof createAttentionBlockPipelines> & { outProjKernelVariant: Lc0WebAttentionOutProjKernelVariant; outProj: PipelineLike; outProjBind: unknown; norm: PipelineLike; normBind: unknown } {
+  const base = createAttentionBlockPipelines(device, { ...buffers, output: buffers.attn }, qkvKernelVariant, pipelineCache);
   let outProj: PipelineLike;
   let outProjBind: unknown;
   if (outProjKernelVariant === 'tvm-packed-f16') {
     if (!buffers.podArgs) throw new Error('TVM packed-f16 attention output projection requires a POD args uniform buffer');
-    const outModule = device.createShaderModule({ label: 'lc0web attention output projection TVM packed-f16 residual', code: ATTENTION_OUTPUT_PROJ_TVM_PACKED_F16_WGSL });
-    outProj = device.createComputePipeline({ layout: 'auto', compute: { module: outModule, entryPoint: 'matmul_kernel' } }) as PipelineLike;
+    outProj = createCachedComputePipeline(device, pipelineCache, 'attention-output-tvm-packed-f16', {
+      label: 'lc0web attention output projection TVM packed-f16 residual',
+      code: ATTENTION_OUTPUT_PROJ_TVM_PACKED_F16_WGSL,
+      entryPoint: 'matmul_kernel',
+    });
     outProjBind = device.createBindGroup({
       layout: outProj.getBindGroupLayout(0),
       entries: [
@@ -3498,8 +3603,10 @@ function createAttentionOutputPipelines(device: DeviceLike, buffers: {
       ],
     });
   } else {
-    const outModule = device.createShaderModule({ label: 'lc0web attention output projection residual', code: ATTENTION_OUTPUT_PROJ_WGSL });
-    outProj = device.createComputePipeline({ layout: 'auto', compute: { module: outModule, entryPoint: 'main' } }) as PipelineLike;
+    outProj = createCachedComputePipeline(device, pipelineCache, 'attention-output-hand', {
+      label: 'lc0web attention output projection residual',
+      code: ATTENTION_OUTPUT_PROJ_WGSL,
+    });
     outProjBind = device.createBindGroup({
       layout: outProj.getBindGroupLayout(0),
       entries: [
@@ -3512,8 +3619,10 @@ function createAttentionOutputPipelines(device: DeviceLike, buffers: {
       ],
     });
   }
-  const normModule = device.createShaderModule({ label: 'lc0web attention output layernorm', code: ATTENTION_OUTPUT_NORM_WGSL });
-  const norm = device.createComputePipeline({ layout: 'auto', compute: { module: normModule, entryPoint: 'main' } }) as PipelineLike;
+  const norm = createCachedComputePipeline(device, pipelineCache, 'attention-output-norm', {
+    label: 'lc0web attention output layernorm',
+    code: ATTENTION_OUTPUT_NORM_WGSL,
+  });
   const normBind = device.createBindGroup({
     layout: norm.getBindGroupLayout(0),
     entries: [
@@ -4145,15 +4254,16 @@ function createEncoder0FfnPipelines(device: DeviceLike, buffers: {
   ln2Bias: BufferLike;
   output: BufferLike;
   podArgs?: BufferLike;
-}, ffnKernelVariant: Lc0WebFfnKernelVariant = 'hand'): { ffnKernelVariant: Lc0WebFfnKernelVariant; dense1: PipelineLike; dense1Bind: unknown; dense2: PipelineLike; dense2Bind: unknown; ln2: PipelineLike; ln2Bind: unknown } {
+}, ffnKernelVariant: Lc0WebFfnKernelVariant = 'hand', pipelineCache?: WgslPipelineCache): { ffnKernelVariant: Lc0WebFfnKernelVariant; dense1: PipelineLike; dense1Bind: unknown; dense2: PipelineLike; dense2Bind: unknown; ln2: PipelineLike; ln2Bind: unknown } {
   const useTvmPackedF16 = ffnKernelVariant === 'tvm-packed-f16';
   const useShaderF16AccumF32 = ffnKernelVariant === 'hand-shader-f16-accum-f32';
   if (useTvmPackedF16 && !buffers.podArgs) throw new Error('TVM packed-f16 FFN kernels require a POD args uniform buffer');
-  const dense1Module = device.createShaderModule({
+  const dense1Descriptor = {
     label: useTvmPackedF16 ? 'lc0web encoder0 FFN dense1 TVM packed-f16 sqrrelu' : useShaderF16AccumF32 ? 'lc0web encoder0 FFN dense1 shader-f16 sqrrelu' : 'lc0web encoder0 FFN dense1 sqrrelu',
     code: useTvmPackedF16 ? FFN_DENSE1_TVM_PACKED_F16_WGSL : useShaderF16AccumF32 ? FFN_DENSE1_SHADER_F16_ACCUM_F32_WGSL : FFN_DENSE1_WGSL,
-  });
-  const dense1 = device.createComputePipeline({ layout: 'auto', compute: { module: dense1Module, entryPoint: useTvmPackedF16 ? 'matmul_kernel' : 'main' } }) as PipelineLike;
+    entryPoint: useTvmPackedF16 ? 'matmul_kernel' : 'main',
+  };
+  const dense1 = createCachedComputePipeline(device, pipelineCache, `ffn-dense1-${ffnKernelVariant}`, dense1Descriptor);
   const dense1Bind = device.createBindGroup({ layout: dense1.getBindGroupLayout(0), entries: useTvmPackedF16 ? [
     { binding: 0, resource: { buffer: buffers.hidden } },
     { binding: 1, resource: { buffer: buffers.dense1Weight } },
@@ -4166,11 +4276,12 @@ function createEncoder0FfnPipelines(device: DeviceLike, buffers: {
     { binding: 2, resource: { buffer: buffers.dense1Bias } },
     { binding: 3, resource: { buffer: buffers.hidden } },
   ] });
-  const dense2Module = device.createShaderModule({
+  const dense2Descriptor = {
     label: useTvmPackedF16 ? 'lc0web encoder0 FFN dense2 TVM packed-f16 residual' : useShaderF16AccumF32 ? 'lc0web encoder0 FFN dense2 shader-f16 residual' : 'lc0web encoder0 FFN dense2 residual',
     code: useTvmPackedF16 ? FFN_DENSE2_TVM_PACKED_F16_WGSL : useShaderF16AccumF32 ? FFN_DENSE2_SHADER_F16_ACCUM_F32_WGSL : FFN_DENSE2_WGSL,
-  });
-  const dense2 = device.createComputePipeline({ layout: 'auto', compute: { module: dense2Module, entryPoint: useTvmPackedF16 ? 'matmul_kernel' : 'main' } }) as PipelineLike;
+    entryPoint: useTvmPackedF16 ? 'matmul_kernel' : 'main',
+  };
+  const dense2 = createCachedComputePipeline(device, pipelineCache, `ffn-dense2-${ffnKernelVariant}`, dense2Descriptor);
   const dense2Bind = device.createBindGroup({ layout: dense2.getBindGroupLayout(0), entries: useTvmPackedF16 ? [
     { binding: 0, resource: { buffer: buffers.skip } },
     { binding: 1, resource: { buffer: buffers.dense2Weight } },
@@ -4187,8 +4298,10 @@ function createEncoder0FfnPipelines(device: DeviceLike, buffers: {
     { binding: 4, resource: { buffer: buffers.input } },
     { binding: 5, resource: { buffer: buffers.alpha } },
   ] });
-  const ln2Module = device.createShaderModule({ label: 'lc0web encoder0 FFN ln2', code: FFN_LN2_WGSL });
-  const ln2 = device.createComputePipeline({ layout: 'auto', compute: { module: ln2Module, entryPoint: 'main' } }) as PipelineLike;
+  const ln2 = createCachedComputePipeline(device, pipelineCache, 'ffn-ln2', {
+    label: 'lc0web encoder0 FFN ln2',
+    code: FFN_LN2_WGSL,
+  });
   const ln2Bind = device.createBindGroup({ layout: ln2.getBindGroupLayout(0), entries: [
     { binding: 0, resource: { buffer: buffers.skip } },
     { binding: 1, resource: { buffer: buffers.ln2Scale } },
@@ -5763,21 +5876,43 @@ type WgslPolicyValueHeadRuntime = {
   buffers: BufferLike[];
 };
 
-function createWgslPolicyValueHeadRuntime(device: DeviceLike, tensors: Lc0WebPolicyValueHeadTensors, inputBuffer: BufferLike, usage: Record<string, number>): WgslPolicyValueHeadRuntime {
-  const denseModule = device.createShaderModule({ label: 'lc0web hybrid WGSL policy/value head dense', code: WGSL_HEADS_DENSE_PROBE });
-  const densePipeline = device.createComputePipeline({ layout: 'auto', compute: { module: denseModule, entryPoint: 'main' } }) as PipelineLike;
-  const policyLogitsModule = device.createShaderModule({ label: 'lc0web hybrid WGSL policy logits', code: WGSL_HEADS_POLICY_LOGITS_PROBE });
-  const policyLogitsPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: policyLogitsModule, entryPoint: 'main' } }) as PipelineLike;
-  const mappedPolicyModule = device.createShaderModule({ label: 'lc0web hybrid WGSL mapped policy', code: WGSL_MAPPED_POLICY_PROBE });
-  const mappedPolicyPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: mappedPolicyModule, entryPoint: 'main' } }) as PipelineLike;
-  const vectorModule = device.createShaderModule({ label: 'lc0web hybrid WGSL value vector dense', code: WGSL_HEADS_VECTOR_DENSE_PROBE });
-  const vectorPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: vectorModule, entryPoint: 'main' } }) as PipelineLike;
-  const softmaxModule = device.createShaderModule({ label: 'lc0web hybrid WGSL WDL softmax', code: WGSL_HEADS_SOFTMAX3_PROBE });
-  const softmaxPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: softmaxModule, entryPoint: 'main' } }) as PipelineLike;
-  const legalPriorsModule = device.createShaderModule({ label: 'lc0web hybrid WGSL legal priors', code: WGSL_LEGAL_PRIORS_PROBE });
-  const legalPriorsPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: legalPriorsModule, entryPoint: 'main' } }) as PipelineLike;
+type WgslPolicyValueHeadSharedResources = {
+  densePipeline: PipelineLike;
+  policyLogitsPipeline: PipelineLike;
+  mappedPolicyPipeline: PipelineLike;
+  vectorPipeline: PipelineLike;
+  softmaxPipeline: PipelineLike;
+  legalPriorsPipeline: PipelineLike;
+  policyWeightBuffer: BufferLike;
+  policyBiasBuffer: BufferLike;
+  policyQWeightBuffer: BufferLike;
+  policyQBiasBuffer: BufferLike;
+  policyKWeightBuffer: BufferLike;
+  policyKBiasBuffer: BufferLike;
+  policyScaleBuffer: BufferLike;
+  policyPromotionWeightBuffer: BufferLike;
+  policyMappingBuffer: BufferLike;
+  valueWeightBuffer: BufferLike;
+  valueBiasBuffer: BufferLike;
+  valueDense1WeightBuffer: BufferLike;
+  valueDense1BiasBuffer: BufferLike;
+  valueDense2WeightBuffer: BufferLike;
+  valueDense2BiasBuffer: BufferLike;
+  policyShapeBuffer: BufferLike;
+  policyLinearShapeBuffer: BufferLike;
+  valueShapeBuffer: BufferLike;
+  valueDense1ShapeBuffer: BufferLike;
+  valueDense2ShapeBuffer: BufferLike;
+  buffers: BufferLike[];
+};
 
-  const buffers: BufferLike[] = [];
+function createWgslPolicyValueHeadSharedResources(device: DeviceLike, tensors: Lc0WebPolicyValueHeadTensors, usage: Record<string, number>, pipelineCache?: WgslPipelineCache): WgslPolicyValueHeadSharedResources {
+  const densePipeline = createCachedComputePipeline(device, pipelineCache, 'heads-dense', { label: 'lc0web hybrid WGSL policy/value head dense', code: WGSL_HEADS_DENSE_PROBE });
+  const policyLogitsPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-policy-logits', { label: 'lc0web hybrid WGSL policy logits', code: WGSL_HEADS_POLICY_LOGITS_PROBE });
+  const mappedPolicyPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-mapped-policy', { label: 'lc0web hybrid WGSL mapped policy', code: WGSL_MAPPED_POLICY_PROBE });
+  const vectorPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-vector', { label: 'lc0web hybrid WGSL value vector dense', code: WGSL_HEADS_VECTOR_DENSE_PROBE });
+  const softmaxPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-softmax', { label: 'lc0web hybrid WGSL WDL softmax', code: WGSL_HEADS_SOFTMAX3_PROBE });
+  const legalPriorsPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-legal-priors', { label: 'lc0web hybrid WGSL legal priors', code: WGSL_LEGAL_PRIORS_PROBE });
   const policyWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyDense1Weight.bytes, DEFAULT_N * DEFAULT_N), usage.STORAGE | usage.COPY_DST);
   const policyBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyDense1Bias.bytes, DEFAULT_N), usage.STORAGE | usage.COPY_DST);
   const policyQWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyQWeight.bytes, DEFAULT_N * DEFAULT_N), usage.STORAGE | usage.COPY_DST);
@@ -5793,6 +5928,18 @@ function createWgslPolicyValueHeadRuntime(device: DeviceLike, tensors: Lc0WebPol
   const valueDense1BiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense1Bias.bytes, DEFAULT_VALUE_HIDDEN), usage.STORAGE | usage.COPY_DST);
   const valueDense2WeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense2Weight.bytes, DEFAULT_VALUE_HIDDEN * 3), usage.STORAGE | usage.COPY_DST);
   const valueDense2BiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense2Bias.bytes, 3), usage.STORAGE | usage.COPY_DST);
+  const policyShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 1], usage.UNIFORM | usage.COPY_DST);
+  const policyLinearShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 0], usage.UNIFORM | usage.COPY_DST);
+  const valueShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_EMBED, 1], usage.UNIFORM | usage.COPY_DST);
+  const valueDense1ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN, 1], usage.UNIFORM | usage.COPY_DST);
+  const valueDense2ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_HIDDEN, 3, 0], usage.UNIFORM | usage.COPY_DST);
+  const buffers = [policyWeightBuffer, policyBiasBuffer, policyQWeightBuffer, policyQBiasBuffer, policyKWeightBuffer, policyKBiasBuffer, policyScaleBuffer, policyPromotionWeightBuffer, policyMappingBuffer, valueWeightBuffer, valueBiasBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, policyShapeBuffer, policyLinearShapeBuffer, valueShapeBuffer, valueDense1ShapeBuffer, valueDense2ShapeBuffer];
+  return { densePipeline, policyLogitsPipeline, mappedPolicyPipeline, vectorPipeline, softmaxPipeline, legalPriorsPipeline, policyWeightBuffer, policyBiasBuffer, policyQWeightBuffer, policyQBiasBuffer, policyKWeightBuffer, policyKBiasBuffer, policyScaleBuffer, policyPromotionWeightBuffer, policyMappingBuffer, valueWeightBuffer, valueBiasBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, policyShapeBuffer, policyLinearShapeBuffer, valueShapeBuffer, valueDense1ShapeBuffer, valueDense2ShapeBuffer, buffers };
+}
+
+function createWgslPolicyValueHeadRuntime(device: DeviceLike, inputBuffer: BufferLike, usage: Record<string, number>, shared: WgslPolicyValueHeadSharedResources): WgslPolicyValueHeadRuntime {
+  const { densePipeline, policyLogitsPipeline, mappedPolicyPipeline, vectorPipeline, softmaxPipeline, legalPriorsPipeline } = shared;
+  const buffers: BufferLike[] = [];
   const policyOutputBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 4, usage: usage.STORAGE }) as BufferLike;
   const policyQBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 4, usage: usage.STORAGE }) as BufferLike;
   const policyKBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 4, usage: usage.STORAGE }) as BufferLike;
@@ -5806,12 +5953,7 @@ function createWgslPolicyValueHeadRuntime(device: DeviceLike, tensors: Lc0WebPol
   const legalArgsBuffer = device.createBuffer({ size: 4 * 4, usage: usage.UNIFORM | usage.COPY_DST }) as BufferLike;
   const legalOutputBuffer = device.createBuffer({ size: WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
   const headsReadbackBuffer = device.createBuffer({ size: Math.max(WGSL_HEADS_READBACK_BYTES, WGSL_GPU_LEGAL_READBACK_BYTES), usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
-  const policyShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 1], usage.UNIFORM | usage.COPY_DST);
-  const policyLinearShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 0], usage.UNIFORM | usage.COPY_DST);
-  const valueShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_EMBED, 1], usage.UNIFORM | usage.COPY_DST);
-  const valueDense1ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN, 1], usage.UNIFORM | usage.COPY_DST);
-  const valueDense2ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_HIDDEN, 3, 0], usage.UNIFORM | usage.COPY_DST);
-  buffers.push(policyWeightBuffer, policyBiasBuffer, policyQWeightBuffer, policyQBiasBuffer, policyKWeightBuffer, policyKBiasBuffer, policyScaleBuffer, policyPromotionWeightBuffer, policyMappingBuffer, valueWeightBuffer, valueBiasBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, policyOutputBuffer, policyQBuffer, policyKBuffer, policyLogitsBuffer, mappedPolicyBuffer, valueOutputBuffer, valueHiddenBuffer, valueLogitsBuffer, valueWdlBuffer, legalIndicesBuffer, legalArgsBuffer, legalOutputBuffer, headsReadbackBuffer, policyShapeBuffer, policyLinearShapeBuffer, valueShapeBuffer, valueDense1ShapeBuffer, valueDense2ShapeBuffer);
+  buffers.push(policyOutputBuffer, policyQBuffer, policyKBuffer, policyLogitsBuffer, mappedPolicyBuffer, valueOutputBuffer, valueHiddenBuffer, valueLogitsBuffer, valueWdlBuffer, legalIndicesBuffer, legalArgsBuffer, legalOutputBuffer, headsReadbackBuffer);
 
   return {
     densePipeline,
@@ -5820,14 +5962,14 @@ function createWgslPolicyValueHeadRuntime(device: DeviceLike, tensors: Lc0WebPol
     vectorPipeline,
     softmaxPipeline,
     legalPriorsPipeline,
-    policyBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, inputBuffer, policyWeightBuffer, policyBiasBuffer, policyOutputBuffer, policyShapeBuffer),
-    policyQBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, policyOutputBuffer, policyQWeightBuffer, policyQBiasBuffer, policyQBuffer, policyLinearShapeBuffer),
-    policyKBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, policyOutputBuffer, policyKWeightBuffer, policyKBiasBuffer, policyKBuffer, policyLinearShapeBuffer),
-    policyLogitsBindGroup: createWgslHeadsPolicyLogitsBindGroup(device, policyLogitsPipeline, policyQBuffer, policyKBuffer, policyScaleBuffer, policyLogitsBuffer),
-    mappedPolicyBindGroup: createMappedPolicyBindGroup(device, mappedPolicyPipeline, policyLogitsBuffer, policyKBuffer, policyPromotionWeightBuffer, policyMappingBuffer, mappedPolicyBuffer),
-    valueBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, inputBuffer, valueWeightBuffer, valueBiasBuffer, valueOutputBuffer, valueShapeBuffer),
-    valueDense1BindGroup: createWgslHeadsDenseBindGroup(device, vectorPipeline, valueOutputBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueHiddenBuffer, valueDense1ShapeBuffer),
-    valueDense2BindGroup: createWgslHeadsDenseBindGroup(device, vectorPipeline, valueHiddenBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, valueLogitsBuffer, valueDense2ShapeBuffer),
+    policyBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, inputBuffer, shared.policyWeightBuffer, shared.policyBiasBuffer, policyOutputBuffer, shared.policyShapeBuffer),
+    policyQBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, policyOutputBuffer, shared.policyQWeightBuffer, shared.policyQBiasBuffer, policyQBuffer, shared.policyLinearShapeBuffer),
+    policyKBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, policyOutputBuffer, shared.policyKWeightBuffer, shared.policyKBiasBuffer, policyKBuffer, shared.policyLinearShapeBuffer),
+    policyLogitsBindGroup: createWgslHeadsPolicyLogitsBindGroup(device, policyLogitsPipeline, policyQBuffer, policyKBuffer, shared.policyScaleBuffer, policyLogitsBuffer),
+    mappedPolicyBindGroup: createMappedPolicyBindGroup(device, mappedPolicyPipeline, policyLogitsBuffer, policyKBuffer, shared.policyPromotionWeightBuffer, shared.policyMappingBuffer, mappedPolicyBuffer),
+    valueBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, inputBuffer, shared.valueWeightBuffer, shared.valueBiasBuffer, valueOutputBuffer, shared.valueShapeBuffer),
+    valueDense1BindGroup: createWgslHeadsDenseBindGroup(device, vectorPipeline, valueOutputBuffer, shared.valueDense1WeightBuffer, shared.valueDense1BiasBuffer, valueHiddenBuffer, shared.valueDense1ShapeBuffer),
+    valueDense2BindGroup: createWgslHeadsDenseBindGroup(device, vectorPipeline, valueHiddenBuffer, shared.valueDense2WeightBuffer, shared.valueDense2BiasBuffer, valueLogitsBuffer, shared.valueDense2ShapeBuffer),
     valueSoftmaxBindGroup: createWgslHeadsSoftmaxBindGroup(device, softmaxPipeline, valueLogitsBuffer, valueWdlBuffer),
     legalPriorsBindGroup: createWgslLegalPriorsBindGroup(device, legalPriorsPipeline, mappedPolicyBuffer, legalIndicesBuffer, legalOutputBuffer, legalArgsBuffer),
     mappedPolicyBuffer,
@@ -6026,8 +6168,14 @@ export interface Lc0WebHybridTimingBreakdown {
   inputUploadMs: number;
   commandEncodeMs: number;
   queueSubmitMs: number;
-  /** Queue drain plus copy/map time for the backend's required readback(s). */
+  /** End-to-end readback synchronization plus mapped-range copy time. */
   readbackSyncedMs: number;
+  /** Host wait for all submitted compute and readback-copy queue work. */
+  queueSyncWaitMs?: number;
+  /** CPU time spent encoding the output copy command buffer. */
+  readbackCopyEncodeMs?: number;
+  /** CPU time spent submitting the output copy command buffer. */
+  readbackCopySubmitMs?: number;
   headRunMs: number;
   legalPriorsMs: number;
   readbackBytes: number;
@@ -6043,7 +6191,9 @@ export interface Lc0WebHybridTimingBreakdown {
   deferredReadbackSlot?: number;
   /** Wall time between queue submission and starting mapAsync; near-zero when readback mapping is requested eagerly. */
   deferredReadbackDelayMs?: number;
-  /** Total mapAsync pending time from request to resolution, separated from CPU copy/postprocess. */
+  /** Synchronous CPU cost to request mapAsync, excluding its asynchronous wait. */
+  readbackMapRequestMs?: number;
+  /** mapAsync pending wall time. This is synchronization wait, not pure mapping cost. */
   readbackMapAsyncMs?: number;
   /** Wall time spent awaiting an already-started mapAsync promise during result finalization. */
   readbackMapAsyncWaitMs?: number;
@@ -6277,8 +6427,18 @@ type InputBodyGpuRuntime = {
   buffers: BufferLike[];
 };
 
-function createInputBodyGpuRuntime(device: DeviceLike, tensors: Lc0WebPreparedInitialInputTensors, outputBuffer: BufferLike, usage: Record<string, number>): InputBodyGpuRuntime {
-  const planesBuffer = device.createBuffer({ size: DEFAULT_INPUT_PLANES * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_DST });
+type InputBodyGpuSharedResources = {
+  pipeline: PipelineLike;
+  posEncodingBuffer: BufferLike;
+  inputWeightBuffer: BufferLike;
+  inputBiasBuffer: BufferLike;
+  mulGateBuffer: BufferLike;
+  addGateBuffer: BufferLike;
+  shapeBuffer: BufferLike;
+  buffers: BufferLike[];
+};
+
+function createInputBodyGpuSharedResources(device: DeviceLike, tensors: Lc0WebPreparedInitialInputTensors, usage: Record<string, number>, pipelineCache?: WgslPipelineCache): InputBodyGpuSharedResources {
   const posEncodingBuffer = createStorageBuffer(device, tensors.posEncoding, usage.STORAGE | usage.COPY_DST);
   const inputWeightBuffer = createStorageBuffer(device, tensors.inputWeight, usage.STORAGE | usage.COPY_DST);
   const inputBiasBuffer = createStorageBuffer(device, tensors.inputBias, usage.STORAGE | usage.COPY_DST);
@@ -6286,18 +6446,26 @@ function createInputBodyGpuRuntime(device: DeviceLike, tensors: Lc0WebPreparedIn
   const addGateBuffer = createStorageBuffer(device, tensors.addGate, usage.STORAGE | usage.COPY_DST);
   const shape = new Uint32Array([DEFAULT_INPUT_PLANES, DEFAULT_POSITIONAL_CHANNELS, DEFAULT_PADDED_INPUT_CHANNELS, DEFAULT_N]);
   const shapeBuffer = createStorageBuffer(device, shape, usage.UNIFORM | usage.COPY_DST);
-  const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0web input body projection', code: INPUT_BODY_WGSL }), entryPoint: 'main' } }) as PipelineLike;
-  const bindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [
+  const pipeline = createCachedComputePipeline(device, pipelineCache, 'input-body', {
+    label: 'lc0web input body projection',
+    code: INPUT_BODY_WGSL,
+  });
+  return { pipeline, posEncodingBuffer, inputWeightBuffer, inputBiasBuffer, mulGateBuffer, addGateBuffer, shapeBuffer, buffers: [posEncodingBuffer, inputWeightBuffer, inputBiasBuffer, mulGateBuffer, addGateBuffer, shapeBuffer] };
+}
+
+function createInputBodyGpuRuntime(device: DeviceLike, outputBuffer: BufferLike, usage: Record<string, number>, shared: InputBodyGpuSharedResources): InputBodyGpuRuntime {
+  const planesBuffer = device.createBuffer({ size: DEFAULT_INPUT_PLANES * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_DST });
+  const bindGroup = device.createBindGroup({ layout: shared.pipeline.getBindGroupLayout(0), entries: [
     { binding: 0, resource: { buffer: planesBuffer } },
-    { binding: 1, resource: { buffer: posEncodingBuffer } },
-    { binding: 2, resource: { buffer: inputWeightBuffer } },
-    { binding: 3, resource: { buffer: inputBiasBuffer } },
-    { binding: 4, resource: { buffer: mulGateBuffer } },
-    { binding: 5, resource: { buffer: addGateBuffer } },
+    { binding: 1, resource: { buffer: shared.posEncodingBuffer } },
+    { binding: 2, resource: { buffer: shared.inputWeightBuffer } },
+    { binding: 3, resource: { buffer: shared.inputBiasBuffer } },
+    { binding: 4, resource: { buffer: shared.mulGateBuffer } },
+    { binding: 5, resource: { buffer: shared.addGateBuffer } },
     { binding: 6, resource: { buffer: outputBuffer } },
-    { binding: 7, resource: { buffer: shapeBuffer } },
+    { binding: 7, resource: { buffer: shared.shapeBuffer } },
   ] });
-  return { planesBuffer, pipeline, bindGroup, buffers: [planesBuffer, posEncodingBuffer, inputWeightBuffer, inputBiasBuffer, mulGateBuffer, addGateBuffer, shapeBuffer] };
+  return { planesBuffer, pipeline: shared.pipeline, bindGroup, buffers: [planesBuffer] };
 }
 
 function encodeInputBodyPass(pass: ComputePassLike, runtime: InputBodyGpuRuntime): void {
@@ -6409,7 +6577,7 @@ function createHybridEncoderLayerWeights(device: DeviceLike, tensors: ReturnType
   return { weights, buffers };
 }
 
-function createHybridEncoderLayerSlotScratch(device: DeviceLike, usage: Record<string, number>, encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand'): { scratch: HybridEncoderLayerSlotScratch; buffers: BufferLike[] } {
+function createHybridEncoderLayerSlotScratch(device: DeviceLike, usage: Record<string, number>, encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand', sharedPodArgs?: BufferLike): { scratch: HybridEncoderLayerSlotScratch; buffers: BufferLike[] } {
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
   const smolgenBias = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_DST });
   const smolgenCompressed = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
@@ -6425,16 +6593,16 @@ function createHybridEncoderLayerSlotScratch(device: DeviceLike, usage: Record<s
   const attentionOutput = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
   const ffnHidden = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN * 4, usage: usage.STORAGE | usage.COPY_DST });
   const ffnSkip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
-  const podArgs = encoderUsesTvmPackedF16Qkv(encoderKernelVariant) || encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) || encoderUsesTvmPackedF16Ffn(encoderKernelVariant) ? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
+  const podArgs = encoderUsesTvmPackedF16Qkv(encoderKernelVariant) || encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) || encoderUsesTvmPackedF16Ffn(encoderKernelVariant) ? sharedPodArgs ?? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
   const scratch: HybridEncoderLayerSlotScratch = { smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, podArgs };
   const buffers = [smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip];
-  if (podArgs) buffers.push(podArgs);
+  if (podArgs && podArgs !== sharedPodArgs) buffers.push(podArgs);
   return { scratch, buffers };
 }
 
-function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<string, number>, weights: HybridEncoderLayerWeights, layerInput: BufferLike, encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand', sharedScratch?: HybridEncoderLayerSlotScratch): { runtime: HybridEncoderLayerSlotRuntime; buffers: BufferLike[] } {
+function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<string, number>, weights: HybridEncoderLayerWeights, layerInput: BufferLike, encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand', sharedScratch?: HybridEncoderLayerSlotScratch, pipelineCache?: WgslPipelineCache, sharedPodArgs?: BufferLike): { runtime: HybridEncoderLayerSlotRuntime; buffers: BufferLike[] } {
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
-  const scratchAndBuffers = sharedScratch ? { scratch: sharedScratch, buffers: [] as BufferLike[] } : createHybridEncoderLayerSlotScratch(device, usage, encoderKernelVariant);
+  const scratchAndBuffers = sharedScratch ? { scratch: sharedScratch, buffers: [] as BufferLike[] } : createHybridEncoderLayerSlotScratch(device, usage, encoderKernelVariant, sharedPodArgs);
   const { scratch, buffers: scratchBuffers } = scratchAndBuffers;
   const { smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, podArgs } = scratch;
   const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC | usage.COPY_DST });
@@ -6457,11 +6625,11 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
     ln2: smolgenLn2,
     smolgenWeight: weights.smolgenWeight,
     output: smolgenBias,
-  }, encoderUsesTiledSmolgenProject(encoderKernelVariant) ? 'tiled-project-f16' : 'hand');
+  }, encoderUsesTiledSmolgenProject(encoderKernelVariant) ? 'tiled-project-f16' : 'hand', pipelineCache);
   const attentionPipelines = createAttentionOutputPipelines(device, {
     input: layerInput, qWeight: weights.qWeight, qBias: weights.qBias, kWeight: weights.kWeight, kBias: weights.kBias, vWeight: weights.vWeight, vBias: weights.vBias, scale: weights.scale, smolgenBias, qkv, scores, probs, attn,
     outWeight: weights.outWeight, outBias: weights.outBias, alpha: weights.attentionAlpha, skip: attentionSkip, lnScale: weights.ln1Scale, lnBias: weights.ln1Bias, output: attentionOutput, podArgs,
-  }, encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand', encoderUsesTvmPackedF16Qkv(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand');
+  }, encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand', encoderUsesTvmPackedF16Qkv(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand', pipelineCache);
   const ffnPipelines = createEncoder0FfnPipelines(device, {
     input: attentionOutput,
     dense1Weight: weights.ffnDense1Weight,
@@ -6475,11 +6643,17 @@ function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<s
     ln2Bias: weights.ln2Bias,
     output,
     podArgs,
-  }, encoderUsesTvmPackedF16Ffn(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand');
+  }, encoderUsesTvmPackedF16Ffn(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand', pipelineCache);
   return { runtime: { output, smolgenPipelines, attentionPipelines, ffnPipelines }, buffers };
 }
 
 interface SubmittedWgslHybridBatchReadbackMapState {
+  startedAt: number;
+  settledAt?: number;
+  promise: Promise<void>;
+}
+
+interface SubmittedWgslHybridBatchQueueState {
   startedAt: number;
   settledAt?: number;
   promise: Promise<void>;
@@ -6494,6 +6668,7 @@ interface SubmittedWgslHybridBatch {
   legalPriorsPrepMs?: number;
   readbackBuffer: BufferLike;
   readbackMapState: SubmittedWgslHybridBatchReadbackMapState;
+  queueState: SubmittedWgslHybridBatchQueueState;
   sequenceId: number;
   batchSequenceIndex?: number;
   deferredReadbackSlot?: number;
@@ -6504,10 +6679,53 @@ interface SubmittedWgslHybridBatch {
   inputUploadMs: number;
   commandEncodeMs: number;
   queueSubmitMs: number;
+  readbackCopyEncodeMs: number;
+  readbackCopySubmitMs: number;
+  readbackMapRequestMs: number;
   inputBridgeCopyMs: number;
   wasmEncodeMs: number;
   wasmTotalMs: number;
   dispatchCount: number;
+}
+
+function hybridPipelineDescriptors(
+  inputBackend: Lc0WebHybridInputBackend,
+  headBackend: Lc0WebHybridHeadBackend,
+  encoderKernelVariant: Lc0WebEncoderKernelVariant,
+): WgslPipelineDescriptor[] {
+  const qkvVariant: Lc0WebAttentionQkvKernelVariant = encoderUsesTvmPackedF16Qkv(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand';
+  const outProjVariant: Lc0WebAttentionOutProjKernelVariant = encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand';
+  const ffnVariant: Lc0WebFfnKernelVariant = encoderUsesTvmPackedF16Ffn(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand';
+  const projectTileSize = smolgenProjectKernelTileSize(encoderUsesTiledSmolgenProject(encoderKernelVariant) ? 'tiled-project-f16' : 'hand');
+  const descriptors: WgslPipelineDescriptor[] = [
+    { key: qkvVariant === 'tvm-packed-f16' ? 'attention-qkv-tvm-packed-f16' : 'attention-qkv-hand', label: qkvVariant === 'tvm-packed-f16' ? 'lc0web attention block QKV TVM packed-f16 projection' : 'lc0web attention block qkv', code: qkvVariant === 'tvm-packed-f16' ? ATTENTION_BLOCK_QKV_TVM_PACKED_F16_WGSL : ATTENTION_BLOCK_QKV_WGSL, entryPoint: qkvVariant === 'tvm-packed-f16' ? 'matmul_kernel' : 'main' },
+    { key: 'attention-score', label: 'lc0web attention block score', code: ATTENTION_BLOCK_SCORE_WGSL },
+    { key: 'attention-softmax', label: 'lc0web attention softmax probe', code: SOFTMAX_WGSL },
+    { key: 'attention-value', label: 'lc0web attention block value', code: ATTENTION_BLOCK_VALUE_WGSL },
+    { key: outProjVariant === 'tvm-packed-f16' ? 'attention-output-tvm-packed-f16' : 'attention-output-hand', label: outProjVariant === 'tvm-packed-f16' ? 'lc0web attention output projection TVM packed-f16 residual' : 'lc0web attention output projection residual', code: outProjVariant === 'tvm-packed-f16' ? ATTENTION_OUTPUT_PROJ_TVM_PACKED_F16_WGSL : ATTENTION_OUTPUT_PROJ_WGSL, entryPoint: outProjVariant === 'tvm-packed-f16' ? 'matmul_kernel' : 'main' },
+    { key: 'attention-output-norm', label: 'lc0web attention output layernorm', code: ATTENTION_OUTPUT_NORM_WGSL },
+    { key: 'smolgen-compress', label: 'lc0web smolgen compress', code: SMOLGEN_COMPRESS_WGSL },
+    { key: 'smolgen-dense1', label: 'lc0web smolgen dense1', code: SMOLGEN_DENSE1_WGSL },
+    { key: 'smolgen-ln1', label: 'lc0web smolgen ln1', code: SMOLGEN_SWISH_LN1_WGSL },
+    { key: 'smolgen-dense2', label: 'lc0web smolgen dense2', code: SMOLGEN_DENSE2_WGSL },
+    { key: 'smolgen-ln2', label: 'lc0web smolgen ln2', code: SMOLGEN_SWISH_LN2_WGSL },
+    { key: `smolgen-project-${projectTileSize ?? 'hand'}`, label: projectTileSize ? `lc0web smolgen project tiled f16 ${projectTileSize}` : 'lc0web smolgen project', code: projectTileSize ? (projectTileSize === 64 ? SMOLGEN_PROJECT_TILED_F16_WGSL : smolgenProjectTiledF16Wgsl(projectTileSize)) : SMOLGEN_PROJECT_WGSL },
+    { key: `ffn-dense1-${ffnVariant}`, label: ffnVariant === 'tvm-packed-f16' ? 'lc0web encoder0 FFN dense1 TVM packed-f16 sqrrelu' : 'lc0web encoder0 FFN dense1 sqrrelu', code: ffnVariant === 'tvm-packed-f16' ? FFN_DENSE1_TVM_PACKED_F16_WGSL : FFN_DENSE1_WGSL, entryPoint: ffnVariant === 'tvm-packed-f16' ? 'matmul_kernel' : 'main' },
+    { key: `ffn-dense2-${ffnVariant}`, label: ffnVariant === 'tvm-packed-f16' ? 'lc0web encoder0 FFN dense2 TVM packed-f16 residual' : 'lc0web encoder0 FFN dense2 residual', code: ffnVariant === 'tvm-packed-f16' ? FFN_DENSE2_TVM_PACKED_F16_WGSL : FFN_DENSE2_WGSL, entryPoint: ffnVariant === 'tvm-packed-f16' ? 'matmul_kernel' : 'main' },
+    { key: 'ffn-ln2', label: 'lc0web encoder0 FFN ln2', code: FFN_LN2_WGSL },
+  ];
+  if (inputBackend !== 'js') descriptors.push({ key: 'input-body', label: 'lc0web input body projection', code: INPUT_BODY_WGSL });
+  if (headBackend === 'wgsl') {
+    descriptors.push(
+      { key: 'heads-dense', label: 'lc0web hybrid WGSL policy/value head dense', code: WGSL_HEADS_DENSE_PROBE },
+      { key: 'heads-policy-logits', label: 'lc0web hybrid WGSL policy logits', code: WGSL_HEADS_POLICY_LOGITS_PROBE },
+      { key: 'heads-mapped-policy', label: 'lc0web hybrid WGSL mapped policy', code: WGSL_MAPPED_POLICY_PROBE },
+      { key: 'heads-vector', label: 'lc0web hybrid WGSL value vector dense', code: WGSL_HEADS_VECTOR_DENSE_PROBE },
+      { key: 'heads-softmax', label: 'lc0web hybrid WGSL WDL softmax', code: WGSL_HEADS_SOFTMAX3_PROBE },
+      { key: 'heads-legal-priors', label: 'lc0web hybrid WGSL legal priors', code: WGSL_LEGAL_PRIORS_PROBE },
+    );
+  }
+  return descriptors;
 }
 
 function addFootprintCategory(categories: Record<string, Lc0WebExecutionFootprintCategory>, name: string, bytes: number, count = 1): void {
@@ -6597,7 +6815,7 @@ function addEncoderLayerScratchFootprint(categories: Record<string, Lc0WebExecut
   addFootprintCategory(categories, 'encoderAttentionScratch', perPhysicalSlotAttention * physicalSlots, 6 * physicalSlots);
   addFootprintCategory(categories, 'encoderFfnScratch', perPhysicalSlotFfnScratch * physicalSlots, 2 * physicalSlots);
   addFootprintCategory(categories, 'encoderLayerOutputs', perLayerSlotOutput * totalLayerSlots, totalLayerSlots);
-  if (hasPodArgs) addFootprintCategory(categories, 'encoderKernelUniforms', paddedGpuBytes(4) * physicalSlots, physicalSlots);
+  if (hasPodArgs) addFootprintCategory(categories, 'encoderKernelUniforms', paddedGpuBytes(4), 1);
 }
 
 function wgslHeadsFootprintCategories(): Record<string, Lc0WebExecutionFootprintCategory> {
@@ -6636,6 +6854,10 @@ function wgslHeadsFootprintCategories(): Record<string, Lc0WebExecutionFootprint
   return categories;
 }
 
+type Lc0WebHybridRuntimeCreateOptions = Omit<Lc0WebHybridEvaluationOptions, 'input'> & {
+  encoderProfileOnly?: boolean;
+};
+
 class Lc0WebHybridRuntime {
   private readonly device: DeviceLike;
   private readonly gpuTimestampSupported: boolean;
@@ -6644,13 +6866,16 @@ class Lc0WebHybridRuntime {
   private readonly legalPriorsBackend: Lc0WebHybridLegalPriorsBackend;
   private readonly encoderKernelVariant: Lc0WebEncoderKernelVariant;
   private readonly inputBodyGpu?: InputBodyGpuRuntime;
+  private readonly inputBodyShared?: InputBodyGpuSharedResources;
   private readonly wasmInputEncoder?: Lc0WasmInputEncoder;
   private readonly wasmLegalPriors?: Lc0WasmLegalPriors;
   private readonly headBackend: Lc0WebHybridHeadBackend;
   private readonly wgslBatchMode: Lc0WebHybridWgslBatchMode;
   private readonly headSession?: CachedPolicyValueHeadSession;
   private readonly wgslHeads?: WgslPolicyValueHeadRuntime;
-  private readonly headTensors: Lc0WebPolicyValueHeadTensors;
+  private readonly wgslHeadShared?: WgslPolicyValueHeadSharedResources;
+  private readonly pipelineCache: WgslPipelineCache;
+  private readonly encoderPodArgs?: BufferLike;
   private readonly usage: Record<string, number>;
   private readonly inputBuffer: BufferLike;
   private readonly readbackBuffer: BufferLike;
@@ -6671,6 +6896,9 @@ class Lc0WebHybridRuntime {
   private wgslDeferredReadbackCapacity = 0;
   private wgslDeferredReadbackInUse = new Set<number>();
   private nextWgslSequenceId = 1;
+  private readonly retiredBuffers = new Set<BufferLike>();
+  private readonly retirementPendingBuffers = new Set<BufferLike>();
+  private destroyed = false;
 
   private constructor(options: {
     device: DeviceLike;
@@ -6680,13 +6908,16 @@ class Lc0WebHybridRuntime {
     legalPriorsBackend: Lc0WebHybridLegalPriorsBackend;
     encoderKernelVariant: Lc0WebEncoderKernelVariant;
     inputBodyGpu?: InputBodyGpuRuntime;
+    inputBodyShared?: InputBodyGpuSharedResources;
     wasmInputEncoder?: Lc0WasmInputEncoder;
     wasmLegalPriors?: Lc0WasmLegalPriors;
     headBackend: Lc0WebHybridHeadBackend;
     wgslBatchMode: Lc0WebHybridWgslBatchMode;
     headSession?: CachedPolicyValueHeadSession;
     wgslHeads?: WgslPolicyValueHeadRuntime;
-    headTensors: Lc0WebPolicyValueHeadTensors;
+    wgslHeadShared?: WgslPolicyValueHeadSharedResources;
+    pipelineCache: WgslPipelineCache;
+    encoderPodArgs?: BufferLike;
     usage: Record<string, number>;
     inputBuffer: BufferLike;
     readbackBuffer: BufferLike;
@@ -6703,13 +6934,16 @@ class Lc0WebHybridRuntime {
     this.legalPriorsBackend = options.legalPriorsBackend;
     this.encoderKernelVariant = options.encoderKernelVariant;
     this.inputBodyGpu = options.inputBodyGpu;
+    this.inputBodyShared = options.inputBodyShared;
     this.wasmInputEncoder = options.wasmInputEncoder;
     this.wasmLegalPriors = options.wasmLegalPriors;
     this.headBackend = options.headBackend;
     this.wgslBatchMode = options.wgslBatchMode;
     this.headSession = options.headSession;
     this.wgslHeads = options.wgslHeads;
-    this.headTensors = options.headTensors;
+    this.wgslHeadShared = options.wgslHeadShared;
+    this.pipelineCache = options.pipelineCache;
+    this.encoderPodArgs = options.encoderPodArgs;
     this.usage = options.usage;
     this.inputBuffer = options.inputBuffer;
     this.readbackBuffer = options.readbackBuffer;
@@ -6724,80 +6958,122 @@ class Lc0WebHybridRuntime {
   readonly packLoadMs: number;
   readonly layers: number;
 
-  static async create(options: Omit<Lc0WebHybridEvaluationOptions, 'input'>): Promise<Lc0WebHybridRuntime> {
+  static async create(options: Lc0WebHybridRuntimeCreateOptions): Promise<Lc0WebHybridRuntime> {
     const layers = clampInteger(options.layers, 10, 1, 32);
     const prefixes = Array.from({ length: layers }, (_, layer) => `/encoder${layer}`);
     const layerTensorNames = prefixes.map((prefix) => lc0WebEncoderBlockTensorNames(prefix));
-    const pack = await loadLc0WebModelPack(options.packUrl, {
-      verifyShards: options.verifyShards ?? true,
-      tensorNames: Array.from(new Set([
-        ...inputBodyTensorNameList(),
-        ...layerTensorNames.flatMap((names) => encoderBlockTensorNameList(names)),
-        ...policyValueHeadTensorNameList(),
-      ])),
-    });
-    const inputTensors = prepareInitialInputTensors(loadInitialInputTensors(pack));
-    const tensorsByLayer = layerTensorNames.map((names) => loadEncoder0FfnInputs(pack, names));
-    const headTensors = loadPolicyValueHeadTensors(pack);
-    const headBackend = options.headBackend ?? 'ort';
-    const wgslBatchMode = options.wgslBatchMode ?? 'physical';
     const inputBackend = options.inputBackend ?? 'js';
     const legalPriorsBackend = options.legalPriorsBackend ?? 'js';
+    const headBackend = options.headBackend ?? 'ort';
+    const wgslBatchMode = options.wgslBatchMode ?? 'physical';
+    const encoderProfileOnly = options.encoderProfileOnly === true;
     if (legalPriorsBackend === 'gpu' && headBackend !== 'wgsl') throw new Error('GPU legal-prior backend requires WGSL heads');
     const encoderKernelVariant = options.encoderKernelVariant ?? 'hand';
-    const headSession = headBackend === 'ort' ? await createCachedPolicyValueHeadSession(headTensors) : undefined;
-    const { device, timestampQuerySupported } = await requestDevice({ timestampQuery: options.timestampQuery });
-    const usage = gpuGlobals().GPUBufferUsage!;
-    const outputElements = DEFAULT_TOKENS * DEFAULT_N;
-    const buffers: BufferLike[] = [];
-    const inputBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
-    const readbackBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
-    buffers.push(inputBuffer, readbackBuffer);
-    const usesGpuInputBody = inputBackend === 'wgsl' || inputBackend === 'wasm';
-    const wasmInputEncoder = inputBackend === 'wasm' ? await createLc0WasmInputEncoder() : undefined;
-    const wasmLegalPriors = legalPriorsBackend === 'wasm' ? await createLc0WasmLegalPriors() : undefined;
-    const inputBodyGpu = usesGpuInputBody ? createInputBodyGpuRuntime(device, inputTensors, inputBuffer, usage) : undefined;
-    if (inputBodyGpu) buffers.push(...inputBodyGpu.buffers);
-    const layerRuntimes: HybridEncoderLayerRuntime[] = [];
-    const sharedSmolgenWeight = createStorageBuffer(device, tensorsByLayer[0].smolgen.smolgenWeight.bytes, usage.STORAGE | usage.COPY_DST);
-    buffers.push(sharedSmolgenWeight);
-    const { scratch: sharedLayerScratch, buffers: sharedLayerScratchBuffers } = createHybridEncoderLayerSlotScratch(device, usage, encoderKernelVariant);
-    buffers.push(...sharedLayerScratchBuffers);
-    let layerInput = inputBuffer;
-    for (const tensors of tensorsByLayer) {
-      const { weights, buffers: weightBuffers } = createHybridEncoderLayerWeights(device, tensors, usage, sharedSmolgenWeight);
-      buffers.push(...weightBuffers);
-      const { runtime, buffers: slotBuffers } = createHybridEncoderLayerSlotRuntime(device, usage, weights, layerInput, encoderKernelVariant, sharedLayerScratch);
-      buffers.push(...slotBuffers);
-      layerRuntimes.push({ ...runtime, weights });
-      layerInput = runtime.output;
+    const initialization = await Promise.allSettled([
+      loadLc0WebModelPack(options.packUrl, {
+        verifyShards: options.verifyShards ?? true,
+        tensorNames: Array.from(new Set([
+          ...inputBodyTensorNameList(),
+          ...layerTensorNames.flatMap((names) => encoderBlockTensorNameList(names)),
+          ...(encoderProfileOnly ? [] : policyValueHeadTensorNameList()),
+        ])),
+      }),
+      requestDevice({ timestampQuery: options.timestampQuery }),
+      inputBackend === 'wasm' ? createLc0WasmInputEncoder() : Promise.resolve(undefined),
+      legalPriorsBackend === 'wasm' ? createLc0WasmLegalPriors() : Promise.resolve(undefined),
+    ]);
+    const initializationFailure = initialization.find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
+    if (initializationFailure) {
+      const deviceResult = initialization[1];
+      if (deviceResult.status === 'fulfilled') deviceResult.value.device.destroy?.();
+      throw initializationFailure.reason;
     }
-    const wgslHeads = headBackend === 'wgsl' ? createWgslPolicyValueHeadRuntime(device, headTensors, layerRuntimes[layerRuntimes.length - 1].output, usage) : undefined;
-    if (wgslHeads) buffers.push(...wgslHeads.buffers);
-    return new Lc0WebHybridRuntime({
-      device,
-      gpuTimestampSupported: timestampQuerySupported,
-      inputTensors,
-      inputBackend,
-      legalPriorsBackend,
-      encoderKernelVariant,
-      inputBodyGpu,
-      wasmInputEncoder,
-      wasmLegalPriors,
-      headBackend,
-      wgslBatchMode,
-      headSession,
-      wgslHeads,
-      headTensors,
-      usage,
-      inputBuffer,
-      readbackBuffer,
-      layerRuntimes,
-      buffers,
-      packUrl: pack.manifestUrl,
-      packLoadMs: pack.elapsedMs,
-      layers,
-    });
+    const pack = (initialization[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof loadLc0WebModelPack>>>).value;
+    const { device, timestampQuerySupported } = (initialization[1] as PromiseFulfilledResult<Awaited<ReturnType<typeof requestDevice>>>).value;
+    const wasmInputEncoder = (initialization[2] as PromiseFulfilledResult<Lc0WasmInputEncoder | undefined>).value;
+    const wasmLegalPriors = (initialization[3] as PromiseFulfilledResult<Lc0WasmLegalPriors | undefined>).value;
+    const buffers: BufferLike[] = [];
+    let headSession: CachedPolicyValueHeadSession | undefined;
+    try {
+      const inputTensors = prepareInitialInputTensors(loadInitialInputTensors(pack));
+      const tensorsByLayer = layerTensorNames.map((names) => loadEncoder0FfnInputs(pack, names));
+      const headTensors = encoderProfileOnly ? undefined : loadPolicyValueHeadTensors(pack);
+      const usage = gpuGlobals().GPUBufferUsage!;
+      const outputElements = DEFAULT_TOKENS * DEFAULT_N;
+      const initializedResources = await Promise.allSettled([
+        createLc0WebGpuPipelineCache(device, hybridPipelineDescriptors(inputBackend, headBackend, encoderKernelVariant)),
+        headBackend === 'ort' && headTensors ? createCachedPolicyValueHeadSession(headTensors) : Promise.resolve(undefined),
+      ]);
+      const resourceFailure = initializedResources.find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
+      const headSessionResult = initializedResources[1];
+      if (resourceFailure) {
+        if (headSessionResult.status === 'fulfilled' && headSessionResult.value) await ort.releaseOrtSession(headSessionResult.value.session).catch(() => undefined);
+        throw resourceFailure.reason;
+      }
+      const pipelineCache = (initializedResources[0] as PromiseFulfilledResult<WgslPipelineCache>).value;
+      headSession = (headSessionResult as PromiseFulfilledResult<CachedPolicyValueHeadSession | undefined>).value;
+      const inputBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
+      const readbackBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
+      buffers.push(inputBuffer, readbackBuffer);
+      const usesGpuInputBody = inputBackend === 'wgsl' || inputBackend === 'wasm';
+      const inputBodyShared = usesGpuInputBody ? createInputBodyGpuSharedResources(device, inputTensors, usage, pipelineCache) : undefined;
+      if (inputBodyShared) buffers.push(...inputBodyShared.buffers);
+      const inputBodyGpu = inputBodyShared ? createInputBodyGpuRuntime(device, inputBuffer, usage, inputBodyShared) : undefined;
+      if (inputBodyGpu) buffers.push(...inputBodyGpu.buffers);
+      const layerRuntimes: HybridEncoderLayerRuntime[] = [];
+      const sharedSmolgenWeight = createStorageBuffer(device, tensorsByLayer[0].smolgen.smolgenWeight.bytes, usage.STORAGE | usage.COPY_DST);
+      buffers.push(sharedSmolgenWeight);
+      const needsEncoderPodArgs = encoderUsesTvmPackedF16Qkv(encoderKernelVariant) || encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) || encoderUsesTvmPackedF16Ffn(encoderKernelVariant);
+      const encoderPodArgs = needsEncoderPodArgs ? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
+      if (encoderPodArgs) buffers.push(encoderPodArgs);
+      const { scratch: sharedLayerScratch, buffers: sharedLayerScratchBuffers } = createHybridEncoderLayerSlotScratch(device, usage, encoderKernelVariant, encoderPodArgs);
+      buffers.push(...sharedLayerScratchBuffers);
+      let layerInput = inputBuffer;
+      for (const tensors of tensorsByLayer) {
+        const { weights, buffers: weightBuffers } = createHybridEncoderLayerWeights(device, tensors, usage, sharedSmolgenWeight);
+        buffers.push(...weightBuffers);
+        const { runtime, buffers: slotBuffers } = createHybridEncoderLayerSlotRuntime(device, usage, weights, layerInput, encoderKernelVariant, sharedLayerScratch, pipelineCache);
+        buffers.push(...slotBuffers);
+        layerRuntimes.push({ ...runtime, weights });
+        layerInput = runtime.output;
+      }
+      const wgslHeadShared = headBackend === 'wgsl' && headTensors ? createWgslPolicyValueHeadSharedResources(device, headTensors, usage, pipelineCache) : undefined;
+      if (wgslHeadShared) buffers.push(...wgslHeadShared.buffers);
+      const wgslHeads = wgslHeadShared ? createWgslPolicyValueHeadRuntime(device, layerRuntimes[layerRuntimes.length - 1].output, usage, wgslHeadShared) : undefined;
+      if (wgslHeads) buffers.push(...wgslHeads.buffers);
+      return new Lc0WebHybridRuntime({
+        device,
+        gpuTimestampSupported: timestampQuerySupported,
+        inputTensors,
+        inputBackend,
+        legalPriorsBackend,
+        encoderKernelVariant,
+        inputBodyGpu,
+        inputBodyShared,
+        wasmInputEncoder,
+        wasmLegalPriors,
+        headBackend,
+        wgslBatchMode,
+        headSession,
+        wgslHeads,
+        wgslHeadShared,
+        pipelineCache,
+        encoderPodArgs,
+        usage,
+        inputBuffer,
+        readbackBuffer,
+        layerRuntimes,
+        buffers,
+        packUrl: pack.manifestUrl,
+        packLoadMs: pack.elapsedMs,
+        layers,
+      });
+    } catch (error) {
+      for (const buffer of buffers) buffer.destroy?.();
+      if (headSession) await ort.releaseOrtSession(headSession.session).catch(() => undefined);
+      device.destroy?.();
+      throw error;
+    }
   }
 
   private createWgslBatchSlot(): HybridWgslBatchSlot {
@@ -6805,19 +7081,20 @@ class Lc0WebHybridRuntime {
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
     const inputBuffer = this.device.createBuffer({ size: outputElements * 4, usage: this.usage.STORAGE | this.usage.COPY_DST });
     this.buffers.push(inputBuffer);
-    const inputBodyGpu = this.inputBackend === 'wgsl' || this.inputBackend === 'wasm' ? createInputBodyGpuRuntime(this.device, this.inputTensors, inputBuffer, this.usage) : undefined;
+    const inputBodyGpu = this.inputBodyShared ? createInputBodyGpuRuntime(this.device, inputBuffer, this.usage, this.inputBodyShared) : undefined;
     if (inputBodyGpu) this.buffers.push(...inputBodyGpu.buffers);
     const layerRuntimes: HybridEncoderLayerSlotRuntime[] = [];
-    const { scratch: sharedLayerScratch, buffers: sharedLayerScratchBuffers } = createHybridEncoderLayerSlotScratch(this.device, this.usage, this.encoderKernelVariant);
+    const { scratch: sharedLayerScratch, buffers: sharedLayerScratchBuffers } = createHybridEncoderLayerSlotScratch(this.device, this.usage, this.encoderKernelVariant, this.encoderPodArgs);
     this.buffers.push(...sharedLayerScratchBuffers);
     let layerInput = inputBuffer;
     for (const layer of this.layerRuntimes) {
-      const { runtime, buffers } = createHybridEncoderLayerSlotRuntime(this.device, this.usage, layer.weights, layerInput, this.encoderKernelVariant, sharedLayerScratch);
+      const { runtime, buffers } = createHybridEncoderLayerSlotRuntime(this.device, this.usage, layer.weights, layerInput, this.encoderKernelVariant, sharedLayerScratch, this.pipelineCache, this.encoderPodArgs);
       this.buffers.push(...buffers);
       layerRuntimes.push(runtime);
       layerInput = runtime.output;
     }
-    const wgslHeads = createWgslPolicyValueHeadRuntime(this.device, this.headTensors, layerInput, this.usage);
+    if (!this.wgslHeadShared) throw new Error('WGSL shared head resources are not initialized');
+    const wgslHeads = createWgslPolicyValueHeadRuntime(this.device, layerInput, this.usage, this.wgslHeadShared);
     this.buffers.push(...wgslHeads.buffers);
     return { inputBuffer, inputBodyGpu, layerRuntimes, wgslHeads };
   }
@@ -6841,6 +7118,7 @@ class Lc0WebHybridRuntime {
   private ensureWgslBatchUploadBuffer(count: number): BufferLike {
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
     if (!this.wgslBatchUploadBuffer || this.wgslBatchUploadCapacity < count) {
+      if (this.wgslBatchUploadBuffer) this.retireSupersededBuffer(this.wgslBatchUploadBuffer);
       this.wgslBatchUploadBuffer = this.device.createBuffer({ size: count * outputElements * 4, usage: this.usage.COPY_SRC | this.usage.COPY_DST });
       this.wgslBatchUploadCapacity = count;
       this.buffers.push(this.wgslBatchUploadBuffer);
@@ -6851,6 +7129,8 @@ class Lc0WebHybridRuntime {
   private ensureWgslDeferredBatchUploadBuffer(count: number, slot: number): BufferLike {
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
     if (!this.wgslDeferredBatchUploadBuffers[slot] || (this.wgslDeferredBatchUploadCapacities[slot] ?? 0) < count) {
+      const previous = this.wgslDeferredBatchUploadBuffers[slot];
+      if (previous) this.retireSupersededBuffer(previous);
       const buffer = this.device.createBuffer({ size: count * outputElements * 4, usage: this.usage.COPY_SRC | this.usage.COPY_DST });
       this.wgslDeferredBatchUploadBuffers[slot] = buffer;
       this.wgslDeferredBatchUploadCapacities[slot] = count;
@@ -6861,6 +7141,7 @@ class Lc0WebHybridRuntime {
 
   private ensureWgslBatchReadbackBuffer(count: number): BufferLike {
     if (!this.wgslBatchReadbackBuffer || this.wgslBatchReadbackCapacity < count) {
+      if (this.wgslBatchReadbackBuffer) this.retireSupersededBuffer(this.wgslBatchReadbackBuffer);
       this.wgslBatchReadbackBuffer = this.device.createBuffer({ size: count * this.wgslHeadReadbackBytes(), usage: this.usage.MAP_READ | this.usage.COPY_DST });
       this.wgslBatchReadbackCapacity = count;
       this.buffers.push(this.wgslBatchReadbackBuffer);
@@ -6871,7 +7152,7 @@ class Lc0WebHybridRuntime {
   private ensureWgslDeferredReadbackBuffer(count: number, slot: number): BufferLike {
     if (this.wgslDeferredReadbackCapacity < count) {
       if (this.wgslDeferredReadbackInUse.size) throw new Error('cannot grow WGSL deferred readback buffers while a deferred readback is still in flight');
-      for (const buffer of this.wgslDeferredReadbackBuffers) buffer.destroy?.();
+      for (const buffer of this.wgslDeferredReadbackBuffers) this.retireSupersededBuffer(buffer);
       this.wgslDeferredReadbackBuffers = [];
       this.wgslDeferredReadbackCapacity = count;
     }
@@ -6881,6 +7162,19 @@ class Lc0WebHybridRuntime {
       this.buffers.push(buffer);
     }
     return this.wgslDeferredReadbackBuffers[slot];
+  }
+
+  private retireSupersededBuffer(buffer: BufferLike): void {
+    if (this.retiredBuffers.has(buffer) || this.retirementPendingBuffers.has(buffer)) return;
+    this.retirementPendingBuffers.add(buffer);
+    void retireLc0WebGpuBufferAfterSubmittedWork(this.device.queue, buffer)
+      .then((destroyed) => {
+        if (destroyed) this.retiredBuffers.add(buffer);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.retirementPendingBuffers.delete(buffer);
+      });
   }
 
   private buildInputPayload(input: Lc0EvaluatorInput, historyFill: Lc0HistoryFill): { payload: Float32Array<ArrayBufferLike>; wasmTiming?: Lc0WasmInputEncoderTiming } {
@@ -6913,7 +7207,11 @@ class Lc0WebHybridRuntime {
     const categories: Record<string, Lc0WebExecutionFootprintCategory> = {};
     addFootprintCategory(categories, 'inputActivation', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) * physicalSlots, physicalSlots);
     addFootprintCategory(categories, 'encoderReadback', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N), 1);
-    if (this.inputBackend !== 'js') addFootprintCategory(categories, 'inputBody', inputBodyGpuFootprintBytes() * physicalSlots, 7 * physicalSlots);
+    if (this.inputBackend !== 'js') {
+      const planesBytes = paddedGpuBytes(DEFAULT_INPUT_PLANES * DEFAULT_TOKENS * 4);
+      addFootprintCategory(categories, 'inputBodyShared', inputBodyGpuFootprintBytes() - planesBytes, 6);
+      addFootprintCategory(categories, 'inputBodyPlanes', planesBytes * physicalSlots, physicalSlots);
+    }
     const layerWeight = encoderLayerWeightFootprint();
     for (const [name, entry] of Object.entries(layerWeight)) addFootprintCategory(categories, name, entry.bytes * this.layers, entry.count * this.layers);
     addFootprintCategory(categories, 'encoderSharedSmolgenWeight', paddedGpuBytes(matrixF16Bytes(DEFAULT_SMOLGEN_HIDDEN, DEFAULT_TOKENS * DEFAULT_TOKENS)), 1);
@@ -6921,7 +7219,10 @@ class Lc0WebHybridRuntime {
     addEncoderLayerScratchFootprint(categories, this.layers, physicalSlots, hasPodArgs);
     if (this.headBackend === 'wgsl') {
       const headCategories = wgslHeadsFootprintCategories();
-      for (const [name, entry] of Object.entries(headCategories)) addFootprintCategory(categories, name, entry.bytes * physicalSlots, entry.count * physicalSlots);
+      for (const [name, entry] of Object.entries(headCategories)) {
+        const shared = name === 'wgslHeadWeights' || name === 'wgslHeadUniforms';
+        addFootprintCategory(categories, name, entry.bytes * (shared ? 1 : physicalSlots), entry.count * (shared ? 1 : physicalSlots));
+      }
     }
     if (this.wgslBatchUploadCapacity > 0) addFootprintCategory(categories, 'batchUpload', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) * this.wgslBatchUploadCapacity, 1);
     for (const capacity of this.wgslDeferredBatchUploadCapacities) {
@@ -7430,18 +7731,31 @@ class Lc0WebHybridRuntime {
       encodeWgslPolicyValueHeads(headPass, slots[slotIndex].wgslHeads);
       if (legalCandidates) encodeWgslLegalPriors(headPass, slots[slotIndex].wgslHeads);
       headPass.end();
-      const readbackOffset = slotIndex * this.wgslHeadReadbackBytes();
-      if (legalCandidates) copyWgslLegalPriorsOutputsTo(encoder, slots[slotIndex].wgslHeads, readbackBuffer, readbackOffset);
-      else copyWgslPolicyValueHeadOutputsTo(encoder, slots[slotIndex].wgslHeads, readbackBuffer, readbackOffset);
     }
     const commandBuffer = encoder.finish();
     const commandEncodeMs = nowMs() - commandEncodeStarted;
     const queueSubmitStarted = nowMs();
     this.device.queue.submit([commandBuffer]);
     const queueSubmitMs = nowMs() - queueSubmitStarted;
+    const readbackCopyEncodeStarted = nowMs();
+    const readbackEncoder = this.device.createCommandEncoder();
+    for (let slotIndex = 0; slotIndex < slots.length; slotIndex++) {
+      const readbackOffset = slotIndex * this.wgslHeadReadbackBytes();
+      if (legalCandidates) copyWgslLegalPriorsOutputsTo(readbackEncoder, slots[slotIndex].wgslHeads, readbackBuffer, readbackOffset);
+      else copyWgslPolicyValueHeadOutputsTo(readbackEncoder, slots[slotIndex].wgslHeads, readbackBuffer, readbackOffset);
+    }
+    const readbackCommandBuffer = readbackEncoder.finish();
+    const readbackCopyEncodeMs = nowMs() - readbackCopyEncodeStarted;
+    const readbackCopySubmitStarted = nowMs();
+    this.device.queue.submit([readbackCommandBuffer]);
+    const readbackCopySubmitMs = nowMs() - readbackCopySubmitStarted;
     const submittedAt = nowMs();
+    const queueState: SubmittedWgslHybridBatchQueueState = { startedAt: nowMs(), promise: Promise.resolve() };
+    queueState.promise = (this.device.queue.onSubmittedWorkDone?.() ?? Promise.resolve()).then(() => { queueState.settledAt = nowMs(); });
+    const readbackMapRequestStarted = nowMs();
     const readbackMapState: SubmittedWgslHybridBatchReadbackMapState = { startedAt: nowMs(), promise: Promise.resolve() };
     readbackMapState.promise = readbackBuffer.mapAsync(gpuGlobals().GPUMapMode!.READ).then(() => { readbackMapState.settledAt = nowMs(); });
+    const readbackMapRequestMs = nowMs() - readbackMapRequestStarted;
     let jsLegalCandidates: LegalPolicyCandidate[][] | undefined;
     let legalPriorsPrepMs: number | undefined;
     try {
@@ -7451,7 +7765,7 @@ class Lc0WebHybridRuntime {
         legalPriorsPrepMs = nowMs() - legalPriorsPrepStarted;
       }
     } catch (error) {
-      await this.cleanupStartedReadbackMap(readbackBuffer, readbackMapState);
+      await this.cleanupStartedReadbackMap(readbackBuffer, readbackMapState, queueState);
       throw error;
     }
     return {
@@ -7463,6 +7777,7 @@ class Lc0WebHybridRuntime {
       legalPriorsPrepMs,
       readbackBuffer,
       readbackMapState,
+      queueState,
       sequenceId: this.nextWgslSequenceId++,
       batchSequenceIndex: sequenceOptions.batchSequenceIndex,
       deferredReadbackSlot: sequenceOptions.deferredReadbackSlot,
@@ -7473,6 +7788,9 @@ class Lc0WebHybridRuntime {
       inputUploadMs,
       commandEncodeMs,
       queueSubmitMs,
+      readbackCopyEncodeMs,
+      readbackCopySubmitMs,
+      readbackMapRequestMs,
       inputBridgeCopyMs,
       wasmEncodeMs,
       wasmTotalMs,
@@ -7480,9 +7798,9 @@ class Lc0WebHybridRuntime {
     };
   }
 
-  private async cleanupStartedReadbackMap(readbackBuffer: BufferLike, readbackMapState: SubmittedWgslHybridBatchReadbackMapState): Promise<void> {
+  private async cleanupStartedReadbackMap(readbackBuffer: BufferLike, readbackMapState: SubmittedWgslHybridBatchReadbackMapState, queueState?: SubmittedWgslHybridBatchQueueState): Promise<void> {
     try {
-      await readbackMapState.promise;
+      await Promise.all([readbackMapState.promise, queueState?.promise ?? Promise.resolve()]);
       readbackBuffer.unmap();
     } catch {
       // The caller is already propagating the primary error. If mapAsync also
@@ -7497,14 +7815,16 @@ class Lc0WebHybridRuntime {
       const readbackStarted = nowMs();
       const deferredReadbackDelayMs = Math.max(0, submitted.readbackMapState.startedAt - submitted.submittedAt);
       const mapAsyncAwaitStarted = nowMs();
-      await submitted.readbackMapState.promise;
+      await Promise.all([submitted.readbackMapState.promise, submitted.queueState.promise]);
       readbackMapped = true;
       const readbackMapAsyncWaitMs = nowMs() - mapAsyncAwaitStarted;
       const readbackMapAsyncMs = Math.max(0, (submitted.readbackMapState.settledAt ?? nowMs()) - submitted.readbackMapState.startedAt);
+      const queueSyncWaitMs = Math.max(0, (submitted.queueState.settledAt ?? nowMs()) - submitted.queueState.startedAt);
       const readbackBytesPerSlot = this.wgslHeadReadbackBytes();
       const mapCopyStarted = nowMs();
       const readbackRange = submitted.readbackBuffer.getMappedRange();
-      const readbackFloats = new Float32Array(readbackRange, 0, submitted.inputs.length * (readbackBytesPerSlot / 4));
+      const readbackFloats = new Float32Array(submitted.inputs.length * (readbackBytesPerSlot / 4));
+      readbackFloats.set(new Float32Array(readbackRange, 0, readbackFloats.length));
       const readbackMapCopyMs = nowMs() - mapCopyStarted;
       const readbackSyncedMs = nowMs() - readbackStarted;
       const headRunMs = nowMs() - headStarted;
@@ -7565,6 +7885,9 @@ class Lc0WebHybridRuntime {
             inputUploadMs: submitted.inputUploadMs,
             commandEncodeMs: submitted.commandEncodeMs,
             queueSubmitMs: submitted.queueSubmitMs,
+            queueSyncWaitMs,
+            readbackCopyEncodeMs: submitted.readbackCopyEncodeMs,
+            readbackCopySubmitMs: submitted.readbackCopySubmitMs,
             readbackSyncedMs,
             headRunMs,
             legalPriorsMs,
@@ -7576,6 +7899,7 @@ class Lc0WebHybridRuntime {
             batchSequenceIndex: submitted.batchSequenceIndex,
             deferredReadbackSlot: submitted.deferredReadbackSlot,
             deferredReadbackDelayMs,
+            readbackMapRequestMs: submitted.readbackMapRequestMs,
             readbackMapAsyncMs,
             readbackMapAsyncWaitMs,
             readbackMapCopyMs,
@@ -7656,7 +7980,7 @@ class Lc0WebHybridRuntime {
           out[pending.index] = await this.finishWgslBatch(pending.submitted, options, 'deferred-double-buffered');
         } catch (error) {
           this.wgslDeferredReadbackInUse.delete(deferredReadbackSlot);
-          await this.cleanupStartedReadbackMap(readbackBuffer, submitted.readbackMapState);
+          await this.cleanupStartedReadbackMap(readbackBuffer, submitted.readbackMapState, submitted.queueState);
           throw error;
         }
       }
@@ -7667,7 +7991,13 @@ class Lc0WebHybridRuntime {
   }
 
   destroy(): void {
-    for (const buffer of this.buffers) buffer.destroy?.();
+    if (this.destroyed) return;
+    this.destroyed = true;
+    for (const buffer of this.buffers) {
+      if (!this.retiredBuffers.has(buffer)) buffer.destroy?.();
+    }
+    if (this.headSession) void ort.releaseOrtSession(this.headSession.session).catch(() => undefined);
+    this.device.destroy?.();
   }
 }
 
@@ -7692,6 +8022,7 @@ export async function runLc0WebHybridEncoderProfile(options: Lc0WebHybridEncoder
     encoderKernelVariant: options.encoderKernelVariant,
     headBackend: 'ort',
     timestampQuery: options.profileMode !== 'sync-staged',
+    encoderProfileOnly: true,
   });
   try {
     return await runtime.profileEncoder(options.input, {
@@ -7738,8 +8069,8 @@ function mean(values: number[]): number {
 
 function summarizeHybridEvaluations(mode: 'immediate' | 'deferred-double-buffered', wallMs: number, batches: Lc0WebHybridEvaluationResult[][]): Lc0WebWgslDeferredReadbackBenchModeResult {
   const flat = batches.flat();
-  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsPrepMs', 'readbackOverlapCpuMs', 'readbackOverlapHiddenMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount'];
-  const physicalBatchScopedKeys = new Set<keyof Lc0WebHybridTimingBreakdown>(['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'readbackSyncedMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount']);
+  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'queueSyncWaitMs', 'readbackCopyEncodeMs', 'readbackCopySubmitMs', 'readbackSyncedMs', 'readbackMapRequestMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsPrepMs', 'readbackOverlapCpuMs', 'readbackOverlapHiddenMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount'];
+  const physicalBatchScopedKeys = new Set<keyof Lc0WebHybridTimingBreakdown>(['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'queueSyncWaitMs', 'readbackCopyEncodeMs', 'readbackCopySubmitMs', 'readbackSyncedMs', 'readbackMapRequestMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount']);
   const timingMeans: Partial<Record<keyof Lc0WebHybridTimingBreakdown, number>> = {};
   for (const key of timingKeys) {
     const values = flat.map((entry) => {

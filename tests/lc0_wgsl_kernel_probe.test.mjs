@@ -1,7 +1,101 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import * as ort from '../src/nn/ortRuntime.ts';
-import { createTinyAttentionOutputOnnxForTest, createTinyEncoder0BlockOnnxForTest, createTinyEncoder0FfnOnnxForTest, createTinyMatmulAddOnnxForTest, createTinyPolicyValueHeadsOnnxForTest, f16BitsToF32, lc0WebEncoderBlockTensorNames } from '../src/lc0/wgslMatmulAddProbe.ts';
+import { createLc0WebGpuPipelineCache, createTinyAttentionOutputOnnxForTest, createTinyEncoder0BlockOnnxForTest, createTinyEncoder0FfnOnnxForTest, createTinyMatmulAddOnnxForTest, createTinyPolicyValueHeadsOnnxForTest, f16BitsToF32, lc0WebEncoderBlockTensorNames, retireLc0WebGpuBufferAfterSubmittedWork } from '../src/lc0/wgslMatmulAddProbe.ts';
+
+test('superseded WebGPU buffers retire only after submitted queue work completes', async () => {
+  let releaseQueue;
+  const events = [];
+  const queueDone = new Promise((resolve) => { releaseQueue = resolve; });
+  const retirement = retireLc0WebGpuBufferAfterSubmittedWork(
+    { onSubmittedWorkDone: async () => { events.push('wait'); await queueDone; events.push('done'); } },
+    { destroy: () => events.push('destroy') },
+  );
+  await Promise.resolve();
+  assert.deepEqual(events, ['wait']);
+  releaseQueue();
+  assert.equal(await retirement, true);
+  assert.deepEqual(events, ['wait', 'done', 'destroy']);
+});
+
+test('buffer retirement reports unsupported queue completion without unsafe destruction', async () => {
+  let destroyed = false;
+  assert.equal(await retireLc0WebGpuBufferAfterSubmittedWork({}, { destroy: () => { destroyed = true; } }), false);
+  assert.equal(destroyed, false);
+});
+
+test('failed queue completion never destroys a superseded WebGPU buffer eagerly', async () => {
+  let destroyed = false;
+  await assert.rejects(
+    retireLc0WebGpuBufferAfterSubmittedWork(
+      { onSubmittedWorkDone: async () => { throw new Error('device lost'); } },
+      { destroy: () => { destroyed = true; } },
+    ),
+    /device lost/,
+  );
+  assert.equal(destroyed, false);
+});
+
+test('immutable WebGPU shader modules and pipelines initialize once in parallel', async () => {
+  let shaderModules = 0;
+  let activePipelines = 0;
+  let maxActivePipelines = 0;
+  const cache = await createLc0WebGpuPipelineCache({
+    createShaderModule: ({ label }) => ({ label, id: ++shaderModules }),
+    createComputePipeline: () => { throw new Error('sync pipeline fallback should not run'); },
+    createComputePipelineAsync: async ({ compute }) => {
+      activePipelines += 1;
+      maxActivePipelines = Math.max(maxActivePipelines, activePipelines);
+      await Promise.resolve();
+      activePipelines -= 1;
+      return { module: compute.module, getBindGroupLayout: () => ({}) };
+    },
+  }, [
+    { key: 'a', label: 'A', code: 'shader-a' },
+    { key: 'b', label: 'B', code: 'shader-b' },
+    { key: 'a', label: 'duplicate ignored', code: 'shader-a-duplicate' },
+  ]);
+  assert.equal(shaderModules, 2);
+  assert.equal(cache.modules.size, 2);
+  assert.equal(cache.pipelines.size, 2);
+  assert.equal(maxActivePipelines, 2);
+});
+
+test('parallel WebGPU pipeline initialization settles all work before rejecting', async () => {
+  const settled = [];
+  await assert.rejects(createLc0WebGpuPipelineCache({
+    createShaderModule: ({ label }) => ({ label }),
+    createComputePipeline: () => { throw new Error('sync pipeline fallback should not run'); },
+    createComputePipelineAsync: async ({ compute }) => {
+      await Promise.resolve();
+      settled.push(compute.module.label);
+      if (compute.module.label === 'A') throw new Error('compile failed');
+      return { getBindGroupLayout: () => ({}) };
+    },
+  }, [
+    { key: 'a', label: 'A', code: 'shader-a' },
+    { key: 'b', label: 'B', code: 'shader-b' },
+  ]), /compile failed/);
+  assert.deepEqual(settled.sort(), ['A', 'B']);
+});
+
+test('hybrid WebGPU slots share immutable input/head resources and report separated waits', async () => {
+  const source = await readFile(new URL('../src/lc0/wgslMatmulAddProbe.ts', import.meta.url), 'utf8');
+  assert.match(source, /type InputBodyGpuSharedResources =/);
+  assert.match(source, /type WgslPolicyValueHeadSharedResources =/);
+  assert.match(source, /createWgslPolicyValueHeadRuntime\(this\.device, layerInput, this\.usage, this\.wgslHeadShared\)/);
+  assert.match(source, /createHybridEncoderLayerSlotRuntime\([^;]+this\.pipelineCache, this\.encoderPodArgs\)/s);
+  assert.match(source, /createLc0WebGpuPipelineCache\(device, hybridPipelineDescriptors/);
+  assert.match(source, /createHybridEncoderLayerSlotScratch\(this\.device, this\.usage, this\.encoderKernelVariant, this\.encoderPodArgs\)/);
+  assert.match(source, /if \(deviceResult\.status === 'fulfilled'\) deviceResult\.value\.device\.destroy\?\.\(\)/);
+  assert.match(source, /encoderProfileOnly: true/);
+  assert.match(source, /\.\.\.\(encoderProfileOnly \? \[\] : policyValueHeadTensorNameList\(\)\)/);
+  assert.match(source, /queueSyncWaitMs\?: number/);
+  assert.match(source, /readbackCopyEncodeMs\?: number/);
+  assert.match(source, /readbackMapRequestMs\?: number/);
+  assert.match(source, /mapAsync pending wall time\. This is synchronization wait, not pure mapping cost/);
+});
 
 test('f16BitsToF32 decodes representative IEEE half values used by lc0web kernels', () => {
   assert.equal(f16BitsToF32(0x0000), 0);
