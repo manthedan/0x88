@@ -22,11 +22,12 @@ function sha256(path) {
 
 export async function checkRecklessExternalWasiAssets(rootPath = '.') {
   const root = resolve(rootPath);
-  for (const relativePath of REQUIRED_ARTIFACTS) {
+  const missingArtifacts = REQUIRED_ARTIFACTS.filter((relativePath) => {
     const path = join(root, relativePath);
-    if (!existsSync(path) || statSync(path).size === 0) {
-      throw new Error(`missing Reckless external WASI prototype asset: ${relativePath}`);
-    }
+    return !existsSync(path) || statSync(path).size === 0;
+  });
+  if (missingArtifacts.length) {
+    throw new Error(`missing Reckless external WASI prototype assets: ${missingArtifacts.join(', ')}`);
   }
 
   const wasmPath = join(root, REQUIRED_ARTIFACTS[0]);

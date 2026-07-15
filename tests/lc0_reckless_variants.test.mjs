@@ -36,12 +36,16 @@ test('Reckless variant aliases keep full SIMD explicit and scalar as fallback', 
   assert.equal(recklessVariantFromParams(new URLSearchParams('recklessVariant=full')).key, 'full');
 });
 
-test('Reckless external NNUE prototype stays explicit and uses the WASI backend', () => {
+test('Reckless external NNUE prototype stays explicit and uses the WASI backend', async () => {
   assert.equal(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.backend, undefined);
   assert.equal(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.wasmUrl, '/reckless/reckless-simd128-external.wasm');
   assert.equal(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.nnueUrl, '/reckless/reckless-v60-7f587dfb.nnue');
   assert.equal(recklessVariantFromParams(new URLSearchParams('reckless=persistent-external')), RECKLESS_WASI_SIMD_EXTERNAL_VARIANT);
   assert.notEqual(defaultRecklessVariantKey(), 'wasi-simd-external');
+  assert.equal(
+    await resolveDefaultRecklessVariantAssetFallback(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT, false),
+    RECKLESS_WASI_SIMD_EXTERNAL_VARIANT,
+  );
 });
 
 test('Reckless relaxed SIMD is the feature-detected default where supported', () => {
@@ -125,8 +129,11 @@ test('IPv6 loopback still probes local generated Reckless assets', async () => {
 test('production probes deployed Reckless assets and skips known-unshipped probes', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
-  let calls = 0;
-  globalThis.fetch = async () => { calls += 1; return { ok: true }; };
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push([url, options]);
+    return { ok: true };
+  };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
     value: { hostname: '0x88.app' },
@@ -136,8 +143,14 @@ test('production probes deployed Reckless assets and skips known-unshipped probe
     assert.equal(recklessVariantAssetStatus(RECKLESS_FULL_VARIANT), 'present');
     const r2Variant = { ...RECKLESS_FULL_VARIANT, wasmUrl: 'https://assets.0x88.app/reckless/reckless.wasm' };
     assert.equal(await checkRecklessVariantAsset(r2Variant), 'present');
+    assert.equal(await checkRecklessVariantAsset(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT), 'present');
     assert.equal(await checkRecklessVariantAsset(RECKLESS_LITE_VARIANT), 'missing');
-    assert.equal(calls, 2);
+    assert.deepEqual(requests, [
+      [RECKLESS_FULL_VARIANT.wasmUrl, { method: 'HEAD', cache: 'no-store' }],
+      [r2Variant.wasmUrl, { method: 'HEAD', cache: 'no-store' }],
+      [RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.wasmUrl, { method: 'HEAD', cache: 'no-store' }],
+      [RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.nnueUrl, { method: 'HEAD', cache: 'no-store' }],
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);

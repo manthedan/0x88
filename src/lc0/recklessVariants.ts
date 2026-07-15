@@ -23,6 +23,7 @@ const recklessAsset = (path: string) => resolvePublicAssetUrl(path);
 const DEPLOYED_RECKLESS_URLS = new Set<string>([
   '/reckless/reckless.wasm',
   '/reckless/reckless-simd128.wasm',
+  '/reckless/reckless-simd128-external.wasm',
   '/reckless/reckless-relaxed-simd128.wasm',
   '/reckless/reckless-browser-api.wasm',
   '/reckless/reckless-browser-api-simd128.wasm',

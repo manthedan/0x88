@@ -129,7 +129,7 @@ const CONFIGS = {
     },
     build: {
       script: 'scripts/build_reckless_release_assets.mjs',
-      command: 'npm run reckless:build-production && npm run reckless:build-browser-api && npm run reckless:build-browser-api-simd && npm run reckless:build-browser-api-simd-external',
+      command: 'npm run reckless:build-release',
       patches: [],
       toolchain: 'Rust cargo with wasm32-wasip1 target; scalar, SIMD, relaxed-SIMD, explicit non-default external-NNUE WASI prototype, and browser-API builds from the pinned Reckless source.',
     },
@@ -289,6 +289,10 @@ if (!config) {
   const out = argValue('--out') ?? `artifacts/engine-manifests/${engine}-${config.flavor}.manifest.json`;
   const sourceArchivePath = argValue('--source-archive');
   const sourceArchiveUrl = argValue('--source-url');
+  const missingArtifacts = config.artifacts.filter((path) => !existsSync(path));
+  if (missingArtifacts.length && !allowMissing) {
+    throw new Error(`Missing artifacts for ${engine} manifest: ${missingArtifacts.join(', ')}`);
+  }
   const artifacts = await Promise.all(config.artifacts.map((p) => fileEntry(p, allowMissing)));
   const totalBytes = sumArtifactBytes(artifacts, 'bytes');
   const totalGzipBytes = sumArtifactBytes(artifacts, 'gzip');
