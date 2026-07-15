@@ -668,8 +668,8 @@ Confirmed local evidence:
   cancellation, lifecycle, and queue-bound tests, but the controlled
   concurrency run was unstable, including one four-search sample near 1,009
   seconds. Production wiring was removed, and later review also identified
-  unresolved cache-aware per-consumer accounting semantics. The prototype is
-  retained only on its temporary research branch.
+  unresolved cache-aware per-consumer accounting semantics. The prototype was
+  not integrated.
 
 Still remaining:
 
