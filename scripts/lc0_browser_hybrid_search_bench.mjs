@@ -206,6 +206,30 @@ function textFromGetResult(result) {
   throw new Error(`agent-browser get text returned unexpected payload: ${JSON.stringify(result)}`);
 }
 
+function browserInfoFromEvalResult(result) {
+  const value = result?.value ?? result?.result ?? result;
+  if (!value || typeof value !== 'object'
+    || typeof value.userAgent !== 'string'
+    || typeof value.platform !== 'string'
+    || !Number.isFinite(value.hardwareConcurrency)) {
+    throw new Error(`agent-browser eval returned unexpected browser info: ${JSON.stringify(result)}`);
+  }
+  return {
+    userAgent: value.userAgent,
+    platform: value.platform,
+    hardwareConcurrency: value.hardwareConcurrency,
+  };
+}
+
+async function readBrowserInfo(args) {
+  const result = await runAgent(args, ['eval', `(() => ({
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    hardwareConcurrency: navigator.hardwareConcurrency,
+  }))()`], 30_000);
+  return browserInfoFromEvalResult(result);
+}
+
 async function runBrowserBenchmark(args) {
   const url = benchmarkUrl(args);
   process.stderr.write(`[lc0-hybrid-search-bench] ${url}\n`);
@@ -224,7 +248,8 @@ async function runBrowserBenchmark(args) {
         if (result.backend !== expectedBackend) throw new Error(`unexpected hybrid backend: ${result.backend}`);
         if ((result.encoderKernelVariant ?? 'hand') !== args.encoderKernel) throw new Error(`unexpected encoder kernel variant: ${result.encoderKernelVariant ?? 'hand'}`);
         if ((result.legalPriorsBackend ?? 'js') !== args.legalPriorsBackend) throw new Error(`unexpected legal-priors backend: ${result.legalPriorsBackend ?? 'js'}`);
-        return { ...result, scriptPreset: args.preset || null, runtimeConfiguration: lc0RuntimeConfiguration(args) };
+        const browserInfo = await readBrowserInfo(args);
+        return { ...result, browserInfo, scriptPreset: args.preset || null, runtimeConfiguration: lc0RuntimeConfiguration(args) };
       } catch (error) {
         if (Date.now() >= deadline) throw error;
       }
