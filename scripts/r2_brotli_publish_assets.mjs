@@ -58,13 +58,15 @@ const targets = [
   ['viridithas/viridithas-wasip1.manifest.json', 'public/viridithas/viridithas-wasip1.manifest.json', 'application/json', immutable],
   ['viridithas/viridithas-wasip1-corresponding-source.tar.gz', 'public/viridithas/viridithas-wasip1-corresponding-source.tar.gz', 'application/gzip', immutable],
   ['reckless/NOTICE.md', 'public/reckless/NOTICE.md', 'text/markdown; charset=utf-8', immutable],
-  ...['reckless.wasm', 'reckless-simd128.wasm', 'reckless-relaxed-simd128.wasm'].map((name) => [
+  ['reckless/reckless-wasip1.manifest.json', 'public/reckless/reckless-wasip1.manifest.json', 'application/json', immutable],
+  ['reckless/reckless-v60-7f587dfb.nnue', 'public/reckless/reckless-v60-7f587dfb.nnue', 'application/octet-stream', immutable],
+  ...['reckless.wasm', 'reckless-simd128.wasm', 'reckless-simd128-external.wasm', 'reckless-relaxed-simd128.wasm'].map((name) => [
     `reckless/${name}`,
     `public/reckless/${name}`,
     'application/wasm',
     immutable,
   ]),
-  ...['reckless-scalar-corresponding-source.tar.gz', 'reckless-simd128-corresponding-source.tar.gz', 'reckless-relaxed-simd128-corresponding-source.tar.gz'].map((name) => [
+  ...['reckless-scalar-corresponding-source.tar.gz', 'reckless-simd128-corresponding-source.tar.gz', 'reckless-simd128-external-corresponding-source.tar.gz', 'reckless-relaxed-simd128-corresponding-source.tar.gz'].map((name) => [
     `reckless/${name}`,
     `public/reckless/${name}`,
     'application/gzip',

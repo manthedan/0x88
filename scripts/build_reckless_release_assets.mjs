@@ -28,6 +28,7 @@ This directory is the patched Reckless source tree used to build ${variant.artif
 - Resolved upstream commit: ${upstreamCommit}
 - Upstream commit summary: ${upstreamSubject}
 - Artifact: ${variant.artifact}
+${variant.runtimeAssets?.length ? `- Runtime assets: ${variant.runtimeAssets.join(', ')}\n` : ''}- Prototype status: ${variant.prototype ? 'explicit non-default prototype' : 'production runtime variant'}
 - Build script in this project: scripts/build_reckless_wasi.mjs
 - Release asset script in this project: scripts/build_reckless_release_assets.mjs
 
@@ -108,6 +109,24 @@ buildVariant({
   },
 });
 
+run(process.execPath, ['scripts/extract_reckless_nnue_asset.mjs']);
+
+buildVariant({
+  label: 'Reckless Full SIMD external NNUE prototype',
+  artifact: 'public/reckless/reckless-simd128-external.wasm',
+  sourceArchive: 'public/reckless/reckless-simd128-external-corresponding-source.tar.gz',
+  workdir: '.local_engines/reckless-release-src-simd-external',
+  command: 'npm run reckless:build-simd-wasi-external',
+  cargoCommand: "RUSTFLAGS='-C target-feature=+simd128' cargo build --release --no-default-features --target wasm32-wasip1",
+  runtimeAssets: ['public/reckless/reckless-v60-7f587dfb.nnue mounted as reckless.nnue'],
+  prototype: true,
+  env: {
+    RUSTFLAGS: `${process.env.RUSTFLAGS ? `${process.env.RUSTFLAGS} ` : ''}-C target-feature=+simd128`,
+    RECKLESS_WASM_SIMD_NNUE: '1',
+    RECKLESS_WASI_EXTERNAL_NNUE: '1',
+  },
+});
+
 buildVariant({
   label: 'Reckless Full Relaxed SIMD',
   artifact: 'public/reckless/reckless-relaxed-simd128.wasm',
@@ -124,7 +143,10 @@ buildVariant({
 console.log('Reckless release assets ready:');
 console.log('  public/reckless/reckless.wasm');
 console.log('  public/reckless/reckless-simd128.wasm');
+console.log('  public/reckless/reckless-simd128-external.wasm (explicit non-default prototype)');
 console.log('  public/reckless/reckless-relaxed-simd128.wasm');
+console.log('  public/reckless/reckless-v60-7f587dfb.nnue');
 console.log('  public/reckless/reckless-scalar-corresponding-source.tar.gz');
 console.log('  public/reckless/reckless-simd128-corresponding-source.tar.gz');
+console.log('  public/reckless/reckless-simd128-external-corresponding-source.tar.gz');
 console.log('  public/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz');
