@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT,
   RECKLESS_FULL_VARIANT,
   RECKLESS_LITE_VARIANT,
   RECKLESS_RELAXED_SIMD_VARIANT,
   RECKLESS_SIMD_VARIANT,
+  RECKLESS_V60_NNUE_BYTES,
   RECKLESS_VARIANTS,
   RECKLESS_WASI_SIMD_EXTERNAL_VARIANT,
   checkRecklessVariantAsset,
@@ -40,6 +42,8 @@ test('Reckless external NNUE prototype stays explicit and uses the WASI backend'
   assert.equal(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.backend, undefined);
   assert.equal(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.wasmUrl, '/reckless/reckless-simd128-external.wasm');
   assert.equal(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.nnueUrl, '/reckless/reckless-v60-7f587dfb.nnue');
+  assert.equal(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.nnueExpectedBytes, RECKLESS_V60_NNUE_BYTES);
+  assert.equal(RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT.nnueExpectedBytes, RECKLESS_V60_NNUE_BYTES);
   assert.equal(recklessVariantFromParams(new URLSearchParams('reckless=persistent-external')), RECKLESS_WASI_SIMD_EXTERNAL_VARIANT);
   assert.notEqual(defaultRecklessVariantKey(), 'wasi-simd-external');
   assert.equal(

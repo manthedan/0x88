@@ -23,7 +23,7 @@ import { defaultStormphraxVariantKey, resolveDefaultStormphraxVariantAssetFallba
 const CPU_ENGINE_DEFAULTS = { depth: 4, hashMb: 16 } as const;
 
 export function recklessCacheKey(variant: RecklessVariant): string {
-  return `${variant.key}:${variant.wasmUrl}:${variant.nnueUrl ?? ''}:${variant.backend ?? 'wasi'}`;
+  return `${variant.key}:${variant.wasmUrl}:${variant.nnueUrl ?? ''}:${variant.nnueExpectedBytes ?? ''}:${variant.backend ?? 'wasi'}`;
 }
 
 export function viridithasCacheKey(variant: ViridithasVariant): string {
@@ -43,7 +43,12 @@ export function stormphraxCacheKey(variant: StormphraxVariant): string {
 }
 
 export function createRecklessEngine(variant: RecklessVariant, onStatus?: () => void): RecklessEngine {
-  return new RecklessEngine({ ...CPU_ENGINE_DEFAULTS }, variant.wasmUrl, { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, ...(onStatus ? { onStatus } : {}) });
+  return new RecklessEngine({ ...CPU_ENGINE_DEFAULTS }, variant.wasmUrl, {
+    backend: variant.backend ?? 'wasi',
+    nnueUrl: variant.nnueUrl,
+    nnueExpectedBytes: variant.nnueExpectedBytes,
+    ...(onStatus ? { onStatus } : {}),
+  });
 }
 
 export function createViridithasEngine(variant: ViridithasVariant, runtimeOptions: ViridithasRuntimeOptions = {}): ViridithasEngine {

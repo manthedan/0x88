@@ -1,7 +1,7 @@
 import { WASI, File, OpenFile, ConsoleStdout, PreopenDirectory, Fd, wasi } from '@bjorn3/browser_wasi_shim';
 
 /** Extra file fetched over HTTP and exposed to the engine via the WASI preopened cwd (e.g. Monty's detached networks). */
-type PreopenFileSpec = { name: string; url: string };
+type PreopenFileSpec = { name: string; url: string; expectedBytes?: number };
 
 type OneShotWorkerRequest = {
   type: 'run';
@@ -34,6 +34,7 @@ type WorkerResponse =
 const moduleCache = new Map<string, Promise<WebAssembly.Module>>();
 const inFlightPreopenBytes = new Map<string, Promise<ArrayBuffer>>();
 const INITIAL_PREOPEN_CAPACITY = 64 * 1024;
+export const MAX_PREOPEN_FILE_BYTES = 1024 * 1024 * 1024;
 const SHARED_STDIN_HEADER_INTS = 4;
 const SHARED_STDIN_HEADER_BYTES = SHARED_STDIN_HEADER_INTS * Int32Array.BYTES_PER_ELEMENT;
 
@@ -128,74 +129,138 @@ async function compileModule(wasmUrl: string): Promise<WebAssembly.Module> {
   return cached;
 }
 
-function positiveSafeIntegerHeader(response: Response, name: string): number | undefined {
-  const raw = response.headers.get(name);
-  if (!raw || !/^\d+$/.test(raw)) return undefined;
+function decodedLengthHeader(response: Response): { name: string; raw: string } | undefined {
+  const decodedLength = response.headers.get('x-artifact-content-length');
+  if (decodedLength !== null) return { name: 'x-artifact-content-length', raw: decodedLength };
+  const contentEncoding = response.headers.get('content-encoding')?.trim().toLowerCase();
+  if (contentEncoding && contentEncoding !== 'identity') return undefined;
+  const contentLength = response.headers.get('content-length');
+  return contentLength === null ? undefined : { name: 'content-length', raw: contentLength };
+}
+
+function parsePositiveSafeInteger(raw: string): number | undefined {
+  if (!/^\d+$/.test(raw)) return undefined;
   const value = Number(raw);
   return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
-function responseDecodedLength(response: Response): number | undefined {
-  const decodedLength = positiveSafeIntegerHeader(response, 'x-artifact-content-length');
-  if (decodedLength) return decodedLength;
-  const contentEncoding = response.headers.get('content-encoding')?.trim().toLowerCase();
-  if (contentEncoding && contentEncoding !== 'identity') return undefined;
-  return positiveSafeIntegerHeader(response, 'content-length');
+function validatedExpectedBytes(url: string, expectedBytes: number | undefined): number | undefined {
+  if (expectedBytes === undefined) return undefined;
+  if (!Number.isSafeInteger(expectedBytes) || expectedBytes <= 0) {
+    throw new Error(`invalid expected byte length for preopen asset ${url}: ${String(expectedBytes)}`);
+  }
+  if (expectedBytes > MAX_PREOPEN_FILE_BYTES) {
+    throw new Error(`expected byte length for preopen asset ${url} exceeds the ${MAX_PREOPEN_FILE_BYTES}-byte hard maximum: ${expectedBytes}`);
+  }
+  return expectedBytes;
 }
 
-function growPreopenBuffer(bytes: Uint8Array<ArrayBufferLike>, requiredBytes: number, loadedBytes: number): Uint8Array<ArrayBuffer> {
+function validatedDecodedLength(response: Response, url: string, expectedBytes: number | undefined): number | undefined {
+  const header = decodedLengthHeader(response);
+  if (!header) return undefined;
+  const decodedBytes = parsePositiveSafeInteger(header.raw);
+  if (decodedBytes === undefined) {
+    throw new Error(`invalid decoded byte length metadata for preopen asset ${url}: ${header.name}=${JSON.stringify(header.raw)}`);
+  }
+  if (decodedBytes > MAX_PREOPEN_FILE_BYTES) {
+    throw new Error(`decoded byte length metadata for preopen asset ${url} exceeds the ${MAX_PREOPEN_FILE_BYTES}-byte hard maximum: ${decodedBytes}`);
+  }
+  if (expectedBytes !== undefined && decodedBytes !== expectedBytes) {
+    throw new Error(`decoded byte length metadata mismatch for preopen asset ${url}: got ${decodedBytes}, expected ${expectedBytes}`);
+  }
+  return decodedBytes;
+}
+
+function preopenLimit(expectedBytes: number | undefined, decodedBytes: number | undefined): number {
+  return expectedBytes ?? decodedBytes ?? MAX_PREOPEN_FILE_BYTES;
+}
+
+function preopenProgressTotal(expectedBytes: number | undefined, decodedBytes: number | undefined): number {
+  return expectedBytes ?? decodedBytes ?? 0;
+}
+
+function preopenDedupeKey(url: string, expectedBytes: number | undefined): string {
+  return `${url}\n${expectedBytes ?? ''}`;
+}
+
+function preopenLengthMismatch(url: string, actualBytes: number, expectedBytes: number): Error {
+  return new Error(`preopen asset ${url} decoded byte length mismatch: got ${actualBytes}, expected ${expectedBytes}`);
+}
+
+function preopenOverflow(url: string, requiredBytes: number, limitBytes: number): Error {
+  return new Error(`preopen asset ${url} exceeds its ${limitBytes}-byte download limit: received at least ${requiredBytes} decoded bytes`);
+}
+
+function initialPreopenCapacity(decodedBytes: number | undefined, limitBytes: number): number {
+  return decodedBytes ?? Math.min(INITIAL_PREOPEN_CAPACITY, limitBytes);
+}
+
+function growPreopenBuffer(bytes: Uint8Array<ArrayBufferLike>, requiredBytes: number, loadedBytes: number, limitBytes: number): Uint8Array<ArrayBuffer> {
   let capacity = Math.max(bytes.byteLength, INITIAL_PREOPEN_CAPACITY);
-  while (capacity < requiredBytes) capacity = Math.max(requiredBytes, capacity * 2);
+  while (capacity < requiredBytes) capacity = Math.min(limitBytes, Math.max(requiredBytes, capacity * 2));
   const grown = new Uint8Array(capacity);
   grown.set(bytes.subarray(0, loadedBytes));
   return grown;
 }
 
-export async function fetchPreopenBytes(url: string): Promise<ArrayBuffer> {
-  const existing = inFlightPreopenBytes.get(url);
+export async function fetchPreopenBytes(url: string, rawExpectedBytes?: number): Promise<ArrayBuffer> {
+  const expectedBytes = validatedExpectedBytes(url, rawExpectedBytes);
+  const dedupeKey = preopenDedupeKey(url, expectedBytes);
+  const existing = inFlightPreopenBytes.get(dedupeKey);
   if (existing) return existing;
   const request = (async () => {
       const response = await fetch(url, { cache: 'force-cache' });
       if (!response.ok) throw new Error(`failed to fetch preopen asset ${url}: HTTP ${response.status}`);
-      const totalBytes = responseDecodedLength(response);
+      const decodedBytes = validatedDecodedLength(response, url, expectedBytes);
+      const limitBytes = preopenLimit(expectedBytes, decodedBytes);
+      const totalBytes = preopenProgressTotal(expectedBytes, decodedBytes);
       if (!response.body) {
-        const buffer = await response.arrayBuffer();
-        post({ type: 'preopen-progress', url, loadedBytes: buffer.byteLength, totalBytes: buffer.byteLength });
-        return buffer;
+        if (expectedBytes !== undefined) throw preopenLengthMismatch(url, 0, expectedBytes);
+        throw new Error(`preopen asset ${url} returned no response body`);
       }
       const reader = response.body.getReader();
-      let bytes: Uint8Array<ArrayBuffer> = new Uint8Array(totalBytes ?? 0);
+      let bytes: Uint8Array<ArrayBuffer> = new Uint8Array(initialPreopenCapacity(decodedBytes, limitBytes));
       let loadedBytes = 0;
       let lastReport = 0;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
         const requiredBytes = loadedBytes + value.byteLength;
-        if (requiredBytes > bytes.byteLength) bytes = growPreopenBuffer(bytes, requiredBytes, loadedBytes);
+        if (requiredBytes > limitBytes) {
+          await reader.cancel().catch(() => undefined);
+          throw preopenOverflow(url, requiredBytes, limitBytes);
+        }
+        if (requiredBytes > bytes.byteLength) bytes = growPreopenBuffer(bytes, requiredBytes, loadedBytes, limitBytes);
         bytes.set(value, loadedBytes);
         loadedBytes += value.byteLength;
         const now = Date.now();
         if (now - lastReport > 250) {
           lastReport = now;
-          post({ type: 'preopen-progress', url, loadedBytes, totalBytes: totalBytes ?? 0 });
+          post({ type: 'preopen-progress', url, loadedBytes, totalBytes });
         }
       }
-      post({ type: 'preopen-progress', url, loadedBytes, totalBytes: totalBytes ?? loadedBytes });
+      if (expectedBytes !== undefined && loadedBytes !== expectedBytes) {
+        throw preopenLengthMismatch(url, loadedBytes, expectedBytes);
+      }
+      if (decodedBytes !== undefined && loadedBytes !== decodedBytes) {
+        throw preopenLengthMismatch(url, loadedBytes, decodedBytes);
+      }
+      post({ type: 'preopen-progress', url, loadedBytes, totalBytes: totalBytes || loadedBytes });
       const buffer = bytes.buffer as ArrayBuffer;
       return loadedBytes === bytes.byteLength ? buffer : buffer.slice(0, loadedBytes);
   })();
-  inFlightPreopenBytes.set(url, request);
+  inFlightPreopenBytes.set(dedupeKey, request);
   try {
     return await request;
   } finally {
-    if (inFlightPreopenBytes.get(url) === request) inFlightPreopenBytes.delete(url);
+    if (inFlightPreopenBytes.get(dedupeKey) === request) inFlightPreopenBytes.delete(dedupeKey);
   }
 }
 
 async function buildPreopenDirectory(preopenFiles: PreopenFileSpec[] | undefined): Promise<PreopenDirectory> {
   const entries = new Map<string, File>();
   for (const spec of preopenFiles ?? []) {
-    entries.set(spec.name, new File(await fetchPreopenBytes(spec.url)));
+    entries.set(spec.name, new File(await fetchPreopenBytes(spec.url, spec.expectedBytes)));
   }
   return new PreopenDirectory('.', entries);
 }

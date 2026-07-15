@@ -29,6 +29,8 @@ export interface RecklessRuntimeOptions {
   disablePersistentFallback?: boolean;
   /** Optional external NNUE asset URL for builds that do not embed network data. */
   nnueUrl?: string;
+  /** Exact decoded byte length required for the external NNUE asset. */
+  nnueExpectedBytes?: number;
   /** Called when the browser API worker reports load/progress status. */
   onStatus?: () => void;
 }
@@ -40,6 +42,7 @@ export interface RecklessRuntimeStatus {
   forceOneShot: boolean;
   wasmUrl: string;
   nnueUrl?: string;
+  nnueExpectedBytes?: number;
   browserApiLoad?: RecklessBrowserApiLoadStatus;
 }
 
@@ -202,9 +205,13 @@ export class RecklessEngine implements BrowserUciEngine {
     this.options = { ...this.options, ...next };
   }
 
-  private wasiPreopenFiles(): { name: string; url: string }[] | undefined {
+  private wasiPreopenFiles(): { name: string; url: string; expectedBytes?: number }[] | undefined {
     if (!this.runtimeOptions.nnueUrl) return undefined;
-    return [{ name: RECKLESS_EXTERNAL_NNUE_FILE, url: this.runtimeOptions.nnueUrl }];
+    return [{
+      name: RECKLESS_EXTERNAL_NNUE_FILE,
+      url: this.runtimeOptions.nnueUrl,
+      ...(this.runtimeOptions.nnueExpectedBytes === undefined ? {} : { expectedBytes: this.runtimeOptions.nnueExpectedBytes }),
+    }];
   }
 
   private recordWasiPreopenProgress(message: { url: string; loadedBytes: number; totalBytes: number }): void {
@@ -605,6 +612,7 @@ export class RecklessEngine implements BrowserUciEngine {
       forceOneShot: this.runtimeOptions.forceOneShot === true,
       wasmUrl: this.wasmUrl,
       nnueUrl: this.runtimeOptions.nnueUrl,
+      nnueExpectedBytes: this.runtimeOptions.nnueExpectedBytes,
       browserApiLoad: this.browserApiLoadStatus ?? undefined,
     };
   }

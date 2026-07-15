@@ -240,7 +240,7 @@ function reportConfig(config: BenchConfig) {
       key: variant.key,
       label: variant.label,
       wasmUrl: variant.wasmUrl,
-      ...(variant.engine === 'reckless' ? { nnueUrl: variant.nnueUrl, backend: variant.backend ?? 'wasi' } : {}),
+      ...(variant.engine === 'reckless' ? { nnueUrl: variant.nnueUrl, nnueExpectedBytes: variant.nnueExpectedBytes, backend: variant.backend ?? 'wasi' } : {}),
       ...(variant.engine === 'berserk' ? { jsUrl: variant.jsUrl, dataUrl: variant.dataUrl, nnueUrl: variant.nnueUrl } : {}),
       ...(variant.engine === 'plentychess' ? { jsUrl: variant.jsUrl, dataUrl: variant.dataUrl } : {}),
       note: variant.note,
@@ -433,7 +433,13 @@ async function runBench(): Promise<void> {
                 : new RecklessEngine(
                 budget.options,
                 variant.wasmUrl,
-                { backend: variant.backend ?? 'wasi', nnueUrl: variant.nnueUrl, forceOneShot: mode === 'one-shot', disablePersistentFallback: mode === 'persistent' },
+                {
+                  backend: variant.backend ?? 'wasi',
+                  nnueUrl: variant.nnueUrl,
+                  nnueExpectedBytes: variant.nnueExpectedBytes,
+                  forceOneShot: mode === 'one-shot',
+                  disablePersistentFallback: mode === 'persistent',
+                },
               );
           try {
             if (mode === 'batch' && variant.engine === 'viridithas' && engine instanceof ViridithasEngine) {

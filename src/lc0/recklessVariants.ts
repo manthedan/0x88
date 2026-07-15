@@ -12,6 +12,7 @@ export interface RecklessVariant {
   note: string;
   backend?: 'wasi' | 'browser-api';
   nnueUrl?: string;
+  nnueExpectedBytes?: number;
 }
 
 export type RecklessAssetStatus = 'unknown' | 'checking' | 'present' | 'missing';
@@ -19,6 +20,8 @@ export type RecklessAssetStatus = 'unknown' | 'checking' | 'present' | 'missing'
 const assetStatuses = new Map<string, RecklessAssetStatus>();
 const assetChecks = new Map<string, Promise<RecklessAssetStatus>>();
 const recklessAsset = (path: string) => resolvePublicAssetUrl(path);
+
+export const RECKLESS_V60_NNUE_BYTES = 63_266_880;
 
 const DEPLOYED_RECKLESS_URLS = new Set<string>([
   '/reckless/reckless.wasm',
@@ -91,6 +94,7 @@ export const RECKLESS_WASI_SIMD_EXTERNAL_VARIANT: RecklessVariant = {
   wasmUrl: recklessAsset('/reckless/reckless-simd128-external.wasm'),
   note: 'Persistent WASI/UCI SIMD prototype with the full NNUE loaded as a separate cacheable asset; embedded WASI variants remain the default and fallback.',
   nnueUrl: recklessAsset('/reckless/reckless-v60-7f587dfb.nnue'),
+  nnueExpectedBytes: RECKLESS_V60_NNUE_BYTES,
 };
 
 export const RECKLESS_BROWSER_API_VARIANT: RecklessVariant = {
@@ -116,6 +120,7 @@ export const RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT: RecklessVariant = {
   note: 'Direct browser API SIMD artifact with the full NNUE loaded as a separate cacheable asset.',
   backend: 'browser-api',
   nnueUrl: recklessAsset('/reckless/reckless-v60-7f587dfb.nnue'),
+  nnueExpectedBytes: RECKLESS_V60_NNUE_BYTES,
 };
 
 export const RECKLESS_VARIANTS = [RECKLESS_SIMD_VARIANT, RECKLESS_RELAXED_SIMD_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_WASI_SIMD_EXTERNAL_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_LITE_VARIANT] as const;
