@@ -89,6 +89,7 @@ function inferTests(files) {
     ['src/lc0/playPreferences.ts', ['play_preferences']],
     ['src/lc0/resourceBroker.ts', ['engine_resource_broker']],
     ['src/lc0/recklessVariants.ts', ['lc0_reckless_variants']],
+    ['src/lc0/recklessWasiWorker.ts', ['lc0_reckless_wasi_worker', 'lc0_reckless_external_nnue']],
     ['src/lc0/viridithasVariants.ts', ['viridithas_variants']],
     ['src/lc0/berserkVariants.ts', ['berserk_variants']],
     ['src/lc0/plentychessVariants.ts', ['plentychess_variants']],

@@ -32,7 +32,8 @@ type WorkerResponse =
   | { type: 'preopen-progress'; url: string; loadedBytes: number; totalBytes: number };
 
 const moduleCache = new Map<string, Promise<WebAssembly.Module>>();
-const inFlightPreopenBytes = new Map<string, Promise<Uint8Array>>();
+const inFlightPreopenBytes = new Map<string, Promise<ArrayBuffer>>();
+const INITIAL_PREOPEN_CAPACITY = 64 * 1024;
 const SHARED_STDIN_HEADER_INTS = 4;
 const SHARED_STDIN_HEADER_BYTES = SHARED_STDIN_HEADER_INTS * Int32Array.BYTES_PER_ELEMENT;
 
@@ -127,26 +128,43 @@ async function compileModule(wasmUrl: string): Promise<WebAssembly.Module> {
   return cached;
 }
 
-async function fetchPreopenBytes(url: string): Promise<Uint8Array> {
+function responseContentLength(response: Response): number {
+  const raw = response.headers.get('content-length');
+  if (!raw || !/^\d+$/.test(raw)) return 0;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
+function growPreopenBuffer(bytes: Uint8Array, requiredBytes: number, loadedBytes: number): Uint8Array {
+  let capacity = Math.max(bytes.byteLength, INITIAL_PREOPEN_CAPACITY);
+  while (capacity < requiredBytes) capacity = Math.max(requiredBytes, capacity * 2);
+  const grown = new Uint8Array(capacity);
+  grown.set(bytes.subarray(0, loadedBytes));
+  return grown;
+}
+
+export async function fetchPreopenBytes(url: string): Promise<ArrayBuffer> {
   const existing = inFlightPreopenBytes.get(url);
   if (existing) return existing;
   const request = (async () => {
       const response = await fetch(url, { cache: 'force-cache' });
       if (!response.ok) throw new Error(`failed to fetch preopen asset ${url}: HTTP ${response.status}`);
-      const totalBytes = Number(response.headers.get('content-length') ?? 0);
+      const totalBytes = responseContentLength(response);
       if (!response.body) {
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        post({ type: 'preopen-progress', url, loadedBytes: bytes.byteLength, totalBytes: bytes.byteLength });
-        return bytes;
+        const buffer = await response.arrayBuffer();
+        post({ type: 'preopen-progress', url, loadedBytes: buffer.byteLength, totalBytes: buffer.byteLength });
+        return buffer;
       }
       const reader = response.body.getReader();
-      const chunks: Uint8Array[] = [];
+      let bytes = new Uint8Array(totalBytes);
       let loadedBytes = 0;
       let lastReport = 0;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        chunks.push(value);
+        const requiredBytes = loadedBytes + value.byteLength;
+        if (requiredBytes > bytes.byteLength) bytes = growPreopenBuffer(bytes, requiredBytes, loadedBytes);
+        bytes.set(value, loadedBytes);
         loadedBytes += value.byteLength;
         const now = Date.now();
         if (now - lastReport > 250) {
@@ -154,14 +172,9 @@ async function fetchPreopenBytes(url: string): Promise<Uint8Array> {
           post({ type: 'preopen-progress', url, loadedBytes, totalBytes });
         }
       }
-      const bytes = new Uint8Array(loadedBytes);
-      let offset = 0;
-      for (const chunk of chunks) {
-        bytes.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
       post({ type: 'preopen-progress', url, loadedBytes, totalBytes: totalBytes || loadedBytes });
-      return bytes;
+      const buffer = bytes.buffer as ArrayBuffer;
+      return loadedBytes === bytes.byteLength ? buffer : buffer.slice(0, loadedBytes);
   })();
   inFlightPreopenBytes.set(url, request);
   try {
