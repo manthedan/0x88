@@ -20,6 +20,7 @@ const out = resolve(process.env.RECKLESS_WASM_OUT ?? 'public/reckless/reckless.w
 const evalfile = process.env.RECKLESS_EVALFILE ? resolve(process.env.RECKLESS_EVALFILE) : '';
 const l1Size = process.env.RECKLESS_L1_SIZE ?? '';
 const enableWasmSimdNnue = process.env.RECKLESS_WASM_SIMD_NNUE === '1';
+const externalWasiNnue = process.env.RECKLESS_WASI_EXTERNAL_NNUE === '1';
 if (l1Size && !/^\d+$/.test(l1Size)) throw new Error(`RECKLESS_L1_SIZE must be an integer, got ${l1Size}`);
 
 function run(cmd, args, options = {}) {
@@ -103,6 +104,14 @@ function patchRecklessForWasi(root) {
     `unsafe fn parallel_clear<T: std::marker::Send>(threads: usize, ptr: *mut T, len: usize) {\n    std::thread::scope(|scope| {\n        let slice = std::slice::from_raw_parts_mut(ptr, len);\n\n        let chunk_size = len.div_ceil(threads);\n        for chunk in slice.chunks_mut(chunk_size) {\n            scope.spawn(|| chunk.as_mut_ptr().write_bytes(0, chunk.len()));\n        }\n    });\n}`,
     `unsafe fn parallel_clear<T: std::marker::Send>(threads: usize, ptr: *mut T, len: usize) {\n    #[cfg(target_arch = "wasm32")]\n    {\n        let _ = threads;\n        ptr.write_bytes(0, len);\n    }\n\n    #[cfg(not(target_arch = "wasm32"))]\n    std::thread::scope(|scope| {\n        let slice = std::slice::from_raw_parts_mut(ptr, len);\n        let chunk_size = len.div_ceil(threads);\n        for chunk in slice.chunks_mut(chunk_size) {\n            scope.spawn(|| chunk.as_mut_ptr().write_bytes(0, chunk.len()));\n        }\n    });\n}`,
   );
+
+  if (externalWasiNnue) {
+    replace(
+      `${root}/src/nnue.rs`,
+      `    fn embedded() -> &'static Self {\n        static EMBEDDED: Parameters = unsafe { std::mem::transmute(*include_bytes!(env!("MODEL"))) };\n        &EMBEDDED\n    }`,
+      `    fn embedded() -> &'static Self {\n        static EXTERNAL: std::sync::OnceLock<&'static Parameters> = std::sync::OnceLock::new();\n        EXTERNAL.get_or_init(|| {\n            let mut boxed = Box::<std::mem::MaybeUninit<Self>>::new(std::mem::MaybeUninit::uninit());\n            let bytes = unsafe {\n                std::slice::from_raw_parts_mut(boxed.as_mut_ptr().cast::<u8>(), std::mem::size_of::<Self>())\n            };\n            let mut file = std::fs::File::open("reckless.nnue").expect("failed to open external Reckless NNUE: reckless.nnue");\n            std::io::Read::read_exact(&mut file, bytes).expect("failed to read external Reckless NNUE: reckless.nnue");\n            Box::leak(unsafe { boxed.assume_init() })\n        })\n    }`,
+    );
+  }
 }
 
 rmSync(workdir, { recursive: true, force: true });
@@ -123,3 +132,4 @@ const built = `${workdir}/target/wasm32-wasip1/release/reckless.wasm`;
 if (!existsSync(built)) throw new Error(`expected build artifact missing: ${built}`);
 cpSync(built, out);
 console.log(`Wrote ${out}`);
+if (externalWasiNnue) console.log('External NNUE runtime file: reckless.nnue');

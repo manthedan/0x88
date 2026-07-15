@@ -10,7 +10,7 @@
 // Usage:
 //   node scripts/reckless_wasi_node_bench.mjs \
 //     --wasm public/reckless/reckless.wasm,public/reckless/reckless-simd128.wasm \
-//     --depths 7,8 --positions 20 --hash 16 [--json out.json]
+//     --depths 7,8 --positions 20 --hash 16 [--nnue path/to/reckless.nnue] [--json out.json]
 import fs from 'node:fs/promises';
 import { WASI, File, OpenFile, ConsoleStdout, PreopenDirectory } from '@bjorn3/browser_wasi_shim';
 
@@ -54,7 +54,10 @@ const depths = (args.get('depths') ?? '7,8').split(',').map((s) => Math.max(1, M
 const positionCount = Math.max(1, Math.min(ROTATED_FEN_SUITE.length, Math.floor(Number(args.get('positions') ?? ROTATED_FEN_SUITE.length))));
 const hashMb = Math.max(1, Math.floor(Number(args.get('hash') ?? 16)));
 const jsonOut = args.get('json') ?? null;
+const nnuePath = args.get('nnue') ?? null;
+const nnueName = args.get('nnue-name') ?? 'reckless.nnue';
 const positions = ROTATED_FEN_SUITE.slice(0, positionCount);
+const nnueBytes = nnuePath ? await fs.readFile(nnuePath) : null;
 
 function lineCollector(lines) {
   const decoder = new TextDecoder('utf-8', { fatal: false });
@@ -106,10 +109,11 @@ async function runOneShot(module, fen, depth) {
       new OpenFile(new File(new TextEncoder().encode(commands))),
       lineCollector(stdout),
       lineCollector(stderr),
-      new PreopenDirectory('.', new Map()),
+      new PreopenDirectory('.', nnueBytes ? new Map([[nnueName, new File(nnueBytes)]]) : new Map()),
     ],
     { debug: false },
   );
+  const rssBefore = process.memoryUsage().rss;
   const started = performance.now();
   const instance = await WebAssembly.instantiate(module, { wasi_snapshot_preview1: wasi.wasiImport });
   let exitCode = 0;
@@ -120,10 +124,11 @@ async function runOneShot(module, fen, depth) {
     else throw error;
   }
   const wallMs = performance.now() - started;
+  const rssAfter = process.memoryUsage().rss;
   const bestmove = stdout.findLast((line) => line.startsWith('bestmove'))?.split(/\s+/)[1] ?? null;
   const infoLines = stdout.filter((line) => line.startsWith('info ') && line.includes(' pv '));
   const info = infoLines.length ? parseInfo(infoLines[infoLines.length - 1]) : {};
-  return { wallMs: Number(wallMs.toFixed(2)), exitCode, bestmove, ...info, stderr: stderr.slice(0, 5) };
+  return { wallMs: Number(wallMs.toFixed(2)), rssDeltaBytes: Math.max(0, rssAfter - rssBefore), exitCode, bestmove, ...info, stderr: stderr.slice(0, 5) };
 }
 
 function median(values) {
@@ -134,8 +139,15 @@ function median(values) {
 }
 
 const modules = new Map();
+const moduleMetrics = {};
 for (const path of wasmPaths) {
-  modules.set(path, await WebAssembly.compile(await fs.readFile(path)));
+  const bytes = await fs.readFile(path);
+  const started = performance.now();
+  modules.set(path, await WebAssembly.compile(bytes));
+  moduleMetrics[path] = {
+    wasmBytes: bytes.byteLength,
+    compileMs: Number((performance.now() - started).toFixed(2)),
+  };
 }
 
 const rows = [];
@@ -176,6 +188,7 @@ for (const path of wasmPaths) {
     summary[path][`depth${depth}`] = {
       runs: subset.length,
       wallMsMedian: Number((median(subset.map((r) => r.wallMs)) ?? 0).toFixed(2)),
+      rssDeltaBytesMedian: median(subset.map((r) => r.rssDeltaBytes ?? 0)),
       engineTimeMsMedian: median(subset.map((r) => r.timeMs ?? 0)),
       nodesTotal: subset.reduce((sum, r) => sum + (r.nodes ?? 0), 0),
       npsMedian: median(subset.map((r) => r.nps ?? 0)),
@@ -183,7 +196,17 @@ for (const path of wasmPaths) {
   }
 }
 
-const report = { positions: positions.length, depths, hashMb, baseline, parity, summary };
+const report = {
+  positions: positions.length,
+  depths,
+  hashMb,
+  nnuePath,
+  nnueBytes: nnueBytes?.byteLength ?? null,
+  baseline,
+  moduleMetrics,
+  parity,
+  summary,
+};
 console.log(JSON.stringify(report, null, 2));
 if (jsonOut) await fs.writeFile(jsonOut, `${JSON.stringify({ ...report, rows }, null, 2)}\n`);
 for (const data of Object.values(parity)) {

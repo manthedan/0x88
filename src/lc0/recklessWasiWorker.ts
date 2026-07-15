@@ -32,7 +32,7 @@ type WorkerResponse =
   | { type: 'preopen-progress'; url: string; loadedBytes: number; totalBytes: number };
 
 const moduleCache = new Map<string, Promise<WebAssembly.Module>>();
-const preopenBytesCache = new Map<string, Promise<Uint8Array>>();
+const inFlightPreopenBytes = new Map<string, Promise<Uint8Array>>();
 const SHARED_STDIN_HEADER_INTS = 4;
 const SHARED_STDIN_HEADER_BYTES = SHARED_STDIN_HEADER_INTS * Int32Array.BYTES_PER_ELEMENT;
 
@@ -128,9 +128,9 @@ async function compileModule(wasmUrl: string): Promise<WebAssembly.Module> {
 }
 
 async function fetchPreopenBytes(url: string): Promise<Uint8Array> {
-  let cached = preopenBytesCache.get(url);
-  if (!cached) {
-    cached = (async () => {
+  const existing = inFlightPreopenBytes.get(url);
+  if (existing) return existing;
+  const request = (async () => {
       const response = await fetch(url, { cache: 'force-cache' });
       if (!response.ok) throw new Error(`failed to fetch preopen asset ${url}: HTTP ${response.status}`);
       const totalBytes = Number(response.headers.get('content-length') ?? 0);
@@ -162,11 +162,13 @@ async function fetchPreopenBytes(url: string): Promise<Uint8Array> {
       }
       post({ type: 'preopen-progress', url, loadedBytes, totalBytes: totalBytes || loadedBytes });
       return bytes;
-    })();
-    preopenBytesCache.set(url, cached);
-    cached.catch(() => preopenBytesCache.delete(url));
+  })();
+  inFlightPreopenBytes.set(url, request);
+  try {
+    return await request;
+  } finally {
+    if (inFlightPreopenBytes.get(url) === request) inFlightPreopenBytes.delete(url);
   }
-  return cached;
 }
 
 async function buildPreopenDirectory(preopenFiles: PreopenFileSpec[] | undefined): Promise<PreopenDirectory> {

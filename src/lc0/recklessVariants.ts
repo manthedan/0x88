@@ -3,7 +3,7 @@ import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 export { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
-export type RecklessVariantKey = 'full' | 'simd' | 'relaxed-simd' | 'lite' | 'browser-api' | 'browser-api-simd' | 'browser-api-simd-external' | 'custom';
+export type RecklessVariantKey = 'full' | 'simd' | 'relaxed-simd' | 'lite' | 'wasi-simd-external' | 'browser-api' | 'browser-api-simd' | 'browser-api-simd-external' | 'custom';
 
 export interface RecklessVariant {
   key: RecklessVariantKey;
@@ -84,6 +84,14 @@ export const RECKLESS_LITE_VARIANT: RecklessVariant = {
   note: 'v53 L1=512 candidate; smaller/faster prototype, weaker and not shipped by default.',
 };
 
+export const RECKLESS_WASI_SIMD_EXTERNAL_VARIANT: RecklessVariant = {
+  key: 'wasi-simd-external',
+  label: 'Reckless Full WASI SIMD external NNUE experimental',
+  wasmUrl: recklessAsset('/reckless/reckless-simd128-external.wasm'),
+  note: 'Persistent WASI/UCI SIMD prototype with the full NNUE loaded as a separate cacheable asset; embedded WASI variants remain the default and fallback.',
+  nnueUrl: recklessAsset('/reckless/reckless-v60-7f587dfb.nnue'),
+};
+
 export const RECKLESS_BROWSER_API_VARIANT: RecklessVariant = {
   key: 'browser-api',
   label: 'Reckless Full browser API experimental',
@@ -109,11 +117,12 @@ export const RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT: RecklessVariant = {
   nnueUrl: recklessAsset('/reckless/reckless-v60-7f587dfb.nnue'),
 };
 
-export const RECKLESS_VARIANTS = [RECKLESS_SIMD_VARIANT, RECKLESS_RELAXED_SIMD_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_LITE_VARIANT] as const;
+export const RECKLESS_VARIANTS = [RECKLESS_SIMD_VARIANT, RECKLESS_RELAXED_SIMD_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_WASI_SIMD_EXTERNAL_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_LITE_VARIANT] as const;
 
 export function normalizeRecklessVariant(raw: string | null | undefined): RecklessVariantKey {
   const value = String(raw ?? '').toLowerCase().replace(/[ _]/g, '-');
   if (value === 'lite' || value === 'small' || value === 'v53') return 'lite';
+  if (value === 'wasi-simd-external' || value === 'wasi-external' || value === 'persistent-external') return 'wasi-simd-external';
   if (value === 'api-simd-external' || value === 'browser-api-simd-external' || value === 'direct-simd-external' || value === 'native-simd-external' || value === 'external-simd') return 'browser-api-simd-external';
   if (value === 'api-simd' || value === 'browser-api-simd' || value === 'direct-simd' || value === 'native-simd') return 'browser-api-simd';
   if (value === 'api' || value === 'browser-api' || value === 'direct' || value === 'native') return 'browser-api';
@@ -134,6 +143,7 @@ export function defaultRecklessVariantKey(): RecklessVariantKey {
 
 export function recklessVariantByKey(key: RecklessVariantKey): RecklessVariant {
   if (key === 'lite') return RECKLESS_LITE_VARIANT;
+  if (key === 'wasi-simd-external') return RECKLESS_WASI_SIMD_EXTERNAL_VARIANT;
   if (key === 'browser-api') return RECKLESS_BROWSER_API_VARIANT;
   if (key === 'browser-api-simd') return RECKLESS_BROWSER_API_SIMD_VARIANT;
   if (key === 'browser-api-simd-external') return RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT;

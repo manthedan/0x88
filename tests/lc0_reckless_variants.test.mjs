@@ -6,6 +6,7 @@ import {
   RECKLESS_RELAXED_SIMD_VARIANT,
   RECKLESS_SIMD_VARIANT,
   RECKLESS_VARIANTS,
+  RECKLESS_WASI_SIMD_EXTERNAL_VARIANT,
   checkRecklessVariantAsset,
   defaultRecklessVariantKey,
   normalizeRecklessVariant,
@@ -29,9 +30,18 @@ test('Reckless variant aliases keep full SIMD explicit and scalar as fallback', 
   assert.equal(normalizeRecklessVariant('simd128'), 'simd');
   assert.equal(normalizeRecklessVariant('full-simd'), 'simd');
   assert.equal(normalizeRecklessVariant('full'), 'full');
+  assert.equal(normalizeRecklessVariant('persistent-external'), 'wasi-simd-external');
   assert.equal(recklessVariantFromParams(new URLSearchParams('recklessVariant=relaxed-simd')).key, 'relaxed-simd');
   assert.equal(recklessVariantFromParams(new URLSearchParams('recklessVariant=simd')).key, 'simd');
   assert.equal(recklessVariantFromParams(new URLSearchParams('recklessVariant=full')).key, 'full');
+});
+
+test('Reckless external NNUE prototype stays explicit and uses the WASI backend', () => {
+  assert.equal(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.backend, undefined);
+  assert.equal(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.wasmUrl, '/reckless/reckless-simd128-external.wasm');
+  assert.equal(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.nnueUrl, '/reckless/reckless-v60-7f587dfb.nnue');
+  assert.equal(recklessVariantFromParams(new URLSearchParams('reckless=persistent-external')), RECKLESS_WASI_SIMD_EXTERNAL_VARIANT);
+  assert.notEqual(defaultRecklessVariantKey(), 'wasi-simd-external');
 });
 
 test('Reckless relaxed SIMD is the feature-detected default where supported', () => {

@@ -27,7 +27,7 @@ export interface RecklessRuntimeOptions {
   forceOneShot?: boolean;
   /** Benchmark/debug knob: fail instead of silently falling back when persistent startup/search errors. */
   disablePersistentFallback?: boolean;
-  /** Optional external NNUE asset URL for browser-api builds that do not embed network data. */
+  /** Optional external NNUE asset URL for builds that do not embed network data. */
   nnueUrl?: string;
   /** Called when the browser API worker reports load/progress status. */
   onStatus?: () => void;
@@ -44,6 +44,7 @@ export interface RecklessRuntimeStatus {
 }
 
 export const DEFAULT_RECKLESS_WASM_URL = resolvePublicAssetUrl('/reckless/reckless.wasm');
+export const RECKLESS_EXTERNAL_NNUE_FILE = 'reckless.nnue';
 
 const SHARED_STDIN_HEADER_INTS = 4;
 const SHARED_STDIN_HEADER_BYTES = SHARED_STDIN_HEADER_INTS * Int32Array.BYTES_PER_ELEMENT;
@@ -201,12 +202,31 @@ export class RecklessEngine implements BrowserUciEngine {
     this.options = { ...this.options, ...next };
   }
 
+  private wasiPreopenFiles(): { name: string; url: string }[] | undefined {
+    if (!this.runtimeOptions.nnueUrl) return undefined;
+    return [{ name: RECKLESS_EXTERNAL_NNUE_FILE, url: this.runtimeOptions.nnueUrl }];
+  }
+
+  private recordWasiPreopenProgress(message: { url: string; loadedBytes: number; totalBytes: number }): void {
+    this.browserApiLoadStatus = {
+      phase: 'nnue-download',
+      nnueUrl: message.url,
+      loadedBytes: message.loadedBytes,
+      totalBytes: message.totalBytes,
+    };
+    this.runtimeOptions.onStatus?.();
+  }
+
   private ensureOneShotWorker(): Worker {
     if (this.worker && this.workerMode === 'oneshot') return this.worker;
     this.disposeWorker();
     const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'reckless-wasi' });
     worker.onmessage = (event: MessageEvent) => {
-      const message = event.data as { type: string; id: number; stdout?: string[]; stderr?: string[]; exitCode?: number; error?: string };
+      const message = event.data as { type: string; id: number; stdout?: string[]; stderr?: string[]; exitCode?: number; error?: string; url?: string; loadedBytes?: number; totalBytes?: number };
+      if (message.type === 'preopen-progress' && message.url && message.loadedBytes !== undefined && message.totalBytes !== undefined) {
+        this.recordWasiPreopenProgress({ url: message.url, loadedBytes: message.loadedBytes, totalBytes: message.totalBytes });
+        return;
+      }
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
@@ -260,11 +280,20 @@ export class RecklessEngine implements BrowserUciEngine {
     this.worker = worker;
     this.workerMode = 'persistent';
     this.sharedInput = sharedInput;
-    worker.postMessage({ type: 'start-persistent', wasmUrl: this.wasmUrl, inputBuffer: sharedInput.buffer });
+    worker.postMessage({
+      type: 'start-persistent',
+      wasmUrl: this.wasmUrl,
+      inputBuffer: sharedInput.buffer,
+      preopenFiles: this.wasiPreopenFiles(),
+    });
     return worker;
   }
 
-  private handlePersistentMessage(message: { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string }): void {
+  private handlePersistentMessage(message: { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string; url?: string; loadedBytes?: number; totalBytes?: number }): void {
+    if (message.type === 'preopen-progress' && message.url && message.loadedBytes !== undefined && message.totalBytes !== undefined) {
+      this.recordWasiPreopenProgress({ url: message.url, loadedBytes: message.loadedBytes, totalBytes: message.totalBytes });
+      return;
+    }
     if (message.type === 'persistent-ready') return;
     if (message.type === 'persistent-line') {
       const active = this.persistentPending;
@@ -357,7 +386,7 @@ export class RecklessEngine implements BrowserUciEngine {
         },
       });
       signal?.addEventListener('abort', onAbort, { once: true });
-      worker.postMessage({ type: 'run', id, wasmUrl: this.wasmUrl, commands });
+      worker.postMessage({ type: 'run', id, wasmUrl: this.wasmUrl, commands, preopenFiles: this.wasiPreopenFiles() });
     });
   }
 
