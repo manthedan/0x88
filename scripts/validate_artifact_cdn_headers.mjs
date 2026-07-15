@@ -63,6 +63,18 @@ function releaseTargets(release, limit, artifactBase) {
           br,
         },
       });
+      if (artifact.migrationSource?.url) {
+        const legacyUrl = new URL(artifact.migrationSource.url, artifactBase).href;
+        targets.push({
+          mode: 'release-physical-legacy',
+          logicalUrl: artifact.logicalUrl ?? artifact.name,
+          url: legacyUrl,
+          identityUrl: legacyUrl,
+          rangeUrl: legacyUrl,
+          brUrl: legacyUrl,
+          cachePolicy: 'immutable',
+        });
+      }
       continue;
     }
     if (artifact.artifactUrl) {

@@ -313,16 +313,152 @@ test('write_artifact_release_manifests carries forward an immutable v2 base rele
   assert.equal(release.artifacts.filter((artifact) => artifact.kind === 'manifest').length, 1);
 });
 
-test('write_artifact_release_manifests rejects carrying v1 artifacts into a v2 release', async () => {
+test('write_artifact_release_manifests migrates an actual v1-shaped base release into deduplicated v2 representations', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-release-v1-carry-forward-'));
+  await mkdir(join(root, 'public/legacy'), { recursive: true });
+  await writeFile(join(root, 'public/legacy/engine.wasm'), 'abc');
+  await writeJson(join(root, 'public/releases/base.json'), {
+    schema: 'lc0_browser.artifact_release_manifest.v1',
+    releaseId: 'base',
+    generatedAt: '2026-07-14T00:00:00.000Z',
+    channel: 'stable',
+    sourceManifests: ['public/legacy/manifest.json'],
+    artifacts: [
+      {
+        logicalUrl: '/legacy/engine.wasm',
+        artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        file: 'engine.wasm',
+        kind: 'engine',
+        contentType: 'application/wasm',
+        sourceManifest: 'public/legacy/manifest.json',
+        localPath: 'public/legacy/engine.wasm',
+      },
+      {
+        logicalUrl: '/legacy/engine-copy.wasm',
+        artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine-copy.wasm`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        file: 'engine-copy.wasm',
+        kind: 'engine',
+        contentType: 'application/wasm',
+        sourceManifest: 'public/legacy/manifest.json',
+        localPath: 'public/legacy/missing-copy.wasm',
+      },
+    ],
+  });
+  const result = spawnSync(process.execPath, [
+    'scripts/write_artifact_release_manifests.mjs',
+    '--root', root,
+    '--release-id', 'next',
+    '--base-release', 'public/releases/base.json',
+    '--manifest', 'missing.json',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const outputRoot = join(root, DEFAULT_RELEASE_OUTPUT);
+  const releasePath = join(outputRoot, 'releases/next.json');
+  const release = JSON.parse(await readFile(releasePath, 'utf8'));
+  assert.equal(release.schema, 'lc0_browser.artifact_release_manifest.v2');
+  assert.equal(release.baseReleaseId, 'base');
+  assert.deepEqual(release.sourceManifests, ['public/legacy/manifest.json']);
+  assert.equal(release.artifacts.length, 2);
+  assert.ok(release.artifacts.every((artifact) => artifact.carriedForwardFrom === 'base'));
+  assert.ok(release.artifacts.every((artifact) => artifact.artifactUrl === undefined));
+  assert.ok(release.artifacts.every((artifact) => artifact.representations.filter((entry) => entry.encoding === 'identity').length === 1));
+  assert.equal(release.artifacts[0].representations[0].url, release.artifacts[1].representations[0].url);
+  assert.equal(release.artifacts[0].representations[1].url, release.artifacts[1].representations[1].url);
+  assert.deepEqual(release.artifacts.map((artifact) => artifact.migrationSource.url).sort(), [
+    `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine-copy.wasm`,
+    `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+  ]);
+
+  const publish = spawnSync(process.execPath, [
+    'scripts/publish_hashed_artifacts_to_r2.mjs',
+    '--root', root,
+    '--release', releasePath,
+    '--bucket', 'test-bucket',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(publish.status, 0, publish.stderr);
+  const plan = JSON.parse(publish.stdout);
+  assert.equal(plan.catalogObjectCount, 2);
+  assert.equal(plan.plannedCount, 2);
+  assert.ok(plan.planned.some((entry) => entry.key === `artifacts/sha256/${ABC_SHA256}/identity`
+    && entry.localPath === join(outputRoot, 'artifacts/sha256', ABC_SHA256, 'identity')));
+});
+
+test('write_artifact_release_manifests preserves verified v1 provenance when a body is unavailable locally', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-release-v1-missing-body-'));
   await writeJson(join(root, 'public/releases/base.json'), {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'base',
     artifacts: [{
       logicalUrl: '/legacy/engine.wasm',
-      artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/legacy.wasm`,
+      artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
       sha256: ABC_SHA256,
       bytes: 3,
+      localPath: 'public/legacy/engine.wasm',
+    }],
+  });
+  const result = spawnSync(process.execPath, [
+    'scripts/write_artifact_release_manifests.mjs',
+    '--root', root,
+    '--release-id', 'next',
+    '--base-release', 'public/releases/base.json',
+    '--manifest', 'missing.json',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const outputRoot = join(root, DEFAULT_RELEASE_OUTPUT);
+  const release = JSON.parse(await readFile(join(outputRoot, 'releases/next.json'), 'utf8'));
+  assert.equal(release.artifacts.length, 1);
+  const [artifact] = release.artifacts;
+  assert.equal(artifact.artifactUrl, undefined);
+  assert.equal(artifact.localPath, undefined);
+  assert.deepEqual(artifact.migrationSource, {
+    schema: 'lc0_browser.artifact_migration_source.v1',
+    releaseId: 'base',
+    key: `artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+    url: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+  });
+  assert.deepEqual(artifact.representations, [{
+    encoding: 'identity',
+    url: `https://assets.0x88.app/artifacts/sha256/${ABC_SHA256}/identity`,
+    sha256: ABC_SHA256,
+    bytes: 3,
+  }]);
+
+  const dryRun = spawnSync(process.execPath, [
+    'scripts/publish_hashed_artifacts_to_r2.mjs',
+    '--root', root,
+    '--release', join(outputRoot, 'releases/next.json'),
+    '--bucket', 'test-bucket',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(dryRun.status, 0, dryRun.stderr);
+  const plan = JSON.parse(dryRun.stdout);
+  assert.equal(plan.plannedCount, 1);
+  assert.equal(plan.planned[0].key, `artifacts/sha256/${ABC_SHA256}/identity`);
+  assert.equal(plan.planned[0].uploadAction, 'materialize-from-v1-and-conditional-create');
+  assert.deepEqual(plan.planned[0].migrationSources, [{
+    releaseId: 'base',
+    key: `artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+    url: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+  }]);
+  assert.equal(existsSync(join(outputRoot, 'artifacts/sha256', ABC_SHA256, 'identity')), false);
+});
+
+test('write_artifact_release_manifests rejects corrupt local v1 migration bodies', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-release-v1-corrupt-body-'));
+  await mkdir(join(root, 'public/legacy'), { recursive: true });
+  await writeFile(join(root, 'public/legacy/engine.wasm'), 'abd');
+  await writeJson(join(root, 'public/releases/base.json'), {
+    schema: 'lc0_browser.artifact_release_manifest.v1',
+    releaseId: 'base',
+    artifacts: [{
+      logicalUrl: '/legacy/engine.wasm',
+      artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+      sha256: ABC_SHA256,
+      bytes: 3,
+      localPath: 'public/legacy/engine.wasm',
     }],
   });
   const result = spawnSync(process.execPath, [
@@ -333,7 +469,173 @@ test('write_artifact_release_manifests rejects carrying v1 artifacts into a v2 r
     '--manifest', 'missing.json',
   ], { cwd: process.cwd(), encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Cannot carry v1 artifacts into a v2 release without identity representations/);
+  assert.match(result.stderr, /Corrupt local v1 migration source/);
+  assert.equal(existsSync(join(root, DEFAULT_RELEASE_OUTPUT, 'releases/next.json')), false);
+  assert.equal(existsSync(join(root, DEFAULT_RELEASE_OUTPUT, 'channels/stable.json')), false);
+});
+
+test('publish_hashed_artifacts_to_r2 materializes a missing SHA-only identity from authoritative v1 R2 content', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-v1-migration-'));
+  await writeJson(join(root, 'public/releases/base.json'), {
+    schema: 'lc0_browser.artifact_release_manifest.v1',
+    releaseId: 'base',
+    artifacts: [{
+      logicalUrl: '/legacy/engine.wasm',
+      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+      sha256: ABC_SHA256,
+      bytes: 3,
+      contentType: 'application/wasm',
+    }],
+  });
+  const generated = spawnSync(process.execPath, [
+    'scripts/write_artifact_release_manifests.mjs',
+    '--root', root,
+    '--release-id', 'next',
+    '--base-release', 'public/releases/base.json',
+    '--manifest', 'missing.json',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(generated.status, 0, generated.stderr);
+
+  const outputRoot = join(root, DEFAULT_RELEASE_OUTPUT);
+  const r2Root = join(root, 'mock-r2');
+  const wrangler = await writeStatefulWrangler(root);
+  const aws = await writeAtomicAws(root);
+  const legacyTarget = `test-bucket/artifacts/sha256/${ABC_SHA256}/engine.wasm`;
+  const identityTarget = `test-bucket/artifacts/sha256/${ABC_SHA256}/identity`;
+  await mkdir(r2Root, { recursive: true });
+  await writeFile(mockR2ObjectPath(r2Root, legacyTarget), 'abc');
+  const server = createServer((_req, res) => res.writeHead(404).end());
+  const port = await listen(server);
+  try {
+    const result = await runNode([
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', join(outputRoot, 'releases/next.json'),
+      '--channel-manifest', join(outputRoot, 'channels/stable.json'),
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--execute',
+      '--wrangler-bin', wrangler,
+      '--aws-bin', aws,
+      '--r2-endpoint', 'https://r2.invalid',
+    ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
+    assert.equal(result.status, 0, result.stderr);
+    const plan = JSON.parse(result.stdout);
+    assert.equal(plan.plannedCount, 1);
+    assert.equal(plan.planned[0].uploadAction, 'migrated-and-uploaded');
+    assert.equal(plan.planned[0].migrationSourceUsed.key, `artifacts/sha256/${ABC_SHA256}/engine.wasm`);
+    assert.equal((await readFile(mockR2ObjectPath(r2Root, identityTarget))).toString(), 'abc');
+    assert.equal((await readFile(mockR2ObjectPath(r2Root, legacyTarget))).toString(), 'abc');
+    assert.equal(existsSync(mockR2ObjectPath(r2Root, 'test-bucket/releases/next.json')), true);
+    assert.equal(existsSync(mockR2ObjectPath(r2Root, 'test-bucket/channels/stable.json')), true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('publish_hashed_artifacts_to_r2 blocks migration when the v1 body is unavailable locally and remotely', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-v1-migration-missing-'));
+  await writeJson(join(root, 'public/releases/base.json'), {
+    schema: 'lc0_browser.artifact_release_manifest.v1',
+    releaseId: 'base',
+    artifacts: [{
+      logicalUrl: '/legacy/engine.wasm',
+      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+      sha256: ABC_SHA256,
+      bytes: 3,
+    }],
+  });
+  const generated = spawnSync(process.execPath, [
+    'scripts/write_artifact_release_manifests.mjs',
+    '--root', root,
+    '--release-id', 'next',
+    '--base-release', 'public/releases/base.json',
+    '--manifest', 'missing.json',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(generated.status, 0, generated.stderr);
+
+  const outputRoot = join(root, DEFAULT_RELEASE_OUTPUT);
+  const r2Root = join(root, 'mock-r2');
+  const wrangler = await writeStatefulWrangler(root);
+  const aws = await writeAtomicAws(root);
+  await mkdir(r2Root, { recursive: true });
+  const server = createServer((_req, res) => res.writeHead(404).end());
+  const port = await listen(server);
+  try {
+    const result = await runNode([
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', join(outputRoot, 'releases/next.json'),
+      '--channel-manifest', join(outputRoot, 'channels/stable.json'),
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--execute',
+      '--wrangler-bin', wrangler,
+      '--aws-bin', aws,
+      '--r2-endpoint', 'https://r2.invalid',
+    ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /V1 migration body is unavailable at R2 key/);
+    assert.match(result.stderr, /Restore the legacy object or provide matching local decoded bytes/);
+    assert.equal(existsSync(mockR2ObjectPath(r2Root, `test-bucket/artifacts/sha256/${ABC_SHA256}/identity`)), false);
+    assert.equal(existsSync(mockR2ObjectPath(r2Root, 'test-bucket/releases/next.json')), false);
+    assert.equal(existsSync(mockR2ObjectPath(r2Root, 'test-bucket/channels/stable.json')), false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('publish_hashed_artifacts_to_r2 rejects corrupt v1 migration content before identity, release, or channel mutation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-v1-migration-corrupt-'));
+  await writeJson(join(root, 'public/releases/base.json'), {
+    schema: 'lc0_browser.artifact_release_manifest.v1',
+    releaseId: 'base',
+    artifacts: [{
+      logicalUrl: '/legacy/engine.wasm',
+      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+      sha256: ABC_SHA256,
+      bytes: 3,
+    }],
+  });
+  const generated = spawnSync(process.execPath, [
+    'scripts/write_artifact_release_manifests.mjs',
+    '--root', root,
+    '--release-id', 'next',
+    '--base-release', 'public/releases/base.json',
+    '--manifest', 'missing.json',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(generated.status, 0, generated.stderr);
+
+  const outputRoot = join(root, DEFAULT_RELEASE_OUTPUT);
+  const r2Root = join(root, 'mock-r2');
+  const wrangler = await writeStatefulWrangler(root);
+  const aws = await writeAtomicAws(root);
+  const legacyTarget = `test-bucket/artifacts/sha256/${ABC_SHA256}/engine.wasm`;
+  await mkdir(r2Root, { recursive: true });
+  await writeFile(mockR2ObjectPath(r2Root, legacyTarget), 'abd');
+  const server = createServer((_req, res) => res.writeHead(404).end());
+  const port = await listen(server);
+  try {
+    const result = await runNode([
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', join(outputRoot, 'releases/next.json'),
+      '--channel-manifest', join(outputRoot, 'channels/stable.json'),
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--execute',
+      '--wrangler-bin', wrangler,
+      '--aws-bin', aws,
+      '--r2-endpoint', 'https://r2.invalid',
+    ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Corrupt v1 migration source/);
+    assert.equal(existsSync(mockR2ObjectPath(r2Root, `test-bucket/artifacts/sha256/${ABC_SHA256}/identity`)), false);
+    assert.equal(existsSync(mockR2ObjectPath(r2Root, 'test-bucket/releases/next.json')), false);
+    assert.equal(existsSync(mockR2ObjectPath(r2Root, 'test-bucket/channels/stable.json')), false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test('write_artifact_release_manifests keeps releases write-once while channels remain mutable for rollback', async () => {

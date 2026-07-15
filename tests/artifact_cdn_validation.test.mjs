@@ -307,6 +307,13 @@ test('validate_artifact_cdn_headers validates the hosted release and its explici
     releaseId: 'v2',
     artifacts: [{
       logicalUrl: '/models/lc0/model.onnx',
+      carriedForwardFrom: 'v1',
+      migrationSource: {
+        schema: 'lc0_browser.artifact_migration_source.v1',
+        releaseId: 'v1',
+        key: `artifacts/sha256/${rawSha}/model.onnx`,
+        url: `/artifacts/sha256/${rawSha}/model.onnx`,
+      },
       raw: { sha256: rawSha, bytes: body.length },
       representations: [
         { encoding: 'identity', url: `/artifacts/sha256/${rawSha}/identity`, sha256: rawSha, bytes: body.length },
@@ -317,6 +324,7 @@ test('validate_artifact_cdn_headers validates the hosted release and its explici
   const releaseBody = Buffer.from(JSON.stringify(release));
   const identityPath = release.artifacts[0].representations[0].url;
   const brPath = release.artifacts[0].representations[1].url;
+  const legacyPath = release.artifacts[0].migrationSource.url;
   const server = createServer((req, res) => {
     if (req.url === '/releases/v2.json') {
       res.writeHead(200, {
@@ -327,7 +335,7 @@ test('validate_artifact_cdn_headers validates the hosted release and its explici
       res.end(req.method === 'HEAD' ? undefined : releaseBody);
       return;
     }
-    if (req.url !== identityPath && req.url !== brPath) {
+    if (req.url !== identityPath && req.url !== brPath && req.url !== legacyPath) {
       res.writeHead(404).end();
       return;
     }
@@ -413,6 +421,10 @@ test('validate_artifact_cdn_headers validates the hosted release and its explici
     assert.equal(parsed.rows[0].brNegotiated, false);
     assert.equal(parsed.rows[0].identityBody, undefined);
     assert.equal(parsed.rows[0].brBody, undefined);
+    assert.equal(parsed.rows.length, 2);
+    assert.equal(parsed.rows[1].mode, 'release-physical-legacy');
+    assert.equal(parsed.rows[1].url, `http://127.0.0.1:${port}${legacyPath}`);
+    assert.equal(parsed.rows[1].range.status, 206);
     assert.equal(fullBodyGets, 0);
 
     brCacheControl = 'public, max-age=300, stale-while-revalidate=86400';

@@ -592,8 +592,11 @@ Completed after Phase 0 integration:
   preliminary HEAD or a duplicate body-cache lookup;
 - the default release generator now emits v2 SHA-only identity/Brotli
   representation maps into an isolated staging directory, deduplicates equal
-  bodies, carries forward v1/v2 releases, and preserves immutable release and
-  mutable channel semantics;
+  bodies, carries forward v2 releases, migrates v1 entries from matching local
+  decoded bodies or verified legacy provenance, and requires the publisher to
+  materialize and hash authoritative v1 content before creating a missing v2
+  identity object, while preserving immutable release and mutable channel
+  semantics;
 - the production R2 publisher accepts v1 and v2 maps, atomically creates
   immutable representation and release objects with conditional S3 writes,
   validates authoritative R2 state, uploads Brotli metadata correctly, and

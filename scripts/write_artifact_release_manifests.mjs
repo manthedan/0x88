@@ -10,6 +10,7 @@ import { constants as zlibConstants, createBrotliCompress } from 'node:zlib';
 import {
   ARTIFACT_RELEASE_V1_SCHEMA,
   ARTIFACT_RELEASE_V2_SCHEMAS,
+  artifactKeyFromReleaseUrl,
   isArtifactReleaseV2,
   releaseCatalogEntries,
 } from './engine_artifact_registry.mjs';
@@ -302,6 +303,96 @@ async function verifyLocalArtifact(artifact, args) {
   return artifact;
 }
 
+function localArtifactPath(artifact, args) {
+  if (!artifact.localPath) return undefined;
+  return isAbsolute(artifact.localPath) ? artifact.localPath : resolve(args.root, artifact.localPath);
+}
+
+function validateV1Artifact(artifact, baseReleaseId) {
+  const logicalUrl = logicalIdentity(artifact);
+  const sha256 = artifact.sha256?.toLowerCase();
+  if (!logicalUrl || !artifact.artifactUrl || !/^[a-f0-9]{64}$/.test(sha256 ?? '') || !Number.isFinite(artifact.bytes)) {
+    throw new Error(`Invalid v1 artifact metadata in base release ${baseReleaseId}: ${logicalUrl ?? artifact.file ?? 'unknown artifact'}`);
+  }
+  const key = artifactKeyFromReleaseUrl(artifact.artifactUrl);
+  const keyMatch = key?.match(/^artifacts\/sha256\/([a-f0-9]{64})\/([^/]+)$/);
+  if (!key || keyMatch?.[1] !== sha256 || keyMatch?.[2] === 'identity') {
+    throw new Error(`Invalid v1 artifact URL in base release ${baseReleaseId} for ${logicalUrl}: ${artifact.artifactUrl}`);
+  }
+  return {
+    logicalUrl,
+    sha256,
+    bytes: artifact.bytes,
+    key,
+    migrationSource: {
+      schema: 'lc0_browser.artifact_migration_source.v1',
+      releaseId: baseReleaseId,
+      key,
+      url: artifact.artifactUrl,
+    },
+  };
+}
+
+function v1BodyCandidates(artifact, metadata, args) {
+  const candidates = [];
+  const add = (path) => {
+    if (path && !candidates.includes(path)) candidates.push(path);
+  };
+  add(localArtifactPath(artifact, args));
+  if (artifact.logicalUrl?.startsWith('/')) add(resolve(args.root, `public/${artifact.logicalUrl.replace(/^\/+/, '')}`));
+  add(resolve(args.outDir, metadata.key));
+  add(resolve(args.root, metadata.key));
+  return candidates;
+}
+
+async function migrateV1Artifacts(base, localArtifacts, args) {
+  const sourceByRaw = new Map();
+  for (const artifact of localArtifacts) {
+    const path = localArtifactPath(artifact, args);
+    if (path) sourceByRaw.set(`${artifact.sha256}/${artifact.bytes}`, path);
+  }
+
+  const inspected = [];
+  for (const artifact of base.artifacts ?? []) {
+    const metadata = validateV1Artifact(artifact, base.releaseId);
+    const candidates = v1BodyCandidates(artifact, metadata, args);
+    const mismatches = [];
+    for (const path of candidates) {
+      const digest = await localFileDigest(path);
+      if (!digest) continue;
+      if (digest.bytes === metadata.bytes && digest.sha256 === metadata.sha256) {
+        sourceByRaw.set(`${metadata.sha256}/${metadata.bytes}`, path);
+        break;
+      }
+      mismatches.push(`${path} has ${digest.bytes}/${digest.sha256}`);
+    }
+    inspected.push({ artifact, metadata, candidates, mismatches });
+  }
+
+  return inspected.map(({ artifact, metadata, mismatches }) => {
+    const sourcePath = sourceByRaw.get(`${metadata.sha256}/${metadata.bytes}`);
+    if (mismatches.length) {
+      throw new Error(
+        `Corrupt local v1 migration source for ${metadata.logicalUrl} in base release ${base.releaseId}: `
+        + mismatches.join('; '),
+      );
+    }
+    return {
+      logicalUrl: metadata.logicalUrl,
+      sha256: metadata.sha256,
+      bytes: metadata.bytes,
+      file: artifact.file ?? basename(metadata.logicalUrl),
+      kind: artifact.kind,
+      contentType: artifact.contentType ?? contentTypeFor(artifact.file ?? metadata.logicalUrl),
+      sourceManifest: artifact.sourceManifest,
+      status: artifact.status,
+      ...(sourcePath ? { localPath: storedLocalPath(sourcePath, args) } : {}),
+      carriedForwardFrom: base.releaseId,
+      migrationSource: metadata.migrationSource,
+    };
+  });
+}
+
 async function collectArtifacts(args) {
   const artifacts = [];
   const sourceManifests = [];
@@ -434,18 +525,19 @@ async function main() {
   let sourceManifests = updatedSourceManifests;
   let baseReleaseId;
   let inheritedArtifacts = [];
+  let migratedV1Artifacts = [];
   if (args.baseRelease) {
     const basePath = args.baseRelease.startsWith('/') ? args.baseRelease : join(args.root, args.baseRelease);
     const base = await readJson(basePath);
     if (base.schema !== ARTIFACT_RELEASE_V1_SCHEMA && !isArtifactReleaseV2(base)) {
       throw new Error(`Unexpected base release schema: ${base.schema}`);
     }
-    if (base.schema === ARTIFACT_RELEASE_V1_SCHEMA && (base.artifacts ?? []).length) {
-      throw new Error('Cannot carry v1 artifacts into a v2 release without identity representations');
-    }
     if (isArtifactReleaseV2(base)) releaseCatalogEntries(base);
     baseReleaseId = base.releaseId;
-    inheritedArtifacts = (base.artifacts ?? []).map((artifact) => ({ ...artifact, carriedForwardFrom: base.releaseId }));
+    if (base.schema === ARTIFACT_RELEASE_V1_SCHEMA) {
+      migratedV1Artifacts = await migrateV1Artifacts(base, localArtifacts, args);
+    }
+    else inheritedArtifacts = (base.artifacts ?? []).map((artifact) => ({ ...artifact, carriedForwardFrom: base.releaseId }));
     sourceManifests = [...new Set([...(base.sourceManifests ?? []), ...sourceManifests])];
   }
   // Newly supplied source manifests are release artifacts too. Inherited
@@ -453,6 +545,34 @@ async function main() {
   // potentially changed or unavailable local files.
   for (const sourceManifest of updatedSourceManifests) {
     localArtifacts.push(await sourceManifestArtifact(sourceManifest, args));
+  }
+  for (const artifact of migratedV1Artifacts) {
+    if (artifact.localPath) {
+      localArtifacts.push(artifact);
+      continue;
+    }
+    const identityKey = `artifacts/sha256/${artifact.sha256}/identity`;
+    const identityUrl = artifactUrlForKey(identityKey, args.assetOrigin);
+    inheritedArtifacts.push({
+      logicalUrl: artifact.logicalUrl,
+      file: artifact.file,
+      kind: artifact.kind,
+      contentType: artifact.contentType,
+      sourceManifest: artifact.sourceManifest,
+      status: artifact.status,
+      carriedForwardFrom: artifact.carriedForwardFrom,
+      migrationSource: artifact.migrationSource,
+      raw: { sha256: artifact.sha256, bytes: artifact.bytes },
+      representations: [{
+        encoding: 'identity',
+        url: identityUrl,
+        sha256: artifact.sha256,
+        bytes: artifact.bytes,
+      }],
+      url: identityUrl,
+      bytes: artifact.bytes,
+      sha256: artifact.sha256,
+    });
   }
   const materializedByRaw = new Map();
   const materializedArtifacts = [];
@@ -471,6 +591,8 @@ async function main() {
       sourceManifest: artifact.sourceManifest,
       status: artifact.status,
       localPath: artifact.localPath,
+      carriedForwardFrom: artifact.carriedForwardFrom,
+      migrationSource: artifact.migrationSource,
     });
   }
   const merged = new Map(inheritedArtifacts.map((artifact) => [logicalIdentity(artifact), artifact]));

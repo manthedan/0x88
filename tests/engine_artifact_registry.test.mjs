@@ -50,6 +50,7 @@ test('Stormphrax registry requires baseline and relaxed SIMD sidecars', () => {
 test('Reckless registry includes the external SIMD WASI artifact', () => {
   const group = BROWSER_ENGINE_ASSET_GROUPS.find((entry) => entry.family === 'reckless');
   assert.ok(group);
+  assert.equal(group.command, 'npm run reckless:build-release');
   assert.ok(group.optionalAssets.includes('/reckless/reckless-simd128-external.wasm'));
 });
 
@@ -68,6 +69,7 @@ test('shared release catalog reads v1 and v2 representation keys and deduplicate
   const v1Key = `artifacts/sha256/${'c'.repeat(64)}/legacy.wasm`;
   const identityKey = `artifacts/sha256/${rawSha}/identity`;
   const brKey = `artifacts/sha256/${rawSha}/br/${brSha}`;
+  const migratedV1Key = identityKey.replace(/\/identity$/, '/model-a.onnx');
   const releases = [
     {
       schema: 'lc0_browser.artifact_release_manifest.v1',
@@ -81,6 +83,13 @@ test('shared release catalog reads v1 and v2 representation keys and deduplicate
         {
           logicalUrl: '/model-a.onnx',
           kind: 'model',
+          carriedForwardFrom: 'v1',
+          migrationSource: {
+            schema: 'lc0_browser.artifact_migration_source.v1',
+            releaseId: 'v1',
+            key: migratedV1Key,
+            url: `/${migratedV1Key}`,
+          },
           raw: { sha256: rawSha, bytes: 3 },
           representations: [
             { encoding: 'identity', url: `/${identityKey}`, sha256: rawSha, bytes: 3 },
@@ -103,6 +112,7 @@ test('shared release catalog reads v1 and v2 representation keys and deduplicate
   assert.deepEqual(catalog.get(identityKey).logicalUrls, ['/model-a.onnx', '/model-b.onnx']);
   assert.deepEqual(catalog.get(identityKey).releases, ['v2']);
   assert.deepEqual(catalog.get(identityKey).kinds, ['model', 'source']);
+  assert.equal(catalog.has(migratedV1Key), false);
 });
 
 test('shared release catalog fails closed on corrupt v2 representation keys', () => {
@@ -163,5 +173,16 @@ test('shared release catalog requires exactly one identity representation per v2
       artifacts: [{ ...artifact, artifactUrl: `/artifacts/sha256/${rawSha}/legacy.onnx` }],
     }]),
     /V2 artifact has no representations/,
+  );
+  assert.throws(
+    () => buildArtifactReleaseCatalog([{
+      ...release([]),
+      artifacts: [{
+        ...artifact,
+        artifactUrl: `/artifacts/sha256/${rawSha}/legacy.onnx`,
+        representations: [identity],
+      }],
+    }]),
+    /V2 artifact contains legacy artifactUrl/,
   );
 });

@@ -112,6 +112,7 @@ test('R2 cleanup plan protects every shared v2 representation and reports catalo
   const brSha = '7'.repeat(64);
   const identityKey = `artifacts/${'sha256'}/${rawSha}/identity`;
   const brKey = `artifacts/sha256/${rawSha}/br/${brSha}`;
+  const migratedV1Key = identityKey.replace(/\/identity$/, '/model-a.onnx');
   const representationMap = [
     { encoding: 'identity', url: `/${identityKey}`, sha256: rawSha, bytes: 3 },
     { encoding: 'br', url: `/${brKey}`, sha256: brSha, bytes: 2 },
@@ -120,20 +121,39 @@ test('R2 cleanup plan protects every shared v2 representation and reports catalo
     schema: 'lc0_browser.artifact_release_manifest.v2',
     releaseId: 'stable-v2',
     artifacts: [
-      { logicalUrl: '/models/a.onnx', raw: { sha256: rawSha, bytes: 3 }, representations: representationMap },
+      {
+        logicalUrl: '/models/a.onnx',
+        carriedForwardFrom: 'legacy-v1',
+        migrationSource: {
+          schema: 'lc0_browser.artifact_migration_source.v1',
+          releaseId: 'legacy-v1',
+          key: migratedV1Key,
+          url: `/${migratedV1Key}`,
+        },
+        raw: { sha256: rawSha, bytes: 3 },
+        representations: representationMap,
+      },
       { logicalUrl: '/models/b.onnx', raw: { sha256: rawSha, bytes: 3 }, representations: representationMap },
     ],
   };
   const plan = buildCleanupPlan({
     now,
     channel: { releaseId: 'stable-v2' },
-    releases: [release],
-    objects: [object('channels/stable.json'), object('releases/stable-v2.json'), object(identityKey)],
+    releases: [
+      {
+        schema: 'lc0_browser.artifact_release_manifest.v1',
+        releaseId: 'legacy-v1',
+        artifacts: [{ logicalUrl: '/models/a.onnx', artifactUrl: `/${migratedV1Key}` }],
+      },
+      release,
+    ],
+    objects: [object('channels/stable.json'), object('releases/stable-v2.json'), object(identityKey), object(migratedV1Key)],
   });
 
-  assert.equal(plan.catalogObjectCount, 2);
+  assert.equal(plan.catalogObjectCount, 3);
   assert.deepEqual(plan.missingReferencedArtifacts, [{ key: brKey, releases: ['stable-v2'] }]);
   assert.ok(plan.protected.some((entry) => entry.key === identityKey && entry.reason === 'referenced by stable release'));
+  assert.ok(plan.protected.some((entry) => entry.key === migratedV1Key && entry.reason === 'referenced by retained release'));
   assert.equal(plan.candidates.some((entry) => entry.key === identityKey), false);
 });
 

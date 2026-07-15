@@ -74,6 +74,9 @@ export function releaseCatalogEntries(release) {
     if (!Array.isArray(artifact.representations) || !artifact.representations.length) {
       throw new Error(`V2 artifact has no representations: ${logicalUrl}`);
     }
+    if (artifact.artifactUrl) {
+      throw new Error(`V2 artifact contains legacy artifactUrl: ${logicalUrl}`);
+    }
     const identityCount = artifact.representations.filter((entry) => entry?.encoding === 'identity').length;
     if (identityCount !== 1) {
       throw new Error(`V2 artifact must have exactly one identity representation: ${logicalUrl} (found ${identityCount})`);

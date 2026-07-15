@@ -189,17 +189,24 @@ function artifactKeyFromUrl(raw) {
 function validateV2Representation(artifact, representation) {
   const key = artifactKeyFromUrl(representation?.url);
   const rawSha256 = artifact?.raw?.sha256?.toLowerCase();
-  if (!key || !rawSha256 || !Number.isFinite(artifact.raw.bytes)) return undefined;
+  if (!key || !/^[a-f0-9]{64}$/.test(rawSha256 ?? '') || !Number.isFinite(artifact.raw.bytes)) return undefined;
   if (representation.encoding === 'identity') {
     if (key !== `artifacts/sha256/${rawSha256}/identity`) return undefined;
     if (representation.sha256?.toLowerCase() !== rawSha256 || representation.bytes !== artifact.raw.bytes) return undefined;
   } else if (representation.encoding === 'br') {
     const encodedSha256 = representation.sha256?.toLowerCase();
-    if (!encodedSha256 || key !== `artifacts/sha256/${rawSha256}/br/${encodedSha256}`) return undefined;
+    if (!/^[a-f0-9]{64}$/.test(encodedSha256 ?? '') || key !== `artifacts/sha256/${rawSha256}/br/${encodedSha256}`) return undefined;
   } else {
     return undefined;
   }
   return { ...representation, sha256: representation.sha256.toLowerCase(), rawSha256 };
+}
+
+function validatedV2Representations(artifact) {
+  if (!Array.isArray(artifact?.representations) || !artifact.representations.length) return undefined;
+  if (artifact.representations.filter((entry) => entry?.encoding === 'identity').length !== 1) return undefined;
+  const representations = artifact.representations.map((entry) => validateV2Representation(artifact, entry));
+  return representations.every(Boolean) ? representations : undefined;
 }
 
 function logicalPathMatches(artifact, logicalUrl) {
@@ -251,16 +258,19 @@ async function descriptorFromStableReleaseLogicalPath(request, env) {
   const artifact = exactArtifact ?? (fallbackArtifacts.length === 1 ? fallbackArtifacts[0] : undefined);
   if (!artifact) return undefined;
 
-  if (artifact.raw && Array.isArray(artifact.representations)) {
-    const selected = selectRepresentation(artifact, request);
+  const v2Release = release?.schema === 'lc0_browser.artifact_release_manifest.v2'
+    || release?.schema === 'lc0-webgpu.artifact-release.v2';
+  if (v2Release || artifact.raw || Array.isArray(artifact.representations)) {
+    const representations = validatedV2Representations(artifact);
+    if (!representations) return undefined;
+    const selected = selectRepresentation({ ...artifact, representations }, request);
     if (!selected) return { unacceptableEncoding: true };
-    const representation = validateV2Representation(artifact, selected);
-    const key = representation && artifactKeyFromUrl(representation.url);
-    if (!representation || !key) return undefined;
+    const key = artifactKeyFromUrl(selected.url);
+    if (!key) return undefined;
     return {
       key,
-      representation,
-      representations: artifact.representations.map((entry) => validateV2Representation(artifact, entry)).filter(Boolean),
+      representation: selected,
+      representations,
       raw: { sha256: artifact.raw.sha256.toLowerCase(), bytes: artifact.raw.bytes },
       contentType: artifact.contentType,
       logicalAlias: true,

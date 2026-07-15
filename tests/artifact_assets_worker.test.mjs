@@ -460,6 +460,37 @@ test('artifact assets worker negotiates a v2 Brotli representation with decoded 
   assert.equal(await text(response), 'compressed-body');
 });
 
+test('artifact assets worker rejects malformed v2 artifacts instead of falling back to legacy fields', async () => {
+  const identity = { encoding: 'identity', url: `/${V2_IDENTITY_KEY}`, sha256: V2_RAW_SHA, bytes: BODY.byteLength };
+  for (const representations of [
+    [],
+    [identity, { ...identity }],
+    [{ ...identity, url: `/artifacts/sha256/${'c'.repeat(64)}/identity` }],
+  ]) {
+    const env = fakeV2Env();
+    const originalGet = env.ARTIFACTS.get;
+    env.ARTIFACTS.get = async (key, options) => {
+      if (key !== 'releases/v2-test.json') return originalGet(key, options);
+      const body = new TextEncoder().encode(JSON.stringify({
+        schema: 'lc0_browser.artifact_release_manifest.v2',
+        releaseId: 'v2-test',
+        artifacts: [{
+          logicalUrl: '/models/lc0/model-a.onnx',
+          artifactUrl: `/${V2_IDENTITY_KEY}`,
+          sha256: V2_RAW_SHA,
+          bytes: BODY.byteLength,
+          raw: { sha256: V2_RAW_SHA, bytes: BODY.byteLength },
+          representations,
+        }],
+      }));
+      return { size: body.byteLength, httpMetadata: { contentType: 'application/json' }, body };
+    };
+    const response = await handleArtifactRequest(new Request('https://assets.example/models/lc0/model-a.onnx'), env);
+    assert.equal(response.status, 404);
+    assert.equal(env.counts.get.get(V2_IDENTITY_KEY), undefined);
+  }
+});
+
 test('artifact assets worker forces v2 Range requests to the identity representation', async () => {
   const env = fakeV2Env();
   const response = await handleArtifactRequest(new Request('https://assets.example/models/lc0/model-a.onnx', {

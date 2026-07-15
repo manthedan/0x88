@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { createReadStream } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { createReadStream, createWriteStream, existsSync } from 'node:fs';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import {
   ARTIFACT_RELEASE_V1_SCHEMA,
   ARTIFACT_RELEASE_V2_SCHEMAS,
@@ -106,11 +107,33 @@ function entryFromLegacyArtifact(artifact, args) {
     contentEncoding: undefined,
     url: publicUrl(args, artifact.artifactUrl),
     verification: 'legacy-full-body',
+    migrationSources: [],
   };
 }
 
 function entriesFromV1Release(release, args) {
   return (release.artifacts ?? []).map((artifact) => entryFromLegacyArtifact(artifact, args));
+}
+
+function validatedMigrationSource(artifact, rawSha256, args) {
+  const migration = artifact.migrationSource;
+  if (!migration) return undefined;
+  const logicalUrl = artifact.logicalUrl ?? artifact.name;
+  const match = migration.key?.match(/^artifacts\/sha256\/([a-f0-9]{64})\/([^/]+)$/);
+  const sourceUrlKey = migration.url ? artifactKeyFromUrl(migration.url) : undefined;
+  if (migration.schema !== 'lc0_browser.artifact_migration_source.v1'
+    || !migration.releaseId
+    || migration.releaseId !== artifact.carriedForwardFrom
+    || match?.[1] !== rawSha256
+    || match?.[2] === 'identity'
+    || sourceUrlKey !== migration.key) {
+    throw new Error(`Invalid v1 migration source metadata for ${logicalUrl}`);
+  }
+  return {
+    releaseId: migration.releaseId,
+    key: migration.key,
+    url: publicUrl(args, migration.url),
+  };
 }
 
 function validateV2Representation(artifact, representation) {
@@ -144,6 +167,7 @@ function entriesFromV2Release(release, args) {
     if (identityCount !== 1) {
       throw new Error(`V2 artifact must have exactly one identity representation: ${artifact.logicalUrl ?? artifact.name} (found ${identityCount})`);
     }
+    const migrationSource = validatedMigrationSource(artifact, artifact.raw?.sha256?.toLowerCase(), args);
     for (const representation of artifact.representations) {
       const validated = validateV2Representation(artifact, representation);
       const logicalUrl = artifact.logicalUrl ?? artifact.name;
@@ -155,6 +179,10 @@ function entriesFromV2Release(release, args) {
           throw new Error(`Conflicting v2 representation metadata for ${validated.key}`);
         }
         if (logicalUrl && !existing.logicalUrls.includes(logicalUrl)) existing.logicalUrls.push(logicalUrl);
+        if (migrationSource && representation.encoding === 'identity'
+          && !existing.migrationSources.some((source) => source.key === migrationSource.key)) {
+          existing.migrationSources.push(migrationSource);
+        }
         // Equal bodies may be inherited by one logical entry and materialized by
         // another. Any local source is sufficient to make the deduplicated body
         // uploadable when the remote object is absent.
@@ -178,6 +206,7 @@ function entriesFromV2Release(release, args) {
         contentEncoding: representation.encoding === 'identity' ? undefined : representation.encoding,
         url: publicUrl(args, representation.url),
         verification: 'v2-immutable-head',
+        migrationSources: migrationSource && representation.encoding === 'identity' ? [migrationSource] : [],
       });
     }
   }
@@ -305,6 +334,54 @@ async function verifyRemoteImmutableObject(args, target, expected) {
   }
 }
 
+function isMissingObjectOutput(output) {
+  return /specified key does not exist|NoSuchKey|status code:\s*404|HTTP\s*404/i.test(output);
+}
+
+async function downloadMigrationSource(source, target) {
+  if (!source.url) throw new Error(`V1 migration source ${source.key} has no downloadable URL`);
+  const response = await fetch(source.url, { cache: 'no-cache', headers: { 'Accept-Encoding': 'identity' } });
+  if (!response.ok) {
+    throw new Error(
+      `V1 migration body is unavailable at R2 key ${source.key} and ${source.url} returned HTTP ${response.status}. `
+      + 'Restore the legacy object or provide matching local decoded bytes before publishing.',
+    );
+  }
+  if (response.body) {
+    await pipeline(Readable.fromWeb(response.body), createWriteStream(target, { flags: 'wx' }));
+    return;
+  }
+  await writeFile(target, new Uint8Array(await response.arrayBuffer()), { flag: 'wx' });
+}
+
+async function materializeMigrationSource(args, item) {
+  const source = item.migrationSources[0];
+  const dir = await mkdtemp(join(tmpdir(), 'lc0-v1-migration-'));
+  const file = join(dir, 'identity');
+  try {
+    const sourceTarget = `${args.bucket}/${source.key}`;
+    const child = spawnSync(args.wranglerBin, ['r2', 'object', 'get', sourceTarget, '--file', file, '--remote'], { encoding: 'utf8' });
+    if (child.status !== 0) {
+      const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
+      if (!isMissingObjectOutput(output)) {
+        throw new Error(`Unable to read authoritative v1 migration source ${sourceTarget}`);
+      }
+      await downloadMigrationSource(source, file);
+    }
+    const actual = await sha256File(file);
+    if (actual.bytes !== item.decodedBytes || actual.sha256 !== item.decodedSha256) {
+      throw new Error(
+        `Corrupt v1 migration source for ${item.logicalUrls.join(', ')}: `
+        + `got ${actual.bytes}/${actual.sha256}, expected ${item.decodedBytes}/${item.decodedSha256}`,
+      );
+    }
+    return { dir, file, source };
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 function isConditionalCreateConflict(output) {
   return /PreconditionFailed|precondition(?: condition)? failed|status code:\s*412|HTTP\s*412/i.test(output);
 }
@@ -393,12 +470,12 @@ async function main() {
   const skipped = [];
 
   for (const entry of entries) {
-    const localExists = Boolean(!entry.carriedForward && entry.localPath && existsSync(entry.localPath));
+    const localExists = Boolean(entry.localPath && existsSync(entry.localPath));
     if (localExists) {
       const actual = await sha256File(entry.localPath);
       if (actual.bytes !== entry.bytes) throw new Error(`Size mismatch for ${entry.logicalUrls.join(', ')}: got ${actual.bytes}, expected ${entry.bytes}`);
       if (actual.sha256 !== entry.sha256) throw new Error(`SHA-256 mismatch for ${entry.logicalUrls.join(', ')}: got ${actual.sha256}, expected ${entry.sha256}`);
-    } else if (!entry.carriedForward) {
+    } else if (!entry.carriedForward && !entry.migrationSources.length) {
       if (args.allowMissing) { skipped.push({ logicalUrls: entry.logicalUrls, reason: entry.localPath ? 'missing localPath' : 'no localPath', localPath: entry.localPath }); continue; }
       throw new Error(`Missing local artifact for ${entry.logicalUrls.join(', ')}: ${entry.localPath ?? 'no localPath'}`);
     }
@@ -406,8 +483,13 @@ async function main() {
     // HEAD verifies representation metadata and a decoded full-body pass proves
     // integrity. This can become HEAD-only once uploads persist a trustworthy R2
     // verification digest; a hash-shaped key alone is not proof of stored bytes.
-    const probe = (args.probeExisting || args.execute || !localExists) ? await probeExistingEntry(entry) : undefined;
-    if (!localExists && probe?.state !== 'existing') throw new Error(`Carried-forward artifact is not available remotely: ${entry.logicalUrls.join(', ')}`);
+    const probe = (args.probeExisting || args.execute || (!localExists && !entry.migrationSources.length))
+      ? await probeExistingEntry(entry)
+      : undefined;
+    if (!localExists && probe?.state !== 'existing' && !entry.migrationSources.length) {
+      throw new Error(`Carried-forward artifact is not available remotely: ${entry.logicalUrls.join(', ')}`);
+    }
+    const migrationPlanned = !localExists && probe?.state !== 'existing' && entry.migrationSources.length > 0;
     planned.push({
       logicalUrl: entry.logicalUrls[0],
       logicalUrls: entry.logicalUrls,
@@ -422,8 +504,11 @@ async function main() {
       cacheControl: 'public, max-age=31536000, immutable',
       artifactUrl: entry.url,
       remoteState: probe?.state ?? 'not-probed',
-      uploadAction: probe?.state === 'existing' ? 'conditional-create-or-verify' : 'conditional-create',
+      uploadAction: probe?.state === 'existing'
+        ? 'conditional-create-or-verify'
+        : (migrationPlanned ? 'materialize-from-v1-and-conditional-create' : 'conditional-create'),
       remoteProbe: probe,
+      migrationSources: entry.migrationSources,
     });
   }
 
@@ -441,6 +526,20 @@ async function main() {
         if (remoteState === 'identical') {
           item.remoteState = 'identical-r2';
           item.uploadAction = 'skip-identical-r2';
+          continue;
+        }
+        if (item.migrationSources.length) {
+          const materialized = await materializeMigrationSource(args, item);
+          try {
+            item.localPath = materialized.file;
+            const uploadState = await createImmutableObjectAtomically(args, item);
+            item.remoteState = uploadState === 'identical' ? 'identical-r2' : 'created-r2';
+            item.uploadAction = uploadState === 'identical' ? 'skip-identical-r2' : 'migrated-and-uploaded';
+            item.migrationSourceUsed = materialized.source;
+          } finally {
+            await rm(materialized.dir, { recursive: true, force: true });
+            item.localPath = undefined;
+          }
           continue;
         }
         throw new Error(`Cannot upload missing R2 artifact ${item.logicalUrls.join(', ')} without a local file: ${item.localPath ?? 'no localPath'}`);
