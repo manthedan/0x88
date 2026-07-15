@@ -6170,8 +6170,8 @@ export interface Lc0WebHybridTimingBreakdown {
   queueSubmitMs: number;
   /** End-to-end readback synchronization plus mapped-range copy time. */
   readbackSyncedMs: number;
-  /** Host wait for all submitted compute and readback-copy queue work. */
-  queueSyncWaitMs?: number;
+  /** Submitted-work fence latency, including all previously queued compute and readback-copy execution. */
+  queueDrainFenceLatencyMs?: number;
   /** CPU time spent encoding the output copy command buffer. */
   readbackCopyEncodeMs?: number;
   /** CPU time spent submitting the output copy command buffer. */
@@ -6898,7 +6898,8 @@ class Lc0WebHybridRuntime {
   private nextWgslSequenceId = 1;
   private readonly retiredBuffers = new Set<BufferLike>();
   private readonly retirementPendingBuffers = new Set<BufferLike>();
-  private destroyed = false;
+  private readonly retirementPromises = new Set<Promise<void>>();
+  private disposePromise?: Promise<void>;
 
   private constructor(options: {
     device: DeviceLike;
@@ -7167,14 +7168,16 @@ class Lc0WebHybridRuntime {
   private retireSupersededBuffer(buffer: BufferLike): void {
     if (this.retiredBuffers.has(buffer) || this.retirementPendingBuffers.has(buffer)) return;
     this.retirementPendingBuffers.add(buffer);
-    void retireLc0WebGpuBufferAfterSubmittedWork(this.device.queue, buffer)
+    const retirement = retireLc0WebGpuBufferAfterSubmittedWork(this.device.queue, buffer)
       .then((destroyed) => {
         if (destroyed) this.retiredBuffers.add(buffer);
       })
       .catch(() => undefined)
       .finally(() => {
         this.retirementPendingBuffers.delete(buffer);
+        this.retirementPromises.delete(retirement);
       });
+    this.retirementPromises.add(retirement);
   }
 
   private buildInputPayload(input: Lc0EvaluatorInput, historyFill: Lc0HistoryFill): { payload: Float32Array<ArrayBufferLike>; wasmTiming?: Lc0WasmInputEncoderTiming } {
@@ -7819,7 +7822,7 @@ class Lc0WebHybridRuntime {
       readbackMapped = true;
       const readbackMapAsyncWaitMs = nowMs() - mapAsyncAwaitStarted;
       const readbackMapAsyncMs = Math.max(0, (submitted.readbackMapState.settledAt ?? nowMs()) - submitted.readbackMapState.startedAt);
-      const queueSyncWaitMs = Math.max(0, (submitted.queueState.settledAt ?? nowMs()) - submitted.queueState.startedAt);
+      const queueDrainFenceLatencyMs = Math.max(0, (submitted.queueState.settledAt ?? nowMs()) - submitted.queueState.startedAt);
       const readbackBytesPerSlot = this.wgslHeadReadbackBytes();
       const mapCopyStarted = nowMs();
       const readbackRange = submitted.readbackBuffer.getMappedRange();
@@ -7885,7 +7888,7 @@ class Lc0WebHybridRuntime {
             inputUploadMs: submitted.inputUploadMs,
             commandEncodeMs: submitted.commandEncodeMs,
             queueSubmitMs: submitted.queueSubmitMs,
-            queueSyncWaitMs,
+            queueDrainFenceLatencyMs,
             readbackCopyEncodeMs: submitted.readbackCopyEncodeMs,
             readbackCopySubmitMs: submitted.readbackCopySubmitMs,
             readbackSyncedMs,
@@ -7990,14 +7993,25 @@ class Lc0WebHybridRuntime {
     return out.map((batch) => batch ?? []);
   }
 
-  destroy(): void {
-    if (this.destroyed) return;
-    this.destroyed = true;
-    for (const buffer of this.buffers) {
-      if (!this.retiredBuffers.has(buffer)) buffer.destroy?.();
-    }
-    if (this.headSession) void ort.releaseOrtSession(this.headSession.session).catch(() => undefined);
-    this.device.destroy?.();
+  async dispose(): Promise<void> {
+    if (this.disposePromise) return this.disposePromise;
+    this.disposePromise = (async () => {
+      try {
+        await this.device.queue.onSubmittedWorkDone?.();
+      } catch {
+        // Device loss must not prevent remaining runtime cleanup.
+      }
+      await Promise.all(Array.from(this.retirementPromises));
+      if (this.headSession) await ort.releaseOrtSession(this.headSession.session).catch(() => undefined);
+      for (const buffer of this.buffers) {
+        if (this.retiredBuffers.has(buffer)) continue;
+        try { buffer.destroy?.(); }
+        catch { /* best-effort cleanup before final device destruction */ }
+      }
+      try { this.device.destroy?.(); }
+      catch { /* disposal is idempotent and failure-safe */ }
+    })();
+    return this.disposePromise;
   }
 }
 
@@ -8009,7 +8023,7 @@ export async function runLc0WebHybridEvaluation(options: Lc0WebHybridEvaluationO
       policyTemperature: options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE,
     });
   } finally {
-    runtime.destroy();
+    await runtime.dispose();
   }
 }
 
@@ -8032,7 +8046,7 @@ export async function runLc0WebHybridEncoderProfile(options: Lc0WebHybridEncoder
       profileMode: options.profileMode ?? 'gpu-timestamp',
     });
   } finally {
-    runtime.destroy();
+    await runtime.dispose();
   }
 }
 
@@ -8069,8 +8083,8 @@ function mean(values: number[]): number {
 
 function summarizeHybridEvaluations(mode: 'immediate' | 'deferred-double-buffered', wallMs: number, batches: Lc0WebHybridEvaluationResult[][]): Lc0WebWgslDeferredReadbackBenchModeResult {
   const flat = batches.flat();
-  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'queueSyncWaitMs', 'readbackCopyEncodeMs', 'readbackCopySubmitMs', 'readbackSyncedMs', 'readbackMapRequestMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsPrepMs', 'readbackOverlapCpuMs', 'readbackOverlapHiddenMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount'];
-  const physicalBatchScopedKeys = new Set<keyof Lc0WebHybridTimingBreakdown>(['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'queueSyncWaitMs', 'readbackCopyEncodeMs', 'readbackCopySubmitMs', 'readbackSyncedMs', 'readbackMapRequestMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount']);
+  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'queueDrainFenceLatencyMs', 'readbackCopyEncodeMs', 'readbackCopySubmitMs', 'readbackSyncedMs', 'readbackMapRequestMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsPrepMs', 'readbackOverlapCpuMs', 'readbackOverlapHiddenMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount'];
+  const physicalBatchScopedKeys = new Set<keyof Lc0WebHybridTimingBreakdown>(['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'queueDrainFenceLatencyMs', 'readbackCopyEncodeMs', 'readbackCopySubmitMs', 'readbackSyncedMs', 'readbackMapRequestMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount']);
   const timingMeans: Partial<Record<keyof Lc0WebHybridTimingBreakdown, number>> = {};
   for (const key of timingKeys) {
     const values = flat.map((entry) => {
@@ -8159,8 +8173,14 @@ export async function runLc0WebWgslDeferredReadbackBenchmark(options: {
       allBestMovesMatch: immediate.bestMoves.length === deferred.bestMoves.length && immediate.bestMoves.every((move, i) => move === deferred.bestMoves[i]),
     };
   } finally {
-    runtime.destroy();
+    await runtime.dispose();
   }
+}
+
+type Lc0WebHybridEvaluatorRuntime = Pick<Lc0WebHybridRuntime, 'evaluate' | 'evaluateBatch' | 'evaluateWgslBatchesDeferredReadback' | 'executionFootprint' | 'dispose'>;
+
+export interface Lc0WebHybridEvaluatorDependencies {
+  createRuntime?: (options: Lc0WebHybridRuntimeCreateOptions) => Promise<Lc0WebHybridEvaluatorRuntime>;
 }
 
 export class Lc0WebHybridEvaluator {
@@ -8174,11 +8194,14 @@ export class Lc0WebHybridEvaluator {
   readonly inputBackend: Lc0WebHybridInputBackend;
   readonly legalPriorsBackend: Lc0WebHybridLegalPriorsBackend;
   readonly encoderKernelVariant: Lc0WebEncoderKernelVariant;
-  private runtimePromise?: Promise<Lc0WebHybridRuntime>;
-  private currentRuntime?: Lc0WebHybridRuntime;
+  private readonly createRuntime: (options: Lc0WebHybridRuntimeCreateOptions) => Promise<Lc0WebHybridEvaluatorRuntime>;
+  private runtimePromise?: Promise<Lc0WebHybridEvaluatorRuntime>;
+  private currentRuntime?: Lc0WebHybridEvaluatorRuntime;
   private evaluationQueue: Promise<void> = Promise.resolve();
+  private disposed = false;
+  private disposePromise?: Promise<void>;
 
-  constructor(options: Omit<Lc0WebHybridEvaluationOptions, 'input'>) {
+  constructor(options: Omit<Lc0WebHybridEvaluationOptions, 'input'>, dependencies: Lc0WebHybridEvaluatorDependencies = {}) {
     this.packUrl = options.packUrl;
     this.layers = clampInteger(options.layers, 10, 1, 32);
     this.historyFill = options.historyFill ?? 'fen_only';
@@ -8190,11 +8213,12 @@ export class Lc0WebHybridEvaluator {
     this.legalPriorsBackend = options.legalPriorsBackend ?? 'js';
     if (this.legalPriorsBackend === 'gpu' && this.headBackend !== 'wgsl') throw new Error('GPU legal-prior backend requires WGSL heads');
     this.encoderKernelVariant = options.encoderKernelVariant ?? 'hand';
+    this.createRuntime = dependencies.createRuntime ?? ((runtimeOptions) => Lc0WebHybridRuntime.create(runtimeOptions));
   }
 
-  private runtime(): Promise<Lc0WebHybridRuntime> {
+  private runtime(): Promise<Lc0WebHybridEvaluatorRuntime> {
     if (!this.runtimePromise) {
-      const runtimePromise = Lc0WebHybridRuntime.create({
+      const runtimePromise = this.createRuntime({
         packUrl: this.packUrl,
         layers: this.layers,
         historyFill: this.historyFill,
@@ -8221,6 +8245,7 @@ export class Lc0WebHybridEvaluator {
   }
 
   private enqueueEvaluation<T>(work: () => Promise<T>): Promise<T> {
+    if (this.disposed) return Promise.reject(new Error('LC0 WebGPU hybrid evaluator has been disposed'));
     const run = this.evaluationQueue.then(work, work);
     this.evaluationQueue = run.then(() => undefined, () => undefined);
     return run;
@@ -8255,12 +8280,18 @@ export class Lc0WebHybridEvaluator {
   }
 
   async dispose(): Promise<void> {
-    const runtimePromise = this.runtimePromise;
-    this.runtimePromise = undefined;
-    this.currentRuntime = undefined;
-    if (!runtimePromise) return;
-    const runtime = await runtimePromise.catch(() => undefined);
-    runtime?.destroy();
+    if (this.disposePromise) return this.disposePromise;
+    this.disposed = true;
+    this.disposePromise = (async () => {
+      await this.evaluationQueue;
+      const runtimePromise = this.runtimePromise;
+      this.runtimePromise = undefined;
+      this.currentRuntime = undefined;
+      if (!runtimePromise) return;
+      const runtime = await runtimePromise.catch(() => undefined);
+      await runtime?.dispose();
+    })();
+    return this.disposePromise;
   }
 }
 
@@ -8386,7 +8417,7 @@ export async function runLc0WebWgslHeadsVsOrtFixtures(options: {
       evaluations,
     };
   } finally {
-    runtime.destroy();
+    await runtime.dispose();
   }
 }
 

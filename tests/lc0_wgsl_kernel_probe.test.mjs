@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import * as ort from '../src/nn/ortRuntime.ts';
-import { createLc0WebGpuPipelineCache, createTinyAttentionOutputOnnxForTest, createTinyEncoder0BlockOnnxForTest, createTinyEncoder0FfnOnnxForTest, createTinyMatmulAddOnnxForTest, createTinyPolicyValueHeadsOnnxForTest, f16BitsToF32, lc0WebEncoderBlockTensorNames, retireLc0WebGpuBufferAfterSubmittedWork } from '../src/lc0/wgslMatmulAddProbe.ts';
+import { createLc0WebGpuPipelineCache, createTinyAttentionOutputOnnxForTest, createTinyEncoder0BlockOnnxForTest, createTinyEncoder0FfnOnnxForTest, createTinyMatmulAddOnnxForTest, createTinyPolicyValueHeadsOnnxForTest, f16BitsToF32, Lc0WebHybridEvaluator, lc0WebEncoderBlockTensorNames, retireLc0WebGpuBufferAfterSubmittedWork } from '../src/lc0/wgslMatmulAddProbe.ts';
 
 test('superseded WebGPU buffers retire only after submitted queue work completes', async () => {
   let releaseQueue;
@@ -80,7 +80,7 @@ test('parallel WebGPU pipeline initialization settles all work before rejecting'
   assert.deepEqual(settled.sort(), ['A', 'B']);
 });
 
-test('hybrid WebGPU slots share immutable input/head resources and report separated waits', async () => {
+test('hybrid WebGPU slots share immutable input/head resources and report truthful separated timings', async () => {
   const source = await readFile(new URL('../src/lc0/wgslMatmulAddProbe.ts', import.meta.url), 'utf8');
   assert.match(source, /type InputBodyGpuSharedResources =/);
   assert.match(source, /type WgslPolicyValueHeadSharedResources =/);
@@ -91,10 +91,102 @@ test('hybrid WebGPU slots share immutable input/head resources and report separa
   assert.match(source, /if \(deviceResult\.status === 'fulfilled'\) deviceResult\.value\.device\.destroy\?\.\(\)/);
   assert.match(source, /encoderProfileOnly: true/);
   assert.match(source, /\.\.\.\(encoderProfileOnly \? \[\] : policyValueHeadTensorNameList\(\)\)/);
-  assert.match(source, /queueSyncWaitMs\?: number/);
+  assert.match(source, /queueDrainFenceLatencyMs\?: number/);
+  assert.match(source, /Submitted-work fence latency, including all previously queued compute and readback-copy execution/);
+  assert.doesNotMatch(source, new RegExp(['queueSync', 'WaitMs'].join('')));
   assert.match(source, /readbackCopyEncodeMs\?: number/);
   assert.match(source, /readbackMapRequestMs\?: number/);
   assert.match(source, /mapAsync pending wall time\. This is synchronization wait, not pure mapping cost/);
+});
+
+test('hybrid WebGPU disposal drains queued evaluations and awaits runtime cleanup', async () => {
+  let releaseFirstEvaluation;
+  let releaseRuntimeCleanup;
+  let markRuntimeCleanupStarted;
+  const firstEvaluationGate = new Promise((resolve) => { releaseFirstEvaluation = resolve; });
+  const runtimeCleanupGate = new Promise((resolve) => { releaseRuntimeCleanup = resolve; });
+  const runtimeCleanupStarted = new Promise((resolve) => { markRuntimeCleanupStarted = resolve; });
+  const events = [];
+  let evaluationCalls = 0;
+  let runtimeCreates = 0;
+  const result = { fen: 'fake', wdl: [1, 0, 0], q: 1, mlh: 0, legalPriors: [] };
+  const runtime = {
+    async evaluate() {
+      evaluationCalls += 1;
+      events.push(`evaluate-${evaluationCalls}-start`);
+      if (evaluationCalls === 1) await firstEvaluationGate;
+      events.push(`evaluate-${evaluationCalls}-end`);
+      return result;
+    },
+    async evaluateBatch(inputs) {
+      return Promise.all(inputs.map(() => this.evaluate()));
+    },
+    async evaluateWgslBatchesDeferredReadback() {
+      throw new Error('not used');
+    },
+    executionFootprint() {
+      return undefined;
+    },
+    async dispose() {
+      events.push('runtime-dispose-start');
+      markRuntimeCleanupStarted();
+      await runtimeCleanupGate;
+      events.push('runtime-dispose-end');
+    },
+  };
+  const evaluator = new Lc0WebHybridEvaluator(
+    { packUrl: '/fake.lc0web.json', verifyShards: false },
+    { createRuntime: async () => { runtimeCreates += 1; return runtime; } },
+  );
+
+  const first = evaluator.evaluate('first');
+  const second = evaluator.evaluate('second');
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(events, ['evaluate-1-start']);
+
+  let disposalSettled = false;
+  const disposal = evaluator.dispose().then(() => { disposalSettled = true; });
+  await Promise.resolve();
+  assert.equal(disposalSettled, false);
+  assert.deepEqual(events, ['evaluate-1-start']);
+
+  releaseFirstEvaluation();
+  await first;
+  await second;
+  await runtimeCleanupStarted;
+  assert.deepEqual(events, [
+    'evaluate-1-start',
+    'evaluate-1-end',
+    'evaluate-2-start',
+    'evaluate-2-end',
+    'runtime-dispose-start',
+  ]);
+  assert.equal(disposalSettled, false);
+
+  releaseRuntimeCleanup();
+  await Promise.all([disposal, evaluator.dispose()]);
+  assert.equal(disposalSettled, true);
+  assert.equal(runtimeCreates, 1);
+  assert.deepEqual(events, [
+    'evaluate-1-start',
+    'evaluate-1-end',
+    'evaluate-2-start',
+    'evaluate-2-end',
+    'runtime-dispose-start',
+    'runtime-dispose-end',
+  ]);
+  await assert.rejects(evaluator.evaluate('after-dispose'), /has been disposed/);
+  assert.equal(runtimeCreates, 1);
+});
+
+test('hybrid WebGPU runtime disposal awaits session release before final device destruction', async () => {
+  const source = await readFile(new URL('../src/lc0/wgslMatmulAddProbe.ts', import.meta.url), 'utf8');
+  const runtimeDispose = source.slice(source.indexOf('  async dispose(): Promise<void> {'), source.indexOf('\n}\n\nexport async function runLc0WebHybridEvaluation'));
+  assert.match(runtimeDispose, /await this\.device\.queue\.onSubmittedWorkDone\?\.\(\)/);
+  assert.match(runtimeDispose, /await Promise\.all\(Array\.from\(this\.retirementPromises\)\)/);
+  assert.match(runtimeDispose, /await ort\.releaseOrtSession\(this\.headSession\.session\)/);
+  assert.ok(runtimeDispose.indexOf('await ort.releaseOrtSession') < runtimeDispose.indexOf('this.device.destroy?.()'));
 });
 
 test('f16BitsToF32 decodes representative IEEE half values used by lc0web kernels', () => {
