@@ -492,6 +492,73 @@ function logicalIdentity(artifact) {
   return artifact.logicalUrl ?? artifact.name;
 }
 
+function rawIdentityMetadata(artifact) {
+  const logicalUrl = logicalIdentity(artifact) ?? 'unknown artifact';
+  const sha256 = (artifact.raw?.sha256 ?? artifact.sha256)?.toLowerCase();
+  const bytes = artifact.raw?.bytes ?? artifact.bytes;
+  if (!/^[a-f0-9]{64}$/.test(sha256 ?? '') || !Number.isFinite(bytes)) {
+    throw new Error(`Invalid raw identity metadata for ${logicalUrl}`);
+  }
+  if (artifact.raw && artifact.sha256 !== undefined && artifact.sha256.toLowerCase() !== sha256) {
+    throw new Error(`Conflicting raw SHA-256 metadata for ${logicalUrl}`);
+  }
+  if (artifact.raw && artifact.bytes !== undefined && artifact.bytes !== bytes) {
+    throw new Error(`Conflicting raw byte length metadata for ${logicalUrl}`);
+  }
+  return { sha256, bytes };
+}
+
+function migrationProvenance(artifact, rawSha256) {
+  const migration = artifact.migrationSource;
+  if (!migration) return undefined;
+  const logicalUrl = logicalIdentity(artifact) ?? 'unknown artifact';
+  const match = migration.key?.match(/^artifacts\/sha256\/([a-f0-9]{64})\/([^/]+)$/);
+  const sourceUrlKey = migration.url ? artifactKeyFromReleaseUrl(migration.url) : undefined;
+  if (migration.schema !== 'lc0_browser.artifact_migration_source.v1'
+    || !migration.releaseId
+    || migration.releaseId !== artifact.carriedForwardFrom
+    || match?.[1] !== rawSha256
+    || match?.[2] === 'identity'
+    || sourceUrlKey !== migration.key) {
+    throw new Error(`Incompatible migration provenance for ${logicalUrl}`);
+  }
+  return {
+    releaseId: migration.releaseId,
+    key: migration.key,
+    url: migration.url,
+  };
+}
+
+function validateRawAliases(artifacts) {
+  const byRawSha256 = new Map();
+  for (const artifact of artifacts) {
+    const logicalUrl = logicalIdentity(artifact) ?? 'unknown artifact';
+    const raw = rawIdentityMetadata(artifact);
+    const provenance = migrationProvenance(artifact, raw.sha256);
+    const group = byRawSha256.get(raw.sha256) ?? {
+      bytes: raw.bytes,
+      logicalUrls: [],
+      provenanceByKey: new Map(),
+    };
+    if (group.bytes !== raw.bytes) {
+      throw new Error(
+        `Conflicting raw byte lengths for decoded SHA-256 ${raw.sha256}: `
+        + `${group.bytes} for ${group.logicalUrls.join(', ')}, ${raw.bytes} for ${logicalUrl}`,
+      );
+    }
+    group.logicalUrls.push(logicalUrl);
+    if (provenance) {
+      const existing = group.provenanceByKey.get(provenance.key);
+      if (existing
+        && (existing.releaseId !== provenance.releaseId || existing.url !== provenance.url)) {
+        throw new Error(`Incompatible migration provenance for decoded SHA-256 ${raw.sha256} at ${provenance.key}`);
+      }
+      group.provenanceByKey.set(provenance.key, provenance);
+    }
+    byRawSha256.set(raw.sha256, group);
+  }
+}
+
 async function reusableGeneratedAt(path, args) {
   if (args.generatedAt || !existsSync(path)) return args.generatedAt;
   let existing;
@@ -537,7 +604,10 @@ async function main() {
     if (base.schema === ARTIFACT_RELEASE_V1_SCHEMA) {
       migratedV1Artifacts = await migrateV1Artifacts(base, localArtifacts, args);
     }
-    else inheritedArtifacts = (base.artifacts ?? []).map((artifact) => ({ ...artifact, carriedForwardFrom: base.releaseId }));
+    else inheritedArtifacts = (base.artifacts ?? []).map((artifact) => ({
+      ...artifact,
+      carriedForwardFrom: artifact.carriedForwardFrom ?? base.releaseId,
+    }));
     sourceManifests = [...new Set([...(base.sourceManifests ?? []), ...sourceManifests])];
   }
   // Newly supplied source manifests are release artifacts too. Inherited
@@ -574,6 +644,9 @@ async function main() {
       sha256: artifact.sha256,
     });
   }
+  const aliases = new Map(inheritedArtifacts.map((artifact) => [logicalIdentity(artifact), artifact]));
+  for (const artifact of localArtifacts) aliases.set(logicalIdentity(artifact), artifact);
+  validateRawAliases(aliases.values());
   const materializedByRaw = new Map();
   const materializedArtifacts = [];
   for (const artifact of localArtifacts) {

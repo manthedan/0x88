@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import {
   artifactKeyFromReleaseUrl,
   buildArtifactReleaseCatalog,
+  isArtifactReleaseV2,
 } from './engine_artifact_registry.mjs';
 
 const DEFAULT_BUCKET = 'browser-chess-models';
@@ -78,6 +79,48 @@ function addRef(map, key, releaseId) {
   map.get(key).add(releaseId);
 }
 
+function validatedMigrationSourceKey(artifact) {
+  const migration = artifact.migrationSource;
+  if (!migration) return undefined;
+  const logicalUrl = artifact.logicalUrl ?? artifact.name ?? 'unknown artifact';
+  const rawSha256 = artifact.raw?.sha256?.toLowerCase();
+  const match = migration.key?.match(/^artifacts\/sha256\/([a-f0-9]{64})\/([^/]+)$/);
+  const sourceUrlKey = migration.url ? artifactKeyFromReleaseUrl(migration.url) : undefined;
+  if (migration.schema !== 'lc0_browser.artifact_migration_source.v1'
+    || !migration.releaseId
+    || migration.releaseId !== artifact.carriedForwardFrom
+    || match?.[1] !== rawSha256
+    || match?.[2] === 'identity'
+    || sourceUrlKey !== migration.key) {
+    throw new Error(`Invalid v1 migration source metadata for ${logicalUrl}; cleanup requires manual review`);
+  }
+  return migration.key;
+}
+
+function artifactReferences(releases) {
+  const catalog = buildArtifactReleaseCatalog(releases);
+  const refs = new Map([...catalog].map(([key, entry]) => [key, {
+    releases: new Set(entry.releases),
+    logicalUrls: entry.logicalUrls,
+    kinds: entry.kinds,
+  }]));
+  for (const release of releases) {
+    if (!isArtifactReleaseV2(release)) continue;
+    const releaseId = release.releaseId ?? release.id ?? 'unknown-release';
+    for (const artifact of release.artifacts ?? []) {
+      const key = validatedMigrationSourceKey(artifact);
+      if (!key) continue;
+      const existing = refs.get(key) ?? { releases: new Set(), logicalUrls: [], kinds: [] };
+      existing.releases.add(releaseId);
+      const logicalUrl = artifact.logicalUrl ?? artifact.name;
+      if (logicalUrl && !existing.logicalUrls.includes(logicalUrl)) existing.logicalUrls.push(logicalUrl);
+      if (artifact.kind && !existing.kinds.includes(artifact.kind)) existing.kinds.push(artifact.kind);
+      refs.set(key, existing);
+    }
+  }
+  return refs;
+}
+
 function isControlKey(key) {
   return CONTROL_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
@@ -113,12 +156,7 @@ function protectedFrom(object, reason, extra = {}) {
 }
 
 export function buildCleanupPlan({ objects, releases, channel, now = new Date(), retentionDays = DEFAULT_RETENTION_DAYS }) {
-  const catalog = buildArtifactReleaseCatalog(releases);
-  const artifactRefs = new Map([...catalog].map(([key, entry]) => [key, {
-    releases: new Set(entry.releases),
-    logicalUrls: entry.logicalUrls,
-    kinds: entry.kinds,
-  }]));
+  const artifactRefs = artifactReferences(releases);
   const logicalRefs = new Map();
   const releasesById = new Map();
   for (const release of releases) {
@@ -134,7 +172,7 @@ export function buildCleanupPlan({ objects, releases, channel, now = new Date(),
   const stableArtifactRefs = new Set();
   const stableLogicalRefs = new Set();
   if (stableRelease) {
-    for (const key of buildArtifactReleaseCatalog([stableRelease]).keys()) stableArtifactRefs.add(key);
+    for (const key of artifactReferences([stableRelease]).keys()) stableArtifactRefs.add(key);
     for (const artifact of stableRelease.artifacts ?? []) {
       const logicalKey = logicalKeyFromUrl(artifact.logicalUrl ?? artifact.name);
       if (logicalKey) stableLogicalRefs.add(logicalKey);
@@ -216,7 +254,7 @@ export function buildCleanupPlan({ objects, releases, channel, now = new Date(),
     stableReleaseId,
     objectCount: objects.length,
     releaseCount: releases.length,
-    catalogObjectCount: catalog.size,
+    catalogObjectCount: artifactRefs.size,
     candidateCount: candidates.length,
     candidateBytes: candidates.reduce((sum, candidate) => sum + candidate.size, 0),
     summaryByCategory,

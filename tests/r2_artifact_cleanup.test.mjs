@@ -139,22 +139,81 @@ test('R2 cleanup plan protects every shared v2 representation and reports catalo
   const plan = buildCleanupPlan({
     now,
     channel: { releaseId: 'stable-v2' },
-    releases: [
-      {
-        schema: 'lc0_browser.artifact_release_manifest.v1',
-        releaseId: 'legacy-v1',
-        artifacts: [{ logicalUrl: '/models/a.onnx', artifactUrl: `/${migratedV1Key}` }],
-      },
-      release,
-    ],
+    releases: [release],
     objects: [object('channels/stable.json'), object('releases/stable-v2.json'), object(identityKey), object(migratedV1Key)],
   });
 
   assert.equal(plan.catalogObjectCount, 3);
   assert.deepEqual(plan.missingReferencedArtifacts, [{ key: brKey, releases: ['stable-v2'] }]);
   assert.ok(plan.protected.some((entry) => entry.key === identityKey && entry.reason === 'referenced by stable release'));
-  assert.ok(plan.protected.some((entry) => entry.key === migratedV1Key && entry.reason === 'referenced by retained release'));
+  assert.ok(plan.protected.some((entry) => entry.key === migratedV1Key && entry.reason === 'referenced by stable release'));
   assert.equal(plan.candidates.some((entry) => entry.key === identityKey), false);
+});
+
+test('R2 cleanup plan releases legacy migration bodies only after their v2 release is no longer retained', () => {
+  const rawSha = 'd'.repeat(64);
+  const migrationKey = `artifacts/sha256/${rawSha}/legacy-model.onnx`;
+  const retainedRelease = {
+    schema: 'lc0_browser.artifact_release_manifest.v2',
+    releaseId: 'rollback-v2',
+    artifacts: [{
+      logicalUrl: '/models/legacy-model.onnx',
+      carriedForwardFrom: 'legacy-v1',
+      migrationSource: {
+        schema: 'lc0_browser.artifact_migration_source.v1',
+        releaseId: 'legacy-v1',
+        key: migrationKey,
+        url: `/${migrationKey}`,
+      },
+      raw: { sha256: rawSha, bytes: 3 },
+      representations: [{
+        encoding: 'identity',
+        url: `/artifacts/sha256/${rawSha}/identity`,
+        sha256: rawSha,
+        bytes: 3,
+      }],
+    }],
+  };
+  const objects = [object(migrationKey, 3, '2025-01-01T00:00:00.000Z')];
+
+  const retained = buildCleanupPlan({ now, retentionDays: 30, releases: [retainedRelease], objects });
+  assert.equal(retained.candidates.some((entry) => entry.key === migrationKey), false);
+  assert.ok(retained.protected.some((entry) => entry.key === migrationKey
+    && entry.reason === 'referenced by retained release'));
+
+  const unretained = buildCleanupPlan({ now, retentionDays: 30, releases: [], objects });
+  assert.ok(unretained.candidates.some((entry) => entry.key === migrationKey
+    && entry.category === 'hashed-orphan'));
+});
+
+test('R2 cleanup plan fails closed on malformed v2 migration source metadata', () => {
+  const rawSha = 'e'.repeat(64);
+  const release = {
+    schema: 'lc0_browser.artifact_release_manifest.v2',
+    releaseId: 'malformed-migration',
+    artifacts: [{
+      logicalUrl: '/models/model.onnx',
+      carriedForwardFrom: 'legacy-v1',
+      migrationSource: {
+        schema: 'lc0_browser.artifact_migration_source.v1',
+        releaseId: 'legacy-v1',
+        key: `artifacts/sha256/${rawSha}/br/not-a-v1-body`,
+        url: `/artifacts/sha256/${rawSha}/br/not-a-v1-body`,
+      },
+      raw: { sha256: rawSha, bytes: 3 },
+      representations: [{
+        encoding: 'identity',
+        url: `/artifacts/sha256/${rawSha}/identity`,
+        sha256: rawSha,
+        bytes: 3,
+      }],
+    }],
+  };
+
+  assert.throws(
+    () => buildCleanupPlan({ now, releases: [release], objects: [] }),
+    /Invalid v1 migration source metadata.*manual review/,
+  );
 });
 
 test('R2 cleanup plan carries source kind and logical metadata into protected v2 catalog objects', () => {
