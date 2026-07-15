@@ -38,14 +38,15 @@ type ApiExports = WebAssembly.Exports & {
 };
 
 type ApiMessage =
-  | { type: 'prewarm'; id: number; wasmUrl: string; nnueUrl?: string; hashMb?: number }
-  | { type: 'new-game'; id: number; wasmUrl: string; nnueUrl?: string; hashMb?: number }
-  | { type: 'search'; id: number; wasmUrl: string; nnueUrl?: string; hashMb?: number; fen: string; depth?: number; movetimeMs?: number; multipv?: number }
+  | { type: 'prewarm'; id: number; wasmUrl: string; nnueUrl?: string; nnueExpectedBytes?: number; hashMb?: number }
+  | { type: 'new-game'; id: number; wasmUrl: string; nnueUrl?: string; nnueExpectedBytes?: number; hashMb?: number }
+  | { type: 'search'; id: number; wasmUrl: string; nnueUrl?: string; nnueExpectedBytes?: number; hashMb?: number; fen: string; depth?: number; movetimeMs?: number; multipv?: number }
   | { type: 'dispose' };
 
 type ApiState = {
   wasmUrl: string;
   nnueUrl?: string;
+  nnueExpectedBytes?: number;
   exports: ApiExports;
   handle: number;
   hashMb: number;
@@ -54,6 +55,8 @@ type ApiState = {
 let state: ApiState | null = null;
 const moduleCache = new Map<string, Promise<WebAssembly.Module>>();
 const nnueCache = new Map<string, Promise<ArrayBuffer>>();
+const INITIAL_NNUE_CAPACITY = 64 * 1024;
+export const MAX_NNUE_BYTES = 1024 * 1024 * 1024;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -108,19 +111,90 @@ async function compileModule(wasmUrl: string, id: number): Promise<WebAssembly.M
   return promise;
 }
 
-async function readResponseWithProgress(response: Response, id: number, phase: string, url: string, started: number): Promise<ArrayBuffer> {
-  const decodedHeader = Number(response.headers.get('x-artifact-content-length') ?? '');
-  const contentLength = Number(response.headers.get('content-length') ?? '');
-  const totalBytes = Number.isSafeInteger(decodedHeader) && decodedHeader > 0
-    ? decodedHeader
-    : !response.headers.has('content-encoding') && Number.isSafeInteger(contentLength) && contentLength > 0 ? contentLength : undefined;
+function decodedLengthHeader(response: Response): { name: string; raw: string } | undefined {
+  const decodedLength = response.headers.get('x-artifact-content-length');
+  if (decodedLength !== null) return { name: 'x-artifact-content-length', raw: decodedLength };
+  const contentEncoding = response.headers.get('content-encoding')?.trim().toLowerCase();
+  if (contentEncoding && contentEncoding !== 'identity') return undefined;
+  const contentLength = response.headers.get('content-length');
+  return contentLength === null ? undefined : { name: 'content-length', raw: contentLength };
+}
+
+function parsePositiveSafeInteger(raw: string): number | undefined {
+  if (!/^\d+$/.test(raw)) return undefined;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function validatedExpectedBytes(url: string, expectedBytes: number | undefined): number | undefined {
+  if (expectedBytes === undefined) return undefined;
+  if (!Number.isSafeInteger(expectedBytes) || expectedBytes <= 0) {
+    throw new Error(`invalid expected byte length for Reckless NNUE asset ${url}: ${String(expectedBytes)}`);
+  }
+  if (expectedBytes > MAX_NNUE_BYTES) {
+    throw new Error(`expected byte length for Reckless NNUE asset ${url} exceeds the ${MAX_NNUE_BYTES}-byte hard maximum: ${expectedBytes}`);
+  }
+  return expectedBytes;
+}
+
+function validatedDecodedLength(response: Response, url: string, expectedBytes: number | undefined): number | undefined {
+  const header = decodedLengthHeader(response);
+  if (!header) return undefined;
+  const decodedBytes = parsePositiveSafeInteger(header.raw);
+  if (decodedBytes === undefined) {
+    throw new Error(`invalid decoded byte length metadata for Reckless NNUE asset ${url}: ${header.name}=${JSON.stringify(header.raw)}`);
+  }
+  if (decodedBytes > MAX_NNUE_BYTES) {
+    throw new Error(`decoded byte length metadata for Reckless NNUE asset ${url} exceeds the ${MAX_NNUE_BYTES}-byte hard maximum: ${decodedBytes}`);
+  }
+  if (expectedBytes !== undefined && decodedBytes !== expectedBytes) {
+    throw new Error(`decoded byte length metadata mismatch for Reckless NNUE asset ${url}: got ${decodedBytes}, expected ${expectedBytes}`);
+  }
+  return decodedBytes;
+}
+
+function nnueCacheKey(url: string, expectedBytes: number | undefined): string {
+  return `${url}\n${expectedBytes ?? ''}`;
+}
+
+function nnueLengthMismatch(url: string, actualBytes: number, expectedBytes: number): Error {
+  return new Error(`Reckless NNUE asset ${url} decoded byte length mismatch: got ${actualBytes}, expected ${expectedBytes}`);
+}
+
+function nnueOverflow(url: string, requiredBytes: number, limitBytes: number): Error {
+  return new Error(`Reckless NNUE asset ${url} exceeds its ${limitBytes}-byte download limit: received at least ${requiredBytes} decoded bytes`);
+}
+
+function initialNnueCapacity(decodedBytes: number | undefined, limitBytes: number): number {
+  return decodedBytes ?? Math.min(INITIAL_NNUE_CAPACITY, limitBytes);
+}
+
+function growNnueBuffer(bytes: Uint8Array<ArrayBufferLike>, requiredBytes: number, loadedBytes: number, limitBytes: number): Uint8Array<ArrayBuffer> {
+  let capacity = Math.max(bytes.byteLength, INITIAL_NNUE_CAPACITY);
+  while (capacity < requiredBytes) capacity = Math.min(limitBytes, Math.max(requiredBytes, capacity * 2));
+  const grown = new Uint8Array(capacity);
+  grown.set(bytes.subarray(0, loadedBytes));
+  return grown;
+}
+
+export async function readNnueResponseWithProgress(
+  response: Response,
+  id: number,
+  phase: string,
+  url: string,
+  started: number,
+  rawExpectedBytes?: number,
+): Promise<ArrayBuffer> {
+  const expectedBytes = validatedExpectedBytes(url, rawExpectedBytes);
+  const decodedBytes = validatedDecodedLength(response, url, expectedBytes);
+  const limitBytes = expectedBytes ?? decodedBytes ?? MAX_NNUE_BYTES;
+  const totalBytes = expectedBytes ?? decodedBytes ?? 0;
   if (!response.body) {
-    const bytes = await response.arrayBuffer();
-    postStatus(id, `${phase}-ready`, { url, loadedBytes: bytes.byteLength, totalBytes: totalBytes ?? bytes.byteLength, elapsedMs: nowMs() - started });
-    return bytes;
+    if (expectedBytes !== undefined) throw nnueLengthMismatch(url, 0, expectedBytes);
+    throw new Error(`Reckless NNUE asset ${url} returned no response body`);
   }
   const reader = response.body.getReader();
-  let out = totalBytes ? new Uint8Array(totalBytes) : new Uint8Array(64 * 1024);
+  let out: Uint8Array<ArrayBuffer> = new Uint8Array(initialNnueCapacity(decodedBytes, limitBytes));
   let loadedBytes = 0;
   let lastProgressMs = 0;
   for (;;) {
@@ -128,44 +202,53 @@ async function readResponseWithProgress(response: Response, id: number, phase: s
     if (done) break;
     if (!value) continue;
     const required = loadedBytes + value.byteLength;
+    if (required > limitBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw nnueOverflow(url, required, limitBytes);
+    }
     if (required > out.byteLength) {
-      const grown = new Uint8Array(Math.max(required, out.byteLength * 2));
-      grown.set(out.subarray(0, loadedBytes));
-      out = grown;
+      out = growNnueBuffer(out, required, loadedBytes, limitBytes);
     }
     out.set(value, loadedBytes);
     loadedBytes = required;
     const current = nowMs();
-    if (current - lastProgressMs > 250 || (totalBytes && loadedBytes >= totalBytes)) {
+    if (current - lastProgressMs > 250 || (totalBytes > 0 && loadedBytes >= totalBytes)) {
       lastProgressMs = current;
       postStatus(id, phase, { url, loadedBytes, totalBytes, elapsedMs: current - started });
     }
   }
-  if (totalBytes && loadedBytes !== totalBytes) throw new Error(`Reckless NNUE decoded byte length mismatch for ${url}: got ${loadedBytes}, expected ${totalBytes}`);
+  if (expectedBytes !== undefined && loadedBytes !== expectedBytes) {
+    throw nnueLengthMismatch(url, loadedBytes, expectedBytes);
+  }
+  if (decodedBytes !== undefined && loadedBytes !== decodedBytes) {
+    throw nnueLengthMismatch(url, loadedBytes, decodedBytes);
+  }
   const bytes = loadedBytes === out.byteLength ? out.buffer : out.buffer.slice(0, loadedBytes);
-  postStatus(id, `${phase}-ready`, { url, loadedBytes, totalBytes: totalBytes ?? loadedBytes, elapsedMs: nowMs() - started });
+  postStatus(id, `${phase}-ready`, { url, loadedBytes, totalBytes: totalBytes || loadedBytes, elapsedMs: nowMs() - started });
   return bytes;
 }
 
-async function fetchNnue(nnueUrl: string, id: number): Promise<ArrayBuffer> {
-  const existing = nnueCache.get(nnueUrl);
+export async function fetchNnue(nnueUrl: string, id: number, rawExpectedBytes?: number): Promise<ArrayBuffer> {
+  const expectedBytes = validatedExpectedBytes(nnueUrl, rawExpectedBytes);
+  const cacheKey = nnueCacheKey(nnueUrl, expectedBytes);
+  const existing = nnueCache.get(cacheKey);
   if (existing) {
-    postStatus(id, 'nnue-memory-cache-hit', { url: nnueUrl });
+    postStatus(id, 'nnue-memory-cache-hit', { url: nnueUrl, totalBytes: expectedBytes });
     return existing;
   }
   const started = nowMs();
-  postStatus(id, 'nnue-fetch', { url: nnueUrl });
-  const promise = fetch(nnueUrl, { cache: 'force-cache' })
-    .then(async (response) => {
-      if (!response.ok) throw new Error(`failed to fetch Reckless NNUE asset ${nnueUrl}: HTTP ${response.status}`);
-      return readResponseWithProgress(response, id, 'nnue-fetch', nnueUrl, started);
-    })
-    .catch((error) => {
-      nnueCache.delete(nnueUrl);
-      throw error;
-    });
-  nnueCache.set(nnueUrl, promise);
-  return promise;
+  postStatus(id, 'nnue-fetch', { url: nnueUrl, totalBytes: expectedBytes });
+  const request = (async () => {
+    const response = await fetch(nnueUrl, { cache: 'force-cache' });
+    if (!response.ok) throw new Error(`failed to fetch Reckless NNUE asset ${nnueUrl}: HTTP ${response.status}`);
+    return readNnueResponseWithProgress(response, id, 'nnue-fetch', nnueUrl, started, expectedBytes);
+  })();
+  nnueCache.set(cacheKey, request);
+  try {
+    return await request;
+  } finally {
+    if (nnueCache.get(cacheKey) === request) nnueCache.delete(cacheKey);
+  }
 }
 
 function assertApiExports(exports: WebAssembly.Exports): asserts exports is ApiExports {
@@ -194,18 +277,21 @@ function nullStdout(): ConsoleStdout {
   return new ConsoleStdout(() => undefined);
 }
 
-async function ensureState(wasmUrl: string, hashMb = 16, nnueUrl: string | undefined, id: number): Promise<ApiState> {
-  if (state && state.wasmUrl === wasmUrl && state.nnueUrl === nnueUrl) {
+async function ensureState(wasmUrl: string, hashMb = 16, nnueUrl: string | undefined, nnueExpectedBytes: number | undefined, id: number): Promise<ApiState> {
+  if (state && state.wasmUrl === wasmUrl && state.nnueUrl === nnueUrl && state.nnueExpectedBytes === nnueExpectedBytes) {
     if (state.hashMb !== hashMb) {
       check(state.exports, state.exports.reckless_api_resize_hash(state.handle, hashMb));
       state.hashMb = hashMb;
     }
-    postStatus(id, 'engine-state-cache-hit', { url: wasmUrl, nnueUrl });
+    postStatus(id, 'engine-state-cache-hit', { url: wasmUrl, nnueUrl, totalBytes: nnueExpectedBytes });
     return state;
   }
-  if (state) state.exports.reckless_api_free(state.handle);
+  if (state) {
+    state.exports.reckless_api_free(state.handle);
+    state = null;
+  }
   const modulePromise = compileModule(wasmUrl, id);
-  const nnuePromise = nnueUrl ? fetchNnue(nnueUrl, id) : undefined;
+  const nnuePromise = nnueUrl ? fetchNnue(nnueUrl, id, nnueExpectedBytes) : undefined;
   const module = await modulePromise;
   const wasiInstance = new WASI(
     ['reckless-browser-api'],
@@ -227,7 +313,7 @@ async function ensureState(wasmUrl: string, hashMb = 16, nnueUrl: string | undef
     })()
     : exports.reckless_api_new(hashMb);
   if (!handle) throw new Error(globalErrorString(exports) || 'Reckless browser API returned a null engine handle');
-  state = { wasmUrl, nnueUrl, exports, handle, hashMb };
+  state = { wasmUrl, nnueUrl, nnueExpectedBytes, exports, handle, hashMb };
   postStatus(id, 'ready', { url: wasmUrl, nnueUrl });
   return state;
 }
@@ -284,7 +370,7 @@ async function handleMessage(message: ApiMessage): Promise<void> {
     state = null;
     return;
   }
-  const api = await ensureState(message.wasmUrl, message.hashMb ?? 16, message.nnueUrl, message.id);
+  const api = await ensureState(message.wasmUrl, message.hashMb ?? 16, message.nnueUrl, message.nnueExpectedBytes, message.id);
   if (message.type === 'prewarm') {
     postOk(message.id);
     return;

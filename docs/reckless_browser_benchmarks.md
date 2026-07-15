@@ -8,10 +8,11 @@ The harness also has a `Load 20-position rotated FEN suite` preset. Its run orde
 
 ## Current production posture
 
-- `Reckless Full SIMD` (`/reckless/reckless-simd128.wasm`) is the default Reckless variant when WebAssembly SIMD validates successfully.
-- `Reckless Full scalar fallback` (`/reckless/reckless.wasm`) remains available for browsers without SIMD support and as an implicit fallback if the default SIMD asset is missing.
-- Browser API and external-NNUE variants remain explicit experimental options; they are useful for structured-result/control and cache-lifecycle work, but do not replace SIMD WASI/UCI for production performance yet.
-- Merge/deploy readiness depends on the release pipeline running `npm run reckless:build-release`, publishing the ignored generated assets (`reckless.wasm` and `reckless-simd128.wasm`) plus their `*corresponding-source*.tar.gz` archives, and serving `.wasm` as `application/wasm` behind COOP/COEP headers for persistent isolated-worker mode. The checked-in `public/_headers` covers static hosts that honor that file; custom hosts should mirror those headers.
+- `Reckless Full Relaxed SIMD` (`/reckless/reckless-relaxed-simd128.wasm`) is the first-choice default when WebAssembly Relaxed SIMD validates and the asset is present.
+- `Reckless Full SIMD` (`/reckless/reckless-simd128.wasm`) is the fixed-SIMD fallback when Relaxed SIMD is unsupported or its default asset is missing.
+- `Reckless Full scalar fallback` (`/reckless/reckless.wasm`) is the final fallback when neither SIMD default is usable.
+- Browser API and external-NNUE variants remain explicit experimental options; they are useful for structured-result/control and cache-lifecycle work, but do not replace the relaxed SIMD > fixed SIMD > scalar WASI/UCI production ladder.
+- Merge/deploy readiness depends on the release pipeline running `npm run reckless:build-release`, publishing the required ignored generated assets (`reckless-relaxed-simd128.wasm`, `reckless-simd128.wasm`, and `reckless.wasm`) plus their matching `*corresponding-source*.tar.gz` archives, and serving `.wasm` as `application/wasm` behind COOP/COEP headers for persistent isolated-worker mode. The checked-in `public/_headers` covers static hosts that honor that file; custom hosts should mirror those headers.
 
 ## 2026-06-04 corrected browser API SIMD full benchmark
 

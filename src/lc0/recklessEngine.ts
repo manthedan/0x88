@@ -501,7 +501,14 @@ export class RecklessEngine implements BrowserUciEngine {
         },
       });
       signal?.addEventListener('abort', onAbort, { once: true });
-      worker.postMessage({ ...message, id, wasmUrl: this.wasmUrl, nnueUrl: this.runtimeOptions.nnueUrl, hashMb: this.options.hashMb ?? 16 });
+      worker.postMessage({
+        ...message,
+        id,
+        wasmUrl: this.wasmUrl,
+        nnueUrl: this.runtimeOptions.nnueUrl,
+        nnueExpectedBytes: this.runtimeOptions.nnueExpectedBytes,
+        hashMb: this.options.hashMb ?? 16,
+      });
     });
   }
 

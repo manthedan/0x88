@@ -113,6 +113,60 @@ test('one-shot Reckless fallback also preopens the external NNUE', async () => {
   }
 });
 
+test('Reckless browser API messages carry the exact external NNUE byte requirement', async () => {
+  class MockWorker {
+    static messages = [];
+
+    constructor() {
+      this.onmessage = null;
+      this.onerror = null;
+    }
+
+    postMessage(message) {
+      MockWorker.messages.push(message);
+      if (message.type === 'dispose') return;
+      queueMicrotask(() => this.onmessage?.({
+        data: {
+          type: 'ok',
+          id: message.id,
+          ...(message.type === 'search' ? {
+            result: {
+              bestmove: 'e2e4',
+              elapsedMs: 1,
+              lines: [],
+            },
+          } : {}),
+        },
+      }));
+    }
+
+    terminate() {}
+  }
+
+  const previousWorker = globalThis.Worker;
+  globalThis.Worker = MockWorker;
+  try {
+    const engine = new RecklessEngine({}, '/reckless/reckless-browser-api-simd128-external.wasm', {
+      backend: 'browser-api',
+      nnueUrl: '/reckless/reckless-v60-7f587dfb.nnue',
+      nnueExpectedBytes: RECKLESS_V60_NNUE_BYTES,
+    });
+    await engine.prewarm();
+    await engine.newGame();
+    assert.equal(await engine.bestMove(FEN), 'e2e4');
+    const apiMessages = MockWorker.messages.filter((message) => ['prewarm', 'new-game', 'search'].includes(message.type));
+    assert.deepEqual(apiMessages.map((message) => message.type), ['prewarm', 'new-game', 'search']);
+    for (const message of apiMessages) {
+      assert.equal(message.nnueUrl, '/reckless/reckless-v60-7f587dfb.nnue');
+      assert.equal(message.nnueExpectedBytes, RECKLESS_V60_NNUE_BYTES);
+    }
+    engine.dispose();
+  } finally {
+    if (previousWorker === undefined) delete globalThis.Worker;
+    else globalThis.Worker = previousWorker;
+  }
+});
+
 test('Reckless provisioning and benchmark construction carry expected NNUE bytes', async () => {
   const provisioning = await readFile('src/lc0/engineProvision.ts', 'utf8');
   assert.match(provisioning, /nnueExpectedBytes:\s*variant\.nnueExpectedBytes/);

@@ -34,13 +34,19 @@ test('Reckless external WASI prototype has explicit build, release, publish, and
   assert.match(publisher, /reckless-simd128-external-corresponding-source\.tar\.gz/);
 
   const hostedArtifacts = await readFile('docs/hosted_artifacts.md', 'utf8');
-  assert.match(hostedArtifacts, /Production must run `npm run reckless:build-release`, which generates the release manifest/);
+  assert.match(hostedArtifacts, /Production must use canonical `npm run reckless:build-release`/);
+  assert.match(hostedArtifacts, /default ladder is relaxed SIMD > fixed SIMD > scalar/);
+  assert.match(hostedArtifacts, /include all three default-ladder WASM assets \(including relaxed SIMD\)/);
 
   const benchmarkNotes = await readFile('docs/reckless_browser_benchmarks.md', 'utf8');
   assert.match(benchmarkNotes, /release pipeline running `npm run reckless:build-release`/);
+  assert.match(benchmarkNotes, /relaxed SIMD > fixed SIMD > scalar WASI\/UCI production ladder/);
+  assert.match(benchmarkNotes, /`reckless-relaxed-simd128\.wasm`, `reckless-simd128\.wasm`, and `reckless\.wasm`/);
 
   const engineCatalog = await readFile('docs/engine_catalog.md', 'utf8');
   assert.match(engineCatalog, /^npm run reckless:build-release && npm run reckless:build-lite-wasi$/m);
+  assert.match(engineCatalog, /default speed ladder is relaxed SIMD > fixed SIMD > scalar WASI\/UCI/);
+  assert.match(engineCatalog, /`npm run reckless:build-release` is the canonical release build/);
 });
 
 test('Reckless release manifest command generates complete external artifact metadata', async () => {

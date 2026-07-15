@@ -40,7 +40,7 @@ Every engine family should have one card with these fields:
 | Lc0 | `small`, `bt4` | `small` stable; `bt4` gated/cautious | ORT/WebGPU/WASM worker + custom lc0web pack paths | Small `t1-256x10-distilled-swa-2432500`; BT4 `BT4-1024x15x32h-swa-6147500-policytune-332` | Small f32 ONNX 80.9 MB or f16 pack ~40.7 MB; BT4-it332 f16 ONNX 370.6 MB | Our browser-native neural/search lane. Most runtime variants are still benchmark-gated. |
 | Centipawn | `bt4-ort` (production), legacy `bt4-auto`/`bt4-custom` in research builds | Production ORT baseline; legacy custom WebGPU explicit | Centipawn SquareFormer evaluator/search path | BT4 SOAP REM c19000 | Small public model relative to LC0 BT4 | Legacy `tiny` deep-links and URL overrides are accepted for compatibility. |
 | Stockfish | `lite`, `full` | Lite single-thread default opponent | NPM `stockfish` JS/WASM UCI worker | `stockfish@18.0.7` | Lite WASM ~7 MB; full WASM ~108 MB | Mature UCI baseline; strongest/large full variant is optional. |
-| Reckless | `simd`, `relaxed-simd`, `full`, `browser-api`, `browser-api-simd`, `browser-api-simd-external`, `lite` | SIMD if available; scalar fallback | Patched Rust `wasm32-wasip1` UCI; optional direct browser API | Upstream `codedeliveryservice/Reckless` commit `0010617448bd` + local patches | Integrated full WASM ~62 MB; external API WASM ~1.2 MB + NNUE ~60 MB | Best current non-Stockfish browser engine candidate; SIMD WASI/UCI is fastest proven path. Relaxed SIMD is explicit/experimental and never default. |
+| Reckless | `simd`, `relaxed-simd`, `full`, `browser-api`, `browser-api-simd`, `browser-api-simd-external`, `lite` | Relaxed SIMD if available; fixed SIMD fallback; scalar final fallback | Patched Rust `wasm32-wasip1` UCI; optional direct browser API | Upstream `codedeliveryservice/Reckless` commit `0010617448bd` + local patches | Integrated full WASM ~62 MB; external API WASM ~1.2 MB + NNUE ~60 MB | Best current non-Stockfish browser engine candidate; the default speed ladder is relaxed SIMD > fixed SIMD > scalar WASI/UCI. |
 | Viridithas | `default`, `simd` | Experimental opt-in | Patched Rust `wasm32-wasip1` UCI, one-shot/persistent/batch | Upstream `cosmobobak/viridithas` commit `20d7402065ca` + v106 `atlantis-b800.nnue.zst` + local patches | WASM ~55 MB with compressed NNUE embedded | Integration works for shallow arena/analysis, but stop/abort and throughput remain experimental. |
 | Berserk | `emscripten` (WASI `default`/`simd` planned only) | Experimental opt-in | Patched single-thread Emscripten UCI worker; WASI still unpromoted | Upstream `jhonnold/berserk` tag `14` commit `8ae895a6151695be4a50d4fb65b0c131659c513a` + network `berserk-9b84c340af7e.nn` | Emscripten emits JS glue + ~128 KB WASM + ~24 MB preload data; generated/local only | Strong GPL C UCI candidate; staged UI integration is experimental while lifecycle/benchmark data accumulates. |
 | PlentyChess | `emscripten` | Experimental opt-in | Patched single-thread Emscripten UCI worker | `Yoshie2000/PlentyChess` commit `58d8ba2505ae2b49f48dd410d214a457d15c12c6` + network `0134-2r24-s0.bin` | JS ~71 KB + WASM ~390 KB + data/processed NNUE ~63 MB raw; ~32-34 MB compressed transfer if `.data` is served with brotli/gzip; generated/local only | Node/browser lifecycle smoke and arena/analysis selector smoke pass; depth-7 rotated-FEN benchmark is ~718k NPS; large sidecar and source-archive release gate keep it experimental. |
@@ -144,7 +144,7 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
 ### Reckless family
 
 - **Family id / UI label:** `reckless` / `Reckless`.
-- **Integration status:** SIMD WASI/UCI is the strongest current browser-native candidate; browser API and lite variants remain experimental.
+- **Integration status:** the relaxed SIMD > fixed SIMD > scalar WASI/UCI ladder is the strongest current browser-native candidate; browser API and lite variants remain experimental.
 - **Source/version anchor:** upstream `codedeliveryservice/Reckless` commit `0010617448bd` in local build dirs, with local WASI/browser patches. Full artifacts are v60; lite candidate uses v53 `v53-0ba42a8c.nnue` when available.
 - **License/distribution:** upstream AGPL-3.0. Generated WASM/NNUE blobs are intentionally ignored; distribution must include corresponding source archives.
 - **Runtime adapter:**
@@ -152,9 +152,9 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
   - Persistent shared-stdin WASI worker when `SharedArrayBuffer` and cross-origin isolation are available.
   - Direct browser API variants bypass UCI text for structured calls, but remain experimental.
 - **UI variants:**
-  - `simd`: `Reckless Full SIMD`, `/reckless/reckless-simd128.wasm`; preferred default when wasm SIMD validates.
-  - `relaxed-simd`: `Reckless Full Relaxed SIMD experimental`, `/reckless/reckless-relaxed-simd128.wasm`; explicit only, disabled when unsupported/missing, never default.
-  - `full`: `Reckless Full scalar fallback`, `/reckless/reckless.wasm`.
+  - `relaxed-simd`: `Reckless Full Relaxed SIMD`, `/reckless/reckless-relaxed-simd128.wasm`; first-choice default when Relaxed SIMD validates and the asset is present.
+  - `simd`: `Reckless Full SIMD`, `/reckless/reckless-simd128.wasm`; fixed-SIMD fallback when Relaxed SIMD is unsupported or its default asset is missing.
+  - `full`: `Reckless Full scalar fallback`, `/reckless/reckless.wasm`; final fallback when neither SIMD default is usable.
   - `browser-api`: `/reckless/reckless-browser-api.wasm`.
   - `browser-api-simd`: `/reckless/reckless-browser-api-simd128.wasm`.
   - `browser-api-simd-external`: `/reckless/reckless-browser-api-simd128-external.wasm` + `/reckless/reckless-v60-7f587dfb.nnue`.
@@ -164,7 +164,7 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
 - **Artifact footprint:**
   - Full scalar/SIMD/browser-api integrated artifacts: ~62 MB each, because the NNUE is embedded.
   - External-NNUE browser API SIMD: ~1.2 MB WASM + ~60 MB cacheable NNUE.
-  - Generated source archives are part of production/deploy obligations.
+  - `npm run reckless:build-release` is the canonical release build. The required default-ladder assets are `reckless-relaxed-simd128.wasm`, `reckless-simd128.wasm`, and `reckless.wasm`, with matching generated source archives.
 - **Feature parity:**
   - Move search: yes.
   - Analysis/MultiPV: yes via UCI-like info lines/direct API formatting.

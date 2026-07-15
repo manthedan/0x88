@@ -310,13 +310,13 @@ test('write_artifact_release_manifests includes TVMJS runtime files', async () =
   const root = await mkdtemp(join(tmpdir(), 'centipawn-tvmjs-release-manifest-'));
   const runtimeDir = join(root, 'public/runtimes/centipawn-tvmjs-webgpu/model/f32/v2');
   await mkdir(runtimeDir, { recursive: true });
-  for (const file of ['tvmjs.bundle.js', 'tvmjs_runtime.wasm', 'model.tvmjs.wasm']) {
-    await writeFile(join(runtimeDir, file), 'abc');
-  }
+  await writeFile(join(runtimeDir, 'tvmjs.bundle.js'), 'def');
+  await writeFile(join(runtimeDir, 'tvmjs_runtime.wasm'), 'abc');
+  await writeFile(join(runtimeDir, 'model.tvmjs.wasm'), 'abc');
   await writeJson(join(runtimeDir, 'manifest.json'), {
     schema: 'lc0_browser.lc0_tvmjs_webgpu_bundle.v1',
     files: [
-      { path: 'tvmjs.bundle.js', bytes: 3, sha256: ABC_SHA256 },
+      { path: 'tvmjs.bundle.js', bytes: 3, sha256: DEF_SHA256 },
       { path: 'tvmjs_runtime.wasm', bytes: 3, sha256: ABC_SHA256 },
       { path: 'model.tvmjs.wasm', bytes: 3, sha256: ABC_SHA256 },
     ],
@@ -646,12 +646,12 @@ test('write_artifact_release_manifests accepts a verified equal local body after
   const root = await mkdtemp(join(tmpdir(), 'lc0-release-v1-equal-local-body-'));
   await mkdir(join(root, 'public/current'), { recursive: true });
   await mkdir(join(root, 'public/legacy'), { recursive: true });
-  await writeFile(join(root, 'public/current/model.onnx'), 'abc');
+  await writeFile(join(root, 'public/current/engine.wasm'), 'abc');
   await writeFile(join(root, 'public/legacy/engine.wasm'), 'abd');
   await writeJson(join(root, 'public/current/manifest.json'), {
     models: [{
-      file: 'model.onnx',
-      url: '/current/model.onnx',
+      file: 'engine.wasm',
+      url: '/current/engine.wasm',
       bytes: 3,
       sha256: ABC_SHA256,
     }],
@@ -677,7 +677,7 @@ test('write_artifact_release_manifests accepts a verified equal local body after
   assert.equal(result.status, 0, result.stderr);
   const release = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'releases/next.json'), 'utf8'));
   const migrated = release.artifacts.find((artifact) => artifact.logicalUrl === '/legacy/engine.wasm');
-  assert.equal(migrated.localPath, 'public/current/model.onnx');
+  assert.equal(migrated.localPath, 'public/current/engine.wasm');
 });
 
 test('write_artifact_release_manifests retains remote v1 migration provenance when speculative local candidates contain newer bytes', async () => {

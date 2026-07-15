@@ -538,8 +538,10 @@ function validateRawAliases(artifacts) {
     const logicalUrl = logicalIdentity(artifact) ?? 'unknown artifact';
     const raw = rawIdentityMetadata(artifact);
     const provenance = migrationProvenance(artifact, raw.sha256);
+    const contentType = artifact.contentType ?? 'application/octet-stream';
     const group = byRawSha256.get(raw.sha256) ?? {
       bytes: raw.bytes,
+      contentType,
       logicalUrls: [],
       provenanceByKey: new Map(),
     };
@@ -547,6 +549,12 @@ function validateRawAliases(artifacts) {
       throw new Error(
         `Conflicting raw byte lengths for decoded SHA-256 ${raw.sha256}: `
         + `${group.bytes} for ${group.logicalUrls.join(', ')}, ${raw.bytes} for ${logicalUrl}`,
+      );
+    }
+    if (group.contentType !== contentType) {
+      throw new Error(
+        `Incompatible contentType metadata for decoded SHA-256 ${raw.sha256}: `
+        + `${group.contentType} for ${group.logicalUrls.join(', ')}, ${contentType} for ${logicalUrl}`,
       );
     }
     group.logicalUrls.push(logicalUrl);
