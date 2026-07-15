@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { arch, cpus, platform, release, totalmem } from 'node:os';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
@@ -236,6 +237,7 @@ function compactResult(strategy, result) {
     searchMeanMs: result.search?.timingStats?.meanMs,
     visitsPerSecond: result.search?.visitsPerSecond,
     bestMove: result.search?.bestMove ?? result.eval?.bestMove,
+    pv: result.search?.pv,
     evalTotalEvalMs: timing.totalEvalMs,
     evalReadbackSyncedMs: timing.readbackSyncedMs,
     evalReadbackMapCount: timing.readbackMapCount,
@@ -272,6 +274,25 @@ function median(values) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+function numericStats(values) {
+  const samples = values.map(Number).filter(Number.isFinite);
+  if (!samples.length) return undefined;
+  const mean = samples.reduce((sum, value) => sum + value, 0) / samples.length;
+  const variance = samples.length > 1
+    ? samples.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (samples.length - 1)
+    : 0;
+  return {
+    samples: samples.length,
+    mean,
+    median: median(samples),
+    min: Math.min(...samples),
+    max: Math.max(...samples),
+    variance,
+    standardDeviation: Math.sqrt(variance),
+    coefficientOfVariation: mean === 0 ? 0 : Math.sqrt(variance) / Math.abs(mean),
+  };
+}
+
 function summarize(cells) {
   const groups = new Map();
   for (const cell of cells) {
@@ -282,6 +303,7 @@ function summarize(cells) {
   }
   return Object.fromEntries(Array.from(groups.entries()).map(([strategy, items]) => {
     const get = (key) => median(items.map((item) => Number(item[key])));
+    const stats = (key) => numericStats(items.map((item) => item[key]));
     return [strategy, {
       samples: items.length,
       avgMsMedian: get('avgMs'),
@@ -298,8 +320,54 @@ function summarize(cells) {
       readbackBytesMedian: get('evalReadbackBytes'),
       searchReadbackBytesMedian: get('searchReadbackBytes'),
       mapReadBufferBytesMedian: get('webgpuMapReadBufferBytesMean'),
+      evalMeanMsStats: stats('evalMeanMs'),
+      searchMeanMsStats: stats('searchMeanMs'),
+      visitsPerSecondStats: stats('visitsPerSecond'),
+      evalReadbackBytesStats: stats('evalReadbackBytes'),
+      searchReadbackBytesStats: stats('searchReadbackBytes'),
     }];
   }));
+}
+
+function searchParity(cells, strategies) {
+  const control = strategies.find((strategy) => !strategy.startsWith('ort-'));
+  if (!control) return undefined;
+  const groups = new Map();
+  for (const cell of cells) {
+    if (!cell.summary || cell.strategy.startsWith('ort-')) continue;
+    const key = `${cell.repeat}:${cell.fenIndex}`;
+    const group = groups.get(key) ?? {};
+    group[cell.strategy] = cell.summary;
+    groups.set(key, group);
+  }
+  return Object.fromEntries(strategies.filter((strategy) => strategy !== control && !strategy.startsWith('ort-')).map((strategy) => {
+    const pairs = Array.from(groups.values()).filter((group) => group[control] && group[strategy]);
+    return [strategy, {
+      control,
+      comparableCells: pairs.length,
+      bestMoveMatches: pairs.filter((group) => group[control].bestMove === group[strategy].bestMove).length,
+      pvMatches: pairs.filter((group) => JSON.stringify(group[control].pv) === JSON.stringify(group[strategy].pv)).length,
+      completedVisitsMatches: pairs.filter((group) => group[control].completedVisits === group[strategy].completedVisits).length,
+    }];
+  }));
+}
+
+function environmentReport(cells) {
+  const cpuList = cpus();
+  const browserInfoByStrategy = {};
+  for (const cell of cells) {
+    if (cell.result?.browserInfo && !browserInfoByStrategy[cell.strategy]) browserInfoByStrategy[cell.strategy] = cell.result.browserInfo;
+  }
+  return {
+    node: process.version,
+    platform: platform(),
+    architecture: arch(),
+    osRelease: release(),
+    cpuModel: cpuList[0]?.model,
+    logicalCpuCount: cpuList.length,
+    totalMemoryBytes: totalmem(),
+    browserInfoByStrategy,
+  };
 }
 
 async function main() {
@@ -336,9 +404,11 @@ async function main() {
       finishedAt: new Date().toISOString(),
       baseUrl: args.baseUrl,
       args: { ...args, agentBrowser: undefined },
+      environment: environmentReport(cells),
       fens,
       cells,
       summary: summarize(cells),
+      searchParity: searchParity(cells, args.strategies),
       note: 'Short browser matrix for attribution only. Use larger repeats/cross-host runs before promotion.',
     };
     await mkdir(dirname(args.out), { recursive: true });
