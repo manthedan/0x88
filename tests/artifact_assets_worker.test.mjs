@@ -120,6 +120,46 @@ test('artifact assets worker preserves encoded length through normalized cached 
   }
 });
 
+test('artifact assets worker ignores legacy v3 HEAD cache entries without encoded length metadata', async () => {
+  const previous = globalThis.caches;
+  const oldCacheUrl = `https://assets.example/${KEY}?__lc0_artifact_head=v3`;
+  const matchedUrls = [];
+  globalThis.caches = { default: {
+    async match(request) {
+      matchedUrls.push(request.url);
+      if (request.url === oldCacheUrl) {
+        return new Response(null, {
+          status: 200,
+          headers: {
+            'Content-Length': '0',
+            'X-Artifact-Content-Length': String(BODY.byteLength),
+          },
+        });
+      }
+      return undefined;
+    },
+    async put() {},
+  } };
+  try {
+    const env = fakeEnv();
+    let headCalls = 0;
+    const originalHead = env.ARTIFACTS.head;
+    env.ARTIFACTS.head = async (...args) => {
+      headCalls += 1;
+      return originalHead(...args);
+    };
+    const response = await handleArtifactRequest(new Request(`https://assets.example/${KEY}`, { method: 'HEAD' }), env);
+    assert.equal(response.headers.get('Cache-Status'), 'lc0-artifact-worker; miss');
+    assert.equal(response.headers.get('Content-Length'), String(BODY.byteLength));
+    assert.equal(response.headers.get('X-Artifact-Encoded-Length'), String(BODY.byteLength));
+    assert.equal(headCalls, 1);
+    assert.deepEqual(matchedUrls, [`https://assets.example/${KEY}?__lc0_artifact_head=v4`]);
+    assert.ok(!matchedUrls.includes(oldCacheUrl));
+  } finally {
+    globalThis.caches = previous;
+  }
+});
+
 test('artifact assets worker serves cached full artifacts without an R2 head hit', async () => {
   await withFakeEdgeCache(async () => {
     const request = new Request(`https://assets.example/${KEY}`);

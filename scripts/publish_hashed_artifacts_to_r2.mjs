@@ -200,6 +200,19 @@ function headerValue(headers, name) {
   return headers.get(name) ?? headers.get(name.toLowerCase());
 }
 
+function positiveIntegerHeader(headers, name) {
+  const raw = headerValue(headers, name);
+  if (raw === null) return undefined;
+  if (!/^[1-9]\d*$/.test(raw)) {
+    throw new Error(`Remote artifact ${name} is not a positive integer: ${raw}`);
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(`Remote artifact ${name} is not a safe positive integer: ${raw}`);
+  }
+  return { raw, value };
+}
+
 function cacheControlDirective(cacheControl, directive, expectedValue) {
   const wanted = directive.toLowerCase();
   for (const part of cacheControl.split(',')) {
@@ -237,11 +250,12 @@ async function probeExistingEntry(entry) {
   const response = await fetch(entry.url, { method: 'HEAD', cache: 'no-cache', headers: { 'Accept-Encoding': 'identity' } });
   if (response.status === 404) return { state: 'missing', url: entry.url, status: response.status };
   if (!response.ok) throw new Error(`Artifact probe failed for ${entry.url}: HTTP ${response.status}`);
-  const encodedLengthHeader = headerValue(response.headers, 'content-length')
-    ?? (!entry.contentEncoding ? headerValue(response.headers, 'x-artifact-content-length') : null);
-  const encodedLength = Number(encodedLengthHeader ?? '');
-  if (!Number.isFinite(encodedLength) || encodedLength !== entry.bytes) {
-    throw new Error(`Remote artifact size mismatch for ${entry.logicalUrls.join(', ')}: got ${encodedLengthHeader ?? 'missing'}, expected ${entry.bytes}`);
+  const encodedLengthMetadata = positiveIntegerHeader(response.headers, 'X-Artifact-Encoded-Length')
+    ?? positiveIntegerHeader(response.headers, 'Content-Length')
+    ?? (!entry.contentEncoding ? positiveIntegerHeader(response.headers, 'X-Artifact-Content-Length') : undefined);
+  const encodedLength = encodedLengthMetadata?.value;
+  if (encodedLength !== entry.bytes) {
+    throw new Error(`Remote artifact size mismatch for ${entry.logicalUrls.join(', ')}: got ${encodedLengthMetadata?.raw ?? 'missing'}, expected ${entry.bytes}`);
   }
   const decodedLengthHeader = headerValue(response.headers, 'x-artifact-content-length');
   if (decodedLengthHeader !== null && Number(decodedLengthHeader) !== entry.decodedBytes) {

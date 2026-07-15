@@ -7,7 +7,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
-import { brotliDecompressSync } from 'node:zlib';
+import { brotliCompressSync, brotliDecompressSync } from 'node:zlib';
 
 const ABC_SHA256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
 const DEFAULT_RELEASE_OUTPUT = '.local-dev-artifacts/artifact-releases';
@@ -642,6 +642,72 @@ test('publish_hashed_artifacts_to_r2 rejects same-length corrupt v2 remote bodie
     ]);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Remote artifact SHA-256 mismatch/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('publish_hashed_artifacts_to_r2 trusts encoded-length metadata when identity and Brotli HEAD Content-Length is normalized to zero', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-v2-normalized-head-'));
+  const identityBody = Buffer.from('abc');
+  const brBody = brotliCompressSync(identityBody);
+  const brSha256 = createHash('sha256').update(brBody).digest('hex');
+  await writeFile(join(root, 'model.onnx'), identityBody);
+  await writeFile(join(root, 'model.onnx.br'), brBody);
+  const releasePath = join(root, 'release.json');
+  await writeJson(releasePath, {
+    schema: 'lc0-webgpu.artifact-release.v2',
+    releaseId: 'v2-normalized-head',
+    artifacts: [{
+      name: 'model',
+      raw: { bytes: identityBody.byteLength, sha256: ABC_SHA256 },
+      representations: [
+        {
+          encoding: 'identity',
+          url: `/artifacts/sha256/${ABC_SHA256}/identity`,
+          localPath: 'model.onnx',
+          bytes: identityBody.byteLength,
+          sha256: ABC_SHA256,
+        },
+        {
+          encoding: 'br',
+          url: `/artifacts/sha256/${ABC_SHA256}/br/${brSha256}`,
+          localPath: 'model.onnx.br',
+          bytes: brBody.byteLength,
+          sha256: brSha256,
+        },
+      ],
+    }],
+  });
+  const server = createServer((req, res) => {
+    const isBr = req.url?.endsWith(`/br/${brSha256}`);
+    const body = isBr ? brBody : identityBody;
+    const headers = {
+      'Content-Length': req.method === 'HEAD' ? '0' : String(body.byteLength),
+      'X-Artifact-Content-Length': String(identityBody.byteLength),
+      'X-Artifact-Encoded-Length': String(body.byteLength),
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      ...(isBr ? { 'Content-Encoding': 'br' } : {}),
+    };
+    res.writeHead(200, headers);
+    res.end(req.method === 'HEAD' ? undefined : body);
+  });
+  const port = await listen(server);
+  try {
+    const result = await runNode([
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root', root,
+      '--release', releasePath,
+      '--bucket', 'test-bucket',
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--probe-existing',
+    ]);
+    assert.equal(result.status, 0, result.stderr);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.plannedCount, 2);
+    assert.ok(parsed.planned.every((entry) => entry.remoteState === 'existing'));
+    assert.equal(parsed.planned.find((entry) => !entry.contentEncoding).remoteProbe.bytes, identityBody.byteLength);
+    assert.equal(parsed.planned.find((entry) => entry.contentEncoding === 'br').remoteProbe.bytes, brBody.byteLength);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

@@ -45,13 +45,16 @@ If direct R2 custom-domain responses cannot provide all required CORS/CORP/timin
 npm run deploy:artifact-worker
 ```
 
-The Worker config in `cloudflare/artifacts.wrangler.toml` binds `browser-chess-models` as `ARTIFACTS` and serves `/artifacts/sha256/*`, `/releases/*.json`, and `/channels/*.json` keys. It preserves percent-encoded object keys, supports `GET`/`HEAD`/`OPTIONS`, handles bounded byte ranges through R2 range reads, and caches immutable artifact full-body/HEAD metadata responses without caching errors. Release manifests are immutable, while mutable channel manifests use revalidation-oriented headers. V2 logical aliases negotiate SHA-only identity and Brotli representation keys, and Range requests always select identity. Cloudflare Workers may normalize cached synthetic `HEAD` responses to `Content-Length: 0`; the Worker also exposes decoded `X-Artifact-Content-Length` and representation-specific `X-Artifact-Encoded-Length` metadata so validation does not depend on that normalized value.
+The Worker config in `cloudflare/artifacts.wrangler.toml` binds `browser-chess-models` as `ARTIFACTS` and serves `/artifacts/sha256/*`, `/releases/*.json`, and `/channels/*.json` keys. It preserves percent-encoded object keys, supports `GET`/`HEAD`/`OPTIONS`, handles bounded byte ranges through R2 range reads, and caches immutable artifact full-body/HEAD metadata responses without caching errors. Release manifests are immutable, while mutable channel manifests use revalidation-oriented headers. V2 logical aliases negotiate SHA-only identity and Brotli representation keys, and Range requests always select identity. Cloudflare Workers may normalize cached synthetic `HEAD` responses to `Content-Length: 0`; the Worker also exposes decoded `X-Artifact-Content-Length` and representation-specific `X-Artifact-Encoded-Length` metadata so validation does not depend on that normalized value. Synthetic HEAD cache keys are versioned so metadata cached before `X-Artifact-Encoded-Length` was added cannot be reused.
 
 ## Non-mutating live CDN canary
 
-Run this only against a release manifest that is already published. It performs
-read-only `HEAD` and small Range requests through the live CDN. It does not
-upload objects, deploy the Worker, purge cache, or change a channel:
+Run this after publishing the immutable release and before promoting a channel.
+It fetches `/releases/<releaseId>.json` directly and requires its bytes to exactly
+match the supplied local manifest. It then performs read-only `HEAD` and small
+Range requests against the identity and Brotli physical representation URLs
+recorded by that release. It does not resolve those checks through `stable`, upload
+objects, deploy the Worker, purge cache, or change a channel:
 
 ```sh
 export RELEASE_MANIFEST=".local-dev-artifacts/artifact-releases/releases/<existing-release-id>.json"
@@ -75,11 +78,17 @@ node scripts/validate_artifact_cdn_headers.mjs \
 
 The v2 release form verifies:
 
-- `Accept-Encoding: identity` selects the SHA-only identity object.
-- `Accept-Encoding: br` selects the recorded Brotli representation.
+- the exact immutable hosted release exists and matches the local manifest.
+- the SHA-only identity object is checked at its explicit physical URL.
+- the recorded Brotli object is checked at its explicit physical URL.
 - decoded and encoded SHA-256/length headers match the release manifest.
-- a Range request sent with Brotli accepted still returns identity bytes and
-  valid `206 Partial Content`.
+- the Range request targets the physical identity URL and returns valid
+  `206 Partial Content`.
+
+This makes the release form a pre-promotion canary. It fails when the requested
+hosted release is absent or differs from the local manifest even if its artifact
+bodies are already shared by another release. Use `--url` separately to canary
+the current channel's logical-alias negotiation behavior.
 
 The default canary does not download full artifact bodies. Run full identity and
 decoded Brotli integrity verification separately, against one tightly limited

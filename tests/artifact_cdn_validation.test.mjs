@@ -36,14 +36,38 @@ async function runV2BodyValidationCase({ identityBody, brDecodedBody }) {
   const rawSha = createHash('sha256').update(expectedBody).digest('hex');
   const brBody = brotliCompressSync(brDecodedBody);
   const brSha = createHash('sha256').update(brBody).digest('hex');
+  const release = {
+    schema: 'lc0_browser.artifact_release_manifest.v2',
+    releaseId: 'v2-corruption',
+    artifacts: [{
+      logicalUrl: '/model.onnx',
+      raw: { sha256: rawSha, bytes: expectedBody.length },
+      representations: [
+        { encoding: 'identity', url: `/artifacts/sha256/${rawSha}/identity`, sha256: rawSha, bytes: expectedBody.length },
+        { encoding: 'br', url: `/artifacts/sha256/${rawSha}/br/${brSha}`, sha256: brSha, bytes: brBody.length },
+      ],
+    }],
+  };
+  const releaseBody = Buffer.from(JSON.stringify(release));
+  const identityPath = release.artifacts[0].representations[0].url;
+  const brPath = release.artifacts[0].representations[1].url;
   const server = createServer((req, res) => {
-    if (req.url !== '/model.onnx') {
+    if (req.url === '/releases/v2-corruption.json') {
+      res.writeHead(200, {
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Content-Type': 'application/json',
+        'Content-Length': String(releaseBody.byteLength),
+      });
+      res.end(req.method === 'HEAD' ? undefined : releaseBody);
+      return;
+    }
+    if (req.url !== identityPath && req.url !== brPath) {
       res.writeHead(404).end();
       return;
     }
-    const wantsBr = req.headers['accept-encoding']?.split(',').some((entry) => entry.trim() === 'br') && !req.headers.range;
+    const wantsBr = req.url === brPath;
     const headers = {
-      'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400',
+      'Cache-Control': 'public, max-age=31536000, immutable',
       'Content-Type': 'application/octet-stream',
       'Content-Length': String(wantsBr ? brBody.length : identityBody.length),
       'X-Artifact-Content-Length': String(expectedBody.length),
@@ -83,18 +107,7 @@ async function runV2BodyValidationCase({ identityBody, brDecodedBody }) {
   const port = await listen(server);
   const root = await mkdtemp(join(tmpdir(), 'lc0-v2-cdn-corruption-'));
   const releasePath = join(root, 'release.json');
-  await writeFile(releasePath, JSON.stringify({
-    schema: 'lc0_browser.artifact_release_manifest.v2',
-    releaseId: 'v2-corruption',
-    artifacts: [{
-      logicalUrl: '/model.onnx',
-      raw: { sha256: rawSha, bytes: expectedBody.length },
-      representations: [
-        { encoding: 'identity', url: `/artifacts/sha256/${rawSha}/identity`, sha256: rawSha, bytes: expectedBody.length },
-        { encoding: 'br', url: `/artifacts/sha256/${rawSha}/br/${brSha}`, sha256: brSha, bytes: brBody.length },
-      ],
-    }],
-  }));
+  await writeFile(releasePath, releaseBody);
   try {
     return await runValidator([
       '--release', releasePath,
@@ -111,13 +124,32 @@ test('validate_artifact_cdn_headers accepts short-cache logical aliases without 
   const body = Buffer.from('abcdefghijklmnopqrstuvwxyz');
   let fullBodyGets = 0;
   let cacheControl = 'public, max-age=300, stale-while-revalidate=86400';
+  let hostedV1ReleaseBody;
+  const bodySha = createHash('sha256').update(body).digest('hex');
+  const physicalPath = `/artifacts/sha256/${bodySha}/artifact.wasm`;
   const server = createServer((req, res) => {
-    if (req.url !== '/artifact.wasm') {
+    if (req.url === '/releases/v1.json') {
+      if (!hostedV1ReleaseBody) {
+        res.writeHead(404).end();
+        return;
+      }
+      res.writeHead(200, {
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Content-Type': 'application/json',
+        'Content-Length': String(hostedV1ReleaseBody.byteLength),
+      });
+      res.end(req.method === 'HEAD' ? undefined : hostedV1ReleaseBody);
+      return;
+    }
+    if (req.url !== '/artifact.wasm' && req.url !== physicalPath) {
       res.writeHead(404).end();
       return;
     }
+    const targetCacheControl = req.url === physicalPath
+      ? 'public, max-age=31536000, immutable'
+      : cacheControl;
     const headers = {
-      'Cache-Control': cacheControl,
+      'Cache-Control': targetCacheControl,
       'Content-Type': 'application/wasm',
       'Content-Length': String(body.length),
       'Accept-Ranges': 'bytes',
@@ -175,17 +207,22 @@ test('validate_artifact_cdn_headers accepts short-cache logical aliases without 
     const { join } = await import('node:path');
     const root = await mkdtemp(join(tmpdir(), 'lc0-v1-cdn-release-'));
     const releasePath = join(root, 'release.json');
-    await writeFile(releasePath, JSON.stringify({
+    hostedV1ReleaseBody = Buffer.from(JSON.stringify({
       schema: 'lc0_browser.artifact_release_manifest.v1',
       releaseId: 'v1',
       artifacts: [{
         logicalUrl: '/artifact.wasm',
-        artifactUrl: `http://127.0.0.1:${port}/artifact.wasm`,
+        artifactUrl: `http://127.0.0.1:${port}${physicalPath}`,
         bytes: body.length,
-        sha256: createHash('sha256').update(body).digest('hex'),
+        sha256: bodySha,
       }],
     }));
-    const v1Result = await runValidator(['--release', releasePath, '--range', '4']);
+    await writeFile(releasePath, hostedV1ReleaseBody);
+    const v1Result = await runValidator([
+      '--release', releasePath,
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--range', '4',
+    ]);
     assert.equal(v1Result.status, 0, v1Result.stderr);
     assert.equal(fullBodyGets, 0);
 
@@ -254,7 +291,7 @@ test('validate_artifact_cdn_headers accepts worker artifact length when HEAD is 
   }
 });
 
-test('validate_artifact_cdn_headers verifies v2 Brotli negotiation and Range identity forcing', async () => {
+test('validate_artifact_cdn_headers validates the hosted release and its explicit physical v2 representations', async () => {
   const { mkdtemp, writeFile } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
@@ -264,14 +301,39 @@ test('validate_artifact_cdn_headers verifies v2 Brotli negotiation and Range ide
   const brSha = createHash('sha256').update(brBody).digest('hex');
   const brBytes = brBody.length;
   let fullBodyGets = 0;
+  let brCacheControl = 'public, max-age=31536000, immutable';
+  const release = {
+    schema: 'lc0_browser.artifact_release_manifest.v2',
+    releaseId: 'v2',
+    artifacts: [{
+      logicalUrl: '/models/lc0/model.onnx',
+      raw: { sha256: rawSha, bytes: body.length },
+      representations: [
+        { encoding: 'identity', url: `/artifacts/sha256/${rawSha}/identity`, sha256: rawSha, bytes: body.length },
+        { encoding: 'br', url: `/artifacts/sha256/${rawSha}/br/${brSha}`, sha256: brSha, bytes: brBytes },
+      ],
+    }],
+  };
+  const releaseBody = Buffer.from(JSON.stringify(release));
+  const identityPath = release.artifacts[0].representations[0].url;
+  const brPath = release.artifacts[0].representations[1].url;
   const server = createServer((req, res) => {
-    if (req.url !== '/models/lc0/model.onnx') {
+    if (req.url === '/releases/v2.json') {
+      res.writeHead(200, {
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Content-Type': 'application/json',
+        'Content-Length': String(releaseBody.byteLength),
+      });
+      res.end(req.method === 'HEAD' ? undefined : releaseBody);
+      return;
+    }
+    if (req.url !== identityPath && req.url !== brPath) {
       res.writeHead(404).end();
       return;
     }
-    const wantsBr = req.headers['accept-encoding']?.split(',').some((entry) => entry.trim() === 'br') && !req.headers.range;
+    const wantsBr = req.url === brPath;
     const headers = {
-      'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400',
+      'Cache-Control': wantsBr ? brCacheControl : 'public, max-age=31536000, immutable',
       'Content-Type': 'application/octet-stream',
       'Content-Length': String(wantsBr ? brBytes : body.length),
       'X-Artifact-Content-Length': String(body.length),
@@ -292,7 +354,7 @@ test('validate_artifact_cdn_headers verifies v2 Brotli negotiation and Range ide
     if (req.method === 'HEAD') {
       res.writeHead(200, {
         ...headers,
-        'Content-Length': wantsBr ? '0' : headers['Content-Length'],
+        'Content-Length': '0',
       }).end();
       return;
     }
@@ -315,18 +377,7 @@ test('validate_artifact_cdn_headers verifies v2 Brotli negotiation and Range ide
   const port = await listen(server);
   const root = await mkdtemp(join(tmpdir(), 'lc0-v2-cdn-release-'));
   const releasePath = join(root, 'release.json');
-  await writeFile(releasePath, JSON.stringify({
-    schema: 'lc0_browser.artifact_release_manifest.v2',
-    releaseId: 'v2',
-    artifacts: [{
-      logicalUrl: '/models/lc0/model.onnx',
-      raw: { sha256: rawSha, bytes: body.length },
-      representations: [
-        { encoding: 'identity', url: `/artifacts/sha256/${rawSha}/identity`, sha256: rawSha, bytes: body.length },
-        { encoding: 'br', url: `/artifacts/sha256/${rawSha}/br/${brSha}`, sha256: brSha, bytes: brBytes },
-      ],
-    }],
-  }));
+  await writeFile(releasePath, releaseBody);
   try {
     const result = await new Promise((resolve) => {
       const child = spawn(process.execPath, [
@@ -345,15 +396,127 @@ test('validate_artifact_cdn_headers verifies v2 Brotli negotiation and Range ide
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.hostedRelease.ok, true);
+    assert.equal(parsed.hostedRelease.url, `http://127.0.0.1:${port}/releases/v2.json`);
+    assert.equal(parsed.rows[0].url, `http://127.0.0.1:${port}${identityPath}`);
+    assert.equal(parsed.rows[0].identityUrl, `http://127.0.0.1:${port}${identityPath}`);
+    assert.equal(parsed.rows[0].rangeUrl, `http://127.0.0.1:${port}${identityPath}`);
+    assert.equal(parsed.rows[0].brUrl, `http://127.0.0.1:${port}${brPath}`);
     assert.equal(parsed.rows[0].brHead.headers['content-encoding'], 'br');
     assert.equal(parsed.rows[0].brHead.headers['content-length'], '0');
     assert.equal(parsed.rows[0].brHead.headers['x-artifact-encoded-length'], String(brBytes));
+    assert.equal(parsed.rows[0].identityHead.headers['content-length'], '0');
+    assert.equal(parsed.rows[0].identityHead.headers['x-artifact-encoded-length'], String(body.length));
     assert.equal(parsed.rows[0].identityHead.headers['content-encoding'], undefined);
     assert.equal(parsed.rows[0].range.headers['content-encoding'], undefined);
-    assert.equal(parsed.rows[0].cachePolicy, 'mutable');
+    assert.equal(parsed.rows[0].cachePolicy, 'immutable');
+    assert.equal(parsed.rows[0].brNegotiated, false);
     assert.equal(parsed.rows[0].identityBody, undefined);
     assert.equal(parsed.rows[0].brBody, undefined);
     assert.equal(fullBodyGets, 0);
+
+    brCacheControl = 'public, max-age=300, stale-while-revalidate=86400';
+    const rejected = await runValidator([
+      '--release', releasePath,
+      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--range', '4',
+    ]);
+    assert.notEqual(rejected.status, 0);
+    assert.ok(JSON.parse(rejected.stdout).rows[0].failures.some((failure) => /physical Brotli artifact cache policy is not immutable/.test(failure)));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('validate_artifact_cdn_headers fails a pre-promotion release canary when the hosted release is absent or mismatched despite shared bodies', async () => {
+  const { mkdtemp, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const body = Buffer.from('abcdefghijklmnopqrstuvwxyz');
+  const rawSha = createHash('sha256').update(body).digest('hex');
+  const identityPath = `/artifacts/sha256/${rawSha}/identity`;
+  const release = {
+    schema: 'lc0_browser.artifact_release_manifest.v2',
+    releaseId: 'pre-promotion',
+    artifacts: [{
+      logicalUrl: '/models/lc0/model.onnx',
+      raw: { sha256: rawSha, bytes: body.byteLength },
+      representations: [{ encoding: 'identity', url: identityPath, sha256: rawSha, bytes: body.byteLength }],
+    }],
+  };
+  const releaseBody = Buffer.from(JSON.stringify(release));
+  let hostedState = 'absent';
+  const server = createServer((req, res) => {
+    if (req.url === '/releases/pre-promotion.json') {
+      if (hostedState === 'absent') {
+        res.writeHead(404, { 'Cache-Control': 'no-store' }).end('Not found');
+      } else {
+        const mismatched = Buffer.from(JSON.stringify({ ...release, generatedAt: 'different' }));
+        res.writeHead(200, {
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'Content-Length': String(mismatched.byteLength),
+        }).end(mismatched);
+      }
+      return;
+    }
+    if (req.url !== identityPath) {
+      res.writeHead(404).end();
+      return;
+    }
+    const headers = {
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(body.byteLength),
+      'X-Artifact-Content-Length': String(body.byteLength),
+      'X-Artifact-Encoded-Length': String(body.byteLength),
+      'X-Artifact-Decoded-SHA256': rawSha,
+      'X-Artifact-Encoded-SHA256': rawSha,
+      'Accept-Ranges': 'bytes',
+      ETag: '"shared-body"',
+      Age: '10',
+      'CF-Cache-Status': 'HIT',
+      'Access-Control-Allow-Origin': '*',
+      'Cross-Origin-Resource-Policy': 'cross-origin',
+      'Timing-Allow-Origin': 'https://0x88.app',
+      'Access-Control-Expose-Headers': 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, X-Artifact-Encoded-Length',
+    };
+    if (req.method === 'HEAD') {
+      res.writeHead(200, headers).end();
+      return;
+    }
+    if (req.headers.range) {
+      const end = Math.min(3, body.byteLength - 1);
+      res.writeHead(206, {
+        ...headers,
+        'Content-Length': String(end + 1),
+        'Content-Range': `bytes 0-${end}/${body.byteLength}`,
+      }).end(body.subarray(0, end + 1));
+      return;
+    }
+    res.writeHead(200, headers).end(body);
+  });
+  const port = await listen(server);
+  const root = await mkdtemp(join(tmpdir(), 'lc0-pre-promotion-cdn-release-'));
+  const releasePath = join(root, 'release.json');
+  await writeFile(releasePath, releaseBody);
+  try {
+    for (const state of ['absent', 'mismatched']) {
+      hostedState = state;
+      const result = await runValidator([
+        '--release', releasePath,
+        '--artifact-base', `http://127.0.0.1:${port}`,
+        '--range', '4',
+      ]);
+      assert.notEqual(result.status, 0);
+      const parsed = JSON.parse(result.stdout);
+      assert.equal(parsed.hostedRelease.ok, false);
+      assert.equal(parsed.rows[0].ok, true, JSON.stringify(parsed.rows[0].failures));
+      assert.ok(parsed.hostedRelease.failures.some((failure) => (
+        state === 'absent'
+          ? /hosted release status 404/.test(failure)
+          : /does not exactly match local manifest/.test(failure)
+      )));
+    }
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -455,5 +618,5 @@ test('validate_artifact_cdn_headers rejects empty release manifests', async () =
     child.on('close', (status) => resolve({ status, stdout, stderr }));
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /No artifact URLs to validate/);
+  assert.match(result.stderr, /No artifact URLs to validate from release/);
 });

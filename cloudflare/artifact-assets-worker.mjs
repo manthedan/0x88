@@ -6,6 +6,7 @@ const LOGICAL_ALIAS_CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate
 const CONTROL_CHANNEL_CACHE_CONTROL = 'public, max-age=60, stale-if-error=86400';
 const DEFAULT_CHANNEL_KEY = 'channels/stable.json';
 const MAX_CONTROL_MANIFEST_BYTES = 8 * 1024 * 1024;
+const HEAD_CACHE_VERSION = 4;
 const EXPOSED_HEADERS = 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, X-Artifact-Encoded-Length, X-Artifact-Decoded-SHA256, X-Artifact-Encoded-SHA256, Content-Range, Accept-Ranges';
 
 function artifactHeaders(env, extra = {}) {
@@ -47,7 +48,7 @@ function edgeCache() {
 function canonicalCacheRequest(request, key, kind = 'body') {
   const url = new URL(request.url);
   url.pathname = `/${key}`;
-  url.search = kind === 'body' ? '' : `__lc0_artifact_${kind}=v3`;
+  url.search = kind === 'body' ? '' : `__lc0_artifact_${kind}=v${kind === 'head' ? HEAD_CACHE_VERSION : 3}`;
   return new Request(url, { method: 'GET' });
 }
 
