@@ -23,13 +23,19 @@ function streamedResponse(chunks, headers = {}) {
   }), { headers });
 }
 
+function resetPreopenState(worker, byteBudget) {
+  worker.recklessWasiWorkerInternalsForTests.resetPreopenByteCache(byteBudget);
+}
+
 test('Reckless WASI preopen rejects invalid, oversized, and mismatching decoded length metadata before reading', async () => {
   const previousSelf = globalThis.self;
   const previousFetch = globalThis.fetch;
   const messages = [];
   let fetches = 0;
   try {
-    const { fetchPreopenBytes, MAX_PREOPEN_FILE_BYTES } = await loadWorkerModule(messages);
+    const worker = await loadWorkerModule(messages);
+    resetPreopenState(worker);
+    const { fetchPreopenBytes, MAX_PREOPEN_FILE_BYTES } = worker;
     globalThis.fetch = async (url) => {
       fetches += 1;
       return new Response(new ReadableStream({ pull() {} }), {
@@ -64,7 +70,9 @@ test('Reckless WASI preopen ignores encoded Content-Length and rejects no-header
   const previousFetch = globalThis.fetch;
   const messages = [];
   try {
-    const { fetchPreopenBytes } = await loadWorkerModule(messages);
+    const worker = await loadWorkerModule(messages);
+    resetPreopenState(worker);
+    const { fetchPreopenBytes } = worker;
     globalThis.fetch = async () => streamedResponse([[1, 2, 3], [4, 5]], {
       'content-encoding': 'br',
       'content-length': '2',
@@ -84,7 +92,9 @@ test('Reckless WASI preopen rejects an undersized final decoded body', async () 
   const previousFetch = globalThis.fetch;
   const messages = [];
   try {
-    const { fetchPreopenBytes } = await loadWorkerModule(messages);
+    const worker = await loadWorkerModule(messages);
+    resetPreopenState(worker);
+    const { fetchPreopenBytes } = worker;
     globalThis.fetch = async () => streamedResponse([[1, 2, 3]], { 'content-encoding': 'br' });
     await assert.rejects(fetchPreopenBytes('/reckless/undersized.nnue', 4), /decoded byte length mismatch: got 3, expected 4/);
     assert.ok(messages.every((message) => message.totalBytes === 4));
@@ -100,7 +110,9 @@ test('Reckless WASI preopen accepts the exact decoded body and reports the expec
   const previousFetch = globalThis.fetch;
   const messages = [];
   try {
-    const { fetchPreopenBytes } = await loadWorkerModule(messages);
+    const worker = await loadWorkerModule(messages);
+    resetPreopenState(worker);
+    const { fetchPreopenBytes } = worker;
     globalThis.fetch = async () => streamedResponse([[1, 2], [3, 4]], {
       'content-encoding': 'br',
       'content-length': '2',
@@ -121,13 +133,15 @@ test('Reckless WASI preopen accepts the exact decoded body and reports the expec
   }
 });
 
-test('Reckless WASI preopen download deduplicates only concurrent requests', async () => {
+test('Reckless WASI preopen reuses verified bytes sequentially and deduplicates concurrent requests', async () => {
   const previousSelf = globalThis.self;
   const previousFetch = globalThis.fetch;
   const messages = [];
   let fetches = 0;
   try {
-    const { fetchPreopenBytes } = await loadWorkerModule(messages);
+    const worker = await loadWorkerModule(messages);
+    resetPreopenState(worker);
+    const { fetchPreopenBytes, recklessWasiWorkerInternalsForTests } = worker;
     globalThis.fetch = async () => {
       fetches += 1;
       return streamedResponse([[1]], { 'content-length': '1' });
@@ -139,8 +153,10 @@ test('Reckless WASI preopen download deduplicates only concurrent requests', asy
     assert.equal(first, second);
     assert.equal(fetches, 1);
 
-    await fetchPreopenBytes('/reckless/dedup.nnue', 1);
-    assert.equal(fetches, 2, 'settled download promises must not remain retained');
+    const third = await fetchPreopenBytes('/reckless/dedup.nnue', 1);
+    assert.equal(third, first);
+    assert.equal(fetches, 1, 'sequential one-shot searches reuse verified worker-lifetime bytes');
+    assert.equal(recklessWasiWorkerInternalsForTests.preopenByteCacheState().inFlightCount, 0);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousSelf === undefined) delete globalThis.self;
@@ -154,7 +170,9 @@ test('Reckless WASI preopen download preserves HTTP and stream errors and permit
   const messages = [];
   let responseIndex = 0;
   try {
-    const { fetchPreopenBytes } = await loadWorkerModule(messages);
+    const worker = await loadWorkerModule(messages);
+    resetPreopenState(worker);
+    const { fetchPreopenBytes, recklessWasiWorkerInternalsForTests } = worker;
     globalThis.fetch = async () => {
       responseIndex += 1;
       if (responseIndex === 1) return new Response('', { status: 503 });
@@ -169,9 +187,110 @@ test('Reckless WASI preopen download preserves HTTP and stream errors and permit
     };
 
     await assert.rejects(fetchPreopenBytes('/reckless/retry.nnue', 1), /HTTP 503/);
+    assert.deepEqual(recklessWasiWorkerInternalsForTests.preopenByteCacheState(), {
+      byteBudget: 64 * 1024 * 1024,
+      totalBytes: 0,
+      keys: [],
+      inFlightCount: 0,
+    });
     await assert.rejects(fetchPreopenBytes('/reckless/retry.nnue', 1), /corrupt response stream/);
+    assert.equal(recklessWasiWorkerInternalsForTests.preopenByteCacheState().inFlightCount, 0);
     assert.deepEqual([...new Uint8Array(await fetchPreopenBytes('/reckless/retry.nnue', 1))], [5]);
     assert.equal(responseIndex, 3);
+    assert.equal(recklessWasiWorkerInternalsForTests.preopenByteCacheState().inFlightCount, 0);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousSelf === undefined) delete globalThis.self;
+    else globalThis.self = previousSelf;
+  }
+});
+
+test('Reckless WASI preopen cache identity includes expected decoded bytes', async () => {
+  const previousSelf = globalThis.self;
+  const previousFetch = globalThis.fetch;
+  const messages = [];
+  let fetches = 0;
+  try {
+    const worker = await loadWorkerModule(messages);
+    resetPreopenState(worker);
+    const { fetchPreopenBytes } = worker;
+    globalThis.fetch = async () => {
+      fetches += 1;
+      return fetches === 1
+        ? streamedResponse([[1]], { 'content-length': '1' })
+        : streamedResponse([[1, 2]], { 'content-length': '2' });
+    };
+
+    assert.equal((await fetchPreopenBytes('/reckless/cache-key.nnue', 1)).byteLength, 1);
+    assert.equal((await fetchPreopenBytes('/reckless/cache-key.nnue', 2)).byteLength, 2);
+    assert.equal((await fetchPreopenBytes('/reckless/cache-key.nnue', 1)).byteLength, 1);
+    assert.equal(fetches, 2);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousSelf === undefined) delete globalThis.self;
+    else globalThis.self = previousSelf;
+  }
+});
+
+test('Reckless WASI preopen cache evicts least-recently-used bytes within its budget', async () => {
+  const previousSelf = globalThis.self;
+  const previousFetch = globalThis.fetch;
+  const messages = [];
+  let fetches = 0;
+  try {
+    const worker = await loadWorkerModule(messages);
+    resetPreopenState(worker, 3);
+    const { fetchPreopenBytes, PREOPEN_BYTE_CACHE_BUDGET, recklessWasiWorkerInternalsForTests } = worker;
+    assert.ok(PREOPEN_BYTE_CACHE_BUDGET >= 63_266_880, 'the production budget must hold the full Reckless v60 NNUE');
+    globalThis.fetch = async (url) => {
+      fetches += 1;
+      const length = url.endsWith('/a.nnue') ? 1 : 2;
+      return streamedResponse([new Array(length).fill(fetches)], { 'content-length': String(length) });
+    };
+
+    await fetchPreopenBytes('/reckless/a.nnue', 1);
+    await fetchPreopenBytes('/reckless/b.nnue', 2);
+    await fetchPreopenBytes('/reckless/a.nnue', 1);
+    await fetchPreopenBytes('/reckless/c.nnue', 2);
+    assert.deepEqual(recklessWasiWorkerInternalsForTests.preopenByteCacheState(), {
+      byteBudget: 3,
+      totalBytes: 3,
+      keys: ['/reckless/a.nnue\n1', '/reckless/c.nnue\n2'],
+      inFlightCount: 0,
+    });
+    await fetchPreopenBytes('/reckless/b.nnue', 2);
+    assert.equal(fetches, 4, 'the evicted least-recently-used entry must be fetched again');
+    assert.ok(recklessWasiWorkerInternalsForTests.preopenByteCacheState().totalBytes <= 3);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousSelf === undefined) delete globalThis.self;
+    else globalThis.self = previousSelf;
+  }
+});
+
+test('Reckless WASI preopen cache does not retain entries larger than its byte budget', async () => {
+  const previousSelf = globalThis.self;
+  const previousFetch = globalThis.fetch;
+  const messages = [];
+  let fetches = 0;
+  try {
+    const worker = await loadWorkerModule(messages);
+    resetPreopenState(worker, 2);
+    const { fetchPreopenBytes, recklessWasiWorkerInternalsForTests } = worker;
+    globalThis.fetch = async () => {
+      fetches += 1;
+      return streamedResponse([[1, 2, 3]], { 'content-length': '3' });
+    };
+
+    await fetchPreopenBytes('/reckless/over-budget.nnue', 3);
+    await fetchPreopenBytes('/reckless/over-budget.nnue', 3);
+    assert.equal(fetches, 2);
+    assert.deepEqual(recklessWasiWorkerInternalsForTests.preopenByteCacheState(), {
+      byteBudget: 2,
+      totalBytes: 0,
+      keys: [],
+      inFlightCount: 0,
+    });
   } finally {
     globalThis.fetch = previousFetch;
     if (previousSelf === undefined) delete globalThis.self;

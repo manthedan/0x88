@@ -33,8 +33,12 @@ type WorkerResponse =
 
 const moduleCache = new Map<string, Promise<WebAssembly.Module>>();
 const inFlightPreopenBytes = new Map<string, Promise<ArrayBuffer>>();
+const verifiedPreopenBytes = new Map<string, ArrayBuffer>();
 const INITIAL_PREOPEN_CAPACITY = 64 * 1024;
 export const MAX_PREOPEN_FILE_BYTES = 1024 * 1024 * 1024;
+export const PREOPEN_BYTE_CACHE_BUDGET = 64 * 1024 * 1024;
+let verifiedPreopenByteCount = 0;
+let verifiedPreopenByteBudget = PREOPEN_BYTE_CACHE_BUDGET;
 const SHARED_STDIN_HEADER_INTS = 4;
 const SHARED_STDIN_HEADER_BYTES = SHARED_STDIN_HEADER_INTS * Int32Array.BYTES_PER_ELEMENT;
 
@@ -183,6 +187,32 @@ function preopenDedupeKey(url: string, expectedBytes: number | undefined): strin
   return `${url}\n${expectedBytes ?? ''}`;
 }
 
+function cachedPreopenBytes(cacheKey: string): ArrayBuffer | undefined {
+  const cached = verifiedPreopenBytes.get(cacheKey);
+  if (!cached) return undefined;
+  verifiedPreopenBytes.delete(cacheKey);
+  verifiedPreopenBytes.set(cacheKey, cached);
+  return cached;
+}
+
+function cacheVerifiedPreopenBytes(cacheKey: string, bytes: ArrayBuffer): void {
+  if (bytes.byteLength === 0 || bytes.byteLength > verifiedPreopenByteBudget) return;
+  const replaced = verifiedPreopenBytes.get(cacheKey);
+  if (replaced) {
+    verifiedPreopenBytes.delete(cacheKey);
+    verifiedPreopenByteCount -= replaced.byteLength;
+  }
+  while (verifiedPreopenByteCount + bytes.byteLength > verifiedPreopenByteBudget) {
+    const oldestKey = verifiedPreopenBytes.keys().next().value as string | undefined;
+    if (oldestKey === undefined) break;
+    const oldest = verifiedPreopenBytes.get(oldestKey);
+    verifiedPreopenBytes.delete(oldestKey);
+    verifiedPreopenByteCount -= oldest?.byteLength ?? 0;
+  }
+  verifiedPreopenBytes.set(cacheKey, bytes);
+  verifiedPreopenByteCount += bytes.byteLength;
+}
+
 function preopenLengthMismatch(url: string, actualBytes: number, expectedBytes: number): Error {
   return new Error(`preopen asset ${url} decoded byte length mismatch: got ${actualBytes}, expected ${expectedBytes}`);
 }
@@ -206,6 +236,11 @@ function growPreopenBuffer(bytes: Uint8Array<ArrayBufferLike>, requiredBytes: nu
 export async function fetchPreopenBytes(url: string, rawExpectedBytes?: number): Promise<ArrayBuffer> {
   const expectedBytes = validatedExpectedBytes(url, rawExpectedBytes);
   const dedupeKey = preopenDedupeKey(url, expectedBytes);
+  const cached = cachedPreopenBytes(dedupeKey);
+  if (cached) {
+    post({ type: 'preopen-progress', url, loadedBytes: cached.byteLength, totalBytes: expectedBytes ?? cached.byteLength });
+    return cached;
+  }
   const existing = inFlightPreopenBytes.get(dedupeKey);
   if (existing) return existing;
   const request = (async () => {
@@ -247,7 +282,9 @@ export async function fetchPreopenBytes(url: string, rawExpectedBytes?: number):
       }
       post({ type: 'preopen-progress', url, loadedBytes, totalBytes: totalBytes || loadedBytes });
       const buffer = bytes.buffer as ArrayBuffer;
-      return loadedBytes === bytes.byteLength ? buffer : buffer.slice(0, loadedBytes);
+      const verified = loadedBytes === bytes.byteLength ? buffer : buffer.slice(0, loadedBytes);
+      if (expectedBytes !== undefined || decodedBytes !== undefined) cacheVerifiedPreopenBytes(dedupeKey, verified);
+      return verified;
   })();
   inFlightPreopenBytes.set(dedupeKey, request);
   try {
@@ -260,10 +297,27 @@ export async function fetchPreopenBytes(url: string, rawExpectedBytes?: number):
 async function buildPreopenDirectory(preopenFiles: PreopenFileSpec[] | undefined): Promise<PreopenDirectory> {
   const entries = new Map<string, File>();
   for (const spec of preopenFiles ?? []) {
-    entries.set(spec.name, new File(await fetchPreopenBytes(spec.url, spec.expectedBytes)));
+    entries.set(spec.name, new File(await fetchPreopenBytes(spec.url, spec.expectedBytes), { readonly: true }));
   }
   return new PreopenDirectory('.', entries);
 }
+
+export const recklessWasiWorkerInternalsForTests = {
+  resetPreopenByteCache(byteBudget = PREOPEN_BYTE_CACHE_BUDGET): void {
+    if (!Number.isSafeInteger(byteBudget) || byteBudget < 0) throw new Error(`invalid preopen byte cache budget: ${String(byteBudget)}`);
+    verifiedPreopenBytes.clear();
+    verifiedPreopenByteCount = 0;
+    verifiedPreopenByteBudget = byteBudget;
+  },
+  preopenByteCacheState(): { byteBudget: number; totalBytes: number; keys: string[]; inFlightCount: number } {
+    return {
+      byteBudget: verifiedPreopenByteBudget,
+      totalBytes: verifiedPreopenByteCount,
+      keys: [...verifiedPreopenBytes.keys()],
+      inFlightCount: inFlightPreopenBytes.size,
+    };
+  },
+};
 
 async function runWasiUci(wasmUrl: string, executableName: string, commands: string[], preopenFiles?: PreopenFileSpec[]): Promise<{ stdout: string[]; stderr: string[]; exitCode: number }> {
   const stdout: string[] = [];
