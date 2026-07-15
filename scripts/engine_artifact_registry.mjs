@@ -71,14 +71,12 @@ export function releaseCatalogEntries(release) {
       if (key) entries.push({ key, logicalUrl, encoding: 'identity', artifact });
       continue;
     }
-    if ((!Array.isArray(artifact.representations) || !artifact.representations.length) && artifact.artifactUrl) {
-      const key = artifactKeyFromReleaseUrl(artifact.artifactUrl);
-      if (!key) throw new Error(`Artifact URL is not content-addressed: ${artifact.artifactUrl}`);
-      entries.push({ key, logicalUrl, encoding: 'identity', artifact, legacy: true });
-      continue;
-    }
     if (!Array.isArray(artifact.representations) || !artifact.representations.length) {
       throw new Error(`V2 artifact has no representations: ${logicalUrl}`);
+    }
+    const identityCount = artifact.representations.filter((entry) => entry?.encoding === 'identity').length;
+    if (identityCount !== 1) {
+      throw new Error(`V2 artifact must have exactly one identity representation: ${logicalUrl} (found ${identityCount})`);
     }
     const rawSha256 = artifact.raw?.sha256?.toLowerCase();
     const rawBytes = artifact.raw?.bytes;

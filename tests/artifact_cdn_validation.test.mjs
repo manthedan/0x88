@@ -597,6 +597,67 @@ test('validate_artifact_cdn_headers rejects corrupt decoded Brotli bodies despit
   assert.ok(parsed.rows[0].failures.some((failure) => /br decoded body SHA-256/.test(failure)));
 });
 
+test('validate_artifact_cdn_headers rejects the whole v2 release when any artifact lacks exactly one valid identity', async () => {
+  const { mkdtemp, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = await mkdtemp(join(tmpdir(), 'lc0-invalid-v2-cdn-release-'));
+  const releasePath = join(root, 'release.json');
+  const rawSha = 'a'.repeat(64);
+  const brSha = 'b'.repeat(64);
+  const identity = {
+    encoding: 'identity',
+    url: `/artifacts/sha256/${rawSha}/identity`,
+    sha256: rawSha,
+    bytes: 3,
+  };
+  const br = {
+    encoding: 'br',
+    url: `/artifacts/sha256/${rawSha}/br/${brSha}`,
+    sha256: brSha,
+    bytes: 2,
+  };
+  let requests = 0;
+  const server = createServer((_req, res) => {
+    requests += 1;
+    res.writeHead(500).end();
+  });
+  const port = await listen(server);
+  try {
+    for (const [representations, expected] of [
+      [[br], /must have exactly one identity representation.*found 0/],
+      [[identity, { ...identity }], /must have exactly one identity representation.*found 2/],
+      [[{ ...identity, url: `/artifacts/sha256/${brSha}/identity` }], /Invalid identity representation/],
+    ]) {
+      await writeFile(releasePath, JSON.stringify({
+        schema: 'lc0_browser.artifact_release_manifest.v2',
+        releaseId: 'invalid-identity',
+        artifacts: [
+          {
+            logicalUrl: '/valid.onnx',
+            raw: { sha256: rawSha, bytes: 3 },
+            representations: [identity],
+          },
+          {
+            logicalUrl: '/invalid.onnx',
+            raw: { sha256: rawSha, bytes: 3 },
+            representations,
+          },
+        ],
+      }));
+      const result = await runValidator([
+        '--release', releasePath,
+        '--artifact-base', `http://127.0.0.1:${port}`,
+      ]);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, expected);
+      assert.equal(requests, 0, 'malformed releases must fail before any hosted probes');
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test('validate_artifact_cdn_headers rejects empty release manifests', async () => {
   const { mkdtemp, writeFile } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');

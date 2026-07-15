@@ -123,3 +123,45 @@ test('shared release catalog fails closed on corrupt v2 representation keys', ()
     }],
   }]), /Invalid identity representation/);
 });
+
+test('shared release catalog requires exactly one identity representation per v2 artifact', () => {
+  const rawSha = 'a'.repeat(64);
+  const brSha = 'b'.repeat(64);
+  const artifact = {
+    logicalUrl: '/model.onnx',
+    raw: { sha256: rawSha, bytes: 3 },
+  };
+  const release = (representations) => ({
+    schema: 'lc0_browser.artifact_release_manifest.v2',
+    releaseId: 'identity-contract',
+    artifacts: [{ ...artifact, representations }],
+  });
+  const identity = {
+    encoding: 'identity',
+    url: `/artifacts/sha256/${rawSha}/identity`,
+    sha256: rawSha,
+    bytes: 3,
+  };
+  const br = {
+    encoding: 'br',
+    url: `/artifacts/sha256/${rawSha}/br/${brSha}`,
+    sha256: brSha,
+    bytes: 2,
+  };
+
+  assert.throws(
+    () => buildArtifactReleaseCatalog([release([br])]),
+    /must have exactly one identity representation.*found 0/,
+  );
+  assert.throws(
+    () => buildArtifactReleaseCatalog([release([identity, { ...identity }])]),
+    /must have exactly one identity representation.*found 2/,
+  );
+  assert.throws(
+    () => buildArtifactReleaseCatalog([{
+      ...release([]),
+      artifacts: [{ ...artifact, artifactUrl: `/artifacts/sha256/${rawSha}/legacy.onnx` }],
+    }]),
+    /V2 artifact has no representations/,
+  );
+});

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { createHash, randomBytes } from 'node:crypto';
 import { constants as fsConstants, createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, posix, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
@@ -10,6 +11,7 @@ import {
   ARTIFACT_RELEASE_V1_SCHEMA,
   ARTIFACT_RELEASE_V2_SCHEMAS,
   isArtifactReleaseV2,
+  releaseCatalogEntries,
 } from './engine_artifact_registry.mjs';
 
 const DEFAULT_SOURCE_MANIFESTS = [
@@ -205,9 +207,12 @@ async function materializeRepresentations(artifact, args) {
     localPath: storedLocalPath(identityTarget, args),
   }];
   if (args.brotli) {
-    const tempPath = resolve(args.outDir, `.artifact-brotli-${process.pid}-${randomBytes(6).toString('hex')}`);
+    const tempDirectory = args.check ? await mkdtemp(join(tmpdir(), 'lc0-artifact-brotli-')) : undefined;
+    const tempPath = tempDirectory
+      ? join(tempDirectory, 'representation.br')
+      : resolve(args.outDir, `.artifact-brotli-${process.pid}-${randomBytes(6).toString('hex')}`);
     try {
-      await mkdir(dirname(tempPath), { recursive: true });
+      if (!tempDirectory) await mkdir(dirname(tempPath), { recursive: true });
       await pipeline(
         createReadStream(sourcePath),
         createBrotliCompress({ params: { [zlibConstants.BROTLI_PARAM_QUALITY]: args.brotliQuality } }),
@@ -225,7 +230,7 @@ async function materializeRepresentations(artifact, args) {
         localPath: storedLocalPath(target, args),
       });
     } finally {
-      await rm(tempPath, { force: true });
+      await rm(tempDirectory ?? tempPath, { recursive: Boolean(tempDirectory), force: true });
     }
   }
   return {
@@ -435,6 +440,10 @@ async function main() {
     if (base.schema !== ARTIFACT_RELEASE_V1_SCHEMA && !isArtifactReleaseV2(base)) {
       throw new Error(`Unexpected base release schema: ${base.schema}`);
     }
+    if (base.schema === ARTIFACT_RELEASE_V1_SCHEMA && (base.artifacts ?? []).length) {
+      throw new Error('Cannot carry v1 artifacts into a v2 release without identity representations');
+    }
+    if (isArtifactReleaseV2(base)) releaseCatalogEntries(base);
     baseReleaseId = base.releaseId;
     inheritedArtifacts = (base.artifacts ?? []).map((artifact) => ({ ...artifact, carriedForwardFrom: base.releaseId }));
     sourceManifests = [...new Set([...(base.sourceManifests ?? []), ...sourceManifests])];
@@ -489,6 +498,7 @@ async function main() {
     generatedAt,
   };
 
+  releaseCatalogEntries(release);
   await writeReleaseOnce(releasePath, release, args.check);
   await writeMutableOrCheck(channelPath, channel, args.check);
   console.log(JSON.stringify({

@@ -167,6 +167,34 @@ test('R2 cleanup plan carries source kind and logical metadata into protected v2
   assert.deepEqual(protectedSource.logicalUrls, ['/stockfish/stockfish-corresponding-source.tar.gz']);
 });
 
+test('R2 cleanup plan rejects malformed v2 releases instead of planning around missing identity objects', () => {
+  const rawSha = 'c'.repeat(64);
+  const identity = {
+    encoding: 'identity',
+    url: `/artifacts/sha256/${rawSha}/identity`,
+    sha256: rawSha,
+    bytes: 3,
+  };
+  const release = (representations) => ({
+    schema: 'lc0_browser.artifact_release_manifest.v2',
+    releaseId: 'malformed-v2',
+    artifacts: [{
+      logicalUrl: '/models/model.onnx',
+      raw: { sha256: rawSha, bytes: 3 },
+      representations,
+    }],
+  });
+
+  assert.throws(
+    () => buildCleanupPlan({ now, releases: [release([])], objects: [] }),
+    /V2 artifact has no representations/,
+  );
+  assert.throws(
+    () => buildCleanupPlan({ now, releases: [release([identity, { ...identity }])], objects: [] }),
+    /must have exactly one identity representation.*found 2/,
+  );
+});
+
 test('parseArgs requires hashed opt-in separately from execute', () => {
   const args = parseArgs(['node', 'script', '--execute', '--delete-category', 'legacy-logical-duplicate,legacy-unreferenced-metadata', '--retention-days', '7']);
   assert.equal(args.execute, true);

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { releaseCatalogEntries } from './engine_artifact_registry.mjs';
 
 function usage() {
   console.log(`Usage: node scripts/validate_artifact_cdn_headers.mjs [--url URL ...] [--release manifest.json] [options]\n\nOptions:\n  --url URL          Logical alias URL to validate against the current channel; may be repeated\n  --release PATH     Local V1/v2 release manifest whose hosted immutable release and physical representations must be validated\n  --artifact-base URL  Hosted artifact origin (default https://assets.0x88.app)\n  --limit N          Max release artifacts to validate\n  --range BYTES      Range probe length (default 1024)\n  --verify-bodies    Download and hash full identity and decoded Brotli bodies\n  --json             Print JSON only\n  -h, --help         Show help\n\nBy default the validator checks HEAD twice and a small Range GET without downloading\nfull artifacts. --release first verifies the exact hosted /releases/<releaseId>.json,\nthen probes that release's physical identity and Brotli representation URLs directly;\nRange always targets physical identity. --url remains a logical-alias canary for the\ncurrent channel and validates identity/Brotli negotiation. Physical release and artifact\nURLs require immutable one-year caching; logical aliases require short or\nrevalidation-safe caching. It never uploads, purges, or mutates channels.\n`);
@@ -353,6 +354,7 @@ async function main() {
   let physicalTargets = [];
   if (args.release) {
     const localRelease = JSON.parse(await readFile(args.release, 'utf8'));
+    releaseCatalogEntries(localRelease);
     physicalTargets = releaseTargets(localRelease, args.limit, args.artifactBase);
     if (!physicalTargets.length) throw new Error('No artifact URLs to validate from release');
     const hosted = await validateHostedRelease(args.release, args.artifactBase);

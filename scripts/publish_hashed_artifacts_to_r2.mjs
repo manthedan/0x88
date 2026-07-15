@@ -138,17 +138,11 @@ function entriesFromV2Release(release, args) {
   const byKey = new Map();
   for (const artifact of release.artifacts ?? []) {
     if (!Array.isArray(artifact.representations) || !artifact.representations.length) {
-      if (artifact.artifactUrl) {
-        const legacy = entryFromLegacyArtifact(artifact, args);
-        const existing = byKey.get(legacy.key);
-        if (existing) {
-          if (!existing.logicalUrls.includes(artifact.logicalUrl)) existing.logicalUrls.push(artifact.logicalUrl);
-          continue;
-        }
-        byKey.set(legacy.key, legacy);
-        continue;
-      }
       throw new Error(`V2 artifact has no representations: ${artifact.logicalUrl ?? artifact.name}`);
+    }
+    const identityCount = artifact.representations.filter((entry) => entry?.encoding === 'identity').length;
+    if (identityCount !== 1) {
+      throw new Error(`V2 artifact must have exactly one identity representation: ${artifact.logicalUrl ?? artifact.name} (found ${identityCount})`);
     }
     for (const representation of artifact.representations) {
       const validated = validateV2Representation(artifact, representation);
@@ -389,8 +383,8 @@ async function manifestPublishItems(args, release) {
 async function main() {
   const args = parseArgs(process.argv);
   const release = JSON.parse(await readFile(args.release, 'utf8'));
-  const entries = releaseEntries(release, args);
   const catalog = buildArtifactReleaseCatalog([release]);
+  const entries = releaseEntries(release, args);
   const plannedKeys = new Set(entries.map((entry) => entry.key));
   if (catalog.size !== plannedKeys.size || [...catalog.keys()].some((key) => !plannedKeys.has(key))) {
     throw new Error(`Release catalog mismatch: catalog has ${catalog.size} representation keys, publisher planned ${plannedKeys.size}`);
