@@ -14,6 +14,7 @@ test('Reckless external WASI prototype has explicit build, release, publish, and
   assert.equal(packageJson.scripts['reckless:artifact-manifest'], 'node scripts/write_engine_artifact_manifest.mjs reckless');
   assert.match(packageJson.scripts['reckless:release-manifest'], /write_engine_artifact_manifest\.mjs reckless/);
   assert.match(packageJson.scripts['reckless:release-manifest'], /public\/reckless\/reckless-wasip1\.manifest\.json/);
+  assert.match(packageJson.scripts['reckless:release-manifest'], /--skip-compression-estimates/);
   assert.match(packageJson.scripts['reckless:build-release'], /reckless:build-browser-api-simd-external/);
   assert.match(packageJson.scripts['reckless:build-release'], /reckless:release-manifest$/);
 

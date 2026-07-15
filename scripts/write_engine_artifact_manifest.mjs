@@ -220,7 +220,7 @@ const CONFIGS = {
 };
 
 function usage() {
-  console.error('Usage: node scripts/write_engine_artifact_manifest.mjs <berserk|plentychess|stormphrax|reckless|viridithas|stockfish> [--out path] [--allow-missing]');
+  console.error('Usage: node scripts/write_engine_artifact_manifest.mjs <berserk|plentychess|stormphrax|reckless|viridithas|stockfish> [--out path] [--allow-missing] [--brotli-quality 0-11] [--skip-compression-estimates]');
 }
 
 function argValue(name) {
@@ -237,12 +237,12 @@ function toolchainSummary(config) {
   return 'emcc not found on PATH while writing manifest; pass --toolchain or ENGINE_ARTIFACT_TOOLCHAIN for release manifests';
 }
 
-function compressionSummary(buf) {
+function compressionSummary(buf, brotliQuality) {
   const gzip = gzipSync(buf, { level: 9 });
-  const brotli = brotliCompressSync(buf, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 } });
+  const brotli = brotliCompressSync(buf, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: brotliQuality } });
   const ratio = (bytes) => Number((bytes / buf.byteLength).toFixed(4));
   return {
-    note: 'Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.',
+    note: `Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality ${brotliQuality}; actual CDN/server settings may differ.`,
     gzip: { bytes: gzip.byteLength, ratio: ratio(gzip.byteLength) },
     brotli: { bytes: brotli.byteLength, ratio: ratio(brotli.byteLength) },
   };
@@ -252,6 +252,7 @@ function sumArtifactBytes(artifacts, field) {
   return artifacts.reduce((sum, artifact) => {
     if (artifact.missing) return sum;
     if (field === 'bytes') return sum + artifact.bytes;
+    if (!artifact.compression?.[field]) return sum;
     return sum + artifact.compression[field].bytes;
   }, 0);
 }
@@ -269,13 +270,22 @@ async function fileMetadata(path, allowMissing, label = 'artifact') {
   };
 }
 
-async function fileEntry(path, allowMissing) {
+async function fileEntry(path, allowMissing, brotliQuality, skipCompressionEstimates) {
   const entry = await fileMetadata(path, allowMissing, 'artifact');
   if (entry.missing) return entry;
+  if (skipCompressionEstimates) {
+    return {
+      ...entry,
+      compression: {
+        skipped: true,
+        note: 'Compression estimates skipped for release generation; run the artifact-manifest command without --skip-compression-estimates for research measurements.',
+      },
+    };
+  }
   const buf = await readFile(path);
   return {
     ...entry,
-    compression: compressionSummary(buf),
+    compression: compressionSummary(buf, brotliQuality),
   };
 }
 
@@ -286,6 +296,11 @@ if (!config) {
   process.exitCode = 1;
 } else {
   const allowMissing = process.argv.includes('--allow-missing');
+  const skipCompressionEstimates = process.argv.includes('--skip-compression-estimates');
+  const brotliQuality = Number(argValue('--brotli-quality') ?? 11);
+  if (!Number.isInteger(brotliQuality) || brotliQuality < 0 || brotliQuality > 11) {
+    throw new Error('--brotli-quality must be an integer from 0 through 11');
+  }
   const out = argValue('--out') ?? `artifacts/engine-manifests/${engine}-${config.flavor}.manifest.json`;
   const sourceArchivePath = argValue('--source-archive');
   const sourceArchiveUrl = argValue('--source-url');
@@ -293,7 +308,7 @@ if (!config) {
   if (missingArtifacts.length && !allowMissing) {
     throw new Error(`Missing artifacts for ${engine} manifest: ${missingArtifacts.join(', ')}`);
   }
-  const artifacts = await Promise.all(config.artifacts.map((p) => fileEntry(p, allowMissing)));
+  const artifacts = await Promise.all(config.artifacts.map((p) => fileEntry(p, allowMissing, brotliQuality, skipCompressionEstimates)));
   const totalBytes = sumArtifactBytes(artifacts, 'bytes');
   const totalGzipBytes = sumArtifactBytes(artifacts, 'gzip');
   const totalBrotliBytes = sumArtifactBytes(artifacts, 'brotli');
@@ -306,10 +321,10 @@ if (!config) {
     artifacts,
     totals: {
       bytes: totalBytes,
-      gzipBytes: totalGzipBytes,
-      brotliBytes: totalBrotliBytes,
-      gzipRatio: totalBytes ? Number((totalGzipBytes / totalBytes).toFixed(4)) : null,
-      brotliRatio: totalBytes ? Number((totalBrotliBytes / totalBytes).toFixed(4)) : null,
+      gzipBytes: skipCompressionEstimates ? null : totalGzipBytes,
+      brotliBytes: skipCompressionEstimates ? null : totalBrotliBytes,
+      gzipRatio: !skipCompressionEstimates && totalBytes ? Number((totalGzipBytes / totalBytes).toFixed(4)) : null,
+      brotliRatio: !skipCompressionEstimates && totalBytes ? Number((totalBrotliBytes / totalBytes).toFixed(4)) : null,
     },
     sourceArchive: sourceArchivePath
       ? {
