@@ -2519,6 +2519,7 @@ function formatScoreHalf(value: number): string {
 
 function renderMatchScore(nameA: string, nameB: string, sameEngine: boolean, score: MatchScore): void {
   if (score.games === 0) { el('matchScore').textContent = 'No games played yet.'; return; }
+  (el('resultSection') as HTMLDetailsElement).open = true;
   const games = `${score.games} game${score.games === 1 ? '' : 's'}`;
   el('matchScore').textContent = sameEngine
     ? `${nameA} mirror · ${score.aWins}–${score.bWins}–${score.draws} (W–L–D, Engine 1 seat) over ${games}`
@@ -2526,6 +2527,7 @@ function renderMatchScore(nameA: string, nameB: string, sameEngine: boolean, sco
 }
 
 function renderStandings(standings: TournamentStandings, scheduledGames: number): void {
+  (el('resultSection') as HTMLDetailsElement).open = true;
   const rows = standings.table();
   const elo = (row: ReturnType<TournamentStandings['table']>[number]) => row.eloDiff === null
     ? '—'
@@ -2810,6 +2812,9 @@ async function startMatch() {
   refreshStormphraxVariantUi();
   refreshSeatControls();
   games.length = 0;
+  inputEl('pgnOut').value = '';
+  inputEl('pgnOut').hidden = true;
+  (el('resultSection') as HTMLDetailsElement).open = false;
   activeEngineIds = [];
   engineOutputs.clear();
   engineOutputHistory.length = 0;
@@ -2917,7 +2922,9 @@ async function startMatch() {
 }
 
 function exportPgn() {
-  inputEl('pgnOut').value = games.map((g) => g.pgn).join('\n\n');
+  const output = inputEl('pgnOut');
+  output.value = games.map((g) => g.pgn).join('\n\n');
+  output.hidden = !games.length;
   el('message').textContent = games.length ? `Exported ${games.length} game(s) as PGN.` : 'No games to export yet.';
 }
 

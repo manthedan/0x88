@@ -36,9 +36,8 @@
 </svelte:head>
 
 <SiteHeader pageTitle="Arena" />
-<BrowserCapabilities />
 <main id="main">
-  <section class="panel" aria-label="Board">
+  <section class="panel board-panel" aria-label="Board">
     <div id="blackSideLabel" class="side-label" aria-label="Black side"></div>
     <div class="eval-chip-row"><span id="whiteEngineChip" class="eval-chip" style="display:none"></span><span id="blackEngineChip" class="eval-chip" style="display:none"></span></div>
     <div class="board-with-evals">
@@ -92,7 +91,7 @@
     </details>
     <details class="section-block" open>
       <summary>Time control</summary>
-      <div class="row">
+      <div class="time-grid">
         <div class="field"><label for="budgetModeSelect">Budget</label>
           <select id="budgetModeSelect"><option value="fixed">Fixed visits/depth</option><option value="movetime" selected>Equal movetime</option></select></div>
         <div class="field" id="movetimeField"><label for="movetimeInput">Movetime ms</label>
@@ -114,7 +113,7 @@
         <input id="stormphraxDepthInput" type="number" value="4" />
         <select id="stormphraxVariantSelect"></select>
       </div>
-      <div class="row">
+      <div class="opening-row">
         <div class="field"><label for="startingPositionSelect">Suite</label>
           <select id="startingPositionSelect"><option value="start">Start position</option><option value="built-in">Built-in opening suite</option><option value="custom">Custom positions / replays</option></select></div>
         <div class="field wide" id="openingTextField" hidden><label for="openingText">Custom openings (one per line: FEN, UCI moves, PGN/SAN, or Name | ...)</label>
@@ -188,18 +187,19 @@
       <div id="runtimeAuditInfo"></div>
     </div>
     {/if}
-    <details class="section-block" open>
+    <details id="engineOutputsSection" class="section-block" open>
       <summary>Engine outputs</summary>
       <div id="engineEvalInfo" class="eval-grid" aria-label="Engine evaluation outputs"><div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">Waiting…</span></div><div class="eval-card-eval">Engine outputs: waiting for a move…</div></div></div>
     </details>
-    <details class="section-block" open>
+    <details id="resultSection" class="section-block">
       <summary>Result</summary>
       <div id="matchScore" class="small" aria-live="polite">No games played yet.</div>
       <div class="log" id="log"></div>
       <pre id="benchResult" class="small" hidden></pre>
       <div class="row"><button id="exportPgn" type="button">Export PGN</button></div>
-      <textarea id="pgnOut" spellcheck="false" placeholder="game PGNs appear here after Export PGN"></textarea>
+      <textarea id="pgnOut" spellcheck="false" placeholder="game PGNs appear here after Export PGN" hidden></textarea>
     </details>
+    <div class="capabilities-slot"><BrowserCapabilities /></div>
   </section>
 </main>
 
@@ -207,16 +207,17 @@
   :root{--acc-w:#2f6e7d;--acc-b:#b15c2b}
   main{
     display:grid;
-    grid-template-columns:minmax(0,1fr) 392px;
-    gap:24px; align-items:start; justify-content:center; padding:26px 28px 56px;
-    max-width:1280px; margin:0 auto;
+    grid-template-columns:minmax(0,1fr) minmax(370px,420px);
+    gap:18px; align-items:start; justify-content:center; padding:16px 24px 48px;
+    max-width:1180px; margin:0 auto;
   }
+  .board-panel{min-width:0; padding:12px}
   .app-sidebar{
-    position:sticky; top:72px;
+    position:sticky; top:72px; padding:0; overflow:hidden;
   }
   :global(.board-with-evals){
-    display:grid; grid-template-columns:18px minmax(0,1fr) 18px;
-    gap:10px; align-items:stretch; margin:0 auto;
+    display:grid; grid-template-columns:14px minmax(0,1fr) 14px;
+    gap:8px; align-items:stretch; margin:0 auto;
   }
   :global(.engine-eval-bar){
     position:relative; min-height:100%;
@@ -256,9 +257,9 @@
   :global(.engine-eval-bar.thinking){box-shadow:0 0 0 2px rgba(159,174,111,.6)}
   :global(.side-label){
     display:flex; justify-content:space-between; align-items:center;
-    gap:10px; margin:6px 0; min-height:40px;
-    padding:10px 14px; border:1px solid var(--rule); border-left:3px solid var(--rule-strong);
-    border-radius:11px; background:var(--panel); font-size:13px;
+    gap:8px; margin:4px 0; min-height:32px;
+    padding:6px 9px; border:1px solid var(--rule); border-left:3px solid var(--rule-strong);
+    border-radius:7px; background:var(--panel); font-size:12px;
   }
   :global(.side-label .side-main){display:flex; flex:1; min-width:0; flex-wrap:nowrap; align-items:center; gap:8px}
   :global(.side-label .color){
@@ -266,7 +267,7 @@
     color:var(--muted); font-weight:700;
     border:1px solid var(--rule); border-radius:4px; padding:2px 5px; background:var(--bg);
   }
-  :global(.side-label .engine){flex:0 0 auto; font-weight:700; font-size:14px}
+  :global(.side-label .engine){flex:0 0 auto; font-weight:700; font-size:13px}
   :global(.side-label .side-eval){
     margin-left:auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
     font-family:var(--mono); font-size:11px; color:var(--muted); font-weight:600;
@@ -288,15 +289,17 @@
   :global(.seat-row .seat-name){flex:0 0 auto; white-space:nowrap; font-size:10px}
   :global(.seat-row .arrow){display:none}
   :global(.seat-row .row-strength){flex:0 0 64px; width:64px}
-  :global(.matchup-note){margin-top:8px; color:var(--muted)}
-  .tournament-actions{margin-top:14px}
-  .tournament-actions button{min-height:40px}
-  .section-block{margin-top:0; padding-top:20px}
-  .section-block:first-child{padding-top:0}
+  :global(.matchup-note){margin-top:6px; color:var(--muted); font-size:11px; line-height:1.4}
+  .tournament-actions{margin-top:9px; justify-content:flex-start}
+  .tournament-actions button{min-height:36px; padding:7px 10px}
+  .tournament-actions #start{flex:0 1 132px}
+  .tournament-actions #stop{flex:0 0 66px}
+  .section-block{margin-top:0; padding:12px; border-top:1px solid var(--rule)}
+  .section-block:first-child{border-top:0}
   .section-block>summary{
-    cursor:pointer; font-size:11px; text-transform:uppercase;
-    letter-spacing:.12em; color:var(--muted-2); font-weight:500;
-    font-family:var(--mono); list-style:none; user-select:none; padding:0 0 10px; transition:color .12s;
+    cursor:pointer; font-size:10px; text-transform:uppercase;
+    letter-spacing:.12em; color:var(--muted-2); font-weight:600;
+    font-family:var(--mono); list-style:none; user-select:none; padding:0 0 8px; transition:color .12s;
   }
   .section-block>summary::-webkit-details-marker{display:none}
   .section-block>summary::before{
@@ -308,14 +311,19 @@
   .section-block[open]>summary{margin-bottom:0}
   .section-block[open]>summary::before{color:var(--accent)}
   :global(#matchScore){
-    margin-top:4px;
-    font-family:var(--mono); font-size:14px; font-weight:700; color:var(--ink);
-    padding:8px 10px; border:1px solid var(--rule); border-radius:7px; background:var(--soft);
+    margin-top:2px;
+    font-family:var(--mono); font-size:12px; font-weight:700; color:var(--ink);
+    padding:7px 8px; border:1px solid var(--rule); border-radius:6px; background:var(--soft);
   }
-  :global(input[type=number]){width:80px; font-family:var(--mono); padding:6px 8px; border:1px solid var(--rule); border-radius:6px}
+  :global(input[type=number]){width:100%; font-family:var(--mono); padding:6px 8px; border:1px solid var(--rule); border-radius:6px}
   :global(select){max-width:100%}
-  .row{margin-top:12px}
-  .field{margin-top:12px}
+  .row{margin-top:8px}
+  .field{margin-top:8px}
+  .time-grid{
+    display:grid; grid-template-columns:1.25fr .8fr .72fr; gap:8px; align-items:end;
+  }
+  .time-grid .field,.opening-row .field{margin-top:0}
+  .opening-row{display:grid; margin-top:9px}
   :global(.field.wide){flex:1 1 100%}
   :global(.field.wide textarea){margin-top:0; min-height:86px}
   :global(.engines){display:grid; gap:4px; margin-top:8px}
@@ -325,7 +333,7 @@
   :global(th){color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase}
   :global(td.num, th.num){text-align:right; font-family:var(--mono)}
   :global(tr.leader td){background:var(--soft)}
-  :global(.log){font-family:var(--mono); font-size:12px; min-height:160px; max-height:260px; overflow:auto; margin-top:8px}
+  :global(.log){font-family:var(--mono); font-size:11px; min-height:120px; max-height:220px; overflow:auto; margin-top:6px}
   :global(.log:empty){min-height:0; margin-top:0}
   :global(.log div){padding:2px 0; border-top:1px solid var(--rule)}
   :global(.log div.replayable){cursor:pointer}
@@ -348,11 +356,11 @@
   :global(.movestrip .mv:hover){background:var(--soft)}
   :global(.movestrip .mv.current){background:var(--accent); color:white}
   :global(.chart-card svg){cursor:pointer}
-  :global(#pairing){font-size:14px; margin-top:14px; font-weight:600; color:var(--ink); font-family:var(--serif)}
+  :global(#pairing){font-size:13px; margin-top:10px; font-weight:600; color:var(--ink); font-family:var(--serif)}
   :global(#message){
-    margin-top:6px; padding:8px 12px; border:1px solid var(--rule-strong);
-    border-radius:8px; background:var(--panel-inset); color:var(--text-soft);
-    font-family:var(--mono); font-size:12px; line-height:1.5;
+    margin-top:5px; padding:6px 9px; border:1px solid var(--rule-strong);
+    border-radius:6px; background:var(--panel-inset); color:var(--text-soft);
+    font-family:var(--mono); font-size:10px; line-height:1.4;
   }
   :global(.model-load-progress){
     margin-top:6px; padding:8px; border:1px solid var(--rule);
@@ -363,12 +371,15 @@
   }
   :global(.loading-progress-row), :global(.search-progress-row){display:grid; gap:3px; margin:4px 0}
   :global(.dl-label), :global(.search-progress-text){font-family:var(--mono); font-size:11px; color:var(--muted)}
-  :global(.eval-grid){display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:8px; margin-top:8px; min-height:78px}
+  :global(.eval-grid){
+    display:grid; grid-template-columns:minmax(0,1fr); gap:6px;
+    width:100%; min-width:0; margin-top:2px; min-height:0;
+  }
   :global(.eval-card){
-    padding:8px 10px; border:1px solid var(--rule); border-radius:var(--radius-sm);
-    background:var(--panel);
+    min-width:0; max-width:100%; padding:7px 8px;
+    border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel);
     display:flex; flex-direction:column; gap:3px;
-    height:88px; overflow:hidden;
+    height:auto; min-height:0; overflow:hidden;
   }
   :global(.eval-card-head){
     display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:2px 8px; flex:0 0 auto; min-width:0;
@@ -386,14 +397,13 @@
     display:flex; flex-wrap:wrap; gap:2px 6px;
   }
   :global(.eval-card-scroll){
-    font-family:var(--mono); font-size:10px; color:var(--muted);
-    flex:1 1 auto; overflow:hidden; line-height:1.4;
-    opacity:.6; transition:opacity .15s; min-height:0;
+    min-width:0; font-family:var(--mono); font-size:10px; color:var(--muted);
+    flex:0 1 auto; overflow:visible; line-height:1.35; opacity:.72;
   }
-  :global(.eval-card:hover .eval-card-scroll){
-    overflow:auto; opacity:1;
+  :global(.eval-card:hover .eval-card-scroll){opacity:1}
+  :global(.eval-card-raw),:global(.eval-card-pv){
+    max-width:100%; white-space:normal; overflow-wrap:anywhere; word-break:break-word;
   }
-  :global(.eval-card-raw){white-space:pre-wrap; overflow-wrap:anywhere}
   :global(.eval-card-pv){color:var(--text-soft)}
   :global(.eval-card .eval-status){font-family:var(--mono); font-size:10px; color:var(--accent); font-weight:600; white-space:nowrap; margin-left:auto}
   :global(.eval-card.active){border-color:color-mix(in srgb, var(--accent) 30%, var(--rule)); background:var(--soft)}
@@ -411,7 +421,7 @@
   :global(.advanced-runtime summary){cursor:pointer; color:var(--muted); font-size:12px; font-weight:700}
   :global(.advanced-runtime[open] summary){margin-bottom:8px}
   :global(.preset-note){flex:1 1 100%; margin-top:-2px; color:var(--muted)}
-  :global(textarea){width:100%; min-height:80px; font-family:var(--mono); font-size:11px; padding:8px; margin-top:8px}
+  :global(textarea){width:100%; min-height:72px; font-family:var(--mono); font-size:11px; padding:8px; margin-top:7px}
   :global(.chart-grid){display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px}
   :global(.chart-card){border:1px solid var(--rule); border-radius:6px; padding:6px 8px; background:var(--card)}
   :global(.chart-card svg){display:block; width:100%; height:auto}
@@ -432,11 +442,23 @@
   :global(.diag-block){display:grid; grid-template-columns:84px 1fr; gap:2px 10px; margin:4px 0; font-size:12px; align-items:baseline}
   :global(.diag-block .diag-label){color:var(--muted)}
   :global(.diag-block .diag-value){font-family:var(--mono); font-variant-numeric:tabular-nums; overflow-wrap:anywhere}
-  @media (max-width:900px){
-    main{grid-template-columns:1fr; padding:18px}
-    .app-sidebar{position:static; max-height:none; overflow-y:visible}
+  .capabilities-slot{padding:0 12px 12px; border-top:1px solid var(--rule)}
+  .capabilities-slot :global(.capabilities){
+    margin:0; padding:10px 0 0; border:0; border-radius:0; background:transparent;
   }
-  @media (max-width:900px){.chart-grid{grid-template-columns:1fr}}
+  @media (max-width:900px){
+    main{grid-template-columns:1fr; padding:16px}
+    .app-sidebar{position:static; max-height:none; overflow-y:visible}
+    .chart-grid{grid-template-columns:1fr}
+  }
+  @media (max-width:520px){
+    main{padding:12px 10px 40px; gap:12px}
+    .board-panel{padding:10px}
+    :global(.board-with-evals){grid-template-columns:10px minmax(0,1fr) 10px; gap:6px}
+    .time-grid{grid-template-columns:1fr 1fr}
+    .time-grid .field:last-child{grid-column:1 / -1}
+    :global(.seat-row .row-unit){display:none}
+  }
   @media (prefers-reduced-motion: reduce){
     :global(.eval-fill){transition:none}
     :global(.engine-eval-bar.thinking){box-shadow:none}
