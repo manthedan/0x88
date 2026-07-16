@@ -35,9 +35,8 @@
 </svelte:head>
 
 <SiteHeader pageTitle="Play" />
-<BrowserCapabilities />
 <main id="main">
-  <section class="panel" aria-label="Board">
+  <section class="panel board-panel" aria-label="Board">
     <div class="board-shell"><div id="ground"></div></div>
     <div id="status" aria-live="polite">Loading...</div>
     <div id="restartBanner" class="restart-banner" hidden>
@@ -51,108 +50,153 @@
     <div id="moveList" class="move-panel"></div>
   </section>
   <section class="panel app-sidebar" aria-label="Game controls">
-    <h2>Opponent</h2>
-    <div class="field"><label for="engineSelect">Engine</label>
-      <select id="engineSelect"></select></div>
-    <div class="field"><label for="levelSelect">Strength</label>
-      <select id="levelSelect"></select></div>
-    <div id="maia3Controls" hidden>
-      <div class="field"><label for="maia3Elo">Maia3 rating <span id="maia3EloValue">1500</span></label>
-        <input id="maia3Elo" type="range" min="600" max="2600" step="100" value="1500" /></div>
-      <div class="field"><label for="maia3Style">Maia3 move style</label>
-        <select id="maia3Style">
-          <option value="sample">Human sampling</option>
-          <option value="argmax">Deterministic top move</option>
-        </select></div>
-      <details class="advanced-settings">
-        <summary>Sampling settings</summary>
-        <div class="field" id="maia3TemperatureField"><label for="maia3Temperature">Temperature</label>
-          <input id="maia3Temperature" type="number" min="0.01" max="5" step="0.05" value="1" /></div>
-        <div class="field" id="maia3TopPField"><label for="maia3TopP">Top-p</label>
-          <input id="maia3TopP" type="number" min="0.01" max="1" step="0.05" value="1" /></div>
-      </details>
-    </div>
-    <div id="levelCaption" class="small"></div>
-    <div id="engineCaution" class="small" hidden></div>
-    <div id="engineNote" role="status" aria-live="polite" hidden></div>
-    <button id="retryEngine" type="button" hidden>Retry engine</button>
-    <div id="dlProgress" hidden><progress></progress><div class="dl-label small"></div></div>
-    <div id="progressAnnouncement" class="visually-hidden" role="status" aria-live="polite"></div>
-    <h2>Game</h2>
-    <div class="field"><label for="colorSelect">You play</label>
-      <select id="colorSelect">
-        <option value="white">White</option>
-        <option value="black">Black</option>
-        <option value="random">Random</option>
-      </select></div>
-    <div class="row">
-      <button id="newGame" class="primary" type="button">New game</button>
-      <button id="takeback" type="button" disabled>Takeback</button>
-      <button id="resign" type="button" disabled>Resign</button>
-      <button id="flip" type="button" title="Flip board">&#x21c5; Flip</button>
-    </div>
-    <div class="row">
-      <button id="exportPgn" type="button">Show PGN</button>
-      <button id="copyPgn" type="button">Copy PGN</button>
-    </div>
-    <div id="pgnOut"></div>
-    <p class="small">Engine computation runs in your browser, and game data is not sent to a server. A new engine downloads when you first use it, then remains cached locally.</p>
+    <details class="section-block" open>
+      <summary>Opponent</summary>
+      <div class="opponent-grid">
+        <div class="field"><label for="engineSelect">Engine</label>
+          <select id="engineSelect"></select></div>
+        <div class="field"><label for="levelSelect">Strength</label>
+          <select id="levelSelect"></select></div>
+      </div>
+      <div id="maia3Controls" hidden>
+        <div class="maia-grid">
+          <div class="field"><label for="maia3Elo">Rating <span id="maia3EloValue">1500</span></label>
+            <input id="maia3Elo" type="range" min="600" max="2600" step="100" value="1500" /></div>
+          <div class="field"><label for="maia3Style">Move selection</label>
+            <select id="maia3Style">
+              <option value="sample">Human sampling</option>
+              <option value="argmax">Top move</option>
+            </select></div>
+        </div>
+        <details class="advanced-settings">
+          <summary>Sampling settings</summary>
+          <div class="sampling-grid">
+            <div class="field" id="maia3TemperatureField"><label for="maia3Temperature">Temperature</label>
+              <input id="maia3Temperature" type="number" min="0.01" max="5" step="0.05" value="1" /></div>
+            <div class="field" id="maia3TopPField"><label for="maia3TopP">Top-p</label>
+              <input id="maia3TopP" type="number" min="0.01" max="1" step="0.05" value="1" /></div>
+          </div>
+        </details>
+      </div>
+      <div id="levelCaption" class="small setup-note"></div>
+      <div id="engineCaution" class="small" hidden></div>
+      <div id="engineNote" role="status" aria-live="polite" hidden></div>
+      <button id="retryEngine" type="button" hidden>Retry engine</button>
+    </details>
+
+    <details class="section-block" open>
+      <summary>Game</summary>
+      <div class="game-setup">
+        <div class="field"><label for="colorSelect">You play</label>
+          <select id="colorSelect">
+            <option value="white">White</option>
+            <option value="black">Black</option>
+            <option value="random">Random</option>
+          </select></div>
+        <div class="game-actions">
+          <button id="newGame" class="primary" type="button">New game</button>
+          <button id="takeback" type="button" disabled>Takeback</button>
+          <button id="resign" type="button" disabled>Resign</button>
+          <button id="flip" type="button" title="Flip board">&#x21c5; Flip</button>
+        </div>
+      </div>
+      <div id="dlProgress" hidden><progress></progress><div class="dl-label small"></div></div>
+      <div id="progressAnnouncement" class="visually-hidden" role="status" aria-live="polite"></div>
+    </details>
+
+    <details class="section-block record-section">
+      <summary>Game record</summary>
+      <div class="record-actions">
+        <button id="exportPgn" type="button">Show PGN</button>
+        <button id="copyPgn" type="button">Copy PGN</button>
+      </div>
+      <div id="pgnOut"></div>
+    </details>
+
+    <div class="capabilities-slot"><BrowserCapabilities /></div>
   </section>
 </main>
 
 <style>
   main{
-    display:grid;
-    grid-template-columns:minmax(0,1fr) 392px;
-    gap:24px; align-items:start; justify-content:center; padding:26px 28px 56px;
-    max-width:1280px; margin:0 auto;
+    display:grid; grid-template-columns:minmax(0,1fr) minmax(370px,420px);
+    gap:18px; align-items:start; justify-content:center;
+    max-width:1136px; margin:0 auto; padding:16px 24px 48px;
   }
+  .board-panel{min-width:0; padding:12px}
   .app-sidebar{
-    position:sticky; top:72px;
+    position:sticky; top:74px; padding:0; overflow:hidden;
+    border-color:var(--rule-strong);
   }
+  .section-block{padding:0 12px 12px; border:0; border-bottom:1px solid var(--rule)}
+  .section-block:not([open]){padding-bottom:0}
+  .section-block>summary{
+    margin:0 -12px 10px; padding:12px; cursor:pointer; list-style:none; user-select:none;
+    font-family:var(--mono); font-size:10px; font-weight:650;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--muted-2);
+  }
+  .section-block:not([open])>summary{margin-bottom:0}
+  .section-block>summary::-webkit-details-marker{display:none}
+  .section-block>summary::before{content:"▸"; display:inline-block; width:14px; color:var(--accent)}
+  .section-block[open]>summary::before{content:"▾"}
+  .field{min-width:0; margin-top:0}
+  .opponent-grid{display:grid; grid-template-columns:minmax(0,1.45fr) minmax(110px,.75fr); gap:8px; align-items:end}
+  :global(.opponent-grid:has(> .field[hidden])){grid-template-columns:1fr}
+  .maia-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:end; margin-top:9px}
+  .sampling-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+  .advanced-settings{margin-top:8px; padding-top:8px; border-top:1px solid var(--rule)}
+  .advanced-settings>summary{
+    cursor:pointer; color:var(--muted); font-family:var(--mono); font-size:10px;
+    letter-spacing:.04em;
+  }
+  .advanced-settings[open]>summary{margin-bottom:8px}
+  .setup-note{margin-top:8px; line-height:1.45}
+  .game-setup{display:grid; grid-template-columns:112px minmax(0,1fr); gap:9px; align-items:start}
+  .game-actions{display:grid; grid-template-columns:112px 82px; gap:6px}
+  .game-actions button{width:100%; min-height:36px; padding:7px 8px}
+  .record-actions{display:flex; gap:6px}
+  .record-actions button{min-height:34px; padding:6px 9px}
+  .capabilities-slot{padding:10px 12px 11px}
+  :global(.capabilities-slot .capabilities){margin:0}
   :global(#status){
-    margin-top:12px; padding:13px 16px;
-    border:1px solid var(--accent-tint-border); border-radius:12px;
-    background:var(--accent-soft); font-size:14px; color:var(--accent-soft-text); font-weight:500;
+    min-height:34px; margin-top:8px; padding:7px 10px;
+    border:1px solid var(--rule-strong); border-left:2px solid var(--accent);
+    border-radius:0 6px 6px 0; background:var(--panel-inset);
+    color:var(--text-soft); font-family:var(--mono); font-size:11px; line-height:1.45;
   }
-  :global(#status.over){border-color:var(--accent); font-weight:700}
+  :global(#status.over){border-color:var(--accent); color:var(--ink); font-weight:700}
   :global(button.danger){background:var(--warn); border-color:var(--warn); color:#fff; font-weight:700}
-  :global(#levelCaption){margin-top:4px}
   :global(#engineCaution){
-    margin-top:6px; padding:7px 9px;
-    border:1px dashed var(--rule); border-radius:6px; background:var(--panel-inset);
+    margin-top:7px; padding:7px 8px; border:1px dashed var(--rule);
+    border-radius:6px; background:var(--panel-inset); line-height:1.4;
   }
   :global(#engineNote){
-    margin-top:8px; padding:8px 10px;
-    border:1px solid var(--rule); border-radius:6px;
-    background:var(--panel-inset); font-family:var(--mono); font-size:12px;
+    margin-top:7px; padding:7px 8px; border:1px solid var(--rule); border-radius:6px;
+    background:var(--panel-inset); font-family:var(--mono); font-size:10px; line-height:1.4;
   }
   :global(#engineNote.warn){color:var(--warn); border-color:var(--warn)}
-  :global(#retryEngine){margin-top:6px}
-  :global(#dlProgress){margin-top:8px}
-  :global(#dlProgress progress){width:100%; height:10px; accent-color:var(--accent)}
-  :global(#dlProgress .dl-label){margin-top:2px; font-family:var(--mono)}
+  :global(#retryEngine){min-height:34px; margin-top:6px; padding:6px 9px}
+  :global(#dlProgress){margin-top:8px; padding:7px 8px; border:1px solid var(--rule); border-radius:6px; background:var(--panel-inset)}
+  :global(#dlProgress progress){width:100%; height:8px; accent-color:var(--accent)}
+  :global(#dlProgress .dl-label){margin-top:2px; font-family:var(--mono); font-size:10px}
   .visually-hidden{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
-  :global(#promoPicker){margin-top:10px; display:flex; gap:6px; flex-wrap:wrap}
+  :global(#promoPicker){margin-top:8px; display:flex; gap:6px; flex-wrap:wrap}
   :global(#moveList){
-    margin-top:12px; font-family:var(--mono); font-size:14px;
-    line-height:1.9; max-height:300px; overflow:auto;
-    padding:10px 14px; border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel-inset);
+    min-height:40px; max-height:160px; margin-top:8px; padding:7px 10px; overflow:auto;
+    border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel-inset);
+    font-family:var(--mono); font-size:12px; line-height:1.65;
   }
-  :global(#moveList .num){color:var(--muted)}
-  :global(#moveList .placeholder){color:var(--muted)}
-  :global(#moveList .san){padding:1px 4px; border-radius:4px}
+  :global(#moveList .num),:global(#moveList .placeholder){color:var(--muted)}
+  :global(#moveList .san){padding:1px 3px; border-radius:4px}
   :global(#moveList .san.current){background:var(--accent); color:var(--on-accent); font-weight:600}
   :global(#pgnOut){
-    font-family:var(--mono); font-size:12px;
-    white-space:pre-wrap; overflow-wrap:anywhere; margin-top:8px;
+    max-height:220px; overflow:auto; margin-top:8px;
+    font-family:var(--mono); font-size:10px; line-height:1.45;
+    white-space:pre-wrap; overflow-wrap:anywhere;
   }
-  :global(#pgnOut:not(:empty)){
-    padding:8px; border:1px solid var(--rule);
-    border-radius:6px; background:var(--card);
-  }
+  :global(#pgnOut:not(:empty)){padding:8px; border:1px solid var(--rule); border-radius:6px; background:var(--card)}
   :global(.restart-banner){
-    margin-top:10px; padding:10px 12px;
+    margin-top:8px; padding:9px 10px;
     border:1px solid var(--accent); border-radius:6px; background:var(--soft);
   }
   :global(#maia3Elo){
@@ -160,18 +204,22 @@
     border-radius:3px; background:var(--rule-strong); outline:none;
   }
   :global(#maia3Elo::-webkit-slider-thumb){
-    -webkit-appearance:none; appearance:none;
-    width:18px; height:18px; border-radius:50%; background:#fff;
-    border:2px solid var(--accent); cursor:pointer;
-    box-shadow:0 2px 6px rgba(80,55,25,.25);
+    -webkit-appearance:none; appearance:none; width:16px; height:16px;
+    border-radius:50%; background:#fff; border:2px solid var(--accent); cursor:pointer;
+    box-shadow:0 2px 6px rgba(80,55,25,.22);
   }
   :global(#maia3Elo::-moz-range-thumb){
-    width:18px; height:18px; border-radius:50%; background:#fff;
-    border:2px solid var(--accent); cursor:pointer;
-    box-shadow:0 2px 6px rgba(80,55,25,.25);
+    width:16px; height:16px; border-radius:50%; background:#fff;
+    border:2px solid var(--accent); cursor:pointer; box-shadow:0 2px 6px rgba(80,55,25,.22);
   }
   @media (max-width:900px){
-    main{grid-template-columns:1fr; padding:18px}
-    .app-sidebar{position:static; max-height:none; overflow-y:visible}
+    main{grid-template-columns:1fr; max-width:680px; padding:12px 10px 40px}
+    .app-sidebar{position:static; max-height:none; overflow:visible}
+  }
+  @media (max-width:520px){
+    .board-panel{padding:8px}
+    .opponent-grid{grid-template-columns:minmax(0,1.2fr) minmax(100px,.8fr)}
+    .maia-grid,.sampling-grid{grid-template-columns:1fr}
+    .game-setup{grid-template-columns:1fr}
   }
 </style>
