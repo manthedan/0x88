@@ -131,15 +131,15 @@
     border-color:var(--rule-strong);
   }
   .section-block{padding:0 12px 12px; border:0; border-bottom:1px solid var(--rule)}
-  .section-block:not([open]){padding-bottom:0}
+  details.section-block:not([open]){padding-bottom:0}
   .section-block>summary,.section-heading{
     margin:0 -12px 10px; padding:12px; list-style:none;
     font-family:var(--mono); font-size:10px; font-weight:650; line-height:1.2;
     letter-spacing:.1em; text-transform:uppercase; color:var(--muted-2);
   }
   .section-block>summary{cursor:pointer; user-select:none}
-  .section-heading{padding-left:26px}
-  .section-block:not([open])>summary{margin-bottom:0}
+  .section-heading{margin-bottom:4px; padding:12px 12px 8px 26px}
+  details.section-block:not([open])>summary{margin-bottom:0}
   .section-block>summary::-webkit-details-marker{display:none}
   .section-block>summary::before{content:"▸"; display:inline-block; width:14px; color:var(--accent)}
   .section-block[open]>summary::before{content:"▾"}
