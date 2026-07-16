@@ -1117,6 +1117,7 @@ function renderEngineList(): void {
     const remove = engineRows.length > 1 ? `<button class="row-rm" data-i="${i}" type="button" title="Remove engine">×</button>` : '';
     return `<div class="engine-row">${engineLogoHtml(engineLogoFamilyForEngineFamily(row.family))}<select class="row-fam" data-i="${i}">${famSel}</select><span class="arrow">→</span><select class="row-var" data-i="${i}">${varSel}</select><span class="arrow">→</span><input class="row-strength" data-i="${i}" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
   }).join('');
+  el('comparisonSection').hidden = activeEngineRows().length < 2;
 }
 
 async function workerBigNetLines(runId: number, variant: string, fen: string, visits: number, positions: BoardState[], requestedMultiPv: number): Promise<AnalysisLine[]> {
@@ -1353,6 +1354,8 @@ function renderEvalBar() {
 
 function renderLegend(lines: AnalysisLine[]) {
   const engines = [...new Set(lines.map((line) => line.engine))];
+  const hasBook = currentBookStats().length > 0;
+  el('engineLegend').hidden = engines.length < 2 && !hasBook;
   const colorKeys = new Map<string, string[]>();
   for (const engine of engines) {
     const key = engineColorKey(engine);
@@ -1369,7 +1372,7 @@ function renderLegend(lines: AnalysisLine[]) {
     const label = (colorKeys.get(key)?.length ?? 1) > 1 ? engine : (familyLabels[key] ?? engine);
     return { label, swatch: engineBrushes(engine).swatch };
   });
-  if (currentBookStats().length) keys.push({ label: 'Book', swatch: BOOK_SWATCH });
+  if (hasBook) keys.push({ label: 'Book', swatch: BOOK_SWATCH });
   el('engineLegend').innerHTML = keys.map((key) =>
     `<span class="key"><span class="dot" style="background:${key.swatch}"></span>${htmlEscape(key.label)}</span>`).join('');
 }
@@ -2397,7 +2400,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     publishLines();
     if (!hadTaskFailure) completeAnalysisKeys.add(selectionCacheKey);
     const message = document.getElementById('message');
-    if (message) message.textContent = hadTaskFailure ? `Analyzed with one or more engine failures/timeouts: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}` : `Analyzed: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`;
+    if (message) message.textContent = hadTaskFailure ? `Analysis completed with one or more engine failures/timeouts: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}` : `Analysis complete · ${selectedLabels}`;
   } catch (error) {
     controller.abort();
     const message = document.getElementById('message');

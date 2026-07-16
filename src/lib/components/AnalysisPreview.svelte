@@ -46,28 +46,33 @@
         <div><span>Current position</span><strong>White to move</strong></div>
         <div><span>Evaluation</span><strong>+0.13</strong></div>
       </div>
-      <div class="mini-status">Analyzed · Lc0 small · 400 visits</div>
+      <div class="mini-status">Analysis complete · Lc0 + SF Lite</div>
       <div class="section-title"><span>▾</span> ENGINES</div>
       <div class="engine-row-preview">
         <img src="/engine-logos/lc0.svg" alt="" />
         <span>Lc0</span><b>→</b><span>Small</span><b>→</b><code>400</code><small>visits</small>
       </div>
+      <div class="engine-row-preview">
+        <img src="/engine-logos/stockfish.png" alt="" />
+        <span>Stockfish</span><b>→</b><span>Lite</span><b>→</b><code>14</code><small>depth</small>
+      </div>
       <div class="add-engine">+ Add engine</div>
       <div class="analyze-controls-preview">
         <div class="analyze-row"><span class="primary">Analyze</span><span class="disabled">Stop</span></div>
         <div class="options-row">
-          <span class="toggle"><i></i>Auto analyze</span>
+          <span class="toggle"><i></i>Auto</span>
           <span class="stepper"><b>−</b><em>LINES<strong>3</strong></em><b>+</b></span>
         </div>
       </div>
 
       <div class="section-title comparison"><span>▾</span> COMPARISON</div>
-      <div class="consensus">1/1 engines prefer d4 · eval spread unavailable</div>
+      <div class="consensus">2/2 engines prefer d4 · eval spread 8 cp</div>
       <div class="compare-head"><span>ENGINE</span><span>BEST</span><span>EVAL</span><span>Δ</span><span>PV</span></div>
       <div class="compare-line"><span><img src="/engine-logos/lc0.svg" alt="" />Lc0</span><strong>d4</strong><code>+0.13</code><code>0</code><code>d4 d5 c4 c6</code></div>
+      <div class="compare-line"><span><img src="/engine-logos/stockfish.png" alt="" />SF</span><strong>d4</strong><code>+0.05</code><code>−8</code><code>d4 Nf6 c4 e6</code></div>
 
       <div class="section-title lines-title"><span>▾</span> LINES</div>
-      <div class="legend"><i></i>Lc0</div>
+      <div class="legend"><i></i>Lc0 <i class="sf"></i>Stockfish</div>
       <div class="analysis-line"><strong>+0.13</strong><code>d4 d5 c4 c6 cxd5</code></div>
       <div class="analysis-line"><strong>+0.12</strong><code>Nf3 d5 d4 Nf6</code></div>
       <div class="analysis-line"><strong>+0.11</strong><code>e4 e5 Nf3 Nc6</code></div>
@@ -183,6 +188,7 @@
   .lines-title{margin-top:13px}
   .legend{display:flex; align-items:center; gap:5px; margin-top:7px; color:var(--muted); font-size:7px}
   .legend i{width:7px; height:7px; border-radius:2px; background:var(--chart-1)}
+  .legend i.sf{margin-left:5px; background:var(--chart-2)}
   .analysis-line{
     display:grid; grid-template-columns:38px minmax(0,1fr); gap:5px;
     padding:5px 3px 5px 7px; border-top:1px solid var(--rule); border-left:2px solid var(--chart-1);
