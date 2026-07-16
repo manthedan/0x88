@@ -161,7 +161,7 @@
   }
   .advanced-settings[open]>summary{margin-bottom:8px}
   .setup-note{margin-top:8px; line-height:1.45}
-  .game-setup{display:grid; grid-template-columns:minmax(112px,.9fr) minmax(0,1.1fr); gap:8px; align-items:end}
+  .game-setup{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; align-items:end}
   .game-setup>button,.game-actions button{width:100%; min-height:36px; padding:7px 8px}
   .game-actions{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; margin-top:6px}
   .status-row{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; align-items:stretch}
