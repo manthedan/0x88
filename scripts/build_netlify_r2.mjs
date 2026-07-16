@@ -4,6 +4,8 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { checkSvelteKitRuntimeId } from './check_sveltekit_runtime_id.mjs';
+import { cleanSvelteKitBuild } from './clean_sveltekit_build.mjs';
 import { prepareNetlifyR2PublicAssets } from './prepare_netlify_r2_public_assets.mjs';
 
 const dist = resolve(process.env.NETLIFY_R2_RELEASE_DIST || process.argv[2] || 'dist-client');
@@ -36,6 +38,7 @@ async function main() {
   try {
     const prep = await timed('prepare pruned public assets', () => prepareNetlifyR2PublicAssets('public', publicDir), timings);
     console.error(`[netlify-r2-build] public assets: copied ${prep.copiedFiles} files, skipped ${prep.skippedFiles} files and ${prep.skippedDirs} dirs (${(prep.skippedBytes / 1_000_000).toFixed(1)} MB)`);
+    await timed('clean prior build output', () => cleanSvelteKitBuild(dist), timings);
     await timed('vite build', () => {
       run('vite', ['build', '--outDir', dist], {
         env: {
@@ -49,6 +52,7 @@ async function main() {
         },
       });
     }, timings);
+    await timed('verify SvelteKit runtime id', () => checkSvelteKitRuntimeId(dist), timings);
     await timed('prune external assets', () => {
       run(process.execPath, ['scripts/prune_external_model_assets.mjs', dist]);
     }, timings);

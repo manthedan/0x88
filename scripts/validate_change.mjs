@@ -6,14 +6,14 @@ function usage() {
 
 Codifies the fast local validation flow:
   quick: typecheck + targeted tests in parallel
-  final: full npm test, optionally with a parallel build
+  final: full npm test, optionally followed by a client build
 
 Options:
   --mode quick|final   Validation mode (default: quick)
   --tests LIST         Comma-separated focused test files for quick mode
   --skip-typecheck     Quick mode only, run targeted tests without typecheck
   --serial             Run quick checks sequentially instead of in parallel
-  --with-build         Final mode only, run build:client in parallel with npm test
+  --with-build         Final mode only, run build:client after npm test
   --dry-run            Print commands without running
   -h, --help           Show this help
 `);
@@ -90,11 +90,13 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) { usage(); return; }
   const steps = plan(args);
+  // `npm test` runs `svelte-kit sync`, which must not mutate .svelte-kit while Vite builds it.
+  const serial = args.serial || (args.mode === 'final' && args.withBuild);
   if (args.dryRun) {
-    console.log(JSON.stringify({ mode: args.mode, parallel: !args.serial, steps }, null, 2));
+    console.log(JSON.stringify({ mode: args.mode, parallel: !serial, steps }, null, 2));
     return;
   }
-  const rows = await runSteps(steps, args.serial);
+  const rows = await runSteps(steps, serial);
   printSummary(rows);
   if (rows.some((row) => row.status !== 0)) process.exit(1);
 }
