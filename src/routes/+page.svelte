@@ -15,7 +15,6 @@
 <section class="hero" aria-labelledby="hero-h1">
   <div class="wrap hero-grid">
     <div class="hero-copy">
-      <p class="eyebrow"><span></span> Local chess compute · WebGPU + WASM</p>
       <h1 id="hero-h1">A chess engine workbench, inside your browser.</h1>
       <p class="lede">
         Play a human-like opponent, compare serious engines on the same position,
@@ -24,9 +23,6 @@
       <div class="cta-row">
         <a class="btn btn-primary" href="/app/play/">Play a game <span aria-hidden="true">→</span></a>
         <a class="btn btn-secondary" href="/app/analysis/">Open analysis</a>
-      </div>
-      <div class="trust-row" aria-label="Product characteristics">
-        <span>Maia3</span><span>Lc0</span><span>Stockfish</span><span>+ 6 engines</span>
       </div>
     </div>
 
@@ -128,8 +124,7 @@
 
 </main>
 <footer class="site-footer">
-  <div class="wrap">
-    <span>0x88 is an open-source browser chess workbench.</span>
+  <div class="wrap landing-footer-wrap">
     <span class="footer-links">
       <a href="/app/play/">Play</a>
       <a href="/app/analysis/">Analysis</a>
@@ -144,7 +139,7 @@
 <style>
   .hero{border-bottom:1px solid var(--rule); background:var(--bg-2)}
   .hero-grid{
-    min-height:600px; padding-top:72px; padding-bottom:72px;
+    min-height:540px; padding-top:60px; padding-bottom:60px;
     display:grid; grid-template-columns:minmax(0,.88fr) minmax(520px,1.12fr);
     gap:clamp(44px,6vw,86px); align-items:center;
   }
@@ -172,12 +167,6 @@
   .btn-primary:hover{background:var(--accent-hover); color:var(--on-accent)}
   .btn-secondary{background:var(--panel); color:var(--ink)}
   .btn-secondary:hover{border-color:var(--accent)}
-  .trust-row{
-    display:flex; flex-wrap:wrap; gap:7px 18px; margin-top:28px; padding-top:18px;
-    border-top:1px solid var(--rule); color:var(--muted); font-family:var(--mono); font-size:11px;
-  }
-  .trust-row span:not(:last-child)::after{content:"/"; margin-left:18px; color:var(--faint)}
-
   .workbench{
     min-width:0; overflow:hidden; border:1px solid var(--rule-strong); border-radius:10px;
     background:var(--panel); box-shadow:0 30px 70px -45px rgba(45,35,20,.6);
@@ -251,6 +240,7 @@
   .principle a{white-space:nowrap; color:var(--ink); font-weight:650; font-size:13px}
   .principle a span{color:var(--accent); margin-left:5px}
   footer.site-footer{margin-top:0}
+  :global(.landing-footer-wrap){justify-content:flex-end}
 
   @media(max-width:1040px){
     .hero-grid{grid-template-columns:minmax(0,.85fr) minmax(460px,1.15fr); gap:38px}
@@ -272,8 +262,6 @@
     .hero-grid{padding:42px 20px 48px; gap:34px}
     .hero h1{font-size:clamp(38px,12vw,50px)}
     .lede{font-size:16px}
-    .trust-row{gap:6px 12px}
-    .trust-row span:not(:last-child)::after{margin-left:12px}
     .workbench-body{grid-template-columns:138px minmax(0,1fr)}
     .engine-output{padding:10px 9px}
     .position-eval{padding-bottom:9px}
@@ -296,6 +284,5 @@
     .workbench-body{grid-template-columns:116px minmax(0,1fr)}
     .engine-line{grid-template-columns:27px 29px 34px minmax(0,1fr)}
     .engine-line code{display:none}
-    .trust-row span:not(:last-child)::after{display:none}
   }
 </style>
