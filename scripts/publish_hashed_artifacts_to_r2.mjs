@@ -274,7 +274,11 @@ async function sha256RemoteUrl(url) {
 
 async function probeExistingEntry(entry) {
   if (!entry.url) return { state: 'unchecked', reason: 'no public artifact URL; pass --artifact-base for relative representation URLs' };
-  const response = await fetch(entry.url, { method: 'HEAD', cache: 'no-cache', headers: { 'Accept-Encoding': 'identity' } });
+  const response = await fetch(entry.url, {
+    method: 'HEAD',
+    cache: 'no-cache',
+    headers: { 'Accept-Encoding': entry.contentEncoding ?? 'identity' },
+  });
   if (response.status === 404) return { state: 'missing', url: entry.url, status: response.status };
   if (!response.ok) throw new Error(`Artifact probe failed for ${entry.url}: HTTP ${response.status}`);
   const encodedLengthMetadata = positiveIntegerHeader(response.headers, 'X-Artifact-Encoded-Length')
@@ -383,10 +387,17 @@ async function verifyRemoteImmutableObject(args, target, expected) {
   const dir = await mkdtemp(join(tmpdir(), 'lc0-r2-exists-'));
   try {
     const file = join(dir, 'object');
-    const child = spawnSync(args.wranglerBin, ['r2', 'object', 'get', target, '--file', file, '--remote'], { encoding: 'utf8' });
+    const child = spawnSync(args.awsBin, [
+      's3api', 'get-object',
+      '--bucket', args.bucket,
+      '--key', expected.key,
+      '--endpoint-url', args.r2Endpoint,
+      '--region', 'auto',
+      file,
+    ], { encoding: 'utf8' });
     if (child.status !== 0) {
       const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
-      if (/specified key does not exist/i.test(output)) return 'missing';
+      if (isMissingObjectOutput(output)) return 'missing';
       throw new Error(`Unable to verify immutable object ${target}; refusing to upload`);
     }
     if (!existsSync(file)) {
