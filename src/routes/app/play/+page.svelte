@@ -96,7 +96,7 @@
       <button id="copyPgn" type="button">Copy PGN</button>
     </div>
     <div id="pgnOut"></div>
-    <p class="small">Engines run entirely in your browser &#x2014; nothing is sent to a server. The first move against a new engine downloads it (a few MB for CPU engines, up to a few hundred MB for the big Lc0 nets).</p>
+    <p class="small">Engine computation runs in your browser, and game data is not sent to a server. A new engine downloads when you first use it, then remains cached locally.</p>
   </section>
 </main>
 

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import SiteHeader from '$lib/components/SiteHeader.svelte';
-  const title = "0x88 Chess — docs: pages, engines, licenses";
-  const description = "What each 0x88.app page does, the chess engines running in your browser, who built them, how we package them, and our GPL/AGPL corresponding-source commitments.";
+  const title = "0x88 Chess — documentation";
+  const description = "Documentation for the 0x88 browser chess workspaces, engine runtimes, upstream projects, licenses, and corresponding-source archives.";
   let tocOpen = false;
   onMount(() => {
     const headings = document.querySelectorAll('.doc-content section[id], .doc-content h3[id]');
@@ -38,9 +38,9 @@
 <section class="doc-hero" aria-labelledby="doc-h1">
   <div class="wrap">
     <p class="kicker">Documentation</p>
-    <h1 id="doc-h1">What's here, who built it, where the source lives.</h1>
+    <h1 id="doc-h1">Browser chess engines and their source</h1>
     <p>
-      <strong>0x88.app</strong> is a browser-first chess platform. The same engines that win computer-chess championships run here in a single browser tab, no installs and no servers. This page explains what each page does, catalogues every engine running on the site, credits the people who built them, and lays out exactly how each binary is packaged and where its corresponding source lives &mdash; so our GPL/AGPL commitments are concrete, not abstract.
+      <strong>0x88.app</strong> is a browser chess platform built from open-source engines and models. This guide explains the app and its browser runtimes. It also credits each upstream project and links every redistributed binary to its license and corresponding source.
     </p>
   </div>
 </section>
@@ -97,15 +97,15 @@
 <!-- ===== PAGES ===== -->
 <section id="pages">
   <h2>The pages <a class="anchor-link" href="#pages" aria-label="Link to this section">#</a></h2>
-  <p class="lead">Three user-facing entry points, each running entirely client-side. Open a URL, pick an engine, and everything else loads into your browser on demand.</p>
+  <p class="lead">0x88 has dedicated workspaces for play, analysis, and engine tournaments. Each workspace runs client-side and loads its engines when needed.</p>
 
   <div class="page-block">
     <h3 id="pages-play"><span class="pn">Play</span> Play a game <a class="anchor-link" href="#pages-play" aria-label="Link to this section">#</a></h3>
     <span class="pg-url">/app/play</span>
-    <p>Play chess against the engine of your choice, or against the human-like Maia3 model that imitates how real players at any rating actually play. Pick your color, pick your opponent, pick a strength level, and the rest is a normal game of chess &mdash; takebacks and PGN export included.</p>
+    <p>The Play page runs a game against Maia3 or one of the available chess engines. Choose a color and strength, then play with takebacks and PGN export available throughout the game.</p>
     <ul>
-      <li><strong>Maia3 rating slider (600&ndash;2600)</strong> &mdash; trained on millions of human games; matches the move distribution of players at a chosen Elo rather than playing the objectively best move.</li>
-      <li><strong>Engine opponents at five strength levels</strong> &mdash; from the small Leela Chess Zero net up to the strongest NNUE engines, with depth/node limits used as the strength dial.</li>
+      <li><strong>Maia3 rating slider (600&ndash;2600)</strong> &mdash; conditions Maia3's move probabilities and human-game outcome predictions on the selected rating.</li>
+      <li><strong>Engine opponents at five strength levels</strong> &mdash; adjusts visit, depth, or node limits according to the selected engine.</li>
       <li><strong>Full game lifecycle</strong> &mdash; takebacks, resign, new game, flip board, move list, and one-click PGN export.</li>
     </ul>
     <p>Nothing about your game is sent anywhere. The engine binary and (if needed) the neural network download on first use, then cache locally for next time.</p>
@@ -114,7 +114,7 @@
   <div class="page-block">
     <h3 id="pages-analysis"><span class="pn">Analysis</span> Analysis board <a class="anchor-link" href="#pages-analysis" aria-label="Link to this section">#</a></h3>
     <span class="pg-url">/app/analysis</span>
-    <p>The analysis board is the power-user surface. Load a position by FEN or a full game by PGN, then run <em>multiple engines side by side</em> on it. Each engine's evaluation, principal variation, and best move are shown in a comparison table so you can see where engines agree and where they disagree &mdash; that disagreement is often the most interesting thing in a position.</p>
+    <p>The Analysis page runs several engines on the same FEN or PGN. Its comparison table places each best move, evaluation, and principal variation together so disagreements are easy to inspect.</p>
     <ul>
       <li><strong>Multi-engine comparison</strong> &mdash; add as many engines as your machine can handle; each contributes its eval, PV, and best move to a shared table.</li>
       <li><strong>Game review</strong> &mdash; annotate every move of a PGN with accuracy scores, critical moments (best/good/inaccuracy/mistake/blunder), and a win-probability chart.</li>
@@ -127,7 +127,7 @@
   <div class="page-block">
     <h3 id="pages-arena"><span class="pn">Arena</span> Engine arena <a class="anchor-link" href="#pages-arena" aria-label="Link to this section">#</a></h3>
     <span class="pg-url">/app/arena</span>
-    <p>The arena is where engines play each other. Schedule head-to-head matches, gauntlets (one engine vs a field), or round-robin tournaments, and watch games play out on the board in real time with live evaluation bars and per-move scoring. It's part spectacle, part testbed &mdash; the same interface the project uses internally to benchmark new Leela Chess Zero networks.</p>
+    <p>The Arena schedules engine matches and tournaments. Games appear live on the board, and finished results feed the standings and evaluation charts. The project also uses this workspace to compare browser engine builds and Leela Chess Zero networks.</p>
     <ul>
       <li><strong>Tournament formats</strong> &mdash; head-to-head, gauntlet, round-robin, with configurable games-per-pairing and color alternation.</li>
       <li><strong>Live standings and Elo estimates</strong> &mdash; running score table, Elo updates after each game, and a final ranking.</li>
@@ -140,11 +140,11 @@
 <!-- ===== HUMAN VS COMPUTER PLAY ===== -->
 <section id="human-vs-computer">
   <h2>Human vs computer play <a class="anchor-link" href="#human-vs-computer" aria-label="Link to this section">#</a></h2>
-  <p class="lead">There are two different ways to make chess AI useful against people. Maia3 is the neural human-modeling lane: it asks what a rated human is likely to play. LQO and Monty-style contempt search are the practical-engine lane: they keep strong search, but stop assuming the opponent will always find the perfect defense.</p>
+  <p class="lead">Maia3 predicts a rating-conditioned human move distribution and human-game outcome. Leela Queen Odds is an Lc0-compatible network trained for games where the engine starts without its queen. The optional contempt controls belong to 0x88's search implementation and model an opponent with limited reply search.</p>
 
   <div class="callout info">
-    <h4>Short version</h4>
-    <p><strong>Maia3</strong> is for human authenticity &mdash; sparring against a 1500-ish style, exploring common human moves, and estimating rating-conditioned human outcomes. <strong>LQO/search contempt</strong> is for practical pressure &mdash; queen-odds play, anti-draw bias, traps, and moves that maximize chances against a fallible human.</p>
+    <h4>Model boundaries</h4>
+    <p>Maia3 is used directly as a move policy. Leela Queen Odds runs through 0x88's PUCT search from its specialized starting position. Contempt search does not make a conventional engine human-like or give it a personality.</p>
   </div>
 
   <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
@@ -159,33 +159,33 @@
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">What is it modeling?</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)">The move distribution and expected result of real humans at a chosen rating.</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">A strong engine's practical chances against an imperfect, budget-limited human opponent.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">A queen-odds policy/value model, optionally combined with a limited-reply opponent model in 0x88's search.</td>
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">How does it pick moves?</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)">Samples from, or takes argmax of, a rating-conditioned neural human policy.</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Runs engine search with odds-calibrated evaluation and contempt knobs such as drawScore, searchContemptLimit, or contemptElo.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Runs 0x88's PUCT search over the specialized network, with optional controls such as <code>drawScore</code> and <code>searchContemptLimit</code>.</td>
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">What should the UI promise?</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Human-like play: "what would a 1500-rated player do?"</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Practical engine play: "what move creates the most problems for this human?"</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Rating-conditioned human move probabilities and expected game result.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">A specialized queen-odds opponent with clearly labeled search settings.</td>
       </tr>
       <tr>
         <td style="padding:10px; font-weight:600">Best fit</td>
         <td style="padding:10px">Human sparring, human-move explorer, and rating-conditioned analysis.</td>
-        <td style="padding:10px">Queen odds, anti-draw pressure, trap-aware play, and practical-vs-objective comparisons.</td>
+        <td style="padding:10px">Queen-odds games and experiments comparing ordinary search with a limited-reply opponent model.</td>
       </tr>
     </tbody>
   </table>
 
-  <p>In product copy, do not call contempt search "human-like": it models the opponent's limitations, not the engine's own style. Conversely, do not route Maia3 through LC0 PUCT by default; a future mixed-policy mode can be useful, but it should be labeled experimental. The full design note lives in <a href="https://github.com/manthedan/0x88/blob/main/docs/human_vs_computer_play.md">docs/human_vs_computer_play.md</a>.</p>
+  <p>Maia3's WDL output predicts the result of a human game at the selected rating; it is not an engine centipawn evaluation. The Leela Queen Odds and contempt experiments use 0x88's PUCT search. The full design note lives in <a href="https://github.com/manthedan/0x88/blob/main/docs/human_vs_computer_play.md">docs/human_vs_computer_play.md</a>.</p>
 </section>
 
 <!-- ===== NEURAL BROWSER RUNTIMES ===== -->
 <section id="neural-runtimes">
   <h2>Neural browser runtimes <a class="anchor-link" href="#neural-runtimes" aria-label="Link to this section">#</a></h2>
-  <p class="lead">The LC0 and Maia lanes are browser neural inference stacks, not CPU UCI ports. They start from ONNX models, WebGPU kernels, or compiler-generated runtimes, then feed policy/value outputs into the Play, Analysis, and Arena surfaces.</p>
+  <p class="lead">Lc0 and Maia3 are loaded as browser models rather than compiled UCI executables. 0x88 supplies input encoding, inference, and legal-move mapping. Its own PUCT implementation searches the Lc0 and Leela Queen Odds outputs, while Maia3 is used directly as a rating-conditioned move policy.</p>
 
   <div class="callout info">
     <h4>Stable baseline</h4>
@@ -236,7 +236,7 @@
 <!-- ===== CPU WASM RUNTIMES ===== -->
 <section id="cpu-wasm">
   <h2>CPU WASM runtimes <a class="anchor-link" href="#cpu-wasm" aria-label="Link to this section">#</a></h2>
-  <p class="lead">Not every engine here is a WebGPU neural net. Stockfish, Reckless, Berserk, Viridithas, PlentyChess, and the Monty lab port are CPU engines compiled to WebAssembly, then wrapped as browser workers with a UCI-style control plane.</p>
+  <p class="lead">Stockfish, Reckless, Berserk, Viridithas, PlentyChess, Stormphrax, and the Monty lab port are CPU engines compiled to WebAssembly. Browser workers provide their UCI-style control layer.</p>
 
   <div class="callout info">
     <h4>Two build lanes</h4>
@@ -328,21 +328,21 @@
 <!-- ===== ENGINES ===== -->
 <section id="engines">
   <h2>The engines <a class="anchor-link" href="#engines" aria-label="Link to this section">#</a></h2>
-  <p class="lead">Two families of chess AI. Neural networks evaluate positions with deep learning on WebGPU; NNUE engines evaluate efficiently on CPU via WebAssembly. All are state-of-the-art in their class, all are open source, and all are the work of the authors credited below &mdash; not us. We package and deploy them; they did the hard part.</p>
+  <p class="lead">These entries separate upstream engine and model facts from 0x88's browser packaging. The <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">CCRL 40/15 list</a> and <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC engine status</a> provide context for native builds under their own hardware and tournament conditions; neither measures the browser artifacts served here.</p>
 
   <div class="engine-entry">
     <h3 id="engines-lc0">Leela Chess Zero <a class="anchor-link" href="#engines-lc0" aria-label="Link to this section">#</a></h3>
     <dl class="engine-meta">
-      <dt>Author</dt><dd>LeelaChessZero &middot; <a href="https://github.com/LeelaChessZero/lc0" rel="noopener">github.com/LeelaChessZero/lc0</a></dd>
-      <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
+      <dt>Project</dt><dd>Leela Chess Zero &middot; <a href="https://github.com/LeelaChessZero/lc0" rel="noopener">github.com/LeelaChessZero/lc0</a></dd>
+      <dt>License</dt><dd><span class="lic gpl">GPL-3.0-or-later</span></dd>
       <dt>Manifest</dt><dd><a href="/models/lc0/manifest.json">/models/lc0/manifest.json</a></dd>
       <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (browser runtime, ONNX export &amp; quantization scripts)</dd>
     </dl>
-    <p>A neural-network engine trained from scratch by self-play, in the tradition of AlphaZero. The networks here (t1, t3, and BT4) are real LC0 weights running on the browser's GPU through ONNX Runtime WebGPU. <strong>This project's headline research effort</strong> &mdash; exploring how far browser WebGPU can go as a deep-learning inference runtime, with quantized ONNX, custom WGSL kernels, and a progressive ladder of net sizes. The related Leela Queen Odds net (used for the Play page's queen-odds bot) is listed separately below.</p>
+    <p>Leela Chess Zero is an open-source UCI engine that combines neural-network policy and value evaluation with Monte Carlo tree search. 0x88 does not compile the upstream C++ engine into WebAssembly. It exports selected Lc0 network weights (T1, T3, and BT4) to browser formats, evaluates them with ONNX Runtime WebGPU or custom WebGPU kernels, and searches them with 0x88's own PUCT implementation.</p>
     <details>
       <summary>Architecture &amp; packaging details</summary>
       <div class="details-body">
-        <p>LC0 uses a residual CNN with a policy head and value head, trained via self-play reinforcement learning. The browser deployment exports these to ONNX and applies QDQ (quantize-dequantize) int8 quantization to the weight tensors while keeping the computation graph in a WebGPU-friendly format. A progressive ladder of network sizes is served so weaker devices get a smaller net automatically.</p>
+        <p>The served networks expose policy and value/WDL outputs used by the browser search. 0x88 exports the weights to ONNX and, for selected artifacts, applies QDQ int8 weight quantization while retaining floating-point computation after dequantization. The T1, T3, and BT4 options form a size ladder for different download, memory, and inference budgets.</p>
       </div>
     </details>
   </div>
@@ -351,16 +351,16 @@
     <h3 id="engines-lqo">Leela Queen Odds (LQO) <a class="anchor-link" href="#engines-lqo" aria-label="Link to this section">#</a></h3>
     <dl class="engine-meta">
       <dt>Author</dt><dd>notune &middot; <a href="https://github.com/notune/LeelaQueenOdds" rel="noopener">github.com/notune/LeelaQueenOdds</a></dd>
-      <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span> (derived from LC0)</dd>
+      <dt>License</dt><dd><span class="lic agpl">AGPL-3.0</span></dd>
       <dt>Artifact</dt><dd><a href="https://assets.0x88.app/models/lc0/lqo_v2.f16.qdq8.onnx">/models/lc0/lqo_v2.f16.qdq8.onnx</a> (~96 MB, QDQ int8)</dd>
       <dt>Derived from</dt><dd><a href="https://assets.0x88.app/models/lc0/lqo_v2.f16.onnx">lqo_v2.f16.onnx</a> (fp16 source export)</dd>
       <dt>Manifest</dt><dd><a href="/models/lc0/manifest.json">/models/lc0/manifest.json</a></dd>
     </dl>
-    <p>The public net behind the Lichess queen-odds bot: a Leela Chess Zero network fine-tuned to win against humans from a <strong>queen-down</strong> starting position. Selecting it on the Play page removes your queen before move one, and the bot then presses hardest for tricks &mdash; the same dynamic the Lichess bot is famous for. Not a general analysis net (it evaluates the queen-odds start as equal), but a uniquely instructive opponent for practicing from behind.</p>
+    <p>Leela Queen Odds v2 is an Lc0-compatible network trained specifically to play human opponents while the engine starts without its queen. The Play page therefore removes the bot's queen, not the user's. Upstream warns that the network is unsuitable for ordinary-position analysis because it evaluates its specialized queen-odds starting position as equal.</p>
     <details>
       <summary>Search parameters &amp; packaging details</summary>
       <div class="details-body">
-        <p>The Lichess bot runs the upstream net with search-contempt at 12&ndash;15k nodes. The browser deployment scales that down to visit budgets and applies three README-derived knobs: <code>cpuct 1.5</code>, <code>drawScore -0.5</code> (aggressive anti-draw lean), and <code>searchContemptLimit 24</code>. These were A/B-validated at queen odds vs Maia 1900 (92% vs 58% baseline).</p>
+        <p>Upstream recommends 15,000 nodes when the network plays White and 12,000 when it plays Black, with <code>ScLimit</code> 40/32, <code>CPuct 1.5</code>, <code>FpuValue 0.4</code>, color-specific <code>DrawScore</code>, and <code>SwapColors</code> when the network plays Black. 0x88 uses lower visit budgets and maps those settings into its own PUCT and search-contempt implementation.</p>
         <p>The served artifact is a QDQ int8 quantization of the fp16 export, derived in-tree and shipped from the LC0 manifest alongside the other big nets (BT4, t3).</p>
       </div>
     </details>
@@ -369,27 +369,28 @@
   <div class="engine-entry">
     <h3 id="engines-maia3">Maia3 <a class="anchor-link" href="#engines-maia3" aria-label="Link to this section">#</a></h3>
     <dl class="engine-meta">
-      <dt>Author</dt><dd>CSSLab (Jon Klein, Reid McIlroy-Young, et al.) &middot; <a href="https://github.com/CSSLab/maia3" rel="noopener">github.com/CSSLab/maia3</a></dd>
+      <dt>Authors</dt><dd>Daniel Monroe, George Eilender, Philip Chalmers, Zhenwei Tang, and Ashton Anderson (CSSLab) &middot; <a href="https://github.com/CSSLab/maia3" rel="noopener">github.com/CSSLab/maia3</a></dd>
       <dt>License</dt><dd><span class="lic agpl">AGPL-3.0</span></dd>
+      <dt>Paper</dt><dd><a href="https://arxiv.org/abs/2605.19091" rel="noopener">Chessformer: A Unified Architecture for Chess Modeling</a></dd>
       <dt>Provenance</dt><dd><a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">/docs/model_provenance/maia3.md</a></dd>
       <dt>Frontend</dt><dd><a href="https://github.com/CSSLab/maia-platform-frontend" rel="noopener">github.com/CSSLab/maia-platform-frontend</a> (byte-identical upstream fp16 model)</dd>
     </dl>
-    <p>A human-move-prediction model trained on millions of real Lichess games. Where Stockfish asks "what's best?", Maia asks "what would a 1500-rated human actually play here?" &mdash; and answers it surprisingly well, across the whole rating ladder. The Play page uses it to give you an opponent that feels like a person, not a sandboxed grandmaster.</p>
+    <p>Maia-3 is a family of Chessformer models for predicting human moves across skill levels. The browser model returns rating-conditioned move probabilities and human-game WDL predictions rather than a searched centipawn evaluation. The Play page can sample from that policy or choose its highest-probability move.</p>
     <div class="callout info">
       <h4>AGPL source offer</h4>
-      <p>The default browser artifact is a local int8 quantization of the upstream fp16 file. Because Maia3 is AGPL-3.0, the <a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">derivation recipe</a> is part of the source offer, not just the upstream link.</p>
+      <p>The default browser artifact is a local int8 quantization of the upstream fp16 file. The AGPL source offer includes the <a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">derivation recipe</a> for that artifact.</p>
     </div>
   </div>
 
   <div class="engine-entry">
     <h3 id="engines-stockfish">Stockfish 18 <a class="anchor-link" href="#engines-stockfish" aria-label="Link to this section">#</a></h3>
     <dl class="engine-meta">
-      <dt>Author</dt><dd>official-stockfish &middot; via <a href="https://github.com/nmrugg/stockfish.js" rel="noopener">github.com/nmrugg/stockfish.js</a></dd>
+      <dt>Project</dt><dd><a href="https://github.com/official-stockfish/Stockfish" rel="noopener">official-stockfish/Stockfish</a> &middot; browser package via <a href="https://github.com/nmrugg/stockfish.js" rel="noopener">nmrugg/stockfish.js</a></dd>
       <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
       <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
       <dt>Source</dt><dd><a href="https://assets.0x88.app/stockfish/stockfish-18.0.7-corresponding-source.tar.gz">stockfish-18.0.7-corresponding-source.tar.gz</a></dd>
     </dl>
-    <p>The strongest classical chess engine in the world, and has been for years. A community project with hundreds of contributors, continually refined through distributed testing (FishCooking). The NNUE evaluation lets it calculate god-like evaluations with a forward pass cheap enough to search hundreds of millions of nodes per second on a CPU. We ship Stockfish.js 18 in Lite and full-network flavors.</p>
+    <p>Stockfish is a community-developed UCI engine derived from Glaurung 2.1. It combines alpha-beta search with NNUE evaluation, and proposed changes are tested through the distributed Fishtest system. Stockfish 18 led the <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">July 2026 CCRL 40/15 list</a>, and Stockfish finished first in the <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC Season 29 Superfinal</a>. 0x88 ships the Stockfish.js 18.0.7 package in Lite and full-network forms.</p>
     <div class="callout info">
       <h4>Relaxed SIMD candidate</h4>
       <p>The Lite single-thread build has a feature-detected relaxed-SIMD candidate. On our Chromium public-asset validation set &mdash; opening, tactical, quiet middlegame, castling-rights, en-passant, promotion, and endgame FENs; fixed depths 7/9 plus 120 ms movetime &mdash; it measured <strong>2.34M aggregate NPS vs 2.01M</strong> for the baseline Lite single build, a <strong>1.16&times;</strong> overall speedup. Fixed-depth parity was exact: 14/14 same best move, score, and PV. Full single-threaded, Lite pthread, and full pthread relaxed builds remain reproducible local candidates while we gather deeper full-net/threaded evidence. Browsers without the relaxed-SIMD dot-product opcode automatically keep using the baseline Lite single artifact.</p>
@@ -397,7 +398,7 @@
     <details>
       <summary>Architecture &amp; packaging details</summary>
       <div class="details-body">
-        <p>Stockfish uses an efficiently updatable neural network (NNUE) as its static evaluation function. The network takes a HalfKAv2 feature representation of the board, runs through a feature transformer and two small linear layers with ClippedReLU activations, and outputs a single eval value. The browser build compiles Stockfish to WebAssembly via Emscripten, with the NNUE network embedded. Both the Lite (smaller net) and full-network variants are served from the manifest.</p>
+        <p>Stockfish uses an efficiently updatable neural network as its static evaluation function inside search. The Stockfish.js package compiles the engine to WebAssembly through Emscripten and embeds the required NNUE data. The manifest serves both the smaller Lite package and the full-network variants.</p>
       </div>
     </details>
   </div>
@@ -410,18 +411,18 @@
       <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
       <dt>Source</dt><dd><a href="https://assets.0x88.app/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz">berserk-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
     </dl>
-    <p>A remarkably strong, remarkably compact engine written in C. Jay Honnold's work is a textbook example of how far clean code and a well-tuned NNUE can go &mdash; Berserk consistently outranks engines with far larger codebases. Compiled here with Emscripten for the browser.</p>
+    <p>Berserk 14 is Jay Honnold's UCI engine written in C. Its documented implementation uses principal-variation search with standard alpha-beta pruning techniques and a bucketed NNUE evaluation. 0x88 compiles the pinned release with Emscripten and serves scalar, WebAssembly SIMD, and relaxed-SIMD variants.</p>
   </div>
 
   <div class="engine-entry">
     <h3 id="engines-viridithas">Viridithas <a class="anchor-link" href="#engines-viridithas" aria-label="Link to this section">#</a></h3>
     <dl class="engine-meta">
       <dt>Author</dt><dd>Cosmo Bobak &middot; <a href="https://github.com/cosmobobak/viridithas" rel="noopener">github.com/cosmobobak/viridithas</a></dd>
-      <dt>License</dt><dd><span class="lic mit">MIT</span></dd>
+      <dt>License</dt><dd><span class="lic mit">MIT</span> at pinned commit <a href="https://github.com/cosmobobak/viridithas/commit/20d7402065cae084715183e019fdd18089e2dfac" rel="noopener"><code>20d7402</code></a>; upstream changed to AGPL-3.0-only in version 20.0.0</dd>
       <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
       <dt>Source</dt><dd><a href="https://assets.0x88.app/viridithas/viridithas-wasip1-corresponding-source.tar.gz">viridithas-wasip1-corresponding-source.tar.gz</a></dd>
     </dl>
-    <p>A modern Rust engine and a consistent top-tier competitor in computer-chess tournaments. Rust's safety guarantees plus Cosmo Bobak's tuning make it both fast and approachable. The browser build here uses relaxed-SIMD for the heavy NNUE inner loops, which WebAssembly finally exposes to engines.</p>
+    <p>Viridithas is Cosmo Bobak's Rust UCI engine with NNUE evaluation. The project documents that its network training does not use evaluations produced by other chess engines. 0x88 pins commit <code>20d7402</code>, whose license is MIT, and serves scalar, WebAssembly SIMD, and relaxed-SIMD WASI builds.</p>
   </div>
 
   <div class="engine-entry">
@@ -432,7 +433,7 @@
       <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
       <dt>Source</dt><dd><a href="https://assets.0x88.app/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz">plentychess-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
     </dl>
-    <p>A top-tier C++ engine and frequent contender at the top of rating lists. PlentyChess ships its own NNUE architecture and a feature-detected SIMD build so the browser picks the fastest instruction set the device supports. Compiled here with Emscripten, with the processed NNUE network embedded.</p>
+    <p>PlentyChess 7.0.66 is Patrick Leonhardt's C++17 UCI engine. Its threat-input NNUE is trained on more than 15 billion self-generated standard-chess and Fischer-random positions, with self-distillation used for part of the training. 0x88 compiles the pinned revision with Emscripten and serves scalar, SSE4.1-shaped WebAssembly SIMD, and relaxed-SIMD variants with the network embedded.</p>
   </div>
 
   <div class="engine-entry">
@@ -443,19 +444,19 @@
       <dt>Network</dt><dd><code>undertown.nnue</code>, trained from Stormphrax self-play data</dd>
       <dt>Source</dt><dd><a href="https://assets.0x88.app/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz">stormphrax-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
     </dl>
-    <p>A Chess960-focused C++ UCI engine with an independently trained NNUE. The browser build uses a single-thread Emscripten worker and a dedicated 128-bit WebAssembly SIMD backend.</p>
+    <p>Stormphrax 8.0.0 is Ciekce's C++ UCI engine with an explicit Chess960 focus. Its NNUE starts from random weights and is trained on data generated by Stormphrax rather than a third-party engine. 0x88 serves a single-thread Emscripten build with WebAssembly SIMD and a feature-detected relaxed-SIMD candidate.</p>
   </div>
 
   <div class="engine-entry">
     <h3 id="engines-reckless">Reckless <a class="anchor-link" href="#engines-reckless" aria-label="Link to this section">#</a></h3>
     <dl class="engine-meta">
-      <dt>Author</dt><dd>CodeDeliveryService &middot; <a href="https://github.com/codedeliveryservice/Reckless" rel="noopener">github.com/codedeliveryservice/Reckless</a></dd>
+      <dt>Project</dt><dd>CodeDeliveryService &middot; <a href="https://github.com/codedeliveryservice/Reckless" rel="noopener">github.com/codedeliveryservice/Reckless</a></dd>
       <dt>License</dt><dd><span class="lic agpl">AGPL-3.0</span></dd>
       <dt>Notice</dt><dd><a href="/reckless/NOTICE.md">/reckless/NOTICE.md</a></dd>
       <dt>Source</dt><dd><a href="https://assets.0x88.app/reckless/reckless-scalar-corresponding-source.tar.gz">scalar</a>, <a href="https://assets.0x88.app/reckless/reckless-simd128-corresponding-source.tar.gz">SIMD</a>, and <a href="https://assets.0x88.app/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz">relaxed SIMD</a></dd>
       <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (build scripts &amp; release policy)</dd>
     </dl>
-    <p>An aggressive, sacrificial Rust engine that lives up to its name &mdash; it plays sharp, entertaining chess and is a favorite in the computer-chess streaming scene.</p>
+    <p>Reckless is a competitive Rust UCI engine using alpha-beta search and NNUE evaluation. Native Reckless 0.9.0 placed second on the <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">July 2026 CCRL 40/15 list</a>, and a development build finished second in the <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC Season 29 Superfinal</a>. 0x88 pins development commit <a href="https://github.com/codedeliveryservice/Reckless/commit/0010617448bdef4c8cd7d4f4825b7e42c8bc262a" rel="noopener"><code>0010617</code></a> and serves scalar, WebAssembly SIMD, and relaxed-SIMD WASI builds.</p>
     <div class="callout info">
       <h4>Public v0 engine</h4>
       <p>Reckless is published through the project CDN for Play, Analysis, and Arena. The browser selects relaxed SIMD or SIMD when supported, and falls back to the scalar WASI build otherwise. Matching source archives for the scalar, SIMD, and relaxed SIMD builds are hosted beside the binaries.</p>
@@ -466,7 +467,7 @@
 <!-- ===== LICENSES ===== -->
 <section id="licenses">
   <h2>Licenses &amp; corresponding source <a class="anchor-link" href="#licenses" aria-label="Link to this section">#</a></h2>
-  <p class="lead">Most of the engines on this site are GPL- or AGPL-licensed. That's not a box we tick &mdash; it's the reason this project exists in the open. Here's exactly what we redistribute, where each component's source lives, and how we honor the corresponding-source obligation.</p>
+  <p class="lead">Most engines on this site use GPL or AGPL licenses. This section identifies each redistributed artifact, its upstream project, and its corresponding-source archive.</p>
 
   <div class="callout info">
     <h4>The short version</h4>
@@ -489,13 +490,13 @@
     <tbody>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Leela Chess Zero</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0-or-later</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/LeelaChessZero/lc0" rel="noopener">LeelaChessZero/lc0</a></td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/manthedan/0x88" rel="noopener">0x88 repo</a> (browser runtime + export scripts)</td>
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Leela Queen Odds (LQO)</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">AGPL-3.0</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/notune/LeelaQueenOdds" rel="noopener">notune/LeelaQueenOdds</a></td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://assets.0x88.app/models/lc0/lqo_v2.f16.onnx">fp16 source export</a> + <a href="https://github.com/manthedan/0x88" rel="noopener">0x88 repo</a> (QDQ int8 derivation scripts)</td>
       </tr>
@@ -519,8 +520,8 @@
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Viridithas</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">MIT</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/cosmobobak/viridithas" rel="noopener">cosmobobak/viridithas</a></td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">MIT (pinned commit)</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/cosmobobak/viridithas/commit/20d7402065cae084715183e019fdd18089e2dfac" rel="noopener">cosmobobak/viridithas@20d7402</a></td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://assets.0x88.app/viridithas/viridithas-wasip1-corresponding-source.tar.gz">viridithas-wasip1-corresponding-source.tar.gz</a> (license still honored)</td>
       </tr>
       <tr>
@@ -528,6 +529,12 @@
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/Yoshie2000/PlentyChess" rel="noopener">Yoshie2000/PlentyChess</a></td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://assets.0x88.app/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz">plentychess-emscripten-single-thread-corresponding-source.tar.gz</a></td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Stormphrax</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0-or-later</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/Ciekce/Stormphrax/tree/v8.0.0" rel="noopener">Ciekce/Stormphrax v8.0.0</a></td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://assets.0x88.app/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz">stormphrax-emscripten-single-thread-corresponding-source.tar.gz</a></td>
       </tr>
       <tr>
         <td style="padding:10px; font-weight:600">Reckless</td>
@@ -561,8 +568,8 @@
 <!-- ===== REMOVAL ===== -->
 <section id="removal">
   <h2>I'm in this project and I don't like it <a class="anchor-link" href="#removal" aria-label="Link to this section">#</a></h2>
-  <p class="lead">Thank you for your contribution to chess. The engines and models above are the work of their authors &mdash; this project only packages them for the browser.</p>
-  <p>If you maintain one of them and would prefer it not be included here, just <a href="https://github.com/manthedan/0x88/issues/new?title=Engine%20removal%20request&amp;body=Which%20engine%20or%20model%3A%20%0A%0AAre%20you%20a%20maintainer%20or%20rights%20holder%3A%20%0A%0AAnything%20else%3A%20" rel="noopener">open an issue on GitHub</a> and I'll remove it &mdash; no questions asked.</p>
+  <p class="lead">The engines and models above belong to their respective projects. 0x88 packages them for browser use.</p>
+  <p>Maintainers and rights holders can request removal by <a href="https://github.com/manthedan/0x88/issues/new?title=Engine%20removal%20request&amp;body=Which%20engine%20or%20model%3A%20%0A%0AAre%20you%20a%20maintainer%20or%20rights%20holder%3A%20%0A%0AAnything%20else%3A%20" rel="noopener">opening an issue on GitHub</a>. The requested engine or model will be removed.</p>
   <p>
     <a class="removal-cta" href="https://github.com/manthedan/0x88/issues/new?title=Engine%20removal%20request&amp;body=Which%20engine%20or%20model%3A%20%0A%0AAre%20you%20a%20maintainer%20or%20rights%20holder%3A%20%0A%0AAnything%20else%3A%20" rel="noopener">Request removal on GitHub <span aria-hidden="true">&rarr;</span></a>
   </p>

@@ -67,9 +67,9 @@ const SF_LEVELS = [
 const BIG_NET_LEVELS = [4, 16, 64, 256, 800];
 
 /**
- * WDL draw contempt vs the human (negative = avoid draws and press for the
- * win). The odds bot presses hardest — its Lichess incarnation runs DrawScore
- * around ±0.4-0.6 — while regular Lc0 opponents get a milder anti-draw lean.
+ * WDL draw contempt against the human opponent. Negative values reduce the
+ * value assigned to draws. The LQO constants below follow its color-specific
+ * upstream settings; regular Lc0 opponents use a smaller adjustment.
  */
 const PLAY_DRAW_SCORE = -0.25;
 /**
@@ -294,7 +294,7 @@ function ctxStrengthCaption(ctx: PlayContext): string {
   const cpuNote = option.family === 'lc0' && option.variant !== 'small' && !bt4SupportedSync()
     ? ' · CPU fallback (no WebGPU): expect several seconds per move'
     : '';
-  if (option.variant === 'lqo') return `≈ ${value} visits per move — higher levels press harder for tricks${cpuNote}`;
+  if (option.variant === 'lqo') return `≈ ${value} visits per move · specialized queen-odds search${cpuNote}`;
   const isNeuralSearch = option.family === 'lc0' || option.family === 'centipawn';
   const base = isNeuralSearch ? `≈ ${value} visits per move` : `search depth ${value}`;
   return isNeuralSearch ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent${cpuNote}` : base;
@@ -947,8 +947,8 @@ function ctxRefreshEngineOptions(ctx: PlayContext): void {
   const select = selectEl('engineSelect');
   const selected = select.value;
   const group = (key: PlayEngineOption['group']) => ENGINE_OPTIONS.filter((option) => option.group === key).map(ctxEngineOptionHtml).join('');
-  select.innerHTML = `<optgroup label="Human-like (Maia, plays like a rated human)">${group('human')}</optgroup>`
-    + `<optgroup label="Odds bots (give you material, then hunt for tricks)">${group('odds')}</optgroup>`
+  select.innerHTML = `<optgroup label="Human move prediction (Maia3)">${group('human')}</optgroup>`
+    + `<optgroup label="Odds engine (starts without its queen)">${group('odds')}</optgroup>`
     + `<optgroup label="Engines (strong at any level)">${group('engine')}</optgroup>`;
   const selectedOption = ENGINE_OPTIONS.find((option) => option.id === selected);
   if (selectedOption && !ctxEngineOptionState(selectedOption).disabled) select.value = selected;
@@ -989,7 +989,7 @@ function ctxRenderEngineCaution(ctx: PlayContext): void {
     const config = BIG_NETS[option.variant as BigNetKey];
     const memory = bigNetMemoryCaution(config);
     const odds = option.variant === 'lqo'
-      ? ' The bot starts without its queen and plays for traps — the Lichess LeelaQueenOdds net. ' : ' ';
+      ? ' The bot starts without its queen and uses the LeelaQueenOdds v2 network. ' : ' ';
     const cpu = bt4SupportedSync() ? '' : ' No WebGPU here: runs on the CPU (wasm) fallback with reduced visit budgets — expect several seconds per move.';
     caution.textContent = `First move downloads the ~${config.approxMb}MB net.${odds}${memory ?? ''}${cpu}`.trimEnd();
     caution.hidden = false;

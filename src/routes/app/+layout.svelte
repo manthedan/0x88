@@ -4,7 +4,7 @@
 <slot />
 <footer class="site-footer">
   <div class="wrap">
-    <span>Local chess compute, built in the open.</span>
+    <span>Chess engines run locally. Source is public.</span>
     <span class="footer-links">
       <a href="/">Home</a>
       <a href="/app/play/">Play</a>

@@ -1,8 +1,8 @@
 # 0x88
 
-Browser-first 0x88 chess-engine research prototype.
+0x88 is a browser-first chess engine research project.
 
-The current trunk is `main` and is intentionally based on the browser LC0 arena/UI work. The `lc0-webgpu-pivot` branch is a separate active WebGPU research branch and should only be changed with explicit approval.
+The `main` branch contains the browser application and LC0 arena work. The separate `lc0-webgpu-pivot` branch contains active WebGPU research and should only be changed with explicit approval.
 
 ## Browser entry points
 

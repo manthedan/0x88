@@ -37,7 +37,7 @@
       <div class="board-nav">
         <span>|◀</span><span>◀</span><span>▶</span><span>▶|</span><span>⇅</span>
       </div>
-      <div class="move-list">no moves · drag a piece or load a PGN</div>
+      <div class="move-list">No moves yet. Drag a piece or load a PGN.</div>
       <div class="position-tools-preview"><span>+</span> Position &amp; PGN</div>
     </section>
 

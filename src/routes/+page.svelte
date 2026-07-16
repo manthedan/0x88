@@ -1,8 +1,8 @@
 <script lang="ts">
   import SiteHeader from '$lib/components/SiteHeader.svelte';
   import AnalysisPreview from '$lib/components/AnalysisPreview.svelte';
-  const title = "0x88 — a chess engine workbench in your browser";
-  const description = "Play Maia3 at your rating, compare Lc0 with Stockfish and other engines, or run live tournaments. Everything runs locally with WebGPU and WebAssembly.";
+  const title = "0x88 | Browser chess engine workbench";
+  const description = "Play against Maia3, compare browser chess engines on one position, or run engine tournaments. Computation stays on your device.";
   const github = "https://github.com/manthedan/0x88";
 </script>
 
@@ -16,10 +16,10 @@
 <section class="hero" aria-labelledby="hero-h1">
   <div class="wrap hero-grid">
     <div class="hero-copy">
-      <h1 id="hero-h1">A chess engine workbench, inside your browser.</h1>
+      <h1 id="hero-h1">A chess engine workbench in your browser.</h1>
       <p class="lede">
-        Play a human-like opponent, compare serious engines on the same position,
-        or run a tournament. No account, no installation, and no game leaves your device.
+        0x88 runs games and analysis on your device, from a Maia3 opponent to
+        multi-engine tournaments. It needs no account or installation.
       </p>
       <div class="cta-row">
         <a class="btn btn-primary" href="/app/play/">Play a game <span aria-hidden="true">→</span></a>
@@ -34,26 +34,26 @@
 <section class="modes" aria-labelledby="modes-h">
   <div class="wrap">
     <div class="section-intro">
-      <p class="eyebrow"><span></span> Choose a workspace</p>
-      <h2 id="modes-h">Three ways to put the engines to work.</h2>
+      <p class="eyebrow"><span></span> Workspaces</p>
+      <h2 id="modes-h">Chess workspaces</h2>
     </div>
     <div class="mode-index">
       <a class="mode" href="/app/play/">
         <span class="mode-number">01 · PLAY</span>
-        <h3>Play a human, not a depth setting.</h3>
-        <p>Set Maia3 to a rating from 600–2600 and face the moves people at that level actually choose. Or select one of nine classical and neural engines.</p>
+        <h3>Rated play</h3>
+        <p>Maia3 predicts move probabilities for ratings from 600–2600. You can sample from that policy or choose another available engine.</p>
         <span class="mode-action">Open play <b aria-hidden="true">→</b></span>
       </a>
       <a class="mode" href="/app/analysis/">
         <span class="mode-number">02 · ANALYSIS</span>
-        <h3>Find the disagreement.</h3>
-        <p>Put Lc0, Stockfish, and specialist engines on one position. Compare evaluations and principal variations without sending your PGN away.</p>
+        <h3>Position analysis</h3>
+        <p>Run Lc0, Stockfish, or another engine on the same position. Their evaluations and principal variations appear together while your PGN stays in the browser.</p>
         <span class="mode-action">Open analysis <b aria-hidden="true">→</b></span>
       </a>
       <a class="mode" href="/app/arena/">
         <span class="mode-number">03 · ARENA</span>
-        <h3>Make the engines prove it.</h3>
-        <p>Run head-to-head matches, gauntlets, or round robins with equal time controls, live boards, standings, and per-game output.</p>
+        <h3>Engine tournaments</h3>
+        <p>Run matches or larger tournaments under shared time controls. The arena records each game and updates the standings as it plays.</p>
         <span class="mode-action">Open arena <b aria-hidden="true">→</b></span>
       </a>
     </div>
@@ -64,10 +64,10 @@
   <div class="wrap principle-grid">
     <p class="principle-mark" aria-hidden="true">0x88</p>
     <div>
-      <p class="eyebrow"><span></span> The local-first difference</p>
-      <h2>Your position stays yours.</h2>
+      <p class="eyebrow"><span></span> Privacy</p>
+      <h2>Local chess computation</h2>
     </div>
-    <p>Engine binaries and neural networks load on demand and cache in your browser. Analysis, games, and tournaments run on your hardware—not a remote chess service.</p>
+    <p>Engine binaries and neural networks load when needed, then cache in your browser. Your chess data remains on your hardware.</p>
     <a href="/docs/">Read the technical notes <span aria-hidden="true">→</span></a>
   </div>
 </section>

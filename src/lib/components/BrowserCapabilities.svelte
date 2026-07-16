@@ -38,10 +38,10 @@
   </summary>
   {#if ready}
     <div class="capability-grid">
-      <div><strong>WebGPU</strong><span>{webgpu ? 'Available — neural engines can use the GPU.' : 'Unavailable — supported engines fall back to WASM/CPU.'}</span></div>
-      <div><strong>Shared memory</strong><span>{isolated && sharedMemory ? 'Available — persistent and threaded WASM runtimes are enabled.' : 'Unavailable — CPU engines use safe single-thread or one-shot modes.'}</span></div>
+      <div><strong>WebGPU</strong><span>{webgpu ? 'Available. Neural engines can use the GPU.' : 'Unavailable. Supported engines fall back to WASM/CPU.'}</span></div>
+      <div><strong>Shared memory</strong><span>{isolated && sharedMemory ? 'Available. Persistent and threaded WASM runtimes are enabled.' : 'Unavailable. CPU engines use safe single-thread or one-shot modes.'}</span></div>
       <div><strong>CPU capacity</strong><span>{threads} logical thread{threads === 1 ? '' : 's'} reported by this browser.</span></div>
-      <div><strong>Model cache</strong><span>{cacheStorage ? 'Available — downloaded models can be reused.' : 'Unavailable — models may download again next visit.'}</span></div>
+      <div><strong>Model cache</strong><span>{cacheStorage ? 'Available. Downloaded models can be reused.' : 'Unavailable. Models may download again next visit.'}</span></div>
     </div>
   {:else}
     <div class="checking">Detecting browser runtime features…</div>

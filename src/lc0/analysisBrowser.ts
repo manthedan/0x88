@@ -1448,7 +1448,7 @@ function renderLines() {
     return `<li data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}">`
       + `<span class="score ${cls}">${engineLogoHtmlForName(line.engine)} ${htmlEscape(line.scoreText)}</span>`
       + `<span class="pv">${htmlEscape(line.pvSan)}</span></li>`;
-  }).join('') || '<li class="small placeholder">No analysis yet — make a move or press Analyze.</li>';
+  }).join('') || '<li class="small placeholder">Make a move or press Analyze to begin.</li>';
 }
 
 function moveNumberPrefix(node: GameNode, force: boolean): string {
@@ -1491,7 +1491,7 @@ function renderMoveList() {
     }
     node = node.children[0];
   }
-  el('movelist').innerHTML = html || '<span class="small">no moves — drag a piece or load a PGN</span>';
+  el('movelist').innerHTML = html || '<span class="small">No moves yet. Drag a piece or load a PGN.</span>';
 }
 
 function renderOpening() {
@@ -2498,7 +2498,7 @@ async function renderMaia3Panel(): Promise<void> {
   const seq = ++maia3PanelSeq;
   const fen = tree.current.fen || START_FEN;
   const board = parseFen(fen);
-  if (!legalMoves(board).length) { el('maia3Grid').innerHTML = '<div class="small">Game over — no moves to predict.</div>'; return; }
+  if (!legalMoves(board).length) { el('maia3Grid').innerHTML = '<div class="small">The game is over. Maia3 has no move to predict.</div>'; return; }
   let evaluations;
   try {
     evaluations = await evaluator.evaluateConditions(board, MAIA3_PANEL_RATINGS.map((elo) => ({ selfElo: elo, oppoElo: elo })));
