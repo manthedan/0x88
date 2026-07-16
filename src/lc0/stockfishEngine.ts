@@ -91,7 +91,12 @@ function isStockfishPthreadScriptUrl(jsUrl: string): boolean {
 
 export function stockfishWorkerUrl(jsUrl: string): { url: string; objectUrl?: string; bootstrapWasmUrl?: string } {
   if (isStockfishPthreadScriptUrl(jsUrl)) {
-    if (!sameOriginUrl(jsUrl) && !isTrustedExecutableAssetUrl(jsUrl)) {
+    // Same-origin Stockfish builds already know how to locate their sibling
+    // WASM and pthread worker script. Wrapping them in our bootstrap changes
+    // self.location.pathname, so every pthread points back at the bootstrap
+    // and can recursively initialize another top-level engine.
+    if (sameOriginUrl(jsUrl)) return { url: jsUrl };
+    if (!isTrustedExecutableAssetUrl(jsUrl)) {
       throw new Error(`Refusing untrusted Stockfish worker URL: ${jsUrl}`);
     }
     return { url: jsUrl, bootstrapWasmUrl: stockfishWasmUrl(jsUrl) };
@@ -297,6 +302,10 @@ export class StockfishEngine implements BrowserUciEngine {
           }
         };
         worker.onerror = (event) => {
+          // The failure is propagated through the engine promises below; stop
+          // the browser from also reporting the same handled worker event as
+          // an uncaught global error.
+          event.preventDefault?.();
           const error = new Error(event.message || 'Stockfish worker error');
           this.failActive(error);
           reject(error);

@@ -42,6 +42,22 @@ test('Stockfish lite-single uses relaxed SIMD when validated and falls back othe
   }
 });
 
+test('same-origin threaded Stockfish uses its native worker URL', () => {
+  const previousLocation = globalThis.location;
+  Object.defineProperty(globalThis, 'location', {
+    value: { href: 'http://localhost:5181/app/analysis/', origin: 'http://localhost:5181' },
+    configurable: true,
+  });
+  try {
+    assert.deepEqual(stockfishWorkerUrl('/stockfish/stockfish-18-lite.js'), {
+      url: '/stockfish/stockfish-18-lite.js',
+    });
+  } finally {
+    if (previousLocation === undefined) delete globalThis.location;
+    else Object.defineProperty(globalThis, 'location', { value: previousLocation, configurable: true });
+  }
+});
+
 test('Stockfish pthread bootstrap loads trusted external artifacts through a local helper', () => {
   const previousLocation = globalThis.location;
   const previousBase = globalThis.LC0_BROWSER_ASSET_BASE_URL;
