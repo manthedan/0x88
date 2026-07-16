@@ -81,9 +81,9 @@ export const LC0_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
 ];
 
 export const CENTIPAWN_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
-  { value: 'bt4-auto', label: 'BT4 SOAP REM c19000 · TVMJS auto' },
-  { value: 'bt4-ort', label: 'BT4 SOAP REM c19000 · ORT' },
-  { value: 'bt4-custom', label: 'BT4 SOAP REM c19000 · TVMJS strict', experimental: true },
+  { value: 'bt4-auto', label: 'v1 · TVMJS auto' },
+  { value: 'bt4-ort', label: 'v1 · ORT' },
+  { value: 'bt4-custom', label: 'v1 · TVMJS strict', experimental: true },
 ];
 
 export const STOCKFISH_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
