@@ -27,10 +27,13 @@
 
 <details class="capabilities" data-testid="browser-capabilities">
   <summary>
-    Browser capabilities
+    <span class="cap-label">Browser capabilities</span>
     {#if ready}
-      <span class:ok={webgpu} class:warn={!webgpu}>WebGPU {webgpu ? 'ready' : 'unavailable'}</span>
-      <span class:ok={isolated && sharedMemory} class:warn={!isolated || !sharedMemory}>WASM threads {isolated && sharedMemory ? 'ready' : 'single-thread fallback'}</span>
+      <span class="desktop-status" class:ok={webgpu} class:warn={!webgpu}>WebGPU {webgpu ? 'ready' : 'unavailable'}</span>
+      <span class="desktop-status" class:ok={isolated && sharedMemory} class:warn={!isolated || !sharedMemory}>WASM threads {isolated && sharedMemory ? 'ready' : 'single-thread fallback'}</span>
+      <span class="mobile-status" class:ok={webgpu && isolated && sharedMemory} class:warn={!webgpu || !isolated || !sharedMemory}>
+        {webgpu && isolated && sharedMemory ? 'WebGPU + threads ready' : webgpu ? 'WebGPU ready · CPU fallback' : 'CPU fallback active'}
+      </span>
     {/if}
   </summary>
   {#if ready}
@@ -48,11 +51,20 @@
 <style>
   .capabilities{max-width:1280px; margin:12px auto 0; padding:8px 12px; border:1px solid var(--rule); border-radius:10px; background:var(--panel)}
   summary{cursor:pointer; display:flex; align-items:center; gap:8px; flex-wrap:wrap; color:var(--muted); font-size:12px; font-weight:650}
-  summary span{padding:2px 7px; border-radius:999px; border:1px solid var(--rule); font-family:var(--mono); font-size:10px}
-  summary span.ok{color:var(--accent); border-color:color-mix(in srgb, var(--accent) 45%, var(--rule))}
-  summary span.warn{color:var(--warn); border-color:color-mix(in srgb, var(--warn) 45%, var(--rule))}
+  summary .cap-label{padding:0; border:0; border-radius:0; font-family:var(--sans); font-size:12px}
+  summary .desktop-status,summary .mobile-status{padding:2px 7px; border-radius:999px; border:1px solid var(--rule); font-family:var(--mono); font-size:10px}
+  summary .ok{color:var(--accent); border-color:color-mix(in srgb, var(--accent) 45%, var(--rule))}
+  summary .warn{color:var(--warn); border-color:color-mix(in srgb, var(--warn) 45%, var(--rule))}
+  .mobile-status{display:none}
   .capability-grid{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 18px; margin-top:10px; padding-top:9px; border-top:1px solid var(--rule); font-size:12px}
   .capability-grid div{display:grid; gap:2px}
   .capability-grid span,.checking{color:var(--muted)}
-  @media(max-width:700px){.capability-grid{grid-template-columns:1fr}.capabilities{margin-inline:12px}}
+  @media(max-width:700px){
+    .capability-grid{grid-template-columns:1fr}
+    .capabilities{margin:10px 12px 0; padding:7px 10px}
+    summary{min-height:28px; flex-wrap:nowrap}
+    summary .cap-label{font-size:11px; margin-right:auto}
+    .desktop-status{display:none}
+    .mobile-status{display:inline-block; white-space:nowrap}
+  }
 </style>

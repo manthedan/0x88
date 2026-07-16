@@ -3,6 +3,7 @@
   import SiteHeader from '$lib/components/SiteHeader.svelte';
   const title = "0x88 Chess — docs: pages, engines, licenses";
   const description = "What each 0x88.app page does, the chess engines running in your browser, who built them, how we package them, and our GPL/AGPL corresponding-source commitments.";
+  let tocOpen = false;
   onMount(() => {
     const headings = document.querySelectorAll('.doc-content section[id], .doc-content h3[id]');
     const tocLinks = document.querySelectorAll<HTMLAnchorElement>('.toc a[href^="#"]');
@@ -48,8 +49,11 @@
 <div class="wrap">
 
 <!-- ===== TOC (left rail) ===== -->
-<aside class="toc" aria-label="On this page">
+<aside class="toc" class:open={tocOpen} aria-label="On this page">
   <h4>On this page</h4>
+  <button class="toc-toggle" type="button" aria-expanded={tocOpen} on:click={() => tocOpen = !tocOpen}>
+    <span>On this page</span><span aria-hidden="true">{tocOpen ? '−' : '+'}</span>
+  </button>
   <ul>
     <li><a href="#pages">The pages</a>
       <ul>
@@ -614,6 +618,7 @@
     text-transform:uppercase; letter-spacing:.07em;
     color:var(--muted-2); margin:0 0 12px; font-weight:600;
   }
+  .toc-toggle{display:none}
   .toc ul{list-style:none; padding:0; margin:0; display:grid; gap:2px}
   .toc a{
     color:var(--muted); text-decoration:none;
@@ -776,8 +781,19 @@
   @media(max-width:860px){
     .doc-body .wrap{grid-template-columns:minmax(0,1fr); gap:0}
     .toc{
-      position:static; max-height:none; padding:0 0 16px;
-      margin-bottom:24px; border:none; border-bottom:1px solid var(--rule);
+      position:static; max-height:none; padding:0;
+      margin-bottom:28px; border:1px solid var(--rule); border-radius:var(--radius);
+      background:var(--panel); overflow:hidden;
     }
+    .toc h4{display:none}
+    .toc-toggle{
+      width:100%; min-height:46px; padding:10px 14px; border:0; border-radius:0;
+      display:flex; align-items:center; justify-content:space-between;
+      background:transparent; color:var(--ink); font-family:var(--mono); font-size:11px;
+      text-transform:uppercase; letter-spacing:.08em; font-weight:650;
+    }
+    .toc.open .toc-toggle{border-bottom:1px solid var(--rule)}
+    .toc:not(.open)>ul{display:none}
+    .toc>ul{padding:10px 8px 12px}
   }
 </style>

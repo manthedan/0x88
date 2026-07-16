@@ -109,7 +109,6 @@
   }
   .app-sidebar{
     position:sticky; top:72px;
-    max-height:calc(100vh - 84px); overflow-y:auto;
   }
   :global(#status){
     margin-top:12px; padding:13px 16px;
@@ -138,7 +137,7 @@
   :global(#moveList){
     margin-top:12px; font-family:var(--mono); font-size:14px;
     line-height:1.9; max-height:300px; overflow:auto;
-    padding:10px 14px; border:1px solid #e6decc; border-radius:var(--radius-sm); background:var(--panel-inset);
+    padding:10px 14px; border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel-inset);
   }
   :global(#moveList .num){color:var(--muted)}
   :global(#moveList .placeholder){color:var(--muted)}

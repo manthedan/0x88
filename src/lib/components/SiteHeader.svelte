@@ -3,6 +3,7 @@
   import { theme, boardStyle, toggleTheme, type BoardStyle } from '$lib/stores/theme';
 
   export let pageTitle = '';
+  let mobileOpen = false;
 
   $: path = $page.url.pathname;
   $: isDark = $theme === 'dark';
@@ -35,6 +36,18 @@
       <a href="/app/arena/" class:active={isActive('/app/arena/')} aria-current={isActive('/app/arena/') ? 'page' : undefined}>Arena</a>
       <a href="/docs/" class:active={isActive('/docs/')} aria-current={isActive('/docs/') ? 'page' : undefined}>Docs</a>
     </nav>
+    <div class="mobile-nav" class:open={mobileOpen}>
+      <button class="menu-toggle" type="button" aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'} title="Menu" aria-expanded={mobileOpen} on:click={() => mobileOpen = !mobileOpen}><span aria-hidden="true"></span></button>
+      {#if mobileOpen}
+        <nav class="mobile-nav-menu" aria-label="Mobile navigation">
+          <a href="/" class:active={isActive('/')} aria-current={isActive('/') ? 'page' : undefined}>Home</a>
+          <a href="/app/play/" class:active={isActive('/app/play/')} aria-current={isActive('/app/play/') ? 'page' : undefined}>Play</a>
+          <a href="/app/analysis/" class:active={isActive('/app/analysis/')} aria-current={isActive('/app/analysis/') ? 'page' : undefined}>Analysis</a>
+          <a href="/app/arena/" class:active={isActive('/app/arena/')} aria-current={isActive('/app/arena/') ? 'page' : undefined}>Arena</a>
+          <a href="/docs/" class:active={isActive('/docs/')} aria-current={isActive('/docs/') ? 'page' : undefined}>Docs</a>
+        </nav>
+      {/if}
+    </div>
     <button class="theme-toggle" type="button" aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'} title={isDark ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={isDark} on:click={toggleTheme}>{isDark ? '\u2600' : '\u263E'}</button>
     <select class="board-style-select" aria-label="Board style" title="Board style" value={$boardStyle} on:change={onBoardChange}>
       <option value="brown">Brown</option>

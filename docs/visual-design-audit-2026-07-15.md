@@ -249,6 +249,19 @@ The product should feel like a serious chess publication merged with a compact e
 3. Add visual-regression screenshots for 1280 × 800, 1024 × 768, 390 × 844, and 320 × 700 in both themes.
 4. Add contrast checks for all design tokens used below 18 px.
 
+## Remediation status
+
+Implemented on `audit/visual-design` after the audit:
+
+- Replaced the generic gradient/card/emoji landing page with an editorial chess workbench, a real board position, and engine comparison output.
+- Removed the desktop nested sidebar scrollers and moved Arena's primary action into the initially visible matchup section.
+- Added a dedicated 320 px navigation menu; verified zero horizontal document overflow.
+- Raised light and dark muted-text contrast and increased the usefulness of semantic color tokens.
+- Replaced hard-coded light borders with theme-aware rule tokens.
+- Collapsed browser capability status to one mobile badge and converted the mobile Docs TOC to a compact disclosure.
+- Removed Arena's reserved empty log gap and simplified footer copy/navigation.
+- Reduced global radii and shifted landing-page hierarchy from cards to typography and section rules.
+
 ## Verification performed
 
 - Production static build: `npm run build:client` — passed.
@@ -257,8 +270,10 @@ The product should feel like a serious chess publication merged with a compact e
 - Dark-theme spot checks on Home, Play, and Analysis.
 - Narrow-width check at 320 px.
 - Runtime-loaded states observed for boards, engine selectors, analysis lines, and capability badges.
-- Local screenshots are retained in the ignored directory:
-  `.local-dev-artifacts/visual-design-audit-2026-07-15/`
+- Full project test suite: 589 passed, 0 failed, 3 skipped.
+- Final browser diagnostics: no console errors, no page errors, and no failed same-origin requests.
+- Audit screenshots are retained in `.local-dev-artifacts/visual-design-audit-2026-07-15/`.
+- Remediation screenshots are retained in `.local-dev-artifacts/visual-design-remediation/`.
 
 ## Top three fixes
 

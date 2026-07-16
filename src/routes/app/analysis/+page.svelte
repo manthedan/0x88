@@ -236,7 +236,6 @@
   }
   .app-sidebar{
     position:sticky; top:72px;
-    max-height:calc(100vh - 84px); overflow-y:auto;
   }
   .board-wrap{display:grid; grid-template-columns:18px 1fr; gap:12px}
   .evalbar{
@@ -398,7 +397,7 @@
   :global(.movelist){
     font-family:var(--mono); font-size:14px; line-height:1.9;
     margin-top:12px; min-height:42px; max-height:300px; overflow:auto;
-    padding:10px 14px; border:1px solid #e6decc; border-radius:var(--radius-sm); background:var(--panel-inset);
+    padding:10px 14px; border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel-inset);
   }
   :global(.maia3-grid){margin-top:8px; font-size:13px}
   :global(.maia3-grid .maia3-row){

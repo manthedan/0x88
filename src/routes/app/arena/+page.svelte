@@ -85,6 +85,10 @@
       </div>
       <div id="arenaSeatList" class="engine-list" aria-label="Arena engine selectors"></div>
       <div class="matchup-note small" id="matchupNote">Pick an engine and strength for each seat; colors alternate each game.</div>
+      <div class="row tournament-actions">
+        <button id="start" class="primary" type="button" disabled>Start match</button>
+        <button id="stop" type="button" disabled>Stop</button>
+      </div>
     </details>
     <details class="section-block" open>
       <summary>Time control</summary>
@@ -117,10 +121,6 @@
           <textarea id="openingText" spellcheck="false" placeholder="Ruy Lopez | e2e4 e7e5 g1f3 b8c6 f1b5&#10;Italian Game | 1. e4 e5 2. Nf3 Nc6 3. Bc4&#10;Sicilian FEN | rnbqkbnr/pp1ppppp/8/2p5/3PP3/8/PPP2PPP/RNBQKBNR b KQkq d3 0 2"></textarea></div>
       </div>
       <div id="openingInfo" class="small">Start position only.</div>
-      <div class="row">
-        <button id="start" class="primary" type="button" disabled>Start match</button>
-        <button id="stop" type="button" disabled>Stop</button>
-      </div>
     </details>
     {#if devMode}
     <details class="section-block advanced-settings">
@@ -213,7 +213,6 @@
   }
   .app-sidebar{
     position:sticky; top:72px;
-    max-height:calc(100vh - 84px); overflow-y:auto;
   }
   :global(.board-with-evals){
     display:grid; grid-template-columns:18px minmax(0,1fr) 18px;
@@ -258,7 +257,7 @@
   :global(.side-label){
     display:flex; justify-content:space-between; align-items:center;
     gap:10px; margin:6px 0; min-height:40px;
-    padding:10px 14px; border:1px solid #e6decc; border-left:3px solid var(--rule-strong);
+    padding:10px 14px; border:1px solid var(--rule); border-left:3px solid var(--rule-strong);
     border-radius:11px; background:var(--panel); font-size:13px;
   }
   :global(.side-label .side-main){display:flex; flex:1; min-width:0; flex-wrap:nowrap; align-items:center; gap:8px}
@@ -290,6 +289,8 @@
   :global(.seat-row .arrow){display:none}
   :global(.seat-row .row-strength){flex:0 0 64px; width:64px}
   :global(.matchup-note){margin-top:8px; color:var(--muted)}
+  .tournament-actions{margin-top:14px}
+  .tournament-actions button{min-height:40px}
   .section-block{margin-top:0; padding-top:20px}
   .section-block:first-child{padding-top:0}
   .section-block>summary{
@@ -324,7 +325,8 @@
   :global(th){color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase}
   :global(td.num, th.num){text-align:right; font-family:var(--mono)}
   :global(tr.leader td){background:var(--soft)}
-  :global(.log){font-family:var(--mono); font-size:12px; height:160px; overflow:auto; margin-top:8px}
+  :global(.log){font-family:var(--mono); font-size:12px; min-height:160px; max-height:260px; overflow:auto; margin-top:8px}
+  :global(.log:empty){min-height:0; margin-top:0}
   :global(.log div){padding:2px 0; border-top:1px solid var(--rule)}
   :global(.log div.replayable){cursor:pointer}
   :global(.log div.replayable:hover){background:var(--soft)}
@@ -339,7 +341,7 @@
   :global(.movestrip){
     margin-top:12px; font-family:var(--mono); font-size:14px;
     line-height:1.9; height:76px; overflow:auto;
-    padding:10px 14px; border:1px solid #e6decc; border-radius:var(--radius-sm); background:var(--panel-inset);
+    padding:10px 14px; border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel-inset);
   }
   :global(.movestrip .num){color:var(--muted)}
   :global(.movestrip .mv){cursor:pointer; padding:1px 3px; border-radius:4px}
