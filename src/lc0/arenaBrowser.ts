@@ -3526,7 +3526,7 @@ async function init(mountSignal: AbortSignal) {
   buildEngines();
   populateSeats();
   if (!isV0DeployProfile()) void refreshBt4Availability();
-  if (!isV0DeployProfile()) void probeEngineLogos(whileArenaMounted(() => { renderSeatSelectors(); refreshSeatControls(); renderSideLabels(); }));
+  void probeEngineLogos(whileArenaMounted(() => { renderSeatSelectors(); refreshSeatControls(); renderSideLabels(); }));
   wireEvents();
   refreshBudgetControls();
   refreshOpeningPreview();

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   engineLogoFamilyForEngineFamily,
   engineLogoFamilyForName,
@@ -37,6 +38,17 @@ test('engine logo URLs match the committed public asset names and extensions', (
   assert.equal(engineLogoUrl('viridithas'), '/engine-logos/viridithas.png');
   assert.equal(engineLogoUrl('berserk'), '/engine-logos/berserk.jpg');
   assert.equal(engineLogoUrl('generic'), '/engine-logos/generic.svg');
+});
+
+test('analysis and arena probe bundled logos in every deploy profile', async () => {
+  const [analysisSource, arenaSource] = await Promise.all([
+    readFile(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8'),
+  ]);
+  assert.match(analysisSource, /void probeEngineLogos\(whileAnalysisMounted/);
+  assert.match(arenaSource, /void probeEngineLogos\(whileArenaMounted/);
+  assert.doesNotMatch(analysisSource, /if \(!isV0DeployProfile\(\)\) void probeEngineLogos/);
+  assert.doesNotMatch(arenaSource, /if \(!isV0DeployProfile\(\)\) void probeEngineLogos/);
 });
 
 test('concurrent engine logo probes retain every re-render callback', async () => {

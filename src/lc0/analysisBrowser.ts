@@ -574,6 +574,8 @@ function modelProgressEl(): HTMLElement {
 }
 
 const loadingProgressItems = new Map<string, LoadingProgressItem>();
+const preloadedAnalysisAssetUrls = new Set<string>();
+const preparedCpuEngineKeys = new Set<string>();
 
 function renderLoadingProgressItems(): void {
   const node = modelProgressEl();
@@ -2191,7 +2193,7 @@ function jsSidecarWasmUrl(jsUrl: string): string | undefined {
 }
 
 async function preloadAnalysisAsset(engineLabel: string, rawUrl: string | undefined, signal: AbortSignal): Promise<void> {
-  if (!rawUrl) return;
+  if (!rawUrl || preloadedAnalysisAssetUrls.has(rawUrl)) return;
   const id = `asset:${engineLabel}:${rawUrl}`;
   const label = `${engineLabel} · ${assetFileLabel(rawUrl)}`;
   showLoadingProgressItem(id, { label, phase: 'Downloading' });
@@ -2202,6 +2204,7 @@ async function preloadAnalysisAsset(engineLabel: string, rawUrl: string | undefi
     if (!response.body) {
       const bytes = await response.arrayBuffer();
       showLoadingProgressItem(id, { label, phase: 'Downloading', loadedBytes: bytes.byteLength, totalBytes: totalBytes ?? bytes.byteLength });
+      preloadedAnalysisAssetUrls.add(rawUrl);
       return;
     }
     const reader = response.body.getReader();
@@ -2219,6 +2222,7 @@ async function preloadAnalysisAsset(engineLabel: string, rawUrl: string | undefi
       }
     }
     showLoadingProgressItem(id, { label, phase: 'Downloaded', loadedBytes, totalBytes: totalBytes ?? loadedBytes });
+    preloadedAnalysisAssetUrls.add(rawUrl);
   } finally {
     hideLoadingProgressItem(id);
   }
@@ -2229,16 +2233,35 @@ async function preloadAnalysisAssets(engineLabel: string, urls: (string | undefi
   for (const url of uniqueUrls) await preloadAnalysisAsset(engineLabel, url, signal);
 }
 
-async function prepareCpuEngine(row: EngineRow, label: string, parentSignal: AbortSignal, urls: (string | undefined)[], start: (signal: AbortSignal) => Promise<void>): Promise<void> {
+async function prepareCpuEngine(
+  row: EngineRow,
+  preparationKey: string,
+  label: string,
+  parentSignal: AbortSignal,
+  urls: (string | undefined)[],
+  start: (signal: AbortSignal) => Promise<void>,
+  beginSearch: () => void,
+): Promise<void> {
+  const prepared = preparedCpuEngineKeys.has(preparationKey);
+  // A warm engine reset is part of the next search, not another model load.
+  // Show one search activity state immediately instead of briefly flashing the
+  // download/startup surface on every position.
+  if (prepared) beginSearch();
   await withEngineTimeout(`${label} loading`, parentSignal, cpuColdStartTimeoutMs(row), async (signal) => {
+    if (prepared) {
+      await start(signal);
+      return;
+    }
     await preloadAnalysisAssets(label, urls, signal);
     showLoadingProgressItem(`startup:${label}`, { label, phase: 'Starting engine' });
     try {
       await start(signal);
+      preparedCpuEngineKeys.add(preparationKey);
     } finally {
       hideLoadingProgressItem(`startup:${label}`);
     }
   });
+  if (!prepared) beginSearch();
 }
 
 async function analyzeCurrent(options: { force?: boolean } = {}) {
@@ -2330,14 +2353,17 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const label = centipawnEngineLabel(row.variant);
         pushTask(index, cacheKey, label, async (beginSearch) => {
           const loadingId = `startup:${label}`;
-          showLoadingProgressItem(loadingId, { label, phase: 'Preparing engine' });
+          const evaluatorKey = centipawnEvaluatorCacheKey(row.variant);
+          const evaluatorPrepared = centipawnEvaluatorPromises.has(evaluatorKey);
+          if (evaluatorPrepared) beginSearch();
+          else showLoadingProgressItem(loadingId, { label, phase: 'Preparing engine' });
           let evaluator: Evaluator;
           try {
             evaluator = await centipawnEvaluator(row.variant);
           } finally {
-            hideLoadingProgressItem(loadingId);
+            if (!evaluatorPrepared) hideLoadingProgressItem(loadingId);
           }
-          beginSearch();
+          if (!evaluatorPrepared) beginSearch();
           const result = await chooseMove(current, evaluator, {
             visits: row.strength,
             batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('centipawnBatch') ?? params.get('tinyBatch') ?? '32') || 32))),
@@ -2358,8 +2384,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
           const engine = getStockfish(kind);
           engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
-          await prepareCpuEngine(row, label, controller.signal, [stockfishUrl, jsSidecarWasmUrl(stockfishUrl)], (signal) => engine.newGame(signal));
-          beginSearch();
+          await prepareCpuEngine(row, `sf:${kind}`, label, controller.signal, [stockfishUrl, jsSidecarWasmUrl(stockfishUrl)], (signal) => engine.newGame(signal), beginSearch);
           const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           return stockfishAnalysisLines(infos, fen, label);
         }));
@@ -2368,11 +2393,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const label = `${variant.label}`;
         const engine = getViridithasFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
-          await prepareCpuEngine(row, label, controller.signal, [variant.wasmUrl], async (signal) => {
+          await prepareCpuEngine(row, `viridithas:${row.variant}`, label, controller.signal, [variant.wasmUrl], async (signal) => {
             engine.setOptions({ depth: 1, movetimeMs: undefined });
             await engine.bestMove(START_FEN, signal);
-          });
-          beginSearch();
+          }, beginSearch);
           const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
@@ -2383,8 +2407,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const engine = getBerserkFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
           engine.setOptions({ threads: lease.threads });
-          await prepareCpuEngine(row, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl, variant.nnueUrl], (signal) => engine.newGame(signal));
-          beginSearch();
+          await prepareCpuEngine(row, `berserk:${row.variant}`, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl, variant.nnueUrl], (signal) => engine.newGame(signal), beginSearch);
           const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
@@ -2395,8 +2418,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const engine = getPlentyChessFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
           engine.setOptions({ threads: lease.threads });
-          await prepareCpuEngine(row, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl], (signal) => engine.newGame(signal));
-          beginSearch();
+          await prepareCpuEngine(row, `plentychess:${row.variant}`, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl], (signal) => engine.newGame(signal), beginSearch);
           const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
@@ -2407,8 +2429,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const engine = getStormphraxFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`stormphrax:${row.variant}`, controller.signal, async (lease) => {
           engine.setOptions({ threads: lease.threads });
-          await prepareCpuEngine(row, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl], (signal) => engine.newGame(signal));
-          beginSearch();
+          await prepareCpuEngine(row, `stormphrax:${row.variant}`, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl], (signal) => engine.newGame(signal), beginSearch);
           const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
@@ -2418,8 +2439,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const label = `${variant.label}`;
         const engine = getRecklessFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
-          await prepareCpuEngine(row, label, controller.signal, [variant.wasmUrl, variant.nnueUrl], (signal) => engine.newGame(signal));
-          beginSearch();
+          await prepareCpuEngine(row, `reckless:${row.variant}`, label, controller.signal, [variant.wasmUrl, variant.nnueUrl], (signal) => engine.newGame(signal), beginSearch);
           const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
@@ -2804,6 +2824,7 @@ function wireEvents() {
 function disposeRuntimeResources(): void {
   analysisAbort?.abort();
   analysisAbort = null;
+  preparedCpuEngineKeys.clear();
   const reviewWasRunning = reviewAbort !== null;
   reviewAbort?.abort();
   reviewAbort = null;
@@ -2991,7 +3012,7 @@ async function init(mountSignal: AbortSignal) {
   renderAll();
   renderEngineList();
   renderRecklessRuntimeInfo();
-  if (!isV0DeployProfile()) void probeEngineLogos(whileAnalysisMounted(() => { renderEngineList(); renderAll(); }));
+  void probeEngineLogos(whileAnalysisMounted(() => { renderEngineList(); renderAll(); }));
   wireEvents();
   void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
   if (!isV0DeployProfile()) {
