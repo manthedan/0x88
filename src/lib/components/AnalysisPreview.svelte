@@ -2,16 +2,44 @@
   type PieceRole = 'rook' | 'knight' | 'bishop' | 'queen' | 'king' | 'pawn';
   type Piece = { color: 'white' | 'black'; role: PieceRole; file: number; rank: number };
 
-  const backRank: PieceRole[] = ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'];
+  // Kiwipete: the classic castling, pin, and move-generation test position.
   const pieces: Piece[] = [
-    ...backRank.map((role, file) => ({ color: 'black' as const, role, file, rank: 0 })),
-    ...backRank.map((role, file) => ({ color: 'white' as const, role, file, rank: 7 })),
-    ...Array.from({ length: 8 }, (_, file) => ({ color: 'black' as const, role: 'pawn' as const, file, rank: 1 })),
-    ...Array.from({ length: 8 }, (_, file) => ({ color: 'white' as const, role: 'pawn' as const, file, rank: 6 })),
+    { color: 'black', role: 'rook', file: 0, rank: 0 },
+    { color: 'black', role: 'king', file: 4, rank: 0 },
+    { color: 'black', role: 'rook', file: 7, rank: 0 },
+    { color: 'black', role: 'pawn', file: 0, rank: 1 },
+    { color: 'black', role: 'pawn', file: 2, rank: 1 },
+    { color: 'black', role: 'pawn', file: 3, rank: 1 },
+    { color: 'black', role: 'queen', file: 4, rank: 1 },
+    { color: 'black', role: 'pawn', file: 5, rank: 1 },
+    { color: 'black', role: 'bishop', file: 6, rank: 1 },
+    { color: 'black', role: 'bishop', file: 0, rank: 2 },
+    { color: 'black', role: 'knight', file: 1, rank: 2 },
+    { color: 'black', role: 'pawn', file: 4, rank: 2 },
+    { color: 'black', role: 'knight', file: 5, rank: 2 },
+    { color: 'black', role: 'pawn', file: 6, rank: 2 },
+    { color: 'black', role: 'pawn', file: 3, rank: 3 },
+    { color: 'black', role: 'pawn', file: 1, rank: 4 },
+    { color: 'white', role: 'pawn', file: 2, rank: 3 },
+    { color: 'white', role: 'pawn', file: 4, rank: 3 },
+    { color: 'white', role: 'pawn', file: 4, rank: 4 },
+    { color: 'white', role: 'knight', file: 2, rank: 5 },
+    { color: 'white', role: 'knight', file: 5, rank: 5 },
+    { color: 'white', role: 'pawn', file: 0, rank: 6 },
+    { color: 'white', role: 'pawn', file: 1, rank: 6 },
+    { color: 'white', role: 'queen', file: 2, rank: 6 },
+    { color: 'white', role: 'bishop', file: 3, rank: 6 },
+    { color: 'white', role: 'bishop', file: 4, rank: 6 },
+    { color: 'white', role: 'pawn', file: 5, rank: 6 },
+    { color: 'white', role: 'pawn', file: 6, rank: 6 },
+    { color: 'white', role: 'pawn', file: 7, rank: 6 },
+    { color: 'white', role: 'rook', file: 0, rank: 7 },
+    { color: 'white', role: 'king', file: 4, rank: 7 },
+    { color: 'white', role: 'rook', file: 7, rank: 7 },
   ];
 </script>
 
-<div class="analysis-preview" role="img" aria-label="Preview of the 0x88 multi-engine Analysis workspace">
+<div class="analysis-preview" role="img" aria-label="Preview of Lc0 and Stockfish analyzing the Kiwipete position in 0x88">
   <div class="preview-grid" aria-hidden="true">
     <section class="board-panel">
       <div class="board-row">
@@ -27,9 +55,9 @@
                   <path d="M0,0 L5,2.5 L0,5 Z"></path>
                 </marker>
               </defs>
-              <line x1="350" y1="650" x2="350" y2="450"></line>
-              <line class="secondary" x1="450" y1="650" x2="450" y2="450"></line>
-              <line class="secondary" x1="650" y1="750" x2="550" y2="550"></line>
+              <line x1="450" y1="350" x2="550" y2="250"></line>
+              <line class="secondary" x1="250" y1="550" x2="350" y2="350"></line>
+              <line class="secondary" x1="450" y1="650" x2="50" y2="250"></line>
             </svg>
           </cg-board>
         </div>
@@ -37,14 +65,14 @@
       <div class="board-nav">
         <span>|◀</span><span>◀</span><span>▶</span><span>▶|</span><span>⇅</span>
       </div>
-      <div class="move-list">No moves yet. Drag a piece or load a PGN.</div>
+      <div class="move-list"><strong>Kiwipete</strong> · White to move · castling rights on both sides</div>
       <div class="position-tools-preview"><span>+</span> Position &amp; PGN</div>
     </section>
 
     <section class="analysis-panel">
       <div class="mini-overview">
         <div><span>Current position</span><strong>White to move</strong></div>
-        <div><span>Evaluation</span><strong>+0.13</strong></div>
+        <div><span>Evaluation</span><strong>+12.71</strong></div>
       </div>
       <div class="mini-status">Analysis complete · Lc0 + SF Lite</div>
       <div class="section-title"><span>▾</span> ENGINES</div>
@@ -54,7 +82,7 @@
       </div>
       <div class="engine-row-preview">
         <img src="/engine-logos/stockfish.png" alt="" />
-        <span>Stockfish</span><b>→</b><span>Lite</span><b>→</b><code>14</code><small>depth</small>
+        <span>Stockfish</span><b>→</b><span>Lite</span><b>→</b><code>12</code><small>depth</small>
       </div>
       <div class="add-engine">+ Add engine</div>
       <div class="analyze-controls-preview">
@@ -66,16 +94,17 @@
       </div>
 
       <div class="section-title comparison"><span>▾</span> COMPARISON</div>
-      <div class="consensus">2/2 engines prefer d4 · eval spread 8 cp</div>
+      <div class="consensus">2/2 engines prefer exf6 · eval spread 868 cp</div>
       <div class="compare-head"><span>ENGINE</span><span>BEST</span><span>EVAL</span><span>Δ</span><span>PV</span></div>
-      <div class="compare-line"><span><img src="/engine-logos/lc0.svg" alt="" />Lc0</span><strong>d4</strong><code>+0.13</code><code>0</code><code>d4 d5 c4 c6</code></div>
-      <div class="compare-line"><span><img src="/engine-logos/stockfish.png" alt="" />SF</span><strong>d4</strong><code>+0.05</code><code>−8</code><code>d4 Nf6 c4 e6</code></div>
+      <div class="compare-line"><span><img src="/engine-logos/lc0.svg" alt="" />Lc0</span><strong>exf6</strong><code>+12.71</code><code>0</code><code>exf6 Bxf6 Bxa6</code></div>
+      <div class="compare-line"><span><img src="/engine-logos/stockfish.png" alt="" />SF</span><strong>exf6</strong><code>+4.03</code><code>−868</code><code>exf6 Bxf6 Nxd5</code></div>
 
       <div class="section-title lines-title"><span>▾</span> LINES</div>
       <div class="legend"><i></i>Lc0 <i class="sf"></i>Stockfish</div>
-      <div class="analysis-line"><strong>+0.13</strong><code>d4 d5 c4 c6 cxd5</code></div>
-      <div class="analysis-line"><strong>+0.12</strong><code>Nf3 d5 d4 Nf6</code></div>
-      <div class="analysis-line"><strong>+0.11</strong><code>e4 e5 Nf3 Nc6</code></div>
+      <div class="analysis-line lc0"><strong><img src="/engine-logos/lc0.svg" alt="" />+12.71</strong><code>exf6 Bxf6 Bxa6 Qxc5</code></div>
+      <div class="analysis-line lc0"><strong><img src="/engine-logos/lc0.svg" alt="" />+5.28</strong><code>Nxd5 exd5 exf6 Bxf6</code></div>
+      <div class="analysis-line sf-line"><strong><img src="/engine-logos/stockfish.png" alt="" />+4.03</strong><code>exf6 Bxf6 Nxd5 exd5</code></div>
+      <div class="analysis-line sf-line"><strong><img src="/engine-logos/stockfish.png" alt="" />+3.90</strong><code>Nxd5 exd5 exf6 Bxf6</code></div>
     </section>
   </div>
 </div>
@@ -99,7 +128,7 @@
   .board-panel{padding:9px}
   .board-row{display:grid; grid-template-columns:8px minmax(0,1fr); gap:7px}
   .evalbar{position:relative; overflow:hidden; border-radius:3px; background:var(--eval-black)}
-  .evalbar span{position:absolute; inset:auto 0 0; height:51.3%; background:var(--eval-white); border-top:1px solid var(--accent)}
+  .evalbar span{position:absolute; inset:auto 0 0; height:96%; background:var(--eval-white); border-top:1px solid var(--accent)}
   .preview-board.cg-wrap{
     width:100%!important; height:auto!important; aspect-ratio:1; box-sizing:border-box;
     overflow:hidden; border:1px solid var(--border-input); border-radius:4px;
@@ -121,6 +150,7 @@
     border:1px solid var(--rule); border-radius:4px; background:var(--panel-inset);
     color:var(--muted); font-family:var(--mono); font-size:8px;
   }
+  .move-list strong{color:var(--ink); font-weight:650}
   .position-tools-preview{
     margin-top:6px; padding:6px 8px; border:1px solid var(--rule); border-radius:4px;
     color:var(--muted-2); font-family:var(--mono); font-size:7px; letter-spacing:.06em; text-transform:uppercase;
@@ -194,7 +224,9 @@
     padding:5px 3px 5px 7px; border-top:1px solid var(--rule); border-left:2px solid var(--chart-1);
     color:var(--ink); font-size:7px;
   }
-  .analysis-line strong{color:var(--accent-deep); font-family:var(--mono)}
+  .analysis-line.sf-line{border-left-color:var(--chart-2)}
+  .analysis-line strong{display:flex; align-items:center; gap:3px; color:var(--accent-deep); font-family:var(--mono)}
+  .analysis-line strong img{width:8px; height:8px; object-fit:contain}
   .analysis-line code{overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--text-soft); font-size:7px}
 
   @container(max-width:520px){
