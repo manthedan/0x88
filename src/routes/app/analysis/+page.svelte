@@ -371,6 +371,17 @@
   }
   :global(.loading-progress-row), :global(.search-progress-row){display:grid; gap:3px; margin:4px 0}
   :global(.dl-label), :global(.search-progress-text){font-family:var(--mono); font-size:11px; color:var(--muted)}
+  :global(.search-activity-row){
+    min-width:0; min-height:20px; display:grid; grid-template-columns:7px minmax(0,1fr);
+    align-items:center; gap:8px;
+  }
+  :global(.search-activity-mark){
+    width:7px; height:7px; border-radius:1px; background:var(--accent);
+    box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+  :global(.search-activity-row .search-progress-text){
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
   .analysis-overview{
     display:grid; grid-template-columns:1fr 1.25fr; gap:0;
     padding:11px 12px; border-bottom:1px solid var(--rule);

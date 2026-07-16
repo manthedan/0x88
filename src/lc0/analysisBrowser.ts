@@ -445,22 +445,35 @@ function analysisProgressText(label: string, progress: { completedVisits?: numbe
   return `${label}: ${completed}/${requested} visits${pct} · best ${progress.move ?? '—'} · Q ${progress.value.toFixed(3)}${speed}`;
 }
 
+function hasBoundedSearchProgress(progress: SearchProgressSnapshot): boolean {
+  return !progress.indeterminate
+    && progress.completed !== undefined
+    && progress.requested !== undefined
+    && progress.requested > 0
+    && progress.requested < Number.MAX_SAFE_INTEGER;
+}
+
 function searchProgressText(progress: SearchProgressSnapshot): string {
   if (progress.indeterminate) return `${progress.label}: searching…`;
   const completed = progress.completed ?? 0;
   const requested = progress.requested ?? completed;
-  const pct = requested > 0 ? ` ${(100 * completed / requested).toFixed(0)}%` : '';
+  const bounded = hasBoundedSearchProgress(progress);
+  const count = bounded ? `${completed}/${requested}` : `${completed}`;
+  const pct = bounded ? ` ${(100 * completed / requested).toFixed(0)}%` : '';
   const elapsed = progress.elapsedMs && progress.elapsedMs > 0 ? ` · ${(progress.elapsedMs / 1000).toFixed(1)}s` : '';
   const nps = progress.nps && progress.nps > 0 ? ` · ${progress.nps.toFixed(1)} ${progress.units}/s` : '';
   const best = progress.best ? ` · best ${progress.best}` : '';
   const value = progress.value !== undefined ? ` · Q ${progress.value.toFixed(3)}` : '';
-  return `${progress.label}: ${completed}/${requested} ${progress.units}${pct}${elapsed}${nps}${best}${value}`;
+  return `${progress.label}: ${count} ${progress.units}${pct}${elapsed}${nps}${best}${value}`;
 }
 
 function searchProgressHtml(progress: SearchProgressSnapshot): string {
-  const value = progress.indeterminate || progress.completed === undefined ? '' : ` value="${Math.max(0, Math.floor(progress.completed))}"`;
-  const max = progress.indeterminate || progress.requested === undefined || progress.requested <= 0 ? '' : ` max="${Math.max(1, Math.floor(progress.requested))}"`;
-  return `<div class="search-progress-row"><progress${value}${max}></progress><div class="search-progress-text">${htmlEscape(searchProgressText(progress))}</div></div>`;
+  if (!hasBoundedSearchProgress(progress)) {
+    return `<div class="search-activity-row"><span class="search-activity-mark" aria-hidden="true"></span><div class="search-progress-text">${htmlEscape(searchProgressText(progress))}</div></div>`;
+  }
+  const value = Math.max(0, Math.floor(progress.completed!));
+  const max = Math.max(1, Math.floor(progress.requested!));
+  return `<div class="search-progress-row"><progress value="${value}" max="${max}"></progress><div class="search-progress-text">${htmlEscape(searchProgressText(progress))}</div></div>`;
 }
 
 function renderAnalysisSearchProgress(): void {
@@ -1392,9 +1405,11 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     .map((line) => [line.engine, line])).values()];
   const body = el('engineCompare').querySelector('tbody')!;
   if (!bestByEngine.length) {
-    el('engineConsensus').textContent = 'No analysis yet.';
     const progressRows = [...searchProgressByEngine.values()].map((progress) => `<tr><td>${engineLogoHtmlForName(progress.label)}</td><td colspan="3" class="small">searching</td><td class="pv">${searchProgressHtml(progress)}</td></tr>`);
-    body.innerHTML = progressRows.length ? progressRows.join('') : '<tr><td colspan="5" class="small">Run analysis to compare selected engines.</td></tr>';
+    el('engineConsensus').textContent = progressRows.length ? 'Analysis in progress.' : analyzing ? 'Preparing selected engines.' : 'No analysis yet.';
+    body.innerHTML = progressRows.length
+      ? progressRows.join('')
+      : `<tr><td colspan="5" class="small">${analyzing ? 'Preparing selected engines…' : 'Run analysis to compare selected engines.'}</td></tr>`;
     return;
   }
   const finiteScores = bestByEngine.map((line) => line.scoreCp).filter((score): score is number => score !== undefined);
@@ -2261,14 +2276,14 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       if (tree.current.fen === fen) { renderLines(); renderEvalBar(); setShapes(bestShapes()); }
     };
     if (lineGroups.some((lines) => lines.length > 0)) publishLines();
+    else renderEngineComparison([]);
     const tasks: Promise<void>[] = [];
     let hadTaskFailure = false;
-    const pushTask = (index: number, cacheKey: string, label: string, taskFactory: () => Promise<AnalysisLine[]>) => {
+    const pushTask = (index: number, cacheKey: string, label: string, taskFactory: (beginSearch: () => void) => Promise<AnalysisLine[]>) => {
       tasks.push((async () => {
         if (controller.signal.aborted || mountAbort.signal.aborted) return;
-        showIndeterminateSearchProgress(runId, fen, label);
         try {
-          const lines = await taskFactory();
+          const lines = await taskFactory(() => showIndeterminateSearchProgress(runId, fen, label));
           if (runId !== activeAnalysisRunId || analysisAbort !== controller || !analyzing || controller.signal.aborted || mountAbort.signal.aborted) return;
           if (lines.length) engineLineCache.set(cacheKey, lines);
           else engineLineCache.delete(cacheKey);
@@ -2313,8 +2328,17 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const positions = analysisPositions;
         const current = positions[positions.length - 1];
         const label = centipawnEngineLabel(row.variant);
-        pushTask(index, cacheKey, label, () => centipawnEvaluator(row.variant)
-          .then((evaluator) => chooseMove(current, evaluator, {
+        pushTask(index, cacheKey, label, async (beginSearch) => {
+          const loadingId = `startup:${label}`;
+          showLoadingProgressItem(loadingId, { label, phase: 'Preparing engine' });
+          let evaluator: Evaluator;
+          try {
+            evaluator = await centipawnEvaluator(row.variant);
+          } finally {
+            hideLoadingProgressItem(loadingId);
+          }
+          beginSearch();
+          const result = await chooseMove(current, evaluator, {
             visits: row.strength,
             batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('centipawnBatch') ?? params.get('tinyBatch') ?? '32') || 32))),
             signal: controller.signal,
@@ -2324,16 +2348,18 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
             multiPv: analysisMultiPv,
             pvDepth: 12,
             onProgress: (progress) => showMoveSearchProgress(runId, fen, label, progress),
-          }))
-          .then((result) => centipawnPuctAnalysisLines(result, fen, label)));
+          });
+          return centipawnPuctAnalysisLines(result, fen, label);
+        });
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
         const label = kind === 'lite' ? 'SF Lite' : 'SF';
         const stockfishUrl = stockfishFlavorUrl(threadedStockfishAvailable() ? (kind === 'lite' ? 'lite-threaded' : 'threaded') : (kind === 'lite' ? 'lite-single' : 'single'));
-        pushTask(index, cacheKey, label, () => withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
+        pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
           const engine = getStockfish(kind);
           engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
           await prepareCpuEngine(row, label, controller.signal, [stockfishUrl, jsSidecarWasmUrl(stockfishUrl)], (signal) => engine.newGame(signal));
+          beginSearch();
           const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           return stockfishAnalysisLines(infos, fen, label);
         }));
@@ -2341,11 +2367,12 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const variant = viridithasVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = getViridithasFor(row.variant);
-        pushTask(index, cacheKey, label, () => withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
+        pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
           await prepareCpuEngine(row, label, controller.signal, [variant.wasmUrl], async (signal) => {
             engine.setOptions({ depth: 1, movetimeMs: undefined });
             await engine.bestMove(START_FEN, signal);
           });
+          beginSearch();
           const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
@@ -2354,9 +2381,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const variant = berserkVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = getBerserkFor(row.variant);
-        pushTask(index, cacheKey, label, () => withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
+        pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
           engine.setOptions({ threads: lease.threads });
           await prepareCpuEngine(row, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl, variant.nnueUrl], (signal) => engine.newGame(signal));
+          beginSearch();
           const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
@@ -2365,9 +2393,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const variant = plentyChessVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = getPlentyChessFor(row.variant);
-        pushTask(index, cacheKey, label, () => withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
+        pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
           engine.setOptions({ threads: lease.threads });
           await prepareCpuEngine(row, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl], (signal) => engine.newGame(signal));
+          beginSearch();
           const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
@@ -2376,9 +2405,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const variant = stormphraxVariantForKey(row.variant);
         const label = variant.label;
         const engine = getStormphraxFor(row.variant);
-        pushTask(index, cacheKey, label, () => withCpuLease(`stormphrax:${row.variant}`, controller.signal, async (lease) => {
+        pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`stormphrax:${row.variant}`, controller.signal, async (lease) => {
           engine.setOptions({ threads: lease.threads });
           await prepareCpuEngine(row, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl], (signal) => engine.newGame(signal));
+          beginSearch();
           const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
@@ -2387,8 +2417,9 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const variant = recklessVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = getRecklessFor(row.variant);
-        pushTask(index, cacheKey, label, () => withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
+        pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
           await prepareCpuEngine(row, label, controller.signal, [variant.wasmUrl, variant.nnueUrl], (signal) => engine.newGame(signal));
+          beginSearch();
           const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
           renderRecklessRuntimeInfo();
           return stockfishAnalysisLines(infos, fen, label);
