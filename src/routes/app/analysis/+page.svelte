@@ -44,35 +44,50 @@
 <SiteHeader pageTitle="Analysis" />
 <BrowserCapabilities />
 <main id="main">
-  <section class="panel" aria-label="Board">
+  <section class="panel board-panel" aria-label="Board">
     <div class="board-wrap">
       <div class="evalbar" title="Evaluation (white advantage)"><div class="mid"></div><div class="white" id="evalWhite" style="height:50%"></div></div>
       <div class="board-shell"><div id="ground"></div></div>
     </div>
-    <div class="nav">
-      <button id="navStart" type="button" title="Start (Up)">|◀</button>
-      <button id="navBack" type="button" title="Back (Left)">◀</button>
-      <button id="navForward" type="button" title="Forward (Right)">▶</button>
-      <button id="navEnd" type="button" title="End (Down)">▶|</button>
-      <button id="flip" type="button" title="Flip board">⇅</button>
+    <div class="nav" aria-label="Move navigation">
+      <button id="navStart" type="button" title="Start (Up)" aria-label="Go to first move">|◀</button>
+      <button id="navBack" type="button" title="Back (Left)" aria-label="Go back one move">◀</button>
+      <button id="navForward" type="button" title="Forward (Right)" aria-label="Go forward one move">▶</button>
+      <button id="navEnd" type="button" title="End (Down)" aria-label="Go to last move">▶|</button>
+      <button id="flip" type="button" title="Flip board" aria-label="Flip board">⇅</button>
     </div>
     <div id="movelist" class="movelist move-panel"></div>
-    <div class="row">
-      <div class="field" style="flex:1 1 100%"><label for="fenInput">FEN</label>
-        <input id="fenInput" type="text" spellcheck="false" autocomplete="off" placeholder="paste a FEN" /></div>
-      <button id="loadFen" type="button">Load FEN</button>
-      <button id="reset" type="button">Reset</button>
-    </div>
-    <h2>PGN</h2>
-    <textarea id="pgnInput" spellcheck="false" placeholder="paste PGN (with variations) and Load"></textarea>
-    <div class="row">
-      <button id="loadPgn" type="button">Load PGN</button>
-      <button id="copyPgn" type="button">Copy PGN</button>
-    </div>
-    <div id="message" aria-live="polite">Loading model…</div>
-    <div id="downloadProgress" class="model-load-progress" hidden></div>
+    <details class="position-tools">
+      <summary>Position &amp; PGN</summary>
+      <div class="position-tools-body">
+        <div class="row fen-row">
+          <div class="field"><label for="fenInput">FEN</label>
+            <input id="fenInput" type="text" spellcheck="false" autocomplete="off" placeholder="Paste a FEN" /></div>
+          <button id="loadFen" type="button">Load FEN</button>
+          <button id="reset" type="button">Reset</button>
+        </div>
+        <div class="pgn-heading"><span>PGN</span><small>Variations supported</small></div>
+        <textarea id="pgnInput" spellcheck="false" placeholder="Paste a PGN"></textarea>
+        <div class="row pgn-actions">
+          <button id="loadPgn" type="button">Load PGN</button>
+          <button id="copyPgn" type="button">Copy PGN</button>
+        </div>
+      </div>
+    </details>
   </section>
   <section class="panel app-sidebar" aria-label="Analysis">
+    <header class="analysis-overview">
+      <div>
+        <span>Current position</span>
+        <strong id="sideToMove">—</strong>
+      </div>
+      <div class="evaluation-readout">
+        <span>Evaluation</span>
+        <strong id="posEval">—</strong>
+      </div>
+    </header>
+    <div id="message" aria-live="polite">Loading model…</div>
+    <div id="downloadProgress" class="model-load-progress" hidden></div>
     <details class="section-block" open>
       <summary>Engines</summary>
       <div class="analyze-controls">
@@ -97,7 +112,7 @@
         </div>
       </div>
       <div id="engineList" class="engine-list"></div>
-      <div class="row">
+      <div class="row add-engine-row">
         <button id="addEngine" type="button">+ Add engine</button>
         {#if devMode}
         <div class="field"><label for="engineProfileSelect">Profile</label>
@@ -148,22 +163,18 @@
     {/if}
     </details>
     <details class="section-block" open>
-      <summary>Engine comparison</summary>
+      <summary>Comparison</summary>
       <div id="engineConsensus" class="compare-summary">No analysis yet.</div>
       <div id="analysisSearchProgress" class="search-progress-grid" hidden></div>
       <table id="engineCompare" class="engine-compare"><thead><tr><th>Engine</th><th>Best</th><th>Eval</th><th>Δ</th><th>PV</th></tr></thead><tbody></tbody></table>
     </details>
     <details class="section-block" open>
-      <summary>Engine lines</summary>
+      <summary>Lines</summary>
       <div id="engineLegend" class="legend"></div>
       <ol id="lines" class="lines"></ol>
-      <dl class="status-inline">
-        <div><dt>Side</dt><dd id="sideToMove">—</dd></div>
-        <div><dt>Eval</dt><dd id="posEval">—</dd></div>
-      </dl>
     </details>
-    <details class="section-block">
-      <summary>Human moves · Maia3</summary>
+    <details class="section-block human-moves">
+      <summary>Human moves <span>Maia3</span></summary>
       <div class="row">
         <button id="maia3Enable" type="button">Load Maia3 (~28MB, cached)</button>
         <span id="maia3PanelStatus" class="small"></span>
@@ -230,16 +241,18 @@
 <style>
   main{
     display:grid;
-    grid-template-columns:minmax(0,1fr) minmax(360px,460px);
-    gap:24px; align-items:start; justify-content:center; padding:26px 28px 56px;
-    max-width:1280px; margin:0 auto;
+    grid-template-columns:minmax(0,1fr) minmax(380px,440px);
+    gap:22px; align-items:start; justify-content:center; padding:24px 28px 64px;
+    max-width:1320px; margin:0 auto;
   }
+  .board-panel{min-width:0; padding:16px}
   .app-sidebar{
-    position:sticky; top:72px;
+    position:sticky; top:74px; padding:0; overflow:hidden;
+    border-color:var(--rule-strong);
   }
-  .board-wrap{display:grid; grid-template-columns:18px 1fr; gap:12px}
+  .board-wrap{display:grid; grid-template-columns:14px 1fr; gap:10px}
   .evalbar{
-    width:18px; border:1px solid var(--border-input); border-radius:6px;
+    width:14px; border:1px solid var(--border-input); border-radius:5px;
     overflow:hidden; background:var(--eval-black); position:relative; flex:0 0 auto;
     box-sizing:border-box;
   }
@@ -252,27 +265,45 @@
     height:1px; background:var(--accent); opacity:.6;
   }
   .board-shell{min-width:0}
-  .nav{display:flex; gap:8px; margin-top:12px}
+  .nav{display:flex; gap:6px; margin-top:10px}
   .nav button{
-    flex:1 1 auto; height:40px; border-radius:9px;
-    border:1px solid var(--border-input); background:var(--panel);
-    color:var(--text-soft); font-size:15px; cursor:pointer;
+    flex:1 1 auto; height:38px; border-radius:7px;
+    border:1px solid var(--border-input); background:var(--panel-inset);
+    color:var(--text-soft); font-size:14px; cursor:pointer;
     display:flex; align-items:center; justify-content:center;
   }
   .nav button:hover{border-color:var(--border-input-hover); background:var(--card); color:var(--ink)}
   .row{margin-top:12px}
-  .engine-list{margin-top:12px}
+  .engine-list{margin-top:10px}
   .field{margin-top:12px}
+  .position-tools{
+    margin-top:10px; overflow:hidden;
+    border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel-inset);
+  }
+  .position-tools>summary{
+    padding:11px 13px; cursor:pointer; list-style:none; user-select:none;
+    font-family:var(--mono); font-size:10px; font-weight:650;
+    letter-spacing:.09em; text-transform:uppercase; color:var(--muted-2);
+  }
+  .position-tools>summary::-webkit-details-marker{display:none}
+  .position-tools>summary::before{content:"+"; display:inline-block; width:14px; color:var(--accent); font-size:13px}
+  .position-tools[open]>summary::before{content:"−"}
+  .position-tools-body{padding:2px 13px 13px; border-top:1px solid var(--rule)}
+  .fen-row .field{flex:1 1 100%; margin-top:10px}
+  .pgn-heading{display:flex; justify-content:space-between; align-items:center; margin:14px 0 6px}
+  .pgn-heading span{font-family:var(--mono); font-size:10px; letter-spacing:.08em; color:var(--muted-2)}
+  .pgn-heading small{color:var(--muted); font-size:11px}
+  .pgn-actions{margin-top:8px}
   input[type=number]:not(.stepper-field input){width:80px}
   :global(.lines){list-style:none; margin:8px 0 0; padding:0}
   :global(.lines li){
-    display:flex; align-items:center; gap:8px;
-    padding:4px 6px; border-top:1px solid var(--rule);
-    cursor:pointer; font-size:13px; padding-left:9px;
+    min-height:35px; display:flex; align-items:center; gap:9px;
+    padding:6px 8px 6px 10px; border-top:1px solid var(--rule);
+    cursor:pointer; font-size:13px;
     overflow:hidden;
   }
   :global(.lines li:hover){background:var(--soft)}
-  :global(.lines .score){display:flex; align-items:center; gap:5px; flex:0 0 auto; font-family:var(--mono); font-weight:700; font-size:12px}
+  :global(.lines .score){width:66px; display:flex; align-items:center; gap:5px; flex:0 0 auto; font-family:var(--mono); font-weight:700; font-size:12px}
   :global(.lines .score.neg){color:#a5461b}
   :global(.lines .score.pos){color:var(--accent)}
   :global(.lines .pv){font-family:var(--mono); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto; min-width:0}
@@ -309,12 +340,13 @@
   :global(.review-critical li:hover){background:var(--soft)}
   :global(.review-critical .mono){font-family:var(--mono)}
   :global(.compare-summary){
-    margin-top:8px; padding:8px; border:1px solid var(--rule);
-    border-radius:var(--radius-sm); background:var(--panel-inset); font-size:12px; color:var(--muted);
+    margin-top:0; padding:8px 10px; border:0; border-left:2px solid var(--accent);
+    border-radius:0 var(--radius-sm) var(--radius-sm) 0;
+    background:var(--accent-soft); font-size:12px; color:var(--text-soft);
   }
   :global(table.engine-compare){width:100%; border-collapse:collapse; font-size:11px; margin-top:8px}
   :global(table.engine-compare th), :global(table.engine-compare td){
-    text-align:left; padding:4px 5px;
+    text-align:left; padding:6px 5px;
     border-bottom:1px solid var(--rule); vertical-align:middle;
   }
   :global(table.engine-compare th){
@@ -334,10 +366,33 @@
   }
   :global(.loading-progress-row), :global(.search-progress-row){display:grid; gap:3px; margin:4px 0}
   :global(.dl-label), :global(.search-progress-text){font-family:var(--mono); font-size:11px; color:var(--muted)}
-  .analyze-controls{display:grid; gap:8px; margin-top:0}
-  .analyze-actions{display:flex; gap:8px}
-  .analyze-actions button{flex:1 1 0}
-  .analyze-options{display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-top:2px}
+  .analysis-overview{
+    display:grid; grid-template-columns:1fr 1.25fr; gap:0;
+    padding:16px 18px; border-bottom:1px solid var(--rule);
+    background:var(--panel-inset);
+  }
+  .analysis-overview>div{min-width:0; display:grid; gap:2px}
+  .analysis-overview>div+div{padding-left:16px; border-left:1px solid var(--rule)}
+  .analysis-overview span{
+    font-family:var(--mono); font-size:9px; line-height:1.3;
+    letter-spacing:.09em; text-transform:uppercase; color:var(--muted-2);
+  }
+  .analysis-overview strong{
+    overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+    color:var(--ink); font-family:var(--serif); font-size:16px; line-height:1.3; font-weight:600;
+  }
+  .evaluation-readout{text-align:right}
+  .app-sidebar #message{
+    margin:12px 18px 0; padding:8px 10px;
+    border:0; border-left:2px solid var(--accent); border-radius:0 var(--radius-sm) var(--radius-sm) 0;
+    background:var(--panel-inset)!important; color:var(--text-soft);
+    font-family:var(--mono); font-size:11px; line-height:1.5;
+  }
+  .app-sidebar :global(.model-load-progress){margin:8px 18px 0}
+  .analyze-controls{display:grid; gap:10px; margin-top:0}
+  .analyze-actions{display:grid; grid-template-columns:1.65fr 1fr; gap:8px}
+  .analyze-actions button{min-height:42px}
+  .analyze-options{display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; align-items:center; margin-top:0}
   .toggle{
     display:inline-flex; align-items:center; gap:8px; cursor:pointer; user-select:none;
   }
@@ -395,9 +450,9 @@
   :global(.legend .key){display:inline-flex; align-items:center; gap:5px}
   :global(.legend .dot){width:11px; height:11px; border-radius:3px; display:inline-block}
   :global(.movelist){
-    font-family:var(--mono); font-size:14px; line-height:1.9;
-    margin-top:12px; min-height:42px; max-height:300px; overflow:auto;
-    padding:10px 14px; border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel-inset);
+    font-family:var(--mono); font-size:13px; line-height:1.8;
+    margin-top:10px; min-height:42px; max-height:220px; overflow:auto;
+    padding:9px 12px; border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel-inset);
   }
   :global(.maia3-grid){margin-top:8px; font-size:13px}
   :global(.maia3-grid .maia3-row){
@@ -418,12 +473,12 @@
   :global(.movelist .mv:hover){background:var(--soft)}
   :global(.movelist .mv.current){background:var(--accent); color:white}
   :global(.movelist .var){color:var(--muted)}
-  .section-block{margin-top:0; padding-top:20px}
-  .section-block:first-child{padding-top:0}
+  .section-block{margin-top:0; padding:17px 18px 18px; border-top:1px solid var(--rule)}
+  .section-block:first-of-type{margin-top:13px}
   .section-block>summary{
-    cursor:pointer; font-size:11px; text-transform:uppercase;
-    letter-spacing:.12em; color:var(--muted-2); font-weight:500;
-    font-family:var(--mono); list-style:none; user-select:none; padding:0 0 10px; transition:color .12s;
+    cursor:pointer; font-size:10px; text-transform:uppercase;
+    letter-spacing:.12em; color:var(--muted-2); font-weight:650;
+    font-family:var(--mono); list-style:none; user-select:none; padding:0 0 12px; transition:color .12s;
   }
   .section-block>summary::-webkit-details-marker{display:none}
   .section-block>summary::before{
@@ -433,12 +488,14 @@
   .section-block[open]>summary::before{transform:rotate(90deg)}
   .section-block>summary:hover{color:var(--ink)}
   .section-block[open]>summary{margin-bottom:0}
+  .section-block:not([open])>summary{padding-bottom:0}
   .section-block[open]>summary::before{color:var(--accent)}
-  #message{
-    margin-top:12px; padding:8px 10px; border:1px solid var(--rule);
-    border-radius:var(--radius-sm); background:var(--panel-inset);
-    font-family:var(--mono); font-size:12px; color:var(--text-soft);
+  .human-moves>summary span{
+    margin-left:5px; padding:2px 5px; border:1px solid var(--accent-tint-border); border-radius:3px;
+    color:var(--accent-deep); font-size:8px; letter-spacing:.06em;
   }
+  .add-engine-row{margin-top:9px}
+  .add-engine-row button{border-style:dashed; background:transparent}
   :global(.pgn-db-list), :global(.pgn-db-results){display:grid; gap:6px; margin-top:8px}
   :global(.pgn-db-list .empty), :global(.pgn-db-results .empty){
     padding:7px 8px; border:1px dashed var(--rule);
@@ -466,8 +523,21 @@
   :global(.wdlbar .d){background:#b9b3a4}
   :global(.wdlbar .b){background:#3a3a3a}
   @media (max-width:900px){
-    main{grid-template-columns:1fr; padding:18px}
+    main{grid-template-columns:1fr; padding:16px}
     .app-sidebar{position:static; max-height:none; overflow-y:visible}
+  }
+  @media (max-width:600px){
+    main{padding:12px 10px 40px; gap:12px}
+    .board-panel{padding:10px}
+    .board-wrap{grid-template-columns:10px 1fr; gap:7px}
+    .evalbar{width:10px}
+    .nav{gap:5px; margin-top:9px}
+    .nav button{height:40px}
+    .analysis-overview{padding:14px}
+    .app-sidebar #message{margin-inline:14px}
+    .app-sidebar :global(.model-load-progress){margin-inline:14px}
+    .section-block{padding:16px 14px}
+    :global(.engine-row .row-unit){display:none}
   }
   @media (prefers-reduced-motion: reduce){
     .evalbar .white{transition:none}

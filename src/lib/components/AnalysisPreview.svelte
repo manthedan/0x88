@@ -38,9 +38,15 @@
         <span>|◀</span><span>◀</span><span>▶</span><span>▶|</span><span>⇅</span>
       </div>
       <div class="move-list">no moves · drag a piece or load a PGN</div>
+      <div class="position-tools-preview"><span>+</span> Position &amp; PGN</div>
     </section>
 
     <section class="analysis-panel">
+      <div class="mini-overview">
+        <div><span>Current position</span><strong>White to move</strong></div>
+        <div><span>Evaluation</span><strong>+0.13</strong></div>
+      </div>
+      <div class="mini-status">Analyzed · Lc0 small · 400 visits</div>
       <div class="section-title"><span>▾</span> ENGINES</div>
       <div class="analyze-row"><span class="primary">Analyze</span><span class="disabled">Stop</span></div>
       <div class="options-row">
@@ -53,12 +59,12 @@
       </div>
       <div class="add-engine">+ Add engine</div>
 
-      <div class="section-title comparison"><span>▾</span> ENGINE COMPARISON</div>
+      <div class="section-title comparison"><span>▾</span> COMPARISON</div>
       <div class="consensus">1/1 engines prefer d4 · eval spread unavailable</div>
       <div class="compare-head"><span>ENGINE</span><span>BEST</span><span>EVAL</span><span>Δ</span><span>PV</span></div>
       <div class="compare-line"><span><img src="/engine-logos/lc0.svg" alt="" />Lc0</span><strong>d4</strong><code>+0.13</code><code>0</code><code>d4 d5 c4 c6</code></div>
 
-      <div class="section-title lines-title"><span>▾</span> ENGINE LINES</div>
+      <div class="section-title lines-title"><span>▾</span> LINES</div>
       <div class="legend"><i></i>Lc0</div>
       <div class="analysis-line"><strong>+0.13</strong><code>d4 d5 c4 c6 cxd5</code></div>
       <div class="analysis-line"><strong>+0.12</strong><code>Nf3 d5 d4 Nf6</code></div>
@@ -108,7 +114,21 @@
     border:1px solid var(--rule); border-radius:4px; background:var(--panel-inset);
     color:var(--muted); font-family:var(--mono); font-size:8px;
   }
-  .analysis-panel{padding:10px 11px}
+  .position-tools-preview{
+    margin-top:6px; padding:6px 8px; border:1px solid var(--rule); border-radius:4px;
+    color:var(--muted-2); font-family:var(--mono); font-size:7px; letter-spacing:.06em; text-transform:uppercase;
+  }
+  .position-tools-preview span{color:var(--accent); margin-right:4px}
+  .analysis-panel{padding:9px 10px}
+  .mini-overview{display:grid; grid-template-columns:1fr .8fr; gap:7px; padding-bottom:7px; border-bottom:1px solid var(--rule)}
+  .mini-overview div{min-width:0; display:grid; gap:1px}
+  .mini-overview div+div{padding-left:7px; border-left:1px solid var(--rule); text-align:right}
+  .mini-overview span{font-family:var(--mono); font-size:5px; letter-spacing:.07em; text-transform:uppercase; color:var(--muted)}
+  .mini-overview strong{overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-family:var(--serif); font-size:10px; color:var(--ink)}
+  .mini-status{
+    margin:7px 0 9px; padding:5px 6px; border-left:2px solid var(--accent); background:var(--panel-inset);
+    color:var(--muted); font-family:var(--mono); font-size:6px;
+  }
   .section-title{
     color:var(--muted-2); font-family:var(--mono); font-size:8px;
     line-height:1; letter-spacing:.11em; font-weight:650;
@@ -172,7 +192,11 @@
     .board-nav{gap:2px; margin-top:4px}
     .board-nav span{height:18px; font-size:7px}
     .move-list{margin-top:4px; padding:5px; font-size:6px}
+    .position-tools-preview{margin-top:4px; padding:4px; font-size:5px}
     .analysis-panel{padding:7px}
+    .mini-overview{padding-bottom:5px}
+    .mini-overview strong{font-size:7px}
+    .mini-status{margin:5px 0 6px; padding:4px; font-size:5px}
     .section-title{font-size:6px}
     .analyze-row{gap:4px; margin-top:6px}
     .analyze-row span,.add-engine{min-height:20px; font-size:7px}
