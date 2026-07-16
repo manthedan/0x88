@@ -395,6 +395,14 @@
   :global(.arena-search-status .search-progress-text){
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
+  :global(.search-activity-row){
+    height:100%; min-width:0; display:grid; grid-template-columns:7px minmax(0,1fr);
+    align-items:center; gap:8px;
+  }
+  :global(.search-activity-mark){
+    width:7px; height:7px; border-radius:1px; background:var(--accent);
+    box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+  }
   :global(.search-progress-placeholder){
     height:100%; display:flex; align-items:center; color:var(--muted);
     font-family:var(--mono); font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;

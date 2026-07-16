@@ -397,10 +397,12 @@ function arenaSearchProgressText(progress: ArenaSearchProgress): string {
 }
 
 function arenaSearchProgressHtml(progress: ArenaSearchProgress): string {
-  const bounded = hasBoundedArenaSearch(progress);
-  const value = bounded ? ` value="${Math.max(0, Math.floor(progress.completed!))}"` : '';
-  const max = bounded ? ` max="${Math.max(1, Math.floor(progress.requested!))}"` : '';
-  return `<div class="search-progress-row"><progress${value}${max}></progress><div class="search-progress-text">${htmlEscape(arenaSearchProgressText(progress))}</div></div>`;
+  if (!hasBoundedArenaSearch(progress)) {
+    return `<div class="search-activity-row"><span class="search-activity-mark" aria-hidden="true"></span><div class="search-progress-text">${htmlEscape(arenaSearchProgressText(progress))}</div></div>`;
+  }
+  const value = Math.max(0, Math.floor(progress.completed!));
+  const max = Math.max(1, Math.floor(progress.requested!));
+  return `<div class="search-progress-row"><progress value="${value}" max="${max}"></progress><div class="search-progress-text">${htmlEscape(arenaSearchProgressText(progress))}</div></div>`;
 }
 
 function setArenaSearchProgress(engineId: string, label: string, progress: ArenaSearchProgress): void {
