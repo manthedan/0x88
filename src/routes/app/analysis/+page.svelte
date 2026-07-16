@@ -90,6 +90,16 @@
     <div id="downloadProgress" class="model-load-progress" hidden></div>
     <details class="section-block" open>
       <summary>Engines</summary>
+      <div id="engineList" class="engine-list">
+        <div class="engine-list-loading">Preparing engine controls…</div>
+      </div>
+      <div class="row add-engine-row">
+        <button id="addEngine" type="button">+ Add engine</button>
+        {#if devMode}
+        <div class="field"><label for="engineProfileSelect">Profile</label>
+          <select id="engineProfileSelect"><option value="">default</option></select></div>
+        {/if}
+      </div>
       <div class="analyze-controls">
         <div class="analyze-actions">
           <button id="analyze" class="primary" type="button" disabled>Analyze</button>
@@ -99,7 +109,7 @@
           <label class="toggle" for="autoAnalyze">
             <input type="checkbox" id="autoAnalyze" checked />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            <span class="toggle-label">Auto</span>
+            <span class="toggle-label">Auto analyze</span>
           </label>
           <div class="stepper">
             <button id="multiPvDec" type="button" class="stepper-btn" aria-label="Decrease lines">&minus;</button>
@@ -110,14 +120,6 @@
             <button id="multiPvInc" type="button" class="stepper-btn" aria-label="Increase lines">+</button>
           </div>
         </div>
-      </div>
-      <div id="engineList" class="engine-list"></div>
-      <div class="row add-engine-row">
-        <button id="addEngine" type="button">+ Add engine</button>
-        {#if devMode}
-        <div class="field"><label for="engineProfileSelect">Profile</label>
-          <select id="engineProfileSelect"><option value="">default</option></select></div>
-        {/if}
       </div>
     {#if devMode}
     <details class="advanced-settings">
@@ -274,7 +276,10 @@
   }
   .nav button:hover{border-color:var(--border-input-hover); background:var(--card); color:var(--ink)}
   .row{margin-top:12px}
-  .engine-list{margin-top:10px}
+  .engine-list{margin-top:0}
+  .engine-list-loading{
+    padding:10px 0; color:var(--muted); font-family:var(--mono); font-size:11px;
+  }
   .field{margin-top:12px}
   .position-tools{
     margin-top:10px; overflow:hidden;
@@ -389,7 +394,10 @@
     font-family:var(--mono); font-size:11px; line-height:1.5;
   }
   .app-sidebar :global(.model-load-progress){margin:8px 18px 0}
-  .analyze-controls{display:grid; gap:10px; margin-top:0}
+  .analyze-controls{
+    display:grid; gap:10px; margin-top:13px; padding-top:13px;
+    border-top:1px solid var(--rule);
+  }
   .analyze-actions{display:grid; grid-template-columns:1.65fr 1fr; gap:8px}
   .analyze-actions button{min-height:42px}
   .analyze-options{display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; align-items:center; margin-top:0}
@@ -494,8 +502,12 @@
     margin-left:5px; padding:2px 5px; border:1px solid var(--accent-tint-border); border-radius:3px;
     color:var(--accent-deep); font-size:8px; letter-spacing:.06em;
   }
-  .add-engine-row{margin-top:9px}
-  .add-engine-row button{border-style:dashed; background:transparent}
+  .add-engine-row{margin-top:6px; align-items:center}
+  .add-engine-row button{
+    flex:0 0 auto; width:auto; min-height:0; padding:5px 2px; border:0; background:transparent;
+    color:var(--accent-deep); font-size:12px; font-weight:650;
+  }
+  .add-engine-row button:hover{background:transparent; color:var(--ink)}
   :global(.pgn-db-list), :global(.pgn-db-results){display:grid; gap:6px; margin-top:8px}
   :global(.pgn-db-list .empty), :global(.pgn-db-results .empty){
     padding:7px 8px; border:1px dashed var(--rule);

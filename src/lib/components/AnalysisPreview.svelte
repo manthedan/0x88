@@ -48,16 +48,18 @@
       </div>
       <div class="mini-status">Analyzed · Lc0 small · 400 visits</div>
       <div class="section-title"><span>▾</span> ENGINES</div>
-      <div class="analyze-row"><span class="primary">Analyze</span><span class="disabled">Stop</span></div>
-      <div class="options-row">
-        <span class="toggle"><i></i>Auto</span>
-        <span class="stepper"><b>−</b><em>LINES<strong>3</strong></em><b>+</b></span>
-      </div>
       <div class="engine-row-preview">
         <img src="/engine-logos/lc0.svg" alt="" />
         <span>Lc0</span><b>→</b><span>Small</span><b>→</b><code>400</code><small>visits</small>
       </div>
       <div class="add-engine">+ Add engine</div>
+      <div class="analyze-controls-preview">
+        <div class="analyze-row"><span class="primary">Analyze</span><span class="disabled">Stop</span></div>
+        <div class="options-row">
+          <span class="toggle"><i></i>Auto analyze</span>
+          <span class="stepper"><b>−</b><em>LINES<strong>3</strong></em><b>+</b></span>
+        </div>
+      </div>
 
       <div class="section-title comparison"><span>▾</span> COMPARISON</div>
       <div class="consensus">1/1 engines prefer d4 · eval spread unavailable</div>
@@ -134,8 +136,9 @@
     line-height:1; letter-spacing:.11em; font-weight:650;
   }
   .section-title>span{color:var(--accent); margin-right:4px}
-  .analyze-row{display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:9px}
-  .analyze-row span,.add-engine{
+  .analyze-controls-preview{margin-top:7px; padding-top:7px; border-top:1px solid var(--rule)}
+  .analyze-row{display:grid; grid-template-columns:1fr 1fr; gap:6px}
+  .analyze-row span{
     min-height:25px; display:grid; place-items:center;
     border:1px solid var(--border-input); border-radius:5px;
     font-size:9px; color:var(--text-soft);
@@ -162,7 +165,10 @@
   .engine-row-preview>b{color:var(--muted); text-align:center}
   .engine-row-preview code{font-size:8px; font-style:italic}
   .engine-row-preview small{color:var(--muted); font-size:6px}
-  .add-engine{margin-top:7px; background:var(--card)}
+  .add-engine{
+    width:max-content; margin-top:4px; padding:3px 1px;
+    color:var(--accent-deep); font-size:7px; font-weight:650;
+  }
   .comparison{margin-top:13px}
   .consensus{
     margin-top:8px; padding:6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
@@ -198,8 +204,9 @@
     .mini-overview strong{font-size:7px}
     .mini-status{margin:5px 0 6px; padding:4px; font-size:5px}
     .section-title{font-size:6px}
-    .analyze-row{gap:4px; margin-top:6px}
-    .analyze-row span,.add-engine{min-height:20px; font-size:7px}
+    .analyze-controls-preview{margin-top:4px; padding-top:4px}
+    .analyze-row{gap:4px}
+    .analyze-row span{min-height:20px; font-size:7px}
     .options-row{height:24px; gap:7px; margin-top:3px; font-size:7px}
     .engine-row-preview{grid-template-columns:10px minmax(28px,1fr) 6px minmax(31px,1fr) 6px 30px; gap:2px; margin-top:3px; font-size:6px}
     .engine-row-preview small{display:none}
