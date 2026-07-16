@@ -189,6 +189,9 @@
     {/if}
     <details id="engineOutputsSection" class="section-block" open>
       <summary>Engine outputs</summary>
+      <div id="arenaSearchStatus" class="arena-search-status" aria-label="Current engine search progress">
+        <div class="search-progress-placeholder">Search progress appears here during play.</div>
+      </div>
       <div id="engineEvalInfo" class="eval-grid" aria-label="Engine evaluation outputs"><div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">Waiting…</span></div><div class="eval-card-eval">Engine outputs: waiting for a move…</div></div></div>
     </details>
     <details id="resultSection" class="section-block">
@@ -378,11 +381,24 @@
     margin-top:6px; padding:8px; border:1px solid var(--rule);
     border-radius:var(--radius-sm); background:var(--panel);
   }
-  :global(.model-load-progress progress), :global(.eval-card progress){
-    width:100%; height:9px; accent-color:var(--accent);
+  :global(.model-load-progress progress), :global(.arena-search-status progress){
+    width:100%; height:8px; accent-color:var(--accent);
   }
   :global(.loading-progress-row), :global(.search-progress-row){display:grid; gap:3px; margin:4px 0}
   :global(.dl-label), :global(.search-progress-text){font-family:var(--mono); font-size:11px; color:var(--muted)}
+  :global(.arena-search-status){
+    height:40px; min-width:0; margin:2px 0 7px; padding:5px 8px;
+    border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel-inset);
+    overflow:hidden;
+  }
+  :global(.arena-search-status .search-progress-row){margin:0}
+  :global(.arena-search-status .search-progress-text){
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  :global(.search-progress-placeholder){
+    height:100%; display:flex; align-items:center; color:var(--muted);
+    font-family:var(--mono); font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
   :global(.eval-grid){
     display:grid; grid-template-columns:minmax(0,1fr); gap:6px;
     width:100%; min-width:0; margin-top:2px; min-height:0;
@@ -417,7 +433,6 @@
     max-width:100%; white-space:normal; overflow-wrap:anywhere; word-break:break-word;
   }
   :global(.eval-card-pv){color:var(--text-soft)}
-  :global(.eval-card .eval-status){font-family:var(--mono); font-size:10px; color:var(--accent); font-weight:600; white-space:nowrap; margin-left:auto}
   :global(.eval-card.active){border-color:color-mix(in srgb, var(--accent) 30%, var(--rule)); background:var(--soft)}
   :global(.runtime-badge){
     margin-top:8px; padding:7px 8px; border:1px solid var(--rule);

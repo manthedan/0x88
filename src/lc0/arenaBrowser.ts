@@ -374,21 +374,32 @@ function hideDownloadProgress(): void {
   hideLoadingProgress(node);
 }
 
+function hasBoundedArenaSearch(progress: ArenaSearchProgress): boolean {
+  return !progress.indeterminate
+    && progress.completed !== undefined
+    && progress.requested !== undefined
+    && progress.requested > 0
+    && progress.requested < Number.MAX_SAFE_INTEGER;
+}
+
 function arenaSearchProgressText(progress: ArenaSearchProgress): string {
   if (progress.indeterminate) return `${progress.label}: searching…`;
   const completed = progress.completed ?? 0;
   const requested = progress.requested ?? completed;
-  const pct = requested > 0 ? ` ${(100 * completed / requested).toFixed(0)}%` : '';
+  const bounded = hasBoundedArenaSearch(progress);
+  const count = bounded ? `${completed}/${requested}` : `${completed}`;
+  const pct = bounded ? ` ${(100 * completed / requested).toFixed(0)}%` : '';
   const elapsed = progress.elapsedMs && progress.elapsedMs > 0 ? ` · ${(progress.elapsedMs / 1000).toFixed(1)}s` : '';
   const nps = progress.nps && progress.nps > 0 ? ` · ${progress.nps.toFixed(1)} ${progress.units}/s` : '';
   const best = progress.best ? ` · best ${progress.best}` : '';
   const value = progress.value !== undefined ? ` · Q ${progress.value.toFixed(3)}` : '';
-  return `${progress.label}: ${completed}/${requested} ${progress.units}${pct}${elapsed}${nps}${best}${value}`;
+  return `${progress.label}: ${count} ${progress.units}${pct}${elapsed}${nps}${best}${value}`;
 }
 
 function arenaSearchProgressHtml(progress: ArenaSearchProgress): string {
-  const value = progress.indeterminate || progress.completed === undefined ? '' : ` value="${Math.max(0, Math.floor(progress.completed))}"`;
-  const max = progress.indeterminate || progress.requested === undefined || progress.requested <= 0 ? '' : ` max="${Math.max(1, Math.floor(progress.requested))}"`;
+  const bounded = hasBoundedArenaSearch(progress);
+  const value = bounded ? ` value="${Math.max(0, Math.floor(progress.completed!))}"` : '';
+  const max = bounded ? ` max="${Math.max(1, Math.floor(progress.requested!))}"` : '';
   return `<div class="search-progress-row"><progress${value}${max}></progress><div class="search-progress-text">${htmlEscape(arenaSearchProgressText(progress))}</div></div>`;
 }
 
@@ -928,17 +939,33 @@ function renderEvalBars(): void {
   render('blackEngineEvalBar', 'Black', boardBlackId, boardBlackName);
 }
 
+function renderArenaSearchStatus(ids: string[]): void {
+  const host = document.getElementById('arenaSearchStatus');
+  if (!host) return;
+  const progressId = ids.find((id) => thinkingEngineIds.has(id) && arenaSearchProgress.has(id))
+    ?? ids.find((id) => arenaSearchProgress.has(id));
+  const progress = progressId ? arenaSearchProgress.get(progressId) : undefined;
+  if (progress) {
+    host.innerHTML = arenaSearchProgressHtml(progress);
+    return;
+  }
+  const thinkingId = ids.find((id) => thinkingEngineIds.has(id));
+  const thinkingName = thinkingId ? engines.get(thinkingId)?.name ?? thinkingId : null;
+  const text = running
+    ? thinkingName ? `${thinkingName}: starting search…` : 'Waiting for the next search…'
+    : 'Search progress appears here during play.';
+  host.innerHTML = `<div class="search-progress-placeholder">${htmlEscape(text)}</div>`;
+}
+
 function renderEngineOutputs(): void {
   const ids = activeEngineIds.length ? activeEngineIds : [...new Set([seatEngineId(0), seatEngineId(1)])].filter((id) => engines.has(id));
+  renderArenaSearchStatus(ids);
   const cards = ids.map((id) => {
     const snapshot = engineOutputs.get(id);
     const name = snapshot?.engineName ?? engines.get(id)?.name ?? id;
     const thinking = thinkingEngineIds.has(id);
-    const progress = arenaSearchProgress.get(id);
-    const progressHtml = progress ? arenaSearchProgressHtml(progress) : '';
     if (!snapshot && !running && !thinking) return '';
-    if (!snapshot) return `<div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">${htmlEscape(name)}</span>${thinking ? '<span class="eval-status">thinking…</span>' : ''}</div><div class="eval-card-eval">${thinking ? 'thinking…' : 'waiting…'}</div><div class="eval-card-scroll">${progressHtml}</div></div>`;
-    const status = thinking ? '<span class="eval-status">thinking…</span>' : '';
+    if (!snapshot) return `<div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">${htmlEscape(name)}</span></div><div class="eval-card-eval">${thinking ? 'thinking…' : 'waiting…'}</div></div>`;
     const moveTag = snapshot.move ? ` · move ${snapshot.move}` : '';
     const statsParts: string[] = [];
     if (snapshot.nps != null) statsParts.push(`${formatNps(snapshot.nps)} nps`);
@@ -948,7 +975,7 @@ function renderEngineOutputs(): void {
     const statsLine = statsParts.length ? `<div class="eval-card-stats">${statsParts.map(htmlEscape).join(' · ')}</div>` : '';
     const detail = snapshot.detail ? `<div class="eval-card-raw">${htmlEscape(snapshot.detail)}</div>` : '';
     const pv = snapshot.pv?.length ? `<div class="eval-card-pv">${htmlEscape(pvText(snapshot.pv))}</div>` : '';
-    return `<div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">${htmlEscape(name)}</span>${status}</div><div class="eval-card-eval">${htmlEscape(snapshot.shortEval)}${htmlEscape(moveTag)}</div>${statsLine}<div class="eval-card-scroll">${progressHtml}${detail}${pv}</div></div>`;
+    return `<div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">${htmlEscape(name)}</span></div><div class="eval-card-eval">${htmlEscape(snapshot.shortEval)}${htmlEscape(moveTag)}</div>${statsLine}<div class="eval-card-scroll">${detail}${pv}</div></div>`;
   });
   const html = cards.filter(Boolean);
   const grid = el('engineEvalInfo');
