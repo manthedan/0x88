@@ -60,8 +60,8 @@
       </div>
       <div id="maia3Controls" hidden>
         <div class="maia-grid">
-          <div class="field"><label for="maia3Elo">Rating <span id="maia3EloValue">1500</span></label>
-            <input id="maia3Elo" type="range" min="600" max="2600" step="100" value="1500" /></div>
+          <div class="field rating-field"><label for="maia3Elo">Rating <span id="maia3EloValue">1500</span></label>
+            <div class="range-control"><input id="maia3Elo" type="range" min="600" max="2600" step="100" value="1500" /></div></div>
           <div class="field"><label for="maia3Style">Move selection</label>
             <select id="maia3Style">
               <option value="sample">Human sampling</option>
@@ -142,7 +142,13 @@
   .field{min-width:0; margin-top:0}
   .opponent-grid{display:grid; grid-template-columns:minmax(0,1.45fr) minmax(110px,.75fr); gap:8px; align-items:end}
   :global(.opponent-grid:has(> .field[hidden])){grid-template-columns:1fr}
-  .maia-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:end; margin-top:9px}
+  .maia-grid{display:grid; grid-template-columns:minmax(0,1fr) minmax(142px,.8fr); gap:8px; align-items:end; margin-top:9px}
+  .maia-grid>.field{display:grid; grid-template-rows:auto 37px; align-items:stretch}
+  .range-control{
+    display:flex; align-items:center; min-width:0; height:37px; padding:0 8px;
+    border:1px solid var(--border-input); border-radius:var(--radius-input);
+    background:var(--input-bg);
+  }
   .sampling-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px}
   .advanced-settings{margin-top:8px; padding-top:8px; border-top:1px solid var(--rule)}
   .advanced-settings>summary{
@@ -151,8 +157,8 @@
   }
   .advanced-settings[open]>summary{margin-bottom:8px}
   .setup-note{margin-top:8px; line-height:1.45}
-  .game-setup{display:grid; grid-template-columns:112px minmax(0,1fr); gap:9px; align-items:start}
-  .game-actions{display:grid; grid-template-columns:112px 82px; gap:6px}
+  .game-setup{display:grid; grid-template-columns:minmax(112px,.75fr) minmax(0,1.35fr); gap:9px; align-items:start}
+  .game-actions{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px}
   .game-actions button{width:100%; min-height:36px; padding:7px 8px}
   .record-actions{display:flex; gap:6px}
   .record-actions button{min-height:34px; padding:6px 9px}
@@ -200,7 +206,7 @@
     border:1px solid var(--accent); border-radius:6px; background:var(--soft);
   }
   :global(#maia3Elo){
-    -webkit-appearance:none; appearance:none; width:100%; height:5px;
+    -webkit-appearance:none; appearance:none; width:100%; height:5px; margin:0;
     border-radius:3px; background:var(--rule-strong); outline:none;
   }
   :global(#maia3Elo::-webkit-slider-thumb){
@@ -221,5 +227,6 @@
     .opponent-grid{grid-template-columns:minmax(0,1.2fr) minmax(100px,.8fr)}
     .maia-grid,.sampling-grid{grid-template-columns:1fr}
     .game-setup{grid-template-columns:1fr}
+    .game-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
   }
 </style>
