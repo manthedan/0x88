@@ -2,6 +2,7 @@
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './engine_artifact_registry.mjs';
+import { isSameOriginThreadedStockfishScript } from './prepare_netlify_r2_public_assets.mjs';
 
 const root = resolve(process.argv[2] ?? 'dist-client');
 
@@ -37,7 +38,8 @@ remove(join(root, 'models', 'bt4_soap_rem_c19000_final.onnx'));
 remove(join(root, 'models', 'monty'));
 remove(join(root, 'monty'));
 for (const dir of EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES) {
-  removeMatchingFiles(join(root, dir), (name, _path, isDir) => isDir ? false : isExternalArtifactName(name));
+  removeMatchingFiles(join(root, dir), (name, path, isDir) => isDir ? false
+    : !isSameOriginThreadedStockfishScript(relative(root, path)) && isExternalArtifactName(name));
 }
 
 console.log(JSON.stringify({ status: 'EXTERNAL_DEPLOY_ASSET_PRUNE_DONE', root: relative(process.cwd(), root) || '.', removed }, null, 2));

@@ -28,8 +28,10 @@ export const DEFAULT_STOCKFISH_FLAVOR: StockfishFlavor = 'lite-single';
 export const STOCKFISH_LITE_SINGLE_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite-single.js');
 export const STOCKFISH_LITE_SINGLE_RELAXED_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite-single-relaxed.js');
 export const STOCKFISH_SINGLE_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-single.js');
-export const STOCKFISH_LITE_THREADED_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite.js');
-export const STOCKFISH_THREADED_URL = resolvePublicAssetUrl('/stockfish/stockfish-18.js');
+// Threaded builds must retain a same-origin worker location so their pthreads
+// resolve back to the native Stockfish script instead of our cross-origin bootstrap.
+export const STOCKFISH_LITE_THREADED_URL = '/stockfish/stockfish-18-lite.js';
+export const STOCKFISH_THREADED_URL = '/stockfish/stockfish-18.js';
 
 export function defaultStockfishUrl(): string {
   return supportsWasmRelaxedSimd() ? STOCKFISH_LITE_SINGLE_RELAXED_URL : STOCKFISH_LITE_SINGLE_URL;

@@ -7,6 +7,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './engine_artifact_registry.mjs';
 import { checkOrtRuntimeAssets } from './check_ort_runtime_assets.mjs';
+import { isSameOriginThreadedStockfishScript } from './prepare_netlify_r2_public_assets.mjs';
 
 const DEFAULT_ASSET_BASE_URL = 'https://assets.0x88.app';
 const DEFAULT_CHANNEL_URL = `${DEFAULT_ASSET_BASE_URL}/channels/stable.json`;
@@ -171,7 +172,9 @@ function findForbiddenExternalAssets(root) {
   walk(join(root, 'models', 'monty'), (_name, _path, _isDir) => true);
   walk(join(root, 'monty'), (_name, _path, _isDir) => true);
   for (const dir of EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES) {
-    walk(join(root, dir), (name, _path, isDir) => !isDir && isExternalArtifactName(name));
+    walk(join(root, dir), (name, path, isDir) => !isDir
+      && !isSameOriginThreadedStockfishScript(relative(root, path))
+      && isExternalArtifactName(name));
   }
   return forbidden.map((item) => ({ ...item, path: relative(process.cwd(), item.path) }));
 }
