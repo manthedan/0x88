@@ -120,6 +120,7 @@
           </div>
         </div>
       </div>
+      <div id="analysisSearchProgress" class="search-progress-grid" hidden></div>
     {#if devMode}
     <details class="advanced-settings">
       <summary>Profiles &amp; engine settings</summary>
@@ -166,7 +167,6 @@
     <details id="comparisonSection" class="section-block" open hidden>
       <summary>Comparison</summary>
       <div id="engineConsensus" class="compare-summary">No analysis yet.</div>
-      <div id="analysisSearchProgress" class="search-progress-grid" hidden></div>
       <table id="engineCompare" class="engine-compare"><thead><tr><th>Engine</th><th>Best</th><th>Eval</th><th>Δ</th><th>PV</th></tr></thead><tbody></tbody></table>
     </details>
     <details class="section-block" open>
