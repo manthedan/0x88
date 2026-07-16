@@ -112,9 +112,14 @@ if (args[0] === 's3api' && args[1] === 'get-object') {
   }
   const file = args.at(-1);
   mkdirSync(dirname(file), { recursive: true });
-  const range = args[args.indexOf('--range') + 1];
-  const end = Number(range.match(/^bytes=0-(\\d+)$/)?.[1]);
-  writeFileSync(file, readFileSync(objectPath).subarray(0, end + 1));
+  const rangeIndex = args.indexOf('--range');
+  const body = readFileSync(objectPath);
+  if (rangeIndex === -1) {
+    writeFileSync(file, body);
+  } else {
+    const end = Number(args[rangeIndex + 1].match(/^bytes=0-(\\d+)$/)?.[1]);
+    writeFileSync(file, body.subarray(0, end + 1));
+  }
   process.stdout.write('{}');
   process.exit(0);
 }
@@ -1626,13 +1631,14 @@ test('publish_hashed_artifacts_to_r2 trusts encoded-length metadata when identit
   });
   const server = createServer((req, res) => {
     const isBr = req.url?.endsWith(`/br/${brSha256}`);
-    const body = isBr ? brBody : identityBody;
+    const servesBr = isBr && req.headers['accept-encoding']?.split(',').map((value) => value.trim()).includes('br');
+    const body = servesBr ? brBody : identityBody;
     const headers = {
       'Content-Length': req.method === 'HEAD' ? '0' : String(body.byteLength),
       'X-Artifact-Content-Length': String(identityBody.byteLength),
-      'X-Artifact-Encoded-Length': String(body.byteLength),
+      'X-Artifact-Encoded-Length': String(isBr ? brBody.byteLength : identityBody.byteLength),
       'Cache-Control': 'public, max-age=31536000, immutable',
-      ...(isBr ? { 'Content-Encoding': 'br' } : {}),
+      ...(servesBr ? { 'Content-Encoding': 'br' } : {}),
     };
     res.writeHead(200, headers);
     res.end(req.method === 'HEAD' ? undefined : body);
@@ -1693,6 +1699,9 @@ test('publish_hashed_artifacts_to_r2 uploads v2 Brotli bodies with Content-Encod
     assert.match(log, new RegExp(`s3api put-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/identity --body .* --content-type application/octet-stream --cache-control public, max-age=31536000, immutable --if-none-match \\* --endpoint-url https://r2\\.invalid --region auto`));
     assert.match(log, new RegExp(`s3api put-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/br/[a-f0-9]{64} --body .* --content-type application/octet-stream --cache-control public, max-age=31536000, immutable --if-none-match \\* --endpoint-url https://r2\\.invalid --region auto --content-encoding br`));
     assert.match(log, /s3api put-object --bucket test-bucket --key releases\/v2-execute\.json .*--content-type application\/json; charset=utf-8 --cache-control public, max-age=31536000, immutable --if-none-match \* .*--endpoint-url https:\/\/r2\.invalid --region auto/);
+    assert.match(log, new RegExp(`s3api get-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/identity --endpoint-url https://r2\\.invalid --region auto`));
+    assert.match(log, new RegExp(`s3api get-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/br/[a-f0-9]{64} --endpoint-url https://r2\\.invalid --region auto`));
+    assert.doesNotMatch(log, /r2 object get/);
     assert.doesNotMatch(log, /r2 object put test-bucket\/artifacts\//);
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -1750,7 +1759,7 @@ test('publish_hashed_artifacts_to_r2 refuses a warm valid CDN object when author
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Refusing to overwrite immutable object .*remote content differs/);
     const log = await readFile(logPath, 'utf8');
-    assert.match(log, new RegExp(`r2 object get ${target}`));
+    assert.match(log, new RegExp(`s3api get-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/identity`));
     assert.doesNotMatch(log, new RegExp(`r2 object put ${target}`));
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -1810,7 +1819,7 @@ test('publish_hashed_artifacts_to_r2 rejects a differing artifact after an atomi
     assert.match(result.stderr, /Refusing to overwrite immutable object .*remote content differs/);
     const log = await readFile(logPath, 'utf8');
     assert.match(log, new RegExp(`s3api put-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/identity .*--if-none-match \\*`));
-    assert.match(log, /r2 object get .*identity/);
+    assert.match(log, new RegExp(`s3api get-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/identity`));
     assert.doesNotMatch(log, /r2 object put .*identity/);
     assert.doesNotMatch(log, /releases\/create-race\.json/);
     assert.doesNotMatch(log, /r2 object put test-bucket\/channels\/stable\.json/);
@@ -2042,7 +2051,7 @@ test('publish_hashed_artifacts_to_r2 skips existing validated artifact uploads',
     assert.equal(parsed.planned[0].remoteState, 'identical-r2');
     assert.equal(parsed.planned[0].uploadAction, 'skip-identical-r2');
     const log = await readFile(logPath, 'utf8');
-    assert.match(log, new RegExp(`r2 object get ${target}`));
+    assert.match(log, new RegExp(`s3api get-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/test\\.onnx`));
     assert.doesNotMatch(log, new RegExp(`r2 object put ${target}`));
     assert.match(log, /s3api put-object --bucket test-bucket --key releases\/test-release\.json .*--if-none-match \*/);
   } finally {

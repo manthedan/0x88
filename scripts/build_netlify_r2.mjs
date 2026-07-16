@@ -62,7 +62,7 @@ async function main() {
       }, timings);
     }
     await timed('precompress artifacts', () => {
-      run(process.execPath, ['scripts/precompress_engine_artifacts.mjs', dist, '--allow-missing', '--exclude', 'monty', '--cache-dir', precompressCacheDir]);
+      run(process.execPath, ['scripts/precompress_engine_artifacts.mjs', dist, '--allow-missing', '--exclude', 'monty', '--exclude', 'stockfish', '--cache-dir', precompressCacheDir]);
     }, timings);
     const total = timings.reduce((sum, entry) => sum + entry.ms, 0);
     console.error(`[netlify-r2-build] total: ${formatMs(total)} dist=${relative(process.cwd(), dist) || '.'}`);

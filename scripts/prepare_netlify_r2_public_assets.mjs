@@ -6,6 +6,14 @@ import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './
 import { isRequiredOrtRuntimeAsset } from './ort_runtime_assets.mjs';
 
 const externalArtifactDirectories = new Set(EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES);
+const sameOriginThreadedStockfishScripts = new Set([
+  'stockfish/stockfish-18-lite.js',
+  'stockfish/stockfish-18.js',
+]);
+
+export function isSameOriginThreadedStockfishScript(relPath) {
+  return sameOriginThreadedStockfishScripts.has(relPath.replace(/\\/g, '/'));
+}
 
 export function shouldSkipR2PublicAsset(relPath, isDir) {
   const normalized = relPath.replace(/\\/g, '/');
@@ -18,12 +26,17 @@ export function shouldSkipR2PublicAsset(relPath, isDir) {
   if (parts[0] === 'models' && parts[1] === 'maia3') return !isDir && name.endsWith('.onnx');
   if (parts[0] === 'models' && !isDir && name === 'bt4_soap_rem_c19000_final.onnx') return true;
   if (parts[0] === 'ort' && !isDir) return !isRequiredOrtRuntimeAsset(name);
+  if (!isDir && isSameOriginThreadedStockfishScript(normalized)) return false;
   if (externalArtifactDirectories.has(parts[0])) return !isDir && isExternalArtifactName(name);
   return false;
 }
 
 async function linkOrCopy(source, target) {
   await mkdir(dirname(target), { recursive: true });
+  if (lstatSync(source).isSymbolicLink()) {
+    await copyFile(source, target);
+    return;
+  }
   try {
     await link(source, target);
   } catch {

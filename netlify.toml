@@ -3,6 +3,18 @@
   publish = "dist-client"
 
 [[redirects]]
+  from = "/stockfish/stockfish-18-lite.wasm"
+  to = "https://assets.0x88.app/stockfish/stockfish-18-lite.wasm"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/stockfish/stockfish-18.wasm"
+  to = "https://assets.0x88.app/stockfish/stockfish-18.wasm"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/lc0-play.html"
   to = "/app/play"
   status = 301
