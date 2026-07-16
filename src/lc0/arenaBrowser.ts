@@ -2492,8 +2492,8 @@ function refreshBudgetControls(): void {
   const movetime = arenaBudgetMode() === 'movetime';
   el('movetimeField').hidden = !movetime;
   el('matchupNote').textContent = movetime
-    ? 'Every engine gets the same time per move (strength fields are ignored); colors alternate each game.'
-    : 'Each engine searches to its configured strength; colors alternate each game.';
+    ? 'Equal time per move · colors alternate.'
+    : 'Configured engine strength · colors alternate.';
 }
 
 function refreshOpeningPreview(): void {
@@ -2506,7 +2506,7 @@ function refreshOpeningPreview(): void {
   if (running) return;
   try {
     const openings = selectedOpenings();
-    el('openingInfo').textContent = `${openings.length} starting position${openings.length === 1 ? '' : 's'} · each pair plays every selected position with the configured color schedule.`;
+    el('openingInfo').textContent = `${openings.length} position${openings.length === 1 ? '' : 's'} in the schedule.`;
     setOpeningPreview(openings[0]);
   } catch (error) {
     el('openingInfo').textContent = `Opening setup error: ${(error as Error).message}`;

@@ -77,26 +77,26 @@
     <details class="section-block" open>
       <summary>Matchup</summary>
       <select id="seatA" hidden></select><select id="seatB" hidden></select>
-      <div class="row">
+      <div class="match-mode-row">
         <div class="field"><label for="tournamentModeSelect">Mode</label>
-          <select id="tournamentModeSelect"><option value="match">Match (Engine 1 vs 2)</option><option value="round-robin">Round robin</option><option value="gauntlet">Gauntlet (Engine 1 challenges)</option></select></div>
+          <select id="tournamentModeSelect"><option value="match">Match</option><option value="round-robin">Round robin</option><option value="gauntlet">Gauntlet (Engine 1 vs field)</option></select></div>
         <button id="addSeat" type="button" title="Add another engine seat">+ Add engine</button>
       </div>
       <div id="arenaSeatList" class="engine-list" aria-label="Arena engine selectors"></div>
-      <div class="matchup-note small" id="matchupNote">Pick an engine and strength for each seat; colors alternate each game.</div>
       <div class="row tournament-actions">
         <button id="start" class="primary" type="button" disabled>Start match</button>
         <button id="stop" type="button" disabled>Stop</button>
       </div>
+      <div class="matchup-note small" id="matchupNote">Equal time per move · colors alternate.</div>
     </details>
     <details class="section-block" open>
       <summary>Time control</summary>
       <div class="time-grid">
         <div class="field"><label for="budgetModeSelect">Budget</label>
           <select id="budgetModeSelect"><option value="fixed">Fixed visits/depth</option><option value="movetime" selected>Equal movetime</option></select></div>
-        <div class="field" id="movetimeField"><label for="movetimeInput">Movetime ms</label>
-          <input id="movetimeInput" type="number" min="10" max="60000" step="50" value="500" /></div>
-        <div class="field"><label for="gamesInput">Games per opening</label>
+        <div class="field" id="movetimeField"><label for="movetimeInput">Per move</label>
+          <div class="unit-input"><input id="movetimeInput" type="number" min="10" max="60000" step="50" value="500" /><span>ms</span></div></div>
+        <div class="field"><label for="gamesInput">Games / opening</label>
           <input id="gamesInput" type="number" min="1" max="20" step="1" value="2" /></div>
       </div>
       <div hidden inert>
@@ -114,7 +114,7 @@
         <select id="stormphraxVariantSelect"></select>
       </div>
       <div class="opening-row">
-        <div class="field"><label for="startingPositionSelect">Suite</label>
+        <div class="field"><label for="startingPositionSelect">Openings</label>
           <select id="startingPositionSelect"><option value="start">Start position</option><option value="built-in">Built-in opening suite</option><option value="custom">Custom positions / replays</option></select></div>
         <div class="field wide" id="openingTextField" hidden><label for="openingText">Custom openings (one per line: FEN, UCI moves, PGN/SAN, or Name | ...)</label>
           <textarea id="openingText" spellcheck="false" placeholder="Ruy Lopez | e2e4 e7e5 g1f3 b8c6 f1b5&#10;Italian Game | 1. e4 e5 2. Nf3 Nc6 3. Bc4&#10;Sicilian FEN | rnbqkbnr/pp1ppppp/8/2p5/3PP3/8/PPP2PPP/RNBQKBNR b KQkq d3 0 2"></textarea></div>
@@ -319,10 +319,22 @@
   :global(select){max-width:100%}
   .row{margin-top:8px}
   .field{margin-top:8px}
+  .match-mode-row{
+    display:grid; grid-template-columns:minmax(0,240px) auto; gap:8px;
+    align-items:end; margin-top:2px;
+  }
+  .match-mode-row .field{margin-top:0}
+  .match-mode-row button{min-height:36px; padding:7px 10px; white-space:nowrap}
   .time-grid{
     display:grid; grid-template-columns:1.25fr .8fr .72fr; gap:8px; align-items:end;
   }
   .time-grid .field,.opening-row .field{margin-top:0}
+  .unit-input{position:relative; min-width:0}
+  .unit-input input{padding-right:28px}
+  .unit-input span{
+    position:absolute; right:9px; top:50%; transform:translateY(-50%);
+    color:var(--muted); font-family:var(--mono); font-size:10px; pointer-events:none;
+  }
   .opening-row{display:grid; margin-top:9px}
   :global(.field.wide){flex:1 1 100%}
   :global(.field.wide textarea){margin-top:0; min-height:86px}
