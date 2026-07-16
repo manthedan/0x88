@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { cleanSvelteKitBuild } from '../scripts/clean_sveltekit_build.mjs';
 
 async function fixture(scriptId, pageId) {
   const root = await mkdtemp(join(tmpdir(), 'sveltekit-runtime-id-'));
@@ -20,6 +21,39 @@ test('SvelteKit runtime check accepts matching generated ids', async () => {
     const report = JSON.parse(stdout);
     assert.equal(report.status, 'SVELTEKIT_RUNTIME_ID_CHECK_DONE');
     assert.equal(report.runtimeId, '__sveltekit_matching');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('SvelteKit runtime check honors the configured release output', async () => {
+  const root = await fixture('__sveltekit_custom', '__sveltekit_custom');
+  try {
+    const stdout = execFileSync(process.execPath, ['scripts/check_sveltekit_runtime_id.mjs'], {
+      encoding: 'utf8',
+      env: { ...process.env, NETLIFY_R2_RELEASE_DIST: root },
+    });
+    const report = JSON.parse(stdout);
+    assert.equal(report.runtimeId, '__sveltekit_custom');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('SvelteKit build cleanup is limited to direct dist-named project directories', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sveltekit-clean-'));
+  const output = join(root, 'dist-review');
+  const generated = join(root, '.svelte-kit', 'output');
+  try {
+    await mkdir(output, { recursive: true });
+    await mkdir(generated, { recursive: true });
+    await cleanSvelteKitBuild(output, root);
+    await assert.rejects(access(output), { code: 'ENOENT' });
+    await assert.rejects(access(generated), { code: 'ENOENT' });
+
+    for (const unsafe of ['.', '..', 'src', join('nested', 'dist-review'), join(root, '..', 'dist-review')]) {
+      await assert.rejects(cleanSvelteKitBuild(unsafe, root), /Refusing to clean unsafe build output/);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -29,7 +29,7 @@ async function idsInFiles(files) {
   return [...ids].sort();
 }
 
-export async function checkSvelteKitRuntimeId(outputDir = 'dist-client') {
+export async function checkSvelteKitRuntimeId(outputDir = process.env.NETLIFY_R2_RELEASE_DIST || 'dist-client') {
   const output = resolve(outputDir);
   const immutable = join(output, '_app', 'immutable');
   const [scripts, pages] = await Promise.all([

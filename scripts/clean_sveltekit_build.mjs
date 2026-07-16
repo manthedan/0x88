@@ -1,15 +1,32 @@
 #!/usr/bin/env node
 import { rm } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export async function cleanSvelteKitBuild(outputDir = process.env.NETLIFY_R2_RELEASE_DIST || 'dist-client') {
-  const projectRoot = resolve('.');
-  const output = resolve(outputDir);
-  if (output === projectRoot) throw new Error('Refusing to clean the project root as a build output');
+const SAFE_OUTPUT_NAME = /^dist(?:[-_.][a-z0-9][a-z0-9._-]*)?$/i;
+
+export async function cleanSvelteKitBuild(
+  outputDir = process.env.NETLIFY_R2_RELEASE_DIST || 'dist-client',
+  projectDir = '.',
+) {
+  const projectRoot = resolve(projectDir);
+  const output = resolve(projectRoot, outputDir);
+  const projectRelativeOutput = relative(projectRoot, output);
+  const isDirectChild = projectRelativeOutput
+    && !isAbsolute(projectRelativeOutput)
+    && !projectRelativeOutput.startsWith(`..${sep}`)
+    && projectRelativeOutput !== '..'
+    && !projectRelativeOutput.includes(sep);
+
+  if (!isDirectChild || !SAFE_OUTPUT_NAME.test(projectRelativeOutput)) {
+    throw new Error(
+      `Refusing to clean unsafe build output "${outputDir}". ` +
+      'Expected a direct project directory named dist or dist-<name>.',
+    );
+  }
 
   await Promise.all([
-    rm(resolve('.svelte-kit', 'output'), { recursive: true, force: true }),
+    rm(resolve(projectRoot, '.svelte-kit', 'output'), { recursive: true, force: true }),
     rm(output, { recursive: true, force: true }),
   ]);
 }
