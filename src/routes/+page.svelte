@@ -1,5 +1,6 @@
 <script lang="ts">
   import SiteHeader from '$lib/components/SiteHeader.svelte';
+  import AnalysisPreview from '$lib/components/AnalysisPreview.svelte';
   const title = "0x88 — a chess engine workbench in your browser";
   const description = "Play Maia3 at your rating, compare Lc0 with Stockfish and other engines, or run live tournaments. Everything runs locally with WebGPU and WebAssembly.";
   const github = "https://github.com/manthedan/0x88";
@@ -26,58 +27,7 @@
       </div>
     </div>
 
-    <div class="workbench" aria-label="Analysis workbench preview">
-      <div class="workbench-head">
-        <div><span class="signal"></span><strong>POSITION LAB</strong><span>startpos · white</span></div>
-        <span class="local-state">LOCAL</span>
-      </div>
-      <div class="workbench-body">
-        <div class="preview-board cg-wrap" aria-label="Chess position">
-          <cg-board>
-            <square class="last-move" style="transform:translate(400%,400%)"></square>
-            <square class="last-move" style="transform:translate(400%,600%)"></square>
-            <piece class="black king" style="transform:translate(600%,0%)"></piece>
-            <piece class="black queen" style="transform:translate(300%,0%)"></piece>
-            <piece class="black rook" style="transform:translate(500%,0%)"></piece>
-            <piece class="black bishop" style="transform:translate(200%,0%)"></piece>
-            <piece class="black knight" style="transform:translate(500%,200%)"></piece>
-            <piece class="black pawn" style="transform:translate(200%,100%)"></piece>
-            <piece class="black pawn" style="transform:translate(300%,300%)"></piece>
-            <piece class="black pawn" style="transform:translate(400%,200%)"></piece>
-            <piece class="black pawn" style="transform:translate(600%,100%)"></piece>
-            <piece class="black pawn" style="transform:translate(700%,100%)"></piece>
-            <piece class="white king" style="transform:translate(600%,700%)"></piece>
-            <piece class="white queen" style="transform:translate(300%,700%)"></piece>
-            <piece class="white rook" style="transform:translate(500%,700%)"></piece>
-            <piece class="white bishop" style="transform:translate(200%,400%)"></piece>
-            <piece class="white knight" style="transform:translate(500%,500%)"></piece>
-            <piece class="white pawn" style="transform:translate(100%,600%)"></piece>
-            <piece class="white pawn" style="transform:translate(300%,500%)"></piece>
-            <piece class="white pawn" style="transform:translate(400%,400%)"></piece>
-            <piece class="white pawn" style="transform:translate(600%,600%)"></piece>
-            <piece class="white pawn" style="transform:translate(700%,600%)"></piece>
-          </cg-board>
-        </div>
-        <div class="engine-output">
-          <div class="position-eval"><span>WHITE</span><strong>+0.31</strong><small>3 engines agree</small></div>
-          <div class="engine-line active">
-            <span class="engine-key">LC0</span><strong>e4</strong><span class="line-score">+0.31</span>
-            <code>e4 e6 d4 d5 Nc3</code>
-          </div>
-          <div class="engine-line">
-            <span class="engine-key">SF</span><strong>Nf3</strong><span class="line-score">+0.28</span>
-            <code>Nf3 d5 d4 Nf6 c4</code>
-          </div>
-          <div class="engine-line human">
-            <span class="engine-key">M3</span><strong>e4</strong><span class="line-score">31%</span>
-            <code>most played at 1500</code>
-          </div>
-        </div>
-      </div>
-      <div class="workbench-foot">
-        <span><i></i> WebGPU ready</span><span>400 visits</span><span>0.8s</span>
-      </div>
-    </div>
+    <div class="preview-wrap"><AnalysisPreview /></div>
   </div>
 </section>
 
@@ -144,6 +94,7 @@
     gap:clamp(44px,6vw,86px); align-items:center;
   }
   .hero-copy{max-width:600px}
+  .preview-wrap{min-width:0}
   .eyebrow{
     display:flex; align-items:center; gap:9px; margin:0 0 16px;
     font-family:var(--mono); font-size:11px; line-height:1.4;
@@ -167,48 +118,6 @@
   .btn-primary:hover{background:var(--accent-hover); color:var(--on-accent)}
   .btn-secondary{background:var(--panel); color:var(--ink)}
   .btn-secondary:hover{border-color:var(--accent)}
-  .workbench{
-    min-width:0; overflow:hidden; border:1px solid var(--rule-strong); border-radius:10px;
-    background:var(--panel); box-shadow:0 30px 70px -45px rgba(45,35,20,.6);
-  }
-  .workbench-head,.workbench-foot{
-    min-height:42px; padding:9px 12px; display:flex; align-items:center; justify-content:space-between;
-    gap:12px; font-family:var(--mono); font-size:9px; letter-spacing:.06em; color:var(--muted);
-  }
-  .workbench-head{border-bottom:1px solid var(--rule)}
-  .workbench-head>div{display:flex; align-items:center; gap:8px; min-width:0}
-  .workbench-head strong{font-size:10px; color:var(--ink); letter-spacing:.1em}
-  .signal{width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
-  .local-state{padding:2px 6px; border:1px solid var(--accent-tint-border); color:var(--accent-deep); border-radius:3px; font-weight:700}
-  .workbench-body{display:grid; grid-template-columns:minmax(230px,.9fr) minmax(230px,1fr); gap:0}
-  .preview-board.cg-wrap{
-    width:100%!important; height:auto!important; aspect-ratio:1; box-sizing:border-box;
-    border-right:1px solid var(--rule); background:var(--board-light);
-  }
-  .preview-board cg-board{position:relative; display:block; overflow:hidden}
-  .engine-output{min-width:0; padding:16px 15px; display:grid; align-content:start; gap:0}
-  .position-eval{
-    display:grid; grid-template-columns:1fr auto; align-items:end; gap:2px 10px;
-    padding:0 4px 14px; border-bottom:1px solid var(--rule);
-  }
-  .position-eval>span{font-family:var(--mono); font-size:9px; letter-spacing:.08em; color:var(--muted)}
-  .position-eval strong{grid-row:1/3; grid-column:2; font-family:var(--mono); font-size:25px; line-height:1; color:var(--accent-deep)}
-  .position-eval small{font-size:11px; color:var(--muted)}
-  .engine-line{
-    display:grid; grid-template-columns:36px 38px 46px minmax(0,1fr); gap:5px; align-items:center;
-    min-height:48px; padding:8px 4px; border-bottom:1px solid var(--rule-soft); font-size:11px;
-  }
-  .engine-line.active{border-left:2px solid var(--accent); padding-left:7px}
-  .engine-key{font-family:var(--mono); font-size:9px; color:var(--muted); font-weight:700}
-  .engine-line strong{font-family:var(--serif); color:var(--ink); font-size:14px}
-  .line-score{font-family:var(--mono); color:var(--accent-deep); font-weight:700}
-  .engine-line code{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-family:var(--mono); font-size:9px}
-  .engine-line.human .line-score{color:var(--warn)}
-  .workbench-foot{border-top:1px solid var(--rule); justify-content:flex-start; gap:18px}
-  .workbench-foot span{display:flex; align-items:center; gap:5px}
-  .workbench-foot span:first-child{margin-right:auto; color:var(--accent-deep)}
-  .workbench-foot i{width:6px; height:6px; border-radius:50%; background:var(--accent)}
-
   .modes .wrap{padding-top:72px; padding-bottom:82px}
   .section-intro{display:grid; grid-template-columns:minmax(220px,.65fr) 1.35fr; gap:32px; align-items:end; margin-bottom:36px}
   .section-intro .eyebrow{margin:0 0 5px}
@@ -244,14 +153,13 @@
 
   @media(max-width:1040px){
     .hero-grid{grid-template-columns:minmax(0,.85fr) minmax(460px,1.15fr); gap:38px}
-    .workbench-body{grid-template-columns:minmax(205px,.9fr) minmax(210px,1fr)}
     .mode{grid-template-columns:95px minmax(220px,.8fr) 1fr 100px; gap:18px}
   }
   @media(max-width:820px){
     .hero-grid{min-height:0; grid-template-columns:1fr; padding-top:54px; padding-bottom:58px}
     .hero-copy{max-width:650px}
     .hero h1{max-width:14ch}
-    .workbench{max-width:650px}
+    .preview-wrap{width:100%; max-width:650px}
     .section-intro{grid-template-columns:1fr; gap:8px}
     .mode{grid-template-columns:90px 1fr 1.15fr; gap:18px}
     .mode-action{grid-column:2; justify-self:start; padding-top:0}
@@ -262,14 +170,6 @@
     .hero-grid{padding:42px 20px 48px; gap:34px}
     .hero h1{font-size:clamp(38px,12vw,50px)}
     .lede{font-size:16px}
-    .workbench-body{grid-template-columns:138px minmax(0,1fr)}
-    .engine-output{padding:10px 9px}
-    .position-eval{padding-bottom:9px}
-    .position-eval strong{font-size:20px}
-    .engine-line{grid-template-columns:30px 31px 38px minmax(0,1fr); min-height:39px; padding:5px 3px}
-    .engine-line code{font-size:8px}
-    .workbench-head>div>span:last-child{display:none}
-    .workbench-foot{gap:12px}
     .modes .wrap{padding:52px 20px 60px}
     .mode{grid-template-columns:1fr; gap:8px; padding:24px 0}
     .mode:hover{padding-left:8px; padding-right:8px}
@@ -279,10 +179,5 @@
     .principle-grid{padding:38px 20px; grid-template-columns:1fr; gap:12px}
     .principle-mark{display:none}
     .principle-grid>a{grid-column:auto; margin-top:5px}
-  }
-  @media(max-width:360px){
-    .workbench-body{grid-template-columns:116px minmax(0,1fr)}
-    .engine-line{grid-template-columns:27px 29px 34px minmax(0,1fr)}
-    .engine-line code{display:none}
   }
 </style>
