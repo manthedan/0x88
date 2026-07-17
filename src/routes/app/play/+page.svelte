@@ -35,7 +35,7 @@
 </svelte:head>
 
 <SiteHeader pageTitle="Play" />
-<main id="main">
+<main id="main" class="app-main">
   <section class="panel board-panel" aria-label="Board">
     <div class="board-shell"><div id="ground"></div></div>
     <div class="status-row">
@@ -120,29 +120,7 @@
 </main>
 
 <style>
-  main{
-    display:grid; grid-template-columns:minmax(0,1fr) minmax(370px,420px);
-    gap:18px; align-items:start; justify-content:center;
-    max-width:1136px; margin:0 auto; padding:16px 24px 48px;
-  }
   .board-panel{min-width:0; padding:12px}
-  .app-sidebar{
-    position:sticky; top:74px; padding:0; overflow:hidden;
-    border-color:var(--rule-strong);
-  }
-  .section-block{padding:0 12px 12px; border:0; border-bottom:1px solid var(--rule)}
-  details.section-block:not([open]){padding-bottom:0}
-  .section-block>summary,.section-heading{
-    margin:0 -12px 10px; padding:12px; list-style:none;
-    font-family:var(--mono); font-size:10px; font-weight:650; line-height:1.2;
-    letter-spacing:.1em; text-transform:uppercase; color:var(--muted-2);
-  }
-  .section-block>summary{cursor:pointer; user-select:none}
-  .section-heading{margin-bottom:4px; padding:12px 12px 8px 26px}
-  details.section-block:not([open])>summary{margin-bottom:0}
-  .section-block>summary::-webkit-details-marker{display:none}
-  .section-block>summary::before{content:"▸"; display:inline-block; width:14px; color:var(--accent)}
-  .section-block[open]>summary::before{content:"▾"}
   .field{min-width:0; margin-top:0}
   .opponent-grid{display:grid; grid-template-columns:minmax(0,1.45fr) minmax(110px,.75fr); gap:8px; align-items:end}
   :global(.opponent-grid:has(> .field[hidden])){grid-template-columns:1fr}
@@ -168,8 +146,6 @@
   .board-action{min-width:72px; min-height:34px; margin-top:8px; padding:6px 9px; font-size:12px}
   .record-actions{display:flex; gap:6px}
   .record-actions button{min-height:34px; padding:6px 9px}
-  .capabilities-slot{padding:10px 12px 11px}
-  :global(.capabilities-slot .capabilities){margin:0}
   :global(#status){
     min-height:34px; margin-top:8px; padding:7px 10px;
     border:1px solid var(--rule-strong); border-left:2px solid var(--accent);
@@ -209,7 +185,7 @@
   :global(#pgnOut:not(:empty)){padding:8px; border:1px solid var(--rule); border-radius:6px; background:var(--card)}
   :global(.restart-banner){
     margin-top:8px; padding:9px 10px;
-    border:1px solid var(--accent); border-radius:6px; background:var(--soft);
+    border:1px solid var(--accent); border-radius:6px; background:var(--accent-soft);
   }
   :global(#maia3Elo){
     -webkit-appearance:none; appearance:none; width:100%; height:5px; margin:0;
@@ -223,10 +199,6 @@
   :global(#maia3Elo::-moz-range-thumb){
     width:16px; height:16px; border-radius:50%; background:#fff;
     border:2px solid var(--accent); cursor:pointer; box-shadow:0 2px 6px rgba(80,55,25,.22);
-  }
-  @media (max-width:900px){
-    main{grid-template-columns:1fr; max-width:680px; padding:12px 10px 40px}
-    .app-sidebar{position:static; max-height:none; overflow:visible}
   }
   @media (max-width:520px){
     .board-panel{padding:8px}

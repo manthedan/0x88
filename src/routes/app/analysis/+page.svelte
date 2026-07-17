@@ -42,7 +42,7 @@
 </svelte:head>
 
 <SiteHeader pageTitle="Analysis" />
-<main id="main">
+<main id="main" class="app-main">
   <section class="panel board-panel" aria-label="Board">
     <div class="board-wrap">
       <div class="evalbar" title="Evaluation (white advantage)"><div class="mid"></div><div class="white" id="evalWhite" style="height:50%"></div></div>
@@ -241,17 +241,7 @@
 </main>
 
 <style>
-  main{
-    display:grid;
-    grid-template-columns:minmax(0,1fr) minmax(370px,420px);
-    gap:18px; align-items:start; justify-content:center; padding:16px 24px 48px;
-    max-width:1160px; margin:0 auto;
-  }
   .board-panel{min-width:0; padding:12px}
-  .app-sidebar{
-    position:sticky; top:74px; padding:0; overflow:hidden;
-    border-color:var(--rule-strong);
-  }
   .board-wrap{display:grid; grid-template-columns:14px 1fr; gap:8px}
   .evalbar{
     width:14px; border:1px solid var(--border-input); border-radius:5px;
@@ -307,7 +297,7 @@
     cursor:pointer; font-size:12px;
     overflow:hidden;
   }
-  :global(.lines li:hover){background:var(--soft)}
+  :global(.lines li:hover){background:var(--accent-soft)}
   :global(.lines .score){width:62px; display:flex; align-items:center; gap:4px; flex:0 0 auto; font-family:var(--mono); font-weight:700; font-size:11px}
   :global(.lines .score.neg){color:#a5461b}
   :global(.lines .score.pos){color:var(--accent)}
@@ -342,7 +332,7 @@
     padding:4px 6px; border-top:1px solid var(--rule);
     cursor:pointer; font-size:12px;
   }
-  :global(.review-critical li:hover){background:var(--soft)}
+  :global(.review-critical li:hover){background:var(--accent-soft)}
   :global(.review-critical .mono){font-family:var(--mono)}
   :global(.compare-summary){
     margin-top:0; padding:8px 10px; border:0; border-left:2px solid var(--accent);
@@ -361,7 +351,7 @@
   :global(table.engine-compare .mono){font-family:var(--mono); white-space:nowrap}
   :global(table.engine-compare .pv){font-family:var(--mono); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px}
   :global(table.engine-compare .agree){color:var(--accent); font-weight:700}
-  :global(table.engine-compare tbody tr:hover){background:var(--soft)}
+  :global(table.engine-compare tbody tr:hover){background:var(--accent-soft)}
   :global(.model-load-progress), :global(.search-progress-grid){
     margin-top:8px; padding:8px; border:1px solid var(--rule);
     border-radius:var(--radius-sm); background:var(--panel-inset);
@@ -401,7 +391,7 @@
   .app-sidebar #message{
     margin:8px 12px 0; padding:6px 8px;
     border:0; border-left:2px solid var(--accent); border-radius:0 var(--radius-sm) var(--radius-sm) 0;
-    background:var(--panel-inset)!important; color:var(--text-soft);
+    background:var(--panel-inset); color:var(--text-soft);
     font-family:var(--mono); font-size:10px; line-height:1.4;
   }
   .app-sidebar :global(.model-load-progress){margin:6px 12px 0}
@@ -491,26 +481,9 @@
     background:#5a6e2a; border-radius:2px; opacity:0.75;
   }
   :global(.movelist .mv){cursor:pointer; padding:0 3px; border-radius:4px}
-  :global(.movelist .mv:hover){background:var(--soft)}
-  :global(.movelist .mv.current){background:var(--accent); color:white}
+  :global(.movelist .mv:hover){background:var(--accent-soft)}
+  :global(.movelist .mv.current){background:var(--accent); color:var(--on-accent)}
   :global(.movelist .var){color:var(--muted)}
-  .section-block{margin-top:0; padding:12px; border-top:1px solid var(--rule)}
-  .section-block:first-of-type{margin-top:9px}
-  .section-block>summary{
-    cursor:pointer; font-size:10px; text-transform:uppercase;
-    letter-spacing:.12em; color:var(--muted-2); font-weight:650;
-    font-family:var(--mono); list-style:none; user-select:none; padding:0 0 8px; transition:color .12s;
-  }
-  .section-block>summary::-webkit-details-marker{display:none}
-  .section-block>summary::before{
-    content:"\25B8"; display:inline-block; margin-right:6px;
-    font-size:10px; transition:transform .15s; color:var(--muted-2);
-  }
-  .section-block[open]>summary::before{transform:rotate(90deg)}
-  .section-block>summary:hover{color:var(--ink)}
-  .section-block[open]>summary{margin-bottom:0}
-  .section-block:not([open])>summary{padding-bottom:0}
-  .section-block[open]>summary::before{color:var(--accent)}
   .human-moves>summary span{
     margin-left:5px; padding:2px 5px; border:1px solid var(--accent-tint-border); border-radius:3px;
     color:var(--accent-deep); font-size:8px; letter-spacing:.06em;
@@ -521,10 +494,6 @@
     color:var(--accent-deep); font-size:12px; font-weight:650;
   }
   .add-engine-row button:hover{background:transparent; color:var(--ink)}
-  .capabilities-slot{padding:0 12px 12px; border-top:1px solid var(--rule)}
-  .capabilities-slot :global(.capabilities){
-    margin:0; padding:10px 0 0; border:0; border-radius:0; background:transparent;
-  }
   :global(.pgn-db-list), :global(.pgn-db-results){display:grid; gap:6px; margin-top:8px}
   :global(.pgn-db-list .empty), :global(.pgn-db-results .empty){
     padding:7px 8px; border:1px dashed var(--rule);
@@ -542,7 +511,7 @@
   :global(table.opening th){color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase}
   :global(table.opening td.num), :global(table.opening th.num){text-align:right; font-family:var(--mono)}
   :global(table.opening tr.mv){cursor:pointer}
-  :global(table.opening tr.mv:hover td){background:var(--soft)}
+  :global(table.opening tr.mv:hover td){background:var(--accent-soft)}
   :global(table.opening .san){font-family:var(--mono); font-weight:700}
   :global(.wdlbar){
     display:flex; height:14px; border-radius:3px; overflow:hidden;
@@ -551,12 +520,7 @@
   :global(.wdlbar .w){background:#f4f1e8}
   :global(.wdlbar .d){background:#b9b3a4}
   :global(.wdlbar .b){background:#3a3a3a}
-  @media (max-width:900px){
-    main{grid-template-columns:1fr; padding:16px}
-    .app-sidebar{position:static; max-height:none; overflow-y:visible}
-  }
   @media (max-width:600px){
-    main{padding:12px 10px 40px; gap:12px}
     .board-panel{padding:10px}
     .board-wrap{grid-template-columns:10px 1fr; gap:7px}
     .evalbar{width:10px}
@@ -571,6 +535,5 @@
   @media (prefers-reduced-motion: reduce){
     .evalbar .white{transition:none}
     :global(.lines li:hover){background:none}
-    .section-block>summary::before{transition:none}
   }
 </style>

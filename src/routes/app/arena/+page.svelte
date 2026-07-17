@@ -36,7 +36,7 @@
 </svelte:head>
 
 <SiteHeader pageTitle="Arena" />
-<main id="main">
+<main id="main" class="app-main">
   <section class="panel board-panel" aria-label="Board">
     <div id="blackSideLabel" class="side-label" aria-label="Black side"></div>
     <div class="eval-chip-row"><span id="whiteEngineChip" class="eval-chip" style="display:none"></span><span id="blackEngineChip" class="eval-chip" style="display:none"></span></div>
@@ -207,17 +207,7 @@
 </main>
 
 <style>
-  :root{--acc-w:#2f6e7d;--acc-b:#b15c2b}
-  main{
-    display:grid;
-    grid-template-columns:minmax(0,1fr) minmax(370px,420px);
-    gap:18px; align-items:start; justify-content:center; padding:16px 24px 48px;
-    max-width:1180px; margin:0 auto;
-  }
   .board-panel{min-width:0; padding:12px}
-  .app-sidebar{
-    position:sticky; top:72px; padding:0; overflow:hidden;
-  }
   :global(.board-with-evals){
     display:grid; grid-template-columns:14px minmax(0,1fr) 14px;
     gap:8px; align-items:stretch; margin:0 auto;
@@ -247,7 +237,7 @@
   :global(.eval-chip){
     display:inline-flex; align-items:center; gap:3px;
     font-family:var(--mono); font-size:9px; font-weight:700; letter-spacing:.02em;
-    color:#fff; border-radius:5px; padding:2px 8px; line-height:1.35;
+    color:var(--on-acc-chip); border-radius:5px; padding:2px 8px; line-height:1.35;
     white-space:nowrap; overflow:hidden; max-width:44%;
   }
   :global(.eval-chip span){overflow:hidden; text-overflow:ellipsis}
@@ -278,9 +268,9 @@
   :global(.side-label .turn){
     flex:0 0 auto; font-family:var(--mono); font-size:10px; font-weight:700;
     color:var(--accent); white-space:nowrap; text-transform:uppercase; letter-spacing:.04em;
-    background:var(--soft); border:1px solid color-mix(in srgb, var(--accent) 30%, var(--rule)); border-radius:999px; padding:2px 8px;
+    background:var(--accent-soft); border:1px solid color-mix(in srgb, var(--accent) 30%, var(--rule)); border-radius:999px; padding:2px 8px;
   }
-  :global(.side-label.active){background:var(--soft); border-color:color-mix(in srgb, var(--accent) 30%, var(--rule)); border-left-color:var(--accent)}
+  :global(.side-label.active){background:var(--accent-soft); border-color:color-mix(in srgb, var(--accent) 30%, var(--rule)); border-left-color:var(--accent)}
   :global(.side-label.active .side-eval){color:var(--accent); font-weight:700}
   :global(#whiteSideLabel .color){color:var(--acc-w); border-color:var(--acc-w); background:var(--card)}
   :global(#blackSideLabel .color){color:var(--acc-b); border-color:var(--acc-b); background:var(--card)}
@@ -297,26 +287,10 @@
   .tournament-actions button{min-height:36px; padding:7px 10px}
   .tournament-actions #start{flex:0 1 132px}
   .tournament-actions #stop{flex:0 0 66px}
-  .section-block{margin-top:0; padding:12px; border-top:1px solid var(--rule)}
-  .section-block:first-child{border-top:0}
-  .section-block>summary{
-    cursor:pointer; font-size:10px; text-transform:uppercase;
-    letter-spacing:.12em; color:var(--muted-2); font-weight:600;
-    font-family:var(--mono); list-style:none; user-select:none; padding:0 0 8px; transition:color .12s;
-  }
-  .section-block>summary::-webkit-details-marker{display:none}
-  .section-block>summary::before{
-    content:"\25B8"; display:inline-block; margin-right:6px;
-    font-size:10px; transition:transform .15s; color:var(--muted-2);
-  }
-  .section-block[open]>summary::before{transform:rotate(90deg)}
-  .section-block>summary:hover{color:var(--ink)}
-  .section-block[open]>summary{margin-bottom:0}
-  .section-block[open]>summary::before{color:var(--accent)}
   :global(#matchScore){
     margin-top:2px;
     font-family:var(--mono); font-size:12px; font-weight:700; color:var(--ink);
-    padding:7px 8px; border:1px solid var(--rule); border-radius:6px; background:var(--soft);
+    padding:7px 8px; border:1px solid var(--rule); border-radius:6px; background:var(--accent-soft);
   }
   :global(input[type=number]){width:100%; font-family:var(--mono); padding:6px 8px; border:1px solid var(--rule); border-radius:6px}
   :global(select){max-width:100%}
@@ -347,16 +321,16 @@
   :global(th, td){text-align:left; padding:5px 8px; border-bottom:1px solid var(--rule)}
   :global(th){color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase}
   :global(td.num, th.num){text-align:right; font-family:var(--mono)}
-  :global(tr.leader td){background:var(--soft)}
+  :global(tr.leader td){background:var(--accent-soft)}
   :global(.log){font-family:var(--mono); font-size:11px; min-height:120px; max-height:220px; overflow:auto; margin-top:6px}
   :global(.log:empty){min-height:0; margin-top:0}
   :global(.log div){padding:2px 0; border-top:1px solid var(--rule)}
   :global(.log div.replayable){cursor:pointer}
-  :global(.log div.replayable:hover){background:var(--soft)}
+  :global(.log div.replayable:hover){background:var(--accent-soft)}
   :global(.review-bar){
     display:flex; align-items:center; justify-content:space-between;
     gap:10px; margin:8px auto 0; padding:7px 10px;
-    border:1px solid color-mix(in srgb, var(--accent) 30%, var(--rule)); border-radius:7px; background:var(--soft);
+    border:1px solid color-mix(in srgb, var(--accent) 30%, var(--rule)); border-radius:7px; background:var(--accent-soft);
     font-size:12px; font-weight:600;
   }
   :global(.review-bar .review-nav){display:flex; gap:5px}
@@ -368,8 +342,8 @@
   }
   :global(.movestrip .num){color:var(--muted)}
   :global(.movestrip .mv){cursor:pointer; padding:1px 3px; border-radius:4px}
-  :global(.movestrip .mv:hover){background:var(--soft)}
-  :global(.movestrip .mv.current){background:var(--accent); color:white}
+  :global(.movestrip .mv:hover){background:var(--accent-soft)}
+  :global(.movestrip .mv.current){background:var(--accent); color:var(--on-accent)}
   :global(.chart-card svg){cursor:pointer}
   :global(#pairing){font-size:13px; margin-top:10px; font-weight:600; color:var(--ink); font-family:var(--serif)}
   :global(#message){
@@ -441,13 +415,13 @@
     max-width:100%; white-space:normal; overflow-wrap:anywhere; word-break:break-word;
   }
   :global(.eval-card-pv){color:var(--text-soft)}
-  :global(.eval-card.active){border-color:color-mix(in srgb, var(--accent) 30%, var(--rule)); background:var(--soft)}
+  :global(.eval-card.active){border-color:color-mix(in srgb, var(--accent) 30%, var(--rule)); background:var(--accent-soft)}
   :global(.runtime-badge){
     margin-top:8px; padding:7px 8px; border:1px solid var(--rule);
     border-radius:6px; background:var(--card); font-family:var(--mono);
     font-size:11px; color:var(--muted); overflow-wrap:anywhere;
   }
-  :global(.runtime-badge.ready){color:var(--accent); border-color:color-mix(in srgb, var(--accent) 30%, var(--rule)); background:var(--soft)}
+  :global(.runtime-badge.ready){color:var(--accent); border-color:color-mix(in srgb, var(--accent) 30%, var(--rule)); background:var(--accent-soft)}
   :global(.runtime-badge.warn){color:var(--warn); border-color:color-mix(in srgb, var(--warn) 35%, var(--rule)); background:var(--warn-soft)}
   :global(.advanced-runtime){
     flex:1 1 100%; border:1px solid var(--rule); border-radius:7px;
@@ -477,17 +451,10 @@
   :global(.diag-block){display:grid; grid-template-columns:84px 1fr; gap:2px 10px; margin:4px 0; font-size:12px; align-items:baseline}
   :global(.diag-block .diag-label){color:var(--muted)}
   :global(.diag-block .diag-value){font-family:var(--mono); font-variant-numeric:tabular-nums; overflow-wrap:anywhere}
-  .capabilities-slot{padding:0 12px 12px; border-top:1px solid var(--rule)}
-  .capabilities-slot :global(.capabilities){
-    margin:0; padding:10px 0 0; border:0; border-radius:0; background:transparent;
-  }
   @media (max-width:900px){
-    main{grid-template-columns:1fr; padding:16px}
-    .app-sidebar{position:static; max-height:none; overflow-y:visible}
     .chart-grid{grid-template-columns:1fr}
   }
   @media (max-width:520px){
-    main{padding:12px 10px 40px; gap:12px}
     .board-panel{padding:10px}
     :global(.board-with-evals){grid-template-columns:10px minmax(0,1fr) 10px; gap:6px}
     .time-grid{grid-template-columns:1fr 1fr}

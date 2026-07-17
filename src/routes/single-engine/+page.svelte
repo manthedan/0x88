@@ -148,7 +148,7 @@
   :global(.mono, code){font-family:var(--mono)}
   :global(#message){
     margin-top:12px; padding:10px; border:1px solid var(--rule);
-    border-radius:6px; background:var(--soft);
+    border-radius:6px; background:var(--accent-soft);
     font-family:var(--mono); font-size:12px;
   }
   :global(.policy-list){list-style:none; margin:10px 0 0; padding:0}

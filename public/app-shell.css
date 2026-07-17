@@ -17,14 +17,16 @@
   --panel:#fcf9f2; --panel-inset:#f7f2e7; --panel-2:#f6efde; --card:#fff;
   --ink:#221c12; --ink-body-strong:#2a2317; --ink-soft:#3a342a;
   --text:#4a4032; --text-soft:#5f5444;
-  --muted:#746955; --muted-2:#706553; --faint:#8a7d66;
+  --muted:#746955; --muted-2:#706553;
   --rule:#e4dbc9; --rule-soft:#e6dccb; --rule-strong:#e4dbc9;
   --border-input:#ddd2bd; --border-input-hover:#c9bda3;
   --accent:#5c7029; --accent-2:#6f8736;
   --accent-hover:#4d601f; --accent-deep:#3f4f1d;
   --accent-soft:#eef2dd; --accent-tint-border:#dde3c2;
   --accent-soft-text:#3f4a1f; --on-accent:#fff;
-  --soft:#eef2dd; /* legacy alias used by app pages */
+  --input-bg:#fff; --radius-input:var(--radius-sm);
+  --board-border:#cdbf9f;
+  --acc-w:#2f6e7d; --acc-b:#b15c2b; --on-acc-chip:#fff;
   --warn:#a5461b; --warn-soft:#f7e6db;
   --chart-1:#4a7a2a; --chart-2:#a5461b; --chart-3:#1c5f8a;
   --chart-4:#7a4a9a; --chart-5:#8a7a1c; --chart-6:#5a5a5a;
@@ -50,12 +52,15 @@
   --panel:#211d17; --panel-inset:#1a1812; --panel-2:#28231b; --card:#28231b;
   --ink:#f0ead9; --ink-body-strong:#f0ead9; --ink-soft:#d8d0bd;
   --text:#c4baa6; --text-soft:#aaa18f;
-  --muted:#aaa18f; --muted-2:#948b78; --faint:#817968;
+  --muted:#aaa18f; --muted-2:#948b78;
   --rule:#332e25; --rule-soft:#2a2620; --rule-strong:#3a352c;
   --border-input:#332e25; --border-input-hover:#4a4438;
   --accent:#a3c456; --accent-2:#b8d574; --accent-deep:#768f2f;
   --accent-hover:#8db540; --accent-soft:#2b3416; --accent-tint-border:#3a4318;
-  --accent-soft-text:#a3c456; --on-accent:#15130f; --soft:#2b3416;
+  --accent-soft-text:#a3c456; --on-accent:#15130f;
+  --input-bg:#28231b;
+  --board-border:#5f4936;
+  --acc-w:#4d92a3; --acc-b:#cd8054; --on-acc-chip:#15130f;
   --warn:#e08147; --warn-soft:#3a2418;
   --chart-1:#9bc967; --chart-2:#ed9566; --chart-3:#6cb6e5;
   --chart-4:#d2a0e8; --chart-5:#dec85f; --chart-6:#c7c1b5;
@@ -75,12 +80,15 @@
     --panel:#211d17; --panel-inset:#1a1812; --panel-2:#28231b; --card:#28231b;
     --ink:#f0ead9; --ink-body-strong:#f0ead9; --ink-soft:#d8d0bd;
     --text:#c4baa6; --text-soft:#aaa18f;
-    --muted:#aaa18f; --muted-2:#948b78; --faint:#817968;
+    --muted:#aaa18f; --muted-2:#948b78;
     --rule:#332e25; --rule-soft:#2a2620; --rule-strong:#3a352c;
     --border-input:#332e25; --border-input-hover:#4a4438;
     --accent:#a3c456; --accent-2:#b8d574; --accent-deep:#768f2f;
     --accent-hover:#8db540; --accent-soft:#2b3416; --accent-tint-border:#3a4318;
-    --accent-soft-text:#a3c456; --on-accent:#15130f; --soft:#2b3416;
+    --accent-soft-text:#a3c456; --on-accent:#15130f;
+    --input-bg:#28231b;
+    --board-border:#5f4936;
+    --acc-w:#4d92a3; --acc-b:#cd8054; --on-acc-chip:#15130f;
     --warn:#e08147; --warn-soft:#3a2418;
     --chart-1:#9bc967; --chart-2:#ed9566; --chart-3:#6cb6e5;
     --chart-4:#d2a0e8; --chart-5:#dec85f; --chart-6:#c7c1b5;
@@ -109,7 +117,7 @@ body{
 a{color:var(--accent); text-decoration:none}
 a:hover{text-decoration:underline}
 h1,h2,h3,h4{font-family:var(--serif); font-weight:600; letter-spacing:-.01em; color:var(--ink)}
-:where(button,select,input,textarea,a):focus-visible{
+:where(button,select,input,textarea,a,summary):focus-visible{
   outline:2px solid var(--accent); outline-offset:2px; border-radius:4px;
 }
 input:focus,select:focus,textarea:focus{
@@ -174,11 +182,17 @@ nav.primary a.active{color:var(--ink); background:color-mix(in srgb, var(--bg-2)
   box-shadow:var(--shadow-lg);
 }
 .mobile-nav-menu a{
-  min-height:40px; display:flex; align-items:center; padding:8px 11px;
+  min-height:44px; display:flex; align-items:center; padding:8px 11px;
   border-radius:6px; color:var(--text-soft); font-size:14px; font-weight:550;
 }
 .mobile-nav-menu a:hover{background:var(--panel-2); color:var(--ink); text-decoration:none}
 .mobile-nav-menu a.active{background:var(--accent-soft); color:var(--accent-soft-text)}
+.mobile-board-field{display:grid; gap:6px; margin-top:6px; padding:8px 11px 6px; border-top:1px solid var(--rule)}
+.mobile-board-field label{
+  font-family:var(--mono); font-size:10px; font-weight:650;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--muted-2);
+}
+.mobile-board-field select{width:100%; min-height:40px}
 
 /* ===== Site footer ===== */
 .site-footer{background:var(--bg-workspace); border-top:1px solid var(--rule-strong); padding:22px 0; margin-top:32px}
@@ -196,62 +210,27 @@ button{
   transition:border-color .15s, background .15s, color .15s;
 }
 button:hover:not(:disabled){border-color:var(--border-input-hover); color:var(--ink)}
-button.primary{background:var(--accent); border-color:var(--accent); color:#f3eee4; font-weight:600}
+button.primary{background:var(--accent); border-color:var(--accent); color:var(--on-accent); font-weight:600}
 button.primary:hover:not(:disabled){background:var(--accent-hover)}
-button.danger{background:var(--warn); border-color:var(--warn); color:#fff; font-weight:600}
+button.danger{background:var(--warn); border-color:var(--warn); color:var(--on-accent); font-weight:600}
 button:disabled{opacity:.55; cursor:not-allowed}
 select, input, textarea{
   font-family:var(--sans); font-size:14px;
-  padding:9px 11px; border:1px solid var(--border-input); border-radius:var(--radius-sm);
-  background:#fff; color:var(--ink-body-strong);
+  padding:9px 11px; border:1px solid var(--border-input); border-radius:var(--radius-input);
+  background:var(--input-bg); color:var(--ink-body-strong);
 }
 select{cursor:pointer; appearance:none; -webkit-appearance:none;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23aa9d85' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%238a7d66' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
   background-repeat:no-repeat; background-position:right 11px center; padding-right:30px;
 }
+select option{background:var(--panel); color:var(--ink)}
 input[type=number]{font-family:var(--mono); font-size:13px}
 input[type=range]{accent-color:var(--accent); padding:0; border:none; background:transparent}
 input[type=checkbox], input[type=radio], progress{accent-color:var(--accent)}
 textarea{width:100%; resize:vertical; line-height:1.5}
 
-/* App pages use `background:white` directly on some surfaces; in dark mode
-   flip those to the panel color so they don't become a bright blob. We
-   intentionally do NOT do this for .cg-wrap / board squares / eval bars
-   because those have to stay high-contrast. */
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme]) .panel{background:var(--panel) !important; border-color:var(--rule) !important}
-  :root:not([data-theme]) button:not(.primary):not(.danger),
-  :root:not([data-theme]) select,
-  :root:not([data-theme]) input,
-  :root:not([data-theme]) textarea,
-  :root:not([data-theme]) .engine-row select,
-  :root:not([data-theme]) .engine-row .row-strength{
-    background:var(--panel-2) !important;
-    color:var(--ink) !important;
-    border-color:var(--rule) !important;
-  }
-  :root:not([data-theme]) select option{background:var(--panel); color:var(--ink)}
-  :root:not([data-theme]) #status,
-  :root:not([data-theme]) #message,
-  :root:not([data-theme]) #matchScore,
-  :root:not([data-theme]) .review-bar{background:var(--accent-soft) !important; border-color:color-mix(in srgb, var(--accent) 25%, var(--rule)) !important}
-}
-:root[data-theme="dark"] .panel{background:var(--panel) !important; border-color:var(--rule) !important}
-:root[data-theme="dark"] button:not(.primary):not(.danger),
-:root[data-theme="dark"] select,
-:root[data-theme="dark"] input,
-:root[data-theme="dark"] textarea,
-:root[data-theme="dark"] .engine-row select,
-:root[data-theme="dark"] .engine-row .row-strength{
-  background:var(--panel-2) !important;
-  color:var(--ink) !important;
-  border-color:var(--rule) !important;
-}
-:root[data-theme="dark"] select option{background:var(--panel); color:var(--ink)}
-:root[data-theme="dark"] #status,
-:root[data-theme="dark"] #message,
-:root[data-theme="dark"] #matchScore,
-:root[data-theme="dark"] .review-bar{background:var(--accent-soft) !important; border-color:color-mix(in srgb, var(--accent) 25%, var(--rule)) !important}
+/* Dark mode is fully token-driven: every surface above reads theme-aware
+   custom properties, so no !important surface overrides are needed here. */
 
 /* ===== Theme toggle button ===== */
 .theme-toggle{
@@ -261,6 +240,7 @@ textarea{width:100%; resize:vertical; line-height:1.5}
   cursor:pointer; display:flex; align-items:center; justify-content:center;
   transition:border-color .15s, color .15s;
 }
+.theme-toggle svg{width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round}
 .theme-toggle:hover{border-color:var(--border-input-hover); color:var(--ink)}
 .board-style-select{
   font-size:13px; padding:7px 11px; border:1px solid var(--border-input);
@@ -293,7 +273,7 @@ textarea{width:100%; resize:vertical; line-height:1.5}
 .board-shell{width:100%; aspect-ratio:1}
 #ground{
   width:100%; height:100%; border-radius:8px; overflow:hidden;
-  border:1px solid #cdbf9f; box-shadow:var(--shadow);
+  border:1px solid var(--board-border); box-shadow:var(--shadow);
 }
 .cg-wrap{width:100%!important; height:100%!important}
 .engine-list{display:grid; gap:6px; margin-top:10px}
@@ -335,6 +315,51 @@ textarea{
 }
 [hidden]{display:none !important}
 
+/* ===== Shared app workspace layout (Play / Analysis / Arena) ===== */
+.app-main{
+  display:grid; grid-template-columns:minmax(0,1fr) minmax(370px,420px);
+  gap:18px; align-items:start; justify-content:center;
+  max-width:1180px; margin:0 auto; padding:16px 24px 48px;
+}
+.app-main .app-sidebar{
+  position:sticky; top:74px; padding:0; overflow:hidden;
+  border-color:var(--rule-strong);
+}
+.app-main .section-block{padding:12px; border-top:1px solid var(--rule)}
+.app-main .section-block:first-child{border-top:0}
+.app-main .section-block>summary{
+  cursor:pointer; list-style:none; user-select:none; padding:0 0 8px;
+  font-family:var(--mono); font-size:10px; font-weight:650; line-height:1.2;
+  letter-spacing:.12em; text-transform:uppercase; color:var(--muted-2);
+  transition:color .12s;
+}
+.app-main .section-block>summary::-webkit-details-marker{display:none}
+.app-main .section-block>summary::before{
+  content:"\25B8"; display:inline-block; margin-right:6px;
+  font-size:10px; color:var(--muted-2); transition:transform .15s;
+}
+.app-main .section-block[open]>summary::before{transform:rotate(90deg); color:var(--accent)}
+.app-main .section-block>summary:hover{color:var(--ink)}
+.app-main .section-block:not([open])>summary{padding-bottom:0}
+.app-main .section-heading{
+  margin:0 0 8px; font-family:var(--mono); font-size:10px; font-weight:650;
+  line-height:1.2; letter-spacing:.12em; text-transform:uppercase; color:var(--muted-2);
+}
+.app-main .capabilities-slot{padding:0 12px 12px; border-top:1px solid var(--rule)}
+.app-main .app-sidebar .capabilities-slot .capabilities{
+  margin:0; padding:10px 0 0; border:0; border-radius:0; background:transparent;
+}
+@media (max-width:900px){
+  .app-main{grid-template-columns:1fr; max-width:680px; padding:16px}
+  .app-main .app-sidebar{position:static}
+}
+@media (max-width:600px){
+  .app-main{padding:12px 10px 40px; gap:12px}
+}
+@media (prefers-reduced-motion: reduce){
+  .app-main .section-block>summary::before{transition:none}
+}
+
 /* ===== Board loading placeholder =====
    #ground starts empty and stays blank (or solid dark via per-page
    inline styles) until the chessground JS mounts. This renders the same
@@ -374,6 +399,7 @@ textarea{
   nav.primary{gap:0}
   nav.primary a{padding:7px 8px; font-size:13px}
   .page-title{font-size:16px}
+  .theme-toggle{width:44px; height:44px}
   .workspace-toolbar .ws-title{font-size:18px}
 }
 @media (max-width:420px){
@@ -386,7 +412,6 @@ textarea{
 @media (max-width:360px){
   nav.primary{display:none}
   .mobile-nav{display:block}
-  .menu-toggle{display:flex}
+  .menu-toggle{display:flex; width:44px; height:44px}
   .site-header .wrap{padding-left:12px; padding-right:12px}
-  .theme-toggle{width:38px; height:38px}
 }

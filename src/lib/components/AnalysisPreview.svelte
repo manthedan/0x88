@@ -260,4 +260,12 @@
     .analysis-line code{font-size:6px}
     .legend{margin-top:5px}
   }
+  @container(max-width:460px){
+    /* On phones the scaled-down analysis text is illegible; show just the
+       board so the hero stays compact and readable. */
+    .preview-grid{grid-template-columns:1fr; padding:8px}
+    .analysis-panel{display:none}
+    .board-panel{padding:8px}
+    .move-list{white-space:normal}
+  }
 </style>
