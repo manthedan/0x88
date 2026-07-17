@@ -41,7 +41,7 @@ test('PlentyChess variant normalization and lookup are stable', () => {
   assert.equal(normalizePlentyChessVariant('browser worker'), 'emscripten');
   assert.equal(normalizePlentyChessVariant('custom'), 'custom');
   assert.equal(normalizePlentyChessVariant('unknown'), 'emscripten');
-  assert.equal(plentyChessVariantByKey('emscripten').label, 'PlentyChess Emscripten experimental');
+  assert.equal(plentyChessVariantByKey('emscripten').label, 'PlentyChess');
   assert.equal(plentyChessVariantByKey('custom').key, 'custom');
   assert.equal(plentyChessVariantUnsupportedReason(PLENTYCHESS_EMSCRIPTEN_VARIANT), supportsWasmSimd() ? null : 'requires WebAssembly SIMD');
 });

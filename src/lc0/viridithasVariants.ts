@@ -15,7 +15,7 @@ export interface ViridithasVariant {
 
 export const VIRIDITHAS_DEFAULT_VARIANT: ViridithasVariant = {
   key: 'default',
-  label: 'Viridithas scalar experimental',
+  label: 'Viridithas',
   wasmUrl: DEFAULT_VIRIDITHAS_WASM_URL,
   note: 'Experimental patched Viridithas wasm32-wasip1 scalar build with one-shot, persistent, and batch benchmark modes.',
 };

@@ -89,7 +89,7 @@ function assetKey(variant: PlentyChessVariant): string {
 
 export const PLENTYCHESS_EMSCRIPTEN_VARIANT: PlentyChessVariant = {
   key: 'emscripten',
-  label: 'PlentyChess Emscripten experimental',
+  label: 'PlentyChess',
   jsUrl: PLENTYCHESS_EMSCRIPTEN_JS_URL,
   wasmUrl: PLENTYCHESS_EMSCRIPTEN_WASM_URL,
   dataUrl: PLENTYCHESS_EMSCRIPTEN_DATA_URL,
@@ -99,7 +99,7 @@ export const PLENTYCHESS_EMSCRIPTEN_VARIANT: PlentyChessVariant = {
 
 export const PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT: PlentyChessVariant = {
   key: 'emscripten-sse41',
-  label: 'PlentyChess SSE4.1 Emscripten',
+  label: 'PlentyChess SSE4.1',
   jsUrl: PLENTYCHESS_EMSCRIPTEN_SSE41_JS_URL,
   wasmUrl: PLENTYCHESS_EMSCRIPTEN_SSE41_WASM_URL,
   dataUrl: PLENTYCHESS_EMSCRIPTEN_SSE41_DATA_URL,
@@ -109,7 +109,7 @@ export const PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT: PlentyChessVariant = {
 
 export const PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT: PlentyChessVariant = {
   key: 'emscripten-relaxed',
-  label: 'PlentyChess Relaxed SIMD Emscripten',
+  label: 'PlentyChess Relaxed SIMD',
   jsUrl: PLENTYCHESS_EMSCRIPTEN_RELAXED_JS_URL,
   wasmUrl: PLENTYCHESS_EMSCRIPTEN_RELAXED_WASM_URL,
   dataUrl: PLENTYCHESS_EMSCRIPTEN_RELAXED_DATA_URL,

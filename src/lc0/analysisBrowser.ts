@@ -38,8 +38,9 @@ import { createStormphraxEngine, stormphraxCacheKey } from './engineProvision.ts
 import { STORMPHRAX_VARIANTS, checkStormphraxVariantAsset, hasExplicitStormphraxVariant, normalizeStormphraxVariant, resolveDefaultStormphraxVariantAssetFallback, stormphraxVariantAssetStatus, stormphraxVariantByKey, stormphraxVariantFromParams, stormphraxVariantUnsupportedReason, type StormphraxVariant } from './stormphraxVariants.ts';
 import { BIG_NETS, bigNetAssetStatusSync, bigNetLoadWarning, bigNetOptionState, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig, type Bt4WorkerSearcher } from './bt4Engine.ts';
 import { acquireBigNetSearcher, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher, type BigNetKey } from './bigNetSessionPool.ts';
-import { ENGINE_FAMILY_PRIORITY, canonicalEngineFamily, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, centipawnEngineLabel, centipawnVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
+import { ENGINE_FAMILY_PRIORITY, canonicalEngineFamily, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyDefinition, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, centipawnEngineLabel, centipawnVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
+import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { hideLoadingProgress, renderLoadingProgress, type LoadingProgressItem } from './loadingProgress.ts';
@@ -1028,7 +1029,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const status = viridithasVariantAssetStatus(v);
     const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
     if (!unsupported && v.key === 'relaxed-simd' && assetProbePending(status)) void checkViridithasVariantAsset(v, whileAnalysisMounted(renderEngineList));
-    return browserVariantOption(v.key, v.label, {
+    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
       assetStatus: status,
       unsupportedReason: unsupported ? 'unsupported by this browser' : null,
       requirePresent: v.key === 'relaxed-simd',
@@ -1039,7 +1040,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const unsupported = v.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd();
     if (!unsupported && assetProbePending(status)) void checkBerserkVariantAsset(v, whileAnalysisMounted(renderEngineList));
     const needsGeneratedAsset = v.key === 'emscripten-simd' || v.key === 'emscripten-relaxed';
-    return browserVariantOption(v.key, v.label, {
+    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
       assetStatus: status,
       unsupportedReason: unsupported ? 'unsupported by this browser' : null,
       requirePresent: needsGeneratedAsset,
@@ -1050,20 +1051,20 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const unsupportedReason = plentyChessVariantUnsupportedReason(v);
     const needsGeneratedAsset = v.key === 'emscripten-sse41' || v.key === 'emscripten-relaxed';
     if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkPlentyChessVariantAsset(v, whileAnalysisMounted(renderEngineList));
-    return browserVariantOption(v.key, v.label, { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
+    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
   });
   if (family === 'stormphrax') return availableStormphraxVariants().map((v) => {
     const status = stormphraxVariantAssetStatus(v);
     const unsupportedReason = stormphraxVariantUnsupportedReason(v);
     const needsGeneratedAsset = v.key === 'emscripten-relaxed';
     if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkStormphraxVariantAsset(v, whileAnalysisMounted(renderEngineList));
-    return browserVariantOption(v.key, v.label, { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
+    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
   });
   const recklessVariants = availableRecklessVariants().filter((v) => !isV0DeployProfile() || ['full', 'simd', 'relaxed-simd'].includes(v.key));
   return recklessVariants.map((v) => {
     const status = recklessVariantAssetStatus(v);
     const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
-    return browserVariantOption(v.key, v.label, {
+    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
       assetStatus: status,
       unsupportedReason: unsupported ? 'unsupported by this browser' : null,
     });
@@ -1153,9 +1154,8 @@ async function workerBigNetLines(runId: number, variant: string, fen: string, vi
   }
 }
 
-// Lc0 big nets are WebGPU-only and require the large local ONNX assets.
+// Lc0 big nets use hosted ONNX assets and prefer WebGPU, with a slow CPU fallback.
 async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<void> {
-  if (isV0DeployProfile()) return;
   await Promise.all([probeBt4Support(), checkBigNetAsset(BIG_NETS.bt4, whileAnalysisMounted(renderRecklessRuntimeInfo)), checkBigNetAsset(BIG_NETS.t3, whileAnalysisMounted(renderRecklessRuntimeInfo))]);
   if (isStaleMount(mountSignal)) return;
   for (const row of engineRows) {
@@ -1401,6 +1401,14 @@ function signedCp(value: number): string {
   return `${sign}${Math.round(value)}`;
 }
 
+function comparisonEngineName(engine: string): string {
+  const rows = activeEngineRows();
+  const row = rows.find((candidate) => rowLabel(candidate) === engine);
+  if (!row) return engine;
+  const familyCount = rows.filter((candidate) => candidate.family === row.family).length;
+  return familyCount > 1 ? engine : engineFamilyDefinition(row.family).label;
+}
+
 function renderEngineComparison(lines: AnalysisLine[]): void {
   const bestByEngine = [...new Map(lines
     .filter((line) => line.multipv === 1 && line.pvUci[0])
@@ -1431,17 +1439,11 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
   const spreadText = evalSpread === null ? 'eval spread unavailable' : `eval spread ${signedCp(evalSpread)} cp`;
   el('engineConsensus').textContent = `${consensusText} · ${spreadText}`;
   const reference = finiteScores.length ? finiteScores[0] : undefined;
-  const colorKeys = new Map<string, number>();
-  for (const line of bestByEngine) {
-    const k = engineColorKey(line.engine);
-    colorKeys.set(k, (colorKeys.get(k) ?? 0) + 1);
-  }
   body.innerHTML = bestByEngine.map((line) => {
     const swatch = engineBrushes(line.engine).swatch;
     const delta = reference === undefined || line.scoreCp === undefined ? '—' : signedCp(line.scoreCp - reference);
     const agreed = line.pvUci[0] === consensusUci && (consensus?.[1].count ?? 0) > 1;
-    const needsName = (colorKeys.get(engineColorKey(line.engine)) ?? 1) > 1;
-    const label = needsName ? `<span class="engine-name-with-logo">${engineLogoHtmlForName(line.engine)}${htmlEscape(line.engine)}</span>` : engineLogoHtmlForName(line.engine);
+    const label = `<span class="engine-name-with-logo">${engineLogoHtmlForName(line.engine)}${htmlEscape(comparisonEngineName(line.engine))}</span>`;
     return `<tr data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}; cursor:pointer">`
       + `<td>${label}</td>`
       + `<td class="mono ${agreed ? 'agree' : ''}">${htmlEscape(firstSanMove(line))}</td>`
@@ -2978,9 +2980,6 @@ async function init(mountSignal: AbortSignal) {
     REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
   }
   REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
-  if (!REQUESTED_VIRIDITHAS_EXPLICIT && REQUESTED_VIRIDITHAS_VARIANT.key === 'relaxed-simd') {
-    REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(viridithasVariantByKey('simd'), false, whileAnalysisMounted(renderRecklessRuntimeInfo));
-  }
   REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
   REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
   REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(REQUESTED_STORMPHRAX_VARIANT, REQUESTED_STORMPHRAX_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
@@ -3015,10 +3014,8 @@ async function init(mountSignal: AbortSignal) {
   void probeEngineLogos(whileAnalysisMounted(() => { renderEngineList(); renderAll(); }));
   wireEvents();
   void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
-  if (!isV0DeployProfile()) {
-    void refreshBt4Availability();
-    void refreshCentipawnHybridManifestStatus();
-  }
+  void refreshBt4Availability();
+  if (!isV0DeployProfile()) void refreshCentipawnHybridManifestStatus();
   await loadLc0Backend(true, mountSignal);
 }
 

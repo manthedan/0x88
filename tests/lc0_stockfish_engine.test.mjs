@@ -21,6 +21,29 @@ test('stockfish flavor helpers map browser Stockfish builds', () => {
   assert.equal(stockfishFlavorUrl('threaded'), '/stockfish/stockfish-18.js');
 });
 
+test('production asset base hosts the full single-threaded Stockfish pair', async () => {
+  const previousBase = globalThis.LC0_BROWSER_ASSET_BASE_URL;
+  const previousLocation = globalThis.location;
+  globalThis.LC0_BROWSER_ASSET_BASE_URL = 'https://assets.0x88.app';
+  Object.defineProperty(globalThis, 'location', {
+    value: { href: 'https://0x88.app/app/analysis/', origin: 'https://0x88.app' },
+    configurable: true,
+  });
+  try {
+    const productionModule = await import(`../src/lc0/stockfishEngine.ts?r2-full=${Date.now()}`);
+    assert.equal(productionModule.stockfishFlavorUrl('single'), 'https://assets.0x88.app/stockfish/stockfish-18-single.js');
+    const worker = productionModule.stockfishWorkerUrl(productionModule.stockfishFlavorUrl('single'));
+    assert.match(worker.url, /^blob:/);
+    assert.match(worker.url, /stockfish-18-single\.wasm$/);
+    URL.revokeObjectURL(worker.objectUrl);
+  } finally {
+    if (previousBase === undefined) delete globalThis.LC0_BROWSER_ASSET_BASE_URL;
+    else globalThis.LC0_BROWSER_ASSET_BASE_URL = previousBase;
+    if (previousLocation === undefined) delete globalThis.location;
+    else Object.defineProperty(globalThis, 'location', { value: previousLocation, configurable: true });
+  }
+});
+
 test('Stockfish lite-single uses relaxed SIMD when validated and falls back otherwise', () => {
   const originalValidate = WebAssembly.validate;
   try {

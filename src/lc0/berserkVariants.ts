@@ -99,7 +99,7 @@ export function supportsBerserkWasmSimd(): boolean {
 
 export const BERSERK_EMSCRIPTEN_VARIANT: BerserkVariant = {
   key: 'emscripten',
-  label: 'Berserk Emscripten experimental',
+  label: 'Berserk',
   jsUrl: BERSERK_EMSCRIPTEN_JS_URL,
   wasmUrl: BERSERK_EMSCRIPTEN_WASM_URL,
   dataUrl: BERSERK_EMSCRIPTEN_DATA_URL,
@@ -109,7 +109,7 @@ export const BERSERK_EMSCRIPTEN_VARIANT: BerserkVariant = {
 
 export const BERSERK_EMSCRIPTEN_SIMD_VARIANT: BerserkVariant = {
   key: 'emscripten-simd',
-  label: 'Berserk SIMD Emscripten experimental',
+  label: 'Berserk SIMD',
   jsUrl: BERSERK_EMSCRIPTEN_SIMD_JS_URL,
   wasmUrl: BERSERK_EMSCRIPTEN_SIMD_WASM_URL,
   dataUrl: BERSERK_EMSCRIPTEN_SIMD_DATA_URL,
@@ -119,7 +119,7 @@ export const BERSERK_EMSCRIPTEN_SIMD_VARIANT: BerserkVariant = {
 
 export const BERSERK_EMSCRIPTEN_RELAXED_VARIANT: BerserkVariant = {
   key: 'emscripten-relaxed',
-  label: 'Berserk Relaxed SIMD Emscripten experimental',
+  label: 'Berserk Relaxed SIMD',
   jsUrl: BERSERK_EMSCRIPTEN_RELAXED_JS_URL,
   wasmUrl: BERSERK_EMSCRIPTEN_RELAXED_WASM_URL,
   dataUrl: BERSERK_EMSCRIPTEN_RELAXED_DATA_URL,

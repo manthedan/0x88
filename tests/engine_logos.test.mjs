@@ -51,6 +51,14 @@ test('analysis and arena probe bundled logos in every deploy profile', async () 
   assert.doesNotMatch(arenaSource, /if \(!isV0DeployProfile\(\)\) void probeEngineLogos/);
 });
 
+test('engine comparison shows family names unless same-family variants need disambiguation', async () => {
+  const source = await readFile(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  const comparisonSource = source.slice(source.indexOf('function comparisonEngineName'), source.indexOf('function renderLines'));
+  assert.match(comparisonSource, /const familyCount = rows\.filter\(\(candidate\) => candidate\.family === row\.family\)\.length;/);
+  assert.match(comparisonSource, /return familyCount > 1 \? engine : engineFamilyDefinition\(row\.family\)\.label;/);
+  assert.match(comparisonSource, /htmlEscape\(comparisonEngineName\(line\.engine\)\)/);
+});
+
 test('concurrent engine logo probes retain every re-render callback', async () => {
   const originalFetch = globalThis.fetch;
   const callbacks = [];

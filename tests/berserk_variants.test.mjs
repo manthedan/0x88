@@ -47,7 +47,7 @@ test('Berserk variant normalization and lookup are stable', () => {
   assert.equal(normalizeBerserkVariant('full'), 'default');
   assert.equal(normalizeBerserkVariant('custom'), 'custom');
   assert.equal(normalizeBerserkVariant('unknown'), 'emscripten');
-  assert.equal(berserkVariantByKey('emscripten').label, 'Berserk Emscripten experimental');
+  assert.equal(berserkVariantByKey('emscripten').label, 'Berserk');
   assert.equal(berserkVariantByKey('simd').label, 'Berserk SIMD WASI planned');
   const relaxed = berserkVariantByKey('emscripten-relaxed');
   assert.equal(relaxed.key, supportsWasmRelaxedSimd() ? 'emscripten-relaxed' : supportsBerserkWasmSimd() ? 'emscripten-simd' : 'emscripten');

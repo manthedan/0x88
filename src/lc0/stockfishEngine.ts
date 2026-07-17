@@ -27,6 +27,8 @@ export type StockfishFlavor = 'lite-single' | 'single' | 'lite-threaded' | 'thre
 export const DEFAULT_STOCKFISH_FLAVOR: StockfishFlavor = 'lite-single';
 export const STOCKFISH_LITE_SINGLE_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite-single.js');
 export const STOCKFISH_LITE_SINGLE_RELAXED_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite-single-relaxed.js');
+// The production app shell intentionally omits this large pair: v0 resolves both
+// the JS and its sibling WASM to the configured R2 asset origin.
 export const STOCKFISH_SINGLE_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-single.js');
 // Threaded builds must retain a same-origin worker location so their pthreads
 // resolve back to the native Stockfish script instead of our cross-origin bootstrap.

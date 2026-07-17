@@ -116,7 +116,7 @@ export const ENGINE_FAMILY_DEFINITIONS = {
     variants: {
       default: 'small',
       options: LC0_ENGINE_VARIANTS,
-      v0Allowed: ['small', 'bt4'],
+      v0Allowed: ['small', 't3', 'bt4'],
       v0Fallback: 'small',
       label: (variant) => variant === 'bt4' ? 'Lc0 BT4-it332' : variant === 't3' ? 'Lc0 t3-512' : 'Lc0',
     },
@@ -147,7 +147,7 @@ export const ENGINE_FAMILY_DEFINITIONS = {
     variants: {
       default: 'lite',
       options: STOCKFISH_ENGINE_VARIANTS,
-      v0Allowed: ['lite'],
+      v0Allowed: ['lite', 'full'],
       v0Fallback: 'lite',
       label: (variant, surface) => surface === 'analysis'
         ? variant === 'lite' ? 'SF Lite' : 'SF'
@@ -199,7 +199,7 @@ export const ENGINE_FAMILY_DEFINITIONS = {
     },
     order: { default: 3, v0: 4 },
     variants: {
-      default: 'default',
+      default: 'relaxed-simd',
       v0Allowed: ['default', 'simd', 'relaxed-simd'],
       v0Fallback: 'default',
     },

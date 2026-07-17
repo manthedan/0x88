@@ -62,35 +62,35 @@ function assetKey(variant: RecklessVariant): string {
 
 export const RECKLESS_FULL_VARIANT: RecklessVariant = {
   key: 'full',
-  label: 'Reckless Full scalar fallback',
+  label: 'Reckless scalar fallback',
   wasmUrl: DEFAULT_RECKLESS_WASM_URL,
   note: 'v60 full-size NNUE scalar WASI/UCI fallback for browsers without WebAssembly SIMD.',
 };
 
 export const RECKLESS_SIMD_VARIANT: RecklessVariant = {
   key: 'simd',
-  label: 'Reckless Full SIMD',
+  label: 'Reckless SIMD',
   wasmUrl: recklessAsset('/reckless/reckless-simd128.wasm'),
   note: 'v60 full-size NNUE with integrated wasm simd128 backend; preferred default when supported.',
 };
 
 export const RECKLESS_RELAXED_SIMD_VARIANT: RecklessVariant = {
   key: 'relaxed-simd',
-  label: 'Reckless Full Relaxed SIMD',
+  label: 'Reckless Relaxed SIMD',
   wasmUrl: recklessAsset('/reckless/reckless-relaxed-simd128.wasm'),
   note: 'v60 full-size NNUE using the relaxed integer dot for dpbusd (exact: activations provably in 0..127). Default when the browser validates Relaxed SIMD; promoted on 60/60 fixed-depth parity and +24% NPS vs the old kernels.',
 };
 
 export const RECKLESS_LITE_VARIANT: RecklessVariant = {
   key: 'lite',
-  label: 'Reckless Lite experimental',
+  label: 'Reckless Lite',
   wasmUrl: recklessAsset('/reckless/reckless-v53-l1-512.wasm'),
   note: 'v53 L1=512 candidate; smaller/faster prototype, weaker and not shipped by default.',
 };
 
 export const RECKLESS_WASI_SIMD_EXTERNAL_VARIANT: RecklessVariant = {
   key: 'wasi-simd-external',
-  label: 'Reckless Full WASI SIMD external NNUE experimental',
+  label: 'Reckless WASI SIMD external NNUE',
   wasmUrl: recklessAsset('/reckless/reckless-simd128-external.wasm'),
   note: 'Persistent WASI/UCI SIMD prototype with the full NNUE loaded as a separate cacheable asset; embedded WASI variants remain the default and fallback.',
   nnueUrl: recklessAsset('/reckless/reckless-v60-7f587dfb.nnue'),
@@ -99,7 +99,7 @@ export const RECKLESS_WASI_SIMD_EXTERNAL_VARIANT: RecklessVariant = {
 
 export const RECKLESS_BROWSER_API_VARIANT: RecklessVariant = {
   key: 'browser-api',
-  label: 'Reckless Full browser API experimental',
+  label: 'Reckless browser API',
   wasmUrl: recklessAsset('/reckless/reckless-browser-api.wasm'),
   note: 'Full-size NNUE with direct WASM exports; bypasses WASI/UCI text for lower adapter overhead.',
   backend: 'browser-api',
@@ -107,7 +107,7 @@ export const RECKLESS_BROWSER_API_VARIANT: RecklessVariant = {
 
 export const RECKLESS_BROWSER_API_SIMD_VARIANT: RecklessVariant = {
   key: 'browser-api-simd',
-  label: 'Reckless Full browser API SIMD experimental',
+  label: 'Reckless browser API SIMD',
   wasmUrl: recklessAsset('/reckless/reckless-browser-api-simd128.wasm'),
   note: 'Direct browser API artifact combined with the integrated wasm simd128 NNUE backend.',
   backend: 'browser-api',
@@ -115,7 +115,7 @@ export const RECKLESS_BROWSER_API_SIMD_VARIANT: RecklessVariant = {
 
 export const RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT: RecklessVariant = {
   key: 'browser-api-simd-external',
-  label: 'Reckless Full browser API SIMD external NNUE experimental',
+  label: 'Reckless browser API SIMD external NNUE',
   wasmUrl: recklessAsset('/reckless/reckless-browser-api-simd128-external.wasm'),
   note: 'Direct browser API SIMD artifact with the full NNUE loaded as a separate cacheable asset.',
   backend: 'browser-api',

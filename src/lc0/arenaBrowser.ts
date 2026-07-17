@@ -40,6 +40,7 @@ import { TournamentStandings, buildSchedule, tournamentPairings, type ScheduledG
 import { hBarChartSvg, lineChartSvg, type ChartSeries } from './charts.ts';
 import { canonicalEngineFamily, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, centipawnEngineLabel, centipawnVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
+import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
@@ -303,7 +304,7 @@ function persistedVariantOrDefault(family: EngineFamily, value: unknown): string
   const variant = String(value ?? '');
   const options = variantOptions(family);
   const selected = options.find((option) => option.value === variant);
-  const pendingBigNet = !isV0DeployProfile() && !bt4AvailabilityResolved && family === 'lc0' && isLc0BigNetVariant(variant);
+  const pendingBigNet = !bt4AvailabilityResolved && family === 'lc0' && isLc0BigNetVariant(variant);
   if (selected && (!selected.disabled || pendingBigNet || /\(checking\b/.test(selected.label))) return selected.value;
   return options.find((option) => !option.disabled)?.value ?? defaultVariant(family);
 }
@@ -1222,7 +1223,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const status = viridithasVariantAssetStatus(v);
     const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
     if (!unsupported && v.key === 'relaxed-simd' && assetProbePending(status)) void checkViridithasVariantAsset(v, whileArenaMounted(populateSeats));
-    return browserVariantOption(v.key, v.label, {
+    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
       assetStatus: status,
       unsupportedReason: unsupported ? 'unsupported by this browser' : null,
       requirePresent: v.key === 'relaxed-simd',
@@ -1233,7 +1234,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const unsupported = v.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd();
     if (!unsupported && assetProbePending(status)) void checkBerserkVariantAsset(v, whileArenaMounted(populateSeats));
     const needsGeneratedAsset = v.key === 'emscripten-simd' || v.key === 'emscripten-relaxed';
-    return browserVariantOption(v.key, v.label, {
+    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
       assetStatus: status,
       unsupportedReason: unsupported ? 'unsupported by this browser' : null,
       requirePresent: needsGeneratedAsset,
@@ -1244,20 +1245,20 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     const unsupportedReason = plentyChessVariantUnsupportedReason(v);
     const needsGeneratedAsset = v.key === 'emscripten-sse41' || v.key === 'emscripten-relaxed';
     if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkPlentyChessVariantAsset(v, whileArenaMounted(populateSeats));
-    return browserVariantOption(v.key, v.label, { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
+    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
   });
   if (family === 'stormphrax') return availableStormphraxVariants().map((v) => {
     const status = stormphraxVariantAssetStatus(v);
     const unsupportedReason = stormphraxVariantUnsupportedReason(v);
     const needsGeneratedAsset = v.key === 'emscripten-relaxed';
     if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkStormphraxVariantAsset(v, whileArenaMounted(populateSeats));
-    return browserVariantOption(v.key, v.label, { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
+    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
   });
   const recklessVariants = availableRecklessVariants().filter((v) => !isV0DeployProfile() || ['full', 'simd', 'relaxed-simd'].includes(v.key));
   return recklessVariants.map((v) => {
     const status = recklessVariantAssetStatus(v);
     const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
-    return browserVariantOption(v.key, v.label, {
+    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
       assetStatus: status,
       unsupportedReason: unsupported ? 'unsupported by this browser' : null,
     });
@@ -1310,7 +1311,7 @@ function renderSeatSelectors(): void {
   for (const row of seatRows) {
     const options = variantOptions(row.family);
     const selected = options.find((option) => option.value === row.variant);
-    const pendingBigNet = !isV0DeployProfile() && !bt4AvailabilityResolved && row.family === 'lc0' && isLc0BigNetVariant(row.variant);
+    const pendingBigNet = !bt4AvailabilityResolved && row.family === 'lc0' && isLc0BigNetVariant(row.variant);
     if (!selected || (selected.disabled && !pendingBigNet && !/\(checking\b/.test(selected.label))) {
       row.variant = options.find((option) => !option.disabled)?.value ?? defaultVariant(row.family);
     }
@@ -2118,7 +2119,6 @@ function refreshStockfishControls(): void {
 // Lc0 big nets are WebGPU-only and locally staged; disable/downgrade them
 // when WebGPU is unusable or their ONNX asset is missing.
 async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<void> {
-  if (isV0DeployProfile()) return;
   await Promise.all([
     probeBt4Support(),
     checkBigNetAsset(BIG_NETS.bt4, whileArenaMounted(renderSeatSelectors)),
@@ -3525,7 +3525,7 @@ async function init(mountSignal: AbortSignal) {
   if (isStaleMount(mountSignal)) return;
   buildEngines();
   populateSeats();
-  if (!isV0DeployProfile()) void refreshBt4Availability();
+  void refreshBt4Availability();
   void probeEngineLogos(whileArenaMounted(() => { renderSeatSelectors(); refreshSeatControls(); renderSideLabels(); }));
   wireEvents();
   refreshBudgetControls();
