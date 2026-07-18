@@ -46,6 +46,7 @@
       <a href="/" class:active={isActive('/')} aria-current={isActive('/') ? 'page' : undefined}>Home</a>
       <a href="/app/play/" class:active={isActive('/app/play/')} aria-current={isActive('/app/play/') ? 'page' : undefined}>Play</a>
       <a href="/app/analysis/" class:active={isActive('/app/analysis/')} aria-current={isActive('/app/analysis/') ? 'page' : undefined}>Analysis</a>
+      <a href="/app/library/" class:active={isActive('/app/library/')} aria-current={isActive('/app/library/') ? 'page' : undefined}>Library</a>
       <a href="/app/arena/" class:active={isActive('/app/arena/')} aria-current={isActive('/app/arena/') ? 'page' : undefined}>Arena</a>
       <a href="/docs/" class:active={isActive('/docs/')} aria-current={isActive('/docs/') ? 'page' : undefined}>Docs</a>
     </nav>
@@ -56,6 +57,7 @@
           <a href="/" class:active={isActive('/')} aria-current={isActive('/') ? 'page' : undefined}>Home</a>
           <a href="/app/play/" class:active={isActive('/app/play/')} aria-current={isActive('/app/play/') ? 'page' : undefined}>Play</a>
           <a href="/app/analysis/" class:active={isActive('/app/analysis/')} aria-current={isActive('/app/analysis/') ? 'page' : undefined}>Analysis</a>
+          <a href="/app/library/" class:active={isActive('/app/library/')} aria-current={isActive('/app/library/') ? 'page' : undefined}>Library</a>
           <a href="/app/arena/" class:active={isActive('/app/arena/')} aria-current={isActive('/app/arena/') ? 'page' : undefined}>Arena</a>
           <a href="/docs/" class:active={isActive('/docs/')} aria-current={isActive('/docs/') ? 'page' : undefined}>Docs</a>
           <div class="mobile-board-field">

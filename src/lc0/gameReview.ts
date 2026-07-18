@@ -144,6 +144,10 @@ export interface AnnotatedPgnOptions {
   startTurn?: 'w' | 'b';
 }
 
+function escapePgnTagValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 /**
  * Standalone annotated PGN for a reviewed mainline: NAGs for inaccuracies/
  * mistakes/blunders plus eval comments (white win %) on every move, and the
@@ -151,7 +155,7 @@ export interface AnnotatedPgnOptions {
  */
 export function annotatedPgn(review: GameReview, options: AnnotatedPgnOptions = {}): string {
   const tags = { Event: 'Game review', ...options.tags };
-  const header = Object.entries(tags).map(([key, value]) => `[${key} "${value}"]`).join('\n');
+  const header = Object.entries(tags).map(([key, value]) => `[${key} "${escapePgnTagValue(value)}"]`).join('\n');
   const startTurn = options.startTurn ?? 'w';
   let fullmove = options.startFullmove ?? 1;
   const tokens: string[] = [];

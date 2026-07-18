@@ -98,3 +98,12 @@ test('annotatedPgn emits NAGs, win comments, and best-move notes', () => {
   // Black's best reply gets no suffix and no best-move note.
   assert.ok(pgn.includes(' d5 '));
 });
+
+test('annotatedPgn escapes quotes and backslashes in tag values', () => {
+  const review = reviewGame(
+    [{ winWhite: 0.5, bestUci: 'e2e4' }, { winWhite: 0.5, bestUci: null }],
+    [{ san: 'e4', uci: 'e2e4' }],
+  );
+  const pgn = annotatedPgn(review, { tags: { Event: 'A "quoted" \\ event' } });
+  assert.match(pgn, /^\[Event "A \\"quoted\\" \\\\ event"\]/);
+});

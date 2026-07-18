@@ -2630,6 +2630,39 @@ function loadPgn() {
   }
 }
 
+async function loadRequestedPgnCollection(mountSignal: AbortSignal): Promise<void> {
+  const id = params.get('collection');
+  if (!id) return;
+  try {
+    const record = await loadPgnCollection(id);
+    if (isStaleMount(mountSignal)) return;
+    if (!record) throw new Error('Collection not found in this browser');
+    const games = parsePgnGames(record.pgn);
+    const requestedIndex = params.get('game') === null ? 0 : Number(params.get('game'));
+    if (!Number.isInteger(requestedIndex) || requestedIndex < 0 || requestedIndex >= games.length) {
+      throw new Error('Requested game is not present in this collection');
+    }
+    const game = games[requestedIndex];
+    tree = game.tree;
+    tree.toStart();
+    inputEl('pgnInput').value = gameTreeToPgn(game.tree, game.tags, game.result);
+    inputEl('importGamesInput').value = record.pgn;
+    inputEl('pgnDbName').value = record.name;
+    activePgnCollectionId = record.id;
+    lastImportSource = record.source;
+    lastImportUsername = record.username ?? '';
+    lastImportColor = record.color ?? '';
+    setImportedPgn(record.pgn, `loaded “${record.name}”:`);
+    renderAll();
+    renderEvalBar();
+    setShapes(bestShapes());
+    const players = game.tags.White && game.tags.Black ? `: ${game.tags.White} – ${game.tags.Black}` : '';
+    el('message').textContent = `Loaded game ${requestedIndex + 1} from “${record.name}”${players}.`;
+  } catch (error) {
+    if (!isStaleMount(mountSignal)) el('message').textContent = `Could not open library collection: ${(error as Error).message}`;
+  }
+}
+
 function copyPgn() {
   const pgn = gameTreeToPgn(tree, {}, tree.root.children.length ? '*' : '*');
   inputEl('pgnInput').value = pgn;
@@ -3013,6 +3046,7 @@ async function init(mountSignal: AbortSignal) {
   renderRecklessRuntimeInfo();
   void probeEngineLogos(whileAnalysisMounted(() => { renderEngineList(); renderAll(); }));
   wireEvents();
+  await loadRequestedPgnCollection(mountSignal);
   void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
   void refreshBt4Availability();
   if (!isV0DeployProfile()) void refreshCentipawnHybridManifestStatus();
