@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import SiteHeader from '$lib/components/SiteHeader.svelte';
-  import { parsePgnGames, type PgnGame } from '../../../chess/pgn';
+  import { parsePgnGames } from '../../../chess/pgn';
   import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from '../../../lc0/gameImport';
   import {
     defaultPgnCollectionName,
@@ -9,12 +9,14 @@
     exportPgnDatabaseBackup,
     formatPgnCollectionSummary,
     importPgnDatabaseBackup,
+    listPgnCollectionGames,
     listPgnCollections,
     loadPgnCollection,
     pgnDatabaseAvailable,
     pgnDatabaseBackupFilename,
     rebuildPgnCollectionIndex,
     savePgnCollection,
+    type PgnCollectionGame,
     type PgnCollectionSource,
     type PgnCollectionSummary,
   } from '../../../lc0/pgnDatabase';
@@ -38,26 +40,13 @@
   let status = 'Your games stay in this browser. Import a PGN or fetch recent public games to begin.';
   let pgnFileInput: HTMLInputElement;
   let backupFileInput: HTMLInputElement;
-  let games: LibraryGame[] = [];
+  let games: PgnCollectionGame[] = [];
   let gameFilter = '';
-
-  interface LibraryGame {
-    index: number;
-    white: string;
-    black: string;
-    whiteElo: string;
-    blackElo: string;
-    result: string;
-    date: string;
-    event: string;
-    opening: string;
-    plyCount: number;
-  }
 
   $: normalizedGameFilter = gameFilter.trim().toLocaleLowerCase();
   $: filteredGames = normalizedGameFilter
-    ? games.filter((game) => [game.white, game.black, game.event, game.opening, game.date, game.result, game.whiteElo, game.blackElo]
-      .some((value) => value.toLocaleLowerCase().includes(normalizedGameFilter)))
+    ? games.filter((game) => [game.white, game.black, game.event, game.opening, game.eco, game.date, game.result, game.whiteElo, game.blackElo]
+      .some((value) => String(value ?? '').toLocaleLowerCase().includes(normalizedGameFilter)))
     : games;
 
   onMount(() => {
@@ -82,31 +71,6 @@
     if (!games.length) throw new Error('No games found in the PGN');
     previewCount = games.length;
     return games.length;
-  }
-
-  function mainlinePlyCount(game: PgnGame): number {
-    let count = 0;
-    let node = game.tree.root.children[0];
-    while (node) {
-      count += 1;
-      node = node.children[0];
-    }
-    return count;
-  }
-
-  function summarizeGames(raw: string): LibraryGame[] {
-    return parsePgnGames(raw).map((game, index) => ({
-      index,
-      white: game.tags.White || 'Unknown',
-      black: game.tags.Black || 'Unknown',
-      whiteElo: game.tags.WhiteElo || '',
-      blackElo: game.tags.BlackElo || '',
-      result: game.result || game.tags.Result || '*',
-      date: game.tags.Date || '',
-      event: game.tags.Event || '',
-      opening: game.tags.Opening || game.tags.ECO || '',
-      plyCount: mainlinePlyCount(game),
-    }));
   }
 
   function setDraft(raw: string, nextSource: PgnCollectionSource, nextUsername = '', nextColor = ''): void {
@@ -187,7 +151,7 @@
       await refreshCollections(record.id);
       collectionName = record.name;
       previewCount = record.gameCount;
-      games = summarizeGames(record.pgn);
+      games = await listPgnCollectionGames(record.id);
       gameFilter = '';
       status = `Saved “${record.name}” with ${record.gameCount} ${record.gameCount === 1 ? 'game' : 'games'} and ${record.indexedPositionCount ?? 0} indexed positions.`;
     } catch (error) {
@@ -209,7 +173,7 @@
       sourceUsername = record.username ?? '';
       sourceColor = record.color ?? '';
       previewCount = record.gameCount;
-      games = summarizeGames(record.pgn);
+      games = await listPgnCollectionGames(record.id);
       gameFilter = '';
       status = `Loaded “${record.name}”. Editing and saving will update this collection.`;
     } catch (error) {
@@ -397,8 +361,8 @@
                   <td><strong>{game.black}</strong>{#if game.blackElo}<small>{game.blackElo}</small>{/if}</td>
                   <td><span class="result result-{game.result.replaceAll('/', '-')}">{game.result}</span></td>
                   <td>{game.date || '—'}</td>
-                  <td><strong>{game.event || 'Untitled game'}</strong><small>{game.opening || `${game.plyCount} ply`}</small></td>
-                  <td><div class="game-actions"><a class="review-game" href={`/app/review/?collection=${encodeURIComponent(selectedId)}&game=${game.index}`}>Review</a><a class="analyze-game" href={`/app/analysis/?collection=${encodeURIComponent(selectedId)}&game=${game.index}`}>Analyze</a></div></td>
+                  <td><strong>{game.event || 'Untitled game'}</strong><small>{game.opening || game.eco || `${game.plyCount} ply`}{#if game.latestReview} · reviewed d{game.latestReview.depth}{/if}</small></td>
+                  <td><div class="game-actions"><a class="review-game" href={`/app/review/?collection=${encodeURIComponent(selectedId)}&gameId=${encodeURIComponent(game.id)}&game=${game.order}`}>{game.latestReview ? `${game.latestReview.accuracy.white.toFixed(0)} / ${game.latestReview.accuracy.black.toFixed(0)}` : 'Review'}</a><a class="analyze-game" href={`/app/analysis/?collection=${encodeURIComponent(selectedId)}&gameId=${encodeURIComponent(game.id)}&game=${game.order}`}>Analyze</a></div></td>
                 </tr>
               {/each}
             </tbody>

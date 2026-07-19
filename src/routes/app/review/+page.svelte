@@ -5,18 +5,20 @@
   import SiteHeader from '$lib/components/SiteHeader.svelte';
   import { parseFen } from '../../../chess/board';
   import { moveToUci } from '../../../chess/moveCodec';
-  import { parsePgnGames, type PgnGame } from '../../../chess/pgn';
+  import { parsePgnGame, type PgnGame } from '../../../chess/pgn';
   import { boardCheck } from '../../../lc0/boardUx';
   import { bestMoveShapes } from '../../../lc0/boardArrows';
   import { lineChartSvg } from '../../../lc0/charts';
   import { annotatedPgn, type GameReview, type MoveClass, type ReviewedMove } from '../../../lc0/gameReview';
   import { runGameReview } from '../../../lc0/gameReviewRunner';
   import type { GameNode } from '../../../lc0/gameTree';
-  import { loadPgnCollection } from '../../../lc0/pgnDatabase';
+  import { listPgnCollectionGames, loadPgnCollection, loadPgnGameReview, pgnGameReviewKey, savePgnGameReview } from '../../../lc0/pgnDatabase';
   import { StockfishEngine } from '../../../lc0/stockfishEngine';
 
   const title = '0x88 Chess — game review';
   const description = 'Review a saved game move by move with Stockfish running locally in your browser.';
+  const REVIEW_ENGINE = 'stockfish-lite';
+  const REVIEW_ALGORITHM_VERSION = 1;
   const classLabel: Record<MoveClass, string> = {
     best: 'Best', good: 'Good', inaccuracy: 'Inaccuracy', mistake: 'Mistake', blunder: 'Blunder', forced: 'Forced',
   };
@@ -27,6 +29,7 @@
   let nodes: GameNode[] = [];
   let collectionId = '';
   let collectionName = '';
+  let gameId = '';
   let gameIndex = 0;
   let currentPly = 0;
   let orientation: 'white' | 'black' = 'white';
@@ -39,6 +42,7 @@
   let review: GameReview | null = null;
   let reviewController: AbortController | null = null;
   let activeEngine: StockfishEngine | null = null;
+  let restoreGeneration = 0;
 
   $: currentReviewedMove = currentPly > 0 ? review?.moves[currentPly - 1] ?? null : null;
   $: reviewedByPly = new Map(review?.moves.map((move) => [move.ply, move]) ?? []);
@@ -63,6 +67,7 @@
     });
     return () => {
       mounted = false;
+      restoreGeneration += 1;
       window.removeEventListener('keydown', onKeydown);
       reviewController?.abort();
       activeEngine?.dispose();
@@ -74,6 +79,7 @@
   async function loadRequestedGame(): Promise<void> {
     const params = new URLSearchParams(location.search);
     collectionId = params.get('collection') ?? '';
+    const requestedGameId = params.get('gameId') ?? '';
     gameIndex = params.get('game') === null ? 0 : Number(params.get('game'));
     if (!collectionId) {
       loadError = 'Choose a saved game from the Library before starting a review.';
@@ -83,16 +89,44 @@
     try {
       const collection = await loadPgnCollection(collectionId);
       if (!collection) throw new Error('Collection not found in this browser');
-      const collectionGames = parsePgnGames(collection.pgn);
-      if (!Number.isInteger(gameIndex) || gameIndex < 0 || gameIndex >= collectionGames.length) throw new Error('Requested game is not present in this collection');
+      const collectionGames = await listPgnCollectionGames(collectionId);
+      const storedGame = requestedGameId
+        ? (collectionGames[gameIndex]?.id === requestedGameId ? collectionGames[gameIndex] : collectionGames.find((entry) => entry.id === requestedGameId))
+        : Number.isInteger(gameIndex) && gameIndex >= 0 ? collectionGames[gameIndex] : undefined;
+      if (!storedGame) throw new Error('Requested game is not present in this collection');
       collectionName = collection.name;
-      game = collectionGames[gameIndex];
+      gameId = storedGame.id;
+      gameIndex = storedGame.order;
+      game = parsePgnGame(storedGame.pgn);
       nodes = [game.tree.root, ...game.tree.mainlineFrom()];
       currentPly = 0;
-      status = `${nodes.length - 1} moves ready to review with Stockfish Lite.`;
+      await restoreReviewForDepth();
     } catch (error) {
       loadError = (error as Error).message;
       status = `Could not load game: ${loadError}`;
+    }
+  }
+
+  async function restoreReviewForDepth(): Promise<void> {
+    if (!gameId) return;
+    const generation = ++restoreGeneration;
+    const requestedGameId = gameId;
+    const requestedDepth = depth;
+    try {
+      const saved = await loadPgnGameReview(requestedGameId, pgnGameReviewKey(REVIEW_ENGINE, requestedDepth, REVIEW_ALGORITHM_VERSION));
+      if (generation !== restoreGeneration || requestedGameId !== gameId || requestedDepth !== depth) return;
+      if (saved) {
+        review = saved.review;
+        status = `Loaded saved review from depth ${saved.depth}.`;
+      } else {
+        review = null;
+        status = `${nodes.length - 1} moves ready to review with Stockfish Lite.`;
+      }
+      renderBoard();
+    } catch (error) {
+      if (generation !== restoreGeneration || requestedGameId !== gameId || requestedDepth !== depth) return;
+      review = null;
+      status = `Saved review could not be loaded: ${(error as Error).message}`;
     }
   }
 
@@ -132,6 +166,7 @@
 
   async function startReview(): Promise<void> {
     if (!game || running || nodes.length < 2) return;
+    restoreGeneration += 1;
     review = null;
     ground?.setShapes([]);
     running = true;
@@ -158,7 +193,20 @@
       });
       if (reviewController !== controller) return;
       review = result;
-      status = `Review complete: ${result.moves.length} moves analyzed at depth ${depth}.`;
+      try {
+        await savePgnGameReview({
+          gameId,
+          reviewKey: pgnGameReviewKey(REVIEW_ENGINE, depth, REVIEW_ALGORITHM_VERSION),
+          engine: REVIEW_ENGINE,
+          depth,
+          algorithmVersion: REVIEW_ALGORITHM_VERSION,
+          review: result,
+          annotatedPgn: annotatedReviewPgn(result),
+        });
+        status = `Review complete and saved: ${result.moves.length} moves analyzed at depth ${depth}.`;
+      } catch (error) {
+        status = `Review complete, but could not be saved: ${(error as Error).message}`;
+      }
       const firstCritical = result.criticalMoves[0];
       if (firstCritical) goTo(firstCritical.ply);
       else renderBoard();
@@ -177,15 +225,19 @@
     activeEngine?.dispose();
   }
 
-  function reviewPgn(): string {
-    if (!review || !game) return '';
+  function annotatedReviewPgn(result: GameReview): string {
+    if (!game) return '';
     const start = parseFen(nodes[0].fen);
-    return annotatedPgn(review, {
+    return annotatedPgn(result, {
       tags: { ...game.tags, Event: game.tags.Event || '0x88 Game Review' },
       result: game.result,
       startFullmove: start.fullmove,
       startTurn: start.turn,
     });
+  }
+
+  function reviewPgn(): string {
+    return review ? annotatedReviewPgn(review) : '';
   }
 
   async function copyAnnotatedPgn(): Promise<void> {
@@ -264,7 +316,7 @@
       <section class="review-controls">
         <div class="section-title"><span>Engine review</span><small>Runs locally</small></div>
         <div class="review-setup">
-          <label for="reviewDepth">Stockfish depth<select id="reviewDepth" bind:value={depth} disabled={running}><option value={10}>Quick · 10</option><option value={12}>Standard · 12</option><option value={14}>Deep · 14</option></select></label>
+          <label for="reviewDepth">Stockfish depth<select id="reviewDepth" bind:value={depth} disabled={running} on:change={() => void restoreReviewForDepth()}><option value={10}>Quick · 10</option><option value={12}>Standard · 12</option><option value={14}>Deep · 14</option></select></label>
           {#if running}<button type="button" on:click={stopReview}>Stop</button>{:else}<button class="primary" type="button" on:click={() => void startReview()} disabled={!game}>Review game</button>{/if}
         </div>
         {#if running}<progress max={progressTotal} value={progress}></progress>{/if}
@@ -293,7 +345,7 @@
         <section class="review-actions">
           <button type="button" on:click={() => void copyAnnotatedPgn()}>Copy annotated PGN</button>
           <button type="button" on:click={downloadAnnotatedPgn}>Download PGN</button>
-          <a href={`/app/analysis/?collection=${encodeURIComponent(collectionId)}&game=${gameIndex}`}>Open in Analysis</a>
+          <a href={`/app/analysis/?collection=${encodeURIComponent(collectionId)}&gameId=${encodeURIComponent(gameId)}&game=${gameIndex}`}>Open in Analysis</a>
         </section>
       {:else}
         <section class="review-empty"><strong>Ready for review</strong><p>Stockfish evaluates every mainline position, then identifies accuracy, mistakes, and the most important moments.</p></section>

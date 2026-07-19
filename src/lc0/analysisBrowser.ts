@@ -19,7 +19,7 @@ import { lineChartSvg } from './charts.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { buildOpeningPositionIndex, mergeOpeningMoveStats, openingStatsFromIndex, openingStatsForPosition, openingSummary, positionKey, type ImportedGame, type OpeningMoveStat, type OpeningPositionIndex } from './openingStats.ts';
-import { defaultPgnCollectionName, deletePgnCollection, duplicatePgnCollection, exportPgnDatabaseBackup, formatPgnCollectionSummary, importPgnDatabaseBackup, listPgnCollections, loadPgnCollection, pgnDatabaseAvailable, pgnDatabaseBackupFilename, renamePgnCollection, savePgnCollection, searchPgnCollectionsByPosition, updatePgnCollectionPositionIndex, type PgnCollectionSource, type PgnCollectionSummary } from './pgnDatabase.ts';
+import { defaultPgnCollectionName, deletePgnCollection, duplicatePgnCollection, exportPgnDatabaseBackup, formatPgnCollectionSummary, importPgnDatabaseBackup, listPgnCollectionGames, listPgnCollections, loadPgnCollection, pgnDatabaseAvailable, pgnDatabaseBackupFilename, renamePgnCollection, savePgnCollection, searchPgnCollectionsByPosition, updatePgnCollectionPositionIndex, type PgnCollectionSource, type PgnCollectionSummary } from './pgnDatabase.ts';
 
 type PgnDatabaseSearchResult = Awaited<ReturnType<typeof searchPgnCollectionsByPosition>>[number];
 import { loadLc0ModelForOrt } from './modelCache.ts';
@@ -2637,12 +2637,15 @@ async function loadRequestedPgnCollection(mountSignal: AbortSignal): Promise<voi
     const record = await loadPgnCollection(id);
     if (isStaleMount(mountSignal)) return;
     if (!record) throw new Error('Collection not found in this browser');
-    const games = parsePgnGames(record.pgn);
+    const games = await listPgnCollectionGames(record.id);
+    if (isStaleMount(mountSignal)) return;
+    const requestedGameId = params.get('gameId');
     const requestedIndex = params.get('game') === null ? 0 : Number(params.get('game'));
-    if (!Number.isInteger(requestedIndex) || requestedIndex < 0 || requestedIndex >= games.length) {
-      throw new Error('Requested game is not present in this collection');
-    }
-    const game = games[requestedIndex];
+    const storedGame = requestedGameId
+      ? (games[requestedIndex]?.id === requestedGameId ? games[requestedIndex] : games.find((entry) => entry.id === requestedGameId))
+      : Number.isInteger(requestedIndex) && requestedIndex >= 0 ? games[requestedIndex] : undefined;
+    if (!storedGame) throw new Error('Requested game is not present in this collection');
+    const game = parsePgnGame(storedGame.pgn);
     tree = game.tree;
     tree.toStart();
     inputEl('pgnInput').value = gameTreeToPgn(game.tree, game.tags, game.result);
@@ -2657,7 +2660,7 @@ async function loadRequestedPgnCollection(mountSignal: AbortSignal): Promise<voi
     renderEvalBar();
     setShapes(bestShapes());
     const players = game.tags.White && game.tags.Black ? `: ${game.tags.White} – ${game.tags.Black}` : '';
-    el('message').textContent = `Loaded game ${requestedIndex + 1} from “${record.name}”${players}.`;
+    el('message').textContent = `Loaded game ${storedGame.order + 1} from “${record.name}”${players}.`;
   } catch (error) {
     if (!isStaleMount(mountSignal)) el('message').textContent = `Could not open library collection: ${(error as Error).message}`;
   }

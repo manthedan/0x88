@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { defaultPgnCollectionName, formatPgnCollectionSummary, normalizePgnDatabaseBackup, pgnDatabaseBackupFilename, rebuildPgnCollectionIndex, sanitizePgnCollectionName } from '../src/lc0/pgnDatabase.ts';
+import { parsePgnGame } from '../src/chess/pgn.ts';
+import { defaultPgnCollectionName, formatPgnCollectionSummary, normalizePgnDatabaseBackup, normalizePgnGameReviewRecord, pgnDatabaseBackupFilename, pgnGameFingerprintText, pgnGameId, pgnGameReviewKey, rebuildPgnCollectionIndex, sanitizePgnCollectionName } from '../src/lc0/pgnDatabase.ts';
 
 test('PGN collection names are trimmed and bounded', () => {
   assert.equal(sanitizePgnCollectionName('  My   Games  '), 'My Games');
@@ -76,4 +77,30 @@ test('PGN database import rebuilds position indexes from raw PGN', () => {
   assert.ok(rebuilt.indexedPositionCount > 0);
   assert.equal(rebuilt.positionIndex.stale, undefined);
   assert.equal(rebuilt.positionIndex['rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -'][0].san, 'e4');
+});
+
+test('game fingerprints deduplicate tag order and annotations', async () => {
+  const first = parsePgnGame('[White "Alice"]\n[Black "Bob"]\n[Date "2026.07.19"]\n[Result "1-0"]\n\n1. e4 { first note } e5 2. Nf3 1-0');
+  const second = parsePgnGame('[Result "1-0"]\n[Date "2026.07.19"]\n[Black "Bob"]\n[White "Alice"]\n\n1. e4 e5 2. Nf3 { another note } 1-0');
+  assert.equal(pgnGameFingerprintText(first), pgnGameFingerprintText(second));
+  assert.equal(await pgnGameId(first), await pgnGameId(second));
+  assert.match(await pgnGameId(first), /^game-[a-f0-9]{64}$/);
+});
+
+test('game fingerprints distinguish different mainlines', async () => {
+  const e4 = parsePgnGame('[White "A"]\n[Black "B"]\n[Result "*"]\n\n1. e4 *');
+  const d4 = parsePgnGame('[White "A"]\n[Black "B"]\n[Result "*"]\n\n1. d4 *');
+  assert.notEqual(await pgnGameId(e4), await pgnGameId(d4));
+});
+
+test('review keys and backup review normalization are versioned', () => {
+  assert.equal(pgnGameReviewKey('stockfish-lite', 12, 2), 'review-v2:stockfish-lite:depth-12');
+  const emptyCounts = { best: 0, good: 0, inaccuracy: 0, mistake: 0, blunder: 0, forced: 0 };
+  const review = { moves: [], accuracy: { white: 100, black: 100 }, counts: { white: emptyCounts, black: emptyCounts }, criticalMoves: [] };
+  const normalized = normalizePgnGameReviewRecord({ gameId: 'game-a', reviewKey: 'review-v1:sf:depth-12', engine: 'sf', depth: 12, algorithmVersion: 1, review, annotatedPgn: 'pgn' });
+  assert.equal(normalized.gameId, 'game-a');
+  assert.equal(normalized.review, review);
+  assert.equal(normalizePgnGameReviewRecord({ gameId: 'game-a' }), null);
+  assert.equal(normalizePgnGameReviewRecord({ gameId: 'game-a', reviewKey: 'review-v1:sf:depth-14', engine: 'sf', depth: 12, algorithmVersion: 1, review }), null);
+  assert.equal(normalizePgnGameReviewRecord({ gameId: 'game-a', reviewKey: 'review-v1:sf:depth-12', engine: 'sf', depth: 12, algorithmVersion: 1, review: { ...review, accuracy: { white: 'bad', black: 100 } } }), null);
 });

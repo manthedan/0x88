@@ -173,6 +173,7 @@
     "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.69.2",
     "binaryen": "^130.0.0",
+    "fake-indexeddb": "^6.2.5",
     "svelte": "^5.56.4",
     "svelte-check": "^4.7.2",
     "typescript": "^5.4.0",
