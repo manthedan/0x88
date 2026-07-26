@@ -6,11 +6,10 @@ publishing this repository to the chess-engine community.
 
 ## Executive conclusion
 
-The project is in good shape. The test suite is green (611 pass, 0 fail, 1
-skipped), production is live and correctly configured (cross-origin isolation
-and Brotli both verified against `https://0x88.app`), and the artifact,
-licensing, and provenance *tooling* is more rigorous than most projects of this
-size.
+The project is in good shape. The test suite is green, production is live and
+correctly configured (cross-origin isolation and Brotli both verified against
+`https://0x88.app`), and the artifact, licensing, and provenance *tooling* is
+more rigorous than most projects of this size.
 
 The 2026-07-14 audit (`inference_caching_optimization_gap_audit_2026-07-14.md`)
 already covers the neural-inference and delivery-layer opportunities well, and
@@ -18,15 +17,50 @@ its ranking still stands. This audit deliberately does not repeat it. It covers
 what that audit did not: **CPU parallelism, runtime artifact selection, and the
 concrete blockers to a public release.**
 
-The single largest untapped runtime win is not another precision format or
-kernel schedule. It is that the project currently uses roughly one core out of
-however many the user has.
+### What actually shipped from this audit
+
+| Finding | Outcome |
+| --- | --- |
+| 1.2 ORT pinned to one thread in built workers | **1.85x** on the CPU-only neural path (Safari/Firefox) |
+| 1.3 Asyncify runtime on the CPU path | −44% raw, −38% brotli, −36% session create |
+| 1.4 16 MB transposition tables; Stockfish had none | 64 MB everywhere, Stockfish now gets a `Hash` |
+| 1.5 Duplicate NNUE `.data` per SIMD variant | −173 MB tracked, no re-download on tier fallback |
+| 2.1 / 2.2 / 2.5 Licence, Berserk, README | GPL-3.0-or-later; Berserk untracked; README rewritten |
+
+### Three of this audit's own claims were wrong
+
+Stated plainly, because a reader should trust the corrections as much as the
+findings:
+
+1. **Threading the CPU engines was called the largest remaining win.** It is
+   not. A prototype confirmed 3-5x raw NPS and then showed that buys **zero
+   extra plies** at fixed movetime. The already-banked SIMD work is worth more.
+   See 1.1.
+2. **436 MB of dead git history.** Those commits live on an unmerged branch; a
+   `main`-only clone never sees them. Real saving from a rewrite: 1.5 MB. See
+   2.3.
+3. **Asyncify was said to cost per-call execution time.** It does not — the
+   difference is ~1%. The win is transfer and startup. See 1.3.
+
+The residual theme is that this project's remaining headroom is in *delivery
+and startup*, not in search throughput — which is also where the 2026-07-14
+audit landed by a different route.
 
 ## Part 1 — Runtime efficiency
 
 ### 1.1 Every CPU engine except Stockfish is single-threaded
 
-**Severity: high. Effort: medium. This is the largest remaining win.**
+**Status: MEASURED AND REJECTED. This audit's headline claim was wrong.**
+
+> This section originally called single-threaded engines "the largest remaining
+> win" and estimated 3-5x, "dwarfing the SIMD gains already banked". A threaded
+> Stormphrax prototype was built to test that. The claim is **confirmed on raw
+> NPS and refuted on strength**, and the recommendation is now *do not pursue*.
+> The measurements are in
+> [`threaded_emscripten_smp_prototype_2026-07-25.md`](threaded_emscripten_smp_prototype_2026-07-25.md);
+> the summary is at the end of this section. The description of the current
+> state below is still accurate — it is the conclusion drawn from it that was
+> wrong.
 
 `src/lc0/engineCatalog.ts` assigns `maxThreads: 1` to Reckless, Viridithas,
 Berserk, PlentyChess, and Stormphrax (lines 171, 195, 219, 243, 267). Only
@@ -72,21 +106,59 @@ The remaining work is on the build side, and it splits cleanly by language:
   C++ engines were never given the same analysis, and the conclusion does not
   transfer to them.
 
-Caveats to size honestly before committing:
+#### What the prototype measured
 
-- `ALLOW_MEMORY_GROWTH=1` combined with pthreads has real Emscripten caveats
-  (growable `SharedArrayBuffer`); the current builds use growth plus a 2 GB
-  maximum, so the interaction needs checking rather than assuming.
-- Lazy SMP scaling in WASM is not the same as native. The measured number
-  matters more than the theoretical one. See
-  `threaded_emscripten_smp_prototype_2026-07-25.md` for the prototype result.
-- Multiple engines can be live simultaneously in Arena and Analysis. Threading
-  makes the broker's job real rather than nominal, which is a feature, but the
-  default per-engine grant needs to account for it.
+A `-pthread` Stormphrax build (sync-search macro dropped, upstream Lazy SMP
+restored, all other flags matched) was benchmarked in Node against the shipped
+single-threaded build, `movetime 1500`, median of 5 interleaved repeats:
+
+| Metric | T=2 | T=4 | T=8 | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Raw NPS | 2.0x | 3.0-3.5x | 4.0-4.4x | claim **confirmed** |
+| Time to fixed depth (256 MiB hash) | — | — | 1.4-2.0x | **weakened** |
+| **Plies reached in a fixed movetime** | ~0 | ~0 | **~0, and −1 to −2 on kiwipete** | **refuted** |
+
+Threaded-at-T=1 matched baseline within 1%, so pthreads cost nothing by
+themselves. But nodes-to-depth-18 scaled almost linearly with thread count
+(kiwipete: 1.3M → 9.6M at T=8) while wall time to that depth *increased*. The
+extra cores overwhelmingly duplicate work. Raising the hash from 64 MiB to
+256 MiB recovered part of the time-to-depth loss — TT pressure is a real
+co-factor — but the plies-at-fixed-time table stayed flat either way.
+
+**The framing this audit used was backwards.** SIMD gains are per-node
+speedups, which convert to depth roughly one-for-one. Lazy SMP gains are node
+*count* gains that mostly do not. So the **+14% to +64% already banked from
+SIMD is worth strictly more than the +330% available from threading** — the
+opposite of the ordering this audit originally asserted.
+
+The one regime where threads paid was `endgame-rook`, 19 → 24 plies at T=8,
+consistent with endgames rewarding wide shallow parallel search. A
+threads-in-endgames-only variant is the only version of this idea the data
+supports, and it is not obviously worth the complexity.
+
+Shipping it would also hit a genuine blocker: `src/lc0/stormphraxEngine.ts`
+loads the glue via `importScripts` into a Blob-URL worker, and the threaded
+glue resolves `_scriptName` to the outer harness blob rather than the
+Emscripten glue, so pthread helpers would load the wrong script. All the
+measurements above are from Node, which sidesteps this; the browser path is
+untested and would need a worker-bootstrap rewrite. Determinism also
+disappears at T≥2, which would make this repo's bestmove-pinned gates flaky.
+
+**Recommendation: do not pursue.** Leave the engines single-threaded.
+
+#### A real bug the prototype found
+
+Building with pthreads exposed an existing latent defect, unrelated to
+threading. `patches/stormphrax-emscripten.patch` reads the 53 MB NNUE into a
+plain `std::vector<std::byte>`, and the shipped single-threaded build satisfies
+the loader's 16-byte alignment requirement **only by luck of what dlmalloc
+returns**. Under `dlmalloc-mt` the address shifts and the loader fails with
+`NetworkLoader: Unaligned pointer`. The patch should request aligned storage
+explicitly regardless of whether threading is ever pursued.
 
 ### 1.2 ORT WASM is pinned to one thread in production workers
 
-**Severity: high. Effort: low — this is likely just a stale workaround.**
+**Severity: high. Effort: low. Status: FIXED — `34377d3`.**
 
 `src/nn/ortRuntime.ts:322-328` defaults ORT's WASM thread count to `'1'` inside
 production-built workers:
@@ -162,7 +234,7 @@ untested.
 
 ### 1.3 The CPU-only path uses the asyncify ORT build
 
-**Severity: medium. Effort: low-medium.**
+**Severity: medium. Effort: low-medium. Status: FIXED — `8fbc108`.**
 
 `browserOrtWasmPaths()` (`src/nn/ortRuntime.ts:336-354`) pins
 `ort-wasm-simd-threaded.asyncify.wasm` for every path, and
@@ -204,7 +276,7 @@ first init, not after.
 
 ### 1.4 Transposition tables are left at 16 MB
 
-**Severity: medium. Effort: trivial.**
+**Severity: medium. Effort: trivial. Status: FIXED — `983390a`.**
 
 - **Stockfish never receives a `Hash` setoption at all.**
   `src/lc0/stockfishEngine.ts` defines `skillLevelCommand` and `threadsCommand`
@@ -230,7 +302,7 @@ clamp to 33554432 MB (32 TB), which is not a meaningful bound.
 
 ### 1.5 Identical NNUE `.data` sidecars are duplicated per SIMD variant
 
-**Severity: medium (bandwidth). Effort: low.**
+**Severity: medium (bandwidth). Effort: low. Status: FIXED — `8de36e4`.**
 
 The Emscripten `.data` preload files are byte-identical across SIMD variants.
 Verified by hashing:
@@ -260,7 +332,7 @@ SIMD tiers share one downloaded network.
 
 ### 1.6 Cloudflare caches nothing on the app origin
 
-**Severity: medium. Effort: trivial (dashboard config, no code).**
+**Severity: medium. Effort: trivial. Status: OPEN — needs a Cloudflare dashboard change, no code.**
 
 Measured against production:
 
@@ -285,7 +357,7 @@ Action: a Cloudflare Cache Rule (or "Cache Everything" scoped by path) for
 
 ### 1.7 R2 artifacts are stored identity-only; Brotli is recomputed per miss
 
-**Severity: medium. Already rank 1 in the 2026-07-14 audit; still unshipped.**
+**Severity: medium. Status: OPEN — rank 1 in the 2026-07-14 audit, still unshipped.**
 
 Measured against `https://assets.0x88.app/reckless/reckless-relaxed-simd128.wasm`:
 
@@ -311,7 +383,7 @@ is the deployed path that has not adopted it.
 
 ### 1.8 The move generator is not a 0x88 move generator
 
-**Severity: low for throughput. High for credibility.**
+**Severity: low for throughput. High for credibility. Status: OPEN — deliberately.**
 
 `src/chess/movegen.ts` backs a project named **0x88** with:
 
@@ -369,9 +441,42 @@ prunes Berserk (`scripts/prune_v0_deploy_assets.mjs:31`), so the live site was
 clean — but the 24 MB `.data` was committed via Git LFS, and publishing the
 repository is itself distribution.
 
-Resolved: the generated Berserk artifacts are removed from the repository and
+Resolved in the repository: the generated Berserk artifacts are removed and
 fetched from upstream at build time. Berserk remains fully buildable; it is no
-longer redistributed by this project.
+longer redistributed *from git*.
+
+#### ACTION REQUIRED — the network is still published on the CDN
+
+Removing the artifacts from git does **not** unpublish them. Verified
+2026-07-25, after the repository change:
+
+```
+GET https://assets.0x88.app/berserk/berserk-emscripten.data
+  → 200, 25,201,924 bytes          <-- the unresolved-license network
+GET https://assets.0x88.app/berserk/berserk-emscripten-relaxed-simd128.js  → 200
+GET https://assets.0x88.app/berserk/berserk-emscripten.wasm                → 200
+```
+
+The objects are still in R2 from earlier deploys, so the project is still
+publicly distributing the exact bytes its own policy says it must not. This is
+the one remaining licensing exposure and it cannot be closed from the
+repository — it needs an R2 deletion with Cloudflare credentials:
+
+```sh
+# Dry run first — this script defaults to dry-run and never touches
+# channels/ or releases/.
+CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… \
+  node scripts/plan_r2_artifact_cleanup.mjs --bucket browser-chess-models
+```
+
+Then remove the `berserk/` objects (and any `artifacts/sha256/…` bodies that
+only Berserk releases reference). Until that is done, treat the Berserk
+provenance issue as open regardless of what the repository contains.
+
+Note the local-origin asymmetry this creates in the meantime: the variant probe
+short-circuits to `missing` on a non-local origin, but on `localhost` it still
+probes and finds the R2 copies, so a developer sees Berserk as available while
+production does not.
 
 ### 2.3 Clone size — smaller problem than it first looked
 
@@ -442,25 +547,31 @@ onboarding path, and explain the licensing and clone-size situation.
 **Before publication**
 
 1. LICENSE (GPL-3.0-or-later) — done.
-2. Berserk artifact removal — done.
+2. Berserk removal from the repository — done.
 3. README rewrite — done.
-4. Clone size — publish `main` only, document `GIT_LFS_SKIP_SMUDGE=1`, and run
-   `git lfs prune`. The history rewrite is **not** recommended (see 2.3); it is
-   verified and held in reserve should the Reckless source archives ever move.
+4. **Delete the Berserk objects from R2** — NOT done, needs credentials. This
+   is the only remaining licensing exposure; see 2.2.
+5. Clone size — publish `main` only and document `GIT_LFS_SKIP_SMUDGE=1`. The
+   history rewrite is **not** recommended (see 2.3); it is verified and held in
+   reserve should the Reckless source archives ever move.
 
-**Runtime, by payoff over effort**
+**Runtime — remaining, by payoff over effort**
 
-1. Threaded Emscripten builds for Berserk / PlentyChess / Stormphrax (1.1).
-2. Retest and likely remove the ORT built-worker thread guard (1.2).
-3. Non-asyncify ORT binary for wasm-EP sessions (1.3).
-4. Shared `.data` across SIMD variants (1.5).
-5. Raise hash defaults and reconcile the clamps (1.4).
-6. Cloudflare cache rule (1.6) — config only.
-7. Stored Brotli representations on R2 (1.7) — already ranked #1 in the
-   2026-07-14 audit.
+1. Cloudflare cache rule (1.6) — config only, no code, currently `DYNAMIC` on
+   every asset.
+2. Stored Brotli representations on R2 (1.7) — rank 1 in the 2026-07-14 audit,
+   still unshipped.
+3. Fix the NNUE alignment latent bug in `patches/stormphrax-emscripten.patch`
+   (1.1) — small, and currently correct only by allocator luck.
+4. Per-surface hash: analysis could take 128-256 MB (1.4). Needs the surface
+   threaded through the `DisposableVariantPool` factories.
 
-**Deliberately not recommended now**
+Items 1.2, 1.3, 1.4, and 1.5 are done. 1.1 is closed as rejected on evidence.
 
-Another quantization format, another manual WGSL micro-tuning sweep, or a
-movegen rewrite pitched as a performance fix. The 2026-07-14 audit's reasoning
-on the first two still holds, and section 1.8 explains the third.
+**Deliberately not recommended**
+
+- **Threading the CPU engines** (1.1) — measured, buys no plies.
+- Another quantization format or manual WGSL micro-tuning sweep — the
+  2026-07-14 audit's reasoning still holds.
+- A movegen rewrite pitched as a performance fix — section 1.8 explains why the
+  rewrite may still be worth doing, but not for speed.

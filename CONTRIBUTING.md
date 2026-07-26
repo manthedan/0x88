@@ -87,14 +87,24 @@ The known gaps are listed honestly in
 [`docs/runtime_efficiency_and_release_readiness_audit_2026-07-25.md`](docs/runtime_efficiency_and_release_readiness_audit_2026-07-25.md).
 The most approachable:
 
-- **Threaded Emscripten builds** for the C++ engines. They have native Lazy SMP
-  and are currently compiled single-threaded; cross-origin isolation is already
-  in place, so the browser side is done.
 - **A real 0x88 or bitboard move generator.** `src/chess/movegen.ts` is a
-  string-array mailbox. It is not currently the bottleneck — be honest about
-  that in your PR — but it is the wrong data structure for a project with this
-  name, and `npm run bench:movegen` gives you an immediate scoreboard.
+  string-array mailbox that clones the board per move. It is not currently the
+  bottleneck — be honest about that in your PR — but it is the wrong data
+  structure for a project with this name, and `npm run bench:movegen` gives you
+  an immediate scoreboard (130k legal movegen/s from startpos today).
+- **NNUE buffer alignment** in `patches/stormphrax-emscripten.patch`. The net is
+  read into a plain `std::vector<std::byte>` and satisfies the loader's 16-byte
+  requirement only by luck of what dlmalloc returns; a different allocator
+  breaks it. Small, self-contained, and a genuine latent bug.
 - **Numerical or parity harnesses** for any runtime that lacks one.
+
+Please note that **threaded Emscripten builds are closed, not open.** It looks
+like the obvious big win — the C++ engines have native Lazy SMP and
+cross-origin isolation is already in place — and a prototype did reach 4.4x raw
+NPS. It bought *zero extra plies* at fixed movetime, because the extra threads
+duplicate work. The measurements are in
+[`docs/threaded_emscripten_smp_prototype_2026-07-25.md`](docs/threaded_emscripten_smp_prototype_2026-07-25.md).
+If you want to reopen it, bring depth-at-fixed-time numbers, not NPS.
 
 ## Licence
 

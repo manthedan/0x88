@@ -157,11 +157,17 @@ The nightly production journey can be run manually with
 ## Known gaps
 
 Kept current in
-[`runtime_efficiency_and_release_readiness_audit_2026-07-25.md`](docs/runtime_efficiency_and_release_readiness_audit_2026-07-25.md).
-The short version: every CPU engine except Stockfish is currently
-single-threaded, the WASM neural path is pinned to one thread and to the
-asyncify runtime, and the move generator is a plain mailbox rather than the
-0x88 board the project is named after. Contributions welcome on any of these.
+[`runtime_efficiency_and_release_readiness_audit_2026-07-25.md`](docs/runtime_efficiency_and_release_readiness_audit_2026-07-25.md),
+including the parts where that audit's own claims turned out to be wrong.
+
+The short version: every CPU engine except Stockfish is single-threaded — and
+[we measured that fixing it buys no playing strength](docs/threaded_emscripten_smp_prototype_2026-07-25.md),
+so it is closed rather than open. The remaining headroom is in delivery and
+startup, not search throughput. The move generator is also a plain string
+mailbox rather than the 0x88 board the project is named after; that is worth
+fixing for the obvious reason, but not for speed.
+
+Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 

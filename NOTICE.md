@@ -58,6 +58,12 @@ build time. Berserk remains fully buildable with
 `npm run berserk:build-emscripten`; it is simply not redistributed here. If you
 resolve the network's licence upstream, this restriction can be lifted.
 
+> **Open item (2026-07-25):** copies of the Berserk artifacts from earlier
+> deploys are still present on the project's asset CDN and have not yet been
+> deleted. Removing them from the repository did not unpublish them. See the
+> "ACTION REQUIRED" note in
+> `docs/runtime_efficiency_and_release_readiness_audit_2026-07-25.md`.
+
 ## Networks and models
 
 | Asset | Source | Licence |
