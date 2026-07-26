@@ -18,7 +18,7 @@ test('netlify_r2_release builds once, stamps dist, then deploys with no-build wi
   const netlifyLog = join(root, 'netlify.log');
   const npm = join(root, 'fake-npm.sh');
   const netlify = join(root, 'fake-netlify.sh');
-  await fakeBin(npm, 'printf "%s\\n" "$*" >> "$NPM_LOG"\nmkdir -p "$NETLIFY_R2_RELEASE_DIST/models/lc0" "$NETLIFY_R2_RELEASE_DIST/ort"\nprintf "{}\\n" > "$NETLIFY_R2_RELEASE_DIST/models/lc0/manifest.json"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.wasm"\nexit 0');
+  await fakeBin(npm, 'printf "%s\\n" "$*" >> "$NPM_LOG"\nmkdir -p "$NETLIFY_R2_RELEASE_DIST/models/lc0" "$NETLIFY_R2_RELEASE_DIST/ort"\nprintf "{}\\n" > "$NETLIFY_R2_RELEASE_DIST/models/lc0/manifest.json"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.wasm"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.wasm"\nexit 0');
   await fakeBin(netlify, 'printf "%s\\n" "$*" >> "$NETLIFY_LOG"\nexit 0');
 
   const first = spawnSync(process.execPath, [
@@ -31,7 +31,12 @@ test('netlify_r2_release builds once, stamps dist, then deploys with no-build wi
   assert.equal(first.status, 0, first.stderr);
   const firstSummary = JSON.parse(first.stdout);
   assert.equal(firstSummary.built, true);
-  assert.deepEqual(firstSummary.verification.ortRuntimeAssets, ['ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.asyncify.wasm']);
+  assert.deepEqual(firstSummary.verification.ortRuntimeAssets, [
+    'ort-wasm-simd-threaded.asyncify.mjs',
+    'ort-wasm-simd-threaded.asyncify.wasm',
+    'ort-wasm-simd-threaded.mjs',
+    'ort-wasm-simd-threaded.wasm',
+  ]);
   assert.ok(firstSummary.timings.some((entry) => entry.name === 'build R2 Netlify dist'));
   const stamp = JSON.parse(await readFile(join(dist, 'release-build.json'), 'utf8'));
   assert.equal(stamp.schema, 'lc0_browser.netlify_r2_release_build.v1');
@@ -203,6 +208,8 @@ test('prepare_netlify_r2_public_assets skips R2-hosted blobs but keeps lightweig
   await writeFile(join(source, 'artifacts/sha256/deadbeef/identity'), 'large generated body');
   await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.asyncify.mjs'), 'asyncify glue');
   await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.asyncify.wasm'), 'asyncify wasm');
+  await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.mjs'), 'cpu-only glue');
+  await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.wasm'), 'cpu-only wasm');
   await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.jsep.mjs'), 'jsep glue');
   await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.jsep.wasm'), 'jsep wasm');
   await writeFile(join(root, 'ort-real/ort-wasm-simd-threaded.jspi.wasm'), 'unused');
@@ -230,6 +237,8 @@ test('prepare_netlify_r2_public_assets skips R2-hosted blobs but keeps lightweig
   assert.equal(existsSync(join(out, 'artifacts')), false);
   assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.asyncify.mjs')), true);
   assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.asyncify.wasm')), true);
+  assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.mjs')), true);
+  assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.wasm')), true);
   assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.jsep.mjs')), false);
   assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.jsep.wasm')), false);
   assert.equal(existsSync(join(out, 'ort/ort-wasm-simd-threaded.jspi.wasm')), false);

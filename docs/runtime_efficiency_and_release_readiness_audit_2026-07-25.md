@@ -141,9 +141,21 @@ Sizes:
 | `ort-wasm-simd-threaded.wasm` | 13.5 MB |
 
 Asyncify instruments the entire module for stack unwinding. It is genuinely
-required for the JSEP/WebGPU path, which suspends across GPU operations. For an
-`executionProviders: ['wasm']` session it is pure overhead — in download size
-*and* in per-call execution cost.
+required for the JSEP/WebGPU path, which suspends across GPU operations, and is
+unnecessary for an `executionProviders: ['wasm']` session.
+
+**Correction to an earlier draft:** this audit originally claimed the asyncify
+build also costs per-call execution time. Measured, that is not true — Node
+steady-state inference differs by about 1% (66.3 ms vs 66.9 ms median). The real
+win is transfer and startup:
+
+| | asyncify | CPU-only | delta |
+| --- | ---: | ---: | ---: |
+| raw (glue + wasm) | 24.30 MB | 13.50 MB | −44.4% |
+| brotli (deploy sidecar) | 3.57 MB | 2.21 MB | −38.1% |
+| session create (Chrome, t1 qdq8, 1 thread) | 516 ms | 329 ms | −36% |
+
+Policy outputs were bit-identical across the two builds.
 
 This compounds with 1.2: the WASM path is the fallback for browsers without
 WebGPU, and it is currently paying both the single-thread penalty and the

@@ -14,17 +14,44 @@ export type OrtWasmArtifactSelection = {
   artifactId?: string;
 };
 
+/**
+ * ORT ships two threaded browser runtimes and we stage both.
+ *
+ * - `asyncify`: the WebGPU/JSEP entrypoint. Instrumented for stack unwinding so
+ *   the wasm side can suspend across GPU work. ~24MB.
+ * - `wasm`: the CPU-only entrypoint. Not asyncify-instrumented, ~13.5MB, and
+ *   everything an `executionProviders: ['wasm']` session needs.
+ *
+ * Both glue modules double as their own Emscripten pthread bootstrap (each
+ * spawns `new Worker(new URL(import.meta.url), { name: 'em-pthread' })`), so
+ * whichever one we hand to ORT must keep its deployed URL for helper workers to
+ * re-import. Glue and binary must come from the same pair: the plain glue
+ * refuses to instantiate the asyncify binary (LinkError) and vice versa.
+ * `scripts/ort_runtime_assets.mjs` mirrors these names for the deploy-time
+ * staging allowlist.
+ */
+export type OrtRuntimeArtifactKind = 'asyncify' | 'wasm';
+
 export const ORT_PTHREAD_BOOTSTRAP_FILE = 'ort-wasm-simd-threaded.asyncify.mjs';
 export const ORT_PTHREAD_WASM_FILE = 'ort-wasm-simd-threaded.asyncify.wasm';
+export const ORT_WASM_EP_BOOTSTRAP_FILE = 'ort-wasm-simd-threaded.mjs';
+export const ORT_WASM_EP_WASM_FILE = 'ort-wasm-simd-threaded.wasm';
+
+export const ORT_RUNTIME_ARTIFACT_FILES: Readonly<Record<OrtRuntimeArtifactKind, { mjs: string; wasm: string }>> = Object.freeze({
+  asyncify: { mjs: ORT_PTHREAD_BOOTSTRAP_FILE, wasm: ORT_PTHREAD_WASM_FILE },
+  wasm: { mjs: ORT_WASM_EP_BOOTSTRAP_FILE, wasm: ORT_WASM_EP_WASM_FILE },
+});
 
 export function resolveOrtPthreadRuntimeUrls(
   runtimeBase = '/ort/',
   pageHref = typeof location === 'undefined' ? 'http://localhost/' : location.href,
+  kind: OrtRuntimeArtifactKind = 'asyncify',
 ): { mjs: string; wasm: string } {
   const base = new URL(runtimeBase.endsWith('/') ? runtimeBase : `${runtimeBase}/`, pageHref);
+  const files = ORT_RUNTIME_ARTIFACT_FILES[kind];
   return {
-    mjs: new URL(ORT_PTHREAD_BOOTSTRAP_FILE, base).href,
-    wasm: new URL(ORT_PTHREAD_WASM_FILE, base).href,
+    mjs: new URL(files.mjs, base).href,
+    wasm: new URL(files.wasm, base).href,
   };
 }
 
@@ -89,6 +116,8 @@ export type OrtRuntimeDiagnostics = {
     sharedArrayBuffer?: boolean;
     threadedAvailable?: boolean;
     simdVariant: OrtWasmSimdVariant;
+    /** Which staged ORT runtime pair this thread loads (see OrtRuntimeArtifactKind). */
+    runtimeArtifact: OrtRuntimeArtifactKind;
     artifactId?: string;
     mjsUrl?: string;
     wasmUrl?: string;
@@ -170,6 +199,8 @@ let forcedOrtDiagnosticsOptions: OrtRuntimeDiagnosticOptions | null = null;
 let forcedOrtWasmArtifact: OrtWasmArtifactSelection = { variant: 'bundled' };
 let forcedOrtWasmThreads: number | null = null;
 let lockedOrtWasmArtifactKey: string | null = null;
+let forcedOrtRuntimeArtifactKind: OrtRuntimeArtifactKind | null = null;
+let lockedOrtRuntimeArtifactKind: OrtRuntimeArtifactKind | null = null;
 
 export type OrtRuntimeDiagnosticOptions = {
   /** Enable ORT WebGPU timestamp profiling and collect per-kernel program totals. */
@@ -240,15 +271,18 @@ function normalizeEp(value: string | null | undefined): OrtExecutionProviderPref
   return 'wasm';
 }
 
+/** The EP requested by the URL/env of this document or worker, ignoring per-call overrides. */
+function ambientOrtExecutionProviderParam(): string | null | undefined {
+  return browserParam('ortEp')
+    ?? browserParam('ep')
+    ?? browserParam('executionProviders')
+    ?? envValue('TINY_LEELA_ORT_EP')
+    ?? envValue('ORT_EXECUTION_PROVIDERS');
+}
+
 export function requestedOrtExecutionProvider(): OrtExecutionProviderPreference {
   if (forcedOrtExecutionProvider) return forcedOrtExecutionProvider;
-  return normalizeEp(
-    browserParam('ortEp')
-      ?? browserParam('ep')
-      ?? browserParam('executionProviders')
-      ?? envValue('TINY_LEELA_ORT_EP')
-      ?? envValue('ORT_EXECUTION_PROVIDERS')
-  );
+  return normalizeEp(ambientOrtExecutionProviderParam());
 }
 
 function webgpuAvailable(): boolean {
@@ -269,6 +303,71 @@ export function resolvedOrtExecutionProviders(): string[] {
   return ['wasm'];
 }
 
+/** True when this document/worker was started with an explicit wasm-only EP pin. */
+function explicitWasmOnlyOrtEpPin(): boolean {
+  const raw = ambientOrtExecutionProviderParam();
+  return raw !== null && raw !== undefined && String(raw).trim() !== '' && normalizeEp(raw) === 'wasm';
+}
+
+/**
+ * Pin the ORT runtime pair for this thread. ORT's wasm artifact is
+ * worker-global once initialized, so this is only honoured before the first
+ * session is created; afterwards the locked kind wins and a conflicting pin
+ * throws.
+ */
+export function setOrtRuntimeArtifactKindForCurrentThread(kind: OrtRuntimeArtifactKind | null): void {
+  if (kind && lockedOrtRuntimeArtifactKind && kind !== lockedOrtRuntimeArtifactKind) {
+    throw new Error(`ORT WASM is already initialized with the ${lockedOrtRuntimeArtifactKind} runtime artifact; select the ${kind} runtime in a fresh worker`);
+  }
+  forcedOrtRuntimeArtifactKind = kind;
+}
+
+/**
+ * Which staged runtime pair this thread loads. Asyncify is required by the
+ * WebGPU/JSEP path and is pure download + instrumentation overhead for
+ * CPU-only sessions, so wasm-EP-only threads take the smaller CPU build.
+ *
+ * The choice must be made before ORT initializes and can never change
+ * afterwards (the binary is worker-global), which is why "this session happens
+ * to run on wasm" is not sufficient on its own:
+ * - strict `ep=webgpu` always keeps asyncify, so a GPU-less browser still fails
+ *   with "WebGPU unavailable" instead of an opaque link error;
+ * - anything that resolves to include `webgpu` keeps asyncify, which also keeps
+ *   the in-process WebGPU->WASM fallback in `createOrtSession` on one binary;
+ * - a CPU-only resolution takes the small build only when escalating to WebGPU
+ *   later in this same thread is impossible (`navigator.gpu` missing, i.e.
+ *   Safari/Firefox) or has been ruled out by an explicit `?ep=wasm` / env pin.
+ *   A programmatic `setRequestedOrtExecutionProviderForCurrentThread('wasm')`
+ *   deliberately does NOT qualify: search workers switch EP per message and
+ *   must keep the GPU-capable binary. Such a worker can still opt in via
+ *   `setOrtRuntimeArtifactKindForCurrentThread('wasm')` before its first
+ *   session.
+ */
+export function ortRuntimeArtifactKindForCurrentThread(): OrtRuntimeArtifactKind {
+  if (lockedOrtRuntimeArtifactKind) return lockedOrtRuntimeArtifactKind;
+  // Node (no `location`) imports ORT's bundle with the Emscripten glue inlined,
+  // which is the asyncify one; configureNodeOrtWasmBinary feeds it the matching
+  // binary and wasmPaths are never consulted, so the kind is fixed there.
+  if (typeof location === 'undefined') return 'asyncify';
+  if (forcedOrtRuntimeArtifactKind) return forcedOrtRuntimeArtifactKind;
+  // Experimental /ort-experimental/ builds carry their own explicit URLs and
+  // are WebGPU-capable asyncify builds.
+  if (forcedOrtWasmArtifact.variant !== 'bundled') return 'asyncify';
+  if (requestedOrtExecutionProvider() === 'webgpu') return 'asyncify';
+  if (resolvedOrtExecutionProviders().includes('webgpu')) return 'asyncify';
+  if (!webgpuAvailable() || explicitWasmOnlyOrtEpPin()) return 'wasm';
+  return 'asyncify';
+}
+
+function lockOrtRuntimeArtifactKind(providers: string[]): OrtRuntimeArtifactKind {
+  const kind = ortRuntimeArtifactKindForCurrentThread();
+  if (kind === 'wasm' && providers.includes('webgpu')) {
+    throw new Error('ORT WASM is initialized with the CPU-only artifact, which has no WebGPU support; request WebGPU in a fresh worker');
+  }
+  lockedOrtRuntimeArtifactKind = kind;
+  return kind;
+}
+
 let lastOrtExecutionProviders: string[] | null = null;
 const sessionAttempts: OrtSessionAttempt[] = [];
 let createdOrtSessions = 0;
@@ -284,6 +383,9 @@ export function describeOrtBackendConfig(): string {
 }
 
 function configureNodeOrtWasmBinary(wasm: { wasmBinary?: ArrayBufferLike | Uint8Array; wasmPaths?: string | { wasm?: string; mjs?: string } }): void {
+  // Node resolves `onnxruntime-web/webgpu` to the bundle whose Emscripten glue
+  // is inlined (the asyncify one), and glue and binary must match, so Node
+  // always feeds it the asyncify binary regardless of the requested EP.
   if (typeof document !== 'undefined' || wasm.wasmBinary || forcedOrtWasmArtifact.variant !== 'bundled') return;
   const proc = globalThis.process as unknown as { cwd?: () => string; getBuiltinModule?: (name: string) => unknown } | undefined;
   const fs = (proc?.getBuiltinModule?.('node:fs') ?? proc?.getBuiltinModule?.('fs')) as { existsSync?: (path: string) => boolean; readFileSync?: (path: string) => Uint8Array } | undefined;
@@ -333,7 +435,7 @@ function requestedOrtWasmThreads(isBrowserMainThread: boolean, isNode: boolean):
   return isBrowserMainThread && requested > 1 && !browserThreadedWasmAvailable() ? 1 : requested;
 }
 
-function browserOrtWasmPaths(): string | Record<string, string> {
+function browserOrtWasmPaths(kind: OrtRuntimeArtifactKind): string | Record<string, string> {
   const override = browserParam('ortWasmPath');
   if (override) return override;
   // Production builds: Vite/rolldown does not emit ORT's dynamic-import glue
@@ -341,17 +443,21 @@ function browserOrtWasmPaths(): string | Record<string, string> {
   // SPA-fallback HTML and initWasm fails ("no available backend found").
   // Hand ORT explicit same-origin glue and wasm URLs instead. The glue module
   // is also the Emscripten pthread bootstrap, so preserving its deployed URL
-  // lets helper workers re-import that exact staged module.
+  // lets helper workers re-import that exact staged module -- which holds for
+  // both staged pairs, each of which bootstraps its own em-pthread workers.
   // `location` (not `document`) detects browser-ness so this also applies
   // inside workers.
   const builtBrowser = typeof location !== 'undefined'
     && (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true;
-  if (builtBrowser) return resolveOrtPthreadRuntimeUrls('/ort/', location.href);
+  if (builtBrowser) return resolveOrtPthreadRuntimeUrls('/ort/', location.href, kind);
   // Dev server: a '/ort/' prefix is blocked for source-mode module imports,
   // so let the glue resolve from node_modules and only pin the .wasm binary.
   // (Empirically the jsep glue resolves its own binary in dev and tolerates
   // this asyncify-named pin; a jsep-named pin breaks its init instead.)
-  return { wasm: '/ort/ort-wasm-simd-threaded.asyncify.wasm' };
+  // That glue is always ORT's own asyncify module -- the only entrypoint the
+  // webgpu bundle names -- and glue and binary must match, so dev stays on the
+  // asyncify binary for every EP. The CPU-only build is a production saving.
+  return { wasm: `/ort/${ORT_PTHREAD_WASM_FILE}` };
 }
 
 function configureOrtWasmArtifact(wasm: {
@@ -372,7 +478,7 @@ function configureOrtWasmArtifact(wasm: {
     wasm.wasmBinary = undefined;
     wasm.wasmPaths = { mjs: artifact.mjsUrl!, wasm: artifact.wasmUrl! };
   } else if (isBrowserRuntime) {
-    wasm.wasmPaths = browserOrtWasmPaths();
+    wasm.wasmPaths = browserOrtWasmPaths(ortRuntimeArtifactKindForCurrentThread());
   }
 }
 
@@ -667,6 +773,7 @@ function logOrtSessionReady(providers: string[], ms: number, note?: string) {
     sessionProviders: providers,
     webgpuAvailable: webgpuAvailable(),
     describe: describeOrtBackendConfig(),
+    runtimeArtifact: ortRuntimeArtifactKindForCurrentThread(),
     ms: Number(ms.toFixed(1)),
     ...(note ? { note } : {}),
   });
@@ -747,6 +854,7 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
       sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
       threadedAvailable: browserThreadedWasmAvailable(),
       simdVariant: artifact.variant,
+      runtimeArtifact: ortRuntimeArtifactKindForCurrentThread(),
       ...(artifact.artifactId ? { artifactId: artifact.artifactId } : {}),
       ...(artifact.mjsUrl ? { mjsUrl: artifact.mjsUrl } : {}),
       ...(artifact.wasmUrl ? { wasmUrl: artifact.wasmUrl } : {}),
@@ -785,7 +893,11 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
 
 export async function createOrtSession(modelPath: string | Uint8Array | ArrayBuffer): Promise<ort.InferenceSession> {
   const providers = resolvedOrtExecutionProviders();
+  // Both locks run before the first InferenceSession.create so the artifact is
+  // decided (and frozen) before ORT initializes its worker-global wasm module;
+  // the WebGPU->WASM fallback below then reuses the same binary.
   lockRequestedOrtWasmArtifact();
+  lockOrtRuntimeArtifactKind(providers);
   const t0 = typeof performance === 'undefined' ? Date.now() : performance.now();
   try {
     const session = await ort.InferenceSession.create(modelPath as never, sessionOptions(providers));

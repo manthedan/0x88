@@ -1,16 +1,20 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { ORT_PTHREAD_BOOTSTRAP_FILE, ORT_RUNTIME_ASSET_FILES, isRequiredOrtRuntimeAsset, uncompressedOrtRuntimeAsset } from './ort_runtime_assets.mjs';
+import { ORT_PTHREAD_BOOTSTRAP_FILES, ORT_RUNTIME_ASSET_FILES, isRequiredOrtRuntimeAsset, uncompressedOrtRuntimeAsset } from './ort_runtime_assets.mjs';
 
+// Every staged glue module is also the Emscripten pthread bootstrap its own
+// helper workers re-import, so each one must carry those markers.
 function verifyPthreadBootstrap(ortDir) {
-  const path = join(ortDir, ORT_PTHREAD_BOOTSTRAP_FILE);
-  if (!existsSync(path)) return;
-  const source = readFileSync(path, 'utf8');
-  const createsSelfWorker = source.includes('new Worker(new URL(import.meta.url)');
-  const namesPthreadWorker = /name\s*:\s*["']em-pthread["']/.test(source);
-  if (!createsSelfWorker || !namesPthreadWorker) {
-    throw new Error(`ORT pthread bootstrap markers missing from ${ORT_PTHREAD_BOOTSTRAP_FILE}`);
+  for (const bootstrap of ORT_PTHREAD_BOOTSTRAP_FILES) {
+    const path = join(ortDir, bootstrap);
+    if (!existsSync(path)) continue;
+    const source = readFileSync(path, 'utf8');
+    const createsSelfWorker = source.includes('new Worker(new URL(import.meta.url)');
+    const namesPthreadWorker = /name\s*:\s*["']em-pthread["']/.test(source);
+    if (!createsSelfWorker || !namesPthreadWorker) {
+      throw new Error(`ORT pthread bootstrap markers missing from ${bootstrap}`);
+    }
   }
 }
 

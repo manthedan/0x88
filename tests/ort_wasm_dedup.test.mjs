@@ -9,7 +9,8 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'ort-dedup-'));
   await mkdir(join(root, 'ort'), { recursive: true });
   await mkdir(join(root, '_app', 'immutable', 'assets'), { recursive: true });
-  await writeFile(join(root, 'ort', 'ort-wasm-simd-threaded.asyncify.wasm'), 'canonical');
+  await writeFile(join(root, 'ort', 'ort-wasm-simd-threaded.asyncify.wasm'), 'canonical webgpu');
+  await writeFile(join(root, 'ort', 'ort-wasm-simd-threaded.wasm'), 'canonical cpu-only');
   return root;
 }
 
@@ -20,6 +21,19 @@ test('ORT WASM deploy check accepts one canonical staged copy', async () => {
     const report = JSON.parse(stdout);
     assert.equal(report.status, 'ORT_WASM_DEDUP_CHECK_DONE');
     assert.deepEqual(report.bundledCopies, []);
+    assert.equal(report.canonical.length, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('ORT WASM deploy check requires both staged runtime binaries', async () => {
+  const root = await fixture();
+  try {
+    await rm(join(root, 'ort', 'ort-wasm-simd-threaded.wasm'));
+    const result = spawnSync(process.execPath, ['scripts/check_ort_wasm_dedup.mjs', root], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Missing canonical staged ORT WASM: .*ort-wasm-simd-threaded\.wasm/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
