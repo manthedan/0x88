@@ -32,9 +32,12 @@ dist-client/
 .deploy-public/
 .svelte-kit/
 public/models/*.pt
+# Reckless binaries and nets are built locally, never committed: the WASI wasm
+# embeds a ~63 MB NNUE. The corresponding-source archives ARE committed, because
+# Reckless is AGPL-3.0 and they are the source-availability obligation for the
+# binaries we host; they are un-ignored by the !public/**/*.tar.gz rule below.
 public/reckless/*.wasm
 public/reckless/*.nnue
-public/reckless/*corresponding-source*.tar.gz
 # Engine release artifacts under public/{plentychess,stormphrax,viridithas,stockfish}/
 # are intentionally trackable so deployed GPL binaries and their corresponding
 # source archives/manifests cannot be hidden by ignore rules. Keep generated
