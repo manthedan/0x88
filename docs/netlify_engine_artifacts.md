@@ -62,11 +62,37 @@ curl -I -H 'Accept-Encoding: br' http://localhost:5181/plentychess/plentychess-e
 
 The local isolated static server can serve `.br`/`.gz` sidecars through normal `Accept-Encoding` negotiation when they exist. Netlify should not rely on unconditional stable-URL rewrites for compressed sidecars.
 
-Run the deploy cache-policy check before release:
+## Where header policy lives
+
+Header policy is declared **once**, in the `[[headers]]` tables of
+`netlify.toml`. `public/_headers` is generated from it and committed, so the
+published tree keeps a `_headers` artifact for static hosts that read one.
+Netlify treats the two as alternative mechanisms and does not document which
+wins when both declare a path, so only one is hand-edited.
+
+To change a header: edit `netlify.toml`, then regenerate.
+
+```sh
+npm run deploy:generate-headers
+```
+
+The deploy cache-policy check verifies the invariants and fails if the
+generated file has drifted from its source:
 
 ```sh
 npm run deploy:cache-policy-check
 ```
+
+It also runs from `scripts/build_netlify_r2.mjs`, which is the command
+`netlify.toml` configures, so every automatic Netlify build is gated by it —
+not only the manual release script.
+
+`scripts/netlify_headers.mjs` is the shared model both the generator and the
+checker read. It parses TOML with `smol-toml` rather than by hand: an earlier
+hand-rolled "narrow TOML subset" was wrong about comments after table headers
+(which silently dropped a whole block from the generated file), escaped quotes,
+multiline delimiters, and table boundaries. Header policy is deploy-critical, so
+the grammar is not this project's to reimplement.
 
 ## Release-policy reminder
 

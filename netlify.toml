@@ -70,27 +70,6 @@
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
 
-# Mutable release-channel pointers are tiny and must revalidate in browsers.
-# CDN-specific headers may keep the edge copy briefly and tolerate origin errors.
-[[headers]]
-  for = "/channels/*"
-  [headers.values]
-    Cache-Control = "public, max-age=0, no-cache"
-    Netlify-CDN-Cache-Control = "public, max-age=60, stale-if-error=86400"
-    CDN-Cache-Control = "public, max-age=60, stale-if-error=86400"
-    Cloudflare-CDN-Cache-Control = "public, max-age=60, stale-if-error=86400"
-
-# Long-lived immutable caching is reserved for content-addressed artifact paths.
-# Stable engine/model URLs must not use immutable because their bytes may change
-# while older browser HTTP-cache entries remain fresh.
-[[headers]]
-  for = "/artifacts/sha256/*"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-    Netlify-CDN-Cache-Control = "public, max-age=31536000"
-    CDN-Cache-Control = "public, max-age=31536000"
-    Cloudflare-CDN-Cache-Control = "public, max-age=31536000"
-
 [[headers]]
   for = "/_app/immutable/*"
   [headers.values]
@@ -147,6 +126,10 @@
     Access-Control-Expose-Headers = "Age, Cache-Status, CF-Cache-Status, Content-Length, ETag"
     Timing-Allow-Origin = "*"
 
+# Long-lived immutable caching is reserved for content-addressed artifact paths.
+# Stable engine/model URLs must not use immutable because their bytes may change
+# while older browser HTTP-cache entries remain fresh. CORP must be cross-origin
+# here so hashed blobs stay loadable under the site-wide COEP: require-corp.
 [[headers]]
   for = "/artifacts/sha256/*"
   [headers.values]
@@ -181,10 +164,25 @@
     Access-Control-Expose-Headers = "Age, Cache-Status, CF-Cache-Status, Content-Length, ETag"
     Timing-Allow-Origin = "*"
 
+# Engine artifacts served from this origin rather than the asset host. These
+# are logical names whose bytes change between builds, so they revalidate.
 [[headers]]
-  for = "/*.html"
+  for = "/reckless/*.wasm"
   [headers.values]
-    Cache-Control = "public, max-age=0, must-revalidate"
+    Content-Type = "application/wasm"
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/reckless/*.nnue"
+  [headers.values]
+    Content-Type = "application/octet-stream"
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/reckless/*corresponding-source*.tar.gz"
+  [headers.values]
+    Content-Type = "application/gzip"
+    Cache-Control = "public, max-age=3600"
 
 [[headers]]
   for = "/sw.js"

@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { checkDeployCachePolicy } from './check_deploy_cache_policy.mjs';
 import { checkSvelteKitRuntimeId } from './check_sveltekit_runtime_id.mjs';
 import { cleanSvelteKitBuild } from './clean_sveltekit_build.mjs';
 import { prepareNetlifyR2PublicAssets } from './prepare_netlify_r2_public_assets.mjs';
@@ -34,6 +35,10 @@ function run(command, args, options = {}) {
 
 async function main() {
   const timings = [];
+  // This is the command `netlify.toml` configures, so it is the path every
+  // automatic Netlify build takes. The gate has to live here to cover them;
+  // checking only in netlify_r2_release.mjs would leave CI deploys ungated.
+  await timed('check deploy cache policy', () => checkDeployCachePolicy(), timings);
   const publicDir = await mkdtemp(join(tmpdir(), 'lc0-netlify-r2-public-'));
   try {
     const prep = await timed('prepare pruned public assets', () => prepareNetlifyR2PublicAssets('public', publicDir), timings);

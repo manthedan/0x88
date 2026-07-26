@@ -19,7 +19,7 @@
     "prebuild:client": "node scripts/clean_sveltekit_build.mjs",
     "build:client": "vite build",
     "postbuild:client": "node scripts/check_sveltekit_runtime_id.mjs",
-    "build:netlify": "BUILD_SCOPE=product npm run build:client && npm run engine-artifacts:precompress-dist",
+    "build:netlify": "npm run deploy:cache-policy-check && BUILD_SCOPE=product npm run build:client && npm run engine-artifacts:precompress-dist",
     "build:netlify:r2": "node scripts/build_netlify_r2.mjs ${NETLIFY_R2_RELEASE_DIST:-dist-client}",
     "deploy:prune-external-model-assets": "node scripts/prune_external_model_assets.mjs dist-client",
     "deploy:prune-v0-assets": "node scripts/prune_v0_deploy_assets.mjs dist-client",
@@ -168,12 +168,14 @@
     "lc0:tiny-strict-custom-webgpu-smoke": "node scripts/lc0_tiny_strict_custom_webgpu_smoke.mjs",
     "productization:targeted-smoke": "node scripts/productization_fast_gate.mjs",
     "productization:fast-gate": "node scripts/productization_fast_gate.mjs",
-    "prepare": "svelte-kit sync"
+    "prepare": "svelte-kit sync",
+    "deploy:generate-headers": "node scripts/generate_netlify_headers_file.mjs"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.69.2",
     "binaryen": "^130.0.0",
+    "smol-toml": "^1.7.1",
     "svelte": "^5.56.4",
     "svelte-check": "^4.7.2",
     "typescript": "^5.4.0",

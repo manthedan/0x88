@@ -25,6 +25,7 @@ concrete blockers to a public release.**
 | 1.3 Asyncify runtime on the CPU path | −44% raw, −38% brotli, −36% session create |
 | 1.4 16 MB transposition tables; Stockfish had none | 64 MB everywhere, Stockfish now gets a `Hash` |
 | 1.5 Duplicate NNUE `.data` per SIMD variant | −173 MB tracked, no re-download on tier fallback |
+| 1.9 Cache-policy gate red, unrun, and bypassable on the build path | Gate green and enforced on every deploy path; header policy de-duplicated to one generated source |
 | 2.1 / 2.5 Licence, README | GPL-3.0-or-later, NOTICE, CONTRIBUTING; README rewritten |
 
 ### Four of this audit's own claims were wrong
@@ -433,6 +434,88 @@ structural win, and it is also where legality bugs come from. It stays open
 until something measures it as worth the risk — most likely the 2026-07-14
 audit's item 3, which would make CPU preparation a larger fraction of latency on
 fast backends.
+
+### 1.9 The deploy cache-policy gate was failing, and nothing ran it
+
+**Severity: medium. Effort: trivial. Status: FIXED in this pass.**
+
+`npm run deploy:cache-policy-check` exited 1 on `main`:
+
+```
+netlify.toml has one-year immutable Cache-Control outside content-addressed artifacts: /releases/*
+public/_headers has one-year immutable Cache-Control outside content-addressed artifacts: /releases/*
+```
+
+The config was right and the checker was stale. Release manifests are named
+`/releases/<date>.<release-sha>.json` and `publish_content_addressed_release.mjs`
+throws `Refusing to overwrite immutable release manifest` on any rewrite, so
+they are write-once both by construction and by enforcement — exactly the
+condition one-year `immutable` requires. `/releases/*` was added to the
+allowlist rather than downgrading the header.
+
+It went unnoticed because the check was referenced only from `package.json` and
+one doc: no test, no CI step, and no release step ever invoked it. It is now
+called from `netlify_r2_release.mjs` before the build (header policy is a
+property of the source config, so it should fail before a build is spent) and
+covered by `tests/deploy_cache_policy.test.mjs`, which asserts each negative
+case actually trips.
+
+Two further defects surfaced while reconciling the files:
+
+- `netlify.toml` declared `/channels/*`, `/artifacts/sha256/*`, and `/*.html`
+  **twice each**. The `/artifacts/sha256/*` pair was not equivalent: the first
+  block omitted `Access-Control-Allow-Origin`, `Cross-Origin-Resource-Policy:
+  cross-origin`, `Access-Control-Expose-Headers`, and `Timing-Allow-Origin`,
+  which the second set. Which of the two won depended on Netlify's merge
+  precedence rather than on anything the repository states. In production this
+  path is mostly dormant — hashed blobs are served from `assets.0x88.app`, not
+  the Netlify origin — but it is the fallback the config exists to describe, and
+  a `Cross-Origin-Resource-Policy` that resolves to `same-origin` under the
+  site-wide `COEP: require-corp` is precisely the kind of defect that appears
+  only once traffic shifts. Duplicates removed, richer block kept.
+- `netlify.toml` and `public/_headers` are both applied and had drifted into
+  near-duplicates of each other, with no documented precedence between them.
+
+### The gate did not cover the deploy path it claimed to
+
+The first wiring called the checker from `netlify_r2_release.mjs` only. But
+`netlify.toml` configures the build command as `npm run build:netlify:r2`, so
+every **automatic** Netlify build ran `scripts/build_netlify_r2.mjs` and never
+touched the checker. A policy violation could reach production through CI while
+the manual release path reported a green gate. The check now runs from the build
+script, verified by breaking the policy and confirming the build aborts.
+
+### Duplicated policy was the root cause, so the duplication was removed
+
+Four rounds of adversarial review found fourteen defects, and after the first
+two, every one of them was in the *checker* rather than in the config it
+guarded. The checker had become a hand-rolled TOML parser, and each round found
+another corner of the grammar it got wrong: case-sensitive comparisons, repeated
+`_headers` fields concatenated per RFC 7230, `#` comments read as active policy,
+quoted `max-age="31536000"` arguments, documented triple-quoted multiline
+values rejected as garbage, ordinary `[context.production]` tables absorbed into
+the preceding block.
+
+That density of defects was a signal about the design, not the implementation.
+The entire cross-file comparison existed only because the policy was stated
+twice. So it is now stated once: `netlify.toml` is the single hand-edited
+source, `public/_headers` is generated from it by
+`scripts/generate_netlify_headers_file.mjs`, and the check fails if the
+generated file has drifted. The published tree keeps its `_headers` artifact for
+static hosts that read one; the cross-file comparison, the list-header
+allowlist, and the second parser are gone. Generation was verified to lose
+nothing: every path and header value from the hand-maintained file is present
+and unchanged, and `/lab/webgpu-lc0-diag/*` is now covered by both mechanisms
+rather than one.
+
+Two lessons worth keeping. A config gate that pattern-matches its own config
+format encodes the author's assumptions about that format rather than the
+format's rules, and it fails in the direction of confidence. And when a
+validator keeps growing to reconcile two sources of truth, the validator is
+rarely the thing that needs fixing.
+
+The two remaining caching items, 1.6 and 1.7, are unaffected — neither is
+fixable in this repository's config.
 
 ## Part 2 — Release readiness
 

@@ -1,3 +1,8 @@
+# Generated from netlify.toml by scripts/generate_netlify_headers_file.mjs.
+# Do not edit by hand: edit the [[headers]] tables in netlify.toml and run
+#   npm run deploy:generate-headers
+# The deploy cache policy check fails if this file is out of date.
+
 /*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
@@ -6,9 +11,27 @@
 /*.html
   Cache-Control: public, max-age=0, must-revalidate
 
-/sw.js
-  Cache-Control: public, max-age=0, must-revalidate
-  Service-Worker-Allowed: /
+/_app/immutable/*
+  Cache-Control: public, max-age=31536000, immutable
+  Netlify-CDN-Cache-Control: public, max-age=31536000
+  CDN-Cache-Control: public, max-age=31536000
+  Cloudflare-CDN-Cache-Control: public, max-age=31536000
+
+/lab/webgpu-lc0-diag/*
+  X-Robots-Tag: noindex, nofollow, noarchive
+
+/ort/*
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+  Netlify-CDN-Cache-Control: public, max-age=86400
+  CDN-Cache-Control: public, max-age=86400
+  Cloudflare-CDN-Cache-Control: public, max-age=86400
+
+/lc0/*.wasm
+  Content-Type: application/wasm
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+  Netlify-CDN-Cache-Control: public, max-age=86400
+  CDN-Cache-Control: public, max-age=86400
+  Cloudflare-CDN-Cache-Control: public, max-age=86400
 
 /channels/*
   Cache-Control: public, max-age=0, no-cache
@@ -36,12 +59,6 @@
   Access-Control-Expose-Headers: Age, Cache-Status, CF-Cache-Status, Content-Length, ETag
   Timing-Allow-Origin: *
 
-/_app/immutable/*
-  Cache-Control: public, max-age=31536000, immutable
-  Netlify-CDN-Cache-Control: public, max-age=31536000
-  CDN-Cache-Control: public, max-age=31536000
-  Cloudflare-CDN-Cache-Control: public, max-age=31536000
-
 /models/*
   Cache-Control: public, max-age=0, must-revalidate
   Netlify-CDN-Cache-Control: public, max-age=86400, stale-if-error=86400
@@ -58,19 +75,6 @@
   Access-Control-Expose-Headers: Age, Cache-Status, CF-Cache-Status, Content-Length, ETag
   Timing-Allow-Origin: *
 
-/ort/*
-  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
-  Netlify-CDN-Cache-Control: public, max-age=86400
-  CDN-Cache-Control: public, max-age=86400
-  Cloudflare-CDN-Cache-Control: public, max-age=86400
-
-/lc0/*.wasm
-  Content-Type: application/wasm
-  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
-  Netlify-CDN-Cache-Control: public, max-age=86400
-  CDN-Cache-Control: public, max-age=86400
-  Cloudflare-CDN-Cache-Control: public, max-age=86400
-
 /reckless/*.wasm
   Content-Type: application/wasm
   Cache-Control: public, max-age=3600
@@ -82,3 +86,7 @@
 /reckless/*corresponding-source*.tar.gz
   Content-Type: application/gzip
   Cache-Control: public, max-age=3600
+
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+  Service-Worker-Allowed: /
