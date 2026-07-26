@@ -118,12 +118,47 @@ In other words, the root cause the guard works around appears to have been
 fixed by later work, and nobody went back to remove the guard.
 
 This matters because the WASM execution provider is the fallback for **every
-browser without WebGPU** — Safari and Firefox users are currently getting
+browser without WebGPU** — Safari and Firefox users were getting
 single-threaded neural inference on machines with 8+ cores.
 
-Action: rebuild, boot a production worker with `?ortThreads=auto`, confirm it
-does not deadlock, and flip the default if green. Tracked in
-`retest ORT threaded wasm boot`.
+**Retested 2026-07-25 — the guard was stale, and the fix is not the obvious
+one.** Driving the actual built `searchWorker` chunk under COOP/COEP, threaded
+ORT boots cleanly at 2/3/4/6/8 threads with no deadlock, and outputs match the
+single-threaded run (top-5 policy moves identical and in order; a ~4e-6
+difference in the top prior, the expected f32 reduction-order variation).
+
+Measured, median of 20 evals, t1-256x10 qdq8, 10-core:
+
+| Threads | CPU-only pair | Asyncify + WebGPU |
+| ---: | ---: | ---: |
+| 1 | 61.3 ms | **11.6 ms** |
+| 2 | 43.4 ms | — |
+| 4 | **40.1 ms** | 18.0 ms |
+| 6 | 54.0 ms | — |
+| 8 | 44.2 ms | — |
+
+The trap: on the WebGPU path, threads are a **55% regression**, and
+`numThreads` is worker-global and fixed at ORT init. A blanket `auto` default
+would have slowed down every Chrome user to speed up Safari and Firefox.
+
+The default is therefore conditional on the runtime artifact: a built worker
+committed to the CPU-only pair (no `navigator.gpu`, or an explicit `?ep=wasm`
+pin) gets `auto`; anything that could still escalate to WebGPU stays at 1; a
+thread without cross-origin isolation stays at 1. End-to-end after the change:
+**64.6 ms → 35.0 ms, a 1.85x speedup** on the path Safari and Firefox use, with
+Chrome/WebGPU unchanged at 1 thread.
+
+`defaultAutoThreads()` also changed from `clamp(hc-1, 2, 4)` to
+`clamp(floor(hc/2), 1, 4)`. ORT is classed `resourceClass: 'gpu'` in the
+catalog and so never draws down the CPU broker budget; capping it at half the
+machine keeps a co-running Stockfish from being over-subscribed, and the old
+floor of 2 was wrong on a single-core device.
+
+Still unverified: a genuinely GPU-less browser. `agent-browser` is
+Chromium-only, so the CPU-only artifact was reached through the explicit
+`ep=wasm` pin rather than the `!webgpuAvailable()` branch — the same decision
+and the same downstream code, but the last mile on real Safari/Firefox is
+untested.
 
 ### 1.3 The CPU-only path uses the asyncify ORT build
 

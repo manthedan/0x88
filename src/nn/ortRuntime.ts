@@ -404,9 +404,67 @@ function browserThreadedWasmAvailable(): boolean {
   return typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined';
 }
 
+/**
+ * Thread count for `auto`. Capped at 4 and never more than half the machine:
+ * ORT is not a participant in the CPU broker (`src/lc0/resourceBroker.ts`), so
+ * a page that is also running a threaded Stockfish must not have every core
+ * claimed here. 4 was also the measured optimum for the CPU-only LC0 path on a
+ * 10-core machine (6 and 8 threads both regressed); see the sweep recorded on
+ * `resolveOrtWasmThreads`.
+ */
 function defaultAutoThreads(): number {
   const hc = typeof navigator === 'undefined' ? 2 : Number(navigator.hardwareConcurrency ?? 2);
-  return Math.max(2, Math.min(4, Math.floor(Number.isFinite(hc) ? hc - 1 : 2)));
+  const cores = Math.floor(Number.isFinite(hc) ? hc : 2);
+  return Math.max(1, Math.min(4, Math.floor(cores / 2)));
+}
+
+export type OrtWasmThreadContext = {
+  /** Explicit request (`?ortThreads=`, env pin); null/'' means "use the default". */
+  raw: string | number | null | undefined;
+  isBrowserMainThread: boolean;
+  isNode: boolean;
+  /** A bundled worker chunk from a production build (not the dev server). */
+  builtWorker: boolean;
+  /** This thread is committed to the CPU-only runtime pair (no WebGPU possible). */
+  cpuOnlyRuntimeArtifact: boolean;
+  /** Cross-origin isolated + SharedArrayBuffer, i.e. threaded wasm can run at all. */
+  threadedAvailable: boolean;
+  autoThreads: number;
+};
+
+/**
+ * Pure thread-budget policy, exported so `tests/ort_fallback_policy.test.mjs`
+ * can pin it without a browser. 0 means "leave ORT's own default in place".
+ */
+export function resolveOrtWasmThreads(context: OrtWasmThreadContext): number {
+  const raw = context.raw === undefined || context.raw === null || String(context.raw).trim() === '' ? null : context.raw;
+  if (raw === null) {
+    // Main thread and Node stay single-threaded: the UI thread must not fan out,
+    // and Node's inlined glue has no pthread sidecar to re-import.
+    if (context.isBrowserMainThread || context.isNode) return 1;
+    // Dev worker: ORT picks its own default from the node_modules glue.
+    if (!context.builtWorker) return 0;
+    // Retested 2026-07-25 against the built `searchWorker` chunk served with
+    // COOP/COEP: threaded ORT no longer deadlocks in a bundled worker. The
+    // 2026-06-11 workaround (`2cc2f65`) predated the self-hosted pthread
+    // sidecars (`180a4a4`, `0157f71`), which is what fixed it -- the helper
+    // workers now re-import the staged glue at its own deployed URL instead of
+    // re-executing our worker chunk. Measured on the CPU-only pair (median of
+    // 20 evals, t1-256x10 qdq8, 10-core): 1t 61.3ms, 2t 43.4ms, 3t 42.2ms,
+    // 4t 40.1ms, 6t 54.0ms, 8t 44.2ms; outputs matched the single-threaded run.
+    // The budget stays 1 on the WebGPU-capable (asyncify) pair: with a WebGPU
+    // session, numThreads=4 *regressed* the same workload from 11.6ms to
+    // 17.9ms, and the artifact is worker-global, so only a thread that can
+    // never escalate to WebGPU (Safari/Firefox, or an explicit `?ep=wasm` pin)
+    // opts in.
+    if (!context.cpuOnlyRuntimeArtifact) return 1;
+    return context.threadedAvailable ? context.autoThreads : 1;
+  }
+  if (String(raw).toLowerCase() === 'auto') return context.threadedAvailable ? context.autoThreads : 1;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  const requested = Math.floor(parsed);
+  return context.isBrowserMainThread && requested > 1 && !context.threadedAvailable ? 1 : requested;
 }
 
 function requestedOrtWasmThreads(isBrowserMainThread: boolean, isNode: boolean): number {
@@ -415,24 +473,20 @@ function requestedOrtWasmThreads(isBrowserMainThread: boolean, isNode: boolean):
       ? 1
       : forcedOrtWasmThreads;
   }
-  // In production builds, ORT's threaded wasm boot inside a bundled worker
-  // deadlocks: the emscripten pthread helpers are spawned from the chunk's
-  // own import.meta.url, which re-executes our worker module instead of the
-  // pthread stub, so the boot handshake never completes (dev serves the glue
-  // from node_modules and is unaffected). Default built workers to a single
-  // thread; an explicit ?ortThreads=N on the worker URL still overrides.
-  const builtWorker = !isBrowserMainThread && !isNode && typeof document === 'undefined'
-    && (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true;
-  const raw = browserParam('ortThreads')
-    ?? browserParam('wasmThreads')
-    ?? envValue('ORT_INTRA_OP_NUM_THREADS')
-    ?? envValue('ORT_NUM_THREADS')
-    ?? (isBrowserMainThread || isNode || builtWorker ? '1' : '0');
-  if (String(raw).toLowerCase() === 'auto') return browserThreadedWasmAvailable() ? defaultAutoThreads() : 1;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-  const requested = Math.floor(parsed);
-  return isBrowserMainThread && requested > 1 && !browserThreadedWasmAvailable() ? 1 : requested;
+  return resolveOrtWasmThreads({
+    raw: browserParam('ortThreads')
+      ?? browserParam('wasmThreads')
+      ?? envValue('ORT_INTRA_OP_NUM_THREADS')
+      ?? envValue('ORT_NUM_THREADS')
+      ?? null,
+    isBrowserMainThread,
+    isNode,
+    builtWorker: !isBrowserMainThread && !isNode && typeof document === 'undefined'
+      && (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true,
+    cpuOnlyRuntimeArtifact: ortRuntimeArtifactKindForCurrentThread() === 'wasm',
+    threadedAvailable: browserThreadedWasmAvailable(),
+    autoThreads: defaultAutoThreads(),
+  });
 }
 
 function browserOrtWasmPaths(kind: OrtRuntimeArtifactKind): string | Record<string, string> {

@@ -10,6 +10,7 @@ import {
   setRequestedOrtExecutionProviderForCurrentThread,
   setRequestedOrtWasmArtifactForCurrentThread,
   setRequestedOrtWasmThreadsForCurrentThread,
+  resolveOrtWasmThreads,
   shouldFallbackToWasmAfterOrtFailure,
   validateOrtWasmArtifactSelection,
 } from '../src/nn/ortRuntime.ts';
@@ -188,4 +189,56 @@ test('ORT WASM thread pinning rejects invalid values', () => {
   assert.throws(() => setRequestedOrtWasmThreadsForCurrentThread(1.5), /positive integer/);
   setRequestedOrtWasmThreadsForCurrentThread(1);
   setRequestedOrtWasmThreadsForCurrentThread(null);
+});
+
+/** A built worker chunk on a cross-origin-isolated production deploy. */
+function builtWorkerContext(overrides = {}) {
+  return {
+    raw: null,
+    isBrowserMainThread: false,
+    isNode: false,
+    builtWorker: true,
+    cpuOnlyRuntimeArtifact: true,
+    threadedAvailable: true,
+    autoThreads: 4,
+    ...overrides,
+  };
+}
+
+test('built workers on the CPU-only ORT runtime default to the auto thread budget', () => {
+  // Retested 2026-07-25 in the built searchWorker chunk under COOP/COEP: the
+  // 2026-06-11 single-thread workaround for the pthread boot deadlock is stale.
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext()), 4);
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ autoThreads: 2 })), 2);
+});
+
+test('the auto thread budget needs cross-origin isolation', () => {
+  // Threaded wasm cannot run at all without SharedArrayBuffer.
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ threadedAvailable: false })), 1);
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: 'auto', threadedAvailable: false })), 1);
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: 'auto', threadedAvailable: true })), 4);
+});
+
+test('WebGPU-capable built workers stay single-threaded by default', () => {
+  // numThreads is worker-global and threads regress the WebGPU session, so only
+  // a thread that can never escalate to WebGPU opts in.
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ cpuOnlyRuntimeArtifact: false })), 1);
+});
+
+test('main thread, Node and dev workers keep their existing thread defaults', () => {
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ isBrowserMainThread: true, builtWorker: false })), 1);
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ isNode: true, builtWorker: false })), 1);
+  // Dev worker: 0 leaves ORT's own default from the node_modules glue in place.
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ builtWorker: false })), 0);
+});
+
+test('an explicit ORT thread request still overrides every default', () => {
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: '1' })), 1);
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: '8', cpuOnlyRuntimeArtifact: false })), 8);
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: 3, isBrowserMainThread: true })), 3);
+  // The main thread cannot fan out without cross-origin isolation.
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: '4', isBrowserMainThread: true, threadedAvailable: false })), 1);
+  // 0 / garbage means "let ORT decide".
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: '0' })), 0);
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: 'nonsense' })), 0);
 });
