@@ -40,11 +40,25 @@ test('Stormphrax registry requires baseline and relaxed SIMD sidecars', () => {
   const group = BROWSER_ENGINE_ASSET_GROUPS.find((entry) => entry.family === 'stormphrax');
   assert.ok(group);
   assert.match(group.command, /stormphrax:build-relaxed-simd-emscripten/);
+  // Code and data are published on different cadences: each SIMD tier needs its
+  // own .js/.wasm, but the preload package is byte-identical across tiers, so
+  // only the canonical one ships and the glue reaches it via Module.locateFile.
   assert.deepEqual(group.assets.filter((asset) => asset.includes('relaxed-simd128')), [
     '/stormphrax/stormphrax-emscripten-relaxed-simd128.js',
     '/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm',
-    '/stormphrax/stormphrax-emscripten-relaxed-simd128.data',
   ]);
+});
+
+test('Emscripten families publish exactly one canonical preload .data', () => {
+  for (const family of ['berserk', 'plentychess', 'stormphrax']) {
+    const group = BROWSER_ENGINE_ASSET_GROUPS.find((entry) => entry.family === family);
+    assert.ok(group, family);
+    assert.deepEqual(
+      group.assets.filter((asset) => asset.endsWith('.data')),
+      [`/${family}/${family}-emscripten.data`],
+      `${family} must ship one shared .data, not one per SIMD tier`,
+    );
+  }
 });
 
 test('Reckless registry includes the external SIMD WASI artifact', () => {

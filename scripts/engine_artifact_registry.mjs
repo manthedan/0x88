@@ -212,9 +212,15 @@ export const BROWSER_ENGINE_ASSET_GROUPS = Object.freeze([
     assets: ['/viridithas/viridithas.wasm', '/viridithas/viridithas-simd128.wasm', '/viridithas/viridithas-relaxed-simd128.wasm'],
   },
   {
+    // Berserk stays in this registry so `check_browser_engine_assets.mjs` can
+    // still tell a contributor which command builds it, but its artifacts are
+    // never committed or deployed: the upstream NNUE has no resolved license
+    // (see docs/engine_artifact_distribution.md). public/berserk/ therefore
+    // holds no binaries, so the publish and precompress passes find nothing
+    // and no-op. A missing Berserk asset here is expected, not a build break.
     family: 'berserk',
-    label: 'Berserk Emscripten worker',
-    status: 'experimental-selectable',
+    label: 'Berserk Emscripten worker (build locally; not distributed)',
+    status: 'build-locally-not-distributed',
     command: 'npm run berserk:build-emscripten && npm run berserk:build-simd-emscripten && npm run berserk:build-relaxed-simd-emscripten',
     docs: 'docs/engine_catalog.md#berserk-family',
     assets: [
@@ -223,10 +229,8 @@ export const BROWSER_ENGINE_ASSET_GROUPS = Object.freeze([
       '/berserk/berserk-emscripten.data',
       '/berserk/berserk-emscripten-simd128.js',
       '/berserk/berserk-emscripten-simd128.wasm',
-      '/berserk/berserk-emscripten-simd128.data',
       '/berserk/berserk-emscripten-relaxed-simd128.js',
       '/berserk/berserk-emscripten-relaxed-simd128.wasm',
-      '/berserk/berserk-emscripten-relaxed-simd128.data',
     ],
   },
   {
@@ -241,10 +245,8 @@ export const BROWSER_ENGINE_ASSET_GROUPS = Object.freeze([
       '/plentychess/plentychess-emscripten.data',
       '/plentychess/plentychess-emscripten-sse41.js',
       '/plentychess/plentychess-emscripten-sse41.wasm',
-      '/plentychess/plentychess-emscripten-sse41.data',
       '/plentychess/plentychess-emscripten-relaxed-simd128.js',
       '/plentychess/plentychess-emscripten-relaxed-simd128.wasm',
-      '/plentychess/plentychess-emscripten-relaxed-simd128.data',
     ],
   },
   {
@@ -259,7 +261,6 @@ export const BROWSER_ENGINE_ASSET_GROUPS = Object.freeze([
       '/stormphrax/stormphrax-emscripten.data',
       '/stormphrax/stormphrax-emscripten-relaxed-simd128.js',
       '/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm',
-      '/stormphrax/stormphrax-emscripten-relaxed-simd128.data',
     ],
   },
 ]);

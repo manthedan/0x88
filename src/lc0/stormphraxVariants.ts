@@ -30,16 +30,24 @@ const STORMPHRAX_RELAXED_JS_PATH = isV0DeployProfile()
 const STORMPHRAX_RELAXED_WASM_PATH = isV0DeployProfile()
   ? '/artifacts/sha256/409e973092412289576c0ae67b982fbb512d9aead2cfe3a81554d2f46994003d/stormphrax-emscripten-relaxed-simd128.wasm'
   : '/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm';
-const STORMPHRAX_RELAXED_DATA_PATH = isV0DeployProfile()
-  ? '/artifacts/sha256/04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf/stormphrax-emscripten-relaxed-simd128.data'
-  : '/stormphrax/stormphrax-emscripten-relaxed-simd128.data';
 
 export const STORMPHRAX_EMSCRIPTEN_JS_URL = resolvePublicAssetUrl(STORMPHRAX_JS_PATH);
 export const STORMPHRAX_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl(STORMPHRAX_WASM_PATH);
+/**
+ * Canonical preload `.data` shared by both Stormphrax SIMD tiers.
+ *
+ * Emscripten emits `<variant>.data` per build, but the packaged undertown NNUE
+ * is byte-identical across the baseline and relaxed builds (verified in
+ * `scripts/build_stormphrax_emscripten.mjs`, which refuses to publish a variant
+ * whose `.data` diverges). Pointing both variants at one URL means a relaxed ->
+ * baseline fallback reuses the ~53 MB download already in the HTTP cache
+ * instead of refetching it, and the CDN stores one copy. Emscripten resolves
+ * the package through `Module.locateFile`, so the name baked into each glue
+ * file is irrelevant.
+ */
 export const STORMPHRAX_EMSCRIPTEN_DATA_URL = resolvePublicAssetUrl(STORMPHRAX_DATA_PATH);
 export const STORMPHRAX_RELAXED_JS_URL = resolvePublicAssetUrl(STORMPHRAX_RELAXED_JS_PATH);
 export const STORMPHRAX_RELAXED_WASM_URL = resolvePublicAssetUrl(STORMPHRAX_RELAXED_WASM_PATH);
-export const STORMPHRAX_RELAXED_DATA_URL = resolvePublicAssetUrl(STORMPHRAX_RELAXED_DATA_PATH);
 export const STORMPHRAX_MAIN_NETWORK = 'undertown.nnue';
 export const STORMPHRAX_SOURCE_NETWORK_URL = `https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/${STORMPHRAX_MAIN_NETWORK}`;
 
@@ -86,7 +94,7 @@ export const STORMPHRAX_RELAXED_VARIANT: StormphraxVariant = {
   label: 'Stormphrax 8 Relaxed SIMD',
   jsUrl: STORMPHRAX_RELAXED_JS_URL,
   wasmUrl: STORMPHRAX_RELAXED_WASM_URL,
-  dataUrl: STORMPHRAX_RELAXED_DATA_URL,
+  dataUrl: STORMPHRAX_EMSCRIPTEN_DATA_URL,
   sourceNetworkUrl: STORMPHRAX_SOURCE_NETWORK_URL,
   note: 'Preferred build using i32x4.relaxed_dot_i8x16_i7x16_add for in-range NNUE L1 vectors with an exact baseline SIMD fallback outside the i7 operand range. Requires WebAssembly Relaxed SIMD.',
 };

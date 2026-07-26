@@ -29,10 +29,8 @@ const CONFIGS = {
       'public/berserk/berserk-emscripten.data',
       'public/berserk/berserk-emscripten-simd128.js',
       'public/berserk/berserk-emscripten-simd128.wasm',
-      'public/berserk/berserk-emscripten-simd128.data',
       'public/berserk/berserk-emscripten-relaxed-simd128.js',
       'public/berserk/berserk-emscripten-relaxed-simd128.wasm',
-      'public/berserk/berserk-emscripten-relaxed-simd128.data',
     ],
     assets: [
       {
@@ -40,7 +38,7 @@ const CONFIGS = {
         sourceUrl: 'https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn',
         rawSha256: '9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084',
         licenseNote: 'No standalone license file found in jhonnold/berserk-networks during intake; do not publicly distribute this network until provenance/license is resolved or confirmed as covered by the engine release.',
-        embeddedIn: 'public/berserk/berserk-emscripten.data, public/berserk/berserk-emscripten-simd128.data, and public/berserk/berserk-emscripten-relaxed-simd128.data',
+        embeddedIn: 'public/berserk/berserk-emscripten.data (one canonical preload package shared by every SIMD tier)',
       },
     ],
   },
@@ -65,10 +63,8 @@ const CONFIGS = {
       'public/plentychess/plentychess-emscripten.data',
       'public/plentychess/plentychess-emscripten-sse41.js',
       'public/plentychess/plentychess-emscripten-sse41.wasm',
-      'public/plentychess/plentychess-emscripten-sse41.data',
       'public/plentychess/plentychess-emscripten-relaxed-simd128.js',
       'public/plentychess/plentychess-emscripten-relaxed-simd128.wasm',
-      'public/plentychess/plentychess-emscripten-relaxed-simd128.data',
     ],
     assets: [
       {
@@ -79,7 +75,7 @@ const CONFIGS = {
         processedSha256: '691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4',
         processingCommand: 'tools/process_net false',
         licenseNote: 'Yoshie2000/PlentyNetworks is licensed under GPL-3.0; preserve GPL-3.0 notices with the network asset.',
-        embeddedIn: 'public/plentychess/plentychess-emscripten.data, public/plentychess/plentychess-emscripten-sse41.data, and public/plentychess/plentychess-emscripten-relaxed-simd128.data',
+        embeddedIn: 'public/plentychess/plentychess-emscripten.data (one canonical preload package shared by every SIMD tier)',
       },
     ],
   },
@@ -106,7 +102,6 @@ const CONFIGS = {
       'public/stormphrax/stormphrax-emscripten.data',
       'public/stormphrax/stormphrax-emscripten-relaxed-simd128.js',
       'public/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm',
-      'public/stormphrax/stormphrax-emscripten-relaxed-simd128.data',
     ],
     assets: [
       {
@@ -114,7 +109,7 @@ const CONFIGS = {
         sourceUrl: 'https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/undertown.nnue',
         rawSha256: '04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf',
         licenseNote: 'Stormphrax documents undertown as its self-trained 8.0.0 release network; distribute it with the GPL corresponding source and provenance manifest.',
-        embeddedIn: 'public/stormphrax/stormphrax-emscripten.data and public/stormphrax/stormphrax-emscripten-relaxed-simd128.data',
+        embeddedIn: 'public/stormphrax/stormphrax-emscripten.data (one canonical preload package shared by every SIMD tier)',
       },
     ],
   },

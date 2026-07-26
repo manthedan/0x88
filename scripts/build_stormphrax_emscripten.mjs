@@ -16,6 +16,10 @@ const netSha256 = process.env.STORMPHRAX_NET_SHA256 ?? '04d651e078b7c7334709dbd7
 const patchPath = path.resolve(process.env.STORMPHRAX_PATCH ?? path.join(root, 'patches', 'stormphrax-emscripten.patch'));
 const jsOut = path.resolve(process.env.STORMPHRAX_EMSCRIPTEN_JS_OUT ?? path.join(root, 'public', 'stormphrax', 'stormphrax-emscripten.js'));
 const outBase = path.basename(jsOut, '.js');
+// Every SIMD variant preloads the identical undertown NNUE, so all variants
+// share one canonical `.data` (src/lc0/stormphraxVariants.ts
+// STORMPHRAX_EMSCRIPTEN_DATA_URL).
+const sharedDataPath = path.resolve(process.env.STORMPHRAX_SHARED_DATA ?? path.join(path.dirname(jsOut), 'stormphrax-emscripten.data'));
 const emsdkImage = process.env.STORMPHRAX_EMSDK_IMAGE ?? 'emscripten/emsdk:6.0.2';
 const skipGit = process.env.STORMPHRAX_SKIP_GIT === '1';
 const relaxedSimd = process.env.STORMPHRAX_WASM_RELAXED_SIMD === '1';
@@ -33,6 +37,34 @@ function canRun(command, args = ['--version']) {
 
 function sha256(file) {
   return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+/**
+ * Emscripten emits one `.data` per variant, but the preloaded NNUE is
+ * byte-identical across SIMD tiers. Publish exactly one copy so browsers and
+ * the CDN never hold duplicates, and fail loudly if a rebuild would have
+ * changed the shared bytes.
+ */
+function publishSharedData(builtDataPath) {
+  const builtDigest = sha256(builtDataPath);
+  if (fs.existsSync(sharedDataPath)) {
+    const sharedDigest = sha256(sharedDataPath);
+    if (sharedDigest !== builtDigest) {
+      throw new Error(
+        `Shared Stormphrax .data mismatch: ${outBase}.data (sha256 ${builtDigest}) differs from ${sharedDataPath} (sha256 ${sharedDigest}).\n` +
+        'All Stormphrax variants share one .data URL, so they must preload identical bytes. Rebuild every variant from the same network, or delete the stale shared .data and rebuild.',
+      );
+    }
+    console.log(`Shared ${sharedDataPath} already matches ${outBase}.data (sha256 ${builtDigest})`);
+  } else {
+    fs.copyFileSync(builtDataPath, sharedDataPath);
+    console.log(`Wrote ${sharedDataPath} (${fs.statSync(sharedDataPath).size} bytes, sha256 ${builtDigest})`);
+  }
+  const perVariantData = path.join(path.dirname(jsOut), `${outBase}.data`);
+  if (perVariantData !== sharedDataPath && fs.existsSync(perVariantData)) {
+    fs.rmSync(perVariantData);
+    console.log(`Removed duplicate ${perVariantData}; all variants load ${path.basename(sharedDataPath)}`);
+  }
 }
 
 function walkSources(dir, out = []) {
@@ -111,9 +143,11 @@ if (process.env.STORMPHRAX_EMXX || canRun('em++')) {
   run('docker', ['run', '--rm', '-v', `${engineDir}:/src`, '-w', '/src', emsdkImage, 'em++', ...emxxArgs]);
 }
 
-for (const ext of ['js', 'wasm', 'data']) {
+// The .js glue and .wasm stay per-variant; only the preload .data is shared.
+for (const ext of ['js', 'wasm']) {
   const built = path.join(engineDir, `${outBase}.${ext}`);
   const out = path.join(path.dirname(jsOut), `${outBase}.${ext}`);
   fs.copyFileSync(built, out);
   console.log(`Wrote ${out} (${fs.statSync(out).size} bytes)`);
 }
+publishSharedData(path.join(engineDir, `${outBase}.data`));

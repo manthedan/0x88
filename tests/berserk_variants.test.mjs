@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  BERSERK_ARTIFACT_BUILD_HINT,
   BERSERK_DEFAULT_NNUE_URL,
   BERSERK_DEFAULT_VARIANT,
   BERSERK_EMSCRIPTEN_DATA_URL,
@@ -14,6 +15,7 @@ import {
   BERSERK_SOURCE_NETWORK_URL,
   BERSERK_VARIANTS,
   supportsBerserkWasmSimd,
+  berserkVariantAssetNote,
   berserkVariantAssetStatus,
   berserkVariantByKey,
   berserkVariantFromParams,
@@ -36,6 +38,26 @@ test('Berserk variants pin Emscripten smoke and planned WASI metadata', () => {
   assert.equal(BERSERK_DEFAULT_VARIANT.wasmUrl, '/berserk/berserk.wasm');
   assert.equal(BERSERK_SIMD_VARIANT.wasmUrl, '/berserk/berserk-simd128.wasm');
   assert.equal(BERSERK_SIMD_VARIANT.nnueUrl, BERSERK_DEFAULT_NNUE_URL);
+});
+
+test('every Berserk Emscripten tier shares one canonical preload .data', () => {
+  assert.equal(BERSERK_EMSCRIPTEN_DATA_URL, '/berserk/berserk-emscripten.data');
+  const emscriptenTiers = BERSERK_VARIANTS.filter((variant) => !!variant.jsUrl);
+  assert.equal(emscriptenTiers.length, 3);
+  // The .data bytes are identical across SIMD tiers, so a relaxed -> simd128 ->
+  // scalar fallback must not re-download ~24 MB the browser already cached.
+  for (const variant of emscriptenTiers) assert.equal(variant.dataUrl, BERSERK_EMSCRIPTEN_DATA_URL, variant.key);
+  // The .js glue and .wasm stay per-variant.
+  assert.equal(new Set(emscriptenTiers.map((variant) => variant.jsUrl)).size, 3);
+  assert.equal(new Set(emscriptenTiers.map((variant) => variant.wasmUrl)).size, 3);
+  assert.equal(berserkVariantByKey('custom').dataUrl, BERSERK_EMSCRIPTEN_DATA_URL);
+});
+
+test('Berserk variants advertise that artifacts are build-locally only', () => {
+  assert.match(BERSERK_ARTIFACT_BUILD_HINT, /npm run berserk:build-emscripten/);
+  for (const variant of BERSERK_VARIANTS.filter((entry) => !!entry.jsUrl)) {
+    assert.ok(variant.note.includes(BERSERK_ARTIFACT_BUILD_HINT), variant.key);
+  }
 });
 
 test('Berserk variant normalization and lookup are stable', () => {
@@ -103,7 +125,11 @@ test('production skips known-unshipped Berserk asset probes', async () => {
   }
 });
 
-test('production probes deployed Berserk Emscripten SIMD sidecars', async () => {
+// Berserk artifacts are intentionally untracked/undeployed while the upstream
+// NNUE license is unresolved, so production must not spend HEAD requests
+// probing for them: every tier resolves straight to a settled `missing`, and
+// the UI/engine explain it with BERSERK_ARTIFACT_BUILD_HINT.
+test('production skips every Berserk artifact probe and degrades to a documented missing state', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   const calls = [];
@@ -116,16 +142,12 @@ test('production probes deployed Berserk Emscripten SIMD sidecars', async () => 
     value: { hostname: '0x88.app' },
   });
   try {
-    assert.equal(await checkBerserkVariantAsset({ ...BERSERK_EMSCRIPTEN_SIMD_VARIANT }), 'present');
-    assert.equal(await checkBerserkVariantAsset({ ...BERSERK_EMSCRIPTEN_RELAXED_VARIANT }), 'present');
-    assert.deepEqual(calls, [
-      ['/berserk/berserk-emscripten-simd128.js', 'HEAD', 'no-store'],
-      ['/berserk/berserk-emscripten-simd128.wasm', 'HEAD', 'no-store'],
-      ['/berserk/berserk-emscripten-simd128.data', 'HEAD', 'no-store'],
-      ['/berserk/berserk-emscripten-relaxed-simd128.js', 'HEAD', 'no-store'],
-      ['/berserk/berserk-emscripten-relaxed-simd128.wasm', 'HEAD', 'no-store'],
-      ['/berserk/berserk-emscripten-relaxed-simd128.data', 'HEAD', 'no-store'],
-    ]);
+    for (const variant of [BERSERK_EMSCRIPTEN_VARIANT, BERSERK_EMSCRIPTEN_SIMD_VARIANT, BERSERK_EMSCRIPTEN_RELAXED_VARIANT]) {
+      const copy = { ...variant };
+      assert.equal(await checkBerserkVariantAsset(copy), 'missing', variant.key);
+      assert.equal(berserkVariantAssetNote(copy), BERSERK_ARTIFACT_BUILD_HINT, variant.key);
+    }
+    assert.deepEqual(calls, []);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);

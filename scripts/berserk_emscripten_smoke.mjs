@@ -24,7 +24,14 @@ const timeoutMs = Math.max(1000, Math.floor(Number(args.get('timeout') ?? 20000)
 const fen = args.get('fen') ?? 'r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 2 3';
 const base = path.basename(jsPath, '.js');
 const wasmPath = path.join(path.dirname(jsPath), `${base}.wasm`);
-const dataPath = path.join(path.dirname(jsPath), `${base}.data`);
+// Every SIMD tier shares one canonical preload package: the builds emit
+// byte-identical `.data`, so only `<family>-emscripten.data` is published
+// and the variant glue reaches it through Module.locateFile. Fall back to
+// it when a variant-named `.data` is absent, and copy it into the temp dir
+// under the basename this glue expects.
+const variantDataPath = path.join(path.dirname(jsPath), `${base}.data`);
+const sharedDataPath = path.join(path.dirname(jsPath), 'berserk-emscripten.data');
+const dataPath = fs.existsSync(variantDataPath) ? variantDataPath : sharedDataPath;
 
 for (const file of [jsPath, wasmPath, dataPath]) {
   if (!fs.existsSync(file)) throw new Error(`Missing Berserk Emscripten artifact: ${file}`);

@@ -36,6 +36,17 @@ test('PlentyChess variant metadata pins the smoked Emscripten sidecars', () => {
   assert.equal(PLENTYCHESS_EMSCRIPTEN_VARIANT.dataUrl, PLENTYCHESS_EMSCRIPTEN_DATA_URL);
 });
 
+test('every PlentyChess SIMD tier shares one canonical preload .data', () => {
+  assert.equal(PLENTYCHESS_EMSCRIPTEN_DATA_URL, '/plentychess/plentychess-emscripten.data');
+  // The ~60 MB .data bytes are identical across default/SSE4.1/relaxed, so a
+  // relaxed -> sse41 -> default fallback must reuse the cached download.
+  for (const variant of PLENTYCHESS_VARIANTS) assert.equal(variant.dataUrl, PLENTYCHESS_EMSCRIPTEN_DATA_URL, variant.key);
+  assert.equal(plentyChessVariantByKey('custom').dataUrl, PLENTYCHESS_EMSCRIPTEN_DATA_URL);
+  // The .js glue and .wasm stay per-variant.
+  assert.equal(new Set(PLENTYCHESS_VARIANTS.map((variant) => variant.jsUrl)).size, PLENTYCHESS_VARIANTS.length);
+  assert.equal(new Set(PLENTYCHESS_VARIANTS.map((variant) => variant.wasmUrl)).size, PLENTYCHESS_VARIANTS.length);
+});
+
 test('PlentyChess variant normalization and lookup are stable', () => {
   assert.equal(normalizePlentyChessVariant('emscripten'), 'emscripten');
   assert.equal(normalizePlentyChessVariant('browser worker'), 'emscripten');
@@ -103,20 +114,22 @@ test('production probes deployed PlentyChess SIMD-tier asset sidecars', async ()
     assert.equal(plentyChessVariantAssetStatus(PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT), 'present');
     const resolved = await resolveDefaultPlentyChessVariantAssetFallback({ ...PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT }, false);
     assert.equal(resolved.key, 'emscripten-sse41');
+    // The relaxed tier is served from R2 with per-variant .js/.wasm but the
+    // one shared .data path.
     const r2Variant = {
       ...PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT,
       jsUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-relaxed-simd128.js',
       wasmUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-relaxed-simd128.wasm',
-      dataUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten-relaxed-simd128.data',
+      dataUrl: 'https://assets.0x88.app/plentychess/plentychess-emscripten.data',
     };
     assert.equal(await checkPlentyChessVariantAsset(r2Variant), 'present');
     assert.deepEqual(calls, [
       ['/plentychess/plentychess-emscripten-sse41.js', 'HEAD', 'no-store'],
       ['/plentychess/plentychess-emscripten-sse41.wasm', 'HEAD', 'no-store'],
-      ['/plentychess/plentychess-emscripten-sse41.data', 'HEAD', 'no-store'],
+      ['/plentychess/plentychess-emscripten.data', 'HEAD', 'no-store'],
       ['https://assets.0x88.app/plentychess/plentychess-emscripten-relaxed-simd128.js', 'HEAD', 'no-store'],
       ['https://assets.0x88.app/plentychess/plentychess-emscripten-relaxed-simd128.wasm', 'HEAD', 'no-store'],
-      ['https://assets.0x88.app/plentychess/plentychess-emscripten-relaxed-simd128.data', 'HEAD', 'no-store'],
+      ['https://assets.0x88.app/plentychess/plentychess-emscripten.data', 'HEAD', 'no-store'],
     ]);
   } finally {
     globalThis.fetch = originalFetch;

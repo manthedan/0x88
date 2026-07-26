@@ -1,10 +1,15 @@
 import { START_FEN } from '../chess/board.ts';
 import { DEFAULT_PLENTYCHESS_EMSCRIPTEN_JS_URL, PlentyChessEngine } from './plentychessEngine.ts';
+import { PLENTYCHESS_EMSCRIPTEN_DATA_URL } from './plentychessVariants.ts';
 
 const params = new URLSearchParams(location.search);
 const statusEl = document.getElementById('status')!;
 const outputEl = document.getElementById('output')!;
 const jsUrl = params.get('plentyChessJs') ?? DEFAULT_PLENTYCHESS_EMSCRIPTEN_JS_URL;
+// Every SIMD tier preloads the same processed NNUE, so all glue files resolve
+// one shared `.data`. Pass it explicitly: without it Emscripten would look for
+// `<glue-basename>.data`, which only exists for the default variant.
+const dataUrl = params.get('plentyChessData') ?? PLENTYCHESS_EMSCRIPTEN_DATA_URL;
 const depth = Math.max(1, Math.floor(Number(params.get('depth') ?? '1') || 1));
 const abortDepth = Math.max(depth + 1, Math.floor(Number(params.get('abortDepth') ?? '16') || 16));
 const fen = params.get('fen') ?? 'r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 2 3';
@@ -33,7 +38,7 @@ async function expectMissingAssetFailure(): Promise<string> {
 }
 
 async function expectAbortAndRecovery(): Promise<{ abortErrorName: string; abortElapsedMs: number; recoveryBestmove: string | null }> {
-  const engine = new PlentyChessEngine({ depth: abortDepth, hashMb: 16, threads: 1 }, jsUrl);
+  const engine = new PlentyChessEngine({ depth: abortDepth, hashMb: 16, threads: 1 }, jsUrl, undefined, dataUrl);
   const controller = new AbortController();
   const started = performance.now();
   const search = engine.bestMove(START_FEN, controller.signal);
@@ -56,7 +61,7 @@ async function expectAbortAndRecovery(): Promise<{ abortErrorName: string; abort
 
 async function run(): Promise<void> {
   const started = performance.now();
-  const engine = new PlentyChessEngine({ depth, hashMb: 16, threads: 1 }, jsUrl);
+  const engine = new PlentyChessEngine({ depth, hashMb: 16, threads: 1 }, jsUrl, undefined, dataUrl);
   try {
     setStatus('Prewarming PlentyChess worker…');
     await engine.prewarm();

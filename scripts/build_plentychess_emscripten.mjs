@@ -17,6 +17,10 @@ const processedSha256 = process.env.PLENTYCHESS_PROCESSED_SHA256 ?? '691efaca9d6
 const patchPath = path.resolve(process.env.PLENTYCHESS_PATCH ?? path.join(root, 'patches', 'plentychess-emscripten.patch'));
 const jsOut = path.resolve(process.env.PLENTYCHESS_EMSCRIPTEN_JS_OUT ?? path.join(root, 'public', 'plentychess', 'plentychess-emscripten.js'));
 const outBase = path.basename(jsOut, '.js');
+// Every SIMD variant preloads the identical processed NNUE, so all variants
+// share one canonical `.data` (src/lc0/plentychessVariants.ts
+// PLENTYCHESS_EMSCRIPTEN_DATA_URL).
+const sharedDataPath = path.resolve(process.env.PLENTYCHESS_SHARED_DATA ?? path.join(path.dirname(jsOut), 'plentychess-emscripten.data'));
 const processedName = process.env.PLENTYCHESS_PROCESSED_NETWORK ?? 'processed.bin';
 const processedPath = path.join(engineDir, processedName);
 const emsdkImage = process.env.PLENTYCHESS_EMSDK_IMAGE ?? 'emscripten/emsdk:latest';
@@ -43,6 +47,34 @@ function verifySha256(filePath, expected, label) {
   const actual = sha256(filePath);
   if (actual !== expected) {
     throw new Error(`${label} checksum mismatch: expected ${expected}, got ${actual}`);
+  }
+}
+
+/**
+ * Emscripten emits one `.data` per variant, but the preloaded NNUE is
+ * byte-identical across SIMD tiers. Publish exactly one copy so browsers and
+ * the CDN never hold duplicates, and fail loudly if a rebuild would have
+ * changed the shared bytes.
+ */
+function publishSharedData(builtDataPath) {
+  const builtDigest = sha256(builtDataPath);
+  if (fs.existsSync(sharedDataPath)) {
+    const sharedDigest = sha256(sharedDataPath);
+    if (sharedDigest !== builtDigest) {
+      throw new Error(
+        `Shared PlentyChess .data mismatch: ${outBase}.data (sha256 ${builtDigest}) differs from ${sharedDataPath} (sha256 ${sharedDigest}).\n` +
+        'All PlentyChess variants share one .data URL, so they must preload identical bytes. Rebuild every variant from the same network, or delete the stale shared .data and rebuild.',
+      );
+    }
+    console.log(`Shared ${sharedDataPath} already matches ${outBase}.data (sha256 ${builtDigest})`);
+  } else {
+    fs.copyFileSync(builtDataPath, sharedDataPath);
+    console.log(`Wrote ${sharedDataPath} (${fs.statSync(sharedDataPath).size} bytes, sha256 ${builtDigest})`);
+  }
+  const perVariantData = path.join(path.dirname(jsOut), `${outBase}.data`);
+  if (perVariantData !== sharedDataPath && fs.existsSync(perVariantData)) {
+    fs.rmSync(perVariantData);
+    console.log(`Removed duplicate ${perVariantData}; all variants load ${path.basename(sharedDataPath)}`);
   }
 }
 
@@ -165,10 +197,12 @@ if (process.env.PLENTYCHESS_EMXX || canRun('em++')) {
   run('docker', ['run', '--rm', '-v', `${engineDir}:/src`, '-w', '/src', emsdkImage, 'em++', ...emccArgs]);
 }
 
-for (const ext of ['js', 'wasm', 'data']) {
+// The .js glue and .wasm stay per-variant; only the preload .data is shared.
+for (const ext of ['js', 'wasm']) {
   const built = path.join(engineDir, `${outBase}.${ext}`);
   const out = path.join(path.dirname(jsOut), `${outBase}.${ext}`);
   fs.copyFileSync(built, out);
   const size = fs.statSync(out).size;
   console.log(`Wrote ${out} (${size} bytes)`);
 }
+publishSharedData(path.join(engineDir, `${outBase}.data`));

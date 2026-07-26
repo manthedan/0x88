@@ -20,29 +20,38 @@ export interface PlentyChessVariant {
 
 export const PLENTYCHESS_EMSCRIPTEN_JS_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten.js');
 export const PLENTYCHESS_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten.wasm');
+/**
+ * Canonical preload `.data` shared by every PlentyChess SIMD tier.
+ *
+ * Emscripten emits `<variant>.data` per build, but the packaged processed NNUE
+ * is byte-identical across the default/SSE4.1/relaxed builds (verified in
+ * `scripts/build_plentychess_emscripten.mjs`, which refuses to publish a
+ * variant whose `.data` diverges). Pointing every variant at one URL means a
+ * relaxed -> sse41 -> default fallback reuses the ~60 MB download already in
+ * the HTTP cache instead of refetching it, and the CDN stores one copy.
+ * Emscripten resolves the package through `Module.locateFile`, so the name
+ * baked into each glue file is irrelevant.
+ */
 export const PLENTYCHESS_EMSCRIPTEN_DATA_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten.data');
 export const PLENTYCHESS_EMSCRIPTEN_SSE41_JS_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-sse41.js');
 export const PLENTYCHESS_EMSCRIPTEN_SSE41_WASM_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-sse41.wasm');
-export const PLENTYCHESS_EMSCRIPTEN_SSE41_DATA_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-sse41.data');
 export const PLENTYCHESS_EMSCRIPTEN_RELAXED_JS_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-relaxed-simd128.js');
 export const PLENTYCHESS_EMSCRIPTEN_RELAXED_WASM_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-relaxed-simd128.wasm');
-export const PLENTYCHESS_EMSCRIPTEN_RELAXED_DATA_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-relaxed-simd128.data');
 export const PLENTYCHESS_MAIN_NETWORK = '0134-2r24-s0.bin';
 export const PLENTYCHESS_SOURCE_NETWORK_URL = `https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/${PLENTYCHESS_MAIN_NETWORK}`;
 
 const assetStatuses = new Map<string, PlentyChessAssetStatus>();
 const assetChecks = new Map<string, Promise<PlentyChessAssetStatus>>();
 
+// One shared `.data`; the .js glue and .wasm stay per-variant.
 const DEPLOYED_PLENTYCHESS_PATHS = new Set([
   '/plentychess/plentychess-emscripten.js',
   '/plentychess/plentychess-emscripten.wasm',
   '/plentychess/plentychess-emscripten.data',
   '/plentychess/plentychess-emscripten-sse41.js',
   '/plentychess/plentychess-emscripten-sse41.wasm',
-  '/plentychess/plentychess-emscripten-sse41.data',
   '/plentychess/plentychess-emscripten-relaxed-simd128.js',
   '/plentychess/plentychess-emscripten-relaxed-simd128.wasm',
-  '/plentychess/plentychess-emscripten-relaxed-simd128.data',
 ]);
 
 function isLocalDevelopmentOrigin(): boolean {
@@ -102,7 +111,7 @@ export const PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT: PlentyChessVariant = {
   label: 'PlentyChess SSE4.1',
   jsUrl: PLENTYCHESS_EMSCRIPTEN_SSE41_JS_URL,
   wasmUrl: PLENTYCHESS_EMSCRIPTEN_SSE41_WASM_URL,
-  dataUrl: PLENTYCHESS_EMSCRIPTEN_SSE41_DATA_URL,
+  dataUrl: PLENTYCHESS_EMSCRIPTEN_DATA_URL,
   sourceNetworkUrl: PLENTYCHESS_SOURCE_NETWORK_URL,
   note: 'Default build plus -msse4.1: single-op convertEpi8Epi16 in the accumulator path (exact-equal semantics).',
 };
@@ -112,7 +121,7 @@ export const PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT: PlentyChessVariant = {
   label: 'PlentyChess Relaxed SIMD',
   jsUrl: PLENTYCHESS_EMSCRIPTEN_RELAXED_JS_URL,
   wasmUrl: PLENTYCHESS_EMSCRIPTEN_RELAXED_WASM_URL,
-  dataUrl: PLENTYCHESS_EMSCRIPTEN_RELAXED_DATA_URL,
+  dataUrl: PLENTYCHESS_EMSCRIPTEN_DATA_URL,
   sourceNetworkUrl: PLENTYCHESS_SOURCE_NETWORK_URL,
   note: 'SSE4.1 build whose dpbusd helpers use the relaxed integer dot (exact: INPUT_QUANT=255/INPUT_SHIFT=9 keep activations in 0..127) and whose f32 tail is vectorized with relaxed madd. Requires WebAssembly Relaxed SIMD.',
 };

@@ -4,9 +4,10 @@ public/stockfish/*corresponding-source*.tar.gz filter=lfs diff=lfs merge=lfs -te
 public/viridithas/*.wasm filter=lfs diff=lfs merge=lfs -text
 public/runtimes/squareformer-tvm-hybrid/** filter=lfs diff=lfs merge=lfs -text
 public/runtimes/centipawn-tvmjs-webgpu/**/*.wasm filter=lfs diff=lfs merge=lfs -text
-public/berserk/*.data filter=lfs diff=lfs merge=lfs -text
-public/berserk/*.wasm filter=lfs diff=lfs merge=lfs -text
-public/berserk/*corresponding-source*.tar.gz filter=lfs diff=lfs merge=lfs -text
+# No public/berserk/* LFS rules: Berserk artifacts are intentionally untracked
+# and .gitignore'd while the upstream NNUE license/provenance is unresolved
+# (docs/engine_artifact_distribution.md). Build them locally with
+# `npm run berserk:build-emscripten`.
 public/plentychess/*.data filter=lfs diff=lfs merge=lfs -text
 public/plentychess/*.wasm filter=lfs diff=lfs merge=lfs -text
 public/stormphrax/*.data filter=lfs diff=lfs merge=lfs -text

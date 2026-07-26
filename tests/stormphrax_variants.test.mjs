@@ -27,6 +27,16 @@ test('Stormphrax variant metadata pins the browser sidecars and undertown networ
   assert.equal(defaultStormphraxVariantKey(), supportsWasmRelaxedSimd() ? 'emscripten-relaxed' : 'emscripten');
 });
 
+test('both Stormphrax SIMD tiers share one canonical preload .data', () => {
+  // The ~53 MB .data bytes are identical, so a relaxed -> baseline fallback
+  // must reuse the cached download instead of refetching it.
+  assert.equal(STORMPHRAX_RELAXED_VARIANT.dataUrl, STORMPHRAX_EMSCRIPTEN_VARIANT.dataUrl);
+  assert.equal(STORMPHRAX_RELAXED_VARIANT.dataUrl, '/stormphrax/stormphrax-emscripten.data');
+  // The .js glue and .wasm stay per-variant.
+  assert.notEqual(STORMPHRAX_RELAXED_VARIANT.jsUrl, STORMPHRAX_EMSCRIPTEN_VARIANT.jsUrl);
+  assert.notEqual(STORMPHRAX_RELAXED_VARIANT.wasmUrl, STORMPHRAX_EMSCRIPTEN_VARIANT.wasmUrl);
+});
+
 test('Stormphrax in-flight asset checks notify callbacks attached by a remount', async () => {
   const originalFetch = globalThis.fetch;
   const resolvers = [];

@@ -72,7 +72,8 @@ If the asset license or provenance is unclear, do not publish the generated engi
 ## Repository hygiene
 
 - Decide per engine whether artifacts are deploy-tracked or CI-generated; do not leave deployed artifacts hidden by `.gitignore` rules.
-- For the current Netlify/Vite deployment, committed/LFS public artifacts are intentional for Berserk, PlentyChess, Viridithas, Stockfish.js, and selected model packs.
+- For the current Netlify/Vite deployment, committed/LFS public artifacts are intentional for PlentyChess, Stormphrax, Viridithas, Stockfish.js, and selected model packs. Berserk is the sole exception: its artifacts are untracked and ignored on purpose (see the Berserk release card), so the "do not hide deployed artifacts" rule is satisfied by not deploying them at all.
+- Emscripten preload `.data` files are byte-identical across the SIMD variants of a family, so each family publishes exactly ONE canonical `.data` (`<family>-emscripten.data`) that every variant loads through `Module.locateFile`; only the `.js` glue and `.wasm` are per-variant. The build scripts hash the freshly built `.data` against the canonical copy and fail the build if it diverges, so a shared file can never be a stale net.
 - Commit source patches, build scripts, smoke scripts, variant metadata, documentation, source archives, and release manifests for deployed third-party binaries, especially copyleft/GPL binaries.
 - Keep generated precompressed `.br`/`.gz` sidecars ignored; they are rebuilt into `dist-client/`.
 
@@ -98,7 +99,22 @@ If the selector is visible in a public deployment but assets are intentionally a
 - Smoke: `npm run berserk:smoke-emscripten`, `lab/berserk-smoke.html`
 - Network: `berserk-9b84c340af7e.nn`
 - Network license/provenance: unresolved; no standalone license file found in `jhonnold/berserk-networks` during intake. Do not publicly distribute the network/data bundle until that is resolved or confirmed as covered by the engine release.
-- Distribution status: source-archive/manifest tooling exists, but public distribution remains blocked on network license/provenance confirmation.
+- Raw network SHA-256: `9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084` (the upstream filename embeds the first 12 hex digits; `file_packager` stores the network verbatim, so the preload `.data` carries the same digest)
+- **Distribution status: build-from-source only; artifacts intentionally untracked pending network license confirmation.**
+
+Berserk is the one engine family whose generated artifacts are neither committed nor deployed. `public/berserk/*.js`, `*.wasm`, `*.data`, `*.nn`, and the corresponding-source archive (which embeds `berserk-9b84c340af7e.nn`) are removed from the repository and covered by `.gitignore`; `.gitattributes` carries no `public/berserk/` LFS rules. Only `public/berserk/README.md` and the release manifest — provenance records that contain no network bytes — stay tracked.
+
+Berserk remains fully buildable by anyone:
+
+```sh
+npm run berserk:build-emscripten
+npm run berserk:build-simd-emscripten
+npm run berserk:build-relaxed-simd-emscripten
+```
+
+`scripts/build_berserk_emscripten.mjs` downloads the network from the upstream release URL when it is absent and verifies both the full SHA-256 and the hash prefix in the filename, deleting the file and failing the build on any mismatch. `src/lc0/berserkVariants.ts` lists no deployed Berserk paths, so a public deployment resolves every Berserk tier to `missing` without spending probe requests, and the selector/engine errors say "build locally with `npm run berserk:build-emscripten`" instead of looking like a broken deploy.
+
+To re-enable distribution once the network license is confirmed: re-list the shipped paths in `DEPLOYED_BERSERK_PATHS`, drop the `public/berserk/` block from `.gitignore`, restore the LFS rules in `.gitattributes`, and publish the artifacts with a regenerated source archive and manifest.
 
 ### PlentyChess Emscripten
 

@@ -11,9 +11,17 @@ const repo = process.env.BERSERK_REPO ?? 'https://github.com/jhonnold/berserk.gi
 const ref = process.env.BERSERK_REF ?? '8ae895a6151695be4a50d4fb65b0c131659c513a';
 const netName = process.env.BERSERK_NETWORK ?? 'berserk-9b84c340af7e.nn';
 const netUrl = process.env.BERSERK_NET_URL ?? `https://github.com/jhonnold/berserk-networks/releases/download/networks/${netName}`;
+// Berserk's Emscripten `.data` is the raw NNUE packaged verbatim by
+// file_packager, so the full raw-network digest is exactly the documented
+// processed `.data` SHA-256 in docs/engine_artifact_distribution.md. The
+// upstream filename embeds the first 12 hex digits of that same digest.
+const netSha256 = process.env.BERSERK_NET_SHA256 ?? '9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084';
 const patchPath = path.resolve(process.env.BERSERK_PATCH ?? path.join(root, 'patches', 'berserk-emscripten.patch'));
 const jsOut = path.resolve(process.env.BERSERK_EMSCRIPTEN_JS_OUT ?? path.join(root, 'public', 'berserk', 'berserk-emscripten.js'));
 const outBase = path.basename(jsOut, '.js');
+// Every SIMD variant preloads the identical NNUE, so all variants share one
+// canonical `.data` (see src/lc0/berserkVariants.ts BERSERK_EMSCRIPTEN_DATA_URL).
+const sharedDataPath = path.resolve(process.env.BERSERK_SHARED_DATA ?? path.join(path.dirname(jsOut), 'berserk-emscripten.data'));
 const srcDir = path.join(engineDir, 'src');
 const netPath = path.join(netDir, netName);
 const emsdkImage = process.env.BERSERK_EMSDK_IMAGE ?? 'emscripten/emsdk:latest';
@@ -30,11 +38,59 @@ function canRun(command, args = ['--version']) {
   return result.status === 0;
 }
 
-function verifyNetworkName(filePath, expectedName) {
-  const digest = createHash('sha256').update(fs.readFileSync(filePath)).digest('hex').slice(0, 12);
-  const actualName = `berserk-${digest}.nn`;
-  if (actualName !== expectedName) {
-    throw new Error(`Network checksum mismatch: expected ${expectedName}, got ${actualName}`);
+function sha256(filePath) {
+  return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+/**
+ * The Berserk network is NOT redistributed from this repository: its
+ * license/provenance is unresolved (docs/engine_artifact_distribution.md), so
+ * the build fetches it from upstream on demand. Both the full SHA-256 and the
+ * hash prefix embedded in the upstream filename must match, and a bad download
+ * is deleted so a retry cannot reuse it.
+ */
+function fetchAndVerifyNetwork() {
+  if (!fs.existsSync(netPath)) {
+    console.log(`Berserk network ${netName} is not present locally; fetching from ${netUrl}`);
+    run('curl', ['-L', '--fail', '--retry', '3', '-o', netPath, netUrl]);
+  }
+  const digest = sha256(netPath);
+  const actualName = `berserk-${digest.slice(0, 12)}.nn`;
+  const problems = [];
+  if (netSha256 && digest !== netSha256) problems.push(`expected SHA-256 ${netSha256}, got ${digest}`);
+  if (actualName !== netName) problems.push(`expected filename ${netName} for this content, got ${actualName}`);
+  if (problems.length) {
+    fs.rmSync(netPath, { force: true });
+    throw new Error(`Berserk network verification FAILED for ${netUrl}\n  ${problems.join('\n  ')}\nThe unverified download was deleted. Refusing to build against an unknown network.`);
+  }
+  console.log(`Verified Berserk network ${netName} (sha256 ${digest})`);
+}
+
+/**
+ * Emscripten emits one `.data` per variant, but the preloaded NNUE is
+ * byte-identical across SIMD tiers. Publish exactly one copy so browsers and
+ * the CDN never hold duplicates, and fail loudly if a rebuild would have
+ * changed the shared bytes.
+ */
+function publishSharedData(builtDataPath) {
+  const builtDigest = sha256(builtDataPath);
+  if (fs.existsSync(sharedDataPath)) {
+    const sharedDigest = sha256(sharedDataPath);
+    if (sharedDigest !== builtDigest) {
+      throw new Error(
+        `Shared Berserk .data mismatch: ${outBase}.data (sha256 ${builtDigest}) differs from ${sharedDataPath} (sha256 ${sharedDigest}).\n` +
+        'All Berserk variants share one .data URL, so they must preload identical bytes. Rebuild every variant from the same network, or delete the stale shared .data and rebuild.',
+      );
+    }
+    console.log(`Shared ${sharedDataPath} already matches ${outBase}.data (sha256 ${builtDigest})`);
+  } else {
+    fs.copyFileSync(builtDataPath, sharedDataPath);
+    console.log(`Wrote ${sharedDataPath} (${fs.statSync(sharedDataPath).size} bytes, sha256 ${builtDigest})`);
+  }
+  const perVariantData = path.join(path.dirname(jsOut), `${outBase}.data`);
+  if (perVariantData !== sharedDataPath && fs.existsSync(perVariantData)) {
+    fs.rmSync(perVariantData);
+    console.log(`Removed duplicate ${perVariantData}; all variants load ${path.basename(sharedDataPath)}`);
   }
 }
 
@@ -54,10 +110,7 @@ if (!skipGit) {
   throw new Error(`BERSERK_SKIP_GIT=1 requires an unpacked Berserk source tree at ${engineDir}`);
 }
 
-if (!fs.existsSync(netPath)) {
-  run('curl', ['-L', '--fail', '-o', netPath, netUrl]);
-}
-verifyNetworkName(netPath, netName);
+fetchAndVerifyNetwork();
 fs.copyFileSync(netPath, path.join(srcDir, netName));
 
 run('git', ['apply', '--ignore-space-change', '--ignore-whitespace', patchPath], { cwd: engineDir });
@@ -142,10 +195,12 @@ if (process.env.BERSERK_EMCC || canRun('emcc')) {
   run('docker', ['run', '--rm', '-v', `${srcDir}:/src`, '-w', '/src', emsdkImage, 'emcc', ...emccArgs]);
 }
 
-for (const ext of ['js', 'wasm', 'data']) {
+// The .js glue and .wasm stay per-variant; only the preload .data is shared.
+for (const ext of ['js', 'wasm']) {
   const built = path.join(srcDir, `${outBase}.${ext}`);
   const out = path.join(path.dirname(jsOut), `${outBase}.${ext}`);
   fs.copyFileSync(built, out);
   const size = fs.statSync(out).size;
   console.log(`Wrote ${out} (${size} bytes)`);
 }
+publishSharedData(path.join(srcDir, `${outBase}.data`));

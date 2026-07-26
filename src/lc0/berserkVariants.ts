@@ -21,33 +21,54 @@ export interface BerserkVariant {
 
 export const BERSERK_EMSCRIPTEN_JS_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten.js');
 export const BERSERK_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten.wasm');
+/**
+ * Canonical preload `.data` shared by every Berserk SIMD tier.
+ *
+ * Emscripten emits `<variant>.data` per build, but the packaged NNUE is
+ * byte-identical across the scalar/simd128/relaxed builds (verified in
+ * `scripts/build_berserk_emscripten.mjs`, which refuses to publish a variant
+ * whose `.data` diverges). Pointing every variant at one URL means a relaxed ->
+ * simd128 -> scalar fallback reuses the ~24 MB download already in the HTTP
+ * cache instead of refetching it. Emscripten resolves the package through
+ * `Module.locateFile`, so the name baked into each glue file is irrelevant.
+ */
 export const BERSERK_EMSCRIPTEN_DATA_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten.data');
 export const BERSERK_EMSCRIPTEN_SIMD_JS_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-simd128.js');
 export const BERSERK_EMSCRIPTEN_SIMD_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-simd128.wasm');
-export const BERSERK_EMSCRIPTEN_SIMD_DATA_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-simd128.data');
 export const BERSERK_EMSCRIPTEN_RELAXED_JS_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-relaxed-simd128.js');
 export const BERSERK_EMSCRIPTEN_RELAXED_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-relaxed-simd128.wasm');
-export const BERSERK_EMSCRIPTEN_RELAXED_DATA_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-relaxed-simd128.data');
 export const BERSERK_DEFAULT_WASM_URL = resolvePublicAssetUrl('/berserk/berserk.wasm');
 export const BERSERK_SIMD_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-simd128.wasm');
 export const BERSERK_MAIN_NETWORK = 'berserk-9b84c340af7e.nn';
 export const BERSERK_DEFAULT_NNUE_URL = resolvePublicAssetUrl(`/berserk/${BERSERK_MAIN_NETWORK}`);
 export const BERSERK_SOURCE_NETWORK_URL = `https://github.com/jhonnold/berserk-networks/releases/download/networks/${BERSERK_MAIN_NETWORK}`;
 
+/**
+ * User-facing explanation for an absent Berserk artifact.
+ *
+ * Berserk is the one engine family whose generated artifacts are deliberately
+ * NOT committed or deployed: the upstream NNUE in `jhonnold/berserk-networks`
+ * has no resolved license/provenance, so this repository must not redistribute
+ * it (see `docs/engine_artifact_distribution.md`). Every other engine ships its
+ * binaries. A missing Berserk asset is therefore expected, not a broken deploy,
+ * and the UI/engine errors should say so.
+ */
+export const BERSERK_ARTIFACT_BUILD_HINT = 'Berserk artifacts are not distributed with this site (upstream NNUE license/provenance is unresolved) — build locally with `npm run berserk:build-emscripten`.';
+
 const assetStatuses = new Map<string, BerserkAssetStatus>();
 const assetChecks = new Map<string, Promise<BerserkAssetStatus>>();
 
-const DEPLOYED_BERSERK_PATHS = new Set([
-  '/berserk/berserk-emscripten.js',
-  '/berserk/berserk-emscripten.wasm',
-  '/berserk/berserk-emscripten.data',
-  '/berserk/berserk-emscripten-simd128.js',
-  '/berserk/berserk-emscripten-simd128.wasm',
-  '/berserk/berserk-emscripten-simd128.data',
-  '/berserk/berserk-emscripten-relaxed-simd128.js',
-  '/berserk/berserk-emscripten-relaxed-simd128.wasm',
-  '/berserk/berserk-emscripten-relaxed-simd128.data',
-]);
+/**
+ * Berserk artifact paths that a public deployment actually serves: none.
+ *
+ * Kept as an explicit empty set (rather than deleting the probe) so that a
+ * future release which clears the network license can re-list the shipped
+ * paths here and get probing back with no other changes. While it is empty,
+ * `shouldSkipKnownUnshippedProbe` short-circuits every `/berserk/` probe on a
+ * non-local origin: the status resolves to `missing` immediately, without
+ * spending HEAD requests on files we know are absent.
+ */
+const DEPLOYED_BERSERK_PATHS = new Set<string>([]);
 
 function isLocalDevelopmentOrigin(): boolean {
   if (typeof location === 'undefined') return true;
@@ -104,7 +125,7 @@ export const BERSERK_EMSCRIPTEN_VARIANT: BerserkVariant = {
   wasmUrl: BERSERK_EMSCRIPTEN_WASM_URL,
   dataUrl: BERSERK_EMSCRIPTEN_DATA_URL,
   sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
-  note: 'Smoked Berserk tag 14 single-thread Emscripten worker build with tablebases disabled and NNUE preloaded in .data.',
+  note: `Smoked Berserk tag 14 single-thread Emscripten worker build with tablebases disabled and NNUE preloaded in .data. ${BERSERK_ARTIFACT_BUILD_HINT}`,
 };
 
 export const BERSERK_EMSCRIPTEN_SIMD_VARIANT: BerserkVariant = {
@@ -112,9 +133,9 @@ export const BERSERK_EMSCRIPTEN_SIMD_VARIANT: BerserkVariant = {
   label: 'Berserk SIMD',
   jsUrl: BERSERK_EMSCRIPTEN_SIMD_JS_URL,
   wasmUrl: BERSERK_EMSCRIPTEN_SIMD_WASM_URL,
-  dataUrl: BERSERK_EMSCRIPTEN_SIMD_DATA_URL,
+  dataUrl: BERSERK_EMSCRIPTEN_DATA_URL,
   sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
-  note: 'Berserk tag 14 Emscripten build compiling the engine SSE4.1 NNUE path via -msse4.1 -msimd128 intrinsic emulation. 40/40 fixed-depth parity with scalar; ~3.8x scalar NPS in Node.',
+  note: `Berserk tag 14 Emscripten build compiling the engine SSE4.1 NNUE path via -msse4.1 -msimd128 intrinsic emulation. 40/40 fixed-depth parity with scalar; ~3.8x scalar NPS in Node. ${BERSERK_ARTIFACT_BUILD_HINT}`,
 };
 
 export const BERSERK_EMSCRIPTEN_RELAXED_VARIANT: BerserkVariant = {
@@ -122,9 +143,9 @@ export const BERSERK_EMSCRIPTEN_RELAXED_VARIANT: BerserkVariant = {
   label: 'Berserk Relaxed SIMD',
   jsUrl: BERSERK_EMSCRIPTEN_RELAXED_JS_URL,
   wasmUrl: BERSERK_EMSCRIPTEN_RELAXED_WASM_URL,
-  dataUrl: BERSERK_EMSCRIPTEN_RELAXED_DATA_URL,
+  dataUrl: BERSERK_EMSCRIPTEN_DATA_URL,
   sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
-  note: 'SIMD Emscripten build whose m128 dpbusd helpers use the relaxed integer dot (exact: InputCReLU8 activations are in 0..127). Requires WebAssembly Relaxed SIMD.',
+  note: `SIMD Emscripten build whose m128 dpbusd helpers use the relaxed integer dot (exact: InputCReLU8 activations are in 0..127). Requires WebAssembly Relaxed SIMD. ${BERSERK_ARTIFACT_BUILD_HINT}`,
 };
 
 export const BERSERK_DEFAULT_VARIANT: BerserkVariant = {
@@ -220,15 +241,38 @@ export function berserkVariantFromParams(params: URLSearchParams): BerserkVarian
   };
 }
 
+/**
+ * Every Berserk tier — including the scalar base — can legitimately be absent,
+ * because the artifacts are intentionally untracked (see
+ * `BERSERK_ARTIFACT_BUILD_HINT`). The base build stays the terminal fallback
+ * since there is no lower tier, but it is probed too so callers report a
+ * settled `missing` instead of an indefinite `unknown`; the load error carries
+ * the build-locally hint.
+ */
 export async function resolveDefaultBerserkVariantAssetFallback(variant: BerserkVariant, explicit: boolean, onChange?: () => void): Promise<BerserkVariant> {
   if (explicit) return variant;
-  if (variant.key !== 'simd' && variant.key !== 'emscripten-relaxed' && variant.key !== 'emscripten-simd') return variant;
+  if (variant.key !== 'simd' && variant.key !== 'emscripten-relaxed' && variant.key !== 'emscripten-simd') {
+    if (variant.key === 'emscripten') await checkBerserkVariantAsset(variant, onChange);
+    return variant;
+  }
   const status = await checkBerserkVariantAsset(variant, onChange);
   if (status !== 'missing') return variant;
   if (variant.key === 'emscripten-relaxed' && supportsBerserkWasmSimd()) {
     return resolveDefaultBerserkVariantAssetFallback(BERSERK_EMSCRIPTEN_SIMD_VARIANT, false, onChange);
   }
+  await checkBerserkVariantAsset(BERSERK_EMSCRIPTEN_VARIANT, onChange);
   return BERSERK_EMSCRIPTEN_VARIANT;
+}
+
+/**
+ * Human-readable status line for a Berserk variant, suitable for a diagnostics
+ * panel. A `missing` artifact is a documented state, not a deploy failure.
+ */
+export function berserkVariantAssetNote(variant: BerserkVariant): string {
+  const status = berserkVariantAssetStatus(variant);
+  if (status === 'missing') return BERSERK_ARTIFACT_BUILD_HINT;
+  if (status === 'present') return 'Berserk artifacts found on this origin.';
+  return 'Checking for locally built Berserk artifacts…';
 }
 
 export function berserkVariantAssetStatus(variant: BerserkVariant): BerserkAssetStatus {

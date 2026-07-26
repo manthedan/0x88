@@ -1,6 +1,7 @@
 import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
 import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
 import { isTrustedExecutableAssetUrl, resolvePublicAssetUrl } from './assetUrls.ts';
+import { BERSERK_ARTIFACT_BUILD_HINT } from './berserkVariants.ts';
 
 export interface BerserkOptions {
   /** Fixed search depth. */
@@ -37,10 +38,20 @@ function abortError(message = 'Berserk search aborted'): Error {
 }
 
 function workerScript(): string {
+  // Berserk artifacts are intentionally not distributed with the site, so a
+  // 404 here is an expected state rather than a broken deploy. Carry the
+  // build-locally hint into the worker so the failure explains itself instead
+  // of surfacing a bare "NetworkError importing script".
   return String.raw`
+const MISSING_ARTIFACT_HINT = ` + JSON.stringify(BERSERK_ARTIFACT_BUILD_HINT) + String.raw`;
+function artifactLoadError(error, urls) {
+  const detail = error && error.message ? error.message : String(error);
+  return new Error('Berserk artifacts failed to load (' + urls.filter(Boolean).join(', ') + '): ' + detail + ' — ' + MISSING_ARTIFACT_HINT);
+}
 let factory = null;
 let modulePromise = null;
 let engine = null;
+let artifactUrls = [];
 function postError(id, error) {
   self.postMessage({ type: 'error', id, message: error && error.message ? error.message : String(error) });
 }
@@ -69,7 +80,12 @@ async function init(id, jsUrl, wasmUrl, dataUrl, trustedJsUrl) {
     const resolvedJsUrl = resolveUrl(jsUrl);
     const resolvedWasmUrl = wasmUrl ? resolveUrl(wasmUrl) : null;
     const resolvedDataUrl = dataUrl ? resolveUrl(dataUrl) : null;
-    await importEmscriptenGlue(resolvedJsUrl, trustedJsUrl);
+    artifactUrls = [resolvedJsUrl, resolvedWasmUrl, resolvedDataUrl];
+    try {
+      await importEmscriptenGlue(resolvedJsUrl, trustedJsUrl);
+    } catch (error) {
+      throw artifactLoadError(error, [resolvedJsUrl]);
+    }
     factory = self.Berserk || (typeof Berserk !== 'undefined' ? Berserk : null);
     if (!factory) throw new Error('Berserk Emscripten factory was not found after importScripts()');
     modulePromise = factory({
@@ -85,7 +101,11 @@ async function init(id, jsUrl, wasmUrl, dataUrl, trustedJsUrl) {
       return mod;
     });
   }
-  await modulePromise;
+  try {
+    await modulePromise;
+  } catch (error) {
+    throw artifactLoadError(error, artifactUrls);
+  }
   self.postMessage({ type: 'ready', id });
 }
 self.onmessage = (event) => {
