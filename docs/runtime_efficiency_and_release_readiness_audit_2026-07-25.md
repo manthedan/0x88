@@ -326,15 +326,54 @@ Resolved: the generated Berserk artifacts are removed from the repository and
 fetched from upstream at build time. Berserk remains fully buildable; it is no
 longer redistributed by this project.
 
-### 2.3 Git history carries 436 MB of dead blobs
+### 2.3 Clone size — smaller problem than it first looked
 
-`.git/objects` is 278 MB before LFS, with a further 750 MB in `.git/lfs`.
-Blobs over 20 MB in history total 436 MB, including two **107 MB** Stockfish
-wasm files added in `8b82ee8` and removed in `5a39ddf` — permanently present in
-every clone despite being absent from the current tree.
+**This section corrects an earlier draft of this audit.** The first pass claimed
+436 MB of dead blobs in history, including two 107 MB Stockfish wasm files
+(added in `8b82ee8`, removed in `5a39ddf`), and recommended a history rewrite.
 
-See `git_history_rewrite_plan_2026-07-25.md` for the inventory, the rewrite, and
-the consequences (every commit hash changes; existing clones must be re-cloned).
+That was wrong. Both of those commits live entirely on the unmerged branch
+`stockfish-relaxed-full-threaded-variants` — verified with
+`git merge-base --is-ancestor 8b82ee8 main` → false. A contributor cloning
+`main` never downloads them.
+
+Measured clone cost:
+
+| Clone shape | Before rewrite | After rewrite | Saved |
+| --- | ---: | ---: | ---: |
+| all refs | 277.9 MB | 197.3 MB | 80.6 MB (29%) |
+| `main` only | 198.8 MB | 197.3 MB | **1.5 MB (0.7%)** |
+
+The 80 MB is obtained by simply **not publishing that branch** — no rewrite, no
+hash churn. A rewrite buys 1.5 MB on a `main`-only publish while invalidating
+all 1029 commit hashes.
+
+Two further corrections to the original inventory: the
+`public/ort-experimental/*.asyncify.wasm` files and the four
+`public/reckless/*corresponding-source*.tar.gz` archives are **live in the
+current tree**, not dead history. The `docs/` benchmark JSONs are 13.1 MB
+logical but only 0.4 MB packed.
+
+What actually dominates a published clone is the four Reckless
+corresponding-source archives: **178 MB packed, roughly 90% of the pack.** They
+are GPL/AGPL-load-bearing and referenced by `reckless-wasip1.manifest.json`,
+`package.json`, `public/_headers`, and `NOTICE.md`. Removing them is a
+licensing decision, not a cleanup. (Note the inconsistency: `.gitignore:37`
+claims these are not committed, but all four are.)
+
+The cheap wins are therefore:
+
+1. publish `main` only and do not publish
+   `stockfish-relaxed-full-threaded-variants` (−80 MB, zero risk);
+2. document `GIT_LFS_SKIP_SMUDGE=1` in the README — LFS is 528 MB live at
+   `main`, dwarfing the pack, and skipping the smudge drops a clone to ~197 MB;
+3. `git lfs prune` reclaims 151 MB locally (mostly four superseded 37 MB
+   Stormphrax source tarballs); no rewrite required.
+
+The full inventory, the verified rewrite, and the consequences of applying it
+are in [`git_history_rewrite_plan_2026-07-25.md`](git_history_rewrite_plan_2026-07-25.md).
+The rewrite is proven to work — the `main` tree hash is byte-identical before
+and after (`9f763b1b…`) — and is kept in reserve rather than applied.
 
 ### 2.4 A fresh clone is not a working app
 
@@ -358,7 +397,9 @@ onboarding path, and explain the licensing and clone-size situation.
 1. LICENSE (GPL-3.0-or-later) — done.
 2. Berserk artifact removal — done.
 3. README rewrite — done.
-4. Git history rewrite — planned, requires sign-off (hash-changing, irreversible).
+4. Clone size — publish `main` only, document `GIT_LFS_SKIP_SMUDGE=1`, and run
+   `git lfs prune`. The history rewrite is **not** recommended (see 2.3); it is
+   verified and held in reserve should the Reckless source archives ever move.
 
 **Runtime, by payoff over effort**
 
