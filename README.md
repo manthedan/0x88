@@ -159,9 +159,9 @@ including the parts where that audit's own claims turned out to be wrong.
 The short version: every CPU engine except Stockfish is single-threaded — and
 [we measured that fixing it buys no playing strength](docs/threaded_emscripten_smp_prototype_2026-07-25.md),
 so it is closed rather than open. The remaining headroom is in delivery and
-startup, not search throughput. The move generator is also a plain string
-mailbox rather than the 0x88 board the project is named after; that is worth
-fixing for the obvious reason, but not for speed.
+startup, not search throughput. The move generator still clones the board per
+move rather than using make/unmake — worth doing, but measure first: it is
+currently under 1% of search time.
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 

@@ -385,44 +385,54 @@ quality level, computed once) and faster to serve. This is precisely the
 2026-07-14 audit, and the `deploy:r2-brotli-assets` tooling already exists — it
 is the deployed path that has not adopted it.
 
-### 1.8 The move generator is not a 0x88 move generator
+### 1.8 Move generator: allocation in the scan loops
 
-**Severity: low for throughput. High for credibility. Status: OPEN — deliberately.**
+**Severity: low. Status: PARTIALLY FIXED — measured, +16%.**
 
-`src/chess/movegen.ts` backs a project named **0x88** with:
+> An earlier draft of this section was titled "The move generator is not a 0x88
+> move generator" and rated the credibility of the repository name as **high**
+> severity, recommending either a rewrite or renaming the project. That was a
+> branding opinion in a runtime-efficiency audit, and it argued for changing
+> correctness-critical code on a benefit this same document said was zero. A
+> project name is not a specification of its internals. The reasoning is
+> withdrawn; what follows is what the measurements actually support.
 
-- a 64-entry array of two-character JavaScript strings (`'wk'`, `'bp'`) as the
-  board representation;
-- `makeMove` (line 147) cloning the entire board object per move;
-- `legalMoves` (line 138) implemented as
-  `pseudoLegalMoves().filter(m => !inCheck(makeMove(board, m)))` — a full board
-  clone, a `findIndex` king scan over 64 squares, and a full attack scan **per
-  pseudo-legal move**, with no pin detection and no make/unmake;
-- template-literal string allocation inside the inner loops of
-  `isSquareAttacked` (lines 98, 102, 122 — `` `${by}n` ``, `` `${by}k` ``), i.e.
-  a string allocation per square probed;
-- `fileOf`/`rankOf` using `%` and `Math.floor` rather than `& 7` and `>> 3`.
+`src/chess/movegen.ts` is a 64-entry mailbox of two-character strings. The
+representation is not the problem. The problem was allocation inside loops that
+run on every legality test:
 
-Measured with the project's own harness (`npm run bench:movegen`):
-**130,464 legal move generations/second** from the start position.
+- `isSquareAttacked` built its comparison strings inline (`` `${by}n` ``) — one
+  allocation per square probed, and it probes on every pseudo-legal move;
+- `kingSquare` built `` `${color}k` `` per call and scanned with `findIndex`;
+- queen generation rebuilt `[...BISHOP, ...ROOK]` — an eight-entry array of
+  arrays — for every queen, on every call;
+- `KNIGHT.forEach(([df, dr]) => …)` allocated a closure and destructured per
+  direction;
+- `fileOf`/`rankOf` used `%` and `Math.floor` rather than `& 7` and `>> 3`.
 
-**Be honest about the impact.** This is *not* currently a bottleneck. The neural
-lane is GPU-bound at roughly 14 ms per batch-8 invoke (~1.75 ms/position)
-against roughly 8 µs for a `legalMoves` call — movegen is well under 1% of
-search time. A rewrite should not be sold as a throughput win.
+All of these were hoisted or replaced. No behaviour change, verified by the
+existing perft gate (startpos depth 5 = 4,865,609 nodes; kiwipete depth 4 =
+4,085,603).
 
-It matters for two other reasons:
+| | positions/sec |
+| --- | ---: |
+| before | 146,226 |
+| after | 169,638 |
+| | **+16%** |
 
-1. It is the first file a chess programmer will open, given the repository name.
-   A project called 0x88 whose board is a string array will be the first thing
-   the community comments on.
-2. It sets the floor for the low-visit and fast-backend cases that the
-   2026-07-14 audit's item 3 ("search-native inference context") targets. If
-   that work lands and CPU preparation becomes a larger fraction of latency,
-   this becomes real.
+**This still does not matter much, and that is the point.** The neural lane is
+GPU-bound at roughly 1.75 ms/position against ~6 µs for a `legalMoves` call, so
+movegen remains well under 1% of search time. These changes were worth making
+because they are mechanical, risk-free under perft, and remove garbage from a
+hot loop — not because they move the product.
 
-Recommendation: either rename the project, or make the representation match the
-name. Do not do it for the FLOPs.
+**What is deliberately NOT done:** `legalMoves` still filters pseudo-legal moves
+by cloning the whole board per move (`makeMove` → `cloneBoard`) and rescanning.
+Make/unmake with incremental king tracking and pin detection is the real
+structural win, and it is also where legality bugs come from. It stays open
+until something measures it as worth the risk — most likely the 2026-07-14
+audit's item 3, which would make CPU preparation a larger fraction of latency on
+fast backends.
 
 ## Part 2 — Release readiness
 

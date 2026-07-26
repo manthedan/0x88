@@ -64,9 +64,10 @@ Two things people usually miss:
    from an unpinned `git clone`.
 2. **Licensing is a gate, not paperwork.** If you add a GPL or AGPL engine, it
    ships with a corresponding-source archive and a release manifest, or it does
-   not ship. If a *network's* provenance is unclear, the artifact does not get
-   committed — Berserk is the worked example of exactly this
-   (see [`NOTICE.md`](NOTICE.md) and
+   not ship. Networks need the same care as engines, and the absence of a
+   `LICENSE` file in a networks repo is a prompt to investigate rather than a
+   verdict — check how the engine's own build consumes the net. Berserk is the
+   worked example (see [`NOTICE.md`](NOTICE.md) and the Berserk card in
    [`docs/engine_artifact_distribution.md`](docs/engine_artifact_distribution.md)).
 
 ## Working style
@@ -87,11 +88,13 @@ The known gaps are listed honestly in
 [`docs/runtime_efficiency_and_release_readiness_audit_2026-07-25.md`](docs/runtime_efficiency_and_release_readiness_audit_2026-07-25.md).
 The most approachable:
 
-- **A real 0x88 or bitboard move generator.** `src/chess/movegen.ts` is a
-  string-array mailbox that clones the board per move. It is not currently the
-  bottleneck — be honest about that in your PR — but it is the wrong data
-  structure for a project with this name, and `npm run bench:movegen` gives you
-  an immediate scoreboard (130k legal movegen/s from startpos today).
+- **Make/unmake in the move generator.** `legalMoves` in `src/chess/movegen.ts`
+  filters pseudo-legal moves by cloning the whole board per move and rescanning
+  for check. Make/unmake with incremental king tracking and pin detection would
+  remove that. Two things to know before starting: it is **not** currently a
+  bottleneck (the neural lane is GPU-bound, movegen is under 1% of search time),
+  and it is correctness-critical — `npm run bench:movegen` scores you, and the
+  perft gate in `tests/perft_parity.test.mjs` is non-negotiable.
 - **NNUE buffer alignment** in `patches/stormphrax-emscripten.patch`. The net is
   read into a plain `std::vector<std::byte>` and satisfies the loader's 16-byte
   requirement only by luck of what dlmalloc returns; a different allocator
