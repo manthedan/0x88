@@ -5,7 +5,7 @@ index b8d20db..908cc82 100644
 @@ -52,6 +52,14 @@
  #define __ENDIAN_DEFINED        1
  #endif /* sun */
-
+ 
 +/* WebAssembly */
 +#if defined(__EMSCRIPTEN__)
 +#define _LITTLE_ENDIAN          1234
@@ -22,9 +22,9 @@ index 9e80c0c..35e657f 100644
 --- a/src/arch.h
 +++ b/src/arch.h
 @@ -22,7 +22,19 @@
-
+ 
  #include <new>
-
+ 
 -#if defined(SP_NATIVE)
 +#if defined(SP_WASM_SIMD)
 +    #define SP_HAS_WASM_SIMD 1
@@ -75,7 +75,7 @@ index 9e80c0c..35e657f 100644
      #define SP_HAS_VNNI512 0
      #define SP_HAS_VBMI2 0
 diff --git a/src/eval/nnue.cpp b/src/eval/nnue.cpp
-index f815c50..7fd8d61 100644
+index f815c50..5bdacd7 100644
 --- a/src/eval/nnue.cpp
 +++ b/src/eval/nnue.cpp
 @@ -21,8 +21,10 @@
@@ -86,13 +86,13 @@ index f815c50..7fd8d61 100644
  #include <memory>
  #include <string_view>
 +#include <vector>
-
+ 
  #include "../../3rdparty/zstd/zstd.h"
-
-@@ -34,23 +36,53 @@
+ 
+@@ -34,23 +36,70 @@
  #include "nnue/features/threats/geometry.h"
  #include "nnue/loader.h"
-
+ 
 -#ifdef _MSC_VER
 -    #define SP_MSVC
 -    #pragma push_macro("_MSC_VER")
@@ -104,12 +104,12 @@ index f815c50..7fd8d61 100644
 +        #pragma push_macro("_MSC_VER")
 +        #undef _MSC_VER
 +    #endif
-
+ 
 -#define INCBIN_PREFIX g_
 -#include "../../3rdparty/incbin.h"
 +    #define INCBIN_PREFIX g_
 +    #include "../../3rdparty/incbin.h"
-
+ 
 -#ifdef SP_MSVC
 -    #pragma pop_macro("_MSC_VER")
 -    #undef SP_MSVC
@@ -118,13 +118,13 @@ index f815c50..7fd8d61 100644
 +        #pragma pop_macro("_MSC_VER")
 +        #undef SP_MSVC
 +    #endif
-
+ 
  namespace {
      INCBIN(std::byte, defaultNet, SP_NETWORK_FILE);
  } // namespace
 +#else
 +namespace {
-+    std::vector<std::byte> g_defaultNetStorage{};
++    std::byte* g_defaultNetStorage{};
 +    const std::byte* g_defaultNetData{};
 +    unsigned int g_defaultNetSize{};
 +
@@ -139,24 +139,41 @@ index f815c50..7fd8d61 100644
 +            stormphrax::eprintln("Invalid network file size {}", static_cast<long long>(size));
 +            return false;
 +        }
-+        g_defaultNetStorage.resize(static_cast<std::size_t>(size));
-+        stream.seekg(0, std::ios::beg);
-+        if (!stream.read(reinterpret_cast<char*>(g_defaultNetStorage.data()), static_cast<std::streamsize>(size))) {
-+            stormphrax::eprintln("Unable to read network file {}", SP_NETWORK_FILE);
++        // NetworkLoader::get() rejects any pointer that is not
++        // stormphrax::util::simd::kAlignment-aligned (16 B on the wasm SIMD path).
++        // INCBIN path this replaces was aligned by the assembler; a plain
++        // std::vector<std::byte> guarantees only alignof(std::byte) == 1 and
++        // merely happened to satisfy the check under dlmalloc, failing under
++        // dlmalloc-mt with "NetworkLoader: Unaligned pointer". Allocate exactly
++        // the way the user-supplied-network path below already does.
++        // aligned_alloc requires a size that is a multiple of the alignment,
++        // so round up; the few slack bytes are never read.
++        const auto bytes = static_cast<stormphrax::usize>(size);
++        const auto padded = (bytes + stormphrax::util::simd::kAlignment - 1) & ~(stormphrax::util::simd::kAlignment - 1);
++        g_defaultNetStorage = stormphrax::util::alignedAlloc<std::byte>(stormphrax::util::simd::kAlignment, padded);
++        if (!g_defaultNetStorage) {
++            stormphrax::eprintln("Failed to allocate {} bytes for network file {}", padded, SP_NETWORK_FILE);
 +            return false;
 +        }
-+        g_defaultNetData = g_defaultNetStorage.data();
-+        g_defaultNetSize = static_cast<unsigned int>(g_defaultNetStorage.size());
++        stream.seekg(0, std::ios::beg);
++        if (!stream.read(reinterpret_cast<char*>(g_defaultNetStorage), static_cast<std::streamsize>(size))) {
++            stormphrax::eprintln("Unable to read network file {}", SP_NETWORK_FILE);
++            stormphrax::util::alignedFree(g_defaultNetStorage);
++            g_defaultNetStorage = nullptr;
++            return false;
++        }
++        g_defaultNetData = g_defaultNetStorage;
++        g_defaultNetSize = static_cast<unsigned int>(bytes);
 +        return true;
 +    }
 +} // namespace
 +#endif
-
+ 
  namespace stormphrax::eval {
      namespace {
-@@ -198,6 +230,9 @@ namespace stormphrax::eval {
+@@ -198,6 +247,9 @@ namespace stormphrax::eval {
      } // namespace
-
+ 
      void init() {
 +#ifdef __EMSCRIPTEN__
 +        if (!loadBrowserNetwork()) return;
@@ -171,7 +188,7 @@ index a8e8368..32fff49 100644
 @@ -141,7 +141,9 @@ namespace stormphrax::eval::nnue::features::threats::geometry {
      }();
  } // namespace stormphrax::eval::nnue::features::threats::geometry
-
+ 
 -#if SP_HAS_VBMI
 +#if SP_HAS_WASM_SIMD
 +    #include "geometry_wasm.h"
@@ -299,13 +316,13 @@ index cd6c32e..b94b22c 100644
 --- a/src/main.cpp
 +++ b/src/main.cpp
 @@ -124,7 +124,9 @@ i32 main(i32 argc, const char* argv[]) {
-
+ 
      const auto exitCode = run(args);
-
+ 
 +#ifndef __EMSCRIPTEN__
      eval::shutdown();
 +#endif
-
+ 
      return exitCode;
  }
 diff --git a/src/search.cpp b/src/search.cpp
@@ -333,29 +350,29 @@ index 94ebce1..c555ea3 100644
 +#endif
          m_rootMoves.reserve(kDefaultMoveListCapacity);
      }
-
+ 
 @@ -105,7 +118,9 @@ namespace stormphrax::search {
              );
          }
-
+ 
 +#ifndef SP_SYNC_SEARCH
          m_resetBarrier.arriveAndWait();
 +#endif
-
+ 
          m_infinite = infinite;
          m_probeWdl = !g_opts.syzygyProbeRootOnly;
 @@ -164,12 +179,20 @@ namespace stormphrax::search {
          m_startTime = startTime;
-
+ 
          m_stop.store(false, std::memory_order::seq_cst);
 +#ifdef SP_SYNC_SEARCH
 +        m_runningThreads.store(1);
 +#else
          m_runningThreads.store(static_cast<i32>(m_threads.size()));
 +#endif
-
+ 
          m_searching.store(true, std::memory_order::relaxed);
-
+ 
 +#ifdef SP_SYNC_SEARCH
 +        searchRoot(*m_threadData[0], true);
 +#else
@@ -363,11 +380,11 @@ index 94ebce1..c555ea3 100644
          m_setupBarrier.arriveAndWait();
 +#endif
      }
-
+ 
      void Searcher::stop() {
 @@ -267,6 +290,10 @@ namespace stormphrax::search {
      }
-
+ 
      void Searcher::setThreads(u32 threadCount) {
 +#ifdef SP_SYNC_SEARCH
 +        SP_UNUSED(threadCount);
@@ -378,14 +395,14 @@ index 94ebce1..c555ea3 100644
          }
 @@ -296,6 +323,7 @@ namespace stormphrax::search {
          }
-
+ 
          m_initBarrier.arriveAndWait();
 +#endif
      }
-
+ 
      void Searcher::populateDefaultRootMoves(const Position& pos) {
 @@ -357,13 +385,16 @@ namespace stormphrax::search {
-
+ 
      void Searcher::stopThreads() {
          m_quit.store(true, std::memory_order::release);
 -
@@ -394,13 +411,13 @@ index 94ebce1..c555ea3 100644
 +#else
          m_resetBarrier.arriveAndWait();
          m_idleBarrier.arriveAndWait();
-
+ 
          for (auto& thread : m_threads) {
              thread.join();
          }
 +#endif
      }
-
+ 
      void Searcher::run(u32 threadId) {
 diff --git a/src/ttable.cpp b/src/ttable.cpp
 index d6fee40..af91954 100644
@@ -409,13 +426,13 @@ index d6fee40..af91954 100644
 @@ -221,6 +221,10 @@ namespace stormphrax {
      void TTable::clear() {
          assert(!m_pendingInit);
-
+ 
 +#ifdef SP_SYNC_SEARCH
 +        std::memset(m_clusters, 0, m_clusterCount * sizeof(Cluster));
 +        m_age = 0;
 +#else
          const auto threadCount = g_opts.threads;
-
+ 
          std::vector<std::thread> threads{};
 @@ -244,6 +248,7 @@ namespace stormphrax {
          for (auto& thread : threads) {
@@ -423,7 +440,7 @@ index d6fee40..af91954 100644
          }
 +#endif
      }
-
+ 
      u32 TTable::full() const {
 diff --git a/src/uci/uci.cpp b/src/uci/uci.cpp
 index e733336..d8a9b75 100644
@@ -436,20 +453,20 @@ index e733336..d8a9b75 100644
 +#include <memory>
  #include <string>
  #include <vector>
-
+ 
 @@ -81,6 +82,8 @@ namespace stormphrax {
              ~UciHandler();
-
+ 
              i32 run(std::span<const std::string_view> commands);
 +            void command(std::string_view line);
 +            [[nodiscard]] bool searching() const { return m_searcher.searching(); }
-
+ 
          private:
              void handleCommand(std::span<std::string_view> tokens, Instant startTime);
 @@ -211,26 +214,18 @@ namespace stormphrax {
              tb::free();
          }
-
+ 
 -        i32 UciHandler::run(std::span<const std::string_view> commands) {
 +        void UciHandler::command(std::string_view line) {
 +            const auto startTime = Instant::now();
@@ -457,7 +474,7 @@ index e733336..d8a9b75 100644
 +            split::split(tokens, line, ' ');
 +            handleCommand(tokens, startTime);
 +        }
-
+ 
 -            const auto handleLine = [&](std::string_view line) {
 -                const auto startTime = Instant::now();
 -
@@ -482,11 +499,11 @@ index e733336..d8a9b75 100644
 +#endif
              return 0;
          }
-
+ 
 @@ -1050,10 +1045,33 @@ namespace stormphrax {
      } // namespace tunable
  #endif
-
+ 
 +#ifdef __EMSCRIPTEN__
 +    std::unique_ptr<UciHandler> s_browserHandler{};
 +#endif
@@ -515,7 +532,7 @@ index e733336..d8a9b75 100644
              return handler.run(commands);
 +#endif
          }
-
+ 
  #if SP_EXTERNAL_TUNE
 diff --git a/src/util/simd.h b/src/util/simd.h
 index b210718..161e3d8 100644
@@ -524,7 +541,7 @@ index b210718..161e3d8 100644
 @@ -26,7 +26,9 @@
  #include "align.h"
  #include "aligned_array.h"
-
+ 
 -#if SP_HAS_AVX512
 +#if SP_HAS_WASM_SIMD
 +    #include "simd/wasm128.h"
@@ -534,7 +551,7 @@ index b210718..161e3d8 100644
      #include "simd/avx2.h"
 diff --git a/src/util/simd/wasm128.h b/src/util/simd/wasm128.h
 new file mode 100644
-index 0000000..0b1a9ab
+index 0000000..1c3ce5b
 --- /dev/null
 +++ b/src/util/simd/wasm128.h
 @@ -0,0 +1,159 @@

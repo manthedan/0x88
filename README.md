@@ -104,8 +104,10 @@ git lfs pull --include="public/models/bt4_soap_rem_c19000_final.onnx"
 | `docs/` | architecture, porting notes, audits, benchmark records |
 | `lab/` | smoke, probe, and benchmark pages |
 
-Note: the separate `lc0-webgpu-pivot` branch holds older WebGPU research and
-should only be changed with explicit approval.
+The WebGPU research lane lives in `docs/` (see
+[`lc0web_custom_inference_checkpoint.md`](docs/lc0web_custom_inference_checkpoint.md)
+and [`lc0_tvmjs_research_runbook.md`](docs/lc0_tvmjs_research_runbook.md)), not
+on a separate branch. `main` is the only branch you need.
 
 ## Adding an engine
 
