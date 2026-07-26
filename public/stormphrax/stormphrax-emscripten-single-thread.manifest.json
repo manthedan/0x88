@@ -112,11 +112,11 @@
     }
   ],
   "totals": {
-    "bytes": 113365755,
-    "gzipBytes": 72326054,
-    "brotliBytes": 68297527,
-    "gzipRatio": 0.638,
-    "brotliRatio": 0.6025
+    "bytes": 57450907,
+    "gzipBytes": 36445636,
+    "brotliBytes": 34367819,
+    "gzipRatio": 0.6344,
+    "brotliRatio": 0.5982
   },
   "sourceArchive": {
     "required": true,
