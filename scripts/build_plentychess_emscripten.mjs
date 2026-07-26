@@ -197,6 +197,14 @@ if (process.env.PLENTYCHESS_EMXX || canRun('em++')) {
   run('docker', ['run', '--rm', '-v', `${engineDir}:/src`, '-w', '/src', emsdkImage, 'em++', ...emccArgs]);
 }
 
+// Recovery model for an interrupted build is re-running it, not atomicity.
+// A crash between publishing the canonical .data and copying the glue/wasm can
+// leave a mixed set, but every path here is regenerated from the pinned
+// upstream source on the next run, publishSharedData re-verifies the canonical
+// bytes and fails loudly on divergence, and nothing deploys straight from this
+// directory without the release gate. Staging all three outputs behind a
+// temp-and-rename commit was considered and rejected as machinery that buys
+// less than it costs in a developer-only build script.
 // Validate and publish the shared preload FIRST. publishSharedData throws when
 // a rebuilt variant's .data diverges from the canonical one, and if the glue and
 // wasm were already in place by then the public tree would be left holding new

@@ -1,5 +1,5 @@
 import * as ort from '../nn/ortRuntime.ts';
-import { createOrtSession, releaseOrtSession, describeOrtBackendConfig, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
+import { createOrtSession, releaseOrtSession, describeOrtBackendConfig, ortRuntimeArtifactKindIsLocked, setOrtRuntimeArtifactKindForCurrentThread, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
 
 type InitMessage = {
   type: 'init';
@@ -57,6 +57,13 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
       if (message.type === 'init') {
         if (session) await releaseOrtSession(session);
         if (message.ep) setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+        // Unlike searchWorker this worker never switches provider per message,
+        // so an ep=wasm request is a lifetime property and can pin the runtime
+        // pair. Without this a WebGPU-capable browser running Maia on WASM
+        // downloads the 24 MB asyncify build and stays single-threaded: the
+        // selector deliberately ignores a programmatic provider pin, because
+        // for a per-message worker it would not be safe.
+        if (message.ep === 'wasm' && !ortRuntimeArtifactKindIsLocked()) setOrtRuntimeArtifactKindForCurrentThread('wasm');
         post({ type: 'progress', id: message.id, stage: 'creating-session' });
         session = await createOrtSession(message.model);
         post({ type: 'ready', id: message.id, inputNames: session.inputNames, outputNames: session.outputNames, backend: describeOrtBackendConfig() });

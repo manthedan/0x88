@@ -60,12 +60,19 @@ test('every Emscripten engine adapter routes locateFile through the shared resol
 // non-default SIMD tier would request a .data that is no longer published and
 // the tests above would still pass. These assert against the real committed
 // artifacts, so a regenerated glue that dropped the hook fails here.
+// Berserk is listed even though its artifacts are never committed: the skip
+// below keeps a clean checkout green, while anyone who has run
+// `npm run berserk:build-emscripten` gets the same assertion applied to their
+// locally generated glue, which is the only place it can be checked at all.
 const GENERATED_GLUE = [
   ['plentychess', 'plentychess-emscripten.js'],
   ['plentychess', 'plentychess-emscripten-sse41.js'],
   ['plentychess', 'plentychess-emscripten-relaxed-simd128.js'],
   ['stormphrax', 'stormphrax-emscripten.js'],
   ['stormphrax', 'stormphrax-emscripten-relaxed-simd128.js'],
+  ['berserk', 'berserk-emscripten.js'],
+  ['berserk', 'berserk-emscripten-simd128.js'],
+  ['berserk', 'berserk-emscripten-relaxed-simd128.js'],
 ];
 
 for (const [family, file] of GENERATED_GLUE) {

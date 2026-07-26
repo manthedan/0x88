@@ -359,10 +359,15 @@ export function ortRuntimeArtifactKindForCurrentThread(): OrtRuntimeArtifactKind
   // which is the asyncify one; configureNodeOrtWasmBinary feeds it the matching
   // binary and wasmPaths are never consulted, so the kind is fixed there.
   if (typeof location === 'undefined') return 'asyncify';
-  if (forcedOrtRuntimeArtifactKind) return forcedOrtRuntimeArtifactKind;
-  // Experimental /ort-experimental/ builds carry their own explicit URLs and
-  // are WebGPU-capable asyncify builds.
+  // Checked BEFORE the forced kind: the experimental /ort-experimental/ builds
+  // carry their own explicit URLs and are asyncify binaries, so what they are
+  // is not a matter of preference. `?ortWasmVariant=fixed|relaxed` combined
+  // with an `ep=wasm` pin would otherwise report the CPU-only kind while
+  // actually loading asyncify, and the thread policy keys off this value --
+  // which is exactly the asyncify-plus-threads combination measured as a 55%
+  // regression.
   if (forcedOrtWasmArtifact.variant !== 'bundled') return 'asyncify';
+  if (forcedOrtRuntimeArtifactKind) return forcedOrtRuntimeArtifactKind;
   if (requestedOrtExecutionProvider() === 'webgpu') return 'asyncify';
   if (resolvedOrtExecutionProviders().includes('webgpu')) return 'asyncify';
   // `webgpuUsableForProviderSelection`, not `webgpuAvailable`: a browser can
