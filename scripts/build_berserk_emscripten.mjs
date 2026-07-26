@@ -52,7 +52,17 @@ function sha256(filePath) {
 function fetchAndVerifyNetwork() {
   if (!fs.existsSync(netPath)) {
     console.log(`Berserk network ${netName} is not present locally; fetching from ${netUrl}`);
-    run('curl', ['-L', '--fail', '--retry', '3', '-o', netPath, netUrl]);
+    // Download to a temp path and rename only on success. curl writes
+    // incrementally and `run` exits the process on a nonzero status, so
+    // fetching straight to netPath would leave a truncated file behind that the
+    // next build treats as cached, skips re-downloading, and then fails to
+    // verify. Anything left at the temp path is never read, and is cleared
+    // before the next attempt; the rename is the commit point. No try/finally:
+    // run() exits the process on failure, so nothing after it would run anyway.
+    const tmpPath = `${netPath}.download`;
+    fs.rmSync(tmpPath, { force: true });
+    run('curl', ['-L', '--fail', '--retry', '3', '-o', tmpPath, netUrl]);
+    fs.renameSync(tmpPath, netPath);
   }
   const digest = sha256(netPath);
   const actualName = `berserk-${digest.slice(0, 12)}.nn`;
@@ -195,12 +205,14 @@ if (process.env.BERSERK_EMCC || canRun('emcc')) {
   run('docker', ['run', '--rm', '-v', `${srcDir}:/src`, '-w', '/src', emsdkImage, 'emcc', ...emccArgs]);
 }
 
-// The .js glue and .wasm stay per-variant; only the preload .data is shared.
+// Validate and publish the shared preload FIRST. publishSharedData throws when
+// a rebuilt variant's .data diverges from the canonical one, and if the glue and
+// wasm were already in place by then the public tree would be left holding new
+// code beside a stale network -- a mixed set that still looks deployable.
+publishSharedData(path.join(srcDir, `${outBase}.data`));
 for (const ext of ['js', 'wasm']) {
   const built = path.join(srcDir, `${outBase}.${ext}`);
   const out = path.join(path.dirname(jsOut), `${outBase}.${ext}`);
   fs.copyFileSync(built, out);
-  const size = fs.statSync(out).size;
-  console.log(`Wrote ${out} (${size} bytes)`);
+  console.log(`Wrote ${out} (${fs.statSync(out).size} bytes)`);
 }
-publishSharedData(path.join(srcDir, `${outBase}.data`));

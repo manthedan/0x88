@@ -323,6 +323,16 @@ export function setOrtRuntimeArtifactKindForCurrentThread(kind: OrtRuntimeArtifa
 }
 
 /**
+ * Whether this thread has already committed to a runtime pair. Callers that
+ * want to *opportunistically* pin (a worker re-initialized with a different EP,
+ * where the binary is already loaded and cannot change) use this to skip the
+ * pin instead of taking the throw above.
+ */
+export function ortRuntimeArtifactKindIsLocked(): boolean {
+  return lockedOrtRuntimeArtifactKind !== null;
+}
+
+/**
  * Which staged runtime pair this thread loads. Asyncify is required by the
  * WebGPU/JSEP path and is pure download + instrumentation overhead for
  * CPU-only sessions, so wasm-EP-only threads take the smaller CPU build.

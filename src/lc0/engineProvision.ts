@@ -13,7 +13,7 @@ import { defaultRecklessVariantKey, recklessVariantByKey, resolveDefaultReckless
 import { ViridithasEngine, type ViridithasRuntimeOptions } from './viridithasEngine.ts';
 import { defaultViridithasVariantKey, resolveDefaultViridithasVariantAssetFallback, viridithasVariantByKey, type ViridithasVariant } from './viridithasVariants.ts';
 import { BerserkEngine } from './berserkEngine.ts';
-import { berserkVariantByKey, defaultBerserkVariantKey, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
+import { BERSERK_ARTIFACT_BUILD_HINT, berserkVariantAssetStatus, berserkVariantByKey, defaultBerserkVariantKey, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { defaultPlentyChessVariantKey, plentyChessVariantByKey, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
 import { StormphraxEngine } from './stormphraxEngine.ts';
@@ -104,9 +104,17 @@ export const DEFAULT_BROWSER_UCI_FAMILY_PROVISIONERS: Record<DefaultBrowserUciFa
   viridithas: async () => createViridithasEngine(
     await resolveDefaultViridithasVariantAssetFallback(viridithasVariantByKey(defaultViridithasVariantKey()), false),
   ),
-  berserk: async () => createBerserkEngine(
-    await resolveDefaultBerserkVariantAssetFallback(berserkVariantByKey(defaultBerserkVariantKey()), false),
-  ),
+  // Berserk is the one family whose artifacts are never deployed (unresolved
+  // upstream NNUE license). Every probe on a public origin therefore resolves
+  // to `missing`, and constructing the engine anyway would spawn a worker whose
+  // glue import is guaranteed to fail with an opaque network error. Fail fast
+  // with the build-locally hint instead; callers already surface the message
+  // (playBrowser renders "<engine> load failed: <message>").
+  berserk: async () => {
+    const variant = await resolveDefaultBerserkVariantAssetFallback(berserkVariantByKey(defaultBerserkVariantKey()), false);
+    if (berserkVariantAssetStatus(variant) === 'missing') throw new Error(BERSERK_ARTIFACT_BUILD_HINT);
+    return createBerserkEngine(variant);
+  },
   plentychess: async () => createPlentyChessEngine(
     await resolveDefaultPlentyChessVariantAssetFallback(plentyChessVariantByKey(defaultPlentyChessVariantKey()), false),
   ),

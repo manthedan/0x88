@@ -1,5 +1,5 @@
 import '../nn/ortConsoleFilter.ts';
-import { collectOrtRuntimeDiagnostics, setOrtRuntimeDiagnosticOptionsForCurrentThread, setRequestedOrtExecutionProviderForCurrentThread, setRequestedOrtWasmArtifactForCurrentThread, setRequestedOrtWasmThreadsForCurrentThread, type OrtExecutionProviderPreference, type OrtRuntimeDiagnosticOptions, type OrtRuntimeDiagnostics, type OrtWasmArtifactSelection } from '../nn/ortRuntime.ts';
+import { collectOrtRuntimeDiagnostics, ortRuntimeArtifactKindIsLocked, setOrtRuntimeArtifactKindForCurrentThread, setOrtRuntimeDiagnosticOptionsForCurrentThread, setRequestedOrtExecutionProviderForCurrentThread, setRequestedOrtWasmArtifactForCurrentThread, setRequestedOrtWasmThreadsForCurrentThread, type OrtExecutionProviderPreference, type OrtRuntimeDiagnosticOptions, type OrtRuntimeDiagnostics, type OrtWasmArtifactSelection } from '../nn/ortRuntime.ts';
 import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { loadLc0WebModelPack } from './modelPack.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationCacheFootprint, type Lc0EvaluationProvider, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
@@ -658,6 +658,16 @@ async function handleInit(message: InitMessage): Promise<void> {
   const evalCacheEntries = Math.max(0, Math.floor(message.evalCacheEntries ?? 0));
   const cacheLabel = evalCacheEntries > 0 ? ` · eval-cache ${evalCacheEntries}` : '';
   setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  // A page-level `?ep=wasm` pin arrives here as message.ep, not on this
+  // worker's own URL, so ortRuntime's ambient-param check cannot see it and
+  // would hand a WebGPU-capable browser the larger asyncify pair (and the
+  // single-thread policy that goes with it) despite the caller ruling WebGPU
+  // out. Init is the one place the EP is known to be stable for the worker's
+  // lifetime -- later per-message EP overrides are deliberately NOT treated as
+  // artifact pins, because a search worker switches EP per message. Skip when
+  // the pair is already locked: a re-init cannot change a loaded binary, and
+  // pinning would throw instead of leaving the existing artifact in place.
+  if (message.ep === 'wasm' && !ortRuntimeArtifactKindIsLocked()) setOrtRuntimeArtifactKindForCurrentThread('wasm');
   setOrtRuntimeDiagnosticOptionsForCurrentThread(message.ortDiagnostics ?? null);
   setRequestedOrtWasmArtifactForCurrentThread(message.ortWasmArtifact ?? null);
   setRequestedOrtWasmThreadsForCurrentThread(message.ortWasmThreads ?? null);

@@ -143,11 +143,14 @@ if (process.env.STORMPHRAX_EMXX || canRun('em++')) {
   run('docker', ['run', '--rm', '-v', `${engineDir}:/src`, '-w', '/src', emsdkImage, 'em++', ...emxxArgs]);
 }
 
-// The .js glue and .wasm stay per-variant; only the preload .data is shared.
+// Validate and publish the shared preload FIRST. publishSharedData throws when
+// a rebuilt variant's .data diverges from the canonical one, and if the glue and
+// wasm were already in place by then the public tree would be left holding new
+// code beside a stale network -- a mixed set that still looks deployable.
+publishSharedData(path.join(engineDir, `${outBase}.data`));
 for (const ext of ['js', 'wasm']) {
   const built = path.join(engineDir, `${outBase}.${ext}`);
   const out = path.join(path.dirname(jsOut), `${outBase}.${ext}`);
   fs.copyFileSync(built, out);
   console.log(`Wrote ${out} (${fs.statSync(out).size} bytes)`);
 }
-publishSharedData(path.join(engineDir, `${outBase}.data`));

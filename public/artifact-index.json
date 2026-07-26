@@ -125,21 +125,10 @@
       "uiLabel": "Berserk Emscripten",
       "status": "experimental",
       "versionOrSource": "jhonnold/berserk tag 14 commit 8ae895a6151695be4a50d4fb65b0c131659c513a; network berserk-9b84c340af7e.nn",
-      "deploymentStatus": "tracked-deployable-with-provenance-caution",
+      "deploymentStatus": "ignored-local-generated-artifacts",
       "manifestUrl": "/berserk/berserk-emscripten-single-thread.manifest.json",
-      "sourceArchiveUrl": "/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz",
-      "primaryUrls": [
-        "/berserk/berserk-emscripten.js",
-        "/berserk/berserk-emscripten.wasm",
-        "/berserk/berserk-emscripten.data",
-        "/berserk/berserk-emscripten-simd128.js",
-        "/berserk/berserk-emscripten-simd128.wasm",
-        "/berserk/berserk-emscripten-simd128.data",
-        "/berserk/berserk-emscripten-relaxed-simd128.js",
-        "/berserk/berserk-emscripten-relaxed-simd128.wasm",
-        "/berserk/berserk-emscripten-relaxed-simd128.data"
-      ],
-      "notes": "Single-thread Emscripten worker builds with scalar, SIMD, and relaxed-SIMD tiers. Distribution policy still flags network license/provenance confirmation as a release concern."
+      "primaryUrls": [],
+      "notes": "NOT DISTRIBUTED. Single-thread Emscripten worker builds (scalar, SIMD, relaxed-SIMD tiers) are buildable locally with `npm run berserk:build-emscripten`, which fetches and SHA-256-verifies the upstream network at build time. The engine binaries, the shared preload .data, and the corresponding-source archive are deliberately untracked and undeployed because the upstream NNUE (jhonnold/berserk-networks) has no resolved license/provenance. Do not re-add public URLs here until that is resolved; see docs/engine_artifact_distribution.md."
     },
     {
       "id": "plentychess-emscripten-single-thread",

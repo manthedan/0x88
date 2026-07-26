@@ -2,6 +2,7 @@ import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, B
 import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
 import { isTrustedExecutableAssetUrl, resolvePublicAssetUrl } from './assetUrls.ts';
 import { BERSERK_ARTIFACT_BUILD_HINT } from './berserkVariants.ts';
+import { resolveEmscriptenAssetUrl } from './emscriptenLocateFile.ts';
 
 export interface BerserkOptions {
   /** Fixed search depth. */
@@ -90,9 +91,7 @@ async function init(id, jsUrl, wasmUrl, dataUrl, trustedJsUrl) {
     if (!factory) throw new Error('Berserk Emscripten factory was not found after importScripts()');
     modulePromise = factory({
       locateFile(file) {
-        if (resolvedWasmUrl && String(file).endsWith('.wasm')) return resolvedWasmUrl;
-        if (resolvedDataUrl && String(file).endsWith('.data')) return resolvedDataUrl;
-        return new URL(file, resolvedJsUrl).href;
+        return resolveEmscriptenAssetUrl(file, { jsUrl: resolvedJsUrl, wasmUrl: resolvedWasmUrl, dataUrl: resolvedDataUrl });
       },
       print(line) { self.postMessage({ type: 'line', line: String(line), stream: 'stdout' }); },
       printErr(line) { self.postMessage({ type: 'line', line: String(line), stream: 'stderr' }); },
