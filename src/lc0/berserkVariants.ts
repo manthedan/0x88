@@ -250,7 +250,16 @@ export function berserkVariantFromParams(params: URLSearchParams): BerserkVarian
  * the build-locally hint.
  */
 export async function resolveDefaultBerserkVariantAssetFallback(variant: BerserkVariant, explicit: boolean, onChange?: () => void): Promise<BerserkVariant> {
-  if (explicit) return variant;
+  if (explicit) {
+    // An explicit selection still picks its own tier -- no fallback laddering --
+    // but it must not skip the probe on a public origin. Callers gate on a
+    // `missing` status, and leaving an explicit `?berserkVariant=emscripten`
+    // sitting at `unknown` walks straight past those guards into 404s instead
+    // of the build-locally hint. Local development keeps the old behaviour so a
+    // freshly built artifact is used without waiting on a probe.
+    if (!isLocalDevelopmentOrigin()) await checkBerserkVariantAsset(variant, onChange);
+    return variant;
+  }
   if (variant.key !== 'simd' && variant.key !== 'emscripten-relaxed' && variant.key !== 'emscripten-simd') {
     if (variant.key === 'emscripten') await checkBerserkVariantAsset(variant, onChange);
     return variant;

@@ -626,6 +626,41 @@ function enqueueModelOperation(work: () => Promise<void>): Promise<void> {
   return run;
 }
 
+/**
+ * Whether this worker's CPU-only artifact pin was *inferred* from an EP rather
+ * than requested outright. Only an inferred pin may be withdrawn below; an
+ * explicit `setOrtRuntimeArtifactKindForCurrentThread` by a dedicated fallback
+ * worker is the caller's decision and is left alone.
+ */
+let inferredCpuOnlyArtifactPin = false;
+
+/**
+ * Apply an execution provider, keeping the ORT runtime-artifact pin consistent
+ * with it.
+ *
+ * A page-level `?ep=wasm` arrives as `message.ep`, not on this worker's URL, so
+ * ortRuntime's ambient-param check cannot see it and would hand a
+ * WebGPU-capable browser the 24 MB asyncify pair plus the single-thread policy
+ * despite the caller ruling WebGPU out. Inferring the pin from the EP fixes
+ * that, but the pin must not outlive the EP that justified it: this worker
+ * switches EP per message, so a later WebGPU message would otherwise reach
+ * createOrtSession with WebGPU providers while the artifact is still CPU-only
+ * and throw. While nothing is locked the artifact is still free, so withdraw
+ * the inferred pin instead. Once locked the binary really cannot change and
+ * ortRuntime's existing error is the correct outcome.
+ */
+function applyOrtExecutionProvider(ep: OrtExecutionProviderPreference | undefined): void {
+  setRequestedOrtExecutionProviderForCurrentThread(ep ?? null);
+  if (ortRuntimeArtifactKindIsLocked()) return;
+  if (ep === 'wasm') {
+    setOrtRuntimeArtifactKindForCurrentThread('wasm');
+    inferredCpuOnlyArtifactPin = true;
+  } else if (inferredCpuOnlyArtifactPin) {
+    setOrtRuntimeArtifactKindForCurrentThread(null);
+    inferredCpuOnlyArtifactPin = false;
+  }
+}
+
 async function handleInit(message: InitMessage): Promise<void> {
   const initKey = JSON.stringify({
     runtime: message.runtime ?? 'onnx',
@@ -657,17 +692,7 @@ async function handleInit(message: InitMessage): Promise<void> {
 
   const evalCacheEntries = Math.max(0, Math.floor(message.evalCacheEntries ?? 0));
   const cacheLabel = evalCacheEntries > 0 ? ` · eval-cache ${evalCacheEntries}` : '';
-  setRequestedOrtExecutionProviderForCurrentThread(message.ep);
-  // A page-level `?ep=wasm` pin arrives here as message.ep, not on this
-  // worker's own URL, so ortRuntime's ambient-param check cannot see it and
-  // would hand a WebGPU-capable browser the larger asyncify pair (and the
-  // single-thread policy that goes with it) despite the caller ruling WebGPU
-  // out. Init is the one place the EP is known to be stable for the worker's
-  // lifetime -- later per-message EP overrides are deliberately NOT treated as
-  // artifact pins, because a search worker switches EP per message. Skip when
-  // the pair is already locked: a re-init cannot change a loaded binary, and
-  // pinning would throw instead of leaving the existing artifact in place.
-  if (message.ep === 'wasm' && !ortRuntimeArtifactKindIsLocked()) setOrtRuntimeArtifactKindForCurrentThread('wasm');
+  applyOrtExecutionProvider(message.ep);
   setOrtRuntimeDiagnosticOptionsForCurrentThread(message.ortDiagnostics ?? null);
   setRequestedOrtWasmArtifactForCurrentThread(message.ortWasmArtifact ?? null);
   setRequestedOrtWasmThreadsForCurrentThread(message.ortWasmThreads ?? null);
@@ -877,7 +902,7 @@ async function handleAttentionScoreBenchmark(message: AttentionScoreBenchmarkMes
 }
 
 async function handleAttentionScoreOrtBenchmark(message: AttentionScoreOrtBenchmarkMessage): Promise<void> {
-  setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  applyOrtExecutionProvider(message.ep);
   const result = await runLc0WebAttentionScoreOrtBenchmark({
     packUrl: message.packUrl,
     iterations: message.iterations,
@@ -920,7 +945,7 @@ async function handleAttentionValueBenchmark(message: AttentionValueBenchmarkMes
 }
 
 async function handleAttentionValueOrtBenchmark(message: AttentionValueOrtBenchmarkMessage): Promise<void> {
-  setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  applyOrtExecutionProvider(message.ep);
   const result = await runLc0WebAttentionValueOrtBenchmark({
     packUrl: message.packUrl,
     iterations: message.iterations,
@@ -955,7 +980,7 @@ async function handleAttentionOutputBenchmark(message: AttentionOutputBenchmarkM
 }
 
 async function handleAttentionOutputOrtBenchmark(message: AttentionOutputOrtBenchmarkMessage): Promise<void> {
-  setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  applyOrtExecutionProvider(message.ep);
   const result = await runLc0WebAttentionOutputOrtBenchmark({
     packUrl: message.packUrl,
     iterations: message.iterations,
@@ -979,7 +1004,7 @@ async function handleEncoder0FfnBenchmark(message: Encoder0FfnBenchmarkMessage):
 }
 
 async function handleEncoder0FfnOrtBenchmark(message: Encoder0FfnOrtBenchmarkMessage): Promise<void> {
-  setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  applyOrtExecutionProvider(message.ep);
   const result = await runLc0WebEncoder0FfnOrtBenchmark({
     packUrl: message.packUrl,
     iterations: message.iterations,
@@ -1002,7 +1027,7 @@ async function handleEncoder0BlockBenchmark(message: Encoder0BlockBenchmarkMessa
 }
 
 async function handleEncoder0BlockOrtBenchmark(message: Encoder0BlockOrtBenchmarkMessage): Promise<void> {
-  setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  applyOrtExecutionProvider(message.ep);
   const result = await runLc0WebEncoder0BlockOrtBenchmark({
     packUrl: message.packUrl,
     iterations: message.iterations,
@@ -1014,7 +1039,7 @@ async function handleEncoder0BlockOrtBenchmark(message: Encoder0BlockOrtBenchmar
 }
 
 async function handleEncoderStackBenchmark(message: EncoderStackBenchmarkMessage): Promise<void> {
-  setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  applyOrtExecutionProvider(message.ep);
   const result = await runLc0WebEncoderStackBenchmark({
     packUrl: message.packUrl,
     layers: message.layers,
@@ -1027,7 +1052,7 @@ async function handleEncoderStackBenchmark(message: EncoderStackBenchmarkMessage
 }
 
 async function handleWgslHeadsProbe(message: WgslHeadsProbeMessage): Promise<void> {
-  setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  applyOrtExecutionProvider(message.ep);
   const result = await runLc0WebWgslHeadsProbe({
     packUrl: message.packUrl,
     verifyShards: message.verifyShards,
@@ -1051,7 +1076,7 @@ async function assertStrictWebGpuOrt(message: string, options: { probeAdapter?: 
 }
 
 async function handleWgslHeadsVsOrtFixtures(message: WgslHeadsVsOrtFixturesMessage): Promise<void> {
-  setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  applyOrtExecutionProvider(message.ep);
   const strictPreflight = message.strictWebGpu
     ? await assertStrictWebGpuOrt('WGSL heads vs ORT fixtures preflight', { probeAdapter: true })
     : undefined;
@@ -1073,7 +1098,7 @@ async function handleMappedPolicyProbe(message: MappedPolicyProbeMessage): Promi
 }
 
 async function handleOrtBenchmark(message: OrtBenchmarkMessage): Promise<void> {
-  setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+  applyOrtExecutionProvider(message.ep);
   const result = await runLc0WebMatmulAddOrtBenchmark({
     packUrl: message.packUrl,
     weightTensorName: message.weightTensorName,
