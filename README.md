@@ -35,7 +35,7 @@ UCI. Full cards in [`docs/engine_catalog.md`](docs/engine_catalog.md).
 | **Viridithas** | classical NNUE (Rust) | WASI, relaxed SIMD |
 | **PlentyChess** | classical NNUE (C++) | Emscripten, relaxed SIMD |
 | **Stormphrax** | classical NNUE (C++) | Emscripten, relaxed SIMD |
-| **Berserk** | classical NNUE (C) | Emscripten — build locally, see below |
+| **Berserk** | classical NNUE (C) | Emscripten, relaxed SIMD |
 
 Every ported engine ships a feature-detected SIMD ladder (relaxed SIMD → fixed
 SIMD → scalar), with fixed-depth parity proven against the scalar build before
@@ -57,18 +57,14 @@ Then open `http://localhost:5173/app/analysis`.
 
 ### What works from a fresh clone, and what doesn't
 
-**Works immediately:** Lc0, Centipawn, Maia 3, Stockfish, PlentyChess,
-Stormphrax, Viridithas. Model and engine assets are fetched on demand from
-`assets.0x88.app`.
+**Works immediately:** everything except Reckless. Model and engine assets are
+fetched on demand from `assets.0x88.app`.
 
 **Needs a local build:** Reckless — `public/reckless/*.wasm` is deliberately
-untracked and needs a Rust + `wasm32-wasip1` toolchain. And Berserk — its
-network's licence is unresolved upstream, so this repository does not
-redistribute it (see [NOTICE.md](NOTICE.md)).
+untracked and needs a Rust + `wasm32-wasip1` toolchain.
 
 ```sh
 npm run reckless:build-wasi        # needs rustup + wasm32-wasip1
-npm run berserk:build-emscripten   # needs emscripten
 ```
 
 ### Threads and SharedArrayBuffer

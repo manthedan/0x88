@@ -53,11 +53,10 @@ test('every Berserk Emscripten tier shares one canonical preload .data', () => {
   assert.equal(berserkVariantByKey('custom').dataUrl, BERSERK_EMSCRIPTEN_DATA_URL);
 });
 
-test('Berserk variants advertise that artifacts are build-locally only', () => {
+test('the missing-artifact hint names the build command', () => {
+  // Berserk artifacts ARE distributed, so this hint is for a local checkout
+  // that has not built a given tier yet -- not for a public deployment.
   assert.match(BERSERK_ARTIFACT_BUILD_HINT, /npm run berserk:build-emscripten/);
-  for (const variant of BERSERK_VARIANTS.filter((entry) => !!entry.jsUrl)) {
-    assert.ok(variant.note.includes(BERSERK_ARTIFACT_BUILD_HINT), variant.key);
-  }
 });
 
 test('Berserk variant normalization and lookup are stable', () => {
@@ -129,7 +128,13 @@ test('production skips known-unshipped Berserk asset probes', async () => {
 // NNUE license is unresolved, so production must not spend HEAD requests
 // probing for them: every tier resolves straight to a settled `missing`, and
 // the UI/engine explain it with BERSERK_ARTIFACT_BUILD_HINT.
-test('production skips every Berserk artifact probe and degrades to a documented missing state', async () => {
+const DEPLOYED = new Set([
+  '/berserk/berserk-emscripten.js', '/berserk/berserk-emscripten.wasm', '/berserk/berserk-emscripten.data',
+  '/berserk/berserk-emscripten-simd128.js', '/berserk/berserk-emscripten-simd128.wasm',
+  '/berserk/berserk-emscripten-relaxed-simd128.js', '/berserk/berserk-emscripten-relaxed-simd128.wasm',
+]);
+
+test('production probes the deployed Berserk artifacts', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   const calls = [];
@@ -144,10 +149,13 @@ test('production skips every Berserk artifact probe and degrades to a documented
   try {
     for (const variant of [BERSERK_EMSCRIPTEN_VARIANT, BERSERK_EMSCRIPTEN_SIMD_VARIANT, BERSERK_EMSCRIPTEN_RELAXED_VARIANT]) {
       const copy = { ...variant };
-      assert.equal(await checkBerserkVariantAsset(copy), 'missing', variant.key);
-      assert.equal(berserkVariantAssetNote(copy), BERSERK_ARTIFACT_BUILD_HINT, variant.key);
+      assert.equal(await checkBerserkVariantAsset(copy), 'present', variant.key);
     }
-    assert.deepEqual(calls, []);
+    // Every tier probes its own js+wasm plus the one shared .data.
+    assert.ok(calls.length > 0);
+    const probed = new Set(calls.map(([url]) => new URL(url, 'https://0x88.app').pathname));
+    assert.ok(probed.has('/berserk/berserk-emscripten.data'), 'canonical .data is probed');
+    for (const p of [...probed]) assert.ok(DEPLOYED.has(p), `probed an undeployed path: ${p}`);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);

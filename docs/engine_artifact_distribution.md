@@ -91,30 +91,55 @@ If the selector is visible in a public deployment but assets are intentionally a
 
 ### Berserk Emscripten
 
-- License: GPL-family upstream; treat as GPL-gated for distribution.
+- License: GPL-3.0 upstream (`LICENSE` in the engine repo; GPL-3.0 headers on every source file, `Copyright (C) 2024 Jay Honnold`).
 - Upstream: `https://github.com/jhonnold/berserk.git`
 - Pin: tag `14`, commit `8ae895a6151695be4a50d4fb65b0c131659c513a`
 - Patch: `patches/berserk-emscripten.patch`
 - Build: `npm run berserk:build-emscripten`
 - Smoke: `npm run berserk:smoke-emscripten`, `lab/berserk-smoke.html`
 - Network: `berserk-9b84c340af7e.nn`
-- Network license/provenance: unresolved; no standalone license file found in `jhonnold/berserk-networks` during intake. Do not publicly distribute the network/data bundle until that is resolved or confirmed as covered by the engine release.
 - Raw network SHA-256: `9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084` (the upstream filename embeds the first 12 hex digits; `file_packager` stores the network verbatim, so the preload `.data` carries the same digest)
-- **Distribution status: build-from-source only; artifacts intentionally untracked pending network license confirmation.**
+- **Distribution status: tracked and deployable.**
 
-Berserk is the one engine family whose generated artifacts are neither committed nor deployed. `public/berserk/*.js`, `*.wasm`, `*.data`, `*.nn`, and the corresponding-source archive (which embeds `berserk-9b84c340af7e.nn`) are removed from the repository and covered by `.gitignore`; `.gitattributes` carries no `public/berserk/` LFS rules. Only `public/berserk/README.md` and the release manifest — provenance records that contain no network bytes — stay tracked.
+#### Network licensing — the reasoning, because it is not a licence file
 
-Berserk remains fully buildable by anyone:
+`jhonnold/berserk-networks` carries no standalone `LICENSE`, and an earlier
+intake stopped there and recorded the status as "unresolved — do not
+distribute". That conclusion was under-evidenced: it looked for a licence file
+and never checked how the engine consumes the network.
 
-```sh
-npm run berserk:build-emscripten
-npm run berserk:build-simd-emscripten
-npm run berserk:build-relaxed-simd-emscripten
+The engine's own `src/Makefile` settles it:
+
+```make
+MAIN_NETWORK = berserk-9b84c340af7e.nn
+EVALFILE     = $(MAIN_NETWORK)
+NETWORK_BASE = https://github.com/jhonnold/berserk-networks/releases/download/networks
 ```
 
-`scripts/build_berserk_emscripten.mjs` downloads the network from the upstream release URL when it is absent and verifies both the full SHA-256 and the hash prefix in the filename, deleting the file and failing the build on any mismatch. `src/lc0/berserkVariants.ts` lists no deployed Berserk paths, so a public deployment resolves every Berserk tier to `missing` without spending probe requests, and the selector/engine errors say "build locally with `npm run berserk:build-emscripten`" instead of looking like a broken deploy.
+An ordinary `make` downloads that exact network and verifies its SHA-256. So the
+net is authored by the same person as the engine, named in the GPL build system
+as *the* network, fetched automatically by that build, and required for the
+resulting binary to run at all. Under GPL-3.0, Corresponding Source is
+everything needed to generate, install and run the work — and the author
+distributes GPL binaries built with it. On that basis the network is treated as
+part of the GPL-3.0 work rather than as a separately licensed asset.
 
-To re-enable distribution once the network license is confirmed: re-list the shipped paths in `DEPLOYED_BERSERK_PATHS`, drop the `public/berserk/` block from `.gitignore`, restore the LFS rules in `.gitattributes`, and publish the artifacts with a regenerated source archive and manifest.
+This is a documented reading, not a certainty. Confirmation has been requested
+upstream, along with a suggestion to add a `LICENSE` file to the networks repo
+so nobody else has to derive this. Record the answer here, with a date and a
+link, when it arrives.
+
+**If the answer is that the nets are not redistributable**, the reversal is
+contained: empty `DEPLOYED_BERSERK_PATHS` in `src/lc0/berserkVariants.ts`,
+re-add a `public/berserk/` block to `.gitignore` and drop the LFS rules from
+`.gitattributes`, remove the Berserk targets from
+`scripts/r2_brotli_publish_assets.mjs` and the manifest from
+`DEFAULT_SOURCE_MANIFESTS` in `scripts/write_artifact_release_manifests.mjs`,
+strip the artifact entries from `public/artifact-index.json` and the release
+manifest, and delete the objects from R2. The engine stays buildable throughout:
+`scripts/build_berserk_emscripten.mjs` fetches and hash-verifies the network
+from upstream when it is absent, so a user always has a working path that does
+not depend on this project redistributing anything.
 
 ### PlentyChess Emscripten
 

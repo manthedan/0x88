@@ -212,15 +212,9 @@ export const BROWSER_ENGINE_ASSET_GROUPS = Object.freeze([
     assets: ['/viridithas/viridithas.wasm', '/viridithas/viridithas-simd128.wasm', '/viridithas/viridithas-relaxed-simd128.wasm'],
   },
   {
-    // Berserk stays in this registry so `check_browser_engine_assets.mjs` can
-    // still tell a contributor which command builds it, but its artifacts are
-    // never committed or deployed: the upstream NNUE has no resolved license
-    // (see docs/engine_artifact_distribution.md). public/berserk/ therefore
-    // holds no binaries, so the publish and precompress passes find nothing
-    // and no-op. A missing Berserk asset here is expected, not a build break.
     family: 'berserk',
-    label: 'Berserk Emscripten worker (build locally; not distributed)',
-    status: 'build-locally-not-distributed',
+    label: 'Berserk Emscripten worker',
+    status: 'experimental-selectable',
     command: 'npm run berserk:build-emscripten && npm run berserk:build-simd-emscripten && npm run berserk:build-relaxed-simd-emscripten',
     docs: 'docs/engine_catalog.md#berserk-family',
     assets: [

@@ -35,11 +35,14 @@ const targets = [
     [`stockfish/${base}.js`, `public/stockfish/${base}.js`, 'text/javascript; charset=utf-8', immutable],
     [`stockfish/${base}.wasm`, `public/stockfish/${base}.wasm`, 'application/wasm', immutable],
   ]),
-  // No berserk/* targets. The upstream NNUE has no resolved license, so nothing
-  // under public/berserk/ may be published -- not the binaries, not the shared
-  // preload .data, and not the corresponding-source archive (it embeds the
-  // network). Re-adding entries here is how a local build would silently
-  // republish it. See docs/engine_artifact_distribution.md.
+  ['berserk/berserk-emscripten-single-thread.manifest.json', 'public/berserk/berserk-emscripten-single-thread.manifest.json', 'application/json', immutable],
+  ['berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz', 'public/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz', 'application/gzip', immutable],
+  // Code per variant, one shared preload package (see plentychess below).
+  ...['berserk-emscripten', 'berserk-emscripten-simd128', 'berserk-emscripten-relaxed-simd128'].flatMap((base) => [
+    [`berserk/${base}.js`, `public/berserk/${base}.js`, 'text/javascript; charset=utf-8', immutable],
+    [`berserk/${base}.wasm`, `public/berserk/${base}.wasm`, 'application/wasm', immutable],
+  ]),
+  ['berserk/berserk-emscripten.data', 'public/berserk/berserk-emscripten.data', 'application/octet-stream', immutable],
   // Code is per-variant; the preload package is not. Every SIMD tier reaches the
   // one canonical .data through Module.locateFile, so publishing a copy per
   // variant would upload ~60 MB of identical bytes twice over.

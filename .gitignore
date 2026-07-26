@@ -38,7 +38,7 @@ public/models/*.pt
 # binaries we host; they are un-ignored by the !public/**/*.tar.gz rule below.
 public/reckless/*.wasm
 public/reckless/*.nnue
-# Engine release artifacts under public/{plentychess,stormphrax,viridithas,stockfish}/
+# Engine release artifacts under public/{berserk,plentychess,stormphrax,viridithas,stockfish}/
 # are intentionally trackable so deployed GPL binaries and their corresponding
 # source archives/manifests cannot be hidden by ignore rules. Keep generated
 # precompressed sidecars ignored; they are rebuilt for dist deploys.
@@ -46,20 +46,6 @@ public/**/*.br
 public/**/*.gz
 # ...but GPL corresponding-source archives must never be hidden by ignores.
 !public/**/*.tar.gz
-# Berserk is the deliberate exception to the rule above: its NNUE
-# (jhonnold/berserk-networks) has no resolved license/provenance, so this
-# repository must not redistribute the network or anything that embeds it —
-# including the Emscripten preload .data and the corresponding-source archive
-# that ships the .nn. Berserk stays fully buildable from source: run
-# `npm run berserk:build-emscripten` (plus the simd/relaxed variants) and the
-# build script fetches and SHA-256-verifies the network from upstream. Remove
-# these rules and re-track the artifacts only once the network license is
-# confirmed; see docs/engine_artifact_distribution.md.
-public/berserk/*.js
-public/berserk/*.wasm
-public/berserk/*.data
-public/berserk/*.nn
-public/berserk/*corresponding-source*.tar.gz
 rust/**/target/
 node_modules/
 node_modules

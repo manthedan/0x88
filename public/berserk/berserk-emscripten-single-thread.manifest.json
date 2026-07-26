@@ -19,15 +19,142 @@
     ],
     "toolchain": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 5.0.7-git"
   },
+  "artifacts": [
+    {
+      "path": "public/berserk/berserk-emscripten.js",
+      "bytes": 66372,
+      "sha256": "ab5dd3fd1b87cdd281cdb401e3714498a8520deccc0e83a464d49e316a85c279",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 18556,
+          "ratio": 0.2796
+        },
+        "brotli": {
+          "bytes": 16553,
+          "ratio": 0.2494
+        }
+      }
+    },
+    {
+      "path": "public/berserk/berserk-emscripten.wasm",
+      "bytes": 128172,
+      "sha256": "0cffe539d41787c8cc2963911e24fe0bdf5319bae1fe03fae243642e8cda9372",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 58166,
+          "ratio": 0.4538
+        },
+        "brotli": {
+          "bytes": 50495,
+          "ratio": 0.394
+        }
+      }
+    },
+    {
+      "path": "public/berserk/berserk-emscripten.data",
+      "bytes": 25201924,
+      "sha256": "9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 18139293,
+          "ratio": 0.7198
+        },
+        "brotli": {
+          "bytes": 14835970,
+          "ratio": 0.5887
+        }
+      }
+    },
+    {
+      "path": "public/berserk/berserk-emscripten-simd128.js",
+      "bytes": 66411,
+      "sha256": "73741083f43cf23dc39c5a2769eff012276e38e8b8e1f5d73dfcf158f6e03ae8",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 18555,
+          "ratio": 0.2794
+        },
+        "brotli": {
+          "bytes": 16565,
+          "ratio": 0.2494
+        }
+      }
+    },
+    {
+      "path": "public/berserk/berserk-emscripten-simd128.wasm",
+      "bytes": 131992,
+      "sha256": "c4e791d4b704a430331a66f4b562a09a9162bfa3788ae787dbf43dcd270a1af0",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 57910,
+          "ratio": 0.4387
+        },
+        "brotli": {
+          "bytes": 50722,
+          "ratio": 0.3843
+        }
+      }
+    },
+    {
+      "path": "public/berserk/berserk-emscripten-relaxed-simd128.js",
+      "bytes": 66451,
+      "sha256": "87805af5371be3fc0cb6a32ec844458a409a86b1878f48ae74279be433d88d6f",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 18563,
+          "ratio": 0.2793
+        },
+        "brotli": {
+          "bytes": 16570,
+          "ratio": 0.2494
+        }
+      }
+    },
+    {
+      "path": "public/berserk/berserk-emscripten-relaxed-simd128.wasm",
+      "bytes": 131480,
+      "sha256": "0add80acd95319f51c60f152a2d4f44ae1f6c622f5b2752cc5235fe1709418bb",
+      "compression": {
+        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
+        "gzip": {
+          "bytes": 57790,
+          "ratio": 0.4395
+        },
+        "brotli": {
+          "bytes": 50719,
+          "ratio": 0.3858
+        }
+      }
+    }
+  ],
   "assets": [
     {
       "name": "berserk-9b84c340af7e.nn",
       "sourceUrl": "https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn",
       "rawSha256": "9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084",
-      "licenseNote": "No standalone license file found in jhonnold/berserk-networks during intake; do not publicly distribute this network until provenance/license is resolved or confirmed as covered by the engine release.",
+      "licenseNote": "Covered by Berserk GPL-3.0: the net is named as EVALFILE in the engine Makefile, downloaded and hash-verified by the engine build, and required for the binary to run, so it forms part of the Corresponding Source the author distributes. See docs/engine_artifact_distribution.md.",
       "embeddedIn": "public/berserk/berserk-emscripten.data (one canonical preload package shared by every SIMD tier)"
     }
   ],
-  "distributionStatus": "not-distributed",
-  "distributionNote": "Berserk artifacts are NOT published by this project. The upstream NNUE in jhonnold/berserk-networks has no resolved license/provenance, so the binaries, the shared preload .data, and the corresponding-source archive are all untracked and undeployed. This manifest is retained as a provenance record only -- it deliberately lists no artifact paths, because every path it used to name is now absent by design. Build locally with `npm run berserk:build-emscripten`, which fetches and SHA-256-verifies the network. Restoring artifact/sourceArchive blocks here is part of re-enabling distribution, not a fix."
+  "totals": {
+    "bytes": 25792802,
+    "gzipBytes": 18368833,
+    "brotliBytes": 15037594,
+    "gzipRatio": 0.7122,
+    "brotliRatio": 0.583
+  },
+  "sourceArchive": {
+    "required": true,
+    "path": "public/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz",
+    "bytes": 18427893,
+    "sha256": "01b9184b5193af4bd04e75fe0edc25fc025f132cb53a0f245e05cd0cb6dd0136",
+    "url": "/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz",
+    "note": "Source archive recorded for public distribution."
+  }
 }

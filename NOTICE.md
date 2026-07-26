@@ -21,7 +21,7 @@ driven over the UCI text protocol. 0x88 does not statically link any engine.
 | [Viridithas](https://github.com/cosmobobak/viridithas) | v20.0.0, commit `20d74020` | MIT | Yes — binaries, manifest, and corresponding source |
 | [PlentyChess](https://github.com/Yoshie2000/PlentyChess) | 7.0.66, commit `58d8ba25` | GPL-3.0 | Yes — binaries, manifest, and corresponding source |
 | [Stormphrax](https://github.com/Ciekce/Stormphrax) | v8.0.0, commit `58296551` | GPL-3.0-or-later | Yes — binaries, manifest, and corresponding source |
-| [Berserk](https://github.com/jhonnold/berserk) | tag 14, commit `8ae895a6` | GPL-family | **No** — see note below |
+| [Berserk](https://github.com/jhonnold/berserk) | tag 14, commit `8ae895a6` | GPL-3.0 | Yes — binaries, manifest, and corresponding source |
 
 ### Note on Reckless and the AGPL
 
@@ -47,22 +47,13 @@ already does.
 
 ### Note on Berserk
 
-The Berserk *engine* is GPL-family and freely redistributable. Its **network**
-is not: no standalone licence was found in `jhonnold/berserk-networks` during
-intake, so provenance is unresolved
-(see `docs/engine_artifact_distribution.md`).
-
-Accordingly, **this repository does not distribute Berserk binaries or its
-network `.data` bundle.** The build script fetches the network from upstream at
-build time. Berserk remains fully buildable with
-`npm run berserk:build-emscripten`; it is simply not redistributed here. If you
-resolve the network's licence upstream, this restriction can be lifted.
-
-> **Open item (2026-07-25):** copies of the Berserk artifacts from earlier
-> deploys are still present on the project's asset CDN and have not yet been
-> deleted. Removing them from the repository did not unpublish them. See the
-> "ACTION REQUIRED" note in
-> `docs/runtime_efficiency_and_release_readiness_audit_2026-07-25.md`.
+Berserk is GPL-3.0, and its network `berserk-9b84c340af7e.nn` is treated as part
+of that GPL work rather than as a separately licensed asset. The networks repo
+has no standalone licence file, but the engine's own `Makefile` names that exact
+net as `EVALFILE`, downloads it during an ordinary build, verifies its hash, and
+the binary cannot run without it — so it forms part of the Corresponding Source
+the author himself distributes. The reasoning is set out in full in
+`docs/engine_artifact_distribution.md`; confirmation has been requested upstream.
 
 ## Networks and models
 
@@ -70,7 +61,7 @@ resolve the network's licence upstream, this restriction can be lifted.
 | --- | --- | --- |
 | PlentyChess `0134-2r24-s0.bin` | [Yoshie2000/PlentyNetworks](https://github.com/Yoshie2000/PlentyNetworks) | GPL-3.0 |
 | Viridithas `atlantis-b800.nnue` | [cosmobobak/viridithas-networks](https://github.com/cosmobobak/viridithas-networks) | MIT (with the engine) |
-| Berserk `berserk-9b84c340af7e.nn` | [jhonnold/berserk-networks](https://github.com/jhonnold/berserk-networks) | **Unresolved** — not redistributed here |
+| Berserk `berserk-9b84c340af7e.nn` | [jhonnold/berserk-networks](https://github.com/jhonnold/berserk-networks) | GPL-3.0 with the engine (see note) |
 | Maia 3 | [CSSLab/maia3](https://github.com/CSSLab/maia3) | AGPL-3.0 |
 | Lc0 networks (t1, t3, BT4) | Leela Chess Zero project | See `docs/model_provenance/` |
 | Centipawn `bt4_soap_rem_c19000_final` | Trained in this project | GPL-3.0-or-later, see `docs/model_provenance/bt4_soap_rem_c19000_final.md` |

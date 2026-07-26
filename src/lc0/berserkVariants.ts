@@ -43,32 +43,24 @@ export const BERSERK_MAIN_NETWORK = 'berserk-9b84c340af7e.nn';
 export const BERSERK_DEFAULT_NNUE_URL = resolvePublicAssetUrl(`/berserk/${BERSERK_MAIN_NETWORK}`);
 export const BERSERK_SOURCE_NETWORK_URL = `https://github.com/jhonnold/berserk-networks/releases/download/networks/${BERSERK_MAIN_NETWORK}`;
 
-/**
- * User-facing explanation for an absent Berserk artifact.
- *
- * Berserk is the one engine family whose generated artifacts are deliberately
- * NOT committed or deployed: the upstream NNUE in `jhonnold/berserk-networks`
- * has no resolved license/provenance, so this repository must not redistribute
- * it (see `docs/engine_artifact_distribution.md`). Every other engine ships its
- * binaries. A missing Berserk asset is therefore expected, not a broken deploy,
- * and the UI/engine errors should say so.
- */
-export const BERSERK_ARTIFACT_BUILD_HINT = 'Berserk artifacts are not distributed with this site (upstream NNUE license/provenance is unresolved) — build locally with `npm run berserk:build-emscripten`.';
+/** Shown when a Berserk artifact is absent, e.g. a variant not yet built locally. */
+export const BERSERK_ARTIFACT_BUILD_HINT = 'Berserk artifact missing — build it with `npm run berserk:build-emscripten` (plus the simd/relaxed variants).';
 
 const assetStatuses = new Map<string, BerserkAssetStatus>();
 const assetChecks = new Map<string, Promise<BerserkAssetStatus>>();
 
-/**
- * Berserk artifact paths that a public deployment actually serves: none.
- *
- * Kept as an explicit empty set (rather than deleting the probe) so that a
- * future release which clears the network license can re-list the shipped
- * paths here and get probing back with no other changes. While it is empty,
- * `shouldSkipKnownUnshippedProbe` short-circuits every `/berserk/` probe on a
- * non-local origin: the status resolves to `missing` immediately, without
- * spending HEAD requests on files we know are absent.
- */
-const DEPLOYED_BERSERK_PATHS = new Set<string>([]);
+// Berserk artifact paths a public deployment serves. Code stays per-variant;
+// the preload package does not, because every SIMD tier emits byte-identical
+// bytes and only the canonical one is published.
+const DEPLOYED_BERSERK_PATHS = new Set([
+  '/berserk/berserk-emscripten.js',
+  '/berserk/berserk-emscripten.wasm',
+  '/berserk/berserk-emscripten.data',
+  '/berserk/berserk-emscripten-simd128.js',
+  '/berserk/berserk-emscripten-simd128.wasm',
+  '/berserk/berserk-emscripten-relaxed-simd128.js',
+  '/berserk/berserk-emscripten-relaxed-simd128.wasm',
+]);
 
 function isLocalDevelopmentOrigin(): boolean {
   if (typeof location === 'undefined') return true;
@@ -125,7 +117,7 @@ export const BERSERK_EMSCRIPTEN_VARIANT: BerserkVariant = {
   wasmUrl: BERSERK_EMSCRIPTEN_WASM_URL,
   dataUrl: BERSERK_EMSCRIPTEN_DATA_URL,
   sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
-  note: `Smoked Berserk tag 14 single-thread Emscripten worker build with tablebases disabled and NNUE preloaded in .data. ${BERSERK_ARTIFACT_BUILD_HINT}`,
+  note: 'Smoked Berserk tag 14 single-thread Emscripten worker build with tablebases disabled and NNUE preloaded in .data.',
 };
 
 export const BERSERK_EMSCRIPTEN_SIMD_VARIANT: BerserkVariant = {
@@ -135,7 +127,7 @@ export const BERSERK_EMSCRIPTEN_SIMD_VARIANT: BerserkVariant = {
   wasmUrl: BERSERK_EMSCRIPTEN_SIMD_WASM_URL,
   dataUrl: BERSERK_EMSCRIPTEN_DATA_URL,
   sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
-  note: `Berserk tag 14 Emscripten build compiling the engine SSE4.1 NNUE path via -msse4.1 -msimd128 intrinsic emulation. 40/40 fixed-depth parity with scalar; ~3.8x scalar NPS in Node. ${BERSERK_ARTIFACT_BUILD_HINT}`,
+  note: `Berserk tag 14 Emscripten build compiling the engine SSE4.1 NNUE path via -msse4.1 -msimd128 intrinsic emulation. 40/40 fixed-depth parity with scalar; ~3.8x scalar NPS in Node.`,
 };
 
 export const BERSERK_EMSCRIPTEN_RELAXED_VARIANT: BerserkVariant = {
@@ -145,7 +137,7 @@ export const BERSERK_EMSCRIPTEN_RELAXED_VARIANT: BerserkVariant = {
   wasmUrl: BERSERK_EMSCRIPTEN_RELAXED_WASM_URL,
   dataUrl: BERSERK_EMSCRIPTEN_DATA_URL,
   sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
-  note: `SIMD Emscripten build whose m128 dpbusd helpers use the relaxed integer dot (exact: InputCReLU8 activations are in 0..127). Requires WebAssembly Relaxed SIMD. ${BERSERK_ARTIFACT_BUILD_HINT}`,
+  note: `SIMD Emscripten build whose m128 dpbusd helpers use the relaxed integer dot (exact: InputCReLU8 activations are in 0..127). Requires WebAssembly Relaxed SIMD.`,
 };
 
 export const BERSERK_DEFAULT_VARIANT: BerserkVariant = {
@@ -288,28 +280,6 @@ export function berserkVariantAssetStatus(variant: BerserkVariant): BerserkAsset
   return assetStatuses.get(assetKey(variant)) ?? 'unknown';
 }
 
-/**
- * Single availability predicate for every Berserk construction site.
- *
- * Callers previously each tested `status === 'missing'`, which is wrong in the
- * two cases where a status never settles: an explicit variant that skipped the
- * probe, and a planned WASI variant silently remapped to an Emscripten tier
- * that was never probed. Both leave `unknown`, walk past a `=== 'missing'`
- * check, and 404.
- *
- * On a public origin the answer needs no probe at all: `DEPLOYED_BERSERK_PATHS`
- * is empty because this project publishes no Berserk artifact, so availability
- * is a policy fact, not a network question. This deliberately also ignores any
- * stale copies still sitting on the asset CDN from earlier deploys — the point
- * is to stop using the unresolved-license network, not to use it while it
- * happens to still resolve. Locally, a developer build is real, so defer to the
- * probe. A `custom` variant is the caller's own URL and is left alone.
- */
-export function berserkArtifactsUnavailable(variant: BerserkVariant): boolean {
-  if (variant.key === 'custom') return false;
-  if (!isLocalDevelopmentOrigin()) return true;
-  return berserkVariantAssetStatus(variant) === 'missing';
-}
 
 export function checkBerserkVariantAsset(variant: BerserkVariant, onChange?: () => void): Promise<BerserkAssetStatus> {
   const key = assetKey(variant);

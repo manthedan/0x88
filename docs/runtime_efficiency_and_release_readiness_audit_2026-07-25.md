@@ -25,9 +25,9 @@ concrete blockers to a public release.**
 | 1.3 Asyncify runtime on the CPU path | −44% raw, −38% brotli, −36% session create |
 | 1.4 16 MB transposition tables; Stockfish had none | 64 MB everywhere, Stockfish now gets a `Hash` |
 | 1.5 Duplicate NNUE `.data` per SIMD variant | −173 MB tracked, no re-download on tier fallback |
-| 2.1 / 2.2 / 2.5 Licence, Berserk, README | GPL-3.0-or-later; Berserk untracked; README rewritten |
+| 2.1 / 2.5 Licence, README | GPL-3.0-or-later, NOTICE, CONTRIBUTING; README rewritten |
 
-### Three of this audit's own claims were wrong
+### Four of this audit's own claims were wrong
 
 Stated plainly, because a reader should trust the corrections as much as the
 findings:
@@ -41,6 +41,10 @@ findings:
    2.3.
 3. **Asyncify was said to cost per-call execution time.** It does not — the
    difference is ~1%. The win is transfer and startup. See 1.3.
+4. **Berserk's network was called unresolved, and the engine was pulled from
+   the live site over it.** The engine's own Makefile downloads that exact net
+   during a normal GPL build and the binary cannot run without it, which makes
+   it Corresponding Source. Restored. See 2.2.
 
 The residual theme is that this project's remaining headroom is in *delivery
 and startup*, not in search throughput — which is also where the 2026-07-14
@@ -432,51 +436,37 @@ Resolved: the project is licensed **GPL-3.0-or-later**, matching every bundled
 engine (Stockfish, Berserk, PlentyChess, Stormphrax, Viridithas) and removing
 any argument about whether the app plus its engines constitute a combined work.
 
-### 2.2 Berserk network provenance — resolved in this pass
+### 2.2 Berserk network provenance — REVISED, and the original finding was wrong
 
-`docs/engine_artifact_distribution.md` states plainly that the Berserk network's
-licence and provenance are unresolved, and that the network/data bundle must not
-be publicly distributed until that is settled. The production deploy already
-prunes Berserk (`scripts/prune_v0_deploy_assets.mjs:31`), so the live site was
-clean — but the 24 MB `.data` was committed via Git LFS, and publishing the
-repository is itself distribution.
+This audit originally reported the Berserk network as unresolved and had the
+project stop distributing it, on the strength of
+`engine_artifact_distribution.md` recording "no standalone license file found in
+`jhonnold/berserk-networks` during intake."
 
-Resolved in the repository: the generated Berserk artifacts are removed and
-fetched from upstream at build time. Berserk remains fully buildable; it is no
-longer redistributed *from git*.
+That intake note was accurate but incomplete, and the audit inherited its
+conclusion without re-deriving it. Nobody had checked how the engine *consumes*
+the network. Berserk's own `src/Makefile` names `berserk-9b84c340af7e.nn` as
+`EVALFILE`, downloads it from the networks repo during an ordinary build, and
+verifies its SHA-256; the binary cannot run without it. The engine is GPL-3.0
+throughout (`Copyright (C) 2024 Jay Honnold`), and the author distributes GPL
+binaries built with that net. Under GPL-3.0 that makes the network part of the
+Corresponding Source of the work he already distributes.
 
-#### ACTION REQUIRED — the network is still published on the CDN
+Berserk is therefore tracked and deployed again. The reasoning is written into
+the distribution card rather than left implicit, confirmation has been requested
+upstream, and the reversal path is documented in case the answer is no.
 
-Removing the artifacts from git does **not** unpublish them. Verified
-2026-07-25, after the repository change:
+Two process lessons worth keeping:
 
-```
-GET https://assets.0x88.app/berserk/berserk-emscripten.data
-  → 200, 25,201,924 bytes          <-- the unresolved-license network
-GET https://assets.0x88.app/berserk/berserk-emscripten-relaxed-simd128.js  → 200
-GET https://assets.0x88.app/berserk/berserk-emscripten.wasm                → 200
-```
-
-The objects are still in R2 from earlier deploys, so the project is still
-publicly distributing the exact bytes its own policy says it must not. This is
-the one remaining licensing exposure and it cannot be closed from the
-repository — it needs an R2 deletion with Cloudflare credentials:
-
-```sh
-# Dry run first — this script defaults to dry-run and never touches
-# channels/ or releases/.
-CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… \
-  node scripts/plan_r2_artifact_cleanup.mjs --bucket browser-chess-models
-```
-
-Then remove the `berserk/` objects (and any `artifacts/sha256/…` bodies that
-only Berserk releases reference). Until that is done, treat the Berserk
-provenance issue as open regardless of what the repository contains.
-
-Note the local-origin asymmetry this creates in the meantime: the variant probe
-short-circuits to `missing` on a non-local origin, but on `localhost` it still
-probes and finds the R2 copies, so a developer sees Berserk as available while
-production does not.
+- **An absent licence file is a prompt to investigate, not a conclusion.** The
+  strict reading cost real product capability — the engine was pulled from the
+  live site — on evidence that a five-minute look at the upstream Makefile
+  overturned.
+- **Do not leave policy and deployment contradicting each other.** The genuine
+  defect here was never "we distribute Berserk"; it was that the repository said
+  "do not distribute" while production served it. That inconsistency is what a
+  community reading both would have caught, and either direction of fix resolves
+  it as long as both agree.
 
 ### 2.3 Clone size — smaller problem than it first looked
 
@@ -549,8 +539,8 @@ onboarding path, and explain the licensing and clone-size situation.
 1. LICENSE (GPL-3.0-or-later) — done.
 2. Berserk removal from the repository — done.
 3. README rewrite — done.
-4. **Delete the Berserk objects from R2** — NOT done, needs credentials. This
-   is the only remaining licensing exposure; see 2.2.
+4. Berserk distribution — restored; see 2.2. Confirmation requested upstream,
+   with a documented reversal path if the answer is no.
 5. Clone size — publish `main` only and document `GIT_LFS_SKIP_SMUDGE=1`. The
    history rewrite is **not** recommended (see 2.3); it is verified and held in
    reserve should the Reckless source archives ever move.
