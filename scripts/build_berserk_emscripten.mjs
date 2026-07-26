@@ -94,7 +94,15 @@ function publishSharedData(builtDataPath) {
     }
     console.log(`Shared ${sharedDataPath} already matches ${outBase}.data (sha256 ${builtDigest})`);
   } else {
-    fs.copyFileSync(builtDataPath, sharedDataPath);
+    // Copy via a temp file and rename, so the canonical path only ever holds
+    // complete bytes. Writing straight to it means an interrupt mid-copy leaves
+    // a truncated file that every later run then hashes, reports as a mismatch,
+    // and throws on WITHOUT replacing -- wedging all future builds until someone
+    // deletes it by hand. rename(2) within one directory is atomic.
+    const tmpDataPath = `${sharedDataPath}.partial`;
+    fs.rmSync(tmpDataPath, { force: true });
+    fs.copyFileSync(builtDataPath, tmpDataPath);
+    fs.renameSync(tmpDataPath, sharedDataPath);
     console.log(`Wrote ${sharedDataPath} (${fs.statSync(sharedDataPath).size} bytes, sha256 ${builtDigest})`);
   }
   const perVariantData = path.join(path.dirname(jsOut), `${outBase}.data`);
@@ -205,14 +213,12 @@ if (process.env.BERSERK_EMCC || canRun('emcc')) {
   run('docker', ['run', '--rm', '-v', `${srcDir}:/src`, '-w', '/src', emsdkImage, 'emcc', ...emccArgs]);
 }
 
-// Recovery model for an interrupted build is re-running it, not atomicity.
 // A crash between publishing the canonical .data and copying the glue/wasm can
-// leave a mixed set, but every path here is regenerated from the pinned
-// upstream source on the next run, publishSharedData re-verifies the canonical
-// bytes and fails loudly on divergence, and nothing deploys straight from this
-// directory without the release gate. Staging all three outputs behind a
-// temp-and-rename commit was considered and rejected as machinery that buys
-// less than it costs in a developer-only build script.
+// still leave a mixed set; recovery for that is re-running the build, since
+// every path regenerates from pinned upstream source and nothing deploys from
+// this directory without the release gate. The canonical .data itself is
+// written atomically (see publishSharedData) because a truncated one is NOT
+// recoverable by re-running: the mismatch check would reject it forever.
 // Validate and publish the shared preload FIRST. publishSharedData throws when
 // a rebuilt variant's .data diverges from the canonical one, and if the glue and
 // wasm were already in place by then the public tree would be left holding new

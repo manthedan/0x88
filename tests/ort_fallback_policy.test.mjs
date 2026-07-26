@@ -212,6 +212,22 @@ test('built workers on the CPU-only ORT runtime default to the auto thread budge
   assert.equal(resolveOrtWasmThreads(builtWorkerContext({ autoThreads: 2 })), 2);
 });
 
+test('an explicit ortThreads=auto still respects the runtime artifact', () => {
+  // `auto` asks for a recommendation, and on the WebGPU-capable asyncify pair
+  // the recommendation is 1: threads there measured as a 55% regression, and
+  // the artifact is worker-global so it cannot be swapped afterwards.
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: 'auto', cpuOnlyRuntimeArtifact: false })), 1);
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: 'auto', cpuOnlyRuntimeArtifact: true })), 4);
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: 'auto', cpuOnlyRuntimeArtifact: true, threadedAvailable: false })), 1);
+});
+
+test('an explicit ortThreads=N remains a genuine override on either artifact', () => {
+  // Stating a number is not asking for advice: benchmarking asyncify at 4
+  // threads must stay possible, or the regression cannot be re-measured.
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: '4', cpuOnlyRuntimeArtifact: false })), 4);
+  assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: '1', cpuOnlyRuntimeArtifact: true })), 1);
+});
+
 test('the auto thread budget needs cross-origin isolation', () => {
   // Threaded wasm cannot run at all without SharedArrayBuffer.
   assert.equal(resolveOrtWasmThreads(builtWorkerContext({ threadedAvailable: false })), 1);

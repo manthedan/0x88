@@ -482,7 +482,15 @@ export function resolveOrtWasmThreads(context: OrtWasmThreadContext): number {
     if (!context.cpuOnlyRuntimeArtifact) return 1;
     return context.threadedAvailable ? context.autoThreads : 1;
   }
-  if (String(raw).toLowerCase() === 'auto') return context.threadedAvailable ? context.autoThreads : 1;
+  // `auto` means "choose sensibly for me", so it obeys the same artifact rule
+  // as the default: on the WebGPU-capable asyncify pair the sensible choice is
+  // 1, because threads there measured as a 55% regression. An explicit integer
+  // below is left as a genuine override -- someone benchmarking asyncify at 4
+  // threads is stating a number, not asking for a recommendation.
+  if (String(raw).toLowerCase() === 'auto') {
+    if (!context.cpuOnlyRuntimeArtifact) return 1;
+    return context.threadedAvailable ? context.autoThreads : 1;
+  }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
   const requested = Math.floor(parsed);

@@ -85,7 +85,11 @@ for (const [family, file] of GENERATED_GLUE) {
       // Artifacts are build outputs; some checkouts legitimately lack them.
       // Skip rather than fail so this does not become a false red for someone
       // who has not built or pulled LFS.
-      t.skip(`${file} not present in this checkout (${error.code})`);
+      // Loud on purpose. Berserk's glue is never committed (its network has no
+      // resolved license), so this assertion CANNOT run in clean CI and a quiet
+      // skip would read as coverage it does not provide. The CI-runnable half
+      // of this guarantee is the --preload-file assertion below.
+      t.skip(`${file} absent — generated-glue assertion NOT exercised in this checkout (${error.code})`);
       return;
     }
     assert.match(
@@ -95,3 +99,18 @@ for (const [family, file] of GENERATED_GLUE) {
     );
   });
 }
+
+// The CI-runnable half of the Berserk guarantee.
+//
+// Emscripten only emits the package loader that consults Module.locateFile when
+// the build packages a preload file; drop `--preload-file` and the generated
+// glue stops routing the .data through the hook entirely, which is the exact
+// regression the assertions above exist to catch. Berserk's glue is never
+// committed, so for that family this is the only check that can run without a
+// local toolchain — it verifies the cause rather than the effect.
+test('every Emscripten build script still packages its preload file', () => {
+  for (const family of ['berserk', 'plentychess', 'stormphrax']) {
+    const script = readFileSync(new URL(`../scripts/build_${family}_emscripten.mjs`, import.meta.url), 'utf8');
+    assert.match(script, /'--preload-file'/, `${family} build must package a preload file`);
+  }
+});
