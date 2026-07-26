@@ -27,7 +27,7 @@ import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVarian
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, hasExplicitViridithasVariant, normalizeViridithasVariant, resolveDefaultViridithasVariantAssetFallback, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
 import { BerserkEngine } from './berserkEngine.ts';
-import { BERSERK_ARTIFACT_BUILD_HINT, BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
+import { BERSERK_ARTIFACT_BUILD_HINT, BERSERK_VARIANTS, berserkArtifactsUnavailable, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
@@ -2453,7 +2453,7 @@ function buildEngines() {
       // reach here; constructing the engine would cache a worker that fails
       // later on a 404 glue fetch instead of showing the build-locally hint.
       const variant = berserkVariantForKey(row.variant);
-      if (berserkVariantAssetStatus(variant) === 'missing') {
+      if (berserkArtifactsUnavailable(variant)) {
         engines.set(id, { id, name, move: async () => { throw new Error(BERSERK_ARTIFACT_BUILD_HINT); } });
         continue;
       }

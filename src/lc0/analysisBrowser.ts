@@ -31,7 +31,7 @@ import { formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
 import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, supportsWasmRelaxedSimd, type RecklessVariant } from './recklessVariants.ts';
 import { canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, hasExplicitViridithasVariant, normalizeViridithasVariant, resolveDefaultViridithasVariantAssetFallback, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
-import { BERSERK_ARTIFACT_BUILD_HINT, BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
+import { BERSERK_ARTIFACT_BUILD_HINT, BERSERK_VARIANTS, berserkArtifactsUnavailable, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
 import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
 import { createStormphraxEngine, stormphraxCacheKey } from './engineProvision.ts';
@@ -1988,7 +1988,7 @@ function reviewEngineChoice(): ReviewEngineChoice {
     // constructing the engine would 404 partway through a review. Fall through
     // to the SF Lite default below rather than failing the run: the returned
     // label names the engine actually used, so the substitution is visible.
-    if (row.family === 'berserk' && berserkVariantAssetStatus(berserkVariantForKey(row.variant)) !== 'missing') {
+    if (row.family === 'berserk' && !berserkArtifactsUnavailable(berserkVariantForKey(row.variant))) {
       return { engine: getBerserkFor(row.variant), label: berserkVariantForKey(row.variant).label, depth: row.strength };
     }
     if (row.family === 'plentychess') return { engine: getPlentyChessFor(row.variant), label: plentyChessVariantForKey(row.variant).label, depth: row.strength };
@@ -2415,7 +2415,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         // See arenaBrowser: Berserk artifacts are never deployed, so a resolved
         // `missing` means constructing the engine only buys a worker that dies
         // on a 404 glue fetch. Surface the build-locally hint instead.
-        if (berserkVariantAssetStatus(variant) === 'missing') {
+        if (berserkArtifactsUnavailable(variant)) {
           pushTask(index, cacheKey, label, () => { throw new Error(BERSERK_ARTIFACT_BUILD_HINT); });
           continue;
         }

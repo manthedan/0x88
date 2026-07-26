@@ -151,20 +151,31 @@ if (process.env.STORMPHRAX_EMXX || canRun('em++')) {
   run('docker', ['run', '--rm', '-v', `${engineDir}:/src`, '-w', '/src', emsdkImage, 'em++', ...emxxArgs]);
 }
 
-// A crash between publishing the canonical .data and copying the glue/wasm can
-// still leave a mixed set; recovery for that is re-running the build, since
-// every path regenerates from pinned upstream source and nothing deploys from
-// this directory without the release gate. The canonical .data itself is
-// written atomically (see publishSharedData) because a truncated one is NOT
-// recoverable by re-running: the mismatch check would reject it forever.
-// Validate and publish the shared preload FIRST. publishSharedData throws when
-// a rebuilt variant's .data diverges from the canonical one, and if the glue and
-// wasm were already in place by then the public tree would be left holding new
-// code beside a stale network -- a mixed set that still looks deployable.
+// Publish the whole variant as one step.
+//
+// Order matters first: publishSharedData throws when a rebuilt variant's .data
+// diverges from the canonical one, so it runs before any code is placed --
+// otherwise the tree would be left holding new glue beside a stale network.
+//
+// Atomicity matters second: the .js and .wasm must land together. A partial
+// copy leaves new glue with an old wasm, which is an Emscripten LinkError at
+// load, and release manifests hash whatever is on disk independently, so a
+// mixed directory can be packaged and shipped. Re-running does not protect
+// against that because the mixed state is already publishable. So stage both
+// into the output directory under temp names, then rename them into place --
+// rename(2) within a directory is atomic, and the window where only one of the
+// two is live is a single syscall rather than a whole file copy.
 publishSharedData(path.join(engineDir, `${outBase}.data`));
+const staged = [];
 for (const ext of ['js', 'wasm']) {
   const built = path.join(engineDir, `${outBase}.${ext}`);
   const out = path.join(path.dirname(jsOut), `${outBase}.${ext}`);
-  fs.copyFileSync(built, out);
+  const tmp = `${out}.partial`;
+  fs.rmSync(tmp, { force: true });
+  fs.copyFileSync(built, tmp);
+  staged.push([tmp, out]);
+}
+for (const [tmp, out] of staged) {
+  fs.renameSync(tmp, out);
   console.log(`Wrote ${out} (${fs.statSync(out).size} bytes)`);
 }

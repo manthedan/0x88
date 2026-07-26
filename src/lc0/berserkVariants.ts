@@ -288,6 +288,29 @@ export function berserkVariantAssetStatus(variant: BerserkVariant): BerserkAsset
   return assetStatuses.get(assetKey(variant)) ?? 'unknown';
 }
 
+/**
+ * Single availability predicate for every Berserk construction site.
+ *
+ * Callers previously each tested `status === 'missing'`, which is wrong in the
+ * two cases where a status never settles: an explicit variant that skipped the
+ * probe, and a planned WASI variant silently remapped to an Emscripten tier
+ * that was never probed. Both leave `unknown`, walk past a `=== 'missing'`
+ * check, and 404.
+ *
+ * On a public origin the answer needs no probe at all: `DEPLOYED_BERSERK_PATHS`
+ * is empty because this project publishes no Berserk artifact, so availability
+ * is a policy fact, not a network question. This deliberately also ignores any
+ * stale copies still sitting on the asset CDN from earlier deploys — the point
+ * is to stop using the unresolved-license network, not to use it while it
+ * happens to still resolve. Locally, a developer build is real, so defer to the
+ * probe. A `custom` variant is the caller's own URL and is left alone.
+ */
+export function berserkArtifactsUnavailable(variant: BerserkVariant): boolean {
+  if (variant.key === 'custom') return false;
+  if (!isLocalDevelopmentOrigin()) return true;
+  return berserkVariantAssetStatus(variant) === 'missing';
+}
+
 export function checkBerserkVariantAsset(variant: BerserkVariant, onChange?: () => void): Promise<BerserkAssetStatus> {
   const key = assetKey(variant);
   const current = assetStatuses.get(key);
