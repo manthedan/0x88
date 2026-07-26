@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Browser-first 0x88 chess-engine research prototype.",
+  "license": "GPL-3.0-or-later",
   "scripts": {
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "npm run typecheck && node --experimental-strip-types --test --test-timeout=120000",
