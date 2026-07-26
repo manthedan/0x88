@@ -962,7 +962,38 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
   return diag;
 }
 
+/**
+ * Settle `probedWebGpuAdapterUsable` before the artifact is chosen.
+ *
+ * `navigator.gpu` existing does not mean an adapter can be acquired (a
+ * blocklisted GPU, a headless or software-only context). Provider and artifact
+ * resolution are both synchronous and consult the probe result, but the only
+ * thing that used to set it was `collectOrtRuntimeDiagnostics({probeAdapter})`,
+ * which normal worker startup runs *after* the first session. Such a browser
+ * therefore locked the 24 MB asyncify pair at one thread, tried WebGPU, failed,
+ * and served the rest of the session from the large binary anyway.
+ *
+ * Runs at most once per thread, and only when the answer can change a decision:
+ * a pinned `ep=wasm` never consults it, and strict `ep=webgpu` resolves to
+ * `['webgpu']` regardless so it still surfaces "WebGPU unavailable" rather than
+ * silently degrading.
+ */
+async function ensureWebGpuAdapterProbed(): Promise<void> {
+  if (probedWebGpuAdapterUsable !== null) return;
+  if (!webgpuAvailable()) return;
+  const requested = requestedOrtExecutionProvider();
+  if (requested === 'wasm' || requested === 'webgpu') return;
+  try {
+    probedWebGpuAdapterUsable = !!(await webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' }));
+  } catch {
+    probedWebGpuAdapterUsable = false;
+  }
+}
+
 export async function createOrtSession(modelPath: string | Uint8Array | ArrayBuffer): Promise<ort.InferenceSession> {
+  // Must precede resolvedOrtExecutionProviders(): both it and the artifact
+  // selector read the probe result, and the locks below freeze that choice.
+  await ensureWebGpuAdapterProbed();
   const providers = resolvedOrtExecutionProviders();
   // Both locks run before the first InferenceSession.create so the artifact is
   // decided (and frozen) before ORT initializes its worker-global wasm module;
