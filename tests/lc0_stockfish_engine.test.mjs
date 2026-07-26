@@ -1,6 +1,28 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseBestMove, parseStockfishInfo, StockfishEngine, defaultStockfishUrl, normalizeStockfishFlavor, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, stockfishGoCommand, stockfishWorkerUrl } from '../src/lc0/stockfishEngine.ts';
+import { parseBestMove, parseStockfishInfo, StockfishEngine, DEFAULT_STOCKFISH_HASH_MB, defaultStockfishUrl, normalizeStockfishFlavor, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, stockfishGoCommand, stockfishWorkerUrl } from '../src/lc0/stockfishEngine.ts';
+
+/** Minimal UCI worker double: answers `uci`/`isready` and records every command. */
+class MockStockfishWorker {
+  static instances = [];
+
+  constructor(url, options) {
+    this.url = String(url);
+    this.options = options;
+    this.messages = [];
+    this.onmessage = null;
+    this.onerror = null;
+    MockStockfishWorker.instances.push(this);
+  }
+
+  postMessage(message) {
+    this.messages.push(message);
+    if (message === 'uci') queueMicrotask(() => this.onmessage?.({ data: 'uciok' }));
+    else if (message === 'isready') queueMicrotask(() => this.onmessage?.({ data: 'readyok' }));
+  }
+
+  terminate() {}
+}
 
 test('parseBestMove extracts the UCI move and handles (none)', () => {
   assert.equal(parseBestMove('bestmove e2e4 ponder e7e5'), 'e2e4');
@@ -110,27 +132,7 @@ test('StockfishEngine reports thread capacity from the resolved worker URL', () 
 });
 
 test('StockfishEngine starts threaded artifacts through the local pthread bootstrap', async () => {
-  class MockStockfishWorker {
-    static instances = [];
-
-    constructor(url, options) {
-      this.url = String(url);
-      this.options = options;
-      this.messages = [];
-      this.onmessage = null;
-      this.onerror = null;
-      MockStockfishWorker.instances.push(this);
-    }
-
-    postMessage(message) {
-      this.messages.push(message);
-      if (message === 'uci') queueMicrotask(() => this.onmessage?.({ data: 'uciok' }));
-      else if (message === 'isready') queueMicrotask(() => this.onmessage?.({ data: 'readyok' }));
-    }
-
-    terminate() {}
-  }
-
+  MockStockfishWorker.instances = [];
   const previousWorker = globalThis.Worker;
   const previousLocation = globalThis.location;
   const previousBase = globalThis.LC0_BROWSER_ASSET_BASE_URL;
@@ -149,6 +151,7 @@ test('StockfishEngine starts threaded artifacts through the local pthread bootst
     assert.deepEqual(worker.messages.slice(0, 4), [
       'uci',
       'setoption name Threads value 2',
+      `setoption name Hash value ${DEFAULT_STOCKFISH_HASH_MB}`,
       'isready',
     ]);
     engine.dispose();
@@ -157,6 +160,52 @@ test('StockfishEngine starts threaded artifacts through the local pthread bootst
     else globalThis.Worker = previousWorker;
     if (previousBase === undefined) delete globalThis.LC0_BROWSER_ASSET_BASE_URL;
     else globalThis.LC0_BROWSER_ASSET_BASE_URL = previousBase;
+    if (previousLocation === undefined) delete globalThis.location;
+    else Object.defineProperty(globalThis, 'location', { value: previousLocation, configurable: true });
+  }
+});
+
+test('StockfishEngine always sends a Hash setoption instead of the 16 MB built-in default', async () => {
+  const previousWorker = globalThis.Worker;
+  const previousLocation = globalThis.location;
+  globalThis.Worker = MockStockfishWorker;
+  Object.defineProperty(globalThis, 'location', {
+    value: { href: 'https://0x88.app/app/analysis/', origin: 'https://0x88.app' },
+    configurable: true,
+  });
+  try {
+    MockStockfishWorker.instances = [];
+    const engine = new StockfishEngine({ depth: 14 }, '/stockfish/stockfish-18-lite-single.js');
+    await engine.prewarm();
+    const worker = MockStockfishWorker.instances[0];
+    assert.deepEqual(worker.messages, [
+      'uci',
+      `setoption name Hash value ${DEFAULT_STOCKFISH_HASH_MB}`,
+      'isready',
+    ]);
+    // Stockfish ignores out-of-range spin values, so the clamp must hold the
+    // wasm32 ceiling of 2048 MB and a 1 MB floor.
+    engine.setOptions({ hashMb: 999999 });
+    engine.setOptions({ hashMb: 0 });
+    assert.deepEqual(worker.messages.slice(3), [
+      'setoption name Hash value 2048',
+      'setoption name Hash value 1',
+    ]);
+    engine.dispose();
+
+    MockStockfishWorker.instances = [];
+    const explicit = new StockfishEngine({ depth: 4, threads: 1, hashMb: 128 }, '/stockfish/stockfish-18-lite-single.js');
+    await explicit.prewarm();
+    assert.deepEqual(MockStockfishWorker.instances[0].messages, [
+      'uci',
+      'setoption name Threads value 1',
+      'setoption name Hash value 128',
+      'isready',
+    ]);
+    explicit.dispose();
+  } finally {
+    if (previousWorker === undefined) delete globalThis.Worker;
+    else globalThis.Worker = previousWorker;
     if (previousLocation === undefined) delete globalThis.location;
     else Object.defineProperty(globalThis, 'location', { value: previousLocation, configurable: true });
   }

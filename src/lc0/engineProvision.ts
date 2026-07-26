@@ -19,8 +19,28 @@ import { defaultPlentyChessVariantKey, plentyChessVariantByKey, resolveDefaultPl
 import { StormphraxEngine } from './stormphraxEngine.ts';
 import { defaultStormphraxVariantKey, resolveDefaultStormphraxVariantAssetFallback, stormphraxVariantByKey, type StormphraxVariant } from './stormphraxVariants.ts';
 
+/**
+ * Transposition-table size handed to every CPU engine at construction.
+ *
+ * The previous 16 MB matched nothing but habit: analysis searches run to
+ * depth 12+ (see engineCatalog's per-surface strength defaults), where a
+ * 16 MB table overwrites itself constantly and costs real strength. 64 MB
+ * is the conservative-but-real step up:
+ *  - Every Emscripten build we ship reserves INITIAL_MEMORY of 256 MB
+ *    (berserk, plentychess) or 512 MB (stormphrax) with ALLOW_MEMORY_GROWTH
+ *    and MAXIMUM_MEMORY=2 GB, so a 64 MB table lives inside the heap the
+ *    module already reserved and never triggers a growth on its own.
+ *  - Arena and analysis can hold several engine workers alive at once
+ *    (see resourceBroker). At 64 MB, even eight concurrent engines add up to
+ *    512 MB of table — large, but not the term that decides an OOM, since the
+ *    reserved heaps already dominate. At 128+ MB per engine it would be.
+ * Pages that want more for a single long-running analysis engine can pass
+ * `hashMb` through setOptions; this is only the construction-time floor.
+ */
+export const DEFAULT_CPU_ENGINE_HASH_MB = 64;
+
 /** Construction-time search defaults; pages re-tune per move via setOptions. */
-const CPU_ENGINE_DEFAULTS = { depth: 4, hashMb: 16 } as const;
+const CPU_ENGINE_DEFAULTS = { depth: 4, hashMb: DEFAULT_CPU_ENGINE_HASH_MB } as const;
 
 export function recklessCacheKey(variant: RecklessVariant): string {
   return `${variant.key}:${variant.wasmUrl}:${variant.nnueUrl ?? ''}:${variant.nnueExpectedBytes ?? ''}:${variant.backend ?? 'wasi'}`;

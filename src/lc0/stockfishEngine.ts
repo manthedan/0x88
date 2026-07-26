@@ -20,7 +20,23 @@ export interface StockfishOptions {
   skillLevel?: number;
   /** UCI Threads. Threaded WASM builds require cross-origin isolation. */
   threads?: number;
+  /** UCI Hash (transposition table) size in MB; defaults to DEFAULT_STOCKFISH_HASH_MB. */
+  hashMb?: number;
 }
+
+/**
+ * Transposition-table size applied when a caller does not pass `hashMb`.
+ *
+ * Stockfish's own built-in default is 16 MB, which throttles anything past
+ * roughly depth 12 — the analysis surface routinely searches deeper than
+ * that. 64 MB is the conservative step up: every Stockfish artifact we ship
+ * is built with INITIAL_MEMORY=128 MB and MAXIMUM_MEMORY=2 GB, so a 64 MB
+ * table fits inside the heap the module already reserves at startup and
+ * never forces a heap growth just for the TT. It also stays small enough
+ * that arena runs, which can keep several engine workers alive at once,
+ * do not multiply into a mobile-browser OOM.
+ */
+export const DEFAULT_STOCKFISH_HASH_MB = 64;
 
 export type StockfishFlavor = 'lite-single' | 'single' | 'lite-threaded' | 'threaded';
 
@@ -137,6 +153,12 @@ function threadsCommand(threads: number): string {
   return `setoption name Threads value ${Math.max(1, Math.min(32, Math.floor(threads)))}`;
 }
 
+// Stockfish caps Hash at 2048 MB on 32-bit targets (wasm32), and silently
+// ignores a spin value outside an option's declared range, so clamp here.
+function hashCommand(hashMb: number): string {
+  return `setoption name Hash value ${Math.max(1, Math.min(2048, Math.floor(hashMb)))}`;
+}
+
 export interface StockfishInfoLine extends BrowserUciInfoLine {}
 
 const STOCKFISH_ABORT_DRAIN_TIMEOUT_MS = 1500;
@@ -196,11 +218,16 @@ export class StockfishEngine implements BrowserUciEngine {
     this.options = { ...this.options, ...next };
     if (this.worker && next.skillLevel !== undefined) this.worker.postMessage(skillLevelCommand(next.skillLevel));
     if (this.worker && next.threads !== undefined) this.worker.postMessage(threadsCommand(next.threads));
+    if (this.worker && next.hashMb !== undefined) this.worker.postMessage(hashCommand(next.hashMb));
   }
 
   private applyOptions(): void {
     if (this.options.skillLevel !== undefined) this.worker?.postMessage(skillLevelCommand(this.options.skillLevel));
     if (this.options.threads !== undefined) this.worker?.postMessage(threadsCommand(this.options.threads));
+    // Unconditional: no caller passes `hashMb` today, and leaving it unset
+    // means Stockfish keeps its 16 MB built-in default. Sent after Threads
+    // because Stockfish reallocates the TT when the thread count changes.
+    this.worker?.postMessage(hashCommand(this.options.hashMb ?? DEFAULT_STOCKFISH_HASH_MB));
   }
 
   private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
