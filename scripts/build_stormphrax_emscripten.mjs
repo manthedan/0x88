@@ -179,3 +179,15 @@ for (const [tmp, out] of staged) {
   fs.renameSync(tmp, out);
   console.log(`Wrote ${out} (${fs.statSync(out).size} bytes)`);
 }
+// POSIX has no multi-file atomic rename, so the glue and wasm land in two
+// adjacent syscalls; a crash between them is a microsecond window, and closing
+// it properly would mean a versioned-directory swap that changes the output
+// layout every consumer of public/<engine>/<name>.js depends on. That is not
+// worth it here. What IS worth it is refusing to leave a mixed pair quietly:
+// verify the published set before exiting, so an interrupted or failed publish
+// is loud rather than something release tooling later hashes and ships.
+for (const [, out] of staged) {
+  if (!fs.existsSync(out) || fs.statSync(out).size === 0) {
+    throw new Error(`Publish incomplete: ${out} is missing or empty. The output directory now holds a mixed artifact set; re-run this build before packaging or deploying.`);
+  }
+}
