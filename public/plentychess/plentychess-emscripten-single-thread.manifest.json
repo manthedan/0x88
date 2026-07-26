@@ -101,22 +101,6 @@
       }
     },
     {
-      "path": "public/plentychess/plentychess-emscripten-sse41.data",
-      "bytes": 63023936,
-      "sha256": "691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4",
-      "compression": {
-        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
-        "gzip": {
-          "bytes": 34010279,
-          "ratio": 0.5396
-        },
-        "brotli": {
-          "bytes": 32447720,
-          "ratio": 0.5148
-        }
-      }
-    },
-    {
       "path": "public/plentychess/plentychess-emscripten-relaxed-simd128.js",
       "bytes": 70983,
       "sha256": "850b884c518b23cd6d84e15f408a1fa0edad02f28dd5a4ea24199cc39fe8668d",
@@ -147,22 +131,6 @@
           "ratio": 0.3141
         }
       }
-    },
-    {
-      "path": "public/plentychess/plentychess-emscripten-relaxed-simd128.data",
-      "bytes": 63023936,
-      "sha256": "691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4",
-      "compression": {
-        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
-        "gzip": {
-          "bytes": 34010279,
-          "ratio": 0.5396
-        },
-        "brotli": {
-          "bytes": 32447720,
-          "ratio": 0.5148
-        }
-      }
     }
   ],
   "assets": [
@@ -174,7 +142,7 @@
       "processedSha256": "691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4",
       "processingCommand": "tools/process_net false",
       "licenseNote": "Yoshie2000/PlentyNetworks is licensed under GPL-3.0; preserve GPL-3.0 notices with the network asset.",
-      "embeddedIn": "public/plentychess/plentychess-emscripten.data, public/plentychess/plentychess-emscripten-sse41.data, and public/plentychess/plentychess-emscripten-relaxed-simd128.data"
+      "embeddedIn": "public/plentychess/plentychess-emscripten.data (one canonical preload package shared by every SIMD tier)"
     }
   ],
   "totals": {

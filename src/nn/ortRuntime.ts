@@ -365,7 +365,14 @@ export function ortRuntimeArtifactKindForCurrentThread(): OrtRuntimeArtifactKind
   if (forcedOrtWasmArtifact.variant !== 'bundled') return 'asyncify';
   if (requestedOrtExecutionProvider() === 'webgpu') return 'asyncify';
   if (resolvedOrtExecutionProviders().includes('webgpu')) return 'asyncify';
-  if (!webgpuAvailable() || explicitWasmOnlyOrtEpPin()) return 'wasm';
+  // `webgpuUsableForProviderSelection`, not `webgpuAvailable`: a browser can
+  // expose `navigator.gpu` and still fail to yield an adapter. Once the probe
+  // has explicitly failed, provider resolution already drops WebGPU, so keying
+  // the artifact off mere API presence would hand that browser the larger
+  // asyncify pair and the single-thread policy for a GPU it can never use.
+  // Strict `ep=webgpu` is unaffected: it returned asyncify above, so a GPU-less
+  // browser still fails with "WebGPU unavailable" rather than a link error.
+  if (!webgpuUsableForProviderSelection() || explicitWasmOnlyOrtEpPin()) return 'wasm';
   return 'asyncify';
 }
 

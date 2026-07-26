@@ -100,22 +100,6 @@
           "ratio": 0.2888
         }
       }
-    },
-    {
-      "path": "public/stormphrax/stormphrax-emscripten-relaxed-simd128.data",
-      "bytes": 55914848,
-      "sha256": "04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf",
-      "compression": {
-        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
-        "gzip": {
-          "bytes": 35880418,
-          "ratio": 0.6417
-        },
-        "brotli": {
-          "bytes": 33929708,
-          "ratio": 0.6068
-        }
-      }
     }
   ],
   "assets": [
@@ -124,7 +108,7 @@
       "sourceUrl": "https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/undertown.nnue",
       "rawSha256": "04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf",
       "licenseNote": "Stormphrax documents undertown as its self-trained 8.0.0 release network; distribute it with the GPL corresponding source and provenance manifest.",
-      "embeddedIn": "public/stormphrax/stormphrax-emscripten.data and public/stormphrax/stormphrax-emscripten-relaxed-simd128.data"
+      "embeddedIn": "public/stormphrax/stormphrax-emscripten.data (one canonical preload package shared by every SIMD tier)"
     }
   ],
   "totals": {

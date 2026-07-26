@@ -145,10 +145,8 @@
         "/plentychess/plentychess-emscripten.data",
         "/plentychess/plentychess-emscripten-sse41.js",
         "/plentychess/plentychess-emscripten-sse41.wasm",
-        "/plentychess/plentychess-emscripten-sse41.data",
         "/plentychess/plentychess-emscripten-relaxed-simd128.js",
-        "/plentychess/plentychess-emscripten-relaxed-simd128.wasm",
-        "/plentychess/plentychess-emscripten-relaxed-simd128.data"
+        "/plentychess/plentychess-emscripten-relaxed-simd128.wasm"
       ],
       "notes": "Single-thread Emscripten worker builds with baseline, SSE4.1, and relaxed-SIMD tiers; processed NNUE is preloaded in each .data sidecar."
     },

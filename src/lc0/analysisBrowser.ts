@@ -1984,7 +1984,13 @@ function reviewEngineChoice(): ReviewEngineChoice {
     if (row.family === 'sf') return { engine: getStockfish(row.variant === 'full' ? 'full' : 'lite'), label: row.variant === 'full' ? 'SF' : 'SF Lite', depth: row.strength };
     if (row.family === 'reckless') return { engine: getRecklessFor(row.variant), label: recklessVariantForKey(row.variant).label, depth: row.strength };
     if (row.family === 'viridithas') return { engine: getViridithasFor(row.variant), label: viridithasVariantForKey(row.variant).label, depth: row.strength };
-    if (row.family === 'berserk') return { engine: getBerserkFor(row.variant), label: berserkVariantForKey(row.variant).label, depth: row.strength };
+    // Berserk artifacts are never deployed, so a `missing` status here means
+    // constructing the engine would 404 partway through a review. Fall through
+    // to the SF Lite default below rather than failing the run: the returned
+    // label names the engine actually used, so the substitution is visible.
+    if (row.family === 'berserk' && berserkVariantAssetStatus(berserkVariantForKey(row.variant)) !== 'missing') {
+      return { engine: getBerserkFor(row.variant), label: berserkVariantForKey(row.variant).label, depth: row.strength };
+    }
     if (row.family === 'plentychess') return { engine: getPlentyChessFor(row.variant), label: plentyChessVariantForKey(row.variant).label, depth: row.strength };
     if (row.family === 'stormphrax') return { engine: getStormphraxFor(row.variant), label: stormphraxVariantForKey(row.variant).label, depth: row.strength };
   }

@@ -23,7 +23,9 @@ const DEFAULT_SOURCE_MANIFESTS = [
   'public/stockfish/stockfish-18.0.7.manifest.json',
   'public/reckless/reckless-wasip1.manifest.json',
   'public/viridithas/viridithas-wasip1.manifest.json',
-  'public/berserk/berserk-emscripten-single-thread.manifest.json',
+  // No Berserk: its artifacts are intentionally untracked (unresolved upstream
+  // NNUE license), and collectArtifacts() verifies every listed artifact exists,
+  // so including it would fail release generation on any clean checkout.
   'public/plentychess/plentychess-emscripten-single-thread.manifest.json',
   'public/stormphrax/stormphrax-emscripten-single-thread.manifest.json',
 ];
