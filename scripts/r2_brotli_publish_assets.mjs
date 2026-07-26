@@ -35,18 +35,19 @@ const targets = [
     [`stockfish/${base}.js`, `public/stockfish/${base}.js`, 'text/javascript; charset=utf-8', immutable],
     [`stockfish/${base}.wasm`, `public/stockfish/${base}.wasm`, 'application/wasm', immutable],
   ]),
-  ['berserk/berserk-emscripten-single-thread.manifest.json', 'public/berserk/berserk-emscripten-single-thread.manifest.json', 'application/json', immutable],
-  ['berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz', 'public/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz', 'application/gzip', immutable],
-  ...['berserk-emscripten', 'berserk-emscripten-simd128', 'berserk-emscripten-relaxed-simd128'].flatMap((base) => [
-    [`berserk/${base}.js`, `public/berserk/${base}.js`, 'text/javascript; charset=utf-8', immutable],
-    [`berserk/${base}.wasm`, `public/berserk/${base}.wasm`, 'application/wasm', immutable],
-    [`berserk/${base}.data`, `public/berserk/${base}.data`, 'application/octet-stream', immutable],
-  ]),
+  // No berserk/* targets. The upstream NNUE has no resolved license, so nothing
+  // under public/berserk/ may be published -- not the binaries, not the shared
+  // preload .data, and not the corresponding-source archive (it embeds the
+  // network). Re-adding entries here is how a local build would silently
+  // republish it. See docs/engine_artifact_distribution.md.
+  // Code is per-variant; the preload package is not. Every SIMD tier reaches the
+  // one canonical .data through Module.locateFile, so publishing a copy per
+  // variant would upload ~60 MB of identical bytes twice over.
   ...['plentychess-emscripten', 'plentychess-emscripten-sse41', 'plentychess-emscripten-relaxed-simd128'].flatMap((base) => [
     [`plentychess/${base}.js`, `public/plentychess/${base}.js`, 'text/javascript; charset=utf-8', immutable],
     [`plentychess/${base}.wasm`, `public/plentychess/${base}.wasm`, 'application/wasm', immutable],
-    [`plentychess/${base}.data`, `public/plentychess/${base}.data`, 'application/octet-stream', immutable],
   ]),
+  ['plentychess/plentychess-emscripten.data', 'public/plentychess/plentychess-emscripten.data', 'application/octet-stream', immutable],
   ['plentychess/plentychess-emscripten-single-thread.manifest.json', 'public/plentychess/plentychess-emscripten-single-thread.manifest.json', 'application/json', immutable],
   ['plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz', 'public/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz', 'application/gzip', immutable],
   ...['viridithas.wasm', 'viridithas-simd128.wasm', 'viridithas-relaxed-simd128.wasm'].map((name) => [

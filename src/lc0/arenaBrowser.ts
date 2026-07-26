@@ -27,7 +27,7 @@ import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVarian
 import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, hasExplicitViridithasVariant, normalizeViridithasVariant, resolveDefaultViridithasVariantAssetFallback, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
 import { BerserkEngine } from './berserkEngine.ts';
-import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
+import { BERSERK_ARTIFACT_BUILD_HINT, BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
@@ -2447,6 +2447,16 @@ function buildEngines() {
       const engine = getViridithasFor(row.variant);
       engines.set(id, { id, name, move: viridithasMove(id, row, engine), warmup: viridithasWarmup(engine) });
     } else if (row.family === 'berserk') {
+      // Berserk artifacts are never deployed (unresolved upstream NNUE
+      // license), so every probe on a public origin resolves to `missing`. The
+      // selector disables it, but a persisted or query-provided seat can still
+      // reach here; constructing the engine would cache a worker that fails
+      // later on a 404 glue fetch instead of showing the build-locally hint.
+      const variant = berserkVariantForKey(row.variant);
+      if (berserkVariantAssetStatus(variant) === 'missing') {
+        engines.set(id, { id, name, move: async () => { throw new Error(BERSERK_ARTIFACT_BUILD_HINT); } });
+        continue;
+      }
       const engine = getBerserkFor(row.variant);
       engines.set(id, { id, name, move: berserkMove(id, row, engine), warmup: berserkWarmup(engine) });
     } else if (row.family === 'plentychess') {

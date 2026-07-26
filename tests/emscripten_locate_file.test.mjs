@@ -53,3 +53,38 @@ test('every Emscripten engine adapter routes locateFile through the shared resol
     assert.doesNotMatch(source, /endsWith\('\.data'\)/, `${family} must not re-implement .data routing`);
   }
 });
+
+// The resolver above is only half the contract. It is the *generated* glue that
+// decides whether to consult Module.locateFile at all: if a future Emscripten
+// version or build flag emitted a package fetch that bypassed the hook, every
+// non-default SIMD tier would request a .data that is no longer published and
+// the tests above would still pass. These assert against the real committed
+// artifacts, so a regenerated glue that dropped the hook fails here.
+const GENERATED_GLUE = [
+  ['plentychess', 'plentychess-emscripten.js'],
+  ['plentychess', 'plentychess-emscripten-sse41.js'],
+  ['plentychess', 'plentychess-emscripten-relaxed-simd128.js'],
+  ['stormphrax', 'stormphrax-emscripten.js'],
+  ['stormphrax', 'stormphrax-emscripten-relaxed-simd128.js'],
+];
+
+for (const [family, file] of GENERATED_GLUE) {
+  test(`generated glue ${file} resolves its preload package through Module.locateFile`, (t) => {
+    const path = new URL(`../public/${family}/${file}`, import.meta.url);
+    let source;
+    try {
+      source = readFileSync(path, 'utf8');
+    } catch (error) {
+      // Artifacts are build outputs; some checkouts legitimately lack them.
+      // Skip rather than fail so this does not become a false red for someone
+      // who has not built or pulled LFS.
+      t.skip(`${file} not present in this checkout (${error.code})`);
+      return;
+    }
+    assert.match(
+      source,
+      /Module\["locateFile"\]\(REMOTE_PACKAGE_BASE/,
+      `${file} must route its preload package through Module.locateFile, or the shared .data redirect cannot work`,
+    );
+  });
+}
