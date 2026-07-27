@@ -335,56 +335,57 @@ is 64.5 MB — while `reckless-browser-api-simd128-external.wasm` is 1.26 MB wit
 an external net. Making the external-net variant the default would let all three
 SIMD tiers share one downloaded network.
 
-### 1.6 Cloudflare caches nothing on the app origin
+### 1.6 App-origin fallback assets bypass the outer Cloudflare cache
 
-**Severity: medium. Effort: trivial. Status: OPEN — needs a Cloudflare dashboard change, no code.**
+**Severity: low. Effort: dashboard-only. Status: OPEN, but no longer on the primary artifact path.**
 
-Measured against production:
+The original finding was too broad. Re-measurement after deployment separates
+three paths:
 
-| URL | `cf-cache-status` |
+| Path | Observed cache behavior |
 | --- | --- |
-| `https://0x88.app/` | `DYNAMIC` |
-| `https://0x88.app/ort/ort-wasm-simd-threaded.asyncify.wasm` (24 MB) | `DYNAMIC` |
-| `https://0x88.app/models/lc0/manifest.json` | `DYNAMIC` |
+| `https://0x88.app/` | `cf-cache-status: DYNAMIC`, intentionally; HTML is mutable |
+| `https://0x88.app/_app/immutable/*` | first request `MISS`, second request `HIT` |
+| `https://0x88.app/ort/*` | outer Cloudflare `DYNAMIC`; Netlify Edge warms to `hit` |
+| `https://assets.0x88.app/<logical artifact>` | `cache-status: lc0-artifact-worker; hit` |
 
-`DYNAMIC` means Cloudflare is not caching the response at all — Cloudflare's
-default cache is extension-driven and does not include `.wasm`. Every cold
-request for the 24 MB ORT binary traverses Cloudflare to the Netlify origin.
+Engine and model downloads now use the `assets.0x88.app` Artifact Worker and R2,
+so the earlier claim that every cold engine request traverses to Netlify is no
+longer true. Versioned application bundles also cache correctly at Cloudflare.
+Only legacy/app-origin fallback paths such as `/ort/*`, `/models/*`, and
+`/engines/*` retain the extra outer-layer miss; Netlify still caches them.
 
-The Netlify edge itself *does* warm correctly (`cache-status: "Netlify Edge"; fwd=miss`
-on the first request, `; hit` on the second), and `netlify.toml` sets
-`Netlify-CDN-Cache-Control` / `CDN-Cache-Control` / `Cloudflare-CDN-Cache-Control`
-correctly. The outer Cloudflare layer is simply not acting on them, so it is
-currently pure added latency.
+Optional action: add a narrowly scoped Cloudflare Cache Rule for those fallback
+paths. Do not cache HTML or mutable channel pointers. This is an optimization,
+not a release blocker or a correctness fix.
 
-Action: a Cloudflare Cache Rule (or "Cache Everything" scoped by path) for
-`/ort/*`, `/models/*`, `/engines/*`, and `/artifacts/sha256/*`. No code change.
+### 1.7 R2 artifacts use stored identity and Brotli representations
 
-### 1.7 R2 artifacts are stored identity-only; Brotli is recomputed per miss
+**Severity: medium. Status: FIXED — stable release `2026-07-27.stored-brotli.1`.**
 
-**Severity: medium. Status: OPEN — rank 1 in the 2026-07-14 audit, still unshipped.**
+The stable channel now uses `lc0_browser.artifact_channel_manifest.v2`, pointing
+to a representation-aware immutable release. Its 87 unique decoded bodies have
+174 physical R2 objects: one identity representation and one Brotli
+representation per body. Object keys include both the decoded SHA-256 and the
+representation encoding/hash, so neither the Worker nor Cloudflare recomputes
+Brotli.
 
-Measured against `https://assets.0x88.app/reckless/reckless-relaxed-simd128.wasm`:
+Across the release, identity representations total 2,912,029,084 bytes and
+Brotli representations total 2,434,195,089 bytes: 477,833,995 bytes (16.4%)
+less transferred data. Live logical-alias checks include:
 
-```
-x-artifact-content-length: 64578859
-x-artifact-encoded-length: 64578859
-x-artifact-decoded-sha256: a9b4b292…34fcb
-x-artifact-encoded-sha256: a9b4b292…34fcb   <-- identical to decoded
-content-encoding: br                         <-- applied by the edge, not stored
-```
+| Artifact | Identity | Stored Brotli | Reduction |
+| --- | ---: | ---: | ---: |
+| Berserk NNUE preload | 25,201,924 | 17,602,380 | 30.2% |
+| Stockfish wasm | 113,007,340 | 74,208,176 | 34.3% |
+| LC0 QDQ model | 20,558,031 | 18,412,665 | 10.4% |
 
-The stored object is identity; Cloudflare compresses on the fly. It works, and
-it does save bandwidth (43.3 MB transferred vs 64.6 MB identity, a 33%
-reduction), but the cost shows up in latency: on a **warm** cache hit the Brotli
-response took 2.30 s against 1.10 s for identity — repeated on-the-fly
-compression at a low quality level.
+Production validation confirmed `Content-Encoding: br`, distinct encoded and
+decoded SHA-256 headers, warm Worker cache hits, and `206 Partial Content`
+identity range responses. A full-body canary downloaded both representations
+of the Berserk preload; the identity body and decoded Brotli body each matched
+the release's decoded SHA-256.
 
-A stored, precompressed `br` representation would be both smaller (higher
-quality level, computed once) and faster to serve. This is precisely the
-"representation-aware, SHA-only artifact delivery" work ranked #1 in the
-2026-07-14 audit, and the `deploy:r2-brotli-assets` tooling already exists — it
-is the deployed path that has not adopted it.
 
 ### 1.8 Move generator: allocation in the scan loops
 
@@ -640,16 +641,16 @@ onboarding path, and explain the licensing and clone-size situation.
 
 **Runtime — remaining, by payoff over effort**
 
-1. Cloudflare cache rule (1.6) — config only, no code, currently `DYNAMIC` on
-   every asset.
-2. Stored Brotli representations on R2 (1.7) — rank 1 in the 2026-07-14 audit,
-   still unshipped.
-3. Fix the NNUE alignment latent bug in `patches/stormphrax-emscripten.patch`
-   (1.1) — small, and currently correct only by allocator luck.
-4. Per-surface hash: analysis could take 128-256 MB (1.4). Needs the surface
+1. Fix the NNUE alignment latent bug in
+   `patches/stormphrax-emscripten.patch` (1.1) — small, and currently correct
+   only by allocator luck.
+2. Per-surface hash: analysis could take 128-256 MB (1.4). Needs the surface
    threaded through the `DisposableVariantPool` factories.
+3. Optional app-origin fallback cache rule (1.6) — dashboard-only; the primary
+   Artifact Worker path and versioned application bundles already cache.
 
-Items 1.2, 1.3, 1.4, and 1.5 are done. 1.1 is closed as rejected on evidence.
+Items 1.2, 1.3, 1.4, 1.5, and 1.7 are done. 1.1 is closed as rejected on
+evidence. The remaining part of 1.6 is an optional fallback optimization.
 
 **Deliberately not recommended**
 
