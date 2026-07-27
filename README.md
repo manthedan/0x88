@@ -14,11 +14,11 @@ your machine.
   side on the same position, with MultiPV, eval bars, and game review.
 - **[Arena](https://0x88.app/app/arena)** — head-to-head matches, round robins
   and gauntlets between engines, with standings and Elo.
-- `/single-engine` — Lc0 policy/eval playground.
 - `/docs` — the in-product documentation surface.
 
-Smoke, probe, and benchmark pages live under `lab/` so the app routes stay
-limited to product-facing entry points.
+Smoke, probe, and benchmark pages live under `lab/` — plus the unlisted,
+noindexed `/single-engine` harness endpoint that the scripts in `scripts/`
+drive — so the app routes stay limited to product-facing entry points.
 
 ## Engines
 
@@ -154,16 +154,13 @@ The nightly production journey can be run manually with
 
 ## Known gaps
 
-Kept current in
-[`runtime_efficiency_and_release_readiness_audit_2026-07-25.md`](docs/runtime_efficiency_and_release_readiness_audit_2026-07-25.md),
-including the parts where that audit's own claims turned out to be wrong.
-
-The short version: every CPU engine except Stockfish is single-threaded — and
+Every CPU engine except Stockfish is single-threaded — and
 [we measured that fixing it buys no playing strength](docs/threaded_emscripten_smp_prototype_2026-07-25.md),
 so it is closed rather than open. The remaining headroom is in delivery and
 startup, not search throughput. The move generator still clones the board per
 move rather than using make/unmake — worth doing, but measure first: it is
-currently under 1% of search time.
+currently under 1% of search time. The running ledger behind these calls is
+[`runtime_efficiency_and_release_readiness_audit_2026-07-25.md`](docs/runtime_efficiency_and_release_readiness_audit_2026-07-25.md).
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 

@@ -30,6 +30,7 @@
 
 <svelte:head>
   <title>{title}</title>
+  <meta name="robots" content="noindex,nofollow,noarchive" />
   <meta name="description" content={description} />
 </svelte:head>
 

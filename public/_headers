@@ -20,6 +20,12 @@
 /lab/webgpu-lc0-diag/*
   X-Robots-Tag: noindex, nofollow, noarchive
 
+/single-engine
+  X-Robots-Tag: noindex, nofollow, noarchive
+
+/single-engine/*
+  X-Robots-Tag: noindex, nofollow, noarchive
+
 /ort/*
   Cache-Control: public, max-age=3600, stale-while-revalidate=86400
   Netlify-CDN-Cache-Control: public, max-age=86400

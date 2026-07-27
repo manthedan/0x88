@@ -85,6 +85,19 @@
   [headers.values]
     X-Robots-Tag = "noindex, nofollow, noarchive"
 
+# Unlisted LC0 harness endpoint driven by the benchmark/parity scripts in
+# scripts/ and embedded by the lab diagnostics page. Not a product surface:
+# do not link from public nav; keep it out of search indexes.
+[[headers]]
+  for = "/single-engine"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow, noarchive"
+
+[[headers]]
+  for = "/single-engine/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow, noarchive"
+
 [[headers]]
   for = "/ort/*"
   [headers.values]
