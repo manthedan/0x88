@@ -234,12 +234,10 @@ export function berserkVariantFromParams(params: URLSearchParams): BerserkVarian
 }
 
 /**
- * Every Berserk tier — including the scalar base — can legitimately be absent,
- * because the artifacts are intentionally untracked (see
- * `BERSERK_ARTIFACT_BUILD_HINT`). The base build stays the terminal fallback
- * since there is no lower tier, but it is probed too so callers report a
- * settled `missing` instead of an indefinite `unknown`; the load error carries
- * the build-locally hint.
+ * Every tier can legitimately be absent from a partial checkout or local
+ * build. The scalar Emscripten build stays the terminal fallback since there
+ * is no lower tier, but it is probed too so callers report a settled `missing`
+ * instead of an indefinite `unknown`; the load error carries the rebuild hint.
  */
 export async function resolveDefaultBerserkVariantAssetFallback(variant: BerserkVariant, explicit: boolean, onChange?: () => void): Promise<BerserkVariant> {
   if (explicit) {

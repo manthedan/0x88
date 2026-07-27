@@ -43,11 +43,11 @@ function sha256(filePath) {
 }
 
 /**
- * The Berserk network is NOT redistributed from this repository: its
- * license/provenance is unresolved (docs/engine_artifact_distribution.md), so
- * the build fetches it from upstream on demand. Both the full SHA-256 and the
- * hash prefix embedded in the upstream filename must match, and a bad download
- * is deleted so a retry cannot reuse it.
+ * The release distributes this network in both the Emscripten preload and the
+ * corresponding-source archive. The build still fetches it from upstream on
+ * demand so a clean source build is reproducible. Both the full SHA-256 and the
+ * hash prefix embedded in the filename must match, and a bad download is
+ * deleted so a retry cannot reuse it.
  */
 function fetchAndVerifyNetwork() {
   if (!fs.existsSync(netPath)) {

@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { resolveEmscriptenAssetUrl } from '../src/lc0/emscriptenLocateFile.ts';
+import { workerScript as berserkWorkerScript } from '../src/lc0/berserkEngine.ts';
+import { workerScript as plentyChessWorkerScript } from '../src/lc0/plentychessEngine.ts';
+import { workerScript as stormphraxWorkerScript } from '../src/lc0/stormphraxEngine.ts';
+import { runInNewContext } from 'node:vm';
 
 const JS = 'https://assets.example/plentychess/plentychess-emscripten-relaxed-simd128.js';
 const WASM = 'https://assets.example/plentychess/plentychess-emscripten-relaxed-simd128.wasm';
@@ -44,13 +48,48 @@ test('redirection is extension-based, never name-based', () => {
   }
 });
 
-test('every Emscripten engine adapter routes locateFile through the shared resolver', () => {
-  // A worker that hand-rolls locateFile again would silently reintroduce the
-  // per-variant .data assumption, and no unit test above would notice.
-  for (const family of ['berserk', 'plentychess', 'stormphrax']) {
-    const source = readFileSync(new URL(`../src/lc0/${family}Engine.ts`, import.meta.url), 'utf8');
-    assert.match(source, /locateFile\(file\)\s*\{\s*return resolveEmscriptenAssetUrl\(/, `${family} must delegate locateFile`);
-    assert.doesNotMatch(source, /endsWith\('\.data'\)/, `${family} must not re-implement .data routing`);
+async function exerciseWorkerScript(script, factoryName) {
+  let located;
+  const messages = [];
+  const self = {
+    location: { href: 'https://app.example/worker.js', origin: 'https://app.example' },
+    postMessage(message) { messages.push(message); },
+  };
+  self[factoryName] = (options) => {
+    located = {
+      wasm: options.locateFile('variant.wasm'),
+      data: options.locateFile('variant.data'),
+    };
+    return Promise.resolve({ ccall() {} });
+  };
+  runInNewContext(script, { self, URL, importScripts() {} });
+  self.onmessage({
+    data: {
+      type: 'init',
+      id: 7,
+      jsUrl: 'https://app.example/engine/variant.js',
+      wasmUrl: 'https://app.example/engine/variant.wasm',
+      dataUrl: 'https://app.example/engine/canonical.data',
+      trustedJsUrl: false,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  return { located, messages };
+}
+
+test('every Emscripten worker can resolve its pinned sidecars at runtime', async () => {
+  for (const [family, factoryName, script] of [
+    ['berserk', 'Berserk', berserkWorkerScript()],
+    ['plentychess', 'PlentyChess', plentyChessWorkerScript()],
+    ['stormphrax', 'Stormphrax', stormphraxWorkerScript()],
+  ]) {
+    const { located, messages } = await exerciseWorkerScript(script, factoryName);
+    assert.deepEqual(located, {
+      wasm: 'https://app.example/engine/variant.wasm',
+      data: 'https://app.example/engine/canonical.data',
+    }, family);
+    assert.equal(messages.at(-1)?.type, 'ready', family);
+    assert.equal(messages.at(-1)?.id, 7, family);
   }
 });
 

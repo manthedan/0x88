@@ -38,12 +38,12 @@ function abortError(message = 'Berserk search aborted'): Error {
   return error;
 }
 
-function workerScript(): string {
-  // Berserk artifacts are intentionally not distributed with the site, so a
-  // 404 here is an expected state rather than a broken deploy. Carry the
-  // build-locally hint into the worker so the failure explains itself instead
-  // of surfacing a bare "NetworkError importing script".
+export function workerScript(): string {
+  // A missing Berserk artifact indicates an incomplete checkout or deploy.
+  // Carry the local rebuild hint into the worker so the failure identifies the
+  // affected URLs instead of surfacing a bare "NetworkError importing script".
   return String.raw`
+const resolveEmscriptenAssetUrl = ${resolveEmscriptenAssetUrl.toString()};
 const MISSING_ARTIFACT_HINT = ` + JSON.stringify(BERSERK_ARTIFACT_BUILD_HINT) + String.raw`;
 function artifactLoadError(error, urls) {
   const detail = error && error.message ? error.message : String(error);

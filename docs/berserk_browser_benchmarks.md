@@ -1,6 +1,6 @@
 # Berserk browser benchmarks
 
-Berserk is still experimental. These notes track the first browser lifecycle and benchmark runs for the Emscripten worker adapter; generated JS/WASM/data artifacts and raw benchmark JSON remain ignored until the GPL/source-archive distribution policy is explicit.
+Berserk is still experimental. These notes track the first browser lifecycle and benchmark runs for the Emscripten worker adapter. The release now tracks the generated JS/WASM/shared-data set with its manifest and corresponding-source archive; raw benchmark JSON remains ignored.
 
 ## 2026-06-05 Emscripten worker lifecycle smoke
 

@@ -72,7 +72,7 @@ If the asset license or provenance is unclear, do not publish the generated engi
 ## Repository hygiene
 
 - Decide per engine whether artifacts are deploy-tracked or CI-generated; do not leave deployed artifacts hidden by `.gitignore` rules.
-- For the current Netlify/Vite deployment, committed/LFS public artifacts are intentional for PlentyChess, Stormphrax, Viridithas, Stockfish.js, and selected model packs. Berserk is the sole exception: its artifacts are untracked and ignored on purpose (see the Berserk release card), so the "do not hide deployed artifacts" rule is satisfied by not deploying them at all.
+- For the current Netlify/Vite deployment, committed/LFS public artifacts are intentional for Berserk, PlentyChess, Stormphrax, Viridithas, Stockfish.js, and selected model packs.
 - Emscripten preload `.data` files are byte-identical across the SIMD variants of a family, so each family publishes exactly ONE canonical `.data` (`<family>-emscripten.data`) that every variant loads through `Module.locateFile`; only the `.js` glue and `.wasm` are per-variant. The build scripts hash the freshly built `.data` against the canonical copy and fail the build if it diverges, so a shared file can never be a stale net.
 - Commit source patches, build scripts, smoke scripts, variant metadata, documentation, source archives, and release manifests for deployed third-party binaries, especially copyleft/GPL binaries.
 - Keep generated precompressed `.br`/`.gz` sidecars ignored; they are rebuilt into `dist-client/`.

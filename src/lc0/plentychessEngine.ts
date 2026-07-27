@@ -37,8 +37,9 @@ function abortError(message = 'PlentyChess search aborted'): Error {
   return error;
 }
 
-function workerScript(): string {
+export function workerScript(): string {
   return String.raw`
+const resolveEmscriptenAssetUrl = ${resolveEmscriptenAssetUrl.toString()};
 let factory = null;
 let modulePromise = null;
 let engine = null;

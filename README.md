@@ -22,8 +22,8 @@ limited to product-facing entry points.
 
 ## Engines
 
-Nine families, each running as an independent WebAssembly module driven over
-UCI. Full cards in [`docs/engine_catalog.md`](docs/engine_catalog.md).
+Nine families: neural evaluators run through browser inference runtimes, while
+classical engines run as independent WebAssembly modules driven over UCI.
 
 | Family | Kind | Runtime |
 | --- | --- | --- |

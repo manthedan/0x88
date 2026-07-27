@@ -16,7 +16,7 @@ const CONFIGS = {
       repo: 'https://github.com/jhonnold/berserk.git',
       tag: '14',
       commit: '8ae895a6151695be4a50d4fb65b0c131659c513a',
-      license: 'GPL-3.0-or-compatible upstream; verify exact release notices before publishing',
+      license: 'GPL-3.0',
     },
     build: {
       script: 'scripts/build_berserk_emscripten.mjs',
@@ -37,7 +37,7 @@ const CONFIGS = {
         name: 'berserk-9b84c340af7e.nn',
         sourceUrl: 'https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn',
         rawSha256: '9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084',
-        licenseNote: 'No standalone license file found in jhonnold/berserk-networks during intake; do not publicly distribute this network until provenance/license is resolved or confirmed as covered by the engine release.',
+        licenseNote: 'Covered by Berserk GPL-3.0 under this release policy: the net is named as EVALFILE in the engine Makefile, downloaded and hash-verified by the engine build, and required for the binary to run, so it is treated as part of the Corresponding Source. See docs/engine_artifact_distribution.md.',
         embeddedIn: 'public/berserk/berserk-emscripten.data (one canonical preload package shared by every SIMD tier)',
       },
     ],

@@ -26,6 +26,7 @@ const CONFIGS = {
       'src/lc0/berserkEngine.ts',
       'src/lc0/berserkSmoke.ts',
       'src/lc0/berserkVariants.ts',
+      'src/lc0/emscriptenLocateFile.ts',
       'src/lc0/browserUciEngine.ts',
       'src/lc0/stockfishEngine.ts',
       'src/chess/board.ts',
@@ -37,7 +38,7 @@ const CONFIGS = {
         name: 'berserk-9b84c340af7e.nn',
         sourceUrl: 'https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn',
         rawSha256: '9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084',
-        licenseNote: 'No standalone license file found in jhonnold/berserk-networks during intake; do not publicly distribute this network until provenance/license is resolved or confirmed as covered by the engine release.',
+        licenseNote: 'Covered by Berserk GPL-3.0 under this release policy: the net is named as EVALFILE in the engine Makefile, downloaded and hash-verified by the engine build, and required for the binary to run, so it is treated as part of the Corresponding Source. See docs/engine_artifact_distribution.md.',
       },
     ],
     envPrefix: 'BERSERK',
@@ -59,6 +60,7 @@ const CONFIGS = {
       'src/lc0/plentychessEngine.ts',
       'src/lc0/plentychessSmoke.ts',
       'src/lc0/plentychessVariants.ts',
+      'src/lc0/emscriptenLocateFile.ts',
       'src/lc0/browserUciEngine.ts',
       'src/lc0/stockfishEngine.ts',
       'src/chess/board.ts',
@@ -93,6 +95,7 @@ const CONFIGS = {
     adapterFiles: [
       'src/lc0/stormphraxEngine.ts',
       'src/lc0/stormphraxVariants.ts',
+      'src/lc0/emscriptenLocateFile.ts',
       'src/lc0/browserUciEngine.ts',
       'src/lc0/stockfishEngine.ts',
       'src/chess/board.ts',
@@ -246,7 +249,17 @@ function rebuildCommand(config) {
   if (config.engine === 'stormphrax') {
     return `rm -rf "$PWD/.build/stormphrax-baseline" "$PWD/.build/stormphrax-relaxed"\nmkdir -p "$PWD/.build" "$PWD/out/public/stormphrax"\ncp -a "${sourceDir}" "$PWD/.build/stormphrax-baseline"\ncp -a "${sourceDir}" "$PWD/.build/stormphrax-relaxed"\n${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="$PWD/.build/stormphrax-baseline" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_EMSCRIPTEN_JS_OUT="$PWD/out/public/stormphrax/stormphrax-emscripten.js" npm run stormphrax:build-emscripten\n${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="$PWD/.build/stormphrax-relaxed" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_RELAXED_SIMD=1 ${config.envPrefix}_EMSCRIPTEN_JS_OUT="$PWD/out/public/stormphrax/stormphrax-emscripten-relaxed-simd128.js" node scripts/build_stormphrax_emscripten.mjs`;
   }
-  if (config.engine === 'berserk' || config.engine === 'plentychess') {
+  if (config.engine === 'berserk') {
+    return `rm -rf "$PWD/.build/berserk-baseline" "$PWD/.build/berserk-simd" "$PWD/.build/berserk-relaxed"
+mkdir -p "$PWD/.build" "$PWD/out/public/berserk"
+cp -a "${sourceDir}" "$PWD/.build/berserk-baseline"
+cp -a "${sourceDir}" "$PWD/.build/berserk-simd"
+cp -a "${sourceDir}" "$PWD/.build/berserk-relaxed"
+BERSERK_SKIP_GIT=1 BERSERK_BUILD_DIR="$PWD/.build/berserk-baseline" BERSERK_NET_DIR="$PWD/assets" BERSERK_EMSCRIPTEN_JS_OUT="$PWD/out/public/berserk/berserk-emscripten.js" node scripts/build_berserk_emscripten.mjs
+BERSERK_SKIP_GIT=1 BERSERK_BUILD_DIR="$PWD/.build/berserk-simd" BERSERK_NET_DIR="$PWD/assets" BERSERK_WASM_SIMD=1 BERSERK_EMSCRIPTEN_JS_OUT="$PWD/out/public/berserk/berserk-emscripten-simd128.js" node scripts/build_berserk_emscripten.mjs
+BERSERK_SKIP_GIT=1 BERSERK_BUILD_DIR="$PWD/.build/berserk-relaxed" BERSERK_NET_DIR="$PWD/assets" BERSERK_WASM_RELAXED_SIMD=1 BERSERK_EMSCRIPTEN_JS_OUT="$PWD/out/public/berserk/berserk-emscripten-relaxed-simd128.js" node scripts/build_berserk_emscripten.mjs`;
+  }
+  if (config.engine === 'plentychess') {
     const outDir = `$PWD/out/public/${config.engine}/${config.engine}-emscripten.js`;
     return `${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_EMSCRIPTEN_JS_OUT="${outDir}" npm run ${config.engine}:build-emscripten`;
   }

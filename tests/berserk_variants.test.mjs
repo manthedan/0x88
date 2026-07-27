@@ -124,10 +124,9 @@ test('production skips known-unshipped Berserk asset probes', async () => {
   }
 });
 
-// Berserk artifacts are intentionally untracked/undeployed while the upstream
-// NNUE license is unresolved, so production must not spend HEAD requests
-// probing for them: every tier resolves straight to a settled `missing`, and
-// the UI/engine explain it with BERSERK_ARTIFACT_BUILD_HINT.
+// The Emscripten tiers are deployed; planned WASI paths are not. Keep the
+// declared set beside this test so a probe can never drift onto an unpublished
+// URL while the shared canonical `.data` remains covered.
 const DEPLOYED = new Set([
   '/berserk/berserk-emscripten.js', '/berserk/berserk-emscripten.wasm', '/berserk/berserk-emscripten.data',
   '/berserk/berserk-emscripten-simd128.js', '/berserk/berserk-emscripten-simd128.wasm',

@@ -1,6 +1,6 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-06-25T06:34:05.218Z",
+  "generatedAt": "2026-07-27T01:17:07.169Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "berserk",
   "flavor": "emscripten-single-thread",
@@ -9,7 +9,7 @@
     "repo": "https://github.com/jhonnold/berserk.git",
     "tag": "14",
     "commit": "8ae895a6151695be4a50d4fb65b0c131659c513a",
-    "license": "GPL-3.0-or-compatible upstream; verify exact release notices before publishing"
+    "license": "GPL-3.0"
   },
   "build": {
     "script": "scripts/build_berserk_emscripten.mjs",
@@ -27,11 +27,11 @@
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 18556,
-          "ratio": 0.2796
+          "bytes": 18676,
+          "ratio": 0.2814
         },
         "brotli": {
-          "bytes": 16553,
+          "bytes": 16552,
           "ratio": 0.2494
         }
       }
@@ -43,8 +43,8 @@
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 58166,
-          "ratio": 0.4538
+          "bytes": 59130,
+          "ratio": 0.4613
         },
         "brotli": {
           "bytes": 50495,
@@ -59,12 +59,12 @@
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 18139293,
-          "ratio": 0.7198
+          "bytes": 17759011,
+          "ratio": 0.7047
         },
         "brotli": {
-          "bytes": 14835970,
-          "ratio": 0.5887
+          "bytes": 14814131,
+          "ratio": 0.5878
         }
       }
     },
@@ -75,8 +75,8 @@
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 18555,
-          "ratio": 0.2794
+          "bytes": 18677,
+          "ratio": 0.2812
         },
         "brotli": {
           "bytes": 16565,
@@ -91,8 +91,8 @@
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 57910,
-          "ratio": 0.4387
+          "bytes": 58880,
+          "ratio": 0.4461
         },
         "brotli": {
           "bytes": 50722,
@@ -107,8 +107,8 @@
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 18563,
-          "ratio": 0.2793
+          "bytes": 18684,
+          "ratio": 0.2812
         },
         "brotli": {
           "bytes": 16570,
@@ -123,8 +123,8 @@
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 57790,
-          "ratio": 0.4395
+          "bytes": 58726,
+          "ratio": 0.4467
         },
         "brotli": {
           "bytes": 50719,
@@ -138,22 +138,22 @@
       "name": "berserk-9b84c340af7e.nn",
       "sourceUrl": "https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn",
       "rawSha256": "9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084",
-      "licenseNote": "Covered by Berserk GPL-3.0: the net is named as EVALFILE in the engine Makefile, downloaded and hash-verified by the engine build, and required for the binary to run, so it forms part of the Corresponding Source the author distributes. See docs/engine_artifact_distribution.md.",
+      "licenseNote": "Covered by Berserk GPL-3.0 under this release policy: the net is named as EVALFILE in the engine Makefile, downloaded and hash-verified by the engine build, and required for the binary to run, so it is treated as part of the Corresponding Source. See docs/engine_artifact_distribution.md.",
       "embeddedIn": "public/berserk/berserk-emscripten.data (one canonical preload package shared by every SIMD tier)"
     }
   ],
   "totals": {
     "bytes": 25792802,
-    "gzipBytes": 18368833,
-    "brotliBytes": 15037594,
-    "gzipRatio": 0.7122,
-    "brotliRatio": 0.583
+    "gzipBytes": 17991784,
+    "brotliBytes": 15015754,
+    "gzipRatio": 0.6976,
+    "brotliRatio": 0.5822
   },
   "sourceArchive": {
     "required": true,
     "path": "public/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz",
-    "bytes": 18427893,
-    "sha256": "01b9184b5193af4bd04e75fe0edc25fc025f132cb53a0f245e05cd0cb6dd0136",
+    "bytes": 18472627,
+    "sha256": "fe42589368640366b667181f990614a84fe04616f957875406c380b4c3945a3d",
     "url": "/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz",
     "note": "Source archive recorded for public distribution."
   }
