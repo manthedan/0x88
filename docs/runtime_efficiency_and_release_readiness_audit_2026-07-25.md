@@ -357,9 +357,12 @@ and R2. Versioned application bundles also cache correctly at Cloudflare. A
 zone Cache Rule now closes the remaining app-origin fallback gap for `GET` and
 `HEAD` requests under `/ort/*`, `/models/*`, and `/engines/*`.
 
-The rule sets cache eligibility only (`set_cache_settings` with `cache: true`);
-it does not override the origin's TTL or cache key. Production canaries for an
-ORT wasm and a model manifest each changed from `MISS` to `HIT` on the second
+The rule sets cache eligibility and explicitly keeps browser TTL in
+`respect_origin` mode; it does not override the origin's TTL or cache key. This
+prevents Cloudflare's default four-hour Browser Cache TTL from inflating the
+origin's one-hour ORT policy.
+Production canaries for an ORT wasm and a model manifest each changed from
+`MISS` to `HIT` on the second
 identical `GET`. A separate HTML canary remained `DYNAMIC`, so mutable pages and
 channel pointers are outside the rule's scope.
 

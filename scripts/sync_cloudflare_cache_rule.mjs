@@ -2,6 +2,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { isDeepStrictEqual } from 'node:util';
 
 const API_BASE = 'https://api.cloudflare.com/client/v4';
 const DEFAULT_CONFIG = new URL('../cloudflare/app-origin-cache-rule.json', import.meta.url);
@@ -77,7 +78,7 @@ function comparableRule(rule) {
 }
 
 function rulesMatch(actual, desired) {
-  return JSON.stringify(comparableRule(actual)) === JSON.stringify(comparableRule(desired));
+  return isDeepStrictEqual(comparableRule(actual), comparableRule(desired));
 }
 
 async function rulesetEntrypoint(zoneId, phase, token) {
