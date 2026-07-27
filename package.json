@@ -35,6 +35,8 @@
     "deploy:publish-r2-artifacts": "node scripts/publish_hashed_artifacts_to_r2.mjs",
     "deploy:validate-cdn-artifacts": "node scripts/validate_artifact_cdn_headers.mjs",
     "deploy:artifact-worker": "wrangler deploy --config cloudflare/artifacts.wrangler.toml",
+    "cloudflare:cache-rule:check": "node scripts/sync_cloudflare_cache_rule.mjs --check",
+    "cloudflare:cache-rule:apply": "node scripts/sync_cloudflare_cache_rule.mjs --apply",
     "deploy:retention-policy-check": "node scripts/check_artifact_retention_policy.mjs",
     "deploy:r2-cleanup-plan": "node scripts/plan_r2_artifact_cleanup.mjs --bucket browser-chess-models",
     "release:verify-r2-dist": "node scripts/netlify_r2_release.mjs --check",

@@ -32,7 +32,7 @@ import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVarian
 import { canUsePersistentViridithasWasi } from './viridithasEngine.ts';
 import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, hasExplicitViridithasVariant, normalizeViridithasVariant, resolveDefaultViridithasVariantAssetFallback, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
-import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
+import { berserkCacheKey, cpuEngineHashMbForSurface, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
 import { createStormphraxEngine, stormphraxCacheKey } from './engineProvision.ts';
 import { STORMPHRAX_VARIANTS, checkStormphraxVariantAsset, hasExplicitStormphraxVariant, normalizeStormphraxVariant, resolveDefaultStormphraxVariantAssetFallback, stormphraxVariantAssetStatus, stormphraxVariantByKey, stormphraxVariantFromParams, stormphraxVariantUnsupportedReason, type StormphraxVariant } from './stormphraxVariants.ts';
@@ -1245,18 +1245,20 @@ function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
   // flavor whenever isolation allows it (flavor is fixed per page lifetime).
   const threaded = threadedStockfishAvailable();
   if (kind === 'lite') {
-    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: 14 }, stockfishFlavorUrl(threaded ? 'lite-threaded' : 'lite-single'));
+    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: 14, hashMb: cpuEngineHashMbForSurface('analysis') }, stockfishFlavorUrl(threaded ? 'lite-threaded' : 'lite-single'));
     return stockfishLite;
   }
-  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: 14 }, stockfishFlavorUrl(threaded ? 'threaded' : 'single'));
+  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: 14, hashMb: cpuEngineHashMbForSurface('analysis') }, stockfishFlavorUrl(threaded ? 'threaded' : 'single'));
   return stockfishFull;
 }
 
-const recklessEngines = new DisposableVariantPool(recklessCacheKey, (variant: RecklessVariant) => createRecklessEngine(variant, renderRecklessRuntimeInfo));
-const viridithasEngines = new DisposableVariantPool(viridithasCacheKey, (variant: ViridithasVariant) => createViridithasEngine(variant, { forceOneShot: true }));
-const berserkEngines = new DisposableVariantPool(berserkCacheKey, createBerserkEngine);
-const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, createPlentyChessEngine);
-const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, createStormphraxEngine);
+const ANALYSIS_CPU_ENGINE_OPTIONS = { surface: 'analysis' } as const;
+
+const recklessEngines = new DisposableVariantPool(recklessCacheKey, (variant: RecklessVariant) => createRecklessEngine(variant, renderRecklessRuntimeInfo, ANALYSIS_CPU_ENGINE_OPTIONS));
+const viridithasEngines = new DisposableVariantPool(viridithasCacheKey, (variant: ViridithasVariant) => createViridithasEngine(variant, { forceOneShot: true }, ANALYSIS_CPU_ENGINE_OPTIONS));
+const berserkEngines = new DisposableVariantPool(berserkCacheKey, (variant: BerserkVariant) => createBerserkEngine(variant, ANALYSIS_CPU_ENGINE_OPTIONS));
+const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, (variant: PlentyChessVariant) => createPlentyChessEngine(variant, ANALYSIS_CPU_ENGINE_OPTIONS));
+const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant: StormphraxVariant) => createStormphraxEngine(variant, ANALYSIS_CPU_ENGINE_OPTIONS));
 
 function getRecklessFor(variantKey: string) {
   return recklessEngines.getOrCreate(recklessVariantForKey(variantKey));

@@ -95,50 +95,6 @@ fs.copyFileSync(netPath, path.join(engineDir, netName));
 
 run('git', ['apply', '--ignore-space-change', '--ignore-whitespace', patchPath], { cwd: engineDir });
 
-// --- post-patch fixup: over-align the browser network buffer -----------------
-// patches/stormphrax-emscripten.patch reads the NNUE file into a plain
-// std::vector<std::byte>. NetworkLoader::get() rejects any pointer that is not
-// util::simd::kAlignment (16 B) aligned. In the single-threaded build dlmalloc
-// happens to hand back a 16 B-aligned block for that ~53 MB allocation; under
-// dlmalloc-mt the preceding pthread bookkeeping shifts it and the engine dies
-// with "NetworkLoader: Unaligned pointer / No network loaded".
-//
-// This is an incidental fragility of the existing browser patch, NOT something
-// intrinsic to threading, so instead of forking the tracked patch we swap the
-// vector for an interface-compatible shim that guarantees 64 B alignment. Only
-// the storage declaration changes; resize()/data()/size() call sites compile
-// unchanged and no NNUE compute path is touched.
-{
-  const nnuePath = path.join(engineDir, 'src', 'eval', 'nnue.cpp');
-  let src = fs.readFileSync(nnuePath, 'utf8');
-  const declNeedle = '    std::vector<std::byte> g_defaultNetStorage{};';
-  if (!src.includes(declNeedle)) {
-    throw new Error(`Alignment fixup anchor not found in ${nnuePath}; the patch layout changed.`);
-  }
-  const shim = `    // [threaded prototype] 64 B-overaligned stand-in for std::vector<std::byte>.
-    class SpAlignedNetStorage {
-    public:
-        void resize(std::size_t n) {
-            m_raw.assign(n + 64, std::byte{});
-            const auto addr = reinterpret_cast<std::uintptr_t>(m_raw.data());
-            m_offset = static_cast<std::size_t>((64 - (addr % 64)) % 64);
-            m_size = n;
-        }
-        [[nodiscard]] std::byte* data() { return m_raw.data() + m_offset; }
-        [[nodiscard]] const std::byte* data() const { return m_raw.data() + m_offset; }
-        [[nodiscard]] std::size_t size() const { return m_size; }
-
-    private:
-        std::vector<std::byte> m_raw{};
-        std::size_t m_offset{};
-        std::size_t m_size{};
-    };
-    SpAlignedNetStorage g_defaultNetStorage{};`;
-  src = src.replace(declNeedle, shim);
-  src = src.replace('#include <vector>', '#include <cstdint>\n#include <vector>');
-  fs.writeFileSync(nnuePath, src);
-  console.log('Applied threaded-prototype network-buffer alignment fixup to src/eval/nnue.cpp');
-}
 
 const sources = [
   ...walkSources(path.join(engineDir, 'src')).sort(),

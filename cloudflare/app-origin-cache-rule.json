@@ -1,0 +1,21 @@
+{
+  "schema": "lc0_browser.cloudflare_cache_rule.v1",
+  "zone": "0x88.app",
+  "keychainService": "lc0-cloudflare-cache-rules",
+  "ruleset": {
+    "name": "0x88 app-origin cache policy",
+    "description": "Explicit cache eligibility for app-origin fallback assets",
+    "kind": "zone",
+    "phase": "http_request_cache_settings"
+  },
+  "rule": {
+    "ref": "cache_app_origin_engine_fallbacks",
+    "description": "Cache app-origin engine, model, and ORT fallback assets",
+    "expression": "(http.host eq \"0x88.app\" and http.request.method in {\"GET\" \"HEAD\"} and (starts_with(http.request.uri.path, \"/ort/\") or starts_with(http.request.uri.path, \"/models/\") or starts_with(http.request.uri.path, \"/engines/\")))",
+    "action": "set_cache_settings",
+    "action_parameters": {
+      "cache": true
+    },
+    "enabled": true
+  }
+}

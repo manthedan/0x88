@@ -29,7 +29,7 @@ import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, hasExplicitViridithas
 import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
-import { berserkCacheKey, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
+import { berserkCacheKey, cpuEngineHashMbForSurface, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
 import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
 import { StormphraxEngine } from './stormphraxEngine.ts';
 import { createStormphraxEngine, stormphraxCacheKey } from './engineProvision.ts';
@@ -228,11 +228,12 @@ let searcher: Lc0PuctSearcher | null = null;
 let lc0Cache: CachedLc0Evaluator | null = null;
 let stockfishLite: StockfishEngine | null = null;
 let stockfishFull: StockfishEngine | null = null;
-const recklessEngines = new DisposableVariantPool(recklessCacheKey, (variant: RecklessVariant) => createRecklessEngine(variant, renderRecklessRuntimeInfo));
-const viridithasEngines = new DisposableVariantPool(viridithasCacheKey, createViridithasEngine);
-const berserkEngines = new DisposableVariantPool(berserkCacheKey, createBerserkEngine);
-const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, createPlentyChessEngine);
-const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, createStormphraxEngine);
+const ARENA_CPU_ENGINE_OPTIONS = { surface: 'arena' } as const;
+const recklessEngines = new DisposableVariantPool(recklessCacheKey, (variant: RecklessVariant) => createRecklessEngine(variant, renderRecklessRuntimeInfo, ARENA_CPU_ENGINE_OPTIONS));
+const viridithasEngines = new DisposableVariantPool(viridithasCacheKey, (variant: ViridithasVariant) => createViridithasEngine(variant, {}, ARENA_CPU_ENGINE_OPTIONS));
+const berserkEngines = new DisposableVariantPool(berserkCacheKey, (variant: BerserkVariant) => createBerserkEngine(variant, ARENA_CPU_ENGINE_OPTIONS));
+const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, (variant: PlentyChessVariant) => createPlentyChessEngine(variant, ARENA_CPU_ENGINE_OPTIONS));
+const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant: StormphraxVariant) => createStormphraxEngine(variant, ARENA_CPU_ENGINE_OPTIONS));
 const centipawnEvaluatorPromises = new Map<string, Promise<Evaluator>>();
 const centipawnEvaluators = new Set<CachedEvaluator>();
 let centipawnEvaluatorGeneration = 0;
@@ -1871,10 +1872,10 @@ function stockfishFlavorFor(kind: 'lite' | 'full'): StockfishFlavor {
 // each has its own lazily-created instance.
 function stockfishEngineFor(kind: 'lite' | 'full'): StockfishEngine {
   if (kind === 'lite') {
-    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: 4, threads: stockfishThreadsPlanned() }, stockfishFlavorUrl(stockfishFlavorFor('lite')));
+    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: 4, threads: stockfishThreadsPlanned(), hashMb: cpuEngineHashMbForSurface('arena') }, stockfishFlavorUrl(stockfishFlavorFor('lite')));
     return stockfishLite;
   }
-  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: 4, threads: stockfishThreadsPlanned() }, stockfishFlavorUrl(stockfishFlavorFor('full')));
+  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: 4, threads: stockfishThreadsPlanned(), hashMb: cpuEngineHashMbForSurface('arena') }, stockfishFlavorUrl(stockfishFlavorFor('full')));
   return stockfishFull;
 }
 

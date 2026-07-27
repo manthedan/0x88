@@ -155,8 +155,57 @@ export function inCheck(board: BoardState, color: Color = board.turn): boolean {
   return king === null ? true : isSquareAttacked(board, king, opposite(color));
 }
 
+function moveKeepsKingSafe(board: BoardState, move: Move, color: Color): boolean {
+  const squares = board.squares;
+  const piece = squares[move.from];
+  if (!piece) return false;
+
+  const captured = squares[move.to];
+  const isPawn = piece[1] === 'p';
+  const isEnPassant = isPawn
+    && move.to === board.epSquare
+    && !captured
+    && fileOf(move.from) !== fileOf(move.to);
+  const enPassantCaptureSquare = isEnPassant ? idx(fileOf(move.to), rankOf(move.from)) : -1;
+  const enPassantCaptured = enPassantCaptureSquare >= 0 ? squares[enPassantCaptureSquare] : null;
+
+  const isCastle = piece[1] === 'k' && Math.abs(fileOf(move.to) - fileOf(move.from)) === 2;
+  const castleRank = color === 'w' ? 0 : 7;
+  const rookFrom = isCastle ? idx(fileOf(move.to) === 6 ? 7 : 0, castleRank) : -1;
+  const rookTo = isCastle ? idx(fileOf(move.to) === 6 ? 5 : 3, castleRank) : -1;
+  const rookFromPiece = rookFrom >= 0 ? squares[rookFrom] : null;
+  const rookToPiece = rookTo >= 0 ? squares[rookTo] : null;
+
+  squares[move.from] = null;
+  if (enPassantCaptureSquare >= 0) squares[enPassantCaptureSquare] = null;
+  squares[move.to] = move.promotion ? PIECES[color][move.promotion] : piece;
+  if (rookFrom >= 0) {
+    squares[rookTo] = rookFromPiece;
+    squares[rookFrom] = null;
+  }
+
+  try {
+    return !inCheck(board, color);
+  } finally {
+    if (rookFrom >= 0) {
+      squares[rookFrom] = rookFromPiece;
+      squares[rookTo] = rookToPiece;
+    }
+    squares[move.from] = piece;
+    squares[move.to] = captured;
+    if (enPassantCaptureSquare >= 0) squares[enPassantCaptureSquare] = enPassantCaptured;
+  }
+}
+
 export function legalMoves(board: BoardState): Move[] {
-  return pseudoLegalMoves(board).filter((move) => !inCheck(makeMove(board, move), board.turn));
+  const moves = pseudoLegalMoves(board);
+  const color = board.turn;
+  let legalCount = 0;
+  for (const move of moves) {
+    if (moveKeepsKingSafe(board, move, color)) moves[legalCount++] = move;
+  }
+  moves.length = legalCount;
+  return moves;
 }
 
 function castlingWithout(castling: string, removed: string): string {

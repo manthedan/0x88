@@ -151,15 +151,18 @@ disappears at T≥2, which would make this repo's bestmove-pinned gates flaky.
 
 **Recommendation: do not pursue.** Leave the engines single-threaded.
 
-#### A real bug the prototype found
+#### A real bug the prototype found — fixed
 
 Building with pthreads exposed an existing latent defect, unrelated to
-threading. `patches/stormphrax-emscripten.patch` reads the 53 MB NNUE into a
-plain `std::vector<std::byte>`, and the shipped single-threaded build satisfies
-the loader's 16-byte alignment requirement **only by luck of what dlmalloc
-returns**. Under `dlmalloc-mt` the address shifts and the loader fails with
-`NetworkLoader: Unaligned pointer`. The patch should request aligned storage
-explicitly regardless of whether threading is ever pursued.
+threading. `patches/stormphrax-emscripten.patch` read the 53 MB NNUE into a
+plain `std::vector<std::byte>`, and the shipped single-threaded build satisfied
+the loader's SIMD alignment requirement only by allocator luck. The patch now
+uses Stormphrax's `alignedAlloc`/`alignedFree` pair with
+`util::simd::kAlignment` (16 bytes on the wasm SIMD path), rounds the allocation
+size as required by the allocator, and fails explicitly on allocation or read
+failure. A rebuilt relaxed-SIMD runtime completed both smoke searches; the
+loader would reject startup with `NetworkLoader: Unaligned pointer` if the
+invariant did not hold.
 
 ### 1.2 ORT WASM is pinned to one thread in production workers
 
@@ -360,6 +363,15 @@ ORT wasm and a model manifest each changed from `MISS` to `HIT` on the second
 identical `GET`. A separate HTML canary remained `DYNAMIC`, so mutable pages and
 channel pointers are outside the rule's scope.
 
+The desired rule is now versioned in
+`cloudflare/app-origin-cache-rule.json`. The idempotent
+`npm run cloudflare:cache-rule:check` and
+`npm run cloudflare:cache-rule:apply` commands compare or reconcile it through
+the Rulesets API while preserving unrelated rules. They accept
+`CLOUDFLARE_API_TOKEN`; on macOS they can instead read the scoped token from
+Keychain service `lc0-cloudflare-cache-rules`, so no credential enters the
+repository.
+
 ### 1.7 R2 artifacts use stored identity and Brotli representations
 
 **Severity: medium. Status: FIXED — stable release `2026-07-27.stored-brotli.1`.**
@@ -390,7 +402,7 @@ the release's decoded SHA-256.
 
 ### 1.8 Move generator: allocation in the scan loops
 
-**Severity: low. Status: PARTIALLY FIXED — measured, +16%.**
+**Severity: low. Status: FIXED — measured, +49% overall.**
 
 > An earlier draft of this section was titled "The move generator is not a 0x88
 > move generator" and rated the credibility of the repository name as **high**
@@ -413,29 +425,30 @@ run on every legality test:
   direction;
 - `fileOf`/`rankOf` used `%` and `Math.floor` rather than `& 7` and `>> 3`.
 
-All of these were hoisted or replaced. No behaviour change, verified by the
-existing perft gate (startpos depth 5 = 4,865,609 nodes; kiwipete depth 4 =
-4,085,603).
+The scan-loop allocations were hoisted or replaced. The second pass removed the
+larger allocation: `legalMoves` now applies each pseudo-legal move directly to
+the existing 64-square array, checks the king, and restores every touched
+square in a `finally` block. Castling, en-passant, capture, and promotion state
+are restored explicitly; the public immutable `makeMove` contract is unchanged.
+The legal-move result also compacts its existing pseudo-move array rather than
+allocating another array through `filter`.
 
-| | positions/sec |
-| --- | ---: |
-| before | 146,226 |
-| after | 169,638 |
-| | **+16%** |
+Correctness is covered by the existing perft gate (startpos depth 5 =
+4,865,609 nodes; kiwipete depth 4 = 4,085,603) and a board-restoration
+regression covering castling, en-passant, and promotion candidates.
 
-**This still does not matter much, and that is the point.** The neural lane is
-GPU-bound at roughly 1.75 ms/position against ~6 µs for a `legalMoves` call, so
-movegen remains well under 1% of search time. These changes were worth making
-because they are mechanical, risk-free under perft, and remove garbage from a
-hot loop — not because they move the product.
+| implementation | positions/sec | change from baseline |
+| --- | ---: | ---: |
+| before | 146,226 | — |
+| scan-loop fixes | 169,638 | +16% |
+| clone-free legality filter | 217,912 | **+49%** |
 
-**What is deliberately NOT done:** `legalMoves` still filters pseudo-legal moves
-by cloning the whole board per move (`makeMove` → `cloneBoard`) and rescanning.
-Make/unmake with incremental king tracking and pin detection is the real
-structural win, and it is also where legality bugs come from. It stays open
-until something measures it as worth the risk — most likely the 2026-07-14
-audit's item 3, which would make CPU preparation a larger fraction of latency on
-fast backends.
+This still does not move the neural product materially. The neural lane is
+GPU-bound at roughly 1.75 ms/position against roughly 4.6 µs for a
+`legalMoves` call, so move generation remains well under 1% of search time.
+The final change is justified by removing an avoidable board clone per
+pseudo-legal move while retaining the same 64-square representation and perft
+contract—not by a branding-driven rewrite.
 
 ### 1.9 The deploy cache-policy gate was failing, and nothing ran it
 
@@ -640,21 +653,21 @@ onboarding path, and explain the licensing and clone-size situation.
    history rewrite is **not** recommended (see 2.3); it is verified and held in
    reserve should the Reckless source archives ever move.
 
-**Runtime — remaining, by payoff over effort**
+**Runtime**
 
-1. Fix the NNUE alignment latent bug in
-   `patches/stormphrax-emscripten.patch` (1.1) — small, and currently correct
-   only by allocator luck.
-2. Per-surface hash: analysis could take 128-256 MB (1.4). Needs the surface
-   threaded through the `DisposableVariantPool` factories.
+The actionable residuals are closed. The Stormphrax NNUE buffer now uses its
+explicit SIMD alignment invariant; Play and Arena retain 64 MB CPU-engine
+hash tables while Analysis receives 128 MB through the shared
+`DisposableVariantPool` factories and its Stockfish adapters; and the
+clone-free legality filter is covered by perft and board-restoration tests.
 
-Items 1.2, 1.3, 1.4, 1.5, 1.6, and 1.7 are done. 1.1 is closed as rejected on
-evidence.
+Items 1.2 through 1.8 are done. The threading proposal in 1.1 remains closed as
+rejected on evidence; the independent alignment defect it uncovered is fixed.
 
 **Deliberately not recommended**
 
 - **Threading the CPU engines** (1.1) — measured, buys no plies.
 - Another quantization format or manual WGSL micro-tuning sweep — the
   2026-07-14 audit's reasoning still holds.
-- A movegen rewrite pitched as a performance fix — section 1.8 explains why the
-  rewrite may still be worth doing, but not for speed.
+- A representation rewrite pitched as a move-generation performance fix —
+  section 1.8 records the measured gain from the narrower make/unmake change.

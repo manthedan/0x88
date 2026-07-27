@@ -20,7 +20,7 @@ import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { BIG_NETS, LQO_NET, T3_NET, bigNetAssetStatusSync, bigNetMemoryCaution, bigNetOptionState, checkBigNetAsset, probeBt4Support, bt4SupportedSync, type BigNetConfig, type Bt4SearchOptions } from './bt4Engine.ts';
 import { acquireBigNetSearcher, peekBigNetSearcher, releaseUnusedBigNetSearchers, type BigNetKey } from './bigNetSessionPool.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
-import { createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
+import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
 import { defaultStormphraxVariantKey, stormphraxVariantByKey, stormphraxVariantUnsupportedReason } from './stormphraxVariants.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { enginePlayLevels, enginePlayOptions, isV0DeployProfile, type EngineFamily } from './engineCatalog.ts';
@@ -512,7 +512,7 @@ function ctxCpuEngineFor(ctx: PlayContext, option: PlayEngineOption): Promise<Cp
     try {
       switch (option.family) {
         case 'sf':
-          return new StockfishEngine({ depth: 4, threads: 1 }, stockfishFlavorUrl(option.variant === 'lite' ? 'lite-single' : 'single'));
+          return new StockfishEngine({ depth: 4, threads: 1, hashMb: cpuEngineHashMbForSurface('play') }, stockfishFlavorUrl(option.variant === 'lite' ? 'lite-single' : 'single'));
         default:
           if (isDefaultBrowserUciFamily(option.family)) return createDefaultBrowserUciEngine(option.family);
           throw new Error(`unsupported engine family ${option.family}`);

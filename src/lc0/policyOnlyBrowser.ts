@@ -17,6 +17,7 @@ import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchOptions, type Lc0SearchResult } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
 import { isV0DeployProfile } from './engineCatalog.ts';
+import { cpuEngineHashMbForSurface } from './engineProvision.ts';
 import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -4030,7 +4031,7 @@ async function battlePolicyMove(positions: BoardState[]): Promise<string | null>
 }
 
 function getStockfish(): StockfishEngine {
-  if (!stockfish) stockfish = new StockfishEngine({ depth: stockfishDepth });
+  if (!stockfish) stockfish = new StockfishEngine({ depth: stockfishDepth, hashMb: cpuEngineHashMbForSurface('analysis') });
   else stockfish.setOptions({ depth: stockfishDepth });
   return stockfish;
 }

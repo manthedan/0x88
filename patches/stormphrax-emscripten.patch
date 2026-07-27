@@ -78,14 +78,13 @@ diff --git a/src/eval/nnue.cpp b/src/eval/nnue.cpp
 index f815c50..5bdacd7 100644
 --- a/src/eval/nnue.cpp
 +++ b/src/eval/nnue.cpp
-@@ -21,8 +21,10 @@
+@@ -21,8 +21,9 @@
  #include <cassert>
  #include <cstring>
  #include <fstream>
 +#include <limits>
  #include <memory>
  #include <string_view>
-+#include <vector>
  
  #include "../../3rdparty/zstd/zstd.h"
  

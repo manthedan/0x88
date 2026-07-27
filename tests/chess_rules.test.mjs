@@ -32,6 +32,30 @@ test('castling is generated only through unattacked empty transit squares', () =
   assert.equal(result.attacked.includes('e1g1'), false);
 });
 
+test('legal move filtering restores board state after special moves', () => {
+  const result = runSnippet(`
+    import { boardToFen, parseFen } from './src/chess/board.ts';
+    import { legalMoves } from './src/chess/movegen.ts';
+    const fens = [
+      'r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1',
+      '8/8/8/3pP3/8/8/8/4K2k w - d6 0 1',
+      '4k3/P7/8/8/8/8/8/4K3 w - - 0 1',
+    ];
+    const outcomes = fens.map((fen) => {
+      const board = parseFen(fen);
+      const squares = board.squares;
+      legalMoves(board);
+      return { sameSquares: board.squares === squares, fen: boardToFen(board) };
+    });
+    console.log(JSON.stringify(outcomes));
+  `);
+  assert.deepEqual(result, [
+    { sameSquares: true, fen: 'r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1' },
+    { sameSquares: true, fen: '8/8/8/3pP3/8/8/8/4K2k w - d6 0 1' },
+    { sameSquares: true, fen: '4k3/P7/8/8/8/8/8/4K3 w - - 0 1' },
+  ]);
+});
+
 test('automatic draw rules cover fifty-move, repetition, and insufficient material', () => {
   const result = runSnippet(`
     import { parseFen, boardToFen } from './src/chess/board.ts';

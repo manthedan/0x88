@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseBestMove, parseStockfishInfo, StockfishEngine, DEFAULT_STOCKFISH_HASH_MB, defaultStockfishUrl, normalizeStockfishFlavor, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, stockfishGoCommand, stockfishWorkerUrl } from '../src/lc0/stockfishEngine.ts';
+import { CPU_ENGINE_HASH_MB_BY_SURFACE, DEFAULT_CPU_ENGINE_HASH_MB, cpuEngineHashMbForSurface } from '../src/lc0/cpuEngineMemory.ts';
 
 /** Minimal UCI worker double: answers `uci`/`isready` and records every command. */
 class MockStockfishWorker {
@@ -41,6 +42,13 @@ test('stockfish flavor helpers map browser Stockfish builds', () => {
   assert.equal(stockfishFlavorUrl('single'), '/stockfish/stockfish-18-single.js');
   assert.equal(stockfishFlavorUrl('lite-threaded'), '/stockfish/stockfish-18-lite.js');
   assert.equal(stockfishFlavorUrl('threaded'), '/stockfish/stockfish-18.js');
+});
+
+test('CPU engine hash budgets reflect each browser surface', () => {
+  assert.deepEqual(CPU_ENGINE_HASH_MB_BY_SURFACE, { play: 64, arena: 64, analysis: 128 });
+  assert.equal(Object.isFrozen(CPU_ENGINE_HASH_MB_BY_SURFACE), true);
+  assert.equal(DEFAULT_CPU_ENGINE_HASH_MB, cpuEngineHashMbForSurface('play'));
+  assert.equal(cpuEngineHashMbForSurface('analysis'), 128);
 });
 
 test('production asset base hosts the full single-threaded Stockfish pair', async () => {

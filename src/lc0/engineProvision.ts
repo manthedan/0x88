@@ -18,29 +18,18 @@ import { PlentyChessEngine } from './plentychessEngine.ts';
 import { defaultPlentyChessVariantKey, plentyChessVariantByKey, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
 import { StormphraxEngine } from './stormphraxEngine.ts';
 import { defaultStormphraxVariantKey, resolveDefaultStormphraxVariantAssetFallback, stormphraxVariantByKey, type StormphraxVariant } from './stormphraxVariants.ts';
+import { cpuEngineHashMbForSurface, type CpuEngineSurface } from './cpuEngineMemory.ts';
 
-/**
- * Transposition-table size handed to every CPU engine at construction.
- *
- * The previous 16 MB matched nothing but habit: analysis searches run to
- * depth 12+ (see engineCatalog's per-surface strength defaults), where a
- * 16 MB table overwrites itself constantly and costs real strength. 64 MB
- * is the conservative-but-real step up:
- *  - Every Emscripten build we ship reserves INITIAL_MEMORY of 256 MB
- *    (berserk, plentychess) or 512 MB (stormphrax) with ALLOW_MEMORY_GROWTH
- *    and MAXIMUM_MEMORY=2 GB, so a 64 MB table lives inside the heap the
- *    module already reserved and never triggers a growth on its own.
- *  - Arena and analysis can hold several engine workers alive at once
- *    (see resourceBroker). At 64 MB, even eight concurrent engines add up to
- *    512 MB of table — large, but not the term that decides an OOM, since the
- *    reserved heaps already dominate. At 128+ MB per engine it would be.
- * Pages that want more for a single long-running analysis engine can pass
- * `hashMb` through setOptions; this is only the construction-time floor.
- */
-export const DEFAULT_CPU_ENGINE_HASH_MB = 64;
+export { CPU_ENGINE_HASH_MB_BY_SURFACE, DEFAULT_CPU_ENGINE_HASH_MB, cpuEngineHashMbForSurface } from './cpuEngineMemory.ts';
+export type { CpuEngineSurface } from './cpuEngineMemory.ts';
 
-/** Construction-time search defaults; pages re-tune per move via setOptions. */
-const CPU_ENGINE_DEFAULTS = { depth: 4, hashMb: DEFAULT_CPU_ENGINE_HASH_MB } as const;
+export interface CpuEngineProvisionOptions {
+  surface?: CpuEngineSurface;
+}
+
+function cpuEngineDefaults(options: CpuEngineProvisionOptions): { depth: number; hashMb: number } {
+  return { depth: 4, hashMb: cpuEngineHashMbForSurface(options.surface ?? 'play') };
+}
 
 export function recklessCacheKey(variant: RecklessVariant): string {
   return `${variant.key}:${variant.wasmUrl}:${variant.nnueUrl ?? ''}:${variant.nnueExpectedBytes ?? ''}:${variant.backend ?? 'wasi'}`;
@@ -62,8 +51,12 @@ export function stormphraxCacheKey(variant: StormphraxVariant): string {
   return `${variant.key}:${variant.jsUrl}:${variant.wasmUrl}:${variant.dataUrl}`;
 }
 
-export function createRecklessEngine(variant: RecklessVariant, onStatus?: () => void): RecklessEngine {
-  return new RecklessEngine({ ...CPU_ENGINE_DEFAULTS }, variant.wasmUrl, {
+export function createRecklessEngine(
+  variant: RecklessVariant,
+  onStatus?: () => void,
+  options: CpuEngineProvisionOptions = {},
+): RecklessEngine {
+  return new RecklessEngine(cpuEngineDefaults(options), variant.wasmUrl, {
     backend: variant.backend ?? 'wasi',
     nnueUrl: variant.nnueUrl,
     nnueExpectedBytes: variant.nnueExpectedBytes,
@@ -71,20 +64,24 @@ export function createRecklessEngine(variant: RecklessVariant, onStatus?: () => 
   });
 }
 
-export function createViridithasEngine(variant: ViridithasVariant, runtimeOptions: ViridithasRuntimeOptions = {}): ViridithasEngine {
-  return new ViridithasEngine({ ...CPU_ENGINE_DEFAULTS }, variant.wasmUrl, runtimeOptions);
+export function createViridithasEngine(
+  variant: ViridithasVariant,
+  runtimeOptions: ViridithasRuntimeOptions = {},
+  options: CpuEngineProvisionOptions = {},
+): ViridithasEngine {
+  return new ViridithasEngine(cpuEngineDefaults(options), variant.wasmUrl, runtimeOptions);
 }
 
-export function createBerserkEngine(variant: BerserkVariant): BerserkEngine {
-  return new BerserkEngine({ ...CPU_ENGINE_DEFAULTS, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
+export function createBerserkEngine(variant: BerserkVariant, options: CpuEngineProvisionOptions = {}): BerserkEngine {
+  return new BerserkEngine({ ...cpuEngineDefaults(options), threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
 }
 
-export function createPlentyChessEngine(variant: PlentyChessVariant): PlentyChessEngine {
-  return new PlentyChessEngine({ ...CPU_ENGINE_DEFAULTS, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
+export function createPlentyChessEngine(variant: PlentyChessVariant, options: CpuEngineProvisionOptions = {}): PlentyChessEngine {
+  return new PlentyChessEngine({ ...cpuEngineDefaults(options), threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
 }
 
-export function createStormphraxEngine(variant: StormphraxVariant): StormphraxEngine {
-  return new StormphraxEngine({ ...CPU_ENGINE_DEFAULTS, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
+export function createStormphraxEngine(variant: StormphraxVariant, options: CpuEngineProvisionOptions = {}): StormphraxEngine {
+  return new StormphraxEngine({ ...cpuEngineDefaults(options), threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl);
 }
 
 export type DefaultBrowserUciFamily = 'reckless' | 'viridithas' | 'berserk' | 'plentychess' | 'stormphrax';
