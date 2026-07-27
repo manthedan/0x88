@@ -6,6 +6,8 @@ existing engine faster, or improving the app around them.
 
 ## Before you start
 
+Requires **Node 24+**.
+
 Run the suite once so you know your baseline is clean:
 
 ```sh
@@ -13,8 +15,12 @@ npm install
 npm test          # typecheck + full suite; takes ~2 minutes
 ```
 
+Run a single test file with
+`node --experimental-strip-types --test tests/<name>.test.mjs`.
+
 If `npm test` is red on a fresh clone, that's a bug — please open an issue
-rather than working around it.
+rather than working around it. Every PR runs CI: `npm audit`, this suite,
+and a production build.
 
 ## The one rule that matters: prove parity before you promote
 
@@ -73,7 +79,7 @@ Two things people usually miss:
 ## Working style
 
 - One commit per logical milestone, with a message that says what changed and
-  why. The history is reviewed inline as it lands.
+  why; commits are reviewed individually as they land.
 - Match the surrounding code — this codebase has consistent naming, comment
   density, and module boundaries. Read the neighbours before writing.
 - Comments explain *why*, especially for anything that looks arbitrary. Several
@@ -81,6 +87,11 @@ Two things people usually miss:
   you find one that is unexplained, documenting it is a good first PR.
 - Don't commit generated engine binaries unless the distribution policy says
   that family is deploy-tracked.
+- Documentation belongs in `docs/` only when it is durable product, runtime,
+  provenance, or license documentation — add it to the index in
+  [`docs/README.md`](docs/README.md). Working notes, one-off audits, and
+  cleanup inventories stay in the gitignored `.local-dev-docs/`. Tracked files
+  should never reference your local machine paths or personal tooling.
 
 ## Good first contributions
 
