@@ -1,6 +1,6 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-07-26T08:05:55.199Z",
+  "generatedAt": "2026-07-27T04:22:36.010Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "stormphrax",
   "flavor": "emscripten-single-thread",
@@ -121,8 +121,8 @@
   "sourceArchive": {
     "required": true,
     "path": "public/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz",
-    "bytes": 37266366,
-    "sha256": "caa03161872dc03c9f240010f4c5a36c1c0e802785fd04e9e6a1839f445d67fc",
+    "bytes": 37267795,
+    "sha256": "f6e043ae1f7dcef7f798f71614abb8cca2a272a6a3acb86a9b26fe7bc7d1252a",
     "url": "/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz",
     "note": "Source archive recorded for public distribution."
   }
