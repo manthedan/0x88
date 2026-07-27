@@ -335,9 +335,9 @@ is 64.5 MB — while `reckless-browser-api-simd128-external.wasm` is 1.26 MB wit
 an external net. Making the external-net variant the default would let all three
 SIMD tiers share one downloaded network.
 
-### 1.6 App-origin fallback assets bypass the outer Cloudflare cache
+### 1.6 App-origin fallback assets cache at the outer Cloudflare edge
 
-**Severity: low. Effort: dashboard-only. Status: OPEN, but no longer on the primary artifact path.**
+**Severity: low. Effort: dashboard-only. Status: FIXED — Cache Rule `cache_app_origin_engine_fallbacks`.**
 
 The original finding was too broad. Re-measurement after deployment separates
 three paths:
@@ -346,18 +346,19 @@ three paths:
 | --- | --- |
 | `https://0x88.app/` | `cf-cache-status: DYNAMIC`, intentionally; HTML is mutable |
 | `https://0x88.app/_app/immutable/*` | first request `MISS`, second request `HIT` |
-| `https://0x88.app/ort/*` | outer Cloudflare `DYNAMIC`; Netlify Edge warms to `hit` |
+| `https://0x88.app/ort/*` | first uncached `GET` is `MISS`; the second is `HIT` |
 | `https://assets.0x88.app/<logical artifact>` | `cache-status: lc0-artifact-worker; hit` |
 
-Engine and model downloads now use the `assets.0x88.app` Artifact Worker and R2,
-so the earlier claim that every cold engine request traverses to Netlify is no
-longer true. Versioned application bundles also cache correctly at Cloudflare.
-Only legacy/app-origin fallback paths such as `/ort/*`, `/models/*`, and
-`/engines/*` retain the extra outer-layer miss; Netlify still caches them.
+Engine and model downloads normally use the `assets.0x88.app` Artifact Worker
+and R2. Versioned application bundles also cache correctly at Cloudflare. A
+zone Cache Rule now closes the remaining app-origin fallback gap for `GET` and
+`HEAD` requests under `/ort/*`, `/models/*`, and `/engines/*`.
 
-Optional action: add a narrowly scoped Cloudflare Cache Rule for those fallback
-paths. Do not cache HTML or mutable channel pointers. This is an optimization,
-not a release blocker or a correctness fix.
+The rule sets cache eligibility only (`set_cache_settings` with `cache: true`);
+it does not override the origin's TTL or cache key. Production canaries for an
+ORT wasm and a model manifest each changed from `MISS` to `HIT` on the second
+identical `GET`. A separate HTML canary remained `DYNAMIC`, so mutable pages and
+channel pointers are outside the rule's scope.
 
 ### 1.7 R2 artifacts use stored identity and Brotli representations
 
@@ -646,11 +647,9 @@ onboarding path, and explain the licensing and clone-size situation.
    only by allocator luck.
 2. Per-surface hash: analysis could take 128-256 MB (1.4). Needs the surface
    threaded through the `DisposableVariantPool` factories.
-3. Optional app-origin fallback cache rule (1.6) — dashboard-only; the primary
-   Artifact Worker path and versioned application bundles already cache.
 
-Items 1.2, 1.3, 1.4, 1.5, and 1.7 are done. 1.1 is closed as rejected on
-evidence. The remaining part of 1.6 is an optional fallback optimization.
+Items 1.2, 1.3, 1.4, 1.5, 1.6, and 1.7 are done. 1.1 is closed as rejected on
+evidence.
 
 **Deliberately not recommended**
 
