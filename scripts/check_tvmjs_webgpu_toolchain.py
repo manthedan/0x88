@@ -23,7 +23,7 @@ def bool_or_error(fn) -> dict[str, Any]:
 
 
 def main() -> int:
-    default_root = Path(os.environ.get("LC0_BROWSER_ROOT", "/Users/macthedan/projects/lc0_browser"))
+    default_root = Path(os.environ.get("LC0_BROWSER_ROOT", str(Path(__file__).resolve().parents[2])))
     tvm_src = Path(os.environ.get("TVM_SRC", str(default_root / ".deps/tvm-webgpu-src")))
     tvm_build_dir = os.environ.get("TVM_BUILD_DIR", "build")
     tvm_lib_dir = tvm_src / tvm_build_dir / "lib"

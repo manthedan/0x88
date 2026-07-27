@@ -2,9 +2,10 @@
 set -euo pipefail
 
 # Reproducible whole-model ONNX -> TVM Relax -> target probe for LC0 browser models.
-# Run from anywhere; durable TVM state lives under /Users/macthedan/projects/lc0_browser.
+# Run from anywhere; durable TVM state lives under the workspace root (the
+# parent of leelaweb/) unless LC0_BROWSER_ROOT overrides it.
 
-ROOT="${LC0_BROWSER_ROOT:-/Users/macthedan/projects/lc0_browser}"
+ROOT="${LC0_BROWSER_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 REPO="${LC0_WEB_REPO:-$ROOT/leelaweb}"
 TVM_SRC="${TVM_SRC:-$ROOT/.deps/tvm-webgpu-src}"
 TVM_ENV="${TVM_ENV:-$ROOT/.envs/tvm-mlc-py313}"

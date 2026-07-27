@@ -38,7 +38,7 @@ reckless-browser/
   - `Reckless Full` from current upstream/default v60 network;
   - `Reckless Lite` from v53 plus `L1_SIZE=512`.
 - Browser worker/runtime adapter if we decide to make the package consumable by web apps outside this LC0 project.
-- Benchmark/example page with CSV/JSON export so downstream users can compare browser runtimes and candidate nets without lc0_webgpu.
+- Benchmark/example page with CSV/JSON export so downstream users can compare browser runtimes and candidate nets without the 0x88 repo.
 
 ## Current local build commands
 

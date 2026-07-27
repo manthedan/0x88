@@ -4,7 +4,7 @@ set -euo pipefail
 # Build the optional TVMJS/WebGPU export toolchain beside the native/source TVM build.
 # This does not replace $TVM_SRC/build; it creates/updates $TVM_SRC/build-tvmjs.
 
-ROOT="${LC0_BROWSER_ROOT:-/Users/macthedan/projects/lc0_browser}"
+ROOT="${LC0_BROWSER_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 TVM_SRC="${TVM_SRC:-$ROOT/.deps/tvm-webgpu-src}"
 TVM_ENV="${TVM_ENV:-$ROOT/.envs/tvm-mlc-py313}"
 TVM_BUILD_DIR="${TVM_BUILD_DIR:-build-tvmjs}"

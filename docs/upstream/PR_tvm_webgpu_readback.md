@@ -26,10 +26,10 @@ Validated by reading back `[1,3]` f16 (6B) and `[1,1]` f16 (2B) outputs of a
 relax VM WebGPU module in Chrome (previously failed validation); large aligned
 tensors unaffected.
 
-## Submission steps (needs your GitHub auth; no gh CLI on this machine)
+## Submission steps
 
 ```bash
-cd /Users/macthedan/projects/lc0_browser/.deps/tvm-webgpu-src
+cd <tvm-webgpu-checkout>
 git checkout -b fix-webgpu-unaligned-readback 044cbd0d4
 # fork apache/tvm on GitHub, then:
 git remote add fork git@github.com:<you>/tvm.git

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${LC0_BROWSER_ROOT:-/Users/macthedan/projects/lc0_browser}"
+ROOT="${LC0_BROWSER_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 REPO="$ROOT/leelaweb"
 TVM_SRC="${TVM_SRC:-$ROOT/.deps/tvm-webgpu-src}"
 TVM_ENV="${TVM_ENV:-$ROOT/.envs/tvm-mlc-py313}"

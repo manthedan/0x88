@@ -47,10 +47,10 @@ It is **not promotion-ready** yet because the evidence is still smoke-derived an
 
 ## Durable local paths
 
-From project root `/Users/macthedan/projects/lc0_browser`:
+From the workspace root (the parent of `leelaweb/`):
 
 ```bash
-export ROOT=/Users/macthedan/projects/lc0_browser
+export ROOT=<path-to-workspace-root>  # contains leelaweb/, .deps/, .envs/
 export WEB=$ROOT/leelaweb-lc0-top-roi   # or another up-to-date leelaweb worktree
 export TVM_SRC=$ROOT/.deps/tvm-webgpu-src
 export TVM_ENV=$ROOT/.envs/tvm-mlc-py313
@@ -801,10 +801,10 @@ Before pushing or merging this research branch:
    git diff --check
    ```
 
-4. Run autoreview with the same validation bundle:
+4. Run the local review gate with the same validation bundle:
 
    ```bash
-   /Users/macthedan/.pi/agent/skills/autoreview/scripts/autoreview --mode local --parallel-tests "npm run typecheck && npm run lc0:tvmjs-webgpu-research-gate"
+   autoreview --mode local --parallel-tests "npm run typecheck && npm run lc0:tvmjs-webgpu-research-gate"
    ```
 
 5. Push the branch only after the checks pass:

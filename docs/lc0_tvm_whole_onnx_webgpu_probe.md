@@ -4,7 +4,7 @@ Status: diagnostic/research artifact path only. This does **not** change the def
 
 ## Durable toolchain
 
-From project root `/Users/macthedan/projects/lc0_browser`:
+From the workspace root (the parent of `leelaweb/`):
 
 ```bash
 export TVM_SRC="$PWD/.deps/tvm-webgpu-src"
@@ -89,7 +89,7 @@ Check readiness first:
 
 ```bash
 cd leelaweb
-ROOT=/Users/macthedan/projects/lc0_browser
+ROOT=<path-to-workspace-root>
 export TVM_SRC="$ROOT/.deps/tvm-webgpu-src"
 export TVM_ENV="$ROOT/.envs/tvm-mlc-py313"
 export TVM_LIBRARY_PATH="$TVM_SRC/build/lib"
@@ -129,7 +129,7 @@ Details:
 Use this wrapper command for the browser-loadable TVMJS wasm artifacts:
 
 ```bash
-cd /Users/macthedan/projects/lc0_browser/leelaweb
+cd <path-to-workspace-root>/leelaweb
 CAST_INT64_INITIALIZERS_TO_INT32=1 \
 TRUST_NONNEGATIVE_GATHER_INDICES=1 \
 SANITIZE_ONNX_NAMES=1 \

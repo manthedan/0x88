@@ -621,7 +621,8 @@ The cheap wins are therefore:
    Stormphrax source tarballs); no rewrite required.
 
 The full inventory, the verified rewrite, and the consequences of applying it
-are in [`git_history_rewrite_plan_2026-07-25.md`](git_history_rewrite_plan_2026-07-25.md).
+are retained in the local-dev doc `.local-dev-docs/git_history_rewrite_plan_2026-07-25.md`
+(deliberately not published with the repository).
 The rewrite is proven to work — the `main` tree hash is byte-identical before
 and after (`9f763b1b…`) — and is kept in reserve rather than applied.
 

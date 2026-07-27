@@ -126,6 +126,6 @@ The UI now treats this as a named variant via `?recklessVariant=lite` and the Re
 
 ## Standalone repo direction
 
-The browser/WASI build patches and Lite build recipe are useful outside lc0_webgpu. See `docs/reckless_lite_standalone.md` for the proposed extraction shape, licensing notes, and artifact naming. The short version: keep generated WASM out of this repo, but make a separate AGPL-compliant `reckless-lite`/`reckless-browser` repo that packages the build script, wasm32 patches, and optional JS worker API.
+The browser/WASI build patches and Lite build recipe are useful outside this project. See `docs/reckless_lite_standalone.md` for the proposed extraction shape, licensing notes, and artifact naming. The short version: keep generated WASM out of this repo, but make a separate AGPL-compliant `reckless-lite`/`reckless-browser` repo that packages the build script, wasm32 patches, and optional JS worker API.
 
 Do not make full/threaded/heavy runtime behavior the default without a clear user opt-in.

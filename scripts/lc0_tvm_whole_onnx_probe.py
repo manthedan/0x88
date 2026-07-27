@@ -5,7 +5,7 @@ This script is intentionally diagnostic and artifact-first.  It records every
 stage in JSON so LC0 / Centipawn / future model TVM experiments are
 reproducible instead of living in /tmp notebooks.
 
-Expected durable environment from project root (/Users/macthedan/projects/lc0_browser):
+Expected durable environment from the workspace root (the parent of leelaweb/):
 
   export TVM_SRC="$PWD/.deps/tvm-webgpu-src"
   export TVM_ENV="$PWD/.envs/tvm-mlc-py313"

@@ -62,10 +62,10 @@ TEST(StructuralEqualHash, FunctorPairConsistentOnTensorContent) {
 }
 ```
 
-## Submission steps (needs your GitHub auth; no gh CLI on this machine)
+## Submission steps
 
 ```bash
-cd /Users/macthedan/projects/lc0_browser/.deps/tvm-webgpu-src/3rdparty/tvm-ffi
+cd <tvm-webgpu-checkout>/3rdparty/tvm-ffi
 git checkout -b fix-structural-equal-tensor-content afea100
 # fork apache/tvm-ffi on GitHub, then:
 git remote add fork git@github.com:<you>/tvm-ffi.git
