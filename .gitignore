@@ -27,6 +27,7 @@ logs/
 screenshots/
 .local-dev-docs/
 .local-dev-artifacts/
+/.wrangler/
 .ralph/
 dist-client/
 .deploy-public/
