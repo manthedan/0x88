@@ -14,3 +14,4 @@ public/stormphrax/*.wasm filter=lfs diff=lfs merge=lfs -text
 public/stormphrax/*corresponding-source*.tar.gz filter=lfs diff=lfs merge=lfs -text
 public/models/bt4_anneal_muon_best.onnx filter=lfs diff=lfs merge=lfs -text
 public/models/bt4_soap_rem_c19000_final.onnx filter=lfs diff=lfs merge=lfs -text
+public/reckless/*corresponding-source*.tar.gz filter=lfs diff=lfs merge=lfs -text
