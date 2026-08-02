@@ -1,24 +1,32 @@
 import { Chessground } from 'chessground';
 import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
-import { boardToFen, parseFen, squareName, START_FEN, type BoardState } from '../chess/board.ts';
+import * as v from 'valibot';
+import { type BoardState, boardToFen, parseFen, START_FEN, squareName } from '../chess/board.ts';
+import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
-import { moveToUci, type Move } from '../chess/moveCodec.ts';
-import { bestMoveShapes, searchShapes } from './boardArrows.ts';
-import { collectOrtRuntimeDiagnostics, describeOrtBackendConfig, type OrtExecutionProviderPreference, type OrtRuntimeDiagnostics, type OrtWasmArtifactSelection } from '../nn/ortRuntime.ts';
+import {
+  collectOrtRuntimeDiagnostics,
+  describeOrtBackendConfig,
+  type OrtExecutionProviderPreference,
+  type OrtRuntimeDiagnostics,
+  type OrtWasmArtifactSelection,
+} from '../nn/ortRuntime.ts';
 import { publishBrowserRuntimeAudit } from '../nn/runtimeAudit.ts';
-import { gameOutcome, type GameResultCode } from './engineBattle.ts';
-import { buildBoardHistoryFromMoves } from './history.ts';
-import { clearLc0ModelCache, describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
+import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { bestMoveShapes, searchShapes } from './boardArrows.ts';
+import { type GameResultCode, gameOutcome } from './engineBattle.ts';
+import { isV0DeployProfile } from './engineCatalog.ts';
+import { cpuEngineHashMbForSurface } from './engineProvision.ts';
+import { buildBoardHistoryFromMoves } from './history.ts';
+import { FenInputFixtureListSchema, HistoryInputFixtureListSchema } from './inputFixtureSchema.ts';
+import { clearLc0ModelCache, describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
+import { type Lc0Evaluation, type Lc0EvaluatorInput, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { workerFallbackReplayAbort } from './ortWorkerFallback.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchOptions, type Lc0SearchResult } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
-import { isV0DeployProfile } from './engineCatalog.ts';
-import { cpuEngineHashMbForSurface } from './engineProvision.ts';
-import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
@@ -57,7 +65,17 @@ type WebGpuBufferAllocationTelemetry = {
   note: string;
 };
 
-type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & { children: Lc0SearchChild[]; pv?: string[]; multiPv?: string[][]; elapsedMs?: number; cancelled?: boolean; stats?: Lc0SearchResult['search']['stats']; executionFootprint?: ExecutionFootprint; cacheFootprint?: CacheFootprint; gpuBufferAllocation?: WebGpuBufferAllocationTelemetry };
+type RenderableSearchResult = Pick<Lc0SearchResult, 'fen' | 'move' | 'visits' | 'value'> & {
+  children: Lc0SearchChild[];
+  pv?: string[];
+  multiPv?: string[][];
+  elapsedMs?: number;
+  cancelled?: boolean;
+  stats?: Lc0SearchResult['search']['stats'];
+  executionFootprint?: ExecutionFootprint;
+  cacheFootprint?: CacheFootprint;
+  gpuBufferAllocation?: WebGpuBufferAllocationTelemetry;
+};
 type PackFootprint = {
   declaredTensorBytes: number;
   loadedTensorBytes: number;
@@ -246,11 +264,25 @@ type AttentionScoreOrtBenchmarkResult = {
   outputSample: number[];
 };
 
-type SmolgenProjectKernelVariant = 'hand' | 'tiled-project-f16' | 'tiled-project-f16-16' | 'tiled-project-f16-32' | 'tiled-project-f16-128' | 'tiled-project-f16-256';
+type SmolgenProjectKernelVariant =
+  | 'hand'
+  | 'tiled-project-f16'
+  | 'tiled-project-f16-16'
+  | 'tiled-project-f16-32'
+  | 'tiled-project-f16-128'
+  | 'tiled-project-f16-256';
 
 function parseSmolgenProjectKernelVariant(raw: string | null): SmolgenProjectKernelVariant {
   if (!raw || raw === 'tiled' || raw === 'tiled-project') return 'tiled-project-f16';
-  if (raw === 'hand' || raw === 'tiled-project-f16' || raw === 'tiled-project-f16-16' || raw === 'tiled-project-f16-32' || raw === 'tiled-project-f16-128' || raw === 'tiled-project-f16-256') return raw;
+  if (
+    raw === 'hand' ||
+    raw === 'tiled-project-f16' ||
+    raw === 'tiled-project-f16-16' ||
+    raw === 'tiled-project-f16-32' ||
+    raw === 'tiled-project-f16-128' ||
+    raw === 'tiled-project-f16-256'
+  )
+    return raw;
   throw new Error(`Unsupported smolgen project kernel variant: ${raw}`);
 }
 
@@ -730,7 +762,11 @@ type HybridEncoderProfileResult = {
   readbackSyncedMs: number;
   outputSample: number[];
   aggregateStageTimings: Array<{ stage: string; label: string; iterations: number; totalMs: number; avgMs: number; percentOfProfiledStageMs: number }>;
-  layerTimings: Array<{ layer: number; totalMs: number; stages: Array<{ stage: string; label: string; iterations: number; totalMs: number; avgMs: number; percentOfProfiledStageMs: number }> }>;
+  layerTimings: Array<{
+    layer: number;
+    totalMs: number;
+    stages: Array<{ stage: string; label: string; iterations: number; totalMs: number; avgMs: number; percentOfProfiledStageMs: number }>;
+  }>;
   note: string;
   executionFootprint?: ExecutionFootprint;
 };
@@ -800,11 +836,14 @@ const SOFTMAX_BENCH_REQUESTED = params.get('softmaxBench') === '1' || params.get
 const ATTENTION_VALUE_BENCH_REQUESTED = params.get('attentionValueBench') === '1' || params.get('valueBench') === '1';
 const ATTENTION_VALUE_ORT_BENCH_REQUESTED = params.get('attentionValueOrtBench') === '1' || params.get('valueOrtBench') === '1';
 const ATTENTION_BLOCK_BENCH_REQUESTED = params.get('attentionBlockBench') === '1' || params.get('attnBlockBench') === '1';
-const ATTENTION_OUTPUT_BENCH_REQUESTED = params.get('attentionOutputBench') === '1' || params.get('attentionNormBench') === '1' || params.get('attnOutBench') === '1';
-const ATTENTION_OUTPUT_ORT_BENCH_REQUESTED = params.get('attentionOutputOrtBench') === '1' || params.get('outputOrtBench') === '1' || params.get('attnOutOrtBench') === '1';
+const ATTENTION_OUTPUT_BENCH_REQUESTED =
+  params.get('attentionOutputBench') === '1' || params.get('attentionNormBench') === '1' || params.get('attnOutBench') === '1';
+const ATTENTION_OUTPUT_ORT_BENCH_REQUESTED =
+  params.get('attentionOutputOrtBench') === '1' || params.get('outputOrtBench') === '1' || params.get('attnOutOrtBench') === '1';
 const ENCODER0_BLOCK_BENCH_REQUESTED = params.get('encoder0BlockBench') === '1' || params.get('fullEncoder0Bench') === '1';
 const ENCODER0_BLOCK_ORT_BENCH_REQUESTED = params.get('encoder0BlockOrtBench') === '1' || params.get('fullEncoder0OrtBench') === '1';
-const ENCODER_STACK_BENCH_REQUESTED = params.get('encoderStackBench') === '1' || params.get('encoderBlocksBench') === '1' || params.get('encoderStackHeadsBench') === '1';
+const ENCODER_STACK_BENCH_REQUESTED =
+  params.get('encoderStackBench') === '1' || params.get('encoderBlocksBench') === '1' || params.get('encoderStackHeadsBench') === '1';
 const MAPPED_POLICY_PROBE_REQUESTED = params.get('mappedPolicyProbe') === '1' || params.get('policyMappingProbe') === '1';
 const WGSL_HEADS_PROBE_REQUESTED = params.get('wgslHeadsProbe') === '1' || params.get('policyValueHeadsProbe') === '1';
 const WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED = params.get('wgslHeadsVsOrt') === '1' || params.get('wgslHeadsFixtures') === '1';
@@ -818,31 +857,91 @@ const QKV_PROBE_REQUESTED = params.get('qkvProbe') === '1';
 const ORT_OP_BENCH_REQUESTED = params.get('ortOpBench') === '1' || params.get('ortBench') === '1';
 const KERNEL_BENCH_REQUESTED = params.get('kernelBench') === '1' || params.get('kernelBenchmark') === '1' || params.get('wgslBench') === '1';
 const SHADER_F16_PROBE_REQUESTED = params.get('shaderF16Probe') === '1' || params.get('shader-f16-probe') === '1';
-const KERNEL_PROBE_REQUESTED = MAPPED_POLICY_PROBE_REQUESTED || WGSL_HEADS_PROBE_REQUESTED || WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED || ENCODER_STACK_BENCH_REQUESTED || ENCODER0_BLOCK_ORT_BENCH_REQUESTED || ENCODER0_BLOCK_BENCH_REQUESTED || ENCODER0_FFN_ORT_BENCH_REQUESTED || ENCODER0_FFN_BENCH_REQUESTED || ATTENTION_OUTPUT_ORT_BENCH_REQUESTED || ATTENTION_OUTPUT_BENCH_REQUESTED || ATTENTION_BLOCK_BENCH_REQUESTED || ATTENTION_VALUE_ORT_BENCH_REQUESTED || ATTENTION_VALUE_BENCH_REQUESTED || SOFTMAX_BENCH_REQUESTED || SMOLGEN_BENCH_REQUESTED || ATTENTION_SCORE_BENCH_REQUESTED || ATTENTION_SCORE_ORT_BENCH_REQUESTED || QKV_BENCH_REQUESTED || QKV_PROBE_REQUESTED || ORT_OP_BENCH_REQUESTED || KERNEL_BENCH_REQUESTED || SHADER_F16_PROBE_REQUESTED || params.get('kernelProbe') === '1' || params.get('wgslProbe') === '1';
+const KERNEL_PROBE_REQUESTED =
+  MAPPED_POLICY_PROBE_REQUESTED ||
+  WGSL_HEADS_PROBE_REQUESTED ||
+  WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED ||
+  ENCODER_STACK_BENCH_REQUESTED ||
+  ENCODER0_BLOCK_ORT_BENCH_REQUESTED ||
+  ENCODER0_BLOCK_BENCH_REQUESTED ||
+  ENCODER0_FFN_ORT_BENCH_REQUESTED ||
+  ENCODER0_FFN_BENCH_REQUESTED ||
+  ATTENTION_OUTPUT_ORT_BENCH_REQUESTED ||
+  ATTENTION_OUTPUT_BENCH_REQUESTED ||
+  ATTENTION_BLOCK_BENCH_REQUESTED ||
+  ATTENTION_VALUE_ORT_BENCH_REQUESTED ||
+  ATTENTION_VALUE_BENCH_REQUESTED ||
+  SOFTMAX_BENCH_REQUESTED ||
+  SMOLGEN_BENCH_REQUESTED ||
+  ATTENTION_SCORE_BENCH_REQUESTED ||
+  ATTENTION_SCORE_ORT_BENCH_REQUESTED ||
+  QKV_BENCH_REQUESTED ||
+  QKV_PROBE_REQUESTED ||
+  ORT_OP_BENCH_REQUESTED ||
+  KERNEL_BENCH_REQUESTED ||
+  SHADER_F16_PROBE_REQUESTED ||
+  params.get('kernelProbe') === '1' ||
+  params.get('wgslProbe') === '1';
 const BENCH_REQUESTED = params.get('bench') === '1' || params.get('timing') === '1';
 const HYBRID_DRIFT_REQUESTED = params.get('hybridDrift') === '1' || params.get('hybridFixtures') === '1';
 const HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED = params.get('hybridSearchFixtureParity') === '1' || params.get('searchFixtureParity') === '1';
 const HYBRID_GPU_LEGAL_PARITY_REQUESTED = params.get('gpuLegalParity') === '1' || params.get('legalTopKParity') === '1';
 const HYBRID_SEARCH_BENCH_REQUESTED = params.get('hybridSearchBench') === '1' || params.get('hybridSearchBenchmark') === '1';
 const HYBRID_MOVE_SEQUENCE_BENCH_REQUESTED = params.get('moveSequenceBench') === '1' || params.get('hybridMoveSequenceBench') === '1';
-const HYBRID_ENCODER_PROFILE_REQUESTED = params.get('hybridEncoderProfile') === '1' || params.get('encoderProfile') === '1' || params.get('hybridProfile') === '1';
-const HYBRID_INPUT_BENCH_REQUESTED = params.get('hybridInputBench') === '1' || params.get('hybridInputBenchmark') === '1' || params.get('wasmInputBench') === '1';
+const HYBRID_ENCODER_PROFILE_REQUESTED =
+  params.get('hybridEncoderProfile') === '1' || params.get('encoderProfile') === '1' || params.get('hybridProfile') === '1';
+const HYBRID_INPUT_BENCH_REQUESTED =
+  params.get('hybridInputBench') === '1' || params.get('hybridInputBenchmark') === '1' || params.get('wasmInputBench') === '1';
 const HYBRID_DEFERRED_READBACK_BENCH_REQUESTED = params.get('wgslDeferredReadbackBench') === '1' || params.get('deferredReadbackBench') === '1';
-const HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED = params.get('wgslDeferredReadbackLifecycle') === '1' || params.get('deferredReadbackLifecycle') === '1' || params.get('wgslLifecycleSmoke') === '1';
-const HYBRID_WGSL_HEADS_REQUESTED = params.get('headBackend') === 'wgsl' || params.get('hybridHeads') === 'wgsl' || params.get('runtime') === 'hybrid-wgsl-heads' || params.get('runtime') === 'wgsl-heads';
+const HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED =
+  params.get('wgslDeferredReadbackLifecycle') === '1' || params.get('deferredReadbackLifecycle') === '1' || params.get('wgslLifecycleSmoke') === '1';
+const HYBRID_WGSL_HEADS_REQUESTED =
+  params.get('headBackend') === 'wgsl' ||
+  params.get('hybridHeads') === 'wgsl' ||
+  params.get('runtime') === 'hybrid-wgsl-heads' ||
+  params.get('runtime') === 'wgsl-heads';
 const HYBRID_WGSL_BATCH_MODE = params.get('wgslBatchMode') === 'serial' || params.get('wgslBatch') === 'serial' ? 'serial' : 'physical';
 const HYBRID_INPUT_BACKEND_PARAM = params.get('inputBackend') ?? params.get('hybridInput');
 const HYBRID_INPUT_BACKEND_REQUESTED = HYBRID_INPUT_BACKEND_PARAM === 'wgsl' || HYBRID_INPUT_BACKEND_PARAM === 'wasm';
-const HYBRID_INPUT_BACKEND = HYBRID_INPUT_BACKEND_PARAM === 'wasm' ? 'wasm' : (HYBRID_INPUT_BACKEND_PARAM === 'wgsl' ? 'wgsl' : 'js');
+const HYBRID_INPUT_BACKEND = HYBRID_INPUT_BACKEND_PARAM === 'wasm' ? 'wasm' : HYBRID_INPUT_BACKEND_PARAM === 'wgsl' ? 'wgsl' : 'js';
 const HYBRID_LEGAL_PRIORS_BACKEND_PARAM = params.get('legalPriorsBackend') ?? params.get('hybridLegalPriors');
 const HYBRID_LEGAL_PRIORS_BACKEND_REQUESTED = HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'wasm' || HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'gpu';
-const HYBRID_LEGAL_PRIORS_BACKEND_RAW = HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'gpu' ? 'gpu' : (HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'wasm' ? 'wasm' : 'js');
+const HYBRID_LEGAL_PRIORS_BACKEND_RAW = HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'gpu' ? 'gpu' : HYBRID_LEGAL_PRIORS_BACKEND_PARAM === 'wasm' ? 'wasm' : 'js';
 const HYBRID_LEGAL_PRIORS_BACKEND = HYBRID_LEGAL_PRIORS_BACKEND_RAW === 'gpu' && !HYBRID_WGSL_HEADS_REQUESTED ? 'js' : HYBRID_LEGAL_PRIORS_BACKEND_RAW;
 const HYBRID_ENCODER_KERNEL_PARAM = params.get('encoderKernel') ?? params.get('hybridEncoderKernel') ?? params.get('encoderKernelVariant');
-const HYBRID_ENCODER_KERNEL_VARIANT = HYBRID_ENCODER_KERNEL_PARAM === 'tvm-packed-f16' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-outproj' || HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-smolgen-project' ? HYBRID_ENCODER_KERNEL_PARAM : 'hand';
-const HYBRID_EVALUATOR_REQUESTED = HYBRID_DRIFT_REQUESTED || HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED || HYBRID_GPU_LEGAL_PARITY_REQUESTED || HYBRID_SEARCH_BENCH_REQUESTED || HYBRID_MOVE_SEQUENCE_BENCH_REQUESTED || HYBRID_ENCODER_PROFILE_REQUESTED || HYBRID_INPUT_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_BENCH_REQUESTED || HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED || HYBRID_WGSL_HEADS_REQUESTED || HYBRID_INPUT_BACKEND_REQUESTED || HYBRID_LEGAL_PRIORS_BACKEND_REQUESTED || HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' || params.get('runtime') === 'hybrid' || params.get('hybridEvaluator') === '1' || params.get('lc0webHybrid') === '1';
-const PACK_PROBE_REQUESTED = !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
-const WORKER_ONLY_MODEL = HYBRID_EVALUATOR_REQUESTED || PACK_PROBE_REQUESTED || BENCH_REQUESTED || params.get('workerOnly') === '1' || params.get('dedicatedWorker') === '1' || params.get('bigModel') === '1';
+const HYBRID_ENCODER_KERNEL_VARIANT =
+  HYBRID_ENCODER_KERNEL_PARAM === 'tvm-packed-f16' ||
+  HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn' ||
+  HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-outproj' ||
+  HYBRID_ENCODER_KERNEL_PARAM === 'mixed-tvm-ffn-smolgen-project'
+    ? HYBRID_ENCODER_KERNEL_PARAM
+    : 'hand';
+const HYBRID_EVALUATOR_REQUESTED =
+  HYBRID_DRIFT_REQUESTED ||
+  HYBRID_SEARCH_FIXTURE_PARITY_REQUESTED ||
+  HYBRID_GPU_LEGAL_PARITY_REQUESTED ||
+  HYBRID_SEARCH_BENCH_REQUESTED ||
+  HYBRID_MOVE_SEQUENCE_BENCH_REQUESTED ||
+  HYBRID_ENCODER_PROFILE_REQUESTED ||
+  HYBRID_INPUT_BENCH_REQUESTED ||
+  HYBRID_DEFERRED_READBACK_BENCH_REQUESTED ||
+  HYBRID_DEFERRED_READBACK_LIFECYCLE_REQUESTED ||
+  HYBRID_WGSL_HEADS_REQUESTED ||
+  HYBRID_INPUT_BACKEND_REQUESTED ||
+  HYBRID_LEGAL_PRIORS_BACKEND_REQUESTED ||
+  HYBRID_ENCODER_KERNEL_VARIANT !== 'hand' ||
+  params.get('runtime') === 'hybrid' ||
+  params.get('hybridEvaluator') === '1' ||
+  params.get('lc0webHybrid') === '1';
+const PACK_PROBE_REQUESTED =
+  !HYBRID_EVALUATOR_REQUESTED && (KERNEL_PROBE_REQUESTED || params.get('packProbe') === '1' || params.get('pack') !== null || params.get('modelPack') !== null);
+const WORKER_ONLY_MODEL =
+  HYBRID_EVALUATOR_REQUESTED ||
+  PACK_PROBE_REQUESTED ||
+  BENCH_REQUESTED ||
+  params.get('workerOnly') === '1' ||
+  params.get('dedicatedWorker') === '1' ||
+  params.get('bigModel') === '1';
 const SEARCH_WORKER_REQUESTED = WORKER_ONLY_MODEL || params.get('worker') === '1' || params.get('searchWorker') === '1';
 const CACHE_MODEL = params.get('cache') === '1' || params.get('modelCache') === '1';
 const HYBRID_EVAL_CACHE_ENTRIES = clampInt(params.get('evalCacheEntries') ?? (params.get('evalCache') === '1' ? '2048' : '0'), 0, 100000, 0);
@@ -857,11 +956,22 @@ function paramFalsey(name: string): boolean {
 }
 
 const ORT_READBACK_PROFILE_REQUESTED = paramTruthy('ortReadbackProfile') || paramTruthy('ortDiagnostics');
-const ORT_WEBGPU_PROFILE_REQUESTED = !paramFalsey('ortWebGpuProfile') && !paramFalsey('ortKernelProfile') && (ORT_READBACK_PROFILE_REQUESTED || paramTruthy('ortWebGpuProfile') || paramTruthy('ortKernelProfile'));
-const ORT_WEBGPU_API_TRACE_REQUESTED = !paramFalsey('ortMonkeyPatchWebGpu') && !paramFalsey('ortWebGpuApiTrace') && (ORT_READBACK_PROFILE_REQUESTED || paramTruthy('ortMonkeyPatchWebGpu') || paramTruthy('ortWebGpuApiTrace'));
-const ORT_PREFERRED_OUTPUT_LOCATION = params.get('ortPreferredOutputLocation') === 'cpu' || params.get('ortPreferredOutputLocation') === 'cpu-pinned' || params.get('ortPreferredOutputLocation') === 'gpu-buffer'
-  ? params.get('ortPreferredOutputLocation') as 'cpu' | 'cpu-pinned' | 'gpu-buffer'
-  : (!paramFalsey('ortGpuOutputs') && (ORT_READBACK_PROFILE_REQUESTED || paramTruthy('ortGpuOutputs')) ? 'gpu-buffer' : undefined);
+const ORT_WEBGPU_PROFILE_REQUESTED =
+  !paramFalsey('ortWebGpuProfile') &&
+  !paramFalsey('ortKernelProfile') &&
+  (ORT_READBACK_PROFILE_REQUESTED || paramTruthy('ortWebGpuProfile') || paramTruthy('ortKernelProfile'));
+const ORT_WEBGPU_API_TRACE_REQUESTED =
+  !paramFalsey('ortMonkeyPatchWebGpu') &&
+  !paramFalsey('ortWebGpuApiTrace') &&
+  (ORT_READBACK_PROFILE_REQUESTED || paramTruthy('ortMonkeyPatchWebGpu') || paramTruthy('ortWebGpuApiTrace'));
+const ORT_PREFERRED_OUTPUT_LOCATION =
+  params.get('ortPreferredOutputLocation') === 'cpu' ||
+  params.get('ortPreferredOutputLocation') === 'cpu-pinned' ||
+  params.get('ortPreferredOutputLocation') === 'gpu-buffer'
+    ? (params.get('ortPreferredOutputLocation') as 'cpu' | 'cpu-pinned' | 'gpu-buffer')
+    : !paramFalsey('ortGpuOutputs') && (ORT_READBACK_PROFILE_REQUESTED || paramTruthy('ortGpuOutputs'))
+      ? 'gpu-buffer'
+      : undefined;
 const BENCH_WARMUP = Math.min(100, Math.max(0, Math.floor(Number(params.get('benchWarmup') ?? '5') || 0)));
 const BENCH_ITERS = Math.min(1000, Math.max(1, Math.floor(Number(params.get('benchIters') ?? params.get('iters') ?? '25') || 25)));
 function requestedKernelVariant(): KernelVariant {
@@ -904,7 +1014,7 @@ let searchMovetimeMs = clampInt(params.get('movetime') ?? params.get('movetimeMs
 let searchCpuct = clampFloat(params.get('cpuct'), 0, 100, 1.5);
 let searchCpuctSchedule: CpuctSchedule = parseCpuctSchedule(params.get('cpuctSchedule'));
 let searchFpuStrategy: FpuStrategy = parseFpuStrategy(params.get('fpuStrategy'));
-let searchFpuReduction = clampFloat(params.get('fpuReduction'), 0, 5, 0.330);
+let searchFpuReduction = clampFloat(params.get('fpuReduction'), 0, 5, 0.33);
 let searchTemperature = clampFloat(params.get('temperature'), 0, 10, 0);
 let engineReplyMode: EngineReplyMode = params.get('mode') === 'search' ? 'search' : 'policy';
 
@@ -979,7 +1089,7 @@ function setBoardShapes(shapes: DrawShape[]) {
 }
 
 function htmlEscape(value: unknown): string {
-  return String(value).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]!));
+  return String(value).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
 }
 
 function requestedWorkerEp(): OrtExecutionProviderPreference {
@@ -1012,9 +1122,7 @@ function requestedOrtWasmArtifactPayload(variantOverride?: 'fixed' | 'relaxed'):
   if (raw !== 'fixed' && raw !== 'relaxed') return undefined;
   const prefix = raw === 'relaxed' ? 'ortWasmRelaxed' : 'ortWasmFixed';
   const directory = `/ort-experimental/${raw}`;
-  const basename = raw === 'relaxed'
-    ? 'ort-wasm-relaxedsimd-threaded.asyncify'
-    : 'ort-wasm-simd-threaded.asyncify';
+  const basename = raw === 'relaxed' ? 'ort-wasm-relaxedsimd-threaded.asyncify' : 'ort-wasm-simd-threaded.asyncify';
   return {
     variant: raw,
     mjsUrl: sameOriginOrtAssetUrl(`${prefix}Mjs`, `${directory}/${basename}.mjs`),
@@ -1071,11 +1179,7 @@ function legalMoveFromUci(uci: string): Move | undefined {
 
 function legalMoveFromDrag(from: Key, to: Key): Move | undefined {
   const base = `${from}${to}`;
-  return legalMoveFromUci(base)
-    ?? legalMoveFromUci(`${base}q`)
-    ?? legalMoveFromUci(`${base}r`)
-    ?? legalMoveFromUci(`${base}b`)
-    ?? legalMoveFromUci(`${base}n`);
+  return legalMoveFromUci(base) ?? legalMoveFromUci(`${base}q`) ?? legalMoveFromUci(`${base}r`) ?? legalMoveFromUci(`${base}b`) ?? legalMoveFromUci(`${base}n`);
 }
 
 function currentEvaluationInput(): string | { positions: BoardState[] } {
@@ -1138,7 +1242,10 @@ function renderStatic() {
   el('status').textContent = PACK_PROBE_REQUESTED ? 'pack probe' : evaluationAvailable() ? 'ready' : 'loading';
   el('searchMode').textContent = searchModeLabel();
   const pipelineText = searchBatchPipelineDepth > 1 ? ` · pipe${searchBatchPipelineDepth}` : '';
-  el('searchBatch').textContent = searchEarlyStop === 'none' ? `${searchBatchSize}${pipelineText} · ${searchBatchCollisionMode} · ${searchCpuctSchedule}` : `${searchBatchSize}${pipelineText} · ${searchBatchCollisionMode} · ${searchCpuctSchedule} · ${searchEarlyStop}`;
+  el('searchBatch').textContent =
+    searchEarlyStop === 'none'
+      ? `${searchBatchSize}${pipelineText} · ${searchBatchCollisionMode} · ${searchCpuctSchedule}`
+      : `${searchBatchSize}${pipelineText} · ${searchBatchCollisionMode} · ${searchCpuctSchedule} · ${searchEarlyStop}`;
   el('searchMove').textContent = `Search ${currentSearchLimitLabel()}`;
   el('engineMove').toggleAttribute('disabled', busy || !evaluationAvailable());
   el('searchMove').toggleAttribute('disabled', busy || !searchAvailable());
@@ -1149,13 +1256,13 @@ function renderStatic() {
   const config = {
     orientation,
     fen: boardFenOnly(),
-    turnColor: board.turn === 'w' ? 'white' as const : 'black' as const,
+    turnColor: board.turn === 'w' ? ('white' as const) : ('black' as const),
     coordinates: true,
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 160 },
     movable: {
       free: false,
-      color: busy ? undefined : board.turn === 'w' ? 'white' as const : 'black' as const,
+      color: busy ? undefined : board.turn === 'w' ? ('white' as const) : ('black' as const),
       dests: busy ? new Map<Key, Key[]>() : legalDests(),
       showDests: !busy,
       events: { after: onUserMove },
@@ -1172,19 +1279,21 @@ function renderSearchResult(result: RenderableSearchResult) {
   const visitsPerSecond = result.elapsedMs && result.elapsedMs > 0 ? result.visits / (result.elapsedMs / 1000) : undefined;
   const stats = result.stats;
   const batchStats = stats ? ` · eval batches ${stats.batchEvalCalls}/${stats.maxEvalBatch}` : '';
-  el('searchLatency').textContent = result.elapsedMs === undefined ? '—' : `${result.elapsedMs.toFixed(0)} ms · ${visitsPerSecond?.toFixed(1) ?? '—'} visits/s${batchStats}`;
+  el('searchLatency').textContent =
+    result.elapsedMs === undefined ? '—' : `${result.elapsedMs.toFixed(0)} ms · ${visitsPerSecond?.toFixed(1) ?? '—'} visits/s${batchStats}`;
   if (result.multiPv && result.multiPv.length > 1) {
-    el('searchPv').innerHTML = result.multiPv
-      .map((line, i) => `<div><b>${i + 1}.</b> ${htmlEscape(line.join(' '))}</div>`)
-      .join('');
+    el('searchPv').innerHTML = result.multiPv.map((line, i) => `<div><b>${i + 1}.</b> ${htmlEscape(line.join(' '))}</div>`).join('');
   } else {
     el('searchPv').textContent = result.pv && result.pv.length ? result.pv.join(' ') : '—';
   }
   const maxVisits = Math.max(1, ...result.children.slice(0, 10).map((entry) => entry.visits));
-  el('searchChildren').innerHTML = result.children.slice(0, 10).map((entry, i) => {
-    const width = Math.max(2, (entry.visits / maxVisits) * 100).toFixed(1);
-    return `<li class="${i === 0 ? 'best' : ''}"><span>${i + 1}</span><b>${htmlEscape(entry.uci)}</b><meter min="0" max="100" value="${width}"></meter><code>${entry.visits} · ${(entry.prior * 100).toFixed(1)}%</code></li>`;
-  }).join('');
+  el('searchChildren').innerHTML = result.children
+    .slice(0, 10)
+    .map((entry, i) => {
+      const width = Math.max(2, (entry.visits / maxVisits) * 100).toFixed(1);
+      return `<li class="${i === 0 ? 'best' : ''}"><span>${i + 1}</span><b>${htmlEscape(entry.uci)}</b><meter min="0" max="100" value="${width}"></meter><code>${entry.visits} · ${(entry.prior * 100).toFixed(1)}%</code></li>`;
+    })
+    .join('');
   // Draw the chosen move (green) and other MultiPV candidates (blue) on the board.
   setBoardShapes(searchShapes(result.move, result.multiPv));
 }
@@ -1200,24 +1309,29 @@ function renderEvaluation() {
   const seq = ++renderSeq;
   renderStatic();
   if (!evaluationAvailable()) return;
-  choosePolicyMove(currentEvaluationInput()).then((choice) => {
-    if (seq !== renderSeq) return;
-    const ev = choice.evaluation;
-    const [win, draw, loss] = ev.wdl;
-    el('bestMove').textContent = choice.move ?? '—';
-    el('wdl').innerHTML = `<b>W</b> ${(win * 100).toFixed(2)}% · <b>D</b> ${(draw * 100).toFixed(2)}% · <b>L</b> ${(loss * 100).toFixed(2)}%`;
-    el('qMlh').textContent = `Q ${ev.q.toFixed(5)} · MLH ${ev.mlh.toFixed(1)}`;
-    const max = Math.max(1e-9, ...ev.legalPriors.slice(0, 10).map((entry) => entry.prior));
-    el('priors').innerHTML = ev.legalPriors.slice(0, 10).map((entry, i) => {
-      const width = Math.max(2, (entry.prior / max) * 100).toFixed(1);
-      return `<li class="${i === 0 ? 'best' : ''}"><span>${i + 1}</span><b>${htmlEscape(entry.uci)}</b><meter min="0" max="100" value="${width}"></meter><code>${(entry.prior * 100).toFixed(2)}%</code></li>`;
-    }).join('');
-    // Reflect the policy pick on the board so analysis is visible there.
-    setBoardShapes(bestMoveShapes(choice.move));
-  }).catch((error) => {
-    if (seq !== renderSeq) return;
-    el('message').textContent = `Evaluation failed: ${(error as Error).message}`;
-  });
+  choosePolicyMove(currentEvaluationInput())
+    .then((choice) => {
+      if (seq !== renderSeq) return;
+      const ev = choice.evaluation;
+      const [win, draw, loss] = ev.wdl;
+      el('bestMove').textContent = choice.move ?? '—';
+      el('wdl').innerHTML = `<b>W</b> ${(win * 100).toFixed(2)}% · <b>D</b> ${(draw * 100).toFixed(2)}% · <b>L</b> ${(loss * 100).toFixed(2)}%`;
+      el('qMlh').textContent = `Q ${ev.q.toFixed(5)} · MLH ${ev.mlh.toFixed(1)}`;
+      const max = Math.max(1e-9, ...ev.legalPriors.slice(0, 10).map((entry) => entry.prior));
+      el('priors').innerHTML = ev.legalPriors
+        .slice(0, 10)
+        .map((entry, i) => {
+          const width = Math.max(2, (entry.prior / max) * 100).toFixed(1);
+          return `<li class="${i === 0 ? 'best' : ''}"><span>${i + 1}</span><b>${htmlEscape(entry.uci)}</b><meter min="0" max="100" value="${width}"></meter><code>${(entry.prior * 100).toFixed(2)}%</code></li>`;
+        })
+        .join('');
+      // Reflect the policy pick on the board so analysis is visible there.
+      setBoardShapes(bestMoveShapes(choice.move));
+    })
+    .catch((error) => {
+      if (seq !== renderSeq) return;
+      el('message').textContent = `Evaluation failed: ${(error as Error).message}`;
+    });
 }
 
 function lc0PolicyRuntimeName(): string {
@@ -1315,18 +1429,20 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
     ortDiagnostics: requestedOrtDiagnosticsPayload(),
     ortWasmArtifact: requestedWasmArtifact,
     ortWasmThreads: requestedOrtWasmThreadsPayload(),
-    ...(HYBRID_EVALUATOR_REQUESTED ? {
-      runtime: 'hybrid',
-      packUrl: PACK_URL,
-      layers: Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10))),
-      verifyShards: params.get('packVerify') !== '0',
-      headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
-      wgslBatchMode: HYBRID_WGSL_BATCH_MODE,
-      inputBackend: HYBRID_INPUT_BACKEND,
-      legalPriorsBackend: HYBRID_LEGAL_PRIORS_BACKEND,
-      encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
-      evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
-    } : {}),
+    ...(HYBRID_EVALUATOR_REQUESTED
+      ? {
+          runtime: 'hybrid',
+          packUrl: PACK_URL,
+          layers: Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10))),
+          verifyShards: params.get('packVerify') !== '0',
+          headBackend: HYBRID_WGSL_HEADS_REQUESTED ? 'wgsl' : 'ort',
+          wgslBatchMode: HYBRID_WGSL_BATCH_MODE,
+          inputBackend: HYBRID_INPUT_BACKEND,
+          legalPriorsBackend: HYBRID_LEGAL_PRIORS_BACKEND,
+          encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
+          evalCacheEntries: HYBRID_EVAL_CACHE_ENTRIES,
+        }
+      : {}),
   };
   searchWorkerInitMessage = initMessage;
   searchWorkerOrtWasmVariant = requestedWasmArtifact?.variant ?? 'bundled';
@@ -1355,13 +1471,26 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
     resolvedRuntime: runtime === 'onnx' ? 'ort-worker' : `${runtime}-lazy`,
     runtimeConfigId: HYBRID_EVALUATOR_REQUESTED ? runtime : undefined,
     manifestUrl: HYBRID_EVALUATOR_REQUESTED ? PACK_URL : undefined,
-    searchBudget: params.get('search') === '1' ? `visits=${params.get('visits') ?? params.get('nodes') ?? 'default'}` : BENCH_REQUESTED ? `bench repeat=${params.get('repeat') ?? 'default'}` : 'policy-only',
-    notes: runtime === 'onnx' ? [ready.backend, ready.modelCache] : [ready.backend, ready.modelCache, 'hybrid runtime is pack-lazy until first evaluation succeeds'],
+    searchBudget:
+      params.get('search') === '1'
+        ? `visits=${params.get('visits') ?? params.get('nodes') ?? 'default'}`
+        : BENCH_REQUESTED
+          ? `bench repeat=${params.get('repeat') ?? 'default'}`
+          : 'policy-only',
+    notes:
+      runtime === 'onnx' ? [ready.backend, ready.modelCache] : [ready.backend, ready.modelCache, 'hybrid runtime is pack-lazy until first evaluation succeeds'],
   });
   renderStatic();
 }
 
-async function initHybridWorkerWithOptions(options: { inputBackend?: 'js' | 'wgsl' | 'wasm'; legalPriorsBackend?: 'js' | 'wasm' | 'gpu'; encoderKernelVariant?: string; headBackend?: 'ort' | 'wgsl' } = {}): Promise<void> {
+async function initHybridWorkerWithOptions(
+  options: {
+    inputBackend?: 'js' | 'wgsl' | 'wasm';
+    legalPriorsBackend?: 'js' | 'wasm' | 'gpu';
+    encoderKernelVariant?: string;
+    headBackend?: 'ort' | 'wgsl';
+  } = {},
+): Promise<void> {
   if (!searchWorker) await initSearchWorker({ initModel: false });
   const inputBackend = options.inputBackend ?? HYBRID_INPUT_BACKEND;
   const initStarted = performance.now();
@@ -1533,14 +1662,16 @@ function recordNumericTimingSamples(samples: Record<string, number[]>, value: un
   const rounded = roundedNumericRecord(value, 8);
   if (!rounded) return;
   for (const [key, numberValue] of Object.entries(rounded)) {
-    (samples[key] ??= []).push(numberValue);
+    samples[key] ??= [];
+    samples[key].push(numberValue);
   }
 }
 
 function aggregateBatchEvaluationTiming(evaluations: BrowserEvaluationChoice[] | undefined): Record<string, number> | undefined {
-  const records = evaluations
-    ?.map((entry) => roundedNumericRecord((entry.evaluation as { timing?: unknown }).timing, 8))
-    .filter((record): record is Record<string, number> => record !== undefined) ?? [];
+  const records =
+    evaluations
+      ?.map((entry) => roundedNumericRecord((entry.evaluation as { timing?: unknown }).timing, 8))
+      .filter((record): record is Record<string, number> => record !== undefined) ?? [];
   if (!records.length) return undefined;
   if (records[0].physicalBatchSize === records.length) return records[0];
   const totals: Record<string, number> = {};
@@ -1554,29 +1685,38 @@ function aggregateBatchEvaluationTiming(evaluations: BrowserEvaluationChoice[] |
 }
 
 function summarizeNumericTimingSamples(samples: Record<string, number[]>, sourcePrefix: string): Record<string, unknown> | undefined {
-  const entries = Object.entries(samples).map(([key, values]) => [key, sampleTimingStats(values, `${sourcePrefix}.${key}`)] as const).filter(([, stats]) => stats !== undefined);
+  const entries = Object.entries(samples)
+    .map(([key, values]) => [key, sampleTimingStats(values, `${sourcePrefix}.${key}`)] as const)
+    .filter(([, stats]) => stats !== undefined);
   return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
 function buildBenchmarkReport(result: BenchmarkReportInput): Record<string, unknown> {
   const perDispatchSyncedMs = result.readbackSyncedMs !== undefined && result.iterations ? result.readbackSyncedMs / result.iterations : undefined;
   const sampleStats = result.timesMs ? sampleTimingStats(result.timesMs, 'timed samples') : undefined;
-  const aggregateStats = sampleStats ?? (result.avgMs !== undefined && result.minMs !== undefined && result.maxMs !== undefined ? {
-    source: 'aggregate result fields (raw samples not returned)',
-    sampleCount: result.iterations ?? 1,
-    meanMs: roundReportMs(result.avgMs),
-    trimmedMeanMs: roundReportMs(result.avgMs),
-    minMs: roundReportMs(result.minMs),
-    maxMs: roundReportMs(result.maxMs),
-    percentileNote: 'p50/p95 unavailable because this result did not include raw timing samples',
-  } : undefined);
+  const aggregateStats =
+    sampleStats ??
+    (result.avgMs !== undefined && result.minMs !== undefined && result.maxMs !== undefined
+      ? {
+          source: 'aggregate result fields (raw samples not returned)',
+          sampleCount: result.iterations ?? 1,
+          meanMs: roundReportMs(result.avgMs),
+          trimmedMeanMs: roundReportMs(result.avgMs),
+          minMs: roundReportMs(result.minMs),
+          maxMs: roundReportMs(result.maxMs),
+          percentileNote: 'p50/p95 unavailable because this result did not include raw timing samples',
+        }
+      : undefined);
   return {
     browserInfo: browserReportInfo(),
     gpuAdapterInfo: result.adapterInfo,
-    packVerification: params.get('packVerify') === '0' ? 'packVerify=0; shard sha256 verification skipped for this benchmark run' : 'pack shard sha256 verification enabled',
+    packVerification:
+      params.get('packVerify') === '0' ? 'packVerify=0; shard sha256 verification skipped for this benchmark run' : 'pack shard sha256 verification enabled',
     perDispatchSyncedMs: roundReportMs(perDispatchSyncedMs, 6),
     dispatchLoopAvgMs: roundReportMs(result.dispatchLoopAvgMs, 6),
-    timingStats: aggregateStats ?? (perDispatchSyncedMs === undefined ? undefined : sampleTimingStats([perDispatchSyncedMs], 'single queued readback/iterations estimate')),
+    timingStats:
+      aggregateStats ??
+      (perDispatchSyncedMs === undefined ? undefined : sampleTimingStats([perDispatchSyncedMs], 'single queued readback/iterations estimate')),
   };
 }
 
@@ -1595,7 +1735,8 @@ function renderBenchmarkResult(result: EvalBenchResult) {
     mlh: result.mlh === undefined ? undefined : Number(result.mlh.toFixed(3)),
   };
   el('benchResult').textContent = JSON.stringify(rounded);
-  el('message').textContent = `BENCH_DONE ${rounded.iterations} evals · avg ${rounded.avgMs.toFixed(1)} ms · ${rounded.evalsPerSecond.toFixed(2)} eval/s · ${rounded.backend}`;
+  el('message').textContent =
+    `BENCH_DONE ${rounded.iterations} evals · avg ${rounded.avgMs.toFixed(1)} ms · ${rounded.evalsPerSecond.toFixed(2)} eval/s · ${rounded.backend}`;
 }
 
 async function runShaderF16Probe(): Promise<void> {
@@ -1606,14 +1747,30 @@ async function runShaderF16Probe(): Promise<void> {
   const maxAbsError = (actual: Float32Array, expected: number[]) => Math.max(0, ...expected.map((value, index) => Math.abs((actual[index] ?? NaN) - value)));
   try {
     if (!gpu) {
-      const result = { status: 'SHADER_F16_PROBE_DONE', shaderF16Supported: false, reason: 'navigator.gpu unavailable', maxAbsError: 0, elapsedMs: roundReportMs(performance.now() - started) };
+      const result = {
+        status: 'SHADER_F16_PROBE_DONE',
+        shaderF16Supported: false,
+        reason: 'navigator.gpu unavailable',
+        maxAbsError: 0,
+        elapsedMs: roundReportMs(performance.now() - started),
+      };
       el('benchResult').textContent = JSON.stringify(result);
       el('message').textContent = 'SHADER_F16_PROBE_DONE unavailable: no navigator.gpu';
       return;
     }
-    const adapter = await gpu.requestAdapter() as { features?: Iterable<string> & { has?: (feature: string) => boolean }; requestDevice: (descriptor?: Record<string, unknown>) => Promise<unknown>; info?: Record<string, unknown> } | null;
+    const adapter = (await gpu.requestAdapter()) as {
+      features?: Iterable<string> & { has?: (feature: string) => boolean };
+      requestDevice: (descriptor?: Record<string, unknown>) => Promise<unknown>;
+      info?: Record<string, unknown>;
+    } | null;
     if (!adapter) {
-      const result = { status: 'SHADER_F16_PROBE_DONE', shaderF16Supported: false, reason: 'WebGPU adapter unavailable', maxAbsError: 0, elapsedMs: roundReportMs(performance.now() - started) };
+      const result = {
+        status: 'SHADER_F16_PROBE_DONE',
+        shaderF16Supported: false,
+        reason: 'WebGPU adapter unavailable',
+        maxAbsError: 0,
+        elapsedMs: roundReportMs(performance.now() - started),
+      };
       el('benchResult').textContent = JSON.stringify(result);
       el('message').textContent = 'SHADER_F16_PROBE_DONE unavailable: no WebGPU adapter';
       return;
@@ -1621,12 +1778,20 @@ async function runShaderF16Probe(): Promise<void> {
     const adapterFeatures = adapter.features ? Array.from(adapter.features).map(String).sort() : [];
     const shaderF16Supported = adapter.features?.has?.('shader-f16') ?? adapterFeatures.includes('shader-f16');
     if (!shaderF16Supported) {
-      const result = { status: 'SHADER_F16_PROBE_DONE', shaderF16Supported: false, adapterFeatures, adapterInfo: adapter.info, reason: 'adapter does not advertise shader-f16', maxAbsError: 0, elapsedMs: roundReportMs(performance.now() - started) };
+      const result = {
+        status: 'SHADER_F16_PROBE_DONE',
+        shaderF16Supported: false,
+        adapterFeatures,
+        adapterInfo: adapter.info,
+        reason: 'adapter does not advertise shader-f16',
+        maxAbsError: 0,
+        elapsedMs: roundReportMs(performance.now() - started),
+      };
       el('benchResult').textContent = JSON.stringify(result);
       el('message').textContent = 'SHADER_F16_PROBE_DONE unsupported on this adapter';
       return;
     }
-    const device = await adapter.requestDevice({ requiredFeatures: ['shader-f16'] }) as any;
+    const device = (await adapter.requestDevice({ requiredFeatures: ['shader-f16'] })) as any;
     const bufferUsage = (globalThis as any).GPUBufferUsage;
     const mapMode = (globalThis as any).GPUMapMode;
     const outputBuffer = device.createBuffer({ size: 16, usage: bufferUsage.STORAGE | bufferUsage.COPY_SRC });
@@ -1644,7 +1809,10 @@ fn main() {
   output[2] = f32(c.z);
   output[3] = f32(c.w);
 }`;
-      const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ label: 'lc0 shader-f16 feature probe', code: shader }), entryPoint: 'main' } });
+      const pipeline = device.createComputePipeline({
+        layout: 'auto',
+        compute: { module: device.createShaderModule({ label: 'lc0 shader-f16 feature probe', code: shader }), entryPoint: 'main' },
+      });
       const bindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: outputBuffer } }] });
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginComputePass();
@@ -1687,7 +1855,12 @@ fn main() {
 async function runPackProbe(): Promise<void> {
   if (!searchWorker) throw new Error('pack probe requires LC0 worker');
   const tensorParam = params.get('packTensor') ?? params.get('tensor');
-  const tensorNames = tensorParam ? tensorParam.split(',').map((name) => name.trim()).filter(Boolean) : undefined;
+  const tensorNames = tensorParam
+    ? tensorParam
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean)
+    : undefined;
   const verifyShards = params.get('packVerify') !== '0';
   el('benchResult').textContent = 'PACK_RUNNING';
   setBusy(true, `Loading lc0web pack in dedicated worker${tensorNames ? ` (${tensorNames.length} tensor filter)` : ''}…`);
@@ -1758,7 +1931,8 @@ async function runSmolgenBenchmark(): Promise<void> {
       .sort((a, b) => b[1] - a[1])
       .map(([stage, ms]) => `${stage} ${ms.toFixed(4)}ms`)
       .join(', ');
-    el('message').textContent = `SMOLGEN_BENCH_DONE ${response.result.projectKernelVariant} avg ${response.result.dispatchLoopAvgMs.toFixed(4)} ms/pass · ${stages}`;
+    el('message').textContent =
+      `SMOLGEN_BENCH_DONE ${response.result.projectKernelVariant} avg ${response.result.dispatchLoopAvgMs.toFixed(4)} ms/pass · ${stages}`;
   } catch (error) {
     el('benchResult').textContent = `SMOLGEN_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Smolgen benchmark failed: ${(error as Error).message}`;
@@ -1798,7 +1972,8 @@ async function runSoftmaxBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(8))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `SOFTMAX_BENCH_DONE ${rounded.rows}x${rounded.tokens} · ${rounded.iterations} queued dispatches · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `SOFTMAX_BENCH_DONE ${rounded.rows}x${rounded.tokens} · ${rounded.iterations} queued dispatches · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `SOFTMAX_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Softmax benchmark failed: ${(error as Error).message}`;
@@ -1814,7 +1989,8 @@ async function runAttentionOutputBenchmark(): Promise<void> {
   const rawWarmup = Number(params.get('attentionOutputWarmup') ?? params.get('attentionNormWarmup') ?? params.get('attnOutWarmup') ?? '3');
   const iterations = Math.min(10_000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 50)));
   const warmup = Math.min(1000, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 3)));
-  const attentionOutProjKernelVariant = params.get('attentionOutProjKernel') === 'tvm-packed-f16' || params.get('attnOutProjKernel') === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand';
+  const attentionOutProjKernelVariant =
+    params.get('attentionOutProjKernel') === 'tvm-packed-f16' || params.get('attnOutProjKernel') === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand';
   el('benchResult').textContent = 'ATTENTION_OUTPUT_BENCH_RUNNING';
   setBusy(true, `Benchmarking lc0web WGSL attention output projection/residual/norm: ${warmup} warmup + ${iterations} queued blocks, one final readback…`);
   try {
@@ -1841,7 +2017,8 @@ async function runAttentionOutputBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(8))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `ATTENTION_OUTPUT_BENCH_DONE ${rounded.tokens}x${rounded.channels} · ${rounded.iterations} queued blocks · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `ATTENTION_OUTPUT_BENCH_DONE ${rounded.tokens}x${rounded.channels} · ${rounded.iterations} queued blocks · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `ATTENTION_OUTPUT_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Attention output benchmark failed: ${(error as Error).message}`;
@@ -1885,7 +2062,8 @@ async function runAttentionOutputOrtBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `ATTENTION_OUTPUT_ORT_BENCH_DONE ${rounded.tokens}x${rounded.channels} · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `ATTENTION_OUTPUT_ORT_BENCH_DONE ${rounded.tokens}x${rounded.channels} · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `ATTENTION_OUTPUT_ORT_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Attention-output ORT benchmark failed: ${(error as Error).message}`;
@@ -1929,7 +2107,8 @@ async function runEncoder0BlockOrtBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `ENCODER0_BLOCK_ORT_BENCH_DONE attention+FFN ${rounded.tokens}x${rounded.channels} · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `ENCODER0_BLOCK_ORT_BENCH_DONE attention+FFN ${rounded.tokens}x${rounded.channels} · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `ENCODER0_BLOCK_ORT_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Encoder0 block ORT benchmark failed: ${(error as Error).message}`;
@@ -1977,9 +2156,10 @@ async function runEncoder0BlockBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(8))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    const slowestStage = rounded.stageTimings.reduce((best, timing) => timing.avgMs > best.avgMs ? timing : best, rounded.stageTimings[0]);
+    const slowestStage = rounded.stageTimings.reduce((best, timing) => (timing.avgMs > best.avgMs ? timing : best), rounded.stageTimings[0]);
     const gpuTimeText = rounded.gpuTimestampMs === undefined ? '' : ` · gpu-timestamp ${rounded.gpuTimestampMs.toFixed(3)} ms`;
-    el('message').textContent = `ENCODER0_BLOCK_BENCH_DONE attention+FFN ${rounded.tokens}x${rounded.channels} · ${rounded.iterations} queued blocks · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms${gpuTimeText} · slowest stage ${slowestStage.label} ${slowestStage.avgMs.toFixed(3)} ms avg · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `ENCODER0_BLOCK_BENCH_DONE attention+FFN ${rounded.tokens}x${rounded.channels} · ${rounded.iterations} queued blocks · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms${gpuTimeText} · slowest stage ${slowestStage.label} ${slowestStage.avgMs.toFixed(3)} ms avg · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `ENCODER0_BLOCK_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Encoder0 block benchmark failed: ${(error as Error).message}`;
@@ -2012,7 +2192,8 @@ async function runMappedPolicyProbe(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(8))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `MAPPED_POLICY_PROBE_DONE ${rounded.outputs} outputs · normal ${rounded.normalOutputs} max |err| ${rounded.normalMaxAbsError.toExponential(2)} · promotion ${rounded.promotionOutputs} max |err| ${rounded.promotionMaxAbsError.toExponential(2)} · nonzero/nonuniform ${rounded.nonzero && rounded.nonuniform ? 'yes' : 'no'}`;
+    el('message').textContent =
+      `MAPPED_POLICY_PROBE_DONE ${rounded.outputs} outputs · normal ${rounded.normalOutputs} max |err| ${rounded.normalMaxAbsError.toExponential(2)} · promotion ${rounded.promotionOutputs} max |err| ${rounded.promotionMaxAbsError.toExponential(2)} · nonzero/nonuniform ${rounded.nonzero && rounded.nonuniform ? 'yes' : 'no'}`;
   } catch (error) {
     el('benchResult').textContent = `MAPPED_POLICY_PROBE_FAILED ${(error as Error).message}`;
     el('message').textContent = `Mapped-policy probe failed: ${(error as Error).message}`;
@@ -2064,7 +2245,8 @@ async function runWgslHeadsProbe(): Promise<void> {
       },
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `WGSL_HEADS_PROBE_DONE policy dense |err| ${rounded.policyDenseMaxAbsError.toExponential(2)} · policy logits |err| ${rounded.policyLogitsMaxAbsError.toExponential(2)} · mapped policy |err| ${rounded.mappedPolicyMaxAbsError.toExponential(2)} · value embed |err| ${rounded.valueEmbedMaxAbsError.toExponential(2)} · WGSL WDL |err| ${rounded.wgslWdlMaxAbsError.toExponential(2)} · nonzero/nonuniform ${rounded.nonzero.policyDense && rounded.nonzero.policyLogits && rounded.nonzero.mappedPolicy && rounded.nonzero.valueEmbed && rounded.nonzero.wgslWdl && rounded.nonuniform.policyDense && rounded.nonuniform.policyLogits && rounded.nonuniform.mappedPolicy && rounded.nonuniform.valueEmbed && rounded.nonuniform.wgslWdl ? 'yes' : 'no'}`;
+    el('message').textContent =
+      `WGSL_HEADS_PROBE_DONE policy dense |err| ${rounded.policyDenseMaxAbsError.toExponential(2)} · policy logits |err| ${rounded.policyLogitsMaxAbsError.toExponential(2)} · mapped policy |err| ${rounded.mappedPolicyMaxAbsError.toExponential(2)} · value embed |err| ${rounded.valueEmbedMaxAbsError.toExponential(2)} · WGSL WDL |err| ${rounded.wgslWdlMaxAbsError.toExponential(2)} · nonzero/nonuniform ${rounded.nonzero.policyDense && rounded.nonzero.policyLogits && rounded.nonzero.mappedPolicy && rounded.nonzero.valueEmbed && rounded.nonzero.wgslWdl && rounded.nonuniform.policyDense && rounded.nonuniform.policyLogits && rounded.nonuniform.mappedPolicy && rounded.nonuniform.valueEmbed && rounded.nonuniform.wgslWdl ? 'yes' : 'no'}`;
   } catch (error) {
     el('benchResult').textContent = `WGSL_HEADS_PROBE_FAILED ${(error as Error).message}`;
     el('message').textContent = `WGSL heads probe failed: ${(error as Error).message}`;
@@ -2081,10 +2263,10 @@ async function runWgslHeadsVsOrtFixtures(): Promise<void> {
   el('benchResult').textContent = 'WGSL_HEADS_VS_ORT_FIXTURES_RUNNING';
   setBusy(true, `Comparing WGSL heads against ORT heads on ${limit} real hybrid encoder fixture output(s)…`);
   try {
-    const records = [
-      ...await fetchNativeRecords('/lc0/native_fen_only_blas.jsonl'),
-      ...await fetchNativeRecords('/lc0/native_history_blas.jsonl'),
-    ].slice(0, limit);
+    const records = [...(await fetchNativeRecords('/lc0/native_fen_only_blas.jsonl')), ...(await fetchNativeRecords('/lc0/native_history_blas.jsonl'))].slice(
+      0,
+      limit,
+    );
     const fixtures = records.map((native) => ({
       id: native.id,
       input: native.moves ? { positions: buildBoardHistoryFromMoves(native.moves, native.startFen) } : native.fen,
@@ -2121,7 +2303,8 @@ async function runWgslHeadsVsOrtFixtures(): Promise<void> {
       })),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `WGSL_HEADS_VS_ORT_FIXTURES_DONE ${rounded.bestMoveMatches}/${rounded.fixtures} best moves · mapped max |diff| ${rounded.maxMappedPolicyAbsDiff.toExponential(2)} · WDL max |diff| ${rounded.maxWdlAbsDiff.toExponential(2)}`;
+    el('message').textContent =
+      `WGSL_HEADS_VS_ORT_FIXTURES_DONE ${rounded.bestMoveMatches}/${rounded.fixtures} best moves · mapped max |diff| ${rounded.maxMappedPolicyAbsDiff.toExponential(2)} · WDL max |diff| ${rounded.maxWdlAbsDiff.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `WGSL_HEADS_VS_ORT_FIXTURES_FAILED ${(error as Error).message}`;
     el('message').textContent = `WGSL heads vs ORT fixture comparison failed: ${(error as Error).message}`;
@@ -2140,7 +2323,10 @@ async function runEncoderStackBenchmark(): Promise<void> {
   const compareOrt = params.get('encoderStackOrt') !== '0';
   const compareHeads = params.get('encoderStackHeads') === '1' || params.get('encoderStackHeadsBench') === '1';
   el('benchResult').textContent = 'ENCODER_STACK_BENCH_RUNNING';
-  setBusy(true, `Running reusable WGSL encoder-block stack over ${layers} layer(s), with block-by-block ${compareOrt ? 'f32 ONNX/ORT ' : ''}parity${compareHeads ? ' and ORT policy/value heads' : ''}…`);
+  setBusy(
+    true,
+    `Running reusable WGSL encoder-block stack over ${layers} layer(s), with block-by-block ${compareOrt ? 'f32 ONNX/ORT ' : ''}parity${compareHeads ? ' and ORT policy/value heads' : ''}…`,
+  );
   try {
     const response = await postWorkerRequest<{ type: 'encoderStackBenchmarkResult'; result: EncoderStackBenchmarkResult }>({
       type: 'encoderStackBenchmark',
@@ -2163,21 +2349,23 @@ async function runEncoderStackBenchmark(): Promise<void> {
       rmsError: Number(response.result.rmsError.toExponential(6)),
       ortMaxAbsError: response.result.ortMaxAbsError === undefined ? undefined : Number(response.result.ortMaxAbsError.toExponential(6)),
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(8))),
-      policyValueHeads: response.result.policyValueHeads ? {
-        ...response.result.policyValueHeads,
-        modelBuildMs: Number(response.result.policyValueHeads.modelBuildMs.toFixed(3)),
-        sessionCreateMs: Number(response.result.policyValueHeads.sessionCreateMs.toFixed(3)),
-        runMs: Number(response.result.policyValueHeads.runMs.toFixed(3)),
-        policyMaxAbsError: Number(response.result.policyValueHeads.policyMaxAbsError.toExponential(6)),
-        policyRmsError: Number(response.result.policyValueHeads.policyRmsError.toExponential(6)),
-        mappedPolicyMaxAbsError: Number(response.result.policyValueHeads.mappedPolicyMaxAbsError.toExponential(6)),
-        mappedPolicyRmsError: Number(response.result.policyValueHeads.mappedPolicyRmsError.toExponential(6)),
-        wdlMaxAbsError: Number(response.result.policyValueHeads.wdlMaxAbsError.toExponential(6)),
-        wdlRmsError: Number(response.result.policyValueHeads.wdlRmsError.toExponential(6)),
-        policySample: response.result.policyValueHeads.policySample.map((value) => Number(value.toFixed(8))),
-        mappedPolicySample: response.result.policyValueHeads.mappedPolicySample.map((value) => Number(value.toFixed(8))),
-        wdl: response.result.policyValueHeads.wdl.map((value) => Number(value.toFixed(8))),
-      } : undefined,
+      policyValueHeads: response.result.policyValueHeads
+        ? {
+            ...response.result.policyValueHeads,
+            modelBuildMs: Number(response.result.policyValueHeads.modelBuildMs.toFixed(3)),
+            sessionCreateMs: Number(response.result.policyValueHeads.sessionCreateMs.toFixed(3)),
+            runMs: Number(response.result.policyValueHeads.runMs.toFixed(3)),
+            policyMaxAbsError: Number(response.result.policyValueHeads.policyMaxAbsError.toExponential(6)),
+            policyRmsError: Number(response.result.policyValueHeads.policyRmsError.toExponential(6)),
+            mappedPolicyMaxAbsError: Number(response.result.policyValueHeads.mappedPolicyMaxAbsError.toExponential(6)),
+            mappedPolicyRmsError: Number(response.result.policyValueHeads.mappedPolicyRmsError.toExponential(6)),
+            wdlMaxAbsError: Number(response.result.policyValueHeads.wdlMaxAbsError.toExponential(6)),
+            wdlRmsError: Number(response.result.policyValueHeads.wdlRmsError.toExponential(6)),
+            policySample: response.result.policyValueHeads.policySample.map((value) => Number(value.toFixed(8))),
+            mappedPolicySample: response.result.policyValueHeads.mappedPolicySample.map((value) => Number(value.toFixed(8))),
+            wdl: response.result.policyValueHeads.wdl.map((value) => Number(value.toFixed(8))),
+          }
+        : undefined,
       blocks: response.result.blocks.map((block) => ({
         ...block,
         dispatchSyncedMs: Number(block.dispatchSyncedMs.toFixed(4)),
@@ -2192,8 +2380,11 @@ async function runEncoderStackBenchmark(): Promise<void> {
     };
     el('benchResult').textContent = JSON.stringify(rounded);
     const ortText = rounded.ortMaxAbsError === undefined ? '' : ` · ORT max |err| ${rounded.ortMaxAbsError.toExponential(2)}`;
-    const headsText = rounded.policyValueHeads ? ` · heads policy |err| ${rounded.policyValueHeads.policyMaxAbsError.toExponential(2)} · mapped |err| ${rounded.policyValueHeads.mappedPolicyMaxAbsError.toExponential(2)} · WDL |err| ${rounded.policyValueHeads.wdlMaxAbsError.toExponential(2)}` : '';
-    el('message').textContent = `ENCODER_STACK_BENCH_DONE ${rounded.layers} reusable WGSL block(s) · avg block ${rounded.avgBlockDispatchSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}${ortText}${headsText}`;
+    const headsText = rounded.policyValueHeads
+      ? ` · heads policy |err| ${rounded.policyValueHeads.policyMaxAbsError.toExponential(2)} · mapped |err| ${rounded.policyValueHeads.mappedPolicyMaxAbsError.toExponential(2)} · WDL |err| ${rounded.policyValueHeads.wdlMaxAbsError.toExponential(2)}`
+      : '';
+    el('message').textContent =
+      `ENCODER_STACK_BENCH_DONE ${rounded.layers} reusable WGSL block(s) · avg block ${rounded.avgBlockDispatchSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}${ortText}${headsText}`;
   } catch (error) {
     el('benchResult').textContent = `ENCODER_STACK_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Encoder stack benchmark failed: ${(error as Error).message}`;
@@ -2212,7 +2403,10 @@ async function runEncoder0FfnBenchmark(): Promise<void> {
   const rawFfnKernelVariant = params.get('encoder0FfnKernel') ?? params.get('ffnKernel');
   const ffnKernelVariant = rawFfnKernelVariant === 'tvm-packed-f16' || rawFfnKernelVariant === 'hand-shader-f16-accum-f32' ? rawFfnKernelVariant : 'hand';
   el('benchResult').textContent = 'FFN_BENCH_RUNNING';
-  setBusy(true, `Benchmarking lc0web WGSL encoder0 FFN dense1/sqrrelu/dense2/residual/ln2: ${warmup} warmup + ${iterations} queued blocks, one final readback…`);
+  setBusy(
+    true,
+    `Benchmarking lc0web WGSL encoder0 FFN dense1/sqrrelu/dense2/residual/ln2: ${warmup} warmup + ${iterations} queued blocks, one final readback…`,
+  );
   try {
     const response = await postWorkerRequest<{ type: 'encoder0FfnBenchmarkResult'; result: Encoder0FfnBenchmarkResult }>({
       type: 'encoder0FfnBenchmark',
@@ -2237,7 +2431,8 @@ async function runEncoder0FfnBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(8))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `FFN_BENCH_DONE encoder0 ${rounded.tokens}x${rounded.channels}→${rounded.hidden}→${rounded.channels} · ${rounded.iterations} queued blocks · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `FFN_BENCH_DONE encoder0 ${rounded.tokens}x${rounded.channels}→${rounded.hidden}→${rounded.channels} · ${rounded.iterations} queued blocks · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `FFN_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Encoder0 FFN benchmark failed: ${(error as Error).message}`;
@@ -2281,7 +2476,8 @@ async function runEncoder0FfnOrtBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `FFN_ORT_BENCH_DONE encoder0 ${rounded.tokens}x${rounded.channels}→${rounded.hidden}→${rounded.channels} · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `FFN_ORT_BENCH_DONE encoder0 ${rounded.tokens}x${rounded.channels}→${rounded.hidden}→${rounded.channels} · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `FFN_ORT_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Encoder0 FFN ORT benchmark failed: ${(error as Error).message}`;
@@ -2298,7 +2494,8 @@ async function runAttentionBlockBenchmark(): Promise<void> {
   const iterations = Math.min(10_000, Math.max(1, Math.floor(Number.isFinite(rawIters) ? rawIters : 100)));
   const warmup = Math.min(1000, Math.max(0, Math.floor(Number.isFinite(rawWarmup) ? rawWarmup : 5)));
   const fusedScoreSoftmax = params.get('attentionFusion') === 'score-softmax' || params.get('fusedScoreSoftmax') === '1';
-  const attentionQkvKernelVariant = params.get('attentionQkvKernel') === 'tvm-packed-f16' || params.get('attnQkvKernel') === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand';
+  const attentionQkvKernelVariant =
+    params.get('attentionQkvKernel') === 'tvm-packed-f16' || params.get('attnQkvKernel') === 'tvm-packed-f16' ? 'tvm-packed-f16' : 'hand';
   el('benchResult').textContent = 'ATTENTION_BLOCK_BENCH_RUNNING';
   setBusy(true, `Benchmarking lc0web WGSL attention block: ${warmup} warmup + ${iterations} queued QKV/QK/softmax/value blocks, one final readback…`);
   try {
@@ -2325,7 +2522,8 @@ async function runAttentionBlockBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(8))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `ATTENTION_BLOCK_BENCH_DONE ${rounded.tokens}x${rounded.channels} · ${rounded.iterations} queued blocks · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `ATTENTION_BLOCK_BENCH_DONE ${rounded.tokens}x${rounded.channels} · ${rounded.iterations} queued blocks · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `ATTENTION_BLOCK_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Attention block benchmark failed: ${(error as Error).message}`;
@@ -2365,7 +2563,8 @@ async function runAttentionValueBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(8))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `ATTENTION_VALUE_BENCH_DONE ${rounded.tokens}x${rounded.channels} · ${rounded.iterations} queued dispatches · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `ATTENTION_VALUE_BENCH_DONE ${rounded.tokens}x${rounded.channels} · ${rounded.iterations} queued dispatches · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `ATTENTION_VALUE_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Attention value benchmark failed: ${(error as Error).message}`;
@@ -2408,7 +2607,8 @@ async function runAttentionValueOrtBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `ATTENTION_VALUE_ORT_BENCH_DONE ${rounded.tokens}x${rounded.channels} · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `ATTENTION_VALUE_ORT_BENCH_DONE ${rounded.tokens}x${rounded.channels} · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `ATTENTION_VALUE_ORT_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Attention-value ORT benchmark failed: ${(error as Error).message}`;
@@ -2449,7 +2649,8 @@ async function runAttentionScoreBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `ATTENTION_SCORE_BENCH_DONE ${rounded.tokens}x${rounded.tokens} · ${rounded.iterations} queued dispatches · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `ATTENTION_SCORE_BENCH_DONE ${rounded.tokens}x${rounded.tokens} · ${rounded.iterations} queued dispatches · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `ATTENTION_SCORE_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Attention-score benchmark failed: ${(error as Error).message}`;
@@ -2493,7 +2694,8 @@ async function runAttentionScoreOrtBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `ATTENTION_SCORE_ORT_BENCH_DONE ${rounded.tokens}x${rounded.tokens} · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `ATTENTION_SCORE_ORT_BENCH_DONE ${rounded.tokens}x${rounded.tokens} · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `ATTENTION_SCORE_ORT_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Attention-score ORT benchmark failed: ${(error as Error).message}`;
@@ -2530,11 +2732,14 @@ async function runQkvBenchmark(): Promise<void> {
       endToEndMs: Number(response.result.endToEndMs.toFixed(3)),
       maxAbsError: Object.fromEntries(Object.entries(response.result.maxAbsError).map(([key, value]) => [key, Number(value.toExponential(6))])),
       rmsError: Object.fromEntries(Object.entries(response.result.rmsError).map(([key, value]) => [key, Number(value.toExponential(6))])),
-      outputSample: Object.fromEntries(Object.entries(response.result.outputSample).map(([key, values]) => [key, values.map((value) => Number(value.toFixed(6)))])),
+      outputSample: Object.fromEntries(
+        Object.entries(response.result.outputSample).map(([key, values]) => [key, values.map((value) => Number(value.toFixed(6)))]),
+      ),
     };
     const maxErr = Math.max(...Object.values(response.result.maxAbsError));
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `QKV_BENCH_DONE encoder0 Q/K/V projections · ${rounded.iterations} queued dispatches · dispatch loop ${rounded.dispatchLoopMs.toFixed(3)} ms · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${maxErr.toExponential(2)}`;
+    el('message').textContent =
+      `QKV_BENCH_DONE encoder0 Q/K/V projections · ${rounded.iterations} queued dispatches · dispatch loop ${rounded.dispatchLoopMs.toFixed(3)} ms · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${maxErr.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `QKV_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `QKV projection benchmark failed: ${(error as Error).message}`;
@@ -2570,7 +2775,9 @@ async function runQkvProbe(): Promise<void> {
       firstMs: Number(response.result.firstMs.toFixed(4)),
       maxAbsError: Object.fromEntries(Object.entries(response.result.maxAbsError).map(([key, value]) => [key, Number(value.toExponential(6))])),
       rmsError: Object.fromEntries(Object.entries(response.result.rmsError).map(([key, value]) => [key, Number(value.toExponential(6))])),
-      outputSample: Object.fromEntries(Object.entries(response.result.outputSample).map(([key, values]) => [key, values.map((value) => Number(value.toFixed(6)))])),
+      outputSample: Object.fromEntries(
+        Object.entries(response.result.outputSample).map(([key, values]) => [key, values.map((value) => Number(value.toFixed(6)))]),
+      ),
     };
     const maxErr = Math.max(...Object.values(response.result.maxAbsError));
     el('benchResult').textContent = JSON.stringify(rounded);
@@ -2619,7 +2826,8 @@ async function runOrtOpBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `ORT_BENCH_DONE tiny MatMul+Add · avg ${rounded.avgMs.toFixed(3)} ms · ${rounded.runsPerSecond.toFixed(1)} run/s · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `ORT_BENCH_DONE tiny MatMul+Add · avg ${rounded.avgMs.toFixed(3)} ms · ${rounded.runsPerSecond.toFixed(1)} run/s · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `ORT_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `ORT op benchmark failed: ${(error as Error).message}`;
@@ -2663,7 +2871,8 @@ async function runKernelBenchmark(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `KERNEL_BENCH_DONE ${rounded.variant} · ${rounded.iterations} queued dispatches · dispatch loop ${rounded.dispatchLoopMs.toFixed(3)} ms · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `KERNEL_BENCH_DONE ${rounded.variant} · ${rounded.iterations} queued dispatches · dispatch loop ${rounded.dispatchLoopMs.toFixed(3)} ms · readback-sync ${rounded.readbackSyncedMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `KERNEL_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Kernel benchmark failed: ${(error as Error).message}`;
@@ -2706,7 +2915,8 @@ async function runKernelProbe(): Promise<void> {
       outputSample: response.result.outputSample.map((value) => Number(value.toFixed(6))),
     };
     el('benchResult').textContent = JSON.stringify(rounded);
-    el('message').textContent = `KERNEL_DONE ${rounded.variant} 256x256 MatMul+Add · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
+    el('message').textContent =
+      `KERNEL_DONE ${rounded.variant} 256x256 MatMul+Add · avg ${rounded.avgMs.toFixed(3)} ms · max |err| ${rounded.maxAbsError.toExponential(2)}`;
   } catch (error) {
     el('benchResult').textContent = `KERNEL_FAILED ${(error as Error).message}`;
     el('message').textContent = `Kernel probe failed: ${(error as Error).message}`;
@@ -2739,7 +2949,8 @@ function queryIntList(names: string[], fallback: number[], min: number, max: num
   for (const name of names) {
     const raw = params.get(name);
     if (raw === null) continue;
-    const values = raw.split(',')
+    const values = raw
+      .split(',')
       .map((entry) => Math.floor(Number(entry.trim())))
       .filter((value) => Number.isFinite(value))
       .map((value) => Math.min(max, Math.max(min, value)));
@@ -2776,12 +2987,14 @@ function aggregateSearchStats(samples: SearchStatsSnapshot[]) {
     }
     return totals;
   }, {});
-  const evalBackendTimingMeans = evalBackendTimingSamples > 0
-    ? Object.fromEntries(Object.entries(evalBackendTimingTotals).map(([key, value]) => [key, roundReportMs(value / evalBackendTimingSamples)]))
-    : undefined;
-  const evalBackendTimingPerPositionMeans = evalBackendTimingPositions > 0
-    ? Object.fromEntries(Object.entries(evalBackendTimingTotals).map(([key, value]) => [key, roundReportMs(value / evalBackendTimingPositions)]))
-    : undefined;
+  const evalBackendTimingMeans =
+    evalBackendTimingSamples > 0
+      ? Object.fromEntries(Object.entries(evalBackendTimingTotals).map(([key, value]) => [key, roundReportMs(value / evalBackendTimingSamples)]))
+      : undefined;
+  const evalBackendTimingPerPositionMeans =
+    evalBackendTimingPositions > 0
+      ? Object.fromEntries(Object.entries(evalBackendTimingTotals).map(([key, value]) => [key, roundReportMs(value / evalBackendTimingPositions)]))
+      : undefined;
   return {
     samples: samples.length,
     rootReusedCount,
@@ -2909,7 +3122,10 @@ async function runHybridEncoderProfile(): Promise<void> {
       })),
     };
     el('benchResult').textContent = JSON.stringify(result);
-    const top = result.aggregateStageTimings.slice(0, 3).map((timing) => `${timing.stage} ${timing.avgMs.toFixed(2)} ms`).join(' · ');
+    const top = result.aggregateStageTimings
+      .slice(0, 3)
+      .map((timing) => `${timing.stage} ${timing.avgMs.toFixed(2)} ms`)
+      .join(' · ');
     el('message').textContent = `HYBRID_ENCODER_PROFILE_DONE ${result.encoderKernelVariant} · top stages ${top}`;
   } catch (error) {
     el('benchResult').textContent = `HYBRID_ENCODER_PROFILE_FAILED ${(error as Error).message}`;
@@ -2976,7 +3192,13 @@ async function runHybridSearchBenchmark(): Promise<void> {
     for (let i = 0; i < searchWarmup; i++) {
       if (resetBetweenSearches) await resetSearchTreeState();
       const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
-        type: 'search', input, visits: searchVisits, batchSize: searchBatchSize, batchPipelineDepth: searchBatchPipelineDepth, multiPv: searchMultiPv, reuseTree,
+        type: 'search',
+        input,
+        visits: searchVisits,
+        batchSize: searchBatchSize,
+        batchPipelineDepth: searchBatchPipelineDepth,
+        multiPv: searchMultiPv,
+        reuseTree,
       });
       lastSearch = response.result;
       el('benchResult').textContent = `HYBRID_SEARCH_BENCH_SEARCH_WARMUP ${i + 1}/${searchWarmup}`;
@@ -2986,7 +3208,13 @@ async function runHybridSearchBenchmark(): Promise<void> {
       if (resetBetweenSearches) await resetSearchTreeState();
       const started = performance.now();
       const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
-        type: 'search', input, visits: searchVisits, batchSize: searchBatchSize, batchPipelineDepth: searchBatchPipelineDepth, multiPv: searchMultiPv, reuseTree,
+        type: 'search',
+        input,
+        visits: searchVisits,
+        batchSize: searchBatchSize,
+        batchPipelineDepth: searchBatchPipelineDepth,
+        multiPv: searchMultiPv,
+        reuseTree,
       });
       lastSearch = response.result;
       searchTimes.push(performance.now() - started);
@@ -2995,7 +3223,8 @@ async function runHybridSearchBenchmark(): Promise<void> {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
     const totalSearchMs = searchTimes.reduce((sum, value) => sum + value, 0);
-    const executionFootprint = lastSearch?.executionFootprint ?? evaluationExecutionFootprint(lastBatchEval?.[0]?.evaluation) ?? evaluationExecutionFootprint(lastEval?.evaluation);
+    const executionFootprint =
+      lastSearch?.executionFootprint ?? evaluationExecutionFootprint(lastBatchEval?.[0]?.evaluation) ?? evaluationExecutionFootprint(lastEval?.evaluation);
     const result = {
       status: 'HYBRID_SEARCH_BENCH_DONE',
       backend: searchWorkerBackend,
@@ -3061,7 +3290,8 @@ async function runHybridSearchBenchmark(): Promise<void> {
     el('benchResult').textContent = JSON.stringify(result);
     const evalMean = (result.eval.timingStats?.meanMs as number | undefined) ?? 0;
     const searchMean = (result.search.timingStats?.meanMs as number | undefined) ?? 0;
-    el('message').textContent = `HYBRID_SEARCH_BENCH_DONE eval ${evalMean.toFixed(1)} ms · search ${searchMean.toFixed(1)} ms · ${result.search.visitsPerSecond.toFixed(1)} visits/s · ${searchWorkerBackend}`;
+    el('message').textContent =
+      `HYBRID_SEARCH_BENCH_DONE eval ${evalMean.toFixed(1)} ms · search ${searchMean.toFixed(1)} ms · ${result.search.visitsPerSecond.toFixed(1)} visits/s · ${searchWorkerBackend}`;
   } catch (error) {
     el('benchResult').textContent = `HYBRID_SEARCH_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Hybrid search benchmark failed: ${(error as Error).message}`;
@@ -3165,7 +3395,8 @@ async function runHybridMoveSequenceBenchmark(): Promise<void> {
       finalFen: boardToFen(board),
     };
     el('benchResult').textContent = JSON.stringify(result);
-    el('message').textContent = `HYBRID_MOVE_SEQUENCE_BENCH_DONE plies ${result.completedPlies}/${plies} · ${result.search.completedVisitsPerSecond.toFixed(1)} completed visits/s · ${searchWorkerBackend}`;
+    el('message').textContent =
+      `HYBRID_MOVE_SEQUENCE_BENCH_DONE plies ${result.completedPlies}/${plies} · ${result.search.completedVisitsPerSecond.toFixed(1)} completed visits/s · ${searchWorkerBackend}`;
   } catch (error) {
     el('benchResult').textContent = `HYBRID_MOVE_SEQUENCE_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Hybrid move-sequence benchmark failed: ${(error as Error).message}`;
@@ -3179,18 +3410,22 @@ type HybridInputBenchFixture = { id: string; kind: 'fen' | 'history'; input: Lc0
 
 async function loadRepresentativeInputFixtures(): Promise<HybridInputBenchFixture[]> {
   const [fenFixtures, historyFixtures] = await Promise.all([
-    fetch('/fixtures/lc0/fen_only.json', { cache: 'no-store' }).then((response) => {
+    fetch('/fixtures/lc0/fen_only.json', { cache: 'no-store' }).then(async (response) => {
       if (!response.ok) throw new Error(`failed to load FEN fixtures: HTTP ${response.status}`);
-      return response.json() as Promise<Array<{ id: string; fen: string }>>;
+      return v.parse(FenInputFixtureListSchema, await response.json());
     }),
-    fetch('/fixtures/lc0/history.json', { cache: 'no-store' }).then((response) => {
+    fetch('/fixtures/lc0/history.json', { cache: 'no-store' }).then(async (response) => {
       if (!response.ok) throw new Error(`failed to load history fixtures: HTTP ${response.status}`);
-      return response.json() as Promise<Array<{ id: string; startFen?: string; moves: string[] }>>;
+      return v.parse(HistoryInputFixtureListSchema, await response.json());
     }),
   ]);
   return [
     ...fenFixtures.map((fixture) => ({ id: fixture.id, kind: 'fen' as const, input: fixture.fen })),
-    ...historyFixtures.map((fixture) => ({ id: fixture.id, kind: 'history' as const, input: { positions: buildBoardHistoryFromMoves(fixture.moves, fixture.startFen ?? START_FEN) } })),
+    ...historyFixtures.map((fixture) => ({
+      id: fixture.id,
+      kind: 'history' as const,
+      input: { positions: buildBoardHistoryFromMoves(fixture.moves, fixture.startFen ?? START_FEN) },
+    })),
   ];
 }
 
@@ -3218,7 +3453,8 @@ async function runHybridDeferredReadbackBenchmark(): Promise<void> {
     });
     const result = response.result;
     el('benchResult').textContent = JSON.stringify(result);
-    el('message').textContent = `WGSL_DEFERRED_READBACK_BENCH_DONE immediate ${result.immediate.evalsPerSecond.toFixed(1)} eval/s · deferred ${result.deferred.evalsPerSecond.toFixed(1)} eval/s · best moves match ${result.allBestMovesMatch ? 'yes' : 'no'}`;
+    el('message').textContent =
+      `WGSL_DEFERRED_READBACK_BENCH_DONE immediate ${result.immediate.evalsPerSecond.toFixed(1)} eval/s · deferred ${result.deferred.evalsPerSecond.toFixed(1)} eval/s · best moves match ${result.allBestMovesMatch ? 'yes' : 'no'}`;
   } catch (error) {
     el('benchResult').textContent = `WGSL_DEFERRED_READBACK_BENCH_FAILED ${(error as Error).message}`;
     el('message').textContent = `Deferred readback benchmark failed: ${(error as Error).message}`;
@@ -3321,16 +3557,25 @@ async function runHybridDeferredReadbackLifecycleSmoke(): Promise<void> {
 }
 
 function parseJsonlRecords<T>(text: string): T[] {
-  return text.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as T);
+  return text
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as T);
 }
 
 function fixedSuiteFenRecordsFromParams(limit: number): NativeRecord[] {
   const raw = params.get('fixedSuiteFens') ?? params.get('fens') ?? '';
   if (!raw.trim()) return [];
-  return raw.split('|').map((entry) => entry.trim()).filter(Boolean).slice(0, limit).map((fen, index) => {
-    parseFen(fen);
-    return { id: `fixed-fen-${index + 1}`, fen, bestmove: '', topPriors: [] };
-  });
+  return raw
+    .split('|')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, limit)
+    .map((fen, index) => {
+      parseFen(fen);
+      return { id: `fixed-fen-${index + 1}`, fen, bestmove: '', topPriors: [] };
+    });
 }
 
 async function loadNativeSearchRecords(visits: number, limit: number): Promise<NativeRecord[]> {
@@ -3340,10 +3585,7 @@ async function loadNativeSearchRecords(visits: number, limit: number): Promise<N
   ]);
   if (!fenResponse.ok) throw new Error(`failed to load native FEN search fixtures for nodes${visits}: HTTP ${fenResponse.status}`);
   if (!historyResponse.ok) throw new Error(`failed to load native history search fixtures for nodes${visits}: HTTP ${historyResponse.status}`);
-  const records = [
-    ...parseJsonlRecords<NativeRecord>(await fenResponse.text()),
-    ...parseJsonlRecords<NativeRecord>(await historyResponse.text()),
-  ];
+  const records = [...parseJsonlRecords<NativeRecord>(await fenResponse.text()), ...parseJsonlRecords<NativeRecord>(await historyResponse.text())];
   return records.slice(0, Math.min(limit, records.length));
 }
 
@@ -3375,7 +3617,9 @@ function rootTopVisitShare(children: Lc0SearchChild[]): number | undefined {
   return Number((top / total).toFixed(6));
 }
 
-function rootChildTrace(children: Lc0SearchChild[] | undefined): Array<{ uci: string; visits: number; prior: number; q: number; probability: number }> | undefined {
+function rootChildTrace(
+  children: Lc0SearchChild[] | undefined,
+): Array<{ uci: string; visits: number; prior: number; q: number; probability: number }> | undefined {
   if (!children) return undefined;
   return children.map((child) => ({
     uci: child.uci,
@@ -3397,7 +3641,10 @@ async function runHybridSearchFixtureParity(): Promise<void> {
   const depths = [1, ...requestedDepths.filter((depth) => depth !== 1)];
   const repeats = boundedQueryInt(['searchFixtureRepeats', 'fixtureRepeats', 'repeats'], 1, 1, 10);
   const fixtureLimit = boundedQueryInt(['fixtureLimit', 'fixtures'], 16, 1, 16);
-  const fixtureIds = (params.get('fixtureIds') ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+  const fixtureIds = (params.get('fixtureIds') ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
   const fixtureIdSet = fixtureIds.length ? new Set(fixtureIds) : undefined;
   const traceRootChildren = params.get('traceRootChildren') === '1';
   const traceSearchVisits = params.get('traceSearchVisits') === '1';
@@ -3509,13 +3756,14 @@ async function runHybridSearchFixtureParity(): Promise<void> {
       nativeComparable: cells.filter((cell) => cell.matchesNative !== undefined).length,
       nativeMatches: cells.filter((cell) => cell.matchesNative).length,
       depthBaselineMatches: cells.filter((cell) => cell.matchesDepthBaseline).length,
-      maxDepthBaselineVisitL1: Math.max(0, ...cells.map((cell) => typeof cell.depthBaselineVisitL1 === 'number' ? cell.depthBaselineVisitL1 : 0)),
+      maxDepthBaselineVisitL1: Math.max(0, ...cells.map((cell) => (typeof cell.depthBaselineVisitL1 === 'number' ? cell.depthBaselineVisitL1 : 0))),
       gpuBufferAllocation: cells.at(-1)?.gpuBufferAllocation,
       mismatches,
       results: cells,
     };
     el('benchResult').textContent = JSON.stringify(result);
-    el('message').textContent = `HYBRID_SEARCH_FIXTURE_PARITY_DONE native ${result.nativeMatches}/${result.cells} · depth baseline ${result.depthBaselineMatches}/${result.cells}`;
+    el('message').textContent =
+      `HYBRID_SEARCH_FIXTURE_PARITY_DONE native ${result.nativeMatches}/${result.cells} · depth baseline ${result.depthBaselineMatches}/${result.cells}`;
   } catch (error) {
     el('benchResult').textContent = `HYBRID_SEARCH_FIXTURE_PARITY_FAILED ${(error as Error).message}`;
     el('message').textContent = `Hybrid search fixture parity failed: ${(error as Error).message}`;
@@ -3530,10 +3778,14 @@ async function runHybridInputBenchmark(): Promise<void> {
   const iterations = boundedQueryInt(['hybridInputBenchIters', 'inputBenchIters', 'iters'], 1, 1, 20);
   const warmup = boundedQueryInt(['hybridInputBenchWarmup', 'inputBenchWarmup', 'warmup'], 1, 0, 10);
   const backendParam = params.get('inputBenchBackends') ?? params.get('hybridInputBackends') ?? 'js,wasm';
-  const requestedBackends = backendParam.split(',').map((entry) => entry.trim()).filter(Boolean).map((entry) => {
-    if (entry !== 'js' && entry !== 'wgsl' && entry !== 'wasm') throw new Error(`invalid hybrid input benchmark backend: ${entry}`);
-    return entry;
-  }) as Array<'js' | 'wgsl' | 'wasm'>;
+  const requestedBackends = backendParam
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      if (entry !== 'js' && entry !== 'wgsl' && entry !== 'wasm') throw new Error(`invalid hybrid input benchmark backend: ${entry}`);
+      return entry;
+    }) as Array<'js' | 'wgsl' | 'wasm'>;
   const backends: Array<'js' | 'wgsl' | 'wasm'> = requestedBackends.includes('js')
     ? ['js', ...requestedBackends.filter((backend) => backend !== 'js')]
     : requestedBackends;
@@ -3574,7 +3826,7 @@ async function runHybridInputBenchmark(): Promise<void> {
           timingStats: sampleTimingStats(fixtureTimes, `${backend} ${fixture.id} input eval round trips`),
           lastBackendTiming: roundedNumericRecord((last?.evaluation as { timing?: unknown } | undefined)?.timing),
           bestMove: last?.move,
-          bestMoveMatchesJs: backend === 'js' ? true : (baselineBestMoves.has(fixture.id) ? last?.move === baselineBestMoves.get(fixture.id) : undefined),
+          bestMoveMatchesJs: backend === 'js' ? true : baselineBestMoves.has(fixture.id) ? last?.move === baselineBestMoves.get(fixture.id) : undefined,
         });
       }
       byBackend[backend] = {
@@ -3612,11 +3864,16 @@ async function runHybridInputBenchmark(): Promise<void> {
 }
 
 async function searchWithWorker(): Promise<RenderableSearchResult> {
-  const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>({
-    type: 'search',
-    input: currentEvaluationInput(),
-    ...currentSearchOptions(),
-  }, (id) => { activeWorkerSearchId = id; });
+  const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>(
+    {
+      type: 'search',
+      input: currentEvaluationInput(),
+      ...currentSearchOptions(),
+    },
+    (id) => {
+      activeWorkerSearchId = id;
+    },
+  );
   return response.result;
 }
 
@@ -3663,10 +3920,13 @@ async function executeSearchResult(): Promise<RenderableSearchResult> {
   const started = performance.now();
   // yieldEveryMs lets the main-thread search relinquish the event loop so the
   // Stop button stays responsive and the page never feels frozen.
-  const search = await searcher!.search(currentEvaluationInput(), currentSearchOptions({
-    signal: mainSearchAbort!.signal,
-    yieldEveryMs: 16,
-  }));
+  const search = await searcher!.search(
+    currentEvaluationInput(),
+    currentSearchOptions({
+      signal: mainSearchAbort!.signal,
+      yieldEveryMs: 16,
+    }),
+  );
   return { ...search, stats: search.search.stats, elapsedMs: performance.now() - started };
 }
 
@@ -3734,9 +3994,12 @@ async function engineMove() {
   }
   const replyWithSearch = engineReplyMode === 'search' && searchAvailable();
   if (replyWithSearch) beginSearch();
-  setBusy(true, replyWithSearch
-    ? `LC0 engine replying with ${currentSearchLimitLabel()} search (${searchModeLabel()})… press Stop to cancel.`
-    : 'LC0 policy-only engine thinking…');
+  setBusy(
+    true,
+    replyWithSearch
+      ? `LC0 engine replying with ${currentSearchLimitLabel()} search (${searchModeLabel()})… press Stop to cancel.`
+      : 'LC0 policy-only engine thinking…',
+  );
   renderStatic();
   try {
     let uci: string | undefined;
@@ -3773,18 +4036,27 @@ async function engineMove() {
 
 function nativeCastlingToStandard(uci: string) {
   switch (uci) {
-    case 'e1h1': return 'e1g1';
-    case 'e1a1': return 'e1c1';
-    case 'e8h8': return 'e8g8';
-    case 'e8a8': return 'e8c8';
-    default: return uci;
+    case 'e1h1':
+      return 'e1g1';
+    case 'e1a1':
+      return 'e1c1';
+    case 'e8h8':
+      return 'e8g8';
+    case 'e8a8':
+      return 'e8c8';
+    default:
+      return uci;
   }
 }
 
 async function fetchNativeRecords(path: string): Promise<NativeRecord[]> {
   const response = await fetch(path);
   if (!response.ok) throw new Error(`native fixture fetch failed for ${path}: ${response.status}`);
-  return (await response.text()).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as NativeRecord);
+  return (await response.text())
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as NativeRecord);
 }
 
 function priorMapByUci(priors: Lc0Evaluation['legalPriors']): Map<string, Lc0Evaluation['legalPriors'][number]> {
@@ -3798,19 +4070,29 @@ async function runHybridGpuLegalParity(): Promise<void> {
   try {
     const limit = Math.min(100, Math.max(1, Math.floor(Number(params.get('gpuLegalParityLimit') ?? params.get('fixtureLimit') ?? '9') || 9)));
     const topK = Math.min(64, Math.max(1, Math.floor(Number(params.get('topK') ?? params.get('legalTopK') ?? '16') || 16)));
-    const records = [
-      ...await fetchNativeRecords('/lc0/native_fen_only_blas.jsonl'),
-      ...await fetchNativeRecords('/lc0/native_history_blas.jsonl'),
-    ].slice(0, limit);
-    const inputs = records.map((native) => native.moves ? { positions: buildBoardHistoryFromMoves(native.moves, native.startFen) } : native.fen);
+    const records = [...(await fetchNativeRecords('/lc0/native_fen_only_blas.jsonl')), ...(await fetchNativeRecords('/lc0/native_history_blas.jsonl'))].slice(
+      0,
+      limit,
+    );
+    const inputs = records.map((native) => (native.moves ? { positions: buildBoardHistoryFromMoves(native.moves, native.startFen) } : native.fen));
     const started = performance.now();
-    await initHybridWorkerWithOptions({ headBackend: 'wgsl', inputBackend: HYBRID_INPUT_BACKEND, legalPriorsBackend: 'js', encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT });
+    await initHybridWorkerWithOptions({
+      headBackend: 'wgsl',
+      inputBackend: HYBRID_INPUT_BACKEND,
+      legalPriorsBackend: 'js',
+      encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
+    });
     const jsEvaluations: Lc0Evaluation[] = [];
     for (let i = 0; i < inputs.length; i++) {
       jsEvaluations.push((await evaluateWithWorker(inputs[i])).evaluation);
       el('benchResult').textContent = `GPU_LEGAL_PARITY_JS ${i + 1}/${inputs.length}`;
     }
-    await initHybridWorkerWithOptions({ headBackend: 'wgsl', inputBackend: HYBRID_INPUT_BACKEND, legalPriorsBackend: 'gpu', encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT });
+    await initHybridWorkerWithOptions({
+      headBackend: 'wgsl',
+      inputBackend: HYBRID_INPUT_BACKEND,
+      legalPriorsBackend: 'gpu',
+      encoderKernelVariant: HYBRID_ENCODER_KERNEL_VARIANT,
+    });
     const gpuEvaluations: Lc0Evaluation[] = [];
     for (let i = 0; i < inputs.length; i++) {
       gpuEvaluations.push((await evaluateWithWorker(inputs[i])).evaluation);
@@ -3826,7 +4108,10 @@ async function runHybridGpuLegalParity(): Promise<void> {
       let missingFromGpu = 0;
       for (const prior of js.legalPriors) {
         const actual = gpu.legalPriors.find((entry) => entry.uci === prior.uci);
-        if (!actual) { missingFromGpu += 1; continue; }
+        if (!actual) {
+          missingFromGpu += 1;
+          continue;
+        }
         maxPriorAbsDiff = Math.max(maxPriorAbsDiff, Math.abs(actual.prior - prior.prior));
         maxLogitAbsDiff = Math.max(maxLogitAbsDiff, Math.abs((actual.logit ?? 0) - (prior.logit ?? 0)));
       }
@@ -3890,10 +4175,10 @@ async function runHybridDriftFixtures() {
   el('benchResult').textContent = 'HYBRID_DRIFT_RUNNING';
   try {
     const limit = Math.min(100, Math.max(1, Math.floor(Number(params.get('hybridDriftLimit') ?? params.get('fixtureLimit') ?? '9') || 9)));
-    const records = [
-      ...await fetchNativeRecords('/lc0/native_fen_only_blas.jsonl'),
-      ...await fetchNativeRecords('/lc0/native_history_blas.jsonl'),
-    ].slice(0, limit);
+    const records = [...(await fetchNativeRecords('/lc0/native_fen_only_blas.jsonl')), ...(await fetchNativeRecords('/lc0/native_history_blas.jsonl'))].slice(
+      0,
+      limit,
+    );
     const started = performance.now();
     const evaluations = [];
     for (const native of records) {
@@ -3937,10 +4222,7 @@ async function runParityFixtures() {
   setBusy(true, 'Running FEN-only and explicit-history fixture parity in browser…');
   el('parity').textContent = 'running…';
   try {
-    const records = [
-      ...await fetchNativeRecords('/lc0/native_fen_only_blas.jsonl'),
-      ...await fetchNativeRecords('/lc0/native_history_blas.jsonl'),
-    ];
+    const records = [...(await fetchNativeRecords('/lc0/native_fen_only_blas.jsonl')), ...(await fetchNativeRecords('/lc0/native_history_blas.jsonl'))];
     const started = performance.now();
     let evaluated = 0;
     const failures: string[] = [];
@@ -3962,8 +4244,10 @@ async function runParityFixtures() {
     } else {
       const elapsedMs = performance.now() - started;
       const evalsPerSecond = evaluated / Math.max(1e-9, elapsedMs / 1000);
-      el('parity').textContent = `passed ${records.length}/${records.length} native BLAS fixtures · ${elapsedMs.toFixed(0)} ms · ${evalsPerSecond.toFixed(1)} eval/s`;
-      el('message').textContent = `Browser FEN-only and explicit-history fixture parity passed (${evaluated} evals via ${WORKER_ONLY_MODEL ? searchWorkerBackend : describeOrtBackendConfig()}).`;
+      el('parity').textContent =
+        `passed ${records.length}/${records.length} native BLAS fixtures · ${elapsedMs.toFixed(0)} ms · ${evalsPerSecond.toFixed(1)} eval/s`;
+      el('message').textContent =
+        `Browser FEN-only and explicit-history fixture parity passed (${evaluated} evals via ${WORKER_ONLY_MODEL ? searchWorkerBackend : describeOrtBackendConfig()}).`;
     }
   } catch (error) {
     el('parity').textContent = `failed: ${(error as Error).message}`;
@@ -3999,7 +4283,14 @@ function battleSleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (ms <= 0 || signal.aborted) return resolve();
     const timer = setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
   });
 }
 
@@ -4018,7 +4309,9 @@ async function battleSearchMove(positions: BoardState[]): Promise<string | null>
   if (searchWorkerReady) {
     const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>(
       { type: 'search', input: { positions }, ...currentSearchOptions({ reuseTree: true }) },
-      (id) => { activeWorkerSearchId = id; },
+      (id) => {
+        activeWorkerSearchId = id;
+      },
     );
     return response.result.cancelled ? null : (response.result.move ?? null);
   }
@@ -4101,18 +4394,24 @@ async function startBattle() {
   const lc0Label = `LC0 search ${currentSearchLimitLabel()}`;
   setBusy(true, `Watching ${lc0Label} vs ${opponentLabel} (${mode})… press Stop to end.`);
   el('battleResults').innerHTML = '';
-  let aWins = 0, bWins = 0, draws = 0, played = 0, cancelled = false;
+  let aWins = 0,
+    bWins = 0,
+    draws = 0,
+    played = 0,
+    cancelled = false;
   try {
     for (let game = 0; game < battleGames; game++) {
-      if (battleAbort.signal.aborted) { cancelled = true; break; }
+      if (battleAbort.signal.aborted) {
+        cancelled = true;
+        break;
+      }
       const aIsWhite = game % 2 === 0;
       el('battleSummary').textContent = `game ${game + 1}/${battleGames}: ${lc0Label} is ${aIsWhite ? 'White' : 'Black'} · playing…`;
-      const outcome = await playGameOnBoard(
-        aIsWhite ? battleSearchMove : opponentMove,
-        aIsWhite ? opponentMove : battleSearchMove,
-        battleAbort.signal,
-      );
-      if (outcome.reason === 'cancelled') { cancelled = true; break; }
+      const outcome = await playGameOnBoard(aIsWhite ? battleSearchMove : opponentMove, aIsWhite ? opponentMove : battleSearchMove, battleAbort.signal);
+      if (outcome.reason === 'cancelled') {
+        cancelled = true;
+        break;
+      }
       played += 1;
       if (outcome.result === '1/2-1/2') draws += 1;
       else if ((outcome.result === '1-0') === aIsWhite) aWins += 1;
@@ -4173,9 +4472,7 @@ async function clearModelCache() {
   if (busy) return;
   try {
     const result = await clearLc0ModelCache();
-    const summary = result.cleared
-      ? `cleared ${result.removedEntries} entr${result.removedEntries === 1 ? 'y' : 'ies'}`
-      : 'nothing to clear';
+    const summary = result.cleared ? `cleared ${result.removedEntries} entr${result.removedEntries === 1 ? 'y' : 'ies'}` : 'nothing to clear';
     mainModelCacheStatus = summary;
     workerModelCacheStatus = workerModelCacheStatus ? `stale (cleared); reload to refetch` : '';
     el('message').textContent = `Model cache ${summary}. Reload the page to refetch from the network.`;
@@ -4219,9 +4516,7 @@ function renderWorkerGpuStatus(backend: string) {
   const node = el('gpuStatus');
   const requestedGpu = requestedWorkerEp() !== 'wasm';
   const usingGpu = backend.includes('webgpu->webgpu') || backend === 'webgpu';
-  node.textContent = usingGpu
-    ? 'active (worker-only)'
-    : requestedGpu ? `worker ${backend} — GPU fallback` : `worker ${backend}`;
+  node.textContent = usingGpu ? 'active (worker-only)' : requestedGpu ? `worker ${backend} — GPU fallback` : `worker ${backend}`;
   node.classList.toggle('warn', requestedGpu && !usingGpu);
 }
 
@@ -4253,7 +4548,13 @@ async function init(mountSignal: AbortSignal) {
     if (!event.persisted) disposeRuntimeResources();
   };
   window.addEventListener('pagehide', policyPagehideHandler);
-  el('message').textContent = SHADER_F16_PROBE_REQUESTED ? 'Preparing WebGPU shader-f16 probe…' : PACK_PROBE_REQUESTED ? 'Preparing dedicated worker for lc0web pack probe…' : WORKER_ONLY_MODEL || experimentalOrtWasmRequested() ? 'Loading LC0 model in dedicated worker…' : 'Loading LC0 ONNX model…';
+  el('message').textContent = SHADER_F16_PROBE_REQUESTED
+    ? 'Preparing WebGPU shader-f16 probe…'
+    : PACK_PROBE_REQUESTED
+      ? 'Preparing dedicated worker for lc0web pack probe…'
+      : WORKER_ONLY_MODEL || experimentalOrtWasmRequested()
+        ? 'Loading LC0 model in dedicated worker…'
+        : 'Loading LC0 ONNX model…';
   renderStatic();
   try {
     if (SHADER_F16_PROBE_REQUESTED) {
@@ -4269,7 +4570,51 @@ async function init(mountSignal: AbortSignal) {
       workerModelCacheStatus = 'pack shards worker-owned';
       useSearchWorker = true;
       await initSearchWorker({ initModel: false });
-      searchWorkerBackend = MAPPED_POLICY_PROBE_REQUESTED ? 'lc0web-wgsl-mapped-policy-probe' : WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED ? 'lc0web-wgsl-encoder-wgsl-heads-probe' : WGSL_HEADS_PROBE_REQUESTED ? 'lc0web-wgsl-heads-probe' : ENCODER_STACK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder-stack-bench' : ENCODER0_BLOCK_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-block-bench' : ENCODER0_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-block-bench' : ENCODER0_FFN_ORT_BENCH_REQUESTED ? 'ort-tiny-encoder0-ffn-bench' : ENCODER0_FFN_BENCH_REQUESTED ? 'lc0web-wgsl-encoder0-ffn-bench' : ATTENTION_OUTPUT_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-output-bench' : ATTENTION_OUTPUT_BENCH_REQUESTED ? 'lc0web-wgsl-attention-output-bench' : ATTENTION_BLOCK_BENCH_REQUESTED ? 'lc0web-wgsl-attention-block-bench' : ATTENTION_VALUE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-value-bench' : ATTENTION_VALUE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-value-bench' : SMOLGEN_BENCH_REQUESTED ? 'lc0web-wgsl-smolgen-bench' : SOFTMAX_BENCH_REQUESTED ? 'lc0web-wgsl-softmax-bench' : ATTENTION_SCORE_ORT_BENCH_REQUESTED ? 'ort-tiny-attention-score-bench' : ATTENTION_SCORE_BENCH_REQUESTED ? 'lc0web-wgsl-attention-score-bench' : QKV_BENCH_REQUESTED ? 'lc0web-wgsl-qkv-bench' : QKV_PROBE_REQUESTED ? 'lc0web-wgsl-qkv-probe' : ORT_OP_BENCH_REQUESTED ? 'ort-tiny-matmul-add-bench' : KERNEL_BENCH_REQUESTED ? 'lc0web-wgsl-kernel-bench' : KERNEL_PROBE_REQUESTED ? 'lc0web-wgsl-kernel' : 'lc0web-pack-loader';
+      searchWorkerBackend = MAPPED_POLICY_PROBE_REQUESTED
+        ? 'lc0web-wgsl-mapped-policy-probe'
+        : WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED
+          ? 'lc0web-wgsl-encoder-wgsl-heads-probe'
+          : WGSL_HEADS_PROBE_REQUESTED
+            ? 'lc0web-wgsl-heads-probe'
+            : ENCODER_STACK_BENCH_REQUESTED
+              ? 'lc0web-wgsl-encoder-stack-bench'
+              : ENCODER0_BLOCK_ORT_BENCH_REQUESTED
+                ? 'ort-tiny-encoder0-block-bench'
+                : ENCODER0_BLOCK_BENCH_REQUESTED
+                  ? 'lc0web-wgsl-encoder0-block-bench'
+                  : ENCODER0_FFN_ORT_BENCH_REQUESTED
+                    ? 'ort-tiny-encoder0-ffn-bench'
+                    : ENCODER0_FFN_BENCH_REQUESTED
+                      ? 'lc0web-wgsl-encoder0-ffn-bench'
+                      : ATTENTION_OUTPUT_ORT_BENCH_REQUESTED
+                        ? 'ort-tiny-attention-output-bench'
+                        : ATTENTION_OUTPUT_BENCH_REQUESTED
+                          ? 'lc0web-wgsl-attention-output-bench'
+                          : ATTENTION_BLOCK_BENCH_REQUESTED
+                            ? 'lc0web-wgsl-attention-block-bench'
+                            : ATTENTION_VALUE_ORT_BENCH_REQUESTED
+                              ? 'ort-tiny-attention-value-bench'
+                              : ATTENTION_VALUE_BENCH_REQUESTED
+                                ? 'lc0web-wgsl-attention-value-bench'
+                                : SMOLGEN_BENCH_REQUESTED
+                                  ? 'lc0web-wgsl-smolgen-bench'
+                                  : SOFTMAX_BENCH_REQUESTED
+                                    ? 'lc0web-wgsl-softmax-bench'
+                                    : ATTENTION_SCORE_ORT_BENCH_REQUESTED
+                                      ? 'ort-tiny-attention-score-bench'
+                                      : ATTENTION_SCORE_BENCH_REQUESTED
+                                        ? 'lc0web-wgsl-attention-score-bench'
+                                        : QKV_BENCH_REQUESTED
+                                          ? 'lc0web-wgsl-qkv-bench'
+                                          : QKV_PROBE_REQUESTED
+                                            ? 'lc0web-wgsl-qkv-probe'
+                                            : ORT_OP_BENCH_REQUESTED
+                                              ? 'ort-tiny-matmul-add-bench'
+                                              : KERNEL_BENCH_REQUESTED
+                                                ? 'lc0web-wgsl-kernel-bench'
+                                                : KERNEL_PROBE_REQUESTED
+                                                  ? 'lc0web-wgsl-kernel'
+                                                  : 'lc0web-pack-loader';
       renderStatic();
       if (MAPPED_POLICY_PROBE_REQUESTED) await runMappedPolicyProbe();
       else if (WGSL_HEADS_VS_ORT_FIXTURES_REQUESTED) await runWgslHeadsVsOrtFixtures();
@@ -4307,11 +4652,17 @@ async function init(mountSignal: AbortSignal) {
       if (isStaleMount(mountSignal)) return;
       mainModelCacheStatus = describeLc0ModelLoad(modelLoad);
       const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
-      if (isStaleMount(mountSignal)) { void evaluator.dispose(); return; }
+      if (isStaleMount(mountSignal)) {
+        void evaluator.dispose();
+        return;
+      }
       const nextPlayer = new Lc0PolicyOnlyPlayer(evaluator);
       const nextSearcher = new Lc0PuctSearcher(evaluator);
       const diagnostics = await collectOrtRuntimeDiagnostics();
-      if (isStaleMount(mountSignal)) { void evaluator.dispose(); return; }
+      if (isStaleMount(mountSignal)) {
+        void evaluator.dispose();
+        return;
+      }
       mainEvaluator = evaluator;
       player = nextPlayer;
       searcher = nextSearcher;
@@ -4343,9 +4694,10 @@ async function init(mountSignal: AbortSignal) {
         }
       }
     }
-    el('message').textContent = WORKER_ONLY_MODEL || experimentalOrtWasmRequested()
-      ? 'Ready. LC0 model is loaded only in the dedicated worker.'
-      : 'Ready. Drag a legal move or ask the engine to move.';
+    el('message').textContent =
+      WORKER_ONLY_MODEL || experimentalOrtWasmRequested()
+        ? 'Ready. LC0 model is loaded only in the dedicated worker.'
+        : 'Ready. Drag a legal move or ask the engine to move.';
     if (HYBRID_DRIFT_REQUESTED) {
       await runHybridDriftFixtures();
       return;
@@ -4407,7 +4759,7 @@ function resetPolicyPageState(): void {
   searchCpuct = clampFloat(params.get('cpuct'), 0, 100, 1.5);
   searchCpuctSchedule = parseCpuctSchedule(params.get('cpuctSchedule'));
   searchFpuStrategy = parseFpuStrategy(params.get('fpuStrategy'));
-  searchFpuReduction = clampFloat(params.get('fpuReduction'), 0, 5, 0.330);
+  searchFpuReduction = clampFloat(params.get('fpuReduction'), 0, 5, 0.33);
   searchTemperature = clampFloat(params.get('temperature'), 0, 10, 0);
   engineReplyMode = params.get('mode') === 'search' ? 'search' : 'policy';
   board = parseFen(params.get('fen') ?? START_FEN);
@@ -4445,92 +4797,111 @@ function seedSettingsInputs() {
 }
 
 function wireEvents(): void {
-el('engineMove').addEventListener('click', () => { void engineMove(); });
-el('searchMove').addEventListener('click', () => { void searchRootPosition(); });
-el('stopSearch').addEventListener('click', stopSearch);
-// "Analyze position" runs a search on the current board. Loading a different
-// position is the explicit job of the FEN box + Load FEN.
-el('analyze').addEventListener('click', () => { void searchRootPosition(); });
-el('runParity').addEventListener('click', () => { void runParityFixtures(); });
-el('reset').addEventListener('click', resetBoard);
-el('flip').addEventListener('click', () => { orientation = orientation === 'white' ? 'black' : 'white'; renderStatic(); });
-el('loadFen').addEventListener('click', () => { loadFenFromInput(); });
-el('clearCache').addEventListener('click', () => { void clearModelCache(); });
-inputEl('fenInput').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') loadFenFromInput(); });
-inputEl('visitsInput').addEventListener('change', () => {
-  searchVisits = clampInt(inputEl('visitsInput').value, 1, 100000, searchVisits);
-  inputEl('visitsInput').value = String(searchVisits);
-  renderStatic();
-});
-inputEl('batchInput').addEventListener('change', () => {
-  searchBatchSize = clampInt(inputEl('batchInput').value, 1, 512, searchBatchSize);
-  inputEl('batchInput').value = String(searchBatchSize);
-  renderStatic();
-});
-selectEl('collisionSelect').addEventListener('change', () => {
-  searchBatchCollisionMode = parseBatchCollisionMode(selectEl('collisionSelect').value);
-  selectEl('collisionSelect').value = searchBatchCollisionMode;
-  renderStatic();
-});
-inputEl('multiPvInput').addEventListener('change', () => {
-  searchMultiPv = clampInt(inputEl('multiPvInput').value, 1, 20, searchMultiPv);
-  inputEl('multiPvInput').value = String(searchMultiPv);
-  renderStatic();
-});
-selectEl('earlyStopSelect').addEventListener('change', () => {
-  searchEarlyStop = parseEarlyStop(selectEl('earlyStopSelect').value);
-  selectEl('earlyStopSelect').value = searchEarlyStop;
-  renderStatic();
-});
-inputEl('movetimeInput').addEventListener('change', () => {
-  searchMovetimeMs = clampInt(inputEl('movetimeInput').value, 0, 600000, searchMovetimeMs);
-  inputEl('movetimeInput').value = String(searchMovetimeMs);
-  renderStatic();
-});
-inputEl('cpuctInput').addEventListener('change', () => {
-  searchCpuct = clampFloat(inputEl('cpuctInput').value, 0, 100, searchCpuct);
-  inputEl('cpuctInput').value = String(searchCpuct);
-  renderStatic();
-});
-selectEl('cpuctScheduleSelect').addEventListener('change', () => {
-  searchCpuctSchedule = parseCpuctSchedule(selectEl('cpuctScheduleSelect').value);
-  selectEl('cpuctScheduleSelect').value = searchCpuctSchedule;
-  renderStatic();
-});
-selectEl('fpuStrategySelect').addEventListener('change', () => {
-  searchFpuStrategy = parseFpuStrategy(selectEl('fpuStrategySelect').value);
-  selectEl('fpuStrategySelect').value = searchFpuStrategy;
-  renderStatic();
-});
-inputEl('fpuReductionInput').addEventListener('change', () => {
-  searchFpuReduction = clampFloat(inputEl('fpuReductionInput').value, 0, 5, searchFpuReduction);
-  inputEl('fpuReductionInput').value = String(searchFpuReduction);
-  renderStatic();
-});
-inputEl('temperatureInput').addEventListener('change', () => {
-  searchTemperature = clampFloat(inputEl('temperatureInput').value, 0, 10, searchTemperature);
-  inputEl('temperatureInput').value = String(searchTemperature);
-  renderStatic();
-});
-inputEl('battleGamesInput').addEventListener('change', () => {
-  battleGames = clampInt(inputEl('battleGamesInput').value, 1, 100, battleGames);
-  inputEl('battleGamesInput').value = String(battleGames);
-});
-inputEl('sfDepthInput').addEventListener('change', () => {
-  stockfishDepth = clampInt(inputEl('sfDepthInput').value, 1, 20, stockfishDepth);
-  inputEl('sfDepthInput').value = String(stockfishDepth);
-});
-selectEl('opponentSelect').addEventListener('change', () => {
-  battleOpponent = selectEl('opponentSelect').value === 'stockfish' ? 'stockfish' : 'policy';
-});
-el('battleStart').addEventListener('click', () => { void startBattle(); });
-selectEl('sideSelect').addEventListener('change', () => {
-  applySideChange(selectEl('sideSelect').value === 'black' ? 'black' : 'white');
-});
-selectEl('modeSelect').addEventListener('change', () => {
-  engineReplyMode = selectEl('modeSelect').value === 'search' ? 'search' : 'policy';
-  el('message').textContent = `Engine reply mode: ${engineReplyMode === 'search' ? 'PUCT search' : 'policy-only'}.`;
-});
+  el('engineMove').addEventListener('click', () => {
+    void engineMove();
+  });
+  el('searchMove').addEventListener('click', () => {
+    void searchRootPosition();
+  });
+  el('stopSearch').addEventListener('click', stopSearch);
+  // "Analyze position" runs a search on the current board. Loading a different
+  // position is the explicit job of the FEN box + Load FEN.
+  el('analyze').addEventListener('click', () => {
+    void searchRootPosition();
+  });
+  el('runParity').addEventListener('click', () => {
+    void runParityFixtures();
+  });
+  el('reset').addEventListener('click', resetBoard);
+  el('flip').addEventListener('click', () => {
+    orientation = orientation === 'white' ? 'black' : 'white';
+    renderStatic();
+  });
+  el('loadFen').addEventListener('click', () => {
+    loadFenFromInput();
+  });
+  el('clearCache').addEventListener('click', () => {
+    void clearModelCache();
+  });
+  inputEl('fenInput').addEventListener('keydown', (event) => {
+    if ((event as KeyboardEvent).key === 'Enter') loadFenFromInput();
+  });
+  inputEl('visitsInput').addEventListener('change', () => {
+    searchVisits = clampInt(inputEl('visitsInput').value, 1, 100000, searchVisits);
+    inputEl('visitsInput').value = String(searchVisits);
+    renderStatic();
+  });
+  inputEl('batchInput').addEventListener('change', () => {
+    searchBatchSize = clampInt(inputEl('batchInput').value, 1, 512, searchBatchSize);
+    inputEl('batchInput').value = String(searchBatchSize);
+    renderStatic();
+  });
+  selectEl('collisionSelect').addEventListener('change', () => {
+    searchBatchCollisionMode = parseBatchCollisionMode(selectEl('collisionSelect').value);
+    selectEl('collisionSelect').value = searchBatchCollisionMode;
+    renderStatic();
+  });
+  inputEl('multiPvInput').addEventListener('change', () => {
+    searchMultiPv = clampInt(inputEl('multiPvInput').value, 1, 20, searchMultiPv);
+    inputEl('multiPvInput').value = String(searchMultiPv);
+    renderStatic();
+  });
+  selectEl('earlyStopSelect').addEventListener('change', () => {
+    searchEarlyStop = parseEarlyStop(selectEl('earlyStopSelect').value);
+    selectEl('earlyStopSelect').value = searchEarlyStop;
+    renderStatic();
+  });
+  inputEl('movetimeInput').addEventListener('change', () => {
+    searchMovetimeMs = clampInt(inputEl('movetimeInput').value, 0, 600000, searchMovetimeMs);
+    inputEl('movetimeInput').value = String(searchMovetimeMs);
+    renderStatic();
+  });
+  inputEl('cpuctInput').addEventListener('change', () => {
+    searchCpuct = clampFloat(inputEl('cpuctInput').value, 0, 100, searchCpuct);
+    inputEl('cpuctInput').value = String(searchCpuct);
+    renderStatic();
+  });
+  selectEl('cpuctScheduleSelect').addEventListener('change', () => {
+    searchCpuctSchedule = parseCpuctSchedule(selectEl('cpuctScheduleSelect').value);
+    selectEl('cpuctScheduleSelect').value = searchCpuctSchedule;
+    renderStatic();
+  });
+  selectEl('fpuStrategySelect').addEventListener('change', () => {
+    searchFpuStrategy = parseFpuStrategy(selectEl('fpuStrategySelect').value);
+    selectEl('fpuStrategySelect').value = searchFpuStrategy;
+    renderStatic();
+  });
+  inputEl('fpuReductionInput').addEventListener('change', () => {
+    searchFpuReduction = clampFloat(inputEl('fpuReductionInput').value, 0, 5, searchFpuReduction);
+    inputEl('fpuReductionInput').value = String(searchFpuReduction);
+    renderStatic();
+  });
+  inputEl('temperatureInput').addEventListener('change', () => {
+    searchTemperature = clampFloat(inputEl('temperatureInput').value, 0, 10, searchTemperature);
+    inputEl('temperatureInput').value = String(searchTemperature);
+    renderStatic();
+  });
+  inputEl('battleGamesInput').addEventListener('change', () => {
+    battleGames = clampInt(inputEl('battleGamesInput').value, 1, 100, battleGames);
+    inputEl('battleGamesInput').value = String(battleGames);
+  });
+  inputEl('sfDepthInput').addEventListener('change', () => {
+    stockfishDepth = clampInt(inputEl('sfDepthInput').value, 1, 20, stockfishDepth);
+    inputEl('sfDepthInput').value = String(stockfishDepth);
+  });
+  selectEl('opponentSelect').addEventListener('change', () => {
+    battleOpponent = selectEl('opponentSelect').value === 'stockfish' ? 'stockfish' : 'policy';
+  });
+  el('battleStart').addEventListener('click', () => {
+    void startBattle();
+  });
+  selectEl('sideSelect').addEventListener('change', () => {
+    applySideChange(selectEl('sideSelect').value === 'black' ? 'black' : 'white');
+  });
+  selectEl('modeSelect').addEventListener('change', () => {
+    engineReplyMode = selectEl('modeSelect').value === 'search' ? 'search' : 'policy';
+    el('message').textContent = `Engine reply mode: ${engineReplyMode === 'search' ? 'PUCT search' : 'policy-only'}.`;
+  });
 }
 
 export function mountPolicyOnlyBrowser(): () => void {

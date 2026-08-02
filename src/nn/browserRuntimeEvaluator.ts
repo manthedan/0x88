@@ -1,11 +1,10 @@
-import { SquareFormerEvaluator, type SquareFormerMeta } from './squareformerEvaluator.ts';
-import { SquareformerTvmHybridEvaluator } from './squareformerTvmHybridEvaluator.ts';
-import { SquareformerTvmjsWebgpuEvaluator } from './squareformerTvmjsWebgpuEvaluator.ts';
+import * as v from 'valibot';
 import { resolvePublicAssetUrl } from '../lc0/assetUrls.ts';
 import type { Evaluator } from './evaluator.ts';
-import { publishBrowserRuntimeAudit, type BrowserRuntimeAuditDetail } from './runtimeAudit.ts';
+import { type BrowserRuntimeAuditDetail, publishBrowserRuntimeAudit } from './runtimeAudit.ts';
 import { RuntimeFallbackEvaluator } from './runtimeFallbackEvaluator.ts';
 import {
+  type BrowserRuntimeSelector,
   BT4_ANNEAL_MUON_BEST_MODEL_ID,
   BT4_SOAP_REM_C19000_FINAL_MODEL_ID,
   normalizeRuntimeModelKey,
@@ -15,8 +14,11 @@ import {
   runtimeFallbackEnabled,
   shouldAttemptCustomRuntime,
   shouldAttemptTvmjsRuntime,
-  type BrowserRuntimeSelector,
 } from './runtimeRegistry.ts';
+import { SquareFormerMetaSchema } from './squareFormerMetaSchema.ts';
+import { SquareFormerEvaluator, type SquareFormerMeta } from './squareformerEvaluator.ts';
+import { SquareformerTvmHybridEvaluator } from './squareformerTvmHybridEvaluator.ts';
+import { SquareformerTvmjsWebgpuEvaluator } from './squareformerTvmjsWebgpuEvaluator.ts';
 
 type NavigatorGpu = Navigator & { gpu?: { requestAdapter(opts?: unknown): Promise<{ requestDevice(): Promise<unknown> } | null> } };
 
@@ -43,10 +45,10 @@ export type BrowserRuntimeEvaluatorResult = {
   fallbackReason?: string;
 };
 
-async function loadJson<T>(url: string): Promise<T> {
+async function loadJson(url: string): Promise<unknown> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url}: ${res.status} ${res.statusText}`);
-  return await res.json() as T;
+  return await res.json();
 }
 
 function inferRuntimeModelId(spec: BrowserSquareformerRuntimeSpec): string {
@@ -61,7 +63,12 @@ function inferRuntimeModelId(spec: BrowserSquareformerRuntimeSpec): string {
   return spec.id ?? spec.onnx;
 }
 
-async function createHybridEvaluator(meta: SquareFormerMeta, manifestUrl: string | undefined, kernelBase: string | undefined, fixtureRoot: string | undefined): Promise<Evaluator> {
+async function createHybridEvaluator(
+  meta: SquareFormerMeta,
+  manifestUrl: string | undefined,
+  kernelBase: string | undefined,
+  fixtureRoot: string | undefined,
+): Promise<Evaluator> {
   const gpu = (navigator as NavigatorGpu).gpu;
   if (!gpu) throw new Error('WebGPU is unavailable for custom WebGPU runtime');
   const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
@@ -83,7 +90,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
   } = {},
 ): Promise<BrowserRuntimeEvaluatorResult> {
   const params = options.params;
-  const meta = await loadJson<SquareFormerMeta>(spec.meta);
+  const meta = v.parse(SquareFormerMetaSchema, await loadJson(spec.meta));
   const modelId = inferRuntimeModelId(spec);
   const requestedRuntime = parseBrowserRuntimeSelector(options.runtime ?? spec.runtime ?? params?.get('runtime'));
   const fallback = options.fallback ?? (params ? runtimeFallbackEnabled(params, true) : true);
@@ -120,9 +127,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
     try {
       if (!manifestUrl) throw new Error(`No TVMJS manifest is registered for ${modelId}`);
       const primary = await SquareformerTvmjsWebgpuEvaluator.create(manifestUrl, meta);
-      const evaluator = fallback
-        ? new RuntimeFallbackEvaluator(primary, () => SquareFormerEvaluator.create(spec.onnx, meta), auditBase)
-        : primary;
+      const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, () => SquareFormerEvaluator.create(spec.onnx, meta), auditBase) : primary;
       const result = {
         evaluator,
         meta,

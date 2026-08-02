@@ -4,6 +4,9 @@
  * unit-tested; the fetchers are thin wrappers that accept an injectable fetch.
  */
 
+import * as v from 'valibot';
+import { ChessComArchivesResponseSchema, ChessComGamesResponseSchema } from './gameImportSchema.ts';
+
 export type ImportSite = 'lichess' | 'chesscom';
 export type ImportColor = 'white' | 'black' | '';
 
@@ -14,7 +17,10 @@ export interface ImportOptions {
   rated?: boolean | '';
 }
 
-type FetchLike = (url: string, init?: { headers?: Record<string, string> }) => Promise<{
+type FetchLike = (
+  url: string,
+  init?: { headers?: Record<string, string> },
+) => Promise<{
   ok: boolean;
   status: number;
   text(): Promise<string>;
@@ -78,7 +84,7 @@ export async function fetchChessComPgn(username: string, opts: ImportOptions, fe
   const archivesResponse = await fetchImpl(chessComArchivesUrl(username));
   if (archivesResponse.status === 404) throw new Error(`Chess.com user "${username}" not found`);
   if (!archivesResponse.ok) throw new Error(`Chess.com archives request failed (${archivesResponse.status})`);
-  const { archives } = (await archivesResponse.json()) as { archives?: string[] };
+  const { archives } = v.parse(ChessComArchivesResponseSchema, await archivesResponse.json());
   if (!archives?.length) return '';
   const max = clampMax(opts.max);
   const pgns: string[] = [];
@@ -86,7 +92,7 @@ export async function fetchChessComPgn(username: string, opts: ImportOptions, fe
   for (let i = archives.length - 1; i >= 0 && pgns.length < max; i--) {
     const monthResponse = await fetchImpl(archives[i]);
     if (!monthResponse.ok) continue;
-    const { games } = (await monthResponse.json()) as { games?: ChessComGame[] };
+    const { games } = v.parse(ChessComGamesResponseSchema, await monthResponse.json());
     pgns.push(...selectChessComPgns(games ?? [], username, { ...opts, max: max - pgns.length }));
   }
   return pgns.join('\n\n');

@@ -1,6 +1,15 @@
+import * as v from 'valibot';
 import type { BoardState } from '../chess/board.ts';
 import { encodeLc0Classical112 } from './encoder112.ts';
-import { currentBoardAndFen, LC0_DEFAULT_POLICY_TEMPERATURE, legalPolicyPriors, type Lc0Evaluation, type Lc0EvaluationProvider, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import {
+  currentBoardAndFen,
+  LC0_DEFAULT_POLICY_TEMPERATURE,
+  type Lc0Evaluation,
+  type Lc0EvaluationProvider,
+  type Lc0EvaluatorInput,
+  legalPolicyPriors,
+} from './onnxEvaluator.ts';
+import { WholeOnnxRuntimeManifestSchema } from './wholeOnnxRuntimeManifestSchema.ts';
 
 const STAGED_RUNTIME_PREFIX = '/runtimes/lc0-' + 'tvm' + 'js-webgpu/';
 const DEFAULT_BUNDLE = 'tvm' + 'js.bundle.js';
@@ -99,7 +108,7 @@ export interface Lc0WholeOnnxWebgpuEvaluatorOptions {
 }
 
 function sumFinite(values: Array<number | undefined>): number {
-  return values.reduce<number>((sum, value) => sum + (Number.isFinite(value) ? value as number : 0), 0);
+  return values.reduce<number>((sum, value) => sum + (Number.isFinite(value) ? (value as number) : 0), 0);
 }
 
 function f32ToF16Bits(value: number): number {
@@ -116,13 +125,16 @@ function f32ToF16Bits(value: number): number {
   const fraction = abs / 2 ** exponent - 1;
   let halfExponent = exponent + 15;
   let halfFraction = Math.round(fraction * 1024);
-  if (halfFraction === 1024) { halfExponent += 1; halfFraction = 0; }
+  if (halfFraction === 1024) {
+    halfExponent += 1;
+    halfFraction = 0;
+  }
   if (halfExponent >= 31) return sign | 0x7bff;
   return sign | (halfExponent << 10) | (halfFraction & 0x03ff);
 }
 
 function f16BitsToF32(bits: number): number {
-  const sign = (bits & 0x8000) ? -1 : 1;
+  const sign = bits & 0x8000 ? -1 : 1;
   const exponent = (bits >>> 10) & 0x1f;
   const fraction = bits & 0x03ff;
   if (exponent === 0) return sign * (fraction === 0 ? 0 : 2 ** -14 * (fraction / 1024));
@@ -222,19 +234,25 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     const startupTimings: Record<string, number> = {};
     const timed = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
       const started = performance.now();
-      try { return await fn(); }
-      finally { startupTimings[name] = (startupTimings[name] ?? 0) + performance.now() - started; }
+      try {
+        return await fn();
+      } finally {
+        startupTimings[name] = (startupTimings[name] ?? 0) + performance.now() - started;
+      }
     };
     const timedSync = <T>(name: string, fn: () => T): T => {
       const started = performance.now();
-      try { return fn(); }
-      finally { startupTimings[name] = (startupTimings[name] ?? 0) + performance.now() - started; }
+      try {
+        return fn();
+      } finally {
+        startupTimings[name] = (startupTimings[name] ?? 0) + performance.now() - started;
+      }
     };
 
     const base = checkedStagedRuntimeUrl(options.manifestUrl, location.href, 'manifest');
     const manifestResponse = await timed('manifestFetchMs', () => fetch(base));
     if (!manifestResponse.ok) throw new Error(`Manifest fetch failed: ${manifestResponse.status}`);
-    const manifest = await timed('manifestJsonMs', () => manifestResponse.json() as Promise<RuntimeManifest>);
+    const manifest = await timed('manifestJsonMs', async () => v.parse(WholeOnnxRuntimeManifestSchema, await manifestResponse.json()));
     const requestedBatch = Math.max(1, Math.floor(options.batch ?? 8));
     const model = manifest.models.find((item) => item.batch === requestedBatch);
     if (!model) throw new Error(`Batch ${requestedBatch} not in manifest`);
@@ -290,7 +308,8 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
 
   async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
     const out: Lc0Evaluation[] = [];
-    for (let i = 0; i < inputs.length; i += this.physicalBatchSize) out.push(...await this.remember(await this.runBatchEvaluation(inputs.slice(i, i + this.physicalBatchSize))));
+    for (let i = 0; i < inputs.length; i += this.physicalBatchSize)
+      out.push(...(await this.remember(await this.runBatchEvaluation(inputs.slice(i, i + this.physicalBatchSize)))));
     return out;
   }
 
@@ -301,7 +320,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     });
     const chunkRows = await this.runBatchSequence(chunks.map((chunk) => chunk.inputs));
     const out = batches.map((): Lc0Evaluation[] => []);
-    for (let i = 0; i < chunkRows.length; i++) out[chunks[i].batchIndex].push(...await this.remember(chunkRows[i]));
+    for (let i = 0; i < chunkRows.length; i++) out[chunks[i].batchIndex].push(...(await this.remember(chunkRows[i])));
     return out;
   }
 
@@ -367,7 +386,14 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
       return cpu;
     });
     const outputCopyEnqueueMs = performance.now() - phaseStarted;
-    return { boards, fens, preparedLegalMoves, staged, device: outs[0].device, timing: { encodeMs, inputConvertMs, inputTensorAllocMs, inputUploadMs, setInputMs, tvmInvokeMs, outputHandleMs, outputCopyEnqueueMs } };
+    return {
+      boards,
+      fens,
+      preparedLegalMoves,
+      staged,
+      device: outs[0].device,
+      timing: { encodeMs, inputConvertMs, inputTensorAllocMs, inputUploadMs, setInputMs, tvmInvokeMs, outputHandleMs, outputCopyEnqueueMs },
+    };
   }
 
   private finishBatch(submitted: SubmittedBatch, timingExtra: Record<string, number | string>): Lc0Evaluation[] {
@@ -383,7 +409,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     const sharedTiming = {
       backend: 'whole-onnx-webgpu',
       tvmBatchEvalId: ++batchEvalSequence,
-      tvmBatchEvalMs: sumFinite(EVAL_TIMING_KEYS.map((key) => typeof phases[key] === 'number' ? phases[key] as number : undefined)),
+      tvmBatchEvalMs: sumFinite(EVAL_TIMING_KEYS.map((key) => (typeof phases[key] === 'number' ? (phases[key] as number) : undefined))),
       ...phases,
       physicalBatchSize: this.physicalBatchSize,
       logicalBatchSize: boards.length,
@@ -417,7 +443,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
   }
 
   private async runBatchSequence(batchesInputs: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> {
-    const submitted = batchesInputs.map((inputs) => inputs.length ? this.submitBatch(inputs) : null);
+    const submitted = batchesInputs.map((inputs) => (inputs.length ? this.submitBatch(inputs) : null));
     const device = submitted.find((batch): batch is SubmittedBatch => !!batch)?.device;
     let syncMs = 0;
     if (device) {
@@ -426,11 +452,15 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
       syncMs = performance.now() - syncStarted;
     }
     const inFlight = submitted.filter(Boolean).length || 1;
-    return submitted.map((batch) => batch ? this.finishBatch(batch, {
-      timingScope: 'whole-model-pipelined-batch',
-      outputReadbackMs: syncMs / inFlight,
-      pipelineFlushBatches: inFlight,
-      pipelineFlushSyncMs: syncMs,
-    }) : []);
+    return submitted.map((batch) =>
+      batch
+        ? this.finishBatch(batch, {
+            timingScope: 'whole-model-pipelined-batch',
+            outputReadbackMs: syncMs / inFlight,
+            pipelineFlushBatches: inFlight,
+            pipelineFlushSyncMs: syncMs,
+          })
+        : [],
+    );
   }
 }

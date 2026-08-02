@@ -1,17 +1,19 @@
+import * as v from 'valibot';
 import type { BoardState } from '../chess/board.ts';
-import { isStmWhiteRankflip, normalizePositionForStmWhite, normalizedMoveToOriginal } from '../chess/boardNormalization.ts';
-import { legalMoves } from '../chess/movegen.ts';
+import { isStmWhiteRankflip, normalizedMoveToOriginal, normalizePositionForStmWhite } from '../chess/boardNormalization.ts';
 import { moveToActionId } from '../chess/moveCodec.ts';
 import { moveToSquareformerPolicyIndex } from '../chess/moveEncodings.ts';
+import { legalMoves } from '../chess/movegen.ts';
 import { isTrustedExecutableAssetUrl } from '../lc0/assetUrls.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
 import {
-  squareformerCompactInput,
-  threatgraphSquareSummaryV1,
-  THREATGRAPH_SQUARE_SUMMARY_V1_FEATURES,
   type SquareFormerMeta,
+  squareformerCompactInput,
+  THREATGRAPH_SQUARE_SUMMARY_V1_FEATURES,
+  threatgraphSquareSummaryV1,
 } from './squareformerEvaluator.ts';
+import { TvmjsManifestSchema } from './tvmjsManifestSchema.ts';
 
 type TvmTensor = {
   shape: readonly number[];
@@ -139,8 +141,7 @@ async function loadTvmjsBundle(url: URL, expected: { sha256: string }): Promise<
         if (api) {
           (globalThis as typeof globalThis & { [BUNDLE_SHA_GLOBAL]?: string })[BUNDLE_SHA_GLOBAL] = expected.sha256;
           resolve(api);
-        }
-        else reject(new Error('TVMJS runtime global missing after bundle load'));
+        } else reject(new Error('TVMJS runtime global missing after bundle load'));
       };
       script.onerror = () => reject(new Error(`TVMJS bundle load failed: ${url}`));
       document.head.appendChild(script);
@@ -210,7 +211,7 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
     if (!isTrustedExecutableAssetUrl(manifestResolved.toString())) throw new Error(`Untrusted TVMJS manifest URL: ${manifestResolved}`);
     const response = await fetch(manifestResolved, { cache: 'no-cache' });
     if (!response.ok) throw new Error(`TVMJS manifest fetch failed ${response.status}: ${manifestResolved}`);
-    const manifest = await response.json() as TvmjsManifest;
+    const manifest = v.parse(TvmjsManifestSchema, await response.json());
     validateManifest(manifest);
     const model = manifest.models?.find((entry) => Number(entry.batch) === 16) ?? manifest.models?.[0];
     if (!model || !Number.isInteger(model.batch) || model.batch <= 0) throw new Error('TVMJS manifest has no fixed-batch model');
@@ -273,10 +274,9 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
     if (!boards.length) return [];
     const output: Evaluation[] = [];
     for (let offset = 0; offset < boards.length; offset += this.physicalBatchSize) {
-      output.push(...await this.evaluatePhysicalBatch(
-        boards.slice(offset, offset + this.physicalBatchSize),
-        contexts.slice(offset, offset + this.physicalBatchSize),
-      ));
+      output.push(
+        ...(await this.evaluatePhysicalBatch(boards.slice(offset, offset + this.physicalBatchSize), contexts.slice(offset, offset + this.physicalBatchSize))),
+      );
     }
     return output;
   }
@@ -363,9 +363,21 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
     if (this.destroyed) return;
     this.destroyed = true;
     const dispose = () => {
-      try { this.runtime.endScope(); } catch { /* already unwound */ }
-      try { this.runtime.dispose(); } catch { /* best effort */ }
-      try { this.device.destroy(); } catch { /* best effort */ }
+      try {
+        this.runtime.endScope();
+      } catch {
+        /* already unwound */
+      }
+      try {
+        this.runtime.dispose();
+      } catch {
+        /* best effort */
+      }
+      try {
+        this.device.destroy();
+      } catch {
+        /* best effort */
+      }
     };
     void this.runTail.then(dispose, dispose);
   }
