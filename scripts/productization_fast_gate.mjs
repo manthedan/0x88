@@ -2,30 +2,24 @@
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { parseScriptArgs } from './lib/cli.mjs';
 
-function usage() {
-  console.log(
-    `Usage: npm run productization:targeted-smoke -- [options]\n       node scripts/productization_fast_gate.mjs [options]\n\nTargeted 0x88 productization smoke for runtime-audit/Centipawn browser work. This is a fast, focused check of runtime/catalog/analysis invariants plus strict Centipawn custom WebGPU smoke wiring; it is not the full shipped-path LC0 WebGPU parity gate. Keep using lc0:browser-ci-smoke for browser WebGPU parity.\n\nOptions:\n  --strict-browser-smoke   Also run real analysis/arena Centipawn strict custom WebGPU smokes\n  --agent-browser BIN      Forwarded to strict browser smoke\n  --base-url URL           Forwarded to strict browser smoke\n  --timeout MS             Forwarded to strict browser smoke\n  --out PATH               Optional JSON artifact path\n  --dry-run                Print commands without running\n  -h, --help               Show this help\n`,
-  );
-}
+const USAGE = `Usage: npm run productization:targeted-smoke -- [options]\n       node scripts/productization_fast_gate.mjs [options]\n\nTargeted 0x88 productization smoke for runtime-audit/Centipawn browser work. This is a fast, focused check of runtime/catalog/analysis invariants plus strict Centipawn custom WebGPU smoke wiring; it is not the full shipped-path LC0 WebGPU parity gate. Keep using lc0:browser-ci-smoke for browser WebGPU parity.\n\nOptions:\n  --strict-browser-smoke   Also run real analysis/arena Centipawn strict custom WebGPU smokes\n  --agent-browser BIN      Forwarded to strict browser smoke\n  --base-url URL           Forwarded to strict browser smoke\n  --timeout MS             Forwarded to strict browser smoke\n  --out PATH               Optional JSON artifact path\n  --dry-run                Print commands without running\n  -h, --help               Show this help\n`;
 
 function parseArgs(argv) {
-  const args = { strictBrowserSmoke: false, dryRun: false };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--strict-browser-smoke') args.strictBrowserSmoke = true;
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--base-url') args.baseUrl = next();
-    else if (arg === '--timeout') args.timeoutMs = next();
-    else if (arg === '--out') args.out = next();
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      'strict-browser-smoke': { type: 'boolean', default: false },
+      'agent-browser': { type: 'string' },
+      'base-url': { type: 'string' },
+      timeout: { type: 'string' },
+      out: { type: 'string' },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.timeoutMs = args.timeout;
+  delete args.timeout;
   return args;
 }
 
@@ -87,10 +81,6 @@ function run(command, commandArgs) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    usage();
-    return;
-  }
   const plan = commandPlan(args);
   if (args.dryRun) {
     console.log(JSON.stringify({ schema: '0x88.targeted-productization-smoke.plan.v1', commands: plan }, null, 2));

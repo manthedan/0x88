@@ -1,32 +1,21 @@
 #!/usr/bin/env node
 import { loadLc0ModelForOrt } from '../src/lc0/modelCache.ts';
+import { parseScriptArgs } from './lib/cli.mjs';
+
+const USAGE = 'Usage: node --experimental-strip-types scripts/bench_model_cache_streaming.mjs [--mb 32] [--chunk-kb 256] [--repeats 3]';
 
 function parseArgs(argv) {
-  const args = { mb: 32, chunkKb: 256, repeats: 3 };
-  for (let i = 2; i < argv.length; i += 1) {
-    const arg = argv[i];
-    const next = argv[i + 1];
-    if (arg === '--mb' && next) {
-      args.mb = Number(next);
-      i += 1;
-      continue;
-    }
-    if (arg === '--chunk-kb' && next) {
-      args.chunkKb = Number(next);
-      i += 1;
-      continue;
-    }
-    if (arg === '--repeats' && next) {
-      args.repeats = Number(next);
-      i += 1;
-      continue;
-    }
-    if (arg === '-h' || arg === '--help') {
-      console.log('Usage: node --experimental-strip-types scripts/bench_model_cache_streaming.mjs [--mb 32] [--chunk-kb 256] [--repeats 3]');
-      process.exit(0);
-    }
-    throw new Error(`Unknown argument: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      mb: { type: 'string', default: '32' },
+      'chunk-kb': { type: 'string', default: '256' },
+      repeats: { type: 'string', default: '3' },
+    },
+    usage: USAGE,
+  });
+  args.mb = Number(args.mb);
+  args.chunkKb = Number(args.chunkKb);
+  args.repeats = Number(args.repeats);
   if (!Number.isFinite(args.mb) || args.mb <= 0) throw new Error('--mb must be positive');
   if (!Number.isFinite(args.chunkKb) || args.chunkKb <= 0) throw new Error('--chunk-kb must be positive');
   if (!Number.isFinite(args.repeats) || args.repeats <= 0) throw new Error('--repeats must be positive');
@@ -51,7 +40,7 @@ function makeStream(totalBytes, chunkBytes) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv);
+  const args = parseArgs(process.argv.slice(2));
   const totalBytes = Math.floor(args.mb * 1024 * 1024);
   const chunkBytes = Math.floor(args.chunkKb * 1024);
   const modelUrl = 'http://localhost/models/lc0/bench.onnx';

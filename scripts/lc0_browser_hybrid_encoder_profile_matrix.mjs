@@ -3,17 +3,15 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { parseScriptArgs } from './lib/cli.mjs';
+import { waitForOutput } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 180_000;
 const ENCODER_KERNELS = ['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'];
 
-function usage() {
-  console.log(
-    `Usage: node scripts/lc0_browser_hybrid_encoder_profile_matrix.mjs [options]\n\nRuns repeated browser hybrid encoder stage profiles over encoder-kernel variants and writes a JSON matrix artifact.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_encoder_profile_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --encoder-kernels LIST\n                       Comma-separated encoder kernels: ${ENCODER_KERNELS.join(',')} (default hand)\n  --repeats N           Repeat each variant, alternating variants in repeat order (default 1)\n  --layers N            Encoder layers (default 10)\n  --profile-mode MODE   gpu-timestamp or sync-staged (default gpu-timestamp)\n  --profile-iters N     Profile iterations per cell (default 10)\n  --profile-warmup N    Profile warmup iterations per cell (default 2)\n  --input-backend MODE  Hybrid input backend: js, wgsl, or wasm (default js)\n  --timeout MS          Per-cell browser timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and URLs without running\n  -h, --help            Show this help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/lc0_browser_hybrid_encoder_profile_matrix.mjs [options]\n\nRuns repeated browser hybrid encoder stage profiles over encoder-kernel variants and writes a JSON matrix artifact.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_encoder_profile_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --encoder-kernels LIST\n                       Comma-separated encoder kernels: ${ENCODER_KERNELS.join(',')} (default hand)\n  --repeats N           Repeat each variant, alternating variants in repeat order (default 1)\n  --layers N            Encoder layers (default 10)\n  --profile-mode MODE   gpu-timestamp or sync-staged (default gpu-timestamp)\n  --profile-iters N     Profile iterations per cell (default 10)\n  --profile-warmup N    Profile warmup iterations per cell (default 2)\n  --input-backend MODE  Hybrid input backend: js, wgsl, or wasm (default js)\n  --timeout MS          Per-cell browser timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and URLs without running\n  -h, --help            Show this help\n`;
 
 function parseList(raw, parse, name) {
   const values = String(raw ?? '')
@@ -26,47 +24,34 @@ function parseList(raw, parse, name) {
 }
 
 function parseArgs(argv) {
-  const args = {
-    out: '/tmp/lc0_hybrid_encoder_profile_matrix.json',
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    encoderKernels: ['hand'],
-    repeats: 1,
-    layers: 10,
-    profileMode: 'gpu-timestamp',
-    profileIters: 10,
-    profileWarmup: 2,
-    inputBackend: 'js',
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
-    explicitBaseUrl: false,
-    dryRun: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--out') args.out = next();
-    else if (arg === '--host') args.host = next();
-    else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--base-url') {
-      args.baseUrl = next();
-      args.explicitBaseUrl = true;
-    } else if (arg === '--encoder-kernels') args.encoderKernels = parseList(next(), (value) => value, 'encoder-kernels');
-    else if (arg === '--repeats') args.repeats = Number(next());
-    else if (arg === '--layers') args.layers = Number(next());
-    else if (arg === '--profile-mode') args.profileMode = next();
-    else if (arg === '--profile-iters') args.profileIters = Number(next());
-    else if (arg === '--profile-warmup') args.profileWarmup = Number(next());
-    else if (arg === '--input-backend') args.inputBackend = next();
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      out: { type: 'string', default: '/tmp/lc0_hybrid_encoder_profile_matrix.json' },
+      host: { type: 'string', default: DEFAULT_HOST },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      'base-url': { type: 'string' },
+      'encoder-kernels': { type: 'string', default: 'hand' },
+      repeats: { type: 'string', default: '1' },
+      layers: { type: 'string', default: '10' },
+      'profile-mode': { type: 'string', default: 'gpu-timestamp' },
+      'profile-iters': { type: 'string', default: '10' },
+      'profile-warmup': { type: 'string', default: '2' },
+      'input-backend': { type: 'string', default: 'js' },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      'agent-browser': { type: 'string', default: process.env.AGENT_BROWSER_BIN ?? 'agent-browser' },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.port = Number(args.port);
+  args.repeats = Number(args.repeats);
+  args.layers = Number(args.layers);
+  args.profileIters = Number(args.profileIters);
+  args.profileWarmup = Number(args.profileWarmup);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  args.encoderKernels = parseList(args.encoderKernels, (value) => value, 'encoder-kernels');
+  args.explicitBaseUrl = args.baseUrl !== undefined;
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   for (const kernel of args.encoderKernels) if (!ENCODER_KERNELS.includes(kernel)) throw new Error(`Invalid encoder kernel: ${kernel}`);
   if (!['gpu-timestamp', 'sync-staged'].includes(args.profileMode)) throw new Error(`Invalid --profile-mode: ${args.profileMode}`);
@@ -87,8 +72,14 @@ function parseArgs(argv) {
 function startServer(args) {
   if (args.explicitBaseUrl) return null;
   const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
-  server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
-  server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
+  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
+  server.stdout.on('data', echoOutput);
+  server.stderr.on('data', echoOutput);
+  server.ready = waitForOutput(server, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs: 30_000,
+    label: `Vite dev server (port ${args.port})`,
+  });
   return server;
 }
 
@@ -226,7 +217,6 @@ async function runCell(args, combo, index, total) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const combos = [];
   for (let repeat = 1; repeat <= args.repeats; repeat++) {
     for (const encoderKernel of args.encoderKernels) combos.push({ repeat, encoderKernel });
@@ -238,6 +228,7 @@ async function main() {
   const server = startServer(args);
   const startedAt = new Date().toISOString();
   try {
+    if (server) await server.ready;
     await waitForServer(args.baseUrl);
     const cells = [];
     for (let i = 0; i < combos.length; i++) cells.push(await runCell(args, combos[i], i + 1, combos.length));

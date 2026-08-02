@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parsePgnGames } from '../src/chess/pgn.ts';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_OUT = 'artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_research.json';
 const DEFAULT_HOST = '127.0.0.1';
@@ -11,79 +12,57 @@ const DEFAULT_PORT = 5291;
 const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
 
-function usage() {
-  console.log(
-    `Usage: node --experimental-strip-types scripts/lc0_tvmjs_webgpu_fixed_suite.mjs [options]\n\nRuns a production-style fixed-position research bridge for the isolated LC0 TVMJS/WebGPU path.\nIt does not add TVMJS to the stable runtime registry or arena runtime UI; it delegates to lc0_tvmjs_webgpu_smoke.mjs and emits a fixed-suite-style report.\n\nOptions:\n  --fens FILE               Newline-separated FEN suite\n  --source-report PATH      Existing runtime arena JSON to derive LC0-to-move FENs from\n  --source-runtime NAME     Runtime in source report (default hybrid-wgsl-heads)\n  --source-game N           1-based game number in source runtime PGN (default 2)\n  --max-positions N         Max fixed positions to run (default 16)\n  --skip-plies N            Ignore source PGN positions before this absolute ply (default 0)\n  --batch N                 TVMJS batch artifact: 1, 4, or 8 (default 8)\n  --visits N                Fixed search visits per position (default 16)\n  --repeats N               Repeat each search row for timing stability (default 1)\n  --ort-compare MODE        ORT comparison: f16, f32, both, none (default f16)\n  --ort-ep EP               ORT EP for comparison: webgpu, wasm, webgpu,wasm (default webgpu)\n  --ort-model TPL           ORT model path template with {batch}/{dtype} placeholders (default t1 family)\n  --fixture-baseline PATH   Native fixture baseline JSONL served path\n  --tie-epsilon X           Forwarded to the child smoke: tolerate near-tie best-move mismatches within X prior mass\n  --stockfish-score-depth N Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N    Score TVMJS/ORT post-search moves by movetime\n  --suite-out PATH          Write normalized FEN suite to PATH (default next to --out)\n  --smoke-out PATH          Child TVMJS smoke artifact path (default next to --out)\n  --report-out PATH         Fixed-suite-style report path (default next to --out)\n  --out PATH                Aggregate bridge JSON path (default ${DEFAULT_OUT})\n  --base-url URL            Use existing dev server for child smoke\n  --host HOST               Vite host when child starts server (default ${DEFAULT_HOST})\n  --port N                  Vite port when child starts server (default ${DEFAULT_PORT})\n  --timeout MS              Child smoke timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN       Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --no-server               Forward --no-server to child smoke\n  --dry-run                 Print resolved commands and artifacts without running or writing\n  -h, --help                Show help\n`,
-  );
-}
+const USAGE = `Usage: node --experimental-strip-types scripts/lc0_tvmjs_webgpu_fixed_suite.mjs [options]\n\nRuns a production-style fixed-position research bridge for the isolated LC0 TVMJS/WebGPU path.\nIt does not add TVMJS to the stable runtime registry or arena runtime UI; it delegates to lc0_tvmjs_webgpu_smoke.mjs and emits a fixed-suite-style report.\n\nOptions:\n  --fens FILE               Newline-separated FEN suite\n  --source-report PATH      Existing runtime arena JSON to derive LC0-to-move FENs from\n  --source-runtime NAME     Runtime in source report (default hybrid-wgsl-heads)\n  --source-game N           1-based game number in source runtime PGN (default 2)\n  --max-positions N         Max fixed positions to run (default 16)\n  --skip-plies N            Ignore source PGN positions before this absolute ply (default 0)\n  --batch N                 TVMJS batch artifact: 1, 4, or 8 (default 8)\n  --visits N                Fixed search visits per position (default 16)\n  --repeats N               Repeat each search row for timing stability (default 1)\n  --ort-compare MODE        ORT comparison: f16, f32, both, none (default f16)\n  --ort-ep EP               ORT EP for comparison: webgpu, wasm, webgpu,wasm (default webgpu)\n  --ort-model TPL           ORT model path template with {batch}/{dtype} placeholders (default t1 family)\n  --fixture-baseline PATH   Native fixture baseline JSONL served path\n  --tie-epsilon X           Forwarded to the child smoke: tolerate near-tie best-move mismatches within X prior mass\n  --stockfish-score-depth N Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N    Score TVMJS/ORT post-search moves by movetime\n  --suite-out PATH          Write normalized FEN suite to PATH (default next to --out)\n  --smoke-out PATH          Child TVMJS smoke artifact path (default next to --out)\n  --report-out PATH         Fixed-suite-style report path (default next to --out)\n  --out PATH                Aggregate bridge JSON path (default ${DEFAULT_OUT})\n  --base-url URL            Use existing dev server for child smoke\n  --host HOST               Vite host when child starts server (default ${DEFAULT_HOST})\n  --port N                  Vite port when child starts server (default ${DEFAULT_PORT})\n  --timeout MS              Child smoke timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN       Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --no-server               Forward --no-server to child smoke\n  --dry-run                 Print resolved commands and artifacts without running or writing\n  -h, --help                Show help\n`;
 
 function parseArgs(argv) {
-  const args = {
-    fensFile: '',
-    sourceReport: '',
-    sourceRuntime: 'hybrid-wgsl-heads',
-    sourceGame: 2,
-    maxPositions: 16,
-    skipPlies: 0,
-    batch: 8,
-    visits: 16,
-    repeats: 1,
-    ortCompare: 'f16',
-    ortEp: 'webgpu',
-    stockfishScoreDepth: undefined,
-    stockfishScoreMs: undefined,
-    out: DEFAULT_OUT,
-    suiteOut: '',
-    smokeOut: '',
-    reportOut: '',
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    agentBrowser: DEFAULT_AGENT_BROWSER,
-    baseUrl: '',
-    noServer: false,
-    dryRun: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--fens') args.fensFile = next();
-    else if (arg === '--source-report') args.sourceReport = next();
-    else if (arg === '--source-runtime') args.sourceRuntime = next();
-    else if (arg === '--source-game') args.sourceGame = Number(next());
-    else if (arg === '--max-positions') args.maxPositions = Number(next());
-    else if (arg === '--skip-plies') args.skipPlies = Number(next());
-    else if (arg === '--batch') args.batch = Number(next());
-    else if (arg === '--manifest') args.manifest = next();
-    else if (arg === '--visits') args.visits = Number(next());
-    else if (arg === '--repeats') args.repeats = Number(next());
-    else if (arg === '--ort-compare') args.ortCompare = next();
-    else if (arg === '--ort-ep') args.ortEp = next();
-    else if (arg === '--ort-model') args.ortModel = next();
-    else if (arg === '--fixture-baseline') args.fixtureBaseline = next();
-    else if (arg === '--tie-epsilon') args.tieEpsilon = Number(next());
-    else if (arg === '--stockfish-score-depth') args.stockfishScoreDepth = Number(next());
-    else if (arg === '--stockfish-score-ms') args.stockfishScoreMs = Number(next());
-    else if (arg === '--suite-out') args.suiteOut = next();
-    else if (arg === '--smoke-out') args.smokeOut = next();
-    else if (arg === '--report-out') args.reportOut = next();
-    else if (arg === '--out') args.out = next();
-    else if (arg === '--base-url') {
-      args.baseUrl = next();
-      args.noServer = true;
-    } else if (arg === '--host') args.host = next();
-    else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
-  if (args.help) return args;
+  const args = parseScriptArgs(argv, {
+    options: {
+      fens: { type: 'string', default: '' },
+      'source-report': { type: 'string', default: '' },
+      'source-runtime': { type: 'string', default: 'hybrid-wgsl-heads' },
+      'source-game': { type: 'string', default: '2' },
+      'max-positions': { type: 'string', default: '16' },
+      'skip-plies': { type: 'string', default: '0' },
+      batch: { type: 'string', default: '8' },
+      manifest: { type: 'string' },
+      visits: { type: 'string', default: '16' },
+      repeats: { type: 'string', default: '1' },
+      'ort-compare': { type: 'string', default: 'f16' },
+      'ort-ep': { type: 'string', default: 'webgpu' },
+      'ort-model': { type: 'string' },
+      'fixture-baseline': { type: 'string' },
+      'tie-epsilon': { type: 'string' },
+      'stockfish-score-depth': { type: 'string' },
+      'stockfish-score-ms': { type: 'string' },
+      'suite-out': { type: 'string', default: '' },
+      'smoke-out': { type: 'string', default: '' },
+      'report-out': { type: 'string', default: '' },
+      out: { type: 'string', default: DEFAULT_OUT },
+      'base-url': { type: 'string', default: '' },
+      host: { type: 'string', default: DEFAULT_HOST },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      'agent-browser': { type: 'string', default: DEFAULT_AGENT_BROWSER },
+      'no-server': { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.fensFile = args.fens;
+  delete args.fens;
+  args.sourceGame = Number(args.sourceGame);
+  args.maxPositions = Number(args.maxPositions);
+  args.skipPlies = Number(args.skipPlies);
+  args.batch = Number(args.batch);
+  args.visits = Number(args.visits);
+  args.repeats = Number(args.repeats);
+  args.port = Number(args.port);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  if (args.tieEpsilon !== undefined) args.tieEpsilon = Number(args.tieEpsilon);
+  if (args.stockfishScoreDepth !== undefined) args.stockfishScoreDepth = Number(args.stockfishScoreDepth);
+  if (args.stockfishScoreMs !== undefined) args.stockfishScoreMs = Number(args.stockfishScoreMs);
+  if (args.baseUrl) args.noServer = true;
   if (!args.fensFile && !args.sourceReport) throw new Error('expected --fens FILE or --source-report PATH');
   if (args.fensFile && args.sourceReport) throw new Error('use only one of --fens or --source-report');
   for (const name of ['sourceGame', 'maxPositions', 'batch', 'visits', 'repeats', 'port', 'timeoutMs']) {
@@ -221,10 +200,6 @@ function childCommands(args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    usage();
-    return;
-  }
   const fens = await loadFens(args);
   if (!fens.length) throw new Error('No fixed-suite FENs resolved');
   args.fenCount = fens.length;

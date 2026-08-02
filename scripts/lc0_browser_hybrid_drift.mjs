@@ -7,6 +7,8 @@ import { boardToFen } from '../src/chess/board.ts';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { applyLc0RuntimePreset, LC0_WEBGPU_RESEARCH_B4_PRESET, lc0RuntimeConfiguration } from './lc0_runtime_presets.mjs';
+import { parseScriptArgs } from './lib/cli.mjs';
+import { waitForOutput } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
@@ -16,57 +18,45 @@ const DEFAULT_F32_MODEL = '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2
 const PARALLEL_BASELINE_MIN_MEMORY_GIB = 24;
 const PARALLEL_BASELINE_MAX_FIXTURES = 16;
 
-function usage() {
-  console.log(
-    `Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_drift.mjs [options]\n\nCompares browser hybrid lc0web WGSL encoder + ORT heads output against f32 ONNX and native BLAS fixture priors.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --limit N            Number of native fixtures to evaluate (default ${DEFAULT_LIMIT})\n  --layers N           Encoder layers for hybrid path (default 10)\n  --preset NAME        Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --input-backend MODE Hybrid input backend: js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                       Hybrid legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads)\n  --encoder-kernel MODE\n                       Hybrid encoder kernels: hand, tvm-packed-f16, mixed-tvm-ffn, or mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project (default hand)\n  --f32-model PATH     f32 ONNX baseline (default ${DEFAULT_F32_MODEL})\n  --baseline-mode MODE Run browser hybrid and f32 baseline as auto|parallel|serial (default auto)\n  --parallel-baseline  Alias for --baseline-mode parallel\n  --serial-baseline    Alias for --baseline-mode serial\n  --no-server          Do not auto-start Vite\n  -h, --help           Show this help\n`,
-  );
-}
+const USAGE = `Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_drift.mjs [options]\n\nCompares browser hybrid lc0web WGSL encoder + ORT heads output against f32 ONNX and native BLAS fixture priors.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --limit N            Number of native fixtures to evaluate (default ${DEFAULT_LIMIT})\n  --layers N           Encoder layers for hybrid path (default 10)\n  --preset NAME        Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --input-backend MODE Hybrid input backend: js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                       Hybrid legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads)\n  --encoder-kernel MODE\n                       Hybrid encoder kernels: hand, tvm-packed-f16, mixed-tvm-ffn, or mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project (default hand)\n  --f32-model PATH     f32 ONNX baseline (default ${DEFAULT_F32_MODEL})\n  --baseline-mode MODE Run browser hybrid and f32 baseline as auto|parallel|serial (default auto)\n  --parallel-baseline  Alias for --baseline-mode parallel\n  --serial-baseline    Alias for --baseline-mode serial\n  --no-server          Do not auto-start Vite\n  -h, --help           Show this help\n`;
+
+const FLAG_ALIASES = { '--hybrid-legal-priors': '--legal-priors-backend' };
 
 function parseArgs(argv) {
-  const args = {
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    limit: DEFAULT_LIMIT,
-    layers: 10,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
-    session: process.env.AGENT_BROWSER_SESSION ?? `lc0-hybrid-drift-${process.pid}`,
-    f32Model: DEFAULT_F32_MODEL,
-    preset: '',
-    headBackend: 'ort',
-    inputBackend: 'js',
-    legalPriorsBackend: 'js',
-    encoderKernel: 'hand',
-    baselineMode: 'auto',
-    noServer: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--base-url') args.baseUrl = next();
-    else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--host') args.host = next();
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--session') args.session = next();
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--limit') args.limit = Number(next());
-    else if (arg === '--layers') args.layers = Number(next());
-    else if (arg === '--preset') args.preset = next();
-    else if (arg === '--head-backend') args.headBackend = next();
-    else if (arg === '--input-backend') args.inputBackend = next();
-    else if (arg === '--legal-priors-backend' || arg === '--hybrid-legal-priors') args.legalPriorsBackend = next();
-    else if (arg === '--encoder-kernel') args.encoderKernel = next();
-    else if (arg === '--f32-model') args.f32Model = next();
-    else if (arg === '--baseline-mode') args.baselineMode = next();
-    else if (arg === '--parallel-baseline') args.baselineMode = 'parallel';
-    else if (arg === '--serial-baseline') args.baselineMode = 'serial';
-    else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  argv = argv.map((arg) => FLAG_ALIASES[arg] ?? arg);
+  const args = parseScriptArgs(argv, {
+    options: {
+      'base-url': { type: 'string' },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      host: { type: 'string', default: DEFAULT_HOST },
+      'agent-browser': { type: 'string', default: process.env.AGENT_BROWSER_BIN ?? 'agent-browser' },
+      session: { type: 'string', default: process.env.AGENT_BROWSER_SESSION ?? `lc0-hybrid-drift-${process.pid}` },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      limit: { type: 'string', default: String(DEFAULT_LIMIT) },
+      layers: { type: 'string', default: '10' },
+      preset: { type: 'string', default: '' },
+      'head-backend': { type: 'string', default: 'ort' },
+      'input-backend': { type: 'string', default: 'js' },
+      'legal-priors-backend': { type: 'string', default: 'js' },
+      'encoder-kernel': { type: 'string', default: 'hand' },
+      'f32-model': { type: 'string', default: DEFAULT_F32_MODEL },
+      'baseline-mode': { type: 'string', default: 'auto' },
+      'parallel-baseline': { type: 'boolean', default: false },
+      'serial-baseline': { type: 'boolean', default: false },
+      'no-server': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.port = Number(args.port);
+  args.limit = Number(args.limit);
+  args.layers = Number(args.layers);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  const baselineFlagIndex = Math.max(argv.lastIndexOf('--baseline-mode'), argv.lastIndexOf('--parallel-baseline'), argv.lastIndexOf('--serial-baseline'));
+  if (baselineFlagIndex >= 0 && argv[baselineFlagIndex] === '--parallel-baseline') args.baselineMode = 'parallel';
+  if (baselineFlagIndex >= 0 && argv[baselineFlagIndex] === '--serial-baseline') args.baselineMode = 'serial';
+  delete args.parallelBaseline;
+  delete args.serialBaseline;
   applyLc0RuntimePreset(args, argv);
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (!['auto', 'parallel', 'serial'].includes(args.baselineMode)) throw new Error(`Invalid --baseline-mode: ${args.baselineMode}`);
@@ -152,8 +142,14 @@ async function waitForServer(baseUrl, timeoutMs) {
 function startServer(args) {
   if (args.noServer) return null;
   const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
-  server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
-  server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
+  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
+  server.stdout.on('data', echoOutput);
+  server.stderr.on('data', echoOutput);
+  server.ready = waitForOutput(server, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs: 30_000,
+    label: `Vite dev server (port ${args.port})`,
+  });
   return server;
 }
 
@@ -303,9 +299,9 @@ async function runBrowserAndF32(args, nativeRecords) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const server = startServer(args);
   try {
+    if (server) await server.ready;
     await waitForServer(args.baseUrl, 30_000);
     const nativeRecords = [...readJsonl('fixtures/lc0/native_fen_only_blas.jsonl'), ...readJsonl('fixtures/lc0/native_history_blas.jsonl')].slice(
       0,

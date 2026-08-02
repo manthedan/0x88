@@ -3,61 +3,50 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { parseScriptArgs } from './lib/cli.mjs';
+import { spawnCapture } from './lib/process.mjs';
+import { waitForOutput } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5203;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/maia3_browser_smoke.mjs [options]\n\nRuns a browser smoke for the standalone Maia3 evaluator. The page creates and disposes evaluator workers, checks edge-position legal masking, records top-5 human-policy moves and WDL probabilities, and fails on browser errors.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --cycles N            Evaluator create/evaluate/dispose cycles (default 2)\n  --self-elo N          Maia3 self Elo (default 1500)\n  --oppo-elo N          Maia3 opponent Elo (default self Elo)\n  --style MODE          argmax or sample (default argmax)\n  --temperature X       Sampling temperature passed to the page (default 1)\n  --top-p X             Nucleus sampling top-p passed to the page (default 1)\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --dry-run             Print smoke URL and exit\n  -h, --help            Show this help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/maia3_browser_smoke.mjs [options]\n\nRuns a browser smoke for the standalone Maia3 evaluator. The page creates and disposes evaluator workers, checks edge-position legal masking, records top-5 human-policy moves and WDL probabilities, and fails on browser errors.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --cycles N            Evaluator create/evaluate/dispose cycles (default 2)\n  --self-elo N          Maia3 self Elo (default 1500)\n  --oppo-elo N          Maia3 opponent Elo (default self Elo)\n  --style MODE          argmax or sample (default argmax)\n  --temperature X       Sampling temperature passed to the page (default 1)\n  --top-p X             Nucleus sampling top-p passed to the page (default 1)\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --dry-run             Print smoke URL and exit\n  -h, --help            Show this help\n`;
 
 function parseArgs(argv) {
-  const args = {
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    agentBrowser: DEFAULT_AGENT_BROWSER,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    noServer: false,
-    explicitBaseUrl: false,
-    dryRun: false,
-    cycles: 2,
-    selfElo: 1500,
-    style: 'argmax',
-    temperature: 1,
-    topP: 1,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--base-url') {
-      args.baseUrl = next();
-      args.explicitBaseUrl = true;
-    } else if (arg === '--host') args.host = next();
-    else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--cycles') args.cycles = Number(next());
-    else if (arg === '--self-elo') args.selfElo = Number(next());
-    else if (arg === '--oppo-elo') args.oppoElo = Number(next());
-    else if (arg === '--style') args.style = next();
-    else if (arg === '--temperature') args.temperature = Number(next());
-    else if (arg === '--top-p') args.topP = Number(next());
-    else if (arg === '--ort-ep') args.ortEp = next();
-    else if (arg === '--grid-size') args.gridSize = Number(next());
-    else if (arg === '--model') args.model = next();
-    else if (arg === '--out') args.out = next();
-    else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      'base-url': { type: 'string' },
+      host: { type: 'string', default: DEFAULT_HOST },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      'agent-browser': { type: 'string', default: DEFAULT_AGENT_BROWSER },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      cycles: { type: 'string', default: '2' },
+      'self-elo': { type: 'string', default: '1500' },
+      'oppo-elo': { type: 'string' },
+      style: { type: 'string', default: 'argmax' },
+      temperature: { type: 'string', default: '1' },
+      'top-p': { type: 'string', default: '1' },
+      'ort-ep': { type: 'string' },
+      'grid-size': { type: 'string' },
+      model: { type: 'string' },
+      out: { type: 'string' },
+      'no-server': { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.explicitBaseUrl = args.baseUrl !== undefined;
+  args.port = Number(args.port);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  args.cycles = Number(args.cycles);
+  args.selfElo = Number(args.selfElo);
+  if (args.oppoElo !== undefined) args.oppoElo = Number(args.oppoElo);
+  args.temperature = Number(args.temperature);
+  args.topP = Number(args.topP);
+  if (args.gridSize !== undefined) args.gridSize = Number(args.gridSize);
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   if (!args.oppoElo) args.oppoElo = args.selfElo;
@@ -74,67 +63,17 @@ function parseArgs(argv) {
   return args;
 }
 
-function spawnCapture(command, commandArgs, options = {}) {
-  return new Promise((resolve, reject) => {
-    const { timeoutMs, echoStderr, ...spawnOptions } = options;
-    const child = spawn(command, commandArgs, { stdio: ['ignore', 'pipe', 'pipe'], ...spawnOptions });
-    const chunks = { stdout: [], stderr: [] };
-    let settled = false;
-    const finish = (fn, value) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      fn(value);
-    };
-    const timer = timeoutMs
-      ? setTimeout(() => {
-          child.kill('SIGKILL');
-          finish(reject, new Error(`${command} ${commandArgs.join(' ')} timed out after ${timeoutMs}ms`));
-        }, timeoutMs)
-      : undefined;
-    child.stdout.on('data', (chunk) => chunks.stdout.push(chunk));
-    child.stderr.on('data', (chunk) => {
-      chunks.stderr.push(chunk);
-      if (echoStderr) process.stderr.write(chunk);
-    });
-    child.on('error', (error) => finish(reject, error));
-    child.on('close', (status) => {
-      const stdout = Buffer.concat(chunks.stdout).toString('utf8');
-      const stderr = Buffer.concat(chunks.stderr).toString('utf8');
-      if (status !== 0) return finish(reject, new Error(`${command} ${commandArgs.join(' ')} failed with ${status}: ${stderr || stdout}`));
-      finish(resolve, { stdout, stderr });
-    });
-  });
-}
-
 function startServer(args) {
   if (args.noServer) return null;
   const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let output = '';
-  let readySettled = false;
-  server.ready = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => settle(reject, new Error(`Vite dev server did not report readiness on port ${args.port}: ${output.trim()}`)), 30_000);
-    const settle = (fn, value) => {
-      if (readySettled) return;
-      readySettled = true;
-      clearTimeout(timer);
-      fn(value);
-    };
-    const onOutput = (chunk) => {
-      output += chunk.toString('utf8');
-      if (/ready in \d+\s*ms/.test(output) || output.includes(`:${args.port}/`)) settle(resolve);
-    };
-    server.stdout.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      onOutput(chunk);
-    });
-    server.stderr.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      onOutput(chunk);
-    });
-    server.on('exit', (status, signal) => settle(reject, new Error(`Vite dev server exited before ready (${status ?? signal}): ${output.trim()}`)));
+  server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
+  server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
+  server.ready = waitForOutput(server, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs: 30_000,
+    label: 'Vite dev server',
   });
   return server;
 }
@@ -157,7 +96,7 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
 
 async function runAgent(args, commandArgs, timeoutMs, session) {
   const fullArgs = ['--json', ...(session ? ['--session', session] : []), ...commandArgs];
-  const { stdout } = await spawnCapture(args.agentBrowser, fullArgs, { echoStderr: true, timeoutMs });
+  const stdout = await spawnCapture(args.agentBrowser, fullArgs, { echoStderr: true, timeoutMs });
   const parsed = stdout ? JSON.parse(stdout.trim()) : null;
   if (parsed && typeof parsed === 'object' && 'success' in parsed) {
     if (parsed.success === false) throw new Error(`${args.agentBrowser} ${commandArgs.join(' ')} failed: ${parsed.error ?? stdout}`);
@@ -262,10 +201,6 @@ async function runSmoke(args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    usage();
-    return;
-  }
   if (args.dryRun) {
     console.log(String(smokeUrl(args)));
     return;

@@ -5,18 +5,18 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parsePgnGames } from '../src/chess/pgn.ts';
 import { applyLc0RuntimePreset, LC0_WEBGPU_RESEARCH_B4_PRESET, lc0RuntimeConfiguration } from './lc0_runtime_presets.mjs';
+import { parseScriptArgs } from './lib/cli.mjs';
+import { waitForOutput } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5180;
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_RUNTIMES = ['onnx', 'hybrid-ort-heads', 'hybrid-wgsl-heads'];
 
-function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_runtime_fixed_suite.mjs [options]\n\nRuns the same fixed LC0-to-move positions in the browser for each LC0 runtime, then scores each LC0 move with Stockfish on the resulting position.\n\nOptions:\n  --source-report PATH      Existing runtime arena JSON to derive positions from\n  --source-runtime NAME     Runtime in source report (default hybrid-wgsl-heads)\n  --source-game N           1-based game number in that runtime PGN (default 2)\n  --max-positions N         Max LC0-to-move positions to extract (default 16)\n  --skip-plies N            Ignore positions before this absolute ply (default 0)\n  --fens FILE               Use newline-separated FENs instead of --source-report\n  --runtimes LIST           Comma-separated runtimes (default ${DEFAULT_RUNTIMES.join(',')})\n  --preset NAME             Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --movetime MS             LC0 movetime per fixed position (default 1000)\n  --stockfish-score-ms MS   Stockfish movetime to score each post-LC0 position (default 500)\n  --stockfish-score-depth N Use fixed Stockfish depth for scoring instead of movetime\n  --cache N                 LC0 NN cache entries (default 2048)\n  --lc0-batch-size N        LC0 PUCT leaf batch size passed to arena search (default 1)\n  --batch-pipeline-depth N  LC0 batch pipeline depth (default 1; >1 is speculative search semantics)\n  --input-backend NAME      Hybrid input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME     Hybrid encoder kernel: hand, tvm-packed-f16, mixed-tvm-ffn, or mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project (default hand)
+const USAGE = `Usage: node --experimental-strip-types scripts/lc0_browser_runtime_fixed_suite.mjs [options]\n\nRuns the same fixed LC0-to-move positions in the browser for each LC0 runtime, then scores each LC0 move with Stockfish on the resulting position.\n\nOptions:\n  --source-report PATH      Existing runtime arena JSON to derive positions from\n  --source-runtime NAME     Runtime in source report (default hybrid-wgsl-heads)\n  --source-game N           1-based game number in that runtime PGN (default 2)\n  --max-positions N         Max LC0-to-move positions to extract (default 16)\n  --skip-plies N            Ignore positions before this absolute ply (default 0)\n  --fens FILE               Use newline-separated FENs instead of --source-report\n  --runtimes LIST           Comma-separated runtimes (default ${DEFAULT_RUNTIMES.join(',')})\n  --preset NAME             Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --movetime MS             LC0 movetime per fixed position (default 1000)\n  --stockfish-score-ms MS   Stockfish movetime to score each post-LC0 position (default 500)\n  --stockfish-score-depth N Use fixed Stockfish depth for scoring instead of movetime\n  --cache N                 LC0 NN cache entries (default 2048)\n  --lc0-batch-size N        LC0 PUCT leaf batch size passed to arena search (default 1)\n  --batch-pipeline-depth N  LC0 batch pipeline depth (default 1; >1 is speculative search semantics)\n  --input-backend NAME      Hybrid input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME     Hybrid encoder kernel: hand, tvm-packed-f16, mixed-tvm-ffn, or mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project (default hand)
   --legal-priors-backend NAME
                             Hybrid legal-priors backend: js, wasm, or gpu (default js; gpu requires WGSL heads)
-  --out PATH                Write full JSON report to PATH\n  --summary-only            Print compact summary only\n  --base-url URL            Use existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N                  Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST               Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN       Browser automation binary (default agent-browser)\n  --session NAME            agent-browser session prefix\n  --timeout MS              Per-runtime browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --no-server               Do not auto-start Vite\n  -h, --help                Show this help\n`);
-}
+  --out PATH                Write full JSON report to PATH\n  --summary-only            Print compact summary only\n  --base-url URL            Use existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N                  Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST               Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN       Browser automation binary (default agent-browser)\n  --session NAME            agent-browser session prefix\n  --timeout MS              Per-runtime browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --no-server               Do not auto-start Vite\n  -h, --help                Show this help\n`;
 
 function sanitizeAgentBrowserSessionName(value) {
   const safe = String(value).replace(/[^A-Za-z0-9_.-]+/g, '-');
@@ -25,76 +25,66 @@ function sanitizeAgentBrowserSessionName(value) {
   return `${safe.slice(0, 49)}-${hash}`;
 }
 
+const FLAG_ALIASES = {
+  '--batch-size': '--lc0-batch-size',
+  '--batch': '--lc0-batch-size',
+  '--pipeline-depth': '--batch-pipeline-depth',
+  '--encoder-kernel-variant': '--encoder-kernel',
+  '--hybrid-legal-priors': '--legal-priors-backend',
+};
+
 function parseArgs(argv) {
-  const args = {
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
-    session: process.env.AGENT_BROWSER_SESSION ?? `lc0-fixed-suite-${process.pid}`,
-    runtimes: [...DEFAULT_RUNTIMES],
-    preset: '',
-    sourceReport: '',
-    sourceRuntime: 'hybrid-wgsl-heads',
-    sourceGame: 2,
-    maxPositions: 16,
-    skipPlies: 0,
-    fensFile: '',
-    movetime: 1000,
-    stockfishScoreMs: 500,
-    stockfishScoreDepth: undefined,
-    cache: 2048,
-    lc0BatchSize: 1,
-    batchPipelineDepth: 1,
-    inputBackend: 'js',
-    encoderKernel: 'hand',
-    legalPriorsBackend: 'js',
-    out: '',
-    summaryOnly: false,
-    noServer: false,
-    explicitBaseUrl: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--source-report') args.sourceReport = next();
-    else if (arg === '--source-runtime') args.sourceRuntime = next();
-    else if (arg === '--source-game') args.sourceGame = Number(next());
-    else if (arg === '--max-positions') args.maxPositions = Number(next());
-    else if (arg === '--skip-plies') args.skipPlies = Number(next());
-    else if (arg === '--fens') args.fensFile = next();
-    else if (arg === '--runtimes')
-      args.runtimes = next()
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-    else if (arg === '--preset') args.preset = next();
-    else if (arg === '--movetime') args.movetime = Number(next());
-    else if (arg === '--stockfish-score-ms') args.stockfishScoreMs = Number(next());
-    else if (arg === '--stockfish-score-depth') args.stockfishScoreDepth = Number(next());
-    else if (arg === '--cache') args.cache = Number(next());
-    else if (arg === '--lc0-batch-size' || arg === '--batch-size' || arg === '--batch') args.lc0BatchSize = Number(next());
-    else if (arg === '--batch-pipeline-depth' || arg === '--pipeline-depth') args.batchPipelineDepth = Number(next());
-    else if (arg === '--input-backend') args.inputBackend = next();
-    else if (arg === '--encoder-kernel' || arg === '--encoder-kernel-variant') args.encoderKernel = next();
-    else if (arg === '--legal-priors-backend' || arg === '--hybrid-legal-priors') args.legalPriorsBackend = next();
-    else if (arg === '--out') args.out = next();
-    else if (arg === '--summary-only') args.summaryOnly = true;
-    else if (arg === '--base-url') {
-      args.baseUrl = next();
-      args.explicitBaseUrl = true;
-    } else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--host') args.host = next();
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--session') args.session = next();
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  argv = argv.map((arg) => FLAG_ALIASES[arg] ?? arg);
+  const args = parseScriptArgs(argv, {
+    options: {
+      host: { type: 'string', default: DEFAULT_HOST },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      'agent-browser': { type: 'string', default: process.env.AGENT_BROWSER_BIN ?? 'agent-browser' },
+      session: { type: 'string', default: process.env.AGENT_BROWSER_SESSION ?? `lc0-fixed-suite-${process.pid}` },
+      runtimes: { type: 'string', default: DEFAULT_RUNTIMES.join(',') },
+      preset: { type: 'string', default: '' },
+      'source-report': { type: 'string', default: '' },
+      'source-runtime': { type: 'string', default: 'hybrid-wgsl-heads' },
+      'source-game': { type: 'string', default: '2' },
+      'max-positions': { type: 'string', default: '16' },
+      'skip-plies': { type: 'string', default: '0' },
+      fens: { type: 'string' },
+      movetime: { type: 'string', default: '1000' },
+      'stockfish-score-ms': { type: 'string', default: '500' },
+      'stockfish-score-depth': { type: 'string' },
+      cache: { type: 'string', default: '2048' },
+      'lc0-batch-size': { type: 'string', default: '1' },
+      'batch-pipeline-depth': { type: 'string', default: '1' },
+      'input-backend': { type: 'string', default: 'js' },
+      'encoder-kernel': { type: 'string', default: 'hand' },
+      'legal-priors-backend': { type: 'string', default: 'js' },
+      out: { type: 'string', default: '' },
+      'summary-only': { type: 'boolean', default: false },
+      'base-url': { type: 'string' },
+      'no-server': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.port = Number(args.port);
+  args.sourceGame = Number(args.sourceGame);
+  args.maxPositions = Number(args.maxPositions);
+  args.skipPlies = Number(args.skipPlies);
+  args.movetime = Number(args.movetime);
+  args.stockfishScoreMs = Number(args.stockfishScoreMs);
+  if (args.stockfishScoreDepth !== undefined) args.stockfishScoreDepth = Number(args.stockfishScoreDepth);
+  args.cache = Number(args.cache);
+  args.lc0BatchSize = Number(args.lc0BatchSize);
+  args.batchPipelineDepth = Number(args.batchPipelineDepth);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  args.runtimes = args.runtimes
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  args.fensFile = args.fens ?? '';
+  delete args.fens;
+  args.explicitBaseUrl = args.baseUrl !== undefined;
   applyLc0RuntimePreset(args, argv);
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
@@ -244,8 +234,14 @@ async function waitForServer(baseUrl, timeoutMs) {
 function startServer(args) {
   if (args.noServer) return null;
   const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
-  server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
-  server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
+  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
+  server.stdout.on('data', echoOutput);
+  server.stderr.on('data', echoOutput);
+  server.ready = waitForOutput(server, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs: 30_000,
+    label: `Vite dev server (port ${args.port})`,
+  });
   return server;
 }
 
@@ -337,11 +333,11 @@ function addRelativeLoss(summary, results) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const fens = await loadFixedFens(args);
   if (!fens.length) throw new Error('No fixed positions extracted');
   const server = startServer(args);
   try {
+    if (server) await server.ready;
     await waitForServer(args.baseUrl, 30_000);
     const results = [];
     for (const runtime of args.runtimes) results.push(await runOne(args, runtime, fens));

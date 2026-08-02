@@ -2,29 +2,20 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { maia3MoveIndex } from '../src/lc0/maia3.ts';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_UPSTREAM = process.env.MAIA_PLATFORM_FRONTEND_DIR ?? '/tmp/maia-platform-frontend';
 
-function usage() {
-  console.log(
-    `Usage: node --experimental-strip-types scripts/maia3_upstream_move_map_parity.mjs [options]\n\nCompares this project's algorithmic Maia3 4352-move indexer against the upstream CSSLab maia-platform-frontend JSON move maps. It reads upstream files from a local clone and does not vendor/copy them.\n\nOptions:\n  --upstream-dir PATH   Local maia-platform-frontend checkout (default ${DEFAULT_UPSTREAM})\n  --out PATH            Optional JSON artifact path\n  -h, --help            Show this help\n`,
-  );
-}
+const USAGE = `Usage: node --experimental-strip-types scripts/maia3_upstream_move_map_parity.mjs [options]\n\nCompares this project's algorithmic Maia3 4352-move indexer against the upstream CSSLab maia-platform-frontend JSON move maps. It reads upstream files from a local clone and does not vendor/copy them.\n\nOptions:\n  --upstream-dir PATH   Local maia-platform-frontend checkout (default ${DEFAULT_UPSTREAM})\n  --out PATH            Optional JSON artifact path\n  -h, --help            Show this help\n`;
 
 function parseArgs(argv) {
-  const args = { upstreamDir: DEFAULT_UPSTREAM };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--upstream-dir') args.upstreamDir = next();
-    else if (arg === '--out') args.out = next();
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
-  return args;
+  return parseScriptArgs(argv, {
+    options: {
+      'upstream-dir': { type: 'string', default: DEFAULT_UPSTREAM },
+      out: { type: 'string' },
+    },
+    usage: USAGE,
+  });
 }
 
 async function readJson(path) {
@@ -33,10 +24,6 @@ async function readJson(path) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    usage();
-    return;
-  }
   const dataDir = join(args.upstreamDir, 'src/lib/engine/data');
   const forwardPath = join(dataDir, 'all_moves_maia3.json');
   const reversePath = join(dataDir, 'all_moves_maia3_reversed.json');

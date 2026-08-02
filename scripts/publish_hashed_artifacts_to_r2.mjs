@@ -13,88 +13,30 @@ import {
   buildArtifactReleaseCatalog,
   isArtifactChannelManifest,
 } from './engine_artifact_registry.mjs';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_ARTIFACT_BASE = 'https://assets.0x88.app';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/publish_hashed_artifacts_to_r2.mjs --release .local-dev-artifacts/artifact-releases/releases/ID.json --bucket BUCKET [options]\n\nOptions:\n  --root DIR          Repository or materialized release root (default .)\n  --execute           Actually call wrangler/AWS CLI; default is dry-run\n  --allow-missing     Skip artifacts whose localPath is absent\n  --wrangler-bin BIN  Wrangler binary (default wrangler)\n  --aws-bin BIN       AWS CLI binary used for atomic immutable object creation (default aws)\n  --r2-endpoint URL   R2 S3 endpoint (or R2_ENDPOINT / R2_ACCOUNT_ID)\n  --channel-manifest PATH  Optional generated channel manifest to publish after the release\n  --artifact-base URL Public artifact origin used to probe relative representation URLs (default https://assets.0x88.app)\n  --probe-existing    In dry-run mode, validate representation URLs and mark existing uploads as skipped\n  -h, --help          Show help\n\nBoth legacy v1 releases and representation-aware v2 releases are accepted. V2 identity\nobjects use artifacts/sha256/<decoded-sha256>/identity; Brotli objects use\nartifacts/sha256/<decoded-sha256>/br/<encoded-sha256>. Existing v2 bodies are\nvalidated with immutable HEAD metadata plus decoded full-body integrity until trusted\nR2 verification metadata is available. Legacy filename-keyed bodies retain v1 checks. Immutable bodies and release manifests are\ncreated atomically with S3 If-None-Match and channel pointers are published last.\n`,
-  );
-}
+const USAGE = `Usage: node scripts/publish_hashed_artifacts_to_r2.mjs --release .local-dev-artifacts/artifact-releases/releases/ID.json --bucket BUCKET [options]\n\nOptions:\n  --root DIR          Repository or materialized release root (default .)\n  --execute           Actually call wrangler/AWS CLI; default is dry-run\n  --allow-missing     Skip artifacts whose localPath is absent\n  --wrangler-bin BIN  Wrangler binary (default wrangler)\n  --aws-bin BIN       AWS CLI binary used for atomic immutable object creation (default aws)\n  --r2-endpoint URL   R2 S3 endpoint (or R2_ENDPOINT / R2_ACCOUNT_ID)\n  --channel-manifest PATH  Optional generated channel manifest to publish after the release\n  --artifact-base URL Public artifact origin used to probe relative representation URLs (default https://assets.0x88.app)\n  --probe-existing    In dry-run mode, validate representation URLs and mark existing uploads as skipped\n  -h, --help          Show help\n\nBoth legacy v1 releases and representation-aware v2 releases are accepted. V2 identity\nobjects use artifacts/sha256/<decoded-sha256>/identity; Brotli objects use\nartifacts/sha256/<decoded-sha256>/br/<encoded-sha256>. Existing v2 bodies are\nvalidated with immutable HEAD metadata plus decoded full-body integrity until trusted\nR2 verification metadata is available. Legacy filename-keyed bodies retain v1 checks. Immutable bodies and release manifests are\ncreated atomically with S3 If-None-Match and channel pointers are published last.\n`;
 
 function parseArgs(argv) {
   const accountId = process.env.R2_ACCOUNT_ID ?? process.env.CLOUDFLARE_ACCOUNT_ID;
-  const args = {
-    root: '.',
-    execute: false,
-    allowMissing: false,
-    wranglerBin: 'wrangler',
-    awsBin: 'aws',
-    r2Endpoint: process.env.R2_ENDPOINT ?? (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined),
-    probeExisting: false,
-    artifactBase: process.env.LC0_ARTIFACT_BASE_URL ?? DEFAULT_ARTIFACT_BASE,
-  };
-  for (let i = 2; i < argv.length; i += 1) {
-    const arg = argv[i];
-    const next = argv[i + 1];
-    if (arg === '--root' && next) {
-      args.root = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--release' && next) {
-      args.release = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--bucket' && next) {
-      args.bucket = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--wrangler-bin' && next) {
-      args.wranglerBin = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--aws-bin' && next) {
-      args.awsBin = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--r2-endpoint' && next) {
-      args.r2Endpoint = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--channel-manifest' && next) {
-      args.channelManifest = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--artifact-base' && next) {
-      args.artifactBase = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--probe-existing') {
-      args.probeExisting = true;
-      continue;
-    }
-    if (arg === '--execute') {
-      args.execute = true;
-      continue;
-    }
-    if (arg === '--allow-missing') {
-      args.allowMissing = true;
-      continue;
-    }
-    if (arg === '-h' || arg === '--help') {
-      usage();
-      process.exit(0);
-    }
-    throw new Error(`Unknown argument: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      root: { type: 'string', default: '.' },
+      release: { type: 'string' },
+      bucket: { type: 'string' },
+      'wrangler-bin': { type: 'string', default: 'wrangler' },
+      'aws-bin': { type: 'string', default: 'aws' },
+      'r2-endpoint': { type: 'string', default: process.env.R2_ENDPOINT ?? (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined) },
+      'channel-manifest': { type: 'string' },
+      'artifact-base': { type: 'string', default: process.env.LC0_ARTIFACT_BASE_URL ?? DEFAULT_ARTIFACT_BASE },
+      'probe-existing': { type: 'boolean', default: false },
+      execute: { type: 'boolean', default: false },
+      'allow-missing': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
   if (!args.release) throw new Error('--release is required');
   if (!args.bucket) throw new Error('--bucket is required');
   return args;
@@ -676,7 +618,7 @@ async function manifestPublishItems(args, release) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv);
+  const args = parseArgs(process.argv.slice(2));
   const release = JSON.parse(await readFile(args.release, 'utf8'));
   const catalog = buildArtifactReleaseCatalog([release]);
   const entries = releaseEntries(release, args);

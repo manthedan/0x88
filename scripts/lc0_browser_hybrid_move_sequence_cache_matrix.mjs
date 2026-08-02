@@ -4,15 +4,13 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { applyLc0RuntimePreset, LC0_WEBGPU_RESEARCH_B4_PRESET, lc0RuntimeConfiguration } from './lc0_runtime_presets.mjs';
+import { parseScriptArgs } from './lib/cli.mjs';
+import { waitForOutput } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5181;
 
-function usage() {
-  console.log(
-    `Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_move_sequence_cache_matrix.mjs [options]\n\nRuns LC0 hybrid move-sequence search benchmarks over tree-reuse and eval-cache settings.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_move_sequence_cache_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --fen FEN             Starting FEN (default browser start position)\n  --plies N             LC0-driven sequence plies per cell (default 8)\n  --visits LIST         Comma-separated visits list (default 32)\n  --preset NAME         Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --batches LIST        Comma-separated batch sizes (default 1,4)\n  --batch-pipeline-depth N\n                        LC0 batch pipeline depth (default 1; >1 is speculative search semantics)\n  --head-backends LIST  Comma-separated head backends: ort,wgsl (default wgsl)\n  --input-backend NAME  Hybrid input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME Hybrid encoder kernel (default hand)\n  --legal-priors-backend NAME\n                        Hybrid legal-priors backend: js, wasm, or gpu (default js; gpu requires WGSL heads)\n  --reuse-tree LIST     Comma-separated booleans (default 0,1)\n  --eval-cache LIST     Comma-separated cache entry counts (default 0,2048)\n  --layers N            Encoder layers (default 10)\n  --timeout MS          Per-cell browser timeout (default 240000)\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`,
-  );
-}
+const USAGE = `Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_move_sequence_cache_matrix.mjs [options]\n\nRuns LC0 hybrid move-sequence search benchmarks over tree-reuse and eval-cache settings.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_move_sequence_cache_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --fen FEN             Starting FEN (default browser start position)\n  --plies N             LC0-driven sequence plies per cell (default 8)\n  --visits LIST         Comma-separated visits list (default 32)\n  --preset NAME         Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --batches LIST        Comma-separated batch sizes (default 1,4)\n  --batch-pipeline-depth N\n                        LC0 batch pipeline depth (default 1; >1 is speculative search semantics)\n  --head-backends LIST  Comma-separated head backends: ort,wgsl (default wgsl)\n  --input-backend NAME  Hybrid input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME Hybrid encoder kernel (default hand)\n  --legal-priors-backend NAME\n                        Hybrid legal-priors backend: js, wasm, or gpu (default js; gpu requires WGSL heads)\n  --reuse-tree LIST     Comma-separated booleans (default 0,1)\n  --eval-cache LIST     Comma-separated cache entry counts (default 0,2048)\n  --layers N            Encoder layers (default 10)\n  --timeout MS          Per-cell browser timeout (default 240000)\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`;
 
 function parseBool(raw) {
   const normalized = String(raw).trim().toLowerCase();
@@ -32,59 +30,53 @@ function parseList(raw, parse, name) {
   return values;
 }
 
+const FLAG_ALIASES = {
+  '--move-sequence-plies': '--plies',
+  '--pipeline-depth': '--batch-pipeline-depth',
+  '--encoder-kernel-variant': '--encoder-kernel',
+  '--hybrid-legal-priors': '--legal-priors-backend',
+};
+
 function parseArgs(argv) {
-  const args = {
-    out: '/tmp/lc0_hybrid_move_sequence_cache_matrix.json',
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    plies: 8,
-    visits: [32],
-    preset: '',
-    batches: [1, 4],
-    batchPipelineDepth: 1,
-    headBackends: ['wgsl'],
-    inputBackend: 'js',
-    encoderKernel: 'hand',
-    legalPriorsBackend: 'js',
-    reuseTree: [false, true],
-    evalCacheEntries: [0, 2048],
-    layers: 10,
-    timeoutMs: 240_000,
-    agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
-    dryRun: false,
-    explicitBaseUrl: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--out') args.out = next();
-    else if (arg === '--host') args.host = next();
-    else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--base-url') {
-      args.baseUrl = next();
-      args.explicitBaseUrl = true;
-    } else if (arg === '--fen') args.fen = next();
-    else if (arg === '--plies' || arg === '--move-sequence-plies') args.plies = Number(next());
-    else if (arg === '--visits') args.visits = parseList(next(), Number, 'visits');
-    else if (arg === '--preset') args.preset = next();
-    else if (arg === '--batches') args.batches = parseList(next(), Number, 'batches');
-    else if (arg === '--batch-pipeline-depth' || arg === '--pipeline-depth') args.batchPipelineDepth = Number(next());
-    else if (arg === '--head-backends') args.headBackends = parseList(next(), (value) => value, 'head-backends');
-    else if (arg === '--input-backend') args.inputBackend = next();
-    else if (arg === '--encoder-kernel' || arg === '--encoder-kernel-variant') args.encoderKernel = next();
-    else if (arg === '--legal-priors-backend' || arg === '--hybrid-legal-priors') args.legalPriorsBackend = next();
-    else if (arg === '--reuse-tree') args.reuseTree = parseList(next(), parseBool, 'reuse-tree');
-    else if (arg === '--eval-cache') args.evalCacheEntries = parseList(next(), Number, 'eval-cache');
-    else if (arg === '--layers') args.layers = Number(next());
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  argv = argv.map((arg) => FLAG_ALIASES[arg] ?? arg);
+  const args = parseScriptArgs(argv, {
+    options: {
+      out: { type: 'string', default: '/tmp/lc0_hybrid_move_sequence_cache_matrix.json' },
+      host: { type: 'string', default: DEFAULT_HOST },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      plies: { type: 'string', default: '8' },
+      visits: { type: 'string', default: '32' },
+      preset: { type: 'string', default: '' },
+      batches: { type: 'string', default: '1,4' },
+      'batch-pipeline-depth': { type: 'string', default: '1' },
+      'head-backends': { type: 'string', default: 'wgsl' },
+      'input-backend': { type: 'string', default: 'js' },
+      'encoder-kernel': { type: 'string', default: 'hand' },
+      'legal-priors-backend': { type: 'string', default: 'js' },
+      'reuse-tree': { type: 'string', default: 'false,true' },
+      'eval-cache': { type: 'string', default: '0,2048' },
+      layers: { type: 'string', default: '10' },
+      timeout: { type: 'string', default: '240000' },
+      'agent-browser': { type: 'string', default: process.env.AGENT_BROWSER_BIN ?? 'agent-browser' },
+      'base-url': { type: 'string' },
+      fen: { type: 'string' },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.port = Number(args.port);
+  args.plies = Number(args.plies);
+  args.batchPipelineDepth = Number(args.batchPipelineDepth);
+  args.layers = Number(args.layers);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  args.visits = parseList(args.visits, Number, 'visits');
+  args.batches = parseList(args.batches, Number, 'batches');
+  args.headBackends = parseList(args.headBackends, (value) => value, 'head-backends');
+  args.reuseTree = parseList(args.reuseTree, parseBool, 'reuse-tree');
+  args.evalCacheEntries = parseList(args.evalCache, Number, 'eval-cache');
+  delete args.evalCache;
+  args.explicitBaseUrl = args.baseUrl !== undefined;
   applyLc0RuntimePreset(args, argv);
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   for (const backend of args.headBackends) if (!['ort', 'wgsl'].includes(backend)) throw new Error(`Invalid backend: ${backend}`);
@@ -118,8 +110,14 @@ function parseArgs(argv) {
 function startServer(args) {
   if (args.explicitBaseUrl) return null;
   const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
-  server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
-  server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
+  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
+  server.stdout.on('data', echoOutput);
+  server.stderr.on('data', echoOutput);
+  server.ready = waitForOutput(server, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs: 30_000,
+    label: `Vite dev server (port ${args.port})`,
+  });
   return server;
 }
 
@@ -295,7 +293,6 @@ async function runCell(args, combo, index, total) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const combos = [];
   for (const headBackend of args.headBackends) {
     for (const visits of args.visits) {
@@ -313,6 +310,7 @@ async function main() {
   const server = startServer(args);
   const startedAt = new Date().toISOString();
   try {
+    if (server) await server.ready;
     await waitForServer(args.baseUrl);
     const cells = [];
     for (let i = 0; i < combos.length; i++) cells.push(await runCell(args, combos[i], i + 1, combos.length));

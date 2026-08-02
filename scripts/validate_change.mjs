@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { parseScriptArgs } from './lib/cli.mjs';
 
-function usage() {
-  console.log(`Usage: node scripts/validate_change.mjs [options] [tests...]
+const USAGE = `Usage: node scripts/validate_change.mjs [options] [tests...]
 
 Codifies the fast local validation flow:
   quick: typecheck + targeted tests in parallel
@@ -16,27 +16,23 @@ Options:
   --with-build         Final mode only, run build:client after npm test
   --dry-run            Print commands without running
   -h, --help           Show this help
-`);
-}
+`;
 
 function parseArgs(argv) {
-  const args = { mode: 'quick', tests: [], skipTypecheck: false, serial: false, withBuild: false, dryRun: false };
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--mode') args.mode = next();
-    else if (arg === '--tests') args.tests.push(...next().split(',').filter(Boolean));
-    else if (arg === '--skip-typecheck') args.skipTypecheck = true;
-    else if (arg === '--serial') args.serial = true;
-    else if (arg === '--with-build') args.withBuild = true;
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else if (arg.startsWith('-')) throw new Error(`Unknown option: ${arg}`);
-    else args.tests.push(arg);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      mode: { type: 'string', default: 'quick' },
+      tests: { type: 'string', multiple: true },
+      'skip-typecheck': { type: 'boolean', default: false },
+      serial: { type: 'boolean', default: false },
+      'with-build': { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    allowPositionals: true,
+    usage: USAGE,
+  });
+  args.tests = [...(args.tests ?? []).flatMap((list) => list.split(',').filter(Boolean)), ...args.positionals];
+  delete args.positionals;
   if (args.mode !== 'quick' && args.mode !== 'final') throw new Error('--mode must be quick or final');
   return args;
 }
@@ -88,10 +84,6 @@ function printSummary(rows) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    usage();
-    return;
-  }
   const steps = plan(args);
   // `npm test` runs `svelte-kit sync`, which must not mutate .svelte-kit while Vite builds it.
   const serial = args.serial || (args.mode === 'final' && args.withBuild);

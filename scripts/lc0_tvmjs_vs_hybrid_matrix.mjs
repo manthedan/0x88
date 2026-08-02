@@ -3,76 +3,61 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { parseScriptArgs } from './lib/cli.mjs';
+import { waitForOutput } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5297;
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_OUT = 'artifacts/tvm/lc0_tvmjs_vs_hybrid_matrix.json';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/lc0_tvmjs_vs_hybrid_matrix.mjs [options]\n\nRuns a reproducible LC0 research matrix for full-model TVMJS/WebGPU and the custom hybrid TVM/WGSL path using one Vite server.\n\nThis is a research wrapper, not a promotion gate. The current hybrid lane uses its native search fixture records; arbitrary-FEN TVMJS runs are marked as not directly fixture-identical until the hybrid page grows arbitrary-FEN support.\n\nOptions:\n  --out PATH                  Aggregate JSON path (default ${DEFAULT_OUT})\n  --base-url URL              Use existing Vite server\n  --host HOST                 Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N                    Vite port when auto-starting (default ${DEFAULT_PORT})\n  --timeout MS                Per child command timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN         Browser automation binary forwarded to child harnesses\n  --batch N                   TVMJS batch artifact, usually 8 (default 8)\n  --hybrid-batch N            Hybrid search leaf batch size, usually 4 (default 4)\n  --fixtures N                Fixture/search rows for both lanes where supported (default 4)\n  --visits N                  Search visits for both lanes; hybrid fixtures currently require 32,64,128 (default 32)\n  --repeats N                 Search repeats for both lanes (default 1)\n  --stockfish-score-depth N   Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N      Score TVMJS/ORT post-search moves by Stockfish movetime\n  --fens PATH                 Optional FEN file; with --fens both lanes use the same FEN rows\n  --tvmjs-out PATH            Override child TVMJS artifact path\n  --hybrid-out PATH           Override child hybrid artifact path\n  --hybrid-preset NAME        Hybrid runtime preset (default lc0-webgpu-research-b4)\n  --hybrid-head-backend MODE  Hybrid head backend, ort or wgsl (default wgsl)\n  --hybrid-input-backend MODE Hybrid input backend, js/wgsl/wasm (default wasm)\n  --hybrid-encoder MODE       Hybrid encoder kernel (default mixed-tvm-ffn-smolgen-project)\n  --hybrid-legal MODE         Hybrid legal-priors backend (default js)\n  --no-server                 Do not auto-start Vite\n  --dry-run                   Print child commands only\n  -h, --help                  Show help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/lc0_tvmjs_vs_hybrid_matrix.mjs [options]\n\nRuns a reproducible LC0 research matrix for full-model TVMJS/WebGPU and the custom hybrid TVM/WGSL path using one Vite server.\n\nThis is a research wrapper, not a promotion gate. The current hybrid lane uses its native search fixture records; arbitrary-FEN TVMJS runs are marked as not directly fixture-identical until the hybrid page grows arbitrary-FEN support.\n\nOptions:\n  --out PATH                  Aggregate JSON path (default ${DEFAULT_OUT})\n  --base-url URL              Use existing Vite server\n  --host HOST                 Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N                    Vite port when auto-starting (default ${DEFAULT_PORT})\n  --timeout MS                Per child command timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN         Browser automation binary forwarded to child harnesses\n  --batch N                   TVMJS batch artifact, usually 8 (default 8)\n  --hybrid-batch N            Hybrid search leaf batch size, usually 4 (default 4)\n  --fixtures N                Fixture/search rows for both lanes where supported (default 4)\n  --visits N                  Search visits for both lanes; hybrid fixtures currently require 32,64,128 (default 32)\n  --repeats N                 Search repeats for both lanes (default 1)\n  --stockfish-score-depth N   Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N      Score TVMJS/ORT post-search moves by Stockfish movetime\n  --fens PATH                 Optional FEN file; with --fens both lanes use the same FEN rows\n  --tvmjs-out PATH            Override child TVMJS artifact path\n  --hybrid-out PATH           Override child hybrid artifact path\n  --hybrid-preset NAME        Hybrid runtime preset (default lc0-webgpu-research-b4)\n  --hybrid-head-backend MODE  Hybrid head backend, ort or wgsl (default wgsl)\n  --hybrid-input-backend MODE Hybrid input backend, js/wgsl/wasm (default wasm)\n  --hybrid-encoder MODE       Hybrid encoder kernel (default mixed-tvm-ffn-smolgen-project)\n  --hybrid-legal MODE         Hybrid legal-priors backend (default js)\n  --no-server                 Do not auto-start Vite\n  --dry-run                   Print child commands only\n  -h, --help                  Show help\n`;
 
 function parseArgs(argv) {
-  const args = {
-    out: DEFAULT_OUT,
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
-    batch: 8,
-    hybridBatch: 4,
-    fixtures: 4,
-    visits: 32,
-    repeats: 1,
-    stockfishScoreDepth: undefined,
-    stockfishScoreMs: undefined,
-    fensFile: '',
-    hybridPreset: 'lc0-webgpu-research-b4',
-    hybridHeadBackend: 'wgsl',
-    hybridInputBackend: 'wasm',
-    hybridEncoder: 'mixed-tvm-ffn-smolgen-project',
-    hybridLegal: 'js',
-    noServer: false,
-    explicitBaseUrl: false,
-    dryRun: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--out') args.out = next();
-    else if (arg === '--base-url') {
-      args.baseUrl = next();
-      args.explicitBaseUrl = true;
-    } else if (arg === '--host') args.host = next();
-    else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--batch') args.batch = Number(next());
-    else if (arg === '--hybrid-batch') args.hybridBatch = Number(next());
-    else if (arg === '--fixtures' || arg === '--fixture-count') args.fixtures = Number(next());
-    else if (arg === '--visits') args.visits = Number(next());
-    else if (arg === '--repeats') args.repeats = Number(next());
-    else if (arg === '--stockfish-score-depth') args.stockfishScoreDepth = Number(next());
-    else if (arg === '--stockfish-score-ms') args.stockfishScoreMs = Number(next());
-    else if (arg === '--fens') args.fensFile = next();
-    else if (arg === '--tvmjs-out') args.tvmjsOut = next();
-    else if (arg === '--hybrid-out') args.hybridOut = next();
-    else if (arg === '--hybrid-preset') args.hybridPreset = next();
-    else if (arg === '--hybrid-head-backend') args.hybridHeadBackend = next();
-    else if (arg === '--hybrid-input-backend') args.hybridInputBackend = next();
-    else if (arg === '--hybrid-encoder') args.hybridEncoder = next();
-    else if (arg === '--hybrid-legal') args.hybridLegal = next();
-    else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      out: { type: 'string', default: DEFAULT_OUT },
+      'base-url': { type: 'string' },
+      host: { type: 'string', default: DEFAULT_HOST },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      'agent-browser': { type: 'string', default: process.env.AGENT_BROWSER_BIN ?? 'agent-browser' },
+      batch: { type: 'string', default: '8' },
+      'hybrid-batch': { type: 'string', default: '4' },
+      fixtures: { type: 'string', default: '4' },
+      'fixture-count': { type: 'string' },
+      visits: { type: 'string', default: '32' },
+      repeats: { type: 'string', default: '1' },
+      'stockfish-score-depth': { type: 'string' },
+      'stockfish-score-ms': { type: 'string' },
+      fens: { type: 'string', default: '' },
+      'tvmjs-out': { type: 'string' },
+      'hybrid-out': { type: 'string' },
+      'hybrid-preset': { type: 'string', default: 'lc0-webgpu-research-b4' },
+      'hybrid-head-backend': { type: 'string', default: 'wgsl' },
+      'hybrid-input-backend': { type: 'string', default: 'wasm' },
+      'hybrid-encoder': { type: 'string', default: 'mixed-tvm-ffn-smolgen-project' },
+      'hybrid-legal': { type: 'string', default: 'js' },
+      'no-server': { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  if (args.fixtureCount !== undefined) args.fixtures = args.fixtureCount;
+  delete args.fixtureCount;
+  args.fensFile = args.fens;
+  delete args.fens;
+  args.port = Number(args.port);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  args.batch = Number(args.batch);
+  args.hybridBatch = Number(args.hybridBatch);
+  args.fixtures = Number(args.fixtures);
+  args.visits = Number(args.visits);
+  args.repeats = Number(args.repeats);
+  if (args.stockfishScoreDepth !== undefined) args.stockfishScoreDepth = Number(args.stockfishScoreDepth);
+  if (args.stockfishScoreMs !== undefined) args.stockfishScoreMs = Number(args.stockfishScoreMs);
+  args.explicitBaseUrl = args.baseUrl !== undefined;
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   for (const [name, value] of Object.entries({
@@ -109,29 +94,13 @@ function startServer(args) {
   const child = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let output = '';
-  let settled = false;
-  child.ready = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => settle(reject, new Error(`Vite did not become ready on ${args.port}: ${output.trim()}`)), 30_000);
-    const settle = (fn, value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      fn(value);
-    };
-    const onOutput = (chunk) => {
-      output += chunk.toString('utf8');
-      if (/ready in \d+\s*ms/.test(output) || output.includes(`:${args.port}/`)) settle(resolve);
-    };
-    child.stdout.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      onOutput(chunk);
-    });
-    child.stderr.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      onOutput(chunk);
-    });
-    child.on('exit', (status, signal) => settle(reject, new Error(`Vite exited before ready (${status ?? signal}): ${output.trim()}`)));
+  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
+  child.stdout.on('data', echoOutput);
+  child.stderr.on('data', echoOutput);
+  child.ready = waitForOutput(child, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs: 30_000,
+    label: `Vite dev server (port ${args.port})`,
   });
   return child;
 }
@@ -296,7 +265,6 @@ async function loadJson(path) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
 
   const tvmjsCommand = [
     'scripts/lc0_tvmjs_webgpu_smoke.mjs',

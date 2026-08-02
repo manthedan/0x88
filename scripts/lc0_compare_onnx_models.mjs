@@ -5,20 +5,23 @@ import { performance } from 'node:perf_hooks';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { collectOrtRuntimeDiagnostics } from '../src/nn/ortRuntime.ts';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 function parseArgs(argv) {
-  const options = { warmup: 1, iterations: 3, threads: 1 };
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === '--baseline') options.baseline = argv[++i];
-    else if (arg === '--candidate') options.candidate = argv[++i];
-    else if (arg === '--fixtures') options.fixtures = argv[++i];
-    else if (arg === '--warmup') options.warmup = Number(argv[++i]);
-    else if (arg === '--iterations') options.iterations = Number(argv[++i]);
-    else if (arg === '--threads') options.threads = Number(argv[++i]);
-    else if (arg === '--out') options.out = argv[++i];
-    else throw new Error(`unknown argument: ${arg}`);
-  }
+  const options = parseScriptArgs(argv, {
+    options: {
+      baseline: { type: 'string' },
+      candidate: { type: 'string' },
+      fixtures: { type: 'string' },
+      warmup: { type: 'string', default: '1' },
+      iterations: { type: 'string', default: '3' },
+      threads: { type: 'string', default: '1' },
+      out: { type: 'string' },
+    },
+  });
+  options.warmup = Number(options.warmup);
+  options.iterations = Number(options.iterations);
+  options.threads = Number(options.threads);
   if (!options.baseline || !options.candidate || !options.fixtures) {
     throw new Error(
       'usage: lc0_compare_onnx_models.mjs --baseline MODEL --candidate MODEL --fixtures JSON [--warmup N] [--iterations N] [--threads N] [--out JSON]',

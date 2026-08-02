@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_BASE_URL = 'https://0x88.app';
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -11,28 +12,21 @@ const EVAL_TIMEOUT_MS = 15_000;
 const ENGINE_FAMILIES = ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess', 'stormphrax', 'centipawn'];
 const RUNTIME_TOKENS = ['Centipawn:', 'Reckless:', 'Viridithas:', 'Berserk:', 'PlentyChess:', 'Stormphrax:'];
 
-function usage() {
-  console.log(
-    `Usage: node scripts/production_browser_smoke.mjs [options]\n\nRuns a production browser journey across Play, Arena, and Analysis. Centipawn and Stormphrax must each complete a first move. The smoke also verifies engine order, runtime diagnostics, page errors, failed network requests, and production cache headers.\n\nRequires a Playwright Chromium build: npx playwright install chromium\n\nOptions:\n  --base-url URL        Production origin (default ${DEFAULT_BASE_URL})\n  --timeout MS          Per-engine/browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --headed              Run Chromium with a visible window (debugging)\n  --out PATH            JSON artifact path\n  --dry-run             Print the planned journey without opening a browser\n  -h, --help            Show this help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/production_browser_smoke.mjs [options]\n\nRuns a production browser journey across Play, Arena, and Analysis. Centipawn and Stormphrax must each complete a first move. The smoke also verifies engine order, runtime diagnostics, page errors, failed network requests, and production cache headers.\n\nRequires a Playwright Chromium build: npx playwright install chromium\n\nOptions:\n  --base-url URL        Production origin (default ${DEFAULT_BASE_URL})\n  --timeout MS          Per-engine/browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --headed              Run Chromium with a visible window (debugging)\n  --out PATH            JSON artifact path\n  --dry-run             Print the planned journey without opening a browser\n  -h, --help            Show this help\n`;
 
 function parseArgs(argv) {
-  const args = { baseUrl: DEFAULT_BASE_URL, timeoutMs: DEFAULT_TIMEOUT_MS, headed: false };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--base-url') args.baseUrl = next();
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--headed') args.headed = true;
-    else if (arg === '--out') args.out = next();
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      'base-url': { type: 'string', default: DEFAULT_BASE_URL },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      headed: { type: 'boolean', default: false },
+      out: { type: 'string' },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
   const base = new URL(args.baseUrl);
   if (!['http:', 'https:'].includes(base.protocol)) throw new Error(`Unsupported --base-url protocol: ${base.protocol}`);
   args.baseUrl = base.origin;
@@ -403,7 +397,6 @@ async function writeArtifact(path, artifact) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   if (args.dryRun) {
     console.log(
       JSON.stringify(

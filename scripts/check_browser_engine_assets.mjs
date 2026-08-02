@@ -2,35 +2,29 @@
 import { stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { BROWSER_ENGINE_ASSET_GROUPS } from './engine_artifact_registry.mjs';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const ROOT = process.cwd();
 const PUBLIC_ROOT = join(ROOT, 'public');
 
-function usage() {
-  console.log(
-    `Usage: node scripts/check_browser_engine_assets.mjs [options]\n\nChecks local public/ browser engine assets used by /app/analysis and /app/arena, then prints the prep/build command for each missing family.\n\nOptions:\n  --only LIST       Comma-separated family ids to check (default all)\n  --allow-missing   Exit 0 even when assets are missing\n  --json            Print JSON only\n  -h, --help        Show this help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/check_browser_engine_assets.mjs [options]\n\nChecks local public/ browser engine assets used by /app/analysis and /app/arena, then prints the prep/build command for each missing family.\n\nOptions:\n  --only LIST       Comma-separated family ids to check (default all)\n  --allow-missing   Exit 0 even when assets are missing\n  --json            Print JSON only\n  -h, --help        Show this help\n`;
 
 function parseArgs(argv) {
-  const args = { only: undefined, allowMissing: false, json: false, help: false };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--only')
-      args.only = new Set(
-        next()
-          .split(',')
-          .map((value) => value.trim())
-          .filter(Boolean),
-      );
-    else if (arg === '--allow-missing') args.allowMissing = true;
-    else if (arg === '--json') args.json = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
+  const args = parseScriptArgs(argv, {
+    options: {
+      only: { type: 'string' },
+      'allow-missing': { type: 'boolean', default: false },
+      json: { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  if (args.only !== undefined) {
+    args.only = new Set(
+      args.only
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean),
+    );
   }
   return args;
 }
@@ -81,7 +75,6 @@ function textReport(report) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const selected = BROWSER_ENGINE_ASSET_GROUPS.filter((group) => !args.only || args.only.has(group.family));
   if (args.only) {
     const known = new Set(BROWSER_ENGINE_ASSET_GROUPS.map((group) => group.family));

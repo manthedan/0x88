@@ -2,32 +2,26 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_MANIFEST = 'public/runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json';
 const DEFAULT_TVM_SRC = '../.deps/tvm-webgpu-src';
 const DEFAULT_OUT = 'artifacts/tvm/lc0_tvmjs_weight_cache_plan.json';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/analyze_lc0_tvmjs_weight_cache_plan.mjs [options]\n\nResearch-only analyzer for TVMJS tensor-cache weight separation readiness.\nIt does not generate or publish separated params; it validates local TVM API support and quantifies the current embedded-per-batch wasm footprint.\n\nOptions:\n  --manifest PATH  Staged TVMJS manifest (default ${DEFAULT_MANIFEST})\n  --tvm-src PATH   Durable TVM source checkout (default ${DEFAULT_TVM_SRC})\n  --out PATH       Output JSON artifact (default ${DEFAULT_OUT})\n  --no-write       Print only\n  -h, --help       Show help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/analyze_lc0_tvmjs_weight_cache_plan.mjs [options]\n\nResearch-only analyzer for TVMJS tensor-cache weight separation readiness.\nIt does not generate or publish separated params; it validates local TVM API support and quantifies the current embedded-per-batch wasm footprint.\n\nOptions:\n  --manifest PATH  Staged TVMJS manifest (default ${DEFAULT_MANIFEST})\n  --tvm-src PATH   Durable TVM source checkout (default ${DEFAULT_TVM_SRC})\n  --out PATH       Output JSON artifact (default ${DEFAULT_OUT})\n  --no-write       Print only\n  -h, --help       Show help\n`;
 
 function parseArgs(argv) {
-  const args = { manifest: DEFAULT_MANIFEST, tvmSrc: DEFAULT_TVM_SRC, out: DEFAULT_OUT, write: true };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--manifest') args.manifest = next();
-    else if (arg === '--tvm-src') args.tvmSrc = next();
-    else if (arg === '--out') args.out = next();
-    else if (arg === '--no-write') args.write = false;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      manifest: { type: 'string', default: DEFAULT_MANIFEST },
+      'tvm-src': { type: 'string', default: DEFAULT_TVM_SRC },
+      out: { type: 'string', default: DEFAULT_OUT },
+      'no-write': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.write = !args.noWrite;
+  delete args.noWrite;
   return args;
 }
 
@@ -62,7 +56,6 @@ function percent(value, base) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const manifestPath = args.manifest;
   const manifestDir = dirname(manifestPath);
   const tvmSrc = resolve(args.tvmSrc);

@@ -8,91 +8,33 @@ import { performance } from 'node:perf_hooks';
 import { checkDeployCachePolicy } from './check_deploy_cache_policy.mjs';
 import { checkOrtRuntimeAssets } from './check_ort_runtime_assets.mjs';
 import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './engine_artifact_registry.mjs';
+import { parseScriptArgs } from './lib/cli.mjs';
 import { isSameOriginThreadedStockfishScript } from './prepare_netlify_r2_public_assets.mjs';
 
 const DEFAULT_ASSET_BASE_URL = 'https://assets.0x88.app';
 const DEFAULT_CHANNEL_URL = `${DEFAULT_ASSET_BASE_URL}/channels/stable.json`;
 const STAMP_FILE = 'release-build.json';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/netlify_r2_release.mjs [options]\n\nOptions:\n  --dist DIR          Built dist directory (default dist-client)\n  --channel-url URL   Artifact channel URL baked into the app shell\n  --asset-base URL    R2/Worker origin for engine/model asset URLs (default https://assets.0x88.app)\n  --build-if-needed   Run the R2/pruned build when the dist stamp is missing/stale\n  --check             Verify the current dist is stamped and pruned; do not build/deploy\n  --deploy            Deploy the verified dist with netlify deploy --no-build\n  --prod              Pass --prod to netlify deploy\n  --message TEXT      Netlify deploy message\n  --npm-bin BIN       npm executable (default npm)\n  --netlify-bin BIN   netlify executable (default netlify)\n  --json              Print machine-readable summary\n  -h, --help          Show help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/netlify_r2_release.mjs [options]\n\nOptions:\n  --dist DIR          Built dist directory (default dist-client)\n  --channel-url URL   Artifact channel URL baked into the app shell\n  --asset-base URL    R2/Worker origin for engine/model asset URLs (default https://assets.0x88.app)\n  --build-if-needed   Run the R2/pruned build when the dist stamp is missing/stale\n  --check             Verify the current dist is stamped and pruned; do not build/deploy\n  --deploy            Deploy the verified dist with netlify deploy --no-build\n  --prod              Pass --prod to netlify deploy\n  --message TEXT      Netlify deploy message\n  --npm-bin BIN       npm executable (default npm)\n  --netlify-bin BIN   netlify executable (default netlify)\n  --json              Print machine-readable summary\n  -h, --help          Show help\n`;
 
 function parseArgs(argv) {
-  const args = {
-    dist: 'dist-client',
-    channelUrl: process.env.VITE_LC0_ARTIFACT_CHANNEL_URL || DEFAULT_CHANNEL_URL,
-    assetBase: process.env.VITE_LC0_BROWSER_ASSET_BASE_URL || DEFAULT_ASSET_BASE_URL,
-    buildIfNeeded: false,
-    check: false,
-    deploy: false,
-    prod: false,
-    message: undefined,
-    npmBin: 'npm',
-    netlifyBin: 'netlify',
-    json: false,
-  };
-  for (let i = 2; i < argv.length; i += 1) {
-    const arg = argv[i];
-    const next = argv[i + 1];
-    if (arg === '--dist' && next) {
-      args.dist = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--channel-url' && next) {
-      args.channelUrl = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--asset-base' && next) {
-      args.assetBase = next.replace(/\/+$/, '');
-      i += 1;
-      continue;
-    }
-    if (arg === '--message' && next) {
-      args.message = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--npm-bin' && next) {
-      args.npmBin = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--netlify-bin' && next) {
-      args.netlifyBin = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--build-if-needed') {
-      args.buildIfNeeded = true;
-      continue;
-    }
-    if (arg === '--check') {
-      args.check = true;
-      continue;
-    }
-    if (arg === '--deploy') {
-      args.deploy = true;
-      continue;
-    }
-    if (arg === '--prod') {
-      args.prod = true;
-      continue;
-    }
-    if (arg === '--json') {
-      args.json = true;
-      continue;
-    }
-    if (arg === '-h' || arg === '--help') {
-      usage();
-      process.exit(0);
-    }
-    throw new Error(`Unknown argument: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      dist: { type: 'string', default: 'dist-client' },
+      'channel-url': { type: 'string', default: process.env.VITE_LC0_ARTIFACT_CHANNEL_URL || DEFAULT_CHANNEL_URL },
+      'asset-base': { type: 'string' },
+      'build-if-needed': { type: 'boolean', default: false },
+      check: { type: 'boolean', default: false },
+      deploy: { type: 'boolean', default: false },
+      prod: { type: 'boolean', default: false },
+      message: { type: 'string' },
+      'npm-bin': { type: 'string', default: 'npm' },
+      'netlify-bin': { type: 'string', default: 'netlify' },
+      json: { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.assetBase = args.assetBase !== undefined ? args.assetBase.replace(/\/+$/, '') : process.env.VITE_LC0_BROWSER_ASSET_BASE_URL || DEFAULT_ASSET_BASE_URL;
   if (args.check && (args.buildIfNeeded || args.deploy)) {
     throw new Error('--check is verification-only and cannot be combined with --build-if-needed or --deploy');
   }
@@ -243,7 +185,7 @@ function verifyPrunedDist(dist) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv);
+  const args = parseArgs(process.argv.slice(2));
   const dist = resolve(args.dist);
   const timings = [];
   // Deploy header policy is a property of the source config, so check it before

@@ -14,6 +14,7 @@ import {
   isArtifactReleaseV2,
   releaseCatalogEntries,
 } from './engine_artifact_registry.mjs';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_SOURCE_MANIFESTS = [
   'public/models/lc0/r2-v0-present.manifest.json',
@@ -29,76 +30,31 @@ const DEFAULT_SOURCE_MANIFESTS = [
 ];
 const DEFAULT_OUTPUT_DIRECTORY = '.local-dev-artifacts/artifact-releases';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/write_artifact_release_manifests.mjs [options]\n\nOptions:\n  --root DIR             Repository root (default .)\n  --release-id ID        Immutable release id (default date + git short sha)\n  --channel NAME         Channel name to write (default stable)\n  --out-dir DIR          Staging output root (default .local-dev-artifacts/artifact-releases under --root)\n  --asset-origin URL     Absolute asset origin prefix (default https://assets.0x88.app)\n  --manifest PATH        Source manifest to include; may be repeated\n  --base-release PATH    Carry forward immutable entries from an existing v1/v2 release\n  --generated-at ISO     Override generatedAt for reproducible checks\n  --no-brotli            Emit identity representations only\n  --brotli-quality N     Brotli quality 0-11 (default 5)\n  --check                Verify existing outputs match instead of writing\n  -h, --help             Show help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/write_artifact_release_manifests.mjs [options]\n\nOptions:\n  --root DIR             Repository root (default .)\n  --release-id ID        Immutable release id (default date + git short sha)\n  --channel NAME         Channel name to write (default stable)\n  --out-dir DIR          Staging output root (default .local-dev-artifacts/artifact-releases under --root)\n  --asset-origin URL     Absolute asset origin prefix (default https://assets.0x88.app)\n  --manifest PATH        Source manifest to include; may be repeated\n  --base-release PATH    Carry forward immutable entries from an existing v1/v2 release\n  --generated-at ISO     Override generatedAt for reproducible checks\n  --no-brotli            Emit identity representations only\n  --brotli-quality N     Brotli quality 0-11 (default 5)\n  --check                Verify existing outputs match instead of writing\n  -h, --help             Show help\n`;
 
 function parseArgs(argv) {
-  const args = { root: '.', channel: 'stable', manifests: [], check: false, brotli: true, brotliQuality: 5 };
-  for (let i = 2; i < argv.length; i += 1) {
-    const arg = argv[i];
-    const next = argv[i + 1];
-    if (arg === '--root' && next) {
-      args.root = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--release-id' && next) {
-      args.releaseId = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--channel' && next) {
-      args.channel = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--out-dir' && next) {
-      args.outDir = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--asset-origin' && next) {
-      args.assetOrigin = next.replace(/\/+$/, '');
-      i += 1;
-      continue;
-    }
-    if (arg === '--manifest' && next) {
-      args.manifests.push(next);
-      i += 1;
-      continue;
-    }
-    if (arg === '--base-release' && next) {
-      args.baseRelease = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--generated-at' && next) {
-      args.generatedAt = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--no-brotli') {
-      args.brotli = false;
-      continue;
-    }
-    if (arg === '--brotli-quality' && next) {
-      args.brotliQuality = Number(next);
-      i += 1;
-      continue;
-    }
-    if (arg === '--check') {
-      args.check = true;
-      continue;
-    }
-    if (arg === '-h' || arg === '--help') {
-      usage();
-      process.exit(0);
-    }
-    throw new Error(`Unknown argument: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      root: { type: 'string', default: '.' },
+      'release-id': { type: 'string' },
+      channel: { type: 'string', default: 'stable' },
+      'out-dir': { type: 'string' },
+      'asset-origin': { type: 'string' },
+      manifest: { type: 'string', multiple: true, default: [] },
+      'base-release': { type: 'string' },
+      'generated-at': { type: 'string' },
+      'no-brotli': { type: 'boolean', default: false },
+      'brotli-quality': { type: 'string', default: '5' },
+      check: { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.manifests = args.manifest;
+  delete args.manifest;
+  args.brotli = !args.noBrotli;
+  delete args.noBrotli;
+  args.brotliQuality = Number(args.brotliQuality);
+  if (args.assetOrigin !== undefined) args.assetOrigin = args.assetOrigin.replace(/\/+$/, '');
   if (!args.releaseId) args.releaseId = defaultReleaseId(args.root);
   if (!args.assetOrigin) args.assetOrigin = process.env.LC0_ARTIFACT_ASSET_ORIGIN ?? 'https://assets.0x88.app';
   if (!args.outDir) args.outDir = join(args.root, DEFAULT_OUTPUT_DIRECTORY);
@@ -642,7 +598,7 @@ async function reusableGeneratedAt(path, args) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv);
+  const args = parseArgs(process.argv.slice(2));
   const releasePath = join(args.outDir, 'releases', `${args.releaseId}.json`);
   const channelPath = join(args.outDir, 'channels', `${args.channel}.json`);
   const generatedAt = (await reusableGeneratedAt(releasePath, args)) ?? new Date().toISOString();

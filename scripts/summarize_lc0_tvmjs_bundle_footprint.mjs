@@ -3,30 +3,24 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:zlib';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_MANIFEST = 'public/runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/summarize_lc0_tvmjs_bundle_footprint.mjs [options]\n\nSummarizes raw/gzip/Brotli transfer-footprint estimates for a staged LC0 TVMJS/WebGPU manifest.\nThis writes a JSON sidecar only; it does not publish generated artifacts or create compressed payload files.\n\nOptions:\n  --manifest PATH       Staged TVMJS runtime manifest (default ${DEFAULT_MANIFEST})\n  --out PATH            JSON footprint sidecar path (default <manifest-dir>/bundle-footprint.json)\n  --gzip-level N        gzip level, 1-9 (default 9)\n  --brotli-quality N    Brotli quality, 0-11 (default 11)\n  -h, --help            Show help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/summarize_lc0_tvmjs_bundle_footprint.mjs [options]\n\nSummarizes raw/gzip/Brotli transfer-footprint estimates for a staged LC0 TVMJS/WebGPU manifest.\nThis writes a JSON sidecar only; it does not publish generated artifacts or create compressed payload files.\n\nOptions:\n  --manifest PATH       Staged TVMJS runtime manifest (default ${DEFAULT_MANIFEST})\n  --out PATH            JSON footprint sidecar path (default <manifest-dir>/bundle-footprint.json)\n  --gzip-level N        gzip level, 1-9 (default 9)\n  --brotli-quality N    Brotli quality, 0-11 (default 11)\n  -h, --help            Show help\n`;
 
 function parseArgs(argv) {
-  const args = { manifest: DEFAULT_MANIFEST, out: '', gzipLevel: 9, brotliQuality: 11 };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--manifest') args.manifest = next();
-    else if (arg === '--out') args.out = next();
-    else if (arg === '--gzip-level') args.gzipLevel = Number(next());
-    else if (arg === '--brotli-quality') args.brotliQuality = Number(next());
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      manifest: { type: 'string', default: DEFAULT_MANIFEST },
+      out: { type: 'string', default: '' },
+      'gzip-level': { type: 'string', default: '9' },
+      'brotli-quality': { type: 'string', default: '11' },
+    },
+    usage: USAGE,
+  });
+  args.gzipLevel = Number(args.gzipLevel);
+  args.brotliQuality = Number(args.brotliQuality);
   if (!Number.isInteger(args.gzipLevel) || args.gzipLevel < 1 || args.gzipLevel > 9) throw new Error(`Invalid --gzip-level ${args.gzipLevel}`);
   if (!Number.isInteger(args.brotliQuality) || args.brotliQuality < 0 || args.brotliQuality > 11)
     throw new Error(`Invalid --brotli-quality ${args.brotliQuality}`);
@@ -56,7 +50,6 @@ function sum(values, key) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const manifest = JSON.parse(await readFile(args.manifest, 'utf8'));
   const manifestDir = dirname(args.manifest);
   const files = [];

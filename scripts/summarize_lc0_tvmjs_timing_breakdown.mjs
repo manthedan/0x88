@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_OUT = 'artifacts/tvm/lc0_tvmjs_timing_breakdown_summary.json';
 const STARTUP_KEYS = [
@@ -33,33 +34,27 @@ const EVAL_KEYS = [
 ];
 const POSITION_EVAL_KEYS = ['legalPriorsMs'];
 
-function usage() {
-  console.log(
-    `Usage: node scripts/summarize_lc0_tvmjs_timing_breakdown.mjs --in PATH [--in PATH ...] [options]\n\nSummarizes observed TVMJS/WebGPU timing buckets from smoke or TVMJS-vs-hybrid matrix artifacts.\nResearch-only: this reports measured buckets and explicit caveats; it does not infer live GPU residency or promotion readiness.\n\nOptions:\n  --in PATH    Input JSON artifact; may be repeated or comma-separated\n  --out PATH   Output JSON summary (default ${DEFAULT_OUT})\n  --no-write   Print only\n  -h, --help   Show help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/summarize_lc0_tvmjs_timing_breakdown.mjs --in PATH [--in PATH ...] [options]\n\nSummarizes observed TVMJS/WebGPU timing buckets from smoke or TVMJS-vs-hybrid matrix artifacts.\nResearch-only: this reports measured buckets and explicit caveats; it does not infer live GPU residency or promotion readiness.\n\nOptions:\n  --in PATH    Input JSON artifact; may be repeated or comma-separated\n  --out PATH   Output JSON summary (default ${DEFAULT_OUT})\n  --no-write   Print only\n  -h, --help   Show help\n`;
 
 function parseArgs(argv) {
-  const args = { inputs: [], out: DEFAULT_OUT, write: true };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--in')
-      args.inputs.push(
-        ...next()
-          .split(',')
-          .map((item) => item.trim())
-          .filter(Boolean),
-      );
-    else if (arg === '--out') args.out = next();
-    else if (arg === '--no-write') args.write = false;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
-  if (!args.help && !args.inputs.length) throw new Error('--in is required');
+  const args = parseScriptArgs(argv, {
+    options: {
+      in: { type: 'string', multiple: true },
+      out: { type: 'string', default: DEFAULT_OUT },
+      'no-write': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.inputs = (args.in ?? []).flatMap((list) =>
+    list
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+  delete args.in;
+  args.write = !args.noWrite;
+  delete args.noWrite;
+  if (!args.inputs.length) throw new Error('--in is required');
   return args;
 }
 
@@ -210,7 +205,6 @@ function aggregate(records) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const records = [];
   for (const input of args.inputs) records.push(normalizeArtifact(input, JSON.parse(await readFile(input, 'utf8'))));
   const out = {

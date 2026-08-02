@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_TIMEOUT_MS = '120000';
 
-function usage() {
-  console.log(`Usage: node scripts/test_timings.mjs [options]
+const USAGE = `Usage: node scripts/test_timings.mjs [options]
 
 Runs test files one at a time and reports the slowest files. Use this when the
 full suite feels slow and we need data before splitting or optimizing tests.
@@ -17,25 +17,21 @@ Options:
   --timeout MS      Per-file node:test timeout (default: 120000)
   --dry-run         Print selected files without running
   -h, --help        Show this help
-`);
-}
+`;
 
 function parseArgs(argv) {
-  const args = { top: 15, timeout: DEFAULT_TIMEOUT_MS, dryRun: false };
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--pattern') args.pattern = next();
-    else if (arg === '--limit') args.limit = Number(next());
-    else if (arg === '--top') args.top = Number(next());
-    else if (arg === '--timeout') args.timeout = next();
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      pattern: { type: 'string' },
+      limit: { type: 'string' },
+      top: { type: 'string', default: '15' },
+      timeout: { type: 'string', default: DEFAULT_TIMEOUT_MS },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  if (args.limit !== undefined) args.limit = Number(args.limit);
+  args.top = Number(args.top);
   return args;
 }
 
@@ -65,10 +61,6 @@ function runFile(file, timeout) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    usage();
-    return;
-  }
   const files = selectedFiles(args);
   if (args.dryRun) {
     console.log(files.join('\n'));

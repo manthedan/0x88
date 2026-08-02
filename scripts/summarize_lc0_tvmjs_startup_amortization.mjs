@@ -1,29 +1,21 @@
 #!/usr/bin/env node
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_OUT = 'artifacts/tvm/lc0_tvmjs_startup_amortization_summary.json';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/summarize_lc0_tvmjs_startup_amortization.mjs --in MATRIX.json [options]\n\nSummarizes startup/init and simple amortization telemetry from a TVMJS-vs-hybrid matrix artifact.\nThis is research evidence only; ORT startup/init is reported only if present in the input artifact.\n\nOptions:\n  --in PATH      TVMJS-vs-hybrid matrix artifact\n  --out PATH     Output JSON summary (default ${DEFAULT_OUT})\n  -h, --help     Show help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/summarize_lc0_tvmjs_startup_amortization.mjs --in MATRIX.json [options]\n\nSummarizes startup/init and simple amortization telemetry from a TVMJS-vs-hybrid matrix artifact.\nThis is research evidence only; ORT startup/init is reported only if present in the input artifact.\n\nOptions:\n  --in PATH      TVMJS-vs-hybrid matrix artifact\n  --out PATH     Output JSON summary (default ${DEFAULT_OUT})\n  -h, --help     Show help\n`;
 
 function parseArgs(argv) {
-  const args = { out: DEFAULT_OUT };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--in') args.in = next();
-    else if (arg === '--out') args.out = next();
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
-  if (!args.help && !args.in) throw new Error('--in is required');
+  const args = parseScriptArgs(argv, {
+    options: {
+      in: { type: 'string' },
+      out: { type: 'string', default: DEFAULT_OUT },
+    },
+    usage: USAGE,
+  });
+  if (!args.in) throw new Error('--in is required');
   return args;
 }
 
@@ -58,7 +50,6 @@ function ratio(a, b) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const artifact = JSON.parse(await readFile(args.in, 'utf8'));
   const tvmjs = artifact.summary?.tvmjs ?? {};
   const hybrid = artifact.summary?.hybrid ?? {};

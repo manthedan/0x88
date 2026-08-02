@@ -4,13 +4,14 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { parseScriptArgs } from './lib/cli.mjs';
+import { waitForOutput } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5198;
 const DEFAULT_TIMEOUT_MS = 180_000;
 
-function usage() {
-  console.log(`Usage: node scripts/lc0_browser_gpu_legal_parity.mjs [options]
+const USAGE = `Usage: node scripts/lc0_browser_gpu_legal_parity.mjs [options]
 
 Runs an isolated browser parity probe comparing JS legal priors to the opt-in WGSL GPU legal-prior scaffold.
 
@@ -32,8 +33,7 @@ Options:
   --no-server             Do not auto-start Vite
   --dry-run               Print URL and exit
   -h, --help              Show this help
-`);
-}
+`;
 
 function shortSessionName(value) {
   const safe = String(value).replace(/[^A-Za-z0-9_.-]+/g, '-');
@@ -43,51 +43,42 @@ function shortSessionName(value) {
 }
 
 function parseArgs(argv) {
-  const args = {
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
-    session: process.env.AGENT_BROWSER_SESSION ?? `lc0-gpu-legal-${process.pid}`,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    fixtureLimit: 3,
-    topK: 16,
-    maxPriorDiff: 0.01,
-    maxWdlDiff: 0.005,
-    maxLogitDiff: 0.05,
-    inputBackend: 'wasm',
-    encoderKernel: 'mixed-tvm-ffn',
-    out: '',
-    noServer: false,
-    dryRun: false,
-    explicitBaseUrl: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--out') args.out = next();
-    else if (arg === '--base-url') {
-      args.baseUrl = next();
-      args.explicitBaseUrl = true;
-    } else if (arg === '--host') args.host = next();
-    else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--session') args.session = next();
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--fixture-limit' || arg === '--fixtures') args.fixtureLimit = Number(next());
-    else if (arg === '--top-k' || arg === '--topk') args.topK = Number(next());
-    else if (arg === '--max-prior-diff') args.maxPriorDiff = Number(next());
-    else if (arg === '--max-wdl-diff') args.maxWdlDiff = Number(next());
-    else if (arg === '--max-logit-diff') args.maxLogitDiff = Number(next());
-    else if (arg === '--input-backend') args.inputBackend = next();
-    else if (arg === '--encoder-kernel') args.encoderKernel = next();
-    else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      out: { type: 'string', default: '' },
+      'base-url': { type: 'string' },
+      host: { type: 'string', default: DEFAULT_HOST },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      'agent-browser': { type: 'string', default: process.env.AGENT_BROWSER_BIN ?? 'agent-browser' },
+      session: { type: 'string', default: process.env.AGENT_BROWSER_SESSION ?? `lc0-gpu-legal-${process.pid}` },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      'fixture-limit': { type: 'string', default: '3' },
+      fixtures: { type: 'string' },
+      'top-k': { type: 'string', default: '16' },
+      topk: { type: 'string' },
+      'max-prior-diff': { type: 'string', default: '0.01' },
+      'max-wdl-diff': { type: 'string', default: '0.005' },
+      'max-logit-diff': { type: 'string', default: '0.05' },
+      'input-backend': { type: 'string', default: 'wasm' },
+      'encoder-kernel': { type: 'string', default: 'mixed-tvm-ffn' },
+      'no-server': { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  if (args.fixtures !== undefined) args.fixtureLimit = args.fixtures;
+  delete args.fixtures;
+  if (args.topk !== undefined) args.topK = args.topk;
+  delete args.topk;
+  args.port = Number(args.port);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  args.fixtureLimit = Number(args.fixtureLimit);
+  args.topK = Number(args.topK);
+  args.maxPriorDiff = Number(args.maxPriorDiff);
+  args.maxWdlDiff = Number(args.maxWdlDiff);
+  args.maxLogitDiff = Number(args.maxLogitDiff);
+  args.explicitBaseUrl = args.baseUrl !== undefined;
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   args.session = shortSessionName(args.session);
@@ -177,29 +168,13 @@ function startServer(args) {
   const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let output = '';
-  let readySettled = false;
-  server.ready = new Promise((resolve, reject) => {
-    const settle = (fn, value) => {
-      if (readySettled) return;
-      readySettled = true;
-      clearTimeout(timer);
-      fn(value);
-    };
-    const timer = setTimeout(() => settle(reject, new Error(`Vite dev server did not report readiness on port ${args.port}: ${output.trim()}`)), 30_000);
-    const onOutput = (chunk) => {
-      output += chunk.toString('utf8');
-      if (/ready in \d+\s*ms/.test(output) || output.includes(`:${args.port}/`)) settle(resolve);
-    };
-    server.stdout.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      onOutput(chunk);
-    });
-    server.stderr.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      onOutput(chunk);
-    });
-    server.on('exit', (status, signal) => settle(reject, new Error(`Vite dev server exited before ready (${status ?? signal}): ${output.trim()}`)));
+  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
+  server.stdout.on('data', echoOutput);
+  server.stderr.on('data', echoOutput);
+  server.ready = waitForOutput(server, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs: 30_000,
+    label: `Vite dev server (port ${args.port})`,
   });
   return server;
 }
@@ -257,7 +232,6 @@ async function runBrowserProbe(args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   if (args.dryRun) {
     console.log(probeUrl(args));
     return;

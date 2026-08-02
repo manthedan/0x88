@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
+import { parseScriptArgs } from './lib/cli.mjs';
+import { spawnCapture } from './lib/process.mjs';
+import { waitForOutput } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5292;
 const DEFAULT_TIMEOUT_MS = 300_000;
 
-function usage() {
-  console.log(`Usage: node scripts/centipawn_tvmjs_webgpu_bench.mjs [options]
+const USAGE = `Usage: node scripts/centipawn_tvmjs_webgpu_bench.mjs [options]
 
 Options:
   --manifest PATH   Staged TVMJS manifest path
@@ -21,77 +23,35 @@ Options:
   --agent-browser   Browser automation binary (default agent-browser)
   --out PATH        JSON evidence output
   -h, --help        Show help
-`);
-}
+`;
 
 function parseArgs(argv) {
-  const args = {
-    manifest: '/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v1-baseline/manifest.json',
-    ortModel: '/models/bt4_soap_rem_c19000_final.onnx',
-    batch: 16,
-    warmup: 5,
-    repeats: 20,
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
-  };
-  for (let index = 0; index < argv.length; index++) {
-    const arg = argv[index];
-    const next = () => {
-      if (index + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++index];
-    };
-    if (arg === '--manifest') args.manifest = next();
-    else if (arg === '--ort-model') args.ortModel = next();
-    else if (arg === '--batch') args.batch = Number(next());
-    else if (arg === '--warmup') args.warmup = Number(next());
-    else if (arg === '--repeats') args.repeats = Number(next());
-    else if (arg === '--host') args.host = next();
-    else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--out') args.out = next();
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      manifest: { type: 'string', default: '/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v1-baseline/manifest.json' },
+      'ort-model': { type: 'string', default: '/models/bt4_soap_rem_c19000_final.onnx' },
+      batch: { type: 'string', default: '16' },
+      warmup: { type: 'string', default: '5' },
+      repeats: { type: 'string', default: '20' },
+      host: { type: 'string', default: DEFAULT_HOST },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      'agent-browser': { type: 'string', default: process.env.AGENT_BROWSER_BIN ?? 'agent-browser' },
+      out: { type: 'string' },
+    },
+    usage: USAGE,
+  });
+  args.batch = Number(args.batch);
+  args.warmup = Number(args.warmup);
+  args.repeats = Number(args.repeats);
+  args.port = Number(args.port);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
   for (const key of ['batch', 'repeats', 'port', 'timeoutMs']) {
     if (!Number.isFinite(args[key]) || args[key] <= 0) throw new Error(`Invalid --${key}: ${args[key]}`);
   }
   if (!Number.isFinite(args.warmup) || args.warmup < 0) throw new Error(`Invalid --warmup: ${args.warmup}`);
   return args;
-}
-
-function spawnCapture(command, commandArgs, options = {}) {
-  return new Promise((resolve, reject) => {
-    const { timeoutMs, stdin, ...spawnOptions } = options;
-    const child = spawn(command, commandArgs, { stdio: ['pipe', 'pipe', 'pipe'], ...spawnOptions });
-    const stdout = [];
-    const stderr = [];
-    let settled = false;
-    const finish = (callback, value) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      callback(value);
-    };
-    const timer = timeoutMs
-      ? setTimeout(() => {
-          child.kill('SIGKILL');
-          finish(reject, new Error(`${command} timed out after ${timeoutMs}ms`));
-        }, timeoutMs)
-      : undefined;
-    child.stdout.on('data', (chunk) => stdout.push(chunk));
-    child.stderr.on('data', (chunk) => stderr.push(chunk));
-    child.on('error', (error) => finish(reject, error));
-    child.on('close', (status) => {
-      const output = Buffer.concat(stdout).toString('utf8');
-      const errors = Buffer.concat(stderr).toString('utf8');
-      if (status !== 0) return finish(reject, new Error(`${command} failed with ${status}: ${errors || output}`));
-      return finish(resolve, output);
-    });
-    child.stdin.end(stdin);
-  });
 }
 
 function parseAgentJson(output) {
@@ -101,7 +61,7 @@ function parseAgentJson(output) {
 }
 
 async function runAgent(args, session, commandArgs, stdin) {
-  const output = await spawnCapture(args.agentBrowser, ['--json', '--session', session, ...commandArgs], { timeoutMs: args.timeoutMs, stdin });
+  const output = await spawnCapture(args.agentBrowser, ['--json', '--session', session, ...commandArgs], { timeoutMs: args.timeoutMs, input: stdin });
   return parseAgentJson(output);
 }
 
@@ -110,30 +70,12 @@ function startServer(args) {
     env: { ...process.env, LC0_TVMJS_LAB: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let output = '';
-  server.ready = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Vite did not become ready: ${output}`)), 30_000);
-    const inspect = (chunk) => {
-      output += chunk.toString('utf8');
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally strips ANSI escape sequences from vite output
-      const plain = output.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
-      if (/ready in \d+\s*ms/.test(plain) || plain.includes(`:${args.port}/`)) {
-        clearTimeout(timer);
-        resolve();
-      }
-    };
-    server.stdout.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      inspect(chunk);
-    });
-    server.stderr.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      inspect(chunk);
-    });
-    server.on('exit', (status, signal) => {
-      clearTimeout(timer);
-      reject(new Error(`Vite exited before ready (${status ?? signal}): ${output}`));
-    });
+  server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
+  server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
+  server.ready = waitForOutput(server, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs: 30_000,
+    label: 'Vite',
   });
   return server;
 }
@@ -162,10 +104,6 @@ async function waitForResult(args, session) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    usage();
-    return;
-  }
   const server = startServer(args);
   const session = `centipawn-tvmjs-${process.pid}`;
   try {

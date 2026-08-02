@@ -1,55 +1,44 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 240_000;
 
+const USAGE = `Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_deferred_readback_bench.mjs [--batch 4] [--iters 4] [--warmup 1] [--fixture-limit 4]\n`;
+
 function parseArgs(argv) {
-  const args = {
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
-    session: process.env.AGENT_BROWSER_SESSION ?? `lc0-wgsl-deferred-readback-${process.pid}`,
-    layers: 10,
-    inputBackend: 'js',
-    batch: 4,
-    iters: 4,
-    warmup: 1,
-    fixtureLimit: 4,
-    packVerify: false,
-    noServer: false,
-    dryRun: false,
-    explicitBaseUrl: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--base-url') {
-      args.baseUrl = next();
-      args.explicitBaseUrl = true;
-    } else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--host') args.host = next();
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--session') args.session = next();
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--layers') args.layers = Number(next());
-    else if (arg === '--input-backend') args.inputBackend = next();
-    else if (arg === '--batch') args.batch = Number(next());
-    else if (arg === '--iters') args.iters = Number(next());
-    else if (arg === '--warmup') args.warmup = Number(next());
-    else if (arg === '--fixture-limit') args.fixtureLimit = Number(next());
-    else if (arg === '--pack-verify') args.packVerify = true;
-    else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      'base-url': { type: 'string' },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      host: { type: 'string', default: DEFAULT_HOST },
+      'agent-browser': { type: 'string', default: process.env.AGENT_BROWSER_BIN ?? 'agent-browser' },
+      session: { type: 'string', default: process.env.AGENT_BROWSER_SESSION ?? `lc0-wgsl-deferred-readback-${process.pid}` },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      layers: { type: 'string', default: '10' },
+      'input-backend': { type: 'string', default: 'js' },
+      batch: { type: 'string', default: '4' },
+      iters: { type: 'string', default: '4' },
+      warmup: { type: 'string', default: '1' },
+      'fixture-limit': { type: 'string', default: '4' },
+      'pack-verify': { type: 'boolean', default: false },
+      'no-server': { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.port = Number(args.port);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  args.layers = Number(args.layers);
+  args.batch = Number(args.batch);
+  args.iters = Number(args.iters);
+  args.warmup = Number(args.warmup);
+  args.fixtureLimit = Number(args.fixtureLimit);
+  args.explicitBaseUrl = args.baseUrl !== undefined;
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
@@ -65,12 +54,6 @@ function parseArgs(argv) {
     if (!Number.isFinite(value) || value < 0 || (!['warmup'].includes(name) && value <= 0)) throw new Error(`Invalid --${name}: ${value}`);
   }
   return args;
-}
-
-function usage() {
-  console.log(
-    `Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_deferred_readback_bench.mjs [--batch 4] [--iters 4] [--warmup 1] [--fixture-limit 4]\n`,
-  );
 }
 
 function benchmarkUrl(args) {
@@ -191,7 +174,6 @@ async function runBrowserBenchmark(args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   if (args.dryRun) {
     console.log(benchmarkUrl(args));
     return;

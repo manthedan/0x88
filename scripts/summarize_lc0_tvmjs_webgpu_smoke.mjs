@@ -1,27 +1,19 @@
 #!/usr/bin/env node
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { parseScriptArgs } from './lib/cli.mjs';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/summarize_lc0_tvmjs_webgpu_smoke.mjs --in ARTIFACT.json [--out REPORT.json]\n\nConverts a lc0_tvmjs_webgpu_smoke artifact into a compact fixed-suite-style research report.\nThis does not add Stockfish post-move scoring; it preserves that limitation explicitly.\n`,
-  );
-}
+const USAGE = `Usage: node scripts/summarize_lc0_tvmjs_webgpu_smoke.mjs --in ARTIFACT.json [--out REPORT.json]\n\nConverts a lc0_tvmjs_webgpu_smoke artifact into a compact fixed-suite-style research report.\nThis does not add Stockfish post-move scoring; it preserves that limitation explicitly.\n`;
 
 function parseArgs(argv) {
-  const args = { in: '', out: '' };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--in') args.in = next();
-    else if (arg === '--out') args.out = next();
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
-  if (!args.help && !args.in) throw new Error('expected --in ARTIFACT.json');
+  const args = parseScriptArgs(argv, {
+    options: {
+      in: { type: 'string' },
+      out: { type: 'string' },
+    },
+    usage: USAGE,
+  });
+  if (!args.in) throw new Error('expected --in ARTIFACT.json');
   return args;
 }
 
@@ -142,7 +134,6 @@ function buildReport(artifact, sourcePath) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const artifact = JSON.parse(await readFile(args.in, 'utf8'));
   const report = buildReport(artifact, args.in);
   const text = `${JSON.stringify(report, null, 2)}\n`;

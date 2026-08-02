@@ -3,45 +3,39 @@ import { parseFen, START_FEN } from '../src/chess/board.ts';
 import { moveToActionId } from '../src/chess/moveCodec.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { searchRoot } from '../src/search/puct.ts';
+import { parseScriptArgs } from './lib/cli.mjs';
+
+const USAGE =
+  'Usage: node --experimental-strip-types scripts/lc0_puct_wasm_feasibility_audit.mjs [--visits 64,256,1024] [--batches 1,4,8] [--iters 3] [--warmup 1] [--out /tmp/audit.json]';
 
 function parseArgs(argv) {
-  const args = {
-    fen: START_FEN,
-    visits: [64, 256, 1024],
-    batches: [1, 4, 8],
-    iters: 3,
-    warmup: 1,
-    out: undefined,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const readValue = () => {
-      if (arg.includes('=')) return arg.slice(arg.indexOf('=') + 1);
-      i += 1;
-      if (i >= argv.length) throw new Error(`Missing value for ${arg}`);
-      return argv[i];
-    };
-    if (arg === '--fen' || arg.startsWith('--fen=')) args.fen = readValue();
-    else if (arg === '--visits' || arg.startsWith('--visits='))
-      args.visits = readValue()
-        .split(',')
-        .map((v) => Number(v.trim()))
-        .filter(Number.isFinite);
-    else if (arg === '--batches' || arg.startsWith('--batches='))
-      args.batches = readValue()
-        .split(',')
-        .map((v) => Number(v.trim()))
-        .filter(Number.isFinite);
-    else if (arg === '--iters' || arg.startsWith('--iters=')) args.iters = Number(readValue());
-    else if (arg === '--warmup' || arg.startsWith('--warmup=')) args.warmup = Number(readValue());
-    else if (arg === '--out' || arg.startsWith('--out=')) args.out = readValue();
-    else if (arg === '--help') {
-      console.log(
-        'Usage: node --experimental-strip-types scripts/lc0_puct_wasm_feasibility_audit.mjs [--visits 64,256,1024] [--batches 1,4,8] [--iters 3] [--warmup 1] [--out /tmp/audit.json]',
-      );
-      process.exit(0);
-    } else throw new Error(`Unknown argument: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      fen: { type: 'string', default: START_FEN },
+      visits: { type: 'string' },
+      batches: { type: 'string' },
+      iters: { type: 'string', default: '3' },
+      warmup: { type: 'string', default: '1' },
+      out: { type: 'string' },
+    },
+    usage: USAGE,
+  });
+  args.visits =
+    args.visits === undefined
+      ? [64, 256, 1024]
+      : args.visits
+          .split(',')
+          .map((v) => Number(v.trim()))
+          .filter(Number.isFinite);
+  args.batches =
+    args.batches === undefined
+      ? [1, 4, 8]
+      : args.batches
+          .split(',')
+          .map((v) => Number(v.trim()))
+          .filter(Number.isFinite);
+  args.iters = Number(args.iters);
+  args.warmup = Number(args.warmup);
   if (!args.visits.length) throw new Error('--visits must include at least one finite number');
   if (!args.batches.length) throw new Error('--batches must include at least one finite number');
   if (!Number.isFinite(args.iters)) throw new Error('--iters must be a finite number');

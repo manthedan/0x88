@@ -1,28 +1,23 @@
 #!/usr/bin/env node
 import { readdir, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { parseScriptArgs } from './lib/cli.mjs';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/lc0_runtime_arena_analyze.mjs <report.json|report-dir>... [options]\n\nBuilds normalized LC0 browser runtime arena summaries from report JSON files.\n\nOptions:\n  --out PATH              Write full analysis JSON\n  --summary-tsv PATH      Write normalized summary TSV\n  --divergence-tsv PATH   Write LC0 same-position move divergence TSV\n  -h, --help              Show this help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/lc0_runtime_arena_analyze.mjs <report.json|report-dir>... [options]\n\nBuilds normalized LC0 browser runtime arena summaries from report JSON files.\n\nOptions:\n  --out PATH              Write full analysis JSON\n  --summary-tsv PATH      Write normalized summary TSV\n  --divergence-tsv PATH   Write LC0 same-position move divergence TSV\n  -h, --help              Show this help\n`;
 
 function parseArgs(argv) {
-  const args = { inputs: [], out: '', summaryTsv: '', divergenceTsv: '', help: false };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--out') args.out = next();
-    else if (arg === '--summary-tsv') args.summaryTsv = next();
-    else if (arg === '--divergence-tsv') args.divergenceTsv = next();
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else args.inputs.push(arg);
-  }
-  if (!args.help && args.inputs.length === 0) throw new Error('expected at least one report JSON file or directory');
+  const args = parseScriptArgs(argv, {
+    options: {
+      out: { type: 'string', default: '' },
+      'summary-tsv': { type: 'string', default: '' },
+      'divergence-tsv': { type: 'string', default: '' },
+    },
+    allowPositionals: true,
+    usage: USAGE,
+  });
+  args.inputs = args.positionals;
+  delete args.positionals;
+  if (args.inputs.length === 0) throw new Error('expected at least one report JSON file or directory');
   return args;
 }
 
@@ -481,7 +476,6 @@ function divergenceTsv(analysis) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const files = await expandInputs(args.inputs);
   const reports = [];
   for (const file of files) {

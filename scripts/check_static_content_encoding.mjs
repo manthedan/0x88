@@ -6,31 +6,22 @@ import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createBrotliCompress, createGzip } from 'node:zlib';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_OUT = 'artifacts/tvm/static_content_encoding_smoke.json';
 const DEFAULT_PATH = 'public/runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/tvmjs_runtime.wasm';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/check_static_content_encoding.mjs [options]\n\nCreates temporary .br/.gz sidecars for one local artifact, serves them with a minimal static server,\nand verifies HEAD responses set the expected Content-Encoding and original Content-Type.\n\nOptions:\n  --file PATH       Artifact to probe (default ${DEFAULT_PATH})\n  --out PATH        Output JSON path (default ${DEFAULT_OUT})\n  --keep-temp       Keep temporary sidecar directory\n  -h, --help        Show help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/check_static_content_encoding.mjs [options]\n\nCreates temporary .br/.gz sidecars for one local artifact, serves them with a minimal static server,\nand verifies HEAD responses set the expected Content-Encoding and original Content-Type.\n\nOptions:\n  --file PATH       Artifact to probe (default ${DEFAULT_PATH})\n  --out PATH        Output JSON path (default ${DEFAULT_OUT})\n  --keep-temp       Keep temporary sidecar directory\n  -h, --help        Show help\n`;
 
 function parseArgs(argv) {
-  const args = { file: DEFAULT_PATH, out: DEFAULT_OUT, keepTemp: false };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--file') args.file = next();
-    else if (arg === '--out') args.out = next();
-    else if (arg === '--keep-temp') args.keepTemp = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
-  return args;
+  return parseScriptArgs(argv, {
+    options: {
+      file: { type: 'string', default: DEFAULT_PATH },
+      out: { type: 'string', default: DEFAULT_OUT },
+      'keep-temp': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
 }
 
 function contentTypeFor(path) {
@@ -107,7 +98,6 @@ async function probe(baseUrl, acceptEncoding) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const source = resolve(args.file);
   const sourceStats = await stat(source);
   const tempRoot = await mkdtemp(join(tmpdir(), 'lc0-static-encoding-'));

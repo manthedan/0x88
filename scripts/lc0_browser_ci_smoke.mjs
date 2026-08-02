@@ -3,53 +3,40 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { parseScriptArgs } from './lib/cli.mjs';
+import { spawnCapture } from './lib/process.mjs';
+import { waitForOutput } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/lc0_browser_ci_smoke.mjs [options]\n\nRuns CI-style browser smokes for the stable hybrid backend, experimental WGSL heads, mapped-policy probe, WGSL-heads-vs-ORT fixtures against both WASM baseline and strict ORT WebGPU, and a final leak check.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-smoke timeout (default ${DEFAULT_TIMEOUT_MS})\n  --fixture-limit N     WGSL heads vs ORT fixture limit (default 3)\n  --max-error N         Probe max abs error tolerance (default 0.001)\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --skip-leak-check     Skip final browser/process leak check\n  --dry-run             Print planned smokes and URLs without running\n  -h, --help            Show this help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/lc0_browser_ci_smoke.mjs [options]\n\nRuns CI-style browser smokes for the stable hybrid backend, experimental WGSL heads, mapped-policy probe, WGSL-heads-vs-ORT fixtures against both WASM baseline and strict ORT WebGPU, and a final leak check.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-smoke timeout (default ${DEFAULT_TIMEOUT_MS})\n  --fixture-limit N     WGSL heads vs ORT fixture limit (default 3)\n  --max-error N         Probe max abs error tolerance (default 0.001)\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --skip-leak-check     Skip final browser/process leak check\n  --dry-run             Print planned smokes and URLs without running\n  -h, --help            Show this help\n`;
 
 function parseArgs(argv) {
-  const args = {
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    agentBrowser: DEFAULT_AGENT_BROWSER,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    fixtureLimit: 3,
-    maxError: 0.001,
-    noServer: false,
-    skipLeakCheck: false,
-    dryRun: false,
-    explicitBaseUrl: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--base-url') {
-      args.baseUrl = next();
-      args.explicitBaseUrl = true;
-    } else if (arg === '--host') args.host = next();
-    else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--fixture-limit') args.fixtureLimit = Number(next());
-    else if (arg === '--max-error') args.maxError = Number(next());
-    else if (arg === '--out') args.out = next();
-    else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '--skip-leak-check') args.skipLeakCheck = true;
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      'base-url': { type: 'string' },
+      host: { type: 'string', default: DEFAULT_HOST },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      'agent-browser': { type: 'string', default: DEFAULT_AGENT_BROWSER },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      'fixture-limit': { type: 'string', default: '3' },
+      'max-error': { type: 'string', default: '0.001' },
+      out: { type: 'string' },
+      'no-server': { type: 'boolean', default: false },
+      'skip-leak-check': { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.port = Number(args.port);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  args.fixtureLimit = Number(args.fixtureLimit);
+  args.maxError = Number(args.maxError);
+  args.explicitBaseUrl = args.baseUrl !== undefined;
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   for (const [name, value] of [
@@ -63,67 +50,18 @@ function parseArgs(argv) {
   return args;
 }
 
-function spawnCapture(command, commandArgs, options = {}) {
-  return new Promise((resolve, reject) => {
-    const { timeoutMs, echoStderr, ...spawnOptions } = options;
-    const child = spawn(command, commandArgs, { stdio: ['ignore', 'pipe', 'pipe'], ...spawnOptions });
-    const chunks = { stdout: [], stderr: [] };
-    let settled = false;
-    const timer = timeoutMs
-      ? setTimeout(() => {
-          child.kill('SIGKILL');
-          finish(reject, new Error(`${command} ${commandArgs.join(' ')} timed out after ${timeoutMs}ms`));
-        }, timeoutMs)
-      : undefined;
-    const finish = (fn, value) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      fn(value);
-    };
-    child.stdout.on('data', (chunk) => chunks.stdout.push(chunk));
-    child.stderr.on('data', (chunk) => {
-      chunks.stderr.push(chunk);
-      if (echoStderr) process.stderr.write(chunk);
-    });
-    child.on('error', (error) => finish(reject, error));
-    child.on('close', (status) => {
-      const stdout = Buffer.concat(chunks.stdout).toString('utf8');
-      const stderr = Buffer.concat(chunks.stderr).toString('utf8');
-      if (status !== 0) return finish(reject, new Error(`${command} ${commandArgs.join(' ')} failed with ${status}: ${stderr || stdout}`));
-      finish(resolve, { stdout, stderr });
-    });
-  });
-}
-
 function startServer(args) {
   if (args.noServer) return null;
   const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let output = '';
-  let readySettled = false;
-  server.ready = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => settle(reject, new Error(`Vite dev server did not report readiness on port ${args.port}: ${output.trim()}`)), 30_000);
-    const settle = (fn, value) => {
-      if (readySettled) return;
-      readySettled = true;
-      clearTimeout(timer);
-      fn(value);
-    };
-    const onOutput = (chunk) => {
-      output += chunk.toString('utf8');
-      if (/ready in \d+\s*ms/.test(output) || output.includes(`:${args.port}/`)) settle(resolve);
-    };
-    server.stdout.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      onOutput(chunk);
-    });
-    server.stderr.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      onOutput(chunk);
-    });
-    server.on('exit', (status, signal) => settle(reject, new Error(`Vite dev server exited before ready (${status ?? signal}): ${output.trim()}`)));
+  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
+  server.stdout.on('data', echoOutput);
+  server.stderr.on('data', echoOutput);
+  server.ready = waitForOutput(server, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs: 30_000,
+    label: `Vite dev server (port ${args.port})`,
   });
   return server;
 }
@@ -158,7 +96,7 @@ function textFromGetResult(result) {
 
 async function runAgent(args, commandArgs, timeoutMs, session) {
   const fullArgs = ['--json', ...(session ? ['--session', session] : []), ...commandArgs];
-  const { stdout } = await spawnCapture(args.agentBrowser, fullArgs, { echoStderr: true, timeoutMs });
+  const stdout = await spawnCapture(args.agentBrowser, fullArgs, { timeoutMs });
   const parsed = stdout ? JSON.parse(stdout.trim()) : null;
   if (parsed && typeof parsed === 'object' && 'success' in parsed) {
     if (parsed.success === false) throw new Error(`${args.agentBrowser} ${commandArgs.join(' ')} failed: ${parsed.error ?? stdout}`);
@@ -234,7 +172,7 @@ async function runHybridBenchSmoke(args, headBackend) {
   ];
   process.stderr.write(`[ci-smoke] hybrid-${headBackend}\n`);
   try {
-    const { stdout } = await spawnCapture('npm', commandArgs, { echoStderr: true, timeoutMs: args.timeoutMs + 60_000 });
+    const stdout = await spawnCapture('npm', commandArgs, { timeoutMs: args.timeoutMs + 60_000 });
     const result = parseJsonFromStdout(stdout);
     const expectedBackend = headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
     if (result.status !== 'HYBRID_SEARCH_BENCH_DONE') throw new Error(`hybrid-${headBackend} unexpected status ${result.status}`);
@@ -303,7 +241,7 @@ async function leakCheck(args, options = {}) {
   if (options.checkVite !== false) cleanupPatterns.push(`vite .*${args.port}`);
   for (const pattern of cleanupPatterns) await spawnCapture('pkill', ['-f', pattern], { timeoutMs: 10_000 }).catch(() => undefined);
   await delay(1000);
-  const { stdout } = await spawnCapture('ps', ['-axo', 'pid,rss,command'], { timeoutMs: 10_000 });
+  const stdout = await spawnCapture('ps', ['-axo', 'pid,rss,command'], { timeoutMs: 10_000 });
   const pattern =
     options.checkVite === false
       ? /Google Chrome for Testing|agent-browser|lc0_browser_hybrid|lc0-policy-only/
@@ -315,7 +253,6 @@ async function leakCheck(args, options = {}) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const plan = smokePlan(args);
   if (args.dryRun) {
     console.log(

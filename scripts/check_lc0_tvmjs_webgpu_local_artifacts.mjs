@@ -2,15 +2,12 @@
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_MANIFEST = 'public/runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json';
 const DEFAULT_EVIDENCE = 'artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_summary.json';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/check_lc0_tvmjs_webgpu_local_artifacts.mjs [options]\n\nChecks local generated TVMJS/WebGPU browser artifacts and evidence summaries.\nThese artifacts are intentionally ignored/local unless a release policy says otherwise.\n\nOptions:\n  --manifest PATH              Staged runtime manifest (default ${DEFAULT_MANIFEST})\n  --evidence PATH              Evidence summary JSON (default ${DEFAULT_EVIDENCE})\n  --no-evidence                Check only the staged manifest/files; useful before a new-family evidence summary exists\n  --min-search-rows N          Minimum evidence search rows (default 94)\n  --min-fixed-suite-reports N  Minimum fixed-suite-style report count (default 0)\n  --min-stockfish-scored-runs N\n                                Minimum Stockfish-scored evidence runs (default 0)\n  --require-all-matches        Fail unless evidence moveMatches equals searchRows (default behavior)\n  --expected-model-family NAME Require manifest.modelFamily\n  --expected-dtype NAME        Require manifest.dtype, e.g. f16\n  --expected-version NAME      Require manifest.version when present in newly staged manifests\n  --expected-batches LIST      Require exactly these manifest model batches, e.g. 1,4,8\n  -h, --help                   Show help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/check_lc0_tvmjs_webgpu_local_artifacts.mjs [options]\n\nChecks local generated TVMJS/WebGPU browser artifacts and evidence summaries.\nThese artifacts are intentionally ignored/local unless a release policy says otherwise.\n\nOptions:\n  --manifest PATH              Staged runtime manifest (default ${DEFAULT_MANIFEST})\n  --evidence PATH              Evidence summary JSON (default ${DEFAULT_EVIDENCE})\n  --no-evidence                Check only the staged manifest/files; useful before a new-family evidence summary exists\n  --min-search-rows N          Minimum evidence search rows (default 94)\n  --min-fixed-suite-reports N  Minimum fixed-suite-style report count (default 0)\n  --min-stockfish-scored-runs N\n                                Minimum Stockfish-scored evidence runs (default 0)\n  --require-all-matches        Fail unless evidence moveMatches equals searchRows (default behavior)\n  --expected-model-family NAME Require manifest.modelFamily\n  --expected-dtype NAME        Require manifest.dtype, e.g. f16\n  --expected-version NAME      Require manifest.version when present in newly staged manifests\n  --expected-batches LIST      Require exactly these manifest model batches, e.g. 1,4,8\n  -h, --help                   Show help\n`;
 
 function parseBatches(raw) {
   const tokens = String(raw)
@@ -32,39 +29,28 @@ function sameNumberList(a, b) {
 }
 
 function parseArgs(argv) {
-  const args = {
-    manifest: DEFAULT_MANIFEST,
-    evidence: DEFAULT_EVIDENCE,
-    checkEvidence: true,
-    minSearchRows: 94,
-    minFixedSuiteReports: 0,
-    minStockfishScoredRuns: 0,
-    requireAllMatches: true,
-    expectedModelFamily: '',
-    expectedDtype: '',
-    expectedVersion: '',
-    expectedBatches: undefined,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--manifest') args.manifest = next();
-    else if (arg === '--evidence') args.evidence = next();
-    else if (arg === '--no-evidence') args.checkEvidence = false;
-    else if (arg === '--min-search-rows') args.minSearchRows = Number(next());
-    else if (arg === '--min-fixed-suite-reports') args.minFixedSuiteReports = Number(next());
-    else if (arg === '--min-stockfish-scored-runs') args.minStockfishScoredRuns = Number(next());
-    else if (arg === '--require-all-matches') args.requireAllMatches = true;
-    else if (arg === '--expected-model-family') args.expectedModelFamily = next();
-    else if (arg === '--expected-dtype') args.expectedDtype = next();
-    else if (arg === '--expected-version') args.expectedVersion = next();
-    else if (arg === '--expected-batches') args.expectedBatches = parseBatches(next());
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      manifest: { type: 'string', default: DEFAULT_MANIFEST },
+      evidence: { type: 'string', default: DEFAULT_EVIDENCE },
+      'no-evidence': { type: 'boolean', default: false },
+      'min-search-rows': { type: 'string', default: '94' },
+      'min-fixed-suite-reports': { type: 'string', default: '0' },
+      'min-stockfish-scored-runs': { type: 'string', default: '0' },
+      'require-all-matches': { type: 'boolean', default: true },
+      'expected-model-family': { type: 'string', default: '' },
+      'expected-dtype': { type: 'string', default: '' },
+      'expected-version': { type: 'string', default: '' },
+      'expected-batches': { type: 'string' },
+    },
+    usage: USAGE,
+  });
+  args.checkEvidence = !args.noEvidence;
+  delete args.noEvidence;
+  args.minSearchRows = Number(args.minSearchRows);
+  args.minFixedSuiteReports = Number(args.minFixedSuiteReports);
+  args.minStockfishScoredRuns = Number(args.minStockfishScoredRuns);
+  if (args.expectedBatches !== undefined) args.expectedBatches = parseBatches(args.expectedBatches);
   if (!Number.isFinite(args.minSearchRows) || args.minSearchRows < 0) throw new Error(`Invalid --min-search-rows ${args.minSearchRows}`);
   if (!Number.isFinite(args.minFixedSuiteReports) || args.minFixedSuiteReports < 0)
     throw new Error(`Invalid --min-fixed-suite-reports ${args.minFixedSuiteReports}`);
@@ -89,7 +75,6 @@ async function loadJson(path) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const failures = [];
   const out = {
     schema: 'lc0_browser.tvmjs_webgpu_local_artifact_check.v1',

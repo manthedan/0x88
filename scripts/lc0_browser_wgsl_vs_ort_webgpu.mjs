@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_PORT = 5179;
 const DEFAULT_HOST = '127.0.0.1';
@@ -23,11 +24,7 @@ const VARIANTS = {
   },
 };
 
-function usage() {
-  console.log(
-    `Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs [options]\n\nAlternates fresh browser sessions between custom WGSL encoder0-block and ORT WebGPU encoder0-block benchmarks.\nThis script reports measurements only; it never promotes an implementation based on these numbers.\n\nOptions:\n  --base-url URL        Use an existing dev server, e.g. http://127.0.0.1:5179\n  --port N             Port for the auto-started Vite dev server (default ${DEFAULT_PORT})\n  --host HOST          Host for the auto-started Vite dev server (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       Session prefix (default: lc0-wgsl-vs-ort-PID)\n  --timeout MS         Per-run wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --samples N          Alternating A/B pairs to run (default ${DEFAULT_SAMPLES})\n  --wgsl-iters N       Queued WGSL encoder0 block iterations per sample (default 1)\n  --wgsl-warmup N      WGSL warmup iterations per sample (default 1)\n  --ort-iters N        ORT timed iterations per sample (default 3)\n  --ort-warmup N       ORT warmup iterations per sample (default 1)\n  --max-error N        Max accepted maxAbsError (default ${DEFAULT_MAX_ERROR})\n  --allow-wasm-fallback\n                       Do not fail if ORT WebGPU falls back to WASM; result is marked not-promotable\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print planned alternating runs and exit\n  -h, --help           Show this help\n`,
-  );
-}
+const USAGE = `Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs [options]\n\nAlternates fresh browser sessions between custom WGSL encoder0-block and ORT WebGPU encoder0-block benchmarks.\nThis script reports measurements only; it never promotes an implementation based on these numbers.\n\nOptions:\n  --base-url URL        Use an existing dev server, e.g. http://127.0.0.1:5179\n  --port N             Port for the auto-started Vite dev server (default ${DEFAULT_PORT})\n  --host HOST          Host for the auto-started Vite dev server (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       Session prefix (default: lc0-wgsl-vs-ort-PID)\n  --timeout MS         Per-run wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --samples N          Alternating A/B pairs to run (default ${DEFAULT_SAMPLES})\n  --wgsl-iters N       Queued WGSL encoder0 block iterations per sample (default 1)\n  --wgsl-warmup N      WGSL warmup iterations per sample (default 1)\n  --ort-iters N        ORT timed iterations per sample (default 3)\n  --ort-warmup N       ORT warmup iterations per sample (default 1)\n  --max-error N        Max accepted maxAbsError (default ${DEFAULT_MAX_ERROR})\n  --allow-wasm-fallback\n                       Do not fail if ORT WebGPU falls back to WASM; result is marked not-promotable\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print planned alternating runs and exit\n  -h, --help           Show this help\n`;
 
 function intArg(value, label, min, max) {
   const parsed = Math.floor(Number(value));
@@ -36,50 +33,37 @@ function intArg(value, label, min, max) {
 }
 
 function parseArgs(argv) {
-  const args = {
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    samples: DEFAULT_SAMPLES,
-    wgslIters: 1,
-    wgslWarmup: 1,
-    ortIters: 3,
-    ortWarmup: 1,
-    maxError: DEFAULT_MAX_ERROR,
-    agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
-    session: process.env.AGENT_BROWSER_SESSION ?? `lc0-wgsl-vs-ort-${process.pid}`,
-    allowWasmFallback: false,
-    packVerify: false,
-    noServer: false,
-    dryRun: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--base-url') args.baseUrl = next();
-    else if (arg === '--port') args.port = intArg(next(), '--port', 1, 65535);
-    else if (arg === '--host') args.host = next();
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--session') args.session = next();
-    else if (arg === '--timeout') args.timeoutMs = intArg(next(), '--timeout', 1, 120_000);
-    else if (arg === '--samples') args.samples = intArg(next(), '--samples', 1, 50);
-    else if (arg === '--wgsl-iters') args.wgslIters = intArg(next(), '--wgsl-iters', 1, 10_000);
-    else if (arg === '--wgsl-warmup') args.wgslWarmup = intArg(next(), '--wgsl-warmup', 0, 1000);
-    else if (arg === '--ort-iters') args.ortIters = intArg(next(), '--ort-iters', 1, 1000);
-    else if (arg === '--ort-warmup') args.ortWarmup = intArg(next(), '--ort-warmup', 0, 100);
-    else if (arg === '--max-error') {
-      args.maxError = Number(next());
-      if (!Number.isFinite(args.maxError) || args.maxError < 0) throw new Error(`Invalid --max-error: ${args.maxError}`);
-    } else if (arg === '--allow-wasm-fallback') args.allowWasmFallback = true;
-    else if (arg === '--pack-verify') args.packVerify = true;
-    else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      'base-url': { type: 'string' },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      host: { type: 'string', default: DEFAULT_HOST },
+      'agent-browser': { type: 'string', default: process.env.AGENT_BROWSER_BIN ?? 'agent-browser' },
+      session: { type: 'string', default: process.env.AGENT_BROWSER_SESSION ?? `lc0-wgsl-vs-ort-${process.pid}` },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      samples: { type: 'string', default: String(DEFAULT_SAMPLES) },
+      'wgsl-iters': { type: 'string', default: '1' },
+      'wgsl-warmup': { type: 'string', default: '1' },
+      'ort-iters': { type: 'string', default: '3' },
+      'ort-warmup': { type: 'string', default: '1' },
+      'max-error': { type: 'string', default: String(DEFAULT_MAX_ERROR) },
+      'allow-wasm-fallback': { type: 'boolean', default: false },
+      'pack-verify': { type: 'boolean', default: false },
+      'no-server': { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.port = intArg(args.port, '--port', 1, 65535);
+  args.timeoutMs = intArg(args.timeout, '--timeout', 1, 120_000);
+  delete args.timeout;
+  args.samples = intArg(args.samples, '--samples', 1, 50);
+  args.wgslIters = intArg(args.wgslIters, '--wgsl-iters', 1, 10_000);
+  args.wgslWarmup = intArg(args.wgslWarmup, '--wgsl-warmup', 0, 1000);
+  args.ortIters = intArg(args.ortIters, '--ort-iters', 1, 1000);
+  args.ortWarmup = intArg(args.ortWarmup, '--ort-warmup', 0, 100);
+  args.maxError = Number(args.maxError);
+  if (!Number.isFinite(args.maxError) || args.maxError < 0) throw new Error(`Invalid --max-error: ${args.maxError}`);
   return args;
 }
 
@@ -273,10 +257,6 @@ async function runOne(args, baseUrl, stepIndex, step) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    usage();
-    return;
-  }
   const baseUrl = args.baseUrl ?? `http://${args.host}:${args.port}`;
   const plan = runPlan(args);
   if (args.dryRun) {

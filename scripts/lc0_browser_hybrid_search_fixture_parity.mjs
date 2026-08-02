@@ -5,13 +5,14 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { applyLc0RuntimePreset, LC0_WEBGPU_RESEARCH_B4_PRESET, lc0RuntimeConfiguration } from './lc0_runtime_presets.mjs';
+import { parseScriptArgs } from './lib/cli.mjs';
+import { waitForOutput } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 300_000;
 
-function usage() {
-  console.log(`Usage: node scripts/lc0_browser_hybrid_search_fixture_parity.mjs [options]
+const USAGE = `Usage: node scripts/lc0_browser_hybrid_search_fixture_parity.mjs [options]
 
 Runs browser/WebGPU LC0 fixed-search fixture parity for hybrid search across batch pipeline depths.
 
@@ -45,8 +46,7 @@ Options:
   --allow-mismatches         Exit 0 and write/report artifacts even when parity mismatches are found
   --dry-run                  Print URL and exit
   -h, --help                 Show this help
-`);
-}
+`;
 
 function sanitizeAgentBrowserSessionName(value) {
   const safe = String(value).replace(/[^A-Za-z0-9_.-]+/g, '-');
@@ -65,80 +65,70 @@ function parseList(raw, mapper = Number, label = 'list') {
   return values;
 }
 
+const FLAG_ALIASES = {
+  '--hybrid-legal-priors': '--legal-priors-backend',
+  '--pipeline-depths': '--batch-pipeline-depths',
+  '--fixtures': '--fixture-limit',
+  '--max-depth-baseline-visit-l1': '--max-depth-visit-l1',
+};
+
 function parseArgs(argv) {
-  const args = {
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    progressTimeoutMs: 0,
-    agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
-    session: process.env.AGENT_BROWSER_SESSION ?? `lc0-search-fixture-parity-${process.pid}`,
-    visits: [32],
-    preset: '',
-    batch: 4,
-    batchPipelineDepths: [1],
-    repeats: 1,
-    fixtureLimit: 16,
-    fixtureIds: [],
-    fensFile: '',
-    fixedSuiteFens: [],
-    traceRootChildren: false,
-    traceSearchVisits: false,
-    layers: 10,
-    headBackend: 'ort',
-    encoderKernel: 'hand',
-    inputBackend: 'js',
-    legalPriorsBackend: 'js',
-    packVerify: false,
-    maxDepthVisitL1: undefined,
-    allowMismatches: false,
-    noServer: false,
-    dryRun: false,
-    explicitBaseUrl: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--out') args.out = next();
-    else if (arg === '--base-url') {
-      args.baseUrl = next();
-      args.explicitBaseUrl = true;
-    } else if (arg === '--host') args.host = next();
-    else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--session') args.session = next();
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--progress-timeout') args.progressTimeoutMs = Number(next());
-    else if (arg === '--visits') args.visits = parseList(next(), Number, 'visits');
-    else if (arg === '--preset') args.preset = next();
-    else if (arg === '--batch') args.batch = Number(next());
-    else if (arg === '--batch-pipeline-depths' || arg === '--pipeline-depths') args.batchPipelineDepths = parseList(next(), Number, 'batch-pipeline-depths');
-    else if (arg === '--repeats') args.repeats = Number(next());
-    else if (arg === '--fixture-limit' || arg === '--fixtures') args.fixtureLimit = Number(next());
-    else if (arg === '--fixture-ids')
-      args.fixtureIds = next()
+  argv = argv.map((arg) => FLAG_ALIASES[arg] ?? arg);
+  const args = parseScriptArgs(argv, {
+    options: {
+      host: { type: 'string', default: DEFAULT_HOST },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      'progress-timeout': { type: 'string', default: '0' },
+      'agent-browser': { type: 'string', default: process.env.AGENT_BROWSER_BIN ?? 'agent-browser' },
+      session: { type: 'string', default: process.env.AGENT_BROWSER_SESSION ?? `lc0-search-fixture-parity-${process.pid}` },
+      visits: { type: 'string', default: '32' },
+      preset: { type: 'string', default: '' },
+      batch: { type: 'string', default: '4' },
+      'batch-pipeline-depths': { type: 'string', default: '1' },
+      repeats: { type: 'string', default: '1' },
+      'fixture-limit': { type: 'string', default: '16' },
+      'fixture-ids': { type: 'string' },
+      fens: { type: 'string' },
+      'trace-root-children': { type: 'boolean', default: false },
+      'trace-search-visits': { type: 'boolean', default: false },
+      layers: { type: 'string', default: '10' },
+      'head-backend': { type: 'string', default: 'ort' },
+      'encoder-kernel': { type: 'string', default: 'hand' },
+      'input-backend': { type: 'string', default: 'js' },
+      'legal-priors-backend': { type: 'string', default: 'js' },
+      'pack-verify': { type: 'boolean', default: false },
+      'max-depth-visit-l1': { type: 'string' },
+      'allow-mismatches': { type: 'boolean', default: false },
+      'base-url': { type: 'string' },
+      out: { type: 'string' },
+      'no-server': { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.port = Number(args.port);
+  args.batch = Number(args.batch);
+  args.repeats = Number(args.repeats);
+  args.fixtureLimit = Number(args.fixtureLimit);
+  args.layers = Number(args.layers);
+  args.progressTimeoutMs = Number(args.progressTimeout);
+  delete args.progressTimeout;
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  if (args.maxDepthVisitL1 !== undefined) args.maxDepthVisitL1 = Number(args.maxDepthVisitL1);
+  args.visits = parseList(args.visits, Number, 'visits');
+  args.batchPipelineDepths = parseList(args.batchPipelineDepths, Number, 'batch-pipeline-depths');
+  args.fixtureIds = args.fixtureIds
+    ? args.fixtureIds
         .split(',')
         .map((value) => value.trim())
-        .filter(Boolean);
-    else if (arg === '--fens') args.fensFile = next();
-    else if (arg === '--trace-root-children') args.traceRootChildren = true;
-    else if (arg === '--trace-search-visits') args.traceSearchVisits = true;
-    else if (arg === '--layers') args.layers = Number(next());
-    else if (arg === '--head-backend') args.headBackend = next();
-    else if (arg === '--encoder-kernel') args.encoderKernel = next();
-    else if (arg === '--input-backend') args.inputBackend = next();
-    else if (arg === '--legal-priors-backend' || arg === '--hybrid-legal-priors') args.legalPriorsBackend = next();
-    else if (arg === '--pack-verify') args.packVerify = true;
-    else if (arg === '--max-depth-visit-l1' || arg === '--max-depth-baseline-visit-l1') args.maxDepthVisitL1 = Number(next());
-    else if (arg === '--allow-mismatches') args.allowMismatches = true;
-    else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+        .filter(Boolean)
+    : [];
+  args.fensFile = args.fens ?? '';
+  delete args.fens;
+  args.fixedSuiteFens = [];
+  args.explicitBaseUrl = args.baseUrl !== undefined;
   applyLc0RuntimePreset(args, argv);
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
@@ -263,31 +253,13 @@ function startServer(args) {
   const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let output = '';
-  let readySettled = false;
-  server.ready = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => settle(reject, new Error(`Vite dev server did not report readiness on port ${args.port}: ${output.trim()}`)), 30_000);
-    const settle = (fn, value) => {
-      if (readySettled) return;
-      readySettled = true;
-      clearTimeout(timer);
-      fn(value);
-    };
-    const onOutput = (chunk) => {
-      output += chunk.toString('utf8');
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally strips ANSI escape sequences from vite output
-      const plainOutput = output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
-      if (/ready in \d+\s*ms/.test(plainOutput) || plainOutput.includes(`:${args.port}/`)) settle(resolve);
-    };
-    server.stdout.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      onOutput(chunk);
-    });
-    server.stderr.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      onOutput(chunk);
-    });
-    server.on('exit', (status, signal) => settle(reject, new Error(`Vite dev server exited before ready (${status ?? signal}): ${output.trim()}`)));
+  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
+  server.stdout.on('data', echoOutput);
+  server.stderr.on('data', echoOutput);
+  server.ready = waitForOutput(server, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs: 30_000,
+    label: `Vite dev server (port ${args.port})`,
   });
   return server;
 }
@@ -361,7 +333,6 @@ async function loadFixedSuiteFens(args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   args.fixedSuiteFens = await loadFixedSuiteFens(args);
   if (args.batchPipelineDepths.some((depth) => depth > 1)) {
     process.stderr.write(

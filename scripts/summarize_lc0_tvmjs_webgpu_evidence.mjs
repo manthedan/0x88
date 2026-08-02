@@ -1,42 +1,31 @@
 #!/usr/bin/env node
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_DIR = 'artifacts/tvm';
 const DEFAULT_OUT = 'artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_summary.json';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/summarize_lc0_tvmjs_webgpu_evidence.mjs [options]\n\nBuilds an aggregate TVMJS/WebGPU research-evidence summary from local smoke/report artifacts.\n\nOptions:\n  --dir PATH       Artifact directory (default ${DEFAULT_DIR})\n  --out PATH       Output summary JSON (default ${DEFAULT_OUT})\n  --no-write       Print summary only\n  --require-all-matches\n                   Fail unless every discovered search row has matching TVMJS/ORT move\n  --min-search-rows N\n                   Fail unless at least N search rows are present\n  --min-stockfish-scored-runs N\n                   Fail unless at least N Stockfish-scored runs are present\n  --min-fixed-suite-reports N\n                   Fail unless at least N fixed-suite-style reports are present\n  -h, --help       Show help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/summarize_lc0_tvmjs_webgpu_evidence.mjs [options]\n\nBuilds an aggregate TVMJS/WebGPU research-evidence summary from local smoke/report artifacts.\n\nOptions:\n  --dir PATH       Artifact directory (default ${DEFAULT_DIR})\n  --out PATH       Output summary JSON (default ${DEFAULT_OUT})\n  --no-write       Print summary only\n  --require-all-matches\n                   Fail unless every discovered search row has matching TVMJS/ORT move\n  --min-search-rows N\n                   Fail unless at least N search rows are present\n  --min-stockfish-scored-runs N\n                   Fail unless at least N Stockfish-scored runs are present\n  --min-fixed-suite-reports N\n                   Fail unless at least N fixed-suite-style reports are present\n  -h, --help       Show help\n`;
 
 function parseArgs(argv) {
-  const args = {
-    dir: DEFAULT_DIR,
-    out: DEFAULT_OUT,
-    write: true,
-    requireAllMatches: false,
-    minSearchRows: 0,
-    minStockfishScoredRuns: 0,
-    minFixedSuiteReports: 0,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--dir') args.dir = next();
-    else if (arg === '--out') args.out = next();
-    else if (arg === '--no-write') args.write = false;
-    else if (arg === '--require-all-matches') args.requireAllMatches = true;
-    else if (arg === '--min-search-rows') args.minSearchRows = Number(next());
-    else if (arg === '--min-stockfish-scored-runs') args.minStockfishScoredRuns = Number(next());
-    else if (arg === '--min-fixed-suite-reports') args.minFixedSuiteReports = Number(next());
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      dir: { type: 'string', default: DEFAULT_DIR },
+      out: { type: 'string', default: DEFAULT_OUT },
+      'no-write': { type: 'boolean', default: false },
+      'require-all-matches': { type: 'boolean', default: false },
+      'min-search-rows': { type: 'string', default: '0' },
+      'min-stockfish-scored-runs': { type: 'string', default: '0' },
+      'min-fixed-suite-reports': { type: 'string', default: '0' },
+    },
+    usage: USAGE,
+  });
+  args.write = !args.noWrite;
+  delete args.noWrite;
+  args.minSearchRows = Number(args.minSearchRows);
+  args.minStockfishScoredRuns = Number(args.minStockfishScoredRuns);
+  args.minFixedSuiteReports = Number(args.minFixedSuiteReports);
   for (const name of ['minSearchRows', 'minStockfishScoredRuns', 'minFixedSuiteReports']) {
     if (!Number.isFinite(args[name]) || args[name] < 0) throw new Error(`Invalid ${name}: ${args[name]}`);
   }
@@ -184,7 +173,6 @@ function checkSummary(summary, args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const summary = await buildSummary(args);
   const failures = checkSummary(summary, args);
   const text = `${JSON.stringify(summary, null, 2)}\n`;

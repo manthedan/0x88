@@ -1,64 +1,54 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { parseScriptArgs } from './lib/cli.mjs';
+import { waitForOutput } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 180_000;
 
-function usage() {
-  console.log(
-    `Usage: node scripts/lc0_browser_ort_readback_profile.mjs [options]\n\nRuns the LC0 ONNX evaluator in browser ORT with diagnostic output enabled.\n\nOptions:\n  --base-url URL        Use an existing dev server\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --model URL          LC0 ONNX model URL\n  --fen FEN            Position to benchmark (default page start position)\n  --iters N            Timed eval iterations (default 10)\n  --warmup N           Warmup eval iterations (default 2)\n  --ep EP              ORT EP: wasm, webgpu, webgpu,wasm, auto (default webgpu)\n  --ort-wasm-variant V ORT WASM artifact: fixed or relaxed\n  --ort-threads N      Pin ORT WASM threads\n  --no-monkey-patch    Disable WebGPU API monkey-patch counts\n  --no-kernel-profile  Disable ORT WebGPU kernel timestamp profiling\n  --no-gpu-outputs     Do not set preferredOutputLocation=gpu-buffer\n  --pack-verify        Kept for symmetry; ignored by ONNX bench\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/lc0_browser_ort_readback_profile.mjs [options]\n\nRuns the LC0 ONNX evaluator in browser ORT with diagnostic output enabled.\n\nOptions:\n  --base-url URL        Use an existing dev server\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --model URL          LC0 ONNX model URL\n  --fen FEN            Position to benchmark (default page start position)\n  --iters N            Timed eval iterations (default 10)\n  --warmup N           Warmup eval iterations (default 2)\n  --ep EP              ORT EP: wasm, webgpu, webgpu,wasm, auto (default webgpu)\n  --ort-wasm-variant V ORT WASM artifact: fixed or relaxed\n  --ort-threads N      Pin ORT WASM threads\n  --no-monkey-patch    Disable WebGPU API monkey-patch counts\n  --no-kernel-profile  Disable ORT WebGPU kernel timestamp profiling\n  --no-gpu-outputs     Do not set preferredOutputLocation=gpu-buffer\n  --pack-verify        Kept for symmetry; ignored by ONNX bench\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`;
 
 function parseArgs(argv) {
-  const args = {
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
-    session: process.env.AGENT_BROWSER_SESSION ?? `lc0-ort-readback-profile-${process.pid}`,
-    iters: 10,
-    warmup: 2,
-    ep: 'webgpu',
-    monkeyPatch: true,
-    kernelProfile: true,
-    gpuOutputs: true,
-    noServer: false,
-    dryRun: false,
-    explicitBaseUrl: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--base-url') {
-      args.baseUrl = next();
-      args.explicitBaseUrl = true;
-    } else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--host') args.host = next();
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--session') args.session = next();
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--model') args.model = next();
-    else if (arg === '--fen') args.fen = next();
-    else if (arg === '--iters') args.iters = Number(next());
-    else if (arg === '--warmup') args.warmup = Number(next());
-    else if (arg === '--ep') args.ep = next();
-    else if (arg === '--ort-wasm-variant') args.ortWasmVariant = next();
-    else if (arg === '--ort-threads') args.ortThreads = Number(next());
-    else if (arg === '--no-monkey-patch') args.monkeyPatch = false;
-    else if (arg === '--no-kernel-profile') args.kernelProfile = false;
-    else if (arg === '--no-gpu-outputs') args.gpuOutputs = false;
-    else if (arg === '--pack-verify') {
-    } else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      host: { type: 'string', default: DEFAULT_HOST },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      'agent-browser': { type: 'string', default: process.env.AGENT_BROWSER_BIN ?? 'agent-browser' },
+      session: { type: 'string', default: process.env.AGENT_BROWSER_SESSION ?? `lc0-ort-readback-profile-${process.pid}` },
+      iters: { type: 'string', default: '10' },
+      warmup: { type: 'string', default: '2' },
+      ep: { type: 'string', default: 'webgpu' },
+      'no-monkey-patch': { type: 'boolean', default: false },
+      'no-kernel-profile': { type: 'boolean', default: false },
+      'no-gpu-outputs': { type: 'boolean', default: false },
+      'pack-verify': { type: 'boolean', default: false },
+      'base-url': { type: 'string' },
+      model: { type: 'string' },
+      fen: { type: 'string' },
+      'ort-wasm-variant': { type: 'string' },
+      'ort-threads': { type: 'string' },
+      'no-server': { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.port = Number(args.port);
+  args.iters = Number(args.iters);
+  args.warmup = Number(args.warmup);
+  if (args.ortThreads !== undefined) args.ortThreads = Number(args.ortThreads);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  args.monkeyPatch = !args.noMonkeyPatch;
+  delete args.noMonkeyPatch;
+  args.kernelProfile = !args.noKernelProfile;
+  delete args.noKernelProfile;
+  args.gpuOutputs = !args.noGpuOutputs;
+  delete args.noGpuOutputs;
+  delete args.packVerify;
+  args.explicitBaseUrl = args.baseUrl !== undefined;
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   for (const [name, value] of [
@@ -158,8 +148,14 @@ async function waitForServer(baseUrl, timeoutMs) {
 function startServer(args) {
   if (args.noServer) return null;
   const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
-  server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
-  server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
+  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
+  server.stdout.on('data', echoOutput);
+  server.stderr.on('data', echoOutput);
+  server.ready = waitForOutput(server, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs: 30_000,
+    label: `Vite dev server (port ${args.port})`,
+  });
   return server;
 }
 
@@ -233,13 +229,13 @@ async function runBrowserBenchmark(args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   if (args.dryRun) {
     console.log(benchmarkUrl(args));
     return;
   }
   const server = startServer(args);
   try {
+    if (server) await server.ready;
     await waitForServer(args.baseUrl, 30_000);
     const result = await runBrowserBenchmark(args);
     console.log(JSON.stringify(result, null, 2));

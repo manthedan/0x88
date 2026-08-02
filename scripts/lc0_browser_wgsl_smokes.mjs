@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_PORT = 5179;
 const DEFAULT_HOST = '127.0.0.1';
@@ -144,50 +145,37 @@ const SMOKES = [
   },
 ];
 
-function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_smokes.mjs [options]\n\nRuns /single-engine WebGPU smoke benchmarks through agent-browser.\n\nOptions:\n  --base-url URL        Use an existing dev server, e.g. http://127.0.0.1:5179\n  --port N             Port for the auto-started Vite dev server (default ${DEFAULT_PORT})\n  --host HOST          Host for the auto-started Vite dev server (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name (default: lc0-wgsl-smokes-PID)\n  --timeout MS         Per-smoke wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --max-error N        Max accepted maxAbsError across outputs (default ${DEFAULT_MAX_ERROR})\n  --only a,b,c         Comma-separated smoke names to run\n  --list               Print smoke names and URLs, then exit
-                       Heavy smokes such as encoder-stack-10-wasm and encoder-stack-heads-2-wasm are listed but excluded from the default run.\n  --no-server          Do not auto-start Vite; requires --base-url or an already-running default URL\n  -h, --help           Show this help\n`);
-}
+const USAGE = `Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_smokes.mjs [options]\n\nRuns /single-engine WebGPU smoke benchmarks through agent-browser.\n\nOptions:\n  --base-url URL        Use an existing dev server, e.g. http://127.0.0.1:5179\n  --port N             Port for the auto-started Vite dev server (default ${DEFAULT_PORT})\n  --host HOST          Host for the auto-started Vite dev server (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name (default: lc0-wgsl-smokes-PID)\n  --timeout MS         Per-smoke wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --max-error N        Max accepted maxAbsError across outputs (default ${DEFAULT_MAX_ERROR})\n  --only a,b,c         Comma-separated smoke names to run\n  --list               Print smoke names and URLs, then exit
+                       Heavy smokes such as encoder-stack-10-wasm and encoder-stack-heads-2-wasm are listed but excluded from the default run.\n  --no-server          Do not auto-start Vite; requires --base-url or an already-running default URL\n  -h, --help           Show this help\n`;
 
 function parseArgs(argv) {
-  const args = {
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    maxError: DEFAULT_MAX_ERROR,
-    maxErrorExplicit: false,
-    agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
-    session: process.env.AGENT_BROWSER_SESSION ?? `lc0-wgsl-smokes-${process.pid}`,
-    noServer: false,
-    list: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--base-url') args.baseUrl = next();
-    else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--host') args.host = next();
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--session') args.session = next();
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--max-error') {
-      args.maxError = Number(next());
-      args.maxErrorExplicit = true;
-    } else if (arg === '--only')
-      args.only = new Set(
-        next()
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-      );
-    else if (arg === '--list') args.list = true;
-    else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      'base-url': { type: 'string' },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      host: { type: 'string', default: DEFAULT_HOST },
+      'agent-browser': { type: 'string', default: process.env.AGENT_BROWSER_BIN ?? 'agent-browser' },
+      session: { type: 'string', default: process.env.AGENT_BROWSER_SESSION ?? `lc0-wgsl-smokes-${process.pid}` },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      'max-error': { type: 'string' },
+      only: { type: 'string' },
+      list: { type: 'boolean', default: false },
+      'no-server': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.port = Number(args.port);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  args.maxErrorExplicit = args.maxError !== undefined;
+  args.maxError = args.maxErrorExplicit ? Number(args.maxError) : DEFAULT_MAX_ERROR;
+  if (args.only !== undefined)
+    args.only = new Set(
+      args.only
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
   if (!Number.isFinite(args.port) || args.port <= 0) throw new Error(`Invalid --port: ${args.port}`);
   if (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0) throw new Error(`Invalid --timeout: ${args.timeoutMs}`);
   if (!Number.isFinite(args.maxError) || args.maxError < 0) throw new Error(`Invalid --max-error: ${args.maxError}`);
@@ -349,10 +337,6 @@ async function runSmoke(args, baseUrl, smoke) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    usage();
-    return;
-  }
   const baseUrl = args.baseUrl ?? `http://${args.host}:${args.port}`;
   const smokes = selectedSmokes(args);
   if (args.list) {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
 import { artifactKeyFromReleaseUrl, buildArtifactReleaseCatalog, isArtifactReleaseV2 } from './engine_artifact_registry.mjs';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_BUCKET = 'browser-chess-models';
 const DEFAULT_RETENTION_DAYS = 90;
@@ -10,79 +11,32 @@ const SOURCE_ARCHIVE_RE = /(?:corresponding-source|source).*\.tar\.gz$/i;
 const SHA_ONLY_V2_KEY_RE = /^artifacts\/sha256\/[a-f0-9]{64}\/(?:identity|br\/[a-f0-9]{64})$/;
 const SAFE_DELETE_CATEGORIES = new Set(['legacy-logical-duplicate', 'legacy-unreferenced-metadata']);
 
-function usage() {
-  console.log(
-    `Usage: node scripts/plan_r2_artifact_cleanup.mjs [options]\n\nBuilds a conservative R2 cleanup plan for the artifact bucket. Dry-run is the default.\n\nOptions:\n  --bucket NAME              R2 bucket (default ${DEFAULT_BUCKET})\n  --account-id ID            Cloudflare account id (or CLOUDFLARE_ACCOUNT_ID)\n  --api-token TOKEN          Cloudflare API token (or CLOUDFLARE_API_TOKEN)\n  --retention-days N         Minimum age before hashed orphan deletion candidates (default ${DEFAULT_RETENTION_DAYS})\n  --execute                  Delete selected candidates; default is dry-run only\n  --delete-category NAME     Candidate category to delete. Repeatable or comma-separated.\n                             Safe categories: ${[...SAFE_DELETE_CATEGORIES].join(', ')}\n  --allow-delete-hashed      Allow deleting hashed-orphan candidates too; requires --execute and --delete-category hashed-orphan\n  --now ISO                  Override current time for deterministic tests\n  --json                     Emit only JSON\n  -h, --help                 Show help\n\nThe script never deletes channels/ or releases/. It never deletes any\nartifacts/sha256/* object referenced by a retained release manifest.\n`,
-  );
-}
+const USAGE = `Usage: node scripts/plan_r2_artifact_cleanup.mjs [options]\n\nBuilds a conservative R2 cleanup plan for the artifact bucket. Dry-run is the default.\n\nOptions:\n  --bucket NAME              R2 bucket (default ${DEFAULT_BUCKET})\n  --account-id ID            Cloudflare account id (or CLOUDFLARE_ACCOUNT_ID)\n  --api-token TOKEN          Cloudflare API token (or CLOUDFLARE_API_TOKEN)\n  --retention-days N         Minimum age before hashed orphan deletion candidates (default ${DEFAULT_RETENTION_DAYS})\n  --execute                  Delete selected candidates; default is dry-run only\n  --delete-category NAME     Candidate category to delete. Repeatable or comma-separated.\n                             Safe categories: ${[...SAFE_DELETE_CATEGORIES].join(', ')}\n  --allow-delete-hashed      Allow deleting hashed-orphan candidates too; requires --execute and --delete-category hashed-orphan\n  --now ISO                  Override current time for deterministic tests\n  --json                     Emit only JSON\n  -h, --help                 Show help\n\nThe script never deletes channels/ or releases/. It never deletes any\nartifacts/sha256/* object referenced by a retained release manifest.\n`;
 
 export function parseArgs(argv) {
-  const args = {
-    bucket: process.env.LC0_R2_ARTIFACT_BUCKET || DEFAULT_BUCKET,
-    accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-    apiToken: process.env.CLOUDFLARE_API_TOKEN,
-    retentionDays: DEFAULT_RETENTION_DAYS,
-    execute: false,
-    deleteCategories: new Set(),
-    allowDeleteHashed: false,
-    now: new Date(),
-    json: false,
-  };
-  for (let i = 2; i < argv.length; i += 1) {
-    const arg = argv[i];
-    const next = argv[i + 1];
-    if (arg === '--bucket' && next) {
-      args.bucket = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--account-id' && next) {
-      args.accountId = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--api-token' && next) {
-      args.apiToken = next;
-      i += 1;
-      continue;
-    }
-    if (arg === '--retention-days' && next) {
-      args.retentionDays = Number(next);
-      i += 1;
-      continue;
-    }
-    if (arg === '--delete-category' && next) {
-      for (const category of next
-        .split(',')
-        .map((value) => value.trim())
-        .filter(Boolean))
-        args.deleteCategories.add(category);
-      i += 1;
-      continue;
-    }
-    if (arg === '--now' && next) {
-      args.now = new Date(next);
-      i += 1;
-      continue;
-    }
-    if (arg === '--execute') {
-      args.execute = true;
-      continue;
-    }
-    if (arg === '--allow-delete-hashed') {
-      args.allowDeleteHashed = true;
-      continue;
-    }
-    if (arg === '--json') {
-      args.json = true;
-      continue;
-    }
-    if (arg === '-h' || arg === '--help') {
-      args.help = true;
-      continue;
-    }
-    throw new Error(`Unknown argument: ${arg}`);
-  }
+  const args = parseScriptArgs(argv.slice(2), {
+    options: {
+      bucket: { type: 'string', default: process.env.LC0_R2_ARTIFACT_BUCKET || DEFAULT_BUCKET },
+      'account-id': { type: 'string', default: process.env.CLOUDFLARE_ACCOUNT_ID },
+      'api-token': { type: 'string', default: process.env.CLOUDFLARE_API_TOKEN },
+      'retention-days': { type: 'string', default: String(DEFAULT_RETENTION_DAYS) },
+      'delete-category': { type: 'string', multiple: true, default: [] },
+      now: { type: 'string' },
+      execute: { type: 'boolean', default: false },
+      'allow-delete-hashed': { type: 'boolean', default: false },
+      json: { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.retentionDays = Number(args.retentionDays);
+  args.deleteCategories = new Set();
+  for (const category of args.deleteCategory
+    .flatMap((value) => value.split(','))
+    .map((value) => value.trim())
+    .filter(Boolean))
+    args.deleteCategories.add(category);
+  delete args.deleteCategory;
+  args.now = args.now !== undefined ? new Date(args.now) : new Date();
   if (!Number.isFinite(args.retentionDays) || args.retentionDays < 0) throw new Error('--retention-days must be a non-negative number');
   if (Number.isNaN(args.now.getTime())) throw new Error('--now must be a valid ISO timestamp');
   return args;
@@ -390,10 +344,6 @@ async function deleteR2Object(args, key) {
 
 export async function main(argv = process.argv) {
   const args = parseArgs(argv);
-  if (args.help) {
-    usage();
-    return;
-  }
   const objects = await listR2Objects(args);
   const { releases, channel } = await loadReleaseManifests(args, objects);
   const plan = buildCleanupPlan({ objects, releases, channel, now: args.now, retentionDays: args.retentionDays });

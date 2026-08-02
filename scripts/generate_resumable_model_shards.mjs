@@ -4,36 +4,23 @@ import { createReadStream } from 'node:fs';
 import { mkdir, open, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseScriptArgs } from './lib/cli.mjs';
 
 const MIN_CHUNK_BYTES = 16 * 1024 * 1024;
 const MAX_CHUNK_BYTES = 32 * 1024 * 1024;
 
+const USAGE = 'Usage: node scripts/generate_resumable_model_shards.mjs --input model.onnx --output output-dir [--chunk-mib 16]';
+
 function parseArgs(argv) {
-  const args = { input: undefined, output: undefined, chunkMib: 16 };
-  for (let index = 2; index < argv.length; index += 1) {
-    const arg = argv[index];
-    const next = argv[index + 1];
-    if (arg === '--input' && next) {
-      args.input = next;
-      index += 1;
-      continue;
-    }
-    if (arg === '--output' && next) {
-      args.output = next;
-      index += 1;
-      continue;
-    }
-    if (arg === '--chunk-mib' && next) {
-      args.chunkMib = Number(next);
-      index += 1;
-      continue;
-    }
-    if (arg === '-h' || arg === '--help') {
-      console.log('Usage: node scripts/generate_resumable_model_shards.mjs --input model.onnx --output output-dir [--chunk-mib 16]');
-      process.exit(0);
-    }
-    throw new Error(`Unknown argument: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      input: { type: 'string' },
+      output: { type: 'string' },
+      'chunk-mib': { type: 'string', default: '16' },
+    },
+    usage: USAGE,
+  });
+  args.chunkMib = Number(args.chunkMib);
   if (!args.input || !args.output) throw new Error('--input and --output are required');
   if (!Number.isInteger(args.chunkMib) || args.chunkMib < 16 || args.chunkMib > 32) {
     throw new Error('--chunk-mib must be an integer from 16 through 32');
@@ -154,7 +141,7 @@ export async function generateResumableModelShards({ inputPath, outputDir, chunk
 }
 
 async function main() {
-  const result = await generateResumableModelShards(parseArgs(process.argv));
+  const result = await generateResumableModelShards(parseArgs(process.argv.slice(2)));
   console.log(
     JSON.stringify(
       {

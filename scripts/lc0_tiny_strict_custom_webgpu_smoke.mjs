@@ -3,6 +3,9 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { parseScriptArgs } from './lib/cli.mjs';
+import { spawnCapture } from './lib/process.mjs';
+import { waitForOutput } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5281;
@@ -10,45 +13,28 @@ const DEFAULT_TIMEOUT_MS = 240_000;
 const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
 const AUDIT_EVENT = 'lc0-browser-runtime-audit';
 
-function usage() {
-  console.log(
-    `Usage: node scripts/lc0_tiny_strict_custom_webgpu_smoke.mjs [options]\n\nRuns strict Centipawn custom WebGPU browser smokes for /app/analysis and /app/arena. The gate fails if the Centipawn runtime audit does not resolve runtime=custom-webgpu without fallback.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-surface timeout (default ${DEFAULT_TIMEOUT_MS})\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --skip-analysis       Skip /app/analysis smoke\n  --skip-arena          Skip /app/arena smoke\n  --dry-run             Print planned URLs without running\n  -h, --help            Show this help\n`,
-  );
-}
+const USAGE = `Usage: node scripts/lc0_tiny_strict_custom_webgpu_smoke.mjs [options]\n\nRuns strict Centipawn custom WebGPU browser smokes for /app/analysis and /app/arena. The gate fails if the Centipawn runtime audit does not resolve runtime=custom-webgpu without fallback.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-surface timeout (default ${DEFAULT_TIMEOUT_MS})\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --skip-analysis       Skip /app/analysis smoke\n  --skip-arena          Skip /app/arena smoke\n  --dry-run             Print planned URLs without running\n  -h, --help            Show this help\n`;
 
 function parseArgs(argv) {
-  const args = {
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    agentBrowser: DEFAULT_AGENT_BROWSER,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    noServer: false,
-    skipAnalysis: false,
-    skipArena: false,
-    dryRun: false,
-    explicitBaseUrl: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--base-url') {
-      args.baseUrl = next();
-      args.explicitBaseUrl = true;
-    } else if (arg === '--host') args.host = next();
-    else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--timeout') args.timeoutMs = Number(next());
-    else if (arg === '--out') args.out = next();
-    else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '--skip-analysis') args.skipAnalysis = true;
-    else if (arg === '--skip-arena') args.skipArena = true;
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  const args = parseScriptArgs(argv, {
+    options: {
+      'base-url': { type: 'string' },
+      host: { type: 'string', default: DEFAULT_HOST },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      'agent-browser': { type: 'string', default: DEFAULT_AGENT_BROWSER },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      out: { type: 'string' },
+      'no-server': { type: 'boolean', default: false },
+      'skip-analysis': { type: 'boolean', default: false },
+      'skip-arena': { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.port = Number(args.port);
+  args.timeoutMs = Number(args.timeout);
+  delete args.timeout;
+  args.explicitBaseUrl = args.baseUrl !== undefined;
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   if (!Number.isFinite(args.port) || args.port <= 0) throw new Error(`Invalid --port: ${args.port}`);
@@ -57,69 +43,18 @@ function parseArgs(argv) {
   return args;
 }
 
-function spawnCapture(command, commandArgs, options = {}) {
-  return new Promise((resolve, reject) => {
-    const { timeoutMs, echoStderr, stdin, ...spawnOptions } = options;
-    const child = spawn(command, commandArgs, { stdio: ['pipe', 'pipe', 'pipe'], ...spawnOptions });
-    const chunks = { stdout: [], stderr: [] };
-    let settled = false;
-    const finish = (fn, value) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      fn(value);
-    };
-    const timer = timeoutMs
-      ? setTimeout(() => {
-          child.kill('SIGKILL');
-          finish(reject, new Error(`${command} ${commandArgs.join(' ')} timed out after ${timeoutMs}ms`));
-        }, timeoutMs)
-      : undefined;
-    child.stdout.on('data', (chunk) => chunks.stdout.push(chunk));
-    child.stderr.on('data', (chunk) => {
-      chunks.stderr.push(chunk);
-      if (echoStderr) process.stderr.write(chunk);
-    });
-    child.on('error', (error) => finish(reject, error));
-    child.on('close', (status) => {
-      const stdout = Buffer.concat(chunks.stdout).toString('utf8');
-      const stderr = Buffer.concat(chunks.stderr).toString('utf8');
-      if (status !== 0) return finish(reject, new Error(`${command} ${commandArgs.join(' ')} failed with ${status}: ${stderr || stdout}`));
-      finish(resolve, { stdout, stderr });
-    });
-    if (stdin !== undefined) child.stdin.end(stdin);
-    else child.stdin.end();
-  });
-}
-
 function startServer(args) {
   if (args.noServer) return null;
   const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let output = '';
-  let settled = false;
-  server.ready = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => settle(reject, new Error(`Vite did not become ready on ${args.port}: ${output.trim()}`)), 30_000);
-    const settle = (fn, value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      fn(value);
-    };
-    const onOutput = (chunk) => {
-      output += chunk.toString('utf8');
-      if (/ready in \d+\s*ms/.test(output) || output.includes(`:${args.port}/`)) settle(resolve);
-    };
-    server.stdout.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      onOutput(chunk);
-    });
-    server.stderr.on('data', (chunk) => {
-      process.stderr.write(`[vite] ${chunk}`);
-      onOutput(chunk);
-    });
-    server.on('exit', (status, signal) => settle(reject, new Error(`Vite exited before ready (${status ?? signal}): ${output.trim()}`)));
+  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
+  server.stdout.on('data', echoOutput);
+  server.stderr.on('data', echoOutput);
+  server.ready = waitForOutput(server, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs: 30_000,
+    label: `Vite dev server (port ${args.port})`,
   });
   return server;
 }
@@ -151,7 +86,7 @@ function parseAgentJson(stdout) {
 
 async function runAgent(args, commandArgs, timeoutMs, session, stdin) {
   const fullArgs = ['--json', ...(session ? ['--session', session] : []), ...commandArgs];
-  const { stdout } = await spawnCapture(args.agentBrowser, fullArgs, { echoStderr: true, timeoutMs, stdin });
+  const stdout = await spawnCapture(args.agentBrowser, fullArgs, { echoStderr: true, timeoutMs, input: stdin });
   return parseAgentJson(stdout);
 }
 
@@ -314,10 +249,6 @@ async function runArenaSmoke(args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    usage();
-    return;
-  }
   const plan = [];
   if (!args.skipAnalysis) plan.push({ name: 'analysis', url: `${args.baseUrl}/app/analysis?centipawnBatch=1` });
   if (!args.skipArena) plan.push({ name: 'arena', url: `${args.baseUrl}/app/arena?seatA=centipawn:bt4-custom:1&seatB=centipawn:bt4-custom:1&games=1` });

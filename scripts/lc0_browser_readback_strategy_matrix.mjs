@@ -5,16 +5,17 @@ import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { parseScriptArgs } from './lib/cli.mjs';
+import { spawnCapture } from './lib/process.mjs';
+import { waitForOutput } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_FENS = 'eval/opening_suite_uho_lite_v1.fen';
 
-function usage() {
-  console.log(`Usage: node scripts/lc0_browser_readback_strategy_matrix.mjs [options]\n\nRuns a fixed-FEN browser matrix comparing ORT WebGPU output-download modes with custom WGSL-head search/readback modes.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_readback_strategy_matrix.json)\n  --base-url URL        Use an existing dev server\n  --host HOST           Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --fens PATH           FEN file (default ${DEFAULT_FENS})\n  --max-positions N     Max FENs to use (default 4)\n  --repeats N           Repeat each strategy/FEN cell (default 1)\n  --strategies LIST     Comma-separated: ort-cpu,ort-gpu,wgsl-pipe1,wgsl-gpu-legal,wgsl-pipe2,wgsl-gpu-legal-pipe2 (default all)\n  --ort-iters N         ORT timed eval iterations per FEN (default 3)\n  --ort-warmup N        ORT warmup eval iterations per FEN (default 1)\n  --wgsl-eval-iters N   WGSL warm eval iterations per FEN (default 2)\n  --wgsl-search-iters N WGSL fixed-visit searches per FEN (default 2)\n  --wgsl-search-warmup N\n                       WGSL search warmup searches per FEN (default 1)\n  --visits N            WGSL fixed PUCT visits (default 32)\n  --batch N             WGSL search leaf batch size (default 4)
-  --pipe2-batch N       Effective batch cap for wgsl-pipe2; lower this to bound overlap experiments (default 4)\n  --input-backend NAME  WGSL strategy input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME WGSL strategy encoder kernel variant (default hand)\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-cell timeout (default ${DEFAULT_TIMEOUT_MS})\n  --no-server           Do not auto-start Vite\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`);
-}
+const USAGE = `Usage: node scripts/lc0_browser_readback_strategy_matrix.mjs [options]\n\nRuns a fixed-FEN browser matrix comparing ORT WebGPU output-download modes with custom WGSL-head search/readback modes.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_readback_strategy_matrix.json)\n  --base-url URL        Use an existing dev server\n  --host HOST           Vite host when auto-starting (default ${DEFAULT_HOST})\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --fens PATH           FEN file (default ${DEFAULT_FENS})\n  --max-positions N     Max FENs to use (default 4)\n  --repeats N           Repeat each strategy/FEN cell (default 1)\n  --strategies LIST     Comma-separated: ort-cpu,ort-gpu,wgsl-pipe1,wgsl-gpu-legal,wgsl-pipe2,wgsl-gpu-legal-pipe2 (default all)\n  --ort-iters N         ORT timed eval iterations per FEN (default 3)\n  --ort-warmup N        ORT warmup eval iterations per FEN (default 1)\n  --wgsl-eval-iters N   WGSL warm eval iterations per FEN (default 2)\n  --wgsl-search-iters N WGSL fixed-visit searches per FEN (default 2)\n  --wgsl-search-warmup N\n                       WGSL search warmup searches per FEN (default 1)\n  --visits N            WGSL fixed PUCT visits (default 32)\n  --batch N             WGSL search leaf batch size (default 4)
+  --pipe2-batch N       Effective batch cap for wgsl-pipe2; lower this to bound overlap experiments (default 4)\n  --input-backend NAME  WGSL strategy input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME WGSL strategy encoder kernel variant (default hand)\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-cell timeout (default ${DEFAULT_TIMEOUT_MS})\n  --no-server           Do not auto-start Vite\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`;
 
 function intArg(value, label, min, max = Number.MAX_SAFE_INTEGER) {
   const parsed = Math.floor(Number(value));
@@ -29,64 +30,52 @@ function parseList(raw) {
     .filter(Boolean);
 }
 
+const FLAG_ALIASES = { '--encoder-kernel-variant': '--encoder-kernel' };
+
 function parseArgs(argv) {
-  const args = {
-    out: '/tmp/lc0_readback_strategy_matrix.json',
-    host: DEFAULT_HOST,
-    port: DEFAULT_PORT,
-    fens: DEFAULT_FENS,
-    maxPositions: 4,
-    repeats: 1,
-    strategies: ['ort-cpu', 'ort-gpu', 'wgsl-pipe1', 'wgsl-gpu-legal', 'wgsl-pipe2', 'wgsl-gpu-legal-pipe2'],
-    ortIters: 3,
-    ortWarmup: 1,
-    wgslEvalIters: 2,
-    wgslSearchIters: 2,
-    wgslSearchWarmup: 1,
-    visits: 32,
-    batch: 4,
-    pipe2Batch: 4,
-    inputBackend: 'js',
-    encoderKernel: 'hand',
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    agentBrowser: process.env.AGENT_BROWSER_BIN ?? 'agent-browser',
-    noServer: false,
-    dryRun: false,
-    explicitBaseUrl: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
-      return argv[++i];
-    };
-    if (arg === '--out') args.out = next();
-    else if (arg === '--base-url') {
-      args.baseUrl = next();
-      args.explicitBaseUrl = true;
-    } else if (arg === '--host') args.host = next();
-    else if (arg === '--port') args.port = intArg(next(), '--port', 1, 65535);
-    else if (arg === '--fens') args.fens = next();
-    else if (arg === '--max-positions') args.maxPositions = intArg(next(), '--max-positions', 1, 10_000);
-    else if (arg === '--repeats') args.repeats = intArg(next(), '--repeats', 1, 100);
-    else if (arg === '--strategies') args.strategies = parseList(next());
-    else if (arg === '--ort-iters') args.ortIters = intArg(next(), '--ort-iters', 1, 1000);
-    else if (arg === '--ort-warmup') args.ortWarmup = intArg(next(), '--ort-warmup', 0, 100);
-    else if (arg === '--wgsl-eval-iters') args.wgslEvalIters = intArg(next(), '--wgsl-eval-iters', 0, 100);
-    else if (arg === '--wgsl-search-iters') args.wgslSearchIters = intArg(next(), '--wgsl-search-iters', 1, 100);
-    else if (arg === '--wgsl-search-warmup') args.wgslSearchWarmup = intArg(next(), '--wgsl-search-warmup', 0, 100);
-    else if (arg === '--visits') args.visits = intArg(next(), '--visits', 1, 1_000_000);
-    else if (arg === '--batch') args.batch = intArg(next(), '--batch', 1, 512);
-    else if (arg === '--pipe2-batch') args.pipe2Batch = intArg(next(), '--pipe2-batch', 1, 512);
-    else if (arg === '--input-backend') args.inputBackend = next();
-    else if (arg === '--encoder-kernel' || arg === '--encoder-kernel-variant') args.encoderKernel = next();
-    else if (arg === '--agent-browser') args.agentBrowser = next();
-    else if (arg === '--timeout') args.timeoutMs = intArg(next(), '--timeout', 1, 600_000);
-    else if (arg === '--no-server') args.noServer = true;
-    else if (arg === '--dry-run') args.dryRun = true;
-    else if (arg === '-h' || arg === '--help') args.help = true;
-    else throw new Error(`Unknown option: ${arg}`);
-  }
+  argv = argv.map((arg) => FLAG_ALIASES[arg] ?? arg);
+  const args = parseScriptArgs(argv, {
+    options: {
+      out: { type: 'string', default: '/tmp/lc0_readback_strategy_matrix.json' },
+      host: { type: 'string', default: DEFAULT_HOST },
+      port: { type: 'string', default: String(DEFAULT_PORT) },
+      fens: { type: 'string', default: DEFAULT_FENS },
+      'max-positions': { type: 'string', default: '4' },
+      repeats: { type: 'string', default: '1' },
+      strategies: { type: 'string', default: 'ort-cpu,ort-gpu,wgsl-pipe1,wgsl-gpu-legal,wgsl-pipe2,wgsl-gpu-legal-pipe2' },
+      'ort-iters': { type: 'string', default: '3' },
+      'ort-warmup': { type: 'string', default: '1' },
+      'wgsl-eval-iters': { type: 'string', default: '2' },
+      'wgsl-search-iters': { type: 'string', default: '2' },
+      'wgsl-search-warmup': { type: 'string', default: '1' },
+      visits: { type: 'string', default: '32' },
+      batch: { type: 'string', default: '4' },
+      'pipe2-batch': { type: 'string', default: '4' },
+      'input-backend': { type: 'string', default: 'js' },
+      'encoder-kernel': { type: 'string', default: 'hand' },
+      timeout: { type: 'string', default: String(DEFAULT_TIMEOUT_MS) },
+      'agent-browser': { type: 'string', default: process.env.AGENT_BROWSER_BIN ?? 'agent-browser' },
+      'base-url': { type: 'string' },
+      'no-server': { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
+    },
+    usage: USAGE,
+  });
+  args.port = intArg(args.port, '--port', 1, 65535);
+  args.maxPositions = intArg(args.maxPositions, '--max-positions', 1, 10_000);
+  args.repeats = intArg(args.repeats, '--repeats', 1, 100);
+  args.ortIters = intArg(args.ortIters, '--ort-iters', 1, 1000);
+  args.ortWarmup = intArg(args.ortWarmup, '--ort-warmup', 0, 100);
+  args.wgslEvalIters = intArg(args.wgslEvalIters, '--wgsl-eval-iters', 0, 100);
+  args.wgslSearchIters = intArg(args.wgslSearchIters, '--wgsl-search-iters', 1, 100);
+  args.wgslSearchWarmup = intArg(args.wgslSearchWarmup, '--wgsl-search-warmup', 0, 100);
+  args.visits = intArg(args.visits, '--visits', 1, 1_000_000);
+  args.batch = intArg(args.batch, '--batch', 1, 512);
+  args.pipe2Batch = intArg(args.pipe2Batch, '--pipe2-batch', 1, 512);
+  args.timeoutMs = intArg(args.timeout, '--timeout', 1, 600_000);
+  delete args.timeout;
+  args.strategies = parseList(args.strategies);
+  args.explicitBaseUrl = args.baseUrl !== undefined;
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   const valid = new Set(['ort-cpu', 'ort-gpu', 'wgsl-pipe1', 'wgsl-gpu-legal', 'wgsl-pipe2', 'wgsl-gpu-legal-pipe2']);
@@ -117,8 +106,14 @@ function startServer(args) {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, FORCE_COLOR: '0' },
   });
-  server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
-  server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
+  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
+  server.stdout.on('data', echoOutput);
+  server.stderr.on('data', echoOutput);
+  server.ready = waitForOutput(server, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs: 30_000,
+    label: `Vite dev server (port ${args.port})`,
+  });
   return server;
 }
 
@@ -136,25 +131,6 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
     await delay(250);
   }
   throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
-}
-
-function spawnCapture(command, commandArgs, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, commandArgs, { stdio: ['ignore', 'pipe', 'pipe'], ...options });
-    const chunks = { stdout: [], stderr: [] };
-    child.stdout.on('data', (chunk) => chunks.stdout.push(chunk));
-    child.stderr.on('data', (chunk) => {
-      chunks.stderr.push(chunk);
-      if (options.echoStderr) process.stderr.write(chunk);
-    });
-    child.on('error', reject);
-    child.on('close', (status) => {
-      const stdout = Buffer.concat(chunks.stdout).toString('utf8');
-      const stderr = Buffer.concat(chunks.stderr).toString('utf8');
-      if (status !== 0) return reject(new Error(`${command} ${commandArgs.join(' ')} failed with ${status}: ${stderr || stdout}`));
-      resolve({ stdout, stderr });
-    });
-  });
 }
 
 function parseJsonStdout(stdout) {
@@ -298,7 +274,8 @@ async function runCell(args, cell, total) {
   const { command, commandArgs } = commandForCell(args, cell);
   process.stderr.write(`[readback-matrix] ${cell.index}/${total} repeat=${cell.repeat} fen=${cell.fenIndex + 1} strategy=${cell.strategy}\n`);
   const started = Date.now();
-  const { stdout } = await spawnCapture(command, commandArgs, { echoStderr: true });
+  // Sub-cells are unbounded (timeoutMs: 0); stderr streams live during long cells.
+  const stdout = await spawnCapture(command, commandArgs, { timeoutMs: 0, echoStderr: true });
   const result = parseJsonStdout(stdout);
   return { ...cell, elapsedMs: Date.now() - started, result, summary: compactResult(cell.strategy, result) };
 }
@@ -426,7 +403,6 @@ function environmentReport(cells) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) return usage();
   const fens = await loadFens(args.fens, args.maxPositions);
   const plan = [];
   for (let repeat = 1; repeat <= args.repeats; repeat++) {
@@ -452,6 +428,7 @@ async function main() {
   const server = startServer(args);
   const startedAt = new Date().toISOString();
   try {
+    if (server) await server.ready;
     await waitForServer(args.baseUrl);
     const cells = [];
     for (const cell of plan) {
