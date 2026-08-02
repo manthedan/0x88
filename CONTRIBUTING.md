@@ -18,6 +18,15 @@ npm test          # typecheck + full suite; takes ~2 minutes
 Run a single test file with
 `node --experimental-strip-types --test tests/<name>.test.mjs`.
 
+Browser-driven smokes and benches (`scripts/*browser*.mjs`) drive a real
+Chromium. Both harnesses are pinned devDependencies, so `npm install` puts
+them on PATH for npm scripts, but each needs its browser downloaded once:
+
+```sh
+npx playwright install chromium        # production journey smoke (npm run production:browser-smoke)
+npx agent-browser install --with-deps  # remaining lc0:browser-* / engine smoke scripts
+```
+
 If `npm test` is red on a fresh clone, that's a bug — please open an issue
 rather than working around it. Every PR runs CI: `npm audit`, this suite,
 and a production build.

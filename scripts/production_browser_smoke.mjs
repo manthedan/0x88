@@ -1,23 +1,24 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { chromium } from 'playwright';
 
 const DEFAULT_BASE_URL = 'https://0x88.app';
 const DEFAULT_TIMEOUT_MS = 180_000;
-const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
+const EVAL_TIMEOUT_MS = 15_000;
 const ENGINE_FAMILIES = ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess', 'stormphrax', 'centipawn'];
 const RUNTIME_TOKENS = ['Centipawn:', 'Reckless:', 'Viridithas:', 'Berserk:', 'PlentyChess:', 'Stormphrax:'];
 
 function usage() {
-  console.log(`Usage: node scripts/production_browser_smoke.mjs [options]\n\nRuns a production browser journey across Play, Arena, and Analysis. Centipawn and Stormphrax must each complete a first move. The smoke also verifies engine order, runtime diagnostics, page errors, failed network requests, and production cache headers.\n\nOptions:\n  --base-url URL        Production origin (default ${DEFAULT_BASE_URL})\n  --agent-browser BIN   Browser CLI (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-engine/browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --out PATH            JSON artifact path\n  --dry-run             Print the planned journey without opening a browser\n  -h, --help            Show this help\n`);
+  console.log(
+    `Usage: node scripts/production_browser_smoke.mjs [options]\n\nRuns a production browser journey across Play, Arena, and Analysis. Centipawn and Stormphrax must each complete a first move. The smoke also verifies engine order, runtime diagnostics, page errors, failed network requests, and production cache headers.\n\nRequires a Playwright Chromium build: npx playwright install chromium\n\nOptions:\n  --base-url URL        Production origin (default ${DEFAULT_BASE_URL})\n  --timeout MS          Per-engine/browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --headed              Run Chromium with a visible window (debugging)\n  --out PATH            JSON artifact path\n  --dry-run             Print the planned journey without opening a browser\n  -h, --help            Show this help\n`,
+  );
 }
 
 function parseArgs(argv) {
-  const args = { baseUrl: DEFAULT_BASE_URL, agentBrowser: DEFAULT_AGENT_BROWSER, timeoutMs: DEFAULT_TIMEOUT_MS };
+  const args = { baseUrl: DEFAULT_BASE_URL, timeoutMs: DEFAULT_TIMEOUT_MS, headed: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => {
@@ -25,8 +26,8 @@ function parseArgs(argv) {
       return argv[++i];
     };
     if (arg === '--base-url') args.baseUrl = next();
-    else if (arg === '--agent-browser') args.agentBrowser = next();
     else if (arg === '--timeout') args.timeoutMs = Number(next());
+    else if (arg === '--headed') args.headed = true;
     else if (arg === '--out') args.out = next();
     else if (arg === '--dry-run') args.dryRun = true;
     else if (arg === '-h' || arg === '--help') args.help = true;
@@ -39,64 +40,63 @@ function parseArgs(argv) {
   return args;
 }
 
-function spawnCapture(command, commandArgs, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, commandArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const stdout = [];
-    const stderr = [];
-    let settled = false;
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      finish(reject, new Error(`${command} ${commandArgs.join(' ')} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    const finish = (fn, value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      fn(value);
-    };
-    child.stdout.on('data', (chunk) => stdout.push(chunk));
-    child.stderr.on('data', (chunk) => stderr.push(chunk));
-    child.on('error', (error) => finish(reject, error));
-    child.on('close', (status) => {
-      const output = Buffer.concat(stdout).toString('utf8').trim();
-      const errors = Buffer.concat(stderr).toString('utf8').trim();
-      if (status !== 0) return finish(reject, new Error(`${command} ${commandArgs.join(' ')} failed with ${status}: ${errors || output}`));
-      finish(resolve, output);
-    });
+async function openBrowserSession(args) {
+  const browser = await chromium.launch({ headless: !args.headed });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const session = { args, browser, page, pageErrors: [], consoleErrors: [], failedRequests: [] };
+  page.on('pageerror', (error) => session.pageErrors.push({ level: 'error', text: `Uncaught ${error?.stack ?? error}` }));
+  page.on('console', (message) => {
+    if (message.type() === 'error') session.consoleErrors.push({ level: 'error', text: message.text() });
   });
+  page.on('requestfailed', (request) => {
+    // Two Chromium failure classes are not transport failures and never surfaced in
+    // the previous HAR-based pipeline:
+    // - net::ERR_ABORTED: the page canceled the request itself (SPA navigation
+    //   abandoning background engine downloads, deduped fetches).
+    // - net::ERR_CACHE_WRITE_FAILURE: disk-cache-layer flake on large brotli
+    //   artifacts; the app retries/dedups and consumes the artifact anyway.
+    // Genuine transport failures (DNS, connection refused, timeout) still count.
+    const errorText = request.failure()?.errorText ?? 'request failed';
+    if (errorText === 'net::ERR_ABORTED' || errorText === 'net::ERR_CACHE_WRITE_FAILURE') return;
+    session.failedRequests.push({ url: request.url(), errorText });
+  });
+  page.on('response', (response) => {
+    const status = response.status();
+    if (status >= 400) session.failedRequests.push({ url: response.url(), status });
+  });
+  return session;
 }
 
-async function runAgent(args, session, commandArgs, timeoutMs = 30_000) {
-  const output = await spawnCapture(args.agentBrowser, ['--json', '--session', session, ...commandArgs], timeoutMs);
-  const parsed = output ? JSON.parse(output) : null;
-  if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-    if (!parsed.success) throw new Error(`${args.agentBrowser} ${commandArgs.join(' ')} failed: ${parsed.error ?? output}`);
-    return parsed.data ?? parsed;
-  }
-  return parsed;
-}
-
-async function closeSession(args, session) {
+async function closeSession(session) {
   try {
-    await runAgent(args, session, ['close'], 10_000);
+    await session.browser.close();
   } catch (error) {
-    process.stderr.write(`[production-smoke] warning: failed to close browser session: ${error.message ?? error}\n`);
+    process.stderr.write(`[production-smoke] warning: failed to close browser: ${error.message ?? error}\n`);
   }
 }
 
-async function evaluate(args, session, expression, timeoutMs = 30_000) {
-  const payload = await runAgent(args, session, ['eval', expression], timeoutMs);
-  return payload?.result ?? payload;
+async function evaluate(session, expression, timeoutMs = EVAL_TIMEOUT_MS) {
+  let timer;
+  try {
+    return await Promise.race([
+      session.page.evaluate(expression),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`page.evaluate timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-async function waitForEval(args, session, expression, validate, timeoutMs) {
+async function waitForEval(session, expression, validate, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let lastValue;
   let lastError;
   while (Date.now() < deadline) {
     try {
-      lastValue = await evaluate(args, session, expression, Math.min(15_000, timeoutMs));
+      lastValue = await evaluate(session, expression, Math.min(EVAL_TIMEOUT_MS, timeoutMs));
       if (validate(lastValue)) return lastValue;
     } catch (error) {
       lastError = error;
@@ -135,55 +135,86 @@ export function failedRequestEntries(payload) {
     if (/favicon\.ico/i.test(text)) return false;
     const status = Number(entry?.status ?? entry?.statusCode ?? entry?.response?.status);
     if (Number.isFinite(status) && status >= 400) return true;
-    const transportError = entry?.error ?? entry?.errorText ?? entry?.failure ?? entry?.failureText ?? entry?.response?.error ?? (status === 0 ? entry?.response?.statusText : undefined);
+    const transportError =
+      entry?.error ??
+      entry?.errorText ??
+      entry?.failure ??
+      entry?.failureText ??
+      entry?.response?.error ??
+      (status === 0 ? entry?.response?.statusText : undefined);
     return entry?.failed === true || (typeof transportError === 'string' && transportError.trim().length > 0);
   });
 }
 
-async function stopHarAndReadFailures(args, session, harPath) {
-  await runAgent(args, session, ['network', 'har', 'stop', harPath], 30_000);
-  const har = JSON.parse(await readFile(harPath, 'utf8'));
-  return failedRequestEntries(har?.log?.entries ?? []);
-}
-
-async function inspectBrowser(args, session, surface) {
-  const errorsPayload = await runAgent(args, session, ['errors'], 15_000);
-  const consolePayload = await runAgent(args, session, ['console'], 15_000);
-  const errors = [...actionableErrorEntries(errorsPayload), ...actionableErrorEntries(consolePayload)];
+async function inspectBrowser(session, surface) {
+  const errors = [...actionableErrorEntries(session.pageErrors), ...actionableErrorEntries(session.consoleErrors)];
   if (errors.length) throw new Error(`${surface} emitted actionable browser errors: ${JSON.stringify(errors)}`);
   return { surface, errors: [] };
 }
 
-async function navigateSurface(args, session, path, fullNavigation = false) {
-  const url = new URL(path, args.baseUrl);
+async function navigateSurface(session, path, fullNavigation = false) {
+  const url = new URL(path, session.args.baseUrl);
   if (fullNavigation) {
-    await runAgent(args, session, ['open', String(url)], 45_000);
+    await session.page.goto(String(url), { waitUntil: 'domcontentloaded', timeout: 45_000 });
     return String(url);
   }
-  const clicked = await evaluate(args, session, `(() => {
+  const clicked = await evaluate(
+    session,
+    `(() => {
     const link = document.querySelector('.site-header nav.primary a[href="${url.pathname}"]');
     if (!link) return false;
     setTimeout(() => link.click(), 0);
     return true;
-  })()`);
+  })()`,
+  );
   if (!clicked) throw new Error(`Could not find an internal link for ${url.pathname}`);
-  await waitForEval(args, session, `location.pathname.endsWith('/') ? location.pathname.slice(0, -1) : location.pathname`, (value) => value === url.pathname.replace(/\/$/, ''), 30_000);
+  await waitForEval(
+    session,
+    `location.pathname.endsWith('/') ? location.pathname.slice(0, -1) : location.pathname`,
+    (value) => value === url.pathname.replace(/\/$/, ''),
+    30_000,
+  );
   return String(url);
 }
 
-async function inspectCapabilities(args, session, surface) {
-  const text = await waitForEval(args, session, `document.querySelector('[data-testid="browser-capabilities"]')?.textContent ?? ''`, (value) => /WebGPU (?:ready|unavailable)/.test(value) && /WASM threads (?:ready|single-thread fallback)/.test(value), 30_000);
+async function inspectCapabilities(session, surface) {
+  const text = await waitForEval(
+    session,
+    `document.querySelector('[data-testid="browser-capabilities"]')?.textContent ?? ''`,
+    (value) => /WebGPU (?:ready|unavailable)/.test(value) && /WASM threads (?:ready|single-thread fallback)/.test(value),
+    30_000,
+  );
   if (!/Model cache/.test(text)) {
-    const expanded = await evaluate(args, session, `(() => { const panel = document.querySelector('[data-testid="browser-capabilities"]'); if (panel) panel.open = true; return panel?.textContent ?? ''; })()`);
+    const expanded = await evaluate(
+      session,
+      `(() => { const panel = document.querySelector('[data-testid="browser-capabilities"]'); if (panel) panel.open = true; return panel?.textContent ?? ''; })()`,
+    );
     if (!/Model cache/.test(expanded)) throw new Error(`${surface} browser capability details did not initialize`);
   }
 }
 
-async function playFirstMove(args, session, engine, fullNavigation = false) {
-  const url = await navigateSurface(args, session, '/app/play/', fullNavigation);
-  await inspectCapabilities(args, session, `Play/${engine}`);
-  await waitForEval(args, session, `(() => ({ engine: !!document.querySelector('#engineSelect option[value="${engine}"]'), color: !!document.querySelector('#colorSelect') }))()`, (value) => value?.engine && value?.color, 60_000);
-  const started = await evaluate(args, session, `(() => {
+async function playFirstMove(session, engine, fullNavigation = false) {
+  const url = await navigateSurface(session, '/app/play/', fullNavigation);
+  await inspectCapabilities(session, `Play/${engine}`);
+  await waitForEval(
+    session,
+    `(() => ({ engine: !!document.querySelector('#engineSelect option[value="${engine}"]'), color: !!document.querySelector('#colorSelect') }))()`,
+    (value) => value?.engine && value?.color,
+    60_000,
+  );
+  // The app reverts engine changes while an engine turn is in flight (playBrowser
+  // guards with ctx.engineThinking and disables the select). A restored game may
+  // start thinking immediately after navigation, so wait for the select to be
+  // enabled before attempting the switch.
+  await waitForEval(
+    session,
+    `(() => { const select = document.querySelector('#engineSelect'); return !!select && !select.disabled; })()`,
+    (value) => value === true,
+    session.args.timeoutMs,
+  );
+  const started = await evaluate(
+    session,
+    `(() => {
     const engine = document.querySelector('#engineSelect');
     const level = document.querySelector('#levelSelect');
     const color = document.querySelector('#colorSelect');
@@ -194,46 +225,64 @@ async function playFirstMove(args, session, engine, fullNavigation = false) {
     color.value = 'black';
     color.dispatchEvent(new Event('change', { bubbles: true }));
     return { engine: engine.value, level: level.value, color: color.value };
-  })()`);
-  if (started?.engine !== engine || started?.level !== '0' || started?.color !== 'black') throw new Error(`Could not start ${engine} at fastest strength as White: ${JSON.stringify(started)}`);
-  const result = await waitForEval(args, session, `(() => ({
+  })()`,
+  );
+  if (started?.engine !== engine || started?.level !== '0' || started?.color !== 'black')
+    throw new Error(`Could not start ${engine} at fastest strength as White: ${JSON.stringify(started)}`);
+  const result = await waitForEval(
+    session,
+    `(() => ({
     engine: document.querySelector('#engineSelect')?.value,
     color: document.querySelector('#colorSelect')?.value,
     status: document.querySelector('#status')?.textContent?.trim() ?? '',
     moves: document.querySelector('#moveList')?.textContent?.trim() ?? ''
-  }))()`, (value) => value?.engine === engine && value?.color === 'black' && value?.status.includes('Your move') && value?.moves && value.moves !== 'No moves yet', args.timeoutMs);
-  await inspectBrowser(args, session, `Play/${engine}`);
+  }))()`,
+    (value) => value?.engine === engine && value?.color === 'black' && value?.status.includes('Your move') && value?.moves && value.moves !== 'No moves yet',
+    session.args.timeoutMs,
+  );
+  await inspectBrowser(session, `Play/${engine}`);
   return { url, ...result };
 }
 
-async function inspectArena(args, session) {
-  const url = await navigateSurface(args, session, '/app/arena/');
-  await inspectCapabilities(args, session, 'Arena');
-  const result = await waitForEval(args, session, `(() => ({
+async function inspectArena(session) {
+  const url = await navigateSurface(session, '/app/arena/');
+  await inspectCapabilities(session, 'Arena');
+  const result = await waitForEval(
+    session,
+    `(() => ({
     title: document.title,
     families: [...(document.querySelector('.seat-fam')?.options ?? [])].map((option) => option.value),
     seats: [...document.querySelectorAll('.seat-fam')].map((select) => select.value)
-  }))()`, (value) => ENGINE_FAMILIES.every((family) => value?.families?.includes(family)), 60_000);
+  }))()`,
+    (value) => ENGINE_FAMILIES.every((family) => value?.families?.includes(family)),
+    60_000,
+  );
   if (JSON.stringify(result.families) !== JSON.stringify(ENGINE_FAMILIES)) throw new Error(`Unexpected Arena family order: ${result.families.join(', ')}`);
-  await inspectBrowser(args, session, 'Arena');
+  await inspectBrowser(session, 'Arena');
   return { url, ...result };
 }
 
-async function inspectAnalysis(args, session) {
-  const url = await navigateSurface(args, session, '/app/analysis/');
-  await inspectCapabilities(args, session, 'Analysis');
-  const result = await waitForEval(args, session, `(() => ({
+async function inspectAnalysis(session) {
+  const url = await navigateSurface(session, '/app/analysis/');
+  await inspectCapabilities(session, 'Analysis');
+  const result = await waitForEval(
+    session,
+    `(() => ({
     title: document.title,
     families: [...(document.querySelector('.row-fam')?.options ?? [])].map((option) => option.value),
     runtimeText: document.querySelector('#recklessRuntimeInfo')?.textContent ?? ''
-  }))()`, (value) => {
-    if (!ENGINE_FAMILIES.every((family) => value?.families?.includes(family))) return false;
-    if (!RUNTIME_TOKENS.every((token) => value?.runtimeText?.includes(token))) return false;
-    return !/checking asset|detecting runtime/i.test(value.runtimeText);
-  }, 60_000);
+  }))()`,
+    (value) => {
+      if (!ENGINE_FAMILIES.every((family) => value?.families?.includes(family))) return false;
+      if (!RUNTIME_TOKENS.every((token) => value?.runtimeText?.includes(token))) return false;
+      return !/checking asset|detecting runtime/i.test(value.runtimeText);
+    },
+    60_000,
+  );
   if (JSON.stringify(result.families) !== JSON.stringify(ENGINE_FAMILIES)) throw new Error(`Unexpected Analysis family order: ${result.families.join(', ')}`);
-  if (/asset missing|runtime[^·]*failed|runtime[^·]*error/i.test(result.runtimeText)) throw new Error(`Analysis runtime diagnostics reported a failure: ${result.runtimeText}`);
-  await inspectBrowser(args, session, 'Analysis');
+  if (/asset missing|runtime[^·]*failed|runtime[^·]*error/i.test(result.runtimeText))
+    throw new Error(`Analysis runtime diagnostics reported a failure: ${result.runtimeText}`);
+  await inspectBrowser(session, 'Analysis');
   return { url, ...result };
 }
 
@@ -269,9 +318,11 @@ export function isExpectedAppShellCacheControl(value) {
 
 export function isExpectedOrtCacheControl(value) {
   const directives = parseCacheControl(value);
-  return hasExactDirectives(directives, ['public', 'max-age', 'stale-while-revalidate'])
-    && browserMaxAge(value) === 3600
-    && directives.get('stale-while-revalidate') === '86400';
+  return (
+    hasExactDirectives(directives, ['public', 'max-age', 'stale-while-revalidate']) &&
+    browserMaxAge(value) === 3600 &&
+    directives.get('stale-while-revalidate') === '86400'
+  );
 }
 
 async function fetchWithRetries(url, attempts = 3) {
@@ -312,39 +363,27 @@ async function probeHttp(args) {
 }
 
 async function runSmoke(args) {
-  const session = `production-smoke-${process.pid}`;
-  const harPath = join(tmpdir(), `${session}.har`);
-  let harStarted = false;
   const report = {
     status: 'PRODUCTION_BROWSER_SMOKE_RUNNING',
     baseUrl: args.baseUrl,
     startedAt: new Date().toISOString(),
     play: {},
   };
+  let session;
   try {
     report.http = await probeHttp(args);
-    await runAgent(args, session, ['open', 'about:blank'], 30_000);
-    await runAgent(args, session, ['network', 'har', 'start'], 15_000);
-    harStarted = true;
-    report.play.centipawn = await playFirstMove(args, session, 'centipawn', true);
-    report.arena = await inspectArena(args, session);
-    report.analysis = await inspectAnalysis(args, session);
-    report.play.stormphrax = await playFirstMove(args, session, 'stormphrax');
-    report.failedRequests = await stopHarAndReadFailures(args, session, harPath);
-    harStarted = false;
+    session = await openBrowserSession(args);
+    report.play.centipawn = await playFirstMove(session, 'centipawn', true);
+    report.arena = await inspectArena(session);
+    report.analysis = await inspectAnalysis(session);
+    report.play.stormphrax = await playFirstMove(session, 'stormphrax');
+    report.failedRequests = failedRequestEntries(session.failedRequests);
     if (report.failedRequests.length) throw new Error(`Production journey had failed network requests: ${JSON.stringify(report.failedRequests)}`);
     report.status = 'PRODUCTION_BROWSER_SMOKE_DONE';
     report.finishedAt = new Date().toISOString();
     return report;
   } catch (error) {
-    if (harStarted) {
-      try {
-        report.failedRequests = await stopHarAndReadFailures(args, session, harPath);
-        harStarted = false;
-      } catch (harError) {
-        report.harError = harError?.message ?? String(harError);
-      }
-    }
+    report.failedRequests = failedRequestEntries(session?.failedRequests ?? []);
     report.status = 'PRODUCTION_BROWSER_SMOKE_FAILED';
     report.finishedAt = new Date().toISOString();
     report.error = { name: error?.name ?? 'Error', message: error?.message ?? String(error), stack: error?.stack };
@@ -352,8 +391,7 @@ async function runSmoke(args) {
     failure.report = report;
     throw failure;
   } finally {
-    await closeSession(args, session);
-    await unlink(harPath).catch(() => {});
+    if (session) await closeSession(session);
   }
 }
 
@@ -367,7 +405,13 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) return usage();
   if (args.dryRun) {
-    console.log(JSON.stringify({ status: 'PRODUCTION_BROWSER_SMOKE_DRY_RUN', baseUrl: args.baseUrl, journey: ['Play/Centipawn', 'Arena', 'Analysis', 'Play/Stormphrax'] }, null, 2));
+    console.log(
+      JSON.stringify(
+        { status: 'PRODUCTION_BROWSER_SMOKE_DRY_RUN', baseUrl: args.baseUrl, journey: ['Play/Centipawn', 'Arena', 'Analysis', 'Play/Stormphrax'] },
+        null,
+        2,
+      ),
+    );
     return;
   }
   try {

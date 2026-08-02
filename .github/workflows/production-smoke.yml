@@ -32,10 +32,10 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - name: Install browser harness
-        run: |
-          npm install --global agent-browser@0.31.1
-          agent-browser install --with-deps
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
       - name: Run production browser journey
         run: node scripts/production_browser_smoke.mjs --base-url "$PRODUCTION_BASE_URL" --out artifacts/production-browser-smoke.json
       - name: Upload smoke report
