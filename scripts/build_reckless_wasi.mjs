@@ -10,6 +10,7 @@ function engineSource(name) {
 }
 
 import { execFileSync } from 'node:child_process';
+import { requireReadableFile } from './lib/prerequisites.mjs';
 
 const repo = process.env.RECKLESS_REPO ?? 'https://github.com/codedeliveryservice/Reckless.git';
 // Pin the default upstream revision so release WASM artifacts can be rebuilt
@@ -19,6 +20,7 @@ const ref = process.env.RECKLESS_REF ?? '0010617448bdef4c8cd7d4f4825b7e42c8bc262
 const workdir = resolve(process.env.RECKLESS_BUILD_DIR ?? '.local_engines/reckless-wasi-src');
 const out = resolve(process.env.RECKLESS_WASM_OUT ?? 'public/reckless/reckless.wasm');
 const evalfile = process.env.RECKLESS_EVALFILE ? resolve(process.env.RECKLESS_EVALFILE) : '';
+if (evalfile) requireReadableFile(evalfile, 'RECKLESS_EVALFILE points at a local NNUE net; download it first (see docs/engine_catalog.md) or unset the variable.');
 const l1Size = process.env.RECKLESS_L1_SIZE ?? '';
 const enableWasmSimdNnue = process.env.RECKLESS_WASM_SIMD_NNUE === '1';
 const externalWasiNnue = process.env.RECKLESS_WASI_EXTERNAL_NNUE === '1';

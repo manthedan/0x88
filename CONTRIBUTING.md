@@ -27,6 +27,20 @@ npx playwright install chromium        # production journey smoke (npm run produ
 npx agent-browser install --with-deps  # remaining lc0:browser-* / engine smoke scripts
 ```
 
+A few scripts reach beyond the repo by design and fail with a setup hint when
+the prerequisite is missing:
+
+- `deploy:onnxsim`, `lc0:quantize-dynamic-mmi`, `lc0:pack-model` need the ONNX
+  python env: `python3 -m venv .venv-onnx && .venv-onnx/bin/pip install -r requirements-onnx.txt`.
+- `lc0:eval-fixtures`/`lc0:eval-history`/`lc0:eval-f16-fixtures` default to a
+  sibling `../models/lc0-bestnets` checkout; pass the model path explicitly otherwise.
+- Engine WASI builds (`reckless:*`, `viridithas:*`, `stormphrax:*`...) clone
+  their pinned upstream sources into the gitignored `.local_engines/` on first
+  run, but `RECKLESS_EVALFILE` and similar net-path variables must point at
+  nets you downloaded yourself (see docs/engine_catalog.md).
+- Generators like `lc0:generate-tvm-wgsl`/`lc0:check-tvm-wgsl` and the policy
+  map generator read sibling checkouts under `../repos` and `../.deps`.
+
 If `npm test` is red on a fresh clone, that's a bug — please open an issue
 rather than working around it. Every PR runs CI: `npm audit`, this suite,
 and a production build.
